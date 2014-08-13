@@ -69,14 +69,17 @@ void Mouse::Update(SDL_Event* eventHandler)
 			case SDL_BUTTON_LEFT:
 				if(!key1.released) key1.released = true;
 				key1.down = false;
+				key1.clicked = false;
 				break;
 			case SDL_BUTTON_RIGHT:
 				if (!key2.released) key2.released = true;
 				key2.down = false;
+				key2.clicked = false;
 				break;
 			case SDL_BUTTON_MIDDLE:
 				if (!key3.released) key3.released = true;
 				key3.down = false;
+				key3.clicked = false;
 				break;
 		}
 	}

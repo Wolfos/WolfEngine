@@ -38,7 +38,7 @@ void Window::Render()
 	{
 		mouseOver = true;
 
-		if (Mouse::KeyReleased(1)) clicked = true;
+		if (Mouse::KeyClicked(1)) clicked = true;
 		else clicked = false;
 	}
 	else

@@ -9,10 +9,10 @@
 ///
 class Input{
 	public:
-		/// What keys are currently being pressed?
-		static Keys keys; 
 		///	Updates all the input variables
 		void Update(SDL_Event * eventHandler); 
+	private:
+		bool inited = false;
 
 };
 #endif

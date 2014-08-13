@@ -34,21 +34,26 @@ void EditorMain::Update()
 	map->Render(Screen::mainCamera->screen, 1, spritesheet, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
 	map->Render(Screen::mainCamera->screen, 2, spritesheet, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
 
-	if(Input::keys.G) grid->Render(Screen::mainCamera->screen, 0, gridtex, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
+	
+		
+	if(showGrid) grid->Render(Screen::mainCamera->screen, 0, gridtex, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
 
-	if (Mouse::KeyReleased(1) && !tilePicker->mouseOver)
+	//Controls
+	if (Mouse::KeyDown(1) && !tilePicker->mouseOver)
 	{
 		map->Put(xMPos, yMPos, layer, selected);
 	}
 
-	if (Input::keys.A) layer = 0;
-	if (Input::keys.B) layer = 1;
-	if (Input::keys.C) layer = 2;
+	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;
 
-	if (Input::keys.W) Screen::mainCamera->gameObject->transform->Move(0, -5);
-	if (Input::keys.A) Screen::mainCamera->gameObject->transform->Move(-5, 0);
-	if (Input::keys.S) Screen::mainCamera->gameObject->transform->Move(0, 5);
-	if (Input::keys.D) Screen::mainCamera->gameObject->transform->Move(5, 0);
+	if (Keyboard::KeyClicked(Keys::A)) layer = 0;
+	if (Keyboard::KeyClicked(Keys::B)) layer = 1;
+	if (Keyboard::KeyClicked(Keys::C)) layer = 2;
+
+	if (Keyboard::KeyDown(Keys::W)) Screen::mainCamera->gameObject->transform->Move(0, -5);
+	if (Keyboard::KeyDown(Keys::A)) Screen::mainCamera->gameObject->transform->Move(-5, 0);
+	if (Keyboard::KeyDown(Keys::S)) Screen::mainCamera->gameObject->transform->Move(0, 5);
+	if (Keyboard::KeyDown(Keys::D)) Screen::mainCamera->gameObject->transform->Move(5, 0);
 }
 
 void EditorMain::Exit()

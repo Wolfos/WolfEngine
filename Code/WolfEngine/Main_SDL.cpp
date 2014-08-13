@@ -6,7 +6,7 @@
 */
 #define _CRT_SECURE_NO_DEPRECATE //MICROSOOOOOOOOFT!
 #include "Includes.h"
-#include "../Game/GameMain.h"
+#include "../GameMain.h"
 #include "Input/Input.h"
 #include "Utilities/Time.h"
 #include "Utilities/Debug.h"

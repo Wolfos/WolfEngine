@@ -2,7 +2,7 @@
 #define _MAP_H
 
 #include "../Includes.h"
-#include "../ECS/GameObject.h"
+#include "../Includes/ECS.h"
 
 ///
 /// A WolfEngine tilemap object
