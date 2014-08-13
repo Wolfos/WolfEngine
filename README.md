@@ -16,7 +16,7 @@ Setup for Windows:
 7. In your command line, cd into that build folder you just made
 8. Run 'cmake -G "Visual Studio 2012" ..'
 9. Open the resulting Visual Studio project file and compile. It will fail to run but that's okay.
-10. Get the debug DLL's for each SDL addon, they're in the respective lib/x86 directory. Put them all where Visual Studio put your EXE
+10. Get the debug DLL's for each SDL addon, they're in the respective lib/x86 directory. Put them all (yes, all of them, that includes libpng and the like) where Visual Studio put your EXE
 11. Copy the Asset folder into the build directory
 12. Run the executable again, either through Visual Studio or by double clicking it
 13. You have succesfully setup WolfEngine for development! (hopefully)
