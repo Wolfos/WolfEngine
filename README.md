@@ -3,6 +3,8 @@ WolfEngine
 
 A tile based 2D game engine
 
+[Documentation](http://wolfengine.net/documentation/)
+
 
 Setup for Windows:
 ==========
