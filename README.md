@@ -16,7 +16,7 @@ Setup for Windows:
 5. Download and install CMake
 6. Make a directory called 'build' in the WolfEngine folder
 7. In your command line, cd into that build folder you just made
-8. Run 'cmake -G "Visual Studio 2012" ..'
+8. Run 'cmake -G "Visual Studio 12 2013" ..' (unless you're using a different VS version)
 9. Open the resulting Visual Studio project file and compile. It will fail to run but that's okay.
 10. Get the debug DLL's for each SDL addon, they're in the respective lib/x86 directory. Put them all (yes, all of them, that includes libpng and the like) where Visual Studio put your EXE
 11. Copy the Asset folder into the build directory
