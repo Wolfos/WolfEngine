@@ -30,19 +30,22 @@ void EditorMain::Update()
 
 	int selected = tilePicker->selected;
 
-	map->Render(Screen::mainCamera->screen, 0, spritesheet, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
-	map->Render(Screen::mainCamera->screen, 1, spritesheet, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
-	map->Render(Screen::mainCamera->screen, 2, spritesheet, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
+	map->Render(Screen::mainCamera->screen, 0, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
+	map->Render(Screen::mainCamera->screen, 1, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
+	map->Render(Screen::mainCamera->screen, 2, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
 
 	
 		
 	if(showGrid) grid->Render(Screen::mainCamera->screen, 0, gridtex, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
 
+
 	//Controls
-	if (Mouse::KeyDown(1) && !tilePicker->mouseOver)
+	if (Mouse::KeyDown(1) && !tilePicker->mouseOver && Mouse::position.x + camera->position.x >= 0 && Mouse::position.x + camera->position.x <= map->width * tilewidth && Mouse::position.y + camera->position.y >= 0 && Mouse::position.y + camera->position.y <= map->height * tileheight)
 	{
 		map->Put(xMPos, yMPos, layer, selected);
 	}
+
+	printf("%d\n", Mouse::position.x + camera->position.x);
 
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;
 
@@ -50,10 +53,10 @@ void EditorMain::Update()
 	if (Keyboard::KeyClicked(Keys::B)) layer = 1;
 	if (Keyboard::KeyClicked(Keys::C)) layer = 2;
 
-	if (Keyboard::KeyDown(Keys::W)) Screen::mainCamera->gameObject->transform->Move(0, -5);
-	if (Keyboard::KeyDown(Keys::A)) Screen::mainCamera->gameObject->transform->Move(-5, 0);
-	if (Keyboard::KeyDown(Keys::S)) Screen::mainCamera->gameObject->transform->Move(0, 5);
-	if (Keyboard::KeyDown(Keys::D)) Screen::mainCamera->gameObject->transform->Move(5, 0);
+	if (Keyboard::KeyDown(Keys::W)) camera->Move(0, -10);
+	if (Keyboard::KeyDown(Keys::A)) camera->Move(-10, 0);
+	if (Keyboard::KeyDown(Keys::S)) camera->Move(0, 10);
+	if (Keyboard::KeyDown(Keys::D)) camera->Move(10, 0);
 }
 
 void EditorMain::Exit()

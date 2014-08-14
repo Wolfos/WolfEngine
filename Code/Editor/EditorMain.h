@@ -23,7 +23,7 @@ class EditorMain
 		Point initMousePos;
 		Transform* camera;
 		int layer = 0;
-		bool showGrid = false;
+		bool showGrid = true;
 };
 
 
