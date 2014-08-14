@@ -53,7 +53,9 @@ SDL_Texture* Image::Load(std::string filename)
 {
 	//The final texture
 	SDL_Texture* newTexture = NULL;
-	newTexture = ToTexture(LoadSurface(filename));
+	SDL_Surface* surface = LoadSurface(filename);
+	newTexture = ToTexture(surface);
+	SDL_FreeSurface(surface);
 
 	if (!newTexture)
 	{

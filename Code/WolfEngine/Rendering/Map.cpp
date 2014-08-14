@@ -187,7 +187,7 @@ void Map::Render(SDL_Renderer* target, int layer, SDL_Texture* spritesheet,
 			targetrect.y = y*tileheight - camera->transform->position.y;
 
 			int val = Get(x, y, layer);
-			if (val<=sheetwidth*sheetheight)
+			if (val<=sheetwidth*sheetheight && val>=0)
 			{
 				sourcerect.x = clip[val].x;
 				sourcerect.y = clip[val].y;

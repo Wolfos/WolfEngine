@@ -22,7 +22,7 @@ void TilePicker::Update()
 
 	//Actual size of tiles on the screen
 	int screentileWidth = tileWidth / (tilesheetRect.w / (hitbox.w - 4));
-	int screentileHeight = tileHeight / (tilesheetRect.h / (hitbox.h - 30));
+	int screentileHeight = tileHeight / (tilesheetRect.h / (hitbox.h - 4));
 
 	if (clicked)
 	{
@@ -31,7 +31,7 @@ void TilePicker::Update()
 		selected = x + y * ((tilesheetRect.w / zoom)/tileWidth);
 	}
 
-	SDL_Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 30 };
+	SDL_Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 4 };
 	SDL_RenderCopy(Screen::mainCamera->screen, tilesheet, &tilesheetRect, &destRect);
 
 	position.x = Screen::mainCamera->width - hitbox.w;
