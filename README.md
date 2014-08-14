@@ -10,7 +10,7 @@ Setup for Windows:
 ==========
 
 1. Download and install Visual Studio (should work with 2010 and up, but only 2013 is tested)
-2. Download SDL2, SDL2_image, SDL2_TTF and SDL2_Mixer (you'll want the development libraries for Visual C++)
+2. Download [SDL2](http://libsdl.org/download-2.0.php), [SDL2_image](https://www.libsdl.org/projects/SDL_image/), [SDL2_TTF](https://www.libsdl.org/projects/SDL_ttf/) and [SDL2_Mixer](http://www.libsdl.org/projects/SDL_mixer/) (you'll want the development libraries for Visual C++)
 3. Extract these libraries into a directory (example: C:\Developer)
 4. Setup environment variables for each, SDL2, SDL2_IMAGE, SDL2_MIXER and SDL2_TTF, pointing to their respective folders
 5. Download and install CMake
