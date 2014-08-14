@@ -15,6 +15,26 @@ void Input::Update(SDL_Event * eventHandler)
 	Mouse::key2.released = false;
 	Mouse::key3.released = false;
 
+	//We need to do all of this here because SDL_MOUSEBUTTONDOWN doesn't call an event every frame, unless the mouse also moved
+	if (Mouse::key1.down)
+	{
+		Mouse::key1.wasdown = true;
+		Mouse::key1.clicked = false;
+	}
+	else Mouse::key1.wasdown = false;
+	if (Mouse::key2.down)
+	{
+		Mouse::key2.wasdown = true;
+		Mouse::key2.clicked = false;
+	}
+	else Mouse::key2.wasdown = false;
+	if (Mouse::key3.down)
+	{
+		Mouse::key3.wasdown = true;
+		Mouse::key3.clicked = false;
+	}
+	else Mouse::key3.wasdown = false;
+
 	if (!inited)
 	{
 		Keyboard::Init();

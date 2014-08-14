@@ -11,10 +11,6 @@ void EditorMain::Start()
 	tilewidth = 128;
 	tileheight = 128;
 
-	//tilePicker = ObjectManager::NewGameObject("TilePicker");
-	//tilePicker->transform->position = { Screen::mainCamera->width - 256, 0 };
-	//tilePicker->AddComponent<TilePicker>();
-
 	tilePicker = new TilePicker(Screen::mainCamera->width-256, 0, 256, 256);
 
 	camera = Screen::mainCamera->gameObject->transform;
@@ -23,8 +19,6 @@ void EditorMain::Start()
 
 void EditorMain::Update()
 {
-	//tilePicker->transform->position = { Screen::mainCamera->width - 256, 0 };
-
 	int xMPos = (Mouse::position.x + camera->position.x) / tilewidth;
 	int yMPos = (Mouse::position.y + camera->position.y) / tileheight;
 
@@ -44,8 +38,6 @@ void EditorMain::Update()
 	{
 		map->Put(xMPos, yMPos, layer, selected);
 	}
-
-	printf("%d\n", Mouse::position.x + camera->position.x);
 
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;
 

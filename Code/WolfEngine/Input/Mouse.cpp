@@ -34,13 +34,6 @@ bool Mouse::KeyClicked(int key)
 
 void Mouse::Update(SDL_Event* eventHandler)
 {
-	if (key1.down) key1.wasdown = true;
-	else key1.wasdown = false;
-	if (key2.down) key2.wasdown = true;
-	else key2.wasdown = false;
-	if (key3.down) key3.wasdown = true;
-	else key3.wasdown = false;
-
 	if (eventHandler->type == SDL_MOUSEBUTTONDOWN)
 	{
 		switch (eventHandler->button.button)
