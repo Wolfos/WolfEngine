@@ -6,7 +6,6 @@ rvanee@wolfengine.net
 */
 #define _CRT_SECURE_NO_DEPRECATE //MICROSOOOOOOOOFT!
 #include "Image.h"
-#include "../Utilities/Debug.h"
 #include "Screen.h"
 
 #ifdef __APPLE__

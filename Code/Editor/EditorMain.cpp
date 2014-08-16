@@ -27,8 +27,6 @@ void EditorMain::Update()
 	map->Render(Screen::mainCamera->screen, 0, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
 	map->Render(Screen::mainCamera->screen, 1, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
 	map->Render(Screen::mainCamera->screen, 2, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
-
-	
 		
 	if(showGrid) grid->Render(Screen::mainCamera->screen, 0, gridtex, tilewidth, tileheight, 0, Screen::mainCamera->gameObject);
 
