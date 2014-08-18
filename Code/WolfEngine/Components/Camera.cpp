@@ -5,12 +5,7 @@ Contact:
 rvanee@wolfengine.net
 */
 #include "Camera.h"
-#include "../Rendering/Screen.h"
 
-void Camera::Added()
-{
-	Screen::mainCamera = this;
-}
 
 void Camera::Update()
 {

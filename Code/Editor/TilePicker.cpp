@@ -32,7 +32,7 @@ void TilePicker::Update()
 	}
 
 	SDL_Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 4 };
-	SDL_RenderCopy(Screen::mainCamera->screen, tilesheet, &tilesheetRect, &destRect);
+	SDL_RenderCopy(Game::renderer, tilesheet, &tilesheetRect, &destRect);
 
-	position.x = Screen::mainCamera->width - hitbox.w;
+	position.x = Game::scene->camera->width - hitbox.w;
 }

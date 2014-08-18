@@ -5,12 +5,12 @@
 class GameMain
 {
 	public:
+		void Create();
 		void Start();
-		void Update();
 		void Exit();
 	private:
 		bool isEditor;
-		EditorMain editor;
+		EditorMain* editor;
 };
 
 #endif

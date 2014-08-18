@@ -6,7 +6,7 @@ rvanee@wolfengine.net
 */
 #define _CRT_SECURE_NO_DEPRECATE //MICROSOOOOOOOOFT!
 #include "Image.h"
-#include "Screen.h"
+#include "../Game.h"
 
 #ifdef __APPLE__
 #include "CoreFoundation/CoreFoundation.h"
@@ -44,7 +44,7 @@ SDL_Surface* Image::LoadSurface(std::string filename)
 
 SDL_Texture* Image::ToTexture(SDL_Surface* surface)
 {
-	return SDL_CreateTextureFromSurface(Screen::mainCamera->screen, surface);
+	return SDL_CreateTextureFromSurface(Game::renderer, surface);
 }
 
 

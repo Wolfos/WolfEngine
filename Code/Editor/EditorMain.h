@@ -4,7 +4,7 @@
 #include "../WolfEngine/WolfEngine.h"
 #include "TilePicker.h"
 
-class EditorMain
+class EditorMain : public Scene
 {
 	public:
 		void Start();
@@ -21,7 +21,7 @@ class EditorMain
 		int tileheight;
 		bool dragging = false;
 		Point initMousePos;
-		Transform* camera;
+		Transform* cam;
 		int layer = 0;
 		bool showGrid = true;
 };

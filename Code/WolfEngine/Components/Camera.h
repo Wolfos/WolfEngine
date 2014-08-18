@@ -10,15 +10,12 @@
 class Camera : public Component
 {
 public:
-	///	The renderer object
-	SDL_Renderer* screen;
 	///	The width of the screen
 	int width = 0;
 	///	The height of the screen
 	int height = 0;
 	///	The window it's rendered to
 	SDL_Window* window;
-	virtual void Added();
 	virtual void Update();
 };
 #endif

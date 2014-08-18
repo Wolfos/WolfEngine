@@ -6,7 +6,7 @@ rvanee@wolfengine.net
 */
 #include "GameObject.h"
 #include "../Utilities/Debug.h"
-#include "ObjectManager.h"
+#include "../Game.h"
 
 void GameObject::Update()
 {
@@ -42,5 +42,6 @@ GameObject::GameObject()
 GameObject::~GameObject()
 {
 	components.clear();
-	ObjectManager::DeleteObject(this);
+	// TODO: implement
+	//Game::scene::DeleteObject(this);
 }

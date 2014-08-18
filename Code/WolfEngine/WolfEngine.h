@@ -12,6 +12,7 @@
 #include "Components/Camera.h"
 #include "Components/SpriteRenderer.h"
 #include "Components/Transform.h"
+#include "Game.h"
 #include "GUI/Window.h"
 #include "Includes/ECS.h"
 #include "Input/Input.h"
@@ -21,7 +22,6 @@
 #include "Models/Point.h"
 #include "Rendering/Image.h"
 #include "Rendering/Map.h"
-#include "Rendering/Screen.h"
 #include "Utilities/Debug.h"
 #include "Utilities/Time.h"
 

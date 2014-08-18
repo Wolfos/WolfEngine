@@ -10,9 +10,8 @@
 #include "Input/Input.h"
 #include "Utilities/Time.h"
 #include "Utilities/Debug.h"
-#include "ECS/ObjectManager.h"
-#include "Rendering/Screen.h"
 #include "GUI/GUI.h"
+#include "Game.h"
 
 //Screen dimensions
 int screenWidth = 1280;
@@ -22,8 +21,6 @@ SDL_Window* window = NULL;
 SDL_Renderer* screenRenderer = NULL;
 
 GameMain gameMain;
-
-ObjectManager objMgr;
 
 const int MAXFPS = 60; //FPS to cap at. Set to -1 to disable
 
@@ -143,8 +140,8 @@ void MainLoop()
 
 		if (eventHandler.type == SDL_WINDOWEVENT_RESIZED)
 		{
-			Screen::mainCamera->width = eventHandler.window.data1;
-			Screen::mainCamera->height = eventHandler.window.data2;
+			Game::scene->camera->width = eventHandler.window.data1;
+			Game::scene->camera->height = eventHandler.window.data2;
 		}
 
 		if(eventHandler.type == SDL_QUIT)
@@ -152,18 +149,18 @@ void MainLoop()
 			quit = 1;
 		}
 
-		gameMain.Update();
+		Game::scene->Update();
 
 		//Update the gameObjects
-		ObjectManager::Update();
+		Game::scene->UpdateObjects();
 
 		//Render the SpriteRenderers
-		ObjectManager::Render();
+		Game::scene->RenderObjects();
 
 		GUI::Update();
 
 		//Late update
-		ObjectManager::LateUpdate();
+		Game::scene->LateUpdateObjects();
 
 		SDL_RenderPresent(screenRenderer);
 		lastFrameTime = curFrameTime;
@@ -182,20 +179,20 @@ int main( int argc, char* args[] )
 		return 1;
 	}
 
-	//Initialize the camera
-	GameObject* camera = ObjectManager::NewGameObject("Camera");
-	camera->AddComponent<Camera>();
-	camera->GetComponent<Camera>()->screen = screenRenderer;
-	camera->GetComponent<Camera>()->width = screenWidth;
-	camera->GetComponent<Camera>()->height = screenHeight;
-	camera->GetComponent<Camera>()->window = window;
+	Game::renderer = screenRenderer;
+
+	gameMain.Create();
+
+	Game::scene->camera->width = screenWidth;
+	Game::scene->camera->height = screenHeight;
+	Game::scene->camera->window = window;
 
 	gameMain.Start();
 
 	MainLoop();
 
 	gameMain.Exit();
-	ObjectManager::Exit();
+	delete Game::scene;
 
 	SDL_DestroyRenderer(screenRenderer);
 	SDL_DestroyWindow(window);

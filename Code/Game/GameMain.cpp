@@ -1,18 +1,19 @@
 #include "GameMain.h"
 #include "../WolfEngine/WolfEngine.h"
 
-void GameMain::Start()
+void GameMain::Create()
 {
+	editor = new EditorMain();
+	Game::scene = editor;
 	isEditor = true;
-	if (isEditor) editor.Start();
 }
 
-void GameMain::Update()
+void GameMain::Start()
 {
-	if (isEditor) editor.Update();
+	if (isEditor) editor->Start();
 }
 
 void GameMain::Exit()
 {
-	if (isEditor) editor.Exit();
+	if (isEditor) editor->Exit();
 }

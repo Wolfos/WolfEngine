@@ -4,11 +4,13 @@
 #include <vector>
 #include "../Rendering/Map.h"
 #include "GameObject.h"
+#include "../Components/Camera.h"
 
 class Scene
 {
 	public:
 		Scene();
+		~Scene();
 
 		///	Load a scene from file
 		void Load(std::string filename);
@@ -24,14 +26,17 @@ class Scene
 
 		void RenderObjects();
 
-		GameObject* camera;
+		void AddGameObject(GameObject* gameObject);
+
+		Camera* camera;
+		int layers;
 
 	private:
 		Map* map;
 		std::string mapfilename;
 
 		std::vector<GameObject*> gameObjects;
-		int numObjects;
+		int numObjects = 0;
 };
 
 #endif

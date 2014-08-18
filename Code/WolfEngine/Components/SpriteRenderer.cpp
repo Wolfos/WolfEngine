@@ -5,7 +5,7 @@ Contact:
 rvanee@wolfengine.net
 */
 #include "SpriteRenderer.h"
-#include "../Rendering/Screen.h"
+#include "../Game.h"
 #include "../ECS/GameObject.h"
 #include "../Utilities/Debug.h"
 #include "../Rendering/Image.h"
@@ -17,9 +17,9 @@ void SpriteRenderer::Added()
 
 void SpriteRenderer::Update()
 {
-	if (layer >= Screen::layers)
+	if (layer >= Game::scene->layers)
 	{
-		Screen::layers = layer + 1;
+		Game::scene->layers = layer + 1;
 	}
 }
 
@@ -53,8 +53,8 @@ void SpriteRenderer::Render()
 	SDL_Rect* dst = new SDL_Rect;
 	if (!gameObject->transform->ignoreCam)
 	{
-		dst->x = gameObject->transform->position.x - Screen::mainCamera->gameObject->transform->position.x;
-		dst->y = gameObject->transform->position.y - Screen::mainCamera->gameObject->transform->position.y;
+		dst->x = gameObject->transform->position.x - Game::scene->camera->gameObject->transform->position.x;
+		dst->y = gameObject->transform->position.y - Game::scene->camera->gameObject->transform->position.y;
 	}
 	else
 	{
@@ -67,7 +67,7 @@ void SpriteRenderer::Render()
 	center->x = (int)((frameWidth*gameObject->transform->scale.x) / 2);
 	center->y = (int)((frameHeight*gameObject->transform->scale.y) / 2);
 
-	SDL_RenderCopyEx(Screen::mainCamera->screen, spriteSheet, rect, dst, gameObject->transform->angle, center, SDL_FLIP_NONE);
+	SDL_RenderCopyEx(Game::renderer, spriteSheet, rect, dst, gameObject->transform->angle, center, SDL_FLIP_NONE);
 	free(clip);
 	delete(dst);
 	delete(rect);

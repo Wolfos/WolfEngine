@@ -1,8 +1,8 @@
 #include "Window.h"
 #include "GUI.h"
 #include "../Rendering/Image.h"
-#include "../Rendering/Screen.h"
 #include "../Input/Mouse.h"
+#include "../Game.h"
 
 Window::Window(int x, int y, int width, int height)
 {
@@ -32,7 +32,7 @@ void Window::Render()
 {
 	hitbox.x = position.x;
 	hitbox.y = position.y;
-	SDL_RenderCopy(Screen::mainCamera->screen, background, NULL, &hitbox);
+	SDL_RenderCopy(Game::renderer, background, NULL, &hitbox);
 
 	if (Collide(Mouse::position, hitbox))
 	{
