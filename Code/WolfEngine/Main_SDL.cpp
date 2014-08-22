@@ -59,8 +59,8 @@ int Init()
 			}
 			else
 			{
-				screenRenderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-				SDL_SetRenderDrawColor(screenRenderer, 0x1e, 0xAB, 0xF4, 0xFF);
+				screenRenderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+				SDL_SetRenderDrawColor(screenRenderer, 0x64, 0x95, 0xED, 0xFF); // Cornflower blue
 			}
 
 			//Initialize SDL_TTF
