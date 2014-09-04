@@ -1,3 +1,8 @@
+Notice 04/09/2014
+==========
+
+I expect to not be able to update for a while. I'm currently in the process of prototyping a large overhaul where I plan to implement scripting in the engine.
+
 WolfEngine
 ==========
 
