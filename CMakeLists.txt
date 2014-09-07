@@ -62,6 +62,38 @@ source_group("WolfEngine\\Models" FILES ${WolfEngine_Models})
 # Rendering
 file(GLOB WolfEngine_Rendering "Code/WolfEngine/Rendering/*.cpp" "Code/WolfEngine/Rendering/*.h")
 source_group("WolfEngine\\Rendering" FILES ${WolfEngine_Rendering})
+# Scripting
+	#add_on
+	file(GLOB WolfEngine_Scripting_Addon_Debugger "Code/WolfEngine/Scripting/add_on/debugger/*.cpp" "Code/WolfEngine/Scripting/add_on/debugger/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\debugger" FILES ${WolfEngine_Scripting_Addon_Debugger})
+	
+	file(GLOB WolfEngine_Scripting_Addon_ScriptArray "Code/WolfEngine/Scripting/add_on/scriptarray/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptarray/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scriptarray" FILES ${WolfEngine_Scripting_Addon_ScriptArray})
+		
+	file(GLOB WolfEngine_Scripting_Addon_ScriptBuilder "Code/WolfEngine/Scripting/add_on/scriptbuilder/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptbuilder/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scriptbuilder" FILES ${WolfEngine_Scripting_Addon_ScriptBuilder})
+		
+	file(GLOB WolfEngine_Scripting_Addon_ScriptFile "Code/WolfEngine/Scripting/add_on/scriptfile/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptfile/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scriptfile" FILES ${WolfEngine_Scripting_Addon_ScriptFile})
+		
+	file(GLOB WolfEngine_Scripting_Addon_ScriptHelper "Code/WolfEngine/Scripting/add_on/scripthelper/*.cpp" "Code/WolfEngine/Scripting/add_on/scripthelper/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scripthelper" FILES ${WolfEngine_Scripting_Addon_ScriptHelper})
+		
+	file(GLOB WolfEngine_Scripting_Addon_ScriptMath "Code/WolfEngine/Scripting/add_on/scriptmath/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptmath/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scriptmath" FILES ${WolfEngine_Scripting_Addon_ScriptMath})
+		
+	file(GLOB WolfEngine_Scripting_Addon_ScriptStdString "Code/WolfEngine/Scripting/add_on/scriptstdstring/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptstdstring/*.h")
+	source_group("WolfEngine\\Scripting\\add_on\\scriptstdstring" FILES ${WolfEngine_Scripting_Addon_ScriptStdString})
+		
+	#AngelScript
+	file(GLOB WolfEngine_Scripting_AngelScript "Code/WolfEngine/Scripting/AngelScript/*.cpp" "Code/WolfEngine/Scripting/AngelScript/*.h")
+	source_group("WolfEngine\\Scripting\\AngelScript" FILES ${WolfEngine_Scripting_AngelScript})
+		
+	#Include
+	file(GLOB WolfEngine_Scripting_Include "Code/WolfEngine/Scripting/Include/*.cpp" "Code/WolfEngine/Scripting/Include/*.h")
+	source_group("WolfEngine\\Scripting\\Include" FILES ${WolfEngine_Scripting_Include})
+	
+		
 # Utilities
 file(GLOB WolfEngine_Utilities "Code/WolfEngine/Utilities/*.cpp" "Code/WolfEngine/Utilities/*.h")
 source_group("WolfEngine\\Utilities" FILES ${WolfEngine_Utilities})
@@ -77,6 +109,17 @@ add_executable(WolfEngine
 	${WolfEngine_Input}
 	${WolfEngine_Models}
 	${WolfEngine_Rendering}
+	
+		${WolfEngine_Scripting_Addon_Debugger}
+		${WolfEngine_Scripting_Addon_ScriptArray}
+		${WolfEngine_Scripting_Addon_ScriptBuilder}
+		${WolfEngine_Scripting_Addon_ScriptFile}
+		${WolfEngine_Scripting_Addon_ScriptHelper}
+		${WolfEngine_Scripting_Addon_ScriptMath}
+		${WolfEngine_Scripting_Addon_ScriptStdString}
+		${WolfEngine_Scripting_AngelScript}
+		${WolfEngine_Scripting_Include}
+		
 	${WolfEngine_Utilities}
 )
 
