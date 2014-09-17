@@ -3,6 +3,7 @@
 #include "../ECS/Component.h"
 #include "../Includes.h"
 #include <string>
+#include "../Rendering/Bitmap.h"
 
 ///
 ///	A component for rendering sprites from a sheet or image
@@ -11,7 +12,7 @@ class SpriteRenderer : public Component
 {
 public:
 	///	The spritesheet or sprite (if no sheet is needed)
-	SDL_Texture* spriteSheet;
+	Bitmap* spriteSheet;
 	///	Filename, not actually used at the moment
 	char* filename;
 	///	The individual sprite's width (not the spritesheet's)
@@ -36,6 +37,6 @@ public:
 	void Render();
 private:
 	int sheetwidth, sheetheight;
-	SDL_Rect* clip;
+	Rect* clip;
 };
 #endif

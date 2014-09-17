@@ -3,13 +3,12 @@
 
 TilePicker::TilePicker(int x, int y, int width, int height) : Window(x, y, width, height)
 {
-	tilesheet = Image::Load("Terrain.png");
+	tilesheet = new Bitmap("Terrain.png");
 
 	tilesheetRect.x = 0;
 	tilesheetRect.y = 0;
-	SDL_QueryTexture(tilesheet, NULL, NULL, &tilesheetRect.w, &tilesheetRect.h);
 
-	tilesheetRect.w = tilesheetRect.w * zoom;
+	tilesheetRect.w = tilesheet->size.x * zoom;
 	tilesheetRect.h = tilesheetRect.w;
 }
 
@@ -31,8 +30,8 @@ void TilePicker::Update()
 		selected = x + y * ((tilesheetRect.w / zoom)/tileWidth);
 	}
 
-	SDL_Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 4 };
-	SDL_RenderCopy(Game::renderer, tilesheet, &tilesheetRect, &destRect);
+	Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 4 };
+	tilesheet->Blit(&tilesheetRect, &destRect);
 
 	position.x = Game::scene->camera->width - hitbox.w;
 }

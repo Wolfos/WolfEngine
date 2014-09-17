@@ -14,8 +14,8 @@ class EditorMain : public Scene
 	private:
 		Map* map;
 		Map* grid;
-		SDL_Texture* spritesheet;
-		SDL_Texture * gridtex;
+		Bitmap* spritesheet;
+		Bitmap * gridtex;
 		TilePicker* tilePicker;
 		int tilewidth;
 		int tileheight;

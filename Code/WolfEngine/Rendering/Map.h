@@ -3,6 +3,7 @@
 
 #include "../Includes.h"
 #include "../Includes/ECS.h"
+#include "Bitmap.h"
 
 ///
 /// A WolfEngine tilemap object
@@ -22,7 +23,7 @@ class Map {
 		void Load(char* filename);
 
 		///	Render the map to an SDL_Renderer
-		void Render(SDL_Renderer* target, int layer, SDL_Texture* spritesheet,
+		void Render(int layer, Bitmap* spritesheet,
 			int tilewidth, int tileheight, int offset, GameObject* camera);
 
 		///	Write the map to file

@@ -20,7 +20,7 @@
 #include "Input/Keyboard.h"
 #include "Input/Keys.h"
 #include "Models/Point.h"
-#include "Rendering/Image.h"
+#include "Rendering/Bitmap.h"
 #include "Rendering/Map.h"
 #include "Utilities/Debug.h"
 #include "Utilities/Time.h"

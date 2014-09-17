@@ -16,7 +16,7 @@ elseif (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
 	endif()
 endif()
 
-# Use our modified FindSDL2* modules
+# Use our modified FindSDL2 modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WolfEngine_SOURCE_DIR}/cmake")
 
 # Look up SDL2 and add the include directory to our include path
@@ -32,12 +32,18 @@ include_directories(${SDL2_MIXER_INCLUDE_DIR})
 # Set an output directory for our binaries
 set(BIN_DIR ${WolfEngine_SOURCE_DIR}/bin)
 
+# Scripts
+file(GLOB Scripts "Assets/Scripts/*.ws")
+source_group("Scripts" FILES ${Scripts})
+
 # Editor
 file(GLOB Editor_Source "Code/Editor/*.cpp" "Code/Editor/*.h")
 source_group("Editor" FILES ${Editor_Source})
+
 # Game
 file(GLOB Game_Source "Code/Game/*.cpp" "Code/Game/*.h")
 source_group("Game" FILES ${Game_Source})
+
 # Engine
 file(GLOB WolfEngine_Source "Code/WolfEngine/*.cpp" "Code/WolfEngine/*.h")
 source_group("WolfEngine" FILES ${WolfEngine_Source})
@@ -63,42 +69,46 @@ source_group("WolfEngine\\Models" FILES ${WolfEngine_Models})
 file(GLOB WolfEngine_Rendering "Code/WolfEngine/Rendering/*.cpp" "Code/WolfEngine/Rendering/*.h")
 source_group("WolfEngine\\Rendering" FILES ${WolfEngine_Rendering})
 # Scripting
+	file(GLOB WolfEngine_Scripting "Code/WolfEngine/Scripting/*.cpp" "Code/WolfEngine/Scripting/*.h")
+	source_group("WolfEngine\\Scripting" FILES ${WolfEngine_Scripting})
+	
 	#add_on
 	file(GLOB WolfEngine_Scripting_Addon_Debugger "Code/WolfEngine/Scripting/add_on/debugger/*.cpp" "Code/WolfEngine/Scripting/add_on/debugger/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\debugger" FILES ${WolfEngine_Scripting_Addon_Debugger})
 	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptArray "Code/WolfEngine/Scripting/add_on/scriptarray/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptarray/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scriptarray" FILES ${WolfEngine_Scripting_Addon_ScriptArray})
-		
+	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptBuilder "Code/WolfEngine/Scripting/add_on/scriptbuilder/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptbuilder/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scriptbuilder" FILES ${WolfEngine_Scripting_Addon_ScriptBuilder})
-		
+	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptFile "Code/WolfEngine/Scripting/add_on/scriptfile/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptfile/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scriptfile" FILES ${WolfEngine_Scripting_Addon_ScriptFile})
-		
+	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptHelper "Code/WolfEngine/Scripting/add_on/scripthelper/*.cpp" "Code/WolfEngine/Scripting/add_on/scripthelper/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scripthelper" FILES ${WolfEngine_Scripting_Addon_ScriptHelper})
-		
+	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptMath "Code/WolfEngine/Scripting/add_on/scriptmath/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptmath/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scriptmath" FILES ${WolfEngine_Scripting_Addon_ScriptMath})
-		
+	
 	file(GLOB WolfEngine_Scripting_Addon_ScriptStdString "Code/WolfEngine/Scripting/add_on/scriptstdstring/*.cpp" "Code/WolfEngine/Scripting/add_on/scriptstdstring/*.h")
 	source_group("WolfEngine\\Scripting\\add_on\\scriptstdstring" FILES ${WolfEngine_Scripting_Addon_ScriptStdString})
-		
+	
 	#AngelScript
 	file(GLOB WolfEngine_Scripting_AngelScript "Code/WolfEngine/Scripting/AngelScript/*.cpp" "Code/WolfEngine/Scripting/AngelScript/*.h")
 	source_group("WolfEngine\\Scripting\\AngelScript" FILES ${WolfEngine_Scripting_AngelScript})
-		
+	
 	#Include
 	file(GLOB WolfEngine_Scripting_Include "Code/WolfEngine/Scripting/Include/*.cpp" "Code/WolfEngine/Scripting/Include/*.h")
 	source_group("WolfEngine\\Scripting\\Include" FILES ${WolfEngine_Scripting_Include})
 	
-		
+	
 # Utilities
 file(GLOB WolfEngine_Utilities "Code/WolfEngine/Utilities/*.cpp" "Code/WolfEngine/Utilities/*.h")
 source_group("WolfEngine\\Utilities" FILES ${WolfEngine_Utilities})
 
 add_executable(WolfEngine 
+	${Scripts}
 	${Editor_Source} 
 	${Game_Source}
 	${WolfEngine_Source}
@@ -109,6 +119,7 @@ add_executable(WolfEngine
 	${WolfEngine_Input}
 	${WolfEngine_Models}
 	${WolfEngine_Rendering}
+	${WolfEngine_Scripting}
 	
 		${WolfEngine_Scripting_Addon_Debugger}
 		${WolfEngine_Scripting_Addon_ScriptArray}
@@ -125,3 +136,9 @@ add_executable(WolfEngine
 
 target_link_libraries(WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
 install(TARGETS WolfEngine RUNTIME DESTINATION ${BIN_DIR})
+
+
+
+#Unit tests
+file(GLOB Tests "Tests/*.cpp" "Tests/*.h")
+add_executable(Tests ${Tests})

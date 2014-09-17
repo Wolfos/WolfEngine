@@ -1,6 +1,7 @@
 #ifndef _WINDOW_H
 #define _WINDOW_H
 #include "../Includes.h"
+#include "../Rendering/Bitmap.h"
 #include "../Models/Point.h"
 
 class Window
@@ -16,12 +17,12 @@ class Window
 		{
 
 		}
-		SDL_Rect hitbox;
+		Rect hitbox;
 		bool clicked = false;
 		bool mouseOver = false;
 	private:
-		SDL_Texture* background;
-		bool Collide(Point point, SDL_Rect rect);
+		Bitmap* background;
+		bool Collide(Point point, Rect rect);
 };
 
 #endif

@@ -9,10 +9,15 @@
 class Scene
 {
 	public:
+		Camera* camera;
+		int layers;
+
+
 		Scene();
 		~Scene();
 
 		///	Load a scene from file
+		/// Not actually implemented yet
 		void Load(std::string filename);
 
 		/// Override, runs every frame
@@ -27,9 +32,6 @@ class Scene
 		void RenderObjects();
 
 		void AddGameObject(GameObject* gameObject);
-
-		Camera* camera;
-		int layers;
 
 	private:
 		Map* map;

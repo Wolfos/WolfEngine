@@ -12,8 +12,8 @@ class TilePicker : public Window
 		int tileWidth = 128;
 		int tileHeight = 128;
 		float zoom = 0.5f;
-		SDL_Rect tilesheetRect;
-		SDL_Texture* tilesheet;
+		Rect tilesheetRect;
+		Bitmap* tilesheet;
 		Button* button;
 };
 

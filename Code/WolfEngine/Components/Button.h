@@ -11,7 +11,7 @@
 class Button : public Component
 {
 public:
-	SDL_Rect hitBox;
+	Rect hitBox;
 	virtual void Added();
 	virtual void Update();
 	bool clicked = false;

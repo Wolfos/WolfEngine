@@ -19,7 +19,7 @@ void Button::Added()
 	hitBox.h = renderer->frameHeight * transform->scale.y;
 }
 
-bool Collide(Point point, SDL_Rect rect)
+bool Collide(Point point, Rect rect)
 {
 	if (point.x < rect.x) return false;
 	if (point.y < rect.y) return false;

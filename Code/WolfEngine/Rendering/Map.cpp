@@ -110,10 +110,10 @@ void Map::Put(int x, int y, int l, int value)
 	data[pos] = value;
 }
 
-void Map::Render(SDL_Renderer* target, int layer, SDL_Texture* spritesheet,
+void Map::Render(int layer, Bitmap* spritesheet,
 	int tilewidth, int tileheight, int offset, GameObject* camera)
 {
-	SDL_Rect* clip;
+	Rect* clip;
 
 	//Tiles to start and finish render on
 	int startX;
@@ -121,19 +121,17 @@ void Map::Render(SDL_Renderer* target, int layer, SDL_Texture* spritesheet,
 	int endX;
 	int endY;
 
-	SDL_Rect sourcerect;
-	SDL_Rect targetrect;
+	Rect sourcerect;
+	Rect targetrect;
 	int x, y, i;
 
-	int sheetwidth;
-	int sheetheight;
-
-	SDL_QueryTexture(spritesheet, NULL, NULL, &sheetwidth, &sheetheight);
+	int sheetwidth = spritesheet->size.x;
+	int sheetheight = spritesheet->size.y;
 
 	sheetwidth /= tilewidth;
 	sheetheight /= tileheight;
 
-	clip = (SDL_Rect*)calloc(sheetwidth*sheetheight, sizeof(SDL_Rect));
+	clip = (Rect*)calloc(sheetwidth*sheetheight, sizeof(Rect));
 
 	i = 0;
 	//Clip contains the position of each possible tile
@@ -192,7 +190,7 @@ void Map::Render(SDL_Renderer* target, int layer, SDL_Texture* spritesheet,
 				sourcerect.x = clip[val].x;
 				sourcerect.y = clip[val].y;
 
-				SDL_RenderCopy(target, spritesheet, &sourcerect, &targetrect);
+				spritesheet->Blit(&sourcerect, &targetrect);
 			}
 
 			i++;

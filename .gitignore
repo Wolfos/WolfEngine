@@ -1,3 +1,14 @@
+Android/Assets/
+Android/Bin/
+Android/Gen/
+Android/jni/libpng/
+Android/jni/SDL/
+Android/jni/SDL2_image/
+Android/jni/SDL2_mixer/
+Android/jni/SDL2_ttf/
+Android/libs/
+Android/obj/
+
 [Bb]uild/
 [Bb]in/
 [Dd]ocumentation/

@@ -8,7 +8,6 @@ rvanee@wolfengine.net
 #include "../Game.h"
 #include "../ECS/GameObject.h"
 #include "../Utilities/Debug.h"
-#include "../Rendering/Image.h"
 
 void SpriteRenderer::Added()
 {
@@ -25,15 +24,16 @@ void SpriteRenderer::Update()
 
 void SpriteRenderer::Render()
 {
-	SDL_Rect* rect = new SDL_Rect;
+	Rect* rect = new Rect;
 	rect->w = frameWidth;
 	rect->h = frameHeight;
 
-	SDL_QueryTexture(spriteSheet, 0, 0, &sheetwidth, &sheetheight);
+	sheetwidth = spriteSheet->size.x;
+	sheetheight = spriteSheet->size.y;
 	if (frameWidth != 0) sheetwidth /= frameWidth;
 	if (frameHeight != 0) sheetheight /= frameHeight;
 
-	clip = (SDL_Rect*)calloc((sheetwidth*sheetheight) + 2 * sheetwidth, sizeof(SDL_Rect));
+	clip = (Rect*)calloc((sheetwidth*sheetheight) + 2 * sheetwidth, sizeof(Rect));
 
 	int i = 0;
 	for (int y = 0; y <= sheetheight; y++)
@@ -50,7 +50,7 @@ void SpriteRenderer::Render()
 	rect->x = clip[frame].x;
 	rect->y = clip[frame].y;
 
-	SDL_Rect* dst = new SDL_Rect;
+	Rect* dst = new Rect;
 	if (!gameObject->transform->ignoreCam)
 	{
 		dst->x = gameObject->transform->position.x - Game::scene->camera->gameObject->transform->position.x;
@@ -67,7 +67,8 @@ void SpriteRenderer::Render()
 	center->x = (int)((frameWidth*gameObject->transform->scale.x) / 2);
 	center->y = (int)((frameHeight*gameObject->transform->scale.y) / 2);
 
-	SDL_RenderCopyEx(Game::renderer, spriteSheet, rect, dst, gameObject->transform->angle, center, SDL_FLIP_NONE);
+	spriteSheet->Blit(rect, dst, gameObject->transform->angle, center);
+
 	free(clip);
 	delete(dst);
 	delete(rect);
@@ -76,5 +77,5 @@ void SpriteRenderer::Render()
 
 void SpriteRenderer::Load(std::string filename)
 {
-	spriteSheet = Image::Load(filename);
+	spriteSheet = new Bitmap(filename);
 }
