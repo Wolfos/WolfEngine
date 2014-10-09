@@ -27,6 +27,7 @@ Todo:
 ==========
 - Integrate scripting
 - Make the editor work
+- Open source WolfEngine
 
 The long run:
 ==========
