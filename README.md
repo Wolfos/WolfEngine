@@ -22,3 +22,14 @@ Setup for Windows:
 11. Copy the Asset folder into the build directory
 12. Run the executable again, either through Visual Studio or by double clicking it
 13. You have succesfully setup WolfEngine for development! (hopefully)
+
+Todo:
+==========
+- Integrate scripting
+- Make the editor work
+
+The long run:
+==========
+- Write a new renderer with no external dependencies
+- Write a new input system with no external dependencies
+- Ditch SDL
