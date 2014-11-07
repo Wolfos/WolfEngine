@@ -107,7 +107,7 @@ source_group("Rendering" FILES ${WolfEngine_Rendering})
 file(GLOB WolfEngine_Utilities "Code/WolfEngine/Utilities/*.cpp" "Code/WolfEngine/Utilities/*.h")
 source_group("Utilities" FILES ${WolfEngine_Utilities})
 
-add_library(WolfEngine SHARED
+add_library(WolfEngine STATIC
 	${WolfEngine_Source}
 	${WolfEngine_Audio}
 	${WolfEngine_Components}
