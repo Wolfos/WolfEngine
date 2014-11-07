@@ -5,9 +5,9 @@ Contact:
 rvanee@wolfengine.net
 */
 #include "SpriteRenderer.h"
-#include "../Game.h"
 #include "../ECS/GameObject.h"
 #include "../Utilities/Debug.h"
+#include "../WolfEngine.h"
 
 void SpriteRenderer::Added()
 {
@@ -16,9 +16,9 @@ void SpriteRenderer::Added()
 
 void SpriteRenderer::Update()
 {
-	if (layer >= Game::scene->layers)
+	if (layer >= WolfEngine::scene->layers)
 	{
-		Game::scene->layers = layer + 1;
+		WolfEngine::scene->layers = layer + 1;
 	}
 }
 
@@ -53,8 +53,8 @@ void SpriteRenderer::Render()
 	Rect* dst = new Rect;
 	if (!gameObject->transform->ignoreCam)
 	{
-		dst->x = gameObject->transform->position.x - Game::scene->camera->gameObject->transform->position.x;
-		dst->y = gameObject->transform->position.y - Game::scene->camera->gameObject->transform->position.y;
+		dst->x = gameObject->transform->position.x - WolfEngine::scene->camera->gameObject->transform->position.x;
+		dst->y = gameObject->transform->position.y - WolfEngine::scene->camera->gameObject->transform->position.y;
 	}
 	else
 	{

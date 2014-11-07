@@ -1,7 +1,6 @@
 #include "Window.h"
 #include "GUI.h"
 #include "../Input/Mouse.h"
-#include "../Game.h"
 
 Window::Window(int x, int y, int width, int height)
 {

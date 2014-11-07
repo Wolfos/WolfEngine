@@ -1,5 +1,6 @@
 #include "Bitmap.h"
-#include "../Game.h"
+
+#include "../WolfEngine.h"
 
 #ifdef __APPLE__
 #include "CoreFoundation/CoreFoundation.h"
@@ -70,7 +71,7 @@ void Bitmap::Blit(Rect* srcrect, Rect* dstrect, double angle, SDL_Point* center)
 		tempcenter->y = size.y / 2;
 		center = tempcenter;
 	}
-	SDL_RenderCopyEx(Game::renderer, texture, srcrect, dstrect, angle, center, SDL_FLIP_NONE);
+	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, dstrect, angle, center, SDL_FLIP_NONE);
 	delete center;
 }
 
@@ -106,5 +107,5 @@ SDL_Surface* Bitmap::LoadSurface(std::string filename)
 
 Texture* Bitmap::ToTexture(SDL_Surface* surface)
 {
-	return SDL_CreateTextureFromSurface(Game::renderer, surface);
+	return SDL_CreateTextureFromSurface(WolfEngine::renderer, surface);
 }

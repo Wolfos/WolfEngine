@@ -33,5 +33,5 @@ void TilePicker::Update()
 	Rect destRect = { position.x + 2, position.y + 2, hitbox.w - 4, hitbox.h - 4 };
 	tilesheet->Blit(&tilesheetRect, &destRect);
 
-	position.x = Game::scene->camera->width - hitbox.w;
+	position.x = WolfEngine::scene->camera->width - hitbox.w;
 }

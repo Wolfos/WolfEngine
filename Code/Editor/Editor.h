@@ -1,10 +1,10 @@
-#ifndef _EDITORMAIN_H
-#define _EDITORMAIN_H
+#ifndef _EDITOR_H
+#define _EDITOR_H
 
 #include "../WolfEngine/WolfEngine.h"
 #include "TilePicker.h"
 
-class EditorMain : public Scene
+class Editor : public Scene
 {
 	public:
 		void Start();

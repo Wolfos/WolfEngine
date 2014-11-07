@@ -1,7 +1,7 @@
-#include "EditorMain.h"
+#include "Editor.h"
 
 
-void EditorMain::Start()
+void Editor::Start()
 {
 	spritesheet = new Bitmap("Terrain.png");
 	gridtex = new Bitmap("Grid.png");
@@ -12,13 +12,13 @@ void EditorMain::Start()
 	tilewidth = 128;
 	tileheight = 128;
 
-	tilePicker = new TilePicker(Game::scene->camera->width - 256, 0, 256, 256);
+	tilePicker = new TilePicker(camera->width - 256, 0, 256, 256);
 
 	cam = camera->gameObject->transform;
 }
 
 
-void EditorMain::Update()
+void Editor::Update()
 {
 	int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
 	int yMPos = (Mouse::position.y + cam->position.y) / tileheight;
@@ -57,7 +57,7 @@ void EditorMain::Update()
 	if (Keyboard::KeyDown(Keys::L)) map->Load("Pjenis.wolfmap");
 }
 
-void EditorMain::Exit()
+void Editor::Exit()
 {
 
 }

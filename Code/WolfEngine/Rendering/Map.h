@@ -2,7 +2,8 @@
 #define _MAP_H
 
 #include "../Includes.h"
-#include "../Includes/ECS.h"
+#include "../ECS/Component.h"
+#include "../ECS/GameObject.h"
 #include "Bitmap.h"
 
 ///

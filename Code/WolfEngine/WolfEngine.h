@@ -12,7 +12,6 @@
 #include "Components/Camera.h"
 #include "Components/SpriteRenderer.h"
 #include "Components/Transform.h"
-#include "Game.h"
 #include "GUI/Window.h"
 #include "Includes/ECS.h"
 #include "Input/Input.h"
@@ -24,5 +23,26 @@
 #include "Rendering/Map.h"
 #include "Utilities/Debug.h"
 #include "Utilities/Time.h"
+
+class WolfEngine
+{
+public:
+	static SDL_Window* window;
+
+	static Scene* scene;
+	static SDL_Renderer* renderer;
+
+	static int maxFPS;
+	static int screenWidth;
+	static int screenHeight;
+
+	static int Init();
+
+	static void MainLoop();
+
+	static int Quit();
+private:
+	static int InitSDL();
+};
 
 #endif

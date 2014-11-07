@@ -6,7 +6,6 @@ rvanee@wolfengine.net
 */
 #include "GameObject.h"
 #include "../Utilities/Debug.h"
-#include "../Game.h"
 
 void GameObject::Update()
 {
