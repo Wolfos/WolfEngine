@@ -1,5 +1,7 @@
 #include "WolfEngine.h"
 #include "GUI/GUI.h"
+#include "Scripting/ScriptMain.h"
+#include "Input/Input.h"
 
 int WolfEngine::maxFPS = 60;
 int WolfEngine::screenWidth = 1280, WolfEngine::screenHeight = 720;
@@ -70,7 +72,10 @@ int WolfEngine::InitSDL()
 
 int WolfEngine::Init()
 {
-	return InitSDL();
+	if (InitSDL()) return 1;
+	if (ScriptMain::Init()) return 1;
+
+	return 0;
 }
 
 void WolfEngine::MainLoop()
