@@ -18,6 +18,11 @@ Map::Map(int w, int h, int l, int defaultValue)
 	layers = l;
 
 	data = (int*)calloc(width*height*layers, sizeof(int));
+	if (!data)
+	{
+		printf("Could not create a map with size %i x %i x %i", width, height, layers);
+		return;
+	}
 
 	int i = 0;
 	for (int l = 0; l < layers; l++)
