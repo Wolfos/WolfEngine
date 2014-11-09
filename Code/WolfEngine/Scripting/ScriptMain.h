@@ -12,6 +12,8 @@ class ScriptMain
 		~ScriptMain();
 
 	private:
-		void MessageCallback(const asSMessageInfo *msg, void *param);
+		static void MessageCallback(const asSMessageInfo *msg, void *param);
+		static void Print(std::string &msg);
+
 };
 #endif

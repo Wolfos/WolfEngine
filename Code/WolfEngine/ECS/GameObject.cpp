@@ -6,6 +6,7 @@ rvanee@wolfengine.net
 */
 #include "GameObject.h"
 #include "../Utilities/Debug.h"
+#include "../Components/Script.h"
 
 void GameObject::Update()
 {
@@ -27,6 +28,16 @@ void GameObject::LateUpdate()
 			local_it->second->LateUpdate();
 		}
 	}
+}
+
+Script* GameObject::AddComponent(std::string filename)
+{
+	Script* s = new Script(filename);
+	components[&typeid(*s)] = s;
+	s->gameObject = this;
+	s->Added();
+
+	return s;
 }
 
 GameObject::GameObject()

@@ -12,6 +12,11 @@ void ScriptMain::MessageCallback(const asSMessageInfo *msg, void *param)
 	printf("%s (%d, %d) : %s : %s\n", msg->section, msg->row, msg->col, type, msg->message);
 }
 
+void ScriptMain::Print(std::string &msg)
+{
+	printf("%s", msg.c_str());
+}
+
 int ScriptMain::Init()
 {
 	// Create the script engine
@@ -26,6 +31,7 @@ int ScriptMain::Init()
 	// necessary to implement the registration yourself if you don't want to.
 	RegisterStdString(engine);
 
+	r = engine->RegisterGlobalFunction("void Print(const string &in)", asFUNCTION(Print), asCALL_CDECL); assert(r > 0);
 
 	// The CScriptBuilder helper is an add-on that loads the file,
 	// performs a pre-processing pass if necessary, and then tells

@@ -1,13 +1,14 @@
 #include "WolfEngine.h"
 #include "GUI/GUI.h"
-#include "Scripting/ScriptMain.h"
 #include "Input/Input.h"
+#include "Utilities/Time.h"
 
 int WolfEngine::maxFPS = 60;
 int WolfEngine::screenWidth = 1280, WolfEngine::screenHeight = 720;
 Scene* WolfEngine::scene;
 SDL_Window* WolfEngine::window;
 SDL_Renderer* WolfEngine::renderer;
+ScriptMain* WolfEngine::scripter;
 
 int WolfEngine::InitSDL()
 {
@@ -30,7 +31,7 @@ int WolfEngine::InitSDL()
 		window = SDL_CreateWindow("WolfEngine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE);
 		if (window == NULL)
 		{
-			Debug::Log("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
+			printf("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
 			return 1;
 		}
 		else
@@ -39,7 +40,7 @@ int WolfEngine::InitSDL()
 			int imgflags = IMG_INIT_PNG;
 			if (!(IMG_Init(imgflags) & imgflags))
 			{
-				Debug::Log("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+				printf("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
 				return 1;
 			}
 			else
@@ -51,7 +52,7 @@ int WolfEngine::InitSDL()
 			//Initialize SDL_TTF
 			if (TTF_Init())
 			{
-				Debug::Log("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
+				printf("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
 				return 1;
 			}
 
@@ -77,6 +78,7 @@ int WolfEngine::Init()
 	scripter = new ScriptMain();
 
 	if (scripter->Init()) return 1;
+
 	return 0;
 }
 

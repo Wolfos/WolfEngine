@@ -1,5 +1,6 @@
 #ifndef _TILEPICKER_H
 #define _TILEPICKER_H
+#include "../WolfEngine/API.h"
 #include "../WolfEngine/WolfEngine.h"
 
 class TilePicker : public Window

@@ -1,8 +1,9 @@
 #ifndef _EDITOR_H
 #define _EDITOR_H
 
-#include "../WolfEngine/WolfEngine.h"
+#include "../WolfEngine/API.h"
 #include "TilePicker.h"
+
 
 class Editor : public Scene
 {

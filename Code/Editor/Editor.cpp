@@ -15,6 +15,8 @@ void Editor::Start()
 	tilePicker = new TilePicker(camera->width - 256, 0, 256, 256);
 
 	cam = camera->gameObject->transform;
+	
+	cam->gameObject->AddComponent("Test.ws");
 }
 
 
@@ -53,8 +55,8 @@ void Editor::Update()
 	if (Keyboard::KeyDown(Keys::S)) cam->Move(0, 10);
 	if (Keyboard::KeyDown(Keys::D)) cam->Move(10, 0);
 
-	if (Keyboard::KeyDown(Keys::P)) map->Write("Pjenis.wolfmap");
-	if (Keyboard::KeyDown(Keys::L)) map->Load("Pjenis.wolfmap");
+	if (Keyboard::KeyDown(Keys::P)) map->Write("Map.wolfmap");
+	if (Keyboard::KeyDown(Keys::L)) map->Load("Map.wolfmap");
 }
 
 void Editor::Exit()

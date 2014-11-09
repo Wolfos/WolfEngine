@@ -5,6 +5,8 @@
 #include <typeinfo> 
 #include <unordered_map>
 
+class Script; //Forward declaration
+
 ///
 ///	A GameObject is a framework to put Components on
 ///	It is advisable to make them through ObjectManager::NewGameObject (unless you want to update them by yourself, which you don't)
@@ -53,6 +55,9 @@ class GameObject
 			component->Added();
 			return component;
 		}
+
+		/// Add a script
+		Script* AddComponent(std::string filename);
 
 		/// Template, removes a component of type <C>
 		/// Doesn't do anything if the component doesn't exist

@@ -1,6 +1,6 @@
 #ifndef _GAMEMAIN_H
 #define _GAMEMAIN_H
-#include "../Editor/EditorMain.h"
+//#include "../Editor/EditorMain.h"
 
 class GameMain
 {
@@ -10,7 +10,7 @@ class GameMain
 		void Exit();
 	private:
 		bool isEditor;
-		EditorMain* editor;
+		//EditorMain* editor;
 };
 
 #endif
