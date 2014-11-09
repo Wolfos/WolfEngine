@@ -40,6 +40,9 @@ public:
 	static void MainLoop();
 
 	static int Quit();
+
+	static ScriptMain* scripter;
+
 private:
 	static int InitSDL();
 };

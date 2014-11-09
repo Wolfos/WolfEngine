@@ -30,7 +30,7 @@ int WolfEngine::InitSDL()
 		window = SDL_CreateWindow("WolfEngine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE);
 		if (window == NULL)
 		{
-			Debug::Log("Window could not be created! SDL_Error: %s\n", SDL_GetError());
+			Debug::Log("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
 			return 1;
 		}
 		else
@@ -39,7 +39,7 @@ int WolfEngine::InitSDL()
 			int imgflags = IMG_INIT_PNG;
 			if (!(IMG_Init(imgflags) & imgflags))
 			{
-				Debug::Log("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+				Debug::Log("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
 				return 1;
 			}
 			else
@@ -51,14 +51,14 @@ int WolfEngine::InitSDL()
 			//Initialize SDL_TTF
 			if (TTF_Init())
 			{
-				Debug::Log("SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
+				Debug::Log("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
 				return 1;
 			}
 
 			//Initialize SDL_Mixer, returns 0 on failure
 			if (!Mix_Init(MIX_INIT_OGG))
 			{
-				printf("SDL_Mixer could not initialize! SDL_ttf Error: %s\n", Mix_GetError());
+				printf("Fatal error: SDL_Mixer could not initialize! SDL_ttf Error: %s\n", Mix_GetError());
 				return 1;
 			}
 			else
@@ -73,8 +73,10 @@ int WolfEngine::InitSDL()
 int WolfEngine::Init()
 {
 	if (InitSDL()) return 1;
-	if (ScriptMain::Init()) return 1;
+	
+	scripter = new ScriptMain();
 
+	if (scripter->Init()) return 1;
 	return 0;
 }
 
@@ -133,6 +135,7 @@ void WolfEngine::MainLoop()
 int WolfEngine::Quit()
 {
 	delete scene;
+	delete scripter;
 
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);

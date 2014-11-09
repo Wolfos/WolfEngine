@@ -1,7 +1,6 @@
 #include "ScriptMain.h"
 #include <assert.h>
 #include "add_on/scriptstdstring/scriptstdstring.h"
-#include "add_on/scriptbuilder/scriptbuilder.h"
 
 void ScriptMain::MessageCallback(const asSMessageInfo *msg, void *param)
 {
@@ -31,17 +30,21 @@ int ScriptMain::Init()
 	// The CScriptBuilder helper is an add-on that loads the file,
 	// performs a pre-processing pass if necessary, and then tells
 	// the engine to build a script module.
-	CScriptBuilder builder;
-	r = builder.StartNewModule(engine, "Components");
+	builder = new CScriptBuilder();
+
+	r = builder->StartNewModule(engine, "Components");
 	if (r < 0)
 	{
 		// If the code fails here it is usually because there
 		// is no more memory to allocate the module
-		printf("Unrecoverable error while starting a new module.\n");
+		printf("Fatal error: could not start a new scripting module.\n");
 		return 1;
 	}
 
 	return 0;
+}
 
-	
+ScriptMain::~ScriptMain()
+{
+	delete builder;
 }

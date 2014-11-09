@@ -53,6 +53,11 @@ asIScriptModule *CScriptBuilder::GetModule()
 	return module;
 }
 
+asIScriptEngine *CScriptBuilder::GetEngine()
+{
+	return engine;
+}
+
 unsigned int CScriptBuilder::GetSectionCount() const
 {
 	return (unsigned int)(includedScripts.size());

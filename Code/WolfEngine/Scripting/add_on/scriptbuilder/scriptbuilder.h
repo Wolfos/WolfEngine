@@ -76,6 +76,9 @@ public:
 	// Returns the current module
 	asIScriptModule *GetModule();
 
+	//Returns the engine
+	asIScriptEngine *GetEngine();
+
 	// Register the callback for resolving include directive
 	void SetIncludeCallback(INCLUDECALLBACK_t callback, void *userParam);
 
