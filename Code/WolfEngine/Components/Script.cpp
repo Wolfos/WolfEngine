@@ -26,6 +26,7 @@ Script::Script(std::string filename)
 	}
 
 	//Compile the script
+	//TODO: Don't compile scripts when the script gets added for obvious reasons
 	builder->AddSectionFromFile(("../Assets/Scripts/" + filename).c_str());
 	//Script failed to compile
 	if (builder->BuildModule())
@@ -37,11 +38,17 @@ Script::Script(std::string filename)
 	asIScriptModule* module = builder->GetModule();
 
 	std::string classname = filename.substr(0, filename.size() - 3); //Remove '.ws' from the filename to get the classname
-
+	
 	asIObjectType *type = engine->GetObjectTypeById(module->GetTypeIdByDecl(classname.c_str()));
+	if (!type)
+	{
+		printf("Fatal error: Could not find class %s in file %s", classname, filename);
+		return;
+	}
 
 	classname += " @" + classname + "()";
 
+	//Factory returns a new object of our type (which is our script)
 	asIScriptFunction *factory = type->GetFactoryByDecl(classname.c_str());
 	context = engine->CreateContext();
 
@@ -67,4 +74,10 @@ void Script::Update()
 	context->Prepare(update);
 	context->SetObject(script);
 	context->Execute();
+}
+
+Script::~Script()
+{
+	//Decreases the object's refcount and releases if that number has reached 0
+	script->Release();
 }

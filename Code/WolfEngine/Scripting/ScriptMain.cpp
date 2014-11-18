@@ -20,7 +20,7 @@ void ScriptMain::Print(std::string &msg)
 int ScriptMain::Init()
 {
 	// Create the script engine
-	asIScriptEngine *engine = asCreateScriptEngine(ANGELSCRIPT_VERSION);
+	asIScriptEngine* engine = asCreateScriptEngine(ANGELSCRIPT_VERSION);
 
 	// Set the message callback to receive information on errors in human readable form.
 	int r = engine->SetMessageCallback(asFUNCTION(MessageCallback), 0, asCALL_CDECL); assert(r >= 0);

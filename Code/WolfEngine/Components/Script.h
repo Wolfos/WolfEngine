@@ -16,6 +16,9 @@ class Script : public Component
 
 		virtual void Added();
 		virtual void Update();
+
+		~Script();
+
 	private:
 		bool Exists(const std::string& name);
 
