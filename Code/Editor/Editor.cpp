@@ -15,8 +15,6 @@ void Editor::Start()
 	tilePicker = new TilePicker(camera->width - 256, 0, 256, 256);
 
 	cam = camera->gameObject->transform;
-	
-	cam->gameObject->AddComponent("Test.ws");
 }
 
 

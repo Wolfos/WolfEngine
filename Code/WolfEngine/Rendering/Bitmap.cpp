@@ -42,6 +42,13 @@ Bitmap::Bitmap(std::string file)
 		}
 		cache.push_back(this);
 	}
+
+	rect = new Rect;
+
+	rect->x = 0;
+	rect->y = 0;
+	rect->w = size.x;
+	rect->h = size.y;
 }
 
 Bitmap::~Bitmap()
@@ -58,6 +65,7 @@ Bitmap::~Bitmap()
 				break;
 			}
 		}
+		delete rect;
 		delete count;
 	}
 }

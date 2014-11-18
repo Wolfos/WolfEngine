@@ -11,13 +11,14 @@ int main(int argc, char* args[])
 	}
 
 	Editor* scene = new Editor();
-	scene->Start();
 
 	WolfEngine::scene = scene;
 
 	scene->camera->width = WolfEngine::screenWidth;
 	scene->camera->height = WolfEngine::screenHeight;
 	scene->camera->window = WolfEngine::window;
+
+	scene->Start();
 
 	WolfEngine::MainLoop();
 

@@ -40,10 +40,6 @@ source_group("Scripts" FILES ${Scripts})
 file(GLOB Editor_Source "Code/Editor/*.cpp" "Code/Editor/*.h")
 # source_group("Editor" FILES ${Editor_Source})
 
-# Game
-file(GLOB Game_Source "Code/Game/*.cpp" "Code/Game/*.h")
-# source_group("Game" FILES ${Game_Source})
-
 # Engine
 file(GLOB WolfEngine_Source "Code/WolfEngine/*.cpp" "Code/WolfEngine/*.h")
 # source_group("WolfEngine" FILES ${WolfEngine_Source})
@@ -135,15 +131,10 @@ add_executable(Editor
 	${Editor_Source} 	
 )
 
-add_executable(Runtime
-	${Scripts}
-	${Game_Source}
-)
 
 target_link_libraries(WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
 target_link_libraries(Editor WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
-target_link_libraries(Runtime WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
-install(TARGETS Editor Runtime WolfEngine 
+install(TARGETS Editor WolfEngine 
 RUNTIME DESTINATION ${BIN_DIR}
 ARCHIVE DESTINATION ${BIN_DIR}
 )

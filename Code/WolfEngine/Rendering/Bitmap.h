@@ -11,6 +11,7 @@ public:
 	int* count = 0;
 	Texture* texture;
 	Point size;
+	Rect* rect;
 
 	Bitmap(std::string file);
 	~Bitmap();
