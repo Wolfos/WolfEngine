@@ -39,11 +39,11 @@ void Editor::Update()
 	//Controls
 	if (Mouse::KeyDown(1) && !tilePicker->mouseOver && Mouse::position.x + cam->position.x >= 0 && Mouse::position.x + cam->position.x <= map->width * tilewidth && Mouse::position.y + cam->position.y >= 0 && Mouse::position.y + cam->position.y <= map->height * tileheight)
 	{
-		map->Put(xMPos, yMPos, layer, selected);
+		if(!Mouse::overGUI) map->Put(xMPos, yMPos, layer, selected);
 	}
 	if (Mouse::KeyDown(2) && !tilePicker->mouseOver && Mouse::position.x + cam->position.x >= 0 && Mouse::position.x + cam->position.x <= map->width * tilewidth && Mouse::position.y + cam->position.y >= 0 && Mouse::position.y + cam->position.y <= map->height * tileheight)
 	{
-		map->Put(xMPos, yMPos, layer, -1);
+		if (!Mouse::overGUI) map->Put(xMPos, yMPos, layer, -1);
 	}
 
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;

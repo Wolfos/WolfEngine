@@ -47,6 +47,8 @@ void Window::HandleInput()
 {
 	if (Collide(Mouse::position, hitbox))
 	{
+		Mouse::overGUI = true;
+
 		mouseOver = true;
 
 		if (Mouse::KeyClicked(1)) clicked = true;
@@ -58,9 +60,15 @@ void Window::HandleInput()
 		clicked = false;
 	}
 
+	if (Collide(Mouse::position, barRect)) //Mouseover on titlebar
+	{
+		Mouse::overGUI = true;
+	}
+
 	//Window dragging
 	if (Collide(Mouse::position, barRect) && Mouse::KeyClicked(1))
 	{
+		Mouse::overGUI = true;
 		vertSnap = None;
 		horSnap = None;
 		dragging = true;
@@ -69,6 +77,7 @@ void Window::HandleInput()
 	}
 	if (dragging)
 	{
+		Mouse::overGUI = true;
 		if (Mouse::KeyReleased(1))
 		{
 			dragging = false;

@@ -1,6 +1,7 @@
 #include "Mouse.h"
 
 Point Mouse::position;
+bool Mouse::overGUI = false;
 Key Mouse::key1;
 Key Mouse::key2;
 Key Mouse::key3;
