@@ -46,6 +46,4 @@ void TilePicker::Update()
 	tilesheet->Blit(&tilesheetRect, &destRect);
 
 	selectionRect->Blit(selectionRect->rect, &selectionRectRect);
-
-	position.x = WolfEngine::scene->camera->width - hitbox.w;
 }

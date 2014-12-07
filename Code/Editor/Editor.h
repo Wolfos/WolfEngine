@@ -16,7 +16,8 @@ class Editor : public Scene
 		Map* map;
 		Map* grid;
 		Bitmap* spritesheet;
-		Bitmap * gridtex;
+		Bitmap* gridtex;
+		Bitmap* topBar;
 		TilePicker* tilePicker;
 		int tilewidth;
 		int tileheight;
