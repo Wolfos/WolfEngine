@@ -181,7 +181,6 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	}
 	else endY = height;
 
-	i = startX + startY * endY;
 	for (y = startY; y<endY; y++)
 	{
 		for (x = startX; x<endX; x++)
@@ -197,12 +196,7 @@ void Map::Render(int layer, Bitmap* spritesheet,
 
 				spritesheet->Blit(&sourcerect, &targetrect);
 			}
-
-			i++;
 		}
-		//Skip over the tiles we're not rendering
-		i += startX;
-		i += width - endX;
 	}
 
 
