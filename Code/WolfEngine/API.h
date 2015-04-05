@@ -6,7 +6,6 @@
 #include "Audio/Music.h"
 #include "Components/Button.h"
 #include "Components/Camera.h"
-#include "Components/Script.h"
 #include "Components/SpriteRenderer.h"
 #include "Components/Transform.h"
 #include "GUI/Window.h"

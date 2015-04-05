@@ -8,7 +8,6 @@ int WolfEngine::screenWidth = 1280, WolfEngine::screenHeight = 720;
 Scene* WolfEngine::scene;
 SDL_Window* WolfEngine::window;
 SDL_Renderer* WolfEngine::renderer;
-ScriptMain* WolfEngine::scripter;
 
 int WolfEngine::InitSDL()
 {
@@ -74,10 +73,6 @@ int WolfEngine::InitSDL()
 int WolfEngine::Init()
 {
 	if (InitSDL()) return 1;
-	
-	scripter = new ScriptMain();
-
-	if (scripter->Init()) return 1;
 
 	return 0;
 }
@@ -137,7 +132,6 @@ void WolfEngine::MainLoop()
 int WolfEngine::Quit()
 {
 	delete scene;
-	delete scripter;
 
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);

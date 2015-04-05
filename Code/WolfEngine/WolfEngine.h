@@ -5,7 +5,6 @@
 #ifndef _WOLFENGINE_H
 #define _WOLFENGINE_H
 
-#include "Scripting/ScriptMain.h"
 #include "ECS/Scene.h"
 
 class WolfEngine
@@ -25,8 +24,6 @@ public:
 	static void MainLoop();
 
 	static int Quit();
-
-	static ScriptMain* scripter;
 
 private:
 	static int InitSDL();
