@@ -25,12 +25,8 @@ Setup for Windows:
 
 Todo:
 ==========
-- Integrate scripting
 - Make the editor work
-- Open source WolfEngine
 
 The long run:
 ==========
-- Write a new renderer with no external dependencies
-- Write a new input system with no external dependencies
-- Ditch SDL
+- Switch to BGFX and ditch SDL
