@@ -3,6 +3,7 @@
 #include "../Models/Point.h"
 #include "../Input/Input.h"
 #include "../Input/Mouse.h"
+#include "../Utilities/Collision.h"
 
 void Button::Added()
 {
@@ -19,23 +20,13 @@ void Button::Added()
 	hitBox.h = renderer->frameHeight * transform->scale.y;
 }
 
-bool Collide(Point point, Rect rect)
-{
-	if (point.x < rect.x) return false;
-	if (point.y < rect.y) return false;
-	if (point.x > rect.x + rect.w) return false;
-	if (point.y > rect.y + rect.h) return false;
-
-	return true;
-}
-
 void Button::Update()
 {
-	if (Mouse::KeyClicked(1) && Collide({ Mouse::position.x, Mouse::position.y }, hitBox))
+	if (Mouse::KeyClicked(1) && Collision::AABB(Mouse::position, hitBox))
 	{
 		clicked = true;
 	}
-	else if (Collide({ Mouse::position.x, Mouse::position.y }, hitBox))
+	else if (Collision::AABB(Mouse::position, hitBox))
 	{
 		clicked = false;
 		mouseOver = true;

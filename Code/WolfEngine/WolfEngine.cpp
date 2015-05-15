@@ -74,6 +74,8 @@ int WolfEngine::Init()
 {
 	if (InitSDL()) return 1;
 
+	GUI::Init();
+
 	return 0;
 }
 
@@ -116,10 +118,11 @@ void WolfEngine::MainLoop()
 		//Render the SpriteRenderers
 		scene->RenderObjects();
 
-		GUI::Update();
-
 		//Late update
 		scene->LateUpdateObjects();
+
+		//OnGUI
+		scene->OnGUI();
 
 		SDL_RenderPresent(renderer);
 		lastFrameTime = curFrameTime;

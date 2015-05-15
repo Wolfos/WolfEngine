@@ -14,6 +14,7 @@ int main(int argc, char* args[])
 
 	WolfEngine::scene = scene;
 
+
 	scene->camera->width = WolfEngine::screenWidth;
 	scene->camera->height = WolfEngine::screenHeight;
 	scene->camera->window = WolfEngine::window;

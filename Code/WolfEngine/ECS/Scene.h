@@ -21,9 +21,10 @@ class Scene
 		void Load(std::string filename);
 
 		/// Override, runs every frame
-		virtual void Update()
-		{
-		}
+		virtual void Update(){}
+
+		/// Override, runs every frame, after everything else
+		virtual void OnGUI(){}
 
 		void UpdateObjects();
 

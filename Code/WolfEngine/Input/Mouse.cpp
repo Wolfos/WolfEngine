@@ -2,33 +2,33 @@
 
 Point Mouse::position;
 bool Mouse::overGUI = false;
+Key Mouse::key0;
 Key Mouse::key1;
 Key Mouse::key2;
-Key Mouse::key3;
 
 bool Mouse::KeyDown(int key)
 {
-	if (key == 1 && key1.down) return true;
+	if (key == 0 && key0.down) return true;
+	else if (key == 1 && key1.down) return true;
 	else if (key == 2 && key2.down) return true;
-	else if (key == 3 && key3.down) return true;
 
 	return false;
 }
 
 bool Mouse::KeyReleased(int key)
 {
-	if (key == 1 && key1.released) return true;
-	else if (key == 2 && key2.released) return true;
-	else if (key == 3 && key3.released) return true;
+	if (key == 0 && key0.released) return true;
+	else if (key == 2 && key1.released) return true;
+	else if (key == 3 && key2.released) return true;
 
 	return false;
 }
 
 bool Mouse::KeyClicked(int key)
 {
-	if (key == 1 && key1.clicked) return true;
-	else if (key == 2 && key2.clicked) return true;
-	else if (key == 3 && key3.clicked) return true;
+	if (key == 1 && key0.clicked) return true;
+	else if (key == 2 && key1.clicked) return true;
+	else if (key == 3 && key2.clicked) return true;
 
 	return false;
 }
@@ -40,19 +40,16 @@ void Mouse::Update(SDL_Event* eventHandler)
 		switch (eventHandler->button.button)
 		{
 			case SDL_BUTTON_LEFT:
-				key1.down = true;
-				if (!key1.wasdown) key1.clicked = true;
-				else key1.clicked = false;
+				key0.down = true;
+				key0.clicked = !key0.wasdown;
 				break;
 			case SDL_BUTTON_RIGHT:
-				key2.down = true;
-				if(!key2.wasdown) key2.clicked = true;
-				else key2.clicked = false;
+				key1.down = true;
+				key1.clicked = !key1.wasdown;
 				break;
 			case SDL_BUTTON_MIDDLE:
-				key3.down = true;
-				if (!key3.wasdown) key3.clicked = true;
-				else key3.clicked = false;
+				key2.down = true;
+				key2.clicked = !key2.wasdown;
 				break;
 		}
 	}
@@ -61,19 +58,19 @@ void Mouse::Update(SDL_Event* eventHandler)
 		switch (eventHandler->button.button)
 		{
 			case SDL_BUTTON_LEFT:
-				if(!key1.released) key1.released = true;
+				if(!key0.released) key0.released = true;
+				key0.down = false;
+				key0.clicked = false;
+				break;
+			case SDL_BUTTON_RIGHT:
+				if (!key1.released) key1.released = true;
 				key1.down = false;
 				key1.clicked = false;
 				break;
-			case SDL_BUTTON_RIGHT:
+			case SDL_BUTTON_MIDDLE:
 				if (!key2.released) key2.released = true;
 				key2.down = false;
 				key2.clicked = false;
-				break;
-			case SDL_BUTTON_MIDDLE:
-				if (!key3.released) key3.released = true;
-				key3.down = false;
-				key3.clicked = false;
 				break;
 		}
 	}

@@ -1,22 +1,15 @@
 #ifndef _GUI_H
 #define _GUI_H
+#include "../Includes.h"
+#include "../Rendering/Bitmap.h"
 
-#include <unordered_map>
-#include <typeinfo> 
-#include "Window.h"
-
-class GUI
+namespace GUI
 {
-	private:
-		static std::unordered_map<const std::type_info*, Window*> windows;
-	public:
-		template <typename W>
-		static void AddWindow(W* window)
-		{
-			windows[&typeid(*window)] = window;
-		}
-
-		static void Update();
+	extern void Init();
+	extern void Box(Rect position);
+	extern bool Button(Rect position, std::string text);
+	extern float VerticalScrollBar(Rect position, float value, float minValue, float maxValue);
+	extern void Exit();
 };
 
 #endif

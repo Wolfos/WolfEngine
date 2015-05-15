@@ -26,11 +26,11 @@ class Mouse
 		static void Update(SDL_Event* eventHandler);
 
 		///	Left mouse button, direct usage not recommended
-		static Key key1;
+		static Key key0;
 		///	Right mouse button, direct usage not recommended
-		static Key key2;
+		static Key key1;
 		/// Middle mouse button, direct usage not recommended
-		static Key key3;
+		static Key key2;
 };
 
 #endif
