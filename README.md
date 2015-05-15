@@ -29,6 +29,3 @@ Todo:
 ==========
 - Make the editor work
 
-The long run:
-==========
-- Switch to BGFX and ditch SDL
