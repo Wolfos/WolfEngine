@@ -62,6 +62,8 @@ float Lerp(float a, float b, float t){
 	return (1 - t)*a + t*b;
 }
 
+int initPos;
+
 extern float GUI::VerticalScrollBar(Rect position, float value, float minValue, float maxValue)
 {
 	scrollBarBackground->Blit(scrollBarBackground->rect, &position);
@@ -86,10 +88,11 @@ extern float GUI::VerticalScrollBar(Rect position, float value, float minValue, 
 			{
 				mousePressed = true;
 				initMouseY = Mouse::position.y;
+				initPos = scrollBarHandlePos.y;
 			}
 			else
 			{
-				nextYPos = scrollBarHandlePos.y + Mouse::position.y - initMouseY;
+				nextYPos = initPos + Mouse::position.y - initMouseY;
 				value = Lerp(minValue, maxValue, nextYPos / ((float)minPoint.y + (float)maxPoint.y));
 
 				if (value < minValue) value = minValue;
