@@ -10,9 +10,9 @@ class Transform : public Component
 {
 public:
 	///	The position in pixels
-	Point position;
+	WPoint position;
 	/// The scale, not in pixels
-	PointF scale;
+	WPointF scale;
 	/// Move by pixels
 	void Move(int x, int y);
 	///	Rotation by degrees

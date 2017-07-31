@@ -25,7 +25,7 @@ extern void GUI::Init()
 	font = new Font("Oregon LDO.ttf",32);
 }
 
-extern void GUI::Box(Rect position)
+extern void GUI::Box(WRect position)
 {
 	boxBackground->Blit(boxBackground->rect, &position);
 	if (Collision::AABB(Mouse::position, position))
@@ -34,7 +34,7 @@ extern void GUI::Box(Rect position)
 	}
 }
 
-extern bool GUI::Button(Rect position, std::string text)
+extern bool GUI::Button(WRect position, std::string text)
 {
 	if (Collision::AABB(Mouse::position, position))
 	{
@@ -64,18 +64,18 @@ float Lerp(float a, float b, float t){
 
 int initPos;
 
-extern float GUI::VerticalScrollBar(Rect position, float value, float minValue, float maxValue)
+extern float GUI::VerticalScrollBar(WRect position, float value, float minValue, float maxValue)
 {
 	scrollBarBackground->Blit(scrollBarBackground->rect, &position);
 
 	if (value < minValue) value = minValue;
 	if (value > maxValue) value = maxValue;
 
-	Point minPoint = { position.x + 4, position.y + 32 };
-	Point maxPoint = { position.x + 4, position.y + position.h - 32 };
-	Point scrollBarHandlePos = Point::Lerp(minPoint, maxPoint, value / (minValue + maxValue));
+	WPoint minPoint = { position.x + 4, position.y + 32 };
+	WPoint maxPoint = { position.x + 4, position.y + position.h - 32 };
+	WPoint scrollBarHandlePos = WPoint::Lerp(minPoint, maxPoint, value / (minValue + maxValue));
 	
-	Rect scrollBarHandleRect = { scrollBarHandlePos.x, scrollBarHandlePos.y - 32, position.w - 8, 64 };
+	WRect scrollBarHandleRect = { scrollBarHandlePos.x, scrollBarHandlePos.y - 32, position.w - 8, 64 };
 	scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
 
 	int nextYPos;

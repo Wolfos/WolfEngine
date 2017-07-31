@@ -10,13 +10,13 @@ public:
 	std::string filename;
 	int* count = 0;
 	Texture* texture;
-	Point size;
-	Rect* rect;
+	WPoint size;
+	WRect* rect;
 
 	Bitmap(std::string file);
 	~Bitmap();
 
-	void Blit(Rect* srcrect, Rect* dstrect, double angle = 0, SDL_Point* center = NULL);
+	void Blit(WRect* srcrect, WRect* dstrect, double angle = 0, SDL_Point* center = NULL);
 private:
 	SDL_Surface* LoadSurface(std::string file);
 	Texture* ToTexture(SDL_Surface* surface);

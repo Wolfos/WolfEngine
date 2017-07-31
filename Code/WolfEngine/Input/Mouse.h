@@ -11,7 +11,7 @@ class Mouse
 {
 	public:
 		///	Mouse position on the screen, in pixels
-		static Point position;
+		static WPoint position;
 		/// Often we don't want clicks on the GUI to pass through to the game
 		/// Handled in GUI, not in Mouse update
 		static bool overGUI;

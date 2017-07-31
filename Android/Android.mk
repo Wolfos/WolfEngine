@@ -28,7 +28,7 @@ $(CODE_PATH)/WolfEngine/GUI/Window.cpp \
 $(CODE_PATH)/WolfEngine/Input/Input.cpp \
 $(CODE_PATH)/WolfEngine/Input/Keyboard.cpp \
 $(CODE_PATH)/WolfEngine/Input/Mouse.cpp \
-$(CODE_PATH)/WolfEngine/Models/Point.cpp \
+$(CODE_PATH)/WolfEngine/Models/WPoint.cpp \
 $(CODE_PATH)/WolfEngine/Rendering/Bitmap.cpp \
 $(CODE_PATH)/WolfEngine/Rendering/Map.cpp \
 $(CODE_PATH)/WolfEngine/Utilities/Debug.cpp \

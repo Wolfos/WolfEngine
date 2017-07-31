@@ -1,5 +1,5 @@
 /*
-WolfEngine © 2013-2014 Robin van Ee
+WolfEngine ï¿½ 2013-2014 Robin van Ee
 http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
@@ -118,7 +118,7 @@ void Map::Put(int x, int y, int l, int value)
 void Map::Render(int layer, Bitmap* spritesheet,
 	int tilewidth, int tileheight, int offset, GameObject* camera)
 {
-	Rect* clip;
+	WRect* clip;
 
 	//Tiles to start and finish render on
 	int startX;
@@ -126,8 +126,8 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	int endX;
 	int endY;
 
-	Rect sourcerect;
-	Rect targetrect;
+	WRect sourcerect;
+	WRect targetrect;
 	int x, y, i;
 
 	int sheetwidth = spritesheet->size.x;
@@ -136,7 +136,7 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	sheetwidth /= tilewidth;
 	sheetheight /= tileheight;
 
-	clip = (Rect*)calloc(sheetwidth*sheetheight, sizeof(Rect));
+	clip = (WRect*)calloc(sheetwidth*sheetheight, sizeof(WRect));
 
 	i = 0;
 	//Clip contains the position of each possible tile
