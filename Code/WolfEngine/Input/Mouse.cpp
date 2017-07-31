@@ -24,6 +24,7 @@ bool Mouse::KeyReleased(int key)
 	return false;
 }
 
+// TODO: this doesn't appear to work
 bool Mouse::KeyClicked(int key)
 {
 	if (key == 1 && key0.clicked) return true;
