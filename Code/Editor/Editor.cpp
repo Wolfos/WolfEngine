@@ -101,7 +101,7 @@ void Editor::OnGUI()
 	}
 	selectionRect->Blit(selectionRect->rect, &selRectPos);
 
-	scrollBarPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, scrollBarPos, 0, spritesheet->size.y - srcRect.h);
+	scrollBarPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, scrollBarPos, spritesheet->size.y - srcRect.h);
 }
 
 void Editor::Exit()
