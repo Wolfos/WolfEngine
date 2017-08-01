@@ -22,25 +22,34 @@ void Editor::Start()
 
 void Editor::Update()
 {
-	int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
-	int yMPos = (Mouse::position.y + cam->position.y) / tileheight;
-
+	// Render our map
 	map->Render(0, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
 	map->Render(1, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
 	map->Render(2, spritesheet, tilewidth, tileheight, 0, camera->gameObject);
-		
-	if (showGrid) grid->Render(0, gridtex, tilewidth, tileheight, 0, camera->gameObject);
 
-	//Controls
-	if (Mouse::position.x + cam->position.x >= 0 && Mouse::position.x + cam->position.x <= map->width * tilewidth && Mouse::position.y + cam->position.y >= 0 && Mouse::position.y + cam->position.y <= map->height * tileheight)
+	// Render the grid
+	if (showGrid) grid->Render(0, gridtex, tilewidth, tileheight, 0, camera->gameObject);
+	
+	// Determine if we clicked on the map
+	if 
+	(	Mouse::position.x + cam->position.x >= 0 && 
+		Mouse::position.x + cam->position.x <= map->width * tilewidth && 
+		Mouse::position.y + cam->position.y >= 0 && 
+		Mouse::position.y + cam->position.y <= map->height * tileheight)
 	{
 		if (!Mouse::overGUI)
 		{
+			// Determine the coordinates of the tile the cursor is over
+			int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
+			int yMPos = (Mouse::position.y + cam->position.y) / tileheight;
+
+			// LMB places a tile, RMB removes one
 			if(Mouse::KeyDown(0)) map->Put(xMPos, yMPos, layer, selected);
 			if(Mouse::KeyDown(1)) map->Put(xMPos, yMPos, layer, -1);
 		}
 	}
 
+	// Keyboard shortcuts
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;
 
 	if (Keyboard::KeyClicked(Keys::A)) layer = 0;
@@ -59,6 +68,7 @@ void Editor::Update()
 void Editor::OnGUI()
 {
 	Mouse::overGUI = false;
+
 	// Draw tile selector
 	Rect rect = { camera->width - 256 - 22, 0, 256, 256 };
 	GUI::Box(rect);
@@ -84,11 +94,12 @@ void Editor::OnGUI()
 
 	if(selRectPos.x == -100) selRectPos = { dstRect.x, dstRect.y, realTileWidth, realTileHeight };
 
-	//Select tile
+	// Select tile
 	if (Mouse::KeyReleased(0))
 	{
 		if (Collision::AABB(Mouse::position, dstRect))
 		{
+			// This code is broken with the scrollbar
 			int xPos = (Mouse::position.x - dstRect.x + srcRect.x) / realTileWidth;
 			int yPos = (Mouse::position.y - dstRect.y + srcRect.y) / realTileHeight;
 			selected = xPos + yPos * (spritesheet->size.x / tilewidth);

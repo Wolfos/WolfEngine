@@ -20,5 +20,6 @@
 #include "Utilities/Collision.h"
 #include "Utilities/Debug.h"
 #include "Utilities/Time.h"
+#include "Utilities/WolfMath.h"
 
 #endif
