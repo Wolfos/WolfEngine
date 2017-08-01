@@ -30,6 +30,8 @@ void Editor::Update()
 	// Render the grid
 	if (showGrid) grid->Render(0, gridtex, tilewidth, tileheight, 0, camera->gameObject);
 	
+	if (Mouse::overGUI) canDraw = false;
+	else if (!Mouse::KeyDown(0)) canDraw = true;
 	// Determine if we clicked on the map
 	if 
 	(	Mouse::position.x + cam->position.x >= 0 && 
@@ -37,7 +39,7 @@ void Editor::Update()
 		Mouse::position.y + cam->position.y >= 0 && 
 		Mouse::position.y + cam->position.y <= map->height * tileheight)
 	{
-		if (!Mouse::overGUI)
+		if (canDraw)
 		{
 			// Determine the coordinates of the tile the cursor is over
 			int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
@@ -72,47 +74,52 @@ void Editor::OnGUI()
 	// Draw tile selector
 	WRect rect = { camera->width - 256 - 22, 0, 256, 256 };
 	GUI::Box(rect);
-	WRect srcRect = { 0, (int)scrollBarPos, 1024, 1024 };
+	WRect srcRect = { (int)xPos, (int)yPos, 1024, 1024 };
 	WRect dstRect = {rect.x + 2, rect.y + 2, 252, 252};
 	spritesheet->Blit(&srcRect, &dstRect);
 
 	int realTileWidth = tilewidth / (srcRect.w / dstRect.w);
 	int realTileHeight = tileheight / (srcRect.h / dstRect.h);
 
-	if (GUI::Button({ rect.x, 256, 64, 64 }, "A"))
+	if (GUI::Button({ rect.x, 278, 64, 64 }, "A"))
 	{
 		layer = 0;
 	}
-	if (GUI::Button({ rect.x + 64, 256, 64, 64 }, "B"))
+	if (GUI::Button({ rect.x + 64, 278, 64, 64 }, "B"))
 	{
 		layer = 1;
 	}
-	if (GUI::Button({ rect.x + 128, 256, 64, 64 }, "C"))
+	if (GUI::Button({ rect.x + 128, 278, 64, 64 }, "C"))
 	{
 		layer = 2;
 	}
 
 	if(selRectPos.x == -100) selRectPos = { dstRect.x, dstRect.y, realTileWidth, realTileHeight };
 
+	float scaledX = (float)xPos / ((float)srcRect.w / (float)dstRect.w);
+	float scaledY = (float)yPos / ((float)srcRect.h / (float)dstRect.h);
 	// Select tile
 	if (Mouse::KeyReleased(0))
 	{
 		if (Collision::AABB(Mouse::position, dstRect))
 		{
-			// This code is broken with the scrollbar
-			int xPos = (Mouse::position.x - dstRect.x + srcRect.x) / realTileWidth;
-			int yPos = (Mouse::position.y - dstRect.y + srcRect.y) / realTileHeight;
+			int xPos = (Mouse::position.x - dstRect.x + scaledX) / realTileWidth;
+			int yPos = (Mouse::position.y - dstRect.y + scaledY) / realTileHeight;
 			selected = xPos + yPos * (spritesheet->size.x / tilewidth);
 			
-			selRectPos.x = xPos * realTileWidth + dstRect.x - srcRect.x;
-			selRectPos.y = yPos * realTileHeight + dstRect.y - srcRect.y;
+			selRectPos.x = xPos * realTileWidth + dstRect.x;
+			selRectPos.y = yPos * realTileHeight + dstRect.y;
 			selRectPos.w = realTileWidth;
 			selRectPos.h = realTileHeight;
 		}
 	}
-	selectionRect->Blit(selectionRect->rect, &selRectPos);
+	WRect srp = selRectPos;
+	srp.x -= scaledX;
+	srp.y -= scaledY;
+	selectionRect->Blit(selectionRect->rect, &srp);
 
-	scrollBarPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, scrollBarPos, spritesheet->size.y - srcRect.h);
+	xPos = GUI::HorizontalScrollBar({ rect.x, rect.y + rect.h, rect.w, 22 }, xPos, spritesheet->size.x - srcRect.w);
+	yPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, yPos, spritesheet->size.y - srcRect.h);
 }
 
 void Editor::Exit()

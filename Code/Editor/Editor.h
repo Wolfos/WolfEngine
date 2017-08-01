@@ -28,7 +28,9 @@ class Editor : public Scene
 		int layer = 0;
 		WRect selRectPos;
 		bool showGrid = true;
-		float scrollBarPos = 0.0f;
+		float yPos = 0.0f;
+		float xPos = 0.0f;
+		bool canDraw = true;
 };
 
 

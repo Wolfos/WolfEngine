@@ -12,6 +12,11 @@ Android/obj/
 .idea/
 cmake-build-debug/
 
+Editor.dir/
+Tests.dir/
+Win32/
+WolfEngine.dir/
+
 [Bb]uild/
 [Bb]in/
 [Dd]ocumentation/
