@@ -31,18 +31,22 @@ extern void GUI::Box(WRect position)
 	}
 }
 
-extern bool GUI::Button(WRect position, std::string text)
+extern bool GUI::Button(WRect position, std::string text, bool highlight)
 {
+	Bitmap* toRender;
 	if (Collision::AABB(Mouse::position, position))
 	{
 		Mouse::overGUI = true;
-		if (Mouse::KeyDown(0)) buttonPressed->Blit(buttonHover->rect, &position);
-		else buttonHover->Blit(buttonHover->rect, &position);
+		if (Mouse::KeyDown(0)) toRender = buttonPressed;
+		else toRender = buttonHover;
 	}
 	else
 	{
+		toRender = buttonBackground;
 		buttonBackground->Blit(buttonBackground->rect, &position);
 	}
+	if (highlight) toRender = buttonPressed;
+	toRender->Blit(toRender->rect, &position);
 	font->Blit(position.x + position.w / 2, position.y + position.h / 2, text, { 255, 255, 255, 255 });
 
 	if (Collision::AABB(Mouse::position, position) && Mouse::KeyReleased(0))

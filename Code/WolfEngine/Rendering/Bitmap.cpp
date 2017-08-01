@@ -8,8 +8,6 @@
 
 std::vector<Bitmap*> Bitmap::cache;
 
-// TODO: Fix potential crash bug when loading the same image more than 2 times because the count isn't correct
-// Maybe use pointers?
 Bitmap::Bitmap(std::string file)
 {
 	bool cached = false;

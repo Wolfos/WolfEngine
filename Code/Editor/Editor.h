@@ -31,7 +31,8 @@ class Editor : public Scene
 		float xPos = 0.0f;
 		bool canDraw = true;
 		WPoint initialMousePos;
-		WPointF initialMapPos;
+		WPointF initialTileSelectPos;
+		WPointF initialCamPos;
 };
 
 

@@ -31,15 +31,15 @@ void Editor::Update()
 	if (showGrid) grid->Render(0, gridtex, tilewidth, tileheight, 0, camera->gameObject);
 	
 	if (Mouse::overGUI) canDraw = false;
-	else if (!Mouse::KeyDown(0)) canDraw = true;
-	// Determine if we clicked on the map
+	else if (!Mouse::KeyDown(0) && !Mouse::KeyDown(1) && !Mouse::KeyDown(2)) canDraw = true;
+	// Determine if the mouse is over the map
 	if 
 	(	Mouse::position.x + cam->position.x >= 0 && 
 		Mouse::position.x + cam->position.x <= map->width * tilewidth && 
 		Mouse::position.y + cam->position.y >= 0 && 
 		Mouse::position.y + cam->position.y <= map->height * tileheight)
 	{
-		if (canDraw)
+		if (canDraw) // Did we start the click action on a GUI element?
 		{
 			// Determine the coordinates of the tile the cursor is over
 			int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
@@ -48,15 +48,29 @@ void Editor::Update()
 			// LMB places a tile, RMB removes one
 			if(Mouse::KeyDown(0)) map->Put(xMPos, yMPos, layer, selected);
 			if(Mouse::KeyDown(1)) map->Put(xMPos, yMPos, layer, -1);
+
+			if (Mouse::KeyClicked(2))
+			{
+				initialMousePos = Mouse::position;
+				initialCamPos.x = cam->position.x;
+				initialCamPos.y = cam->position.y;
+			}
+			if (Mouse::KeyDown(2))
+			{
+				cam->position.x = initialCamPos.x - (Mouse::position.x - initialMousePos.x);
+				cam->position.y = initialCamPos.y - (Mouse::position.y - initialMousePos.y);
+			}
 		}
+
 	}
+
 
 	// Keyboard shortcuts
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;
 
-	if (Keyboard::KeyClicked(Keys::A)) layer = 0;
-	if (Keyboard::KeyClicked(Keys::B)) layer = 1;
-	if (Keyboard::KeyClicked(Keys::C)) layer = 2;
+	if (Keyboard::KeyClicked(Keys::One)) layer = 0;
+	if (Keyboard::KeyClicked(Keys::Two)) layer = 1;
+	if (Keyboard::KeyClicked(Keys::Three)) layer = 2;
 
 	if (Keyboard::KeyDown(Keys::W)) cam->Move(0, -10);
 	if (Keyboard::KeyDown(Keys::A)) cam->Move(-10, 0);
@@ -81,15 +95,18 @@ void Editor::OnGUI()
 	int realTileWidth = tilewidth / (srcRect.w / dstRect.w);
 	int realTileHeight = tileheight / (srcRect.h / dstRect.h);
 
-	if (GUI::Button({ rect.x, 278, 64, 64 }, "A"))
+	bool highlight = layer == 0;
+	if (GUI::Button({ rect.x, 278, 64, 64 }, "A", highlight))
 	{
 		layer = 0;
 	}
-	if (GUI::Button({ rect.x + 64, 278, 64, 64 }, "B"))
+	highlight = layer == 1;
+	if (GUI::Button({ rect.x + 64, 278, 64, 64 }, "B", highlight))
 	{
 		layer = 1;
 	}
-	if (GUI::Button({ rect.x + 128, 278, 64, 64 }, "C"))
+	highlight = layer == 2;
+	if (GUI::Button({ rect.x + 128, 278, 64, 64 }, "C", highlight))
 	{
 		layer = 2;
 	}
@@ -112,16 +129,16 @@ void Editor::OnGUI()
 			selRectPos.w = realTileWidth;
 			selRectPos.h = realTileHeight;
 		}
-		if (Mouse::KeyClicked(1))
+		if (Mouse::KeyClicked(2))
 		{
 			initialMousePos = Mouse::position;
-			initialMapPos.x = xPos;
-			initialMapPos.y = yPos;
+			initialTileSelectPos.x = xPos;
+			initialTileSelectPos.y = yPos;
 		}
-		if (Mouse::KeyDown(1))
+		if (Mouse::KeyDown(2))
 		{
-			xPos = initialMapPos.x - (Mouse::position.x - initialMousePos.x) * (srcRect.w / dstRect.w);
-			yPos = initialMapPos.y - (Mouse::position.y - initialMousePos.y) * (srcRect.h / dstRect.h);
+			xPos = initialTileSelectPos.x - (Mouse::position.x - initialMousePos.x) * (srcRect.w / dstRect.w);
+			yPos = initialTileSelectPos.y - (Mouse::position.y - initialMousePos.y) * (srcRect.h / dstRect.h);
 		}
 	}
 	WRect srp = selRectPos;
