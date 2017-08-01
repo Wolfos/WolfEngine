@@ -68,7 +68,7 @@ Bitmap::~Bitmap()
 	}
 }
 
-void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center)
+void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center, float scale)
 {
 	if (!center)
 	{
@@ -77,7 +77,12 @@ void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* cente
 		tempcenter->y = size.y / 2;
 		center = tempcenter;
 	}
-	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, dstrect, angle, center, SDL_FLIP_NONE);
+	WRect rect = *dstrect;
+	rect.x *= scale;
+	rect.y *= scale;
+	rect.w *= scale;
+	rect.h *= scale;
+	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, &rect, angle, center, SDL_FLIP_NONE);
 	delete center;
 }
 

@@ -11,11 +11,12 @@ rvanee@wolfengine.net
 #include "../Components/Camera.h"
 
 
-Map::Map(int w, int h, int l, int defaultValue)
+Map::Map(int w, int h, int l, int defaultValue, float scale)
 {
 	width = w;
 	height = h;
 	layers = l;
+	this->scale = scale;
 
 	data = (int*)calloc(width*height*layers, sizeof(int));
 	if (!data)
@@ -169,15 +170,15 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	else startY = 0;
 
 
-	if (((camera->transform->position.x + camera->GetComponent<Camera>()->width*camera->transform->scale.x) / tilewidth) + 1 <= width)
+	if (((camera->transform->position.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1 <= width)
 	{
-		endX = ((camera->transform->position.x + camera->GetComponent<Camera>()->width * camera->transform->scale.x) / tilewidth) + 1;
+		endX = ((camera->transform->position.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1;
 	}
 	else endX = width;
 	
-	if (((camera->transform->position.y + camera->GetComponent<Camera>()->height * camera->transform->scale.y) / tileheight) + 1 <= height)
+	if (((camera->transform->position.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1 <= height)
 	{
-		endY = ((camera->transform->position.y + camera->GetComponent<Camera>()->height * camera->transform->scale.y) / tileheight) + 1;
+		endY = ((camera->transform->position.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1;
 	}
 	else endY = height;
 
@@ -194,7 +195,7 @@ void Map::Render(int layer, Bitmap* spritesheet,
 				sourcerect.x = clip[val].x;
 				sourcerect.y = clip[val].y;
 
-				spritesheet->Blit(&sourcerect, &targetrect);
+				spritesheet->Blit(&sourcerect, &targetrect, 0, NULL, scale);
 			}
 		}
 	}

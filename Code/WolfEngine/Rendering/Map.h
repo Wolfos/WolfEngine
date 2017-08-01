@@ -15,10 +15,11 @@ class Map {
 		int height; /// Map height in tiles
 		int layers; /// Number of layers in the map
 		int *data; /// Pointer to the map's tiledata array
+		float scale = 1;
 		//int *events; /// Pointer to the map's event data array
 
 		///	Create a new map filled with the default value, doesn't need to be called if you're going to be loading it from file
-		Map(int width, int height, int layers, int defaultValue);
+		Map(int width, int height, int layers, int defaultValue, float scale = 1);
 
 		///	Load a map from file
 		void Load(char* filename);

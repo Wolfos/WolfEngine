@@ -33,6 +33,8 @@ class Editor : public Scene
 		WPoint initialMousePos;
 		WPointF initialTileSelectPos;
 		WPointF initialCamPos;
+		float mapScale = 1;
+		float zoomSpeed = 0.01f;
 };
 
 

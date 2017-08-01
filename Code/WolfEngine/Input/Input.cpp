@@ -14,6 +14,8 @@ void Input::Update(SDL_Event * eventHandler)
 	Mouse::key0.released = false;
 	Mouse::key1.released = false;
 	Mouse::key2.released = false;
+	Mouse::scrollX = 0;
+	Mouse::scrollY = 0;
 
 	//We need to do all of this here because SDL_MOUSEBUTTONDOWN doesn't call an event every frame, unless the mouse also moved
 	if (Mouse::key0.down)

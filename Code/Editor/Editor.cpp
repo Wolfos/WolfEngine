@@ -7,8 +7,9 @@ void Editor::Start()
 	gridtex = new Bitmap("Grid.png");
 	selectionRect = new Bitmap("SelectionRect.png");
 
-	map = new Map(100, 100, 3, -1);
-	grid = new Map(100, 100, 1, 0);
+	map = new Map(100, 100, 3, -1, mapScale);
+	grid = new Map(100, 100, 1, 0, mapScale);
+
 
 	tilewidth = 128;
 	tileheight = 128;
@@ -42,9 +43,8 @@ void Editor::Update()
 		if (canDraw) // Did we start the click action on a GUI element?
 		{
 			// Determine the coordinates of the tile the cursor is over
-			int xMPos = (Mouse::position.x + cam->position.x) / tilewidth;
-			int yMPos = (Mouse::position.y + cam->position.y) / tileheight;
-
+			int xMPos = (Mouse::position.x + cam->position.x) / ((float)tilewidth * mapScale);
+			int yMPos = (Mouse::position.y + cam->position.y) / ((float)tileheight * mapScale);
 			// LMB places a tile, RMB removes one
 			if(Mouse::KeyDown(0)) map->Put(xMPos, yMPos, layer, selected);
 			if(Mouse::KeyDown(1)) map->Put(xMPos, yMPos, layer, -1);
@@ -61,9 +61,7 @@ void Editor::Update()
 				cam->position.y = initialCamPos.y - (Mouse::position.y - initialMousePos.y);
 			}
 		}
-
 	}
-
 
 	// Keyboard shortcuts
 	if (Keyboard::KeyClicked(Keys::G)) showGrid = !showGrid;

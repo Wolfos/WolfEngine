@@ -25,6 +25,7 @@ class Mouse
 		/// This function runs at the start of every frame. For internal use only
 		static void Update(SDL_Event* eventHandler);
 
+		static float scrollX, scrollY;
 		///	Left mouse button, direct usage not recommended
 		static Key key0;
 		///	Right mouse button, direct usage not recommended

@@ -5,6 +5,7 @@ bool Mouse::overGUI = false;
 Key Mouse::key0;
 Key Mouse::key1;
 Key Mouse::key2;
+float Mouse::scrollX, Mouse::scrollY;
 
 bool Mouse::KeyDown(int key)
 {
@@ -77,6 +78,11 @@ void Mouse::Update(SDL_Event* eventHandler)
 	else if (eventHandler->type == SDL_MOUSEMOTION)
 	{
 		SDL_GetMouseState(&position.x, &position.y);
+	}
+	else if (eventHandler->type == SDL_MOUSEWHEEL)
+	{
+		scrollX = eventHandler->wheel.x;
+		scrollY = eventHandler->wheel.y;
 	}
 
 }
