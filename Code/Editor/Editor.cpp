@@ -116,7 +116,21 @@ void Editor::OnGUI()
 	WRect srp = selRectPos;
 	srp.x -= scaledX;
 	srp.y -= scaledY;
-	selectionRect->Blit(selectionRect->rect, &srp);
+
+	WRect ssrcRect = *selectionRect->rect;
+	if (srp.x < rect.x)
+	{
+		ssrcRect.x -= srp.x - rect.x;
+		srp.x += ssrcRect.x;
+		srp.w -= ssrcRect.x;
+	}
+	if (srp.y + srp.h > rect.y + rect.h)
+	{
+		ssrcRect.y += (srp.y + srp.h) - (rect.y + rect.h);
+		srp.y += ssrcRect.y;
+		srp.h -= ssrcRect.y;
+	}
+	selectionRect->Blit(&ssrcRect, &srp);
 
 	xPos = GUI::HorizontalScrollBar({ rect.x, rect.y + rect.h, rect.w, 22 }, xPos, spritesheet->size.x - srcRect.w);
 	yPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, yPos, spritesheet->size.y - srcRect.h);
