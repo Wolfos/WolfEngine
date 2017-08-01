@@ -24,12 +24,11 @@ bool Mouse::KeyReleased(int key)
 	return false;
 }
 
-// TODO: this doesn't appear to work
 bool Mouse::KeyClicked(int key)
 {
-	if (key == 1 && key0.clicked) return true;
-	else if (key == 2 && key1.clicked) return true;
-	else if (key == 3 && key2.clicked) return true;
+	if (key == 0 && key0.clicked) return true;
+	else if (key == 1 && key1.clicked) return true;
+	else if (key == 2 && key2.clicked) return true;
 
 	return false;
 }

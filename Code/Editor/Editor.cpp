@@ -99,9 +99,9 @@ void Editor::OnGUI()
 	float scaledX = (float)xPos / ((float)srcRect.w / (float)dstRect.w);
 	float scaledY = (float)yPos / ((float)srcRect.h / (float)dstRect.h);
 	// Select tile
-	if (Mouse::KeyReleased(0))
+	if (Collision::AABB(Mouse::position, dstRect))
 	{
-		if (Collision::AABB(Mouse::position, dstRect))
+		if (Mouse::KeyReleased(0))
 		{
 			int xPos = (Mouse::position.x - dstRect.x + scaledX) / realTileWidth;
 			int yPos = (Mouse::position.y - dstRect.y + scaledY) / realTileHeight;
@@ -111,6 +111,17 @@ void Editor::OnGUI()
 			selRectPos.y = yPos * realTileHeight + dstRect.y;
 			selRectPos.w = realTileWidth;
 			selRectPos.h = realTileHeight;
+		}
+		if (Mouse::KeyClicked(1))
+		{
+			initialMousePos = Mouse::position;
+			initialMapPos.x = xPos;
+			initialMapPos.y = yPos;
+		}
+		if (Mouse::KeyDown(1))
+		{
+			xPos = initialMapPos.x - (Mouse::position.x - initialMousePos.x) * (srcRect.w / dstRect.w);
+			yPos = initialMapPos.y - (Mouse::position.y - initialMousePos.y) * (srcRect.h / dstRect.h);
 		}
 	}
 	WRect srp = selRectPos;

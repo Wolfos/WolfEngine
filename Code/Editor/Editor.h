@@ -22,7 +22,6 @@ class Editor : public Scene
 		int tilewidth;
 		int tileheight;
 		bool dragging = false;
-		WPoint initMousePos;
 		Transform* cam;
 		int selected = 0;
 		int layer = 0;
@@ -31,6 +30,8 @@ class Editor : public Scene
 		float yPos = 0.0f;
 		float xPos = 0.0f;
 		bool canDraw = true;
+		WPoint initialMousePos;
+		WPointF initialMapPos;
 };
 
 
