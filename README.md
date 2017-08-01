@@ -3,7 +3,7 @@ WolfEngine
 
 A tile based 2D game engine
 
-[Documentation](http://wolfengine.net/documentation/)
+[Documentation](http://rvanee.nl/documentation/)
 
 [Trello](https://trello.com/b/qcnDlhgd/wolfengine)
 
@@ -23,9 +23,5 @@ Setup for Windows:
 10. Get the debug DLL's for each SDL addon, they're in the respective lib/x86 directory. Put them all (yes, all of them, that includes libpng and the like) where Visual Studio put your EXE
 11. Copy the Asset folder into the build directory
 12. Run the executable again, either through Visual Studio or by double clicking it
-13. You have succesfully setup WolfEngine for development! (hopefully)
-
-Todo:
-==========
-- Make the editor work
+13. You have succesfully setup WolfEngine for development!
 

@@ -22,11 +22,11 @@ class Editor : public Scene
 		int tilewidth;
 		int tileheight;
 		bool dragging = false;
-		Point initMousePos;
+		WPoint initMousePos;
 		Transform* cam;
 		int selected = 0;
 		int layer = 0;
-		Rect selRectPos;
+		WRect selRectPos;
 		bool showGrid = true;
 		float scrollBarPos = 0.0f;
 };

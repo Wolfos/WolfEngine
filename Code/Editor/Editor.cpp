@@ -70,10 +70,10 @@ void Editor::OnGUI()
 	Mouse::overGUI = false;
 
 	// Draw tile selector
-	Rect rect = { camera->width - 256 - 22, 0, 256, 256 };
+	WRect rect = { camera->width - 256 - 22, 0, 256, 256 };
 	GUI::Box(rect);
-	Rect srcRect = { 0, scrollBarPos, 1024, 1024 };
-	Rect dstRect = {rect.x + 2, rect.y + 2, 252, 252};
+	WRect srcRect = { 0, (int)scrollBarPos, 1024, 1024 };
+	WRect dstRect = {rect.x + 2, rect.y + 2, 252, 252};
 	spritesheet->Blit(&srcRect, &dstRect);
 
 	int realTileWidth = tilewidth / (srcRect.w / dstRect.w);
@@ -112,7 +112,7 @@ void Editor::OnGUI()
 	}
 	selectionRect->Blit(selectionRect->rect, &selRectPos);
 
-	scrollBarPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, scrollBarPos, 0, spritesheet->size.y - srcRect.h);
+	scrollBarPos = GUI::VerticalScrollBar({ rect.x + rect.w, rect.y, 22, rect.h }, scrollBarPos, spritesheet->size.y - srcRect.h);
 }
 
 void Editor::Exit()

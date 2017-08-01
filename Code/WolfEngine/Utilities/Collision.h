@@ -4,6 +4,6 @@
 #include "../Models/Point.h"
 namespace Collision
 {
-	extern bool AABB(Point point, Rect rect);
+	extern bool AABB(WPoint point, WRect rect);
 }
 #endif

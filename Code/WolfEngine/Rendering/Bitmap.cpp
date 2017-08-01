@@ -43,7 +43,7 @@ Bitmap::Bitmap(std::string file)
 		cache.push_back(this);
 	}
 
-	rect = new Rect;
+	rect = new WRect;
 
 	rect->x = 0;
 	rect->y = 0;
@@ -70,7 +70,7 @@ Bitmap::~Bitmap()
 	}
 }
 
-void Bitmap::Blit(Rect* srcrect, Rect* dstrect, double angle, SDL_Point* center)
+void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center)
 {
 	if (!center)
 	{
@@ -96,7 +96,7 @@ SDL_Surface* Bitmap::LoadSurface(std::string filename)
 	char path[PATH_MAX];
 	CFURLGetFileSystemRepresentation(resourcesURL, TRUE, (UInt8 *)path, PATH_MAX);
 	std::string cppPath(path);
-	std::string newFilename = cppPath + "/Assets/Sprites/" + filename;
+	std::string newFilename = cppPath + "/../Assets/Sprites/" + filename;
 #else
 	std::string newFilename = "../Assets/Sprites/";
 	newFilename += filename;

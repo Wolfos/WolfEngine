@@ -37,6 +37,6 @@ public:
 	void Render();
 private:
 	int sheetwidth, sheetheight;
-	Rect* clip;
+	WRect* clip;
 };
 #endif

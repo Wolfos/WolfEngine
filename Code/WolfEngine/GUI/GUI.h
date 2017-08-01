@@ -6,9 +6,9 @@
 namespace GUI
 {
 	extern void Init();
-	extern void Box(Rect position);
-	extern bool Button(Rect position, std::string text);
-	extern float VerticalScrollBar(Rect position, float value, float minValue, float maxValue);
+	extern void Box(WRect position);
+	extern bool Button(WRect position, std::string text);
+	extern float VerticalScrollBar(WRect position, float value, float maxValue);
 	extern void Exit();
 };
 

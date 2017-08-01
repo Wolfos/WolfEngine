@@ -11,7 +11,7 @@
 class Button : public Component
 {
 public:
-	Rect hitBox;
+	WRect hitBox;
 	virtual void Added();
 	virtual void Update();
 	bool clicked = false;

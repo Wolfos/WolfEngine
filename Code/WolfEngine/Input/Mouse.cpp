@@ -1,6 +1,6 @@
 #include "Mouse.h"
 
-Point Mouse::position;
+WPoint Mouse::position;
 bool Mouse::overGUI = false;
 Key Mouse::key0;
 Key Mouse::key1;
@@ -24,6 +24,7 @@ bool Mouse::KeyReleased(int key)
 	return false;
 }
 
+// TODO: this doesn't appear to work
 bool Mouse::KeyClicked(int key)
 {
 	if (key == 1 && key0.clicked) return true;

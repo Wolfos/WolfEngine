@@ -1,5 +1,5 @@
 /*
-WolfEngine © 2013-2014 Robin van Ee
+WolfEngine ï¿½ 2013-2014 Robin van Ee
 http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
@@ -24,7 +24,7 @@ void SpriteRenderer::Update()
 
 void SpriteRenderer::Render()
 {
-	Rect* rect = new Rect;
+	WRect* rect = new WRect;
 	rect->w = frameWidth;
 	rect->h = frameHeight;
 
@@ -33,7 +33,7 @@ void SpriteRenderer::Render()
 	if (frameWidth != 0) sheetwidth /= frameWidth;
 	if (frameHeight != 0) sheetheight /= frameHeight;
 
-	clip = (Rect*)calloc((sheetwidth*sheetheight) + 2 * sheetwidth, sizeof(Rect));
+	clip = (WRect*)calloc((sheetwidth*sheetheight) + 2 * sheetwidth, sizeof(WRect));
 
 	int i = 0;
 	for (int y = 0; y <= sheetheight; y++)
@@ -50,7 +50,7 @@ void SpriteRenderer::Render()
 	rect->x = clip[frame].x;
 	rect->y = clip[frame].y;
 
-	Rect* dst = new Rect;
+	WRect* dst = new WRect;
 	if (!gameObject->transform->ignoreCam)
 	{
 		dst->x = gameObject->transform->position.x - WolfEngine::scene->camera->gameObject->transform->position.x;

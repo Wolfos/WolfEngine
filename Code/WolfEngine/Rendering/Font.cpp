@@ -29,8 +29,8 @@ void Font::Blit(int x, int y, std::string text, SDL_Color color)
 		printf("Unable to create texture from rendered text! SDL Error: %s\n", SDL_GetError());
 	}
 
-	Rect srcRect = { 0, 0, textSurface->w, textSurface->h };
-	Rect dstRect = { x - textSurface->w/2, y - textSurface->h/2, textSurface->w, textSurface->h };
+	WRect srcRect = { 0, 0, textSurface->w, textSurface->h };
+	WRect dstRect = { x - textSurface->w/2, y - textSurface->h/2, textSurface->w, textSurface->h };
 
 	SDL_RenderCopy(WolfEngine::renderer, mTexture, &srcRect, &dstRect);
 

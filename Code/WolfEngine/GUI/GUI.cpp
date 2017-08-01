@@ -10,9 +10,6 @@ Bitmap* buttonPressed;
 Bitmap* scrollBarBackground;
 Bitmap* scrollBarHandle;
 Font* font;
-bool mousePressed = false;
-int initMouseX;
-int initMouseY;
 
 extern void GUI::Init()
 {
@@ -25,7 +22,7 @@ extern void GUI::Init()
 	font = new Font("Oregon LDO.ttf",32);
 }
 
-extern void GUI::Box(Rect position)
+extern void GUI::Box(WRect position)
 {
 	boxBackground->Blit(boxBackground->rect, &position);
 	if (Collision::AABB(Mouse::position, position))
@@ -34,7 +31,7 @@ extern void GUI::Box(Rect position)
 	}
 }
 
-extern bool GUI::Button(Rect position, std::string text)
+extern bool GUI::Button(WRect position, std::string text)
 {
 	if (Collision::AABB(Mouse::position, position))
 	{
@@ -62,48 +59,44 @@ float Lerp(float a, float b, float t){
 	return (1 - t)*a + t*b;
 }
 
-int initPos;
-
-extern float GUI::VerticalScrollBar(Rect position, float value, float minValue, float maxValue)
+float Clamp(float val, float min, float max)
 {
+	if(val < min) val = min;
+	if(val > max) val = max;
+	return val;
+}
+
+int initPos;
+bool mouseDown;
+
+extern float GUI::VerticalScrollBar(WRect position, float value, float maxValue)
+{
+	float minValue = 0;
 	scrollBarBackground->Blit(scrollBarBackground->rect, &position);
 
-	if (value < minValue) value = minValue;
-	if (value > maxValue) value = maxValue;
-
-	Point minPoint = { position.x + 4, position.y + 32 };
-	Point maxPoint = { position.x + 4, position.y + position.h - 32 };
-	Point scrollBarHandlePos = Point::Lerp(minPoint, maxPoint, value / (minValue + maxValue));
+	WRect scrollBarHandleRect = { position.x,
+								  (int)Lerp(position.y, position.h - 64, (value - minValue) / maxValue),
+								  position.w,
+								  64 };
 	
-	Rect scrollBarHandleRect = { scrollBarHandlePos.x, scrollBarHandlePos.y - 32, position.w - 8, 64 };
+	if(!mouseDown && Mouse::KeyDown(0) && Collision::AABB(Mouse::position, scrollBarHandleRect))
+	{
+		mouseDown = true;
+		initPos = Mouse::position.y - scrollBarHandleRect.y;
+	}
+	else if(mouseDown && Mouse::KeyDown(0))
+	{
+		value = Lerp(minValue, maxValue, (float)Mouse::position.y / (float)(position.h - scrollBarHandleRect.h ));
+	}
+	else if(!Mouse::KeyDown(0))
+	{
+		mouseDown = false;
+	}
+
+	value = Clamp(value, minValue, maxValue);
+	scrollBarHandleRect.y = Lerp(position.y, position.h - scrollBarHandleRect.h, (value - minValue) / maxValue);
 	scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
 
-	int nextYPos;
-
-	if (Mouse::KeyDown(0))
-	{
-		if (Collision::AABB(Mouse::position, scrollBarHandleRect))
-		{
-			if (!mousePressed)
-			{
-				mousePressed = true;
-				initMouseY = Mouse::position.y;
-				initPos = scrollBarHandlePos.y;
-			}
-			else
-			{
-				nextYPos = initPos + Mouse::position.y - initMouseY;
-				value = Lerp(minValue, maxValue, nextYPos / ((float)minPoint.y + (float)maxPoint.y));
-
-				if (value < minValue) value = minValue;
-				if (value > maxValue) value = maxValue;
-			}
-		}
-	}
-	else
-	{
-		mousePressed = false;
-	}
 	return value;
 }
 
