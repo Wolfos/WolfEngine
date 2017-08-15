@@ -4,8 +4,9 @@ http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
 */
-#define _CRT_SECURE_NO_DEPRECATE //MICROSOOOOOOOOFT!
+#define _CRT_SECURE_NO_DEPRECATE
 #include "Map.h"
+#include "../Utilities/WolfMath.h"
 #include "../Utilities/Debug.h"
 #include "../Components/Transform.h"
 #include "../Components/Camera.h"
@@ -119,8 +120,6 @@ void Map::Put(int x, int y, int l, int value)
 void Map::Render(int layer, Bitmap* spritesheet,
 	int tilewidth, int tileheight, int offset, GameObject* camera)
 {
-	WRect* clip;
-
 	//Tiles to start and finish render on
 	int startX;
 	int startY;
@@ -129,31 +128,12 @@ void Map::Render(int layer, Bitmap* spritesheet,
 
 	WRect sourcerect;
 	WRect targetrect;
-	int x, y, i;
 
 	int sheetwidth = spritesheet->size.x;
 	int sheetheight = spritesheet->size.y;
 
 	sheetwidth /= tilewidth;
 	sheetheight /= tileheight;
-
-	clip = (WRect*)calloc(sheetwidth*sheetheight, sizeof(WRect));
-
-	i = 0;
-	//Clip contains the position of each possible tile
-	//X and Y are inverted because we read from left to right
-	for (y = 0; y<sheetheight; y++)
-	{
-		for (x = 0; x<sheetwidth; x++)
-		{
-			clip[i].x = x*tilewidth + (offset*x);
-			clip[i].y = y*tileheight + (offset*y);
-			clip[i].w = tilewidth;
-			clip[i].h = tileheight;
-			i++;
-		}
-	}
-
 
 	sourcerect.w = tilewidth;
 	sourcerect.h = tileheight;
@@ -182,9 +162,9 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	}
 	else endY = height;
 
-	for (y = startY; y<endY; y++)
+	for (int y = startY; y<endY; y++)
 	{
-		for (x = startX; x<endX; x++)
+		for (int x = startX; x<endX; x++)
 		{
 			targetrect.x = x*tilewidth - camera->transform->position.x;
 			targetrect.y = y*tileheight - camera->transform->position.y;
@@ -192,14 +172,13 @@ void Map::Render(int layer, Bitmap* spritesheet,
 			int val = Get(x, y, layer);
 			if (val<=sheetwidth*sheetheight && val>=0)
 			{
-				sourcerect.x = clip[val].x;
-				sourcerect.y = clip[val].y;
+				int yPos = WolfMath::Floor(val / sheetwidth);
+				int xPos = val - yPos * sheetwidth;
+				sourcerect.x = xPos * tilewidth;
+				sourcerect.y = yPos * tileheight;
 
 				spritesheet->Blit(&sourcerect, &targetrect, 0, NULL, scale);
 			}
 		}
 	}
-
-
-	free(clip);
 }
