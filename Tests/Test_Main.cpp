@@ -9,6 +9,5 @@ int failed;
 
 int main()
 {
-
 	Sleep(10000);
 }

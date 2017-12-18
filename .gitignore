@@ -17,3 +17,11 @@ cmake-build-debug/
 [Dd]ocumentation/
 DLL/
 *.exe
+[Cc]makeFiles/
+[Dd]ebug/
+Wolfengine.build/
+CMakeScripts/
+CMakeCache.txt
+cmake_install.cmake
+*.xcodeproj
+

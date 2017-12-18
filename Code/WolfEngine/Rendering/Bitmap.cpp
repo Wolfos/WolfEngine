@@ -53,8 +53,8 @@ Bitmap::Bitmap(std::string file)
 
 Bitmap::~Bitmap()
 {
-	count--;
-	if (count <= 0)
+	*count--;
+	if (*count <= 0)
 	{
 		SDL_DestroyTexture(texture);
 		for (int i = 0; i < cache.size(); i++)
