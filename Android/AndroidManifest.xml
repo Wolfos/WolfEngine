@@ -34,8 +34,8 @@
     </application>
 	
 
-    <!-- Android 2.3.3 -->
-    <uses-sdk android:minSdkVersion="10" android:targetSdkVersion="14" />
+    <!-- Android 3.2 -->
+    <uses-sdk android:minSdkVersion="13" android:targetSdkVersion="24" />
 
     <!-- OpenGL ES 2.0 -->
     <uses-feature android:glEsVersion="0x00020000" /> 

@@ -9,6 +9,7 @@ Scene* WolfEngine::scene;
 SDL_Window* WolfEngine::window;
 SDL_Renderer* WolfEngine::renderer;
 
+
 int WolfEngine::InitSDL()
 {
 	//Initialize SDL

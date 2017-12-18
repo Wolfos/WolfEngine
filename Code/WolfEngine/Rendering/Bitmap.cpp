@@ -8,8 +8,6 @@
 
 std::vector<Bitmap*> Bitmap::cache;
 
-// TODO: Fix potential crash bug when loading the same image more than 2 times because the count isn't correct
-// Maybe use pointers?
 Bitmap::Bitmap(std::string file)
 {
 	bool cached = false;
@@ -70,7 +68,7 @@ Bitmap::~Bitmap()
 	}
 }
 
-void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center)
+void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center, float scale)
 {
 	if (!center)
 	{
@@ -79,7 +77,12 @@ void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* cente
 		tempcenter->y = size.y / 2;
 		center = tempcenter;
 	}
-	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, dstrect, angle, center, SDL_FLIP_NONE);
+	WRect rect = *dstrect;
+	rect.x *= scale;
+	rect.y *= scale;
+	rect.w *= scale;
+	rect.h *= scale;
+	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, &rect, angle, center, SDL_FLIP_NONE);
 	delete center;
 }
 

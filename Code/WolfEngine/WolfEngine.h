@@ -1,5 +1,5 @@
 ///
-///	This file includes all the engine headers
+///	Main engine class, static AF. Please refactor
 ///
 
 #ifndef _WOLFENGINE_H

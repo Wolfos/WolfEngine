@@ -189,6 +189,38 @@ void Keyboard::Update(SDL_Event* eventHandler)
 			case SDLK_TAB:
 				Down(Keys::Tab);
 				break;
+
+			// Number keys
+			case SDLK_1:
+				Down(Keys::One);
+				break;
+			case SDLK_2:
+				Down(Keys::Two);
+				break;
+			case SDLK_3:
+				Down(Keys::Three);
+				break;
+			case SDLK_4:
+				Down(Keys::Four);
+				break;
+			case SDLK_5:
+				Down(Keys::Five);
+				break;
+			case SDLK_6:
+				Down(Keys::Six);
+				break;
+			case SDLK_7:
+				Down(Keys::Seven);
+				break;
+			case SDLK_8:
+				Down(Keys::Eight);
+				break;
+			case SDLK_9:
+				Down(Keys::Nine);
+				break;
+			case SDLK_0:
+				Down(Keys::Zero);
+				break;
 		}
 	}
 	#pragma endregion
@@ -323,6 +355,38 @@ void Keyboard::Update(SDL_Event* eventHandler)
 			break;
 		case SDLK_TAB:
 			Up(Keys::Tab);
+			break;
+
+			// Number keys
+		case SDLK_1:
+			Up(Keys::One);
+			break;
+		case SDLK_2:
+			Up(Keys::Two);
+			break;
+		case SDLK_3:
+			Up(Keys::Three);
+			break;
+		case SDLK_4:
+			Up(Keys::Four);
+			break;
+		case SDLK_5:
+			Up(Keys::Five);
+			break;
+		case SDLK_6:
+			Up(Keys::Six);
+			break;
+		case SDLK_7:
+			Up(Keys::Seven);
+			break;
+		case SDLK_8:
+			Up(Keys::Eight);
+			break;
+		case SDLK_9:
+			Up(Keys::Nine);
+			break;
+		case SDLK_0:
+			Up(Keys::Zero);
 			break;
 		}
 	}

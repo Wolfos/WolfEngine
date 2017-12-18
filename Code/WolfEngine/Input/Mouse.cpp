@@ -5,6 +5,7 @@ bool Mouse::overGUI = false;
 Key Mouse::key0;
 Key Mouse::key1;
 Key Mouse::key2;
+float Mouse::scrollX, Mouse::scrollY;
 
 bool Mouse::KeyDown(int key)
 {
@@ -24,12 +25,11 @@ bool Mouse::KeyReleased(int key)
 	return false;
 }
 
-// TODO: this doesn't appear to work
 bool Mouse::KeyClicked(int key)
 {
-	if (key == 1 && key0.clicked) return true;
-	else if (key == 2 && key1.clicked) return true;
-	else if (key == 3 && key2.clicked) return true;
+	if (key == 0 && key0.clicked) return true;
+	else if (key == 1 && key1.clicked) return true;
+	else if (key == 2 && key2.clicked) return true;
 
 	return false;
 }
@@ -78,6 +78,11 @@ void Mouse::Update(SDL_Event* eventHandler)
 	else if (eventHandler->type == SDL_MOUSEMOTION)
 	{
 		SDL_GetMouseState(&position.x, &position.y);
+	}
+	else if (eventHandler->type == SDL_MOUSEWHEEL)
+	{
+		scrollX = eventHandler->wheel.x;
+		scrollY = eventHandler->wheel.y;
 	}
 
 }
