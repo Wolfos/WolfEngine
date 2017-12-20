@@ -59,7 +59,7 @@ int WolfEngine::InitSDL()
 			//Initialize SDL_Mixer, returns 0 on failure
 			if (!Mix_Init(MIX_INIT_OGG))
 			{
-				printf("Fatal error: SDL_Mixer could not initialize! SDL_ttf Error: %s\n", Mix_GetError());
+				printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
 				return 1;
 			}
 			else
