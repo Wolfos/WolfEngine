@@ -1,32 +1,23 @@
 ///
-///	Main engine class, static AF. Please refactor
+///	Global engine functions and values
 ///
-
-#ifndef _WOLFENGINE_H
-#define _WOLFENGINE_H
 
 #include "ECS/Scene.h"
 
-class WolfEngine
+namespace WolfEngine
 {
-public:
-	static SDL_Window* window;
+    extern SDL_Window* window;
 
-	static Scene* scene;
-	static SDL_Renderer* renderer;
+	extern Scene* scene;
+	extern SDL_Renderer* renderer;
 
-	static int maxFPS;
-	static int screenWidth;
-	static int screenHeight;
+	extern int maxFPS;
+	extern int screenWidth;
+	extern int screenHeight;
 
-	static int Init();
+	extern int Init();
 
-	static void MainLoop();
+	extern void MainLoop();
 
-	static int Quit();
-
-private:
-	static int InitSDL();
+	extern int Quit();
 };
-
-#endif
