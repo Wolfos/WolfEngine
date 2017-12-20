@@ -32,10 +32,6 @@ include_directories(${SDL2_MIXER_INCLUDE_DIR})
 # Set an output directory for our binaries
 set(BIN_DIR ${WolfEngine_SOURCE_DIR}/bin)
 
-# Scripts
-file(GLOB Scripts "Assets/Scripts/*.ws")
-source_group("Scripts" FILES ${Scripts})
-
 # Editor
 file(GLOB Editor_Source "Code/Editor/*.cpp" "Code/Editor/*.h")
 # source_group("Editor" FILES ${Editor_Source})
@@ -105,8 +101,3 @@ RUNTIME DESTINATION ${BIN_DIR}
 ARCHIVE DESTINATION ${BIN_DIR}
 )
 
-
-
-#Unit tests
-file(GLOB Tests "Tests/*.cpp" "Tests/*.h")
-add_executable(Tests ${Tests})
