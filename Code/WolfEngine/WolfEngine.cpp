@@ -13,7 +13,7 @@ SDL_Renderer* WolfEngine::renderer;
 int WolfEngine::InitSDL()
 {
 	//Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO) < 0)
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
 	{
 		printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
 		return 1;
@@ -55,8 +55,13 @@ int WolfEngine::InitSDL()
 				printf("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
 				return 1;
 			}
-
-			//Initialize SDL_Mixer, returns 0 on failure
+            
+            if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024)==-1)
+            {
+                printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
+                return 1;
+            }
+			//Initialize SDL_Mixer
 			if (!Mix_Init(MIX_INIT_OGG))
 			{
 				printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
