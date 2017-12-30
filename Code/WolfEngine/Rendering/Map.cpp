@@ -143,22 +143,23 @@ void Map::Render(int layer, Bitmap* spritesheet,
 
 	//Occlusion culling, but need to make sure we CAN cull first
 	//If we can't cull (ergo, the map is too small or we're off the map), we just render the whole map
-	if (camera->transform->position.x >= 0)startX = camera->transform->position.x / tilewidth;
+    WPoint cameraPosition = camera->transform->GetPosition();
+	if (cameraPosition.x >= 0)startX = cameraPosition.x / tilewidth;
 	else startX = 0;
 
-	if (camera->transform->position.y >= 0)startY = camera->transform->position.y / tileheight;
+	if (cameraPosition.y >= 0)startY = cameraPosition.y / tileheight;
 	else startY = 0;
 
 
-	if (((camera->transform->position.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1 <= width)
+	if (((cameraPosition.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1 <= width)
 	{
-		endX = ((camera->transform->position.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1;
+		endX = ((cameraPosition.x + camera->GetComponent<Camera>()->width / scale) / tilewidth) + 1;
 	}
 	else endX = width;
 	
-	if (((camera->transform->position.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1 <= height)
+	if (((cameraPosition.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1 <= height)
 	{
-		endY = ((camera->transform->position.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1;
+		endY = ((cameraPosition.y + camera->GetComponent<Camera>()->height / scale) / tileheight) + 1;
 	}
 	else endY = height;
 
@@ -166,8 +167,8 @@ void Map::Render(int layer, Bitmap* spritesheet,
 	{
 		for (int x = startX; x<endX; x++)
 		{
-			targetrect.x = x*tilewidth - camera->transform->position.x;
-			targetrect.y = y*tileheight - camera->transform->position.y;
+			targetrect.x = x*tilewidth - cameraPosition.x;
+			targetrect.y = y*tileheight - cameraPosition.y;
 
 			int val = Get(x, y, layer);
 			if (val<=sheetwidth*sheetheight && val>=0)

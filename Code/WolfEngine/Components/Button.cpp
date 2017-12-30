@@ -14,8 +14,8 @@ void Button::Added()
 	if (!renderer) throw "No SpriteRenderer is present on the GameObject";
 #endif
 
-	hitBox.x = transform->position.x;
-	hitBox.y = transform->position.y;
+	hitBox.x = transform->GetPosition().x;
+	hitBox.y = transform->GetPosition().y;
 	hitBox.w = renderer->frameWidth * transform->scale.x;
 	hitBox.h = renderer->frameHeight * transform->scale.y;
 }

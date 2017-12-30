@@ -5,8 +5,6 @@
 #include <typeinfo> 
 #include <unordered_map>
 
-class Script; //Forward declaration
-
 ///
 ///	A GameObject is a framework to put Components on
 ///	It is advisable to make them through ObjectManager::NewGameObject (unless you want to update them by yourself, which you don't)
@@ -19,10 +17,10 @@ class GameObject
 		/// A pointer to the GameObject's transform component (every GameObject gets a transform component by default)
 		Transform* transform;
 		/// The GameObject's name
-		char* name;
-		/// The GameObject's unique ID
-		int id;
-
+        std::string name;
+        /// The GameObject's unique id
+        int id;
+    
 		///	Runs every frame, runs the Update() function for each component
 		void Update();
 		///	Runs every frame, runs the LateUpdate() function for each component
@@ -53,11 +51,9 @@ class GameObject
 			components[&typeid(*component)] = component;
 			component->gameObject = this;
 			component->Added();
+            component->name = name;
 			return component;
 		}
-
-		/// Add a script
-		Script* AddComponent(std::string filename);
 
 		/// Template, removes a component of type <C>
 		/// Doesn't do anything if the component doesn't exist

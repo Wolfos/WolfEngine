@@ -3,6 +3,28 @@
 ///	WPoint is usually used for locations in pixels
 class WPoint{
 public:
+    WPoint operator+=(const WPoint& b)
+    {
+        this->x += b.x;
+        this->y += b.y;
+        return *this;
+    }
+    
+    WPoint operator+(const WPoint& b) {
+        WPoint point;
+        point.x = this->x + b.x;
+        point.y = this->y + b.y;
+        return point;
+    }
+    
+    WPoint operator-(const WPoint& b)
+    {
+        WPoint point;
+        point.x = this->x - b.x;
+        point.y = this->y - b.y;
+        return point;
+    }
+    
 	int x;
 	int y;
 	/// Linear interpolation between Points

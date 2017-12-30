@@ -1,5 +1,6 @@
 #ifndef _COMPONENT_H
 #define _COMPONENT_H
+#include <string>
 
 class GameObject;
 
@@ -7,6 +8,11 @@ class GameObject;
 class Component
 {
 	public:
+        ///    A pointer to the GameObject that contains this component
+        GameObject* gameObject;
+        /// The name of the GameObject that contains this component
+        std::string name;
+    
 		///	Runs when a component is first added to a GameObject
 		virtual void Added()
 		{
@@ -22,7 +28,5 @@ class Component
 		{
 
 		}
-		///	A pointer to the GameObject that contains this component
-		GameObject* gameObject;
 };
 #endif

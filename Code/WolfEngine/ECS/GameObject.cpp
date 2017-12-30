@@ -1,5 +1,5 @@
 /*
-WolfEngine © 2013-2014 Robin van Ee
+WolfEngine ï¿½ 2013-2014 Robin van Ee
 http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
@@ -34,8 +34,6 @@ GameObject::GameObject()
 	//Every GameObject gets a transform component
 	AddComponent<Transform>();
 	transform = GetComponent<Transform>();
-	transform->position.x = 0;
-	transform->position.y = 0;
 }
 
 GameObject::~GameObject()

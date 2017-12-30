@@ -53,13 +53,16 @@ void SpriteRenderer::Render()
 	WRect* dst = new WRect;
 	if (!gameObject->transform->ignoreCam)
 	{
-		dst->x = gameObject->transform->position.x - WolfEngine::scene->camera->gameObject->transform->position.x;
-		dst->y = gameObject->transform->position.y - WolfEngine::scene->camera->gameObject->transform->position.y;
+        WPoint objPos = gameObject->transform->GetPosition();
+        WPoint camPos = WolfEngine::scene->camera->gameObject->transform->GetPosition();
+        WPoint targetPos = objPos - camPos;
+        dst->x = targetPos.x;
+        dst->y = targetPos.y;
 	}
 	else
 	{
-		dst->x = gameObject->transform->position.x;
-		dst->y = gameObject->transform->position.y;
+		dst->x = gameObject->transform->GetPosition().x;
+		dst->y = gameObject->transform->GetPosition().y;
 	}
 	dst->w = (int)(frameWidth*gameObject->transform->scale.x);
 	dst->h = (int)(frameHeight*gameObject->transform->scale.y);

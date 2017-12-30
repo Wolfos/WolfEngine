@@ -33,18 +33,19 @@ void Editor::Update()
 	
 	if (Mouse::overGUI) canDraw = false;
 	else if (!Mouse::KeyDown(0) && !Mouse::KeyDown(1) && !Mouse::KeyDown(2)) canDraw = true;
+    WPoint camPosition = cam->GetPosition();
 	// Determine if the mouse is over the map
 	if 
-	(	Mouse::position.x + cam->position.x >= 0 && 
-		Mouse::position.x + cam->position.x <= map->width * tilewidth && 
-		Mouse::position.y + cam->position.y >= 0 && 
-		Mouse::position.y + cam->position.y <= map->height * tileheight)
+	(	Mouse::position.x + camPosition.x >= 0 &&
+		Mouse::position.x + camPosition.x <= map->width * tilewidth &&
+		Mouse::position.y + camPosition.y >= 0 &&
+		Mouse::position.y + camPosition.y <= map->height * tileheight)
 	{
 		if (canDraw) // Did we start the click action on a GUI element?
 		{
 			// Determine the coordinates of the tile the cursor is over
-			int xMPos = (Mouse::position.x + cam->position.x) / ((float)tilewidth * mapScale);
-			int yMPos = (Mouse::position.y + cam->position.y) / ((float)tileheight * mapScale);
+			int xMPos = (Mouse::position.x + camPosition.x) / ((float)tilewidth * mapScale);
+			int yMPos = (Mouse::position.y + camPosition.y) / ((float)tileheight * mapScale);
 			// LMB places a tile, RMB removes one
 			if(Mouse::KeyDown(0)) map->Put(xMPos, yMPos, layer, selected);
 			if(Mouse::KeyDown(1)) map->Put(xMPos, yMPos, layer, -1);
@@ -52,13 +53,13 @@ void Editor::Update()
 			if (Mouse::KeyClicked(2))
 			{
 				initialMousePos = Mouse::position;
-				initialCamPos.x = cam->position.x;
-				initialCamPos.y = cam->position.y;
+				initialCamPos.x = camPosition.x;
+				initialCamPos.y = camPosition.y;
 			}
 			if (Mouse::KeyDown(2))
 			{
-				cam->position.x = initialCamPos.x - (Mouse::position.x - initialMousePos.x);
-				cam->position.y = initialCamPos.y - (Mouse::position.y - initialMousePos.y);
+				camPosition.x = initialCamPos.x - (Mouse::position.x - initialMousePos.x);
+				camPosition.y = initialCamPos.y - (Mouse::position.y - initialMousePos.y);
 			}
 		}
 	}
