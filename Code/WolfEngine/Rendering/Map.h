@@ -16,20 +16,19 @@ class Map {
 		int layers; /// Number of layers in the map
 		int *data; /// Pointer to the map's tiledata array
 		float scale = 1;
-		//int *events; /// Pointer to the map's event data array
 
 		///	Create a new map filled with the default value, doesn't need to be called if you're going to be loading it from file
 		Map(int width, int height, int layers, int defaultValue, float scale = 1);
 
 		///	Load a map from file
-		void Load(char* filename);
+        void Load(std::string filename);
 
 		///	Render the map to an SDL_Renderer
 		void Render(int layer, Bitmap* spritesheet,
 			int tilewidth, int tileheight, int offset, GameObject* camera);
 
 		///	Write the map to file
-		void Write(char* filename);
+        void Write(std::string filename);
 
 		///	Get the tile value at X, Y, L
 		int Get(int x, int y, int l);

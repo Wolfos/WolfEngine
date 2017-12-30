@@ -5,8 +5,14 @@
 //  Created by Robin on 19/12/2017.
 //
 
-#ifndef EditorComponent_h
-#define EditorComponent_h
+#pragma once
+#include "../WolfEngine/API.h"
 
-
-#endif /* EditorComponent_h */
+struct EditorComponent
+{
+    std::string name;
+    std::vector<std::string> stringMembers;
+    std::vector<int> intMembers;
+    std::vector<WPoint> pointMembers;
+    std::vector<WPointF> pointFMembers;
+};

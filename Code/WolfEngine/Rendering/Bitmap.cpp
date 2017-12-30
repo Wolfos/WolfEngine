@@ -12,7 +12,7 @@ Bitmap::Bitmap(std::string file)
 {
 	bool cached = false;
 	filename = file;
-	for (int i = 0; i < cache.size(); i++)
+	for (size_t i = 0; i < cache.size(); i++)
 	{
 		if (cache[i]->filename == filename)
 		{
@@ -55,7 +55,7 @@ Bitmap::~Bitmap()
 	if (*count <= 0)
 	{
 		SDL_DestroyTexture(texture);
-		for (int i = 0; i < cache.size(); i++)
+		for (size_t i = 0; i < cache.size(); i++)
 		{
 			if (cache[i]->filename == filename)
 			{

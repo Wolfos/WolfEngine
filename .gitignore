@@ -22,11 +22,4 @@ WolfEngine.dir/
 [Dd]ocumentation/
 DLL/
 *.exe
-[Cc]makeFiles/
-[Dd]ebug/
-Wolfengine.build/
-CMakeScripts/
-CMakeCache.txt
-cmake_install.cmake
-*.xcodeproj
-
+.DS_Store

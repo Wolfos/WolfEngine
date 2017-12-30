@@ -40,13 +40,13 @@ Map::Map(int w, int h, int l, int defaultValue, float scale)
 	}
 }
 
-void Map::Load(char *filename)
+void Map::Load(std::string filename)
 {
-	FILE *f = fopen(filename, "rb");
+	FILE *f = fopen(filename.c_str(), "rb");
 
 	if (!f)
 	{
-		Debug::Log("Could not load %s", filename);
+		Debug::Log("Could not load %s", filename.c_str());
 		return;
 	}
 
@@ -78,12 +78,12 @@ void Map::Load(char *filename)
 	fclose(f);
 }
 
-void Map::Write(char* filename)
+void Map::Write(std::string filename)
 {
-	FILE *f = fopen(filename, "wb");
+	FILE *f = fopen(filename.c_str(), "wb");
 	if (!f)
 	{
-		Debug::Log("Error opening %s for writing", filename);
+		Debug::Log("Error opening %s for writing", filename.c_str());
 		return;
 	}
 

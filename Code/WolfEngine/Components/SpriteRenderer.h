@@ -13,8 +13,6 @@ class SpriteRenderer : public Component
 public:
 	///	The spritesheet or sprite (if no sheet is needed)
 	Bitmap* spriteSheet;
-	///	Filename, not actually used at the moment
-	char* filename;
 	///	The individual sprite's width (not the spritesheet's)
 	int frameWidth = 0;
 	///	The individual sprite's height (not the spritesheet's)

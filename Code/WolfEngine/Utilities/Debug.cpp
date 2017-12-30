@@ -1,5 +1,5 @@
 /*
-WolfEngine © 2013-2014 Robin van Ee
+WolfEngine ï¿½ 2013-2014 Robin van Ee
 http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
@@ -10,6 +10,8 @@ rvanee@wolfengine.net
 #else
 	#include <stdio.h>
 #endif
+
+
 void Debug::Log(char* text, ...)
 {
 	#ifdef __ANDROID__
@@ -17,4 +19,9 @@ void Debug::Log(char* text, ...)
 	#else
 		printf(text);
 	#endif
+}
+
+void Debug::Log(std::string text)
+{
+    Log(text.c_str());
 }

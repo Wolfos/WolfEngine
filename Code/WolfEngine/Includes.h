@@ -13,11 +13,11 @@
 		#include "SDL_image.h"
 		#include "SDL_ttf.h"
 		#include "SDL_mixer.h"
-    #elif defined __APPLE__
-        #include <SDL.h>
-        #include <SDL_image.h>
-        #include <SDL_ttf.h>
-        #include <SDL_mixer.h>
+    	#elif defined __APPLE__
+        	#include <SDL.h>
+        	#include <SDL_image.h>
+        	#include <SDL_ttf.h>
+        	#include <SDL_mixer.h>
 	#else
 		#include <SDL2/SDL.h>
 		#include <SDL2/SDL_image.h>
@@ -25,7 +25,7 @@
 		#include <SDL2/SDL_mixer.h>
 	#endif
 	
-	#ifdef _SDL_H
+	#if defined _SDL_H || defined SDL_h_
 		#define Texture SDL_Texture
 		#define WRect SDL_Rect
 	#endif
