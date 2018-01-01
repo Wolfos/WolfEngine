@@ -1,23 +1,5 @@
 #include "../WolfEngine/WolfEngine.h"
 #include "../WolfEngine/API.h"
-#include <vector>
-#include <random>
-
-float RandomRange(float start, float end)
-{
-    std::random_device rd;
-    std::mt19937 eng(rd());
-    std::uniform_real_distribution<float> distribution(start, end);
-    return distribution(eng);
-}
-
-int RandomRange(int start, int end)
-{
-    std::random_device rd;
-    std::mt19937 eng(rd());
-    std::uniform_int_distribution<int> distribution(start, end);
-    return distribution(eng);
-}
 
 class Animal : public Component
 {
@@ -28,12 +10,12 @@ public:
         sr->Load("Animals.png");
         sr->frameWidth = 286;
         sr->frameHeight = 286;
-        sr->frame = RandomRange(0, 9);
+        sr->frame = WolfEngine::RandomRange(0, 9);
         
-        float randomScale = RandomRange(.1f, .5f);
-		float randomAngle = RandomRange(0.0f, 360.0f);
-        int randomX = RandomRange(0, WolfEngine::screenWidth);
-        int randomY = RandomRange(0, WolfEngine::screenHeight);
+        float randomScale = WolfEngine::RandomRange(.1f, .5f);
+		float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
+        int randomX = WolfEngine::RandomRange(0, WolfEngine::screenWidth);
+        int randomY = WolfEngine::RandomRange(0, WolfEngine::screenHeight);
         gameObject->transform->scale = {randomScale, randomScale};
 		gameObject->transform->angle = randomAngle;
         gameObject->transform->localPosition = {randomX, randomY};

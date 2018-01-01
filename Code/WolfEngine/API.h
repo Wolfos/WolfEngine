@@ -19,6 +19,7 @@
 #include "Rendering/Map.h"
 #include "Utilities/Collision.h"
 #include "Utilities/Debug.h"
+#include "Utilities/Random.h"
 #include "Utilities/Time.h"
 #include "Utilities/WolfMath.h"
 

@@ -24,5 +24,6 @@ namespace WolfEngine
 	extern int Quit();
 
 	// Utility functions
+	/// Get the path to the 'Assets' folder
 	extern std::string FindAssetFolder();
 };
