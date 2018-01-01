@@ -29,12 +29,19 @@ include_directories(${SDL2_TTF_INCLUDE_DIR})
 find_package(SDL2_mixer REQUIRED)
 include_directories(${SDL2_MIXER_INCLUDE_DIR})
 
+find_package(OpenGL)
+include_directories(${OPENGL_INCLUDE_DIRS})
+
 # Set an output directory for our binaries
 set(BIN_DIR ${WolfEngine_SOURCE_DIR}/bin)
 
 # Editor
 file(GLOB Editor_Source "Code/Editor/*.cpp" "Code/Editor/*.h")
 # source_group("Editor" FILES ${Editor_Source})
+
+# Test application
+file(GLOB Test_Source "Code/Test/*.cpp" "Code/Test/*.h")
+# source_group("Test" FILES ${Test_Source})
 
 # Engine
 file(GLOB WolfEngine_Source "Code/WolfEngine/*.cpp" "Code/WolfEngine/*.h")
@@ -74,28 +81,20 @@ add_library(WolfEngine STATIC
 	${WolfEngine_Input}
 	${WolfEngine_Models}
 	${WolfEngine_Rendering}
-	${WolfEngine_Scripting}
-	
-		${WolfEngine_Scripting_Addon_Debugger}
-		${WolfEngine_Scripting_Addon_ScriptArray}
-		${WolfEngine_Scripting_Addon_ScriptBuilder}
-		${WolfEngine_Scripting_Addon_ScriptFile}
-		${WolfEngine_Scripting_Addon_ScriptHelper}
-		${WolfEngine_Scripting_Addon_ScriptMath}
-		${WolfEngine_Scripting_Addon_ScriptStdString}
-		${WolfEngine_Scripting_AngelScript}
-		${WolfEngine_Scripting_Include}
 		
-	${WolfEngine_Utilities}
-)
+	${WolfEngine_Utilities})
 
 add_executable(Editor 
 	${Editor_Source} 	
 )
 
+add_executable(Test
+	${Test_Source}
+)
 
-target_link_libraries(WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
-target_link_libraries(Editor WolfEngine ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
+target_link_libraries(WolfEngine ${OPENGL_LIBRARIES} ${SDL2_LIBRARY} ${SDL2_IMAGE_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
+target_link_libraries(Editor WolfEngine)
+target_link_libraries(Test WolfEngine)
 install(TARGETS Editor WolfEngine 
 RUNTIME DESTINATION ${BIN_DIR}
 ARCHIVE DESTINATION ${BIN_DIR}

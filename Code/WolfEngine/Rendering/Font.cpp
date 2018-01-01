@@ -3,7 +3,8 @@
 
 Font::Font(std::string filename, int size)
 {
-	font = TTF_OpenFont(("../Assets/Fonts/" + filename).c_str(), size);
+	std::string path = WolfEngine::FindAssetFolder() + "Fonts/" + filename;
+	font = TTF_OpenFont(path.c_str(), size);
 	if (font == NULL)
 	{
 		printf("Failed to load font! SDL_ttf Error: %s\n", TTF_GetError());

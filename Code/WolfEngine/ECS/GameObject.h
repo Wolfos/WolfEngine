@@ -7,7 +7,6 @@
 
 ///
 ///	A GameObject is a framework to put Components on
-///	It is advisable to make them through ObjectManager::NewGameObject (unless you want to update them by yourself, which you don't)
 ///
 class GameObject
 {

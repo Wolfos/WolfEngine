@@ -81,4 +81,6 @@ void SpriteRenderer::Render()
 void SpriteRenderer::Load(std::string filename)
 {
 	spriteSheet = new Bitmap(filename);
+    frameWidth = spriteSheet->size.x;
+    frameHeight = spriteSheet->size.y;
 }

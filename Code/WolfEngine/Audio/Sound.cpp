@@ -1,24 +1,21 @@
 /*
-WolfEngine © 2013-2014 Robin van Ee
+WolfEngine ï¿½ 2013-2014 Robin van Ee
 http://wolfengine.net
 Contact:
 rvanee@wolfengine.net
 */
 #define _CRT_SECURE_NO_DEPRECATE //MICROSOOOOOOOOFT!
 #include "Sound.h"
+#include "../WolfEngine.h"
 
-Sound::Sound(char* filename)
+Sound::Sound(std::string filename)
 {
-	#ifdef ANDROID
-		char newFilename[1024] = "Audio/";
-	#else
-		char newFilename[1024] = "../Assets/Audio/";
-	#endif
-	strcat(newFilename, filename);
-	sound = Mix_LoadWAV(newFilename);
+	std::string path = WolfEngine::FindAssetFolder() + "Audio/" + filename;
+
+	sound = Mix_LoadWAV(path.c_str());
 	if (!sound)
 	{
-		printf("Unable to load audio file %s! SDL_Mixer Error: %s\n", newFilename, Mix_GetError());
+		printf("Unable to load audio file %s! SDL_Mixer Error: %s\n", path.c_str(), Mix_GetError());
 	}
 }
 

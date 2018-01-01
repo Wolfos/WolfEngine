@@ -3,6 +3,7 @@
 ///
 
 #include "ECS/Scene.h"
+#include <string>
 
 namespace WolfEngine
 {
@@ -10,6 +11,7 @@ namespace WolfEngine
 
 	extern Scene* scene;
 	extern SDL_Renderer* renderer;
+    extern SDL_GLContext context;
 
 	extern int maxFPS;
 	extern int screenWidth;
@@ -20,4 +22,7 @@ namespace WolfEngine
 	extern void MainLoop();
 
 	extern int Quit();
+
+	// Utility functions
+	extern std::string FindAssetFolder();
 };

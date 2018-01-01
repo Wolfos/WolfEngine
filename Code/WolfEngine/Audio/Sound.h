@@ -1,6 +1,6 @@
-#ifndef _SOUND_H
-#define _SOUND_H
+#pragma once
 #include "../Includes.h"
+#include <string>
 ///
 /// For playing sound effects
 /// Not streamed but many can be played at the same time
@@ -10,7 +10,7 @@ class Sound
 {
 public:
 	///	Loads a sound from a file located in ../Assets/Audio
-	Sound(char* filename);
+	Sound(std::string filename);
 	///	Plays the sound, loop 0 plays once, loop 1 plays twice, etc
 	void Play(int loop = 0);
 	/// Stops the sound
@@ -20,4 +20,3 @@ private:
 	Mix_Chunk* sound;
 	int channel;
 };
-#endif
