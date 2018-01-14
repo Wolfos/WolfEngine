@@ -9,8 +9,8 @@ class Bitmap
 public:
 	std::string filename;
 	int* count = 0;
-	Texture* texture;
-	WPoint size;
+	GLuint textureID;
+	Vector2<int> size;
 	WRect* rect;
 
 	Bitmap(std::string file);
@@ -19,7 +19,7 @@ public:
 	void Blit(WRect* srcrect, WRect* dstrect, double angle = 0, SDL_Point* center = NULL, float scale = 1);
 private:
 	SDL_Surface* LoadSurface(std::string file);
-	Texture* ToTexture(SDL_Surface* surface);
+	void GenTexture(SDL_Surface* surface);
 	static std::vector<Bitmap*> cache;
 };
 

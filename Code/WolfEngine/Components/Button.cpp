@@ -16,8 +16,8 @@ void Button::Added()
 
 	hitBox.x = transform->GetPosition().x;
 	hitBox.y = transform->GetPosition().y;
-	hitBox.w = renderer->frameWidth * transform->scale.x;
-	hitBox.h = renderer->frameHeight * transform->scale.y;
+	hitBox.w = renderer->frameWidth * transform->localScale.x;
+	hitBox.h = renderer->frameHeight * transform->localScale.y;
 }
 
 void Button::Update()

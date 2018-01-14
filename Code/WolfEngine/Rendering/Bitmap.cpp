@@ -15,7 +15,7 @@ Bitmap::Bitmap(std::string file)
 			cached = true;
 			cache[i]->count++;
 			count = cache[i]->count;
-			texture = cache[i]->texture;
+			textureID = cache[i]->textureID;
 			size = cache[i]->size;
 		}
 	}
@@ -25,15 +25,16 @@ Bitmap::Bitmap(std::string file)
 		count = new int;
 
 		SDL_Surface* surface = LoadSurface(file);
-		texture = ToTexture(surface);
+		size = {surface->w, surface->h};
+		GenTexture(surface);
 		SDL_FreeSurface(surface);
 
-		SDL_QueryTexture(texture, NULL, NULL, &size.x, &size.y);
+		//SDL_QueryTexture(texture, NULL, NULL, &size.x, &size.y);
 
-		if (!texture)
-		{
-			printf("Unable to create texture from %s! SDL Error: %s\n", filename.c_str(), SDL_GetError());
-		}
+		//if (!texture)
+		//{
+			//printf("Unable to create texture from %s! SDL Error: %s\n", filename.c_str(), SDL_GetError());
+		//}
 		cache.push_back(this);
 	}
 
@@ -50,7 +51,7 @@ Bitmap::~Bitmap()
 	*count--;
 	if (*count <= 0)
 	{
-		SDL_DestroyTexture(texture);
+		//SDL_DestroyTexture(texture);
 		for (size_t i = 0; i < cache.size(); i++)
 		{
 			if (cache[i]->filename == filename)
@@ -80,7 +81,7 @@ void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* cente
 	rect.y *= scale;
 	rect.w *= scale;
 	rect.h *= scale;
-	SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, &rect, angle, center, SDL_FLIP_NONE);
+	//SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, &rect, angle, center, SDL_FLIP_NONE);
 	if(deleteCenter) delete center;
 }
 
@@ -99,7 +100,19 @@ SDL_Surface* Bitmap::LoadSurface(std::string filename)
 	return loadedSurface;
 }
 
-Texture* Bitmap::ToTexture(SDL_Surface* surface)
+void Bitmap::GenTexture(SDL_Surface* surface)
 {
-	return SDL_CreateTextureFromSurface(WolfEngine::renderer, surface);
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+
+	int mode = GL_RGB;
+
+	if(surface->format->BytesPerPixel == 4) {
+		mode = GL_RGBA;
+	}
+
+	glTexImage2D(GL_TEXTURE_2D, 0, mode, size.x, size.y, 0, mode, GL_UNSIGNED_BYTE, surface->pixels);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }

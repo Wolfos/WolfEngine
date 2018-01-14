@@ -14,85 +14,71 @@ int WolfEngine::screenHeight = 720;
 
 SDL_Window* WolfEngine::window;
 Scene* WolfEngine::scene;
-SDL_Renderer* WolfEngine::renderer;
 SDL_GLContext WolfEngine::context;
 
 int InitSDL()
 {
 	//Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
+	if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
     {
         printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
         return 1;
     }
-    else
-    {
-        // Request OpenGL 3.2 context
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-        
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+	// Request OpenGL 3.3 context
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+
+	//SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+	//SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 #ifdef ANDROID
-        // Find ideal screen resolution
-        // Android's screen resolution isn't actually set by CreateWindow, but this also sets the camera's width and height correctly
-        SDL_DisplayMode* mode = new SDL_DisplayMode;
-        SDL_GetDisplayMode(0, 0, mode);
-        screenWidth = mode->w;
-        screenHeight = mode->h;
+	// Find ideal screen resolution
+	// Android's screen resolution isn't actually set by CreateWindow, but this also sets the camera's width and height correctly
+	SDL_DisplayMode* mode = new SDL_DisplayMode;
+	SDL_GetDisplayMode(0, 0, mode);
+	screenWidth = mode->w;
+	screenHeight = mode->h;
 #endif
-        window = SDL_CreateWindow("WolfEngine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
-        if (window == NULL)
-        {
-            printf("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
-            return 1;
-        }
-        else
-        {
-            // Initialize SDL_Image
-            int imgflags = IMG_INIT_PNG;
-            if (!(IMG_Init(imgflags) & imgflags))
-            {
-                printf("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
-                return 1;
-            }
-            else
-            {
-                renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-                SDL_SetRenderDrawColor(renderer, 0x64, 0x95, 0xED, 0xFF); // Cornflower blue
-            }
-            
-            // Initialize SDL_TTF
-            if (TTF_Init())
-            {
-                printf("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
-                return 1;
-            }
-            
-            if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024)==-1)
-            {
-                printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
-                return 1;
-            }
-            // Initialize SDL_Mixer
-            if (!Mix_Init(MIX_INIT_OGG))
-            {
-                printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
-                return 1;
-            }
-            else
-            {
-                Mix_OpenAudio(22050, AUDIO_S16, 2, 4096);
-            }
-            // Create OpenGL context
-            context = SDL_GL_CreateContext(window);
-            // Vsync
-            SDL_GL_SetSwapInterval(1);
-            glClearColor ( 1.0, 0.0, 0.0, 1.0 );
-            glClear ( GL_COLOR_BUFFER_BIT );
-            SDL_GL_SwapWindow(window);
-        }
-    }
+	window = SDL_CreateWindow("WolfEngine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+	if (window == NULL)
+	{
+		printf("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
+		return 1;
+	}
+
+	// Create OpenGL context
+	context = SDL_GL_CreateContext(window);
+	printf("GL Version: %s\n", glGetString(GL_VERSION));
+	printf("Shading language version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+	// Initialize SDL_Image
+	int imgflags = IMG_INIT_PNG;
+	if (!(IMG_Init(imgflags) & imgflags))
+	{
+		printf("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+		return 1;
+	}
+
+	// Initialize SDL_TTF
+	if (TTF_Init())
+	{
+		printf("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
+		return 1;
+	}
+
+	if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024)==-1)
+	{
+		printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
+		return 1;
+	}
+
+	// Initialize SDL_Mixer
+	if (!Mix_Init(MIX_INIT_OGG))
+	{
+		printf("Fatal error: SDL_Mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
+		return 1;
+	}
+
     return 0;
 }
 
@@ -100,11 +86,12 @@ int WolfEngine::Init()
 {
     if (InitSDL()) return 1;
     
-    GUI::Init();
+    //GUI::Init();
     
     return 0;
 }
 
+#include "Rendering/Shader.h"
 void WolfEngine::MainLoop()
 {
     int quit = 0;
@@ -112,17 +99,59 @@ void WolfEngine::MainLoop()
     Uint32 curFrameTime = 0;
     Uint32 lastFrameTime = 0;
     Input input;
-    
+
+    Shader* shader = new Shader( "Sprite.vert", "Sprite.frag" );
     while (!quit)
     {
         curFrameTime = SDL_GetTicks();
         
         Time::frameTimeS = (double)(curFrameTime - lastFrameTime) / 1000;
-        int fps = (int)(1.f / Time::frameTimeS);
         
-        //Clear the screen
-        SDL_RenderClear(renderer);
-        
+        // Clear the screen
+		glClearColor ( 0.392, 0.584, 0.929, 1.0 );
+		glClear ( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+		// Set shader
+        glUseProgram(shader->id);
+
+	    // Matrices
+	    Matrix projection;
+	    projection.SetPerspective(70.0f, screenWidth / screenHeight, 0.01f, 100.0f);
+
+	    Matrix view;
+	    view.SetIdentity();
+
+	    Matrix model;
+	    model.SetIdentity();
+	    model.Translate(0, 0, -1);
+
+	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "pMatrix"), 1, GL_FALSE, &projection.GetData()[0]);
+	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "vMatrix"), 1, GL_FALSE, &view.GetData()[0]);
+	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "mMatrix"), 1, GL_FALSE, &model.GetData()[0]);
+
+	    GLuint vArrayID;
+	    glGenVertexArrays(1, &vArrayID);
+	    glBindVertexArray(vArrayID);
+
+	    static const GLfloat vertices[] = {
+                -1.0f, -1.0f, 0.0f,
+                1.0f, -1.0f, 0.0f,
+                0.0f,  1.0f, 0.0f,
+        };
+
+        GLuint vertexBuffer;
+        glGenBuffers(1, &vertexBuffer);
+        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
+        glDrawArrays(GL_TRIANGLES, 0, 3); // Starting from vertex 0; 3 vertices total -> 1 triangle
+        glDisableVertexAttribArray(0);
+
+
         input.Update(&eventHandler);
         
         if (eventHandler.type == SDL_WINDOWEVENT_RESIZED)
@@ -135,23 +164,25 @@ void WolfEngine::MainLoop()
         {
             quit = 1;
         }
+
         
-        scene->Update();
+        //scene->Update();
         
         //Update the gameObjects
-        scene->UpdateObjects();
+        //scene->UpdateObjects();
         
         //Render the SpriteRenderers
-        scene->RenderObjects();
+        //scene->RenderObjects();
         
         //Late update
-        scene->LateUpdateObjects();
+        //scene->LateUpdateObjects();
         
         //OnGUI
-        scene->OnGUI();
-        
-        SDL_RenderPresent(renderer);
+        //scene->OnGUI();
+
         lastFrameTime = curFrameTime;
+
+		SDL_GL_SwapWindow(window);
         
         if (maxFPS != -1 && SDL_GetTicks() - curFrameTime < 1000 / maxFPS)
             SDL_Delay((1000 / maxFPS) - (SDL_GetTicks() - curFrameTime));
@@ -161,8 +192,7 @@ void WolfEngine::MainLoop()
 int WolfEngine::Quit()
 {
     delete scene;
-    
-    SDL_DestroyRenderer(renderer);
+
     SDL_DestroyWindow(window);
     
     SDL_Quit();
@@ -201,7 +231,6 @@ extern "C"
 #endif
 
 // Utility functions
-
 std::string WolfEngine::FindAssetFolder()
 {
 #ifdef __APPLE__

@@ -1,7 +1,8 @@
-#ifndef _TRANSFORM_H
-#define _TRANSFORM_H
+#pragma once
 #include "../ECS/Component.h"
 #include "../Models/Point.h"
+#include "../Models/Quaternion.h"
+#include "../Models/Matrix.h"
 #include <vector>
 #include <string>
 ///
@@ -11,19 +12,16 @@
 class Transform : public Component
 {
 public:
-	///	The position in pixels
-	WPoint localPosition;
-    WPoint relativeTo;
-	/// The scale, not in pixels
-	WPointF scale;
-	///	Rotation by degrees
-	double angle = 0;
-	///	If we want to ignore the camera position
-	bool ignoreCam = false;
+	///	Local position in world units
+	Vector3<> localPosition;
+	/// Local scale
+	Vector3<> localScale;
+	///	Local rotation
+	Quaternion localRotation;
     
 	virtual void Added();
     /// Returns the global position of the transform
-    WPoint GetPosition();
+    Vector3<> GetPosition();
     /// Add a child to the transform
     void AddChild(Transform* child);
     /// Returns the first child with this name
@@ -36,4 +34,3 @@ protected:
     Transform* parent;
     std::vector<Transform*>* children;
 };
-#endif

@@ -1,43 +1,66 @@
-#ifndef _POINT_H
-#define _POINT_H
-///	WPoint is usually used for locations in pixels
-class WPoint{
+#pragma once
+
+/// Vector of two numbers
+template <class t = float> class Vector2
+{
 public:
-    WPoint operator+=(const WPoint& b)
-    {
-        this->x += b.x;
-        this->y += b.y;
-        return *this;
-    }
-    
-    WPoint operator+(const WPoint& b) {
-        WPoint point;
-        point.x = this->x + b.x;
-        point.y = this->y + b.y;
-        return point;
-    }
-    
-    WPoint operator-(const WPoint& b)
-    {
-        WPoint point;
-        point.x = this->x - b.x;
-        point.y = this->y - b.y;
-        return point;
-    }
-    
-	int x;
-	int y;
-	/// Linear interpolation between Points
-	static WPoint Lerp(WPoint from, WPoint to, float t);
+	t x;
+	t y;
+
+	///	Linear interpolation
+	Vector2<t> Lerp(Vector2 from, Vector2 to, float time)
+	{
+		Vector2 point;
+		point.x = (1 - time)*from.x + time*to.x;
+		point.y = (1 - time)*from.y + time*to.y;
+		return point;
+	}
+
+	Vector2& operator +(const Vector2& other)
+	{
+		this->x += other.x;
+		this->y += other.y;
+		return *this;
+	}
 };
 
-/// WPointF is usually used for scale
-/// Same as WPoint, just with floating point numbers
-class WPointF{
+/// Vector of three numbers
+template <class t = float> class Vector3
+{
 public:
-	float x;
-	float y;
-	///	Linear interpolation between PointF's
-	static WPointF Lerp(WPointF from, WPointF to, float t);
+	t x;
+	t y;
+	t z;
+
+	/// Linear interpolation
+	static Vector3<t> Lerp(Vector3 from, Vector3 to, float time)
+	{
+		Vector3 point;
+		point.x = (1 - time)*from.x + time*to.x;
+		point.y = (1 - time)*from.y + time*to.y;
+		point.z = (1 - time)*from.z + time*to.z;
+		return point;
+	}
+
+	Vector3& operator +(const Vector3& other)
+	{
+		this->x += other.x;
+		this->y += other.y;
+		this->z += other.z;
+		return *this;
+	}
+
+	Vector3& operator +(const Vector2<t>& other)
+	{
+		this->x += other.x;
+		this->y += other.y;
+		return *this;
+	}
+
+	Vector3& operator -(const Vector3& other)
+	{
+		this->x -= other.x;
+		this->y -= other.y;
+		return *this;
+	}
 };
-#endif

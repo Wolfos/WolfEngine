@@ -10,7 +10,6 @@ namespace WolfEngine
     extern SDL_Window* window;
 
 	extern Scene* scene;
-	extern SDL_Renderer* renderer;
     extern SDL_GLContext context;
 
 	extern int maxFPS;

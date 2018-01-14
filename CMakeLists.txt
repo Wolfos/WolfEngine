@@ -43,6 +43,9 @@ file(GLOB Editor_Source "Code/Editor/*.cpp" "Code/Editor/*.h")
 file(GLOB Test_Source "Code/Test/*.cpp" "Code/Test/*.h")
 # source_group("Test" FILES ${Test_Source})
 
+# Shaders
+file(GLOB Shaders "Assets/Shaders/*.vert" "Assets/Shaders/*.frag")
+
 # Engine
 file(GLOB WolfEngine_Source "Code/WolfEngine/*.cpp" "Code/WolfEngine/*.h")
 # source_group("WolfEngine" FILES ${WolfEngine_Source})
@@ -67,22 +70,22 @@ source_group("Models" FILES ${WolfEngine_Models})
 # Rendering
 file(GLOB WolfEngine_Rendering "Code/WolfEngine/Rendering/*.cpp" "Code/WolfEngine/Rendering/*.h")
 source_group("Rendering" FILES ${WolfEngine_Rendering})
-	
 # Utilities
 file(GLOB WolfEngine_Utilities "Code/WolfEngine/Utilities/*.cpp" "Code/WolfEngine/Utilities/*.h")
 source_group("Utilities" FILES ${WolfEngine_Utilities})
 
 add_library(WolfEngine STATIC
-	${WolfEngine_Source}
-	${WolfEngine_Audio}
-	${WolfEngine_Components}
-	${WolfEngine_ECS}
-	${WolfEngine_GUI}
-	${WolfEngine_Input}
-	${WolfEngine_Models}
-	${WolfEngine_Rendering}
-		
-	${WolfEngine_Utilities})
+		${WolfEngine_Source}
+		${WolfEngine_Audio}
+		${WolfEngine_Components}
+		${WolfEngine_ECS}
+		${WolfEngine_GUI}
+		${WolfEngine_Input}
+		${WolfEngine_Models}
+		${WolfEngine_Rendering}
+		${WolfEngine_Utilities}
+		${Shaders}
+		)
 
 add_executable(Editor 
 	${Editor_Source} 	

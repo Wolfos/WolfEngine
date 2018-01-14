@@ -11,12 +11,12 @@ rvanee@wolfengine.net
 void Transform::Added()
 {
     parent = NULL;
-	scale.x = 1;
-	scale.y = 1;
+	localScale.x = 1;
+    localScale.y = 1;
+    localScale.z = 1;
     localPosition.x = 0;
     localPosition.y = 0;
-    relativeTo.x = 0;
-    relativeTo.y = 0;
+    localPosition.z = 0;
 }
 
 void Transform::AddChild(Transform* child)
@@ -35,7 +35,7 @@ void Transform::AddChild(Transform* child)
     child->parent = this;
 }
 
-WPoint Transform::GetPosition()
+Vector3<> Transform::GetPosition()
 {
     if(parent != NULL)
     {

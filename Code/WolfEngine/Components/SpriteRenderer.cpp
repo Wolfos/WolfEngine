@@ -24,6 +24,7 @@ void SpriteRenderer::Update()
 
 void SpriteRenderer::Render()
 {
+	/*
 	WRect* rect = new WRect;
 	rect->w = frameWidth;
 	rect->h = frameHeight;
@@ -51,30 +52,25 @@ void SpriteRenderer::Render()
 	rect->y = clip[frame].y;
 
 	WRect* dst = new WRect;
-	if (!gameObject->transform->ignoreCam)
-	{
-        WPoint objPos = gameObject->transform->GetPosition();
-        WPoint camPos = WolfEngine::scene->camera->gameObject->transform->GetPosition();
-        WPoint targetPos = objPos - camPos;
-        dst->x = targetPos.x;
-        dst->y = targetPos.y;
-	}
-	else
-	{
-		dst->x = gameObject->transform->GetPosition().x;
-		dst->y = gameObject->transform->GetPosition().y;
-	}
-	dst->w = (int)(frameWidth*gameObject->transform->scale.x);
-	dst->h = (int)(frameHeight*gameObject->transform->scale.y);
 
-	center->x = (int)((frameWidth*gameObject->transform->scale.x) / 2);
-	center->y = (int)((frameHeight*gameObject->transform->scale.y) / 2);
+	Vector3 objPos = gameObject->transform->GetPosition();
+	Vector3 camPos = WolfEngine::scene->camera->gameObject->transform->GetPosition();
+	Vector3 targetPos = objPos - camPos;
+	dst->x = targetPos.x;
+	dst->y = targetPos.y;
+
+	dst->w = (int)(frameWidth*gameObject->transform->localScale.x);
+	dst->h = (int)(frameHeight*gameObject->transform->localScale.y);
+
+	center->x = (int)((frameWidth*gameObject->transform->localScale.x) / 2);
+	center->y = (int)((frameHeight*gameObject->transform->localScale.y) / 2);
 
 	spriteSheet->Blit(rect, dst, gameObject->transform->angle, center);
 
 	free(clip);
 	delete(dst);
 	delete(rect);
+	 */
 }
 
 

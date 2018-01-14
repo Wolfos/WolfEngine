@@ -1,6 +1,6 @@
 #include "Mouse.h"
 
-WPoint Mouse::position;
+Vector2<int> Mouse::position;
 bool Mouse::overGUI = false;
 Key Mouse::key0;
 Key Mouse::key1;

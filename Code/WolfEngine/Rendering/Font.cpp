@@ -24,17 +24,17 @@ void Font::Blit(int x, int y, std::string text, SDL_Color color)
 		printf("Unable to render text surface! SDL_ttf Error: %s\n", TTF_GetError());
 	}
 
-	SDL_Texture* mTexture = SDL_CreateTextureFromSurface(WolfEngine::renderer, textSurface);
-	if (mTexture == NULL)
-	{
-		printf("Unable to create texture from rendered text! SDL Error: %s\n", SDL_GetError());
-	}
+	//SDL_Texture* mTexture = SDL_CreateTextureFromSurface(WolfEngine::renderer, textSurface);
+	//if (mTexture == NULL)
+	//{
+		//printf("Unable to create texture from rendered text! SDL Error: %s\n", SDL_GetError());
+	//}
 
-	WRect srcRect = { 0, 0, textSurface->w, textSurface->h };
-	WRect dstRect = { x - textSurface->w/2, y - textSurface->h/2, textSurface->w, textSurface->h };
+	//WRect srcRect = { 0, 0, textSurface->w, textSurface->h };
+	//WRect dstRect = { x - textSurface->w/2, y - textSurface->h/2, textSurface->w, textSurface->h };
 
-	SDL_RenderCopy(WolfEngine::renderer, mTexture, &srcRect, &dstRect);
+	//SDL_RenderCopy(WolfEngine::renderer, mTexture, &srcRect, &dstRect);
 
 	SDL_FreeSurface(textSurface);
-	SDL_DestroyTexture(mTexture);
+	//SDL_DestroyTexture(mTexture);
 }

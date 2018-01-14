@@ -1,6 +1,6 @@
 #include "Collision.h"
 
-extern bool Collision::AABB(WPoint point, WRect rect)
+extern bool Collision::AABB(Vector2<float> point, WRect rect)
 {
 	if (point.x < rect.x) return false;
 	if (point.y < rect.y) return false;

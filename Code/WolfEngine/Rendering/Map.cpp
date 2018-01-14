@@ -143,7 +143,7 @@ void Map::Render(int layer, Bitmap* spritesheet,
 
 	//Occlusion culling, but need to make sure we CAN cull first
 	//If we can't cull (ergo, the map is too small or we're off the map), we just render the whole map
-    WPoint cameraPosition = camera->transform->GetPosition();
+    Vector3<> cameraPosition = camera->transform->GetPosition();
 	if (cameraPosition.x >= 0)startX = cameraPosition.x / tilewidth;
 	else startX = 0;
 
