@@ -125,9 +125,9 @@ void WolfEngine::MainLoop()
 	    model.SetIdentity();
 	    model.Translate(0, 0, -1);
 
-	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "pMatrix"), 1, GL_FALSE, &projection.GetData()[0]);
-	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "vMatrix"), 1, GL_FALSE, &view.GetData()[0]);
-	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "mMatrix"), 1, GL_FALSE, &model.GetData()[0]);
+	    Matrix mvp = model * view * projection;
+
+	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "mvp"), 1, GL_FALSE, &mvp.GetData()[0]);
 
 	    GLuint vArrayID;
 	    glGenVertexArrays(1, &vArrayID);
@@ -139,7 +139,7 @@ void WolfEngine::MainLoop()
                 0.0f,  1.0f, 0.0f,
         };
 
-        GLuint vertexBuffer;
+	    GLuint vertexBuffer;
         glGenBuffers(1, &vertexBuffer);
         glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);

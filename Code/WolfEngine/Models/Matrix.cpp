@@ -60,6 +60,7 @@ void Matrix::Scale(float x, float y, float z)
 	data[10] = z;
 }
 
+
 Matrix Matrix::operator * (const Matrix& m) const {
 	Matrix ret;
 
