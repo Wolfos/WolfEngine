@@ -15,7 +15,7 @@
 #include "Input/Mouse.h"
 #include "Input/Keyboard.h"
 #include "Input/Keys.h"
-#include "Models/Point.h"
+#include "Math/Vectors.h"
 #include "Rendering/Bitmap.h"
 #include "Rendering/Font.h"
 #include "Rendering/Map.h"
@@ -23,6 +23,6 @@
 #include "Utilities/Debug.h"
 #include "Utilities/Random.h"
 #include "Utilities/Time.h"
-#include "Utilities/WolfMath.h"
+#include "Math/WolfMath.h"
 
 #endif

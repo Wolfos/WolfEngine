@@ -1,6 +1,5 @@
-#ifndef _MOUSE_H
-#define _MOUSE_H
-#include "../Models/Point.h"
+#pragma once
+#include "../Math/Vectors.h"
 #include "../Includes.h"
 #include "Key.h"
 
@@ -33,5 +32,3 @@ class Mouse
 		/// Middle mouse button, direct usage not recommended
 		static Key key2;
 };
-
-#endif

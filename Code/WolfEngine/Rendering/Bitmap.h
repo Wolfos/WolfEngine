@@ -1,7 +1,7 @@
 #ifndef _BITMAP_H
 #define _BITMAP_H
 #include "../Includes.h"
-#include "../Models/Point.h"
+#include "../Math/Vectors.h"
 #include <string>
 #include <vector>
 class Bitmap

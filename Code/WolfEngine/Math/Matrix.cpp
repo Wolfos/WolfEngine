@@ -4,7 +4,7 @@
 
 #include "Matrix.h"
 #include <cstring>
-#include "../Utilities/WolfMath.h"
+#include "WolfMath.h"
 
 Matrix::Matrix()
 {
@@ -32,7 +32,7 @@ void Matrix::SetPerspective(float angle, float aspect, float clipMin, float clip
 	memset(data, 0, sizeof(float) * 16);
 	data[0] = 0.5f / tangent;
 	data[5] = 0.5f * aspect / tangent;
-	data[10] = -(clipMin * 2) / (clipMax - clipMin);
+	//data[10] = -(clipMax + clipMin) / (clipMax - clipMin);
 	data[11] = -1;
 	data[14] = (-2 * clipMax * clipMin) / (clipMax - clipMin);
 }
@@ -46,11 +46,11 @@ void Matrix::SetOrtho(float left, float right, float top, float bottom, float cl
 	data[15] = 1;
 }
 
-void Matrix::Translate(float x, float y, float z)
+void Matrix::Translate(Vector3<float> direction)
 {
-	data[12] += x;
-	data[13] += y;
-	data[14] += z;
+	data[12] += direction.x;
+	data[13] += direction.y;
+	data[14] += direction.z;
 }
 
 void Matrix::Scale(float x, float y, float z)
@@ -85,4 +85,42 @@ Matrix Matrix::operator * (const Matrix& m) const {
 	ret.data[15] = ((data[12]*m.data[3])+(data[13]*m.data[7])+(data[14]*m.data[11])+(data[15]*m.data[15]));
 
 	return ret;
+}
+
+void Matrix::FromQuat(Quaternion *q, Vector3<float> pivot)
+{
+	SetIdentity();
+
+	float sqw = q->w*q->w;
+	float sqx = q->x*q->x;
+	float sqy = q->y*q->y;
+	float sqz = q->z*q->z;
+	data[0] = sqx - sqy - sqz + sqw; // since sqw + sqx + sqy + sqz =1
+	data[5] = -sqx + sqy - sqz + sqw;
+	data[10] = -sqx - sqy + sqz + sqw;
+
+	double tmp1 = q->x*q->y;
+	double tmp2 = q->z*q->w;
+	data[4] = 2.0 * (tmp1 + tmp2);
+	data[1] = 2.0 * (tmp1 - tmp2);
+
+	tmp1 = q->x*q->z;
+	tmp2 = q->y*q->w;
+	data[8] = 2.0 * (tmp1 - tmp2);
+	data[2] = 2.0 * (tmp1 + tmp2);
+
+	tmp1 = q->y*q->z;
+	tmp2 = q->x*q->w;
+	data[9] = 2.0 * (tmp1 + tmp2);
+	data[6] = 2.0 * (tmp1 - tmp2);
+
+	float a1 = pivot.x;
+	float a2 = pivot.y;
+	float a3 = pivot.z;
+
+	data[12] = a1 - a1 * data[0] - a2 * data[4] - a3 * data[8];
+	data[13] = a2 - a1 * data[1] - a2 * data[5] - a3 * data[9];
+	data[14] = a3 - a1 * data[2] - a2 * data[6] - a3 * data[10];
+	data[3] = data[7] = data[11] = 0.0;
+	data[15] = 1.0;
 }

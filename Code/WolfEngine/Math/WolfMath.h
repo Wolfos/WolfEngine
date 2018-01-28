@@ -9,5 +9,8 @@ namespace WolfMath
 	float Cos(float value);
 	float Tan(float value);
 	float DegToRad(float degrees);
+	float Sqrt(float value);
+	float Atan2(float y, float x);
+	float Asin(float value);
 }
 #endif

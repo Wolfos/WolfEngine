@@ -6,7 +6,7 @@ rvanee@wolfengine.net
 */
 #define _CRT_SECURE_NO_DEPRECATE
 #include "Map.h"
-#include "../Utilities/WolfMath.h"
+#include "../Math/WolfMath.h"
 #include "../Utilities/Debug.h"
 #include "../Components/Transform.h"
 #include "../Components/Camera.h"

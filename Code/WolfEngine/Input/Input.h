@@ -1,7 +1,7 @@
 #ifndef _INPUT_H
 #define _INPUT_H
 #include "Keys.h"
-#include "../Models/Point.h"
+#include "../Math/Vectors.h"
 #include "../Includes.h"
 
 ///

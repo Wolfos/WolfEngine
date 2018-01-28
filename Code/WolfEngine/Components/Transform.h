@@ -1,8 +1,8 @@
 #pragma once
 #include "../ECS/Component.h"
-#include "../Models/Point.h"
-#include "../Models/Quaternion.h"
-#include "../Models/Matrix.h"
+#include "../Math/Vectors.h"
+#include "../Math/Quaternion.h"
+#include "../Math/Matrix.h"
 #include <vector>
 #include <string>
 ///

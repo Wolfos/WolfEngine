@@ -64,8 +64,8 @@ source_group("GUI" FILES ${WolfEngine_GUI})
 # Input
 file(GLOB WolfEngine_Input "Code/WolfEngine/Input/*.cpp" "Code/WolfEngine/Input/*.h")
 source_group("Input" FILES ${WolfEngine_Input})
-# Models
-file(GLOB WolfEngine_Models "Code/WolfEngine/Models/*.cpp" "Code/WolfEngine/Models/*.h")
+# Math
+file(GLOB WolfEngine_Models "Code/WolfEngine/Math/*.cpp" "Code/WolfEngine/Math/*.h")
 source_group("Models" FILES ${WolfEngine_Models})
 # Rendering
 file(GLOB WolfEngine_Rendering "Code/WolfEngine/Rendering/*.cpp" "Code/WolfEngine/Rendering/*.h")

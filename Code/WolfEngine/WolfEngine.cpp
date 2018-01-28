@@ -16,6 +16,7 @@ SDL_Window* WolfEngine::window;
 Scene* WolfEngine::scene;
 SDL_GLContext WolfEngine::context;
 
+
 int InitSDL()
 {
 	//Initialize SDL
@@ -45,6 +46,7 @@ int InitSDL()
 		printf("Fatal error: Window could not be created! SDL_Error: %s\n", SDL_GetError());
 		return 1;
 	}
+	SDL_GetWindowSize(window, &screenWidth, &screenHeight);
 
 	// Create OpenGL context
 	context = SDL_GL_CreateContext(window);
@@ -92,6 +94,7 @@ int WolfEngine::Init()
 }
 
 #include "Rendering/Shader.h"
+#include "Rendering/Mesh.h"
 void WolfEngine::MainLoop()
 {
     int quit = 0;
@@ -100,7 +103,18 @@ void WolfEngine::MainLoop()
     Uint32 lastFrameTime = 0;
     Input input;
 
+	//glEnable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	Vector3<float> rotation = {0, 0, 0};
+
+	Bitmap* bmp = new Bitmap("test.png");
+
     Shader* shader = new Shader( "Sprite.vert", "Sprite.frag" );
+
+	Mesh* mesh = new Mesh();
+	mesh->CreateQuad();
+
     while (!quit)
     {
         curFrameTime = SDL_GetTicks();
@@ -111,45 +125,54 @@ void WolfEngine::MainLoop()
 		glClearColor ( 0.392, 0.584, 0.929, 1.0 );
 		glClear ( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 
+		//rotation.z += 0.01f;
+		Quaternion* quat = Quaternion::FromEuler(rotation);
+		//Quaternion* quat = new Quaternion();
+		Matrix rot;
+		rot.FromQuat(quat, {0, 0, 0});
+
 		// Set shader
         glUseProgram(shader->id);
 
 	    // Matrices
 	    Matrix projection;
-	    projection.SetPerspective(70.0f, screenWidth / screenHeight, 0.01f, 100.0f);
+		float aspect = (float)screenWidth / (float)screenHeight;
+		float size = 2;
+		projection.SetOrtho(-aspect * size, aspect * size, -1 * size, 1 * size, 0.01f, 100.0f);
 
 	    Matrix view;
 	    view.SetIdentity();
 
 	    Matrix model;
 	    model.SetIdentity();
-	    model.Translate(0, 0, -1);
+	    model.Translate({0, 0, -1});
+		model = model * rot;
 
 	    Matrix mvp = model * view * projection;
 
 	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "mvp"), 1, GL_FALSE, &mvp.GetData()[0]);
 
-	    GLuint vArrayID;
-	    glGenVertexArrays(1, &vArrayID);
-	    glBindVertexArray(vArrayID);
 
-	    static const GLfloat vertices[] = {
-                -1.0f, -1.0f, 0.0f,
-                1.0f, -1.0f, 0.0f,
-                0.0f,  1.0f, 0.0f,
-        };
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, bmp->textureID);
+		glUniform1i(glGetUniformLocation(shader->id,  "sampler"), 0);
 
-	    GLuint vertexBuffer;
-        glGenBuffers(1, &vertexBuffer);
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
+		// Vertices
         glEnableVertexAttribArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-
+        glBindBuffer(GL_ARRAY_BUFFER, mesh->vertexBuffer);
         glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
-        glDrawArrays(GL_TRIANGLES, 0, 3); // Starting from vertex 0; 3 vertices total -> 1 triangle
-        glDisableVertexAttribArray(0);
+
+		// UVs
+		glEnableVertexAttribArray(1);
+		glBindBuffer(GL_ARRAY_BUFFER, mesh->uvBuffer);
+		glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, (void*)0);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->indexBuffer);
+
+		// Draw
+		glDrawElements(GL_TRIANGLES, mesh->indices.size(), GL_UNSIGNED_INT, (void*)0);
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
 
 
         input.Update(&eventHandler);
@@ -164,7 +187,6 @@ void WolfEngine::MainLoop()
         {
             quit = 1;
         }
-
         
         //scene->Update();
         

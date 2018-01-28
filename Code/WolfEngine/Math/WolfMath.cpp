@@ -31,3 +31,18 @@ float WolfMath::DegToRad(float degrees)
 {
 	return degrees * pi / 180;
 }
+
+float WolfMath::Sqrt(float value)
+{
+	return sqrt(value);
+}
+
+float WolfMath::Atan2(float y, float x)
+{
+	return atan2(y, x);
+}
+
+float WolfMath::Asin(float value)
+{
+	return asin(value);
+}

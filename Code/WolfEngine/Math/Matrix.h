@@ -2,6 +2,8 @@
 // Created by Robin on 01/01/2018.
 //
 #pragma once
+#include "Vectors.h"
+#include "Quaternion.h"
 
 class Matrix
 {
@@ -21,10 +23,14 @@ public:
 	/// Sets an ortographic projection matrix
 	void SetOrtho(float left, float right, float top, float bottom, float clipMin, float clipMax);
 
-	void Translate(float x, float y, float z);
+	/// Move in direction
+	void Translate(Vector3<float> direction);
 
 	void Scale(float x, float y, float z);
 
 	Matrix operator * (const Matrix& m) const;
+
+	/// Generates a rotation Matrix from a Quaternion
+	void FromQuat(Quaternion* q, Vector3<float> pivot);
 };
 

@@ -91,13 +91,13 @@ SDL_Surface* Bitmap::LoadSurface(std::string filename)
 
 
 	//Load image at specified path
-	SDL_Surface* loadedSurface = IMG_Load(path.c_str());
-	if (!loadedSurface)
+	SDL_Surface *surface = IMG_Load(path.c_str());
+	if (!surface)
 	{
 		printf("Unable to load image %s! SDL_image Error: %s\n", path.c_str(), IMG_GetError());
 	}
 
-	return loadedSurface;
+	return surface;
 }
 
 void Bitmap::GenTexture(SDL_Surface* surface)
@@ -107,12 +107,13 @@ void Bitmap::GenTexture(SDL_Surface* surface)
 
 	int mode = GL_RGB;
 
-	if(surface->format->BytesPerPixel == 4) {
+	if(surface->format->BytesPerPixel == 4)
+	{
 		mode = GL_RGBA;
 	}
 
 	glTexImage2D(GL_TEXTURE_2D, 0, mode, size.x, size.y, 0, mode, GL_UNSIGNED_BYTE, surface->pixels);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
