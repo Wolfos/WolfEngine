@@ -30,8 +30,8 @@ int InitSDL()
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
-	//SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-	//SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 #ifdef ANDROID
 	// Find ideal screen resolution
 	// Android's screen resolution isn't actually set by CreateWindow, but this also sets the camera's width and height correctly
@@ -95,6 +95,7 @@ int WolfEngine::Init()
 
 #include "Rendering/Shader.h"
 #include "Rendering/Mesh.h"
+#include "Components/SpriteRenderer.h"
 void WolfEngine::MainLoop()
 {
     int quit = 0;
@@ -106,14 +107,14 @@ void WolfEngine::MainLoop()
 	//glEnable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	Vector3<float> rotation = {0, 0, 0};
 
-	Bitmap* bmp = new Bitmap("test.png");
+	GameObject* obj = new GameObject();
+	obj->transform->Translate({0, 0, 1});
+	SpriteRenderer* r = obj->AddComponent<SpriteRenderer>();
+	r->Load("test.png");
 
-    Shader* shader = new Shader( "Sprite.vert", "Sprite.frag" );
-
-	Mesh* mesh = new Mesh();
-	mesh->CreateQuad();
+	GameObject* cam = new GameObject();
+	Camera* camera = cam->AddComponent<Camera>();
 
     while (!quit)
     {
@@ -125,55 +126,7 @@ void WolfEngine::MainLoop()
 		glClearColor ( 0.392, 0.584, 0.929, 1.0 );
 		glClear ( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 
-		//rotation.z += 0.01f;
-		Quaternion* quat = Quaternion::FromEuler(rotation);
-		//Quaternion* quat = new Quaternion();
-		Matrix rot;
-		rot.FromQuat(quat, {0, 0, 0});
-
-		// Set shader
-        glUseProgram(shader->id);
-
-	    // Matrices
-	    Matrix projection;
-		float aspect = (float)screenWidth / (float)screenHeight;
-		float size = 2;
-		projection.SetOrtho(-aspect * size, aspect * size, -1 * size, 1 * size, 0.01f, 100.0f);
-
-	    Matrix view;
-	    view.SetIdentity();
-
-	    Matrix model;
-	    model.SetIdentity();
-	    model.Translate({0, 0, -1});
-		model = model * rot;
-
-	    Matrix mvp = model * view * projection;
-
-	    glUniformMatrix4fv(glGetUniformLocation(shader->id, "mvp"), 1, GL_FALSE, &mvp.GetData()[0]);
-
-
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, bmp->textureID);
-		glUniform1i(glGetUniformLocation(shader->id,  "sampler"), 0);
-
-		// Vertices
-        glEnableVertexAttribArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, mesh->vertexBuffer);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
-
-		// UVs
-		glEnableVertexAttribArray(1);
-		glBindBuffer(GL_ARRAY_BUFFER, mesh->uvBuffer);
-		glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, (void*)0);
-
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->indexBuffer);
-
-		// Draw
-		glDrawElements(GL_TRIANGLES, mesh->indices.size(), GL_UNSIGNED_INT, (void*)0);
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(1);
-
+		r->Render(camera);
 
         input.Update(&eventHandler);
         

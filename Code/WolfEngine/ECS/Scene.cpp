@@ -44,7 +44,7 @@ void Scene::RenderObjects()
 			{
 				if (gameObjects[i]->GetComponent<SpriteRenderer>()->layer == j)
 				{
-					gameObjects[i]->GetComponent<SpriteRenderer>()->Render();
+					gameObjects[i]->GetComponent<SpriteRenderer>()->Render(camera);
 				}
 			}
 		}

@@ -6,12 +6,18 @@ rvanee@wolfengine.net
 */
 #include "SpriteRenderer.h"
 #include "../ECS/GameObject.h"
-#include "../Utilities/Debug.h"
 #include "../WolfEngine.h"
+
+Shader* SpriteRenderer::defaultShader = NULL;
 
 void SpriteRenderer::Added()
 {
 	center = new SDL_Point;
+	mesh = new Mesh();
+	mesh->CreateQuad();
+
+	if(defaultShader == NULL) defaultShader = new Shader( "Sprite.vert", "Sprite.frag" );
+	shader = defaultShader;
 }
 
 void SpriteRenderer::Update()
@@ -22,55 +28,39 @@ void SpriteRenderer::Update()
 	}
 }
 
-void SpriteRenderer::Render()
+void SpriteRenderer::Render(Camera* camera)
 {
-	/*
-	WRect* rect = new WRect;
-	rect->w = frameWidth;
-	rect->h = frameHeight;
+	// Set shader
+	glUseProgram(shader->id);
 
-	sheetwidth = spriteSheet->size.x;
-	sheetheight = spriteSheet->size.y;
-	if (frameWidth != 0) sheetwidth /= frameWidth;
-	if (frameHeight != 0) sheetheight /= frameHeight;
+	Matrix model = gameObject->transform->GetMatrix();
+	Matrix view = camera->gameObject->transform->GetMatrix();
+	Matrix projection = camera->GetProjection();
 
-	clip = (WRect*)calloc((sheetwidth*sheetheight) + 2 * sheetwidth, sizeof(WRect));
+	Matrix mvp = model * view * projection;
 
-	int i = 0;
-	for (int y = 0; y <= sheetheight; y++)
-	{
-		for (int x = 0; x<sheetwidth; x++)
-		{
-			clip[i].x = x*frameWidth + (sheetOffset*x);
-			clip[i].y = y*frameHeight + (sheetOffset*y);
-			clip[i].w = frameWidth;
-			clip[i].h = frameHeight;
-			i++;
-		}
-	}
-	rect->x = clip[frame].x;
-	rect->y = clip[frame].y;
+	glUniformMatrix4fv(glGetUniformLocation(shader->id, "mvp"), 1, GL_FALSE, &mvp.GetData()[0]);
 
-	WRect* dst = new WRect;
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, spriteSheet->textureID);
+	glUniform1i(glGetUniformLocation(shader->id,  "sampler"), 0);
 
-	Vector3 objPos = gameObject->transform->GetPosition();
-	Vector3 camPos = WolfEngine::scene->camera->gameObject->transform->GetPosition();
-	Vector3 targetPos = objPos - camPos;
-	dst->x = targetPos.x;
-	dst->y = targetPos.y;
+	// Vertices
+	glEnableVertexAttribArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, mesh->vertexBuffer);
+	glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
 
-	dst->w = (int)(frameWidth*gameObject->transform->localScale.x);
-	dst->h = (int)(frameHeight*gameObject->transform->localScale.y);
+	// UVs
+	glEnableVertexAttribArray(1);
+	glBindBuffer(GL_ARRAY_BUFFER, mesh->uvBuffer);
+	glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, (void*)0);
 
-	center->x = (int)((frameWidth*gameObject->transform->localScale.x) / 2);
-	center->y = (int)((frameHeight*gameObject->transform->localScale.y) / 2);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->indexBuffer);
 
-	spriteSheet->Blit(rect, dst, gameObject->transform->angle, center);
-
-	free(clip);
-	delete(dst);
-	delete(rect);
-	 */
+	// Draw
+	glDrawElements(GL_TRIANGLES, mesh->indices.size(), GL_UNSIGNED_INT, (void*)0);
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
 }
 
 

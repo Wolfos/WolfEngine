@@ -17,19 +17,23 @@ public:
 	/// Local scale
 	Vector3<> localScale;
 	///	Local rotation
-	Quaternion localRotation;
+	Quaternion* localRotation;
     
 	virtual void Added();
     /// Returns the global position of the transform
     Vector3<> GetPosition();
+	/// Returns the global scale of the transform
+	Vector3<> GetScale();
+	/// Converts the transform to a transformation matrix
+	Matrix GetMatrix();
     /// Add a child to the transform
     void AddChild(Transform* child);
     /// Returns the first child with this name
     Transform* GetChild(std::string name);
     /// Returns a pointer to the list of children
-    std::vector<Transform*>* GetChildren();
-    /// Move by pixels
-    void Move(int x, int y);
+    std::vector<Transform*> GetChildren();
+    /// Translate
+    void Translate(Vector3<> direction);
 protected:
     Transform* parent;
     std::vector<Transform*>* children;

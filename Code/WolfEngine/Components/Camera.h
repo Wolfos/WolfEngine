@@ -2,6 +2,7 @@
 #define _CAMERA_H
 #include "../ECS/Component.h"
 #include "../Includes.h"
+#include "../Math/Matrix.h"
 
 ///
 ///	A Camera component, only one of these can be present at a time and it's created before the game starts
@@ -10,6 +11,7 @@
 class Camera : public Component
 {
 public:
+	virtual void Added();
 	///	The width of the screen
 	int width = 0;
 	///	The height of the screen
@@ -17,5 +19,13 @@ public:
 	///	The window it's rendered to
 	SDL_Window* window;
 	virtual void Update();
+
+	float ortographicSize;
+
+	float aspectRatio;
+
+	float clipMin, clipMax;
+
+	Matrix GetProjection();
 };
 #endif

@@ -4,6 +4,9 @@
 #include "../Includes.h"
 #include <string>
 #include "../Rendering/Bitmap.h"
+#include "../Rendering/Mesh.h"
+#include "../Rendering/Shader.h"
+#include "Camera.h"
 
 ///
 ///	A component for rendering sprites from a sheet or image
@@ -32,9 +35,13 @@ public:
 	void Load(std::string filename);
 
 	///	Renders the sprite
-	void Render();
+	void Render(Camera* camera);
+
+	Shader* shader;
 private:
 	int sheetwidth, sheetheight;
-	WRect* clip;
+	Mesh* mesh;
+	static Shader* defaultShader;
+
 };
 #endif

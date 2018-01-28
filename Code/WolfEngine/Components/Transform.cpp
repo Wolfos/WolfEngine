@@ -5,25 +5,20 @@ Contact:
 rvanee@wolfengine.net
 */
 #include "Transform.h"
-#include <stdio.h>
-#include "../Utilities/Debug.h"
 
 void Transform::Added()
 {
     parent = NULL;
-	localScale.x = 1;
-    localScale.y = 1;
-    localScale.z = 1;
-    localPosition.x = 0;
-    localPosition.y = 0;
-    localPosition.z = 0;
+	localPosition = {0,0,0};
+    localScale = {1,1,1};
+	localRotation = new Quaternion();
 }
 
 void Transform::AddChild(Transform* child)
 {
-    if(children)
+	if(children)
     {
-        children->push_back(child);
+		children->push_back(child);
     }
     
     // Remove child from previous parent
@@ -47,8 +42,37 @@ Vector3<> Transform::GetPosition()
     }
 }
 
-void Transform::Move(int x, int y)
+Vector3<> Transform::GetScale()
 {
-	localPosition.x += x;
-	localPosition.y += y;
+	if(parent != NULL)
+	{
+		return localScale * parent->GetScale();
+	}
+	else
+	{
+		return localScale;
+	}
+}
+
+Matrix Transform::GetMatrix()
+{
+	Matrix translate;
+	Matrix rotate;
+	Matrix scale;
+
+	translate.SetIdentity();
+	Vector3<> position = GetPosition();
+	translate.Translate(position);
+
+	rotate.FromQuat(localRotation, position);
+
+	scale.SetIdentity();
+	scale.Scale(GetScale());
+
+	return translate * rotate * scale;
+}
+
+void Transform::Translate(Vector3<> direction)
+{
+	localPosition = localPosition + direction;
 }

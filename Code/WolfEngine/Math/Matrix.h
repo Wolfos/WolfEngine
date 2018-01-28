@@ -26,7 +26,7 @@ public:
 	/// Move in direction
 	void Translate(Vector3<float> direction);
 
-	void Scale(float x, float y, float z);
+	void Scale(Vector3<float> scale);
 
 	Matrix operator * (const Matrix& m) const;
 

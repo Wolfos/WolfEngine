@@ -53,11 +53,11 @@ void Matrix::Translate(Vector3<float> direction)
 	data[14] += direction.z;
 }
 
-void Matrix::Scale(float x, float y, float z)
+void Matrix::Scale(Vector3<float> scale)
 {
-	data[0] = x;
-	data[5] = y;
-	data[10] = z;
+	data[0] = scale.x;
+	data[5] = scale.y;
+	data[10] = scale.z;
 }
 
 
