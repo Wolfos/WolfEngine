@@ -32,8 +32,10 @@ public:
     Transform* GetChild(std::string name);
     /// Returns a pointer to the list of children
     std::vector<Transform*> GetChildren();
-    /// Translate
+    /// Move in direction
     void Translate(Vector3<> direction);
+	/// Rotate by Euler angles
+	void Rotate(Vector3<> eulerAngles);
 protected:
     Transform* parent;
     std::vector<Transform*>* children;

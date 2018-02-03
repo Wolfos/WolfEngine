@@ -23,6 +23,9 @@ public:
 	/// Sets an ortographic projection matrix
 	void SetOrtho(float left, float right, float top, float bottom, float clipMin, float clipMax);
 
+	/// Convert the matrix to a view matrix
+	void ToView();
+
 	/// Move in direction
 	void Translate(Vector3<float> direction);
 

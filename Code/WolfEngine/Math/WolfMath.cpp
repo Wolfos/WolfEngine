@@ -32,6 +32,11 @@ float WolfMath::DegToRad(float degrees)
 	return degrees * pi / 180;
 }
 
+float WolfMath::RadToDeg(float radians)
+{
+	return radians * 180 / pi;
+}
+
 float WolfMath::Sqrt(float value)
 {
 	return sqrt(value);

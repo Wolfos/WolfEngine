@@ -9,10 +9,12 @@ class Quaternion
 public:
 	float x, y, z, w;
 
-	Quaternion();
+	Quaternion(float x = 0, float y = 0, float z = 0, float w = 1);
 
 	/// Converts the Quaternion to Euler angles
 	Vector3<float> ToEuler();
 	/// Returns a Quaternion from Euler angles
 	static Quaternion* FromEuler(Vector3<float> angles);
+
+	void Multiply(Quaternion* other);
 };

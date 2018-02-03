@@ -93,8 +93,6 @@ int WolfEngine::Init()
     return 0;
 }
 
-#include "Rendering/Shader.h"
-#include "Rendering/Mesh.h"
 #include "Components/SpriteRenderer.h"
 void WolfEngine::MainLoop()
 {
@@ -115,6 +113,7 @@ void WolfEngine::MainLoop()
 
 	GameObject* cam = new GameObject();
 	Camera* camera = cam->AddComponent<Camera>();
+	//obj->transform->Rotate({0, 0, 180.0f});
 
     while (!quit)
     {
@@ -126,6 +125,7 @@ void WolfEngine::MainLoop()
 		glClearColor ( 0.392, 0.584, 0.929, 1.0 );
 		glClear ( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 
+		obj->transform->Rotate({0, 0, 1.0f});
 		r->Render(camera);
 
         input.Update(&eventHandler);

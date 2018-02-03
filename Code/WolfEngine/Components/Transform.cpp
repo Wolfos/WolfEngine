@@ -61,18 +61,26 @@ Matrix Transform::GetMatrix()
 	Matrix scale;
 
 	translate.SetIdentity();
-	Vector3<> position = GetPosition();
-	translate.Translate(position);
+	translate.Translate(localPosition);
 
-	rotate.FromQuat(localRotation, position);
+	rotate.FromQuat(localRotation, localPosition);
 
 	scale.SetIdentity();
 	scale.Scale(GetScale());
 
-	return translate * rotate * scale;
+	Matrix localMatrix = translate * rotate * scale;
+	if(parent == NULL) return localMatrix;
+	else return parent->GetMatrix() * localMatrix;
 }
 
 void Transform::Translate(Vector3<> direction)
 {
 	localPosition = localPosition + direction;
+}
+
+void Transform::Rotate(Vector3<> eulerAngles)
+{
+	Quaternion* rotateBy = Quaternion::FromEuler(eulerAngles);
+	localRotation->Multiply(rotateBy);
+	delete rotateBy;
 }

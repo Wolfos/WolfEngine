@@ -46,6 +46,11 @@ void Matrix::SetOrtho(float left, float right, float top, float bottom, float cl
 	data[15] = 1;
 }
 
+void Matrix::ToView()
+{
+	//float*
+}
+
 void Matrix::Translate(Vector3<float> direction)
 {
 	data[12] += direction.x;
@@ -99,7 +104,7 @@ void Matrix::FromQuat(Quaternion *q, Vector3<float> pivot)
 	data[5] = -sqx + sqy - sqz + sqw;
 	data[10] = -sqx - sqy + sqz + sqw;
 
-	double tmp1 = q->x*q->y;
+	double tmp1 = q->x*-q->y;
 	double tmp2 = q->z*q->w;
 	data[4] = 2.0 * (tmp1 + tmp2);
 	data[1] = 2.0 * (tmp1 - tmp2);
