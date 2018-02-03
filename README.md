@@ -3,6 +3,8 @@ WolfEngine
 
 A tile based 2D game engine
 
+The engine is currently undergoing a heavy rewrite and will only run on MacOS at the moment. All of the following information is outdated:
+
 [Documentation](http://rvanee.nl/documentation/)
 
 [Trello](https://trello.com/b/qcnDlhgd/wolfengine)
