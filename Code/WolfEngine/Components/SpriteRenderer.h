@@ -32,12 +32,15 @@ public:
 	virtual void Update();
 
 	///	Loads a file into the spritesheet
-	void Load(std::string filename);
+	void Load(std::string filename, int frameWidth = 0, int frameHeight = 0);
 
 	///	Renders the sprite
 	void Render(Camera* camera);
 
 	Shader* shader;
+
+	// Spritesheet width in frames, in case not the entire spritesheet is being used you can set this manually
+	int widthInFrames = 1;
 private:
 	int sheetwidth, sheetheight;
 	Mesh* mesh;

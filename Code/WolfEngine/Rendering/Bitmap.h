@@ -16,7 +16,6 @@ public:
 	Bitmap(std::string file);
 	~Bitmap();
 
-	void Blit(WRect* srcrect, WRect* dstrect, double angle = 0, SDL_Point* center = NULL, float scale = 1);
 private:
 	SDL_Surface* LoadSurface(std::string file);
 	void GenTexture(SDL_Surface* surface);

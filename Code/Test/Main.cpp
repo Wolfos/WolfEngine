@@ -7,23 +7,22 @@ public:
     virtual void Added()
     {
         SpriteRenderer* sr = gameObject->AddComponent<SpriteRenderer>();
-        sr->Load("Animals.png");
-        sr->frameWidth = 286;
-        sr->frameHeight = 286;
+        sr->Load("Animals.png", 286, 286);
         sr->frame = WolfEngine::RandomRange(0, 9);
+        sr->widthInFrames = 2;
 
-        float randomScale = WolfEngine::RandomRange(.1f, .5f);
+        float randomScale = WolfEngine::RandomRange(.04f, .1f);
 		float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
-        float randomX = WolfEngine::RandomRange(0, WolfEngine::screenWidth);
-        float randomY = WolfEngine::RandomRange(0, WolfEngine::screenHeight);
-        //gameObject->transform->scale = {randomScale, randomScale};
-		//gameObject->transform->angle = randomAngle;
-        gameObject->transform->localPosition = {randomX, randomY};
+        float randomX = WolfEngine::RandomRange(-1.0f, 1.0f);
+        float randomY = WolfEngine::RandomRange(-1.0f, 1.0f);
+        gameObject->transform->localScale = {randomScale, randomScale, randomScale};
+		gameObject->transform->Rotate({0,0,randomAngle});
+        gameObject->transform->Translate({randomX, randomY, 1});
     }
 
     virtual void Update()
     {
-        //gameObject->transform->angle+=10 * Time::frameTimeS;
+		gameObject->transform->Rotate({0, 0, 10 * Time::frameTimeS});
     }
 };
 

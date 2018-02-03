@@ -48,12 +48,12 @@ Quaternion* Quaternion::FromEuler(Vector3<float> eulerAngles)
 	eulerAngles.y = DegToRad(eulerAngles.y);
 	eulerAngles.z = DegToRad(eulerAngles.z);
 
-	double cy = Cos(eulerAngles.z * 0.5);
-	double sy = Sin(eulerAngles.z * 0.5);
-	double cr = Cos(eulerAngles.y * 0.5);
-	double sr = Sin(eulerAngles.y * 0.5);
-	double cp = Cos(eulerAngles.x * 0.5);
-	double sp = Sin(eulerAngles.x * 0.5);
+	float cy = Cos(eulerAngles.z * 0.5f);
+	float sy = Sin(eulerAngles.z * 0.5f);
+	float cr = Cos(eulerAngles.y * 0.5f);
+	float sr = Sin(eulerAngles.y * 0.5f);
+	float cp = Cos(eulerAngles.x * 0.5f);
+	float sp = Sin(eulerAngles.x * 0.5f);
 
 	Quaternion* q = new Quaternion();
 	q->w = cy * cr * cp + sy * sr * sp;

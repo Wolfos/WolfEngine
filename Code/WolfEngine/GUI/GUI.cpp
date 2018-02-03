@@ -24,7 +24,7 @@ extern void GUI::Init()
 
 extern void GUI::Box(WRect position)
 {
-	boxBackground->Blit(boxBackground->rect, &position);
+	//boxBackground->Blit(boxBackground->rect, &position);
 	if (Collision::AABB(Mouse::position, position))
 	{
 		Mouse::overGUI = true;
@@ -43,10 +43,10 @@ extern bool GUI::Button(WRect position, std::string text, bool highlight)
 	else
 	{
 		toRender = buttonBackground;
-		buttonBackground->Blit(buttonBackground->rect, &position);
+		//buttonBackground->Blit(buttonBackground->rect, &position);
 	}
 	if (highlight) toRender = buttonPressed;
-	toRender->Blit(toRender->rect, &position);
+	//toRender->Blit(toRender->rect, &position);
 	font->Blit(position.x + position.w / 2, position.y + position.h / 2, text, { 255, 255, 255, 255 });
 
 	if (Collision::AABB(Mouse::position, position) && Mouse::KeyReleased(0))
@@ -80,7 +80,7 @@ extern float GUI::VerticalScrollBar(WRect position, float value, float maxValue)
 	}
 
 	float minValue = 0;
-	scrollBarBackground->Blit(scrollBarBackground->rect, &position);
+	//scrollBarBackground->Blit(scrollBarBackground->rect, &position);
 
 	WRect scrollBarHandleRect = { position.x,
 								  (int)Lerp(position.y, position.y + position.h - 64, (value - minValue) / maxValue),
@@ -102,7 +102,7 @@ extern float GUI::VerticalScrollBar(WRect position, float value, float maxValue)
 
 	value = Clamp(value, minValue, maxValue);
 	scrollBarHandleRect.y = Lerp(position.y, position.y + position.h - scrollBarHandleRect.h, (value - minValue) / maxValue);
-	scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
+	//scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
 
 	return value;
 }
@@ -115,7 +115,7 @@ extern float GUI::HorizontalScrollBar(WRect position, float value, float maxValu
 	}
 
 	float minValue = 0;
-	scrollBarBackground->Blit(scrollBarBackground->rect, &position);
+	//scrollBarBackground->Blit(scrollBarBackground->rect, &position);
 
 	WRect scrollBarHandleRect = { (int)Lerp(position.x, position.x + position.w - 64, (value - minValue) / maxValue),
 		position.y,
@@ -137,7 +137,7 @@ extern float GUI::HorizontalScrollBar(WRect position, float value, float maxValu
 
 	value = Clamp(value, minValue, maxValue);
 	scrollBarHandleRect.x = Lerp(position.x, position.x + position.w - scrollBarHandleRect.w, (value - minValue) / maxValue);
-	scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
+	//scrollBarHandle->Blit(scrollBarHandle->rect, &scrollBarHandleRect);
 
 	return value;
 }

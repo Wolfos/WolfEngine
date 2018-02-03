@@ -29,12 +29,6 @@ Bitmap::Bitmap(std::string file)
 		GenTexture(surface);
 		SDL_FreeSurface(surface);
 
-		//SDL_QueryTexture(texture, NULL, NULL, &size.x, &size.y);
-
-		//if (!texture)
-		//{
-			//printf("Unable to create texture from %s! SDL Error: %s\n", filename.c_str(), SDL_GetError());
-		//}
 		cache.push_back(this);
 	}
 
@@ -65,25 +59,6 @@ Bitmap::~Bitmap()
 	}
 }
 
-void Bitmap::Blit(WRect* srcrect, WRect* dstrect, double angle, SDL_Point* center, float scale)
-{
-    bool deleteCenter = false;
-	if (!center)
-	{
-		SDL_Point* tempcenter = new SDL_Point;
-		tempcenter->x = size.x / 2;
-		tempcenter->y = size.y / 2;
-		center = tempcenter;
-        deleteCenter = true;
-	}
-	WRect rect = *dstrect;
-	rect.x *= scale;
-	rect.y *= scale;
-	rect.w *= scale;
-	rect.h *= scale;
-	//SDL_RenderCopyEx(WolfEngine::renderer, texture, srcrect, &rect, angle, center, SDL_FLIP_NONE);
-	if(deleteCenter) delete center;
-}
 
 SDL_Surface* Bitmap::LoadSurface(std::string filename)
 {
@@ -114,6 +89,8 @@ void Bitmap::GenTexture(SDL_Surface* surface)
 
 	glTexImage2D(GL_TEXTURE_2D, 0, mode, size.x, size.y, 0, mode, GL_UNSIGNED_BYTE, surface->pixels);
 
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }

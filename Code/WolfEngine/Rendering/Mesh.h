@@ -21,6 +21,7 @@ public:
 
 	/// Send the mesh data to the GPU
 	void Apply();
+	void ApplyUVs();
 	/// The mesh becomes a quad
 	void CreateQuad();
 

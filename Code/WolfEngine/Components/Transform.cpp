@@ -16,16 +16,14 @@ void Transform::Added()
 
 void Transform::AddChild(Transform* child)
 {
-	if(children)
-    {
-		children->push_back(child);
-    }
+	children.push_back(child);
+
     
     // Remove child from previous parent
     if(child->parent)
     {
-        auto it = std::find(child->parent->children->begin(), child->parent->children->end(), child);
-        child->parent->children->erase(it);
+        auto it = std::find(child->parent->children.begin(), child->parent->children.end(), child);
+        child->parent->children.erase(it);
     }
     child->parent = this;
 }
@@ -68,7 +66,7 @@ Matrix Transform::GetMatrix()
 	scale.SetIdentity();
 	scale.Scale(localScale);
 
-	Matrix localMatrix = translate * rotate * scale;
+	Matrix localMatrix = scale * translate * rotate;//translate * rotate * scale;
 	if(parent == NULL) return localMatrix;
 	else return localMatrix * parent->GetMatrix();
 }

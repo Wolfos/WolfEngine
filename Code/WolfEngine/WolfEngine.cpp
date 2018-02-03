@@ -106,35 +106,15 @@ void WolfEngine::MainLoop()
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	GameObject* obj = new GameObject();
-	obj->transform->Translate({0, 0, 1});
-	obj->transform->localScale = {0.5f, 0.5f, 0.5f};
-	SpriteRenderer* r = obj->AddComponent<SpriteRenderer>();
-	r->Load("test.png");
-
-	GameObject* obj2 = new GameObject();
-	obj->transform->AddChild(obj2->transform);
-	obj2->transform->Translate({1, 0, 0});
-	SpriteRenderer* r2 = obj2->AddComponent<SpriteRenderer>();
-	r2->Load("test.png");
-
-	GameObject* cam = new GameObject();
-	Camera* camera = cam->AddComponent<Camera>();
-	//obj->transform->Rotate({0, 0, 180.0f});
-
     while (!quit)
     {
         curFrameTime = SDL_GetTicks();
         
-        Time::frameTimeS = (double)(curFrameTime - lastFrameTime) / 1000;
+        Time::frameTimeS = (float)(curFrameTime - lastFrameTime) / 1000;
         
         // Clear the screen
 		glClearColor ( 0.392, 0.584, 0.929, 1.0 );
 		glClear ( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-
-		obj->transform->Rotate({0, 0, 1.0f});
-		r->Render(camera);
-		r2->Render(camera);
 
         input.Update(&eventHandler);
         
@@ -149,19 +129,16 @@ void WolfEngine::MainLoop()
             quit = 1;
         }
         
-        //scene->Update();
+        scene->Update();
         
         //Update the gameObjects
-        //scene->UpdateObjects();
+        scene->UpdateObjects();
         
         //Render the SpriteRenderers
-        //scene->RenderObjects();
+        scene->RenderObjects();
         
         //Late update
-        //scene->LateUpdateObjects();
-        
-        //OnGUI
-        //scene->OnGUI();
+        scene->LateUpdateObjects();
 
         lastFrameTime = curFrameTime;
 

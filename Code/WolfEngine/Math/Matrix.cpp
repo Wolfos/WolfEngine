@@ -104,20 +104,20 @@ void Matrix::FromQuat(Quaternion *q, Vector3<float> pivot)
 	data[5] = -sqx + sqy - sqz + sqw;
 	data[10] = -sqx - sqy + sqz + sqw;
 
-	double tmp1 = q->x*-q->y;
-	double tmp2 = q->z*q->w;
-	data[4] = 2.0 * (tmp1 + tmp2);
-	data[1] = 2.0 * (tmp1 - tmp2);
+	float tmp1 = q->x*-q->y;
+	float tmp2 = q->z*q->w;
+	data[4] = 2 * (tmp1 + tmp2);
+	data[1] = 2 * (tmp1 - tmp2);
 
 	tmp1 = q->x*q->z;
 	tmp2 = q->y*q->w;
-	data[8] = 2.0 * (tmp1 - tmp2);
-	data[2] = 2.0 * (tmp1 + tmp2);
+	data[8] = 2 * (tmp1 - tmp2);
+	data[2] = 2 * (tmp1 + tmp2);
 
 	tmp1 = q->y*q->z;
 	tmp2 = q->x*q->w;
-	data[9] = 2.0 * (tmp1 + tmp2);
-	data[6] = 2.0 * (tmp1 - tmp2);
+	data[9] = 2 * (tmp1 + tmp2);
+	data[6] = 2 * (tmp1 - tmp2);
 
 	float a1 = pivot.x;
 	float a2 = pivot.y;

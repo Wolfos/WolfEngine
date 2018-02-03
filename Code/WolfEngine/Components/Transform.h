@@ -38,5 +38,5 @@ public:
 	void Rotate(Vector3<> eulerAngles);
 protected:
     Transform* parent;
-    std::vector<Transform*>* children;
+    std::vector<Transform*> children;
 };

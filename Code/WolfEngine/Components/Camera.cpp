@@ -20,6 +20,7 @@ void Camera::Added()
 void Camera::Update()
 {
 	SDL_GetWindowSize(window, &width, &height);
+	aspectRatio = (float)width / (float)height;
 }
 
 Matrix Camera::GetProjection()

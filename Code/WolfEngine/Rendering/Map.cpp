@@ -178,7 +178,7 @@ void Map::Render(int layer, Bitmap* spritesheet,
 				sourcerect.x = xPos * tilewidth;
 				sourcerect.y = yPos * tileheight;
 
-				spritesheet->Blit(&sourcerect, &targetrect, 0, NULL, scale);
+				//spritesheet->Blit(&sourcerect, &targetrect, 0, NULL, scale);
 			}
 		}
 	}

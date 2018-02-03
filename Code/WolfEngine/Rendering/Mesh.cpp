@@ -39,6 +39,18 @@ void Mesh::Apply()
 	hasBuffers = true;
 }
 
+void Mesh::ApplyUVs()
+{
+	if(hasBuffers)
+	{
+		glDeleteBuffers(1, &uvBuffer);
+	}
+
+	glGenBuffers(1, &uvBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, uvBuffer);
+	glBufferData(GL_ARRAY_BUFFER, uvs.size() * sizeof(float) * 2, &uvs[0], GL_STATIC_DRAW);
+}
+
 void Mesh::CleanBuffers()
 {
 	if(hasBuffers)

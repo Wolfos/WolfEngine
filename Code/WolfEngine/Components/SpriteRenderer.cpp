@@ -7,6 +7,7 @@ rvanee@wolfengine.net
 #include "SpriteRenderer.h"
 #include "../ECS/GameObject.h"
 #include "../WolfEngine.h"
+#include "../Math/WolfMath.h"
 
 Shader* SpriteRenderer::defaultShader = NULL;
 
@@ -51,6 +52,23 @@ void SpriteRenderer::Render(Camera* camera)
 	glBindBuffer(GL_ARRAY_BUFFER, mesh->vertexBuffer);
 	glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
 
+	mesh->uvs.clear();
+
+	int y = WolfMath::Floor(frame / widthInFrames);
+	int x = frame - y * widthInFrames;
+
+	float uvX = (float)x * frameWidth / (float)sheetwidth;
+	float uvY = (float)y * frameHeight / (float)sheetheight;
+	float uvWidth = (float)frameWidth / (float)sheetwidth;
+	float uvHeight = (float)frameHeight / (float)sheetheight;
+
+	mesh->uvs.push_back({uvX, uvY + uvHeight});
+	mesh->uvs.push_back({uvX + uvWidth, uvY + uvHeight});
+	mesh->uvs.push_back({uvX, uvY});
+	mesh->uvs.push_back({uvX + uvWidth, uvY});
+
+	mesh->ApplyUVs();
+
 	// UVs
 	glEnableVertexAttribArray(1);
 	glBindBuffer(GL_ARRAY_BUFFER, mesh->uvBuffer);
@@ -65,9 +83,22 @@ void SpriteRenderer::Render(Camera* camera)
 }
 
 
-void SpriteRenderer::Load(std::string filename)
+void SpriteRenderer::Load(std::string filename, int frameWidth, int frameHeight)
 {
 	spriteSheet = new Bitmap(filename);
-    frameWidth = spriteSheet->size.x;
-    frameHeight = spriteSheet->size.y;
+    sheetwidth = spriteSheet->size.x;
+    sheetheight = spriteSheet->size.y;
+
+	if(frameWidth == 0 || frameHeight == 0)
+	{
+		this->frameWidth = sheetwidth;
+		this->frameHeight = sheetheight;
+	}
+	else
+	{
+		this->frameWidth = frameWidth;
+		this->frameHeight = frameHeight;
+	}
+
+	widthInFrames = sheetwidth / this->frameWidth;
 }
