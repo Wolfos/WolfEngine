@@ -66,11 +66,11 @@ Matrix Transform::GetMatrix()
 	rotate.FromQuat(localRotation, localPosition);
 
 	scale.SetIdentity();
-	scale.Scale(GetScale());
+	scale.Scale(localScale);
 
 	Matrix localMatrix = translate * rotate * scale;
 	if(parent == NULL) return localMatrix;
-	else return parent->GetMatrix() * localMatrix;
+	else return localMatrix * parent->GetMatrix();
 }
 
 void Transform::Translate(Vector3<> direction)

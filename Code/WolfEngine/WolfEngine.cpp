@@ -108,8 +108,15 @@ void WolfEngine::MainLoop()
 
 	GameObject* obj = new GameObject();
 	obj->transform->Translate({0, 0, 1});
+	obj->transform->localScale = {0.5f, 0.5f, 0.5f};
 	SpriteRenderer* r = obj->AddComponent<SpriteRenderer>();
 	r->Load("test.png");
+
+	GameObject* obj2 = new GameObject();
+	obj->transform->AddChild(obj2->transform);
+	obj2->transform->Translate({1, 0, 0});
+	SpriteRenderer* r2 = obj2->AddComponent<SpriteRenderer>();
+	r2->Load("test.png");
 
 	GameObject* cam = new GameObject();
 	Camera* camera = cam->AddComponent<Camera>();
@@ -127,6 +134,7 @@ void WolfEngine::MainLoop()
 
 		obj->transform->Rotate({0, 0, 1.0f});
 		r->Render(camera);
+		r2->Render(camera);
 
         input.Update(&eventHandler);
         
