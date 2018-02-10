@@ -46,9 +46,49 @@ void Matrix::SetOrtho(float left, float right, float top, float bottom, float cl
 	data[15] = 1;
 }
 
-void Matrix::ToView()
+void Matrix::ViewInverse()
 {
-	//float*
+	data[0] = -data[0];
+	data[1] = -data[1];
+	data[2] = -data[2];
+	data[4] = -data[4];
+	data[5] = -data[5];
+	data[6] = -data[6];
+	data[8] = -data[8];
+	data[9] = -data[9];
+	data[10] = -data[10];
+	data[12] = -data[12];
+	data[13] = -data[13];
+	data[14] = -data[14];
+}
+
+void Matrix::LookAt(Vector3<float> camPos, Vector3<float> forward, Vector3<float> up)
+{
+	Vector3<> f = forward - camPos;
+	f.Normalize();
+	Vector3<> s = Vector3<>::Cross(up, f);
+	s.Normalize();
+	Vector3<> u = Vector3<>::Cross(f, s);
+
+	SetIdentity();
+
+	data[0] = s.x;
+	data[1] = s.y;
+	data[2] = s.z;
+	data[4] = u.x;
+	data[5] = u.y;
+	data[6] = u.z;
+	data[8] = f.x;
+	data[9] = f.y;
+	data[10] = f.z;
+
+	data[3] = -WolfMath::Dot(s, camPos);
+	data[7] = -WolfMath::Dot(u, camPos);
+	data[11] = -WolfMath::Dot(f, camPos);
+	data[12] = 1;
+	data[13] = 1;
+	data[14] = 1;
+	data[15] = 1;
 }
 
 void Matrix::Translate(Vector3<float> direction)

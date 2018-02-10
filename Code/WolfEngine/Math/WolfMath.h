@@ -1,5 +1,7 @@
-#ifndef _WOLFMATH_H
-#define _WOLFMATH_H
+#pragma once
+#include "Vectors.h"
+template <class t> class Vector3;
+
 namespace WolfMath
 {
 	const float pi = 3.14159265359f;
@@ -13,5 +15,5 @@ namespace WolfMath
 	float Sqrt(float value);
 	float Atan2(float y, float x);
 	float Asin(float value);
+	float Dot(Vector3<float> a, Vector3<float>b);
 }
-#endif

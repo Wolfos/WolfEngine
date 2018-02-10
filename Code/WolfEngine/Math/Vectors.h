@@ -1,4 +1,10 @@
 #pragma once
+#include "WolfMath.h"
+
+namespace WolfMath
+{
+	float Sqrt(float value);
+}
 
 /// Vector of two numbers
 template <class t = float> class Vector2
@@ -14,6 +20,22 @@ public:
 		point.x = (1 - time)*from.x + time*to.x;
 		point.y = (1 - time)*from.y + time*to.y;
 		return point;
+	}
+
+	/// Returns the vector's magnitude
+	t Magnitude()
+	{
+		t x2 = x * x;
+		t y2 = y * y;
+
+		return x2 + y2;
+	}
+
+	void Normalize()
+	{
+		float m = Magnitude();
+		x /= m;
+		y /= m;
 	}
 
 	Vector2& operator +(const Vector2& other)
@@ -42,34 +64,65 @@ public:
 		return point;
 	}
 
-	Vector3& operator +(const Vector3& other)
+	/// Returns the vector's magnitude
+	t Magnitude()
 	{
-		this->x += other.x;
-		this->y += other.y;
-		this->z += other.z;
-		return *this;
+		t x2 = x * x;
+		t y2 = y * y;
+		t z2 = z * z;
+
+		return WolfMath::Sqrt(x2 + y2 + z2);
 	}
 
-	Vector3& operator +(const Vector2<t>& other)
+	void Normalize()
 	{
-		this->x += other.x;
-		this->y += other.y;
-		return *this;
+		float m = Magnitude();
+		x /= m;
+		y /= m;
+		z /= m;
 	}
 
-	Vector3& operator -(const Vector3& other)
+	static Vector3<> Cross(Vector3<> a, Vector3<> b)
 	{
-		this->x -= other.x;
-		this->y -= other.y;
-		this->z -= other.z;
-		return *this;
+		Vector3<> c;
+		c.x = a.y*b.z - a.z*b.y;
+		c.y = a.z*b.x - a.x*b.z;
+		c.z = a.x*b.y - a.y*b.x;
+		return c;
 	}
 
-	Vector3& operator *(const Vector3& other)
+	Vector3 operator +(const Vector3 other)
 	{
-		this->x *= other.x;
-		this->y *= other.y;
-		this->z *- other.z;
-		return *this;
+		Vector3 v;
+		v.x = this->x + other.x;
+		v.y = this->y + other.y;
+		v.z = this->z + other.z;
+		return v;
+	}
+
+	Vector3 operator +(const Vector2<t> other)
+	{
+		Vector3 v;
+		v.x = this->x + other.x;
+		v.y = this->y + other.y;
+		return v;
+	}
+
+	Vector3 operator -(const Vector3 other)
+	{
+		Vector3 v;
+		v.x = this->x - other.x;
+		v.y = this->y - other.y;
+		v.z = this->z - other.z;
+		return v;
+	}
+
+	Vector3 operator *(const Vector3 other)
+	{
+		Vector3 v;
+		v.x = this->x * other.x;
+		v.y = this->y * other.y;
+		v.z = this->z * other.z;
+		return v;
 	}
 };

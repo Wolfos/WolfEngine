@@ -16,5 +16,12 @@ public:
 	/// Returns a Quaternion from Euler angles
 	static Quaternion* FromEuler(Vector3<float> angles);
 
+	/// Forward direction vector
+	Vector3<float> Forward();
+	/// Up direction vector
+	Vector3<float> Up();
+	/// Right direction vector
+	Vector3<float> Right();
+
 	void Multiply(Quaternion* other);
 };

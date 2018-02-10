@@ -20,6 +20,11 @@ public:
 	SDL_Window* window;
 	virtual void Update();
 
+	Matrix projection;
+	Matrix view;
+
+	void UpdateMatrices();
+
 	float ortographicSize;
 
 	float aspectRatio;

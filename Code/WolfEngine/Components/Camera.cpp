@@ -29,3 +29,10 @@ Matrix Camera::GetProjection()
 	m.SetOrtho(-aspectRatio * ortographicSize, aspectRatio * ortographicSize, -1 * ortographicSize, 1 * ortographicSize, clipMin, clipMax);
 	return m;
 }
+
+void Camera::UpdateMatrices()
+{
+	projection = GetProjection();
+	view = gameObject->transform->GetMatrix();
+	view.ViewInverse();
+}

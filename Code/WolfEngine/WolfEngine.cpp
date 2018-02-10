@@ -133,6 +133,8 @@ void WolfEngine::MainLoop()
         
         //Update the gameObjects
         scene->UpdateObjects();
+
+		scene->camera->UpdateMatrices();
         
         //Render the SpriteRenderers
         scene->RenderObjects();

@@ -1,5 +1,6 @@
 #include "../WolfEngine/WolfEngine.h"
 #include "../WolfEngine/API.h"
+#include <typeinfo>
 
 class Animal : public Component
 {
@@ -31,7 +32,7 @@ class TestScene : public Scene
 public:
     void Start()
     {
-        for(int i = 0; i < 5000; i++)
+        for(int i = 0; i < 50; i++)
         {
             GameObject* animal = new GameObject();
             animal->AddComponent<Animal>();

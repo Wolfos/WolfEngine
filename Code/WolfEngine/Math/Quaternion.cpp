@@ -42,6 +42,33 @@ Vector3<float> Quaternion::ToEuler()
 	return e;
 }
 
+Vector3<float> Quaternion::Forward()
+{
+	return {
+			2 * (x * z + w * y),
+			2 * (y*z - w*x),
+			1 - 2 * (x*x + y*y)
+	};
+}
+
+Vector3<float> Quaternion::Up()
+{
+	return {
+			2 * (x*y - w*z),
+			1 - 2 * (x*x + z*z),
+			2 * (y*z + w*x)
+	};
+}
+
+Vector3<float> Quaternion::Right()
+{
+	return {
+			-(1 - 2 * (y*y + z*z)),
+			-(2 * (x*y + w*z)),
+			-(2 * (x*z - w*y))
+	};
+}
+
 Quaternion* Quaternion::FromEuler(Vector3<float> eulerAngles)
 {
 	eulerAngles.x = DegToRad(eulerAngles.x);

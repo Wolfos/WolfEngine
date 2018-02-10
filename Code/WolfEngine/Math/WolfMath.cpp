@@ -1,5 +1,6 @@
 #include "WolfMath.h"
 #include <math.h>
+#include <numeric>
 
 float WolfMath::Clamp(float value, float min, float max)
 {
@@ -50,4 +51,11 @@ float WolfMath::Atan2(float y, float x)
 float WolfMath::Asin(float value)
 {
 	return asin(value);
+}
+
+float WolfMath::Dot(Vector3<float> a, Vector3<float>b)
+{
+	double aa[] = {a.x, a.y, a.z};
+	double bb[] = {b.x, b.y, b.z};
+	return std::inner_product(std::begin(aa), std::end(aa), std::begin(bb), 0);
 }

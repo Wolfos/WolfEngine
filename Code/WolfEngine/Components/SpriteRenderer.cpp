@@ -35,9 +35,8 @@ void SpriteRenderer::Render(Camera* camera)
 	glUseProgram(shader->id);
 
 	Matrix model = gameObject->transform->GetMatrix();
-	// This is incorrect, please generate a 'lookat' matrix
-	Matrix view = camera->gameObject->transform->GetMatrix();
-	Matrix projection = camera->GetProjection();
+	Matrix view = camera->view;
+	Matrix projection = camera->projection;
 
 	Matrix mvp = model * view * projection;
 
