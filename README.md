@@ -9,7 +9,7 @@ The engine is currently undergoing a heavy rewrite and will only run on MacOS at
 [Documentation](http://rvanee.nl/documentation/)
 
 
-Setup for Windows (currently not working):
+Setup for Windows (the engine currently doesn't run on Windows, but it should be very easy to port):
 ==========
 
 1. Download and install Visual Studio
@@ -25,4 +25,3 @@ Setup for Windows (currently not working):
 11. Copy the Asset folder into the build directory
 12. Run the executable again, either through Visual Studio or by double clicking it
 13. You have succesfully setup WolfEngine for development!
-
