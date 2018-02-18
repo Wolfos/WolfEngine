@@ -4,12 +4,12 @@ WolfEngine
 
 A tile-based 2D game engine made for fun and learning
 
-The engine is currently undergoing a partial rewrite and will only run on MacOS at the moment.
+The engine is currently undergoing a partial rewrite and will only run on MacOS at the moment. Support for Windows and Linux is on the roadmap.
 
 [Documentation (outdated)](http://rvanee.nl/documentation/)
 
 
-Setup for Windows (the engine currently doesn't run on Windows, but it should be very easy to port):
+Setup for Windows (will not compile at the moment)
 ==========
 
 1. Download and install Visual Studio
