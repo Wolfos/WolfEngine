@@ -1,6 +1,5 @@
 #include "../WolfEngine/WolfEngine.h"
 #include "../WolfEngine/API.h"
-#include <typeinfo>
 
 class Animal : public Component
 {

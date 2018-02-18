@@ -53,14 +53,6 @@ int InitSDL()
 	printf("GL Version: %s\n", glGetString(GL_VERSION));
 	printf("Shading language version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-	// Initialize SDL_Image
-	int imgflags = IMG_INIT_PNG;
-	if (!(IMG_Init(imgflags) & imgflags))
-	{
-		printf("Fatal error: SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
-		return 1;
-	}
-
 	// Initialize SDL_TTF
 	if (TTF_Init())
 	{

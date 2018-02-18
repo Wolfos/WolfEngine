@@ -7,7 +7,6 @@ rvanee@wolfengine.net
 #include "SpriteRenderer.h"
 #include "../ECS/GameObject.h"
 #include "../WolfEngine.h"
-#include "../Math/WolfMath.h"
 
 Shader* SpriteRenderer::defaultShader = NULL;
 
