@@ -16,14 +16,14 @@ elseif (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
 	endif()
 endif()
 
+# Use our modified modules
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WolfEngine_SOURCE_DIR}/cmake")
 # GLEW is not required on MacOS
 if(NOT APPLE)
 	find_package(GLEW REQUIRED)
-	include_directories($(GLEW_INCLUDE_DIRS))
+	include_directories(${GLEW_INCLUDE_DIR})
 endif()
 
-# Use our modified FindSDL2 modules
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WolfEngine_SOURCE_DIR}/cmake")
 # Look up SDL2 and add the include directory to our include path
 find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIR})
