@@ -29,6 +29,7 @@ Setup for Windows
 Setup for MacOS
 ==========
 (TODO: more detailed instructions)
+
 Install the required libraries (SDL2, SDL2_TTF and SDL2_Mixer) through a package manager and the XCode build tools, then build using CMake.
 
 Note: GLEW is not required on MacOS
