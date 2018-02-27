@@ -1,6 +1,7 @@
 #include "WolfMath.h"
 #include <math.h>
 #include <numeric>
+#include <algorithm>
 
 float WolfMath::Clamp(float value, float min, float max)
 {
