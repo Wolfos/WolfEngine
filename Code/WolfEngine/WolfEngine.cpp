@@ -53,6 +53,11 @@ int InitSDL()
 	printf("GL Version: %s\n", glGetString(GL_VERSION));
 	printf("Shading language version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
+#if !defined __APPLE__
+    glewExperimental = GL_TRUE;
+    glewInit();
+#endif
+
 	// Initialize SDL_TTF
 	if (TTF_Init())
 	{
@@ -199,6 +204,6 @@ std::string WolfEngine::FindAssetFolder()
 #elif defined ANDROID
     return "";
 #else
-	return "../../Assets/";
+	return "../Assets/";
 #endif
 }

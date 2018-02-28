@@ -7,6 +7,8 @@
 		#include <SDL.h>
 		#include <SDL_ttf.h>
 		#include <SDL_mixer.h>
+		#include <GL/glew.h>
+		#include <GL/gl.h>
 	#elif defined __ANDROID__
 		#include "SDL.h"
 		#include "SDL_ttf.h"
@@ -20,6 +22,8 @@
 		#include <SDL2/SDL.h>
 		#include <SDL2/SDL_ttf.h>
 		#include <SDL2/SDL_mixer.h>
+        #include <GL/glew.h>
+		#include <GL/gl.h>
 	#endif
 	
 	#if defined _SDL_H || defined SDL_h_

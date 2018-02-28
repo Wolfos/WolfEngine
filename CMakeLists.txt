@@ -16,8 +16,13 @@ elseif (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
 	endif()
 endif()
 
-# Use our modified FindSDL2 modules
+# Use our modified modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WolfEngine_SOURCE_DIR}/cmake")
+# GLEW is not required on MacOS
+if(NOT APPLE)
+	find_package(GLEW REQUIRED)
+	include_directories(${GLEW_INCLUDE_DIR})
+endif()
 
 # Look up SDL2 and add the include directory to our include path
 find_package(SDL2 REQUIRED)
@@ -27,6 +32,7 @@ include_directories(${SDL2_TTF_INCLUDE_DIR})
 find_package(SDL2_mixer REQUIRED)
 include_directories(${SDL2_MIXER_INCLUDE_DIR})
 
+# OpenGL
 find_package(OpenGL)
 include_directories(${OPENGL_INCLUDE_DIRS})
 
@@ -93,7 +99,7 @@ add_executable(Test
 	${Test_Source}
 )
 
-target_link_libraries(WolfEngine ${OPENGL_LIBRARIES} ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
+target_link_libraries(WolfEngine ${GLEW_LIBRARIES} ${OPENGL_LIBRARIES} ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
 target_link_libraries(Editor WolfEngine)
 target_link_libraries(Test WolfEngine)
 install(TARGETS Editor WolfEngine 

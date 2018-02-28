@@ -11,13 +11,13 @@ public:
         sr->frame = WolfEngine::RandomRange(0, 9);
         sr->widthInFrames = 2;
 
-        float randomScale = WolfEngine::RandomRange(.04f, .1f);
-		float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
-        float randomX = WolfEngine::RandomRange(-1.0f, 1.0f);
-        float randomY = WolfEngine::RandomRange(-1.0f, 1.0f);
-        gameObject->transform->localScale = {randomScale, randomScale, randomScale};
-		gameObject->transform->Rotate({0,0,randomAngle});
-        gameObject->transform->Translate({randomX, randomY, 1});
+        //float randomScale = WolfEngine::RandomRange(.04f, .1f);
+		//float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
+       // float randomX = WolfEngine::RandomRange(-1.0f, 1.0f);
+        //float randomY = WolfEngine::RandomRange(-1.0f, 1.0f);
+        gameObject->transform->localScale = {1, 1, 1};
+		//gameObject->transform->Rotate({0,0,randomAngle});
+        gameObject->transform->Translate({0, 0, 1});
     }
 
     virtual void Update()

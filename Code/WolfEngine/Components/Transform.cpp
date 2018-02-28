@@ -5,6 +5,7 @@ Contact:
 rvanee@wolfengine.net
 */
 #include "Transform.h"
+#include <algorithm>
 
 void Transform::Added()
 {
