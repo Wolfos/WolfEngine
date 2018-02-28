@@ -56,7 +56,7 @@ int InitSDL()
 	// Initialize SDL_TTF
 	if (TTF_Init())
 	{
-		printf("Fatal error: SDL_ttf could not initialize! SDL_ttf Error: %s\n", SDL_GetError());
+		printf("Fatal error: SDL_TTF could not initialize! SDL_TTF Error: %s\n", SDL_GetError());
 		return 1;
 	}
 
@@ -141,6 +141,7 @@ void WolfEngine::MainLoop()
         if (maxFPS != -1 && SDL_GetTicks() - curFrameTime < 1000 / maxFPS)
             SDL_Delay((1000 / maxFPS) - (SDL_GetTicks() - curFrameTime));
     }
+	Quit();
 }
 
 int WolfEngine::Quit()

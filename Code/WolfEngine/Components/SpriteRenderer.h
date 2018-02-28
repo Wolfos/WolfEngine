@@ -30,6 +30,7 @@ public:
 	SDL_Point* center;
 	virtual void Added();
 	virtual void Update();
+	virtual void Destroy();
 
 	///	Loads a file into the spritesheet
 	void Load(std::string filename, int frameWidth = 0, int frameHeight = 0);

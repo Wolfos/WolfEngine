@@ -10,6 +10,10 @@ Scene::Scene()
 
 Scene::~Scene()
 {
+	for(int i = 0; i < gameObjects.size(); i++)
+	{
+		delete gameObjects[i];
+	}
 	gameObjects.clear();
 }
 

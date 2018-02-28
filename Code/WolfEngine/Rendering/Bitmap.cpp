@@ -16,6 +16,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#include <algorithm>
+
 std::vector<Bitmap*> Bitmap::cache;
 
 Bitmap::Bitmap(std::string file)
@@ -27,8 +29,8 @@ Bitmap::Bitmap(std::string file)
 		if (cache[i]->filename == filename)
 		{
 			cached = true;
-			cache[i]->count++;
 			count = cache[i]->count;
+			*count += 1;
 			textureID = cache[i]->textureID;
 			size = cache[i]->size;
 		}
@@ -37,6 +39,7 @@ Bitmap::Bitmap(std::string file)
 	if (!cached)
 	{
 		count = new int;
+		*count = 1;
 
 		int width, height, channels;
 		std::string path = WolfEngine::FindAssetFolder() + "Sprites/" + filename;
@@ -64,20 +67,12 @@ Bitmap::Bitmap(std::string file)
 
 Bitmap::~Bitmap()
 {
-	*count--;
+	*count-= 1;
 	if (*count <= 0)
 	{
-		//SDL_DestroyTexture(texture);
-		for (size_t i = 0; i < cache.size(); i++)
-		{
-			if (cache[i]->filename == filename)
-			{
-				cache.erase(cache.begin() + i);
-				break;
-			}
-		}
 		delete count;
 	}
+	cache.erase(std::remove(cache.begin(), cache.end(), this), cache.end());
 	delete rect;
 }
 

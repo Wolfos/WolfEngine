@@ -33,7 +33,7 @@ public:
     {
         for(int i = 0; i < 50; i++)
         {
-            GameObject* animal = new GameObject();
+            GameObject* animal = new GameObject;
             animal->AddComponent<Animal>();
             AddGameObject(animal);
         }
@@ -53,11 +53,6 @@ public:
             timer = 0;
         }
     }
-
-    void Exit()
-    {
-
-    }
 };
 
 int main(int argc, char* args[])
@@ -75,13 +70,10 @@ int main(int argc, char* args[])
 
     scene->camera->width = WolfEngine::screenWidth;
     scene->camera->height = WolfEngine::screenHeight;
-    scene->camera->window = WolfEngine::window;
 
     scene->Start();
 
     WolfEngine::MainLoop();
-
-    WolfEngine::Quit();
     return 0;
 }
 

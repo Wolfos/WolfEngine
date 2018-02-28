@@ -17,6 +17,7 @@ public:
 	/// Local scale
 	Vector3<> localScale;
 	///	Local rotation
+	// TODO: Clean this up
 	Quaternion* localRotation;
     
 	virtual void Added();

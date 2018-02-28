@@ -63,8 +63,8 @@ source_group("GUI" FILES ${WolfEngine_GUI})
 file(GLOB WolfEngine_Input "Code/WolfEngine/Input/*.cpp" "Code/WolfEngine/Input/*.h")
 source_group("Input" FILES ${WolfEngine_Input})
 # Math
-file(GLOB WolfEngine_Models "Code/WolfEngine/Math/*.cpp" "Code/WolfEngine/Math/*.h")
-source_group("Models" FILES ${WolfEngine_Models})
+file(GLOB WolfEngine_Math "Code/WolfEngine/Math/*.cpp" "Code/WolfEngine/Math/*.h")
+source_group("Math" FILES ${WolfEngine_Math})
 # Rendering
 file(GLOB WolfEngine_Rendering "Code/WolfEngine/Rendering/*.cpp" "Code/WolfEngine/Rendering/*.h")
 source_group("Rendering" FILES ${WolfEngine_Rendering})
@@ -79,7 +79,7 @@ add_library(WolfEngine STATIC
 		${WolfEngine_ECS}
 		${WolfEngine_GUI}
 		${WolfEngine_Input}
-		${WolfEngine_Models}
+		${WolfEngine_Math}
 		${WolfEngine_Rendering}
 		${WolfEngine_Utilities}
 		${Shaders}

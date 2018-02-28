@@ -12,7 +12,6 @@ class Scene
 		Camera* camera;
 		int layers;
 
-
 		Scene();
 		~Scene();
 
@@ -35,9 +34,6 @@ class Scene
 		void AddGameObject(GameObject* gameObject);
 
 	private:
-		Map* map;
-		std::string mapfilename;
-
 		std::vector<GameObject*> gameObjects;
 		int numObjects = 0;
 };

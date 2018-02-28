@@ -28,7 +28,7 @@ class GameObject
 		GameObject();
 		~GameObject();
 
-		///	Template, returns a component of type <C>
+		///	Returns a component of type <C>, or 0 if no component was found
 		template <typename C>
 		C* GetComponent()
 		{
@@ -42,7 +42,7 @@ class GameObject
 			}
 		}
 
-		///	Template, adds a component of type <C>
+		///	Add a component of type <C>
 		template <typename C>
 		C* AddComponent()
 		{
@@ -54,7 +54,7 @@ class GameObject
 			return component;
 		}
 
-		/// Template, removes a component of type <C>
+		/// Remove a component of type <C>
 		/// Doesn't do anything if the component doesn't exist
 		template <typename C>
 		void RemoveComponent()
@@ -63,7 +63,7 @@ class GameObject
 			{
 				C* component = components[&typeid(C)];
 				components.erase(component);
-				free(component);
+				delete component;
 			}
 		}
 

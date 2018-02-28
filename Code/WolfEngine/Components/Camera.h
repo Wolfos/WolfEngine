@@ -16,8 +16,6 @@ public:
 	int width = 0;
 	///	The height of the screen
 	int height = 0;
-	///	The window it's rendered to
-	SDL_Window* window;
 	virtual void Update();
 
 	Matrix projection;

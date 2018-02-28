@@ -38,7 +38,12 @@ GameObject::GameObject()
 
 GameObject::~GameObject()
 {
-	components.clear();
-	// TODO: implement
-	//Game::scene::DeleteObject(this);
+	for (unsigned i = 0; i != components.bucket_count(); ++i)
+	{
+		for (auto local_it = components.begin(i); local_it != components.end(i); ++local_it)
+		{
+			local_it->second->Destroy();
+			delete local_it->second;
+		}
+	}
 }

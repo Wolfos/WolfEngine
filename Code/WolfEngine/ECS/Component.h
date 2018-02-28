@@ -28,5 +28,11 @@ class Component
 		{
 
 		}
+
+		/// Runs when the component was removed, or the GameObject deleted
+		virtual void Destroy()
+		{
+
+		}
 };
 #endif

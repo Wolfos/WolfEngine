@@ -28,6 +28,14 @@ void SpriteRenderer::Update()
 	}
 }
 
+void SpriteRenderer::Destroy()
+{
+	delete center;
+	delete mesh;
+	delete spriteSheet;
+	if(shader != defaultShader) delete shader;
+}
+
 void SpriteRenderer::Render(Camera* camera)
 {
 	// Set shader
