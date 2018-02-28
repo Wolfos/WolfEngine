@@ -19,7 +19,7 @@ void Camera::Added()
 
 void Camera::Update()
 {
-	SDL_GetWindowSize(window, &width, &height);
+	SDL_GetWindowSize(WolfEngine::window, &width, &height);
 	aspectRatio = (float)width / (float)height;
 }
 
