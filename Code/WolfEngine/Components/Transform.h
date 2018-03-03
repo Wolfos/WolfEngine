@@ -17,10 +17,10 @@ public:
 	/// Local scale
 	Vector3<> localScale;
 	///	Local rotation
-	// TODO: Clean this up
 	Quaternion* localRotation;
     
 	virtual void Added();
+	virtual void Destroy();
     /// Returns the global position of the transform
     Vector3<> GetPosition();
 	/// Returns the global scale of the transform

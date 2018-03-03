@@ -15,6 +15,11 @@ void Transform::Added()
 	localRotation = new Quaternion();
 }
 
+void Transform::Destroy()
+{
+	delete localRotation;
+}
+
 void Transform::AddChild(Transform* child)
 {
 	children.push_back(child);
