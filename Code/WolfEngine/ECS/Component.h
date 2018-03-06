@@ -8,7 +8,7 @@ class GameObject;
 class Component
 {
 	public:
-        ///    A pointer to the GameObject that contains this component
+        /// The GameObject that contains this component
         GameObject* gameObject;
         /// The name of the GameObject that contains this component
         std::string name;

@@ -62,33 +62,132 @@ void Matrix::ViewInverse()
 	data[14] = -data[14];
 }
 
-void Matrix::LookAt(Vector3<float> camPos, Vector3<float> forward, Vector3<float> up)
+void Matrix::Invert()
 {
-	Vector3<> f = forward - camPos;
-	f.Normalize();
-	Vector3<> s = Vector3<>::Cross(up, f);
-	s.Normalize();
-	Vector3<> u = Vector3<>::Cross(f, s);
+	Matrix temp;
+	float  det;
+	int i;
 
-	SetIdentity();
+	temp.data[0] = data[5]  * data[10] * data[15] -
+			 data[5]  * data[11] * data[14] -
+			 data[9]  * data[6]  * data[15] +
+			 data[9]  * data[7]  * data[14] +
+			 data[13] * data[6]  * data[11] -
+			 data[13] * data[7]  * data[10];
 
-	data[0] = s.x;
-	data[1] = s.y;
-	data[2] = s.z;
-	data[4] = u.x;
-	data[5] = u.y;
-	data[6] = u.z;
-	data[8] = f.x;
-	data[9] = f.y;
-	data[10] = f.z;
+	temp.data[4] = -data[4]  * data[10] * data[15] +
+			 data[4]  * data[11] * data[14] +
+			 data[8]  * data[6]  * data[15] -
+			 data[8]  * data[7]  * data[14] -
+			 data[12] * data[6]  * data[11] +
+			 data[12] * data[7]  * data[10];
 
-	data[3] = -WolfMath::Dot(s, camPos);
-	data[7] = -WolfMath::Dot(u, camPos);
-	data[11] = -WolfMath::Dot(f, camPos);
-	data[12] = 1;
-	data[13] = 1;
-	data[14] = 1;
-	data[15] = 1;
+	temp.data[8] = data[4]  * data[9] * data[15] -
+			 data[4]  * data[11] * data[13] -
+			 data[8]  * data[5] * data[15] +
+			 data[8]  * data[7] * data[13] +
+			 data[12] * data[5] * data[11] -
+			 data[12] * data[7] * data[9];
+
+	temp.data[12] = -data[4]  * data[9] * data[14] +
+			  data[4]  * data[10] * data[13] +
+			  data[8]  * data[5] * data[14] -
+			  data[8]  * data[6] * data[13] -
+			  data[12] * data[5] * data[10] +
+			  data[12] * data[6] * data[9];
+
+	temp.data[1] = -data[1]  * data[10] * data[15] +
+			 data[1]  * data[11] * data[14] +
+			 data[9]  * data[2] * data[15] -
+			 data[9]  * data[3] * data[14] -
+			 data[13] * data[2] * data[11] +
+			 data[13] * data[3] * data[10];
+
+	temp.data[5] = data[0]  * data[10] * data[15] -
+			 data[0]  * data[11] * data[14] -
+			 data[8]  * data[2] * data[15] +
+			 data[8]  * data[3] * data[14] +
+			 data[12] * data[2] * data[11] -
+			 data[12] * data[3] * data[10];
+
+	temp.data[9] = -data[0]  * data[9] * data[15] +
+			 data[0]  * data[11] * data[13] +
+			 data[8]  * data[1] * data[15] -
+			 data[8]  * data[3] * data[13] -
+			 data[12] * data[1] * data[11] +
+			 data[12] * data[3] * data[9];
+
+	temp.data[13] = data[0]  * data[9] * data[14] -
+			  data[0]  * data[10] * data[13] -
+			  data[8]  * data[1] * data[14] +
+			  data[8]  * data[2] * data[13] +
+			  data[12] * data[1] * data[10] -
+			  data[12] * data[2] * data[9];
+
+	temp.data[2] = data[1]  * data[6] * data[15] -
+			 data[1]  * data[7] * data[14] -
+			 data[5]  * data[2] * data[15] +
+			 data[5]  * data[3] * data[14] +
+			 data[13] * data[2] * data[7] -
+			 data[13] * data[3] * data[6];
+
+	temp.data[6] = -data[0]  * data[6] * data[15] +
+			 data[0]  * data[7] * data[14] +
+			 data[4]  * data[2] * data[15] -
+			 data[4]  * data[3] * data[14] -
+			 data[12] * data[2] * data[7] +
+			 data[12] * data[3] * data[6];
+
+	temp.data[10] = data[0]  * data[5] * data[15] -
+			  data[0]  * data[7] * data[13] -
+			  data[4]  * data[1] * data[15] +
+			  data[4]  * data[3] * data[13] +
+			  data[12] * data[1] * data[7] -
+			  data[12] * data[3] * data[5];
+
+	temp.data[14] = -data[0]  * data[5] * data[14] +
+			  data[0]  * data[6] * data[13] +
+			  data[4]  * data[1] * data[14] -
+			  data[4]  * data[2] * data[13] -
+			  data[12] * data[1] * data[6] +
+			  data[12] * data[2] * data[5];
+
+	temp.data[3] = -data[1] * data[6] * data[11] +
+			 data[1] * data[7] * data[10] +
+			 data[5] * data[2] * data[11] -
+			 data[5] * data[3] * data[10] -
+			 data[9] * data[2] * data[7] +
+			 data[9] * data[3] * data[6];
+
+	temp.data[7] = data[0] * data[6] * data[11] -
+			 data[0] * data[7] * data[10] -
+			 data[4] * data[2] * data[11] +
+			 data[4] * data[3] * data[10] +
+			 data[8] * data[2] * data[7] -
+			 data[8] * data[3] * data[6];
+
+	temp.data[11] = -data[0] * data[5] * data[11] +
+			  data[0] * data[7] * data[9] +
+			  data[4] * data[1] * data[11] -
+			  data[4] * data[3] * data[9] -
+			  data[8] * data[1] * data[7] +
+			  data[8] * data[3] * data[5];
+
+	temp.data[15] = data[0] * data[5] * data[10] -
+			  data[0] * data[6] * data[9] -
+			  data[4] * data[1] * data[10] +
+			  data[4] * data[2] * data[9] +
+			  data[8] * data[1] * data[6] -
+			  data[8] * data[2] * data[5];
+
+	det = data[0] * temp.data[0] + data[1] * temp.data[4] + data[2] * temp.data[8] + data[3] * temp.data[12];
+
+	if (det == 0) return;
+
+	det = 1.0 / det;
+
+	for (i = 0; i < 16; i++)
+		data[i] = temp.data[i] * det;
 }
 
 void Matrix::Translate(Vector3<float> direction)

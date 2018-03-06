@@ -21,12 +21,14 @@ void Camera::Update()
 {
 	SDL_GetWindowSize(WolfEngine::window, &width, &height);
 	aspectRatio = (float)width / (float)height;
+	gameObject->transform->Rotate({0, 1, 0});
 }
 
 Matrix Camera::GetProjection()
 {
 	Matrix m;
 	m.SetOrtho(-aspectRatio * ortographicSize, aspectRatio * ortographicSize, -1 * ortographicSize, 1 * ortographicSize, clipMin, clipMax);
+	//m.SetPerspective(60, aspectRatio, clipMin, clipMax);
 	return m;
 }
 
@@ -34,5 +36,10 @@ void Camera::UpdateMatrices()
 {
 	projection = GetProjection();
 	view = gameObject->transform->GetMatrix();
-	view.ViewInverse();
+	view.Invert();
+}
+
+Vector3<float> Camera::ScreenToWorldPosition(Vector2<float> screenPosition)
+{
+	Matrix camMatrix = view * projection;
 }

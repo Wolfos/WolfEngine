@@ -23,10 +23,9 @@ public:
 	/// Sets an ortographic projection matrix
 	void SetOrtho(float left, float right, float top, float bottom, float clipMin, float clipMax);
 
-	/// Generate LookAt matrix
-	void LookAt(Vector3<float> camPos, Vector3<float> center, Vector3<float> up);
-
 	void ViewInverse();
+
+	void Invert();
 
 	/// Move in direction
 	void Translate(Vector3<float> direction);

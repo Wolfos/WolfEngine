@@ -3,18 +3,18 @@
 #include "../ECS/Component.h"
 #include "../Includes.h"
 #include "../Math/Matrix.h"
+#include "../Math/Vectors.h"
 
 ///
-///	A Camera component, only one of these can be present at a time and it's created before the game starts
-/// Access the main camera through Screen::mainCamera
+///	A Camera component, created by Scene's constructor
 ///
 class Camera : public Component
 {
 public:
 	virtual void Added();
-	///	The width of the screen
+	///	The width of the screen in pixels
 	int width = 0;
-	///	The height of the screen
+	///	The height of the screen in pixels
 	int height = 0;
 	virtual void Update();
 
@@ -30,5 +30,7 @@ public:
 	float clipMin, clipMax;
 
 	Matrix GetProjection();
+	Matrix GetView();
+	Vector3<float> ScreenToWorldPosition(Vector2<float> screenPosition);
 };
 #endif

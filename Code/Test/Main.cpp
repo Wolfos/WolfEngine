@@ -16,17 +16,17 @@ public:
 		float randomX = WolfEngine::RandomRange(-1.0f, 1.0f);
         float randomY = WolfEngine::RandomRange(-1.0f, 1.0f);
         gameObject->transform->localScale = {randomScale, randomScale, randomScale};
-		gameObject->transform->Rotate({0,0,randomAngle});
+		//gameObject->transform->Rotate({0,0,randomAngle});
         gameObject->transform->Translate({randomX, randomY, 1});
     }
 
     virtual void Update()
     {
-		gameObject->transform->Rotate({0, 0, 10 * Time::frameTimeS});
+		//gameObject->transform->Rotate({0, 0, 10 * Time::frameTimeS});
     }
 };
 
-class TestScene : public Scene
+class SpriteTestScene : public Scene
 {
 public:
     void Start()
@@ -64,7 +64,7 @@ int main(int argc, char* args[])
         return 1;
     }
 
-    TestScene* scene = new TestScene();
+	SpriteTestScene* scene = new SpriteTestScene();
 
     WolfEngine::scene = scene;
 
