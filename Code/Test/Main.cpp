@@ -48,7 +48,7 @@ public:
         if(timer == 10)
         {
             int averageFrameTime = ((totalFrameTime / 10) * 1000);
-            printf("%d\n", averageFrameTime);
+            //printf("%d\n", averageFrameTime);
             totalFrameTime = 0;
             timer = 0;
         }
@@ -62,6 +62,10 @@ int main(int argc, char* args[])
         Debug::Log("WolfEngine has failed to initialize.\n");
         Debug::Log("¶¶¶¶¶¶¶¶¶_¶¶¶¶¶¶¶¶¶¶¶¶¶¶_¶¶¶¶    Wow!\n¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶_Ø¶¶¶¶¶\n¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶_Ø¶¶¶¶¶¶¶\n¶¶¶¶¶¶¶¶_Ø¶¶ØØØØ___Ø¶¶¶¶¶¶¶¶¶\n¶¶¶¶¶__Ø¶¶¶¶¶¶¶¶¶¶¶¶¶¶_¶¶¶¶¶¶\n¶¶¶_Ø¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶Ø¶¶Ø¶¶¶¶¶\n¶¶¶¶¶¶__¶¶¶¶¶¶¶¶¶¶¶¶¶¶Ø_¶¶¶¶¶        Much error :(\n¶¶¶¶¶¶¶Ø¶¶¶¶¶_Ø¶_¶¶¶¶¶¶¶¶¶¶¶¶\n¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶Ø¶¶¶¶¶¶¶¶Ø_¶¶\n¶¶¶¶_¶¶_¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶\nØ¶Ø¶_¶_¶¶_¶Ø¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶\n¶¶¶¶Ø¶Ø¶¶__¶_¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶\n¶¶¶¶ØØ__¶¶¶_¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶\n¶¶¶¶¶¶¶¶ØØØ¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶    Many wrong\n¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶_¶¶¶¶¶\n¶¶Ø_¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶_¶¶¶¶¶¶¶\n¶¶¶¶Ø_¶¶¶¶¶¶¶¶¶¶___Ø¶¶¶¶_Ø¶¶¶\n¶¶¶¶¶¶Ø______ØØØ¶¶¶¶¶__Ø¶¶¶¶¶\n¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶¶ØØ¶¶¶¶¶¶¶¶\n");
         return 1;
+    }
+    else
+    {
+        printf("WolfEngine has been initialized successfully\n");
     }
 
 	SpriteTestScene* scene = new SpriteTestScene();

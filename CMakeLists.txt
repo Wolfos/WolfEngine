@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 2.6)
+set(CMAKE_VERBOSE_MAKEFILE on)
 project(WolfEngine)
 
 # Bump up warning levels appropriately for clang, gcc & msvc
@@ -19,22 +20,26 @@ endif()
 # Use our modified modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${WolfEngine_SOURCE_DIR}/cmake")
 # GLEW is not required on MacOS
-if(NOT APPLE)
+if(NOT APPLE AND NOT EMSCRIPTEN)
 	find_package(GLEW REQUIRED)
 	include_directories(${GLEW_INCLUDE_DIR})
 endif()
 
 # Look up SDL2 and add the include directory to our include path
-find_package(SDL2 REQUIRED)
-include_directories(${SDL2_INCLUDE_DIR})
-find_package(SDL2_ttf REQUIRED)
-include_directories(${SDL2_TTF_INCLUDE_DIR})
-find_package(SDL2_mixer REQUIRED)
-include_directories(${SDL2_MIXER_INCLUDE_DIR})
+if(NOT EMSCRIPTEN)
+	find_package(SDL2 REQUIRED)
+	include_directories(${SDL2_INCLUDE_DIR})
+	find_package(SDL2_ttf REQUIRED)
+	include_directories(${SDL2_TTF_INCLUDE_DIR})
+	find_package(SDL2_mixer REQUIRED)
+	include_directories(${SDL2_MIXER_INCLUDE_DIR})
 
-# OpenGL
-find_package(OpenGL)
-include_directories(${OPENGL_INCLUDE_DIRS})
+	# OpenGL
+	find_package(OpenGL)
+	include_directories(${OPENGL_INCLUDE_DIRS})
+endif()
+
+
 
 # Set an output directory for our binaries
 set(BIN_DIR ${WolfEngine_SOURCE_DIR}/bin)
@@ -98,6 +103,12 @@ add_executable(Editor
 add_executable(Test
 	${Test_Source}
 )
+
+if(EMSCRIPTEN)
+	set_target_properties(Test
+			PROPERTIES SUFFIX ".html"
+			LINK_FLAGS "-Os -s ALLOW_MEMORY_GROWTH=1 -s USE_WEBGL2=1 -s FULL_ES3=1 -s USE_SDL=2 -s USE_SDL_IMAGE=2 -s USE_SDL_TTF=2 -s WASM=1 --preload-file ${CMAKE_SOURCE_DIR}/Assets@Assets --bind")
+endif()
 
 target_link_libraries(WolfEngine ${GLEW_LIBRARIES} ${OPENGL_LIBRARIES} ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY} ${SDL2_MIXER_LIBRARY})
 target_link_libraries(Editor WolfEngine)

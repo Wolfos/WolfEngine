@@ -18,7 +18,13 @@
         #include <SDL_ttf.h>
         #include <SDL_mixer.h>
         #include <OpenGL/gl3.h>
-	#else
+    #elif defined __EMSCRIPTEN__
+        #include <SDL.h>
+        #include <SDL_ttf.h>
+        #include <SDL_mixer.h>
+        #include <GLES3/gl3.h>
+		#include <GLES3/gl2ext.h>
+    #else
 		#include <SDL2/SDL.h>
 		#include <SDL2/SDL_ttf.h>
 		#include <SDL2/SDL_mixer.h>

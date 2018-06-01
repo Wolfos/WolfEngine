@@ -21,7 +21,7 @@ void Camera::Update()
 {
 	SDL_GetWindowSize(WolfEngine::window, &width, &height);
 	aspectRatio = (float)width / (float)height;
-	gameObject->transform->Rotate({0, 1, 0});
+	//gameObject->transform->Rotate({0, 1, 0});
 }
 
 Matrix Camera::GetProjection()

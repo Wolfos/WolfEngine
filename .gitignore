@@ -11,6 +11,7 @@ Android/obj/
 
 .idea/
 cmake-build-debug/
+cmake-build-emscripten/
 
 Editor.dir/
 Tests.dir/

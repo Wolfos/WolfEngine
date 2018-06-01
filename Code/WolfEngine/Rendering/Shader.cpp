@@ -19,7 +19,7 @@ Shader::Shader(std::string vertFilename, std::string fragFilename)
 	std::ifstream vertFile(vertPath);
 	if(!vertFile.is_open())
 	{
-		printf("Could not open file %s", vertPath.c_str());
+		printf("Could not open file %s\n", vertPath.c_str());
 		return;
 	}
 	vertFile.seekg(0, std::ios::end);
@@ -32,7 +32,7 @@ Shader::Shader(std::string vertFilename, std::string fragFilename)
 	std::ifstream fragFile(fragPath);
 	if(!fragFile.is_open())
 	{
-		printf("Could not open file %s", fragPath.c_str());
+		printf("Could not open file %s\n", fragPath.c_str());
 		return;
 	}
 	fragFile.seekg(0, std::ios::end);
