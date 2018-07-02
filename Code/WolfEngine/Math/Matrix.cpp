@@ -32,7 +32,7 @@ void Matrix::SetPerspective(float angle, float aspect, float clipMin, float clip
 	memset(data, 0, sizeof(float) * 16);
 	data[0] = 0.5f / tangent;
 	data[5] = 0.5f * aspect / tangent;
-	//data[10] = -(clipMax + clipMin) / (clipMax - clipMin);
+	data[10] = -(clipMax + clipMin) / (clipMax - clipMin);
 	data[11] = -1;
 	data[14] = (-2 * clipMax * clipMin) / (clipMax - clipMin);
 }
@@ -41,7 +41,7 @@ void Matrix::SetOrtho(float left, float right, float top, float bottom, float cl
 {
 	memset(data, 0, sizeof(float) * 16);
 	data[0] = 2 / (right - left);
-	data[5] = 2 / (top - bottom);
+	data[5] = 2 / (bottom - top);
 	data[10] = -2 / (clipMax - clipMin);
 	data[15] = 1;
 }

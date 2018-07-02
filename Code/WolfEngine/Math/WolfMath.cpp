@@ -54,6 +54,11 @@ float WolfMath::Asin(float value)
 	return asin(value);
 }
 
+float WolfMath::Lerp(float start, float end, float value)
+{
+	return start + value * (end - start);
+}
+
 float WolfMath::Dot(Vector3<float> a, Vector3<float>b)
 {
 	double aa[] = {a.x, a.y, a.z};

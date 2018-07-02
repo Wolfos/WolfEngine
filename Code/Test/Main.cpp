@@ -12,7 +12,7 @@ public:
         sr->widthInFrames = 2;
 
         float randomScale = WolfEngine::RandomRange(.04f, .1f);
-		float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
+		//float randomAngle = WolfEngine::RandomRange(0.0f, 360.0f);
 		float randomX = WolfEngine::RandomRange(-1.0f, 1.0f);
         float randomY = WolfEngine::RandomRange(-1.0f, 1.0f);
         gameObject->transform->localScale = {randomScale, randomScale, randomScale};
@@ -22,7 +22,8 @@ public:
 
     virtual void Update()
     {
-		//gameObject->transform->Rotate({0, 0, 10 * Time::frameTimeS});
+		gameObject->transform->Rotate({0, 0, 10 * Time::frameTimeS});
+        gameObject->transform->localPosition = gameObject->scene->camera->ScreenToWorldPosition(Mouse::position);
     }
 };
 

@@ -4,6 +4,9 @@
 #include "../Components/Transform.h"
 #include <typeinfo> 
 #include <unordered_map>
+#include "Scene.h"
+
+class Scene;
 
 ///
 ///	A GameObject is a framework to put Components on
@@ -19,6 +22,9 @@ class GameObject
         std::string name;
         /// The GameObject's unique id
         int id;
+
+		/// The scene the GameObject is in
+		Scene* scene;
     
 		///	Runs every frame, runs the Update() function for each component
 		void Update();

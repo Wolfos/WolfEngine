@@ -31,6 +31,6 @@ public:
 
 	Matrix GetProjection();
 	Matrix GetView();
-	Vector3<float> ScreenToWorldPosition(Vector2<float> screenPosition);
+	Vector3<float> ScreenToWorldPosition(Vector2<int> screenPosition);
 };
 #endif
