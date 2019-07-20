@@ -59,5 +59,6 @@ void Scene::AddGameObject(GameObject* gameObject)
 {
 	gameObjects.push_back(gameObject);
 	gameObject->id = numObjects;
+	gameObject->scene = this;
 	numObjects++;
 }

@@ -58,8 +58,6 @@ void SpriteRenderer::Render(Camera* camera)
 	glBindBuffer(GL_ARRAY_BUFFER, mesh->vertexBuffer);
 	glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, (void*)0);
 
-	mesh->uvs.clear();
-
 	int y = WolfMath::Floor(frame / widthInFrames);
 	int x = frame - y * widthInFrames;
 
@@ -67,6 +65,8 @@ void SpriteRenderer::Render(Camera* camera)
 	float uvY = (float)y * frameHeight / (float)sheetheight;
 	float uvWidth = (float)frameWidth / (float)sheetwidth;
 	float uvHeight = (float)frameHeight / (float)sheetheight;
+
+	mesh->uvs.clear();
 
 	mesh->uvs.push_back({uvX, uvY + uvHeight});
 	mesh->uvs.push_back({uvX + uvWidth, uvY + uvHeight});

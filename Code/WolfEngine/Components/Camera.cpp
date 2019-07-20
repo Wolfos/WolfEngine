@@ -6,6 +6,7 @@ rvanee@wolfengine.net
 */
 #include "Camera.h"
 #include "../WolfEngine.h"
+#include "../Math/WolfMath.h"
 
 void Camera::Added()
 {
@@ -21,13 +22,12 @@ void Camera::Update()
 {
 	SDL_GetWindowSize(WolfEngine::window, &width, &height);
 	aspectRatio = (float)width / (float)height;
-	//gameObject->transform->Rotate({0, 1, 0});
 }
 
 Matrix Camera::GetProjection()
 {
 	Matrix m;
-	m.SetOrtho(-aspectRatio * ortographicSize, aspectRatio * ortographicSize, -1 * ortographicSize, 1 * ortographicSize, clipMin, clipMax);
+	m.SetOrtho(-aspectRatio * ortographicSize, aspectRatio * ortographicSize, -ortographicSize, ortographicSize, clipMin, clipMax);
 	//m.SetPerspective(60, aspectRatio, clipMin, clipMax);
 	return m;
 }
@@ -36,10 +36,15 @@ void Camera::UpdateMatrices()
 {
 	projection = GetProjection();
 	view = gameObject->transform->GetMatrix();
+	//view.ViewInverse();
 	view.Invert();
 }
 
-Vector3<float> Camera::ScreenToWorldPosition(Vector2<float> screenPosition)
+Vector3<float> Camera::ScreenToWorldPosition(Vector2<int> screenPosition)
 {
-	Matrix camMatrix = view * projection;
+	Vector3<float> worldPos;
+	worldPos.y = WolfMath::Lerp(ortographicSize, -ortographicSize, ((float)screenPosition.y) / height);
+	worldPos.x = WolfMath::Lerp(-ortographicSize * aspectRatio, ortographicSize * aspectRatio, ((float)screenPosition.x) / width);
+
+	return worldPos;
 }

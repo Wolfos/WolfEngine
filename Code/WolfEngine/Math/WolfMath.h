@@ -15,5 +15,6 @@ namespace WolfMath
 	float Sqrt(float value);
 	float Atan2(float y, float x);
 	float Asin(float value);
+	float Lerp(float start, float end, float value);
 	float Dot(Vector3<float> a, Vector3<float>b);
 }
