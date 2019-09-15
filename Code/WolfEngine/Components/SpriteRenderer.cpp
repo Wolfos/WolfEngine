@@ -107,4 +107,7 @@ void SpriteRenderer::Load(std::string filename, int frameWidth, int frameHeight)
 	}
 
 	widthInFrames = sheetwidth / this->frameWidth;
+
+	float aspect = (float)frameWidth / (float)frameHeight;
+	gameObject->transform->localScale.x = aspect;
 }

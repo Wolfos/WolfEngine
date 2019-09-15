@@ -58,6 +58,8 @@ public:
 
 int main(int argc, char* args[])
 {
+	WolfEngine::screenWidth = 800;
+	WolfEngine::screenHeight = 600;
     if (WolfEngine::Init())
     {
         Debug::Log("WolfEngine has failed to initialize.\n");

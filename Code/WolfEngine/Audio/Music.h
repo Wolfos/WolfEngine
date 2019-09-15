@@ -1,5 +1,4 @@
-#ifndef _MUSIC_H
-#define _MUSIC_H
+#pragma once
 #include "../Includes.h"
 #include <string>
 ///
@@ -20,4 +19,3 @@ public:
 private:
 	Mix_Music* music;
 };
-#endif

@@ -8,6 +8,10 @@
 
 Shader::Shader(std::string vertFilename, std::string fragFilename)
 {
+#ifdef _GLES_
+	vertFilename += ".es";
+	fragFilename += ".es";
+#endif
 	// Find path to shader
 	std::string vertPath = WolfEngine::FindAssetFolder() + "Shaders/" + vertFilename;
 	std::string fragPath = WolfEngine::FindAssetFolder() + "Shaders/" + fragFilename;

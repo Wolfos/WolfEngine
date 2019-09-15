@@ -40,7 +40,6 @@ if(NOT EMSCRIPTEN)
 endif()
 
 
-
 # Set an output directory for our binaries
 set(BIN_DIR ${WolfEngine_SOURCE_DIR}/bin)
 
@@ -103,6 +102,7 @@ add_executable(Editor
 add_executable(Test
 	${Test_Source}
 )
+
 
 if(EMSCRIPTEN)
 	set_target_properties(Test

@@ -4,8 +4,9 @@
 #include "Utilities/Time.h"
 #ifdef __APPLE__
 #include "CoreFoundation/CoreFoundation.h"
-#endif
+#elif defined __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
+#endif
 
 using namespace WolfEngine;
 
@@ -16,6 +17,8 @@ int WolfEngine::screenHeight = 720;
 SDL_Window* WolfEngine::window;
 Scene* WolfEngine::scene;
 SDL_GLContext WolfEngine::context;
+
+bool quit = false;
 
 
 int InitSDL()
@@ -29,8 +32,14 @@ int InitSDL()
 	// Request OpenGL 3.3 context
 	//SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     //SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#ifdef __EMSCRIPTEN__
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+#endif
 
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
@@ -122,7 +131,7 @@ void Loop()
 
     if (eventHandler.type == SDL_QUIT)
     {
-        //return 1;
+        quit = true;
     }
 
     scene->Update();
@@ -144,8 +153,6 @@ void Loop()
 
     if (maxFPS != -1 && SDL_GetTicks() - curFrameTime < 1000 / maxFPS)
         SDL_Delay((1000 / maxFPS) - (SDL_GetTicks() - curFrameTime));
-
-    //return 0;
 }
 
 #include "Components/SpriteRenderer.h"
@@ -156,8 +163,9 @@ void WolfEngine::MainLoop()
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 #if !__EMSCRIPTEN__
-    while (!Loop())
+    while (!quit)
     {
+		Loop();
     }
 #else
     emscripten_set_main_loop(Loop, 0, 1);
