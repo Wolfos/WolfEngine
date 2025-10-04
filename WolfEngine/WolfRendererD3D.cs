@@ -336,7 +336,7 @@ public unsafe class WolfRendererD3D
 
 	#region Win32 sync interop
 	[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-	private static extern nint CreateEventEx(nint lpEventAttributes, string? lpName, uint dwFlags, uint dwDesiredAccess);
+	private static extern nint CreateEventEx(nint lpEventAttributes, string lpName, uint dwFlags, uint dwDesiredAccess);
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);
