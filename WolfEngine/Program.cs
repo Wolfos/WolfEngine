@@ -1,6 +1,4 @@
-﻿using System.Runtime.InteropServices;
-
-namespace WolfEngine;
+﻿namespace WolfEngine;
 
 class Program
 {

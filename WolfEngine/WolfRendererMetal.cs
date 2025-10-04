@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -19,6 +18,11 @@ public class WolfRendererMetal
     private NSWindowInstance _window;
     private MTKViewInstance _view;
     private MetalViewDelegate _viewDelegate;
+    private NSWindowDelegate _windowDelegate = null!;
+    private NSMenu _mainMenu = null!;
+    private NSMenuItem _appMenuItem = null!;
+    private NSMenu _appMenu = null!;
+    private NSMenuItem _quitMenuItem = null!;
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
     private readonly MTLClearColor _clearColor = new() { red = 0.392, green = 0.584, blue = 0.929, alpha = 1.0 };
@@ -88,9 +92,15 @@ public class WolfRendererMetal
         _viewDelegate.DrawableSizeWillChange += ResizeDrawable;
         _view.Delegate = _viewDelegate;
 
+        SetupMenu();
+
         _window.SetContentView(_view.NativePtr);
         _window.SetTitle(WindowTitle);
         _window.MakeKeyAndOrderFront();
+
+        _windowDelegate = new NSWindowDelegate();
+        _windowDelegate.WindowWillClose += OnWindowWillClose;
+        _window.SetDelegate(_windowDelegate);
 
         var app = new NSApplicationInstance(notification.Object);
         app.ActivateIgnoringOtherApps(true);
@@ -161,6 +171,30 @@ public class WolfRendererMetal
         {
             _isUpdatingDrawableSize = false;
         }
+    }
+
+    private void SetupMenu()
+    {
+        _mainMenu = new NSMenu();
+        _appMenuItem = new NSMenuItem();
+        _mainMenu.AddItem(_appMenuItem);
+
+        _appMenu = new NSMenu(WindowTitle);
+        var quitTitle = $"Quit {WindowTitle}";
+        _quitMenuItem = new NSMenuItem();
+        _quitMenuItem.SetTitle(quitTitle);
+        _quitMenuItem.SetAction(new Selector("terminate:"));
+        _quitMenuItem.SetTarget(IntPtr.Zero); // let NSApp handle terminate:
+        _quitMenuItem.SetKeyEquivalent("q");
+        _appMenu.AddItem(_quitMenuItem);
+
+        _appMenuItem.SetSubmenu(_appMenu);
+        _application.SetMainMenu(_mainMenu);
+    }
+
+    private void OnWindowWillClose()
+    {
+        _application.Terminate();
     }
 
     private static bool NearlyEqual(double a, double b)

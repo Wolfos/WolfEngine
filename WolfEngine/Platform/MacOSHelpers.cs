@@ -5,6 +5,7 @@ using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
+using ObjectiveCRuntimeClass = SharpMetal.ObjectiveCRuntime;
 
 namespace WolfEngine.Platform;
 
@@ -121,6 +122,16 @@ internal sealed class NSApplicationInstance
     {
         ObjectiveC.objc_msgSend(NativePtr, "setDelegate:", appDelegate.NativePtr);
     }
+
+    public void SetMainMenu(NSMenu menu)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, "setMainMenu:", menu.NativePtr);
+    }
+
+    public void Terminate()
+    {
+        ObjectiveC.objc_msgSend(NativePtr, "terminate:", NativePtr);
+    }
 }
 
 [SupportedOSPlatform("macos")]
@@ -143,9 +154,7 @@ internal sealed class NSWindowInstance
 
     public void SetTitle(string title)
     {
-        var nsStringClass = new ObjectiveCClass("NSString");
-        var nsStringPtr = ObjectiveC.IntPtr_objc_msgSend(nsStringClass.Alloc(), "initWithUTF8String:", title);
-        Title = new NSString(nsStringPtr);
+        Title = new NSString(NSStringHelper.Create(title));
     }
 
     public void SetContentView(IntPtr view)
@@ -156,6 +165,11 @@ internal sealed class NSWindowInstance
     public void MakeKeyAndOrderFront()
     {
         ObjectiveC.objc_msgSend(NativePtr, "makeKeyAndOrderFront:", IntPtr.Zero);
+    }
+
+    public void SetDelegate(NSWindowDelegate @delegate)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, "setDelegate:", @delegate.NativePtr);
     }
 }
 
@@ -219,6 +233,109 @@ internal static class ObjCNative
 {
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern void ObjcMsgSendDrawableSize(IntPtr receiver, IntPtr selector, NSPoint size);
+}
+
+internal static class NSStringHelper
+{
+    public static IntPtr Create(string value)
+    {
+        var nsStringClass = new ObjectiveCClass("NSString");
+        return ObjectiveC.IntPtr_objc_msgSend(nsStringClass, "stringWithUTF8String:", value);
+    }
+}
+
+[SupportedOSPlatform("macos")]
+internal sealed class NSWindowDelegate
+{
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void WindowWillCloseDelegate(IntPtr id, IntPtr cmd, IntPtr notification);
+
+    private readonly WindowWillCloseDelegate _willClose;
+
+    public event Action WindowWillClose;
+
+    public IntPtr NativePtr { get; }
+
+    public unsafe NSWindowDelegate()
+    {
+        byte* name = Utf8StringMarshaller.ConvertToUnmanaged("WolfEngineWindowDelegate");
+        byte* types = Utf8StringMarshaller.ConvertToUnmanaged("v@:@");
+
+        _willClose = (_, _, _) => WindowWillClose?.Invoke();
+        var willClosePtr = Marshal.GetFunctionPointerForDelegate(_willClose);
+
+        var @class = ObjectiveC.objc_allocateClassPair(new ObjectiveCClass("NSObject"), (char*)name, 0);
+        ObjectiveC.class_addMethod(@class, "windowWillClose:", willClosePtr, (char*)types);
+        ObjectiveC.objc_registerClassPair(@class);
+
+        NativePtr = new ObjectiveCClass(@class).AllocInit();
+    }
+}
+
+[SupportedOSPlatform("macos")]
+internal sealed class NSMenu
+{
+    public IntPtr NativePtr { get; }
+
+    public NSMenu()
+    {
+        var menuClass = new ObjectiveCClass("NSMenu");
+        NativePtr = ObjectiveC.IntPtr_objc_msgSend(menuClass.Alloc(), new Selector("init"));
+    }
+
+    public NSMenu(string title)
+    {
+        var menuClass = new ObjectiveCClass("NSMenu");
+        var alloc = menuClass.Alloc();
+        var nsTitle = NSStringHelper.Create(title);
+        NativePtr = ObjectiveCRuntimeClass.IntPtr_objc_msgSend(alloc, new Selector("initWithTitle:").SelPtr, nsTitle);
+    }
+
+    public void AddItem(NSMenuItem item)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("addItem:"), item.NativePtr);
+    }
+}
+
+[SupportedOSPlatform("macos")]
+internal sealed class NSMenuItem
+{
+    public const ulong CommandKeyMask = 1UL << 20;
+
+    public IntPtr NativePtr { get; }
+
+    public NSMenuItem()
+    {
+        var itemClass = new ObjectiveCClass("NSMenuItem");
+        NativePtr = ObjectiveC.IntPtr_objc_msgSend(itemClass.Alloc(), new Selector("init"));
+    }
+
+    public void SetSubmenu(NSMenu submenu)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("setSubmenu:"), submenu.NativePtr);
+    }
+
+    public void SetTarget(IntPtr target)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("setTarget:"), target);
+    }
+
+    public void SetTitle(string title)
+    {
+        var nsTitle = NSStringHelper.Create(title);
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("setTitle:"), nsTitle);
+    }
+
+    public void SetAction(Selector action)
+    {
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("setAction:"), action);
+    }
+
+    public void SetKeyEquivalent(string key)
+    {
+        var nsKey = NSStringHelper.Create(key);
+        ObjectiveC.objc_msgSend(NativePtr, new Selector("setKeyEquivalent:"), nsKey);
+    }
 }
 
 [Flags]
