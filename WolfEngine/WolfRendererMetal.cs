@@ -34,17 +34,17 @@ public class WolfRendererMetal
     private double _drawableHeight;
 
     private MTLBuffer _vertexBuffer;
-    private MTLLibrary _defaultLibrary;
+    private MTLLibrary _shaderLibrary;
     private MTLRenderPipelineState _pipelineState;
 
 
     private const string WindowTitle = "Hello Metal!";
     
-    private Vector3[] _triangleVertices =
+    private Vector4[] _triangleVertices =
     [
-	    new(-0.5f, -0.5f, 0.0f),
-	    new( 0.5f, -0.5f, 0.0f),
-	    new( 0.0f,  0.5f, 0.0f)
+	    new(-0.5f, -0.5f, 0.0f, 0.0f),
+	    new( 0.5f, -0.5f, 0.0f, 0.0f),
+	    new( 0.0f,  0.5f, 0.0f, 0.0f)
     ];
 
     private const string _shaderSource =
@@ -99,8 +99,8 @@ public class WolfRendererMetal
 
     private void CreateRenderPipeline()
     {
-	    var vertexShader = _defaultLibrary.NewFunction(new NSString(NSStringHelper.Create("vertexShader")));
-	    var fragmentShader = _defaultLibrary.NewFunction(new NSString(NSStringHelper.Create("fragmentShader")));
+	    var vertexShader = _shaderLibrary.NewFunction(NSStringHelper.From("vertexShader"));
+	    var fragmentShader = _shaderLibrary.NewFunction(NSStringHelper.From("fragmentShader"));
 
 	    var pipeline = new MTLRenderPipelineDescriptor();
 	    pipeline.VertexFunction = vertexShader;
@@ -164,16 +164,20 @@ public class WolfRendererMetal
 
     private void CreateTriangle()
 	{
-		
-		
-		var length = (ulong)(_triangleVertices.Length * Marshal.SizeOf<Vector3>());
+		var length = (ulong)(_triangleVertices.Length * Marshal.SizeOf<Vector4>());
 		_vertexBuffer = _device.NewBuffer(length, MTLResourceOptions.ResourceStorageModeManaged);
 		BufferHelper.CopyToBuffer(_triangleVertices, _vertexBuffer);
 	}
 
 	private void CreateDefaultLibrary()
 	{
-		_defaultLibrary = _device.NewDefaultLibrary();
+		var libraryError = new NSError(IntPtr.Zero);
+		_shaderLibrary = _device.NewLibrary(NSStringHelper.From(_shaderSource), new(IntPtr.Zero), ref libraryError);
+		if (libraryError != IntPtr.Zero)
+		{
+			throw new Exception($"Failed to create library! {libraryError.LocalizedDescription}");
+		}
+
 	}
 
     private void Draw(MTKViewInstance view)

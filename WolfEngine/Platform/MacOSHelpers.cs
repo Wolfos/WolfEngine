@@ -154,7 +154,7 @@ internal sealed class NSWindowInstance
 
     public void SetTitle(string title)
     {
-        Title = new NSString(NSStringHelper.Create(title));
+        Title = NSStringHelper.From(title);
     }
 
     public void SetContentView(IntPtr view)
@@ -237,10 +237,12 @@ internal static class ObjCNative
 
 internal static class NSStringHelper
 {
-    public static IntPtr Create(string value)
+    public static NSString From(string value)
     {
         var nsStringClass = new ObjectiveCClass("NSString");
-        return ObjectiveC.IntPtr_objc_msgSend(nsStringClass, "stringWithUTF8String:", value);
+        var alloc = nsStringClass.Alloc();
+        var ptr = ObjectiveC.IntPtr_objc_msgSend(alloc, "initWithUTF8String:", value);
+        return new NSString(ptr);
     }
 }
 
@@ -287,7 +289,7 @@ internal sealed class NSMenu
     {
         var menuClass = new ObjectiveCClass("NSMenu");
         var alloc = menuClass.Alloc();
-        var nsTitle = NSStringHelper.Create(title);
+        var nsTitle = NSStringHelper.From(title);
         NativePtr = ObjectiveCRuntimeClass.IntPtr_objc_msgSend(alloc, new Selector("initWithTitle:").SelPtr, nsTitle);
     }
 
@@ -322,7 +324,7 @@ internal sealed class NSMenuItem
 
     public void SetTitle(string title)
     {
-        var nsTitle = NSStringHelper.Create(title);
+        var nsTitle = NSStringHelper.From(title);
         ObjectiveC.objc_msgSend(NativePtr, new Selector("setTitle:"), nsTitle);
     }
 
@@ -333,7 +335,7 @@ internal sealed class NSMenuItem
 
     public void SetKeyEquivalent(string key)
     {
-        var nsKey = NSStringHelper.Create(key);
+        var nsKey = NSStringHelper.From(key);
         ObjectiveC.objc_msgSend(NativePtr, new Selector("setKeyEquivalent:"), nsKey);
     }
 }
