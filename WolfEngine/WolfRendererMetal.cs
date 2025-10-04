@@ -1,3 +1,5 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -31,7 +33,22 @@ public class WolfRendererMetal
     private double _drawableWidth;
     private double _drawableHeight;
 
+    private MTLBuffer _vertexBuffer;
+    private MTLLibrary _defaultLibrary;
+    private MTLRenderPipelineState _pipelineState;
+
+
     private const string WindowTitle = "Hello Metal!";
+    
+    private Vector3[] _triangleVertices =
+    [
+	    new(-0.5f, -0.5f, 0.0f),
+	    new( 0.5f, -0.5f, 0.0f),
+	    new( 0.0f,  0.5f, 0.0f)
+    ];
+
+    private const string _shaderSource =
+	    "\n#include <metal_stdlib>\nusing namespace metal;\n\nvertex float4\nvertexShader(uint vertexID [[vertex_id]],\n             constant simd::float3* vertexPositions)\n{\n    float4 vertexOutPositions = float4(vertexPositions[vertexID][0],\n                                       vertexPositions[vertexID][1],\n                                       vertexPositions[vertexID][2],\n                                       1.0f);\n    return vertexOutPositions;\n}\n\nfragment float4 fragmentShader(float4 vertexOutPositions [[stage_in]]) {\n    return float4(182.0f/255.0f, 240.0f/255.0f, 228.0f/255.0f, 1.0f);\n}";
 
     public WolfRendererMetal(int screenWidth, int screenHeight)
     {
@@ -65,78 +82,135 @@ public class WolfRendererMetal
 
     private void OnApplicationDidFinishLaunching(NSNotification notification)
     {
-        _device = MTLDevice.CreateSystemDefaultDevice();
-        if (_device.NativePtr == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Failed to create the default Metal device.");
-        }
-
-        _commandQueue = _device.NewCommandQueue();
-        if (_commandQueue.NativePtr == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Failed to create a Metal command queue.");
-        }
-
-        var contentRect = new NSRect(0, 0, _width, _height);
-        var style = NSWindowStyleMask.Titled | NSWindowStyleMask.Resizable | NSWindowStyleMask.Closable | NSWindowStyleMask.Miniaturizable;
-        _window = new NSWindowInstance(contentRect, (ulong)style);
-        _view = new MTKViewInstance(contentRect, _device)
-        {
-            ColorPixelFormat = MTLPixelFormat.BGRA8Unorm,
-            Paused = false,
-            PreferredFramesPerSecond = 120
-        };
-
-        _viewDelegate = new MetalViewDelegate();
-        _viewDelegate.DrawInMTKView += Draw;
-        _viewDelegate.DrawableSizeWillChange += ResizeDrawable;
-        _view.Delegate = _viewDelegate;
-
+        CreateDevice();
+        
+        CreateView();
         SetupMenu();
+        
+        CreateTriangle();
+        CreateDefaultLibrary();
+        CreateCommandQueue();
 
-        _window.SetContentView(_view.NativePtr);
-        _window.SetTitle(WindowTitle);
-        _window.MakeKeyAndOrderFront();
-
-        _windowDelegate = new NSWindowDelegate();
-        _windowDelegate.WindowWillClose += OnWindowWillClose;
-        _window.SetDelegate(_windowDelegate);
+        CreateRenderPipeline();
 
         var app = new NSApplicationInstance(notification.Object);
         app.ActivateIgnoringOtherApps(true);
     }
 
-    private void Draw(MTKViewInstance view)
+    private void CreateRenderPipeline()
     {
-        if (_commandQueue.NativePtr == IntPtr.Zero)
-        {
-            return;
-        }
+	    var vertexShader = _defaultLibrary.NewFunction(new NSString(NSStringHelper.Create("vertexShader")));
+	    var fragmentShader = _defaultLibrary.NewFunction(new NSString(NSStringHelper.Create("fragmentShader")));
 
-        var renderPassDescriptor = view.CurrentRenderPassDescriptor;
-        if (renderPassDescriptor.NativePtr == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var colorAttachment = renderPassDescriptor.ColorAttachments.Object(0);
-        colorAttachment.LoadAction = MTLLoadAction.Clear;
-        colorAttachment.StoreAction = MTLStoreAction.Store;
-        colorAttachment.ClearColor = _clearColor;
-        renderPassDescriptor.ColorAttachments.SetObject(colorAttachment, 0);
-
-        var drawable = view.CurrentDrawable;
-        if (drawable.NativePtr == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var commandBuffer = _commandQueue.CommandBuffer();
-        var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
-        encoder.EndEncoding();
-        commandBuffer.PresentDrawable(drawable);
-        commandBuffer.Commit();
+	    var pipeline = new MTLRenderPipelineDescriptor();
+	    pipeline.VertexFunction = vertexShader;
+	    pipeline.FragmentFunction = fragmentShader;
+        
+	    var colorAttachment = pipeline.ColorAttachments.Object(0);
+	    colorAttachment.PixelFormat = MTLPixelFormat.BGRA8UnormsRGB;
+	    pipeline.ColorAttachments.SetObject(colorAttachment, 0);
+        
+	    var pipelineStateError = new NSError(IntPtr.Zero);
+	    _pipelineState = _device.NewRenderPipelineState(pipeline, ref pipelineStateError);
+	    if (pipelineStateError != IntPtr.Zero)
+	    {
+		    throw new Exception($"Failed to create render pipeline state! {pipelineStateError.LocalizedDescription}");
+	    }
     }
+
+    private void CreateDevice()
+    {
+	    _device = MTLDevice.CreateSystemDefaultDevice();
+	    if (_device.NativePtr == IntPtr.Zero)
+	    {
+		    throw new InvalidOperationException("Failed to create the default Metal device.");
+	    }
+    }
+
+    private void CreateCommandQueue()
+    {
+	    _commandQueue = _device.NewCommandQueue();
+	    if (_commandQueue.NativePtr == IntPtr.Zero)
+	    {
+		    throw new InvalidOperationException("Failed to create a Metal command queue.");
+	    }
+    }
+
+    private void CreateView()
+    {
+	    var contentRect = new NSRect(0, 0, _width, _height);
+	    var style = NSWindowStyleMask.Titled | NSWindowStyleMask.Resizable | NSWindowStyleMask.Closable | NSWindowStyleMask.Miniaturizable;
+	    _window = new NSWindowInstance(contentRect, (ulong)style);
+	    _view = new MTKViewInstance(contentRect, _device)
+	    {
+		    ColorPixelFormat = MTLPixelFormat.BGRA8Unorm,
+		    Paused = false,
+		    PreferredFramesPerSecond = 120
+	    };
+
+	    _viewDelegate = new MetalViewDelegate();
+	    _viewDelegate.DrawInMTKView += Draw;
+	    _viewDelegate.DrawableSizeWillChange += ResizeDrawable;
+	    _view.Delegate = _viewDelegate;
+	    
+	    _window.SetContentView(_view.NativePtr);
+	    _window.SetTitle(WindowTitle);
+	    _window.MakeKeyAndOrderFront();
+
+	    _windowDelegate = new NSWindowDelegate();
+	    _windowDelegate.WindowWillClose += OnWindowWillClose;
+	    _window.SetDelegate(_windowDelegate);
+    }
+
+    private void CreateTriangle()
+	{
+		
+		
+		var length = (ulong)(_triangleVertices.Length * Marshal.SizeOf<Vector3>());
+		_vertexBuffer = _device.NewBuffer(length, MTLResourceOptions.ResourceStorageModeManaged);
+		BufferHelper.CopyToBuffer(_triangleVertices, _vertexBuffer);
+	}
+
+	private void CreateDefaultLibrary()
+	{
+		_defaultLibrary = _device.NewDefaultLibrary();
+	}
+
+    private void Draw(MTKViewInstance view)
+	{
+		if (_commandQueue.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var renderPassDescriptor = view.CurrentRenderPassDescriptor;
+		if (renderPassDescriptor.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var colorAttachment = renderPassDescriptor.ColorAttachments.Object(0);
+		colorAttachment.LoadAction = MTLLoadAction.Clear;
+		colorAttachment.StoreAction = MTLStoreAction.Store;
+		colorAttachment.ClearColor = _clearColor;
+		renderPassDescriptor.ColorAttachments.SetObject(colorAttachment, 0);
+
+		var drawable = view.CurrentDrawable;
+		if (drawable.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var commandBuffer = _commandQueue.CommandBuffer();
+		var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
+		encoder.SetRenderPipelineState(_pipelineState);
+		encoder.SetVertexBuffer(_vertexBuffer, 0, 0);
+		encoder.DrawPrimitives(MTLPrimitiveType.Triangle, 0, (ulong)_triangleVertices.Length);
+		
+		encoder.EndEncoding();
+		commandBuffer.PresentDrawable(drawable);
+		commandBuffer.Commit();
+	}
 
     private void ResizeDrawable(MTKViewInstance view, NSRect rect)
     {

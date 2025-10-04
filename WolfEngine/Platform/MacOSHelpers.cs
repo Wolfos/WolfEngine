@@ -338,6 +338,16 @@ internal sealed class NSMenuItem
     }
 }
 
+[SupportedOSPlatform("macos")]
+public static class BufferHelper
+{
+    public static unsafe void CopyToBuffer<T>(T[] source, MTLBuffer buffer)
+    {
+        var span = new Span<T>(buffer.Contents.ToPointer(), source.Length);
+        source.CopyTo(span);
+    }
+}
+
 [Flags]
 internal enum NSWindowStyleMask : ulong
 {
