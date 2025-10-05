@@ -39,18 +39,21 @@ public unsafe class WolfRendererD3D
 	private uint _backbufferIndex;
 
 	private IWindow _window;
+	private readonly IShaderCompiler _shaderCompiler;
 
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
 
 	private Vector4[] _triangleVertices =
 	[
-		new(-0.5f, -0.5f, 0.0f, 0.0f),
-		new( 0.5f, -0.5f, 0.0f, 0.0f),
-		new( 0.0f,  0.5f, 0.0f, 0.0f)
+		new(-0.5f, -0.5f, 0.0f, 1.0f),
+		new( 0.5f, -0.5f, 0.0f, 1.0f),
+		new( 0.0f,  0.5f, 0.0f, 1.0f)
 	];
 
-	public WolfRendererD3D(int width, int height)
+
+	public WolfRendererD3D(int width, int height, IShaderCompiler shaderCompiler)
 	{
+		_shaderCompiler = shaderCompiler;
 		var options = WindowOptions.Default;
 		options.Size = new(width, height);
 		options.Title = "WolfEngine";

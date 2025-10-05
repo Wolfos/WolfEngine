@@ -13,6 +13,7 @@ public class WolfRendererMetal
 {
     private readonly int _width;
     private readonly int _height;
+    private readonly IShaderCompiler _shaderCompiler;
 
     private readonly NSApplicationInstance _application;
     private readonly MetalAppDelegate _appDelegate;
@@ -42,15 +43,12 @@ public class WolfRendererMetal
     
     private Vector4[] _triangleVertices =
     [
-	    new(-0.5f, -0.5f, 0.0f, 0.0f),
-	    new( 0.5f, -0.5f, 0.0f, 0.0f),
-	    new( 0.0f,  0.5f, 0.0f, 0.0f)
+	    new(-0.5f, -0.5f, 0.0f, 1.0f),
+	    new( 0.5f, -0.5f, 0.0f, 1.0f),
+	    new( 0.0f,  0.5f, 0.0f, 1.0f)
     ];
 
-    private const string _shaderSource =
-	    "\n#include <metal_stdlib>\nusing namespace metal;\n\nvertex float4\nvertexShader(uint vertexID [[vertex_id]],\n             constant simd::float3* vertexPositions)\n{\n    float4 vertexOutPositions = float4(vertexPositions[vertexID][0],\n                                       vertexPositions[vertexID][1],\n                                       vertexPositions[vertexID][2],\n                                       1.0f);\n    return vertexOutPositions;\n}\n\nfragment float4 fragmentShader(float4 vertexOutPositions [[stage_in]]) {\n    return float4(182.0f/255.0f, 240.0f/255.0f, 228.0f/255.0f, 1.0f);\n}";
-
-    public WolfRendererMetal(int screenWidth, int screenHeight)
+    public WolfRendererMetal(int screenWidth, int screenHeight, IShaderCompiler shaderCompiler)
     {
         if (!OperatingSystem.IsMacOS())
         {
@@ -59,6 +57,7 @@ public class WolfRendererMetal
 
         _width = screenWidth;
         _height = screenHeight;
+        _shaderCompiler = shaderCompiler;
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -97,14 +96,15 @@ public class WolfRendererMetal
         app.ActivateIgnoringOtherApps(true);
     }
 
-    private void CreateRenderPipeline()
-    {
+	private void CreateRenderPipeline()
+	{
 	    var vertexShader = _shaderLibrary.NewFunction(NSStringHelper.From("vertexShader"));
 	    var fragmentShader = _shaderLibrary.NewFunction(NSStringHelper.From("fragmentShader"));
 
 	    var pipeline = new MTLRenderPipelineDescriptor();
 	    pipeline.VertexFunction = vertexShader;
 	    pipeline.FragmentFunction = fragmentShader;
+	    pipeline.VertexDescriptor = CreateVertexDescriptor();
         
 	    var colorAttachment = pipeline.ColorAttachments.Object(0);
 	    colorAttachment.PixelFormat = MTLPixelFormat.BGRA8UnormsRGB;
@@ -114,9 +114,30 @@ public class WolfRendererMetal
 	    _pipelineState = _device.NewRenderPipelineState(pipeline, ref pipelineStateError);
 	    if (pipelineStateError != IntPtr.Zero)
 	    {
-		    throw new Exception($"Failed to create render pipeline state! {pipelineStateError.LocalizedDescription}");
+		    throw new Exception($"Failed to create render pipeline state! {pipelineStateError.LocalizedDescription.ToManagedString()}");
 	    }
-    }
+	}
+
+	private static MTLVertexDescriptor CreateVertexDescriptor()
+	{
+		var descriptor = new MTLVertexDescriptor();
+
+		var attributes = descriptor.Attributes;
+		var positionAttribute = attributes.Object(0);
+		positionAttribute.Format = MTLVertexFormat.Float4;
+		positionAttribute.Offset = 0;
+		positionAttribute.BufferIndex = 0;
+		attributes.SetObject(positionAttribute, 0);
+
+		var layouts = descriptor.Layouts;
+		var layout = layouts.Object(0);
+		layout.Stride = (ulong)Marshal.SizeOf<Vector4>();
+		layout.StepFunction = MTLVertexStepFunction.PerVertex;
+		layout.StepRate = 1;
+		layouts.SetObject(layout, 0);
+
+		return descriptor;
+	}
 
     private void CreateDevice()
     {
@@ -172,12 +193,13 @@ public class WolfRendererMetal
 	private void CreateDefaultLibrary()
 	{
 		var libraryError = new NSError(IntPtr.Zero);
-		_shaderLibrary = _device.NewLibrary(NSStringHelper.From(_shaderSource), new(IntPtr.Zero), ref libraryError);
+		var shaderSource = _shaderCompiler.GetShader("default.slang");
+		_shaderLibrary = _device.NewLibrary(NSStringHelper.From(shaderSource), new(IntPtr.Zero), ref libraryError);
 		if (libraryError != IntPtr.Zero)
 		{
-			throw new Exception($"Failed to create library! {libraryError.LocalizedDescription}");
+			var description = libraryError.LocalizedDescription.ToManagedString("Unknown error");
+			throw new Exception($"Failed to create library! {description}");
 		}
-
 	}
 
     private void Draw(MTKViewInstance view)

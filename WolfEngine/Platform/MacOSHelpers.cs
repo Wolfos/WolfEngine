@@ -249,6 +249,26 @@ internal static class NSStringHelper
 }
 
 [SupportedOSPlatform("macos")]
+internal static class NSStringExtensions
+{
+    public static string ToManagedString(this NSString nsString, string fallback = "")
+    {
+        if (nsString.NativePtr == IntPtr.Zero)
+        {
+            return fallback;
+        }
+
+        var utf8Ptr = ObjectiveC.IntPtr_objc_msgSend(nsString.NativePtr, new Selector("UTF8String"));
+        if (utf8Ptr == IntPtr.Zero)
+        {
+            return fallback;
+        }
+
+        return Marshal.PtrToStringUTF8(utf8Ptr) ?? fallback;
+    }
+}
+
+[SupportedOSPlatform("macos")]
 internal sealed class NSWindowDelegate
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
