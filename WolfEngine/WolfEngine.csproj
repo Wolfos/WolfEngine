@@ -35,6 +35,9 @@
 
     <ItemGroup>
       <None Update="Shaders\default.slang">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+      <None Update="Models\Monkey.obj">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
     </ItemGroup>

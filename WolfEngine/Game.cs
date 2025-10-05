@@ -1,3 +1,4 @@
+using System.IO;
 using System.Numerics;
 
 namespace WolfEngine;
@@ -13,21 +14,8 @@ public class Game
 
 	public void Run()
 	{
-		var vertices = new[]
-		{
-			new Vector4(-0.5f, -0.5f, 0.0f, 1.0f),
-			new Vector4( 0.5f, -0.5f, 0.0f, 1.0f),
-			new Vector4(-0.5f,  0.5f, 0.0f, 1.0f),
-			new Vector4( 0.5f,  0.5f, 0.0f, 1.0f)
-		};
-
-		var indices = new uint[]
-		{
-			0, 1, 2,
-			2, 1, 3
-		};
-
-		var mesh = new Mesh(vertices, indices);
+		var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
+		var mesh = new Mesh(meshPath);
 		_renderer.LoadMesh(mesh, "default.slang");
 		_renderer.Run();
 	}
