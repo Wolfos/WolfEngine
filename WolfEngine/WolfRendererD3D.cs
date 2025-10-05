@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D.Compilers;
@@ -26,6 +27,8 @@ public unsafe class WolfRendererD3D
 
 	private ComPtr<ID3D12DescriptorHeap> _rtvHeap = default;
 	private uint _rtvDescriptorSize;
+	private CpuDescriptorHandle[] _rtvCpuHandles = new CpuDescriptorHandle[FrameCount];
+	private ulong[] _frameFenceValues = new ulong[FrameCount];
 	private ComPtr<ID3D12Resource>[] _renderTargets = new ComPtr<ID3D12Resource>[FrameCount];
 	private ComPtr<ID3D12CommandAllocator>[] _commandAllocators = new ComPtr<ID3D12CommandAllocator>[FrameCount];
 	private ComPtr<ID3D12GraphicsCommandList> _commandList = default;
@@ -37,13 +40,20 @@ public unsafe class WolfRendererD3D
 
 	private IWindow _window;
 
-	private readonly float[] _backgroundColour = new[] {0.392f, 0.584f, 0.929f, 1.0f};
-	
+	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
+
+	private Vector4[] _triangleVertices =
+	[
+		new(-0.5f, -0.5f, 0.0f, 0.0f),
+		new( 0.5f, -0.5f, 0.0f, 0.0f),
+		new( 0.0f,  0.5f, 0.0f, 0.0f)
+	];
+
 	public WolfRendererD3D(int width, int height)
 	{
 		var options = WindowOptions.Default;
 		options.Size = new(width, height);
-		options.Title = "Hello DirectX12";
+		options.Title = "WolfEngine";
 		options.API = GraphicsAPI.None;
 		_window = Window.Create(options);
 
@@ -65,9 +75,7 @@ public unsafe class WolfRendererD3D
 
 		var input = _window.CreateInput();
 		foreach (var keyboard in input.Keyboards)
-		{
 			keyboard.KeyDown += OnKeyDown;
-		}
 
 		CreateDeviceAndQueue();
 		CreateSwapchain();
@@ -88,17 +96,14 @@ public unsafe class WolfRendererD3D
 				out _device
 			)
 		);
-		
+
 		var commandQueueDescription = new CommandQueueDesc(
 			type: CommandListType.Direct,
 			priority: (int)CommandQueuePriority.Normal,
 			flags: CommandQueueFlags.None);
-		
+
 		// Create command queue
-		SilkMarshal.ThrowHResult
-		(
-			_device.CreateCommandQueue(commandQueueDescription, out _commandQueue)
-		);
+		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(commandQueueDescription, out _commandQueue));
 	}
 
 	private void CreateSwapchain()
@@ -109,7 +114,7 @@ public unsafe class WolfRendererD3D
 			Format = Format.FormatB8G8R8A8Unorm,
 			BufferUsage = DXGI.UsageRenderTargetOutput,
 			SwapEffect = SwapEffect.FlipDiscard,
-			SampleDesc = new SampleDesc(1, 0)
+			SampleDesc = new(1, 0)
 		};
 
 		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
@@ -144,28 +149,26 @@ public unsafe class WolfRendererD3D
 		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in rtvHeapDesc, out _rtvHeap));
 		_rtvDescriptorSize = _device.GetDescriptorHandleIncrementSize(DescriptorHeapType.Rtv);
 
-		// Create render target views for each back buffer
+		// Create render target views for each back buffer and cache CPU handles
 		var rtvHandle = _rtvHeap.GetCPUDescriptorHandleForHeapStart();
 		for (var i = 0; i < FrameCount; i++)
 		{
+			_rtvCpuHandles[i] = rtvHandle;
 			SilkMarshal.ThrowHResult(_swapchain.GetBuffer((uint)i, out _renderTargets[i]));
-
 			_device.CreateRenderTargetView(_renderTargets[i], null, rtvHandle);
-
-			// Offset the handle for the next RTV
-			rtvHandle.Ptr += (nuint)_rtvDescriptorSize;
+			rtvHandle.Ptr += _rtvDescriptorSize;
 		}
 	}
 
 	private void CreateCommandAllocatorsAndList()
 	{
 		for (var i = 0; i < FrameCount; i++)
-		{
 			SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(CommandListType.Direct, out _commandAllocators[i]));
-		}
 
-		SilkMarshal.ThrowHResult(_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(0, CommandListType.Direct, _commandAllocators[0], default, out _commandList));
-		// SilkMarshal.ThrowHResult(_device.CreateCommandList(0, CommandListType.Direct, _commandAllocators[0], default, out _commandList));
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0, CommandListType.Direct, _commandAllocators[0], default, out _commandList));
+
 		// Command lists are created in the recording state; close until we start rendering
 		SilkMarshal.ThrowHResult(_commandList.Close());
 	}
@@ -176,27 +179,31 @@ public unsafe class WolfRendererD3D
 		_fenceValue = 0;
 		_fenceEvent = CreateEventEx(nint.Zero, null, 0, 0x1F0003 /* EVENT_ALL_ACCESS */);
 		if (_fenceEvent == nint.Zero)
-		{
 			throw new InvalidOperationException("Failed to create fence event.");
-		}
 	}
 
 	private void OnUpdate(double deltaSeconds) { /* No-op for now */ }
 
 	private void OnFramebufferResize(Vector2D<int> newSize)
 	{
+		// Guard against zero-size (minimized)
+		if (newSize.X == 0 || newSize.Y == 0)
+			return;
+
 		WaitForGpu();
 
 		// Release current targets
 		for (var i = 0; i < FrameCount; i++)
 		{
 			if (_renderTargets[i].Handle != null)
-			{
 				_renderTargets[i].Dispose();
-			}
 		}
 
-		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers((uint)FrameCount, (uint)newSize.X, (uint)newSize.Y, Format.FormatB8G8R8A8Unorm, 0));
+		// Dispose old RTV heap before resizing
+		if (_rtvHeap.Handle != null)
+			_rtvHeap.Dispose();
+
+		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint)newSize.X, (uint)newSize.Y, Format.FormatB8G8R8A8Unorm, 0));
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
 		CreateRtvHeapAndTargets();
@@ -206,21 +213,23 @@ public unsafe class WolfRendererD3D
 	{
 		var frameIdx = _backbufferIndex;
 
+		// Ensure GPU finished with this frame's resources before resetting allocator/list
+		if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
+		{
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*)_fenceEvent));
+			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
+		}
+
 		// Reset allocator & list
 		SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset((ID3D12CommandAllocator*)_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
-		// SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx], default));
+		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
 
 		// Transition back buffer: PRESENT -> RENDER_TARGET
 		{
-			var barrier = new ResourceBarrier
+			var barrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			barrier.Anonymous.Transition = new()
 			{
-				Type = ResourceBarrierType.Transition,
-				Flags = ResourceBarrierFlags.None
-			};
-			barrier.Anonymous.Transition = new ResourceTransitionBarrier
-			{
-				PResource = _renderTargets[frameIdx],
+				PResource = _renderTargets[frameIdx].Handle,
 				Subresource = D3D12.ResourceBarrierAllSubresources,
 				StateBefore = ResourceStates.Present,
 				StateAfter = ResourceStates.RenderTarget
@@ -228,31 +237,27 @@ public unsafe class WolfRendererD3D
 			_commandList.ResourceBarrier(1, &barrier);
 		}
 
-		// Get current RTV handle
-		var rtvHandle = _rtvHeap.GetCPUDescriptorHandleForHeapStart();
-		rtvHandle.Ptr += (nuint)(_rtvDescriptorSize * frameIdx);
+		// Set viewport & scissor
+		var fb = _window.FramebufferSize;
+		var vp = new Viewport { TopLeftX = 0, TopLeftY = 0, Width = fb.X, Height = fb.Y, MinDepth = 0.0f, MaxDepth = 1.0f };
+		_commandList.RSSetViewports(1, &vp);
+		var sc = new Box2D<int>(0, 0, fb.X, fb.Y);
+		_commandList.RSSetScissorRects(1, &sc);
 
-		// Clear render target
-		// _commandList.OMSetRenderTargets(1, &rtvHandle, false, null);
-		// _commandList.OMSetRenderTargets(1, &rtvHandle, new Silk.NET.Core.Bool32(false), null);
-		_commandList.OMSetRenderTargets(1, &rtvHandle, new Silk.NET.Core.Bool32(false), (CpuDescriptorHandle*)null);
-		
+		// Get current RTV handle (cached)
+		var rtvHandle = _rtvCpuHandles[frameIdx];
+
+		// Bind & clear
+		_commandList.OMSetRenderTargets(1, &rtvHandle, new(false), (CpuDescriptorHandle*)null);
 		fixed (float* clear = _backgroundColour)
-		{
-			_commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Silk.NET.Maths.Box2D<int>*)null);
-			// _commandList.ClearRenderTargetView(rtvHandle, clear, 0, null);
-		}
+			_commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Box2D<int>*)null);
 
 		// Transition back buffer: RENDER_TARGET -> PRESENT
 		{
-			var barrier = new ResourceBarrier
+			var barrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			barrier.Anonymous.Transition = new()
 			{
-				Type = ResourceBarrierType.Transition,
-				Flags = ResourceBarrierFlags.None
-			};
-			barrier.Anonymous.Transition = new ResourceTransitionBarrier
-			{
-				PResource = _renderTargets[frameIdx],
+				PResource = _renderTargets[frameIdx].Handle,
 				Subresource = D3D12.ResourceBarrierAllSubresources,
 				StateBefore = ResourceStates.RenderTarget,
 				StateAfter = ResourceStates.Present
@@ -268,8 +273,10 @@ public unsafe class WolfRendererD3D
 		// Present
 		SilkMarshal.ThrowHResult(_swapchain.Present(1, 0));
 
-		// Simple CPU/GPU sync for now (wait every frame)
-		SignalAndWait();
+		// Signal fence for this frame and store its value
+		_fenceValue++;
+		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
+		_frameFenceValues[frameIdx] = _fenceValue;
 
 		// Get the new backbuffer index
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
@@ -281,7 +288,6 @@ public unsafe class WolfRendererD3D
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
-			//SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, _fenceEvent));
 			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
@@ -291,7 +297,6 @@ public unsafe class WolfRendererD3D
 	{
 		_fenceValue++;
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
-		// SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, _fenceEvent));
 		SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 		WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 	}
@@ -325,6 +330,7 @@ public unsafe class WolfRendererD3D
 		{
 			_fence.Dispose();
 		}
+
 		if (_fenceEvent != nint.Zero)
 		{
 			CloseHandle(_fenceEvent);

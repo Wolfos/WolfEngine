@@ -38,7 +38,7 @@ public class WolfRendererMetal
     private MTLRenderPipelineState _pipelineState;
 
 
-    private const string WindowTitle = "Hello Metal!";
+    private const string WindowTitle = "WolfEngine";
     
     private Vector4[] _triangleVertices =
     [

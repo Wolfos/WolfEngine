@@ -229,12 +229,14 @@ internal enum NSApplicationActivationPolicy : long
     Prohibited = 2
 }
 
+[SupportedOSPlatform("macos")]
 internal static class ObjCNative
 {
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern void ObjcMsgSendDrawableSize(IntPtr receiver, IntPtr selector, NSPoint size);
 }
 
+[SupportedOSPlatform("macos")]
 internal static class NSStringHelper
 {
     public static NSString From(string value)
