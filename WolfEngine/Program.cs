@@ -13,14 +13,16 @@ class Program
         ConfigureServices(services);
         using var provider = services.BuildServiceProvider();
 
-        if (OperatingSystem.IsMacOS())
-        {
-            _ = ActivatorUtilities.CreateInstance<WolfRendererMetal>(provider, ScreenWidth, ScreenHeight);
+		if (OperatingSystem.IsMacOS())
+		{
+			var renderer = ActivatorUtilities.CreateInstance<WolfRendererMetal>(provider, ScreenWidth, ScreenHeight);
+			var game = new Game(renderer);
+			game.Run();
         }
-        else if (OperatingSystem.IsWindows())
-        {
-            _ = ActivatorUtilities.CreateInstance<WolfRendererD3D>(provider, ScreenWidth, ScreenHeight);
-        }
+		else if (OperatingSystem.IsWindows())
+		{
+			_ = ActivatorUtilities.CreateInstance<WolfRendererD3D>(provider, ScreenWidth, ScreenHeight);
+		}
     }
 
     private static void ConfigureServices(IServiceCollection services)

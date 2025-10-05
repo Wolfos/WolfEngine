@@ -9,7 +9,7 @@ using WolfEngine.Platform;
 namespace WolfEngine;
 
 [SupportedOSPlatform("macos")]
-public class WolfRendererMetal
+public class WolfRendererMetal: IRenderer
 {
     private readonly int _width;
     private readonly int _height;
@@ -35,18 +35,18 @@ public class WolfRendererMetal
     private double _drawableHeight;
 
     private MTLBuffer _vertexBuffer;
+    private MTLBuffer _indexBuffer;
     private MTLLibrary _shaderLibrary;
     private MTLRenderPipelineState _pipelineState;
 
 
     private const string WindowTitle = "WolfEngine";
-    
-    private Vector4[] _triangleVertices =
-    [
-	    new(-0.5f, -0.5f, 0.0f, 1.0f),
-	    new( 0.5f, -0.5f, 0.0f, 1.0f),
-	    new( 0.0f,  0.5f, 0.0f, 1.0f)
-    ];
+
+    private Mesh _mesh = null!;
+    private string _shaderPath = null!;
+    private ulong _vertexCount;
+    private ulong _indexCount;
+    private bool _meshLoaded;
 
     public WolfRendererMetal(int screenWidth, int screenHeight, IShaderCompiler shaderCompiler)
     {
@@ -70,8 +70,28 @@ public class WolfRendererMetal
         _appDelegate.DidFinishLaunching += OnApplicationDidFinishLaunching;
 
         _application.SetDelegate(_appDelegate);
-        _application.Run();
     }
+
+	public void LoadMesh(Mesh mesh, string shaderPath)
+	{
+		_mesh = mesh ?? throw new ArgumentNullException(nameof(mesh));
+		_shaderPath = string.IsNullOrWhiteSpace(shaderPath)
+			? throw new ArgumentException("Shader path cannot be empty.", nameof(shaderPath))
+			: shaderPath;
+		_vertexCount = (ulong)_mesh.Vertices.Length;
+		_indexCount = (ulong)_mesh.Indices.Length;
+		_meshLoaded = true;
+	}
+
+	public void Run()
+	{
+		if (!_meshLoaded)
+		{
+			throw new InvalidOperationException("LoadMesh must be called before running the renderer.");
+		}
+
+		_application.Run();
+	}
 
     private void OnApplicationWillFinishLaunching(NSNotification notification)
     {
@@ -86,7 +106,7 @@ public class WolfRendererMetal
         CreateView();
         SetupMenu();
         
-        CreateTriangle();
+        UploadMesh();
         CreateDefaultLibrary();
         CreateCommandQueue();
 
@@ -183,17 +203,41 @@ public class WolfRendererMetal
 	    _window.SetDelegate(_windowDelegate);
     }
 
-    private void CreateTriangle()
+    private void UploadMesh()
 	{
-		var length = (ulong)(_triangleVertices.Length * Marshal.SizeOf<Vector4>());
-		_vertexBuffer = _device.NewBuffer(length, MTLResourceOptions.ResourceStorageModeManaged);
-		BufferHelper.CopyToBuffer(_triangleVertices, _vertexBuffer);
+		if (!_meshLoaded)
+		{
+			throw new InvalidOperationException("Mesh data is not loaded.");
+		}
+
+		var vertexBufferLength = (ulong)(_mesh.Vertices.Length * Marshal.SizeOf<Vector4>());
+		_vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+		if (_vertexBuffer.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to allocate vertex buffer.");
+		}
+		BufferHelper.CopyToBuffer(_mesh.Vertices, _vertexBuffer);
+		_vertexBuffer.DidModifyRange(new NSRange { location = 0, length = vertexBufferLength });
+
+		var indexBufferLength = (ulong)(_mesh.Indices.Length * sizeof(uint));
+		_indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+		if (_indexBuffer.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to allocate index buffer.");
+		}
+		BufferHelper.CopyToBuffer(_mesh.Indices, _indexBuffer);
+		_indexBuffer.DidModifyRange(new NSRange { location = 0, length = indexBufferLength });
 	}
 
 	private void CreateDefaultLibrary()
 	{
 		var libraryError = new NSError(IntPtr.Zero);
-		var shaderSource = _shaderCompiler.GetShader("default.slang");
+		if (!_meshLoaded)
+		{
+			throw new InvalidOperationException("Mesh data is not loaded.");
+		}
+
+		var shaderSource = _shaderCompiler.GetShader(_shaderPath);
 		_shaderLibrary = _device.NewLibrary(NSStringHelper.From(shaderSource), new(IntPtr.Zero), ref libraryError);
 		if (libraryError != IntPtr.Zero)
 		{
@@ -231,7 +275,7 @@ public class WolfRendererMetal
 		var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
 		encoder.SetRenderPipelineState(_pipelineState);
 		encoder.SetVertexBuffer(_vertexBuffer, 0, 0);
-		encoder.DrawPrimitives(MTLPrimitiveType.Triangle, 0, (ulong)_triangleVertices.Length);
+		encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, _indexCount, MTLIndexType.UInt32, _indexBuffer, 0);
 		
 		encoder.EndEncoding();
 		commandBuffer.PresentDrawable(drawable);
