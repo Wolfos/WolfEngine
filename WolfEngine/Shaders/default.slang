@@ -1,3 +1,8 @@
+cbuffer MaterialParams : register(b0)
+{
+    float4 baseColor;
+};
+
 struct VSInput
 {
     float4 position : POSITION;
@@ -17,5 +22,5 @@ VSOutput vertexShader(VSInput input)
 
 float4 fragmentShader(VSOutput input) : SV_Target
 {
-    return float4(182.0f / 255.0f, 240.0f / 255.0f, 228.0f / 255.0f, 1.0f);
+    return baseColor;
 }

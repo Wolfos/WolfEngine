@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -21,11 +22,11 @@ public class WolfRendererMetal: IRenderer
     private NSWindowInstance _window;
     private MTKViewInstance _view;
     private MetalViewDelegate _viewDelegate;
-    private NSWindowDelegate _windowDelegate = null!;
-    private NSMenu _mainMenu = null!;
-    private NSMenuItem _appMenuItem = null!;
-    private NSMenu _appMenu = null!;
-    private NSMenuItem _quitMenuItem = null!;
+    private NSWindowDelegate _windowDelegate;
+    private NSMenu _mainMenu;
+    private NSMenuItem _appMenuItem;
+    private NSMenu _appMenu;
+    private NSMenuItem _quitMenuItem;
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
     private readonly MTLClearColor _clearColor = new() { red = 0.392, green = 0.584, blue = 0.929, alpha = 1.0 };
@@ -34,19 +35,57 @@ public class WolfRendererMetal: IRenderer
     private double _drawableWidth;
     private double _drawableHeight;
 
-    private MTLBuffer _vertexBuffer;
-    private MTLBuffer _indexBuffer;
-    private MTLLibrary _shaderLibrary;
-    private MTLRenderPipelineState _pipelineState;
-
-
     private const string WindowTitle = "WolfEngine";
+    private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
+    private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+    private readonly Dictionary<Material, MaterialResources> _materialResources = new();
+    private readonly List<DrawInstruction> _drawCommands = new();
+    private Action _updateCallback = static () => { };
 
-    private Mesh _mesh = null!;
-    private string _shaderPath = null!;
-    private ulong _vertexCount;
-    private ulong _indexCount;
-    private bool _meshLoaded;
+    private sealed class MeshResources
+    {
+        public MeshResources(MTLBuffer vertexBuffer, MTLBuffer indexBuffer, ulong indexCount)
+        {
+            VertexBuffer = vertexBuffer;
+            IndexBuffer = indexBuffer;
+            IndexCount = indexCount;
+        }
+
+        public MTLBuffer VertexBuffer { get; }
+
+        public MTLBuffer IndexBuffer { get; }
+
+        public ulong IndexCount { get; }
+    }
+
+    private sealed class MaterialResources
+    {
+        public MaterialResources(MTLRenderPipelineState pipelineState, MTLBuffer colorBuffer)
+        {
+            PipelineState = pipelineState;
+            ColorBuffer = colorBuffer;
+        }
+
+        public MTLRenderPipelineState PipelineState { get; }
+
+        public MTLBuffer ColorBuffer { get; }
+    }
+
+    private readonly struct DrawInstruction
+    {
+        public DrawInstruction(Mesh mesh, Material material, Matrix4x4 transform)
+        {
+            Mesh = mesh;
+            Material = material;
+            Transform = transform;
+        }
+
+        public Mesh Mesh { get; }
+
+        public Material Material { get; }
+
+        public Matrix4x4 Transform { get; }
+    }
 
     public WolfRendererMetal(int screenWidth, int screenHeight, IShaderCompiler shaderCompiler)
     {
@@ -72,24 +111,14 @@ public class WolfRendererMetal: IRenderer
         _application.SetDelegate(_appDelegate);
     }
 
-	public void LoadMesh(Mesh mesh, string shaderPath)
+	public void SubmitCommand(RenderCommand command)
 	{
-		_mesh = mesh ?? throw new ArgumentNullException(nameof(mesh));
-		_shaderPath = string.IsNullOrWhiteSpace(shaderPath)
-			? throw new ArgumentException("Shader path cannot be empty.", nameof(shaderPath))
-			: shaderPath;
-		_vertexCount = (ulong)_mesh.Vertices.Length;
-		_indexCount = (ulong)_mesh.Indices.Length;
-		_meshLoaded = true;
+		_pendingCommands.Enqueue(command);
 	}
 
-	public void Run()
+	public void Run(Action update)
 	{
-		if (!_meshLoaded)
-		{
-			throw new InvalidOperationException("LoadMesh must be called before running the renderer.");
-		}
-
+		_updateCallback = update ?? throw new ArgumentNullException(nameof(update));
 		_application.Run();
 	}
 
@@ -105,21 +134,19 @@ public class WolfRendererMetal: IRenderer
         
         CreateView();
         SetupMenu();
-        
-        UploadMesh();
-        CreateDefaultLibrary();
         CreateCommandQueue();
 
-        CreateRenderPipeline();
+        ProcessPendingCommands();
+        ArenaAllocator.RenderCommands.Reset();
 
         var app = new NSApplicationInstance(notification.Object);
         app.ActivateIgnoringOtherApps(true);
     }
 
-	private void CreateRenderPipeline()
+	private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)
 	{
-	    var vertexShader = _shaderLibrary.NewFunction(NSStringHelper.From("vertexShader"));
-	    var fragmentShader = _shaderLibrary.NewFunction(NSStringHelper.From("fragmentShader"));
+	    var vertexShader = shaderLibrary.NewFunction(NSStringHelper.From("vertexShader"));
+	    var fragmentShader = shaderLibrary.NewFunction(NSStringHelper.From("fragmentShader"));
 
 	    var pipeline = new MTLRenderPipelineDescriptor();
 	    pipeline.VertexFunction = vertexShader;
@@ -131,11 +158,13 @@ public class WolfRendererMetal: IRenderer
 	    pipeline.ColorAttachments.SetObject(colorAttachment, 0);
         
 	    var pipelineStateError = new NSError(IntPtr.Zero);
-	    _pipelineState = _device.NewRenderPipelineState(pipeline, ref pipelineStateError);
+	    var pipelineState = _device.NewRenderPipelineState(pipeline, ref pipelineStateError);
 	    if (pipelineStateError != IntPtr.Zero)
 	    {
 		    throw new Exception($"Failed to create render pipeline state! {pipelineStateError.LocalizedDescription.ToManagedString()}");
 	    }
+
+	    return pipelineState;
 	}
 
 	private static MTLVertexDescriptor CreateVertexDescriptor()
@@ -203,59 +232,172 @@ public class WolfRendererMetal: IRenderer
 	    _window.SetDelegate(_windowDelegate);
     }
 
-    private void UploadMesh()
+	private MeshResources UploadMesh(Mesh mesh)
 	{
-		if (!_meshLoaded)
+		if (mesh.Vertices.Length == 0)
 		{
-			throw new InvalidOperationException("Mesh data is not loaded.");
+			throw new InvalidOperationException("Mesh must contain vertex data.");
 		}
 
-		var vertexBufferLength = (ulong)(_mesh.Vertices.Length * Marshal.SizeOf<Vector4>());
-		_vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
-		if (_vertexBuffer.NativePtr == IntPtr.Zero)
+		var vertexBufferLength = (ulong)(mesh.Vertices.Length * Marshal.SizeOf<Vector4>());
+		var vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+		if (vertexBuffer.NativePtr == IntPtr.Zero)
 		{
 			throw new InvalidOperationException("Failed to allocate vertex buffer.");
 		}
-		BufferHelper.CopyToBuffer(_mesh.Vertices, _vertexBuffer);
-		_vertexBuffer.DidModifyRange(new NSRange { location = 0, length = vertexBufferLength });
+		BufferHelper.CopyToBuffer(mesh.Vertices, vertexBuffer);
+		vertexBuffer.DidModifyRange(new NSRange { location = 0, length = vertexBufferLength });
 
-		var indexBufferLength = (ulong)(_mesh.Indices.Length * sizeof(uint));
-		_indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
-		if (_indexBuffer.NativePtr == IntPtr.Zero)
+		var indexBufferLength = (ulong)(mesh.Indices.Length * sizeof(uint));
+		var indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+		if (indexBuffer.NativePtr == IntPtr.Zero)
 		{
 			throw new InvalidOperationException("Failed to allocate index buffer.");
 		}
-		BufferHelper.CopyToBuffer(_mesh.Indices, _indexBuffer);
-		_indexBuffer.DidModifyRange(new NSRange { location = 0, length = indexBufferLength });
+		BufferHelper.CopyToBuffer(mesh.Indices, indexBuffer);
+		indexBuffer.DidModifyRange(new NSRange { location = 0, length = indexBufferLength });
+
+		return new MeshResources(vertexBuffer, indexBuffer, (ulong)mesh.Indices.Length);
 	}
 
-	private void CreateDefaultLibrary()
+	private MTLLibrary CreateShaderLibrary(Material material)
 	{
 		var libraryError = new NSError(IntPtr.Zero);
-		if (!_meshLoaded)
-		{
-			throw new InvalidOperationException("Mesh data is not loaded.");
-		}
-
-		var shaderSource = _shaderCompiler.GetShader(_shaderPath);
-		_shaderLibrary = _device.NewLibrary(NSStringHelper.From(shaderSource), new(IntPtr.Zero), ref libraryError);
+		var shaderSource = material.ShaderSource;
+		var library = _device.NewLibrary(NSStringHelper.From(shaderSource), new(IntPtr.Zero), ref libraryError);
 		if (libraryError != IntPtr.Zero)
 		{
 			var description = libraryError.LocalizedDescription.ToManagedString("Unknown error");
 			throw new Exception($"Failed to create library! {description}");
 		}
+
+		return library;
 	}
 
-    private void Draw(MTKViewInstance view)
+	private MaterialResources CreateMaterialResources(Material material)
 	{
+		var library = CreateShaderLibrary(material);
+		var pipeline = CreateRenderPipeline(library);
+
+		var color = new[] { material.Color };
+		var colorBufferLength = (ulong)(Marshal.SizeOf<Vector4>());
+		var colorBuffer = _device.NewBuffer(colorBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+		if (colorBuffer.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to allocate material buffer.");
+		}
+		BufferHelper.CopyToBuffer(color, colorBuffer);
+		colorBuffer.DidModifyRange(new NSRange { location = 0, length = colorBufferLength });
+
+		return new MaterialResources(pipeline, colorBuffer);
+	}
+
+	private MeshResources EnsureMeshResources(Mesh mesh)
+	{
+		if (!_meshResources.TryGetValue(mesh, out var resources))
+		{
+			resources = UploadMesh(mesh);
+			_meshResources[mesh] = resources;
+		}
+
+		return resources;
+	}
+
+	private MaterialResources EnsureMaterialResources(Material material)
+	{
+		if (!_materialResources.TryGetValue(material, out var resources))
+		{
+			resources = CreateMaterialResources(material);
+			_materialResources[material] = resources;
+		}
+
+		return resources;
+	}
+
+	private void ProcessPendingCommands()
+	{
+		while (_pendingCommands.TryDequeue(out var command))
+		{
+			switch (command.Type)
+			{
+				case RenderCommandType.CreateMesh:
+					HandleCreateMeshCommand(command);
+					break;
+				case RenderCommandType.CreateMaterial:
+					HandleCreateMaterialCommand(command);
+					break;
+				case RenderCommandType.DrawMesh:
+					HandleDrawMeshCommand(command);
+					break;
+				default:
+					throw new ArgumentOutOfRangeException(nameof(command.Type), command.Type, "Unsupported render command type.");
+			}
+		}
+	}
+
+	private void HandleCreateMeshCommand(RenderCommand command)
+	{
+		var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
+		if (payload.MeshHandle.Target is not Mesh mesh)
+		{
+			throw new InvalidOperationException("Mesh payload target was null.");
+		}
+		payload.MeshHandle.Free();
+		EnsureMeshResources(mesh);
+	}
+
+	private void HandleCreateMaterialCommand(RenderCommand command)
+	{
+		var payload = command.ReadPayload<RenderCommand.CreateMaterialPayload>();
+		if (payload.MaterialHandle.Target is not Material material)
+		{
+			throw new InvalidOperationException("Material payload target was null.");
+		}
+		payload.MaterialHandle.Free();
+		EnsureMaterialResources(material);
+	}
+
+	private void HandleDrawMeshCommand(RenderCommand command)
+	{
+		var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
+		if (payload.MeshHandle.Target is not Mesh mesh)
+		{
+			throw new InvalidOperationException("Mesh payload target was null.");
+		}
+		if (payload.MaterialHandle.Target is not Material material)
+		{
+			throw new InvalidOperationException("Material payload target was null.");
+		}
+		payload.MeshHandle.Free();
+		payload.MaterialHandle.Free();
+		EnsureMeshResources(mesh);
+		EnsureMaterialResources(material);
+		_drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
+	}
+
+	private void Draw(MTKViewInstance view)
+	{
+		_updateCallback();
+		ProcessPendingCommands();
+
 		if (_commandQueue.NativePtr == IntPtr.Zero)
 		{
+			_drawCommands.Clear();
+			ArenaAllocator.RenderCommands.Reset();
+			return;
+		}
+
+		if (_drawCommands.Count == 0)
+		{
+			ArenaAllocator.RenderCommands.Reset();
 			return;
 		}
 
 		var renderPassDescriptor = view.CurrentRenderPassDescriptor;
 		if (renderPassDescriptor.NativePtr == IntPtr.Zero)
 		{
+			_drawCommands.Clear();
+			ArenaAllocator.RenderCommands.Reset();
 			return;
 		}
 
@@ -268,18 +410,30 @@ public class WolfRendererMetal: IRenderer
 		var drawable = view.CurrentDrawable;
 		if (drawable.NativePtr == IntPtr.Zero)
 		{
+			_drawCommands.Clear();
+			ArenaAllocator.RenderCommands.Reset();
 			return;
 		}
 
 		var commandBuffer = _commandQueue.CommandBuffer();
 		var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
-		encoder.SetRenderPipelineState(_pipelineState);
-		encoder.SetVertexBuffer(_vertexBuffer, 0, 0);
-		encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, _indexCount, MTLIndexType.UInt32, _indexBuffer, 0);
-		
+
+		foreach (var drawCommand in _drawCommands)
+		{
+			var meshResources = EnsureMeshResources(drawCommand.Mesh);
+			var materialResources = EnsureMaterialResources(drawCommand.Material);
+
+			encoder.SetRenderPipelineState(materialResources.PipelineState);
+			encoder.SetVertexBuffer(meshResources.VertexBuffer, 0, 0);
+			encoder.SetFragmentBuffer(materialResources.ColorBuffer, 0, 0);
+			encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, meshResources.IndexCount, MTLIndexType.UInt32, meshResources.IndexBuffer, 0);
+		}
+
 		encoder.EndEncoding();
 		commandBuffer.PresentDrawable(drawable);
 		commandBuffer.Commit();
+		_drawCommands.Clear();
+		ArenaAllocator.RenderCommands.Reset();
 	}
 
     private void ResizeDrawable(MTKViewInstance view, NSRect rect)

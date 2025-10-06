@@ -15,8 +15,9 @@ class Program
 
 		if (OperatingSystem.IsMacOS())
 		{
+			var shaderCompiler = provider.GetRequiredService<IShaderCompiler>();
 			var renderer = ActivatorUtilities.CreateInstance<WolfRendererMetal>(provider, ScreenWidth, ScreenHeight);
-			var game = new Game(renderer);
+			var game = new Game(renderer, shaderCompiler);
 			game.Run();
         }
 		else if (OperatingSystem.IsWindows())
