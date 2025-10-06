@@ -382,22 +382,20 @@ public class WolfRendererMetal: IRenderer
 
 		if (_commandQueue.NativePtr == IntPtr.Zero)
 		{
-			_drawCommands.Clear();
-			ArenaAllocator.RenderCommands.Reset();
+			Cleanup();
 			return;
 		}
 
 		if (_drawCommands.Count == 0)
 		{
-			ArenaAllocator.RenderCommands.Reset();
+			Cleanup();
 			return;
 		}
 
 		var renderPassDescriptor = view.CurrentRenderPassDescriptor;
 		if (renderPassDescriptor.NativePtr == IntPtr.Zero)
 		{
-			_drawCommands.Clear();
-			ArenaAllocator.RenderCommands.Reset();
+			Cleanup();
 			return;
 		}
 
@@ -410,8 +408,7 @@ public class WolfRendererMetal: IRenderer
 		var drawable = view.CurrentDrawable;
 		if (drawable.NativePtr == IntPtr.Zero)
 		{
-			_drawCommands.Clear();
-			ArenaAllocator.RenderCommands.Reset();
+			Cleanup();
 			return;
 		}
 
@@ -432,8 +429,15 @@ public class WolfRendererMetal: IRenderer
 		encoder.EndEncoding();
 		commandBuffer.PresentDrawable(drawable);
 		commandBuffer.Commit();
-		_drawCommands.Clear();
-		ArenaAllocator.RenderCommands.Reset();
+		
+		Cleanup();
+		return;
+
+		void Cleanup()
+		{
+			_drawCommands.Clear();
+			ArenaAllocator.RenderCommands.Reset();
+		}
 	}
 
     private void ResizeDrawable(MTKViewInstance view, NSRect rect)

@@ -18,7 +18,7 @@ class Program
 			var shaderCompiler = provider.GetRequiredService<IShaderCompiler>();
 			var renderer = ActivatorUtilities.CreateInstance<WolfRendererMetal>(provider, ScreenWidth, ScreenHeight);
 			var game = new Game(renderer, shaderCompiler);
-			game.Run();
+			renderer.Run(game.Update);
         }
 		else if (OperatingSystem.IsWindows())
 		{
