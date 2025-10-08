@@ -29,6 +29,7 @@
       <PackageReference Include="Silk.NET.Direct3D12" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Input" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Maths" Version="2.22.0" />
+      <PackageReference Include="Silk.NET.SDL" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Windowing" Version="2.22.0" />
       <PackageReference Include="Slangc.NET" Version="2025.17.2" />
     </ItemGroup>

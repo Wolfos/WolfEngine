@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 
@@ -9,9 +10,10 @@ public class Game
     private readonly IRenderer _renderer;
     private readonly IShaderCompiler _shaderCompiler;
 
-    private Mesh? _mesh;
-    private Material? _material;
+    private Mesh _mesh;
+    private Material _material;
     private bool _initialized;
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
     public Game(IRenderer renderer, IShaderCompiler shaderCompiler)
     {
@@ -31,7 +33,10 @@ public class Game
             return;
         }
 
-        _renderer.SubmitCommand(RenderCommand.DrawMesh(_mesh, _material, Matrix4x4.Identity));
+        var time = (float)_stopwatch.Elapsed.TotalSeconds;
+        var transform = Matrix4x4.CreateRotationY(time * 0.5f);
+
+        _renderer.SubmitCommand(RenderCommand.DrawMesh(_mesh!, _material!, transform));
     }
 
     private void InitializeContent()

@@ -422,6 +422,14 @@ public class WolfRendererMetal: IRenderer
 
 			encoder.SetRenderPipelineState(materialResources.PipelineState);
 			encoder.SetVertexBuffer(meshResources.VertexBuffer, 0, 0);
+			unsafe
+			{
+			    var transformCopy = drawCommand.Transform;
+			    var transformPtr = stackalloc Matrix4x4[1];
+			    transformPtr[0] = transformCopy;
+			    var transformSize = (ulong)sizeof(Matrix4x4);
+			    encoder.SetVertexBytes((IntPtr)transformPtr, transformSize, 1);
+			}
 			encoder.SetFragmentBuffer(materialResources.ColorBuffer, 0, 0);
 			encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, meshResources.IndexCount, MTLIndexType.UInt32, meshResources.IndexBuffer, 0);
 		}
