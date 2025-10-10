@@ -26,6 +26,10 @@ public unsafe class WolfRendererMetal : IRenderer
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly Dictionary<Material, MaterialResources> _materialResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
+    private Camera _camera = null!;
+    private bool _hasCamera;
+    private MTLTexture _depthTexture;
+    private MTLDepthStencilState _depthState;
     private readonly MTLClearColor _clearColor = new() { red = 0.392, green = 0.584, blue = 0.929, alpha = 1.0 };
     private readonly Sdl _sdl;
 
@@ -70,6 +74,20 @@ public unsafe class WolfRendererMetal : IRenderer
         public MTLRenderPipelineState PipelineState { get; }
 
         public MTLBuffer ColorBuffer { get; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct VertexData
+    {
+        public Vector4 Position;
+        public Vector4 Normal;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CameraParams
+    {
+        public Matrix4x4 ViewProjection;
+        public Vector4 CameraPosition;
     }
 
     private readonly struct DrawInstruction
@@ -120,6 +138,7 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             CreateDevice();
             CreateCommandQueue();
+            CreateDepthState();
             InitializeWindow();
             MainLoop();
         }
@@ -241,6 +260,20 @@ public unsafe class WolfRendererMetal : IRenderer
         }
     }
 
+    private void CreateDepthState()
+    {
+        var descriptor = new MTLDepthStencilDescriptor();
+        descriptor.DepthCompareFunction = MTLCompareFunction.Less;
+        descriptor.DepthWriteEnabled = true;
+
+        _depthState = _device.NewDepthStencilState(descriptor);
+        descriptor.Dispose();
+        if (_depthState.NativePtr == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to create depth-stencil state.");
+        }
+    }
+
     private void UpdateDrawableSize()
     {
         if (_window is null)
@@ -268,6 +301,39 @@ public unsafe class WolfRendererMetal : IRenderer
 
         var size = new NSPoint(drawableWidth, drawableHeight);
         ObjCNative.ObjcMsgSendDrawableSize(_metalLayer.NativePtr, DrawableSizeSelector.SelPtr, size);
+
+        CreateDepthTexture(drawableWidth, drawableHeight);
+    }
+
+    private void CreateDepthTexture(int width, int height)
+    {
+        if (_device.NativePtr == IntPtr.Zero || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        if (_depthTexture.NativePtr != IntPtr.Zero)
+        {
+            _depthTexture.Dispose();
+            _depthTexture = default;
+        }
+
+        var descriptor = new MTLTextureDescriptor();
+        descriptor.TextureType = MTLTextureType.Type2D;
+        descriptor.PixelFormat = MTLPixelFormat.Depth32Float;
+        descriptor.Width = (ulong)width;
+        descriptor.Height = (ulong)height;
+        descriptor.MipmapLevelCount = 1;
+        descriptor.SampleCount = 1;
+        descriptor.StorageMode = MTLStorageMode.Private;
+        descriptor.Usage = MTLTextureUsage.RenderTarget;
+
+        _depthTexture = _device.NewTexture(descriptor);
+        descriptor.Dispose();
+        if (_depthTexture.NativePtr == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to create depth texture.");
+        }
     }
 
     private bool RenderFrame()
@@ -283,10 +349,25 @@ public unsafe class WolfRendererMetal : IRenderer
             return false;
         }
 
+        if (_hasCamera == false)
+        {
+            _drawCommands.Clear();
+            ArenaAllocator.RenderCommands.Reset();
+            return false;
+        }
+
+        var camera = _camera;
+        var viewProjection = Matrix4x4.Multiply(camera.Transform, camera.Perspective);
+
         UpdateDrawableSize();
 
         var drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
         if (drawablePtr == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (_depthTexture.NativePtr == IntPtr.Zero)
         {
             return false;
         }
@@ -300,6 +381,12 @@ public unsafe class WolfRendererMetal : IRenderer
         colorAttachment.StoreAction = MTLStoreAction.Store;
         colorAttachment.ClearColor = _clearColor;
         renderPassDescriptor.ColorAttachments.SetObject(colorAttachment, 0);
+
+        var depthAttachment = renderPassDescriptor.DepthAttachment;
+        depthAttachment.Texture = _depthTexture;
+        depthAttachment.LoadAction = MTLLoadAction.Clear;
+        depthAttachment.StoreAction = MTLStoreAction.DontCare;
+        depthAttachment.ClearDepth = 1.0;
 
         var commandBuffer = _commandQueue.CommandBuffer();
         var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
@@ -318,6 +405,13 @@ public unsafe class WolfRendererMetal : IRenderer
             encoder.SetViewport(viewport);
         }
 
+        if (_depthState.NativePtr != IntPtr.Zero)
+        {
+            encoder.SetDepthStencilState(_depthState);
+        }
+        encoder.SetCullMode(MTLCullMode.Back);
+        encoder.SetFrontFacingWinding(MTLWinding.Clockwise);
+
         foreach (var drawCommand in _drawCommands)
         {
             var meshResources = EnsureMeshResources(drawCommand.Mesh);
@@ -329,8 +423,18 @@ public unsafe class WolfRendererMetal : IRenderer
             var transformCopy = drawCommand.Transform;
             var transformPtr = stackalloc Matrix4x4[1];
             transformPtr[0] = transformCopy;
-            var transformSize = (ulong)sizeof(Matrix4x4);
-            encoder.SetVertexBytes((IntPtr)transformPtr, transformSize, 1);
+            var matrixSize = (ulong)sizeof(Matrix4x4);
+            encoder.SetVertexBytes((IntPtr)transformPtr, matrixSize, 1);
+
+            var cameraParamsPtr = stackalloc CameraParams[1];
+            cameraParamsPtr[0] = new CameraParams
+            {
+                ViewProjection = viewProjection,
+                CameraPosition = new Vector4(camera.Position, 1.0f)
+            };
+            var cameraParamsSize = (ulong)sizeof(CameraParams);
+            encoder.SetVertexBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
+            encoder.SetFragmentBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
 #pragma warning restore CA2014
             encoder.SetFragmentBuffer(materialResources.ColorBuffer, 0, 0);
             encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, meshResources.IndexCount, MTLIndexType.UInt32, meshResources.IndexBuffer, 0);
@@ -347,6 +451,18 @@ public unsafe class WolfRendererMetal : IRenderer
 
     private void Shutdown()
     {
+        if (_depthTexture.NativePtr != IntPtr.Zero)
+        {
+            _depthTexture.Dispose();
+            _depthTexture = default;
+        }
+
+        if (_depthState.NativePtr != IntPtr.Zero)
+        {
+            _depthState.Dispose();
+            _depthState = default;
+        }
+
         if (_metalView is not null)
         {
             _sdl.MetalDestroyView(_metalView);
@@ -403,6 +519,7 @@ public unsafe class WolfRendererMetal : IRenderer
         pipeline.VertexFunction = vertexShader;
         pipeline.FragmentFunction = fragmentShader;
         pipeline.VertexDescriptor = CreateVertexDescriptor();
+        pipeline.DepthAttachmentPixelFormat = MTLPixelFormat.Depth32Float;
 
         var colorAttachment = pipeline.ColorAttachments.Object(0);
         colorAttachment.PixelFormat = MTLPixelFormat.BGRA8Unorm;
@@ -429,9 +546,15 @@ public unsafe class WolfRendererMetal : IRenderer
         positionAttribute.BufferIndex = 0;
         attributes.SetObject(positionAttribute, 0);
 
+        var normalAttribute = attributes.Object(1);
+        normalAttribute.Format = MTLVertexFormat.Float4;
+        normalAttribute.Offset = (ulong)Marshal.SizeOf<Vector4>();
+        normalAttribute.BufferIndex = 0;
+        attributes.SetObject(normalAttribute, 1);
+
         var layouts = descriptor.Layouts;
         var layout = layouts.Object(0);
-        layout.Stride = (ulong)Marshal.SizeOf<Vector4>();
+        layout.Stride = (ulong)Marshal.SizeOf<VertexData>();
         layout.StepFunction = MTLVertexStepFunction.PerVertex;
         layout.StepRate = 1;
         layouts.SetObject(layout, 0);
@@ -446,13 +569,30 @@ public unsafe class WolfRendererMetal : IRenderer
             throw new InvalidOperationException("Mesh must contain vertex data.");
         }
 
-        var vertexBufferLength = (ulong)(mesh.Vertices.Length * Marshal.SizeOf<Vector4>());
+        if (mesh.Normals.Length != mesh.Vertices.Length)
+        {
+            throw new InvalidOperationException("Mesh must contain a normal for each vertex.");
+        }
+
+        var vertexCount = mesh.Vertices.Length;
+        var vertexData = new VertexData[vertexCount];
+        for (var i = 0; i < vertexCount; i++)
+        {
+            var normal = mesh.Normals[i];
+            vertexData[i] = new VertexData
+            {
+                Position = mesh.Vertices[i],
+                Normal = new Vector4(normal, 0.0f)
+            };
+        }
+
+        var vertexBufferLength = (ulong)(vertexData.Length * Marshal.SizeOf<VertexData>());
         var vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
         if (vertexBuffer.NativePtr == IntPtr.Zero)
         {
             throw new InvalidOperationException("Failed to allocate vertex buffer.");
         }
-        BufferHelper.CopyToBuffer(mesh.Vertices, vertexBuffer);
+        BufferHelper.CopyToBuffer(vertexData, vertexBuffer);
         vertexBuffer.DidModifyRange(new NSRange { location = 0, length = vertexBufferLength });
 
         var indexBufferLength = (ulong)(mesh.Indices.Length * sizeof(uint));
@@ -504,6 +644,9 @@ public unsafe class WolfRendererMetal : IRenderer
                 case RenderCommandType.DrawMesh:
                     HandleDrawMeshCommand(command);
                     break;
+                case RenderCommandType.SetCamera:
+                    HandleSetCameraCommand(command);
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(command.Type), command.Type, "Unsupported render command type.");
             }
@@ -548,6 +691,18 @@ public unsafe class WolfRendererMetal : IRenderer
         EnsureMeshResources(mesh);
         EnsureMaterialResources(material);
         _drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
+    }
+
+    private void HandleSetCameraCommand(RenderCommand command)
+    {
+        var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
+        if (payload.CameraHandle.Target is not Camera camera)
+        {
+            throw new InvalidOperationException("Camera payload target was null.");
+        }
+        payload.CameraHandle.Free();
+        _camera = camera;
+        _hasCamera = true;
     }
 
     private static bool NearlyEqual(double a, double b)

@@ -7,7 +7,8 @@ public enum RenderCommandType
 {
     CreateMesh,
     CreateMaterial,
-    DrawMesh
+    DrawMesh,
+    SetCamera
 }
 
 public readonly struct RenderCommand
@@ -50,6 +51,15 @@ public readonly struct RenderCommand
         return new RenderCommand(RenderCommandType.DrawMesh, pointer);
     }
 
+    public static RenderCommand SetCamera(Camera camera)
+    {
+        ArgumentNullException.ThrowIfNull(camera);
+
+        var payload = new SetCameraPayload(GCHandle.Alloc(camera));
+        var pointer = ArenaAllocator.RenderCommands.Store(payload);
+        return new RenderCommand(RenderCommandType.SetCamera, pointer);
+    }
+
     public T ReadPayload<T>() where T : struct
     {
         return ArenaAllocator.RenderCommands.Read<T>(Payload);
@@ -89,5 +99,15 @@ public readonly struct RenderCommand
         public GCHandle MaterialHandle { get; }
 
         public Matrix4x4 Transform { get; }
+    }
+
+    public readonly struct SetCameraPayload
+    {
+        public SetCameraPayload(GCHandle cameraHandle)
+        {
+            CameraHandle = cameraHandle;
+        }
+
+        public GCHandle CameraHandle { get; }
     }
 }
