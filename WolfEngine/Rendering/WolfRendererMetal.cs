@@ -42,6 +42,7 @@ public unsafe class WolfRendererMetal : IRenderer
     private bool _hasDrawableSize;
     private double _drawableWidth;
     private double _drawableHeight;
+    private Action _startupCallback = static () => { };
     private Action _updateCallback = static () => { };
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
@@ -130,8 +131,9 @@ public unsafe class WolfRendererMetal : IRenderer
         _pendingCommands.Enqueue(command);
     }
 
-    public void Run(Action update)
+    public void Run(Action startup, Action update)
     {
+        _startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
         _updateCallback = update ?? throw new ArgumentNullException(nameof(update));
 
         try
@@ -152,6 +154,8 @@ public unsafe class WolfRendererMetal : IRenderer
     {
         _isRunning = true;
         var @event = new Event();
+
+        _startupCallback();
 
         while (_isRunning)
         {

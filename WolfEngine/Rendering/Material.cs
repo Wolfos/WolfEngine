@@ -18,7 +18,7 @@ public sealed class Material
         }
 
         ShaderPath = shaderPath;
-        ShaderSource = shaderCompiler.GetShader(shaderPath);
+        ShaderSource = shaderCompiler.GetMetalSource(shaderPath);
     }
 
     public string ShaderPath { get; }

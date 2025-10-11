@@ -11,7 +11,6 @@ public class Game
     private Mesh _mesh;
     private Material _material;
     private Camera _camera;
-    private bool _initialized;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
     public Game(IRenderer renderer, IMaterialFactory materialFactory)
@@ -19,16 +18,11 @@ public class Game
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _materialFactory = materialFactory;
 
-        _renderer.Run(Update);
+        _renderer.Run(Startup, Update);
     }
 
-    public void Update()
+    private void Update()
     {
-        if (_initialized == false)
-        {
-            InitializeContent();
-        }
-
         if (_mesh is null || _material is null)
         {
             return;
@@ -38,6 +32,11 @@ public class Game
         var transform = Matrix4x4.CreateRotationY(time * 0.5f);
 
         _renderer.SubmitCommand(RenderCommand.DrawMesh(_mesh!, _material!, transform));
+    }
+
+    private void Startup()
+    {
+        InitializeContent();
     }
 
     private void InitializeContent()
@@ -51,8 +50,6 @@ public class Game
         _renderer.SubmitCommand(RenderCommand.CreateMesh(_mesh));
         _renderer.SubmitCommand(RenderCommand.CreateMaterial(_material));
         _renderer.SubmitCommand(RenderCommand.SetCamera(_camera));
-
-        _initialized = true;
     }
 
     private static Camera CreateCamera()

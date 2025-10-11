@@ -4,8 +4,7 @@ namespace WolfEngine;
 
 class Program
 {
-
-    static void Main(string[] args)
+    private static void Main()
     {
         var services = new ServiceCollection();
         ConfigureServices(services);

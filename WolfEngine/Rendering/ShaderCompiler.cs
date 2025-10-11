@@ -5,17 +5,21 @@ namespace WolfEngine;
 
 public interface IShaderCompiler
 {
-	string GetShader(string filename);
+	string GetMetalSource(string filename);
 }
 
 public class ShaderCompiler : IShaderCompiler
 {
-	public string GetShader(string filename)
+	private Dictionary<string, string> _cachedShaders = new();
+	
+	public string GetMetalSource(string filename)
 	{
 		if (string.IsNullOrWhiteSpace(filename))
 		{
 			throw new ArgumentException("Shader filename cannot be null or empty.", nameof(filename));
 		}
+
+		if (_cachedShaders.TryGetValue(filename, out var source)) return source;
 
 		var shaderPath = Path.IsPathRooted(filename)
 			? filename
@@ -38,6 +42,8 @@ public class ShaderCompiler : IShaderCompiler
 		};
 
 		var compiled = SlangCompiler.Compile(args);
-		return Encoding.UTF8.GetString(compiled);
+		var metalSource = Encoding.UTF8.GetString(compiled);
+		_cachedShaders.Add(filename, metalSource);
+		return metalSource;
 	}
 }
