@@ -58,10 +58,10 @@ public unsafe class WolfRendererD3D
     private bool _isRunning;
     private Vector2D<int> _framebufferSize;
 
-    public WolfRendererD3D(int width, int height, IShaderCompiler shaderCompiler)
+    public WolfRendererD3D(IShaderCompiler shaderCompiler)
     {
-        _width = width;
-        _height = height;
+        _width = 1280;
+        _height = 720;
         _shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
         _sdl = Sdl.GetApi();
 

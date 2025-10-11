@@ -8,7 +8,11 @@ namespace WolfEngine;
 
 public class Mesh
 {
-    public Mesh(string filename)
+    public Vector4[] Vertices { get; }
+    public uint[] Indices { get; }
+    public Vector3[] Normals { get; }
+    
+    public unsafe Mesh(string filename)
     {
         var assimp = Assimp.GetApi();
         if (string.IsNullOrWhiteSpace(filename))
@@ -29,69 +33,66 @@ public class Mesh
                                             | PostProcessSteps.JoinIdenticalVertices
                                             | PostProcessSteps.PreTransformVertices;
 
-        unsafe
+        var scene = assimp.ImportFile(fullPath, (uint)postProcess);
+        if (scene == null)
         {
-            Scene* scene = assimp.ImportFile(fullPath, (uint)postProcess);
-            if (scene == null)
+            throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
+        }
+
+        try
+        {
+            if (scene->MNumMeshes == 0)
             {
-                throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
+                throw new InvalidOperationException($"No meshes were found in '{fullPath}'.");
             }
 
-            try
+            var mesh = scene->MMeshes[0];
+            if (mesh->MVertices == null)
             {
-                if (scene->MNumMeshes == 0)
-                {
-                    throw new InvalidOperationException($"No meshes were found in '{fullPath}'.");
-                }
+                throw new InvalidOperationException($"Mesh '{fullPath}' does not contain position data.");
+            }   
 
-                var mesh = scene->MMeshes[0];
-                if (mesh->MVertices == null)
-                {
-                    throw new InvalidOperationException($"Mesh '{fullPath}' does not contain position data.");
-                }
-
-                var vertexCount = mesh->MNumVertices;
-                var vertices = new Vector4[vertexCount];
-                var normals = new Vector3[vertexCount];
-                var rawVertices = mesh->MVertices;
-                var rawNormals = mesh->MNormals;
-                for (var i = 0; i < vertexCount; i++)
-                {
-                    var position = rawVertices[i];
-                    vertices[i] = new Vector4(position.X, position.Y, position.Z, 1.0f);
-                    if (rawNormals is not null)
-                    {
-                        var normal = rawNormals[i];
-                        normals[i] = Vector3.Normalize(new Vector3(normal.X, normal.Y, normal.Z));
-                    }
-                }
-
-                var indexList = new List<uint>((int)(mesh->MNumFaces * 3));
-                var faces = mesh->MFaces;
-                for (var faceIndex = 0; faceIndex < mesh->MNumFaces; faceIndex++)
-                {
-                    var face = faces[faceIndex];
-                    for (var i = 0; i < face.MNumIndices; i++)
-                    {
-                        indexList.Add(face.MIndices[i]);
-                    }
-                }
-
-                if (indexList.Count == 0)
-                {
-                    throw new InvalidOperationException($"Mesh '{fullPath}' does not contain index data.");
-                }
-
-                Vertices = vertices;
-                Indices = indexList.ToArray();
-                Normals = rawNormals is not null
-                    ? normals
-                    : GenerateVertexNormals(vertices, Indices);
-            }
-            finally
+            var vertexCount = mesh->MNumVertices;
+            var vertices = new Vector4[vertexCount];
+            var normals = new Vector3[vertexCount];
+            var rawVertices = mesh->MVertices;
+            var rawNormals = mesh->MNormals;
+            for (var i = 0; i < vertexCount; i++)
             {
-                assimp.ReleaseImport(scene);
+                var position = rawVertices[i];
+                vertices[i] = new Vector4(position.X, position.Y, position.Z, 1.0f);
+                if (rawNormals is not null)
+                {
+                    var normal = rawNormals[i];
+                    normals[i] = Vector3.Normalize(new Vector3(normal.X, normal.Y, normal.Z));
+                }
             }
+
+            var indexList = new List<uint>((int)(mesh->MNumFaces * 3));
+            var faces = mesh->MFaces;
+            for (var faceIndex = 0; faceIndex < mesh->MNumFaces; faceIndex++)
+            {
+                var face = faces[faceIndex];
+                for (var i = 0; i < face.MNumIndices; i++)
+                {
+                    indexList.Add(face.MIndices[i]);
+                }
+            }
+
+            if (indexList.Count == 0)
+            {
+                throw new InvalidOperationException($"Mesh '{fullPath}' does not contain index data.");
+            }
+
+            Vertices = vertices;
+            Indices = indexList.ToArray();
+            Normals = rawNormals is not null
+                ? normals
+                : GenerateVertexNormals(vertices, Indices);
+        }
+        finally
+        {
+            assimp.ReleaseImport(scene);
         }
     }
     
@@ -124,9 +125,6 @@ public class Mesh
         }
     }
 
-    public Vector4[] Vertices { get; }
-    public uint[] Indices { get; }
-    public Vector3[] Normals { get; }
 
     private static Vector3[] GenerateVertexNormals(IReadOnlyList<Vector4> vertices, IReadOnlyList<uint> indices)
     {

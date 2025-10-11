@@ -106,15 +106,15 @@ public unsafe class WolfRendererMetal : IRenderer
         public Matrix4x4 Transform { get; }
     }
 
-    public WolfRendererMetal(int screenWidth, int screenHeight, IShaderCompiler shaderCompiler)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler)
     {
         if (OperatingSystem.IsMacOS() == false)
         {
             throw new PlatformNotSupportedException("Metal renderer is only supported on macOS.");
         }
 
-        _width = screenWidth;
-        _height = screenHeight;
+        _width = 1280;
+        _height = 720;
         _shaderCompiler = shaderCompiler;
 
         ObjectiveC.LinkMetal();

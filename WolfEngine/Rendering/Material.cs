@@ -5,7 +5,7 @@ namespace WolfEngine;
 
 public sealed class Material
 {
-    public Material(IShaderCompiler shaderCompiler, string shaderPath, Vector4 color)
+    public Material(IShaderCompiler shaderCompiler, string shaderPath)
     {
         if (shaderCompiler is null)
         {
@@ -18,7 +18,6 @@ public sealed class Material
         }
 
         ShaderPath = shaderPath;
-        Color = color;
         ShaderSource = shaderCompiler.GetShader(shaderPath);
     }
 
@@ -26,5 +25,5 @@ public sealed class Material
 
     public string ShaderSource { get; }
 
-    public Vector4 Color { get; }
+    public Vector4 Color { get; set; }
 }

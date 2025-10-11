@@ -6,7 +6,7 @@ namespace WolfEngine;
 public class Game
 {
     private readonly IRenderer _renderer;
-    private readonly IShaderCompiler _shaderCompiler;
+    private readonly IMaterialFactory _materialFactory;
 
     private Mesh _mesh;
     private Material _material;
@@ -14,10 +14,12 @@ public class Game
     private bool _initialized;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
-    public Game(IRenderer renderer, IShaderCompiler shaderCompiler)
+    public Game(IRenderer renderer, IMaterialFactory materialFactory)
     {
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-        _shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+        _materialFactory = materialFactory;
+
+        _renderer.Run(Update);
     }
 
     public void Update()
@@ -42,7 +44,8 @@ public class Game
     {
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
         _mesh = new Mesh(meshPath);
-        _material = new Material(_shaderCompiler, "default.slang", new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+        _material = _materialFactory.GetMaterial("default.slang");
+        _material.Color = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         _camera = CreateCamera();
 
         _renderer.SubmitCommand(RenderCommand.CreateMesh(_mesh));
