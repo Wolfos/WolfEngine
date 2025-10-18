@@ -81,7 +81,6 @@ public class ShaderCompiler : IShaderCompiler
 			throw new FileNotFoundException($"Shader file '{shaderPath}' was not found.", shaderPath);
 		}
 
-		var stage = ResolveStage(profile);
 
 		var args = new List<string>
 		{
@@ -89,32 +88,11 @@ public class ShaderCompiler : IShaderCompiler
 			"-target", "dxil",
 			"-profile", profile,
 			"-entry", entryPoint,
-			"-stage", stage,
 			"-o", "-"
 		};
 
 		var compiled = SlangCompiler.Compile(args.ToArray());
 		_cachedDxil.Add(key, compiled);
 		return compiled;
-	}
-
-	private static string ResolveStage(string profile)
-	{
-		if (profile.StartsWith("vs", StringComparison.OrdinalIgnoreCase))
-		{
-			return "vertex";
-		}
-
-		if (profile.StartsWith("ps", StringComparison.OrdinalIgnoreCase))
-		{
-			return "fragment";
-		}
-
-		if (profile.StartsWith("cs", StringComparison.OrdinalIgnoreCase))
-		{
-			return "compute";
-		}
-
-		throw new ArgumentException($"Unsupported shader profile '{profile}'.", nameof(profile));
 	}
 }
