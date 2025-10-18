@@ -8,11 +8,11 @@
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-      <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-      <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -20,42 +20,44 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
-      <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-      <PackageReference Include="SharpMetal" Version="1.0.0-preview21" />
-      <PackageReference Include="Silk.NET.Assimp" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Core" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Direct3D12" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Input" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Maths" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.SDL" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Windowing" Version="2.22.0" />
-      <PackageReference Include="Slangc.NET" Version="2025.17.2" />
+        <PackageReference Include="ImGui.NET" Version="1.91.6.1"/>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1"/>
+        <PackageReference Include="SharpMetal" Version="1.0.0-preview21"/>
+        <PackageReference Include="Silk.NET.Assimp" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Core" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Direct3D12" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Input" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Maths" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.SDL" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Windowing" Version="2.22.0"/>
+        <PackageReference Include="Slangc.NET" Version="2025.17.2"/>
     </ItemGroup>
 
     <ItemGroup>
-      <None Update="Shaders\default.slang">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
-      <None Update="Shaders\triangle.slang">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
-      <None Update="Models\Monkey.obj">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-      <None Update="Models\Monkey.mtl">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-      <None Update="Binaries\dxcompiler.dll">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
-      <None Update="Binaries\dxil.dll">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
+        <None Update="Shaders\default.slang">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\triangle.slang">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Models\Monkey.obj">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Models\Monkey.mtl">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Binaries\dxcompiler.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <TargetPath>dxcompiler.dll</TargetPath>
+        </None>
+        <None Update="Binaries\dxil.dll">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <TargetPath>dxil.dll</TargetPath>
+        </None>
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Binaries\" />
+        <Folder Include="Binaries\"/>
     </ItemGroup>
 
 </Project>
