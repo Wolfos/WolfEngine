@@ -7,16 +7,18 @@ public class Game
 {
     private readonly IRenderer _renderer;
     private readonly IMaterialFactory _materialFactory;
+    private readonly IRenderCommandFactory _renderCommandFactory;
 
     private Mesh _mesh;
     private Material _material;
     private Camera _camera;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
-    public Game(IRenderer renderer, IMaterialFactory materialFactory)
+    public Game(IRenderer renderer, IMaterialFactory materialFactory, IRenderCommandFactory renderCommandFactory)
     {
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _materialFactory = materialFactory;
+        _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
 
         _renderer.Run(Startup, Update);
     }
@@ -31,7 +33,7 @@ public class Game
         var time = (float)_stopwatch.Elapsed.TotalSeconds;
         var transform = Matrix4x4.CreateRotationY(time * 0.5f);
 
-        _renderer.SubmitCommand(RenderCommand.DrawMesh(_mesh!, _material!, transform));
+        _renderer.SubmitCommand(_renderCommandFactory.DrawMesh(_mesh!, _material!, transform));
     }
 
     private void Startup()
@@ -47,9 +49,9 @@ public class Game
         _material.Color = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         _camera = CreateCamera();
 
-        _renderer.SubmitCommand(RenderCommand.CreateMesh(_mesh));
-        _renderer.SubmitCommand(RenderCommand.CreateMaterial(_material));
-        _renderer.SubmitCommand(RenderCommand.SetCamera(_camera));
+        _renderer.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));
+        _renderer.SubmitCommand(_renderCommandFactory.CreateMaterial(_material));
+        _renderer.SubmitCommand(_renderCommandFactory.SetCamera(_camera));
     }
 
     private static Camera CreateCamera()

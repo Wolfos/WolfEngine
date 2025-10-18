@@ -17,6 +17,8 @@ class Program
     {
         services.AddSingleton<IShaderCompiler, ShaderCompiler>();
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
+        services.AddSingleton<IArenaAllocator, ArenaAllocator>();
+        services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
         
         if (OperatingSystem.IsMacOS())
         {

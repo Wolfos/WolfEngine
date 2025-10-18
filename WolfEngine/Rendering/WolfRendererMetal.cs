@@ -22,6 +22,7 @@ public unsafe class WolfRendererMetal : IRenderer
     private readonly int _width;
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
+    private readonly IArenaAllocator _renderCommandAllocator;
     private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly Dictionary<Material, MaterialResources> _materialResources = new();
@@ -107,7 +108,7 @@ public unsafe class WolfRendererMetal : IRenderer
         public Matrix4x4 Transform { get; }
     }
 
-    public WolfRendererMetal(IShaderCompiler shaderCompiler)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator)
     {
         if (OperatingSystem.IsMacOS() == false)
         {
@@ -117,6 +118,7 @@ public unsafe class WolfRendererMetal : IRenderer
         _width = 1280;
         _height = 720;
         _shaderCompiler = shaderCompiler;
+        _renderCommandAllocator = renderCommandAllocator ?? throw new ArgumentNullException(nameof(renderCommandAllocator));
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -349,14 +351,14 @@ public unsafe class WolfRendererMetal : IRenderer
 
         if (_drawCommands.Count == 0)
         {
-            ArenaAllocator.RenderCommands.Reset();
+            _renderCommandAllocator.Reset();
             return false;
         }
 
         if (_hasCamera == false)
         {
             _drawCommands.Clear();
-            ArenaAllocator.RenderCommands.Reset();
+            _renderCommandAllocator.Reset();
             return false;
         }
 
@@ -449,7 +451,7 @@ public unsafe class WolfRendererMetal : IRenderer
         commandBuffer.Commit();
 
         _drawCommands.Clear();
-        ArenaAllocator.RenderCommands.Reset();
+        _renderCommandAllocator.Reset();
         return true;
     }
 

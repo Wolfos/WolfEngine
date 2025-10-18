@@ -13,56 +13,27 @@ public enum RenderCommandType
 
 public readonly struct RenderCommand
 {
-    private RenderCommand(RenderCommandType type, nint payload)
+    private readonly IArenaAllocator _allocator;
+
+    internal RenderCommand(RenderCommandType type, nint payload, IArenaAllocator allocator)
     {
         Type = type;
         Payload = payload;
+        _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
     }
 
     public RenderCommandType Type { get; }
 
     public nint Payload { get; }
 
-    public static RenderCommand CreateMesh(Mesh mesh)
-    {
-        ArgumentNullException.ThrowIfNull(mesh);
-
-        var payload = new CreateMeshPayload(GCHandle.Alloc(mesh));
-        var pointer = ArenaAllocator.RenderCommands.Store(payload);
-        return new RenderCommand(RenderCommandType.CreateMesh, pointer);
-    }
-
-    public static RenderCommand CreateMaterial(Material material)
-    {
-        ArgumentNullException.ThrowIfNull(material);
-
-        var payload = new CreateMaterialPayload(GCHandle.Alloc(material));
-        var pointer = ArenaAllocator.RenderCommands.Store(payload);
-        return new RenderCommand(RenderCommandType.CreateMaterial, pointer);
-    }
-
-    public static RenderCommand DrawMesh(Mesh mesh, Material material, Matrix4x4 transform)
-    {
-        ArgumentNullException.ThrowIfNull(mesh);
-        ArgumentNullException.ThrowIfNull(material);
-
-        var payload = new DrawMeshPayload(GCHandle.Alloc(mesh), GCHandle.Alloc(material), transform);
-        var pointer = ArenaAllocator.RenderCommands.Store(payload);
-        return new RenderCommand(RenderCommandType.DrawMesh, pointer);
-    }
-
-    public static RenderCommand SetCamera(Camera camera)
-    {
-        ArgumentNullException.ThrowIfNull(camera);
-
-        var payload = new SetCameraPayload(GCHandle.Alloc(camera));
-        var pointer = ArenaAllocator.RenderCommands.Store(payload);
-        return new RenderCommand(RenderCommandType.SetCamera, pointer);
-    }
-
     public T ReadPayload<T>() where T : struct
     {
-        return ArenaAllocator.RenderCommands.Read<T>(Payload);
+        if (_allocator is null)
+        {
+            throw new InvalidOperationException("Allocator is not available for this render command.");
+        }
+
+        return _allocator.Read<T>(Payload);
     }
 
     public readonly struct CreateMeshPayload

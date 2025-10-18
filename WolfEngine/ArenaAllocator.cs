@@ -3,14 +3,23 @@ using System.Runtime.InteropServices;
 
 namespace WolfEngine;
 
-internal unsafe class ArenaAllocator
+public interface IArenaAllocator
+{
+    nint Store<T>(T payload) where T : struct;
+
+    T Read<T>(nint pointer) where T : struct;
+
+    void Reset();
+}
+
+internal unsafe class ArenaAllocator : IArenaAllocator
 {
     private const int DefaultBlockSize = 4096;
     private readonly object _lock = new();
     private readonly List<Block> _blocks = new();
     private int _currentBlockIndex = -1;
 
-    private ArenaAllocator()
+    public ArenaAllocator()
     {
     }
 
@@ -18,8 +27,6 @@ internal unsafe class ArenaAllocator
     {
         DisposeUnmanaged();
     }
-
-    public static ArenaAllocator RenderCommands { get; } = new();
 
     public nint Store<T>(T payload) where T : struct
     {
@@ -29,6 +36,7 @@ internal unsafe class ArenaAllocator
         {
             alignment = IntPtr.Size;
         }
+
         var pointer = Allocate(size, alignment);
         Unsafe.Write((void*)pointer, payload);
         return pointer;
@@ -110,6 +118,7 @@ internal unsafe class ArenaAllocator
         {
             NativeMemory.Free((void*)block.Pointer);
         }
+
         _blocks.Clear();
         _currentBlockIndex = -1;
     }
