@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -40,6 +41,49 @@ public unsafe class WolfRendererD3D
         public ComPtr<ID3D12Resource> ColorBuffer { get; }
     }
 
+    private sealed class MeshResources
+    {
+        public MeshResources(
+            ComPtr<ID3D12Resource> vertexBuffer,
+            ComPtr<ID3D12Resource> indexBuffer,
+            VertexBufferView vertexView,
+            IndexBufferView indexView,
+            uint indexCount)
+        {
+            VertexBuffer = vertexBuffer;
+            IndexBuffer = indexBuffer;
+            VertexView = vertexView;
+            IndexView = indexView;
+            IndexCount = indexCount;
+        }
+
+        public ComPtr<ID3D12Resource> VertexBuffer { get; }
+
+        public ComPtr<ID3D12Resource> IndexBuffer { get; }
+
+        public VertexBufferView VertexView { get; }
+
+        public IndexBufferView IndexView { get; }
+
+        public uint IndexCount { get; }
+    }
+
+    private readonly struct DrawInstruction
+    {
+        public DrawInstruction(Mesh mesh, Material material, Matrix4x4 transform)
+        {
+            Mesh = mesh;
+            Material = material;
+            Transform = transform;
+        }
+
+        public Mesh Mesh { get; }
+
+        public Material Material { get; }
+
+        public Matrix4x4 Transform { get; }
+    }
+
     private readonly int _width;
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
@@ -67,7 +111,12 @@ public unsafe class WolfRendererD3D
     private ComPtr<ID3D12Resource> _vertexBufferUpload = default;
     private VertexBufferView _vertexBufferView;
     private ComPtr<ID3D12RootSignature> _rootSignature = default;
+    private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
+    private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly Dictionary<Material, MaterialResources> _materialResources = new();
+    private readonly List<DrawInstruction> _drawCommands = new();
+    private Camera _camera = null!;
+    private bool _hasCamera;
     private Material _triangleMaterial = null!;
 
     private uint _backbufferIndex;
@@ -93,6 +142,11 @@ public unsafe class WolfRendererD3D
         {
             Dispose();
         }
+    }
+
+    public void SubmitCommand(RenderCommand command)
+    {
+        _pendingCommands.Enqueue(command);
     }
 
     private void InitializeWindow()
@@ -505,6 +559,30 @@ public unsafe class WolfRendererD3D
         EnsureMaterialResources(_triangleMaterial);
     }
 
+    private void ProcessPendingCommands()
+    {
+        while (_pendingCommands.TryDequeue(out var command))
+        {
+            switch (command.Type)
+            {
+                case RenderCommandType.CreateMesh:
+                    HandleCreateMeshCommand(command);
+                    break;
+                case RenderCommandType.CreateMaterial:
+                    HandleCreateMaterialCommand(command);
+                    break;
+                case RenderCommandType.DrawMesh:
+                    HandleDrawMeshCommand(command);
+                    break;
+                case RenderCommandType.SetCamera:
+                    HandleSetCameraCommand(command);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(command.Type), command.Type, "Unsupported render command type.");
+            }
+        }
+    }
+
     private MaterialResources CreateMaterialResources(Material material)
     {
         if (material is null)
@@ -690,9 +768,64 @@ public unsafe class WolfRendererD3D
         return (size + alignment - 1) & ~(alignment - 1);
     }
 
+    private void HandleCreateMeshCommand(RenderCommand command)
+    {
+        var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
+        if (payload.MeshHandle.Target is not Mesh mesh)
+        {
+            throw new InvalidOperationException("Mesh payload target was null.");
+        }
+
+        payload.MeshHandle.Free();
+        _ = mesh;
+        // TODO: Implement mesh creation
+    }
+
+    private void HandleCreateMaterialCommand(RenderCommand command)
+    {
+        var payload = command.ReadPayload<RenderCommand.CreateMaterialPayload>();
+        if (payload.MaterialHandle.Target is not Material material)
+        {
+            throw new InvalidOperationException("Material payload target was null.");
+        }
+
+        payload.MaterialHandle.Free();
+        EnsureMaterialResources(material);
+    }
+
+    private void HandleDrawMeshCommand(RenderCommand command)
+    {
+        var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
+        if (payload.MeshHandle.Target is not Mesh mesh)
+        {
+            throw new InvalidOperationException("Mesh payload target was null.");
+        }
+        if (payload.MaterialHandle.Target is not Material material)
+        {
+            throw new InvalidOperationException("Material payload target was null.");
+        }
+
+        payload.MeshHandle.Free();
+        payload.MaterialHandle.Free();
+        _drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
+    }
+
+    private void HandleSetCameraCommand(RenderCommand command)
+    {
+        var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
+        if (payload.CameraHandle.Target is not Camera camera)
+        {
+            throw new InvalidOperationException("Camera payload target was null.");
+        }
+
+        payload.CameraHandle.Free();
+        _camera = camera;
+        _hasCamera = true;
+    }
+
     private void OnUpdate(double deltaSeconds)
     {
-        // Reserved for future logic.
+        ProcessPendingCommands();
     }
 
     private void OnFramebufferResize(Vector2D<int> newSize)
@@ -727,6 +860,7 @@ public unsafe class WolfRendererD3D
 
     private void OnRender(double deltaSeconds)
     {
+        _ = _hasCamera;
         var frameIdx = _backbufferIndex;
 
         if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
@@ -792,6 +926,7 @@ public unsafe class WolfRendererD3D
         _frameFenceValues[frameIdx] = _fenceValue;
 
         _backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
+        _drawCommands.Clear();
     }
 
     private void SignalAndWait()
@@ -828,6 +963,19 @@ public unsafe class WolfRendererD3D
         _factory.Dispose();
         _swapchain.Dispose();
         _commandQueue.Dispose();
+        foreach (var meshResources in _meshResources.Values)
+        {
+            if (meshResources.VertexBuffer.Handle is not null)
+            {
+                meshResources.VertexBuffer.Dispose();
+            }
+
+            if (meshResources.IndexBuffer.Handle is not null)
+            {
+                meshResources.IndexBuffer.Dispose();
+            }
+        }
+        _meshResources.Clear();
         foreach (var resources in _materialResources.Values)
         {
             if (resources.PipelineState.Handle is not null)
