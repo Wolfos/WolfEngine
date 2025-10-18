@@ -8,6 +8,7 @@ using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using Silk.NET.Maths;
 using Silk.NET.SDL;
+using System.Text;
 
 namespace WolfEngine;
 
@@ -25,6 +26,34 @@ public unsafe class WolfRendererD3D
         new( 0.5f, -0.5f, 0.0f, 1.0f),
         new( 0.0f,  0.5f, 0.0f, 1.0f)
     ];
+    private const string VertexShaderSource = @"
+struct VSInput
+{
+    float4 Position : POSITION;
+};
+
+struct PSInput
+{
+    float4 Position : SV_POSITION;
+};
+
+PSInput VSMain(VSInput input)
+{
+    PSInput output;
+    output.Position = input.Position;
+    return output;
+}";
+
+    private const string PixelShaderSource = @"
+struct PSInput
+{
+    float4 Position : SV_POSITION;
+};
+
+float4 PSMain(PSInput input) : SV_TARGET
+{
+    return float4(1.0f, 1.0f, 1.0f, 1.0f);
+}";
 
     private readonly int _width;
     private readonly int _height;
@@ -51,6 +80,11 @@ public unsafe class WolfRendererD3D
     private ComPtr<ID3D12Fence> _fence = default;
     private ulong _fenceValue;
     private nint _fenceEvent = nint.Zero;
+    private ComPtr<ID3D12Resource> _vertexBuffer = default;
+    private ComPtr<ID3D12Resource> _vertexBufferUpload = default;
+    private VertexBufferView _vertexBufferView;
+    private ComPtr<ID3D12RootSignature> _rootSignature = default;
+    private ComPtr<ID3D12PipelineState> _pipelineState = default;
 
     private uint _backbufferIndex;
     private Window* _window;
@@ -231,6 +265,8 @@ public unsafe class WolfRendererD3D
         CreateRtvHeapAndTargets();
         CreateCommandAllocatorsAndList();
         CreateSyncObjects();
+        CreateTriangleVertexBuffer();
+        CreatePipelineStateObjects();
     }
 
     private void CreateDeviceAndQueue()
@@ -338,6 +374,326 @@ public unsafe class WolfRendererD3D
         }
     }
 
+    private ComPtr<ID3D10Blob> CompileShader(string source, string entryPoint, string target)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            throw new ArgumentException("Shader source cannot be empty.", nameof(source));
+        }
+
+        if (string.IsNullOrWhiteSpace(entryPoint))
+        {
+            throw new ArgumentException("Entry point cannot be empty.", nameof(entryPoint));
+        }
+
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            throw new ArgumentException("Target profile cannot be empty.", nameof(target));
+        }
+
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        fixed (byte* sourcePtr = sourceBytes)
+        {
+            var entryPtr = SilkMarshal.StringToPtr(entryPoint, NativeStringEncoding.Ansi);
+            var targetPtr = SilkMarshal.StringToPtr(target, NativeStringEncoding.Ansi);
+            try
+            {
+                ID3D10Blob* shaderBlob = null;
+                ID3D10Blob* errorBlob = null;
+
+                var hr = _compiler.Compile(
+                    sourcePtr,
+                    (nuint)sourceBytes.Length,
+                    (byte*)null,
+                    null,
+                    null,
+                    (byte*)entryPtr,
+                    (byte*)targetPtr,
+                    0,
+                    0,
+                    &shaderBlob,
+                    &errorBlob);
+
+                if (hr < 0)
+                {
+                    string errorMessage = $"Shader compilation failed for entry '{entryPoint}' targeting '{target}'.";
+                    if (errorBlob is not null)
+                    {
+                        var message = Marshal.PtrToStringAnsi((nint)errorBlob->GetBufferPointer());
+                        if (!string.IsNullOrWhiteSpace(message))
+                        {
+                            errorMessage = $"{errorMessage} {message}";
+                        }
+                    }
+
+                    if (errorBlob is not null)
+                    {
+                        errorBlob->Release();
+                    }
+
+                    throw new InvalidOperationException(errorMessage);
+                }
+
+                if (errorBlob is not null)
+                {
+                    errorBlob->Release();
+                }
+
+                return new ComPtr<ID3D10Blob>(shaderBlob);
+            }
+            finally
+            {
+                SilkMarshal.Free(entryPtr);
+                SilkMarshal.Free(targetPtr);
+            }
+        }
+    }
+
+    private void CreateTriangleVertexBuffer()
+    {
+        var vertexStride = Unsafe.SizeOf<Vector4>();
+        var vertexBufferSize = (ulong)(_triangleVertices.Length * vertexStride);
+
+        var defaultHeapProps = new HeapProperties(HeapType.Default);
+        var resourceDesc = new ResourceDesc
+        {
+            Dimension = ResourceDimension.Buffer,
+            Alignment = 0,
+            Width = vertexBufferSize,
+            Height = 1,
+            DepthOrArraySize = 1,
+            MipLevels = 1,
+            Format = Format.FormatUnknown,
+            SampleDesc = new SampleDesc(1, 0),
+            Layout = TextureLayout.LayoutRowMajor,
+            Flags = ResourceFlags.None
+        };
+
+        SilkMarshal.ThrowHResult(
+            _device.CreateCommittedResource(
+                &defaultHeapProps,
+                HeapFlags.None,
+                in resourceDesc,
+                ResourceStates.CopyDest,
+                null,
+                out _vertexBuffer));
+
+        var uploadHeapProps = new HeapProperties(HeapType.Upload);
+        SilkMarshal.ThrowHResult(
+            _device.CreateCommittedResource(
+                &uploadHeapProps,
+                HeapFlags.None,
+                in resourceDesc,
+                ResourceStates.GenericRead,
+                null,
+                out _vertexBufferUpload));
+
+        void* mappedData = null;
+        var uploadPtr = _vertexBufferUpload.Handle;
+        SilkMarshal.ThrowHResult(uploadPtr->Map(0, null, &mappedData));
+        try
+        {
+            fixed (Vector4* vertexData = _triangleVertices)
+            {
+                System.Buffer.MemoryCopy(vertexData, mappedData, (long)vertexBufferSize, (long)vertexBufferSize);
+            }
+        }
+        finally
+        {
+            uploadPtr->Unmap(0, null);
+        }
+
+        SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
+        SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*)null));
+        _commandList.CopyBufferRegion(_vertexBuffer.Handle, 0, _vertexBufferUpload.Handle, 0, vertexBufferSize);
+
+        var vertexBarrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+        vertexBarrier.Anonymous.Transition = new()
+        {
+            PResource = _vertexBuffer.Handle,
+            Subresource = D3D12.ResourceBarrierAllSubresources,
+            StateBefore = ResourceStates.CopyDest,
+            StateAfter = ResourceStates.VertexAndConstantBuffer
+        };
+        _commandList.ResourceBarrier(1, &vertexBarrier);
+
+        SilkMarshal.ThrowHResult(_commandList.Close());
+        ID3D12CommandList* lists = (ID3D12CommandList*)_commandList.Handle;
+        _commandQueue.ExecuteCommandLists(1, &lists);
+
+        SignalAndWait();
+
+        var vertexBufferPtr = _vertexBuffer.Handle;
+        _vertexBufferView = new VertexBufferView
+        {
+            BufferLocation = vertexBufferPtr->GetGPUVirtualAddress(),
+            SizeInBytes = (uint)vertexBufferSize,
+            StrideInBytes = (uint)vertexStride
+        };
+
+        if (_vertexBufferUpload.Handle is not null)
+        {
+            _vertexBufferUpload.Dispose();
+            _vertexBufferUpload = default;
+        }
+    }
+
+    private void CreatePipelineStateObjects()
+    {
+        using var vertexShader = CompileShader(VertexShaderSource, "VSMain", "vs_5_0");
+        using var pixelShader = CompileShader(PixelShaderSource, "PSMain", "ps_5_0");
+
+        var rootSignatureDesc = new RootSignatureDesc
+        {
+            NumParameters = 0,
+            PParameters = null,
+            NumStaticSamplers = 0,
+            PStaticSamplers = null,
+            Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
+        };
+
+        var versionedDesc = new VersionedRootSignatureDesc
+        {
+            Version = D3DRootSignatureVersion.Version10
+        };
+        versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
+
+        ID3D10Blob* rootSignatureBlob = null;
+        ID3D10Blob* rootSignatureError = null;
+        var serializeResult = _d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
+        if (rootSignatureError is not null)
+        {
+            var message = Marshal.PtrToStringAnsi((nint)rootSignatureError->GetBufferPointer());
+            rootSignatureError->Release();
+            if (serializeResult < 0)
+            {
+                throw new InvalidOperationException($"Failed to serialise root signature: {message}");
+            }
+        }
+        SilkMarshal.ThrowHResult(serializeResult);
+
+        SilkMarshal.ThrowHResult(_device.CreateRootSignature(
+            0,
+            rootSignatureBlob->GetBufferPointer(),
+            rootSignatureBlob->GetBufferSize(),
+            out _rootSignature));
+        rootSignatureBlob->Release();
+
+        var vertexShaderPtr = vertexShader.Handle;
+        var pixelShaderPtr = pixelShader.Handle;
+
+        Span<byte> semanticName = [(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
+        InputElementDesc inputElement = new()
+        {
+            SemanticName = (byte*)Unsafe.AsPointer(ref semanticName.GetPinnableReference()),
+            SemanticIndex = 0,
+            Format = Format.FormatR32G32B32A32Float,
+            InputSlot = 0,
+            AlignedByteOffset = 0,
+            InputSlotClass = InputClassification.PerVertexData,
+            InstanceDataStepRate = 0
+        };
+
+        InputLayoutDesc inputLayout = new()
+        {
+            PInputElementDescs = &inputElement,
+            NumElements = 1
+        };
+
+        var blendState = new BlendDesc
+        {
+            AlphaToCoverageEnable = 0,
+            IndependentBlendEnable = 0
+        };
+        blendState.RenderTarget[0] = new RenderTargetBlendDesc
+        {
+            BlendEnable = 0,
+            LogicOpEnable = 0,
+            SrcBlend = Blend.One,
+            DestBlend = Blend.Zero,
+            BlendOp = BlendOp.Add,
+            SrcBlendAlpha = Blend.One,
+            DestBlendAlpha = Blend.Zero,
+            BlendOpAlpha = BlendOp.Add,
+            LogicOp = LogicOp.Noop,
+            RenderTargetWriteMask = (byte)ColorWriteEnable.All
+        };
+
+        var rasterizerState = new RasterizerDesc
+        {
+            FillMode = FillMode.Solid,
+            CullMode = CullMode.Back,
+            FrontCounterClockwise = 1,
+            DepthBias = D3D12.DefaultDepthBias,
+            DepthBiasClamp = 0.0f,
+            SlopeScaledDepthBias = 0.0f,
+            DepthClipEnable = 1,
+            MultisampleEnable = 0,
+            AntialiasedLineEnable = 0,
+            ForcedSampleCount = 0,
+            ConservativeRaster = ConservativeRasterizationMode.Off
+        };
+
+        var depthStencilState = new DepthStencilDesc
+        {
+            DepthEnable = 0,
+            DepthWriteMask = DepthWriteMask.All,
+            DepthFunc = ComparisonFunc.Less,
+            StencilEnable = 0,
+            StencilReadMask = D3D12.DefaultStencilReadMask,
+            StencilWriteMask = D3D12.DefaultStencilWriteMask,
+            FrontFace = new DepthStencilopDesc
+            {
+                StencilFailOp = StencilOp.Keep,
+                StencilDepthFailOp = StencilOp.Keep,
+                StencilPassOp = StencilOp.Keep,
+                StencilFunc = ComparisonFunc.Always
+            },
+            BackFace = new DepthStencilopDesc
+            {
+                StencilFailOp = StencilOp.Keep,
+                StencilDepthFailOp = StencilOp.Keep,
+                StencilPassOp = StencilOp.Keep,
+                StencilFunc = ComparisonFunc.Always
+            }
+        };
+
+        var shaderBytecodeVS = new ShaderBytecode
+        {
+            PShaderBytecode = vertexShaderPtr->GetBufferPointer(),
+            BytecodeLength = vertexShaderPtr->GetBufferSize()
+        };
+
+        var shaderBytecodePS = new ShaderBytecode
+        {
+            PShaderBytecode = pixelShaderPtr->GetBufferPointer(),
+            BytecodeLength = pixelShaderPtr->GetBufferSize()
+        };
+
+        var psoDesc = new GraphicsPipelineStateDesc
+        {
+            PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
+            VS = shaderBytecodeVS,
+            PS = shaderBytecodePS,
+            BlendState = blendState,
+            SampleMask = D3D12.DefaultSampleMask,
+            RasterizerState = rasterizerState,
+            DepthStencilState = depthStencilState,
+            InputLayout = inputLayout,
+            IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
+            PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
+            NumRenderTargets = 1,
+            DSVFormat = Format.FormatUnknown,
+            SampleDesc = new SampleDesc(1, 0),
+            NodeMask = 0,
+            CachedPSO = default,
+            Flags = PipelineStateFlags.None
+        };
+        psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
+
+        SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _pipelineState));
+    }
+
     private void OnUpdate(double deltaSeconds)
     {
         // Reserved for future logic.
@@ -384,7 +740,7 @@ public unsafe class WolfRendererD3D
         }
 
         SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
-        SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
+        SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)_pipelineState.Handle));
 
         var barrierBegin = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
         barrierBegin.Anonymous.Transition = new()
@@ -408,6 +764,13 @@ public unsafe class WolfRendererD3D
         {
             _commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Box2D<int>*)null);
         }
+
+        _commandList.SetPipelineState((ID3D12PipelineState*)_pipelineState.Handle);
+        _commandList.SetGraphicsRootSignature(_rootSignature.Handle);
+        _commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
+        var vbView = _vertexBufferView;
+        _commandList.IASetVertexBuffers(0, 1, &vbView);
+        _commandList.DrawInstanced(3, 1, 0, 0);
 
         var barrierEnd = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
         barrierEnd.Anonymous.Transition = new()
@@ -466,15 +829,35 @@ public unsafe class WolfRendererD3D
         _factory.Dispose();
         _swapchain.Dispose();
         _commandQueue.Dispose();
+        if (_pipelineState.Handle is not null)
+        {
+            _pipelineState.Dispose();
+            _pipelineState = default;
+        }
+        if (_rootSignature.Handle is not null)
+        {
+            _rootSignature.Dispose();
+            _rootSignature = default;
+        }
+        if (_vertexBuffer.Handle is not null)
+        {
+            _vertexBuffer.Dispose();
+            _vertexBuffer = default;
+        }
+        if (_vertexBufferUpload.Handle is not null)
+        {
+            _vertexBufferUpload.Dispose();
+            _vertexBufferUpload = default;
+        }
+        if (_fence.Handle is not null)
+        {
+            _fence.Dispose();
+            _fence = default;
+        }
         _device.Dispose();
         _compiler.Dispose();
         _d3d12.Dispose();
         _dxgi.Dispose();
-
-        if (_fence.Handle is not null)
-        {
-            _fence.Dispose();
-        }
 
         if (_fenceEvent != nint.Zero)
         {
