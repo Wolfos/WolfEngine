@@ -27,7 +27,8 @@ class Program
         }
         else if (OperatingSystem.IsWindows())
         {
-            _ = ActivatorUtilities.CreateInstance<WolfRendererD3D>(services.BuildServiceProvider());
+            services.AddSingleton<IRenderer, WolfRendererD3D>();
+            services.AddSingleton<Game>();
         }
     }
 }
