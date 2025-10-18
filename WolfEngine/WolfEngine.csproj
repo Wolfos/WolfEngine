@@ -25,7 +25,6 @@
       <PackageReference Include="SharpMetal" Version="1.0.0-preview21" />
       <PackageReference Include="Silk.NET.Assimp" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Core" Version="2.22.0" />
-      <PackageReference Include="Silk.NET.Direct3D.Compilers" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Direct3D12" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Input" Version="2.22.0" />
       <PackageReference Include="Silk.NET.Maths" Version="2.22.0" />
@@ -36,6 +35,9 @@
 
     <ItemGroup>
       <None Update="Shaders\default.slang">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+      <None Update="Shaders\triangle.slang">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
       <None Update="Models\Monkey.obj">

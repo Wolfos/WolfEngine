@@ -3,12 +3,10 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
-using Silk.NET.Direct3D.Compilers;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using Silk.NET.Maths;
 using Silk.NET.SDL;
-using System.Text;
 
 namespace WolfEngine;
 
@@ -26,34 +24,7 @@ public unsafe class WolfRendererD3D
         new( 0.5f, -0.5f, 0.0f, 1.0f),
         new( 0.0f,  0.5f, 0.0f, 1.0f)
     ];
-    private const string VertexShaderSource = @"
-struct VSInput
-{
-    float4 Position : POSITION;
-};
-
-struct PSInput
-{
-    float4 Position : SV_POSITION;
-};
-
-PSInput VSMain(VSInput input)
-{
-    PSInput output;
-    output.Position = input.Position;
-    return output;
-}";
-
-    private const string PixelShaderSource = @"
-struct PSInput
-{
-    float4 Position : SV_POSITION;
-};
-
-float4 PSMain(PSInput input) : SV_TARGET
-{
-    return float4(1.0f, 1.0f, 1.0f, 1.0f);
-}";
+    private const string TriangleShaderFile = "triangle.slang";
 
     private readonly int _width;
     private readonly int _height;
@@ -62,8 +33,6 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     private DXGI _dxgi = null!;
     private D3D12 _d3d12 = null!;
-    private D3DCompiler _compiler = null!;
-
     private ComPtr<IDXGIFactory2> _factory = default;
     private ComPtr<IDXGISwapChain3> _swapchain = default;
     private ComPtr<ID3D12Device> _device = default;
@@ -258,7 +227,6 @@ float4 PSMain(PSInput input) : SV_TARGET
         _dxgi = DXGI.GetApi();
         #pragma warning restore CS0618
         _d3d12 = D3D12.GetApi();
-        _compiler = D3DCompiler.GetApi();
 
         CreateDeviceAndQueue();
         CreateSwapchain();
@@ -374,81 +342,6 @@ float4 PSMain(PSInput input) : SV_TARGET
         }
     }
 
-    private ComPtr<ID3D10Blob> CompileShader(string source, string entryPoint, string target)
-    {
-        if (string.IsNullOrWhiteSpace(source))
-        {
-            throw new ArgumentException("Shader source cannot be empty.", nameof(source));
-        }
-
-        if (string.IsNullOrWhiteSpace(entryPoint))
-        {
-            throw new ArgumentException("Entry point cannot be empty.", nameof(entryPoint));
-        }
-
-        if (string.IsNullOrWhiteSpace(target))
-        {
-            throw new ArgumentException("Target profile cannot be empty.", nameof(target));
-        }
-
-        var sourceBytes = Encoding.UTF8.GetBytes(source);
-        fixed (byte* sourcePtr = sourceBytes)
-        {
-            var entryPtr = SilkMarshal.StringToPtr(entryPoint, NativeStringEncoding.Ansi);
-            var targetPtr = SilkMarshal.StringToPtr(target, NativeStringEncoding.Ansi);
-            try
-            {
-                ID3D10Blob* shaderBlob = null;
-                ID3D10Blob* errorBlob = null;
-
-                var hr = _compiler.Compile(
-                    sourcePtr,
-                    (nuint)sourceBytes.Length,
-                    (byte*)null,
-                    null,
-                    null,
-                    (byte*)entryPtr,
-                    (byte*)targetPtr,
-                    0,
-                    0,
-                    &shaderBlob,
-                    &errorBlob);
-
-                if (hr < 0)
-                {
-                    string errorMessage = $"Shader compilation failed for entry '{entryPoint}' targeting '{target}'.";
-                    if (errorBlob is not null)
-                    {
-                        var message = Marshal.PtrToStringAnsi((nint)errorBlob->GetBufferPointer());
-                        if (!string.IsNullOrWhiteSpace(message))
-                        {
-                            errorMessage = $"{errorMessage} {message}";
-                        }
-                    }
-
-                    if (errorBlob is not null)
-                    {
-                        errorBlob->Release();
-                    }
-
-                    throw new InvalidOperationException(errorMessage);
-                }
-
-                if (errorBlob is not null)
-                {
-                    errorBlob->Release();
-                }
-
-                return new ComPtr<ID3D10Blob>(shaderBlob);
-            }
-            finally
-            {
-                SilkMarshal.Free(entryPtr);
-                SilkMarshal.Free(targetPtr);
-            }
-        }
-    }
-
     private void CreateTriangleVertexBuffer()
     {
         var vertexStride = Unsafe.SizeOf<Vector4>();
@@ -540,8 +433,8 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     private void CreatePipelineStateObjects()
     {
-        using var vertexShader = CompileShader(VertexShaderSource, "VSMain", "vs_5_0");
-        using var pixelShader = CompileShader(PixelShaderSource, "PSMain", "ps_5_0");
+        var vertexShaderBytes = _shaderCompiler.GetDxil(TriangleShaderFile, "vertexShader", "vs_6_0");
+        var pixelShaderBytes = _shaderCompiler.GetDxil(TriangleShaderFile, "fragmentShader", "ps_6_0");
 
         var rootSignatureDesc = new RootSignatureDesc
         {
@@ -578,9 +471,6 @@ float4 PSMain(PSInput input) : SV_TARGET
             rootSignatureBlob->GetBufferSize(),
             out _rootSignature));
         rootSignatureBlob->Release();
-
-        var vertexShaderPtr = vertexShader.Handle;
-        var pixelShaderPtr = pixelShader.Handle;
 
         Span<byte> semanticName = [(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
         InputElementDesc inputElement = new()
@@ -658,40 +548,44 @@ float4 PSMain(PSInput input) : SV_TARGET
             }
         };
 
-        var shaderBytecodeVS = new ShaderBytecode
+        fixed (byte* vertexPtr = vertexShaderBytes)
+        fixed (byte* pixelPtr = pixelShaderBytes)
         {
-            PShaderBytecode = vertexShaderPtr->GetBufferPointer(),
-            BytecodeLength = vertexShaderPtr->GetBufferSize()
-        };
+            var shaderBytecodeVS = new ShaderBytecode
+            {
+                PShaderBytecode = vertexPtr,
+                BytecodeLength = (nuint)vertexShaderBytes.Length
+            };
 
-        var shaderBytecodePS = new ShaderBytecode
-        {
-            PShaderBytecode = pixelShaderPtr->GetBufferPointer(),
-            BytecodeLength = pixelShaderPtr->GetBufferSize()
-        };
+            var shaderBytecodePS = new ShaderBytecode
+            {
+                PShaderBytecode = pixelPtr,
+                BytecodeLength = (nuint)pixelShaderBytes.Length
+            };
 
-        var psoDesc = new GraphicsPipelineStateDesc
-        {
-            PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
-            VS = shaderBytecodeVS,
-            PS = shaderBytecodePS,
-            BlendState = blendState,
-            SampleMask = D3D12.DefaultSampleMask,
-            RasterizerState = rasterizerState,
-            DepthStencilState = depthStencilState,
-            InputLayout = inputLayout,
-            IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
-            PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
-            NumRenderTargets = 1,
-            DSVFormat = Format.FormatUnknown,
-            SampleDesc = new SampleDesc(1, 0),
-            NodeMask = 0,
-            CachedPSO = default,
-            Flags = PipelineStateFlags.None
-        };
-        psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
+            var psoDesc = new GraphicsPipelineStateDesc
+            {
+                PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
+                VS = shaderBytecodeVS,
+                PS = shaderBytecodePS,
+                BlendState = blendState,
+                SampleMask = D3D12.DefaultSampleMask,
+                RasterizerState = rasterizerState,
+                DepthStencilState = depthStencilState,
+                InputLayout = inputLayout,
+                IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
+                PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
+                NumRenderTargets = 1,
+                DSVFormat = Format.FormatUnknown,
+                SampleDesc = new SampleDesc(1, 0),
+                NodeMask = 0,
+                CachedPSO = default,
+                Flags = PipelineStateFlags.None
+            };
+            psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
 
-        SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _pipelineState));
+            SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _pipelineState));
+        }
     }
 
     private void OnUpdate(double deltaSeconds)
@@ -855,7 +749,6 @@ float4 PSMain(PSInput input) : SV_TARGET
             _fence = default;
         }
         _device.Dispose();
-        _compiler.Dispose();
         _d3d12.Dispose();
         _dxgi.Dispose();
 
