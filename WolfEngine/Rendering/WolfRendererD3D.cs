@@ -109,9 +109,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12Fence> _fence = default;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
-	private ComPtr<ID3D12Resource> _vertexBuffer = default;
-	private ComPtr<ID3D12Resource> _vertexBufferUpload = default;
-	private VertexBufferView _vertexBufferView;
 	private ComPtr<ID3D12RootSignature> _rootSignature = default;
 	private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
 	private ComPtr<ID3D12Resource> _depthBuffer = default;
@@ -121,7 +118,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly List<DrawInstruction> _drawCommands = new();
 	private Camera _camera = null!;
 	private bool _hasCamera;
-	private Material _triangleMaterial = null!;
 
 	private uint _backbufferIndex;
 	private Window* _window;
@@ -151,6 +147,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		var lastTime = 0.0;
 
 		startupCallback();
+		ProcessPendingCommands();
 
 		try
 		{
@@ -655,7 +652,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			FillMode = FillMode.Solid,
 			CullMode = CullMode.Back,
-			FrontCounterClockwise = 1,
+			FrontCounterClockwise = 0,
 			DepthBias = D3D12.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
 			SlopeScaledDepthBias = 0.0f,
@@ -1146,7 +1143,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		var hasDrawCommands = _drawCommands.Count > 0;
 		var renderedScene = false;
 
-#pragma warning disable CA2014
+		#pragma warning disable CA2014
 		if (hasDrawCommands && _hasCamera)
 		{
 			var viewProjection = _camera.Transform * _camera.Perspective;
@@ -1190,42 +1187,11 @@ public unsafe class WolfRendererD3D : IRenderer
 
 			renderedScene = true;
 		}
-		else if (!hasDrawCommands)
-		{
-			var materialResources = EnsureMaterialResources(_triangleMaterial);
-			_commandList.SetPipelineState((ID3D12PipelineState*) materialResources.PipelineState.Handle);
-			_commandList.SetGraphicsRootSignature(_rootSignature.Handle);
-			var colorBufferPtr = materialResources.ColorBuffer.Handle;
-			_commandList.SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
-
-			Span<float> identityModel = stackalloc float[16];
-			WriteMatrix(identityModel, Matrix4x4.Identity);
-			fixed (float* modelPtr = identityModel)
-			{
-				_commandList.SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
-			}
-
-			Span<float> identityCamera = stackalloc float[20];
-			WriteMatrix(identityCamera, Matrix4x4.Identity);
-			identityCamera[16] = 0.0f;
-			identityCamera[17] = 0.0f;
-			identityCamera[18] = 0.0f;
-			identityCamera[19] = 1.0f;
-			fixed (float* cameraPtr = identityCamera)
-			{
-				_commandList.SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
-			}
-
-			_commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
-			var vbView = _vertexBufferView;
-			_commandList.IASetVertexBuffers(0, 1, &vbView);
-			_commandList.DrawInstanced(3, 1, 0, 0);
-		}
-		else
+		else if (hasDrawCommands)
 		{
 			_drawCommands.Clear();
 		}
-#pragma warning restore CA2014
+		#pragma warning restore CA2014
 
 		var barrierEnd = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		barrierEnd.Anonymous.Transition = new()
@@ -1332,18 +1298,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			_rootSignature.Dispose();
 			_rootSignature = default;
-		}
-
-		if (_vertexBuffer.Handle is not null)
-		{
-			_vertexBuffer.Dispose();
-			_vertexBuffer = default;
-		}
-
-		if (_vertexBufferUpload.Handle is not null)
-		{
-			_vertexBufferUpload.Dispose();
-			_vertexBufferUpload = default;
 		}
 
 		if (_fence.Handle is not null)
