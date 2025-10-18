@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -25,6 +26,19 @@ public unsafe class WolfRendererD3D
         new( 0.0f,  0.5f, 0.0f, 1.0f)
     ];
     private const string TriangleShaderFile = "triangle.slang";
+
+    private sealed class MaterialResources
+    {
+        public MaterialResources(ComPtr<ID3D12PipelineState> pipelineState, ComPtr<ID3D12Resource> colorBuffer)
+        {
+            PipelineState = pipelineState;
+            ColorBuffer = colorBuffer;
+        }
+
+        public ComPtr<ID3D12PipelineState> PipelineState { get; }
+
+        public ComPtr<ID3D12Resource> ColorBuffer { get; }
+    }
 
     private readonly int _width;
     private readonly int _height;
@@ -53,7 +67,8 @@ public unsafe class WolfRendererD3D
     private ComPtr<ID3D12Resource> _vertexBufferUpload = default;
     private VertexBufferView _vertexBufferView;
     private ComPtr<ID3D12RootSignature> _rootSignature = default;
-    private ComPtr<ID3D12PipelineState> _pipelineState = default;
+    private readonly Dictionary<Material, MaterialResources> _materialResources = new();
+    private Material _triangleMaterial = null!;
 
     private uint _backbufferIndex;
     private Window* _window;
@@ -234,7 +249,8 @@ public unsafe class WolfRendererD3D
         CreateCommandAllocatorsAndList();
         CreateSyncObjects();
         CreateTriangleVertexBuffer();
-        CreatePipelineStateObjects();
+        CreateRootSignature();
+        InitializeMaterials();
     }
 
     private void CreateDeviceAndQueue()
@@ -431,15 +447,21 @@ public unsafe class WolfRendererD3D
         }
     }
 
-    private void CreatePipelineStateObjects()
+    private void CreateRootSignature()
     {
-        var vertexShaderBytes = _shaderCompiler.GetDxil(TriangleShaderFile, "vertexShader", "vs_6_0");
-        var pixelShaderBytes = _shaderCompiler.GetDxil(TriangleShaderFile, "fragmentShader", "ps_6_0");
+        var rootParameters = stackalloc RootParameter[1];
+        rootParameters[0].ParameterType = RootParameterType.TypeCbv;
+        rootParameters[0].Anonymous.Descriptor = new RootDescriptor
+        {
+            ShaderRegister = 0,
+            RegisterSpace = 0
+        };
+        rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
 
         var rootSignatureDesc = new RootSignatureDesc
         {
-            NumParameters = 0,
-            PParameters = null,
+            NumParameters = 1,
+            PParameters = rootParameters,
             NumStaticSamplers = 0,
             PStaticSamplers = null,
             Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
@@ -471,6 +493,27 @@ public unsafe class WolfRendererD3D
             rootSignatureBlob->GetBufferSize(),
             out _rootSignature));
         rootSignatureBlob->Release();
+    }
+
+    private void InitializeMaterials()
+    {
+        _triangleMaterial = new Material(TriangleShaderFile)
+        {
+            Color = new Vector4(1.0f, 1.0f, 1.0f, 1.0f)
+        };
+
+        EnsureMaterialResources(_triangleMaterial);
+    }
+
+    private MaterialResources CreateMaterialResources(Material material)
+    {
+        if (material is null)
+        {
+            throw new ArgumentNullException(nameof(material));
+        }
+
+        var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
+        var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
 
         Span<byte> semanticName = [(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
         InputElementDesc inputElement = new()
@@ -548,6 +591,8 @@ public unsafe class WolfRendererD3D
             }
         };
 
+        ComPtr<ID3D12PipelineState> pipelineState = default;
+
         fixed (byte* vertexPtr = vertexShaderBytes)
         fixed (byte* pixelPtr = pixelShaderBytes)
         {
@@ -584,8 +629,65 @@ public unsafe class WolfRendererD3D
             };
             psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
 
-            SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _pipelineState));
+            SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
         }
+
+        var colorSize = Align((ulong)Unsafe.SizeOf<Vector4>(), D3D12.ConstantBufferDataPlacementAlignment);
+        var uploadProps = new HeapProperties(HeapType.Upload);
+        var bufferDesc = new ResourceDesc
+        {
+            Dimension = ResourceDimension.Buffer,
+            Alignment = 0,
+            Width = colorSize,
+            Height = 1,
+            DepthOrArraySize = 1,
+            MipLevels = 1,
+            Format = Format.FormatUnknown,
+            SampleDesc = new SampleDesc(1, 0),
+            Layout = TextureLayout.LayoutRowMajor,
+            Flags = ResourceFlags.None
+        };
+
+        ComPtr<ID3D12Resource> colorBuffer;
+        SilkMarshal.ThrowHResult(
+            _device.CreateCommittedResource(
+                &uploadProps,
+                HeapFlags.None,
+                in bufferDesc,
+                ResourceStates.GenericRead,
+                null,
+                out colorBuffer));
+
+        void* mappedData = null;
+        SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedData));
+        try
+        {
+            var color = material.Color;
+            Unsafe.Write((Vector4*)mappedData, color);
+        }
+        finally
+        {
+            colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+        }
+
+        return new MaterialResources(pipelineState, colorBuffer);
+    }
+
+    private MaterialResources EnsureMaterialResources(Material material)
+    {
+        if (_materialResources.TryGetValue(material, out var resources))
+        {
+            return resources;
+        }
+
+        resources = CreateMaterialResources(material);
+        _materialResources.Add(material, resources);
+        return resources;
+    }
+
+    private static ulong Align(ulong size, ulong alignment)
+    {
+        return (size + alignment - 1) & ~(alignment - 1);
     }
 
     private void OnUpdate(double deltaSeconds)
@@ -634,7 +736,7 @@ public unsafe class WolfRendererD3D
         }
 
         SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
-        SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)_pipelineState.Handle));
+        SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
 
         var barrierBegin = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
         barrierBegin.Anonymous.Transition = new()
@@ -659,8 +761,11 @@ public unsafe class WolfRendererD3D
             _commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Box2D<int>*)null);
         }
 
-        _commandList.SetPipelineState((ID3D12PipelineState*)_pipelineState.Handle);
+        var materialResources = EnsureMaterialResources(_triangleMaterial);
+        _commandList.SetPipelineState((ID3D12PipelineState*)materialResources.PipelineState.Handle);
         _commandList.SetGraphicsRootSignature(_rootSignature.Handle);
+        var colorBufferPtr = materialResources.ColorBuffer.Handle;
+        _commandList.SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
         _commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
         var vbView = _vertexBufferView;
         _commandList.IASetVertexBuffers(0, 1, &vbView);
@@ -723,11 +828,19 @@ public unsafe class WolfRendererD3D
         _factory.Dispose();
         _swapchain.Dispose();
         _commandQueue.Dispose();
-        if (_pipelineState.Handle is not null)
+        foreach (var resources in _materialResources.Values)
         {
-            _pipelineState.Dispose();
-            _pipelineState = default;
+            if (resources.PipelineState.Handle is not null)
+            {
+                resources.PipelineState.Dispose();
+            }
+
+            if (resources.ColorBuffer.Handle is not null)
+            {
+                resources.ColorBuffer.Dispose();
+            }
         }
+        _materialResources.Clear();
         if (_rootSignature.Handle is not null)
         {
             _rootSignature.Dispose();

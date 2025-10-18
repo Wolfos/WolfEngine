@@ -487,7 +487,7 @@ public unsafe class WolfRendererMetal : IRenderer
     private MTLLibrary CreateShaderLibrary(Material material)
     {
         var libraryError = new NSError(IntPtr.Zero);
-        var shaderSource = material.ShaderSource;
+        var shaderSource = _shaderCompiler.GetMetalSource(material.ShaderPath);
         var library = _device.NewLibrary(NSStringHelper.From(shaderSource), new(IntPtr.Zero), ref libraryError);
         if (libraryError != IntPtr.Zero)
         {

@@ -1,3 +1,5 @@
+using System;
+
 namespace WolfEngine;
 
 public interface IMaterialFactory
@@ -7,15 +9,21 @@ public interface IMaterialFactory
 
 public class MaterialFactory : IMaterialFactory
 {
-	private readonly IShaderCompiler _shaderCompiler;
-
 	public MaterialFactory(IShaderCompiler shaderCompiler)
 	{
-		_shaderCompiler = shaderCompiler;
+		if (shaderCompiler is null)
+		{
+			throw new ArgumentNullException(nameof(shaderCompiler));
+		}
 	}
 
 	public Material GetMaterial(string shader)
 	{
-		return new Material(_shaderCompiler, shader);
+		if (string.IsNullOrWhiteSpace(shader))
+		{
+			throw new ArgumentException("Shader path cannot be empty.", nameof(shader));
+		}
+
+		return new Material(shader);
 	}
 }
