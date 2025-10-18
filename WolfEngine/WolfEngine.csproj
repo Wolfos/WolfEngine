@@ -46,11 +46,11 @@
         <None Update="Models\Monkey.mtl">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-        <None Update="Binaries\dxcompiler.dll" Condition=" '$(OS)' == 'Windows_NT'">
+        <None Update="Binaries\dxcompiler.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <TargetPath>dxcompiler.dll</TargetPath>
         </None>
-        <None Update="Binaries\dxil.dll" Condition=" '$(OS)' == 'Windows_NT'">
+        <None Update="Binaries\dxil.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <TargetPath>dxil.dll</TargetPath>
         </None>
