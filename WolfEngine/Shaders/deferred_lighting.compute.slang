@@ -3,6 +3,7 @@ SamplerState linearSampler : register(s0);
 Texture2D gbufferAlbedo : register(t0);
 Texture2D gbufferNormal : register(t1);
 Texture2D gbufferMaterial : register(t2);
+RWTexture2D<float4> lightingTarget : register(u0);
 
 cbuffer CameraParams : register(b0)
 {
@@ -11,46 +12,28 @@ cbuffer CameraParams : register(b0)
     float padding;
     float4 extra0;
     float4 extra1;
-}
-
-struct VSOutput
-{
-    float4 position : SV_Position;
-    float2 uv : TEXCOORD0;
 };
-
-VSOutput vertexShader(uint vertexId : SV_VertexID)
-{
-    float2 positions[4] = {
-        float2(-1.0f, -1.0f),
-        float2(-1.0f,  1.0f),
-        float2( 1.0f, -1.0f),
-        float2( 1.0f,  1.0f)
-    };
-
-    float2 uvs[4] = {
-        float2(0.0f, 1.0f),
-        float2(0.0f, 0.0f),
-        float2(1.0f, 1.0f),
-        float2(1.0f, 0.0f)
-    };
-
-    VSOutput output;
-    output.position = float4(positions[vertexId], 0.0f, 1.0f);
-    output.uv = uvs[vertexId];
-    return output;
-}
 
 float3 DecodeNormal(float3 encoded)
 {
     return normalize(encoded * 2.0f - 1.0f);
 }
 
-float4 fragmentShader(VSOutput input) : SV_Target
+[numthreads(8, 8, 1)]
+void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    float3 albedo = gbufferAlbedo.Sample(linearSampler, input.uv).rgb;
-    float3 normal = DecodeNormal(gbufferNormal.Sample(linearSampler, input.uv).xyz);
-    float metallic = gbufferMaterial.Sample(linearSampler, input.uv).r;
+    uint width, height;
+    lightingTarget.GetDimensions(width, height);
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    float2 uv = (float2(dispatchThreadId.xy) + 0.5f) / float2(width, height);
+
+    float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
+    float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
+    float metallic = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f).r;
 
     float3 lightDirection = normalize(float3(-0.5f, -1.0f, -0.2f));
     float3 lightColor = float3(1.0f, 1.0f, 1.0f);
@@ -67,5 +50,5 @@ float4 fragmentShader(VSOutput input) : SV_Target
     float3 specularComponent = specular * lightColor * 0.5f;
 
     float3 color = ambient + diffuseComponent + specularComponent;
-    return float4(color, 1.0f);
+    lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

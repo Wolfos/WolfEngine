@@ -70,7 +70,6 @@ public sealed class RenderGraphFrameBuilder
 
 		_graph.AddPass("Deferred Lighting")
 			.WriteTexture(_frameResources.Backbuffer)
-			.WriteTexture(_frameResources.Depth)
 			.SetExecute(context => renderedScene = callbacks.ExecuteDeferred(context, _frameResources));
 
 		_graph.Execute();

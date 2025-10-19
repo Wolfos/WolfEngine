@@ -37,10 +37,10 @@
         <None Update="Shaders\default.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="Shaders\deferred_lighting.slang">
+        <None Update="Shaders\gbuffer.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="Shaders\gbuffer.slang">
+        <None Update="Shaders\deferred_lighting.compute.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\triangle.slang">

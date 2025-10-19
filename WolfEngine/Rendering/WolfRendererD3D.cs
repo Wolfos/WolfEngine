@@ -114,14 +114,15 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12Fence> _fence = default;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
-private ComPtr<ID3D12RootSignature> _rootSignature = default;
-private ComPtr<ID3D12PipelineState> _gbufferPipeline = default;
-private ComPtr<ID3D12RootSignature> _deferredRootSignature = default;
-private ComPtr<ID3D12PipelineState> _deferredPipeline = default;
-private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
-private ComPtr<ID3D12Resource> _depthBuffer = default;
-private ComPtr<ID3D12DescriptorHeap> _srvHeap = default;
-private uint _srvDescriptorSize;
+	private ComPtr<ID3D12RootSignature> _rootSignature = default;
+	private ComPtr<ID3D12PipelineState> _gbufferPipeline = default;
+	private ComPtr<ID3D12RootSignature> _lightingRootSignature = default;
+	private ComPtr<ID3D12PipelineState> _lightingPipeline = default;
+	private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
+	private ComPtr<ID3D12Resource> _depthBuffer = default;
+	private ComPtr<ID3D12DescriptorHeap> _lightingDescriptorHeap = default;
+	private uint _lightingDescriptorSize;
+	private ComPtr<ID3D12Resource> _lightingBuffer = default;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
 private readonly Dictionary<Material, MaterialResources> _materialResources = new();
@@ -304,11 +305,12 @@ private readonly List<DrawInstruction> _drawCommands = new();
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
-	CreateRootSignature();
-	CreateDepthResources();
-	CreateGBufferPipeline();
-	CreateSrvHeap();
-	CreateDeferredPipeline();
+CreateRootSignature();
+CreateDepthResources();
+CreateGBufferPipeline();
+CreateLightingDescriptors();
+CreateLightingBuffer();
+CreateLightingPipeline();
 }
 
 	private void CreateDeviceAndQueue()
@@ -622,202 +624,174 @@ private readonly List<DrawInstruction> _drawCommands = new();
 
 			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _gbufferPipeline));
 		}
-	}
-
-
-private void CreateSrvHeap()
-{
-	var heapDesc = new DescriptorHeapDesc
-	{
-		Type = DescriptorHeapType.CbvSrvUav,
-		NumDescriptors = 3,
-		Flags = DescriptorHeapFlags.ShaderVisible,
-		NodeMask = 0
-	};
-
-	SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _srvHeap));
-	_srvDescriptorSize = _device.GetDescriptorHandleIncrementSize(DescriptorHeapType.CbvSrvUav);
 }
 
-private void CreateDeferredPipeline()
-{
-	var vertexShaderBytes = _shaderCompiler.GetDxil("deferred_lighting.slang", "vertexShader", "vs_6_6");
-	var pixelShaderBytes = _shaderCompiler.GetDxil("deferred_lighting.slang", "fragmentShader", "ps_6_6");
-
-	var descriptorRange = stackalloc DescriptorRange[1];
-	descriptorRange[0].RangeType = DescriptorRangeType.Srv;
-	descriptorRange[0].NumDescriptors = 3;
-	descriptorRange[0].BaseShaderRegister = 0;
-	descriptorRange[0].RegisterSpace = 0;
-	descriptorRange[0].OffsetInDescriptorsFromTableStart = 0;
-
-	var rootParameters = stackalloc RootParameter[2];
-	rootParameters[0].ParameterType = (RootParameterType) 0;
-	rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-	rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = descriptorRange;
-	rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
-
-	rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
-	rootParameters[1].Anonymous.Constants = new RootConstants
+	private void CreateLightingDescriptors()
 	{
-		ShaderRegister = 0,
-		RegisterSpace = 0,
-		Num32BitValues = 20
-	};
-	rootParameters[1].ShaderVisibility = ShaderVisibility.Pixel;
-
-	var staticSampler = stackalloc StaticSamplerDesc[1];
-	staticSampler[0] = new StaticSamplerDesc
-	{
-		Filter = Filter.MinMagMipLinear,
-		AddressU = TextureAddressMode.Clamp,
-		AddressV = TextureAddressMode.Clamp,
-		AddressW = TextureAddressMode.Clamp,
-		MipLODBias = 0.0f,
-		MaxAnisotropy = 0,
-		ComparisonFunc = ComparisonFunc.Always,
-		BorderColor = StaticBorderColor.TransparentBlack,
-		MinLOD = 0.0f,
-		MaxLOD = float.MaxValue,
-		ShaderRegister = 0,
-		RegisterSpace = 0,
-		ShaderVisibility = ShaderVisibility.Pixel
-	};
-
-	var rootSignatureDesc = new RootSignatureDesc
-	{
-		NumParameters = 2,
-		PParameters = rootParameters,
-		NumStaticSamplers = 1,
-		PStaticSamplers = staticSampler,
-		Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
-	};
-
-	var versionedDesc = new VersionedRootSignatureDesc
-	{
-		Version = D3DRootSignatureVersion.Version10
-	};
-	versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
-
-	ID3D10Blob* deferredRootSignatureBlob = null;
-	ID3D10Blob* rootSignatureError = null;
-	var serializeResult = _d3d12.SerializeVersionedRootSignature(&versionedDesc, &deferredRootSignatureBlob, &rootSignatureError);
-	if (rootSignatureError is not null)
-	{
-		var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
-		rootSignatureError->Release();
-		if (serializeResult < 0)
+		var heapDesc = new DescriptorHeapDesc
 		{
-			throw new InvalidOperationException($"Failed to serialise deferred root signature: {message}");
+			Type = DescriptorHeapType.CbvSrvUav,
+			NumDescriptors = 4,
+			Flags = DescriptorHeapFlags.ShaderVisible,
+			NodeMask = 0
+		};
+
+		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _lightingDescriptorHeap));
+		_lightingDescriptorSize = _device.GetDescriptorHandleIncrementSize(DescriptorHeapType.CbvSrvUav);
+	}
+
+	private void CreateLightingBuffer()
+	{
+		if (_lightingBuffer.Handle is not null)
+		{
+			_lightingBuffer.Dispose();
+			_lightingBuffer = default;
+		}
+
+		var width = Math.Max(_framebufferSize.X, 1);
+		var height = Math.Max(_framebufferSize.Y, 1);
+		if (width == 0 || height == 0)
+		{
+			return;
+		}
+
+		var desc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Texture2D,
+			Alignment = 0,
+			Width = (ulong) width,
+			Height = (uint) height,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatB8G8R8A8Unorm,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutUnknown,
+			Flags = ResourceFlags.AllowUnorderedAccess
+		};
+
+		var heapProps = new HeapProperties(HeapType.Default);
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+			&heapProps,
+			HeapFlags.None,
+			in desc,
+			ResourceStates.UnorderedAccess,
+			null,
+			out _lightingBuffer));
+	}
+
+	private void CreateLightingPipeline()
+	{
+		var shaderBytes = _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
+
+		var srvRange = stackalloc DescriptorRange[1];
+		srvRange[0].RangeType = DescriptorRangeType.Srv;
+		srvRange[0].NumDescriptors = 3;
+		srvRange[0].BaseShaderRegister = 0;
+		srvRange[0].RegisterSpace = 0;
+		srvRange[0].OffsetInDescriptorsFromTableStart = 0;
+
+		var uavRange = stackalloc DescriptorRange[1];
+		uavRange[0].RangeType = DescriptorRangeType.Uav;
+		uavRange[0].NumDescriptors = 1;
+		uavRange[0].BaseShaderRegister = 0;
+		uavRange[0].RegisterSpace = 0;
+		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
+
+		var rootParameters = stackalloc RootParameter[3];
+		rootParameters[0].ParameterType = (RootParameterType) 0;
+		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
+		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[1].ParameterType = (RootParameterType) 0;
+		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
+		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[2].Anonymous.Constants = new RootConstants
+		{
+			ShaderRegister = 0,
+			RegisterSpace = 0,
+			Num32BitValues = 20
+		};
+		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+
+		var staticSampler = stackalloc StaticSamplerDesc[1];
+		staticSampler[0] = new StaticSamplerDesc
+		{
+			Filter = Filter.MinMagMipLinear,
+			AddressU = TextureAddressMode.Clamp,
+			AddressV = TextureAddressMode.Clamp,
+			AddressW = TextureAddressMode.Clamp,
+			MipLODBias = 0.0f,
+			MaxAnisotropy = 0,
+			ComparisonFunc = ComparisonFunc.Always,
+			BorderColor = StaticBorderColor.TransparentBlack,
+			MinLOD = 0.0f,
+			MaxLOD = float.MaxValue,
+			ShaderRegister = 0,
+			RegisterSpace = 0,
+			ShaderVisibility = ShaderVisibility.All
+		};
+
+		var rootSignatureDesc = new RootSignatureDesc
+		{
+			NumParameters = 3,
+			PParameters = rootParameters,
+			NumStaticSamplers = 1,
+			PStaticSamplers = staticSampler,
+			Flags = RootSignatureFlags.None
+		};
+
+		var versionedDesc = new VersionedRootSignatureDesc
+		{
+			Version = D3DRootSignatureVersion.Version10
+		};
+		versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
+
+		ID3D10Blob* rootSignatureBlob = null;
+		ID3D10Blob* rootSignatureError = null;
+		var serializeResult =
+			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
+		if (rootSignatureError is not null)
+		{
+			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
+			rootSignatureError->Release();
+			if (serializeResult < 0)
+			{
+				throw new InvalidOperationException($"Failed to serialise lighting root signature: {message}");
+			}
+		}
+
+		SilkMarshal.ThrowHResult(serializeResult);
+		SilkMarshal.ThrowHResult(_device.CreateRootSignature(
+			0,
+			rootSignatureBlob->GetBufferPointer(),
+			rootSignatureBlob->GetBufferSize(),
+			out _lightingRootSignature));
+		rootSignatureBlob->Release();
+
+		fixed (byte* shaderPtr = shaderBytes)
+		{
+			var shaderBytecode = new ShaderBytecode
+			{
+				PShaderBytecode = shaderPtr,
+				BytecodeLength = (nuint) shaderBytes.Length
+			};
+
+			var pipelineDesc = new ComputePipelineStateDesc
+			{
+				PRootSignature = (ID3D12RootSignature*) _lightingRootSignature.Handle,
+				CS = shaderBytecode,
+				NodeMask = 0,
+				CachedPSO = default,
+				Flags = PipelineStateFlags.None
+			};
+
+			SilkMarshal.ThrowHResult(_device.CreateComputePipelineState(in pipelineDesc, out _lightingPipeline));
 		}
 	}
-
-	SilkMarshal.ThrowHResult(serializeResult);
-	SilkMarshal.ThrowHResult(_device.CreateRootSignature(
-		0,
-		deferredRootSignatureBlob->GetBufferPointer(),
-		deferredRootSignatureBlob->GetBufferSize(),
-		out _deferredRootSignature));
-	deferredRootSignatureBlob->Release();
-
-	fixed (byte* vertexPtr = vertexShaderBytes)
-	fixed (byte* pixelPtr = pixelShaderBytes)
-	{
-		var shaderBytecodeVS = new ShaderBytecode
-		{
-			PShaderBytecode = vertexPtr,
-			BytecodeLength = (nuint) vertexShaderBytes.Length
-		};
-
-		var shaderBytecodePS = new ShaderBytecode
-		{
-			PShaderBytecode = pixelPtr,
-			BytecodeLength = (nuint) pixelShaderBytes.Length
-		};
-
-		var blendState = new BlendDesc
-		{
-			AlphaToCoverageEnable = 0,
-			IndependentBlendEnable = 0
-		};
-		var blendDesc = new RenderTargetBlendDesc
-		{
-			BlendEnable = 0,
-			LogicOpEnable = 0,
-			SrcBlend = Blend.One,
-			DestBlend = Blend.Zero,
-			BlendOp = BlendOp.Add,
-			SrcBlendAlpha = Blend.One,
-			DestBlendAlpha = Blend.Zero,
-			BlendOpAlpha = BlendOp.Add,
-			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte) ColorWriteEnable.All
-		};
-		blendState.RenderTarget[0] = blendDesc;
-
-		var rasterizerState = new RasterizerDesc
-		{
-			FillMode = FillMode.Solid,
-			CullMode = CullMode.None,
-			FrontCounterClockwise = 0,
-			DepthBias = D3D12.DefaultDepthBias,
-			DepthBiasClamp = 0.0f,
-			SlopeScaledDepthBias = 0.0f,
-			DepthClipEnable = 1,
-			MultisampleEnable = 0,
-			AntialiasedLineEnable = 0,
-			ForcedSampleCount = 0,
-			ConservativeRaster = ConservativeRasterizationMode.Off
-		};
-
-		var depthStencilState = new DepthStencilDesc
-		{
-			DepthEnable = 0,
-			DepthWriteMask = DepthWriteMask.Zero,
-			DepthFunc = ComparisonFunc.Always,
-			StencilEnable = 0,
-			StencilReadMask = D3D12.DefaultStencilReadMask,
-			StencilWriteMask = D3D12.DefaultStencilWriteMask,
-			FrontFace = new DepthStencilopDesc
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			},
-			BackFace = new DepthStencilopDesc
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			}
-		};
-
-		var psoDesc = new GraphicsPipelineStateDesc
-		{
-			PRootSignature = (ID3D12RootSignature*) _deferredRootSignature.Handle,
-			VS = shaderBytecodeVS,
-			PS = shaderBytecodePS,
-			BlendState = blendState,
-			SampleMask = D3D12.DefaultSampleMask,
-			RasterizerState = rasterizerState,
-			DepthStencilState = depthStencilState,
-			InputLayout = default,
-			IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
-			PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
-			NumRenderTargets = 1,
-			DSVFormat = Format.FormatUnknown,
-			SampleDesc = new SampleDesc(1, 0),
-			NodeMask = 0,
-			CachedPSO = default,
-			Flags = PipelineStateFlags.None
-		};
-		psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
-
-		SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _deferredPipeline));
-	}
-}
 
 private void CreateDepthResources()
 	{
@@ -1425,9 +1399,10 @@ private void OnFramebufferResize(Int2 newSize)
 			Format.FormatB8G8R8A8Unorm, 0));
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
-		CreateRtvHeapAndTargets();
-		CreateDepthResources();
-	}
+	CreateRtvHeapAndTargets();
+	CreateDepthResources();
+	CreateLightingBuffer();
+}
 
 	private void OnRender(double deltaSeconds)
 	{
@@ -1645,8 +1620,7 @@ private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameReso
 
 private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
 {
-	var hasDrawCommands = _drawCommands.Count > 0;
-	if (hasDrawCommands == false)
+	if (_lightingBuffer.Handle is null)
 	{
 		return false;
 	}
@@ -1657,38 +1631,10 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 		return false;
 	}
 
-	var backbufferTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.Backbuffer);
-
-	var barrierBegin = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	barrierBegin.Anonymous.Transition = new()
-	{
-		PResource = backbufferTexture.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.Present,
-			StateAfter = ResourceStates.RenderTarget
-		};
-		_commandList.ResourceBarrier(1, &barrierBegin);
-
-	var viewport = new Viewport
-	{
-		TopLeftX = 0,
-		TopLeftY = 0,
-		Width = resources.FramebufferSize.X,
-		Height = resources.FramebufferSize.Y,
-		MinDepth = 0.0f,
-		MaxDepth = 1.0f
-	};
-	_commandList.RSSetViewports(1, &viewport);
-
-	var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
-	_commandList.RSSetScissorRects(1, &scissor);
-
-	var rtvHandle = backbufferTexture.RenderTargetView;
-	_commandList.OMSetRenderTargets(1, &rtvHandle, new(false), (CpuDescriptorHandle*) null);
-
 	var gbufferAlbedo = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferAlbedo);
 	var gbufferNormal = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferNormal);
 	var gbufferMaterial = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferMaterial);
+	var backbufferTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.Backbuffer);
 
 	var resourceBarriers = stackalloc ResourceBarrier[3];
 	resourceBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
@@ -1697,7 +1643,7 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 		PResource = gbufferAlbedo.Resource,
 		Subresource = D3D12.ResourceBarrierAllSubresources,
 		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.PixelShaderResource
+		StateAfter = ResourceStates.NonPixelShaderResource
 	};
 	resourceBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 	resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
@@ -1705,7 +1651,7 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 		PResource = gbufferNormal.Resource,
 		Subresource = D3D12.ResourceBarrierAllSubresources,
 		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.PixelShaderResource
+		StateAfter = ResourceStates.NonPixelShaderResource
 	};
 	resourceBarriers[2] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 	resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
@@ -1713,26 +1659,31 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 		PResource = gbufferMaterial.Resource,
 		Subresource = D3D12.ResourceBarrierAllSubresources,
 		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.PixelShaderResource
+		StateAfter = ResourceStates.NonPixelShaderResource
 	};
 	_commandList.ResourceBarrier(3, resourceBarriers);
 
-	var cpuHandle = _srvHeap.GetCPUDescriptorHandleForHeapStart();
-
+	var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
 	_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-	cpuHandle.Ptr += _srvDescriptorSize;
+	cpuHandle.Ptr += _lightingDescriptorSize;
 	_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-	cpuHandle.Ptr += _srvDescriptorSize;
+	cpuHandle.Ptr += _lightingDescriptorSize;
 	_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
+	cpuHandle.Ptr += _lightingDescriptorSize;
 
-	ID3D12DescriptorHeap* srvHeaps = (ID3D12DescriptorHeap*) _srvHeap.Handle;
-	_commandList.SetDescriptorHeaps(1, &srvHeaps);
+	_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*) null, (UnorderedAccessViewDesc*) null, cpuHandle);
 
-	var gpuHandle = _srvHeap.GetGPUDescriptorHandleForHeapStart();
+	ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*) _lightingDescriptorHeap.Handle;
+	_commandList.SetDescriptorHeaps(1, &descriptorHeaps);
 
-	_commandList.SetPipelineState((ID3D12PipelineState*) _deferredPipeline.Handle);
-	_commandList.SetGraphicsRootSignature(_deferredRootSignature.Handle);
-	_commandList.SetGraphicsRootDescriptorTable(0, gpuHandle);
+	var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
+	var uavGpuHandle = srvGpuHandle;
+	uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
+
+	_commandList.SetPipelineState((ID3D12PipelineState*) _lightingPipeline.Handle);
+	_commandList.SetComputeRootSignature(_lightingRootSignature.Handle);
+	_commandList.SetComputeRootDescriptorTable(0, srvGpuHandle);
+	_commandList.SetComputeRootDescriptorTable(1, uavGpuHandle);
 
 	var viewProjection = _camera.Transform * _camera.Perspective;
 	Span<float> cameraConstants = stackalloc float[20];
@@ -1744,11 +1695,56 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 
 	fixed (float* cameraPtr = cameraConstants)
 	{
-		_commandList.SetGraphicsRoot32BitConstants(1, 20, cameraPtr, 0);
+		_commandList.SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
 	}
 
-	_commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglestrip);
-	_commandList.DrawInstanced(4, 1, 0, 0);
+	var dispatchX = (uint) ((resources.FramebufferSize.X + 7) / 8);
+	var dispatchY = (uint) ((resources.FramebufferSize.Y + 7) / 8);
+	_commandList.Dispatch(dispatchX, dispatchY, 1);
+
+	var uavBarrier = new ResourceBarrier {Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None};
+	uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
+	_commandList.ResourceBarrier(1, &uavBarrier);
+
+	var copyBarriers = stackalloc ResourceBarrier[2];
+	copyBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	copyBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = _lightingBuffer.Handle,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.UnorderedAccess,
+		StateAfter = ResourceStates.CopySource
+	};
+	copyBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = backbufferTexture.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.Present,
+		StateAfter = ResourceStates.CopyDest
+	};
+	_commandList.ResourceBarrier(2, copyBarriers);
+
+	_commandList.CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
+
+	var presentBarriers = stackalloc ResourceBarrier[2];
+	presentBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = backbufferTexture.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.CopyDest,
+		StateAfter = ResourceStates.Present
+	};
+	presentBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = _lightingBuffer.Handle,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.CopySource,
+		StateAfter = ResourceStates.UnorderedAccess
+	};
+	_commandList.ResourceBarrier(2, presentBarriers);
 
 	return true;
 }
@@ -1829,26 +1825,31 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 			}
 		}
 
-		_materialResources.Clear();
+	_materialResources.Clear();
 	if (_gbufferPipeline.Handle is not null)
 	{
 		_gbufferPipeline.Dispose();
 		_gbufferPipeline = default;
 	}
-	if (_deferredPipeline.Handle is not null)
+	if (_lightingPipeline.Handle is not null)
 	{
-		_deferredPipeline.Dispose();
-		_deferredPipeline = default;
+		_lightingPipeline.Dispose();
+		_lightingPipeline = default;
 	}
-	if (_deferredRootSignature.Handle is not null)
+	if (_lightingRootSignature.Handle is not null)
 	{
-		_deferredRootSignature.Dispose();
-		_deferredRootSignature = default;
+		_lightingRootSignature.Dispose();
+		_lightingRootSignature = default;
 	}
-	if (_srvHeap.Handle is not null)
+	if (_lightingDescriptorHeap.Handle is not null)
 	{
-		_srvHeap.Dispose();
-		_srvHeap = default;
+		_lightingDescriptorHeap.Dispose();
+		_lightingDescriptorHeap = default;
+	}
+	if (_lightingBuffer.Handle is not null)
+	{
+		_lightingBuffer.Dispose();
+		_lightingBuffer = default;
 	}
 	if (_rootSignature.Handle is not null)
 	{
