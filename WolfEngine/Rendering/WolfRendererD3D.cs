@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -113,10 +114,14 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12Fence> _fence = default;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
-	private ComPtr<ID3D12RootSignature> _rootSignature = default;
-	private ComPtr<ID3D12PipelineState> _gbufferPipeline = default;
-	private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
-	private ComPtr<ID3D12Resource> _depthBuffer = default;
+private ComPtr<ID3D12RootSignature> _rootSignature = default;
+private ComPtr<ID3D12PipelineState> _gbufferPipeline = default;
+private ComPtr<ID3D12RootSignature> _deferredRootSignature = default;
+private ComPtr<ID3D12PipelineState> _deferredPipeline = default;
+private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
+private ComPtr<ID3D12Resource> _depthBuffer = default;
+private ComPtr<ID3D12DescriptorHeap> _srvHeap = default;
+private uint _srvDescriptorSize;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
 private readonly Dictionary<Material, MaterialResources> _materialResources = new();
@@ -299,10 +304,12 @@ private readonly List<DrawInstruction> _drawCommands = new();
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
-		CreateRootSignature();
-		CreateDepthResources();
-		CreateGBufferPipeline();
-	}
+	CreateRootSignature();
+	CreateDepthResources();
+	CreateGBufferPipeline();
+	CreateSrvHeap();
+	CreateDeferredPipeline();
+}
 
 	private void CreateDeviceAndQueue()
 	{
@@ -618,7 +625,201 @@ private readonly List<DrawInstruction> _drawCommands = new();
 	}
 
 
-	private void CreateDepthResources()
+private void CreateSrvHeap()
+{
+	var heapDesc = new DescriptorHeapDesc
+	{
+		Type = DescriptorHeapType.CbvSrvUav,
+		NumDescriptors = 3,
+		Flags = DescriptorHeapFlags.ShaderVisible,
+		NodeMask = 0
+	};
+
+	SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _srvHeap));
+	_srvDescriptorSize = _device.GetDescriptorHandleIncrementSize(DescriptorHeapType.CbvSrvUav);
+}
+
+private void CreateDeferredPipeline()
+{
+	var vertexShaderBytes = _shaderCompiler.GetDxil("deferred_lighting.slang", "vertexShader", "vs_6_6");
+	var pixelShaderBytes = _shaderCompiler.GetDxil("deferred_lighting.slang", "fragmentShader", "ps_6_6");
+
+	var descriptorRange = stackalloc DescriptorRange[1];
+	descriptorRange[0].RangeType = DescriptorRangeType.Srv;
+	descriptorRange[0].NumDescriptors = 3;
+	descriptorRange[0].BaseShaderRegister = 0;
+	descriptorRange[0].RegisterSpace = 0;
+	descriptorRange[0].OffsetInDescriptorsFromTableStart = 0;
+
+	var rootParameters = stackalloc RootParameter[2];
+	rootParameters[0].ParameterType = (RootParameterType) 0;
+	rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+	rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = descriptorRange;
+	rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
+
+	rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
+	rootParameters[1].Anonymous.Constants = new RootConstants
+	{
+		ShaderRegister = 0,
+		RegisterSpace = 0,
+		Num32BitValues = 20
+	};
+	rootParameters[1].ShaderVisibility = ShaderVisibility.Pixel;
+
+	var staticSampler = stackalloc StaticSamplerDesc[1];
+	staticSampler[0] = new StaticSamplerDesc
+	{
+		Filter = Filter.MinMagMipLinear,
+		AddressU = TextureAddressMode.Clamp,
+		AddressV = TextureAddressMode.Clamp,
+		AddressW = TextureAddressMode.Clamp,
+		MipLODBias = 0.0f,
+		MaxAnisotropy = 0,
+		ComparisonFunc = ComparisonFunc.Always,
+		BorderColor = StaticBorderColor.TransparentBlack,
+		MinLOD = 0.0f,
+		MaxLOD = float.MaxValue,
+		ShaderRegister = 0,
+		RegisterSpace = 0,
+		ShaderVisibility = ShaderVisibility.Pixel
+	};
+
+	var rootSignatureDesc = new RootSignatureDesc
+	{
+		NumParameters = 2,
+		PParameters = rootParameters,
+		NumStaticSamplers = 1,
+		PStaticSamplers = staticSampler,
+		Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
+	};
+
+	var versionedDesc = new VersionedRootSignatureDesc
+	{
+		Version = D3DRootSignatureVersion.Version10
+	};
+	versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
+
+	ID3D10Blob* deferredRootSignatureBlob = null;
+	ID3D10Blob* rootSignatureError = null;
+	var serializeResult = _d3d12.SerializeVersionedRootSignature(&versionedDesc, &deferredRootSignatureBlob, &rootSignatureError);
+	if (rootSignatureError is not null)
+	{
+		var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
+		rootSignatureError->Release();
+		if (serializeResult < 0)
+		{
+			throw new InvalidOperationException($"Failed to serialise deferred root signature: {message}");
+		}
+	}
+
+	SilkMarshal.ThrowHResult(serializeResult);
+	SilkMarshal.ThrowHResult(_device.CreateRootSignature(
+		0,
+		deferredRootSignatureBlob->GetBufferPointer(),
+		deferredRootSignatureBlob->GetBufferSize(),
+		out _deferredRootSignature));
+	deferredRootSignatureBlob->Release();
+
+	fixed (byte* vertexPtr = vertexShaderBytes)
+	fixed (byte* pixelPtr = pixelShaderBytes)
+	{
+		var shaderBytecodeVS = new ShaderBytecode
+		{
+			PShaderBytecode = vertexPtr,
+			BytecodeLength = (nuint) vertexShaderBytes.Length
+		};
+
+		var shaderBytecodePS = new ShaderBytecode
+		{
+			PShaderBytecode = pixelPtr,
+			BytecodeLength = (nuint) pixelShaderBytes.Length
+		};
+
+		var blendState = new BlendDesc
+		{
+			AlphaToCoverageEnable = 0,
+			IndependentBlendEnable = 0
+		};
+		var blendDesc = new RenderTargetBlendDesc
+		{
+			BlendEnable = 0,
+			LogicOpEnable = 0,
+			SrcBlend = Blend.One,
+			DestBlend = Blend.Zero,
+			BlendOp = BlendOp.Add,
+			SrcBlendAlpha = Blend.One,
+			DestBlendAlpha = Blend.Zero,
+			BlendOpAlpha = BlendOp.Add,
+			LogicOp = LogicOp.Noop,
+			RenderTargetWriteMask = (byte) ColorWriteEnable.All
+		};
+		blendState.RenderTarget[0] = blendDesc;
+
+		var rasterizerState = new RasterizerDesc
+		{
+			FillMode = FillMode.Solid,
+			CullMode = CullMode.None,
+			FrontCounterClockwise = 0,
+			DepthBias = D3D12.DefaultDepthBias,
+			DepthBiasClamp = 0.0f,
+			SlopeScaledDepthBias = 0.0f,
+			DepthClipEnable = 1,
+			MultisampleEnable = 0,
+			AntialiasedLineEnable = 0,
+			ForcedSampleCount = 0,
+			ConservativeRaster = ConservativeRasterizationMode.Off
+		};
+
+		var depthStencilState = new DepthStencilDesc
+		{
+			DepthEnable = 0,
+			DepthWriteMask = DepthWriteMask.Zero,
+			DepthFunc = ComparisonFunc.Always,
+			StencilEnable = 0,
+			StencilReadMask = D3D12.DefaultStencilReadMask,
+			StencilWriteMask = D3D12.DefaultStencilWriteMask,
+			FrontFace = new DepthStencilopDesc
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			},
+			BackFace = new DepthStencilopDesc
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			}
+		};
+
+		var psoDesc = new GraphicsPipelineStateDesc
+		{
+			PRootSignature = (ID3D12RootSignature*) _deferredRootSignature.Handle,
+			VS = shaderBytecodeVS,
+			PS = shaderBytecodePS,
+			BlendState = blendState,
+			SampleMask = D3D12.DefaultSampleMask,
+			RasterizerState = rasterizerState,
+			DepthStencilState = depthStencilState,
+			InputLayout = default,
+			IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
+			PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
+			NumRenderTargets = 1,
+			DSVFormat = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			NodeMask = 0,
+			CachedPSO = default,
+			Flags = PipelineStateFlags.None
+		};
+		psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
+
+		SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _deferredPipeline));
+	}
+}
+
+private void CreateDepthResources()
 	{
 	if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
 	{
@@ -1241,6 +1442,12 @@ private void OnFramebufferResize(Int2 newSize)
 		SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
 		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*) null));
 
+		if (_fence.GetCompletedValue() < _fenceValue)
+		{
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
+			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
+		}
+
 		var framebufferSize = _framebufferSize;
 		RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) =>
 			ImportBackbufferTexture(registry, frameIdx, width, height);
@@ -1249,9 +1456,9 @@ private void OnFramebufferResize(Int2 newSize)
 
 		var frameResources = _frameBuilder.BeginFrame(framebufferSize, ImportBackbuffer, ImportDepth);
 
-		var callbacks = new RenderPassCallbacks(
-			(context, resources) => ExecuteGBufferPass(context, resources),
-			(context, resources) => ExecuteForwardPass(context, resources));
+	var callbacks = new RenderPassCallbacks(
+		(context, resources) => ExecuteGBufferPass(context, resources),
+		(context, resources) => ExecuteDeferredPass(context, resources));
 
 		var renderedScene = _frameBuilder.BuildAndExecute(callbacks);
 
@@ -1272,7 +1479,15 @@ private void OnFramebufferResize(Int2 newSize)
 		ID3D12CommandList* lists = (ID3D12CommandList*) _commandList.Handle;
 		_commandQueue.ExecuteCommandLists(1, &lists);
 
-		SilkMarshal.ThrowHResult(_swapchain.Present(1, 0));
+		var presentResult = _swapchain.Present(1, 0);
+		if (presentResult < 0)
+		{
+			var removalReason = _device.GetDeviceRemovedReason();
+			var message =
+				$"IDXGISwapChain::Present failed with HRESULT 0x{presentResult:X8}. DeviceRemovedReason=0x{removalReason:X8}.";
+
+			throw new InvalidOperationException(message);
+		}
 
 		_fenceValue++;
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
@@ -1428,7 +1643,7 @@ private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameReso
 		#pragma warning restore CA2014
 	}
 
-private bool ExecuteForwardPass(RenderGraphContext context, RenderGraphFrameResources resources)
+private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
 {
 	var hasDrawCommands = _drawCommands.Count > 0;
 	if (hasDrawCommands == false)
@@ -1443,12 +1658,11 @@ private bool ExecuteForwardPass(RenderGraphContext context, RenderGraphFrameReso
 	}
 
 	var backbufferTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.Backbuffer);
-	var depthTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.Depth);
 
-		var barrierBegin = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrierBegin.Anonymous.Transition = new()
-		{
-			PResource = backbufferTexture.Resource,
+	var barrierBegin = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	barrierBegin.Anonymous.Transition = new()
+	{
+		PResource = backbufferTexture.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.Present,
 			StateAfter = ResourceStates.RenderTarget
@@ -1469,58 +1683,75 @@ private bool ExecuteForwardPass(RenderGraphContext context, RenderGraphFrameReso
 	var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
 	_commandList.RSSetScissorRects(1, &scissor);
 
-		var rtvHandle = backbufferTexture.RenderTargetView;
-		var dsvHandle = depthTexture.DepthStencilView;
-		_commandList.OMSetRenderTargets(1, &rtvHandle, new(false), &dsvHandle);
-		fixed (float* clear = _backgroundColour)
-		{
-			_commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Box2D<int>*) null);
-		}
-		_commandList.ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*) null);
+	var rtvHandle = backbufferTexture.RenderTargetView;
+	_commandList.OMSetRenderTargets(1, &rtvHandle, new(false), (CpuDescriptorHandle*) null);
 
-		var viewProjection = _camera.Transform * _camera.Perspective;
-		Span<float> cameraConstants = stackalloc float[20];
-		WriteMatrix(cameraConstants, viewProjection);
-		cameraConstants[16] = _camera.Position.X;
-		cameraConstants[17] = _camera.Position.Y;
-		cameraConstants[18] = _camera.Position.Z;
-		cameraConstants[19] = 1.0f;
+	var gbufferAlbedo = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferAlbedo);
+	var gbufferNormal = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferNormal);
+	var gbufferMaterial = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferMaterial);
 
-		#pragma warning disable CA2014
-		foreach (var draw in _drawCommands)
-		{
-			var meshResources = EnsureMeshResources(draw.Mesh);
-			var materialResources = EnsureMaterialResources(draw.Material);
+	var resourceBarriers = stackalloc ResourceBarrier[3];
+	resourceBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	resourceBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = gbufferAlbedo.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.RenderTarget,
+		StateAfter = ResourceStates.PixelShaderResource
+	};
+	resourceBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = gbufferNormal.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.RenderTarget,
+		StateAfter = ResourceStates.PixelShaderResource
+	};
+	resourceBarriers[2] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+	resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = gbufferMaterial.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.RenderTarget,
+		StateAfter = ResourceStates.PixelShaderResource
+	};
+	_commandList.ResourceBarrier(3, resourceBarriers);
 
-			_commandList.SetPipelineState((ID3D12PipelineState*) materialResources.PipelineState.Handle);
-			_commandList.SetGraphicsRootSignature(_rootSignature.Handle);
+	var cpuHandle = _srvHeap.GetCPUDescriptorHandleForHeapStart();
 
-			var colorBufferPtr = materialResources.ColorBuffer.Handle;
-			_commandList.SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
+	_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
+	cpuHandle.Ptr += _srvDescriptorSize;
+	_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
+	cpuHandle.Ptr += _srvDescriptorSize;
+	_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
 
-			Span<float> modelConstants = stackalloc float[16];
-			WriteMatrix(modelConstants, draw.Transform);
-			fixed (float* modelPtr = modelConstants)
-			{
-				_commandList.SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
-			}
+	ID3D12DescriptorHeap* srvHeaps = (ID3D12DescriptorHeap*) _srvHeap.Handle;
+	_commandList.SetDescriptorHeaps(1, &srvHeaps);
 
-			fixed (float* cameraPtr = cameraConstants)
-			{
-				_commandList.SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
-			}
+	var gpuHandle = _srvHeap.GetGPUDescriptorHandleForHeapStart();
 
-			_commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
-			var vertexView = meshResources.VertexView;
-			_commandList.IASetVertexBuffers(0, 1, &vertexView);
-			var indexView = meshResources.IndexView;
-			_commandList.IASetIndexBuffer(&indexView);
-			_commandList.DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
-		}
-		#pragma warning restore CA2014
+	_commandList.SetPipelineState((ID3D12PipelineState*) _deferredPipeline.Handle);
+	_commandList.SetGraphicsRootSignature(_deferredRootSignature.Handle);
+	_commandList.SetGraphicsRootDescriptorTable(0, gpuHandle);
 
-		return true;
+	var viewProjection = _camera.Transform * _camera.Perspective;
+	Span<float> cameraConstants = stackalloc float[20];
+	WriteMatrix(cameraConstants, viewProjection);
+	cameraConstants[16] = _camera.Position.X;
+	cameraConstants[17] = _camera.Position.Y;
+	cameraConstants[18] = _camera.Position.Z;
+	cameraConstants[19] = 1.0f;
+
+	fixed (float* cameraPtr = cameraConstants)
+	{
+		_commandList.SetGraphicsRoot32BitConstants(1, 20, cameraPtr, 0);
 	}
+
+	_commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglestrip);
+	_commandList.DrawInstanced(4, 1, 0, 0);
+
+	return true;
+}
 
 	private void SignalAndWait()
 	{
@@ -1599,16 +1830,31 @@ private bool ExecuteForwardPass(RenderGraphContext context, RenderGraphFrameReso
 		}
 
 		_materialResources.Clear();
-		if (_gbufferPipeline.Handle is not null)
-		{
-			_gbufferPipeline.Dispose();
-			_gbufferPipeline = default;
-		}
-		if (_rootSignature.Handle is not null)
-		{
-			_rootSignature.Dispose();
-			_rootSignature = default;
-		}
+	if (_gbufferPipeline.Handle is not null)
+	{
+		_gbufferPipeline.Dispose();
+		_gbufferPipeline = default;
+	}
+	if (_deferredPipeline.Handle is not null)
+	{
+		_deferredPipeline.Dispose();
+		_deferredPipeline = default;
+	}
+	if (_deferredRootSignature.Handle is not null)
+	{
+		_deferredRootSignature.Dispose();
+		_deferredRootSignature = default;
+	}
+	if (_srvHeap.Handle is not null)
+	{
+		_srvHeap.Dispose();
+		_srvHeap = default;
+	}
+	if (_rootSignature.Handle is not null)
+	{
+		_rootSignature.Dispose();
+		_rootSignature = default;
+	}
 
 		if (_fence.Handle is not null)
 		{

@@ -7,7 +7,7 @@ namespace WolfEngine.Rendering;
 
 public readonly record struct RenderPassCallbacks(
 	Action<RenderGraphContext, RenderGraphFrameResources> ExecuteGBuffer,
-	Func<RenderGraphContext, RenderGraphFrameResources, bool> ExecuteForward);
+	Func<RenderGraphContext, RenderGraphFrameResources, bool> ExecuteDeferred);
 
 public readonly struct RenderGraphFrameResources
 {
@@ -44,10 +44,14 @@ public sealed class RenderGraphFrameBuilder
 			FramebufferSize = framebufferSize,
 			Backbuffer = importBackbuffer(_resources, framebufferSize.X, framebufferSize.Y),
 			Depth = importDepth(_resources, framebufferSize.X, framebufferSize.Y),
-			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
-			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y, TextureFormat.Rgba16Float, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
-			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
-			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y, TextureFormat.D32Float, TextureUsage.DepthStencil))
+			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
+				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
+				framebufferSize.Y, TextureFormat.Rgba16Float, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
+				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
+				TextureFormat.D32Float, TextureUsage.DepthStencil))
 		};
 
 		return _frameResources;
@@ -64,10 +68,10 @@ public sealed class RenderGraphFrameBuilder
 			.WriteTexture(_frameResources.GBufferDepth)
 			.SetExecute(context => callbacks.ExecuteGBuffer(context, _frameResources));
 
-		_graph.AddPass("Forward Lighting")
+		_graph.AddPass("Deferred Lighting")
 			.WriteTexture(_frameResources.Backbuffer)
 			.WriteTexture(_frameResources.Depth)
-			.SetExecute(context => renderedScene = callbacks.ExecuteForward(context, _frameResources));
+			.SetExecute(context => renderedScene = callbacks.ExecuteDeferred(context, _frameResources));
 
 		_graph.Execute();
 
