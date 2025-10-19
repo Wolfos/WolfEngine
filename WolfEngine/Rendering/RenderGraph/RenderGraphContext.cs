@@ -15,4 +15,9 @@ public sealed class RenderGraphContext
 	public string PassName { get; }
 
 	public RenderGraphResourceRegistry ResourceRegistry { get; }
+
+	public IRenderGraphTexture GetTexture(RenderGraphResourceHandle handle)
+	{
+		return ResourceRegistry.GetTexture(handle);
+	}
 }

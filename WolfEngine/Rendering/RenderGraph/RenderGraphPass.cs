@@ -6,7 +6,9 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphPass
 {
-	private Action<RenderGraphContext>? _execute;
+private Action<RenderGraphContext> _execute = context => { };
+	private readonly List<RenderGraphResourceHandle> _reads = new();
+	private readonly List<RenderGraphResourceHandle> _writes = new();
 
 	internal RenderGraphPass(string name)
 	{
@@ -15,19 +17,43 @@ public sealed class RenderGraphPass
 
 	public string Name { get; }
 
+	internal IReadOnlyList<RenderGraphResourceHandle> Reads => _reads;
+
+	internal IReadOnlyList<RenderGraphResourceHandle> Writes => _writes;
+
 	internal void SetExecute(Action<RenderGraphContext> execute)
 	{
 		_execute = execute ?? throw new ArgumentNullException(nameof(execute));
 	}
 
-	internal void Execute(RenderGraphContext context)
+	internal void AddRead(RenderGraphResourceHandle handle)
 	{
-		if (_execute is null)
+		if (handle.IsValid == false)
 		{
-			// Pass authoring should always supply an execute callback; early return keeps things safe during scaffolding.
-			return;
+			throw new ArgumentException("Handle is not valid.", nameof(handle));
 		}
 
-		_execute(context);
+		if (_reads.Contains(handle) == false)
+		{
+			_reads.Add(handle);
+		}
+	}
+
+	internal void AddWrite(RenderGraphResourceHandle handle)
+	{
+		if (handle.IsValid == false)
+		{
+			throw new ArgumentException("Handle is not valid.", nameof(handle));
+		}
+
+		if (_writes.Contains(handle) == false)
+		{
+			_writes.Add(handle);
+		}
+	}
+
+	internal void Execute(RenderGraphContext context)
+	{
+	_execute(context);
 	}
 }

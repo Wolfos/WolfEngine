@@ -31,6 +31,8 @@ These pieces are sufficient to record a single pass that runs arbitrary code, wh
 
 **Feature tie-in:** Enables the deferred base pass + clustered lighting because G-Buffer attachments and depth hierarchy can be allocated transiently and shared across passes.
 
+**Direct3D12 status:** Implemented. The registry now instantiates RTV/DSV-backed resources through a dedicated D3D12 backend and the renderer imports swapchain/depth surfaces as external graph resources.
+
 ## 5. Pass Graph + Scheduling (R3)
 - Allow pass dependencies via explicit resource reads/writes; topologically sort passes before execution.
 - Add culling of unused passes and resources (e.g., debug-only overlays not requested this frame).

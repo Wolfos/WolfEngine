@@ -37,6 +37,9 @@
         <None Update="Shaders\default.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\gbuffer.slang">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\triangle.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

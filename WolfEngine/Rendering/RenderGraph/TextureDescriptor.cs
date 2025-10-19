@@ -6,11 +6,12 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public readonly struct TextureDescriptor
 {
-	public TextureDescriptor(int width, int height, TextureFormat format)
+	public TextureDescriptor(int width, int height, TextureFormat format, TextureUsage usage)
 	{
 		Width = width;
 		Height = height;
 		Format = format;
+		Usage = usage;
 	}
 
 	public int Width { get; }
@@ -18,12 +19,24 @@ public readonly struct TextureDescriptor
 	public int Height { get; }
 
 	public TextureFormat Format { get; }
+
+	public TextureUsage Usage { get; }
 }
 
 public enum TextureFormat
 {
 	Unknown = 0,
+	Bgra8Unorm,
 	Rgba8Unorm,
 	Rgba16Float,
 	D32Float
+}
+
+[Flags]
+public enum TextureUsage
+{
+	None = 0,
+	RenderTarget = 1 << 0,
+	DepthStencil = 1 << 1,
+	ShaderResource = 1 << 2
 }

@@ -14,6 +14,12 @@ public sealed class RenderGraph
 		_resourceRegistry = resourceRegistry ?? throw new ArgumentNullException(nameof(resourceRegistry));
 	}
 
+	public void BeginFrame()
+	{
+		_resourceRegistry.BeginFrame();
+		_passes.Clear();
+	}
+
 	public RenderGraphBuilder AddPass(string name)
 	{
 		var pass = new RenderGraphPass(name);
@@ -23,15 +29,27 @@ public sealed class RenderGraph
 
 	public void Execute()
 	{
-		_resourceRegistry.BeginFrame();
-
 		foreach (var pass in _passes)
 		{
+			foreach (var read in pass.Reads)
+			{
+				_resourceRegistry.GetTexture(read);
+			}
+
+			foreach (var write in pass.Writes)
+			{
+				_resourceRegistry.GetTexture(write);
+			}
+
 			var context = new RenderGraphContext(_resourceRegistry, pass.Name);
 			pass.Execute(context);
 		}
 
-		_resourceRegistry.EndFrame();
 		_passes.Clear();
+	}
+
+	public void EndFrame()
+	{
+		_resourceRegistry.EndFrame();
 	}
 }

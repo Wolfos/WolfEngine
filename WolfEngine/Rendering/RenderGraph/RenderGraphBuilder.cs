@@ -20,6 +20,18 @@ public sealed class RenderGraphBuilder
 		return _resourceRegistry.CreateTransientTexture(descriptor);
 	}
 
+	public RenderGraphBuilder ReadTexture(RenderGraphResourceHandle handle)
+	{
+		_pass.AddRead(handle);
+		return this;
+	}
+
+	public RenderGraphBuilder WriteTexture(RenderGraphResourceHandle handle)
+	{
+		_pass.AddWrite(handle);
+		return this;
+	}
+
 	public void SetExecute(Action<RenderGraphContext> execute)
 	{
 		_pass.SetExecute(execute ?? throw new ArgumentNullException(nameof(execute)));
