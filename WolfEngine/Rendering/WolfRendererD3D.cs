@@ -6,17 +6,15 @@ using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
+using Silk.NET.Input;
 using Silk.NET.Maths;
-using Silk.NET.SDL;
+using Silk.NET.Windowing;
 
 namespace WolfEngine;
 
 public unsafe class WolfRendererD3D : IRenderer
 {
 	private const int FrameCount = 2;
-	private const uint SdlQuitEvent = 0x100;
-	private const uint SdlWindowEvent = 0x200;
-	private const uint SdlKeyDownEvent = 0x300;
 
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
 
@@ -86,7 +84,12 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly int _width;
 	private readonly int _height;
 	private readonly IShaderCompiler _shaderCompiler;
-	private readonly Sdl _sdl;
+	private readonly IArenaAllocator _arenaAllocator;
+	private IWindow? _window;
+	private IInputContext? _inputContext;
+	private Action _startupCallback = static () => { };
+	private Action _updateCallback = static () => { };
+	private bool _isInitialized;
 
 	private DXGI _dxgi = null!;
 	private D3D12 _d3d12 = null!;
@@ -120,57 +123,35 @@ public unsafe class WolfRendererD3D : IRenderer
 	private bool _hasCamera;
 
 	private uint _backbufferIndex;
-	private Window* _window;
 	private nint _windowHandle;
-	private bool _isRunning;
 	private Vector2D<int> _framebufferSize;
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler)
+	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator)
 	{
 		_width = 1280;
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
-		_sdl = Sdl.GetApi();
+		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 	}
 
 	public void Run(Action startup, Action update)
 	{
-		var startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
-		var updateCallback = update ?? throw new ArgumentNullException(nameof(update));
+		_startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
+		_updateCallback = update ?? throw new ArgumentNullException(nameof(update));
 
 		InitializeWindow();
-		OnLoad();
 
-		_isRunning = true;
-		var evt = new Event();
-		var clock = Stopwatch.StartNew();
-		var lastTime = 0.0;
+		var window = _window ?? throw new InvalidOperationException("Window was not initialised.");
 
-		startupCallback();
-		ProcessPendingCommands();
+		window.Load += OnWindowLoad;
+		window.Update += OnWindowUpdate;
+		window.Render += OnWindowRender;
+		window.FramebufferResize += OnWindowFramebufferResize;
+		window.Closing += OnWindowClosing;
 
 		try
 		{
-			while (_isRunning)
-			{
-				PumpEvents(ref evt);
-
-				updateCallback();
-
-				var currentTime = clock.Elapsed.TotalSeconds;
-				var delta = currentTime - lastTime;
-				lastTime = currentTime;
-
-				OnUpdate(delta);
-				if (_framebufferSize.X > 0 && _framebufferSize.Y > 0)
-				{
-					OnRender(delta);
-				}
-				else
-				{
-					_sdl.Delay(1);
-				}
-			}
+			window.Run();
 		}
 		finally
 		{
@@ -183,103 +164,105 @@ public unsafe class WolfRendererD3D : IRenderer
 		_pendingCommands.Enqueue(command);
 	}
 
-	private void InitializeWindow()
+	private void OnWindowLoad()
 	{
-		if (_sdl.Init(Sdl.InitVideo) < 0)
-		{
-			throw new InvalidOperationException("Failed to initialise SDL video subsystem.");
-		}
+		RetrieveNativeHandle();
+		UpdateFramebufferSize();
 
-		var titlePtr = SilkMarshal.StringToPtr("WolfEngine", NativeStringEncoding.UTF8);
-		try
-		{
-			var flags = WindowFlags.Resizable;
-			_window = _sdl.CreateWindow((byte*) titlePtr, Sdl.WindowposCentered, Sdl.WindowposCentered, _width, _height,
-				(uint) flags);
-		}
-		finally
-		{
-			SilkMarshal.Free(titlePtr);
-		}
+		OnLoad();
 
 		if (_window is null)
 		{
-			throw new InvalidOperationException("Failed to create SDL window.");
+			throw new InvalidOperationException("Window was not initialised.");
 		}
 
-		RetrieveNativeHandle();
-		UpdateFramebufferSize();
+		_inputContext = _window.CreateInput();
+		foreach (var keyboard in _inputContext.Keyboards)
+		{
+			keyboard.KeyDown += HandleKeyDown;
+		}
+
+		_startupCallback();
+		ProcessPendingCommands();
+		_isInitialized = true;
+	}
+
+	private void OnWindowUpdate(double deltaSeconds)
+	{
+		_updateCallback();
+		OnUpdate(deltaSeconds);
+	}
+
+	private void OnWindowRender(double deltaSeconds)
+	{
+		if (_isInitialized == false)
+		{
+			return;
+		}
+
+		if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
+		{
+			return;
+		}
+		
+		OnRender(deltaSeconds);
+	}
+
+	private void OnWindowFramebufferResize(Vector2D<int> newSize)
+	{
+		if (_isInitialized == false)
+		{
+			if (newSize.X > 0 && newSize.Y > 0)
+			{
+				_framebufferSize = newSize;
+			}
+
+			return;
+		}
+
+		OnFramebufferResize(newSize);
+	}
+
+	private void OnWindowClosing()
+	{
+		_isInitialized = false;
+	}
+
+	private void HandleKeyDown(IKeyboard keyboard, Key key, int keycode)
+	{
+		if (key == Key.Escape)
+		{
+			_window?.Close();
+		}
+	}
+
+	private void InitializeWindow()
+	{
+		var options = WindowOptions.Default;
+		options.Title = "WolfEngine";
+		options.Size = new Vector2D<int>(_width, _height);
+		options.API = GraphicsAPI.None;
+
+		_window = Window.Create(options);
 	}
 
 	private void RetrieveNativeHandle()
 	{
-		var wmInfo = new SysWMInfo();
-		_sdl.GetVersion(&wmInfo.Version);
-
-		if (!_sdl.GetWindowWMInfo(_window, &wmInfo))
+		if (_window is null)
 		{
-			throw new InvalidOperationException("Failed to query SDL window information.");
+			throw new InvalidOperationException("Window was not initialised.");
 		}
 
-		if (wmInfo.Subsystem != SysWMType.Windows)
+		var win32 = _window.Native.Win32;
+		if (win32 is null)
 		{
-			throw new InvalidOperationException($"Unsupported SDL subsystem {wmInfo.Subsystem} for Direct3D renderer.");
+			throw new InvalidOperationException("Direct3D renderer requires a Win32 window handle.");
 		}
 
-		_windowHandle = (nint) wmInfo.Info.Win.Hwnd;
+		_windowHandle = win32.Value.Hwnd;
 		if (_windowHandle == nint.Zero)
 		{
-			throw new InvalidOperationException("SDL reported a null window handle.");
-		}
-	}
-
-	private void PumpEvents(ref Event evt)
-	{
-		while (_sdl.PollEvent(ref evt) != 0)
-		{
-			switch (evt.Type)
-			{
-				case SdlQuitEvent:
-					_isRunning = false;
-					break;
-				case SdlWindowEvent:
-					HandleWindowEvent(evt);
-					break;
-				case SdlKeyDownEvent:
-					HandleKeyEvent(evt);
-					break;
-			}
-		}
-	}
-
-	private void HandleWindowEvent(Event evt)
-	{
-		switch ((WindowEventID) evt.Window.Event)
-		{
-			case WindowEventID.Close:
-				_isRunning = false;
-				break;
-			case WindowEventID.SizeChanged:
-			case WindowEventID.Resized:
-				var width = evt.Window.Data1;
-				var height = evt.Window.Data2;
-				if (width > 0 && height > 0)
-				{
-					var newSize = new Vector2D<int>(width, height);
-					OnFramebufferResize(newSize);
-				}
-
-				break;
-		}
-	}
-
-	private void HandleKeyEvent(Event evt)
-	{
-		var keySym = evt.Key.Keysym;
-		const int EscapeKeycode = 27;
-		if (keySym.Sym == EscapeKeycode)
-		{
-			_isRunning = false;
+			throw new InvalidOperationException("Windowing subsystem reported a null window handle.");
 		}
 	}
 
@@ -290,12 +273,10 @@ public unsafe class WolfRendererD3D : IRenderer
 			return;
 		}
 
-		int width = 0;
-		int height = 0;
-		_sdl.GetWindowSize(_window, ref width, ref height);
-		if (width > 0 && height > 0)
+		var size = _window.FramebufferSize;
+		if (size.X > 0 && size.Y > 0)
 		{
-			_framebufferSize = new Vector2D<int>(width, height);
+			_framebufferSize = size;
 		}
 	}
 
@@ -1217,6 +1198,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		if (renderedScene)
 		{
 			_drawCommands.Clear();
+			_arenaAllocator.Reset();
 		}
 	}
 
@@ -1241,7 +1223,10 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private void Dispose()
 	{
-		SignalAndWait();
+		if (_commandQueue.Handle is not null && _fence.Handle is not null)
+		{
+			SignalAndWait();
+		}
 
 		for (var i = 0; i < FrameCount; i++)
 		{
@@ -1316,13 +1301,29 @@ public unsafe class WolfRendererD3D : IRenderer
 			_fenceEvent = nint.Zero;
 		}
 
+		if (_inputContext is not null)
+		{
+			foreach (var keyboard in _inputContext.Keyboards)
+			{
+				keyboard.KeyDown -= HandleKeyDown;
+			}
+
+			_inputContext.Dispose();
+			_inputContext = null;
+		}
+
 		if (_window is not null)
 		{
-			_sdl.DestroyWindow(_window);
+			_window.Load -= OnWindowLoad;
+			_window.Update -= OnWindowUpdate;
+			_window.Render -= OnWindowRender;
+			_window.FramebufferResize -= OnWindowFramebufferResize;
+			_window.Closing -= OnWindowClosing;
+			_window.Dispose();
 			_window = null;
 		}
 
-		_sdl.Quit();
+		_isInitialized = false;
 	}
 
 	[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

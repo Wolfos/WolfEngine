@@ -15,9 +15,9 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
-    <PropertyGroup>
-        <PublishAot>true</PublishAot>
-    </PropertyGroup>
+<!--    <PropertyGroup>-->
+<!--        <PublishAot>true</PublishAot>-->
+<!--    </PropertyGroup>-->
 
     <ItemGroup>
         <PackageReference Include="ImGui.NET" Version="1.91.6.1"/>
