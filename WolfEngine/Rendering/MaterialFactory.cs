@@ -1,5 +1,3 @@
-using System;
-
 namespace WolfEngine;
 
 public interface IMaterialFactory

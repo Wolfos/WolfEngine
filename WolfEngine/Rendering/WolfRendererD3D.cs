@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -9,6 +8,7 @@ using Silk.NET.DXGI;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -116,11 +116,13 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
 	private ComPtr<ID3D12Resource> _depthBuffer = default;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
-	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-	private readonly Dictionary<Material, MaterialResources> _materialResources = new();
-	private readonly List<DrawInstruction> _drawCommands = new();
-	private Camera _camera = null!;
-	private bool _hasCamera;
+private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+private readonly Dictionary<Material, MaterialResources> _materialResources = new();
+private readonly List<DrawInstruction> _drawCommands = new();
+private readonly RenderGraphResourceRegistry _renderGraphResources = new();
+private readonly RenderGraph _renderGraph;
+private Camera _camera = null!;
+private bool _hasCamera;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -132,6 +134,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
+		_renderGraph = new RenderGraph(_renderGraphResources);
 	}
 
 	public void Run(Action startup, Action update)
@@ -1093,33 +1096,13 @@ public unsafe class WolfRendererD3D : IRenderer
 		SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
 		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*) null));
 
-		var barrierBegin = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrierBegin.Anonymous.Transition = new()
-		{
-			PResource = _renderTargets[frameIdx].Handle,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.Present,
-			StateAfter = ResourceStates.RenderTarget
-		};
-		_commandList.ResourceBarrier(1, &barrierBegin);
-
 		var fb = _framebufferSize;
-		var vp = new Viewport
-			{TopLeftX = 0, TopLeftY = 0, Width = fb.X, Height = fb.Y, MinDepth = 0.0f, MaxDepth = 1.0f};
-		_commandList.RSSetViewports(1, &vp);
-		var sc = new Box2D<int>(0, 0, fb.X, fb.Y);
-		_commandList.RSSetScissorRects(1, &sc);
-
 		var rtvHandle = _rtvCpuHandles[frameIdx];
 		var dsvHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
-		_commandList.OMSetRenderTargets(1, &rtvHandle, new(false), &dsvHandle);
-		fixed (float* clear = _backgroundColour)
-		{
-			_commandList.ClearRenderTargetView(rtvHandle, clear, 0, (Box2D<int>*) null);
-		}
 
-		_commandList.ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*) null);
+		_renderGraph.AddPass("Clear Backbuffer")
+			.SetExecute(_ => ClearBackbufferPass(frameIdx, fb, rtvHandle, dsvHandle));
+		_renderGraph.Execute();
 
 		var hasDrawCommands = _drawCommands.Count > 0;
 		var renderedScene = false;
@@ -1200,6 +1183,37 @@ public unsafe class WolfRendererD3D : IRenderer
 			_drawCommands.Clear();
 			_arenaAllocator.Reset();
 		}
+	}
+
+	private void ClearBackbufferPass(uint frameIdx, Vector2D<int> framebufferSize, CpuDescriptorHandle rtvHandle, CpuDescriptorHandle dsvHandle)
+	{
+		var barrierBegin = new ResourceBarrier
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		barrierBegin.Anonymous.Transition = new()
+		{
+			PResource = _renderTargets[frameIdx].Handle,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.Present,
+			StateAfter = ResourceStates.RenderTarget
+		};
+		_commandList.ResourceBarrier(1, &barrierBegin);
+
+		var viewport = new Viewport
+			{TopLeftX = 0, TopLeftY = 0, Width = framebufferSize.X, Height = framebufferSize.Y, MinDepth = 0.0f, MaxDepth = 1.0f};
+		_commandList.RSSetViewports(1, &viewport);
+
+		var scissor = new Box2D<int>(0, 0, framebufferSize.X, framebufferSize.Y);
+		_commandList.RSSetScissorRects(1, &scissor);
+
+		var rtv = rtvHandle;
+		var dsv = dsvHandle;
+		_commandList.OMSetRenderTargets(1, &rtv, new(false), &dsv);
+		fixed (float* clear = _backgroundColour)
+		{
+			_commandList.ClearRenderTargetView(rtv, clear, 0, (Box2D<int>*) null);
+		}
+
+		_commandList.ClearDepthStencilView(dsv, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*) null);
 	}
 
 	private void SignalAndWait()
