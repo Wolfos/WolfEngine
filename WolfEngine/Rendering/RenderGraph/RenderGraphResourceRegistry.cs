@@ -1,5 +1,6 @@
 #nullable enable
 using System.Collections.Generic;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
 
@@ -11,39 +12,42 @@ public sealed class RenderGraphResourceRegistry
 {
 	private sealed class TextureRecord
 	{
-		public TextureRecord(TextureDescriptor descriptor, bool isExternal, IRenderGraphTexture? texture)
+		public TextureRecord(TextureDescriptor descriptor, bool ownsTexture, IGfxTexture? texture)
 		{
 			Descriptor = descriptor;
-			IsExternal = isExternal;
+			OwnsTexture = ownsTexture;
 			Texture = texture;
 		}
 
 		public TextureDescriptor Descriptor { get; }
 
-		public bool IsExternal { get; }
+		public bool OwnsTexture { get; }
 
-		public IRenderGraphTexture? Texture { get; set; }
+		public IGfxTexture? Texture { get; set; }
 	}
 
 	private int _nextHandleId = 1;
 	private readonly Dictionary<int, TextureRecord> _textures = new();
-	private IRenderGraphBackend _backend = null!;
+	private IGfxDevice _device = null!;
 
-	public void SetBackend(IRenderGraphBackend backend)
+	public void SetDevice(IGfxDevice device)
 	{
-		_backend = backend ?? throw new ArgumentNullException(nameof(backend));
+		_device = device ?? throw new ArgumentNullException(nameof(device));
 	}
 
 	public void BeginFrame()
 	{
 		foreach (var (_, record) in _textures)
 		{
-			if (record.IsExternal)
+			if (record.OwnsTexture == false)
 			{
 				continue;
 			}
 
-			record.Texture?.Dispose();
+			if (record.Texture is IDisposable disposable)
+			{
+				disposable.Dispose();
+			}
 		}
 
 		_textures.Clear();
@@ -58,11 +62,11 @@ public sealed class RenderGraphResourceRegistry
 	public RenderGraphResourceHandle CreateTransientTexture(in TextureDescriptor descriptor)
 	{
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_textures[handle.Id] = new TextureRecord(descriptor, isExternal: false, texture: null);
+		_textures[handle.Id] = new TextureRecord(descriptor, ownsTexture: true, texture: null);
 		return handle;
 	}
 
-	public RenderGraphResourceHandle ImportTexture(IRenderGraphTexture texture)
+	public RenderGraphResourceHandle ImportTexture(IGfxTexture texture, bool takeOwnership = false)
 	{
 		if (texture is null)
 		{
@@ -70,11 +74,11 @@ public sealed class RenderGraphResourceRegistry
 		}
 
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_textures[handle.Id] = new TextureRecord(texture.Descriptor, isExternal: true, texture);
+		_textures[handle.Id] = new TextureRecord(texture.Descriptor, ownsTexture: takeOwnership, texture);
 		return handle;
 	}
 
-	internal IRenderGraphTexture GetTexture(RenderGraphResourceHandle handle)
+	internal IGfxTexture GetTexture(RenderGraphResourceHandle handle)
 	{
 		if (_textures.TryGetValue(handle.Id, out var record) == false)
 		{
@@ -83,12 +87,12 @@ public sealed class RenderGraphResourceRegistry
 
 		if (record.Texture is null)
 		{
-			if (_backend is null)
+			if (_device is null)
 			{
-				throw new InvalidOperationException("Render graph backend has not been configured.");
+				throw new InvalidOperationException("Render graph device has not been configured.");
 			}
 
-			record.Texture = _backend.CreateTexture(record.Descriptor);
+			record.Texture = _device.CreateTexture(record.Descriptor);
 		}
 
 		return record.Texture;

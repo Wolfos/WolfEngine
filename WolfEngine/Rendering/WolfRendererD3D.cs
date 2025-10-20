@@ -11,6 +11,7 @@ using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Backend.D3D12;
 
 namespace WolfEngine;
 
@@ -97,9 +98,10 @@ public unsafe class WolfRendererD3D : IRenderer
 	private D3D12 _d3d12 = null!;
 	private ComPtr<IDXGIFactory2> _factory = default;
 	private ComPtr<IDXGISwapChain3> _swapchain = default;
-	private ComPtr<ID3D12Device> _device = default;
-	private ComPtr<IDXGIAdapter> _adapter = default;
-	private ComPtr<ID3D12CommandQueue> _commandQueue = default;
+private ComPtr<ID3D12Device> _device = default;
+private ComPtr<IDXGIAdapter> _adapter = default;
+private ComPtr<ID3D12CommandQueue> _commandQueue = default;
+private D3D12Device _gfxDevice = null!;
 
 	private ComPtr<ID3D12DescriptorHeap> _rtvHeap = default;
 	private uint _rtvDescriptorSize;
@@ -320,13 +322,15 @@ public unsafe class WolfRendererD3D : IRenderer
 				_adapter,
 				D3DFeatureLevel.Level120,
 				out _device));
-		_renderGraphResources.SetBackend(new D3D12RenderGraphBackend(_device));
 		var commandQueueDescription = new CommandQueueDesc(
 			type: CommandListType.Direct,
 			priority: (int)CommandQueuePriority.Normal,
 			flags: CommandQueueFlags.None);
 
-		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
+	SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
+
+	_gfxDevice = new D3D12Device(_device, _commandQueue);
+	_renderGraphResources.SetDevice(_gfxDevice);
 	}
 
 	private void CreateSwapchain()
@@ -1439,7 +1443,9 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var renderedScene = _frameBuilder.BuildAndExecute(callbacks);
 
-		var backbufferTexture = (ID3D12RenderGraphTexture)_renderGraphResources.GetTexture(frameResources.Backbuffer);
+	var backbufferResource = _renderGraphResources.GetTexture(frameResources.Backbuffer);
+	var backbufferTexture = backbufferResource as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Render graph returned a texture incompatible with the Direct3D12 backend.");
 		_frameBuilder.EndFrame();
 
 		var barrierEnd = new ResourceBarrier
@@ -1486,18 +1492,23 @@ public unsafe class WolfRendererD3D : IRenderer
 	private RenderGraphResourceHandle ImportBackbufferTexture(RenderGraphResourceRegistry registry, uint frameIdx,
 		int width, int height)
 	{
+		if (frameIdx >= _renderTargets.Length)
+		{
+			throw new ArgumentOutOfRangeException(nameof(frameIdx));
+		}
+
 		var descriptor = new TextureDescriptor(
 			Math.Max(width, 1),
 			Math.Max(height, 1),
 			TextureFormat.Bgra8Unorm,
 			TextureUsage.RenderTarget);
 
-		var texture = new D3D12ExternalRenderGraphTexture(
+		var texture = new ImportedD3D12Texture(
 			descriptor,
-			_renderTargets[frameIdx].Handle,
-			hasRtv: true,
+			_renderTargets[frameIdx],
+			_rtvHeap,
 			_rtvCpuHandles[frameIdx],
-			hasDsv: false,
+			null,
 			default);
 
 		return registry.ImportTexture(texture);
@@ -1518,12 +1529,12 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
 
-		var texture = new D3D12ExternalRenderGraphTexture(
+		var texture = new ImportedD3D12Texture(
 			descriptor,
-			_depthBuffer.Handle,
-			hasRtv: false,
+			_depthBuffer,
+			null,
 			default,
-			hasDsv: true,
+			_dsvHeap,
 			depthHandle);
 
 		return registry.ImportTexture(texture);
@@ -1537,10 +1548,14 @@ public unsafe class WolfRendererD3D : IRenderer
 			return;
 		}
 
-		var albedoTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferAlbedo);
-		var normalTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferNormal);
-		var materialTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferMaterial);
-		var depthTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferDepth);
+	var albedoTexture = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Albedo texture is not compatible with the Direct3D12 backend.");
+	var normalTexture = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Normal texture is not compatible with the Direct3D12 backend.");
+	var materialTexture = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Material texture is not compatible with the Direct3D12 backend.");
+	var depthTexture = context.GetTexture(resources.GBufferDepth) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Depth texture is not compatible with the Direct3D12 backend.");
 
 		var viewport = new Viewport
 		{
@@ -1556,11 +1571,11 @@ public unsafe class WolfRendererD3D : IRenderer
 		var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
 		_commandList.RSSetScissorRects(1, &scissor);
 
-		var rtvHandles = stackalloc CpuDescriptorHandle[3];
-		rtvHandles[0] = albedoTexture.RenderTargetView;
-		rtvHandles[1] = normalTexture.RenderTargetView;
-		rtvHandles[2] = materialTexture.RenderTargetView;
-		var dsvHandle = depthTexture.DepthStencilView;
+	var rtvHandles = stackalloc CpuDescriptorHandle[3];
+	rtvHandles[0] = albedoTexture.RenderTargetView ?? throw new InvalidOperationException("Albedo texture missing RTV.");
+	rtvHandles[1] = normalTexture.RenderTargetView ?? throw new InvalidOperationException("Normal texture missing RTV.");
+	rtvHandles[2] = materialTexture.RenderTargetView ?? throw new InvalidOperationException("Material texture missing RTV.");
+	var dsvHandle = depthTexture.DepthStencilView ?? throw new InvalidOperationException("Depth texture missing DSV.");
 		_commandList.OMSetRenderTargets(3, rtvHandles, new(false), &dsvHandle);
 
 		Span<float> albedoClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -1638,10 +1653,14 @@ public unsafe class WolfRendererD3D : IRenderer
 			return false;
 		}
 
-		var gbufferAlbedo = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferAlbedo);
-		var gbufferNormal = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferNormal);
-		var gbufferMaterial = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferMaterial);
-		var backbufferTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.Backbuffer);
+	var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("G-buffer albedo texture not compatible with Direct3D12 backend.");
+	var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("G-buffer normal texture not compatible with Direct3D12 backend.");
+	var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("G-buffer material texture not compatible with Direct3D12 backend.");
+	var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture
+		?? throw new InvalidOperationException("Backbuffer texture not compatible with Direct3D12 backend.");
 
 		var resourceBarriers = stackalloc ResourceBarrier[3];
 		resourceBarriers[0] = new ResourceBarrier
@@ -1729,27 +1748,27 @@ public unsafe class WolfRendererD3D : IRenderer
 		};
 		copyBarriers[1] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
-		copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = backbufferTexture.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.Present,
-			StateAfter = ResourceStates.CopyDest
-		};
-		_commandList.ResourceBarrier(2, copyBarriers);
+	copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = backbufferTextureDeferred.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.Present,
+		StateAfter = ResourceStates.CopyDest
+	};
+	_commandList.ResourceBarrier(2, copyBarriers);
 
-		_commandList.CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
+	_commandList.CopyResource(backbufferTextureDeferred.Resource, _lightingBuffer.Handle);
 
 		var presentBarriers = stackalloc ResourceBarrier[2];
 		presentBarriers[0] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
-		presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = backbufferTexture.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.CopyDest,
-			StateAfter = ResourceStates.Present
-		};
+	presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+	{
+		PResource = backbufferTextureDeferred.Resource,
+		Subresource = D3D12.ResourceBarrierAllSubresources,
+		StateBefore = ResourceStates.CopyDest,
+		StateAfter = ResourceStates.Present
+	};
 		presentBarriers[1] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier

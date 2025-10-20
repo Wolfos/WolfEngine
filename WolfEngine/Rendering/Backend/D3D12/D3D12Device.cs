@@ -282,29 +282,29 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			var colorCount = targets.ColorAttachments.Count;
 			CpuDescriptorHandle* dsvHandle = null;
 			CpuDescriptorHandle depthStorage = default;
-			if (targets.DepthAttachment is DepthTargetBinding depthBinding)
+		if (targets.DepthAttachment is DepthTargetBinding depthBinding)
+		{
+			if (depthBinding.Texture is not ID3D12BackendTexture depthTexture ||
+			    depthTexture.DepthStencilView is null)
 			{
-				if (depthBinding.Texture is not D3D12Texture depthTexture ||
-				    depthTexture.DepthStencilView is null)
-				{
-					throw new InvalidOperationException("Depth attachment was not provided by the Direct3D12 backend.");
-				}
-
-				depthStorage = depthTexture.DepthStencilView.Value;
-				dsvHandle = &depthStorage;
+				throw new InvalidOperationException("Depth attachment was not provided by the Direct3D12 backend.");
 			}
 
+			depthStorage = depthTexture.DepthStencilView.Value;
+			dsvHandle = &depthStorage;
+		}
+
 			var singleHandle = new Bool32(0);
-			if (colorCount > 0)
+		if (colorCount > 0)
+		{
+			Span<CpuDescriptorHandle> rtvSpan = stackalloc CpuDescriptorHandle[colorCount];
+			for (var i = 0; i < colorCount; i++)
 			{
-				Span<CpuDescriptorHandle> rtvSpan = stackalloc CpuDescriptorHandle[colorCount];
-				for (var i = 0; i < colorCount; i++)
+				if (targets.ColorAttachments[i].Texture is not ID3D12BackendTexture texture ||
+				    texture.RenderTargetView is null)
 				{
-					if (targets.ColorAttachments[i].Texture is not D3D12Texture texture ||
-					    texture.RenderTargetView is null)
-					{
-						throw new InvalidOperationException("Render target attachment was not provided by the Direct3D12 backend.");
-					}
+					throw new InvalidOperationException("Render target attachment was not provided by the Direct3D12 backend.");
+				}
 
 					rtvSpan[i] = texture.RenderTargetView.Value;
 				}
@@ -458,11 +458,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		public void Barrier(in ResourceBarrierDescription barrier)
 		{
 			ID3D12Resource* resource = null;
-			if (barrier.Resource is D3D12Texture texture)
-			{
-				resource = texture.Resource.Handle;
-			}
-			else if (barrier.Resource is D3D12Buffer buffer)
+		if (barrier.Resource is ID3D12BackendTexture texture)
+		{
+			resource = texture.Resource;
+		}
+		else if (barrier.Resource is D3D12Buffer buffer)
 			{
 				resource = buffer.Resource.Handle;
 			}
@@ -518,12 +518,12 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		public BufferDescriptor Descriptor => _descriptor;
 
-		public ComPtr<ID3D12Resource> Resource { get; }
+		public ComPtr<ID3D12Resource> Resource { get; private set; }
 
 		public ulong SizeInBytes { get; }
 	}
 
-	private sealed class D3D12Texture : IGfxTexture
+	internal sealed class D3D12Texture : ID3D12BackendTexture, IDisposable
 	{
 		private readonly TextureDescriptor _descriptor;
 		private ComPtr<ID3D12DescriptorHeap> _rtvHeap;
@@ -542,11 +542,13 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		public TextureDescriptor Descriptor => _descriptor;
 
-		public ComPtr<ID3D12Resource> Resource { get; }
+		public ComPtr<ID3D12Resource> Resource { get; private set; }
 
 		public CpuDescriptorHandle? RenderTargetView => _rtvHandle;
 
 		public CpuDescriptorHandle? DepthStencilView => _dsvHandle;
+
+		ID3D12Resource* ID3D12BackendTexture.Resource => Resource.Handle;
 
 		public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
 		{
@@ -568,6 +570,17 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			{
 				heap.Dispose();
 				heap = default;
+			}
+		}
+
+		public void Dispose()
+		{
+			DisposeHeap(ref _rtvHeap);
+			DisposeHeap(ref _dsvHeap);
+			if (Resource.Handle is not null)
+			{
+				Resource.Dispose();
+				Resource = default;
 			}
 		}
 	}

@@ -1,3 +1,5 @@
+using WolfEngine.Rendering.Abstraction;
+
 namespace WolfEngine.Rendering;
 
 /// <summary>
@@ -16,7 +18,7 @@ public sealed class RenderGraphContext
 
 	public RenderGraphResourceRegistry ResourceRegistry { get; }
 
-	public IRenderGraphTexture GetTexture(RenderGraphResourceHandle handle)
+	public IGfxTexture GetTexture(RenderGraphResourceHandle handle)
 	{
 		return ResourceRegistry.GetTexture(handle);
 	}
