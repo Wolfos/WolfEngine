@@ -58,6 +58,28 @@ public readonly struct Viewport
 }
 
 /// <summary>
+/// Integer rectangle used for scissor definitions.
+/// </summary>
+public readonly struct RectInt
+{
+	public RectInt(int x, int y, int width, int height)
+	{
+		X = x;
+		Y = y;
+		Width = width;
+		Height = height;
+	}
+
+	public int X { get; }
+
+	public int Y { get; }
+
+	public int Width { get; }
+
+	public int Height { get; }
+}
+
+/// <summary>
 /// Associates a texture with a specific render target slot.
 /// </summary>
 public readonly struct ColorTargetBinding

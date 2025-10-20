@@ -11,7 +11,13 @@ using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Backend.D3D12;
+using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
+using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
+using D3DFillMode = Silk.NET.Direct3D12.FillMode;
+using D3DCullMode = Silk.NET.Direct3D12.CullMode;
 
 namespace WolfEngine;
 
@@ -39,8 +45,8 @@ public unsafe class WolfRendererD3D : IRenderer
 		public MeshResources(
 			ComPtr<ID3D12Resource> vertexBuffer,
 			ComPtr<ID3D12Resource> indexBuffer,
-			VertexBufferView vertexView,
-			IndexBufferView indexView,
+			D3DVertexBufferView vertexView,
+			D3DIndexBufferView indexView,
 			uint indexCount)
 		{
 			VertexBuffer = vertexBuffer;
@@ -54,9 +60,9 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		public ComPtr<ID3D12Resource> IndexBuffer { get; }
 
-		public VertexBufferView VertexView { get; }
+		public D3DVertexBufferView VertexView { get; }
 
-		public IndexBufferView IndexView { get; }
+		public D3DIndexBufferView IndexView { get; }
 
 		public uint IndexCount { get; }
 	}
@@ -114,6 +120,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private ComPtr<ID3D12GraphicsCommandList> _commandList = default;
 	private ID3D12GraphicsCommandList* _activeCommandList;
+	private IGfxCommandList _currentGfxCommandList = null!;
 	private ComPtr<ID3D12Fence> _fence = default;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
@@ -552,8 +559,8 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var rasterizerState = new RasterizerDesc
 		{
-			FillMode = FillMode.Solid,
-			CullMode = CullMode.Back,
+			FillMode = D3DFillMode.Solid,
+			CullMode = D3DCullMode.Back,
 			FrontCounterClockwise = 0,
 			DepthBias = D3D12.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
@@ -959,8 +966,8 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var rasterizerState = new RasterizerDesc
 		{
-			FillMode = FillMode.Solid,
-			CullMode = CullMode.Back,
+			FillMode = D3DFillMode.Solid,
+			CullMode = D3DCullMode.Back,
 			FrontCounterClockwise = 0,
 			DepthBias = D3D12.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
@@ -1280,14 +1287,14 @@ public unsafe class WolfRendererD3D : IRenderer
 		vertexUpload.Dispose();
 		indexUpload.Dispose();
 
-		var vertexView = new VertexBufferView
+		var vertexView = new D3DVertexBufferView
 		{
 			BufferLocation = vertexBuffer.GetGPUVirtualAddress(),
 			SizeInBytes = (uint)vertexBufferSize,
 			StrideInBytes = vertexStride
 		};
 
-		var indexView = new IndexBufferView
+		var indexView = new D3DIndexBufferView
 		{
 			BufferLocation = indexBuffer.GetGPUVirtualAddress(),
 			SizeInBytes = (uint)indexBufferSize,
@@ -1434,6 +1441,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var commandList = backendCommandList.NativeCommandList;
 		_activeCommandList = commandList;
+		_currentGfxCommandList = gfxCommandList;
 
 		var framebufferSize = _framebufferSize;
 
@@ -1470,6 +1478,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		_gfxDevice.Submit(gfxCommandList);
 		_activeCommandList = null;
+		_currentGfxCommandList = null!;
 
 		var presentResult = _swapchain.Present(1, 0);
 		if (presentResult < 0)
@@ -1565,92 +1574,59 @@ public unsafe class WolfRendererD3D : IRenderer
 		                   ?? throw new InvalidOperationException(
 			                   "Depth texture is not compatible with the Direct3D12 backend.");
 
-		var viewport = new Viewport
+		var gbufferConfig = new GBufferPassConfig
 		{
-			TopLeftX = 0,
-			TopLeftY = 0,
-			Width = resources.FramebufferSize.X,
-			Height = resources.FramebufferSize.Y,
-			MinDepth = 0.0f,
-			MaxDepth = 1.0f
+			FramebufferWidth = resources.FramebufferSize.X,
+			FramebufferHeight = resources.FramebufferSize.Y,
+			AlbedoTarget = albedoTexture,
+			NormalTarget = normalTexture,
+			MaterialTarget = materialTexture,
+			DepthTarget = depthTexture
 		};
-		_activeCommandList->RSSetViewports(1, &viewport);
 
-		var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
-		_activeCommandList->RSSetScissorRects(1, &scissor);
-
-		var rtvHandles = stackalloc CpuDescriptorHandle[3];
-		rtvHandles[0] = albedoTexture.RenderTargetView ??
-		                throw new InvalidOperationException("Albedo texture missing RTV.");
-		rtvHandles[1] = normalTexture.RenderTargetView ??
-		                throw new InvalidOperationException("Normal texture missing RTV.");
-		rtvHandles[2] = materialTexture.RenderTargetView ??
-		                throw new InvalidOperationException("Material texture missing RTV.");
-		var dsvHandle = depthTexture.DepthStencilView ??
-		                throw new InvalidOperationException("Depth texture missing DSV.");
-		var singleHandle = new Silk.NET.Core.Bool32(0);
-		_activeCommandList->OMSetRenderTargets(3, rtvHandles, singleHandle, &dsvHandle);
-
-		Span<float> albedoClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
-		Span<float> normalClear = stackalloc float[4] { 0.5f, 0.5f, 1.0f, 1.0f };
-		Span<float> materialClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
-		fixed (float* albedoPtr = albedoClear)
+		GBufferPass.Record(_currentGfxCommandList, gbufferConfig, () =>
 		{
-			_activeCommandList->ClearRenderTargetView(rtvHandles[0], albedoPtr, 0, (Box2D<int>*)null);
-		}
+			_activeCommandList->SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
+			_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
 
-		fixed (float* normalPtr = normalClear)
-		{
-			_activeCommandList->ClearRenderTargetView(rtvHandles[1], normalPtr, 0, (Box2D<int>*)null);
-		}
-
-		fixed (float* materialPtr = materialClear)
-		{
-			_activeCommandList->ClearRenderTargetView(rtvHandles[2], materialPtr, 0, (Box2D<int>*)null);
-		}
-
-		_activeCommandList->ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*)null);
-
-		_activeCommandList->SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
-		_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
-
-		var viewProjection = _camera.Transform * _camera.Perspective;
-		Span<float> cameraConstants = stackalloc float[20];
-		WriteMatrix(cameraConstants, viewProjection);
-		cameraConstants[16] = _camera.Position.X;
-		cameraConstants[17] = _camera.Position.Y;
-		cameraConstants[18] = _camera.Position.Z;
-		cameraConstants[19] = 1.0f;
+			var viewProjection = _camera.Transform * _camera.Perspective;
+			Span<float> cameraConstants = stackalloc float[20];
+			WriteMatrix(cameraConstants, viewProjection);
+			cameraConstants[16] = _camera.Position.X;
+			cameraConstants[17] = _camera.Position.Y;
+			cameraConstants[18] = _camera.Position.Z;
+			cameraConstants[19] = 1.0f;
 
 #pragma warning disable CA2014
-		foreach (var draw in _drawCommands)
-		{
-			var meshResources = EnsureMeshResources(draw.Mesh);
-			var materialResources = EnsureMaterialResources(draw.Material);
-
-			var colorBufferPtr = materialResources.ColorBuffer.Handle;
-			_activeCommandList->SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
-
-			Span<float> modelConstants = stackalloc float[16];
-			WriteMatrix(modelConstants, draw.Transform);
-			fixed (float* modelPtr = modelConstants)
+			foreach (var draw in _drawCommands)
 			{
-				_activeCommandList->SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
-			}
+				var meshResources = EnsureMeshResources(draw.Mesh);
+				var materialResources = EnsureMaterialResources(draw.Material);
 
-			fixed (float* cameraPtr = cameraConstants)
-			{
-				_activeCommandList->SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
-			}
+				var colorBufferPtr = materialResources.ColorBuffer.Handle;
+				_activeCommandList->SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
 
-			_activeCommandList->IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
-			var vertexView = meshResources.VertexView;
-			_activeCommandList->IASetVertexBuffers(0, 1, &vertexView);
-			var indexView = meshResources.IndexView;
-			_activeCommandList->IASetIndexBuffer(&indexView);
-			_activeCommandList->DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
-		}
+				Span<float> modelConstants = stackalloc float[16];
+				WriteMatrix(modelConstants, draw.Transform);
+				fixed (float* modelPtr = modelConstants)
+				{
+					_activeCommandList->SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
+				}
+
+				fixed (float* cameraPtr = cameraConstants)
+				{
+					_activeCommandList->SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
+				}
+
+				_activeCommandList->IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
+				var vertexView = meshResources.VertexView;
+				_activeCommandList->IASetVertexBuffers(0, 1, &vertexView);
+				var indexView = meshResources.IndexView;
+				_activeCommandList->IASetIndexBuffer(&indexView);
+				_activeCommandList->DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
+			}
 #pragma warning restore CA2014
+		});
 	}
 
 	private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)

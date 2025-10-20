@@ -15,6 +15,12 @@ public interface IGfxCommandList
 
 	void BindPipeline(IGfxPipeline pipeline);
 
+	void SetScissorRect(in RectInt rect);
+
+	void ClearColorAttachment(uint index, ReadOnlySpan<float> color);
+
+	void ClearDepthStencil(float depth);
+
 	void SetBindlessTable(IGfxDescriptorTable table);
 
 	void PushConstants<T>(in T data) where T : unmanaged;

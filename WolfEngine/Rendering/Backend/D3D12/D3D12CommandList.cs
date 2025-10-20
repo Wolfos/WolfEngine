@@ -24,6 +24,21 @@ public class D3D12CommandList: IGfxCommandList
 		throw new NotImplementedException();
 	}
 
+	public void SetScissorRect(in RectInt rect)
+	{
+		throw new NotImplementedException();
+	}
+
+	public void ClearColorAttachment(uint index, ReadOnlySpan<float> color)
+	{
+		throw new NotImplementedException();
+	}
+
+	public void ClearDepthStencil(float depth)
+	{
+		throw new NotImplementedException();
+	}
+
 	public void PushConstants<T>(in T data) where T : unmanaged
 	{
 		throw new NotImplementedException();

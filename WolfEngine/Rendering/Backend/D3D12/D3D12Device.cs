@@ -247,6 +247,9 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	private sealed class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 	{
+		private readonly CpuDescriptorHandle[] _currentRtvHandles = new CpuDescriptorHandle[8];
+		private uint _currentRtvCount;
+		private CpuDescriptorHandle? _currentDsvHandle;
 		private bool _isClosed;
 
 		public D3D12CommandList(CommandListType type, ComPtr<ID3D12CommandAllocator> allocator,
@@ -304,6 +307,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			CommandList.RSSetScissorRects(1, &scissor);
 
 			var colorCount = targets.ColorAttachments.Count;
+			_currentRtvCount = (uint) colorCount;
 			CpuDescriptorHandle* dsvHandle = null;
 			CpuDescriptorHandle depthStorage = default;
 			if (targets.DepthAttachment is DepthTargetBinding depthBinding)
@@ -316,6 +320,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 				depthStorage = depthTexture.DepthStencilView.Value;
 				dsvHandle = &depthStorage;
+				_currentDsvHandle = depthStorage;
+			}
+			else
+			{
+				_currentDsvHandle = null;
 			}
 
 			var singleHandle = new Bool32(0);
@@ -332,6 +341,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 					}
 
 					rtvSpan[i] = texture.RenderTargetView.Value;
+					_currentRtvHandles[i] = rtvSpan[i];
 				}
 
 				fixed (CpuDescriptorHandle* rtvPtr = rtvSpan)
@@ -343,11 +353,14 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			}
 
 			CommandList.OMSetRenderTargets(0, (CpuDescriptorHandle*)null, singleHandle, dsvHandle);
+			_currentRtvCount = 0;
 		}
 
 		public void EndPass()
 		{
 			// No-op for now. The application is responsible for inserting any necessary barriers.
+			_currentRtvCount = 0;
+			_currentDsvHandle = null;
 		}
 
 		public void BindPipeline(IGfxPipeline pipeline)
@@ -373,6 +386,35 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		{
 			throw new NotSupportedException(
 				"Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
+		}
+
+		public void SetScissorRect(in RectInt rect)
+		{
+			var scissor = new Box2D<int>(rect.X, rect.Y, rect.X + rect.Width, rect.Y + rect.Height);
+			CommandList.RSSetScissorRects(1, &scissor);
+		}
+
+		public void ClearColorAttachment(uint index, ReadOnlySpan<float> color)
+		{
+			if (index >= _currentRtvCount)
+			{
+				throw new ArgumentOutOfRangeException(nameof(index));
+			}
+
+			fixed (float* colorPtr = color)
+			{
+				CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorPtr, 0, (Box2D<int>*)null);
+			}
+		}
+
+		public void ClearDepthStencil(float depth)
+		{
+			if (_currentDsvHandle.HasValue == false)
+			{
+				return;
+			}
+
+			CommandList.ClearDepthStencilView(_currentDsvHandle.Value, ClearFlags.Depth, depth, 0, 0, (Box2D<int>*)null);
 		}
 
 		public void PushConstants<T>(in T data) where T : unmanaged

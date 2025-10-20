@@ -9,7 +9,9 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class GBufferPassConfig
 {
-    public required PipelineKey Pipeline { get; init; }
+    public required int FramebufferWidth { get; init; }
+
+    public required int FramebufferHeight { get; init; }
 
     public required IGfxTexture AlbedoTarget { get; init; }
 
@@ -24,4 +26,6 @@ public sealed class GBufferPassConfig
     public float[] NormalClearColor { get; init; } = [0.5f, 0.5f, 1.0f, 1.0f];
 
     public float[] MaterialClearColor { get; init; } = [0.0f, 0.0f, 0.0f, 1.0f];
+
+    public float DepthClearValue { get; init; } = 1.0f;
 }
