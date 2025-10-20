@@ -74,7 +74,98 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	public IGfxTexture CreateTexture(in TextureDescriptor descriptor)
 	{
-		throw new NotSupportedException("Direct3D12 texture allocation is not yet implemented.");
+		if (descriptor.Width <= 0 || descriptor.Height <= 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(descriptor), "Textures must have positive dimensions.");
+		}
+
+		var format = ToDxgiFormat(descriptor.Format);
+
+		var resourceDesc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Texture2D,
+			Alignment = 0,
+			Width = (ulong) descriptor.Width,
+			Height = (uint) descriptor.Height,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = format,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutUnknown,
+			Flags = DetermineResourceFlags(descriptor.Usage)
+		};
+
+		var heapProps = new HeapProperties(HeapType.Default);
+		var initialState = DetermineInitialState(descriptor.Usage);
+
+		ClearValue clearValue = default;
+		ClearValue* clearValuePtr = null;
+
+		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
+		{
+			clearValue.Format = format;
+			clearValue.Anonymous.Color[0] = 0.0f;
+			clearValue.Anonymous.Color[1] = 0.0f;
+			clearValue.Anonymous.Color[2] = 0.0f;
+			clearValue.Anonymous.Color[3] = 1.0f;
+			clearValuePtr = &clearValue;
+		}
+		else if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
+		{
+			clearValue.Format = format;
+			clearValue.Anonymous.DepthStencil = new DepthStencilValue
+			{
+				Depth = 1.0f,
+				Stencil = 0
+			};
+			clearValuePtr = &clearValue;
+		}
+
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+			&heapProps,
+			HeapFlags.None,
+			in resourceDesc,
+			initialState,
+			clearValuePtr,
+			out ComPtr<ID3D12Resource> resource));
+
+		var texture = new D3D12Texture(null, descriptor, resource);
+
+		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
+		{
+			var rtvHeapDesc = new DescriptorHeapDesc
+			{
+				Type = DescriptorHeapType.Rtv,
+				NumDescriptors = 1,
+				Flags = DescriptorHeapFlags.None,
+				NodeMask = 0
+			};
+
+			SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in rtvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
+			var handle = heap.GetCPUDescriptorHandleForHeapStart();
+			_device.CreateRenderTargetView(resource, null, handle);
+
+			texture.SetRenderTargetView(heap, handle);
+		}
+
+		if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
+		{
+			var dsvHeapDesc = new DescriptorHeapDesc
+			{
+				Type = DescriptorHeapType.Dsv,
+				NumDescriptors = 1,
+				Flags = DescriptorHeapFlags.None,
+				NodeMask = 0
+			};
+
+			SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in dsvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
+			var handle = heap.GetCPUDescriptorHandleForHeapStart();
+			_device.CreateDepthStencilView(resource, null, handle);
+
+			texture.SetDepthStencilView(heap, handle);
+		}
+
+		return texture;
 	}
 
 	public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor)
@@ -435,6 +526,10 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private sealed class D3D12Texture : IGfxTexture
 	{
 		private readonly TextureDescriptor _descriptor;
+		private ComPtr<ID3D12DescriptorHeap> _rtvHeap;
+		private ComPtr<ID3D12DescriptorHeap> _dsvHeap;
+		private CpuDescriptorHandle? _rtvHandle;
+		private CpuDescriptorHandle? _dsvHandle;
 
 		public D3D12Texture(string? name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 		{
@@ -449,9 +544,32 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		public ComPtr<ID3D12Resource> Resource { get; }
 
-		public CpuDescriptorHandle? RenderTargetView { get; set; }
+		public CpuDescriptorHandle? RenderTargetView => _rtvHandle;
 
-		public CpuDescriptorHandle? DepthStencilView { get; set; }
+		public CpuDescriptorHandle? DepthStencilView => _dsvHandle;
+
+		public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
+		{
+			DisposeHeap(ref _rtvHeap);
+			_rtvHeap = heap;
+			_rtvHandle = handle;
+		}
+
+		public void SetDepthStencilView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
+		{
+			DisposeHeap(ref _dsvHeap);
+			_dsvHeap = heap;
+			_dsvHandle = handle;
+		}
+
+		private static void DisposeHeap(ref ComPtr<ID3D12DescriptorHeap> heap)
+		{
+			if (heap.Handle is not null)
+			{
+				heap.Dispose();
+				heap = default;
+			}
+		}
 	}
 
 	private sealed class D3D12Pipeline : IGfxPipeline
@@ -530,5 +648,52 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		}
 
 		return result == 0 ? ResourceStates.Common : result;
+	}
+
+	private static Format ToDxgiFormat(TextureFormat format) => format switch
+	{
+		TextureFormat.Bgra8Unorm => Format.FormatB8G8R8A8Unorm,
+		TextureFormat.Rgba8Unorm => Format.FormatR8G8B8A8Unorm,
+		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
+		TextureFormat.D32Float => Format.FormatD32Float,
+		TextureFormat.Unknown => Format.FormatUnknown,
+		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
+	};
+
+	private static ResourceFlags DetermineResourceFlags(TextureUsage usage)
+	{
+		var flags = ResourceFlags.None;
+
+		if ((usage & TextureUsage.RenderTarget) != 0)
+		{
+			flags |= ResourceFlags.AllowRenderTarget;
+		}
+
+		if ((usage & TextureUsage.DepthStencil) != 0)
+		{
+			flags |= ResourceFlags.AllowDepthStencil;
+		}
+
+		if ((usage & TextureUsage.ShaderResource) == 0)
+		{
+			flags |= ResourceFlags.DenyShaderResource;
+		}
+
+		return flags;
+	}
+
+	private static ResourceStates DetermineInitialState(TextureUsage usage)
+	{
+		if ((usage & TextureUsage.RenderTarget) != 0)
+		{
+			return ResourceStates.RenderTarget;
+		}
+
+		if ((usage & TextureUsage.DepthStencil) != 0)
+		{
+			return ResourceStates.DepthWrite;
+		}
+
+		return ResourceStates.Common;
 	}
 }
