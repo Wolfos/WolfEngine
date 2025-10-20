@@ -168,6 +168,20 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		return texture;
 	}
 
+	public ID3D12BackendTexture ImportExternalTexture(
+		in TextureDescriptor descriptor,
+		ID3D12Resource* resource,
+		CpuDescriptorHandle? rtvHandle,
+		CpuDescriptorHandle? dsvHandle)
+	{
+		if (resource is null)
+		{
+			throw new ArgumentNullException(nameof(resource));
+		}
+
+		return new ExternalD3D12Texture(descriptor, resource, rtvHandle, dsvHandle);
+	}
+
 	public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor)
 	{
 		throw new NotSupportedException("Direct3D12 buffer allocation is not yet implemented.");
@@ -557,33 +571,54 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			_rtvHandle = handle;
 		}
 
-		public void SetDepthStencilView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
-		{
-			DisposeHeap(ref _dsvHeap);
-			_dsvHeap = heap;
-			_dsvHandle = handle;
-		}
+	public void SetDepthStencilView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
+	{
+		DisposeHeap(ref _dsvHeap);
+		_dsvHeap = heap;
+		_dsvHandle = handle;
+	}
 
-		private static void DisposeHeap(ref ComPtr<ID3D12DescriptorHeap> heap)
+	private static void DisposeHeap(ref ComPtr<ID3D12DescriptorHeap> heap)
+	{
+		if (heap.Handle is not null)
 		{
-			if (heap.Handle is not null)
-			{
-				heap.Dispose();
-				heap = default;
-			}
-		}
-
-		public void Dispose()
-		{
-			DisposeHeap(ref _rtvHeap);
-			DisposeHeap(ref _dsvHeap);
-			if (Resource.Handle is not null)
-			{
-				Resource.Dispose();
-				Resource = default;
-			}
+			heap.Dispose();
+			heap = default;
 		}
 	}
+
+	public void Dispose()
+	{
+		DisposeHeap(ref _rtvHeap);
+		DisposeHeap(ref _dsvHeap);
+		if (Resource.Handle is not null)
+		{
+			Resource.Dispose();
+			Resource = default;
+		}
+	}
+}
+
+private sealed class ExternalD3D12Texture : ID3D12BackendTexture
+{
+	public ExternalD3D12Texture(TextureDescriptor descriptor, ID3D12Resource* resource, CpuDescriptorHandle? rtv, CpuDescriptorHandle? dsv)
+	{
+		Descriptor = descriptor;
+		Resource = resource;
+		RenderTargetView = rtv;
+		DepthStencilView = dsv;
+	}
+
+	public string? Name => null;
+
+	public TextureDescriptor Descriptor { get; }
+
+	public ID3D12Resource* Resource { get; }
+
+	public CpuDescriptorHandle? RenderTargetView { get; }
+
+	public CpuDescriptorHandle? DepthStencilView { get; }
+}
 
 	private sealed class D3D12Pipeline : IGfxPipeline
 	{

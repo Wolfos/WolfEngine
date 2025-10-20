@@ -1503,15 +1503,13 @@ private D3D12Device _gfxDevice = null!;
 			TextureFormat.Bgra8Unorm,
 			TextureUsage.RenderTarget);
 
-		var texture = new ImportedD3D12Texture(
-			descriptor,
-			_renderTargets[frameIdx],
-			_rtvHeap,
-			_rtvCpuHandles[frameIdx],
-			null,
-			default);
+var imported = _gfxDevice.ImportExternalTexture(
+  descriptor,
+  _renderTargets[frameIdx].Handle,
+  _rtvCpuHandles[frameIdx],
+  null);
 
-		return registry.ImportTexture(texture);
+	return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
 	private RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
@@ -1529,15 +1527,13 @@ private D3D12Device _gfxDevice = null!;
 
 		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
 
-		var texture = new ImportedD3D12Texture(
-			descriptor,
-			_depthBuffer,
-			null,
-			default,
-			_dsvHeap,
-			depthHandle);
+	var imported = _gfxDevice.ImportExternalTexture(
+		descriptor,
+		_depthBuffer.Handle,
+		null,
+		depthHandle);
 
-		return registry.ImportTexture(texture);
+	return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
 	private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
