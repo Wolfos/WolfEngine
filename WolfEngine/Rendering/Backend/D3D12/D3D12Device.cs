@@ -59,7 +59,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		nativeCommandList.Close();
 
-		ID3D12CommandList* nativeHandle = (ID3D12CommandList*) nativeCommandList.CommandList.Handle;
+		ID3D12CommandList* nativeHandle = (ID3D12CommandList*)nativeCommandList.CommandList.Handle;
 		var queue = nativeCommandList.Type == CommandListType.Compute ? _computeQueue : _graphicsQueue;
 
 		queue.ExecuteCommandLists(1, &nativeHandle);
@@ -85,8 +85,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong) descriptor.Width,
-			Height = (uint) descriptor.Height,
+			Width = (ulong)descriptor.Width,
+			Height = (uint)descriptor.Height,
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = format,
@@ -141,7 +141,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				NodeMask = 0
 			};
 
-			SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in rtvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
+			SilkMarshal.ThrowHResult(
+				_device.CreateDescriptorHeap(in rtvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
 			var handle = heap.GetCPUDescriptorHandleForHeapStart();
 			_device.CreateRenderTargetView(resource, null, handle);
 
@@ -158,7 +159,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				NodeMask = 0
 			};
 
-			SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in dsvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
+			SilkMarshal.ThrowHResult(
+				_device.CreateDescriptorHeap(in dsvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
 			var handle = heap.GetCPUDescriptorHandleForHeapStart();
 			_device.CreateDepthStencilView(resource, null, handle);
 
@@ -198,12 +200,13 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	{
 		SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(type, out ComPtr<ID3D12CommandAllocator> allocator));
 
-		SilkMarshal.ThrowHResult(_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
-			0,
-			type,
-			allocator,
-			default,
-			out ComPtr<ID3D12GraphicsCommandList> commandList));
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0,
+				type,
+				allocator,
+				default,
+				out ComPtr<ID3D12GraphicsCommandList> commandList));
 
 		var wrapper = new D3D12CommandList(type, allocator, commandList);
 
@@ -219,30 +222,35 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	{
 		public DescriptorHandle AllocateShaderResourceView(IGfxResource resource)
 		{
-			throw new NotSupportedException("Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			throw new NotSupportedException(
+				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
 		public DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource)
 		{
-			throw new NotSupportedException("Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			throw new NotSupportedException(
+				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
 		public DescriptorHandle AllocateConstantBufferView(IGfxBuffer buffer)
 		{
-			throw new NotSupportedException("Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			throw new NotSupportedException(
+				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
 		public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler)
 		{
-			throw new NotSupportedException("Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			throw new NotSupportedException(
+				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 	}
 
-	private sealed class D3D12CommandList : IGfxCommandList, IDisposable
+	private sealed class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 	{
 		private bool _isClosed;
 
-		public D3D12CommandList(CommandListType type, ComPtr<ID3D12CommandAllocator> allocator, ComPtr<ID3D12GraphicsCommandList> commandList)
+		public D3D12CommandList(CommandListType type, ComPtr<ID3D12CommandAllocator> allocator,
+			ComPtr<ID3D12GraphicsCommandList> commandList)
 		{
 			Type = type;
 			Allocator = allocator;
@@ -254,6 +262,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		public ComPtr<ID3D12CommandAllocator> Allocator { get; }
 
 		public ComPtr<ID3D12GraphicsCommandList> CommandList { get; }
+
+		public ID3D12GraphicsCommandList* NativeCommandList => CommandList.Handle;
 
 		public void Close()
 		{
@@ -286,51 +296,53 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 			CommandList.RSSetViewports(1, &nativeViewport);
 
-			var left = (int) Math.Floor(viewport.X);
-			var top = (int) Math.Floor(viewport.Y);
-			var right = (int) Math.Ceiling(viewport.X + viewport.Width);
-			var bottom = (int) Math.Ceiling(viewport.Y + viewport.Height);
+			var left = (int)Math.Floor(viewport.X);
+			var top = (int)Math.Floor(viewport.Y);
+			var right = (int)Math.Ceiling(viewport.X + viewport.Width);
+			var bottom = (int)Math.Ceiling(viewport.Y + viewport.Height);
 			var scissor = new Box2D<int>(left, top, right, bottom);
 			CommandList.RSSetScissorRects(1, &scissor);
 
 			var colorCount = targets.ColorAttachments.Count;
 			CpuDescriptorHandle* dsvHandle = null;
 			CpuDescriptorHandle depthStorage = default;
-		if (targets.DepthAttachment is DepthTargetBinding depthBinding)
-		{
-			if (depthBinding.Texture is not ID3D12BackendTexture depthTexture ||
-			    depthTexture.DepthStencilView is null)
+			if (targets.DepthAttachment is DepthTargetBinding depthBinding)
 			{
-				throw new InvalidOperationException("Depth attachment was not provided by the Direct3D12 backend.");
+				if (depthBinding.Texture is not ID3D12BackendTexture depthTexture ||
+				    depthTexture.DepthStencilView is null)
+				{
+					throw new InvalidOperationException("Depth attachment was not provided by the Direct3D12 backend.");
+				}
+
+				depthStorage = depthTexture.DepthStencilView.Value;
+				dsvHandle = &depthStorage;
 			}
 
-			depthStorage = depthTexture.DepthStencilView.Value;
-			dsvHandle = &depthStorage;
-		}
-
 			var singleHandle = new Bool32(0);
-		if (colorCount > 0)
-		{
-			Span<CpuDescriptorHandle> rtvSpan = stackalloc CpuDescriptorHandle[colorCount];
-			for (var i = 0; i < colorCount; i++)
+			if (colorCount > 0)
 			{
-				if (targets.ColorAttachments[i].Texture is not ID3D12BackendTexture texture ||
-				    texture.RenderTargetView is null)
+				Span<CpuDescriptorHandle> rtvSpan = stackalloc CpuDescriptorHandle[colorCount];
+				for (var i = 0; i < colorCount; i++)
 				{
-					throw new InvalidOperationException("Render target attachment was not provided by the Direct3D12 backend.");
-				}
+					if (targets.ColorAttachments[i].Texture is not ID3D12BackendTexture texture ||
+					    texture.RenderTargetView is null)
+					{
+						throw new InvalidOperationException(
+							"Render target attachment was not provided by the Direct3D12 backend.");
+					}
 
 					rtvSpan[i] = texture.RenderTargetView.Value;
 				}
 
 				fixed (CpuDescriptorHandle* rtvPtr = rtvSpan)
 				{
-					CommandList.OMSetRenderTargets((uint) colorCount, rtvPtr, singleHandle, dsvHandle);
+					CommandList.OMSetRenderTargets((uint)colorCount, rtvPtr, singleHandle, dsvHandle);
 				}
+
 				return;
 			}
 
-			CommandList.OMSetRenderTargets(0, (CpuDescriptorHandle*) null, singleHandle, dsvHandle);
+			CommandList.OMSetRenderTargets(0, (CpuDescriptorHandle*)null, singleHandle, dsvHandle);
 		}
 
 		public void EndPass()
@@ -359,7 +371,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		public void SetBindlessTable(IGfxDescriptorTable table)
 		{
-			throw new NotSupportedException("Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
+			throw new NotSupportedException(
+				"Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
 		}
 
 		public void PushConstants<T>(in T data) where T : unmanaged
@@ -396,7 +409,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				var start = view.Offset;
 				if (start >= size)
 				{
-					throw new ArgumentOutOfRangeException(nameof(vertexBuffers), "Vertex buffer offset exceeds buffer size.");
+					throw new ArgumentOutOfRangeException(nameof(vertexBuffers),
+						"Vertex buffer offset exceeds buffer size.");
 				}
 
 				var remaining = size - start;
@@ -406,11 +420,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				{
 					BufferLocation = gpuAddress + start,
 					StrideInBytes = view.Stride,
-					SizeInBytes = (uint) spanSize
+					SizeInBytes = (uint)spanSize
 				};
 			}
 
-			CommandList.IASetVertexBuffers(0, (uint) vertexBuffers.Length, views);
+			CommandList.IASetVertexBuffers(0, (uint)vertexBuffers.Length, views);
 		}
 
 		public void SetIndexBuffer(in AbstractionIndexBufferView indexBuffer)
@@ -441,13 +455,14 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			{
 				IndexFormat.UInt16 => Format.FormatR16Uint,
 				IndexFormat.UInt32 => Format.FormatR32Uint,
-				_ => throw new ArgumentOutOfRangeException(nameof(indexBuffer), indexBuffer.Format, "Unsupported index format.")
+				_ => throw new ArgumentOutOfRangeException(nameof(indexBuffer), indexBuffer.Format,
+					"Unsupported index format.")
 			};
 
 			var view = new Silk.NET.Direct3D12.IndexBufferView
 			{
 				BufferLocation = gpuAddress + offset,
-				SizeInBytes = (uint) spanSize,
+				SizeInBytes = (uint)spanSize,
 				Format = format
 			};
 
@@ -472,11 +487,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		public void Barrier(in ResourceBarrierDescription barrier)
 		{
 			ID3D12Resource* resource = null;
-		if (barrier.Resource is ID3D12BackendTexture texture)
-		{
-			resource = texture.Resource;
-		}
-		else if (barrier.Resource is D3D12Buffer buffer)
+			if (barrier.Resource is ID3D12BackendTexture texture)
+			{
+				resource = texture.Resource;
+			}
+			else if (barrier.Resource is D3D12Buffer buffer)
 			{
 				resource = buffer.Resource.Handle;
 			}
@@ -520,7 +535,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	{
 		private readonly BufferDescriptor _descriptor;
 
-		public D3D12Buffer(string? name, BufferDescriptor descriptor, ComPtr<ID3D12Resource> resource, ulong sizeInBytes)
+		public D3D12Buffer(string? name, BufferDescriptor descriptor, ComPtr<ID3D12Resource> resource,
+			ulong sizeInBytes)
 		{
 			Name = name;
 			_descriptor = descriptor;
@@ -571,58 +587,60 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			_rtvHandle = handle;
 		}
 
-	public void SetDepthStencilView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
-	{
-		DisposeHeap(ref _dsvHeap);
-		_dsvHeap = heap;
-		_dsvHandle = handle;
-	}
-
-	private static void DisposeHeap(ref ComPtr<ID3D12DescriptorHeap> heap)
-	{
-		if (heap.Handle is not null)
+		public void SetDepthStencilView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
 		{
-			heap.Dispose();
-			heap = default;
+			DisposeHeap(ref _dsvHeap);
+			_dsvHeap = heap;
+			_dsvHandle = handle;
+		}
+
+		private static void DisposeHeap(ref ComPtr<ID3D12DescriptorHeap> heap)
+		{
+			if (heap.Handle is not null)
+			{
+				heap.Dispose();
+				heap = default;
+			}
+		}
+
+		public void Dispose()
+		{
+			DisposeHeap(ref _rtvHeap);
+			DisposeHeap(ref _dsvHeap);
+			if (Resource.Handle is not null)
+			{
+				Resource.Dispose();
+				Resource = default;
+			}
 		}
 	}
 
-	public void Dispose()
+	private sealed class ExternalD3D12Texture : ID3D12BackendTexture
 	{
-		DisposeHeap(ref _rtvHeap);
-		DisposeHeap(ref _dsvHeap);
-		if (Resource.Handle is not null)
+		public ExternalD3D12Texture(TextureDescriptor descriptor, ID3D12Resource* resource, CpuDescriptorHandle? rtv,
+			CpuDescriptorHandle? dsv)
 		{
-			Resource.Dispose();
-			Resource = default;
+			Descriptor = descriptor;
+			Resource = resource;
+			RenderTargetView = rtv;
+			DepthStencilView = dsv;
 		}
+
+		public string? Name => null;
+
+		public TextureDescriptor Descriptor { get; }
+
+		public ID3D12Resource* Resource { get; }
+
+		public CpuDescriptorHandle? RenderTargetView { get; }
+
+		public CpuDescriptorHandle? DepthStencilView { get; }
 	}
-}
-
-private sealed class ExternalD3D12Texture : ID3D12BackendTexture
-{
-	public ExternalD3D12Texture(TextureDescriptor descriptor, ID3D12Resource* resource, CpuDescriptorHandle? rtv, CpuDescriptorHandle? dsv)
-	{
-		Descriptor = descriptor;
-		Resource = resource;
-		RenderTargetView = rtv;
-		DepthStencilView = dsv;
-	}
-
-	public string? Name => null;
-
-	public TextureDescriptor Descriptor { get; }
-
-	public ID3D12Resource* Resource { get; }
-
-	public CpuDescriptorHandle? RenderTargetView { get; }
-
-	public CpuDescriptorHandle? DepthStencilView { get; }
-}
 
 	private sealed class D3D12Pipeline : IGfxPipeline
 	{
-		public D3D12Pipeline(PipelineKey key, PassKind kind, ComPtr<ID3D12PipelineState> pipelineState, ComPtr<ID3D12RootSignature> rootSignature)
+		public D3D12Pipeline(PipelineKey key, PassKind kind, ComPtr<ID3D12PipelineState> pipelineState,
+			ComPtr<ID3D12RootSignature> rootSignature)
 		{
 			Key = key;
 			Kind = kind;

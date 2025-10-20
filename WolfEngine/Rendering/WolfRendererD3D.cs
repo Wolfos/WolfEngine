@@ -98,10 +98,10 @@ public unsafe class WolfRendererD3D : IRenderer
 	private D3D12 _d3d12 = null!;
 	private ComPtr<IDXGIFactory2> _factory = default;
 	private ComPtr<IDXGISwapChain3> _swapchain = default;
-private ComPtr<ID3D12Device> _device = default;
-private ComPtr<IDXGIAdapter> _adapter = default;
-private ComPtr<ID3D12CommandQueue> _commandQueue = default;
-private D3D12Device _gfxDevice = null!;
+	private ComPtr<ID3D12Device> _device = default;
+	private ComPtr<IDXGIAdapter> _adapter = default;
+	private ComPtr<ID3D12CommandQueue> _commandQueue = default;
+	private D3D12Device _gfxDevice = null!;
 
 	private ComPtr<ID3D12DescriptorHeap> _rtvHeap = default;
 	private uint _rtvDescriptorSize;
@@ -113,6 +113,7 @@ private D3D12Device _gfxDevice = null!;
 		new ComPtr<ID3D12CommandAllocator>[FrameCount];
 
 	private ComPtr<ID3D12GraphicsCommandList> _commandList = default;
+	private ID3D12GraphicsCommandList* _activeCommandList;
 	private ComPtr<ID3D12Fence> _fence = default;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
@@ -327,10 +328,10 @@ private D3D12Device _gfxDevice = null!;
 			priority: (int)CommandQueuePriority.Normal,
 			flags: CommandQueueFlags.None);
 
-	SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
+		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
 
-	_gfxDevice = new D3D12Device(_device, _commandQueue);
-	_renderGraphResources.SetDevice(_gfxDevice);
+		_gfxDevice = new D3D12Device(_device, _commandQueue);
+		_renderGraphResources.SetDevice(_gfxDevice);
 	}
 
 	private void CreateSwapchain()
@@ -1418,14 +1419,21 @@ private D3D12Device _gfxDevice = null!;
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
-		SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
-
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
 			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
+
+		var gfxCommandList = _gfxDevice.BeginGraphics();
+		if (gfxCommandList is not ID3D12BackendCommandList backendCommandList)
+		{
+			throw new InvalidOperationException(
+				"Direct3D12 backend returned an unexpected command list implementation.");
+		}
+
+		var commandList = backendCommandList.NativeCommandList;
+		_activeCommandList = commandList;
 
 		var framebufferSize = _framebufferSize;
 
@@ -1443,9 +1451,10 @@ private D3D12Device _gfxDevice = null!;
 
 		var renderedScene = _frameBuilder.BuildAndExecute(callbacks);
 
-	var backbufferResource = _renderGraphResources.GetTexture(frameResources.Backbuffer);
-	var backbufferTexture = backbufferResource as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Render graph returned a texture incompatible with the Direct3D12 backend.");
+		var backbufferResource = _renderGraphResources.GetTexture(frameResources.Backbuffer);
+		var backbufferTexture = backbufferResource as ID3D12BackendTexture
+		                        ?? throw new InvalidOperationException(
+			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
 		_frameBuilder.EndFrame();
 
 		var barrierEnd = new ResourceBarrier
@@ -1457,11 +1466,10 @@ private D3D12Device _gfxDevice = null!;
 			StateBefore = ResourceStates.RenderTarget,
 			StateAfter = ResourceStates.Present
 		};
-		_commandList.ResourceBarrier(1, &barrierEnd);
+		commandList->ResourceBarrier(1, &barrierEnd);
 
-		SilkMarshal.ThrowHResult(_commandList.Close());
-		ID3D12CommandList* lists = (ID3D12CommandList*)_commandList.Handle;
-		_commandQueue.ExecuteCommandLists(1, &lists);
+		_gfxDevice.Submit(gfxCommandList);
+		_activeCommandList = null;
 
 		var presentResult = _swapchain.Present(1, 0);
 		if (presentResult < 0)
@@ -1503,13 +1511,13 @@ private D3D12Device _gfxDevice = null!;
 			TextureFormat.Bgra8Unorm,
 			TextureUsage.RenderTarget);
 
-var imported = _gfxDevice.ImportExternalTexture(
-  descriptor,
-  _renderTargets[frameIdx].Handle,
-  _rtvCpuHandles[frameIdx],
-  null);
+		var imported = _gfxDevice.ImportExternalTexture(
+			descriptor,
+			_renderTargets[frameIdx].Handle,
+			_rtvCpuHandles[frameIdx],
+			null);
 
-	return registry.ImportTexture(imported, takeOwnership: false);
+		return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
 	private RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
@@ -1527,13 +1535,13 @@ var imported = _gfxDevice.ImportExternalTexture(
 
 		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
 
-	var imported = _gfxDevice.ImportExternalTexture(
-		descriptor,
-		_depthBuffer.Handle,
-		null,
-		depthHandle);
+		var imported = _gfxDevice.ImportExternalTexture(
+			descriptor,
+			_depthBuffer.Handle,
+			null,
+			depthHandle);
 
-	return registry.ImportTexture(imported, takeOwnership: false);
+		return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
 	private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
@@ -1544,14 +1552,18 @@ var imported = _gfxDevice.ImportExternalTexture(
 			return;
 		}
 
-	var albedoTexture = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Albedo texture is not compatible with the Direct3D12 backend.");
-	var normalTexture = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Normal texture is not compatible with the Direct3D12 backend.");
-	var materialTexture = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Material texture is not compatible with the Direct3D12 backend.");
-	var depthTexture = context.GetTexture(resources.GBufferDepth) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Depth texture is not compatible with the Direct3D12 backend.");
+		var albedoTexture = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
+		                    ?? throw new InvalidOperationException(
+			                    "Albedo texture is not compatible with the Direct3D12 backend.");
+		var normalTexture = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
+		                    ?? throw new InvalidOperationException(
+			                    "Normal texture is not compatible with the Direct3D12 backend.");
+		var materialTexture = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
+		                      ?? throw new InvalidOperationException(
+			                      "Material texture is not compatible with the Direct3D12 backend.");
+		var depthTexture = context.GetTexture(resources.GBufferDepth) as ID3D12BackendTexture
+		                   ?? throw new InvalidOperationException(
+			                   "Depth texture is not compatible with the Direct3D12 backend.");
 
 		var viewport = new Viewport
 		{
@@ -1562,40 +1574,45 @@ var imported = _gfxDevice.ImportExternalTexture(
 			MinDepth = 0.0f,
 			MaxDepth = 1.0f
 		};
-		_commandList.RSSetViewports(1, &viewport);
+		_activeCommandList->RSSetViewports(1, &viewport);
 
 		var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
-		_commandList.RSSetScissorRects(1, &scissor);
+		_activeCommandList->RSSetScissorRects(1, &scissor);
 
-	var rtvHandles = stackalloc CpuDescriptorHandle[3];
-	rtvHandles[0] = albedoTexture.RenderTargetView ?? throw new InvalidOperationException("Albedo texture missing RTV.");
-	rtvHandles[1] = normalTexture.RenderTargetView ?? throw new InvalidOperationException("Normal texture missing RTV.");
-	rtvHandles[2] = materialTexture.RenderTargetView ?? throw new InvalidOperationException("Material texture missing RTV.");
-	var dsvHandle = depthTexture.DepthStencilView ?? throw new InvalidOperationException("Depth texture missing DSV.");
-		_commandList.OMSetRenderTargets(3, rtvHandles, new(false), &dsvHandle);
+		var rtvHandles = stackalloc CpuDescriptorHandle[3];
+		rtvHandles[0] = albedoTexture.RenderTargetView ??
+		                throw new InvalidOperationException("Albedo texture missing RTV.");
+		rtvHandles[1] = normalTexture.RenderTargetView ??
+		                throw new InvalidOperationException("Normal texture missing RTV.");
+		rtvHandles[2] = materialTexture.RenderTargetView ??
+		                throw new InvalidOperationException("Material texture missing RTV.");
+		var dsvHandle = depthTexture.DepthStencilView ??
+		                throw new InvalidOperationException("Depth texture missing DSV.");
+		var singleHandle = new Silk.NET.Core.Bool32(0);
+		_activeCommandList->OMSetRenderTargets(3, rtvHandles, singleHandle, &dsvHandle);
 
 		Span<float> albedoClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
 		Span<float> normalClear = stackalloc float[4] { 0.5f, 0.5f, 1.0f, 1.0f };
 		Span<float> materialClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
 		fixed (float* albedoPtr = albedoClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[0], albedoPtr, 0, (Box2D<int>*)null);
+			_activeCommandList->ClearRenderTargetView(rtvHandles[0], albedoPtr, 0, (Box2D<int>*)null);
 		}
 
 		fixed (float* normalPtr = normalClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[1], normalPtr, 0, (Box2D<int>*)null);
+			_activeCommandList->ClearRenderTargetView(rtvHandles[1], normalPtr, 0, (Box2D<int>*)null);
 		}
 
 		fixed (float* materialPtr = materialClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[2], materialPtr, 0, (Box2D<int>*)null);
+			_activeCommandList->ClearRenderTargetView(rtvHandles[2], materialPtr, 0, (Box2D<int>*)null);
 		}
 
-		_commandList.ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*)null);
+		_activeCommandList->ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*)null);
 
-		_commandList.SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
-		_commandList.SetGraphicsRootSignature(_rootSignature.Handle);
+		_activeCommandList->SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
+		_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
 
 		var viewProjection = _camera.Transform * _camera.Perspective;
 		Span<float> cameraConstants = stackalloc float[20];
@@ -1612,26 +1629,26 @@ var imported = _gfxDevice.ImportExternalTexture(
 			var materialResources = EnsureMaterialResources(draw.Material);
 
 			var colorBufferPtr = materialResources.ColorBuffer.Handle;
-			_commandList.SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
+			_activeCommandList->SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
 
 			Span<float> modelConstants = stackalloc float[16];
 			WriteMatrix(modelConstants, draw.Transform);
 			fixed (float* modelPtr = modelConstants)
 			{
-				_commandList.SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
+				_activeCommandList->SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
 			}
 
 			fixed (float* cameraPtr = cameraConstants)
 			{
-				_commandList.SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
+				_activeCommandList->SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
 			}
 
-			_commandList.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
+			_activeCommandList->IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
 			var vertexView = meshResources.VertexView;
-			_commandList.IASetVertexBuffers(0, 1, &vertexView);
+			_activeCommandList->IASetVertexBuffers(0, 1, &vertexView);
 			var indexView = meshResources.IndexView;
-			_commandList.IASetIndexBuffer(&indexView);
-			_commandList.DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
+			_activeCommandList->IASetIndexBuffer(&indexView);
+			_activeCommandList->DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
 		}
 #pragma warning restore CA2014
 	}
@@ -1649,14 +1666,18 @@ var imported = _gfxDevice.ImportExternalTexture(
 			return false;
 		}
 
-	var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("G-buffer albedo texture not compatible with Direct3D12 backend.");
-	var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("G-buffer normal texture not compatible with Direct3D12 backend.");
-	var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("G-buffer material texture not compatible with Direct3D12 backend.");
-	var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture
-		?? throw new InvalidOperationException("Backbuffer texture not compatible with Direct3D12 backend.");
+		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
+		                    ?? throw new InvalidOperationException(
+			                    "G-buffer albedo texture not compatible with Direct3D12 backend.");
+		var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
+		                    ?? throw new InvalidOperationException(
+			                    "G-buffer normal texture not compatible with Direct3D12 backend.");
+		var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
+		                      ?? throw new InvalidOperationException(
+			                      "G-buffer material texture not compatible with Direct3D12 backend.");
+		var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture
+		                                ?? throw new InvalidOperationException(
+			                                "Backbuffer texture not compatible with Direct3D12 backend.");
 
 		var resourceBarriers = stackalloc ResourceBarrier[3];
 		resourceBarriers[0] = new ResourceBarrier
@@ -1686,7 +1707,7 @@ var imported = _gfxDevice.ImportExternalTexture(
 			StateBefore = ResourceStates.RenderTarget,
 			StateAfter = ResourceStates.NonPixelShaderResource
 		};
-		_commandList.ResourceBarrier(3, resourceBarriers);
+		_activeCommandList->ResourceBarrier(3, resourceBarriers);
 
 		var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
 		_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
@@ -1700,16 +1721,16 @@ var imported = _gfxDevice.ImportExternalTexture(
 			cpuHandle);
 
 		ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*)_lightingDescriptorHeap.Handle;
-		_commandList.SetDescriptorHeaps(1, &descriptorHeaps);
+		_activeCommandList->SetDescriptorHeaps(1, &descriptorHeaps);
 
 		var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
 		var uavGpuHandle = srvGpuHandle;
 		uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
 
-		_commandList.SetPipelineState((ID3D12PipelineState*)_lightingPipeline.Handle);
-		_commandList.SetComputeRootSignature(_lightingRootSignature.Handle);
-		_commandList.SetComputeRootDescriptorTable(0, srvGpuHandle);
-		_commandList.SetComputeRootDescriptorTable(1, uavGpuHandle);
+		_activeCommandList->SetPipelineState((ID3D12PipelineState*)_lightingPipeline.Handle);
+		_activeCommandList->SetComputeRootSignature(_lightingRootSignature.Handle);
+		_activeCommandList->SetComputeRootDescriptorTable(0, srvGpuHandle);
+		_activeCommandList->SetComputeRootDescriptorTable(1, uavGpuHandle);
 
 		var viewProjection = _camera.Transform * _camera.Perspective;
 		Span<float> cameraConstants = stackalloc float[20];
@@ -1721,16 +1742,16 @@ var imported = _gfxDevice.ImportExternalTexture(
 
 		fixed (float* cameraPtr = cameraConstants)
 		{
-			_commandList.SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
+			_activeCommandList->SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
 		}
 
 		var dispatchX = (uint)((resources.FramebufferSize.X + 7) / 8);
 		var dispatchY = (uint)((resources.FramebufferSize.Y + 7) / 8);
-		_commandList.Dispatch(dispatchX, dispatchY, 1);
+		_activeCommandList->Dispatch(dispatchX, dispatchY, 1);
 
 		var uavBarrier = new ResourceBarrier { Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None };
 		uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
-		_commandList.ResourceBarrier(1, &uavBarrier);
+		_activeCommandList->ResourceBarrier(1, &uavBarrier);
 
 		var copyBarriers = stackalloc ResourceBarrier[2];
 		copyBarriers[0] = new ResourceBarrier
@@ -1744,27 +1765,27 @@ var imported = _gfxDevice.ImportExternalTexture(
 		};
 		copyBarriers[1] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
-	copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = backbufferTextureDeferred.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.Present,
-		StateAfter = ResourceStates.CopyDest
-	};
-	_commandList.ResourceBarrier(2, copyBarriers);
+		copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = backbufferTextureDeferred.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.Present,
+			StateAfter = ResourceStates.CopyDest
+		};
+		_activeCommandList->ResourceBarrier(2, copyBarriers);
 
-	_commandList.CopyResource(backbufferTextureDeferred.Resource, _lightingBuffer.Handle);
+		_activeCommandList->CopyResource(backbufferTextureDeferred.Resource, _lightingBuffer.Handle);
 
 		var presentBarriers = stackalloc ResourceBarrier[2];
 		presentBarriers[0] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
-	presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = backbufferTextureDeferred.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.CopyDest,
-		StateAfter = ResourceStates.Present
-	};
+		presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = backbufferTextureDeferred.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopyDest,
+			StateAfter = ResourceStates.Present
+		};
 		presentBarriers[1] = new ResourceBarrier
 			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
@@ -1774,7 +1795,7 @@ var imported = _gfxDevice.ImportExternalTexture(
 			StateBefore = ResourceStates.CopySource,
 			StateAfter = ResourceStates.UnorderedAccess
 		};
-		_commandList.ResourceBarrier(2, presentBarriers);
+		_activeCommandList->ResourceBarrier(2, presentBarriers);
 
 		return true;
 	}
