@@ -124,9 +124,9 @@ public unsafe class WolfRendererD3D : IRenderer
 	private uint _lightingDescriptorSize;
 	private ComPtr<ID3D12Resource> _lightingBuffer = default;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
-private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-private readonly Dictionary<Material, MaterialResources> _materialResources = new();
-private readonly List<DrawInstruction> _drawCommands = new();
+	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+	private readonly Dictionary<Material, MaterialResources> _materialResources = new();
+	private readonly List<DrawInstruction> _drawCommands = new();
 	private readonly RenderGraphResourceRegistry _renderGraphResources = new();
 	private readonly RenderGraph _renderGraph;
 	private readonly RenderGraphFrameBuilder _frameBuilder;
@@ -217,7 +217,7 @@ private readonly List<DrawInstruction> _drawCommands = new();
 		{
 			return;
 		}
-		
+
 		OnRender(deltaSeconds);
 	}
 
@@ -286,12 +286,12 @@ private readonly List<DrawInstruction> _drawCommands = new();
 			return;
 		}
 
-	var size = _window.FramebufferSize;
-	if (size.X > 0 && size.Y > 0)
-	{
-		_framebufferSize = new Int2(size.X, size.Y);
+		var size = _window.FramebufferSize;
+		if (size.X > 0 && size.Y > 0)
+		{
+			_framebufferSize = new Int2(size.X, size.Y);
+		}
 	}
-}
 
 	private void OnLoad()
 	{
@@ -305,13 +305,13 @@ private readonly List<DrawInstruction> _drawCommands = new();
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
-CreateRootSignature();
-CreateDepthResources();
-CreateGBufferPipeline();
-CreateLightingDescriptors();
-CreateLightingBuffer();
-CreateLightingPipeline();
-}
+		CreateRootSignature();
+		CreateDepthResources();
+		CreateGBufferPipeline();
+		CreateLightingDescriptors();
+		CreateLightingBuffer();
+		CreateLightingPipeline();
+	}
 
 	private void CreateDeviceAndQueue()
 	{
@@ -323,7 +323,7 @@ CreateLightingPipeline();
 		_renderGraphResources.SetBackend(new D3D12RenderGraphBackend(_device));
 		var commandQueueDescription = new CommandQueueDesc(
 			type: CommandListType.Direct,
-			priority: (int) CommandQueuePriority.Normal,
+			priority: (int)CommandQueuePriority.Normal,
 			flags: CommandQueueFlags.None);
 
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
@@ -338,14 +338,14 @@ CreateLightingPipeline();
 			BufferUsage = DXGI.UsageRenderTargetOutput,
 			SwapEffect = SwapEffect.FlipDiscard,
 			SampleDesc = new(1, 0),
-			Width = (uint) Math.Max(_framebufferSize.X, 1),
-			Height = (uint) Math.Max(_framebufferSize.Y, 1)
+			Width = (uint)Math.Max(_framebufferSize.X, 1),
+			Height = (uint)Math.Max(_framebufferSize.Y, 1)
 		};
 
 		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
 
 		var factoryPtr = _factory.Handle;
-		var queuePtr = (IUnknown*) _commandQueue.Handle;
+		var queuePtr = (IUnknown*)_commandQueue.Handle;
 		IDXGISwapChain1* swapChain1 = null;
 		var swapchainResult = factoryPtr->CreateSwapChainForHwnd(
 			queuePtr,
@@ -358,7 +358,7 @@ CreateLightingPipeline();
 
 		IDXGISwapChain3* swapChain3 = null;
 		var swapChain3Guid = IDXGISwapChain3.Guid;
-		SilkMarshal.ThrowHResult(swapChain1->QueryInterface(ref swapChain3Guid, (void**) &swapChain3));
+		SilkMarshal.ThrowHResult(swapChain1->QueryInterface(ref swapChain3Guid, (void**)&swapChain3));
 		_swapchain = new ComPtr<IDXGISwapChain3>(swapChain3);
 
 		swapChain1->Release();
@@ -383,7 +383,7 @@ CreateLightingPipeline();
 		for (var i = 0; i < FrameCount; i++)
 		{
 			_rtvCpuHandles[i] = rtvHandle;
-			SilkMarshal.ThrowHResult(_swapchain.GetBuffer((uint) i, out _renderTargets[i]));
+			SilkMarshal.ThrowHResult(_swapchain.GetBuffer((uint)i, out _renderTargets[i]));
 			_device.CreateRenderTargetView(_renderTargets[i], null, rtvHandle);
 			rtvHandle.Ptr += _rtvDescriptorSize;
 		}
@@ -468,7 +468,7 @@ CreateLightingPipeline();
 			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
 		if (rootSignatureError is not null)
 		{
-			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
+			var message = Marshal.PtrToStringAnsi((nint)rootSignatureError->GetBufferPointer());
 			rootSignatureError->Release();
 			if (serializeResult < 0)
 			{
@@ -539,7 +539,7 @@ CreateLightingPipeline();
 			DestBlendAlpha = Blend.Zero,
 			BlendOpAlpha = BlendOp.Add,
 			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte) ColorWriteEnable.All
+			RenderTargetWriteMask = (byte)ColorWriteEnable.All
 		};
 		blendState.RenderTarget[0] = blendDesc;
 		blendState.RenderTarget[1] = blendDesc;
@@ -590,18 +590,18 @@ CreateLightingPipeline();
 			var shaderBytecodeVS = new ShaderBytecode
 			{
 				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint) vertexShaderBytes.Length
+				BytecodeLength = (nuint)vertexShaderBytes.Length
 			};
 
 			var shaderBytecodePS = new ShaderBytecode
 			{
 				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint) pixelShaderBytes.Length
+				BytecodeLength = (nuint)pixelShaderBytes.Length
 			};
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
@@ -624,7 +624,7 @@ CreateLightingPipeline();
 
 			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _gbufferPipeline));
 		}
-}
+	}
 
 	private void CreateLightingDescriptors()
 	{
@@ -659,8 +659,8 @@ CreateLightingPipeline();
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong) width,
-			Height = (uint) height,
+			Width = (ulong)width,
+			Height = (uint)height,
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = Format.FormatB8G8R8A8Unorm,
@@ -698,12 +698,12 @@ CreateLightingPipeline();
 		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
 
 		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = (RootParameterType) 0;
+		rootParameters[0].ParameterType = (RootParameterType)0;
 		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
 		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
 
-		rootParameters[1].ParameterType = (RootParameterType) 0;
+		rootParameters[1].ParameterType = (RootParameterType)0;
 		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
 		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
@@ -756,7 +756,7 @@ CreateLightingPipeline();
 			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
 		if (rootSignatureError is not null)
 		{
-			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
+			var message = Marshal.PtrToStringAnsi((nint)rootSignatureError->GetBufferPointer());
 			rootSignatureError->Release();
 			if (serializeResult < 0)
 			{
@@ -777,12 +777,12 @@ CreateLightingPipeline();
 			var shaderBytecode = new ShaderBytecode
 			{
 				PShaderBytecode = shaderPtr,
-				BytecodeLength = (nuint) shaderBytes.Length
+				BytecodeLength = (nuint)shaderBytes.Length
 			};
 
 			var pipelineDesc = new ComputePipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _lightingRootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*)_lightingRootSignature.Handle,
 				CS = shaderBytecode,
 				NodeMask = 0,
 				CachedPSO = default,
@@ -793,12 +793,12 @@ CreateLightingPipeline();
 		}
 	}
 
-private void CreateDepthResources()
+	private void CreateDepthResources()
 	{
-	if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
-	{
-		_framebufferSize = new Int2(_width, _height);
-	}
+		if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
+		{
+			_framebufferSize = new Int2(_width, _height);
+		}
 
 		if (_dsvHeap.Handle is not null)
 		{
@@ -823,8 +823,8 @@ private void CreateDepthResources()
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong) Math.Max(_framebufferSize.X, 1),
-			Height = (uint) Math.Max(_framebufferSize.Y, 1),
+			Width = (ulong)Math.Max(_framebufferSize.X, 1),
+			Height = (uint)Math.Max(_framebufferSize.Y, 1),
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = Format.FormatD32Float,
@@ -902,10 +902,10 @@ private void CreateDepthResources()
 
 		var inputElements = stackalloc InputElementDesc[2];
 		Span<byte> positionSemantic =
-			[(byte) 'P', (byte) 'O', (byte) 'S', (byte) 'I', (byte) 'T', (byte) 'I', (byte) 'O', (byte) 'N', 0];
+			[(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
 		inputElements[0] = new InputElementDesc
 		{
-			SemanticName = (byte*) Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
+			SemanticName = (byte*)Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
 			SemanticIndex = 0,
 			Format = Format.FormatR32G32B32A32Float,
 			InputSlot = 0,
@@ -914,10 +914,10 @@ private void CreateDepthResources()
 			InstanceDataStepRate = 0
 		};
 
-		Span<byte> normalSemantic = [(byte) 'N', (byte) 'O', (byte) 'R', (byte) 'M', (byte) 'A', (byte) 'L', 0];
+		Span<byte> normalSemantic = [(byte)'N', (byte)'O', (byte)'R', (byte)'M', (byte)'A', (byte)'L', 0];
 		inputElements[1] = new InputElementDesc
 		{
-			SemanticName = (byte*) Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
+			SemanticName = (byte*)Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
 			SemanticIndex = 0,
 			Format = Format.FormatR32G32B32Float,
 			InputSlot = 0,
@@ -949,7 +949,7 @@ private void CreateDepthResources()
 			DestBlendAlpha = Blend.Zero,
 			BlendOpAlpha = BlendOp.Add,
 			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte) ColorWriteEnable.All
+			RenderTargetWriteMask = (byte)ColorWriteEnable.All
 		};
 
 		var rasterizerState = new RasterizerDesc
@@ -999,18 +999,18 @@ private void CreateDepthResources()
 			var shaderBytecodeVS = new ShaderBytecode
 			{
 				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint) vertexShaderBytes.Length
+				BytecodeLength = (nuint)vertexShaderBytes.Length
 			};
 
 			var shaderBytecodePS = new ShaderBytecode
 			{
 				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint) pixelShaderBytes.Length
+				BytecodeLength = (nuint)pixelShaderBytes.Length
 			};
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
@@ -1032,7 +1032,7 @@ private void CreateDepthResources()
 			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
 		}
 
-		var colorSize = Align((ulong) Unsafe.SizeOf<Vector4>(), D3D12.ConstantBufferDataPlacementAlignment);
+		var colorSize = Align((ulong)Unsafe.SizeOf<Vector4>(), D3D12.ConstantBufferDataPlacementAlignment);
 		var uploadProps = new HeapProperties(HeapType.Upload);
 		var bufferDesc = new ResourceDesc
 		{
@@ -1059,15 +1059,15 @@ private void CreateDepthResources()
 				out colorBuffer));
 
 		void* mappedData = null;
-		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedData));
+		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedData));
 		try
 		{
 			var color = material.Color;
-			Unsafe.Write((Vector4*) mappedData, color);
+			Unsafe.Write((Vector4*)mappedData, color);
 		}
 		finally
 		{
-			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
 		}
 
 		return new MaterialResources(pipelineState, colorBuffer);
@@ -1131,8 +1131,8 @@ private void CreateDepthResources()
 			vertices[i].Padding = 0.0f;
 		}
 
-		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();
-		var vertexBufferSize = (ulong) (vertexStride * (uint) vertexCount);
+		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
+		var vertexBufferSize = (ulong)(vertexStride * (uint)vertexCount);
 		var vertexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1171,7 +1171,7 @@ private void CreateDepthResources()
 				out vertexUpload));
 
 		void* mappedVertices = null;
-		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedVertices));
+		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedVertices));
 		try
 		{
 			fixed (VertexData* srcVertices = vertices)
@@ -1181,7 +1181,7 @@ private void CreateDepthResources()
 		}
 		finally
 		{
-			vertexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			vertexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
 		}
 
 		var indices = mesh.Indices;
@@ -1190,7 +1190,7 @@ private void CreateDepthResources()
 			throw new InvalidOperationException("Mesh must contain index data.");
 		}
 
-		var indexBufferSize = (ulong) (sizeof(uint) * indices.Length);
+		var indexBufferSize = (ulong)(sizeof(uint) * indices.Length);
 		var indexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1226,7 +1226,7 @@ private void CreateDepthResources()
 				out indexUpload));
 
 		void* mappedIndices = null;
-		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedIndices));
+		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedIndices));
 		try
 		{
 			fixed (uint* srcIndices = indices)
@@ -1236,17 +1236,17 @@ private void CreateDepthResources()
 		}
 		finally
 		{
-			indexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			indexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
 		}
 
 		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*) null));
+		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*)null));
 
 		_commandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexBufferSize);
 		_commandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexBufferSize);
 
 		var vertexBarrier = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		vertexBarrier.Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = vertexBuffer.Handle,
@@ -1257,7 +1257,7 @@ private void CreateDepthResources()
 		_commandList.ResourceBarrier(1, &vertexBarrier);
 
 		var indexBarrier = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		indexBarrier.Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = indexBuffer.Handle,
@@ -1268,7 +1268,7 @@ private void CreateDepthResources()
 		_commandList.ResourceBarrier(1, &indexBarrier);
 
 		SilkMarshal.ThrowHResult(_commandList.Close());
-		ID3D12CommandList* copyLists = (ID3D12CommandList*) _commandList.Handle;
+		ID3D12CommandList* copyLists = (ID3D12CommandList*)_commandList.Handle;
 		_commandQueue.ExecuteCommandLists(1, &copyLists);
 		SignalAndWait();
 
@@ -1278,18 +1278,18 @@ private void CreateDepthResources()
 		var vertexView = new VertexBufferView
 		{
 			BufferLocation = vertexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint) vertexBufferSize,
+			SizeInBytes = (uint)vertexBufferSize,
 			StrideInBytes = vertexStride
 		};
 
 		var indexView = new IndexBufferView
 		{
 			BufferLocation = indexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint) indexBufferSize,
+			SizeInBytes = (uint)indexBufferSize,
 			Format = Format.FormatR32Uint
 		};
 
-		return new MeshResources(vertexBuffer, indexBuffer, vertexView, indexView, (uint) indices.Length);
+		return new MeshResources(vertexBuffer, indexBuffer, vertexView, indexView, (uint)indices.Length);
 	}
 
 	private MeshResources EnsureMeshResources(Mesh mesh)
@@ -1371,14 +1371,14 @@ private void CreateDepthResources()
 		ProcessPendingCommands();
 	}
 
-private void OnFramebufferResize(Int2 newSize)
-{
-	if (newSize.X == 0 || newSize.Y == 0)
+	private void OnFramebufferResize(Int2 newSize)
 	{
-		return;
-	}
+		if (newSize.X == 0 || newSize.Y == 0)
+		{
+			return;
+		}
 
-	_framebufferSize = newSize;
+		_framebufferSize = newSize;
 
 		WaitForGpu();
 
@@ -1395,14 +1395,14 @@ private void OnFramebufferResize(Int2 newSize)
 			_rtvHeap.Dispose();
 		}
 
-	SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint) newSize.X, (uint) newSize.Y,
+		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint)newSize.X, (uint)newSize.Y,
 			Format.FormatB8G8R8A8Unorm, 0));
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
-	CreateRtvHeapAndTargets();
-	CreateDepthResources();
-	CreateLightingBuffer();
-}
+		CreateRtvHeapAndTargets();
+		CreateDepthResources();
+		CreateLightingBuffer();
+	}
 
 	private void OnRender(double deltaSeconds)
 	{
@@ -1410,37 +1410,40 @@ private void OnFramebufferResize(Int2 newSize)
 
 		if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*) _fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*)_fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
 		SilkMarshal.ThrowHResult(_commandAllocators[frameIdx].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*) null));
+		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[frameIdx].Handle, (ID3D12PipelineState*)null));
 
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
 		var framebufferSize = _framebufferSize;
+
 		RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) =>
 			ImportBackbufferTexture(registry, frameIdx, width, height);
+
 		RenderGraphResourceHandle ImportDepth(RenderGraphResourceRegistry registry, int width, int height) =>
 			ImportDepthTexture(registry, width, height);
 
 		var frameResources = _frameBuilder.BeginFrame(framebufferSize, ImportBackbuffer, ImportDepth);
 
-	var callbacks = new RenderPassCallbacks(
-		(context, resources) => ExecuteGBufferPass(context, resources),
-		(context, resources) => ExecuteDeferredPass(context, resources));
+		var callbacks = new RenderPassCallbacks(
+			(context, resources) => ExecuteGBufferPass(context, resources),
+			(context, resources) => ExecuteDeferredPass(context, resources));
 
 		var renderedScene = _frameBuilder.BuildAndExecute(callbacks);
 
-		var backbufferTexture = (ID3D12RenderGraphTexture) _renderGraphResources.GetTexture(frameResources.Backbuffer);
+		var backbufferTexture = (ID3D12RenderGraphTexture)_renderGraphResources.GetTexture(frameResources.Backbuffer);
 		_frameBuilder.EndFrame();
 
-		var barrierEnd = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		var barrierEnd = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		barrierEnd.Anonymous.Transition = new()
 		{
 			PResource = backbufferTexture.Resource,
@@ -1451,7 +1454,7 @@ private void OnFramebufferResize(Int2 newSize)
 		_commandList.ResourceBarrier(1, &barrierEnd);
 
 		SilkMarshal.ThrowHResult(_commandList.Close());
-		ID3D12CommandList* lists = (ID3D12CommandList*) _commandList.Handle;
+		ID3D12CommandList* lists = (ID3D12CommandList*)_commandList.Handle;
 		_commandQueue.ExecuteCommandLists(1, &lists);
 
 		var presentResult = _swapchain.Present(1, 0);
@@ -1480,77 +1483,78 @@ private void OnFramebufferResize(Int2 newSize)
 		}
 	}
 
-private RenderGraphResourceHandle ImportBackbufferTexture(RenderGraphResourceRegistry registry, uint frameIdx, int width, int height)
-{
-	var descriptor = new TextureDescriptor(
-		Math.Max(width, 1),
-		Math.Max(height, 1),
-		TextureFormat.Bgra8Unorm,
-		TextureUsage.RenderTarget);
-
-	var texture = new D3D12ExternalRenderGraphTexture(
-		descriptor,
-		_renderTargets[frameIdx].Handle,
-		hasRtv: true,
-		_rtvCpuHandles[frameIdx],
-		hasDsv: false,
-		default);
-
-	return registry.ImportTexture(texture);
-}
-
-private RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
-{
-	if (_depthBuffer.Handle is null)
+	private RenderGraphResourceHandle ImportBackbufferTexture(RenderGraphResourceRegistry registry, uint frameIdx,
+		int width, int height)
 	{
-		throw new InvalidOperationException("Depth buffer was not initialised.");
+		var descriptor = new TextureDescriptor(
+			Math.Max(width, 1),
+			Math.Max(height, 1),
+			TextureFormat.Bgra8Unorm,
+			TextureUsage.RenderTarget);
+
+		var texture = new D3D12ExternalRenderGraphTexture(
+			descriptor,
+			_renderTargets[frameIdx].Handle,
+			hasRtv: true,
+			_rtvCpuHandles[frameIdx],
+			hasDsv: false,
+			default);
+
+		return registry.ImportTexture(texture);
 	}
 
-	var descriptor = new TextureDescriptor(
-		Math.Max(width, 1),
-		Math.Max(height, 1),
-		TextureFormat.D32Float,
-		TextureUsage.DepthStencil);
-
-	var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
-
-	var texture = new D3D12ExternalRenderGraphTexture(
-		descriptor,
-		_depthBuffer.Handle,
-		hasRtv: false,
-		default,
-		hasDsv: true,
-		depthHandle);
-
-	return registry.ImportTexture(texture);
-}
-
-private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
-{
-	var canRender = _drawCommands.Count > 0 && _hasCamera;
-	if (canRender == false)
+	private RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
 	{
-		return;
+		if (_depthBuffer.Handle is null)
+		{
+			throw new InvalidOperationException("Depth buffer was not initialised.");
+		}
+
+		var descriptor = new TextureDescriptor(
+			Math.Max(width, 1),
+			Math.Max(height, 1),
+			TextureFormat.D32Float,
+			TextureUsage.DepthStencil);
+
+		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
+
+		var texture = new D3D12ExternalRenderGraphTexture(
+			descriptor,
+			_depthBuffer.Handle,
+			hasRtv: false,
+			default,
+			hasDsv: true,
+			depthHandle);
+
+		return registry.ImportTexture(texture);
 	}
 
-	var albedoTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferAlbedo);
-	var normalTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferNormal);
-	var materialTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferMaterial);
-	var depthTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferDepth);
-
-	var viewport = new Viewport
+	private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
 	{
-		TopLeftX = 0,
-		TopLeftY = 0,
-		Width = resources.FramebufferSize.X,
-		Height = resources.FramebufferSize.Y,
-		MinDepth = 0.0f,
-		MaxDepth = 1.0f
-	};
-	_commandList.RSSetViewports(1, &viewport);
+		var canRender = _drawCommands.Count > 0 && _hasCamera;
+		if (canRender == false)
+		{
+			return;
+		}
 
-	var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
-	_commandList.RSSetScissorRects(1, &scissor);
+		var albedoTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferAlbedo);
+		var normalTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferNormal);
+		var materialTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferMaterial);
+		var depthTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferDepth);
+
+		var viewport = new Viewport
+		{
+			TopLeftX = 0,
+			TopLeftY = 0,
+			Width = resources.FramebufferSize.X,
+			Height = resources.FramebufferSize.Y,
+			MinDepth = 0.0f,
+			MaxDepth = 1.0f
+		};
+		_commandList.RSSetViewports(1, &viewport);
+
+		var scissor = new Box2D<int>(0, 0, resources.FramebufferSize.X, resources.FramebufferSize.Y);
+		_commandList.RSSetScissorRects(1, &scissor);
 
 		var rtvHandles = stackalloc CpuDescriptorHandle[3];
 		rtvHandles[0] = albedoTexture.RenderTargetView;
@@ -1559,24 +1563,27 @@ private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameReso
 		var dsvHandle = depthTexture.DepthStencilView;
 		_commandList.OMSetRenderTargets(3, rtvHandles, new(false), &dsvHandle);
 
-		Span<float> albedoClear = stackalloc float[4] {0.0f, 0.0f, 0.0f, 1.0f};
-		Span<float> normalClear = stackalloc float[4] {0.5f, 0.5f, 1.0f, 1.0f};
-		Span<float> materialClear = stackalloc float[4] {0.0f, 0.0f, 0.0f, 1.0f};
+		Span<float> albedoClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
+		Span<float> normalClear = stackalloc float[4] { 0.5f, 0.5f, 1.0f, 1.0f };
+		Span<float> materialClear = stackalloc float[4] { 0.0f, 0.0f, 0.0f, 1.0f };
 		fixed (float* albedoPtr = albedoClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[0], albedoPtr, 0, (Box2D<int>*) null);
+			_commandList.ClearRenderTargetView(rtvHandles[0], albedoPtr, 0, (Box2D<int>*)null);
 		}
+
 		fixed (float* normalPtr = normalClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[1], normalPtr, 0, (Box2D<int>*) null);
+			_commandList.ClearRenderTargetView(rtvHandles[1], normalPtr, 0, (Box2D<int>*)null);
 		}
+
 		fixed (float* materialPtr = materialClear)
 		{
-			_commandList.ClearRenderTargetView(rtvHandles[2], materialPtr, 0, (Box2D<int>*) null);
+			_commandList.ClearRenderTargetView(rtvHandles[2], materialPtr, 0, (Box2D<int>*)null);
 		}
-		_commandList.ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*) null);
 
-		_commandList.SetPipelineState((ID3D12PipelineState*) _gbufferPipeline.Handle);
+		_commandList.ClearDepthStencilView(dsvHandle, ClearFlags.Depth, 1.0f, 0, 0, (Box2D<int>*)null);
+
+		_commandList.SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
 		_commandList.SetGraphicsRootSignature(_rootSignature.Handle);
 
 		var viewProjection = _camera.Transform * _camera.Perspective;
@@ -1587,7 +1594,7 @@ private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameReso
 		cameraConstants[18] = _camera.Position.Z;
 		cameraConstants[19] = 1.0f;
 
-		#pragma warning disable CA2014
+#pragma warning disable CA2014
 		foreach (var draw in _drawCommands)
 		{
 			var meshResources = EnsureMeshResources(draw.Mesh);
@@ -1615,139 +1622,147 @@ private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameReso
 			_commandList.IASetIndexBuffer(&indexView);
 			_commandList.DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
 		}
-		#pragma warning restore CA2014
+#pragma warning restore CA2014
 	}
 
-private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
-{
-	if (_lightingBuffer.Handle is null)
+	private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
 	{
-		return false;
+		if (_lightingBuffer.Handle is null)
+		{
+			return false;
+		}
+
+		if (_hasCamera == false)
+		{
+			_drawCommands.Clear();
+			return false;
+		}
+
+		var gbufferAlbedo = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferAlbedo);
+		var gbufferNormal = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferNormal);
+		var gbufferMaterial = (ID3D12RenderGraphTexture)context.GetTexture(resources.GBufferMaterial);
+		var backbufferTexture = (ID3D12RenderGraphTexture)context.GetTexture(resources.Backbuffer);
+
+		var resourceBarriers = stackalloc ResourceBarrier[3];
+		resourceBarriers[0] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		resourceBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = gbufferAlbedo.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.NonPixelShaderResource
+		};
+		resourceBarriers[1] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = gbufferNormal.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.NonPixelShaderResource
+		};
+		resourceBarriers[2] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = gbufferMaterial.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.NonPixelShaderResource
+		};
+		_commandList.ResourceBarrier(3, resourceBarriers);
+
+		var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
+		_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		cpuHandle.Ptr += _lightingDescriptorSize;
+		_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		cpuHandle.Ptr += _lightingDescriptorSize;
+		_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		cpuHandle.Ptr += _lightingDescriptorSize;
+
+		_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*)null, (UnorderedAccessViewDesc*)null,
+			cpuHandle);
+
+		ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*)_lightingDescriptorHeap.Handle;
+		_commandList.SetDescriptorHeaps(1, &descriptorHeaps);
+
+		var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
+		var uavGpuHandle = srvGpuHandle;
+		uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
+
+		_commandList.SetPipelineState((ID3D12PipelineState*)_lightingPipeline.Handle);
+		_commandList.SetComputeRootSignature(_lightingRootSignature.Handle);
+		_commandList.SetComputeRootDescriptorTable(0, srvGpuHandle);
+		_commandList.SetComputeRootDescriptorTable(1, uavGpuHandle);
+
+		var viewProjection = _camera.Transform * _camera.Perspective;
+		Span<float> cameraConstants = stackalloc float[20];
+		WriteMatrix(cameraConstants, viewProjection);
+		cameraConstants[16] = _camera.Position.X;
+		cameraConstants[17] = _camera.Position.Y;
+		cameraConstants[18] = _camera.Position.Z;
+		cameraConstants[19] = 1.0f;
+
+		fixed (float* cameraPtr = cameraConstants)
+		{
+			_commandList.SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
+		}
+
+		var dispatchX = (uint)((resources.FramebufferSize.X + 7) / 8);
+		var dispatchY = (uint)((resources.FramebufferSize.Y + 7) / 8);
+		_commandList.Dispatch(dispatchX, dispatchY, 1);
+
+		var uavBarrier = new ResourceBarrier { Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None };
+		uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
+		_commandList.ResourceBarrier(1, &uavBarrier);
+
+		var copyBarriers = stackalloc ResourceBarrier[2];
+		copyBarriers[0] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		copyBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = _lightingBuffer.Handle,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.UnorderedAccess,
+			StateAfter = ResourceStates.CopySource
+		};
+		copyBarriers[1] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = backbufferTexture.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.Present,
+			StateAfter = ResourceStates.CopyDest
+		};
+		_commandList.ResourceBarrier(2, copyBarriers);
+
+		_commandList.CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
+
+		var presentBarriers = stackalloc ResourceBarrier[2];
+		presentBarriers[0] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = backbufferTexture.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopyDest,
+			StateAfter = ResourceStates.Present
+		};
+		presentBarriers[1] = new ResourceBarrier
+			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = _lightingBuffer.Handle,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopySource,
+			StateAfter = ResourceStates.UnorderedAccess
+		};
+		_commandList.ResourceBarrier(2, presentBarriers);
+
+		return true;
 	}
-
-	if (_hasCamera == false)
-	{
-		_drawCommands.Clear();
-		return false;
-	}
-
-	var gbufferAlbedo = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferAlbedo);
-	var gbufferNormal = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferNormal);
-	var gbufferMaterial = (ID3D12RenderGraphTexture) context.GetTexture(resources.GBufferMaterial);
-	var backbufferTexture = (ID3D12RenderGraphTexture) context.GetTexture(resources.Backbuffer);
-
-	var resourceBarriers = stackalloc ResourceBarrier[3];
-	resourceBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	resourceBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = gbufferAlbedo.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.NonPixelShaderResource
-	};
-	resourceBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = gbufferNormal.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.NonPixelShaderResource
-	};
-	resourceBarriers[2] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = gbufferMaterial.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.RenderTarget,
-		StateAfter = ResourceStates.NonPixelShaderResource
-	};
-	_commandList.ResourceBarrier(3, resourceBarriers);
-
-	var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
-	_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-	cpuHandle.Ptr += _lightingDescriptorSize;
-	_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-	cpuHandle.Ptr += _lightingDescriptorSize;
-	_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-	cpuHandle.Ptr += _lightingDescriptorSize;
-
-	_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*) null, (UnorderedAccessViewDesc*) null, cpuHandle);
-
-	ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*) _lightingDescriptorHeap.Handle;
-	_commandList.SetDescriptorHeaps(1, &descriptorHeaps);
-
-	var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
-	var uavGpuHandle = srvGpuHandle;
-	uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
-
-	_commandList.SetPipelineState((ID3D12PipelineState*) _lightingPipeline.Handle);
-	_commandList.SetComputeRootSignature(_lightingRootSignature.Handle);
-	_commandList.SetComputeRootDescriptorTable(0, srvGpuHandle);
-	_commandList.SetComputeRootDescriptorTable(1, uavGpuHandle);
-
-	var viewProjection = _camera.Transform * _camera.Perspective;
-	Span<float> cameraConstants = stackalloc float[20];
-	WriteMatrix(cameraConstants, viewProjection);
-	cameraConstants[16] = _camera.Position.X;
-	cameraConstants[17] = _camera.Position.Y;
-	cameraConstants[18] = _camera.Position.Z;
-	cameraConstants[19] = 1.0f;
-
-	fixed (float* cameraPtr = cameraConstants)
-	{
-		_commandList.SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
-	}
-
-	var dispatchX = (uint) ((resources.FramebufferSize.X + 7) / 8);
-	var dispatchY = (uint) ((resources.FramebufferSize.Y + 7) / 8);
-	_commandList.Dispatch(dispatchX, dispatchY, 1);
-
-	var uavBarrier = new ResourceBarrier {Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None};
-	uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
-	_commandList.ResourceBarrier(1, &uavBarrier);
-
-	var copyBarriers = stackalloc ResourceBarrier[2];
-	copyBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	copyBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = _lightingBuffer.Handle,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.UnorderedAccess,
-		StateAfter = ResourceStates.CopySource
-	};
-	copyBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = backbufferTexture.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.Present,
-		StateAfter = ResourceStates.CopyDest
-	};
-	_commandList.ResourceBarrier(2, copyBarriers);
-
-	_commandList.CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
-
-	var presentBarriers = stackalloc ResourceBarrier[2];
-	presentBarriers[0] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = backbufferTexture.Resource,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.CopyDest,
-		StateAfter = ResourceStates.Present
-	};
-	presentBarriers[1] = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-	presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-	{
-		PResource = _lightingBuffer.Handle,
-		Subresource = D3D12.ResourceBarrierAllSubresources,
-		StateBefore = ResourceStates.CopySource,
-		StateAfter = ResourceStates.UnorderedAccess
-	};
-	_commandList.ResourceBarrier(2, presentBarriers);
-
-	return true;
-}
 
 	private void SignalAndWait()
 	{
@@ -1755,7 +1770,7 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 	}
@@ -1764,7 +1779,7 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 	{
 		_fenceValue++;
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
-		SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
+		SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
 		WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 	}
 
@@ -1825,37 +1840,42 @@ private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameRes
 			}
 		}
 
-	_materialResources.Clear();
-	if (_gbufferPipeline.Handle is not null)
-	{
-		_gbufferPipeline.Dispose();
-		_gbufferPipeline = default;
-	}
-	if (_lightingPipeline.Handle is not null)
-	{
-		_lightingPipeline.Dispose();
-		_lightingPipeline = default;
-	}
-	if (_lightingRootSignature.Handle is not null)
-	{
-		_lightingRootSignature.Dispose();
-		_lightingRootSignature = default;
-	}
-	if (_lightingDescriptorHeap.Handle is not null)
-	{
-		_lightingDescriptorHeap.Dispose();
-		_lightingDescriptorHeap = default;
-	}
-	if (_lightingBuffer.Handle is not null)
-	{
-		_lightingBuffer.Dispose();
-		_lightingBuffer = default;
-	}
-	if (_rootSignature.Handle is not null)
-	{
-		_rootSignature.Dispose();
-		_rootSignature = default;
-	}
+		_materialResources.Clear();
+		if (_gbufferPipeline.Handle is not null)
+		{
+			_gbufferPipeline.Dispose();
+			_gbufferPipeline = default;
+		}
+
+		if (_lightingPipeline.Handle is not null)
+		{
+			_lightingPipeline.Dispose();
+			_lightingPipeline = default;
+		}
+
+		if (_lightingRootSignature.Handle is not null)
+		{
+			_lightingRootSignature.Dispose();
+			_lightingRootSignature = default;
+		}
+
+		if (_lightingDescriptorHeap.Handle is not null)
+		{
+			_lightingDescriptorHeap.Dispose();
+			_lightingDescriptorHeap = default;
+		}
+
+		if (_lightingBuffer.Handle is not null)
+		{
+			_lightingBuffer.Dispose();
+			_lightingBuffer = default;
+		}
+
+		if (_rootSignature.Handle is not null)
+		{
+			_rootSignature.Dispose();
+			_rootSignature = default;
+		}
 
 		if (_fence.Handle is not null)
 		{
