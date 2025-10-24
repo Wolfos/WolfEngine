@@ -37,17 +37,10 @@ public static class GBufferPass
 
 	public static void Record(IGfxCommandList commandList, GBufferPassConfig config, Action drawCommands)
 	{
-		if (commandList is null)
-		{
-			throw new ArgumentNullException(nameof(commandList));
-		}
+        ArgumentNullException.ThrowIfNull(commandList);
+        ArgumentNullException.ThrowIfNull(config);
 
-		if (config is null)
-		{
-			throw new ArgumentNullException(nameof(config));
-		}
-
-		var targets = CreatePassTargets(config);
+        var targets = CreatePassTargets(config);
 		var viewport = CreateViewport(config);
 		commandList.BeginPass(targets, viewport);
 		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
