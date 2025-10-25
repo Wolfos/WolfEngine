@@ -6,7 +6,6 @@ namespace WolfEngine;
 public enum RenderCommandType
 {
     CreateMesh,
-    CreateMaterial,
     DrawMesh,
     SetCamera
 }

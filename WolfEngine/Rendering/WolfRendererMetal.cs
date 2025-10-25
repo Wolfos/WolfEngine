@@ -8,6 +8,7 @@ using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using Silk.NET.Core.Native;
 using Silk.NET.SDL;
+using WolfEngine.Backend.Metal;
 using WolfEngine.Platform;
 
 namespace WolfEngine;
@@ -25,7 +26,6 @@ public unsafe class WolfRendererMetal : IRenderer
     private readonly IArenaAllocator _renderCommandAllocator;
     private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-    private readonly Dictionary<Material, MaterialResources> _materialResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
     private Camera _camera = null!;
     private bool _hasCamera;
@@ -64,20 +64,7 @@ public unsafe class WolfRendererMetal : IRenderer
 
         public ulong IndexCount { get; }
     }
-
-    private sealed class MaterialResources
-    {
-        public MaterialResources(MTLRenderPipelineState pipelineState, MTLBuffer colorBuffer)
-        {
-            PipelineState = pipelineState;
-            ColorBuffer = colorBuffer;
-        }
-
-        public MTLRenderPipelineState PipelineState { get; }
-
-        public MTLBuffer ColorBuffer { get; }
-    }
-
+    
     [StructLayout(LayoutKind.Sequential)]
     private struct VertexData
     {
@@ -421,7 +408,7 @@ public unsafe class WolfRendererMetal : IRenderer
         foreach (var drawCommand in _drawCommands)
         {
             var meshResources = EnsureMeshResources(drawCommand.Mesh);
-            var materialResources = EnsureMaterialResources(drawCommand.Material);
+            var materialResources = drawCommand.Material.Resources as MtlMaterialResources;
 
             encoder.SetRenderPipelineState(materialResources.PipelineState);
             encoder.SetVertexBuffer(meshResources.VertexBuffer, 0, 0);
@@ -498,7 +485,7 @@ public unsafe class WolfRendererMetal : IRenderer
         return library;
     }
 
-    private MaterialResources CreateMaterialResources(Material material)
+    public void CreateMaterialResources(Material material)
     {
         var library = CreateShaderLibrary(material);
         var pipeline = CreateRenderPipeline(library);
@@ -513,7 +500,11 @@ public unsafe class WolfRendererMetal : IRenderer
         BufferHelper.CopyToBuffer(color, colorBuffer);
         colorBuffer.DidModifyRange(new NSRange { location = 0, length = colorBufferLength });
 
-        return new MaterialResources(pipeline, colorBuffer);
+        material.Resources = new MtlMaterialResources
+        {
+            PipelineState = pipeline,
+            ColorBuffer = colorBuffer
+        };
     }
 
     private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)
@@ -624,17 +615,6 @@ public unsafe class WolfRendererMetal : IRenderer
         return resources;
     }
 
-    private MaterialResources EnsureMaterialResources(Material material)
-    {
-        if (_materialResources.TryGetValue(material, out var resources) == false)
-        {
-            resources = CreateMaterialResources(material);
-            _materialResources[material] = resources;
-        }
-
-        return resources;
-    }
-
     private void ProcessPendingCommands()
     {
         while (_pendingCommands.TryDequeue(out var command))
@@ -643,9 +623,6 @@ public unsafe class WolfRendererMetal : IRenderer
             {
                 case RenderCommandType.CreateMesh:
                     HandleCreateMeshCommand(command);
-                    break;
-                case RenderCommandType.CreateMaterial:
-                    HandleCreateMaterialCommand(command);
                     break;
                 case RenderCommandType.DrawMesh:
                     HandleDrawMeshCommand(command);
@@ -670,17 +647,6 @@ public unsafe class WolfRendererMetal : IRenderer
         EnsureMeshResources(mesh);
     }
 
-    private void HandleCreateMaterialCommand(RenderCommand command)
-    {
-        var payload = command.ReadPayload<RenderCommand.CreateMaterialPayload>();
-        if (payload.MaterialHandle.Target is not Material material)
-        {
-            throw new InvalidOperationException("Material payload target was null.");
-        }
-        payload.MaterialHandle.Free();
-        EnsureMaterialResources(material);
-    }
-
     private void HandleDrawMeshCommand(RenderCommand command)
     {
         var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
@@ -695,7 +661,6 @@ public unsafe class WolfRendererMetal : IRenderer
         payload.MeshHandle.Free();
         payload.MaterialHandle.Free();
         EnsureMeshResources(mesh);
-        EnsureMaterialResources(material);
         _drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
     }
 

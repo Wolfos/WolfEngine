@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -26,19 +25,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private const int FrameCount = 2;
 
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
-
-	private sealed class MaterialResources
-	{
-		public MaterialResources(ComPtr<ID3D12PipelineState> pipelineState, ComPtr<ID3D12Resource> colorBuffer)
-		{
-			PipelineState = pipelineState;
-			ColorBuffer = colorBuffer;
-		}
-
-		public ComPtr<ID3D12PipelineState> PipelineState { get; }
-
-		public ComPtr<ID3D12Resource> ColorBuffer { get; }
-	}
 
 	private sealed class MeshResources
 	{
@@ -135,7 +121,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12Resource> _lightingBuffer = default;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-	private readonly Dictionary<Material, MaterialResources> _materialResources = new();
 	private readonly List<DrawInstruction> _drawCommands = new();
 	private readonly RenderGraphResourceRegistry _renderGraphResources = new();
 	private readonly RenderGraph _renderGraph;
@@ -147,14 +132,14 @@ public unsafe class WolfRendererD3D : IRenderer
 	private nint _windowHandle;
 	private Int2 _framebufferSize = Int2.Zero;
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator)
+	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, RenderGraph renderGraph, RenderGraphFrameBuilder frameBuilder)
 	{
 		_width = 1280;
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
-		_renderGraph = new RenderGraph(_renderGraphResources);
-		_frameBuilder = new RenderGraphFrameBuilder(_renderGraphResources, _renderGraph);
+		_renderGraph = renderGraph;
+		_frameBuilder = frameBuilder;
 	}
 
 	public void Run(Action startup, Action update)
@@ -340,6 +325,196 @@ public unsafe class WolfRendererD3D : IRenderer
 		_gfxDevice = new D3D12Device(_device, _commandQueue);
 		_renderGraphResources.SetDevice(_gfxDevice);
 	}
+	
+		public void CreateMaterialResources(Material material)
+	{
+		if (material is null)
+		{
+			throw new ArgumentNullException(nameof(material));
+		}
+
+		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
+		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
+
+		InputLayoutDesc inputLayout;
+
+		var inputElements = stackalloc InputElementDesc[2];
+		Span<byte> positionSemantic =
+			[(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
+		inputElements[0] = new InputElementDesc
+		{
+			SemanticName = (byte*)Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
+			SemanticIndex = 0,
+			Format = Format.FormatR32G32B32A32Float,
+			InputSlot = 0,
+			AlignedByteOffset = 0,
+			InputSlotClass = InputClassification.PerVertexData,
+			InstanceDataStepRate = 0
+		};
+
+		Span<byte> normalSemantic = [(byte)'N', (byte)'O', (byte)'R', (byte)'M', (byte)'A', (byte)'L', 0];
+		inputElements[1] = new InputElementDesc
+		{
+			SemanticName = (byte*)Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
+			SemanticIndex = 0,
+			Format = Format.FormatR32G32B32Float,
+			InputSlot = 0,
+			AlignedByteOffset = 16,
+			InputSlotClass = InputClassification.PerVertexData,
+			InstanceDataStepRate = 0
+		};
+
+		inputLayout = new InputLayoutDesc
+		{
+			PInputElementDescs = inputElements,
+			NumElements = 2
+		};
+
+
+		var blendState = new BlendDesc
+		{
+			AlphaToCoverageEnable = 0,
+			IndependentBlendEnable = 0
+		};
+		blendState.RenderTarget[0] = new RenderTargetBlendDesc
+		{
+			BlendEnable = 0,
+			LogicOpEnable = 0,
+			SrcBlend = Blend.One,
+			DestBlend = Blend.Zero,
+			BlendOp = BlendOp.Add,
+			SrcBlendAlpha = Blend.One,
+			DestBlendAlpha = Blend.Zero,
+			BlendOpAlpha = BlendOp.Add,
+			LogicOp = LogicOp.Noop,
+			RenderTargetWriteMask = (byte)ColorWriteEnable.All
+		};
+
+		var rasterizerState = new RasterizerDesc
+		{
+			FillMode = D3DFillMode.Solid,
+			CullMode = D3DCullMode.Back,
+			FrontCounterClockwise = 0,
+			DepthBias = Silk.NET.Direct3D12.D3D12.DefaultDepthBias,
+			DepthBiasClamp = 0.0f,
+			SlopeScaledDepthBias = 0.0f,
+			DepthClipEnable = 1,
+			MultisampleEnable = 0,
+			AntialiasedLineEnable = 0,
+			ForcedSampleCount = 0,
+			ConservativeRaster = ConservativeRasterizationMode.Off
+		};
+
+		var depthStencilState = new DepthStencilDesc
+		{
+			DepthEnable = 1,
+			DepthWriteMask = DepthWriteMask.All,
+			DepthFunc = ComparisonFunc.Less,
+			StencilEnable = 0,
+			StencilReadMask = Silk.NET.Direct3D12.D3D12.DefaultStencilReadMask,
+			StencilWriteMask = Silk.NET.Direct3D12.D3D12.DefaultStencilWriteMask,
+			FrontFace = new()
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			},
+			BackFace = new()
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			}
+		};
+
+		ComPtr<ID3D12PipelineState> pipelineState = default;
+
+		fixed (byte* vertexPtr = vertexShaderBytes)
+		fixed (byte* pixelPtr = pixelShaderBytes)
+		{
+			var shaderBytecodeVS = new ShaderBytecode
+			{
+				PShaderBytecode = vertexPtr,
+				BytecodeLength = (nuint)vertexShaderBytes.Length
+			};
+
+			var shaderBytecodePS = new ShaderBytecode
+			{
+				PShaderBytecode = pixelPtr,
+				BytecodeLength = (nuint)pixelShaderBytes.Length
+			};
+
+			var psoDesc = new GraphicsPipelineStateDesc
+			{
+				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
+				VS = shaderBytecodeVS,
+				PS = shaderBytecodePS,
+				BlendState = blendState,
+				SampleMask = Silk.NET.Direct3D12.D3D12.DefaultSampleMask,
+				RasterizerState = rasterizerState,
+				DepthStencilState = depthStencilState,
+				InputLayout = inputLayout,
+				IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
+				PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
+				NumRenderTargets = 1,
+				DSVFormat = Format.FormatUnknown,
+				SampleDesc = new SampleDesc(1, 0),
+				NodeMask = 0,
+				CachedPSO = default,
+				Flags = PipelineStateFlags.None
+			};
+			psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
+
+			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
+		}
+
+		var colorSize = Align((ulong)Unsafe.SizeOf<Vector4>(), Silk.NET.Direct3D12.D3D12.ConstantBufferDataPlacementAlignment);
+		var uploadProps = new HeapProperties(HeapType.Upload);
+		var bufferDesc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = colorSize,
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.None
+		};
+
+		ComPtr<ID3D12Resource> colorBuffer;
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommittedResource(
+				&uploadProps,
+				HeapFlags.None,
+				in bufferDesc,
+				ResourceStates.GenericRead,
+				null,
+				out colorBuffer));
+
+		void* mappedData = null;
+		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedData));
+		try
+		{
+			var color = material.Color;
+			Unsafe.Write((Vector4*)mappedData, color);
+		}
+		finally
+		{
+			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+		}
+
+		material.Resources = new D3D12MaterialResources
+		{
+			ColorBuffer = colorBuffer,
+			PipelineState = pipelineState
+		};
+	}
+
 
 	private void CreateSwapchain()
 	{
@@ -884,9 +1059,6 @@ public unsafe class WolfRendererD3D : IRenderer
 				case RenderCommandType.CreateMesh:
 					HandleCreateMeshCommand(command);
 					break;
-				case RenderCommandType.CreateMaterial:
-					HandleCreateMaterialCommand(command);
-					break;
 				case RenderCommandType.DrawMesh:
 					HandleDrawMeshCommand(command);
 					break;
@@ -899,204 +1071,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			}
 		}
 	}
-
-	private MaterialResources CreateMaterialResources(Material material)
-	{
-		if (material is null)
-		{
-			throw new ArgumentNullException(nameof(material));
-		}
-
-		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
-		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
-
-		InputLayoutDesc inputLayout;
-
-		var inputElements = stackalloc InputElementDesc[2];
-		Span<byte> positionSemantic =
-			[(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
-		inputElements[0] = new InputElementDesc
-		{
-			SemanticName = (byte*)Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
-			SemanticIndex = 0,
-			Format = Format.FormatR32G32B32A32Float,
-			InputSlot = 0,
-			AlignedByteOffset = 0,
-			InputSlotClass = InputClassification.PerVertexData,
-			InstanceDataStepRate = 0
-		};
-
-		Span<byte> normalSemantic = [(byte)'N', (byte)'O', (byte)'R', (byte)'M', (byte)'A', (byte)'L', 0];
-		inputElements[1] = new InputElementDesc
-		{
-			SemanticName = (byte*)Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
-			SemanticIndex = 0,
-			Format = Format.FormatR32G32B32Float,
-			InputSlot = 0,
-			AlignedByteOffset = 16,
-			InputSlotClass = InputClassification.PerVertexData,
-			InstanceDataStepRate = 0
-		};
-
-		inputLayout = new InputLayoutDesc
-		{
-			PInputElementDescs = inputElements,
-			NumElements = 2
-		};
-
-
-		var blendState = new BlendDesc
-		{
-			AlphaToCoverageEnable = 0,
-			IndependentBlendEnable = 0
-		};
-		blendState.RenderTarget[0] = new RenderTargetBlendDesc
-		{
-			BlendEnable = 0,
-			LogicOpEnable = 0,
-			SrcBlend = Blend.One,
-			DestBlend = Blend.Zero,
-			BlendOp = BlendOp.Add,
-			SrcBlendAlpha = Blend.One,
-			DestBlendAlpha = Blend.Zero,
-			BlendOpAlpha = BlendOp.Add,
-			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte)ColorWriteEnable.All
-		};
-
-		var rasterizerState = new RasterizerDesc
-		{
-			FillMode = D3DFillMode.Solid,
-			CullMode = D3DCullMode.Back,
-			FrontCounterClockwise = 0,
-			DepthBias = D3D12.DefaultDepthBias,
-			DepthBiasClamp = 0.0f,
-			SlopeScaledDepthBias = 0.0f,
-			DepthClipEnable = 1,
-			MultisampleEnable = 0,
-			AntialiasedLineEnable = 0,
-			ForcedSampleCount = 0,
-			ConservativeRaster = ConservativeRasterizationMode.Off
-		};
-
-		var depthStencilState = new DepthStencilDesc
-		{
-			DepthEnable = 1,
-			DepthWriteMask = DepthWriteMask.All,
-			DepthFunc = ComparisonFunc.Less,
-			StencilEnable = 0,
-			StencilReadMask = D3D12.DefaultStencilReadMask,
-			StencilWriteMask = D3D12.DefaultStencilWriteMask,
-			FrontFace = new DepthStencilopDesc
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			},
-			BackFace = new DepthStencilopDesc
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			}
-		};
-
-		ComPtr<ID3D12PipelineState> pipelineState = default;
-
-		fixed (byte* vertexPtr = vertexShaderBytes)
-		fixed (byte* pixelPtr = pixelShaderBytes)
-		{
-			var shaderBytecodeVS = new ShaderBytecode
-			{
-				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint)vertexShaderBytes.Length
-			};
-
-			var shaderBytecodePS = new ShaderBytecode
-			{
-				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint)pixelShaderBytes.Length
-			};
-
-			var psoDesc = new GraphicsPipelineStateDesc
-			{
-				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
-				VS = shaderBytecodeVS,
-				PS = shaderBytecodePS,
-				BlendState = blendState,
-				SampleMask = D3D12.DefaultSampleMask,
-				RasterizerState = rasterizerState,
-				DepthStencilState = depthStencilState,
-				InputLayout = inputLayout,
-				IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
-				PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
-				NumRenderTargets = 1,
-				DSVFormat = Format.FormatUnknown,
-				SampleDesc = new SampleDesc(1, 0),
-				NodeMask = 0,
-				CachedPSO = default,
-				Flags = PipelineStateFlags.None
-			};
-			psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
-
-			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
-		}
-
-		var colorSize = Align((ulong)Unsafe.SizeOf<Vector4>(), D3D12.ConstantBufferDataPlacementAlignment);
-		var uploadProps = new HeapProperties(HeapType.Upload);
-		var bufferDesc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Buffer,
-			Alignment = 0,
-			Width = colorSize,
-			Height = 1,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatUnknown,
-			SampleDesc = new SampleDesc(1, 0),
-			Layout = TextureLayout.LayoutRowMajor,
-			Flags = ResourceFlags.None
-		};
-
-		ComPtr<ID3D12Resource> colorBuffer;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&uploadProps,
-				HeapFlags.None,
-				in bufferDesc,
-				ResourceStates.GenericRead,
-				null,
-				out colorBuffer));
-
-		void* mappedData = null;
-		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedData));
-		try
-		{
-			var color = material.Color;
-			Unsafe.Write((Vector4*)mappedData, color);
-		}
-		finally
-		{
-			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
-		}
-
-		return new MaterialResources(pipelineState, colorBuffer);
-	}
-
-	private MaterialResources EnsureMaterialResources(Material material)
-	{
-		if (_materialResources.TryGetValue(material, out var resources))
-		{
-			return resources;
-		}
-
-		resources = CreateMaterialResources(material);
-		_materialResources.Add(material, resources);
-		return resources;
-	}
-
+	
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
 	{
 		if (destination.Length < 16)
@@ -1333,18 +1308,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		EnsureMeshResources(mesh);
 	}
 
-	private void HandleCreateMaterialCommand(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.CreateMaterialPayload>();
-		if (payload.MaterialHandle.Target is not Material material)
-		{
-			throw new InvalidOperationException("Material payload target was null.");
-		}
-
-		payload.MaterialHandle.Free();
-		EnsureMaterialResources(material);
-	}
-
 	private void HandleDrawMeshCommand(RenderCommand command)
 	{
 		var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
@@ -1361,8 +1324,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		payload.MeshHandle.Free();
 		payload.MaterialHandle.Free();
 		EnsureMeshResources(mesh);
-		EnsureMaterialResources(material);
-		_drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
+		_drawCommands.Add(new(mesh, material, payload.Transform));
 	}
 
 	private void HandleSetCameraCommand(RenderCommand command)
@@ -1601,8 +1563,9 @@ public unsafe class WolfRendererD3D : IRenderer
 			foreach (var draw in _drawCommands)
 			{
 				var meshResources = EnsureMeshResources(draw.Mesh);
-				var materialResources = EnsureMaterialResources(draw.Material);
+				var materialResources = draw.Material.Resources as D3D12MaterialResources;
 
+				// ReSharper disable once PossibleNullReferenceException (accepting the risk here so we don't have to assert in the render loop)
 				var colorBufferPtr = materialResources.ColorBuffer.Handle;
 				_activeCommandList->SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
 
@@ -1839,20 +1802,9 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 
 		_meshResources.Clear();
-		foreach (var resources in _materialResources.Values)
-		{
-			if (resources.PipelineState.Handle is not null)
-			{
-				resources.PipelineState.Dispose();
-			}
-
-			if (resources.ColorBuffer.Handle is not null)
-			{
-				resources.ColorBuffer.Dispose();
-			}
-		}
-
-		_materialResources.Clear();
+		
+		// TODO: material disposal should be handled by render graph
+		
 		if (_gbufferPipeline.Handle is not null)
 		{
 			_gbufferPipeline.Dispose();

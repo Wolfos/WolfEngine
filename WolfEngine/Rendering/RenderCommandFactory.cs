@@ -6,9 +6,6 @@ namespace WolfEngine;
 public interface IRenderCommandFactory
 {
     RenderCommand CreateMesh(Mesh mesh);
-
-    RenderCommand CreateMaterial(Material material);
-
     RenderCommand DrawMesh(Mesh mesh, Material material, Matrix4x4 transform);
 
     RenderCommand SetCamera(Camera camera);
@@ -31,15 +28,6 @@ public class RenderCommandFactory : IRenderCommandFactory
         var payload = new RenderCommand.CreateMeshPayload(GCHandle.Alloc(mesh));
         var pointer = _arenaAllocator.Store(payload);
         return new RenderCommand(RenderCommandType.CreateMesh, pointer, _arenaAllocator);
-    }
-
-    public RenderCommand CreateMaterial(Material material)
-    {
-        ArgumentNullException.ThrowIfNull(material);
-
-        var payload = new RenderCommand.CreateMaterialPayload(GCHandle.Alloc(material));
-        var pointer = _arenaAllocator.Store(payload);
-        return new RenderCommand(RenderCommandType.CreateMaterial, pointer, _arenaAllocator);
     }
 
     public RenderCommand DrawMesh(Mesh mesh, Material material, Matrix4x4 transform)

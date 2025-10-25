@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -19,6 +20,10 @@ class Program
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
+
+        services.AddSingleton<RenderGraphResourceRegistry>();
+        services.AddSingleton<RenderGraph>();
+        services.AddSingleton<RenderGraphFrameBuilder>();
         
         if (OperatingSystem.IsMacOS())
         {

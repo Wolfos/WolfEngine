@@ -45,12 +45,12 @@ public class Game
     {
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
         _mesh = new Mesh(meshPath);
-        _material = _materialFactory.GetMaterial("default.slang");
+        _material = _materialFactory.GetMaterial("gbuffer.slang");
         _material.Color = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         _camera = CreateCamera();
 
         _renderer.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));
-        _renderer.SubmitCommand(_renderCommandFactory.CreateMaterial(_material));
+        _renderer.CreateMaterialResources(_material);
         _renderer.SubmitCommand(_renderCommandFactory.SetCamera(_camera));
     }
 

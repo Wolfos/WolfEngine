@@ -1,10 +1,15 @@
 #nullable enable
 
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using WolfEngine.Rendering.Abstraction;
 using Silk.NET.DXGI;
 using WolfEngine.Backend.D3D12;
+using D3DFillMode = Silk.NET.Direct3D12.FillMode;
+using D3DCullMode = Silk.NET.Direct3D12.CullMode;
+
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
@@ -17,15 +22,16 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private readonly ComPtr<ID3D12Device> _device;
 	private readonly ComPtr<ID3D12CommandQueue> _graphicsQueue;
 	private readonly ComPtr<ID3D12CommandQueue> _computeQueue;
+
 	private readonly IGfxDescriptorTable _globalTable = new NullDescriptorTable();
 
 	private readonly List<IDisposable> _liveCommandLists = new();
 	private readonly object _commandListLock = new();
+	
 
 	public D3D12Device(
 		ComPtr<ID3D12Device> device,
-		ComPtr<ID3D12CommandQueue> graphicsQueue,
-		ComPtr<ID3D12CommandQueue>? computeQueue = null)
+		ComPtr<ID3D12CommandQueue> graphicsQueue, ComPtr<ID3D12CommandQueue>? computeQueue = null)
 	{
 		_device = device;
 		_graphicsQueue = graphicsQueue;
@@ -187,6 +193,13 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	}
 
 	public IGfxDescriptorTable GlobalTable => _globalTable;
+	
+	private static ulong Align(ulong size, ulong alignment)
+	{
+		return (size + alignment - 1) & ~(alignment - 1);
+	}
+	
+	
 
 	private IGfxCommandList CreateCommandList(CommandListType type)
 	{

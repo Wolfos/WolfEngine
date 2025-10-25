@@ -1,4 +1,5 @@
 using System.Numerics;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
 
@@ -17,4 +18,6 @@ public sealed class Material
     public string ShaderPath { get; }
 
     public Vector4 Color { get; set; }
+    
+    internal IMaterialResources Resources { get; set; }
 }
