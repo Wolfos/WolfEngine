@@ -84,6 +84,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	private IInputContext _inputContext = null!;
 	private Action _startupCallback = static () => { };
 	private Action _updateCallback = static () => { };
+	private Action<float> _renderCallback = static (float deltaTime) => { };
 	private bool _isInitialized;
 
 	private DXGI _dxgi = null!;
@@ -122,9 +123,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
 	private readonly List<DrawInstruction> _drawCommands = new();
-	private readonly RenderGraphResourceRegistry _renderGraphResources = new();
-	private readonly RenderGraph _renderGraph;
-	private readonly RenderGraphFrameBuilder _frameBuilder;
 	private Camera _camera = null!;
 	private bool _hasCamera;
 
@@ -132,20 +130,19 @@ public unsafe class WolfRendererD3D : IRenderer
 	private nint _windowHandle;
 	private Int2 _framebufferSize = Int2.Zero;
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, RenderGraph renderGraph, RenderGraphFrameBuilder frameBuilder)
+	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator)
 	{
 		_width = 1280;
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
-		_renderGraph = renderGraph;
-		_frameBuilder = frameBuilder;
 	}
 
-	public void Run(Action startup, Action update)
+	public void Run(Action startup, Action update, Action<float> render)
 	{
-		_startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
-		_updateCallback = update ?? throw new ArgumentNullException(nameof(update));
+		_startupCallback = startup;
+		_updateCallback = update;
+		_renderCallback = render;
 
 		InitializeWindow();
 
@@ -195,13 +192,13 @@ public unsafe class WolfRendererD3D : IRenderer
 		_isInitialized = true;
 	}
 
-	private void OnWindowUpdate(double deltaSeconds)
+	private void OnWindowUpdate(double deltaTime)
 	{
 		_updateCallback();
-		OnUpdate(deltaSeconds);
+		OnUpdate((float)deltaTime);
 	}
 
-	private void OnWindowRender(double deltaSeconds)
+	private void OnWindowRender(double deltaTime)
 	{
 		if (_isInitialized == false)
 		{
@@ -213,7 +210,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			return;
 		}
 
-		OnRender(deltaSeconds);
+		_renderCallback((float)deltaTime);
 	}
 
 	private void OnWindowFramebufferResize(Vector2D<int> newSize)
@@ -317,16 +314,15 @@ public unsafe class WolfRendererD3D : IRenderer
 				out _device));
 		var commandQueueDescription = new CommandQueueDesc(
 			type: CommandListType.Direct,
-			priority: (int)CommandQueuePriority.Normal,
+			priority: (int) CommandQueuePriority.Normal,
 			flags: CommandQueueFlags.None);
 
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
 
 		_gfxDevice = new D3D12Device(_device, _commandQueue);
-		_renderGraphResources.SetDevice(_gfxDevice);
 	}
-	
-		public void CreateMaterialResources(Material material)
+
+	public IMaterialResources CreateMaterialResources(Material material)
 	{
 		if (material is null)
 		{
@@ -340,10 +336,10 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var inputElements = stackalloc InputElementDesc[2];
 		Span<byte> positionSemantic =
-			[(byte)'P', (byte)'O', (byte)'S', (byte)'I', (byte)'T', (byte)'I', (byte)'O', (byte)'N', 0];
+			[(byte) 'P', (byte) 'O', (byte) 'S', (byte) 'I', (byte) 'T', (byte) 'I', (byte) 'O', (byte) 'N', 0];
 		inputElements[0] = new InputElementDesc
 		{
-			SemanticName = (byte*)Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
+			SemanticName = (byte*) Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
 			SemanticIndex = 0,
 			Format = Format.FormatR32G32B32A32Float,
 			InputSlot = 0,
@@ -352,10 +348,10 @@ public unsafe class WolfRendererD3D : IRenderer
 			InstanceDataStepRate = 0
 		};
 
-		Span<byte> normalSemantic = [(byte)'N', (byte)'O', (byte)'R', (byte)'M', (byte)'A', (byte)'L', 0];
+		Span<byte> normalSemantic = [(byte) 'N', (byte) 'O', (byte) 'R', (byte) 'M', (byte) 'A', (byte) 'L', 0];
 		inputElements[1] = new InputElementDesc
 		{
-			SemanticName = (byte*)Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
+			SemanticName = (byte*) Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
 			SemanticIndex = 0,
 			Format = Format.FormatR32G32B32Float,
 			InputSlot = 0,
@@ -387,7 +383,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			DestBlendAlpha = Blend.Zero,
 			BlendOpAlpha = BlendOp.Add,
 			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte)ColorWriteEnable.All
+			RenderTargetWriteMask = (byte) ColorWriteEnable.All
 		};
 
 		var rasterizerState = new RasterizerDesc
@@ -437,18 +433,18 @@ public unsafe class WolfRendererD3D : IRenderer
 			var shaderBytecodeVS = new ShaderBytecode
 			{
 				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint)vertexShaderBytes.Length
+				BytecodeLength = (nuint) vertexShaderBytes.Length
 			};
 
 			var shaderBytecodePS = new ShaderBytecode
 			{
 				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint)pixelShaderBytes.Length
+				BytecodeLength = (nuint) pixelShaderBytes.Length
 			};
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
@@ -470,7 +466,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
 		}
 
-		var colorSize = Align((ulong)Unsafe.SizeOf<Vector4>(), Silk.NET.Direct3D12.D3D12.ConstantBufferDataPlacementAlignment);
+		var colorSize = Align((ulong) Unsafe.SizeOf<Vector4>(),
+			Silk.NET.Direct3D12.D3D12.ConstantBufferDataPlacementAlignment);
 		var uploadProps = new HeapProperties(HeapType.Upload);
 		var bufferDesc = new ResourceDesc
 		{
@@ -497,24 +494,33 @@ public unsafe class WolfRendererD3D : IRenderer
 				out colorBuffer));
 
 		void* mappedData = null;
-		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedData));
+		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedData));
 		try
 		{
 			var color = material.Color;
-			Unsafe.Write((Vector4*)mappedData, color);
+			Unsafe.Write((Vector4*) mappedData, color);
 		}
 		finally
 		{
-			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
 		}
 
-		material.Resources = new D3D12MaterialResources
+		return new D3D12MaterialResources
 		{
 			ColorBuffer = colorBuffer,
 			PipelineState = pipelineState
 		};
 	}
 
+	public IGfxDevice GetGfxDevice()
+	{
+		return _gfxDevice;
+	}
+
+	public Int2 GetFrameBufferSize()
+	{
+		return _framebufferSize;
+	}
 
 	private void CreateSwapchain()
 	{
@@ -525,14 +531,14 @@ public unsafe class WolfRendererD3D : IRenderer
 			BufferUsage = DXGI.UsageRenderTargetOutput,
 			SwapEffect = SwapEffect.FlipDiscard,
 			SampleDesc = new(1, 0),
-			Width = (uint)Math.Max(_framebufferSize.X, 1),
-			Height = (uint)Math.Max(_framebufferSize.Y, 1)
+			Width = (uint) Math.Max(_framebufferSize.X, 1),
+			Height = (uint) Math.Max(_framebufferSize.Y, 1)
 		};
 
 		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
 
 		var factoryPtr = _factory.Handle;
-		var queuePtr = (IUnknown*)_commandQueue.Handle;
+		var queuePtr = (IUnknown*) _commandQueue.Handle;
 		IDXGISwapChain1* swapChain1 = null;
 		var swapchainResult = factoryPtr->CreateSwapChainForHwnd(
 			queuePtr,
@@ -545,7 +551,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		IDXGISwapChain3* swapChain3 = null;
 		var swapChain3Guid = IDXGISwapChain3.Guid;
-		SilkMarshal.ThrowHResult(swapChain1->QueryInterface(ref swapChain3Guid, (void**)&swapChain3));
+		SilkMarshal.ThrowHResult(swapChain1->QueryInterface(ref swapChain3Guid, (void**) &swapChain3));
 		_swapchain = new ComPtr<IDXGISwapChain3>(swapChain3);
 
 		swapChain1->Release();
@@ -570,7 +576,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		for (var i = 0; i < FrameCount; i++)
 		{
 			_rtvCpuHandles[i] = rtvHandle;
-			SilkMarshal.ThrowHResult(_swapchain.GetBuffer((uint)i, out _renderTargets[i]));
+			SilkMarshal.ThrowHResult(_swapchain.GetBuffer((uint) i, out _renderTargets[i]));
 			_device.CreateRenderTargetView(_renderTargets[i], null, rtvHandle);
 			rtvHandle.Ptr += _rtvDescriptorSize;
 		}
@@ -655,7 +661,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
 		if (rootSignatureError is not null)
 		{
-			var message = Marshal.PtrToStringAnsi((nint)rootSignatureError->GetBufferPointer());
+			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
 			rootSignatureError->Release();
 			if (serializeResult < 0)
 			{
@@ -726,7 +732,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			DestBlendAlpha = Blend.Zero,
 			BlendOpAlpha = BlendOp.Add,
 			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte)ColorWriteEnable.All
+			RenderTargetWriteMask = (byte) ColorWriteEnable.All
 		};
 		blendState.RenderTarget[0] = blendDesc;
 		blendState.RenderTarget[1] = blendDesc;
@@ -777,18 +783,18 @@ public unsafe class WolfRendererD3D : IRenderer
 			var shaderBytecodeVS = new ShaderBytecode
 			{
 				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint)vertexShaderBytes.Length
+				BytecodeLength = (nuint) vertexShaderBytes.Length
 			};
 
 			var shaderBytecodePS = new ShaderBytecode
 			{
 				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint)pixelShaderBytes.Length
+				BytecodeLength = (nuint) pixelShaderBytes.Length
 			};
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*)_rootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
@@ -846,8 +852,8 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong)width,
-			Height = (uint)height,
+			Width = (ulong) width,
+			Height = (uint) height,
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = Format.FormatB8G8R8A8Unorm,
@@ -885,12 +891,12 @@ public unsafe class WolfRendererD3D : IRenderer
 		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
 
 		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = (RootParameterType)0;
+		rootParameters[0].ParameterType = (RootParameterType) 0;
 		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
 		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
 
-		rootParameters[1].ParameterType = (RootParameterType)0;
+		rootParameters[1].ParameterType = (RootParameterType) 0;
 		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
 		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
@@ -943,7 +949,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
 		if (rootSignatureError is not null)
 		{
-			var message = Marshal.PtrToStringAnsi((nint)rootSignatureError->GetBufferPointer());
+			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
 			rootSignatureError->Release();
 			if (serializeResult < 0)
 			{
@@ -964,12 +970,12 @@ public unsafe class WolfRendererD3D : IRenderer
 			var shaderBytecode = new ShaderBytecode
 			{
 				PShaderBytecode = shaderPtr,
-				BytecodeLength = (nuint)shaderBytes.Length
+				BytecodeLength = (nuint) shaderBytes.Length
 			};
 
 			var pipelineDesc = new ComputePipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*)_lightingRootSignature.Handle,
+				PRootSignature = (ID3D12RootSignature*) _lightingRootSignature.Handle,
 				CS = shaderBytecode,
 				NodeMask = 0,
 				CachedPSO = default,
@@ -1010,8 +1016,8 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong)Math.Max(_framebufferSize.X, 1),
-			Height = (uint)Math.Max(_framebufferSize.Y, 1),
+			Width = (ulong) Math.Max(_framebufferSize.X, 1),
+			Height = (uint) Math.Max(_framebufferSize.Y, 1),
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = Format.FormatD32Float,
@@ -1071,7 +1077,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			}
 		}
 	}
-	
+
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
 	{
 		if (destination.Length < 16)
@@ -1118,8 +1124,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			vertices[i].Padding = 0.0f;
 		}
 
-		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
-		var vertexBufferSize = (ulong)(vertexStride * (uint)vertexCount);
+		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();
+		var vertexBufferSize = (ulong) (vertexStride * (uint) vertexCount);
 		var vertexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1158,7 +1164,7 @@ public unsafe class WolfRendererD3D : IRenderer
 				out vertexUpload));
 
 		void* mappedVertices = null;
-		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedVertices));
+		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedVertices));
 		try
 		{
 			fixed (VertexData* srcVertices = vertices)
@@ -1168,7 +1174,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 		finally
 		{
-			vertexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+			vertexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
 		}
 
 		var indices = mesh.Indices;
@@ -1177,7 +1183,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			throw new InvalidOperationException("Mesh must contain index data.");
 		}
 
-		var indexBufferSize = (ulong)(sizeof(uint) * indices.Length);
+		var indexBufferSize = (ulong) (sizeof(uint) * indices.Length);
 		var indexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1213,7 +1219,7 @@ public unsafe class WolfRendererD3D : IRenderer
 				out indexUpload));
 
 		void* mappedIndices = null;
-		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Silk.NET.Direct3D12.Range*)null, &mappedIndices));
+		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedIndices));
 		try
 		{
 			fixed (uint* srcIndices = indices)
@@ -1223,17 +1229,17 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 		finally
 		{
-			indexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+			indexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
 		}
 
 		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*)null));
+		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*) null));
 
 		_commandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexBufferSize);
 		_commandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexBufferSize);
 
 		var vertexBarrier = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		vertexBarrier.Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = vertexBuffer.Handle,
@@ -1244,7 +1250,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		_commandList.ResourceBarrier(1, &vertexBarrier);
 
 		var indexBarrier = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		indexBarrier.Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = indexBuffer.Handle,
@@ -1255,7 +1261,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		_commandList.ResourceBarrier(1, &indexBarrier);
 
 		SilkMarshal.ThrowHResult(_commandList.Close());
-		ID3D12CommandList* copyLists = (ID3D12CommandList*)_commandList.Handle;
+		ID3D12CommandList* copyLists = (ID3D12CommandList*) _commandList.Handle;
 		_commandQueue.ExecuteCommandLists(1, &copyLists);
 		SignalAndWait();
 
@@ -1265,18 +1271,18 @@ public unsafe class WolfRendererD3D : IRenderer
 		var vertexView = new D3DVertexBufferView
 		{
 			BufferLocation = vertexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint)vertexBufferSize,
+			SizeInBytes = (uint) vertexBufferSize,
 			StrideInBytes = vertexStride
 		};
 
 		var indexView = new D3DIndexBufferView
 		{
 			BufferLocation = indexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint)indexBufferSize,
+			SizeInBytes = (uint) indexBufferSize,
 			Format = Format.FormatR32Uint
 		};
 
-		return new MeshResources(vertexBuffer, indexBuffer, vertexView, indexView, (uint)indices.Length);
+		return new MeshResources(vertexBuffer, indexBuffer, vertexView, indexView, (uint) indices.Length);
 	}
 
 	private MeshResources EnsureMeshResources(Mesh mesh)
@@ -1369,7 +1375,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			_rtvHeap.Dispose();
 		}
 
-		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint)newSize.X, (uint)newSize.Y,
+		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint) newSize.X, (uint) newSize.Y,
 			Format.FormatB8G8R8A8Unorm, 0));
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
@@ -1378,57 +1384,49 @@ public unsafe class WolfRendererD3D : IRenderer
 		CreateLightingBuffer();
 	}
 
-	private void OnRender(double deltaSeconds)
+	public void BeginFrame()
 	{
 		var frameIdx = _backbufferIndex;
 
 		if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*)_fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*) _fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
-		var gfxCommandList = _gfxDevice.BeginGraphics();
-		if (gfxCommandList is not ID3D12BackendCommandList backendCommandList)
-		{
-			throw new InvalidOperationException(
-				"Direct3D12 backend returned an unexpected command list implementation.");
-		}
+		var gfxCommandList = _gfxDevice.BeginGraphics() as ID3D12BackendCommandList;
 
-		var commandList = backendCommandList.NativeCommandList;
+		var commandList = gfxCommandList.NativeCommandList;
 		_activeCommandList = commandList;
 		_currentGfxCommandList = gfxCommandList;
+	}
 
+	public void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture)
+	{
 		var framebufferSize = _framebufferSize;
 
-		RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) =>
-			ImportBackbufferTexture(registry, frameIdx, width, height);
-
-		RenderGraphResourceHandle ImportDepth(RenderGraphResourceRegistry registry, int width, int height) =>
-			ImportDepthTexture(registry, width, height);
-
-		var frameResources = _frameBuilder.BeginFrame(framebufferSize, ImportBackbuffer, ImportDepth);
-
-		var callbacks = new RenderPassCallbacks(
-			(context, resources) => ExecuteGBufferPass(context, resources),
-			(context, resources) => ExecuteDeferredPass(context, resources));
-
-		var renderedScene = _frameBuilder.BuildAndExecute(callbacks);
-
-		var backbufferResource = _renderGraphResources.GetTexture(frameResources.Backbuffer);
+		// var frameResources = renderGraphFrameBuilder.BeginFrame(framebufferSize, ImportBackbuffer, ImportDepth);
+		//
+		// var callbacks = new RenderPassCallbacks(
+		// 	(context, resources) => ExecuteGBufferPass(context, resources),
+		// 	(context, resources) => ExecuteDeferredPass(context, resources));
+		//
+		// var renderedScene = renderGraphFrameBuilder.BuildAndExecute(callbacks);
+		//
+		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture
 		                        ?? throw new InvalidOperationException(
 			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
-		_frameBuilder.EndFrame();
+		// renderGraphFrameBuilder.EndFrame();
 
 		var barrierEnd = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		barrierEnd.Anonymous.Transition = new()
 		{
 			PResource = backbufferTexture.Resource,
@@ -1436,9 +1434,9 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateBefore = ResourceStates.RenderTarget,
 			StateAfter = ResourceStates.Present
 		};
-		commandList->ResourceBarrier(1, &barrierEnd);
+		_activeCommandList->ResourceBarrier(1, &barrierEnd);
 
-		_gfxDevice.Submit(gfxCommandList);
+		_gfxDevice.Submit(_currentGfxCommandList);
 		_activeCommandList = null;
 		_currentGfxCommandList = null!;
 
@@ -1454,28 +1452,23 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		_fenceValue++;
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
-		_frameFenceValues[frameIdx] = _fenceValue;
+		_frameFenceValues[_backbufferIndex] = _fenceValue;
 
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
-		if (renderedScene)
-		{
-			_drawCommands.Clear();
-			_arenaAllocator.Reset();
-		}
-		else if (_drawCommands.Count > 0 && _hasCamera == false)
+		// if (renderedScene)
+		// {
+		// 	_drawCommands.Clear();
+		// 	_arenaAllocator.Reset();
+		// }
+		if (_drawCommands.Count > 0 && _hasCamera == false)
 		{
 			_drawCommands.Clear();
 		}
 	}
 
-	private RenderGraphResourceHandle ImportBackbufferTexture(RenderGraphResourceRegistry registry, uint frameIdx,
+	public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry,
 		int width, int height)
 	{
-		if (frameIdx >= _renderTargets.Length)
-		{
-			throw new ArgumentOutOfRangeException(nameof(frameIdx));
-		}
-
 		var descriptor = new TextureDescriptor(
 			Math.Max(width, 1),
 			Math.Max(height, 1),
@@ -1484,14 +1477,14 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var imported = _gfxDevice.ImportExternalTexture(
 			descriptor,
-			_renderTargets[frameIdx].Handle,
-			_rtvCpuHandles[frameIdx],
+			_renderTargets[_backbufferIndex].Handle,
+			_rtvCpuHandles[_backbufferIndex],
 			null);
 
 		return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
-	private RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
+	public RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
 	{
 		if (_depthBuffer.Handle is null)
 		{
@@ -1515,7 +1508,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		return registry.ImportTexture(imported, takeOwnership: false);
 	}
 
-	private void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
+	public void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
 	{
 		var canRender = _drawCommands.Count > 0 && _hasCamera;
 		if (canRender == false)
@@ -1548,7 +1541,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		GBufferPass.Record(_currentGfxCommandList, gbufferConfig, () =>
 		{
-			_activeCommandList->SetPipelineState((ID3D12PipelineState*)_gbufferPipeline.Handle);
+			_activeCommandList->SetPipelineState((ID3D12PipelineState*) _gbufferPipeline.Handle);
 			_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
 
 			var viewProjection = _camera.Transform * _camera.Perspective;
@@ -1592,17 +1585,17 @@ public unsafe class WolfRendererD3D : IRenderer
 		});
 	}
 
-	private bool ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
+	public void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
 	{
 		if (_lightingBuffer.Handle is null)
 		{
-			return false;
+			return;
 		}
 
 		if (_hasCamera == false)
 		{
 			_drawCommands.Clear();
-			return false;
+			return;
 		}
 
 		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
@@ -1620,7 +1613,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var resourceBarriers = stackalloc ResourceBarrier[3];
 		resourceBarriers[0] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		resourceBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = gbufferAlbedo.Resource,
@@ -1629,7 +1622,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateAfter = ResourceStates.NonPixelShaderResource
 		};
 		resourceBarriers[1] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = gbufferNormal.Resource,
@@ -1638,7 +1631,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateAfter = ResourceStates.NonPixelShaderResource
 		};
 		resourceBarriers[2] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = gbufferMaterial.Resource,
@@ -1649,24 +1642,25 @@ public unsafe class WolfRendererD3D : IRenderer
 		_activeCommandList->ResourceBarrier(3, resourceBarriers);
 
 		var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
-		_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
 		cpuHandle.Ptr += _lightingDescriptorSize;
-		_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
 		cpuHandle.Ptr += _lightingDescriptorSize;
-		_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*)null, cpuHandle);
+		_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
 		cpuHandle.Ptr += _lightingDescriptorSize;
 
-		_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*)null, (UnorderedAccessViewDesc*)null,
+		_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*) null,
+			(UnorderedAccessViewDesc*) null,
 			cpuHandle);
 
-		ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*)_lightingDescriptorHeap.Handle;
+		ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*) _lightingDescriptorHeap.Handle;
 		_activeCommandList->SetDescriptorHeaps(1, &descriptorHeaps);
 
 		var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
 		var uavGpuHandle = srvGpuHandle;
 		uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
 
-		_activeCommandList->SetPipelineState((ID3D12PipelineState*)_lightingPipeline.Handle);
+		_activeCommandList->SetPipelineState((ID3D12PipelineState*) _lightingPipeline.Handle);
 		_activeCommandList->SetComputeRootSignature(_lightingRootSignature.Handle);
 		_activeCommandList->SetComputeRootDescriptorTable(0, srvGpuHandle);
 		_activeCommandList->SetComputeRootDescriptorTable(1, uavGpuHandle);
@@ -1684,17 +1678,17 @@ public unsafe class WolfRendererD3D : IRenderer
 			_activeCommandList->SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
 		}
 
-		var dispatchX = (uint)((resources.FramebufferSize.X + 7) / 8);
-		var dispatchY = (uint)((resources.FramebufferSize.Y + 7) / 8);
+		var dispatchX = (uint) ((resources.FramebufferSize.X + 7) / 8);
+		var dispatchY = (uint) ((resources.FramebufferSize.Y + 7) / 8);
 		_activeCommandList->Dispatch(dispatchX, dispatchY, 1);
 
-		var uavBarrier = new ResourceBarrier { Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None };
+		var uavBarrier = new ResourceBarrier {Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None};
 		uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
 		_activeCommandList->ResourceBarrier(1, &uavBarrier);
 
 		var copyBarriers = stackalloc ResourceBarrier[2];
 		copyBarriers[0] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		copyBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = _lightingBuffer.Handle,
@@ -1703,7 +1697,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateAfter = ResourceStates.CopySource
 		};
 		copyBarriers[1] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = backbufferTextureDeferred.Resource,
@@ -1717,7 +1711,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var presentBarriers = stackalloc ResourceBarrier[2];
 		presentBarriers[0] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = backbufferTextureDeferred.Resource,
@@ -1726,7 +1720,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateAfter = ResourceStates.Present
 		};
 		presentBarriers[1] = new ResourceBarrier
-			{ Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = _lightingBuffer.Handle,
@@ -1735,8 +1729,6 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateAfter = ResourceStates.UnorderedAccess
 		};
 		_activeCommandList->ResourceBarrier(2, presentBarriers);
-
-		return true;
 	}
 
 	private void SignalAndWait()
@@ -1745,7 +1737,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
 		if (_fence.GetCompletedValue() < _fenceValue)
 		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
+			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 	}
@@ -1754,7 +1746,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	{
 		_fenceValue++;
 		SilkMarshal.ThrowHResult(_commandQueue.Signal(_fence, _fenceValue));
-		SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*)_fenceEvent));
+		SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
 		WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 	}
 
@@ -1802,9 +1794,9 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 
 		_meshResources.Clear();
-		
+
 		// TODO: material disposal should be handled by render graph
-		
+
 		if (_gbufferPipeline.Handle is not null)
 		{
 			_gbufferPipeline.Dispose();

@@ -9,7 +9,10 @@ using SharpMetal.QuartzCore;
 using Silk.NET.Core.Native;
 using Silk.NET.SDL;
 using WolfEngine.Backend.Metal;
+using WolfEngine.Mathematics;
 using WolfEngine.Platform;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
 
@@ -118,6 +121,11 @@ public unsafe class WolfRendererMetal : IRenderer
     public void SubmitCommand(RenderCommand command)
     {
         _pendingCommands.Enqueue(command);
+    }
+
+    public void Run(Action startup, Action update, Action<float> render)
+    {
+        throw new NotImplementedException();
     }
 
     public void Run(Action startup, Action update)
@@ -485,7 +493,7 @@ public unsafe class WolfRendererMetal : IRenderer
         return library;
     }
 
-    public void CreateMaterialResources(Material material)
+    public IMaterialResources CreateMaterialResources(Material material)
     {
         var library = CreateShaderLibrary(material);
         var pipeline = CreateRenderPipeline(library);
@@ -500,11 +508,52 @@ public unsafe class WolfRendererMetal : IRenderer
         BufferHelper.CopyToBuffer(color, colorBuffer);
         colorBuffer.DidModifyRange(new NSRange { location = 0, length = colorBufferLength });
 
-        material.Resources = new MtlMaterialResources
+        return new MtlMaterialResources
         {
             PipelineState = pipeline,
             ColorBuffer = colorBuffer
         };
+    }
+
+    public IGfxDevice GetGfxDevice()
+    {
+        throw new NotImplementedException();
+    }
+
+    public Int2 GetFrameBufferSize()
+    {
+        throw new NotImplementedException();
+    }
+
+    public void BeginFrame()
+    {
+        throw new NotImplementedException();
+    }
+
+    public void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer,
+        RenderGraphResourceHandle depthTexture)
+    {
+        throw new NotImplementedException();
+    }
+
+    public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)
+    {
+        throw new NotImplementedException();
+    }
+
+    public RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
+    {
+        throw new NotImplementedException();
     }
 
     private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)

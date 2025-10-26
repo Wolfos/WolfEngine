@@ -1,3 +1,5 @@
+using WolfEngine.Rendering.Abstraction;
+
 namespace WolfEngine.Rendering;
 
 /// <summary>
@@ -7,18 +9,17 @@ namespace WolfEngine.Rendering;
 public sealed class RenderGraph
 {
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
+	private readonly RenderGraphFrameBuilder _frameBuilder;
+	private readonly IRenderer _renderer;
 	private readonly List<RenderGraphPass> _passes = new();
 
-	public RenderGraph(RenderGraphResourceRegistry resourceRegistry)
+	public RenderGraph(RenderGraphResourceRegistry resourceRegistry, IRenderer renderer, RenderGraphFrameBuilder frameBuilder)
 	{
-		_resourceRegistry = resourceRegistry ?? throw new ArgumentNullException(nameof(resourceRegistry));
+		_resourceRegistry = resourceRegistry;
+		_renderer = renderer;
+		_frameBuilder = frameBuilder;
 	}
-
-	public void BeginFrame()
-	{
-		_resourceRegistry.BeginFrame();
-		_passes.Clear();
-	}
+	
 
 	public RenderGraphBuilder AddPass(string name)
 	{
@@ -46,6 +47,43 @@ public sealed class RenderGraph
 		}
 
 		_passes.Clear();
+	}
+
+	public void Startup(Action startup, Action update)
+	{
+		_renderer.Run(startup, update, OnRender);
+		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
+	}
+
+	public void OnRender(float deltaTime)
+	{
+		_resourceRegistry.BeginFrame();
+		_passes.Clear();
+		
+		_renderer.BeginFrame();
+
+		var frameBufferSize = _renderer.GetFrameBufferSize();
+		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
+		var depthTexture = _renderer.ImportDepthTexture(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
+		_frameBuilder.BeginFrame(frameBufferSize, backBuffer, depthTexture);
+		
+		
+		//var callbacks = new RenderPassCallbacks()
+		//_frameBuilder.Build(); // TODO: This is spaghet
+		Execute();
+		
+		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, depthTexture);
+	}
+
+	public IMaterialResources EnsureMaterialResources(Material material)
+	{
+		// TODO: Should probably be handled in resource registry
+		return _renderer.CreateMaterialResources(material);
+	}
+
+	public void SubmitCommand(RenderCommand command)
+	{
+		_renderer.SubmitCommand(command);
 	}
 
 	public void EndFrame()

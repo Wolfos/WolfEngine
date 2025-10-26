@@ -49,7 +49,7 @@ public static class GBufferPass
 		commandList.ClearColorAttachment(2, config.MaterialClearColor);
 		commandList.ClearDepthStencil(config.DepthClearValue);
 
-		drawCommands?.Invoke();
+		drawCommands();
 
 		commandList.EndPass();
 	}

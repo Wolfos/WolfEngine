@@ -1,3 +1,5 @@
+using WolfEngine.Rendering;
+
 namespace WolfEngine;
 
 public interface IMaterialFactory
@@ -7,12 +9,10 @@ public interface IMaterialFactory
 
 public class MaterialFactory : IMaterialFactory
 {
-	public MaterialFactory(IShaderCompiler shaderCompiler)
+	private readonly RenderGraph _renderGraph;
+	public MaterialFactory(IShaderCompiler shaderCompiler, RenderGraph renderGraph)
 	{
-		if (shaderCompiler is null)
-		{
-			throw new ArgumentNullException(nameof(shaderCompiler));
-		}
+		_renderGraph = renderGraph;
 	}
 
 	public Material GetMaterial(string shader)
@@ -22,6 +22,9 @@ public class MaterialFactory : IMaterialFactory
 			throw new ArgumentException("Shader path cannot be empty.", nameof(shader));
 		}
 
-		return new Material(shader);
+		var material = new Material(shader);
+		material.Resources = _renderGraph.EnsureMaterialResources(material);
+
+		return material;
 	}
 }

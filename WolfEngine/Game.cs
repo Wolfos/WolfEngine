@@ -1,26 +1,27 @@
 using System.Diagnostics;
 using System.Numerics;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
 public class Game
 {
-    private readonly IRenderer _renderer;
     private readonly IMaterialFactory _materialFactory;
     private readonly IRenderCommandFactory _renderCommandFactory;
-
+    private readonly RenderGraph _renderGraph;
+    
     private Mesh _mesh;
     private Material _material;
     private Camera _camera;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
-    public Game(IRenderer renderer, IMaterialFactory materialFactory, IRenderCommandFactory renderCommandFactory)
+    public Game(IMaterialFactory materialFactory, IRenderCommandFactory renderCommandFactory, RenderGraph renderGraph)
     {
-        _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _materialFactory = materialFactory;
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
+        _renderGraph = renderGraph;
 
-        _renderer.Run(Startup, Update);
+        _renderGraph.Startup(Startup, Update);
     }
 
     private void Update()
@@ -33,7 +34,7 @@ public class Game
         var time = (float)_stopwatch.Elapsed.TotalSeconds;
         var transform = Matrix4x4.CreateRotationY(time * 0.5f);
 
-        _renderer.SubmitCommand(_renderCommandFactory.DrawMesh(_mesh!, _material!, transform));
+        _renderGraph.SubmitCommand(_renderCommandFactory.DrawMesh(_mesh!, _material!, transform));
     }
 
     private void Startup()
@@ -49,9 +50,8 @@ public class Game
         _material.Color = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         _camera = CreateCamera();
 
-        _renderer.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));
-        _renderer.CreateMaterialResources(_material);
-        _renderer.SubmitCommand(_renderCommandFactory.SetCamera(_camera));
+        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));
+        _renderGraph.SubmitCommand(_renderCommandFactory.SetCamera(_camera));
     }
 
     private static Camera CreateCamera()

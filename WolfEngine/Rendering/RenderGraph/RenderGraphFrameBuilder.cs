@@ -23,27 +23,23 @@ public readonly struct RenderGraphFrameResources
 public sealed class RenderGraphFrameBuilder
 {
 	private readonly RenderGraphResourceRegistry _resources;
-	private readonly RenderGraph _graph;
 	private RenderGraphFrameResources _frameResources;
 
-	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, RenderGraph graph)
+	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources)
 	{
 		_resources = resources;
-		_graph = graph;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
 		Int2 framebufferSize,
-		Func<RenderGraphResourceRegistry, int, int, RenderGraphResourceHandle> importBackbuffer,
-		Func<RenderGraphResourceRegistry, int, int, RenderGraphResourceHandle> importDepth)
+		RenderGraphResourceHandle backBuffer,
+		RenderGraphResourceHandle depthTexture)
 	{
-		_graph.BeginFrame();
-
-		_frameResources = new RenderGraphFrameResources
+		_frameResources = new()
 		{
 			FramebufferSize = framebufferSize,
-			Backbuffer = importBackbuffer(_resources, framebufferSize.X, framebufferSize.Y),
-			Depth = importDepth(_resources, framebufferSize.X, framebufferSize.Y),
+			Backbuffer = backBuffer,
+			Depth = depthTexture,
 			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
 				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
 			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
@@ -57,28 +53,21 @@ public sealed class RenderGraphFrameBuilder
 		return _frameResources;
 	}
 
-	public bool BuildAndExecute(RenderPassCallbacks callbacks)
+	public bool Build(RenderPassCallbacks callbacks, RenderGraph graph)
 	{
 		var renderedScene = false;
 
-		_graph.AddPass("GBuffer")
+		graph.AddPass("GBuffer")
 			.WriteTexture(_frameResources.GBufferAlbedo)
 			.WriteTexture(_frameResources.GBufferNormal)
 			.WriteTexture(_frameResources.GBufferMaterial)
 			.WriteTexture(_frameResources.GBufferDepth)
 			.SetExecute(context => callbacks.ExecuteGBuffer(context, _frameResources));
 
-		_graph.AddPass("Deferred Lighting")
+		graph.AddPass("Deferred Lighting")
 			.WriteTexture(_frameResources.Backbuffer)
 			.SetExecute(context => renderedScene = callbacks.ExecuteDeferred(context, _frameResources));
-
-		_graph.Execute();
-
+		
 		return renderedScene;
-	}
-
-	public void EndFrame()
-	{
-		_graph.EndFrame();
 	}
 }
