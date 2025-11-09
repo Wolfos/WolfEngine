@@ -46,8 +46,7 @@ public class Game
     {
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
         _mesh = new Mesh(meshPath);
-        _material = _materialFactory.GetMaterial("gbuffer.slang");
-        _material.Color = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
+		_material = _materialFactory.GetMaterial("gbuffer.slang", new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
         _camera = CreateCamera();
 
         _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));

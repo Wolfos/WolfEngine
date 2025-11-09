@@ -15,6 +15,6 @@ public interface IRenderer
 	void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height);
-	//void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources);
-	//void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources);
+	void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources);
+	void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources);
 }

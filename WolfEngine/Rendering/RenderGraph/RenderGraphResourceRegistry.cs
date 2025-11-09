@@ -32,7 +32,7 @@ public sealed class RenderGraphResourceRegistry
 
 	public void SetDevice(IGfxDevice device)
 	{
-		_device = device ?? throw new ArgumentNullException(nameof(device));
+		_device = device;
 	}
 
 	public void BeginFrame()

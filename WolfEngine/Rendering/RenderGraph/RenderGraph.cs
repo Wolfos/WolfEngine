@@ -52,27 +52,36 @@ public sealed class RenderGraph
 	public void Startup(Action startup, Action update)
 	{
 		_renderer.Run(startup, update, OnRender);
-		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 	}
 
 	public void OnRender(float deltaTime)
 	{
+		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
+		
+		_renderer.BeginFrame();
+
 		_resourceRegistry.BeginFrame();
 		_passes.Clear();
 		
-		_renderer.BeginFrame();
 
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
 		var depthTexture = _renderer.ImportDepthTexture(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
 		_frameBuilder.BeginFrame(frameBufferSize, backBuffer, depthTexture);
+
+
+		var callbacks = new RenderPassCallbacks
+		(
+			(context, resources) => _renderer.ExecuteGBufferPass(context, resources),
+			(context, resources) => _renderer.ExecuteDeferredPass(context, resources)
+			);
 		
-		
-		//var callbacks = new RenderPassCallbacks()
-		//_frameBuilder.Build(); // TODO: This is spaghet
+		_frameBuilder.Build(callbacks, this); // TODO: This is spaghet
 		Execute();
 		
 		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, depthTexture);
+		
+		_resourceRegistry.EndFrame();
 	}
 
 	public IMaterialResources EnsureMaterialResources(Material material)
@@ -84,10 +93,5 @@ public sealed class RenderGraph
 	public void SubmitCommand(RenderCommand command)
 	{
 		_renderer.SubmitCommand(command);
-	}
-
-	public void EndFrame()
-	{
-		_resourceRegistry.EndFrame();
 	}
 }

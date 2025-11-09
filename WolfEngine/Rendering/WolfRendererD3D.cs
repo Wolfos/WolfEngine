@@ -467,7 +467,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 
 		var colorSize = Align((ulong) Unsafe.SizeOf<Vector4>(),
-			Silk.NET.Direct3D12.D3D12.ConstantBufferDataPlacementAlignment);
+			D3D12.ConstantBufferDataPlacementAlignment);
 		var uploadProps = new HeapProperties(HeapType.Upload);
 		var bufferDesc = new ResourceDesc
 		{
@@ -1105,11 +1105,6 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private MeshResources CreateMeshResources(Mesh mesh)
 	{
-		if (mesh is null)
-		{
-			throw new ArgumentNullException(nameof(mesh));
-		}
-
 		var vertexCount = mesh.Vertices.Length;
 		if (vertexCount == 0)
 		{
@@ -1169,7 +1164,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			fixed (VertexData* srcVertices = vertices)
 			{
-				System.Buffer.MemoryCopy(srcVertices, mappedVertices, vertexBufferSize, vertexBufferSize);
+				Buffer.MemoryCopy(srcVertices, mappedVertices, vertexBufferSize, vertexBufferSize);
 			}
 		}
 		finally
@@ -1455,15 +1450,9 @@ public unsafe class WolfRendererD3D : IRenderer
 		_frameFenceValues[_backbufferIndex] = _fenceValue;
 
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
-		// if (renderedScene)
-		// {
-		// 	_drawCommands.Clear();
-		// 	_arenaAllocator.Reset();
-		// }
-		if (_drawCommands.Count > 0 && _hasCamera == false)
-		{
-			_drawCommands.Clear();
-		}
+		
+		_drawCommands.Clear();
+		_arenaAllocator.Reset();
 	}
 
 	public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry,
@@ -1536,7 +1525,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			AlbedoTarget = albedoTexture,
 			NormalTarget = normalTexture,
 			MaterialTarget = materialTexture,
-			DepthTarget = depthTexture
+			DepthTarget = depthTexture,
+			AlbedoClearColor = _backgroundColour
 		};
 
 		GBufferPass.Record(_currentGfxCommandList, gbufferConfig, () =>
@@ -1856,7 +1846,7 @@ public unsafe class WolfRendererD3D : IRenderer
 				keyboard.KeyDown -= HandleKeyDown;
 			}
 
-			_inputContext.Dispose();
+			//_inputContext.Dispose();
 			_inputContext = null;
 		}
 

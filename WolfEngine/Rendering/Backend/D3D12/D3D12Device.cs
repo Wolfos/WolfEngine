@@ -1,14 +1,10 @@
 #nullable enable
 
-using System.Numerics;
-using System.Runtime.CompilerServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using WolfEngine.Rendering.Abstraction;
 using Silk.NET.DXGI;
 using WolfEngine.Backend.D3D12;
-using D3DFillMode = Silk.NET.Direct3D12.FillMode;
-using D3DCullMode = Silk.NET.Direct3D12.CullMode;
 
 
 namespace WolfEngine.Rendering.Backend.D3D12;

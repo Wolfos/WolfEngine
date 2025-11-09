@@ -7,7 +7,7 @@ namespace WolfEngine.Rendering;
 
 public readonly record struct RenderPassCallbacks(
 	Action<RenderGraphContext, RenderGraphFrameResources> ExecuteGBuffer,
-	Func<RenderGraphContext, RenderGraphFrameResources, bool> ExecuteDeferred);
+	Action<RenderGraphContext, RenderGraphFrameResources> ExecuteDeferred);
 
 public readonly struct RenderGraphFrameResources
 {
@@ -66,8 +66,8 @@ public sealed class RenderGraphFrameBuilder
 
 		graph.AddPass("Deferred Lighting")
 			.WriteTexture(_frameResources.Backbuffer)
-			.SetExecute(context => renderedScene = callbacks.ExecuteDeferred(context, _frameResources));
+			.SetExecute(context => callbacks.ExecuteDeferred(context, _frameResources));
 		
-		return renderedScene;
+		return true;
 	}
 }
