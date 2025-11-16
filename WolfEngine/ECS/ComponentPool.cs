@@ -9,6 +9,9 @@ public class ComponentPool<T> : IComponentPool where T:struct
 	private int[] _entities = Array.Empty<int>();
 	private T[] _data = Array.Empty<T>();
 	private int _count;
+	
+	internal int Count => _count;
+	internal ReadOnlySpan<int> EntitiesSpan => _entities.AsSpan(0, _count);
 
 	public void Add(Entity e, in T value)
 	{
@@ -47,11 +50,21 @@ public class ComponentPool<T> : IComponentPool where T:struct
 
 	private void EnsureSparseSize(int size)
 	{
-		// TODO: Implement
+		if (_sparse.Length >= size) return;
+
+		var newSize = _sparse.Length > 0 ? _sparse.Length : 4;
+		while (newSize < size) newSize *= 2;
+		Array.Resize(ref _sparse, newSize);
 	}
 
 	private void EnsureCapacity(int size)
 	{
-		// TODO: Implement
+		if (_entities.Length >= size) return;
+
+		var newSize = _entities.Length > 0 ? _entities.Length : 4;
+		while (newSize < size) newSize *= 2;
+
+		Array.Resize(ref _entities, newSize);
+		Array.Resize(ref _data, newSize);
 	}
 }
