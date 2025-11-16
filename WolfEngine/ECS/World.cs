@@ -6,7 +6,7 @@ public class World
 	private readonly Dictionary<Type, IComponentPool> _pools = new();
 
 	public Entity CreateEntity() => _entities.Create();
-	public void Destroy(Entity e) => _entities.Destroy(e);
+	public void DestroyEntity(Entity e) => _entities.Destroy(e);
 
 	public void AddComponent<T>(Entity e, in T value = default) where T : struct, IEntityComponent
 		=> Pool<T>().Add(e, value);
@@ -26,5 +26,5 @@ public class World
 
 	private ComponentPool<T> Pool<T>() where T:struct, IEntityComponent
 		=> (ComponentPool<T>) (_pools.TryGetValue(typeof(T), out var p)
-			? p : (_pools[typeof(T)] = new ComponentPool<T>()));
+			? p : _pools[typeof(T)] = new ComponentPool<T>());
 }

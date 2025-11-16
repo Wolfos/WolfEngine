@@ -723,12 +723,8 @@ public unsafe class WolfRendererMetal : IRenderer
     private void HandleSetCameraCommand(RenderCommand command)
     {
         var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
-        if (payload.CameraHandle.Target is not Camera camera)
-        {
-            throw new InvalidOperationException("Camera payload target was null.");
-        }
-        payload.CameraHandle.Free();
-        _camera = camera;
+
+        _camera = payload.Camera;
         _cameraTransform = payload.Transform;
         _hasCamera = true;
     }

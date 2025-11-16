@@ -43,7 +43,7 @@ public class Game
             ref var transform = ref entry.First;
             ref var camera = ref entry.Second;
             
-            var command = _renderCommandFactory.SetCamera(camera, transform);
+            var command = _renderCommandFactory.SetCamera(ref camera, ref transform);
             _renderGraph.SubmitCommand(command);
         }
         
@@ -52,7 +52,7 @@ public class Game
             ref var transform = ref entry.First;
             ref var meshRenderer = ref entry.Second;
             
-            var command = _renderCommandFactory.DrawMesh(meshRenderer, transform);
+            var command = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transform);
             _renderGraph.SubmitCommand(command);
         }
     }

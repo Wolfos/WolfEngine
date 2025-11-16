@@ -7,9 +7,9 @@ namespace WolfEngine;
 public interface IRenderCommandFactory
 {
     RenderCommand CreateMesh(Mesh mesh);
-    RenderCommand DrawMesh(MeshRenderer meshRenderer, Transform transform);
+    RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Transform transform);
 
-    RenderCommand SetCamera(Camera camera, Transform transform);
+    RenderCommand SetCamera(ref Camera camera, ref Transform transform);
 }
 
 
@@ -31,18 +31,16 @@ public class RenderCommandFactory : IRenderCommandFactory
         return new RenderCommand(RenderCommandType.CreateMesh, pointer, _arenaAllocator);
     }
 
-    public RenderCommand DrawMesh(MeshRenderer meshRenderer, Transform transform)
+    public RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Transform transform)
     {
         var payload = new RenderCommand.DrawMeshPayload(GCHandle.Alloc(meshRenderer.Mesh), GCHandle.Alloc(meshRenderer.Material), transform.GetTransform());
         var pointer = _arenaAllocator.Store(payload);
         return new RenderCommand(RenderCommandType.DrawMesh, pointer, _arenaAllocator);
     }
 
-    public RenderCommand SetCamera(Camera camera, Transform transform)
+    public RenderCommand SetCamera(ref Camera camera, ref Transform transform)
     {
-        ArgumentNullException.ThrowIfNull(camera);
-
-        var payload = new RenderCommand.SetCameraPayload(GCHandle.Alloc(camera), transform);
+        var payload = new RenderCommand.SetCameraPayload(camera, transform);
         var pointer = _arenaAllocator.Store(payload);
         return new RenderCommand(RenderCommandType.SetCamera, pointer, _arenaAllocator);
     }

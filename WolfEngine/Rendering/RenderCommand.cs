@@ -74,13 +74,13 @@ public readonly struct RenderCommand
 
     public readonly struct SetCameraPayload
     {
-        public SetCameraPayload(GCHandle cameraHandle, Transform transform)
+        public SetCameraPayload(Camera camera, Transform transform)
         {
-            CameraHandle = cameraHandle;
+            Camera = camera;
             Transform = transform;
         }
 
-        public GCHandle CameraHandle { get; }
+        public Camera Camera { get; }
 
         public Transform Transform { get; }
     }
