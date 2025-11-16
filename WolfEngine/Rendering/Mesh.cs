@@ -1,6 +1,7 @@
 #nullable enable
 using System.Numerics;
 using Silk.NET.Assimp;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
 
@@ -9,6 +10,12 @@ public class Mesh
     public Vector4[] Vertices { get; }
     public uint[] Indices { get; }
     public Vector3[] Normals { get; }
+    
+    // GPU resources are set by the renderer after creation
+    internal IGfxBuffer? VertexBuffer { get; set; }
+    internal IGfxBuffer? IndexBuffer { get; set; }
+    internal uint StrideInBytes { get; set; }
+    internal uint IndexCount { get; set; }
     
     public unsafe Mesh(string filename)
     {

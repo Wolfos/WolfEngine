@@ -6,7 +6,10 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 internal class D3D12MaterialResources: IMaterialResources
 {
-	public ComPtr<ID3D12PipelineState> PipelineState { get; set; }
+	public required IGfxPipeline Pipeline { get; init; }
+	public required IGfxBuffer? ConstantBuffer { get; init; }
 
-	public ComPtr<ID3D12Resource> ColorBuffer { get; set;  }
+	// Internal D3D12-specific properties (for backwards compatibility during transition)
+	internal ComPtr<ID3D12PipelineState> PipelineState { get; init; }
+	internal ComPtr<ID3D12Resource> ColorBuffer { get; init; }
 }

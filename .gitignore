@@ -484,3 +484,4 @@ $RECYCLE.BIN/
 *.swp
 WolfEngine/.dotnet/
 .dotnet/
+.vscode/

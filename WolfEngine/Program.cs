@@ -23,7 +23,6 @@ class Program
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();
-        services.AddSingleton<RenderGraphFrameBuilder>();
         
         if (OperatingSystem.IsMacOS())
         {

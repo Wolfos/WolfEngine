@@ -156,6 +156,76 @@ internal unsafe class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 			"Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
 	}
 
+	public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
+	{
+		if (buffer is not D3D12Buffer d3d12Buffer)
+		{
+			throw new InvalidOperationException("Buffer was not created by the Direct3D12 backend.");
+		}
+
+		var resource = d3d12Buffer.Resource.Handle;
+		if (resource is null)
+		{
+			throw new InvalidOperationException("Buffer resource was null.");
+		}
+
+		var gpuAddress = resource->GetGPUVirtualAddress() + offset;
+		CommandList.SetGraphicsRootConstantBufferView(slot, gpuAddress);
+	}
+
+	public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data)
+	{
+		if (data.IsEmpty)
+		{
+			return;
+		}
+
+		var num32BitValues = (uint)data.Length / 4;
+		if (data.Length % 4 != 0)
+		{
+			throw new ArgumentException("Data size must be a multiple of 4 bytes.", nameof(data));
+		}
+
+		fixed (byte* dataPtr = data)
+		{
+			CommandList.SetGraphicsRoot32BitConstants(slot, num32BitValues, dataPtr, 0);
+		}
+	}
+
+	public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data)
+	{
+		if (data.IsEmpty)
+		{
+			return;
+		}
+
+		var num32BitValues = (uint)data.Length / 4;
+		if (data.Length % 4 != 0)
+		{
+			throw new ArgumentException("Data size must be a multiple of 4 bytes.", nameof(data));
+		}
+
+		fixed (byte* dataPtr = data)
+		{
+			CommandList.SetComputeRoot32BitConstants(slot, num32BitValues, dataPtr, 0);
+		}
+	}
+
+	public void SetPrimitiveTopology(PrimitiveTopology topology)
+	{
+		var d3d12Topology = topology switch
+		{
+			PrimitiveTopology.TriangleList => D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist,
+			PrimitiveTopology.TriangleStrip => D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglestrip,
+			PrimitiveTopology.LineList => D3DPrimitiveTopology.D3DPrimitiveTopologyLinelist,
+			PrimitiveTopology.LineStrip => D3DPrimitiveTopology.D3DPrimitiveTopologyLinestrip,
+			PrimitiveTopology.PointList => D3DPrimitiveTopology.D3DPrimitiveTopologyPointlist,
+			_ => throw new ArgumentOutOfRangeException(nameof(topology), topology, "Unsupported primitive topology.")
+		};
+
+		CommandList.IASetPrimitiveTopology(d3d12Topology);
+	}
+
 	public void SetScissorRect(in RectInt rect)
 	{
 		var scissor = new Box2D<int>(rect.X, rect.Y, rect.X + rect.Width, rect.Y + rect.Height);
@@ -187,7 +257,8 @@ internal unsafe class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 
 	public void PushConstants<T>(in T data) where T : unmanaged
 	{
-		throw new NotSupportedException("PushConstants is not yet implemented for the Direct3D12 backend.");
+		ReadOnlySpan<byte> bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref System.Runtime.CompilerServices.Unsafe.AsRef(in data), 1));
+		SetGraphicsConstants(0, bytes);
 	}
 
 	public void SetVertexBuffers(ReadOnlySpan<AbstractionVertexBufferView> vertexBuffers)
@@ -292,6 +363,28 @@ internal unsafe class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
 		CommandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+	}
+
+	/// <summary>
+	/// Sets the descriptor heaps to be used by the command list.
+	/// This is a D3D12-specific operation required before any descriptor tables can be bound.
+	/// </summary>
+	public void SetDescriptorHeaps(ComPtr<ID3D12DescriptorHeap>[] heaps)
+	{
+		var heapPtrs = stackalloc ID3D12DescriptorHeap*[heaps.Length];
+		for (int i = 0; i < heaps.Length; i++)
+		{
+			heapPtrs[i] = heaps[i].Handle;
+		}
+		CommandList.SetDescriptorHeaps((uint)heaps.Length, heapPtrs);
+	}
+
+	/// <summary>
+	/// Sets a compute root descriptor table.
+	/// </summary>
+	public void SetComputeRootDescriptorTable(uint rootParameterIndex, GpuDescriptorHandle baseDescriptor)
+	{
+		CommandList.SetComputeRootDescriptorTable(rootParameterIndex, baseDescriptor);
 	}
 	
 	private static ResourceStates ConvertResourceState(ResourceState state)

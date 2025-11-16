@@ -1,11 +1,18 @@
-﻿using SharpMetal.Metal;
+﻿#nullable enable
+
+using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Backend.Metal;
 
 internal class MtlMaterialResources: IMaterialResources
 {
-	public MTLRenderPipelineState PipelineState { get; set; }
+	public required IGfxPipeline Pipeline { get; init; }
+	
+	public required IGfxBuffer? ConstantBuffer { get; init; }
 
-	public MTLBuffer ColorBuffer { get; set; }
+	// Internal Metal-specific properties
+	internal MTLRenderPipelineState PipelineState { get; init; }
+
+	internal MTLBuffer ColorBuffer { get; init; }
 }

@@ -517,6 +517,8 @@ public unsafe class WolfRendererMetal : IRenderer
 
         return new MtlMaterialResources
         {
+            Pipeline = null!, // TODO: Implement Metal pipeline wrapper
+            ConstantBuffer = null, // TODO: Implement Metal buffer wrapper
             PipelineState = pipeline,
             ColorBuffer = colorBuffer
         };

@@ -24,6 +24,9 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private readonly List<IDisposable> _liveCommandLists = new();
 	private readonly object _commandListLock = new();
 	
+	private readonly Dictionary<PipelineKey, IGfxPipeline> _pipelineCache = new();
+	private readonly object _pipelineLock = new();
+	
 
 	public D3D12Device(
 		ComPtr<ID3D12Device> device,
@@ -41,7 +44,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	public IGfxCommandList BeginCompute()
 	{
-		return CreateCommandList(CommandListType.Compute);
+		return CreateCommandList(CommandListType.Direct);
 	}
 
 	public void Submit(IGfxCommandList commandList)
@@ -53,7 +56,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		nativeCommandList.Close();
 
-		ID3D12CommandList* nativeHandle = (ID3D12CommandList*)nativeCommandList.CommandList.Handle;
+		var nativeHandle = (ID3D12CommandList*)nativeCommandList.CommandList.Handle;
 		var queue = nativeCommandList.Type == CommandListType.Compute ? _computeQueue : _graphicsQueue;
 
 		queue.ExecuteCommandLists(1, &nativeHandle);
@@ -185,7 +188,20 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
 	{
-		throw new NotSupportedException("Direct3D12 pipeline creation is not yet implemented.");
+		lock (_pipelineLock)
+		{
+			if (_pipelineCache.TryGetValue(key, out var cached))
+			{
+				return cached;
+			}
+
+			// TODO: Implement full pipeline creation from shader bytecode and pipeline key
+			// This requires moving PSO creation logic from WolfRendererD3D
+			// For now, pipelines are still created in the renderer
+			throw new NotSupportedException(
+				"Direct3D12 pipeline creation is not yet fully implemented. " +
+				"PSO creation still resides in WolfRendererD3D and needs to be moved here.");
+		}
 	}
 
 	public IGfxDescriptorTable GlobalTable => _globalTable;

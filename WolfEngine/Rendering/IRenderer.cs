@@ -6,7 +6,6 @@ namespace WolfEngine;
 
 public interface IRenderer
 {
-	void SubmitCommand(RenderCommand command);
 	void Run(Action startup, Action<float> update, Action<float> render);
 	IMaterialResources CreateMaterialResources(Material material);
 	IGfxDevice GetGfxDevice();
@@ -15,6 +14,4 @@ public interface IRenderer
 	void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height);
-	void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources);
-	void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources);
 }

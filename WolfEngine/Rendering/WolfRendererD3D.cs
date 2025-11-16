@@ -28,6 +28,14 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
 
+	// Internal properties for temporary backend-specific descriptor setup
+	internal ComPtr<ID3D12Device> Device => _device;
+	internal ComPtr<ID3D12PipelineState> LightingPipeline => _lightingPipeline;
+	internal ComPtr<ID3D12RootSignature> LightingRootSignature => _lightingRootSignature;
+	internal ComPtr<ID3D12DescriptorHeap> LightingDescriptorHeap => _lightingDescriptorHeap;
+	internal uint LightingDescriptorSize => _lightingDescriptorSize;
+	internal ComPtr<ID3D12Resource> LightingBuffer => _lightingBuffer;
+
 	private sealed class MeshResources
 	{
 		public MeshResources(
@@ -103,13 +111,11 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly CpuDescriptorHandle[] _rtvCpuHandles = new CpuDescriptorHandle[FrameCount];
 	private readonly ulong[] _frameFenceValues = new ulong[FrameCount];
 	private readonly ComPtr<ID3D12Resource>[] _renderTargets = new ComPtr<ID3D12Resource>[FrameCount];
+	private RenderGraphResourceHandle _lightingBufferHandle;
 
 	private readonly ComPtr<ID3D12CommandAllocator>[] _commandAllocators =
 		new ComPtr<ID3D12CommandAllocator>[FrameCount];
 
-	private ComPtr<ID3D12GraphicsCommandList> _commandList;
-	private ID3D12GraphicsCommandList* _activeCommandList;
-	private IGfxCommandList _currentGfxCommandList = null!;
 	private ComPtr<ID3D12Fence> _fence;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
@@ -122,12 +128,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12DescriptorHeap> _lightingDescriptorHeap;
 	private uint _lightingDescriptorSize;
 	private ComPtr<ID3D12Resource> _lightingBuffer;
-	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-	private readonly List<DrawInstruction> _drawCommands = new();
-	private Camera _camera;
-	private Transform _cameraTransform;
-	private bool _hasCamera;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -167,10 +168,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 	}
 
-	public void SubmitCommand(RenderCommand command)
-	{
-		_pendingCommands.Enqueue(command);
-	}
 
 	private void OnWindowLoad()
 	{
@@ -190,9 +187,9 @@ public unsafe class WolfRendererD3D : IRenderer
 			keyboard.KeyDown += HandleKeyDown;
 		}
 
-		_startupCallback();
-		ProcessPendingCommands();
-		_isInitialized = true;
+	_startupCallback();
+	// Command processing is now handled by the render graph
+	_isInitialized = true;
 	}
 
 	private void OnWindowUpdate(double deltaTime)
@@ -508,10 +505,35 @@ public unsafe class WolfRendererD3D : IRenderer
 			colorBuffer.Unmap(0, (Range*) null);
 		}
 
+		// Wrap in abstraction interfaces
+		var pipelineKey = new PipelineKey(
+			PassKind.Graphics,
+			vertexEntryPoint: "vertexShader",
+			pixelEntryPoint: "fragmentShader",
+			computeEntryPoint: null,
+			renderTargets: new RenderTargetFormats(new[] { TextureFormat.Bgra8Unorm }),
+			depthStencil: new Rendering.Abstraction.DepthStencilFormat(TextureFormat.Unknown),
+			renderState: default);
+
+		var pipeline = new D3D12Pipeline(
+			pipelineKey,
+			PassKind.Graphics,
+			pipelineState,
+			_rootSignature);
+
+		var constantBuffer = new D3D12Buffer(
+			$"{material.ShaderPath}_ColorBuffer",
+			new BufferDescriptor(colorSize, BufferUsage.Constant),
+			colorBuffer,
+			colorSize);
+
 		return new D3D12MaterialResources
 		{
-			ColorBuffer = colorBuffer,
-			PipelineState = pipelineState
+			Pipeline = pipeline,
+			ConstantBuffer = constantBuffer,
+			// Keep internal D3D12-specific properties for backwards compatibility
+			PipelineState = pipelineState,
+			ColorBuffer = colorBuffer
 		};
 	}
 
@@ -591,16 +613,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(CommandListType.Direct, out _commandAllocators[i]));
 		}
-
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
-				0,
-				CommandListType.Direct,
-				_commandAllocators[0],
-				default,
-				out _commandList));
-
-		SilkMarshal.ThrowHResult(_commandList.Close());
+		// Command lists are now created per-pass by the render graph
 	}
 
 	private void CreateSyncObjects()
@@ -1055,52 +1068,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		_device.CreateDepthStencilView(_depthBuffer, &dsv, depthHandle);
 	}
 
-	private void ProcessPendingCommands()
-	{
-		while (_pendingCommands.TryDequeue(out var command))
-		{
-			switch (command.Type)
-			{
-				case RenderCommandType.CreateMesh:
-					HandleCreateMeshCommand(command);
-					break;
-				case RenderCommandType.DrawMesh:
-					HandleDrawMeshCommand(command);
-					break;
-				case RenderCommandType.SetCamera:
-					HandleSetCameraCommand(command);
-					break;
-				default:
-					throw new ArgumentOutOfRangeException(nameof(command.Type), command.Type,
-						"Unsupported render command type.");
-			}
-		}
-	}
-
-	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
-	{
-		if (destination.Length < 16)
-		{
-			throw new ArgumentException("Destination span must contain at least 16 elements.", nameof(destination));
-		}
-
-		destination[0] = matrix.M11;
-		destination[1] = matrix.M12;
-		destination[2] = matrix.M13;
-		destination[3] = matrix.M14;
-		destination[4] = matrix.M21;
-		destination[5] = matrix.M22;
-		destination[6] = matrix.M23;
-		destination[7] = matrix.M24;
-		destination[8] = matrix.M31;
-		destination[9] = matrix.M32;
-		destination[10] = matrix.M33;
-		destination[11] = matrix.M34;
-		destination[12] = matrix.M41;
-		destination[13] = matrix.M42;
-		destination[14] = matrix.M43;
-		destination[15] = matrix.M44;
-	}
 
 	private MeshResources CreateMeshResources(Mesh mesh)
 	{
@@ -1226,11 +1193,20 @@ public unsafe class WolfRendererD3D : IRenderer
 			indexUpload.Unmap(0, (Range*) null);
 		}
 
+		// Create a temporary command list for uploading mesh data
 		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
-		SilkMarshal.ThrowHResult(_commandList.Reset(_commandAllocators[0].Handle, (ID3D12PipelineState*) null));
+		
+		ComPtr<ID3D12GraphicsCommandList> uploadCommandList;
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0,
+				CommandListType.Direct,
+				_commandAllocators[0],
+				default,
+				out uploadCommandList));
 
-		_commandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexBufferSize);
-		_commandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexBufferSize);
+		uploadCommandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexBufferSize);
+		uploadCommandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexBufferSize);
 
 		var vertexBarrier = new ResourceBarrier
 			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
@@ -1241,7 +1217,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateBefore = ResourceStates.CopyDest,
 			StateAfter = ResourceStates.VertexAndConstantBuffer
 		};
-		_commandList.ResourceBarrier(1, &vertexBarrier);
+		uploadCommandList.ResourceBarrier(1, &vertexBarrier);
 
 		var indexBarrier = new ResourceBarrier
 			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
@@ -1252,12 +1228,14 @@ public unsafe class WolfRendererD3D : IRenderer
 			StateBefore = ResourceStates.CopyDest,
 			StateAfter = ResourceStates.IndexBuffer
 		};
-		_commandList.ResourceBarrier(1, &indexBarrier);
+		uploadCommandList.ResourceBarrier(1, &indexBarrier);
 
-		SilkMarshal.ThrowHResult(_commandList.Close());
-		ID3D12CommandList* copyLists = (ID3D12CommandList*) _commandList.Handle;
+		SilkMarshal.ThrowHResult(uploadCommandList.Close());
+		ID3D12CommandList* copyLists = (ID3D12CommandList*) uploadCommandList.Handle;
 		_commandQueue.ExecuteCommandLists(1, &copyLists);
 		SignalAndWait();
+		
+		uploadCommandList.Dispose();
 
 		vertexUpload.Dispose();
 		indexUpload.Dispose();
@@ -1275,6 +1253,24 @@ public unsafe class WolfRendererD3D : IRenderer
 			SizeInBytes = (uint) indexBufferSize,
 			Format = Format.FormatR32Uint
 		};
+
+		// Wrap in abstraction and set on mesh
+		var vertexBufferAbstraction = new D3D12Buffer(
+			"MeshVertexBuffer",
+			new BufferDescriptor(vertexBufferSize, BufferUsage.Vertex),
+			vertexBuffer,
+			vertexBufferSize);
+
+		var indexBufferAbstraction = new D3D12Buffer(
+			"MeshIndexBuffer",
+			new BufferDescriptor(indexBufferSize, BufferUsage.Index),
+			indexBuffer,
+			indexBufferSize);
+
+		mesh.VertexBuffer = vertexBufferAbstraction;
+		mesh.IndexBuffer = indexBufferAbstraction;
+		mesh.StrideInBytes = vertexStride;
+		mesh.IndexCount = (uint)indices.Length;
 
 		return new MeshResources(vertexBuffer, indexBuffer, vertexView, indexView, (uint) indices.Length);
 	}
@@ -1296,65 +1292,9 @@ public unsafe class WolfRendererD3D : IRenderer
 		return (size + alignment - 1) & ~(alignment - 1);
 	}
 
-	private void HandleCreateMeshCommand(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
-		if (payload.MeshHandle.Target is not Mesh mesh)
-		{
-			throw new InvalidOperationException("Mesh payload target was null.");
-		}
-
-		payload.MeshHandle.Free();
-		EnsureMeshResources(mesh);
-	}
-
-	private void HandleDrawMeshCommand(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
-		if (payload.MeshHandle.Target is not Mesh mesh)
-		{
-			throw new InvalidOperationException("Mesh payload target was null.");
-		}
-
-		if (payload.MaterialHandle.Target is not Material material)
-		{
-			throw new InvalidOperationException("Material payload target was null.");
-		}
-
-		payload.MeshHandle.Free();
-		payload.MaterialHandle.Free();
-		EnsureMeshResources(mesh);
-		_drawCommands.Add(new(mesh, material, payload.Transform));
-	}
-
-	private void HandleSetCameraCommand(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
-
-		_camera = payload.Camera;
-		_cameraTransform = payload.Transform;
-		_hasCamera = true;
-	}
-
-	private bool TryGetCameraMatrices(out Matrix4x4 viewProjection, out Vector3 position)
-	{
-		var world = _cameraTransform.GetTransform();
-
-		if (Matrix4x4.Invert(world, out var view) == false ||
-		    Matrix4x4.Decompose(world, out _, out _, out position) == false)
-		{
-			viewProjection = Matrix4x4.Identity;
-			position = Vector3.Zero;
-			return false;
-		}
-
-		viewProjection = view * _camera.Perspective;
-		return true;
-	}
-
 	private void OnUpdate(double deltaSeconds)
 	{
-		ProcessPendingCommands();
+		// Command processing is now handled by the render graph
 	}
 
 	private void OnFramebufferResize(Int2 newSize)
@@ -1406,45 +1346,54 @@ public unsafe class WolfRendererD3D : IRenderer
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
 
-		var gfxCommandList = _gfxDevice.BeginGraphics() as ID3D12BackendCommandList;
-
-		var commandList = gfxCommandList.NativeCommandList;
-		_activeCommandList = commandList;
-		_currentGfxCommandList = gfxCommandList;
+		// Command list creation is now handled per-pass by the render graph
 	}
 
 	public void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture)
 	{
-		var framebufferSize = _framebufferSize;
-
-		// var frameResources = renderGraphFrameBuilder.BeginFrame(framebufferSize, ImportBackbuffer, ImportDepth);
-		//
-		// var callbacks = new RenderPassCallbacks(
-		// 	(context, resources) => ExecuteGBufferPass(context, resources),
-		// 	(context, resources) => ExecuteDeferredPass(context, resources));
-		//
-		// var renderedScene = renderGraphFrameBuilder.BuildAndExecute(callbacks);
-		//
 		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture
 		                        ?? throw new InvalidOperationException(
 			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
-		// renderGraphFrameBuilder.EndFrame();
 
-		var barrierEnd = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrierEnd.Anonymous.Transition = new()
+		if (_lightingBuffer.Handle is null)
+		{
+			throw new InvalidOperationException("Lighting buffer was not initialised.");
+		}
+
+		// Copy deferred lighting output into the backbuffer, then present
+		var presentCommandList = _gfxDevice.BeginGraphics() as D3D12CommandList
+		                         ?? throw new InvalidOperationException("Failed to create present command list.");
+		var nativeCommandList = (ID3D12GraphicsCommandList*)presentCommandList.CommandList.Handle;
+
+		ResourceBarrier* barriers = stackalloc ResourceBarrier[2];
+		barriers[0] = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		barriers[0].Anonymous.Transition = new()
+		{
+			PResource = _lightingBuffer.Handle,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.UnorderedAccess,
+			StateAfter = ResourceStates.CopySource
+		};
+		barriers[1] = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		barriers[1].Anonymous.Transition = new()
 		{
 			PResource = backbufferTexture.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.Present
+			StateBefore = ResourceStates.Present,
+			StateAfter = ResourceStates.CopyDest
 		};
-		_activeCommandList->ResourceBarrier(1, &barrierEnd);
+		nativeCommandList->ResourceBarrier(2, barriers);
 
-		_gfxDevice.Submit(_currentGfxCommandList);
-		_activeCommandList = null;
-		_currentGfxCommandList = null!;
+		nativeCommandList->CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
+
+		barriers[0].Anonymous.Transition.StateBefore = ResourceStates.CopySource;
+		barriers[0].Anonymous.Transition.StateAfter = ResourceStates.UnorderedAccess;
+		barriers[1].Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
+		barriers[1].Anonymous.Transition.StateAfter = ResourceStates.Present;
+		nativeCommandList->ResourceBarrier(2, barriers);
+
+		_gfxDevice.Submit(presentCommandList);
 
 		var presentResult = _swapchain.Present(1, 0);
 		if (presentResult < 0)
@@ -1462,7 +1411,6 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 		
-		_drawCommands.Clear();
 		_arenaAllocator.Reset();
 	}
 
@@ -1481,7 +1429,30 @@ public unsafe class WolfRendererD3D : IRenderer
 			_rtvCpuHandles[_backbufferIndex],
 			null);
 
-		return registry.ImportTexture(imported, takeOwnership: false);
+		return registry.ImportTexture(imported, takeOwnership: false, initialState: ResourceState.Present);
+	}
+
+	public RenderGraphResourceHandle ImportLightingBuffer(RenderGraphResourceRegistry registry, int width, int height)
+	{
+		if (_lightingBuffer.Handle is null)
+		{
+			throw new InvalidOperationException("Lighting buffer was not initialised.");
+		}
+
+		var descriptor = new TextureDescriptor(
+			Math.Max(width, 1),
+			Math.Max(height, 1),
+			TextureFormat.Bgra8Unorm,
+			TextureUsage.ShaderResource);
+
+		var imported = _gfxDevice.ImportExternalTexture(
+			descriptor,
+			_lightingBuffer.Handle,
+			null,
+			null);
+
+		_lightingBufferHandle = registry.ImportTexture(imported, takeOwnership: false, initialState: ResourceState.UnorderedAccess);
+		return _lightingBufferHandle;
 	}
 
 	public RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
@@ -1506,230 +1477,6 @@ public unsafe class WolfRendererD3D : IRenderer
 			depthHandle);
 
 		return registry.ImportTexture(imported, takeOwnership: false);
-	}
-
-	public void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
-	{
-		var canRender = _drawCommands.Count > 0 && _hasCamera;
-		if (canRender == false)
-		{
-			return;
-		}
-
-		if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
-		{
-			return;
-		}
-
-		var albedoTexture = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
-		                    ?? throw new InvalidOperationException(
-			                    "Albedo texture is not compatible with the Direct3D12 backend.");
-		var normalTexture = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
-		                    ?? throw new InvalidOperationException(
-			                    "Normal texture is not compatible with the Direct3D12 backend.");
-		var materialTexture = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
-		                      ?? throw new InvalidOperationException(
-			                      "Material texture is not compatible with the Direct3D12 backend.");
-		var depthTexture = context.GetTexture(resources.GBufferDepth) as ID3D12BackendTexture
-		                   ?? throw new InvalidOperationException(
-			                   "Depth texture is not compatible with the Direct3D12 backend.");
-
-		var gbufferConfig = new GBufferPassConfig
-		{
-			FramebufferWidth = resources.FramebufferSize.X,
-			FramebufferHeight = resources.FramebufferSize.Y,
-			AlbedoTarget = albedoTexture,
-			NormalTarget = normalTexture,
-			MaterialTarget = materialTexture,
-			DepthTarget = depthTexture,
-			AlbedoClearColor = _backgroundColour
-		};
-
-		GBufferPass.Record(_currentGfxCommandList, gbufferConfig, () =>
-		{
-			_activeCommandList->SetPipelineState(_gbufferPipeline.Handle);
-			_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
-
-			Span<float> cameraConstants = stackalloc float[20];
-			WriteMatrix(cameraConstants, viewProjection);
-			cameraConstants[16] = cameraPosition.X;
-			cameraConstants[17] = cameraPosition.Y;
-			cameraConstants[18] = cameraPosition.Z;
-			cameraConstants[19] = 1.0f;
-
-#pragma warning disable CA2014
-			foreach (var draw in _drawCommands)
-			{
-				var meshResources = EnsureMeshResources(draw.Mesh);
-				var materialResources = draw.Material.Resources as D3D12MaterialResources;
-
-				// ReSharper disable once PossibleNullReferenceException (accepting the risk here so we don't have to assert in the render loop)
-				var colorBufferPtr = materialResources.ColorBuffer.Handle;
-				_activeCommandList->SetGraphicsRootConstantBufferView(0, colorBufferPtr->GetGPUVirtualAddress());
-
-				Span<float> modelConstants = stackalloc float[16];
-				WriteMatrix(modelConstants, draw.Transform);
-				fixed (float* modelPtr = modelConstants)
-				{
-					_activeCommandList->SetGraphicsRoot32BitConstants(1, 16, modelPtr, 0);
-				}
-
-				fixed (float* cameraPtr = cameraConstants)
-				{
-					_activeCommandList->SetGraphicsRoot32BitConstants(2, 20, cameraPtr, 0);
-				}
-
-				_activeCommandList->IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglelist);
-				var vertexView = meshResources.VertexView;
-				_activeCommandList->IASetVertexBuffers(0, 1, &vertexView);
-				var indexView = meshResources.IndexView;
-				_activeCommandList->IASetIndexBuffer(&indexView);
-				_activeCommandList->DrawIndexedInstanced(meshResources.IndexCount, 1, 0, 0, 0);
-			}
-#pragma warning restore CA2014
-		});
-	}
-
-	public void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
-	{
-		if (_lightingBuffer.Handle is null)
-		{
-			return;
-		}
-
-		if (_hasCamera == false)
-		{
-			_drawCommands.Clear();
-			return;
-		}
-
-		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture;
-		var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture;
-		var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture;
-		var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture;
-
-		var resourceBarriers = stackalloc ResourceBarrier[3];
-		resourceBarriers[0] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		resourceBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = gbufferAlbedo.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.NonPixelShaderResource
-		};
-		resourceBarriers[1] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		resourceBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = gbufferNormal.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.NonPixelShaderResource
-		};
-		resourceBarriers[2] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		resourceBarriers[2].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = gbufferMaterial.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.NonPixelShaderResource
-		};
-		_activeCommandList->ResourceBarrier(3, resourceBarriers);
-
-		var cpuHandle = _lightingDescriptorHeap.GetCPUDescriptorHandleForHeapStart();
-		_device.CreateShaderResourceView(gbufferAlbedo.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-		cpuHandle.Ptr += _lightingDescriptorSize;
-		_device.CreateShaderResourceView(gbufferNormal.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-		cpuHandle.Ptr += _lightingDescriptorSize;
-		_device.CreateShaderResourceView(gbufferMaterial.Resource, (ShaderResourceViewDesc*) null, cpuHandle);
-		cpuHandle.Ptr += _lightingDescriptorSize;
-
-		_device.CreateUnorderedAccessView(_lightingBuffer.Handle, (ID3D12Resource*) null,
-			(UnorderedAccessViewDesc*) null,
-			cpuHandle);
-
-		ID3D12DescriptorHeap* descriptorHeaps = _lightingDescriptorHeap.Handle;
-		_activeCommandList->SetDescriptorHeaps(1, &descriptorHeaps);
-
-		var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
-		var uavGpuHandle = srvGpuHandle;
-		uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
-
-		_activeCommandList->SetPipelineState(_lightingPipeline.Handle);
-		_activeCommandList->SetComputeRootSignature(_lightingRootSignature.Handle);
-		_activeCommandList->SetComputeRootDescriptorTable(0, srvGpuHandle);
-		_activeCommandList->SetComputeRootDescriptorTable(1, uavGpuHandle);
-
-		if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
-		{
-			return;
-		}
-
-		Span<float> cameraConstants = stackalloc float[20];
-		WriteMatrix(cameraConstants, viewProjection);
-		cameraConstants[16] = cameraPosition.X;
-		cameraConstants[17] = cameraPosition.Y;
-		cameraConstants[18] = cameraPosition.Z;
-		cameraConstants[19] = 1.0f;
-
-		fixed (float* cameraPtr = cameraConstants)
-		{
-			_activeCommandList->SetComputeRoot32BitConstants(2, 20, cameraPtr, 0);
-		}
-
-		var dispatchX = (uint) ((resources.FramebufferSize.X + 7) / 8);
-		var dispatchY = (uint) ((resources.FramebufferSize.Y + 7) / 8);
-		_activeCommandList->Dispatch(dispatchX, dispatchY, 1);
-
-		var uavBarrier = new ResourceBarrier {Type = ResourceBarrierType.Uav, Flags = ResourceBarrierFlags.None};
-		uavBarrier.Anonymous.UAV.PResource = _lightingBuffer.Handle;
-		_activeCommandList->ResourceBarrier(1, &uavBarrier);
-
-		var copyBarriers = stackalloc ResourceBarrier[2];
-		copyBarriers[0] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		copyBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = _lightingBuffer.Handle,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.UnorderedAccess,
-			StateAfter = ResourceStates.CopySource
-		};
-		copyBarriers[1] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		copyBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = backbufferTextureDeferred.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.Present,
-			StateAfter = ResourceStates.CopyDest
-		};
-		_activeCommandList->ResourceBarrier(2, copyBarriers);
-
-		_activeCommandList->CopyResource(backbufferTextureDeferred.Resource, _lightingBuffer.Handle);
-
-		var presentBarriers = stackalloc ResourceBarrier[2];
-		presentBarriers[0] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		presentBarriers[0].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = backbufferTextureDeferred.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.CopyDest,
-			StateAfter = ResourceStates.Present
-		};
-		presentBarriers[1] = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		presentBarriers[1].Anonymous.Transition = new ResourceTransitionBarrier
-		{
-			PResource = _lightingBuffer.Handle,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.CopySource,
-			StateAfter = ResourceStates.UnorderedAccess
-		};
-		_activeCommandList->ResourceBarrier(2, presentBarriers);
 	}
 
 	private void SignalAndWait()
@@ -1764,8 +1511,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			_commandAllocators[i].Dispose();
 		}
 
-		_commandList.Dispose();
-		_rtvHeap.Dispose();
+	// Command lists are now created per-pass
+	_rtvHeap.Dispose();
 		if (_dsvHeap.Handle is not null)
 		{
 			_dsvHeap.Dispose();
@@ -1872,11 +1619,11 @@ public unsafe class WolfRendererD3D : IRenderer
 			_window = null;
 		}
 
-		_isInitialized = false;
-	}
+	_isInitialized = false;
+}
 
-	[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-	private static extern nint CreateEventEx(nint lpEventAttributes, string lpName, uint dwFlags, uint dwDesiredAccess);
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+private static extern nint CreateEventEx(nint lpEventAttributes, string lpName, uint dwFlags, uint dwDesiredAccess);
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);

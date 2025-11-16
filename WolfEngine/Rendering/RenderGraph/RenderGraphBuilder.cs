@@ -1,3 +1,5 @@
+using WolfEngine.Rendering.Abstraction;
+
 namespace WolfEngine.Rendering;
 
 /// <summary>
@@ -19,16 +21,21 @@ public sealed class RenderGraphBuilder
 	{
 		return _resourceRegistry.CreateTransientTexture(descriptor);
 	}
-
-	public RenderGraphBuilder ReadTexture(RenderGraphResourceHandle handle)
+	
+	public RenderGraphResourceHandle CreateTransientBuffer(in BufferDescriptor descriptor)
 	{
-		_pass.AddRead(handle);
+		return _resourceRegistry.CreateTransientBuffer(descriptor);
+	}
+
+	public RenderGraphBuilder ReadTexture(RenderGraphResourceHandle handle, ResourceState state = ResourceState.ShaderResource)
+	{
+		_pass.AddRead(handle, state);
 		return this;
 	}
 
-	public RenderGraphBuilder WriteTexture(RenderGraphResourceHandle handle)
+	public RenderGraphBuilder WriteTexture(RenderGraphResourceHandle handle, ResourceState state = ResourceState.RenderTarget)
 	{
-		_pass.AddWrite(handle);
+		_pass.AddWrite(handle, state);
 		return this;
 	}
 
