@@ -4,7 +4,7 @@ namespace WolfEngine.ECS;
 
 public struct Transform: IEntityComponent
 {
-	public Vector3 LocalPosition { get; set; }
-	public Quaternion LocalRotation { get; set; }
-	public Vector3 LocalScale { get; set; }
+	public Vector3 LocalPosition;
+	public Quaternion LocalRotation;
+	public Vector3 LocalScale;
 }

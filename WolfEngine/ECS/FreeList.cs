@@ -2,7 +2,7 @@
 
 public class FreeList
 {
-	struct Slot
+	private struct Slot
 	{
 		public int NextFree;
 		public int Generation;
@@ -36,7 +36,7 @@ public class FreeList
 		slot.Alive = true;
 		slot.Generation++;
 
-		return new Entity(index, slot.Generation);
+		return new(index, slot.Generation);
 	}
 
 	public void Destroy(Entity entity)

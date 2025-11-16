@@ -8,21 +8,21 @@ public class ComponentPool<T> : IComponentPool where T:struct
 	
 	private int[] _entities = Array.Empty<int>();
 	private T[] _data = Array.Empty<T>();
-	private int _count;
-	
-	internal int Count => _count;
-	internal ReadOnlySpan<int> EntitiesSpan => _entities.AsSpan(0, _count);
+
+	public int Count { get; private set; }
+
+	internal ReadOnlySpan<int> EntitiesSpan => _entities.AsSpan(0, Count);
 
 	public void Add(Entity e, in T value)
 	{
 		EnsureSparseSize(e.Index + 1);
 		if (_sparse[e.Index] != 0) return; 
-		EnsureCapacity(_count + 1);
+		EnsureCapacity(Count + 1);
 
-		_entities[_count] = e.Index;
-		_data[_count] = value;
-		_sparse[e.Index] = _count + 1;
-		_count++;
+		_entities[Count] = e.Index;
+		_data[Count] = value;
+		_sparse[e.Index] = Count + 1;
+		Count++;
 	}
 
 	public bool Has(Entity e) => e.Index < _sparse.Length && _sparse[e.Index] != 0;
@@ -37,7 +37,7 @@ public class ComponentPool<T> : IComponentPool where T:struct
 	{
 		var slot = _sparse[e.Index] - 1;
 		if (slot < 0) return;
-		var last = _count - 1;
+		var last = Count - 1;
 
 		_data[slot] = _data[last];
 		var movedEntity = _entities[last];
@@ -45,7 +45,7 @@ public class ComponentPool<T> : IComponentPool where T:struct
 		_sparse[movedEntity] = slot + 1;
 
 		_sparse[e.Index] = 0;
-		_count--;
+		Count--;
 	}
 
 	private void EnsureSparseSize(int size)

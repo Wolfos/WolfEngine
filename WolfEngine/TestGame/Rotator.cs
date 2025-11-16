@@ -4,5 +4,5 @@ namespace WolfEngine.TestGame;
 
 public struct Rotator: IEntityComponent
 {
-	public float RotationSpeed { get; set; }
+	public float RotationSpeed;
 }

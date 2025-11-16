@@ -124,13 +124,13 @@ public class Mesh
     }
 
 
-    private static Vector3[] GenerateVertexNormals(IReadOnlyList<Vector4> vertices, IReadOnlyList<uint> indices)
+    private static Vector3[] GenerateVertexNormals(Vector4[] vertices, uint[] indices)
     {
-        var normals = new Vector3[vertices.Count];
+        var normals = new Vector3[vertices.Length];
 
-        for (var i = 0; i < indices.Count; i += 3)
+        for (var i = 0; i < indices.Length; i += 3)
         {
-            if (i + 2 >= indices.Count)
+            if (i + 2 >= indices.Length)
             {
                 break;
             }
