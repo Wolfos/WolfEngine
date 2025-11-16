@@ -9,6 +9,7 @@ using SharpMetal.QuartzCore;
 using Silk.NET.Core.Native;
 using Silk.NET.SDL;
 using WolfEngine.Backend.Metal;
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Platform;
 using WolfEngine.Rendering;
@@ -30,7 +31,8 @@ public unsafe class WolfRendererMetal : IRenderer
     private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
-    private Camera _camera = null!;
+    private Camera _camera;
+    private Transform _cameraTransform;
     private bool _hasCamera;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
@@ -47,7 +49,8 @@ public unsafe class WolfRendererMetal : IRenderer
     private double _drawableWidth;
     private double _drawableHeight;
     private Action _startupCallback = static () => { };
-    private Action _updateCallback = static () => { };
+    private Action<float> _updateCallback = static deltaTime => { };
+
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
     private static readonly Selector DrawableSizeSelector = new("setDrawableSize:");
@@ -123,12 +126,12 @@ public unsafe class WolfRendererMetal : IRenderer
         _pendingCommands.Enqueue(command);
     }
 
-    public void Run(Action startup, Action update, Action<float> render)
+    public void Run(Action startup, Action<float> update, Action<float> render)
     {
         throw new NotImplementedException();
     }
 
-    public void Run(Action startup, Action update)
+    public void Run(Action startup, Action<float> update)
     {
         _startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
         _updateCallback = update ?? throw new ArgumentNullException(nameof(update));
@@ -158,7 +161,8 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             PumpEvents(ref @event);
 
-            _updateCallback();
+            // TODO: Delta time
+            _updateCallback(0);
             ProcessPendingCommands();
             var rendered = RenderFrame();
 
@@ -357,8 +361,11 @@ public unsafe class WolfRendererMetal : IRenderer
             return false;
         }
 
-        var camera = _camera;
-        var viewProjection = Matrix4x4.Multiply(camera.Transform, camera.Perspective);
+        if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
+        {
+            _renderCommandAllocator.Reset();
+            return false;
+        }
 
         UpdateDrawableSize();
 
@@ -431,7 +438,7 @@ public unsafe class WolfRendererMetal : IRenderer
             cameraParamsPtr[0] = new CameraParams
             {
                 ViewProjection = viewProjection,
-                CameraPosition = new Vector4(camera.Position, 1.0f)
+                CameraPosition = new Vector4(cameraPosition, 1.0f)
             };
             var cameraParamsSize = (ulong)sizeof(CameraParams);
             encoder.SetVertexBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
@@ -722,7 +729,23 @@ public unsafe class WolfRendererMetal : IRenderer
         }
         payload.CameraHandle.Free();
         _camera = camera;
+        _cameraTransform = payload.Transform;
         _hasCamera = true;
+    }
+
+    private bool TryGetCameraMatrices(out Matrix4x4 viewProjection, out Vector3 position)
+    {
+        var world = _cameraTransform.GetTransform();
+        if (Matrix4x4.Invert(world, out var view) == false ||
+            Matrix4x4.Decompose(world, out _, out _, out position) == false)
+        {
+            viewProjection = Matrix4x4.Identity;
+            position = Vector3.Zero;
+            return false;
+        }
+
+        viewProjection = view * _camera.Perspective;
+        return true;
     }
 
     private static bool NearlyEqual(double a, double b)

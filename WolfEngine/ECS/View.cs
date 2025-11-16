@@ -5,7 +5,7 @@ public readonly ref struct View<T1,T2>
 {
 	private readonly ComponentPool<T1> _a;
 	private readonly ComponentPool<T2> _b;
-	public View(ComponentPool<T1> a, ComponentPool<T2> b) { this._a=a; this._b=b; }
+	public View(ComponentPool<T1> a, ComponentPool<T2> b) { _a=a; _b=b; }
 
 	public Enumerator GetEnumerator() => new(_a, _b);
 

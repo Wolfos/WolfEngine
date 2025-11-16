@@ -7,7 +7,7 @@ namespace WolfEngine;
 public interface IRenderer
 {
 	void SubmitCommand(RenderCommand command);
-	void Run(Action startup, Action update, Action<float> render);
+	void Run(Action startup, Action<float> update, Action<float> render);
 	IMaterialResources CreateMaterialResources(Material material);
 	IGfxDevice GetGfxDevice();
 	Int2 GetFrameBufferSize();

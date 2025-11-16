@@ -5,19 +5,19 @@ public class World
 	private readonly FreeList _entities = new();
 	private readonly Dictionary<Type, IComponentPool> _pools = new();
 
-	public Entity Create() => _entities.Create();
+	public Entity CreateEntity() => _entities.Create();
 	public void Destroy(Entity e) => _entities.Destroy(e);
 
-	public void Add<T>(Entity e, in T value = default) where T : struct
+	public void AddComponent<T>(Entity e, in T value = default) where T : struct
 		=> Pool<T>().Add(e, value);
 
-	public ref T Get<T>(Entity e) where T : struct
+	public ref T GetComponent<T>(Entity e) where T : struct
 		=> ref Pool<T>().Get(e);
 
-	public bool Has<T>(Entity e) where T : struct
+	public bool HasComponent<T>(Entity e) where T : struct
 		=> Pool<T>().Has(e);
 
-	public void Remove<T>(Entity e) where T : struct
+	public void RemoveComponent<T>(Entity e) where T : struct
 		=> Pool<T>().Remove(e);
 
 	public View<T1,T2> View<T1,T2>()

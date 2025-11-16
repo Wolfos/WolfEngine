@@ -8,6 +8,7 @@ using Silk.NET.DXGI;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
@@ -84,7 +85,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	private IWindow _window = null!;
 	private IInputContext _inputContext = null!;
 	private Action _startupCallback = static () => { };
-	private Action _updateCallback = static () => { };
+	private Action<float> _updateCallback = static deltaTime => { };
 	private Action<float> _renderCallback = static deltaTime => { };
 	private bool _isInitialized;
 
@@ -124,7 +125,8 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
 	private readonly List<DrawInstruction> _drawCommands = new();
-	private Camera _camera = null!;
+	private Camera _camera;
+	private Transform _cameraTransform;
 	private bool _hasCamera;
 
 	private uint _backbufferIndex;
@@ -139,7 +141,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 	}
 
-	public void Run(Action startup, Action update, Action<float> render)
+	public void Run(Action startup, Action<float> update, Action<float> render)
 	{
 		_startupCallback = startup;
 		_updateCallback = update;
@@ -195,7 +197,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private void OnWindowUpdate(double deltaTime)
 	{
-		_updateCallback();
+		_updateCallback((float)deltaTime);
 		OnUpdate((float)deltaTime);
 	}
 
@@ -1335,7 +1337,24 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		payload.CameraHandle.Free();
 		_camera = camera;
+		_cameraTransform = payload.Transform;
 		_hasCamera = true;
+	}
+
+	private bool TryGetCameraMatrices(out Matrix4x4 viewProjection, out Vector3 position)
+	{
+		var world = _cameraTransform.GetTransform();
+
+		if (Matrix4x4.Invert(world, out var view) == false ||
+		    Matrix4x4.Decompose(world, out _, out _, out position) == false)
+		{
+			viewProjection = Matrix4x4.Identity;
+			position = Vector3.Zero;
+			return false;
+		}
+
+		viewProjection = view * _camera.Perspective;
+		return true;
 	}
 
 	private void OnUpdate(double deltaSeconds)
@@ -1502,6 +1521,11 @@ public unsafe class WolfRendererD3D : IRenderer
 			return;
 		}
 
+		if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
+		{
+			return;
+		}
+
 		var albedoTexture = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
 		                    ?? throw new InvalidOperationException(
 			                    "Albedo texture is not compatible with the Direct3D12 backend.");
@@ -1531,12 +1555,11 @@ public unsafe class WolfRendererD3D : IRenderer
 			_activeCommandList->SetPipelineState(_gbufferPipeline.Handle);
 			_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
 
-			var viewProjection = _camera.Transform * _camera.Perspective;
 			Span<float> cameraConstants = stackalloc float[20];
 			WriteMatrix(cameraConstants, viewProjection);
-			cameraConstants[16] = _camera.Position.X;
-			cameraConstants[17] = _camera.Position.Y;
-			cameraConstants[18] = _camera.Position.Z;
+			cameraConstants[16] = cameraPosition.X;
+			cameraConstants[17] = cameraPosition.Y;
+			cameraConstants[18] = cameraPosition.Z;
 			cameraConstants[19] = 1.0f;
 
 #pragma warning disable CA2014
@@ -1644,12 +1667,16 @@ public unsafe class WolfRendererD3D : IRenderer
 		_activeCommandList->SetComputeRootDescriptorTable(0, srvGpuHandle);
 		_activeCommandList->SetComputeRootDescriptorTable(1, uavGpuHandle);
 
-		var viewProjection = _camera.Transform * _camera.Perspective;
+		if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
+		{
+			return;
+		}
+
 		Span<float> cameraConstants = stackalloc float[20];
 		WriteMatrix(cameraConstants, viewProjection);
-		cameraConstants[16] = _camera.Position.X;
-		cameraConstants[17] = _camera.Position.Y;
-		cameraConstants[18] = _camera.Position.Z;
+		cameraConstants[16] = cameraPosition.X;
+		cameraConstants[17] = cameraPosition.Y;
+		cameraConstants[18] = cameraPosition.Z;
 		cameraConstants[19] = 1.0f;
 
 		fixed (float* cameraPtr = cameraConstants)

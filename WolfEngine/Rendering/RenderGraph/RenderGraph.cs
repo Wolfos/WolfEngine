@@ -49,7 +49,7 @@ public sealed class RenderGraph
 		_passes.Clear();
 	}
 
-	public void Startup(Action startup, Action update)
+	public void Startup(Action startup, Action<float> update)
 	{
 		_renderer.Run(startup, update, OnRender);
 	}

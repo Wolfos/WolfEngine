@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Numerics;
+using WolfEngine.ECS;
 using WolfEngine.Rendering;
+using WolfEngine.TestGame;
 
 namespace WolfEngine;
 
@@ -10,11 +12,10 @@ public class Game
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
     
-    private Mesh _mesh;
-    private Material _material;
-    private Camera _camera;
-    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
-
+    private World _world;
+    private Entity _camera;
+    private Entity _monkey;
+    
     public Game(IMaterialFactory materialFactory, IRenderCommandFactory renderCommandFactory, RenderGraph renderGraph)
     {
         _materialFactory = materialFactory;
@@ -24,36 +25,80 @@ public class Game
         _renderGraph.Startup(Startup, Update);
     }
 
-    private void Update()
+    private void Update(float deltaTime)
     {
-        if (_mesh is null || _material is null)
+        foreach (var entry in _world.View<Transform, Rotator>())
         {
-            return;
+            ref var transform = ref entry.First;
+            ref var rotator = ref entry.Second;
+            
+            rotator.CurrentRotation += deltaTime * rotator.RotationSpeed;
+            transform.LocalRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, rotator.CurrentRotation); 
         }
-
-        var time = (float)_stopwatch.Elapsed.TotalSeconds;
-        var transform = Matrix4x4.CreateRotationY(time * 0.5f);
-
-        _renderGraph.SubmitCommand(_renderCommandFactory.DrawMesh(_mesh!, _material!, transform));
+        
+        // TODO: Probably only want one camera per render pass
+        // TODO: Move these two loops to render pass
+        foreach (var entry in _world.View<Transform, Camera>())
+        {
+            ref var transform = ref entry.First;
+            ref var camera = ref entry.Second;
+            
+            var command = _renderCommandFactory.SetCamera(camera, transform);
+            _renderGraph.SubmitCommand(command);
+        }
+        
+        foreach (var entry in _world.View<Transform, MeshRenderer>())
+        {
+            ref var transform = ref entry.First;
+            ref var meshRenderer = ref entry.Second;
+            
+            var command = _renderCommandFactory.DrawMesh(meshRenderer, transform);
+            _renderGraph.SubmitCommand(command);
+        }
     }
 
     private void Startup()
     {
-        InitializeContent();
+        CreateWorld();
     }
 
-    private void InitializeContent()
+    private void CreateWorld()
+    {
+        _world = new();
+
+        var (cameraComponent, cameraTransform) = CreateCamera();
+        
+        _camera = _world.CreateEntity();
+        _world.AddComponent(_camera, cameraComponent);
+        _world.AddComponent(_camera, cameraTransform);
+        
+        var (mesh, material) = CreateMonkeyResources();
+
+        var monkeyTransform = new Transform();
+        var monkeyRenderer = new MeshRenderer
+        {
+            Mesh = mesh, Material = material
+        };
+        var monkeySpinner = new Rotator
+        {
+            RotationSpeed = 0.5f
+        };
+        _monkey = _world.CreateEntity();
+        _world.AddComponent(_monkey, monkeyTransform);
+        _world.AddComponent(_monkey, monkeyRenderer);
+        _world.AddComponent(_monkey, monkeySpinner);
+    }
+
+    private (Mesh mesh, Material material) CreateMonkeyResources()
     {
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
-        _mesh = new Mesh(meshPath);
-		_material = _materialFactory.GetMaterial("gbuffer.slang", new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
-        _camera = CreateCamera();
-
-        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(_mesh));
-        _renderGraph.SubmitCommand(_renderCommandFactory.SetCamera(_camera));
+        var mesh = new Mesh(meshPath);
+        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(mesh));
+        var material = _materialFactory.GetMaterial("gbuffer.slang", new(1.0f, 0.0f, 0.0f, 1.0f));
+        return (mesh, material);
     }
 
-    private static Camera CreateCamera()
+    private static (Camera, Transform) CreateCamera()
     {
         const int screenWidth = 1280;
         const int screenHeight = 720;
@@ -69,10 +114,13 @@ public class Game
         var cameraPosition = new Vector3(0.0f, 0.0f, -5.0f);
         var target = Vector3.Zero;
         var up = Vector3.UnitY;
-        camera.Transform = CreateLookAtLeftHanded(cameraPosition, target, up);
-        camera.Position = cameraPosition;
+        
+        var view = CreateLookAtLeftHanded(cameraPosition, target, up);
+        Matrix4x4.Invert(view, out var world);
 
-        return camera;
+        var transform = new Transform(world);
+
+        return (camera, transform);
     }
 
     private static Matrix4x4 CreateLookAtLeftHanded(Vector3 position, Vector3 target, Vector3 up)

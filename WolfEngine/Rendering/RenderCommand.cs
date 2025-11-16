@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using WolfEngine.ECS;
 
 namespace WolfEngine;
 
@@ -73,11 +74,14 @@ public readonly struct RenderCommand
 
     public readonly struct SetCameraPayload
     {
-        public SetCameraPayload(GCHandle cameraHandle)
+        public SetCameraPayload(GCHandle cameraHandle, Transform transform)
         {
             CameraHandle = cameraHandle;
+            Transform = transform;
         }
 
         public GCHandle CameraHandle { get; }
+
+        public Transform Transform { get; }
     }
 }
