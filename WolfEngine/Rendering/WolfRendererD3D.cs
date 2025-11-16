@@ -11,12 +11,13 @@ using Silk.NET.Windowing;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Backend.D3D12;
+using WolfEngine.Rendering.Passes;
 using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
 using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
 using D3DFillMode = Silk.NET.Direct3D12.FillMode;
 using D3DCullMode = Silk.NET.Direct3D12.CullMode;
+using Range = Silk.NET.Direct3D12.Range;
 
 namespace WolfEngine;
 
@@ -84,19 +85,19 @@ public unsafe class WolfRendererD3D : IRenderer
 	private IInputContext _inputContext = null!;
 	private Action _startupCallback = static () => { };
 	private Action _updateCallback = static () => { };
-	private Action<float> _renderCallback = static (float deltaTime) => { };
+	private Action<float> _renderCallback = static deltaTime => { };
 	private bool _isInitialized;
 
 	private DXGI _dxgi = null!;
 	private D3D12 _d3d12 = null!;
-	private ComPtr<IDXGIFactory2> _factory = default;
-	private ComPtr<IDXGISwapChain3> _swapchain = default;
-	private ComPtr<ID3D12Device> _device = default;
+	private ComPtr<IDXGIFactory2> _factory;
+	private ComPtr<IDXGISwapChain3> _swapchain;
+	private ComPtr<ID3D12Device> _device;
 	private ComPtr<IDXGIAdapter> _adapter = default;
-	private ComPtr<ID3D12CommandQueue> _commandQueue = default;
+	private ComPtr<ID3D12CommandQueue> _commandQueue;
 	private D3D12Device _gfxDevice = null!;
 
-	private ComPtr<ID3D12DescriptorHeap> _rtvHeap = default;
+	private ComPtr<ID3D12DescriptorHeap> _rtvHeap;
 	private uint _rtvDescriptorSize;
 	private readonly CpuDescriptorHandle[] _rtvCpuHandles = new CpuDescriptorHandle[FrameCount];
 	private readonly ulong[] _frameFenceValues = new ulong[FrameCount];
@@ -105,21 +106,21 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly ComPtr<ID3D12CommandAllocator>[] _commandAllocators =
 		new ComPtr<ID3D12CommandAllocator>[FrameCount];
 
-	private ComPtr<ID3D12GraphicsCommandList> _commandList = default;
+	private ComPtr<ID3D12GraphicsCommandList> _commandList;
 	private ID3D12GraphicsCommandList* _activeCommandList;
 	private IGfxCommandList _currentGfxCommandList = null!;
-	private ComPtr<ID3D12Fence> _fence = default;
+	private ComPtr<ID3D12Fence> _fence;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
-	private ComPtr<ID3D12RootSignature> _rootSignature = default;
-	private ComPtr<ID3D12PipelineState> _gbufferPipeline = default;
-	private ComPtr<ID3D12RootSignature> _lightingRootSignature = default;
-	private ComPtr<ID3D12PipelineState> _lightingPipeline = default;
-	private ComPtr<ID3D12DescriptorHeap> _dsvHeap = default;
-	private ComPtr<ID3D12Resource> _depthBuffer = default;
-	private ComPtr<ID3D12DescriptorHeap> _lightingDescriptorHeap = default;
+	private ComPtr<ID3D12RootSignature> _rootSignature;
+	private ComPtr<ID3D12PipelineState> _gbufferPipeline;
+	private ComPtr<ID3D12RootSignature> _lightingRootSignature;
+	private ComPtr<ID3D12PipelineState> _lightingPipeline;
+	private ComPtr<ID3D12DescriptorHeap> _dsvHeap;
+	private ComPtr<ID3D12Resource> _depthBuffer;
+	private ComPtr<ID3D12DescriptorHeap> _lightingDescriptorHeap;
 	private uint _lightingDescriptorSize;
-	private ComPtr<ID3D12Resource> _lightingBuffer = default;
+	private ComPtr<ID3D12Resource> _lightingBuffer;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
 	private readonly List<DrawInstruction> _drawCommands = new();
@@ -391,7 +392,7 @@ public unsafe class WolfRendererD3D : IRenderer
 			FillMode = D3DFillMode.Solid,
 			CullMode = D3DCullMode.Back,
 			FrontCounterClockwise = 0,
-			DepthBias = Silk.NET.Direct3D12.D3D12.DefaultDepthBias,
+			DepthBias = D3D12.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
 			SlopeScaledDepthBias = 0.0f,
 			DepthClipEnable = 1,
@@ -407,8 +408,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			DepthWriteMask = DepthWriteMask.All,
 			DepthFunc = ComparisonFunc.Less,
 			StencilEnable = 0,
-			StencilReadMask = Silk.NET.Direct3D12.D3D12.DefaultStencilReadMask,
-			StencilWriteMask = Silk.NET.Direct3D12.D3D12.DefaultStencilWriteMask,
+			StencilReadMask = D3D12.DefaultStencilReadMask,
+			StencilWriteMask = D3D12.DefaultStencilWriteMask,
 			FrontFace = new()
 			{
 				StencilFailOp = StencilOp.Keep,
@@ -444,11 +445,11 @@ public unsafe class WolfRendererD3D : IRenderer
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
+				PRootSignature = _rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
-				SampleMask = Silk.NET.Direct3D12.D3D12.DefaultSampleMask,
+				SampleMask = D3D12.DefaultSampleMask,
 				RasterizerState = rasterizerState,
 				DepthStencilState = depthStencilState,
 				InputLayout = inputLayout,
@@ -494,7 +495,7 @@ public unsafe class WolfRendererD3D : IRenderer
 				out colorBuffer));
 
 		void* mappedData = null;
-		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedData));
+		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Range*) null, &mappedData));
 		try
 		{
 			var color = material.Color;
@@ -502,7 +503,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 		finally
 		{
-			colorBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			colorBuffer.Unmap(0, (Range*) null);
 		}
 
 		return new D3D12MaterialResources
@@ -794,7 +795,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 			var psoDesc = new GraphicsPipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _rootSignature.Handle,
+				PRootSignature = _rootSignature.Handle,
 				VS = shaderBytecodeVS,
 				PS = shaderBytecodePS,
 				BlendState = blendState,
@@ -843,10 +844,6 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var width = Math.Max(_framebufferSize.X, 1);
 		var height = Math.Max(_framebufferSize.Y, 1);
-		if (width == 0 || height == 0)
-		{
-			return;
-		}
 
 		var desc = new ResourceDesc
 		{
@@ -891,12 +888,12 @@ public unsafe class WolfRendererD3D : IRenderer
 		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
 
 		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = (RootParameterType) 0;
+		rootParameters[0].ParameterType = 0;
 		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
 		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
 
-		rootParameters[1].ParameterType = (RootParameterType) 0;
+		rootParameters[1].ParameterType = 0;
 		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
 		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
 		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
@@ -975,7 +972,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 			var pipelineDesc = new ComputePipelineStateDesc
 			{
-				PRootSignature = (ID3D12RootSignature*) _lightingRootSignature.Handle,
+				PRootSignature = _lightingRootSignature.Handle,
 				CS = shaderBytecode,
 				NodeMask = 0,
 				CachedPSO = default,
@@ -1159,7 +1156,7 @@ public unsafe class WolfRendererD3D : IRenderer
 				out vertexUpload));
 
 		void* mappedVertices = null;
-		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedVertices));
+		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Range*) null, &mappedVertices));
 		try
 		{
 			fixed (VertexData* srcVertices = vertices)
@@ -1169,7 +1166,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 		finally
 		{
-			vertexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			vertexUpload.Unmap(0, (Range*) null);
 		}
 
 		var indices = mesh.Indices;
@@ -1214,17 +1211,17 @@ public unsafe class WolfRendererD3D : IRenderer
 				out indexUpload));
 
 		void* mappedIndices = null;
-		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Silk.NET.Direct3D12.Range*) null, &mappedIndices));
+		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Range*) null, &mappedIndices));
 		try
 		{
 			fixed (uint* srcIndices = indices)
 			{
-				System.Buffer.MemoryCopy(srcIndices, mappedIndices, indexBufferSize, indexBufferSize);
+				Buffer.MemoryCopy(srcIndices, mappedIndices, indexBufferSize, indexBufferSize);
 			}
 		}
 		finally
 		{
-			indexUpload.Unmap(0, (Silk.NET.Direct3D12.Range*) null);
+			indexUpload.Unmap(0, (Range*) null);
 		}
 
 		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
@@ -1531,7 +1528,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		GBufferPass.Record(_currentGfxCommandList, gbufferConfig, () =>
 		{
-			_activeCommandList->SetPipelineState((ID3D12PipelineState*) _gbufferPipeline.Handle);
+			_activeCommandList->SetPipelineState(_gbufferPipeline.Handle);
 			_activeCommandList->SetGraphicsRootSignature(_rootSignature.Handle);
 
 			var viewProjection = _camera.Transform * _camera.Perspective;
@@ -1588,18 +1585,10 @@ public unsafe class WolfRendererD3D : IRenderer
 			return;
 		}
 
-		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture
-		                    ?? throw new InvalidOperationException(
-			                    "G-buffer albedo texture not compatible with Direct3D12 backend.");
-		var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture
-		                    ?? throw new InvalidOperationException(
-			                    "G-buffer normal texture not compatible with Direct3D12 backend.");
-		var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture
-		                      ?? throw new InvalidOperationException(
-			                      "G-buffer material texture not compatible with Direct3D12 backend.");
-		var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture
-		                                ?? throw new InvalidOperationException(
-			                                "Backbuffer texture not compatible with Direct3D12 backend.");
+		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as ID3D12BackendTexture;
+		var gbufferNormal = context.GetTexture(resources.GBufferNormal) as ID3D12BackendTexture;
+		var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as ID3D12BackendTexture;
+		var backbufferTextureDeferred = context.GetTexture(resources.Backbuffer) as ID3D12BackendTexture;
 
 		var resourceBarriers = stackalloc ResourceBarrier[3];
 		resourceBarriers[0] = new ResourceBarrier
@@ -1643,14 +1632,14 @@ public unsafe class WolfRendererD3D : IRenderer
 			(UnorderedAccessViewDesc*) null,
 			cpuHandle);
 
-		ID3D12DescriptorHeap* descriptorHeaps = (ID3D12DescriptorHeap*) _lightingDescriptorHeap.Handle;
+		ID3D12DescriptorHeap* descriptorHeaps = _lightingDescriptorHeap.Handle;
 		_activeCommandList->SetDescriptorHeaps(1, &descriptorHeaps);
 
 		var srvGpuHandle = _lightingDescriptorHeap.GetGPUDescriptorHandleForHeapStart();
 		var uavGpuHandle = srvGpuHandle;
 		uavGpuHandle.Ptr += _lightingDescriptorSize * 3;
 
-		_activeCommandList->SetPipelineState((ID3D12PipelineState*) _lightingPipeline.Handle);
+		_activeCommandList->SetPipelineState(_lightingPipeline.Handle);
 		_activeCommandList->SetComputeRootSignature(_lightingRootSignature.Handle);
 		_activeCommandList->SetComputeRootDescriptorTable(0, srvGpuHandle);
 		_activeCommandList->SetComputeRootDescriptorTable(1, uavGpuHandle);

@@ -25,7 +25,7 @@ public sealed class RenderGraph
 	{
 		var pass = new RenderGraphPass(name);
 		_passes.Add(pass);
-		return new RenderGraphBuilder(pass, _resourceRegistry);
+		return new (pass, _resourceRegistry);
 	}
 
 	public void Execute()
