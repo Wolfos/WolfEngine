@@ -1,7 +1,5 @@
 #nullable enable
 
-using System;
-
 namespace WolfEngine.Rendering.Abstraction;
 
 /// <summary>

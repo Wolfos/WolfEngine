@@ -1,9 +1,7 @@
 #nullable enable
 
-using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
 

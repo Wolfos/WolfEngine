@@ -159,7 +159,11 @@ public sealed class RenderGraph
 	private void HandleCreateMesh(RenderCommand command)
 	{
 		var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
-		// Mesh creation is now handled by EnsureMeshResources when the mesh is first drawn
+		if (payload.MeshHandle.Target is Mesh mesh)
+		{
+			_renderer.EnsureMeshResources(mesh);
+		}
+
 		payload.MeshHandle.Free();
 	}
 

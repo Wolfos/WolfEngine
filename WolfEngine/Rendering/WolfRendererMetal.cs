@@ -422,30 +422,30 @@ public unsafe class WolfRendererMetal : IRenderer
 
         foreach (var drawCommand in _drawCommands)
         {
-            var meshResources = EnsureMeshResources(drawCommand.Mesh);
-            var materialResources = drawCommand.Material.Resources as MtlMaterialResources;
-
-            encoder.SetRenderPipelineState(materialResources.PipelineState);
-            encoder.SetVertexBuffer(meshResources.VertexBuffer, 0, 0);
-#pragma warning disable CA2014
-            var transformCopy = drawCommand.Transform;
-            var transformPtr = stackalloc Matrix4x4[1];
-            transformPtr[0] = transformCopy;
-            var matrixSize = (ulong)sizeof(Matrix4x4);
-            encoder.SetVertexBytes((IntPtr)transformPtr, matrixSize, 1);
-
-            var cameraParamsPtr = stackalloc CameraParams[1];
-            cameraParamsPtr[0] = new CameraParams
-            {
-                ViewProjection = viewProjection,
-                CameraPosition = new Vector4(cameraPosition, 1.0f)
-            };
-            var cameraParamsSize = (ulong)sizeof(CameraParams);
-            encoder.SetVertexBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
-            encoder.SetFragmentBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
-#pragma warning restore CA2014
-            encoder.SetFragmentBuffer(materialResources.ColorBuffer, 0, 0);
-            encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, meshResources.IndexCount, MTLIndexType.UInt32, meshResources.IndexBuffer, 0);
+//             var mesh = drawCommand.mesh
+//             var materialResources = drawCommand.Material.Resources as MtlMaterialResources;
+//
+//             encoder.SetRenderPipelineState(materialResources.PipelineState);
+//             encoder.SetVertexBuffer(meshResources.VertexBuffer, 0, 0);
+// #pragma warning disable CA2014
+//             var transformCopy = drawCommand.Transform;
+//             var transformPtr = stackalloc Matrix4x4[1];
+//             transformPtr[0] = transformCopy;
+//             var matrixSize = (ulong)sizeof(Matrix4x4);
+//             encoder.SetVertexBytes((IntPtr)transformPtr, matrixSize, 1);
+//
+//             var cameraParamsPtr = stackalloc CameraParams[1];
+//             cameraParamsPtr[0] = new CameraParams
+//             {
+//                 ViewProjection = viewProjection,
+//                 CameraPosition = new Vector4(cameraPosition, 1.0f)
+//             };
+//             var cameraParamsSize = (ulong)sizeof(CameraParams);
+//             encoder.SetVertexBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
+//             encoder.SetFragmentBytes((IntPtr)cameraParamsPtr, cameraParamsSize, 2);
+// #pragma warning restore CA2014
+//             encoder.SetFragmentBuffer(materialResources.ColorBuffer, 0, 0);
+//             encoder.DrawIndexedPrimitives(MTLPrimitiveType.Triangle, meshResources.IndexCount, MTLIndexType.UInt32, meshResources.IndexBuffer, 0);
         }
 
         encoder.EndEncoding();
@@ -662,15 +662,13 @@ public unsafe class WolfRendererMetal : IRenderer
         return new MeshResources(vertexBuffer, indexBuffer, (ulong)mesh.Indices.Length);
     }
 
-    private MeshResources EnsureMeshResources(Mesh mesh)
+    public void EnsureMeshResources(Mesh mesh)
     {
         if (_meshResources.TryGetValue(mesh, out var resources) == false)
         {
             resources = UploadMesh(mesh);
             _meshResources[mesh] = resources;
-        }
-
-        return resources;
+        } 
     }
 
     private void ProcessPendingCommands()

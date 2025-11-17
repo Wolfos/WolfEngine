@@ -12,8 +12,8 @@ public class Mesh
     public Vector3[] Normals { get; }
     
     // GPU resources are set by the renderer after creation
-    internal IGfxBuffer? VertexBuffer { get; set; }
-    internal IGfxBuffer? IndexBuffer { get; set; }
+    internal IGfxBuffer VertexBuffer { get; set; }
+    internal IGfxBuffer IndexBuffer { get; set; }
     internal uint StrideInBytes { get; set; }
     internal uint IndexCount { get; set; }
     
@@ -65,11 +65,11 @@ public class Mesh
             for (var i = 0; i < vertexCount; i++)
             {
                 var position = rawVertices[i];
-                vertices[i] = new Vector4(position.X, position.Y, position.Z, 1.0f);
+                vertices[i] = new(position.X, position.Y, position.Z, 1.0f);
                 if (rawNormals is not null)
                 {
                     var normal = rawNormals[i];
-                    normals[i] = Vector3.Normalize(new Vector3(normal.X, normal.Y, normal.Z));
+                    normals[i] = Vector3.Normalize(new(normal.X, normal.Y, normal.Z));
                 }
             }
 
