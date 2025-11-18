@@ -10,52 +10,29 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public static class DeferredLightingPass
 {
-	public static void Record(RenderGraphContext context, DeferredLightingPassConfig config, SceneDrawData sceneData)
+	public static unsafe void Record(RenderGraphContext context, DeferredLightingPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(config);
 
 		var commandList = context.CommandList;
 
-		// D3D12-specific: Set descriptor heaps before binding any descriptors
-		if (commandList is Backend.D3D12.D3D12CommandList d3d12Cmd && config.D3D12DescriptorHeap.HasValue)
-		{
-			var heaps = new[] { config.D3D12DescriptorHeap.Value };
-			d3d12Cmd.SetDescriptorHeaps(heaps);
-		}
-
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		// D3D12-specific: Bind descriptor tables for SRVs and UAVs
-		if (commandList is Backend.D3D12.D3D12CommandList d3d12CmdList && config.D3D12GpuDescriptorHandle.HasValue)
-		{
-			// Root parameter 0: SRV descriptor table (3 GBuffer textures)
-			d3d12CmdList.SetComputeRootDescriptorTable(0, config.D3D12GpuDescriptorHandle.Value);
-			
-			// Root parameter 1: UAV descriptor table (1 output texture)
-			// UAV is at offset 3 in the heap (after the 3 SRVs)
-			var uavHandle = config.D3D12GpuDescriptorHandle.Value;
-			uavHandle.Ptr += 3 * config.D3D12DescriptorSize;
-			d3d12CmdList.SetComputeRootDescriptorTable(1, uavHandle);
-		}
-
-		// Bind descriptor table if provided (for future bindless abstraction)
-		if (config.DescriptorTable != null)
-		{
-			commandList.SetBindlessTable(config.DescriptorTable);
-		}
+		// Bind descriptor sets for SRVs and UAVs
+		commandList.BindComputeDescriptorSet(0, config.SrvTable);
+		commandList.BindComputeDescriptorSet(1, config.UavTable);
 
 		// Set camera constants (Root parameter 2)
 		Span<float> cameraConstants = stackalloc float[20];
-		WriteMatrix(cameraConstants, sceneData.ViewProjection);
-		cameraConstants[16] = sceneData.CameraPosition.X;
-		cameraConstants[17] = sceneData.CameraPosition.Y;
-		cameraConstants[18] = sceneData.CameraPosition.Z;
+		WriteMatrix(cameraConstants, sceneData.InverseProjection);
+		cameraConstants[16] = sceneData.CameraOrigin.X;
+		cameraConstants[17] = sceneData.CameraOrigin.Y;
+		cameraConstants[18] = sceneData.CameraOrigin.Z;
 		cameraConstants[19] = 1.0f;
-		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
-		commandList.SetComputeConstants(2, cameraBytes);
-
+		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(cameraConstants));
+		
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
 		var dispatchY = (uint)((config.DispatchSize.Y + 7) / 8);
@@ -87,4 +64,3 @@ public static class DeferredLightingPass
 		destination[15] = matrix.M44;
 	}
 }
-

@@ -33,6 +33,10 @@ public interface IGfxCommandList
 
 	void ClearDepthStencil(float depth);
 
+	void BindGraphicsDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet);
+
+	void BindComputeDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet);
+
 	void SetBindlessTable(IGfxDescriptorTable table);
 
 	void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0);

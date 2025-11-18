@@ -4,6 +4,10 @@ namespace WolfEngine.ECS;
 
 public struct Transform: IEntityComponent
 {
+	public Vector3 Position => LocalPosition; // TODO: World space conversion when parenting exists
+	public Quaternion Rotation => LocalRotation; // TODO: World space conversion when parenting exists
+	public Vector3 Scale => LocalScale; // TODO: World space conversion when parenting exists
+	
 	public Vector3 LocalPosition;
 	public Quaternion LocalRotation;
 	public Vector3 LocalScale;
@@ -29,9 +33,9 @@ public struct Transform: IEntityComponent
 
 	public Matrix4x4 GetTransform()
 	{
-		var scale = Matrix4x4.CreateScale(LocalScale);
-		var rotation = Matrix4x4.CreateFromQuaternion(LocalRotation);
-		var translation = Matrix4x4.CreateTranslation(LocalPosition);
+		var scale = Matrix4x4.CreateScale(Scale);
+		var rotation = Matrix4x4.CreateFromQuaternion(Rotation);
+		var translation = Matrix4x4.CreateTranslation(Position);
 
 		return scale * rotation * translation;
 	}

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.ECS;
 
@@ -6,7 +7,7 @@ namespace WolfEngine;
 public interface IRenderCommandFactory
 {
     RenderCommand CreateMesh(Mesh mesh);
-    RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Transform transform);
+    RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Matrix4x4 transform);
 
     RenderCommand SetCamera(ref Camera camera, ref Transform transform);
 }
@@ -30,9 +31,9 @@ public class RenderCommandFactory : IRenderCommandFactory
         return new RenderCommand(RenderCommandType.CreateMesh, pointer, _arenaAllocator);
     }
 
-    public RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Transform transform)
+    public RenderCommand DrawMesh(ref MeshRenderer meshRenderer, ref Matrix4x4 transform)
     {
-        var payload = new RenderCommand.DrawMeshPayload(GCHandle.Alloc(meshRenderer.Mesh), GCHandle.Alloc(meshRenderer.Material), transform.GetTransform());
+        var payload = new RenderCommand.DrawMeshPayload(GCHandle.Alloc(meshRenderer.Mesh), GCHandle.Alloc(meshRenderer.Material), transform);
         var pointer = _arenaAllocator.Store(payload);
         return new RenderCommand(RenderCommandType.DrawMesh, pointer, _arenaAllocator);
     }

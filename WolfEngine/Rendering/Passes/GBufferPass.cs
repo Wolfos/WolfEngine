@@ -55,9 +55,9 @@ public static class GBufferPass
 		// Build camera constants once
 		Span<float> cameraConstants = stackalloc float[20];
 		WriteMatrix(cameraConstants, sceneData.ViewProjection);
-		cameraConstants[16] = sceneData.CameraPosition.X;
-		cameraConstants[17] = sceneData.CameraPosition.Y;
-		cameraConstants[18] = sceneData.CameraPosition.Z;
+			cameraConstants[16] = sceneData.CameraOrigin.X;
+			cameraConstants[17] = sceneData.CameraOrigin.Y;
+			cameraConstants[18] = sceneData.CameraOrigin.Z;
 		cameraConstants[19] = 1.0f;
 		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
 

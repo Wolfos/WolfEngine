@@ -48,7 +48,7 @@ public sealed class RenderGraphFrameBuilder
 			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
 				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
 			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
-				TextureFormat.D32Float, TextureUsage.DepthStencil)),
+				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource)),
 			LightingBuffer = _renderer.ImportLightingBuffer(_resources, framebufferSize.X, framebufferSize.Y)
 		};
 
@@ -90,6 +90,7 @@ public sealed class RenderGraphFrameBuilder
 			.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 			.SetExecute(context =>
 			{
@@ -101,17 +102,17 @@ public sealed class RenderGraphFrameBuilder
 		return true;
 	}
 
-	private unsafe DeferredLightingPassConfig BuildDeferredLightingConfig(RenderGraphContext context, RenderGraphFrameResources resources)
+	private DeferredLightingPassConfig BuildDeferredLightingConfig(RenderGraphContext context, RenderGraphFrameResources resources)
 	{
 		// Build pipeline key for deferred lighting
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new Abstraction.DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default);
+			var pipelineKey = new PipelineKey(
+				PassKind.Compute,
+				vertexEntryPoint: null,
+				pixelEntryPoint: null,
+				computeEntryPoint: "CSMain",
+				renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+				depthStencil: new Abstraction.DepthStencilFormat(TextureFormat.Unknown),
+				renderState: default);
 
 		var pipeline = new Backend.D3D12.D3D12Pipeline(
 			pipelineKey,
@@ -119,44 +120,25 @@ public sealed class RenderGraphFrameBuilder
 			_renderer.LightingPipeline,
 			_renderer.LightingRootSignature);
 
-		// TODO: Descriptor table setup is temporarily backend-specific
-		// This will be properly abstracted in future work
-		SetupDeferredLightingDescriptors(context, resources);
+		var device = _renderer.GetGfxDevice();
 
-		// Get the GPU descriptor handle for the descriptor table
-		var gpuHandle = _renderer.LightingDescriptorHeap.Handle->GetGPUDescriptorHandleForHeapStart();
+		var srvTableBuilder = device.CreateDescriptorSetBuilder();
+		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
+		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
+		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
+		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferDepth));
+		var srvTable = srvTableBuilder.Build();
+
+		var uavTableBuilder = device.CreateDescriptorSetBuilder();
+		uavTableBuilder.AddUnorderedAccess(0, context.GetTexture(resources.LightingBuffer));
+		var uavTable = uavTableBuilder.Build();
 
 		return new DeferredLightingPassConfig
 		{
 			Pipeline = pipeline,
-			DescriptorTable = null, // Not using bindless for now
-			DispatchSize = resources.FramebufferSize,
-			D3D12DescriptorHeap = _renderer.LightingDescriptorHeap,
-			D3D12GpuDescriptorHandle = gpuHandle,
-			D3D12DescriptorSize = _renderer.LightingDescriptorSize
+			SrvTable = srvTable,
+			UavTable = uavTable,
+			DispatchSize = resources.FramebufferSize
 		};
-	}
-
-	private unsafe void SetupDeferredLightingDescriptors(RenderGraphContext context, RenderGraphFrameResources resources)
-	{
-		// This is D3D12-specific descriptor setup that will be abstracted later
-		var gbufferAlbedo = context.GetTexture(resources.GBufferAlbedo) as Backend.D3D12.ID3D12BackendTexture;
-		var gbufferNormal = context.GetTexture(resources.GBufferNormal) as Backend.D3D12.ID3D12BackendTexture;
-		var gbufferMaterial = context.GetTexture(resources.GBufferMaterial) as Backend.D3D12.ID3D12BackendTexture;
-		var lightingTarget = context.GetTexture(resources.LightingBuffer) as Backend.D3D12.ID3D12BackendTexture;
-		if (lightingTarget is null)
-		{
-			throw new InvalidOperationException("Lighting target was not provided by the Direct3D12 backend.");
-		}
-
-		var cpuHandle = _renderer.LightingDescriptorHeap.Handle->GetCPUDescriptorHandleForHeapStart();
-		_renderer.Device.Handle->CreateShaderResourceView(gbufferAlbedo!.Resource, null, cpuHandle);
-		cpuHandle.Ptr += _renderer.LightingDescriptorSize;
-		_renderer.Device.Handle->CreateShaderResourceView(gbufferNormal!.Resource, null, cpuHandle);
-		cpuHandle.Ptr += _renderer.LightingDescriptorSize;
-		_renderer.Device.Handle->CreateShaderResourceView(gbufferMaterial!.Resource, null, cpuHandle);
-		cpuHandle.Ptr += _renderer.LightingDescriptorSize;
-
-		_renderer.Device.Handle->CreateUnorderedAccessView(lightingTarget.Resource, null, null, cpuHandle);
 	}
 }

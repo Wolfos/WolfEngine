@@ -1,6 +1,7 @@
 #nullable enable
 
 using System.Numerics;
+using System.Collections.Generic;
 
 namespace WolfEngine.Rendering;
 
@@ -9,16 +10,20 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class SceneDrawData
 {
-	public SceneDrawData(Matrix4x4 viewProjection, Vector3 cameraPosition, IReadOnlyList<DrawPacket> drawPackets)
+	public SceneDrawData(Matrix4x4 viewProjection, Matrix4x4 inverseProjection, Vector3 cameraOrigin,
+		IReadOnlyList<DrawPacket> drawPackets)
 	{
 		ViewProjection = viewProjection;
-		CameraPosition = cameraPosition;
+		InverseProjection = inverseProjection;
+		CameraOrigin = cameraOrigin;
 		DrawPackets = drawPackets ?? throw new ArgumentNullException(nameof(drawPackets));
 	}
 
 	public Matrix4x4 ViewProjection { get; }
+
+	public Matrix4x4 InverseProjection { get; }
 	
-	public Vector3 CameraPosition { get; }
+	public Vector3 CameraOrigin { get; }
 	
 	public IReadOnlyList<DrawPacket> DrawPackets { get; }
 }

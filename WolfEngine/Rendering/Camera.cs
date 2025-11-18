@@ -7,9 +7,9 @@ public struct Camera: IEntityComponent
 {
 	public Matrix4x4 Perspective { get; private set; }
 
-	public int ScreenResolutionX { get; set; }
-	public int ScreenResolutionY { get; set; }
-
+	public int ScreenResolutionX;
+	public int ScreenResolutionY;
+	
 	public void SetPerspective(float fov)
 	{
 		fov = float.DegreesToRadians(fov);

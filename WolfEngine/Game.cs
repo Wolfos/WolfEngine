@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
@@ -47,12 +46,15 @@ public class Game
             _renderGraph.SubmitCommand(command);
         }
         
+        
         foreach (var entry in _world.View<Transform, MeshRenderer>())
         {
             ref var transform = ref entry.First;
             ref var meshRenderer = ref entry.Second;
+
+            var transformMatrix = transform.GetTransform();
             
-            var command = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transform);
+            var command = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transformMatrix);
             _renderGraph.SubmitCommand(command);
         }
     }
@@ -91,7 +93,7 @@ public class Game
 
     private (Mesh mesh, Material material) CreateMonkeyResources()
     {
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "Monkey.obj");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
         var mesh = new Mesh(meshPath);
         _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(mesh));
         var material = _materialFactory.GetMaterial("gbuffer.slang", new(1.0f, 0.0f, 0.0f, 1.0f));
@@ -111,7 +113,7 @@ public class Game
         };
         camera.SetPerspective(fieldOfView);
 
-        var cameraPosition = new Vector3(0.0f, 0.0f, -5.0f);
+        var cameraPosition = new Vector3(0.0f, 0.0f, -3.0f);
         var target = Vector3.Zero;
         var up = Vector3.UnitY;
         

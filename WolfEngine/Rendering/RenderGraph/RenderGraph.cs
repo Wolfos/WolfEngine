@@ -18,7 +18,7 @@ public sealed class RenderGraph
 	private readonly RenderGraphCompiler _compiler;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly List<DrawPacket> _drawPackets = new();
-	private Camera? _camera;
+	private Camera _camera;
 	private Transform _cameraTransform;
 	private bool _hasCamera;
 
@@ -26,8 +26,8 @@ public sealed class RenderGraph
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
-		_frameBuilder = new RenderGraphFrameBuilder(resourceRegistry, renderer);
-		_compiler = new RenderGraphCompiler(resourceRegistry);
+		_frameBuilder = new(resourceRegistry, renderer);
+		_compiler = new(resourceRegistry);
 	}
 
 
@@ -47,14 +47,27 @@ public sealed class RenderGraph
 
 		// Build scene data from camera and draw packets
 		SceneDrawData sceneData = null;
-		if (_hasCamera && _camera.HasValue)
+		if (_hasCamera)
 		{
 			var world = _cameraTransform.GetTransform();
 			if (Matrix4x4.Invert(world, out var view) &&
-			    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition))
+			    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
+			    Matrix4x4.Invert(_camera.Perspective, out var invProjection))
 			{
-				var viewProjection = view * _camera.Value.Perspective;
-				sceneData = new SceneDrawData(viewProjection, cameraPosition, _drawPackets);
+				// Use camera-relative space for draw packets
+				for (var i = 0; i < _drawPackets.Count; i++)
+				{
+					var packet = _drawPackets[i];
+					var relative = packet.Transform;
+					var translation = relative.Translation - cameraPosition;
+					relative.Translation = translation;
+					_drawPackets[i] = new(packet.Mesh, packet.Material, relative);
+				}
+
+				// Remove camera translation from the view matrix since objects are now camera-relative
+				view.Translation = Vector3.Zero;
+				var viewProjection = view * _camera.Perspective;
+				sceneData = new(viewProjection, invProjection, cameraPosition, _drawPackets);
 			}
 		}
 

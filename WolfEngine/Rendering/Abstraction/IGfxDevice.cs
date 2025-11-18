@@ -41,4 +41,9 @@ public interface IGfxDevice
 	/// Global bindless descriptor table shared across passes and command lists.
 	/// </summary>
 	IGfxDescriptorTable GlobalTable { get; }
+
+	/// <summary>
+	/// Creates a backend-specific descriptor set builder.
+	/// </summary>
+	IGfxDescriptorSetBuilder CreateDescriptorSetBuilder();
 }

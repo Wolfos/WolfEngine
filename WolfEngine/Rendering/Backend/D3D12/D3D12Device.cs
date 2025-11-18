@@ -6,6 +6,8 @@ using WolfEngine.Rendering.Abstraction;
 using Silk.NET.DXGI;
 using WolfEngine.Backend.D3D12;
 
+using FenceFlags = Silk.NET.Direct3D12.FenceFlags;
+using Fence = Silk.NET.Direct3D12.ID3D12Fence;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
@@ -21,12 +23,26 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	private readonly IGfxDescriptorTable _globalTable = new NullDescriptorTable();
 
-	private readonly List<IDisposable> _liveCommandLists = new();
+	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
+	private readonly ComPtr<Fence> _submissionFence;
+	private ulong _submissionFenceValue;
 	
 	private readonly Dictionary<PipelineKey, IGfxPipeline> _pipelineCache = new();
 	private readonly object _pipelineLock = new();
 	
+	private readonly struct CommandListSubmission
+	{
+		public CommandListSubmission(D3D12CommandList commandList, ulong fenceValue)
+		{
+			CommandList = commandList;
+			FenceValue = fenceValue;
+		}
+
+		public D3D12CommandList CommandList { get; }
+
+		public ulong FenceValue { get; }
+	}
 
 	public D3D12Device(
 		ComPtr<ID3D12Device> device,
@@ -35,6 +51,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		_device = device;
 		_graphicsQueue = graphicsQueue;
 		_computeQueue = computeQueue ?? graphicsQueue;
+		SilkMarshal.ThrowHResult(_device.CreateFence(0, FenceFlags.None, out _submissionFence));
+		_submissionFenceValue = 0;
 	}
 
 	public IGfxCommandList BeginGraphics()
@@ -60,13 +78,14 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		var queue = nativeCommandList.Type == CommandListType.Compute ? _computeQueue : _graphicsQueue;
 
 		queue.ExecuteCommandLists(1, &nativeHandle);
+		var fenceValue = ++_submissionFenceValue;
+		SilkMarshal.ThrowHResult(queue.Signal(_submissionFence, fenceValue));
 
 		lock (_commandListLock)
 		{
-			_liveCommandLists.Remove(nativeCommandList);
+			_inFlightCommandLists.Add(new CommandListSubmission(nativeCommandList, fenceValue));
+			CleanupCompletedCommandListsLocked();
 		}
-
-		nativeCommandList.Dispose();
 	}
 
 	public IGfxTexture CreateTexture(in TextureDescriptor descriptor)
@@ -204,6 +223,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		}
 	}
 
+	public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder()
+	{
+		return new D3D12DescriptorSetBuilder(_device);
+	}
+
 	public IGfxDescriptorTable GlobalTable => _globalTable;
 	
 	private static ulong Align(ulong size, ulong alignment)
@@ -227,12 +251,20 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		var wrapper = new D3D12CommandList(type, allocator, commandList);
 
-		lock (_commandListLock)
-		{
-			_liveCommandLists.Add(wrapper);
-		}
-
 		return wrapper;
+	}
+
+	private void CleanupCompletedCommandListsLocked()
+	{
+		var completedFence = _submissionFence.Handle->GetCompletedValue();
+		for (var i = _inFlightCommandLists.Count - 1; i >= 0; i--)
+		{
+			if (_inFlightCommandLists[i].FenceValue <= completedFence)
+			{
+				_inFlightCommandLists[i].CommandList.Dispose();
+				_inFlightCommandLists.RemoveAt(i);
+			}
+		}
 	}
 
 	private sealed class NullDescriptorTable : IGfxDescriptorTable

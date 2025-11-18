@@ -887,7 +887,7 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var srvRange = stackalloc DescriptorRange[1];
 		srvRange[0].RangeType = DescriptorRangeType.Srv;
-		srvRange[0].NumDescriptors = 3;
+		srvRange[0].NumDescriptors = 4;
 		srvRange[0].BaseShaderRegister = 0;
 		srvRange[0].RegisterSpace = 0;
 		srvRange[0].OffsetInDescriptorsFromTableStart = 0;

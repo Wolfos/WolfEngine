@@ -13,7 +13,7 @@ using D3D12Api = Silk.NET.Direct3D12.D3D12;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-internal unsafe class D3D12CommandList : ID3D12BackendCommandList, IDisposable
+internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 {
 	private readonly CpuDescriptorHandle[] _currentRtvHandles = new CpuDescriptorHandle[8];
 	private uint _currentRtvCount;
@@ -156,13 +156,32 @@ internal unsafe class D3D12CommandList : ID3D12BackendCommandList, IDisposable
 			"Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
 	}
 
+	public void BindGraphicsDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet)
+	{
+		throw new NotSupportedException("Graphics descriptor set binding is not yet implemented for Direct3D12.");
+	}
+
+	public void BindComputeDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet)
+	{
+		if (descriptorSet is not D3D12DescriptorSet d3dDescriptorSet)
+		{
+			throw new InvalidOperationException("Descriptor set was not created by the Direct3D12 backend.");
+		}
+
+		var heapPtr = stackalloc ID3D12DescriptorHeap*[1];
+		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
+		CommandList.SetDescriptorHeaps(1, heapPtr);
+
+		CommandList.SetComputeRootDescriptorTable(slot, d3dDescriptorSet.GpuHandle);
+	}
+
 	public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
 	{
 		if (buffer is not D3D12Buffer d3d12Buffer)
 		{
 			throw new InvalidOperationException("Buffer was not created by the Direct3D12 backend.");
 		}
-
+		
 		var resource = d3d12Buffer.Resource.Handle;
 		if (resource is null)
 		{
