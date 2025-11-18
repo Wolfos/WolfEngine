@@ -96,7 +96,15 @@ public sealed class RenderGraphFrameBuilder
 			{
 				// SceneData is guaranteed to be non-null here as RenderGraph skips passes when null
 				var config = BuildDeferredLightingConfig(context, _frameResources);
-				DeferredLightingPass.Record(context, config, context.SceneData!);
+				try
+				{
+					DeferredLightingPass.Record(context, config, context.SceneData!);
+				}
+				finally
+				{
+					config.SrvTable.Dispose();
+					config.UavTable.Dispose();
+				}
 			});
 		
 		return true;

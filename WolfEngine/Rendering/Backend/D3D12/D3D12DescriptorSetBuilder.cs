@@ -161,4 +161,9 @@ internal sealed class D3D12DescriptorSet : IGfxDescriptorSet
 	public ComPtr<ID3D12DescriptorHeap> DescriptorHeap { get; }
 
 	public GpuDescriptorHandle GpuHandle { get; }
+
+	public void Dispose()
+	{
+		DescriptorHeap.Dispose();
+	}
 }

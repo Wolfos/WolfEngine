@@ -5,7 +5,7 @@ namespace WolfEngine.Rendering.Abstraction;
 /// <summary>
 /// API-neutral descriptor set used to bind SRVs/UAVs/CBVs and samplers for a shader stage.
 /// </summary>
-public interface IGfxDescriptorSet
+public interface IGfxDescriptorSet : IDisposable
 {
 }
 
