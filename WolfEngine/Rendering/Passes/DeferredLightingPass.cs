@@ -1,9 +1,7 @@
-#nullable enable
 
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -13,8 +11,8 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class DeferredLightingPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
-	private IGfxPipeline? _pipeline;
-	private byte[]? _shaderBytes;
+	private IGfxPipeline _pipeline;
+	private byte[] _shaderBytes;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler)
 	{
