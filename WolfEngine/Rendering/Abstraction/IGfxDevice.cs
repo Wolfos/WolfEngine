@@ -47,3 +47,20 @@ public interface IGfxDevice
 	/// </summary>
 	IGfxDescriptorSetBuilder CreateDescriptorSetBuilder();
 }
+
+/// <summary>
+/// Optionally implemented by backends that support pooling of transient textures.
+/// </summary>
+public interface ITexturePoolDevice
+{
+	/// <summary>
+	/// Attempts to return a texture to the pool instead of disposing it.
+	/// Returns true if the texture was successfully pooled.
+	/// </summary>
+	bool ReturnTexture(IGfxTexture texture);
+
+	/// <summary>
+	/// Clears any pooled textures, releasing their resources.
+	/// </summary>
+	void ClearTexturePool();
+}

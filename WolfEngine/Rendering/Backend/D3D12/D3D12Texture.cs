@@ -7,7 +7,7 @@ namespace WolfEngine.Backend.D3D12;
 
 internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 {
-	private readonly TextureDescriptor _descriptor;
+	private TextureDescriptor _descriptor;
 	private ComPtr<ID3D12DescriptorHeap> _rtvHeap;
 	private ComPtr<ID3D12DescriptorHeap> _dsvHeap;
 	private CpuDescriptorHandle? _rtvHandle;
@@ -15,12 +15,14 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	public D3D12Texture(string? name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 	{
-		Name = name;
-		_descriptor = descriptor;
-		Resource = resource;
+		Initialize(name, descriptor, resource);
 	}
 
-	public string? Name { get; }
+	internal D3D12Texture()
+	{
+	}
+
+	public string? Name { get; private set; }
 
 	public TextureDescriptor Descriptor => _descriptor;
 
@@ -31,6 +33,17 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	public CpuDescriptorHandle? DepthStencilView => _dsvHandle;
 
 	ID3D12Resource* ID3D12BackendTexture.Resource => Resource.Handle;
+
+	internal void Initialize(string? name, in TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
+	{
+		Name = name;
+		_descriptor = descriptor;
+		Resource = resource;
+		DisposeHeap(ref _rtvHeap);
+		DisposeHeap(ref _dsvHeap);
+		_rtvHandle = null;
+		_dsvHandle = null;
+	}
 
 	public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
 	{
@@ -64,5 +77,8 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 			Resource.Dispose();
 			Resource = default;
 		}
+
+		_rtvHandle = null;
+		_dsvHandle = null;
 	}
 }

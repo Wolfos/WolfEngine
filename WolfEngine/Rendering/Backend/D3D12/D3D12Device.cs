@@ -21,7 +21,7 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 /// Placeholder Direct3D12 backend that satisfies the abstraction surface.
 /// Provides a staging point for wiring real D3D12 behaviour without blocking compilation.
 /// </summary>
-public sealed unsafe class D3D12Device : IGfxDevice
+public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 {
 	private readonly ComPtr<ID3D12Device> _device;
 	private readonly ComPtr<ID3D12CommandQueue> _graphicsQueue;
@@ -40,6 +40,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private ComPtr<ID3D12RootSignature> _graphicsRootSignature;
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
+	private readonly Queue<D3D12Texture> _texturePool = new();
+	private readonly object _texturePoolLock = new();
 	
 	private readonly struct CommandListSubmission
 	{
@@ -155,7 +157,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			clearValuePtr,
 			out ComPtr<ID3D12Resource> resource));
 
-		var texture = new D3D12Texture(null, descriptor, resource);
+		var texture = RentTextureWrapper();
+		texture.Initialize(null, descriptor, resource);
 
 		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
 		{
@@ -274,6 +277,19 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		return wrapper;
 	}
 
+	private D3D12Texture RentTextureWrapper()
+	{
+		lock (_texturePoolLock)
+		{
+			if (_texturePool.Count > 0)
+			{
+				return _texturePool.Dequeue();
+			}
+		}
+
+		return new D3D12Texture();
+	}
+
 	private void CleanupCompletedCommandListsLocked()
 	{
 		var completedFence = _submissionFence.Handle->GetCompletedValue();
@@ -290,6 +306,34 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 				pool.Enqueue(completed);
 				_inFlightCommandLists.RemoveAt(i);
+			}
+		}
+	}
+
+	public bool ReturnTexture(IGfxTexture texture)
+	{
+		if (texture is not D3D12Texture d3dTexture)
+		{
+			return false;
+		}
+
+		d3dTexture.Dispose();
+
+		lock (_texturePoolLock)
+		{
+			_texturePool.Enqueue(d3dTexture);
+		}
+
+		return true;
+	}
+
+	public void ClearTexturePool()
+	{
+		lock (_texturePoolLock)
+		{
+			while (_texturePool.Count > 0)
+			{
+				_texturePool.Dequeue().Dispose();
 			}
 		}
 	}

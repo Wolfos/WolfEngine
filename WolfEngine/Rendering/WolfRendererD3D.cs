@@ -725,6 +725,10 @@ public unsafe class WolfRendererD3D : IRenderer
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
 		CreateRtvHeapAndTargets();
+		if (_gfxDevice is ITexturePoolDevice poolDevice)
+		{
+			poolDevice.ClearTexturePool();
+		}
 	}
 
 	public void BeginFrame()
@@ -890,6 +894,11 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			_fence.Dispose();
 			_fence = default;
+		}
+
+		if (_gfxDevice is ITexturePoolDevice poolDevice)
+		{
+			poolDevice.ClearTexturePool();
 		}
 
 		_device.Dispose();

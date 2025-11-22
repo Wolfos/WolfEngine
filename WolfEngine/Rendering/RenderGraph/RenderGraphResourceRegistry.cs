@@ -57,10 +57,12 @@ public sealed class RenderGraphResourceRegistry
 	private readonly Dictionary<int, TextureRecord> _textures = new();
 	private readonly Dictionary<int, BufferRecord> _buffers = new();
 	private IGfxDevice _device = null!;
+	private ITexturePoolDevice? _texturePoolDevice;
 
 	public void SetDevice(IGfxDevice device)
 	{
 		_device = device;
+		_texturePoolDevice = device as ITexturePoolDevice;
 	}
 
 	public void BeginFrame()
@@ -72,10 +74,18 @@ public sealed class RenderGraphResourceRegistry
 				continue;
 			}
 
-			if (record.Texture is IDisposable disposable)
+			if (record.Texture is null)
+			{
+				continue;
+			}
+
+			var returned = _texturePoolDevice?.ReturnTexture(record.Texture) ?? false;
+			if (returned == false && record.Texture is IDisposable disposable)
 			{
 				disposable.Dispose();
 			}
+
+			record.Texture = null;
 		}
 		
 		foreach (var (_, record) in _buffers)
