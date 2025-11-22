@@ -3,19 +3,33 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine;
 
 namespace WolfEngine.Rendering.Passes;
 
 /// <summary>
 /// API-agnostic deferred lighting compute pass that shades the G-buffer into the output texture.
 /// </summary>
-public static class DeferredLightingPass
+public sealed class DeferredLightingPass
 {
-	public static DeferredLightingPassConfig BuildDeferredLightingConfig(RenderGraphContext context, RenderGraphFrameResources resources, IRenderer renderer)
-	{
-		var pipeline = renderer.GetDeferredLightingPipeline();
+	private readonly IShaderCompiler _shaderCompiler;
+	private IGfxPipeline? _pipeline;
+	private byte[]? _shaderBytes;
 
-		var device = renderer.GetGfxDevice();
+	public DeferredLightingPass(IShaderCompiler shaderCompiler)
+	{
+		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+	}
+
+	public DeferredLightingPassConfig BuildConfig(
+		RenderGraphContext context,
+		RenderGraphFrameResources resources,
+		IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(device);
+
+		var pipeline = EnsurePipeline(device);
 
 		var srvTableBuilder = device.CreateDescriptorSetBuilder();
 		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
@@ -37,7 +51,7 @@ public static class DeferredLightingPass
 		};
 	}
 
-	public static unsafe void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
+	public unsafe void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 
@@ -58,11 +72,34 @@ public static class DeferredLightingPass
 		cameraConstants[18] = sceneData.CameraOrigin.Z;
 		cameraConstants[19] = 1.0f;
 		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(cameraConstants));
-		
+
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
 		var dispatchY = (uint)((config.DispatchSize.Y + 7) / 8);
 		commandList.Dispatch(dispatchX, dispatchY, 1);
+	}
+
+	private IGfxPipeline EnsurePipeline(IGfxDevice device)
+	{
+		if (_pipeline is not null)
+		{
+			return _pipeline;
+		}
+
+		_shaderBytes ??= _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
+
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
+			renderState: default);
+
+		var shaderSet = new ShaderBytecodeSet(compute: _shaderBytes);
+		_pipeline = device.GetOrCreatePipeline(pipelineKey, shaderSet);
+		return _pipeline;
 	}
 
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)

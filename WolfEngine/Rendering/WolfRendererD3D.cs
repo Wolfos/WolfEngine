@@ -108,8 +108,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-	private byte[]? _deferredLightingShader;
-	private IGfxPipeline? _deferredLightingPipeline;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -830,31 +828,6 @@ public unsafe class WolfRendererD3D : IRenderer
 			null);
 
 		return registry.ImportTexture(imported, takeOwnership: false, initialState: ResourceState.Present);
-	}
-
-	public IGfxPipeline GetDeferredLightingPipeline()
-	{
-		if (_deferredLightingPipeline is not null)
-		{
-			return _deferredLightingPipeline;
-		}
-
-		_deferredLightingShader ??= _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Compute,
-			vertexEntryPoint: null,
-			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
-			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
-			renderState: default);
-
-		_deferredLightingPipeline = _gfxDevice.GetOrCreatePipeline(
-			pipelineKey,
-			new ShaderBytecodeSet(compute: _deferredLightingShader));
-
-		return _deferredLightingPipeline;
 	}
 
 	private void SignalAndWait()

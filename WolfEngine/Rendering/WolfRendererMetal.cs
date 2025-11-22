@@ -553,11 +553,6 @@ public unsafe class WolfRendererMetal : IRenderer
         throw new NotImplementedException();
     }
 
-    public IGfxPipeline GetDeferredLightingPipeline()
-    {
-        throw new NotImplementedException();
-    }
-
     public void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
     {
         throw new NotImplementedException();

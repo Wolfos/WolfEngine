@@ -16,7 +16,6 @@ public interface IRenderer
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle backBuffer,
 		RenderGraphResourceHandle presentedTexture);
-	IGfxPipeline GetDeferredLightingPipeline();
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 }

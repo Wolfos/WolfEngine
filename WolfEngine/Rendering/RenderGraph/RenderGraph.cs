@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;
 
@@ -23,12 +24,16 @@ public sealed class RenderGraph
 	private Transform _cameraTransform;
 	private bool _hasCamera;
 
-	public RenderGraph(RenderGraphResourceRegistry resourceRegistry, IRenderer renderer, IArenaAllocator arenaAllocator)
+	public RenderGraph(
+		RenderGraphResourceRegistry resourceRegistry,
+		IRenderer renderer,
+		IArenaAllocator arenaAllocator,
+		DeferredLightingPass deferredLightingPass)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_frameBuilder = new(resourceRegistry, renderer);
+		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
 		_compiler = new(resourceRegistry);
 	}
 

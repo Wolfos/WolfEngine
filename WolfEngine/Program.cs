@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine;
 
@@ -20,6 +21,7 @@ class Program
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
+        services.AddSingleton<DeferredLightingPass>();
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();

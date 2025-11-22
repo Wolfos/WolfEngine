@@ -20,13 +20,15 @@ public readonly struct RenderGraphFrameResources
 public sealed class RenderGraphFrameBuilder
 {
 	private readonly RenderGraphResourceRegistry _resources;
+	private readonly IRenderer _renderer;
+	private readonly DeferredLightingPass _deferredLightingPass;
 	private RenderGraphFrameResources _frameResources;
-	private IRenderer _renderer;
 
-	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer)
+	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer, DeferredLightingPass deferredLightingPass)
 	{
 		_resources = resources;
 		_renderer = renderer;
+		_deferredLightingPass = deferredLightingPass;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
@@ -95,10 +97,10 @@ public sealed class RenderGraphFrameBuilder
 			.SetExecute(context =>
 			{
 				// SceneData is guaranteed to be non-null here as RenderGraph skips passes when null
-				var config = DeferredLightingPass.BuildDeferredLightingConfig(context, _frameResources, _renderer);
+				var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
 				try
 				{
-					DeferredLightingPass.Record(context, ref config, context.SceneData!);
+					_deferredLightingPass.Record(context, ref config, context.SceneData!);
 				}
 				finally
 				{

@@ -1,6 +1,5 @@
 #nullable enable
 
-using System;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
