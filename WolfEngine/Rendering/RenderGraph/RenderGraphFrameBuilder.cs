@@ -24,7 +24,8 @@ public sealed class RenderGraphFrameBuilder
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private RenderGraphFrameResources _frameResources;
 
-	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer, DeferredLightingPass deferredLightingPass)
+	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
+		DeferredLightingPass deferredLightingPass)
 	{
 		_resources = resources;
 		_renderer = renderer;
@@ -81,7 +82,10 @@ public sealed class RenderGraphFrameBuilder
 					NormalTarget = normalTexture,
 					MaterialTarget = materialTexture,
 					DepthTarget = depthTexture,
-					AlbedoClearColor = new[] { 0.392f, 0.584f, 0.929f, 1.0f }
+					AlbedoClearColor = new(0.392f, 0.584f, 0.929f, 1.0f),
+					NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
+					MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
+					DepthClearValue = 1.0f
 				};
 
 				GBufferPass.Record(context, gbufferConfig, context.SceneData!);
@@ -108,8 +112,7 @@ public sealed class RenderGraphFrameBuilder
 					config.UavTable.Dispose();
 				}
 			});
-		
+
 		return true;
 	}
-
 }

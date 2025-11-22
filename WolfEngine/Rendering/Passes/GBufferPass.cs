@@ -10,11 +10,6 @@ public static class GBufferPass
 {
 	public static PassTargets CreatePassTargets(GBufferPassConfig config)
 	{
-		if (config is null)
-		{
-			throw new ArgumentNullException(nameof(config));
-		}
-
         var colorBindings = new[]
         {
             new ColorTargetBinding(config.AlbedoTarget),
@@ -29,11 +24,6 @@ public static class GBufferPass
 
     public static Viewport CreateViewport(GBufferPassConfig config)
     {
-        if (config is null)
-        {
-            throw new ArgumentNullException(nameof(config));
-        }
-
         return new Viewport(0.0f, 0.0f, config.FramebufferWidth, config.FramebufferHeight);
     }
 

@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -7,7 +8,7 @@ namespace WolfEngine.Rendering.Passes;
 /// <summary>
 /// Describes the API-agnostic parameters required to record the G-buffer pass.
 /// </summary>
-public sealed class GBufferPassConfig
+public struct GBufferPassConfig
 {
     public required int FramebufferWidth { get; init; }
 
@@ -21,11 +22,11 @@ public sealed class GBufferPassConfig
 
     public required IGfxTexture DepthTarget { get; init; }
 
-    public float[] AlbedoClearColor { get; init; } = [0.0f, 0.0f, 0.0f, 1.0f];
+    public Vector4 AlbedoClearColor { get; init; }
 
-    public float[] NormalClearColor { get; init; } = [0.5f, 0.5f, 1.0f, 1.0f];
+    public Vector4 NormalClearColor { get; init; }
 
-    public float[] MaterialClearColor { get; init; } = [0.0f, 0.0f, 0.0f, 1.0f];
+    public Vector4 MaterialClearColor { get; init; }
 
-    public float DepthClearValue { get; init; } = 1.0f;
+    public float DepthClearValue { get; init; }
 }

@@ -1,3 +1,4 @@
+using System.Numerics;
 using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -260,17 +261,15 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.RSSetScissorRects(1, &scissor);
 	}
 
-	public void ClearColorAttachment(uint index, ReadOnlySpan<float> color)
+	public void ClearColorAttachment(uint index, Vector4 color)
 	{
 		if (index >= _currentRtvCount)
 		{
 			throw new ArgumentOutOfRangeException(nameof(index));
 		}
 
-		fixed (float* colorPtr = color)
-		{
-			CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorPtr, 0, (Box2D<int>*) null);
-		}
+		var colorValues = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
+		CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorValues, 0, (Box2D<int>*) null);
 	}
 
 	public void ClearDepthStencil(float depth)
