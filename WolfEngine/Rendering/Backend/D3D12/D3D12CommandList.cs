@@ -53,6 +53,15 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		Allocator.Dispose();
 	}
 
+	public void Reset()
+	{
+		SilkMarshal.ThrowHResult(Allocator.Reset());
+		SilkMarshal.ThrowHResult(CommandList.Reset(Allocator, (ID3D12PipelineState*) null));
+		_isClosed = false;
+		_currentRtvCount = 0;
+		_currentDsvHandle = null;
+	}
+
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
 	{
 		var nativeViewport = new Silk.NET.Direct3D12.Viewport

@@ -39,6 +39,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private readonly object _pipelineLock = new();
 	private ComPtr<ID3D12RootSignature> _graphicsRootSignature;
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
+	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
 	
 	private readonly struct CommandListSubmission
 	{
@@ -92,7 +93,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 		lock (_commandListLock)
 		{
-			_inFlightCommandLists.Add(new CommandListSubmission(nativeCommandList, fenceValue));
+			_inFlightCommandLists.Add(new(nativeCommandList, fenceValue));
 			CleanupCompletedCommandListsLocked();
 		}
 	}
@@ -251,6 +252,13 @@ public sealed unsafe class D3D12Device : IGfxDevice
 
 	private IGfxCommandList CreateCommandList(CommandListType type)
 	{
+		if (_commandListPool.TryGetValue(type, out var queue) && queue.Count > 0)
+		{
+			var pooled = queue.Dequeue();
+			pooled.Reset();
+			return pooled;
+		}
+
 		SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(type, out ComPtr<ID3D12CommandAllocator> allocator));
 
 		SilkMarshal.ThrowHResult(
@@ -273,7 +281,14 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		{
 			if (_inFlightCommandLists[i].FenceValue <= completedFence)
 			{
-				_inFlightCommandLists[i].CommandList.Dispose();
+				var completed = _inFlightCommandLists[i].CommandList;
+				if (_commandListPool.TryGetValue(completed.Type, out var pool) == false)
+				{
+					pool = new Queue<D3D12CommandList>();
+					_commandListPool[completed.Type] = pool;
+				}
+
+				pool.Enqueue(completed);
 				_inFlightCommandLists.RemoveAt(i);
 			}
 		}
