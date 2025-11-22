@@ -307,7 +307,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		SilkMarshal.ThrowHResult(
 			_d3d12.CreateDevice(
 				_adapter,
-				D3DFeatureLevel.Level120,
+				D3DFeatureLevel.Level122,
 				out _device));
 		var commandQueueDescription = new CommandQueueDesc(
 			type: CommandListType.Direct,
@@ -1408,8 +1408,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		_frameFenceValues[_backbufferIndex] = _fenceValue;
 
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
-
-		_arenaAllocator.Reset();
 	}
 
 	public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry,

@@ -19,10 +19,6 @@ internal unsafe class ArenaAllocator : IArenaAllocator
     private readonly List<Block> _blocks = new();
     private int _currentBlockIndex = -1;
 
-    public ArenaAllocator()
-    {
-    }
-
     ~ArenaAllocator()
     {
         DisposeUnmanaged();

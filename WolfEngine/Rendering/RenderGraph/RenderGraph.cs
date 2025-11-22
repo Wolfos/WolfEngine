@@ -14,6 +14,7 @@ public sealed class RenderGraph
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
 	private readonly RenderGraphFrameBuilder _frameBuilder;
 	private readonly IRenderer _renderer;
+	private readonly IArenaAllocator _arenaAllocator;
 	private readonly List<RenderGraphPass> _passes = new();
 	private readonly RenderGraphCompiler _compiler;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
@@ -22,10 +23,11 @@ public sealed class RenderGraph
 	private Transform _cameraTransform;
 	private bool _hasCamera;
 
-	public RenderGraph(RenderGraphResourceRegistry resourceRegistry, IRenderer renderer)
+	public RenderGraph(RenderGraphResourceRegistry resourceRegistry, IRenderer renderer, IArenaAllocator arenaAllocator)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
+		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer);
 		_compiler = new(resourceRegistry);
 	}
@@ -148,6 +150,7 @@ public sealed class RenderGraph
 
 		// Clear for next frame
 		_drawPackets.Clear();
+		_arenaAllocator.Reset();
 	}
 
 	private void ProcessCommands()
