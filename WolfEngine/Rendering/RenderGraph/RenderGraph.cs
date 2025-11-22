@@ -17,6 +17,7 @@ public sealed class RenderGraph
 	private readonly IRenderer _renderer;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly List<RenderGraphPass> _passes = new();
+	private readonly Queue<RenderGraphPass> _passPool = new();
 	private readonly RenderGraphCompiler _compiler;
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly List<DrawPacket> _drawPackets = new();
@@ -40,7 +41,8 @@ public sealed class RenderGraph
 
 	public RenderGraphBuilder AddPass(string name, PassKind kind = PassKind.Graphics)
 	{
-		var pass = new RenderGraphPass(name, kind);
+		var pass = _passPool.Count > 0 ? _passPool.Dequeue() : new RenderGraphPass();
+		pass.Configure(name, kind);
 		_passes.Add(pass);
 		return new(pass, _resourceRegistry);
 	}
@@ -81,7 +83,7 @@ public sealed class RenderGraph
 		// Skip all rendering if there's no scene data yet (no camera set)
 		if (sceneData == null)
 		{
-			_passes.Clear();
+			ReleasePasses();
 			return;
 		}
 
@@ -121,7 +123,7 @@ public sealed class RenderGraph
 			device.Submit(commandList);
 		}
 
-		_passes.Clear();
+		ReleasePasses();
 	}
 
 	public void Startup(Action startup, Action<float> update)
@@ -136,7 +138,7 @@ public sealed class RenderGraph
 		_renderer.BeginFrame();
 
 		_resourceRegistry.BeginFrame();
-		_passes.Clear();
+		ReleasePasses();
 
 		// Process pending render commands to build scene data
 		ProcessCommands();
@@ -216,5 +218,15 @@ public sealed class RenderGraph
 	public void SubmitCommand(RenderCommand command)
 	{
 		_pendingCommands.Enqueue(command);
+	}
+	private void ReleasePasses()
+	{
+		foreach (var pass in _passes)
+		{
+			pass.Clear();
+			_passPool.Enqueue(pass);
+		}
+
+		_passes.Clear();
 	}
 }

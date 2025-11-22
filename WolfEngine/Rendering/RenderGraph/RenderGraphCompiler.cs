@@ -10,6 +10,7 @@ namespace WolfEngine.Rendering;
 public sealed class RenderGraphCompiler
 {
 	private readonly RenderGraphResourceRegistry _registry;
+	private readonly Dictionary<int, ResourceState> _resourceStates = new();
 
 	public RenderGraphCompiler(RenderGraphResourceRegistry registry)
 	{
@@ -27,7 +28,8 @@ public sealed class RenderGraphCompiler
 		}
 
 		// Track the last state each resource was in
-		var resourceStates = new Dictionary<int, ResourceState>();
+		var resourceStates = _resourceStates;
+		resourceStates.Clear();
 
 		foreach (var pass in passes)
 		{
@@ -62,6 +64,8 @@ public sealed class RenderGraphCompiler
 			var handle = new RenderGraphResourceHandle(handleId);
 			_registry.SetResourceState(handle, finalState);
 		}
+
+		resourceStates.Clear();
 	}
 
 	/// <summary>

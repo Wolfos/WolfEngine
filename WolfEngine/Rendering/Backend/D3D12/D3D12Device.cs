@@ -41,6 +41,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
 	private readonly Queue<D3D12Texture> _texturePool = new();
+	private readonly Queue<ExternalD3D12Texture> _externalTexturePool = new();
 	private readonly object _texturePoolLock = new();
 	
 	private readonly struct CommandListSubmission
@@ -210,7 +211,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			throw new ArgumentNullException(nameof(resource));
 		}
 
-		return new ExternalD3D12Texture(descriptor, resource, rtvHandle, dsvHandle);
+		var wrapper = RentExternalTextureWrapper();
+		wrapper.Initialize(descriptor, resource, rtvHandle, dsvHandle);
+		return wrapper;
 	}
 
 	public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor)
@@ -290,6 +293,19 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		return new D3D12Texture();
 	}
 
+	private ExternalD3D12Texture RentExternalTextureWrapper()
+	{
+		lock (_texturePoolLock)
+		{
+			if (_externalTexturePool.Count > 0)
+			{
+				return _externalTexturePool.Dequeue();
+			}
+		}
+
+		return new ExternalD3D12Texture();
+	}
+
 	private void CleanupCompletedCommandListsLocked()
 	{
 		var completedFence = _submissionFence.Handle->GetCompletedValue();
@@ -312,19 +328,27 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	public bool ReturnTexture(IGfxTexture texture)
 	{
-		if (texture is not D3D12Texture d3dTexture)
+		switch (texture)
 		{
-			return false;
+			case D3D12Texture owned:
+				owned.Dispose();
+				lock (_texturePoolLock)
+				{
+					_texturePool.Enqueue(owned);
+				}
+
+				return true;
+			case ExternalD3D12Texture external:
+				external.Reset();
+				lock (_texturePoolLock)
+				{
+					_externalTexturePool.Enqueue(external);
+				}
+
+				return true;
+			default:
+				return false;
 		}
-
-		d3dTexture.Dispose();
-
-		lock (_texturePoolLock)
-		{
-			_texturePool.Enqueue(d3dTexture);
-		}
-
-		return true;
 	}
 
 	public void ClearTexturePool()
@@ -335,6 +359,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			{
 				_texturePool.Dequeue().Dispose();
 			}
+
+			_externalTexturePool.Clear();
 		}
 	}
 
@@ -820,7 +846,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	private sealed class ExternalD3D12Texture : ID3D12BackendTexture
 	{
-		public ExternalD3D12Texture(TextureDescriptor descriptor, ID3D12Resource* resource, CpuDescriptorHandle? rtv,
+		public string? Name => null;
+
+		public TextureDescriptor Descriptor { get; private set; }
+
+		public ID3D12Resource* Resource { get; private set; }
+
+		public CpuDescriptorHandle? RenderTargetView { get; private set; }
+
+		public CpuDescriptorHandle? DepthStencilView { get; private set; }
+
+		public void Initialize(TextureDescriptor descriptor, ID3D12Resource* resource, CpuDescriptorHandle? rtv,
 			CpuDescriptorHandle? dsv)
 		{
 			Descriptor = descriptor;
@@ -829,15 +865,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			DepthStencilView = dsv;
 		}
 
-		public string? Name => null;
-
-		public TextureDescriptor Descriptor { get; }
-
-		public ID3D12Resource* Resource { get; }
-
-		public CpuDescriptorHandle? RenderTargetView { get; }
-
-		public CpuDescriptorHandle? DepthStencilView { get; }
+		public void Reset()
+		{
+			Descriptor = default;
+			Resource = null;
+			RenderTargetView = null;
+			DepthStencilView = null;
+		}
 	}
 	
 

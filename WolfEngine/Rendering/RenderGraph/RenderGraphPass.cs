@@ -8,21 +8,41 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphPass
 {
-	private Action<RenderGraphContext> _execute = context => { };
+	private Action<RenderGraphContext> _execute = static _ => { };
 	private readonly List<RenderGraphResourceHandle> _reads = new();
 	private readonly List<RenderGraphResourceHandle> _writes = new();
 	private readonly List<ResourceUsage> _resourceUsages = new();
 	private readonly List<ResourceBarrierDescription> _barriers = new();
 
+	internal RenderGraphPass()
+	{
+		Name = string.Empty;
+	}
+
 	internal RenderGraphPass(string name, PassKind kind = PassKind.Graphics)
+	{
+		Configure(name, kind);
+	}
+
+	public string Name { get; private set; }
+	
+	public PassKind Kind { get; private set; }
+
+	internal void Configure(string name, PassKind kind)
 	{
 		Name = name ?? throw new ArgumentNullException(nameof(name));
 		Kind = kind;
+		Clear();
 	}
 
-	public string Name { get; }
-	
-	public PassKind Kind { get; }
+	internal void Clear()
+	{
+		_reads.Clear();
+		_writes.Clear();
+		_resourceUsages.Clear();
+		_barriers.Clear();
+		_execute = static _ => { };
+	}
 
 	internal IReadOnlyList<RenderGraphResourceHandle> Reads => _reads;
 
@@ -74,6 +94,6 @@ public sealed class RenderGraphPass
 
 	internal void Execute(RenderGraphContext context)
 	{
-	_execute(context);
+		_execute(context);
 	}
 }
