@@ -1,7 +1,6 @@
 #nullable enable
 
 using System.Numerics;
-using System.Collections.Generic;
 
 namespace WolfEngine.Rendering;
 

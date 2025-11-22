@@ -11,10 +11,11 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
+using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
+using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
+using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
 using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
 using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
-using D3DFillMode = Silk.NET.Direct3D12.FillMode;
-using D3DCullMode = Silk.NET.Direct3D12.CullMode;
 using Range = Silk.NET.Direct3D12.Range;
 
 namespace WolfEngine;
@@ -24,9 +25,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	private const int FrameCount = 2;
 
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
-
-	// Internal properties for temporary backend-specific descriptor setup
-
+	
 	private sealed class MeshResources
 	{
 		public MeshResources(
@@ -108,12 +107,9 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12Fence> _fence;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
-	private ComPtr<ID3D12RootSignature> _rootSignature;
-	private ComPtr<ID3D12PipelineState> _gbufferPipeline;
-	private ComPtr<ID3D12RootSignature> _lightingRootSignature;
-	private ComPtr<ID3D12PipelineState> _lightingPipeline;
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-	private IGfxPipeline? _lightingPipelineObject;
+	private byte[]? _deferredLightingShader;
+	private IGfxPipeline? _deferredLightingPipeline;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -282,9 +278,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
-		CreateRootSignature();
-		CreateGBufferPipeline();
-		CreateLightingPipeline();
 	}
 
 	private void CreateDeviceAndQueue()
@@ -313,140 +306,6 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
 		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
-
-		InputLayoutDesc inputLayout;
-
-		var inputElements = stackalloc InputElementDesc[2];
-		Span<byte> positionSemantic =
-			[(byte) 'P', (byte) 'O', (byte) 'S', (byte) 'I', (byte) 'T', (byte) 'I', (byte) 'O', (byte) 'N', 0];
-		inputElements[0] = new()
-		{
-			SemanticName = (byte*) Unsafe.AsPointer(ref positionSemantic.GetPinnableReference()),
-			SemanticIndex = 0,
-			Format = Format.FormatR32G32B32A32Float,
-			InputSlot = 0,
-			AlignedByteOffset = 0,
-			InputSlotClass = InputClassification.PerVertexData,
-			InstanceDataStepRate = 0
-		};
-
-		Span<byte> normalSemantic = [(byte) 'N', (byte) 'O', (byte) 'R', (byte) 'M', (byte) 'A', (byte) 'L', 0];
-		inputElements[1] = new()
-		{
-			SemanticName = (byte*) Unsafe.AsPointer(ref normalSemantic.GetPinnableReference()),
-			SemanticIndex = 0,
-			Format = Format.FormatR32G32B32Float,
-			InputSlot = 0,
-			AlignedByteOffset = 16,
-			InputSlotClass = InputClassification.PerVertexData,
-			InstanceDataStepRate = 0
-		};
-
-		inputLayout = new()
-		{
-			PInputElementDescs = inputElements,
-			NumElements = 2
-		};
-
-
-		var blendState = new BlendDesc
-		{
-			AlphaToCoverageEnable = 0,
-			IndependentBlendEnable = 0
-		};
-		blendState.RenderTarget[0] = new()
-		{
-			BlendEnable = 0,
-			LogicOpEnable = 0,
-			SrcBlend = Blend.One,
-			DestBlend = Blend.Zero,
-			BlendOp = BlendOp.Add,
-			SrcBlendAlpha = Blend.One,
-			DestBlendAlpha = Blend.Zero,
-			BlendOpAlpha = BlendOp.Add,
-			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte) ColorWriteEnable.All
-		};
-
-		var rasterizerState = new RasterizerDesc
-		{
-			FillMode = D3DFillMode.Solid,
-			CullMode = D3DCullMode.Back,
-			FrontCounterClockwise = 0,
-			DepthBias = D3D12.DefaultDepthBias,
-			DepthBiasClamp = 0.0f,
-			SlopeScaledDepthBias = 0.0f,
-			DepthClipEnable = 1,
-			MultisampleEnable = 0,
-			AntialiasedLineEnable = 0,
-			ForcedSampleCount = 0,
-			ConservativeRaster = ConservativeRasterizationMode.Off
-		};
-
-		var depthStencilState = new DepthStencilDesc
-		{
-			DepthEnable = 1,
-			DepthWriteMask = DepthWriteMask.All,
-			DepthFunc = ComparisonFunc.Less,
-			StencilEnable = 0,
-			StencilReadMask = D3D12.DefaultStencilReadMask,
-			StencilWriteMask = D3D12.DefaultStencilWriteMask,
-			FrontFace = new()
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			},
-			BackFace = new()
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			}
-		};
-
-		ComPtr<ID3D12PipelineState> pipelineState = default;
-
-		fixed (byte* vertexPtr = vertexShaderBytes)
-		fixed (byte* pixelPtr = pixelShaderBytes)
-		{
-			var shaderBytecodeVS = new ShaderBytecode
-			{
-				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint) vertexShaderBytes.Length
-			};
-
-			var shaderBytecodePS = new ShaderBytecode
-			{
-				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint) pixelShaderBytes.Length
-			};
-
-			var psoDesc = new GraphicsPipelineStateDesc
-			{
-				PRootSignature = _rootSignature.Handle,
-				VS = shaderBytecodeVS,
-				PS = shaderBytecodePS,
-				BlendState = blendState,
-				SampleMask = D3D12.DefaultSampleMask,
-				RasterizerState = rasterizerState,
-				DepthStencilState = depthStencilState,
-				InputLayout = inputLayout,
-				IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
-				PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
-				NumRenderTargets = 1,
-				DSVFormat = Format.FormatUnknown,
-				SampleDesc = new(1, 0),
-				NodeMask = 0,
-				CachedPSO = default,
-				Flags = PipelineStateFlags.None
-			};
-			psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
-
-			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out pipelineState));
-		}
 
 		var colorSize = Align((ulong) Unsafe.SizeOf<Vector4>(),
 			D3D12.ConstantBufferDataPlacementAlignment);
@@ -488,20 +347,24 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 
 		// Wrap in abstraction interfaces
+		var renderState = new RenderStateDescriptor(
+			AbstractionFillMode.Solid,
+			AbstractionCullMode.Back,
+			depthTestEnabled: true,
+			depthWriteEnabled: true,
+			BlendMode.Opaque);
+
 		var pipelineKey = new PipelineKey(
 			PassKind.Graphics,
 			vertexEntryPoint: "vertexShader",
 			pixelEntryPoint: "fragmentShader",
 			computeEntryPoint: null,
 			renderTargets: new(new[] {TextureFormat.Bgra8Unorm}),
-			depthStencil: new(TextureFormat.Unknown),
-			renderState: default);
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderState: renderState);
 
-		var pipeline = new D3D12Pipeline(
-			pipelineKey,
-			PassKind.Graphics,
-			pipelineState,
-			_rootSignature);
+		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
+		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
 
 		var constantBuffer = new D3D12Buffer(
 			$"{material.ShaderPath}_ColorBuffer",
@@ -512,10 +375,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
-			ConstantBuffer = constantBuffer,
-			// Keep internal D3D12-specific properties for backwards compatibility
-			PipelineState = pipelineState,
-			ColorBuffer = colorBuffer
+			ConstantBuffer = constantBuffer
 		};
 	}
 
@@ -606,343 +466,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		if (_fenceEvent == nint.Zero)
 		{
 			throw new InvalidOperationException("Failed to create fence event.");
-		}
-	}
-
-	private void CreateRootSignature()
-	{
-		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = RootParameterType.TypeCbv;
-		rootParameters[0].Anonymous.Descriptor = new()
-		{
-			ShaderRegister = 0,
-			RegisterSpace = 0
-		};
-		rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
-
-		rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[1].Anonymous.Constants = new()
-		{
-			ShaderRegister = 1,
-			RegisterSpace = 0,
-			Num32BitValues = 16
-		};
-		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
-
-		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[2].Anonymous.Constants = new()
-		{
-			ShaderRegister = 2,
-			RegisterSpace = 0,
-			Num32BitValues = 20
-		};
-		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
-
-		var rootSignatureDesc = new RootSignatureDesc
-		{
-			NumParameters = 3,
-			PParameters = rootParameters,
-			NumStaticSamplers = 0,
-			PStaticSamplers = null,
-			Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
-		};
-
-		var versionedDesc = new VersionedRootSignatureDesc
-		{
-			Version = D3DRootSignatureVersion.Version10
-		};
-		versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
-
-		ID3D10Blob* rootSignatureBlob = null;
-		ID3D10Blob* rootSignatureError = null;
-		var serializeResult =
-			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
-		if (rootSignatureError is not null)
-		{
-			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
-			rootSignatureError->Release();
-			if (serializeResult < 0)
-			{
-				throw new InvalidOperationException($"Failed to serialise root signature: {message}");
-			}
-		}
-
-		SilkMarshal.ThrowHResult(serializeResult);
-
-		SilkMarshal.ThrowHResult(_device.CreateRootSignature(
-			0,
-			rootSignatureBlob->GetBufferPointer(),
-			rootSignatureBlob->GetBufferSize(),
-			out _rootSignature));
-		rootSignatureBlob->Release();
-	}
-
-	private void CreateGBufferPipeline()
-	{
-		var vertexShaderBytes = _shaderCompiler.GetDxil("gbuffer.slang", "vertexShader", "vs_6_6");
-		var pixelShaderBytes = _shaderCompiler.GetDxil("gbuffer.slang", "fragmentShader", "ps_6_6");
-
-		ReadOnlySpan<byte> positionSemantic = "POSITION"u8;
-		ReadOnlySpan<byte> normalSemantic = "NORMAL"u8;
-
-		var inputElements = stackalloc InputElementDesc[2];
-		fixed (byte* positionPtr = positionSemantic)
-		fixed (byte* normalPtr = normalSemantic)
-		{
-			inputElements[0] = default;
-			inputElements[0].SemanticName = positionPtr;
-			inputElements[0].SemanticIndex = 0;
-			inputElements[0].Format = Format.FormatR32G32B32A32Float;
-			inputElements[0].InputSlot = 0;
-			inputElements[0].AlignedByteOffset = 0;
-			inputElements[0].InputSlotClass = InputClassification.PerVertexData;
-			inputElements[0].InstanceDataStepRate = 0;
-
-			inputElements[1] = default;
-			inputElements[1].SemanticName = normalPtr;
-			inputElements[1].SemanticIndex = 0;
-			inputElements[1].Format = Format.FormatR32G32B32Float;
-			inputElements[1].InputSlot = 0;
-			inputElements[1].AlignedByteOffset = 16;
-			inputElements[1].InputSlotClass = InputClassification.PerVertexData;
-			inputElements[1].InstanceDataStepRate = 0;
-		}
-
-		var inputLayout = new InputLayoutDesc
-		{
-			PInputElementDescs = inputElements,
-			NumElements = 2
-		};
-
-		var blendState = new BlendDesc
-		{
-			AlphaToCoverageEnable = 0,
-			IndependentBlendEnable = 0
-		};
-		var blendDesc = new RenderTargetBlendDesc
-		{
-			BlendEnable = 0,
-			LogicOpEnable = 0,
-			SrcBlend = Blend.One,
-			DestBlend = Blend.Zero,
-			BlendOp = BlendOp.Add,
-			SrcBlendAlpha = Blend.One,
-			DestBlendAlpha = Blend.Zero,
-			BlendOpAlpha = BlendOp.Add,
-			LogicOp = LogicOp.Noop,
-			RenderTargetWriteMask = (byte) ColorWriteEnable.All
-		};
-		blendState.RenderTarget[0] = blendDesc;
-		blendState.RenderTarget[1] = blendDesc;
-		blendState.RenderTarget[2] = blendDesc;
-
-		var rasterizerState = new RasterizerDesc
-		{
-			FillMode = D3DFillMode.Solid,
-			CullMode = D3DCullMode.Back,
-			FrontCounterClockwise = 0,
-			DepthBias = D3D12.DefaultDepthBias,
-			DepthBiasClamp = 0.0f,
-			SlopeScaledDepthBias = 0.0f,
-			DepthClipEnable = 1,
-			MultisampleEnable = 0,
-			AntialiasedLineEnable = 0,
-			ForcedSampleCount = 0,
-			ConservativeRaster = ConservativeRasterizationMode.Off
-		};
-
-		var depthStencilState = new DepthStencilDesc
-		{
-			DepthEnable = 1,
-			DepthWriteMask = DepthWriteMask.All,
-			DepthFunc = ComparisonFunc.Less,
-			StencilEnable = 0,
-			StencilReadMask = D3D12.DefaultStencilReadMask,
-			StencilWriteMask = D3D12.DefaultStencilWriteMask,
-			FrontFace = new()
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			},
-			BackFace = new()
-			{
-				StencilFailOp = StencilOp.Keep,
-				StencilDepthFailOp = StencilOp.Keep,
-				StencilPassOp = StencilOp.Keep,
-				StencilFunc = ComparisonFunc.Always
-			}
-		};
-
-		fixed (byte* vertexPtr = vertexShaderBytes)
-		fixed (byte* pixelPtr = pixelShaderBytes)
-		{
-			var shaderBytecodeVS = new ShaderBytecode
-			{
-				PShaderBytecode = vertexPtr,
-				BytecodeLength = (nuint) vertexShaderBytes.Length
-			};
-
-			var shaderBytecodePS = new ShaderBytecode
-			{
-				PShaderBytecode = pixelPtr,
-				BytecodeLength = (nuint) pixelShaderBytes.Length
-			};
-
-			var psoDesc = new GraphicsPipelineStateDesc
-			{
-				PRootSignature = _rootSignature.Handle,
-				VS = shaderBytecodeVS,
-				PS = shaderBytecodePS,
-				BlendState = blendState,
-				SampleMask = D3D12.DefaultSampleMask,
-				RasterizerState = rasterizerState,
-				DepthStencilState = depthStencilState,
-				InputLayout = inputLayout,
-				IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
-				PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
-				NumRenderTargets = 3,
-				DSVFormat = Format.FormatD32Float,
-				SampleDesc = new(1, 0),
-				NodeMask = 0,
-				CachedPSO = default,
-				Flags = PipelineStateFlags.None
-			};
-			psoDesc.RTVFormats[0] = Format.FormatB8G8R8A8Unorm;
-			psoDesc.RTVFormats[1] = Format.FormatR16G16B16A16Float;
-			psoDesc.RTVFormats[2] = Format.FormatR8G8B8A8Unorm;
-
-			SilkMarshal.ThrowHResult(_device.CreateGraphicsPipelineState(in psoDesc, out _gbufferPipeline));
-		}
-	}
-
-	private void CreateLightingPipeline()
-	{
-		var shaderBytes = _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
-
-		var srvRange = stackalloc DescriptorRange[1];
-		srvRange[0].RangeType = DescriptorRangeType.Srv;
-		srvRange[0].NumDescriptors = 4;
-		srvRange[0].BaseShaderRegister = 0;
-		srvRange[0].RegisterSpace = 0;
-		srvRange[0].OffsetInDescriptorsFromTableStart = 0;
-
-		var uavRange = stackalloc DescriptorRange[1];
-		uavRange[0].RangeType = DescriptorRangeType.Uav;
-		uavRange[0].NumDescriptors = 1;
-		uavRange[0].BaseShaderRegister = 0;
-		uavRange[0].RegisterSpace = 0;
-		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
-
-		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = 0;
-		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
-		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[1].ParameterType = 0;
-		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
-		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[2].Anonymous.Constants = new()
-		{
-			ShaderRegister = 0,
-			RegisterSpace = 0,
-			Num32BitValues = 20
-		};
-		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
-
-		var staticSampler = stackalloc StaticSamplerDesc[1];
-		staticSampler[0] = new()
-		{
-			Filter = Filter.MinMagMipLinear,
-			AddressU = TextureAddressMode.Clamp,
-			AddressV = TextureAddressMode.Clamp,
-			AddressW = TextureAddressMode.Clamp,
-			MipLODBias = 0.0f,
-			MaxAnisotropy = 0,
-			ComparisonFunc = ComparisonFunc.Always,
-			BorderColor = StaticBorderColor.TransparentBlack,
-			MinLOD = 0.0f,
-			MaxLOD = float.MaxValue,
-			ShaderRegister = 0,
-			RegisterSpace = 0,
-			ShaderVisibility = ShaderVisibility.All
-		};
-
-		var rootSignatureDesc = new RootSignatureDesc
-		{
-			NumParameters = 3,
-			PParameters = rootParameters,
-			NumStaticSamplers = 1,
-			PStaticSamplers = staticSampler,
-			Flags = RootSignatureFlags.None
-		};
-
-		var versionedDesc = new VersionedRootSignatureDesc
-		{
-			Version = D3DRootSignatureVersion.Version10
-		};
-		versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
-
-		ID3D10Blob* rootSignatureBlob = null;
-		ID3D10Blob* rootSignatureError = null;
-		var serializeResult =
-			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
-		if (rootSignatureError is not null)
-		{
-			var message = Marshal.PtrToStringAnsi((nint) rootSignatureError->GetBufferPointer());
-			rootSignatureError->Release();
-			if (serializeResult < 0)
-			{
-				throw new InvalidOperationException($"Failed to serialise lighting root signature: {message}");
-			}
-		}
-
-		SilkMarshal.ThrowHResult(serializeResult);
-		SilkMarshal.ThrowHResult(_device.CreateRootSignature(
-			0,
-			rootSignatureBlob->GetBufferPointer(),
-			rootSignatureBlob->GetBufferSize(),
-			out _lightingRootSignature));
-		rootSignatureBlob->Release();
-
-		fixed (byte* shaderPtr = shaderBytes)
-		{
-			var shaderBytecode = new ShaderBytecode
-			{
-				PShaderBytecode = shaderPtr,
-				BytecodeLength = (nuint) shaderBytes.Length
-			};
-
-			var pipelineDesc = new ComputePipelineStateDesc
-			{
-				PRootSignature = _lightingRootSignature.Handle,
-				CS = shaderBytecode,
-				NodeMask = 0,
-				CachedPSO = default,
-				Flags = PipelineStateFlags.None
-			};
-
-			SilkMarshal.ThrowHResult(_device.CreateComputePipelineState(in pipelineDesc, out _lightingPipeline));
-
-			var pipelineKey = new PipelineKey(
-				PassKind.Compute,
-				vertexEntryPoint: null,
-				pixelEntryPoint: null,
-				computeEntryPoint: "CSMain",
-				renderTargets: new RenderTargetFormats(System.Array.Empty<TextureFormat>()),
-				depthStencil: new WolfEngine.Rendering.Abstraction.DepthStencilFormat(TextureFormat.Unknown),
-				renderState: default);
-
-			_lightingPipelineObject = new D3D12Pipeline(
-				pipelineKey,
-				PassKind.Compute,
-				_lightingPipeline,
-				_lightingRootSignature);
 		}
 	}
 
@@ -1311,7 +834,27 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	public IGfxPipeline GetDeferredLightingPipeline()
 	{
-		return _lightingPipelineObject ?? throw new InvalidOperationException("Lighting pipeline was not initialised.");
+		if (_deferredLightingPipeline is not null)
+		{
+			return _deferredLightingPipeline;
+		}
+
+		_deferredLightingShader ??= _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
+
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderState: default);
+
+		_deferredLightingPipeline = _gfxDevice.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _deferredLightingShader));
+
+		return _deferredLightingPipeline;
 	}
 
 	private void SignalAndWait()
@@ -1369,30 +912,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		_meshResources.Clear();
 
 		// TODO: material disposal should be handled by render graph
-
-		if (_gbufferPipeline.Handle is not null)
-		{
-			_gbufferPipeline.Dispose();
-			_gbufferPipeline = default;
-		}
-
-		if (_lightingPipeline.Handle is not null)
-		{
-			_lightingPipeline.Dispose();
-			_lightingPipeline = default;
-		}
-
-		if (_lightingRootSignature.Handle is not null)
-		{
-			_lightingRootSignature.Dispose();
-			_lightingRootSignature = default;
-		}
-
-		if (_rootSignature.Handle is not null)
-		{
-			_rootSignature.Dispose();
-			_rootSignature = default;
-		}
 
 		if (_fence.Handle is not null)
 		{

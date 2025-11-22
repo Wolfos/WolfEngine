@@ -1,10 +1,17 @@
 #nullable enable
 
+using System;
+using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using WolfEngine.Rendering.Abstraction;
 using Silk.NET.DXGI;
 using WolfEngine.Backend.D3D12;
+using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
+using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
+using D3D12Api = Silk.NET.Direct3D12.D3D12;
+using D3DFillMode = Silk.NET.Direct3D12.FillMode;
+using D3DCullMode = Silk.NET.Direct3D12.CullMode;
 
 using FenceFlags = Silk.NET.Direct3D12.FenceFlags;
 using Fence = Silk.NET.Direct3D12.ID3D12Fence;
@@ -20,6 +27,7 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	private readonly ComPtr<ID3D12Device> _device;
 	private readonly ComPtr<ID3D12CommandQueue> _graphicsQueue;
 	private readonly ComPtr<ID3D12CommandQueue> _computeQueue;
+	private readonly D3D12Api _d3d12 = D3D12Api.GetApi();
 
 	private readonly IGfxDescriptorTable _globalTable = new NullDescriptorTable();
 
@@ -30,6 +38,8 @@ public sealed unsafe class D3D12Device : IGfxDevice
 	
 	private readonly Dictionary<PipelineKey, IGfxPipeline> _pipelineCache = new();
 	private readonly object _pipelineLock = new();
+	private ComPtr<ID3D12RootSignature> _graphicsRootSignature;
+	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	
 	private readonly struct CommandListSubmission
 	{
@@ -214,12 +224,15 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				return cached;
 			}
 
-			// TODO: Implement full pipeline creation from shader bytecode and pipeline key
-			// This requires moving PSO creation logic from WolfRendererD3D
-			// For now, pipelines are still created in the renderer
-			throw new NotSupportedException(
-				"Direct3D12 pipeline creation is not yet fully implemented. " +
-				"PSO creation still resides in WolfRendererD3D and needs to be moved here.");
+			IGfxPipeline pipeline = key.PassKind switch
+			{
+				PassKind.Graphics => CreateGraphicsPipeline(key, shaders),
+				PassKind.Compute => CreateComputePipeline(key, shaders),
+				_ => throw new NotSupportedException($"Unsupported pass kind '{key.PassKind}'.")
+			};
+
+			_pipelineCache[key] = pipeline;
+			return pipeline;
 		}
 	}
 
@@ -265,6 +278,459 @@ public sealed unsafe class D3D12Device : IGfxDevice
 				_inFlightCommandLists.RemoveAt(i);
 			}
 		}
+	}
+
+	private D3D12Pipeline CreateGraphicsPipeline(PipelineKey key, in ShaderBytecodeSet shaders)
+	{
+		if (shaders.Vertex.HasValue == false || shaders.Pixel.HasValue == false)
+		{
+			throw new InvalidOperationException("Graphics pipelines require both vertex and pixel shaders.");
+		}
+
+		EnsureGraphicsRootSignature();
+
+		var vertexShader = shaders.Vertex.Value.Span;
+		var pixelShader = shaders.Pixel.Value.Span;
+
+		Span<byte> positionSemantic = stackalloc byte["POSITION".Length + 1];
+		Span<byte> normalSemantic = stackalloc byte["NORMAL".Length + 1];
+		CopySemantic("POSITION"u8, positionSemantic);
+		CopySemantic("NORMAL"u8, normalSemantic);
+
+		var inputElements = stackalloc InputElementDesc[2];
+		fixed (byte* positionPtr = positionSemantic)
+		fixed (byte* normalPtr = normalSemantic)
+		{
+			inputElements[0] = default;
+			inputElements[0].SemanticName = positionPtr;
+			inputElements[0].SemanticIndex = 0;
+			inputElements[0].Format = Format.FormatR32G32B32A32Float;
+			inputElements[0].InputSlot = 0;
+			inputElements[0].AlignedByteOffset = 0;
+			inputElements[0].InputSlotClass = InputClassification.PerVertexData;
+			inputElements[0].InstanceDataStepRate = 0;
+
+			inputElements[1] = default;
+			inputElements[1].SemanticName = normalPtr;
+			inputElements[1].SemanticIndex = 0;
+			inputElements[1].Format = Format.FormatR32G32B32Float;
+			inputElements[1].InputSlot = 0;
+			inputElements[1].AlignedByteOffset = 16;
+			inputElements[1].InputSlotClass = InputClassification.PerVertexData;
+			inputElements[1].InstanceDataStepRate = 0;
+
+			var inputLayout = new InputLayoutDesc
+			{
+				PInputElementDescs = inputElements,
+				NumElements = 2
+			};
+
+			var renderState = CreateNormalizedRenderState(key.RenderState);
+			var blendState = CreateBlendState(renderState, key.RenderTargets.Formats.Span.Length);
+			var rasterizerState = CreateRasterizerState(renderState);
+			var depthStencilState = CreateDepthStencilState(renderState);
+
+			var targetFormats = key.RenderTargets.Formats.Span;
+			var depthFormat = key.DepthStencil.Format != TextureFormat.Unknown
+				? ToDxgiFormat(key.DepthStencil.Format)
+				: Format.FormatUnknown;
+
+			fixed (byte* vertexPtr = vertexShader)
+			fixed (byte* pixelPtr = pixelShader)
+			{
+				var shaderBytecodeVS = new ShaderBytecode
+				{
+					PShaderBytecode = vertexPtr,
+					BytecodeLength = (nuint) vertexShader.Length
+				};
+
+				var shaderBytecodePS = new ShaderBytecode
+				{
+					PShaderBytecode = pixelPtr,
+					BytecodeLength = (nuint) pixelShader.Length
+				};
+
+				var psoDesc = new GraphicsPipelineStateDesc
+				{
+					PRootSignature = _graphicsRootSignature.Handle,
+					VS = shaderBytecodeVS,
+					PS = shaderBytecodePS,
+					BlendState = blendState,
+					SampleMask = D3D12Api.DefaultSampleMask,
+					RasterizerState = rasterizerState,
+					DepthStencilState = depthStencilState,
+					InputLayout = inputLayout,
+					IBStripCutValue = IndexBufferStripCutValue.ValueDisabled,
+					PrimitiveTopologyType = PrimitiveTopologyType.Triangle,
+					NumRenderTargets = (uint) targetFormats.Length,
+					DSVFormat = depthFormat,
+					SampleDesc = new SampleDesc(1, 0),
+					NodeMask = 0,
+					CachedPSO = default,
+					Flags = PipelineStateFlags.None
+				};
+
+				for (var i = 0; i < targetFormats.Length; i++)
+				{
+					psoDesc.RTVFormats[i] = ToDxgiFormat(targetFormats[i]);
+				}
+
+				SilkMarshal.ThrowHResult(
+					_device.CreateGraphicsPipelineState(in psoDesc, out ComPtr<ID3D12PipelineState> pipelineState));
+
+				return new D3D12Pipeline(key, PassKind.Graphics, pipelineState, _graphicsRootSignature);
+			}
+		}
+	}
+
+	private D3D12Pipeline CreateComputePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
+	{
+		if (shaders.Compute.HasValue == false)
+		{
+			throw new InvalidOperationException("Compute pipelines require a compute shader.");
+		}
+
+		EnsureComputeRootSignature();
+
+		var computeShader = shaders.Compute.Value.Span;
+		fixed (byte* shaderPtr = computeShader)
+		{
+			var shaderBytecode = new ShaderBytecode
+			{
+				PShaderBytecode = shaderPtr,
+				BytecodeLength = (nuint) computeShader.Length
+			};
+
+			var pipelineDesc = new ComputePipelineStateDesc
+			{
+				PRootSignature = _computeRootSignature.Handle,
+				CS = shaderBytecode,
+				NodeMask = 0,
+				CachedPSO = default,
+				Flags = PipelineStateFlags.None
+			};
+
+			SilkMarshal.ThrowHResult(
+				_device.CreateComputePipelineState(in pipelineDesc, out ComPtr<ID3D12PipelineState> pipelineState));
+
+			return new D3D12Pipeline(key, PassKind.Compute, pipelineState, _computeRootSignature);
+		}
+	}
+
+	private void EnsureGraphicsRootSignature()
+	{
+		if (_graphicsRootSignature.Handle is not null)
+		{
+			return;
+		}
+
+		var rootParameters = stackalloc RootParameter[3];
+		rootParameters[0].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[0].Anonymous.Descriptor = new()
+		{
+			ShaderRegister = 0,
+			RegisterSpace = 0
+		};
+		rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
+
+		rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[1].Anonymous.Constants = new()
+		{
+			ShaderRegister = 1,
+			RegisterSpace = 0,
+			Num32BitValues = 16
+		};
+		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
+
+		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[2].Anonymous.Constants = new()
+		{
+			ShaderRegister = 2,
+			RegisterSpace = 0,
+			Num32BitValues = 20
+		};
+		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+
+		var rootSignatureDesc = new RootSignatureDesc
+		{
+			NumParameters = 3,
+			PParameters = rootParameters,
+			NumStaticSamplers = 0,
+			PStaticSamplers = null,
+			Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
+		};
+
+		var versionedDesc = new VersionedRootSignatureDesc
+		{
+			Version = D3DRootSignatureVersion.Version10
+		};
+		versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
+
+		ID3D10Blob* rootSignatureBlob = null;
+		ID3D10Blob* rootSignatureError = null;
+		var serializeResult =
+			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
+		try
+		{
+			HandleRootSignatureErrors(serializeResult, rootSignatureError, "graphics");
+
+			SilkMarshal.ThrowHResult(_device.CreateRootSignature(
+				0,
+				rootSignatureBlob->GetBufferPointer(),
+				rootSignatureBlob->GetBufferSize(),
+				out _graphicsRootSignature));
+		}
+		finally
+		{
+			if (rootSignatureBlob is not null)
+			{
+				rootSignatureBlob->Release();
+			}
+		}
+	}
+
+	private void EnsureComputeRootSignature()
+	{
+		if (_computeRootSignature.Handle is not null)
+		{
+			return;
+		}
+
+		var srvRange = stackalloc DescriptorRange[1];
+		srvRange[0].RangeType = DescriptorRangeType.Srv;
+		srvRange[0].NumDescriptors = 4;
+		srvRange[0].BaseShaderRegister = 0;
+		srvRange[0].RegisterSpace = 0;
+		srvRange[0].OffsetInDescriptorsFromTableStart = 0;
+
+		var uavRange = stackalloc DescriptorRange[1];
+		uavRange[0].RangeType = DescriptorRangeType.Uav;
+		uavRange[0].NumDescriptors = 1;
+		uavRange[0].BaseShaderRegister = 0;
+		uavRange[0].RegisterSpace = 0;
+		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
+
+		var rootParameters = stackalloc RootParameter[3];
+		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
+		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[1].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
+		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[2].Anonymous.Constants = new()
+		{
+			ShaderRegister = 0,
+			RegisterSpace = 0,
+			Num32BitValues = 20
+		};
+		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+
+		var staticSampler = stackalloc StaticSamplerDesc[1];
+		staticSampler[0] = new()
+		{
+			Filter = Filter.MinMagMipLinear,
+			AddressU = TextureAddressMode.Clamp,
+			AddressV = TextureAddressMode.Clamp,
+			AddressW = TextureAddressMode.Clamp,
+			MipLODBias = 0.0f,
+			MaxAnisotropy = 0,
+			ComparisonFunc = ComparisonFunc.Always,
+			BorderColor = StaticBorderColor.TransparentBlack,
+			MinLOD = 0.0f,
+			MaxLOD = float.MaxValue,
+			ShaderRegister = 0,
+			RegisterSpace = 0,
+			ShaderVisibility = ShaderVisibility.All
+		};
+
+		var rootSignatureDesc = new RootSignatureDesc
+		{
+			NumParameters = 3,
+			PParameters = rootParameters,
+			NumStaticSamplers = 1,
+			PStaticSamplers = staticSampler,
+			Flags = RootSignatureFlags.None
+		};
+
+		var versionedDesc = new VersionedRootSignatureDesc
+		{
+			Version = D3DRootSignatureVersion.Version10
+		};
+		versionedDesc.Anonymous.Desc10 = rootSignatureDesc;
+
+		ID3D10Blob* rootSignatureBlob = null;
+		ID3D10Blob* rootSignatureError = null;
+		var serializeResult =
+			_d3d12.SerializeVersionedRootSignature(&versionedDesc, &rootSignatureBlob, &rootSignatureError);
+		try
+		{
+			HandleRootSignatureErrors(serializeResult, rootSignatureError, "compute");
+
+			SilkMarshal.ThrowHResult(_device.CreateRootSignature(
+				0,
+				rootSignatureBlob->GetBufferPointer(),
+				rootSignatureBlob->GetBufferSize(),
+				out _computeRootSignature));
+		}
+		finally
+		{
+			if (rootSignatureBlob is not null)
+			{
+				rootSignatureBlob->Release();
+			}
+		}
+	}
+
+	private static void HandleRootSignatureErrors(int result, ID3D10Blob* errorBlob, string kind)
+	{
+		string? errorMessage = null;
+		if (errorBlob is not null)
+		{
+			errorMessage = Marshal.PtrToStringAnsi((nint) errorBlob->GetBufferPointer());
+			errorBlob->Release();
+		}
+
+		if (result < 0)
+		{
+			throw new InvalidOperationException($"Failed to serialize {kind} root signature: {errorMessage ?? "Unknown error"}");
+		}
+	}
+
+	private static void CopySemantic(ReadOnlySpan<byte> source, Span<byte> destination)
+	{
+		source.CopyTo(destination);
+		destination[source.Length] = 0;
+	}
+
+	private static RenderStateDescriptor CreateNormalizedRenderState(RenderStateDescriptor state)
+	{
+		var defaultState = new RenderStateDescriptor(
+			AbstractionFillMode.Solid,
+			AbstractionCullMode.Back,
+			depthTestEnabled: true,
+			depthWriteEnabled: true,
+			BlendMode.Opaque);
+
+		return state.Equals(default) ? defaultState : state;
+	}
+
+	private static BlendDesc CreateBlendState(RenderStateDescriptor state, int targetCount)
+	{
+		var blendDesc = new BlendDesc
+		{
+			AlphaToCoverageEnable = 0,
+			IndependentBlendEnable = 0
+		};
+
+		var count = Math.Max(1, targetCount);
+		for (var i = 0; i < count; i++)
+		{
+			blendDesc.RenderTarget[i] = CreateRenderTargetBlendDesc(state.BlendMode);
+		}
+
+		return blendDesc;
+	}
+
+	private static RenderTargetBlendDesc CreateRenderTargetBlendDesc(BlendMode blendMode)
+	{
+		var desc = new RenderTargetBlendDesc
+		{
+			RenderTargetWriteMask = (byte) ColorWriteEnable.All,
+			LogicOp = LogicOp.Noop,
+			LogicOpEnable = 0
+		};
+
+		switch (blendMode)
+		{
+			case BlendMode.Additive:
+				desc.BlendEnable = 1;
+				desc.SrcBlend = Blend.One;
+				desc.DestBlend = Blend.One;
+				desc.BlendOp = BlendOp.Add;
+				desc.SrcBlendAlpha = Blend.One;
+				desc.DestBlendAlpha = Blend.One;
+				desc.BlendOpAlpha = BlendOp.Add;
+				break;
+			case BlendMode.AlphaBlend:
+				desc.BlendEnable = 1;
+				desc.SrcBlend = Blend.SrcAlpha;
+				desc.DestBlend = Blend.InvSrcAlpha;
+				desc.BlendOp = BlendOp.Add;
+				desc.SrcBlendAlpha = Blend.One;
+				desc.DestBlendAlpha = Blend.One;
+				desc.BlendOpAlpha = BlendOp.Add;
+				break;
+			default:
+				desc.BlendEnable = 0;
+				desc.SrcBlend = Blend.One;
+				desc.DestBlend = Blend.Zero;
+				desc.BlendOp = BlendOp.Add;
+				desc.SrcBlendAlpha = Blend.One;
+				desc.DestBlendAlpha = Blend.Zero;
+				desc.BlendOpAlpha = BlendOp.Add;
+				break;
+		}
+
+		return desc;
+	}
+
+	private static RasterizerDesc CreateRasterizerState(RenderStateDescriptor state)
+	{
+		return new RasterizerDesc
+		{
+			FillMode = state.FillMode switch
+			{
+				AbstractionFillMode.Wireframe => D3DFillMode.Wireframe,
+				_ => D3DFillMode.Solid
+			},
+			CullMode = state.CullMode switch
+			{
+				AbstractionCullMode.None => D3DCullMode.None,
+				AbstractionCullMode.Front => D3DCullMode.Front,
+				_ => D3DCullMode.Back
+			},
+			FrontCounterClockwise = 0,
+			DepthBias = D3D12Api.DefaultDepthBias,
+			DepthBiasClamp = 0.0f,
+			SlopeScaledDepthBias = 0.0f,
+			DepthClipEnable = 1,
+			MultisampleEnable = 0,
+			AntialiasedLineEnable = 0,
+			ForcedSampleCount = 0,
+			ConservativeRaster = ConservativeRasterizationMode.Off
+		};
+	}
+
+	private static DepthStencilDesc CreateDepthStencilState(RenderStateDescriptor state)
+	{
+		return new DepthStencilDesc
+		{
+			DepthEnable = state.DepthTestEnabled ? (byte) 1 : (byte) 0,
+			DepthWriteMask = state.DepthWriteEnabled ? DepthWriteMask.All : DepthWriteMask.Zero,
+			DepthFunc = ComparisonFunc.Less,
+			StencilEnable = 0,
+			StencilReadMask = D3D12Api.DefaultStencilReadMask,
+			StencilWriteMask = D3D12Api.DefaultStencilWriteMask,
+			FrontFace = new()
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			},
+			BackFace = new()
+			{
+				StencilFailOp = StencilOp.Keep,
+				StencilDepthFailOp = StencilOp.Keep,
+				StencilPassOp = StencilOp.Keep,
+				StencilFunc = ComparisonFunc.Always
+			}
+		};
 	}
 
 	private sealed class NullDescriptorTable : IGfxDescriptorTable

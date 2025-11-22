@@ -1,13 +1,9 @@
 #nullable enable
 
-using System.Collections.Generic;
-using System.Linq;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering;
-using D3D12Api = Silk.NET.Direct3D12.D3D12;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
