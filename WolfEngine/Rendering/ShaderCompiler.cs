@@ -7,6 +7,7 @@ public interface IShaderCompiler
 {
 	string GetMetalSource(string filename);
 	byte[] GetDxil(string filename, string entryPoint, string profile);
+	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
 }
 
 public class ShaderCompiler : IShaderCompiler
@@ -94,5 +95,10 @@ public class ShaderCompiler : IShaderCompiler
 		var compiled = SlangCompiler.Compile(args.ToArray());
 		_cachedDxil.Add(key, compiled);
 		return compiled;
+	}
+
+	public ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint)
+	{
+		return GetDxil(filename, entryPoint, "cs_6_6");
 	}
 }

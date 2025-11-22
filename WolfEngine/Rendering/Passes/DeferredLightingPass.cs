@@ -12,7 +12,7 @@ public sealed class DeferredLightingPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
 	private IGfxPipeline _pipeline;
-	private byte[] _shaderBytes;
+	private ReadOnlyMemory<byte> _computeShader;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler)
 	{
@@ -84,7 +84,9 @@ public sealed class DeferredLightingPass
 			return _pipeline;
 		}
 
-		_shaderBytes ??= _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
+		_computeShader = _computeShader.IsEmpty
+			? _shaderCompiler.GetComputeShader("deferred_lighting.compute.slang", "CSMain")
+			: _computeShader;
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -95,7 +97,7 @@ public sealed class DeferredLightingPass
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default);
 
-		var shaderSet = new ShaderBytecodeSet(compute: _shaderBytes);
+		var shaderSet = new ShaderBytecodeSet(compute: _computeShader);
 		_pipeline = device.GetOrCreatePipeline(pipelineKey, shaderSet);
 		return _pipeline;
 	}
