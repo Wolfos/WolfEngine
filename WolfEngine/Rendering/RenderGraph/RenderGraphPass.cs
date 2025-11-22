@@ -54,7 +54,7 @@ public sealed class RenderGraphPass
 
 	internal void SetExecute(Action<RenderGraphContext> execute)
 	{
-		_execute = execute ?? throw new ArgumentNullException(nameof(execute));
+		_execute = execute;
 	}
 
 	internal void AddRead(RenderGraphResourceHandle handle, ResourceState state = ResourceState.ShaderResource)

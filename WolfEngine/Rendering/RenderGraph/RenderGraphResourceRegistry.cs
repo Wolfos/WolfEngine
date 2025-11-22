@@ -9,53 +9,65 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphResourceRegistry
 {
-	private sealed class TextureRecord
+private sealed class TextureRecord
+{
+	public TextureDescriptor Descriptor;
+	public bool OwnsTexture;
+	public IGfxTexture? Texture;
+	public ResourceState InitialState;
+	public ResourceState CurrentState;
+
+	public void Initialize(TextureDescriptor descriptor, bool ownsTexture, IGfxTexture? texture, ResourceState state)
 	{
-		public TextureRecord(TextureDescriptor descriptor, bool ownsTexture, IGfxTexture? texture, ResourceState initialState = ResourceState.Common)
-		{
-			Descriptor = descriptor;
-			OwnsTexture = ownsTexture;
-			Texture = texture;
-			InitialState = initialState;
-			CurrentState = initialState;
-		}
-
-		public TextureDescriptor Descriptor { get; }
-
-		public bool OwnsTexture { get; }
-
-		public IGfxTexture? Texture { get; set; }
-		
-		public ResourceState InitialState { get; }
-		
-		public ResourceState CurrentState { get; set; }
+		Descriptor = descriptor;
+		OwnsTexture = ownsTexture;
+		Texture = texture;
+		InitialState = state;
+		CurrentState = state;
 	}
 
-	private sealed class BufferRecord
+	public void Reset()
 	{
-		public BufferRecord(BufferDescriptor descriptor, bool ownsBuffer, IGfxBuffer? buffer, ResourceState initialState = ResourceState.Common)
-		{
-			Descriptor = descriptor;
-			OwnsBuffer = ownsBuffer;
-			Buffer = buffer;
-			InitialState = initialState;
-			CurrentState = initialState;
-		}
+		Descriptor = default;
+		OwnsTexture = false;
+		Texture = null;
+		InitialState = ResourceState.Common;
+		CurrentState = ResourceState.Common;
+	}
+}
 
-		public BufferDescriptor Descriptor { get; }
+private sealed class BufferRecord
+{
+	public BufferDescriptor Descriptor;
+	public bool OwnsBuffer;
+	public IGfxBuffer? Buffer;
+	public ResourceState InitialState;
+	public ResourceState CurrentState;
 
-		public bool OwnsBuffer { get; }
-
-		public IGfxBuffer? Buffer { get; set; }
-		
-		public ResourceState InitialState { get; }
-		
-		public ResourceState CurrentState { get; set; }
+	public void Initialize(BufferDescriptor descriptor, bool ownsBuffer, IGfxBuffer? buffer, ResourceState state)
+	{
+		Descriptor = descriptor;
+		OwnsBuffer = ownsBuffer;
+		Buffer = buffer;
+		InitialState = state;
+		CurrentState = state;
 	}
 
-	private int _nextHandleId = 1;
-	private readonly Dictionary<int, TextureRecord> _textures = new();
-	private readonly Dictionary<int, BufferRecord> _buffers = new();
+	public void Reset()
+	{
+		Descriptor = default;
+		OwnsBuffer = false;
+		Buffer = null;
+		InitialState = ResourceState.Common;
+		CurrentState = ResourceState.Common;
+	}
+}
+
+private int _nextHandleId = 1;
+private readonly Dictionary<int, TextureRecord> _textures = new();
+private readonly Dictionary<int, BufferRecord> _buffers = new();
+private readonly Stack<TextureRecord> _texturePool = new();
+private readonly Stack<BufferRecord> _bufferPool = new();
 private IGfxDevice _device = null!;
 private ITexturePoolDevice? _texturePoolDevice;
 
@@ -99,6 +111,16 @@ public void BeginFrame()
 			}
 		}
 
+		foreach (var record in _textures.Values)
+		{
+			_texturePool.Push(record);
+		}
+
+		foreach (var record in _buffers.Values)
+		{
+			_bufferPool.Push(record);
+		}
+
 		_textures.Clear();
 		_buffers.Clear();
 		_nextHandleId = 1;
@@ -112,7 +134,9 @@ public void BeginFrame()
 	public RenderGraphResourceHandle CreateTransientTexture(in TextureDescriptor descriptor)
 	{
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_textures[handle.Id] = new TextureRecord(descriptor, ownsTexture: true, texture: null);
+		var record = _texturePool.Count > 0 ? _texturePool.Pop() : new TextureRecord();
+		record.Initialize(descriptor, true, null, ResourceState.Common);
+		_textures[handle.Id] = record;
 		return handle;
 	}
 
@@ -124,28 +148,12 @@ public void BeginFrame()
 		}
 
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_textures[handle.Id] = new TextureRecord(texture.Descriptor, ownsTexture: takeOwnership, texture, initialState);
+		var record = _texturePool.Count > 0 ? _texturePool.Pop() : new TextureRecord();
+		record.Initialize(texture.Descriptor, takeOwnership, texture, initialState);
+		_textures[handle.Id] = record;
 		return handle;
 	}
-
-	public RenderGraphResourceHandle CreateTransientBuffer(in BufferDescriptor descriptor)
-	{
-		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_buffers[handle.Id] = new BufferRecord(descriptor, ownsBuffer: true, buffer: null);
-		return handle;
-	}
-
-	public RenderGraphResourceHandle ImportBuffer(IGfxBuffer buffer, bool takeOwnership = false, ResourceState initialState = ResourceState.Common)
-	{
-		if (buffer is null)
-		{
-			throw new ArgumentNullException(nameof(buffer));
-		}
-
-		var handle = new RenderGraphResourceHandle(_nextHandleId++);
-		_buffers[handle.Id] = new BufferRecord(buffer.Descriptor, ownsBuffer: takeOwnership, buffer, initialState);
-		return handle;
-	}
+	
 
 	internal IGfxTexture GetTexture(RenderGraphResourceHandle handle)
 	{

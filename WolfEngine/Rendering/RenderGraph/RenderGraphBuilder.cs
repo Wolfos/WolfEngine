@@ -17,16 +17,6 @@ public sealed class RenderGraphBuilder
 		_resourceRegistry = resourceRegistry;
 	}
 
-	public RenderGraphResourceHandle CreateTransientTexture(in TextureDescriptor descriptor)
-	{
-		return _resourceRegistry.CreateTransientTexture(descriptor);
-	}
-	
-	public RenderGraphResourceHandle CreateTransientBuffer(in BufferDescriptor descriptor)
-	{
-		return _resourceRegistry.CreateTransientBuffer(descriptor);
-	}
-
 	public RenderGraphBuilder ReadTexture(RenderGraphResourceHandle handle, ResourceState state = ResourceState.ShaderResource)
 	{
 		_pass.AddRead(handle, state);
@@ -41,6 +31,6 @@ public sealed class RenderGraphBuilder
 
 	public void SetExecute(Action<RenderGraphContext> execute)
 	{
-		_pass.SetExecute(execute ?? throw new ArgumentNullException(nameof(execute)));
+		_pass.SetExecute(execute);
 	}
 }

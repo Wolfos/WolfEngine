@@ -23,13 +23,20 @@ public sealed class RenderGraphFrameBuilder
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private RenderGraphFrameResources _frameResources;
+	
+	private readonly Action<RenderGraphContext> _gbufferExecute;
+	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 
+	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
 		DeferredLightingPass deferredLightingPass)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		_deferredLightingPass = deferredLightingPass;
+		
+		_gbufferExecute = ExecuteGBuffer;
+		_deferredLightingExecute = ExecuteDeferredLighting;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
@@ -57,6 +64,7 @@ public sealed class RenderGraphFrameBuilder
 
 		return _frameResources;
 	}
+	
 
 	public bool Build(RenderGraph graph)
 	{
@@ -66,30 +74,7 @@ public sealed class RenderGraphFrameBuilder
 			.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
 			.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
 			.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-			.SetExecute(context =>
-			{
-				// SceneData is guaranteed to be non-null here as RenderGraph skips passes when null
-				var albedoTexture = context.GetTexture(_frameResources.GBufferAlbedo);
-				var normalTexture = context.GetTexture(_frameResources.GBufferNormal);
-				var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
-				var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
-
-				var gbufferConfig = new GBufferPassConfig
-				{
-					FramebufferWidth = _frameResources.FramebufferSize.X,
-					FramebufferHeight = _frameResources.FramebufferSize.Y,
-					AlbedoTarget = albedoTexture,
-					NormalTarget = normalTexture,
-					MaterialTarget = materialTexture,
-					DepthTarget = depthTexture,
-					AlbedoClearColor = new(0.392f, 0.584f, 0.929f, 1.0f),
-					NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
-					MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
-					DepthClearValue = 1.0f
-				};
-
-				GBufferPass.Record(context, gbufferConfig, context.SceneData!);
-			});
+			.SetExecute(_gbufferExecute);
 
 		// Register Deferred Lighting pass with proper resource states
 		graph.AddPass("Deferred Lighting", PassKind.Compute)
@@ -98,21 +83,46 @@ public sealed class RenderGraphFrameBuilder
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
-			.SetExecute(context =>
-			{
-				// SceneData is guaranteed to be non-null here as RenderGraph skips passes when null
-				var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
-				try
-				{
-					_deferredLightingPass.Record(context, ref config, context.SceneData!);
-				}
-				finally
-				{
-					config.SrvTable.Dispose();
-					config.UavTable.Dispose();
-				}
-			});
+			.SetExecute(_deferredLightingExecute);
 
 		return true;
+	}
+
+	private void ExecuteGBuffer(RenderGraphContext context)
+	{
+		var albedoTexture = context.GetTexture(_frameResources.GBufferAlbedo);
+		var normalTexture = context.GetTexture(_frameResources.GBufferNormal);
+		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
+		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
+
+		var gbufferConfig = new GBufferPassConfig
+		{
+			FramebufferWidth = _frameResources.FramebufferSize.X,
+			FramebufferHeight = _frameResources.FramebufferSize.Y,
+			AlbedoTarget = albedoTexture,
+			NormalTarget = normalTexture,
+			MaterialTarget = materialTexture,
+			DepthTarget = depthTexture,
+			AlbedoClearColor = new(0.392f, 0.584f, 0.929f, 1.0f),
+			NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
+			MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
+			DepthClearValue = 1.0f
+		};
+
+		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
+	}
+	
+	private void ExecuteDeferredLighting(RenderGraphContext context)
+	{
+		var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
+		try
+		{
+			_deferredLightingPass.Record(context, ref config, context.SceneData!);
+		}
+		finally
+		{
+			config.SrvTable.Dispose();
+			config.UavTable.Dispose();
+		}
 	}
 }

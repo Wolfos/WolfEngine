@@ -90,14 +90,14 @@ public sealed class RenderGraph
 		foreach (var pass in _passes)
 		{
 			// Materialize resources used by this pass
-			foreach (var read in pass.Reads)
+			for (var i = 0; i < pass.Reads.Count; i++)
 			{
-				_resourceRegistry.GetTexture(read);
+				_resourceRegistry.GetTexture(pass.Reads[i]);
 			}
 
-			foreach (var write in pass.Writes)
+			for (var i = 0; i < pass.Writes.Count; i++)
 			{
-				_resourceRegistry.GetTexture(write);
+				_resourceRegistry.GetTexture(pass.Writes[i]);
 			}
 
 			// Create command list for this pass based on its kind
@@ -106,9 +106,9 @@ public sealed class RenderGraph
 				: device.BeginCompute();
 
 			// Inject barriers before the pass executes
-			foreach (var barrier in pass.Barriers)
+			for (var i = 0; i < pass.Barriers.Count; i++)
 			{
-				commandList.Barrier(barrier);
+				commandList.Barrier(pass.Barriers[i]);
 			}
 
 			// Execute the pass with the command list and scene data

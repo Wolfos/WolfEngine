@@ -29,9 +29,6 @@ public static class GBufferPass
 
 	public static void Record(RenderGraphContext context, GBufferPassConfig config, SceneDrawData sceneData)
 	{
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(config);
-
 		var commandList = context.CommandList;
         var targets = CreatePassTargets(config);
 		var viewport = CreateViewport(config);
@@ -52,8 +49,9 @@ public static class GBufferPass
 		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
 
 		// Draw all meshes
-		foreach (var drawPacket in sceneData.DrawPackets)
+		for (var i = 0; i < sceneData.DrawPackets.Count; i++)
 		{
+			var drawPacket = sceneData.DrawPackets[i];
 			var mesh = drawPacket.Mesh;
 			var material = drawPacket.Material;
 
@@ -84,9 +82,9 @@ public static class GBufferPass
 			// Set topology and buffers
 			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
-			var vertexViews = new[] 
-			{ 
-				new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, 0) 
+			var vertexViews = new[]
+			{
+				new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, 0)
 			};
 			commandList.SetVertexBuffers(vertexViews);
 

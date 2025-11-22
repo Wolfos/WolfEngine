@@ -31,11 +31,13 @@ public sealed class RenderGraphCompiler
 		var resourceStates = _resourceStates;
 		resourceStates.Clear();
 
-		foreach (var pass in passes)
+		for(int i = 0; i < passes.Count; i++)
 		{
+			var pass = passes[i];
 			// Generate barriers for resources this pass uses
-			foreach (var usage in pass.ResourceUsages)
+			for (var j = 0; j < pass.ResourceUsages.Count; j++)
 			{
+				var usage = pass.ResourceUsages[j];
 				var currentState = resourceStates.TryGetValue(usage.Handle.Id, out var state)
 					? state
 					: _registry.GetResourceState(usage.Handle);
