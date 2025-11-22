@@ -341,6 +341,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 			flags |= ResourceFlags.AllowDepthStencil;
 		}
 
+		if ((usage & TextureUsage.UnorderedAccess) != 0)
+		{
+			flags |= ResourceFlags.AllowUnorderedAccess;
+		}
+
 		if ((usage & TextureUsage.ShaderResource) == 0)
 		{
 			flags |= ResourceFlags.DenyShaderResource;
@@ -359,6 +364,11 @@ public sealed unsafe class D3D12Device : IGfxDevice
 		if ((usage & TextureUsage.DepthStencil) != 0)
 		{
 			return ResourceStates.DepthWrite;
+		}
+
+		if ((usage & TextureUsage.UnorderedAccess) != 0)
+		{
+			return ResourceStates.UnorderedAccess;
 		}
 
 		return ResourceStates.Common;

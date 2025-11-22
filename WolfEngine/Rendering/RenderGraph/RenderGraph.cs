@@ -138,13 +138,12 @@ public sealed class RenderGraph
 
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-		var depthTexture = _renderer.ImportDepthTexture(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-		_frameBuilder.BeginFrame(frameBufferSize, backBuffer, depthTexture);
+		var frameResources = _frameBuilder.BeginFrame(frameBufferSize, backBuffer);
 
 		_frameBuilder.Build(this);
 		Execute();
 
-		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, depthTexture);
+		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer);
 
 		_resourceRegistry.EndFrame();
 

@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -10,10 +11,35 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public static class DeferredLightingPass
 {
-	public static unsafe void Record(RenderGraphContext context, DeferredLightingPassConfig config, SceneDrawData sceneData)
+	public static DeferredLightingPassConfig BuildDeferredLightingConfig(RenderGraphContext context, RenderGraphFrameResources resources, IRenderer renderer)
+	{
+		var pipeline = renderer.GetDeferredLightingPipeline();
+
+		var device = renderer.GetGfxDevice();
+
+		var srvTableBuilder = device.CreateDescriptorSetBuilder();
+		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
+		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
+		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
+		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferDepth));
+		var srvTable = srvTableBuilder.Build();
+
+		var uavTableBuilder = device.CreateDescriptorSetBuilder();
+		uavTableBuilder.AddUnorderedAccess(0, context.GetTexture(resources.LightingBuffer));
+		var uavTable = uavTableBuilder.Build();
+
+		return new DeferredLightingPassConfig
+		{
+			Pipeline = pipeline,
+			SrvTable = srvTable,
+			UavTable = uavTable,
+			DispatchSize = resources.FramebufferSize
+		};
+	}
+
+	public static unsafe void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
-		ArgumentNullException.ThrowIfNull(config);
 
 		var commandList = context.CommandList;
 

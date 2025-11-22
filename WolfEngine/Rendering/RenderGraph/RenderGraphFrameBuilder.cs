@@ -10,7 +10,6 @@ public readonly struct RenderGraphFrameResources
 {
 	public Int2 FramebufferSize { get; init; }
 	public RenderGraphResourceHandle Backbuffer { get; init; }
-	public RenderGraphResourceHandle Depth { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
@@ -21,26 +20,23 @@ public readonly struct RenderGraphFrameResources
 public sealed class RenderGraphFrameBuilder
 {
 	private readonly RenderGraphResourceRegistry _resources;
-	private readonly WolfRendererD3D _renderer;
 	private RenderGraphFrameResources _frameResources;
+	private IRenderer _renderer;
 
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer)
 	{
 		_resources = resources;
-		_renderer = renderer as WolfRendererD3D
-		            ?? throw new ArgumentException("Renderer must be WolfRendererD3D for now.", nameof(renderer));
+		_renderer = renderer;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
 		Int2 framebufferSize,
-		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle depthTexture)
+		RenderGraphResourceHandle backBuffer)
 	{
 		_frameResources = new()
 		{
 			FramebufferSize = framebufferSize,
 			Backbuffer = backBuffer,
-			Depth = depthTexture,
 			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
 				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
 			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
@@ -49,7 +45,11 @@ public sealed class RenderGraphFrameBuilder
 				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
 			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
 				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource)),
-			LightingBuffer = _renderer.ImportLightingBuffer(_resources, framebufferSize.X, framebufferSize.Y)
+			LightingBuffer = _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Bgra8Unorm,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess))
 		};
 
 		return _frameResources;
@@ -95,10 +95,10 @@ public sealed class RenderGraphFrameBuilder
 			.SetExecute(context =>
 			{
 				// SceneData is guaranteed to be non-null here as RenderGraph skips passes when null
-				var config = BuildDeferredLightingConfig(context, _frameResources);
+				var config = DeferredLightingPass.BuildDeferredLightingConfig(context, _frameResources, _renderer);
 				try
 				{
-					DeferredLightingPass.Record(context, config, context.SceneData!);
+					DeferredLightingPass.Record(context, ref config, context.SceneData!);
 				}
 				finally
 				{
@@ -110,43 +110,4 @@ public sealed class RenderGraphFrameBuilder
 		return true;
 	}
 
-	private DeferredLightingPassConfig BuildDeferredLightingConfig(RenderGraphContext context, RenderGraphFrameResources resources)
-	{
-		// Build pipeline key for deferred lighting
-			var pipelineKey = new PipelineKey(
-				PassKind.Compute,
-				vertexEntryPoint: null,
-				pixelEntryPoint: null,
-				computeEntryPoint: "CSMain",
-				renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
-				depthStencil: new Abstraction.DepthStencilFormat(TextureFormat.Unknown),
-				renderState: default);
-
-		var pipeline = new Backend.D3D12.D3D12Pipeline(
-			pipelineKey,
-			PassKind.Compute,
-			_renderer.LightingPipeline,
-			_renderer.LightingRootSignature);
-
-		var device = _renderer.GetGfxDevice();
-
-		var srvTableBuilder = device.CreateDescriptorSetBuilder();
-		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
-		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
-		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
-		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferDepth));
-		var srvTable = srvTableBuilder.Build();
-
-		var uavTableBuilder = device.CreateDescriptorSetBuilder();
-		uavTableBuilder.AddUnorderedAccess(0, context.GetTexture(resources.LightingBuffer));
-		var uavTable = uavTableBuilder.Build();
-
-		return new DeferredLightingPassConfig
-		{
-			Pipeline = pipeline,
-			SrvTable = srvTable,
-			UavTable = uavTable,
-			DispatchSize = resources.FramebufferSize
-		};
-	}
 }

@@ -11,8 +11,12 @@ public interface IRenderer
 	IGfxDevice GetGfxDevice();
 	Int2 GetFrameBufferSize();
 	void BeginFrame();
-	void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture);
+	void Render(
+		float deltaTime,
+		RenderGraphResourceRegistry resourceRegistry,
+		RenderGraphResourceHandle backBuffer,
+		RenderGraphResourceHandle presentedTexture);
+	IGfxPipeline GetDeferredLightingPipeline();
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
-	RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 }

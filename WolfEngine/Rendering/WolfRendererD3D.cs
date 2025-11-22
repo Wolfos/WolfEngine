@@ -26,12 +26,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
 
 	// Internal properties for temporary backend-specific descriptor setup
-	internal ComPtr<ID3D12Device> Device => _device;
-	internal ComPtr<ID3D12PipelineState> LightingPipeline => _lightingPipeline;
-	internal ComPtr<ID3D12RootSignature> LightingRootSignature => _lightingRootSignature;
-	internal ComPtr<ID3D12DescriptorHeap> LightingDescriptorHeap => _lightingDescriptorHeap;
-	internal uint LightingDescriptorSize => _lightingDescriptorSize;
-	internal ComPtr<ID3D12Resource> LightingBuffer => _lightingBuffer;
 
 	private sealed class MeshResources
 	{
@@ -108,8 +102,6 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly CpuDescriptorHandle[] _rtvCpuHandles = new CpuDescriptorHandle[FrameCount];
 	private readonly ulong[] _frameFenceValues = new ulong[FrameCount];
 	private readonly ComPtr<ID3D12Resource>[] _renderTargets = new ComPtr<ID3D12Resource>[FrameCount];
-	private RenderGraphResourceHandle _lightingBufferHandle;
-
 	private readonly ComPtr<ID3D12CommandAllocator>[] _commandAllocators =
 		new ComPtr<ID3D12CommandAllocator>[FrameCount];
 
@@ -120,12 +112,8 @@ public unsafe class WolfRendererD3D : IRenderer
 	private ComPtr<ID3D12PipelineState> _gbufferPipeline;
 	private ComPtr<ID3D12RootSignature> _lightingRootSignature;
 	private ComPtr<ID3D12PipelineState> _lightingPipeline;
-	private ComPtr<ID3D12DescriptorHeap> _dsvHeap;
-	private ComPtr<ID3D12Resource> _depthBuffer;
-	private ComPtr<ID3D12DescriptorHeap> _lightingDescriptorHeap;
-	private uint _lightingDescriptorSize;
-	private ComPtr<ID3D12Resource> _lightingBuffer;
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+	private IGfxPipeline? _lightingPipelineObject;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -295,10 +283,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
 		CreateRootSignature();
-		CreateDepthResources();
 		CreateGBufferPipeline();
-		CreateLightingDescriptors();
-		CreateLightingBuffer();
 		CreateLightingPipeline();
 	}
 
@@ -832,55 +817,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 	}
 
-	private void CreateLightingDescriptors()
-	{
-		var heapDesc = new DescriptorHeapDesc
-		{
-			Type = DescriptorHeapType.CbvSrvUav,
-			NumDescriptors = 4,
-			Flags = DescriptorHeapFlags.ShaderVisible,
-			NodeMask = 0
-		};
-
-		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _lightingDescriptorHeap));
-		_lightingDescriptorSize = _device.GetDescriptorHandleIncrementSize(DescriptorHeapType.CbvSrvUav);
-	}
-
-	private void CreateLightingBuffer()
-	{
-		if (_lightingBuffer.Handle is not null)
-		{
-			_lightingBuffer.Dispose();
-			_lightingBuffer = default;
-		}
-
-		var width = Math.Max(_framebufferSize.X, 1);
-		var height = Math.Max(_framebufferSize.Y, 1);
-
-		var desc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Texture2D,
-			Alignment = 0,
-			Width = (ulong) width,
-			Height = (uint) height,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatB8G8R8A8Unorm,
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutUnknown,
-			Flags = ResourceFlags.AllowUnorderedAccess
-		};
-
-		var heapProps = new HeapProperties(HeapType.Default);
-		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
-			&heapProps,
-			HeapFlags.None,
-			in desc,
-			ResourceStates.UnorderedAccess,
-			null,
-			out _lightingBuffer));
-	}
-
 	private void CreateLightingPipeline()
 	{
 		var shaderBytes = _shaderCompiler.GetDxil("deferred_lighting.compute.slang", "CSMain", "cs_6_6");
@@ -992,77 +928,22 @@ public unsafe class WolfRendererD3D : IRenderer
 			};
 
 			SilkMarshal.ThrowHResult(_device.CreateComputePipelineState(in pipelineDesc, out _lightingPipeline));
+
+			var pipelineKey = new PipelineKey(
+				PassKind.Compute,
+				vertexEntryPoint: null,
+				pixelEntryPoint: null,
+				computeEntryPoint: "CSMain",
+				renderTargets: new RenderTargetFormats(System.Array.Empty<TextureFormat>()),
+				depthStencil: new WolfEngine.Rendering.Abstraction.DepthStencilFormat(TextureFormat.Unknown),
+				renderState: default);
+
+			_lightingPipelineObject = new D3D12Pipeline(
+				pipelineKey,
+				PassKind.Compute,
+				_lightingPipeline,
+				_lightingRootSignature);
 		}
-	}
-
-	private void CreateDepthResources()
-	{
-		if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
-		{
-			_framebufferSize = new(_width, _height);
-		}
-
-		if (_dsvHeap.Handle is not null)
-		{
-			_dsvHeap.Dispose();
-		}
-
-		var dsvDesc = new DescriptorHeapDesc
-		{
-			Type = DescriptorHeapType.Dsv,
-			NumDescriptors = 1,
-			Flags = DescriptorHeapFlags.None,
-			NodeMask = 0
-		};
-		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in dsvDesc, out _dsvHeap));
-
-		if (_depthBuffer.Handle is not null)
-		{
-			_depthBuffer.Dispose();
-		}
-
-		var depthDesc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Texture2D,
-			Alignment = 0,
-			Width = (ulong) Math.Max(_framebufferSize.X, 1),
-			Height = (uint) Math.Max(_framebufferSize.Y, 1),
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatD32Float,
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutUnknown,
-			Flags = ResourceFlags.AllowDepthStencil
-		};
-
-		var depthClearValue = new ClearValue
-		{
-			Format = Format.FormatD32Float
-		};
-		depthClearValue.Anonymous.DepthStencil = new()
-		{
-			Depth = 1.0f,
-			Stencil = 0
-		};
-
-		var heapProps = new HeapProperties(HeapType.Default);
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&heapProps,
-				HeapFlags.None,
-				in depthDesc,
-				ResourceStates.DepthWrite,
-				&depthClearValue,
-				out _depthBuffer));
-
-		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
-		var dsv = new DepthStencilViewDesc
-		{
-			Format = Format.FormatD32Float,
-			ViewDimension = DsvDimension.Texture2D,
-			Flags = 0
-		};
-		_device.CreateDepthStencilView(_depthBuffer, &dsv, depthHandle);
 	}
 
 
@@ -1323,8 +1204,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
 		CreateRtvHeapAndTargets();
-		CreateDepthResources();
-		CreateLightingBuffer();
 	}
 
 	public void BeginFrame()
@@ -1346,18 +1225,20 @@ public unsafe class WolfRendererD3D : IRenderer
 		// Command list creation is now handled per-pass by the render graph
 	}
 
-	public void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry,
-		RenderGraphResourceHandle backBuffer, RenderGraphResourceHandle depthTexture)
+	public void Render(
+		float deltaTime,
+		RenderGraphResourceRegistry resourceRegistry,
+		RenderGraphResourceHandle backBuffer,
+		RenderGraphResourceHandle presentedTexture)
 	{
 		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture
 		                        ?? throw new InvalidOperationException(
 			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
 
-		if (_lightingBuffer.Handle is null)
-		{
-			throw new InvalidOperationException("Lighting buffer was not initialised.");
-		}
+		var presentedResource = resourceRegistry.GetTexture(presentedTexture) as ID3D12BackendTexture
+		                        ?? throw new InvalidOperationException(
+			                        "Presented texture was not compatible with the Direct3D12 backend.");
 
 		// Copy deferred lighting output into the backbuffer, then present
 		var presentCommandList = _gfxDevice.BeginGraphics() as D3D12CommandList
@@ -1368,7 +1249,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		barriers[0] = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		barriers[0].Anonymous.Transition = new()
 		{
-			PResource = _lightingBuffer.Handle,
+			PResource = presentedResource.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.UnorderedAccess,
 			StateAfter = ResourceStates.CopySource
@@ -1383,7 +1264,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		};
 		nativeCommandList->ResourceBarrier(2, barriers);
 
-		nativeCommandList->CopyResource(backbufferTexture.Resource, _lightingBuffer.Handle);
+		nativeCommandList->CopyResource(backbufferTexture.Resource, presentedResource.Resource);
 
 		barriers[0].Anonymous.Transition.StateBefore = ResourceStates.CopySource;
 		barriers[0].Anonymous.Transition.StateAfter = ResourceStates.UnorderedAccess;
@@ -1428,52 +1309,9 @@ public unsafe class WolfRendererD3D : IRenderer
 		return registry.ImportTexture(imported, takeOwnership: false, initialState: ResourceState.Present);
 	}
 
-	public RenderGraphResourceHandle ImportLightingBuffer(RenderGraphResourceRegistry registry, int width, int height)
+	public IGfxPipeline GetDeferredLightingPipeline()
 	{
-		if (_lightingBuffer.Handle is null)
-		{
-			throw new InvalidOperationException("Lighting buffer was not initialised.");
-		}
-
-		var descriptor = new TextureDescriptor(
-			Math.Max(width, 1),
-			Math.Max(height, 1),
-			TextureFormat.Bgra8Unorm,
-			TextureUsage.ShaderResource);
-
-		var imported = _gfxDevice.ImportExternalTexture(
-			descriptor,
-			_lightingBuffer.Handle,
-			null,
-			null);
-
-		_lightingBufferHandle =
-			registry.ImportTexture(imported, takeOwnership: false, initialState: ResourceState.UnorderedAccess);
-		return _lightingBufferHandle;
-	}
-
-	public RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
-	{
-		if (_depthBuffer.Handle is null)
-		{
-			throw new InvalidOperationException("Depth buffer was not initialised.");
-		}
-
-		var descriptor = new TextureDescriptor(
-			Math.Max(width, 1),
-			Math.Max(height, 1),
-			TextureFormat.D32Float,
-			TextureUsage.DepthStencil);
-
-		var depthHandle = _dsvHeap.GetCPUDescriptorHandleForHeapStart();
-
-		var imported = _gfxDevice.ImportExternalTexture(
-			descriptor,
-			_depthBuffer.Handle,
-			null,
-			depthHandle);
-
-		return registry.ImportTexture(imported, takeOwnership: false);
+		return _lightingPipelineObject ?? throw new InvalidOperationException("Lighting pipeline was not initialised.");
 	}
 
 	private void SignalAndWait()
@@ -1510,20 +1348,10 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		// Command lists are now created per-pass
 		_rtvHeap.Dispose();
-		if (_dsvHeap.Handle is not null)
-		{
-			_dsvHeap.Dispose();
-			_dsvHeap = default;
-		}
 
 		_factory.Dispose();
 		_swapchain.Dispose();
 		_commandQueue.Dispose();
-		if (_depthBuffer.Handle is not null)
-		{
-			_depthBuffer.Dispose();
-			_depthBuffer = default;
-		}
 
 		foreach (var meshResources in _meshResources.Values)
 		{
@@ -1558,18 +1386,6 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			_lightingRootSignature.Dispose();
 			_lightingRootSignature = default;
-		}
-
-		if (_lightingDescriptorHeap.Handle is not null)
-		{
-			_lightingDescriptorHeap.Dispose();
-			_lightingDescriptorHeap = default;
-		}
-
-		if (_lightingBuffer.Handle is not null)
-		{
-			_lightingBuffer.Dispose();
-			_lightingBuffer = default;
 		}
 
 		if (_rootSignature.Handle is not null)

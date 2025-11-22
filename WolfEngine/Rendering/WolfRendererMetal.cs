@@ -539,8 +539,11 @@ public unsafe class WolfRendererMetal : IRenderer
         throw new NotImplementedException();
     }
 
-    public void Render(float deltaTime, RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle backBuffer,
-        RenderGraphResourceHandle depthTexture)
+    public void Render(
+        float deltaTime,
+        RenderGraphResourceRegistry resourceRegistry,
+        RenderGraphResourceHandle backBuffer,
+        RenderGraphResourceHandle presentedTexture)
     {
         throw new NotImplementedException();
     }
@@ -550,7 +553,7 @@ public unsafe class WolfRendererMetal : IRenderer
         throw new NotImplementedException();
     }
 
-    public RenderGraphResourceHandle ImportDepthTexture(RenderGraphResourceRegistry registry, int width, int height)
+    public IGfxPipeline GetDeferredLightingPipeline()
     {
         throw new NotImplementedException();
     }

@@ -6,7 +6,7 @@ namespace WolfEngine.Rendering.Passes;
 /// <summary>
 /// Describes the API-agnostic parameters required to record the deferred lighting compute pass.
 /// </summary>
-public sealed class DeferredLightingPassConfig
+public struct DeferredLightingPassConfig
 {
 	public required IGfxPipeline Pipeline { get; init; }
 
