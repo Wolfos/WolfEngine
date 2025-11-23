@@ -324,7 +324,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			var remaining = size - start;
 			var spanSize = Math.Min(remaining, uint.MaxValue);
 
-			views[i] = new Silk.NET.Direct3D12.VertexBufferView
+			views[i] = new()
 			{
 				BufferLocation = gpuAddress + start,
 				StrideInBytes = view.Stride,

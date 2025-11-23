@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.Importing;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 
@@ -19,6 +20,7 @@ class Program
     {
         services.AddSingleton<IShaderCompiler, ShaderCompiler>();
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
+        services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
         services.AddSingleton<DeferredLightingPass>();

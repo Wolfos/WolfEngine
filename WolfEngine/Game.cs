@@ -1,6 +1,8 @@
+using System.Linq;
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
+using WolfEngine.Importing;
 using WolfEngine.TestGame;
 
 namespace WolfEngine;
@@ -8,6 +10,7 @@ namespace WolfEngine;
 public class Game
 {
     private readonly IMaterialFactory _materialFactory;
+    private readonly IThreeDFileImporter _fileImporter;
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
     
@@ -15,9 +18,14 @@ public class Game
     private Entity _camera;
     private Entity _monkey;
     
-    public Game(IMaterialFactory materialFactory, IRenderCommandFactory renderCommandFactory, RenderGraph renderGraph)
+    public Game(
+        IMaterialFactory materialFactory,
+        IThreeDFileImporter fileImporter,
+        IRenderCommandFactory renderCommandFactory,
+        RenderGraph renderGraph)
     {
         _materialFactory = materialFactory;
+        _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
 
@@ -74,30 +82,32 @@ public class Game
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
         
-        var (mesh, material) = CreateMonkeyResources();
-
-        var monkeyTransform = new Transform();
-        var monkeyRenderer = new MeshRenderer
-        {
-            Mesh = mesh, Material = material
-        };
-        var monkeySpinner = new Rotator
-        {
-            RotationSpeed = 0.5f
-        };
-        _monkey = _world.CreateEntity();
-        _world.AddComponent(_monkey, monkeyTransform);
-        _world.AddComponent(_monkey, monkeyRenderer);
-        _world.AddComponent(_monkey, monkeySpinner);
-    }
-
-    private (Mesh mesh, Material material) CreateMonkeyResources()
-    {
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
-        var mesh = new Mesh(meshPath);
-        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(mesh));
-        var material = _materialFactory.GetMaterial("gbuffer.slang", new(1.0f, 0.0f, 0.0f, 1.0f));
-        return (mesh, material);
+        var scene = _fileImporter.Import(meshPath);
+        foreach (var importedMesh in scene.Meshes)
+        {
+            
+            var entity = _world.CreateEntity();
+            var transform = importedMesh.Transform;
+
+            var mat = _materialFactory.GetMaterial("gbuffer.slang", new(1.0f, 0.0f, 0.0f, 1.0f));
+
+            _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(importedMesh.Mesh));
+            var meshRenderer = new MeshRenderer
+            {
+                Mesh = importedMesh.Mesh,
+                Material = mat
+            };
+
+            var rotator = new Rotator
+            {
+                RotationSpeed = 1.0f
+            };
+            
+            _world.AddComponent(entity, transform);
+            _world.AddComponent(entity, meshRenderer);
+            //_world.AddComponent(entity, rotator);
+        }
     }
 
     private static (Camera, Transform) CreateCamera()
@@ -113,7 +123,7 @@ public class Game
         };
         camera.SetPerspective(fieldOfView);
 
-        var cameraPosition = new Vector3(0.0f, 0.0f, -3.0f);
+        var cameraPosition = new Vector3(0.0f, 1.0f, -3.0f);
         var target = Vector3.Zero;
         var up = Vector3.UnitY;
         
