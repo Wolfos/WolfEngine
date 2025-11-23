@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using Silk.NET.Assimp;
 using WolfEngine.ECS;
@@ -104,7 +102,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             }
 
             // Traverse node graph to create placed meshes with transforms
-            TraverseNode(scene->MRootNode, Matrix4x4.Identity, scene, meshData, meshes);
+            TraverseNode(scene->MRootNode, scene, meshData, meshes);
         }
         finally
         {
@@ -116,7 +114,6 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
     private static unsafe void TraverseNode(
         Node* node,
-        Matrix4x4 parentTransform,
         Scene* scene,
         IReadOnlyList<(Mesh mesh, int materialIndex)> meshData,
         List<ImportedMesh> output)
@@ -127,7 +124,6 @@ public class ThreeDFileImporter : IThreeDFileImporter
         }
 
         var localTransform = node->MTransformation;
-        var worldTransform = parentTransform * localTransform;
 
         for (var i = 0; i < node->MNumMeshes; i++)
         {
@@ -138,12 +134,24 @@ public class ThreeDFileImporter : IThreeDFileImporter
             }
 
             var (mesh, materialIndex) = meshData[meshIndex];
-            output.Add(new ImportedMesh(new Transform(worldTransform), mesh, materialIndex));
+            output.Add(new (GetTransform(localTransform), mesh, materialIndex));
         }
 
         for (var childIndex = 0; childIndex < node->MNumChildren; childIndex++)
         {
-            TraverseNode(node->MChildren[childIndex], worldTransform, scene, meshData, output);
+            TraverseNode(node->MChildren[childIndex], scene, meshData, output);
         }
+    }
+
+    private static Transform GetTransform(Matrix4x4 m)
+    {
+        // Convert Assimp matrix to column major
+        var packed = new Matrix4x4(
+            m.M11, m.M21, m.M31, m.M41,
+            m.M12, m.M22, m.M32, m.M42,
+            m.M13, m.M23, m.M33, m.M43,
+            m.M14, m.M24, m.M34, m.M44);
+
+        return new (packed);
     }
 }

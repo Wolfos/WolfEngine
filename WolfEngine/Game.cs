@@ -82,7 +82,7 @@ public class Game
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
         
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "BlenderScene.gltf");
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
