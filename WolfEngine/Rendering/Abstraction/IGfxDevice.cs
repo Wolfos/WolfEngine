@@ -57,7 +57,7 @@ public interface ITexturePoolDevice
 	/// Attempts to return a texture to the pool instead of disposing it.
 	/// Returns true if the texture was successfully pooled.
 	/// </summary>
-	bool ReturnTexture(IGfxTexture texture);
+	bool ReturnTexture(IGfxTexture texture, ResourceState lastKnownState);
 
 	/// <summary>
 	/// Clears any pooled textures, releasing their resources.

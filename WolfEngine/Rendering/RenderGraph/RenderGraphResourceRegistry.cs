@@ -1,5 +1,6 @@
 #nullable enable
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
@@ -88,7 +89,7 @@ public void BeginFrame()
 
 		if (record.Texture is not null)
 		{
-			var recycled = _texturePoolDevice?.ReturnTexture(record.Texture) ?? false;
+			var recycled = _texturePoolDevice?.ReturnTexture(record.Texture, record.CurrentState) ?? false;
 			if (recycled == false && record.OwnsTexture && record.Texture is IDisposable disposable)
 			{
 				disposable.Dispose();
@@ -171,7 +172,7 @@ public void BeginFrame()
 
 			record.Texture = _device.CreateTexture(record.Descriptor);
 		}
-
+		
 		return record.Texture;
 	}
 
@@ -191,7 +192,7 @@ public void BeginFrame()
 
 			record.Buffer = _device.CreateBuffer(record.Descriptor);
 		}
-
+		
 		return record.Buffer;
 	}
 

@@ -5,6 +5,7 @@ using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
 using WolfEngine.TestGame;
+using WolfEngine.Utility;
 
 namespace WolfEngine;
 
@@ -19,7 +20,11 @@ public class Game
     private Entity _camera;
     private Entity _monkey;
 
-    private readonly Stopwatch _stopwatch = new();
+    private readonly Stopwatch _frameStopwatch = Stopwatch.StartNew();
+    private readonly Stopwatch _statsStopwatch = Stopwatch.StartNew();
+    private double _frameTimeAccumulatorMs;
+    private double _maxFrameTimeMs;
+    private int _frameCount;
     
     public Game(
         IMaterialFactory materialFactory,
@@ -37,8 +42,25 @@ public class Game
 
     private void Update(float deltaTime)
     {
-        Console.Out.WriteLine($"{_stopwatch.Elapsed.TotalMilliseconds}ms");
-        _stopwatch.Restart();
+        var frameTimeMs = _frameStopwatch.Elapsed.TotalMilliseconds;
+        _frameStopwatch.Restart();
+
+        _frameTimeAccumulatorMs += frameTimeMs;
+        _maxFrameTimeMs = Math.Max(_maxFrameTimeMs, frameTimeMs);
+        _frameCount++;
+
+        if (_statsStopwatch.Elapsed.TotalSeconds >= 2)
+        {
+             var averageFrameTimeMs = _frameCount > 0 ? _frameTimeAccumulatorMs / _frameCount : 0.0;
+             Console.Out.WriteLine($"Frame timing (last 2s): avg {averageFrameTimeMs:F2}ms | max {_maxFrameTimeMs:F2}ms");
+            
+            //Profiler.Report();
+
+            _frameTimeAccumulatorMs = 0.0;
+            _maxFrameTimeMs = 0.0;
+            _frameCount = 0;
+            _statsStopwatch.Restart();
+        }
         
         
         foreach (var entry in _world.View<Transform, Rotator>())

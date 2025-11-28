@@ -1,6 +1,7 @@
 #nullable enable
 
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
@@ -30,10 +31,13 @@ public sealed class RenderGraphCompiler
 		// Track the last state each resource was in
 		var resourceStates = _resourceStates;
 		resourceStates.Clear();
+		
 
 		for(int i = 0; i < passes.Count; i++)
 		{
 			var pass = passes[i];
+			Profiler.StartBlock(pass.Name);
+
 			// Generate barriers for resources this pass uses
 			for (var j = 0; j < pass.ResourceUsages.Count; j++)
 			{
@@ -41,11 +45,12 @@ public sealed class RenderGraphCompiler
 				var currentState = resourceStates.TryGetValue(usage.Handle.Id, out var state)
 					? state
 					: _registry.GetResourceState(usage.Handle);
-
+				
 				// If the required state differs from current state, we need a barrier
 				if (currentState != usage.State && (currentState & usage.State) != usage.State)
 				{
 					var resource = _registry.GetResource(usage.Handle);
+					
 					var barrier = new ResourceBarrierDescription(resource, currentState, usage.State);
 					pass.AddBarrier(barrier);
 
@@ -58,7 +63,12 @@ public sealed class RenderGraphCompiler
 					resourceStates[usage.Handle.Id] = usage.State;
 				}
 			}
+			
+			Profiler.EndBlock(pass.Name);
+
 		}
+		
+
 
 		// Update registry with final states
 		foreach (var (handleId, finalState) in resourceStates)
@@ -66,6 +76,7 @@ public sealed class RenderGraphCompiler
 			var handle = new RenderGraphResourceHandle(handleId);
 			_registry.SetResourceState(handle, finalState);
 		}
+		
 
 		resourceStates.Clear();
 	}

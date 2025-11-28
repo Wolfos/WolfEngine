@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -40,9 +41,41 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private ComPtr<ID3D12RootSignature> _graphicsRootSignature;
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
-	private readonly Queue<D3D12Texture> _texturePool = new();
+	private readonly Dictionary<TextureDescriptor, Queue<PooledTexture>> _texturePool = new(new TextureDescriptorComparer());
 	private readonly Queue<ExternalD3D12Texture> _externalTexturePool = new();
 	private readonly object _texturePoolLock = new();
+	private ComPtr<ID3D12CommandAllocator> _transitionAllocator;
+	private ComPtr<ID3D12GraphicsCommandList> _transitionCommandList;
+	private nint _submissionFenceEvent;
+
+	private readonly struct PooledTexture
+	{
+		public PooledTexture(D3D12Texture texture, ResourceStates state)
+		{
+			Texture = texture;
+			LastKnownState = state;
+		}
+
+		public D3D12Texture Texture { get; }
+
+		public ResourceStates LastKnownState { get; }
+	}
+
+	private sealed class TextureDescriptorComparer : IEqualityComparer<TextureDescriptor>
+	{
+		public bool Equals(TextureDescriptor x, TextureDescriptor y)
+		{
+			return x.Width == y.Width &&
+			       x.Height == y.Height &&
+			       x.Format == y.Format &&
+			       x.Usage == y.Usage;
+		}
+
+		public int GetHashCode(TextureDescriptor obj)
+		{
+			return HashCode.Combine(obj.Width, obj.Height, (int)obj.Format, (int)obj.Usage);
+		}
+	}
 	
 	private readonly struct CommandListSubmission
 	{
@@ -108,6 +141,12 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			throw new ArgumentOutOfRangeException(nameof(descriptor), "Textures must have positive dimensions.");
 		}
 
+		var initialState = DetermineInitialState(descriptor.Usage);
+		if (TryRentPooledTexture(descriptor, initialState, out var pooledTexture))
+		{
+			return pooledTexture;
+		}
+
 		var format = ToDxgiFormat(descriptor.Format);
 
 		var resourceDesc = new ResourceDesc
@@ -125,7 +164,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		};
 
 		var heapProps = new HeapProperties(HeapType.Default);
-		var initialState = DetermineInitialState(descriptor.Usage);
 
 		ClearValue clearValue = default;
 		ClearValue* clearValuePtr = null;
@@ -158,7 +196,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			clearValuePtr,
 			out ComPtr<ID3D12Resource> resource));
 
-		var texture = RentTextureWrapper();
+		var texture = new D3D12Texture();
 		texture.Initialize(null, descriptor, resource);
 
 		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
@@ -280,17 +318,31 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		return wrapper;
 	}
 
-	private D3D12Texture RentTextureWrapper()
+	private bool TryRentPooledTexture(in TextureDescriptor descriptor, ResourceStates desiredState, out IGfxTexture texture)
 	{
+		PooledTexture? pooled = null;
+
 		lock (_texturePoolLock)
 		{
-			if (_texturePool.Count > 0)
+			if (_texturePool.TryGetValue(descriptor, out var queue) && queue.Count > 0)
 			{
-				return _texturePool.Dequeue();
+				pooled = queue.Dequeue();
 			}
 		}
 
-		return new D3D12Texture();
+		if (pooled.HasValue == false)
+		{
+			texture = null!;
+			return false;
+		}
+
+		if (pooled.Value.LastKnownState != desiredState)
+		{
+			TransitionResource(pooled.Value.Texture.Resource.Handle, pooled.Value.LastKnownState, desiredState);
+		}
+
+		texture = pooled.Value.Texture;
+		return true;
 	}
 
 	private ExternalD3D12Texture RentExternalTextureWrapper()
@@ -326,15 +378,21 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		}
 	}
 
-	public bool ReturnTexture(IGfxTexture texture)
+	public bool ReturnTexture(IGfxTexture texture, ResourceState lastKnownState)
 	{
 		switch (texture)
 		{
 			case D3D12Texture owned:
-				owned.Dispose();
+				var state = ToBackendState(lastKnownState);
 				lock (_texturePoolLock)
 				{
-					_texturePool.Enqueue(owned);
+					if (_texturePool.TryGetValue(owned.Descriptor, out var queue) == false)
+					{
+						queue = new Queue<PooledTexture>();
+						_texturePool[owned.Descriptor] = queue;
+					}
+
+					queue.Enqueue(new PooledTexture(owned, state));
 				}
 
 				return true;
@@ -355,12 +413,146 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	{
 		lock (_texturePoolLock)
 		{
-			while (_texturePool.Count > 0)
+			foreach (var queue in _texturePool.Values)
 			{
-				_texturePool.Dequeue().Dispose();
+				while (queue.Count > 0)
+				{
+					queue.Dequeue().Texture.Dispose();
+				}
 			}
 
+			_texturePool.Clear();
+
 			_externalTexturePool.Clear();
+		}
+	}
+
+	private static ResourceStates ToBackendState(ResourceState state)
+	{
+		var result = ResourceStates.Common;
+
+		if (state.HasFlag(ResourceState.Common))
+		{
+			result |= ResourceStates.Common;
+		}
+
+		if (state.HasFlag(ResourceState.RenderTarget))
+		{
+			result |= ResourceStates.RenderTarget;
+		}
+
+		if (state.HasFlag(ResourceState.DepthWrite))
+		{
+			result |= ResourceStates.DepthWrite;
+		}
+
+		if (state.HasFlag(ResourceState.ShaderResource))
+		{
+			result |= ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource;
+		}
+
+		if (state.HasFlag(ResourceState.UnorderedAccess))
+		{
+			result |= ResourceStates.UnorderedAccess;
+		}
+
+		if (state.HasFlag(ResourceState.CopySource))
+		{
+			result |= ResourceStates.CopySource;
+		}
+
+		if (state.HasFlag(ResourceState.CopyDestination))
+		{
+			result |= ResourceStates.CopyDest;
+		}
+
+		if (state.HasFlag(ResourceState.IndirectArgument))
+		{
+			result |= ResourceStates.IndirectArgument;
+		}
+
+		if (state.HasFlag(ResourceState.Present))
+		{
+			result |= ResourceStates.Present;
+		}
+
+		return result;
+	}
+
+	private void TransitionResource(ID3D12Resource* resource, ResourceStates before, ResourceStates after)
+	{
+		if (before == after)
+		{
+			return;
+		}
+
+		EnsureTransitionCommandList();
+
+		SilkMarshal.ThrowHResult(_transitionAllocator.Reset());
+		SilkMarshal.ThrowHResult(_transitionCommandList.Reset(_transitionAllocator, (ID3D12PipelineState*) null));
+
+		var barrier = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		barrier.Anonymous.Transition = new()
+		{
+			PResource = resource,
+			Subresource = D3D12Api.ResourceBarrierAllSubresources,
+			StateBefore = before,
+			StateAfter = after
+		};
+
+		_transitionCommandList.ResourceBarrier(1, &barrier);
+		SilkMarshal.ThrowHResult(_transitionCommandList.Close());
+		ID3D12CommandList* lists = (ID3D12CommandList*) _transitionCommandList.Handle;
+		_graphicsQueue.ExecuteCommandLists(1, &lists);
+
+		var fenceValue = ++_submissionFenceValue;
+		SilkMarshal.ThrowHResult(_graphicsQueue.Signal(_submissionFence, fenceValue));
+		WaitForFence(fenceValue);
+	}
+
+	private void EnsureTransitionCommandList()
+	{
+		if (_transitionCommandList.Handle is not null)
+		{
+			return;
+		}
+
+		SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(CommandListType.Direct, out _transitionAllocator));
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0,
+				CommandListType.Direct,
+				_transitionAllocator,
+				default,
+				out _transitionCommandList));
+
+		// Command lists are created in the recording state; close once so later Reset calls succeed.
+		SilkMarshal.ThrowHResult(_transitionCommandList.Close());
+	}
+
+	private void WaitForFence(ulong fenceValue)
+	{
+		if (_submissionFence.Handle->GetCompletedValue() >= fenceValue)
+		{
+			return;
+		}
+
+		EnsureSubmissionFenceEvent();
+		SilkMarshal.ThrowHResult(_submissionFence.Handle->SetEventOnCompletion(fenceValue, (void*) _submissionFenceEvent));
+		WaitForSingleObject(_submissionFenceEvent, 0xFFFFFFFF);
+	}
+
+	private void EnsureSubmissionFenceEvent()
+	{
+		if (_submissionFenceEvent != nint.Zero)
+		{
+			return;
+		}
+
+		_submissionFenceEvent = CreateEventEx(nint.Zero, null, 0, 0x1F0003);
+		if (_submissionFenceEvent == nint.Zero)
+		{
+			throw new InvalidOperationException("Failed to create submission fence event.");
 		}
 	}
 
@@ -931,4 +1123,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		return ResourceStates.Common;
 	}
+
+	[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+	private static extern nint CreateEventEx(nint lpEventAttributes, string? lpName, uint dwFlags, uint dwDesiredAccess);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);
 }
