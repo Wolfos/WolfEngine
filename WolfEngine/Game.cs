@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using WolfEngine.ECS;
@@ -17,6 +18,8 @@ public class Game
     private World _world;
     private Entity _camera;
     private Entity _monkey;
+
+    private readonly Stopwatch _stopwatch = new();
     
     public Game(
         IMaterialFactory materialFactory,
@@ -34,6 +37,10 @@ public class Game
 
     private void Update(float deltaTime)
     {
+        Console.Out.WriteLine($"{_stopwatch.Elapsed.TotalMilliseconds}ms");
+        _stopwatch.Restart();
+        
+        
         foreach (var entry in _world.View<Transform, Rotator>())
         {
             ref var transform = ref entry.First;
@@ -86,27 +93,28 @@ public class Game
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
-            
             var entity = _world.CreateEntity();
             var transform = importedMesh.Transform;
 
-            var mat = _materialFactory.GetMaterial("gbuffer.slang", new(1.0f, 0.0f, 0.0f, 1.0f));
+            var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
+
+            var material = _materialFactory.GetMaterial("gbuffer.slang", importedMaterial.BaseColor);
 
             _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(importedMesh.Mesh));
             var meshRenderer = new MeshRenderer
             {
                 Mesh = importedMesh.Mesh,
-                Material = mat
+                Material = material
             };
 
             var rotator = new Rotator
             {
-                RotationSpeed = 1.0f
+                RotationSpeed = 0.5f
             };
             
             _world.AddComponent(entity, transform);
             _world.AddComponent(entity, meshRenderer);
-            //_world.AddComponent(entity, rotator);
+           // _world.AddComponent(entity, rotator);
         }
     }
 
@@ -123,7 +131,7 @@ public class Game
         };
         camera.SetPerspective(fieldOfView);
 
-        var cameraPosition = new Vector3(0.0f, 1.0f, -3.0f);
+        var cameraPosition = new Vector3(0.0f, 1.0f, -5.0f);
         var target = Vector3.Zero;
         var up = Vector3.UnitY;
         

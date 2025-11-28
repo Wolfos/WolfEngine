@@ -40,7 +40,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 lightDirection = normalize(float3(-0.5f, -1.0f, -0.2f));
     float3 lightColor = float3(1.0f, 1.0f, 1.0f);
-    float ambientStrength = 0.05f;
+    float ambientStrength = 0.5f;
 
     float diffuse = max(dot(normal, -lightDirection), 0.0f);
     float3 ambient = ambientStrength * albedo;

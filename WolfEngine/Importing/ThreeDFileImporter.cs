@@ -10,8 +10,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
     public unsafe ImportedScene Import(string filename)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filename);
-
+        
         var assimp = Assimp.GetApi();
+        
         var fullPath = Path.IsPathRooted(filename)
             ? filename
             : Path.Combine(AppContext.BaseDirectory, filename);
@@ -44,16 +45,11 @@ public class ThreeDFileImporter : IThreeDFileImporter
             for (var materialIndex = 0; materialIndex < scene->MNumMaterials; materialIndex++)
             {
                 var material = scene->MMaterials[materialIndex];
-                var propertyArray = new ImportedMaterialProperty[material->MNumProperties];
+
+                var baseColor = Vector4.One;
+                assimp.GetMaterialColor(material, Assimp.MaterialColorDiffuseBase, 0, 0, ref baseColor);
                 
-                for (var propertyIndex = 0; propertyIndex < material->MNumProperties; propertyIndex++)
-                {
-                    var property = material->MProperties[propertyIndex];
-                    var importedProperty = new ImportedMaterialProperty(property->MKey.ToString());
-                    propertyArray[propertyIndex] = importedProperty;
-                }
-                
-                materials.Add(new (propertyArray));
+                materials.Add(new (baseColor));
             }
             
             // Textures

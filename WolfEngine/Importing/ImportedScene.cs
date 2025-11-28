@@ -1,4 +1,5 @@
-﻿using WolfEngine.ECS;
+﻿using System.Numerics;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Importing;
 
@@ -9,11 +10,7 @@ public record ImportedScene(
 );
 
 public record struct ImportedMaterial(
-	IReadOnlyCollection<ImportedMaterialProperty> Properties
-);
-
-public record struct ImportedMaterialProperty(
-	string Name
+	Vector4 BaseColor
 );
 
 public record struct ImportedTexture(

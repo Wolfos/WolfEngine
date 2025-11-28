@@ -23,7 +23,7 @@
         <PackageReference Include="ImGui.NET" Version="1.91.6.1"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1"/>
         <PackageReference Include="SharpMetal" Version="1.0.0-preview21"/>
-        <PackageReference Include="Silk.NET.Assimp" Version="2.22.0"/>
+        <PackageReference Include="Silk.NET.Assimp" Version="2.22.0" />
         <PackageReference Include="Silk.NET.Core" Version="2.22.0"/>
         <PackageReference Include="Silk.NET.Direct3D12" Version="2.22.0"/>
         <PackageReference Include="Silk.NET.Input" Version="2.22.0"/>
