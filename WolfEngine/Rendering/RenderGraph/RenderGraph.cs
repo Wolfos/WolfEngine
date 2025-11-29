@@ -1,10 +1,7 @@
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Numerics;
-using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
-using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
