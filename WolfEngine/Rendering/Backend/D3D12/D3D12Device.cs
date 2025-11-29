@@ -441,47 +441,47 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	{
 		var result = ResourceStates.Common;
 
-		if (state.HasFlag(ResourceState.Common))
+		if ((state & ResourceState.Common) != 0)
 		{
 			result |= ResourceStates.Common;
 		}
 
-		if (state.HasFlag(ResourceState.RenderTarget))
+		if ((state & ResourceState.RenderTarget) != 0)
 		{
 			result |= ResourceStates.RenderTarget;
 		}
 
-		if (state.HasFlag(ResourceState.DepthWrite))
+		if ((state & ResourceState.DepthWrite) != 0)
 		{
 			result |= ResourceStates.DepthWrite;
 		}
 
-		if (state.HasFlag(ResourceState.ShaderResource))
+		if ((state & ResourceState.ShaderResource) != 0)
 		{
 			result |= ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource;
 		}
 
-		if (state.HasFlag(ResourceState.UnorderedAccess))
+		if ((state & ResourceState.UnorderedAccess) != 0)
 		{
 			result |= ResourceStates.UnorderedAccess;
 		}
 
-		if (state.HasFlag(ResourceState.CopySource))
+		if ((state & ResourceState.CopySource) != 0)
 		{
 			result |= ResourceStates.CopySource;
 		}
 
-		if (state.HasFlag(ResourceState.CopyDestination))
+		if ((state & ResourceState.CopyDestination) != 0)
 		{
 			result |= ResourceStates.CopyDest;
 		}
 
-		if (state.HasFlag(ResourceState.IndirectArgument))
+		if ((state & ResourceState.IndirectArgument) != 0)
 		{
 			result |= ResourceStates.IndirectArgument;
 		}
 
-		if (state.HasFlag(ResourceState.Present))
+		if ((state & ResourceState.Present) != 0)
 		{
 			result |= ResourceStates.Present;
 		}
