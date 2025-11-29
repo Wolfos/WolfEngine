@@ -3,6 +3,7 @@ using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
+using WolfEngine.Input;
 using WolfEngine.TestGame;
 
 namespace WolfEngine;
@@ -13,6 +14,8 @@ public class Game
     private readonly IThreeDFileImporter _fileImporter;
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
+    private readonly IInputSystem _inputSystem;
+    
     private Thread _gameThread = null!;
     private volatile bool _running;
     private readonly ManualResetEventSlim _worldReady = new(false);
@@ -26,17 +29,20 @@ public class Game
     private double _frameTimeAccumulatorMs;
     private double _maxFrameTimeMs;
     private int _frameCount;
+
+    private CameraMoverSystem _cameraMoverSystem;
     
     public Game(
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph)
+        RenderGraph renderGraph, IInputSystem inputSystem)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
+        _inputSystem = inputSystem;
     }
 
     public void Run()
@@ -92,6 +98,7 @@ public class Game
             _statsStopwatch.Restart();
         }
         
+        _cameraMoverSystem.Update(deltaTime);
         
         foreach (var entry in _world.View<Transform, Rotator>())
         {
@@ -114,13 +121,16 @@ public class Game
     {
         _world = new();
 
+        _cameraMoverSystem = new CameraMoverSystem(_inputSystem, _world);
+
         var (cameraComponent, cameraTransform) = CreateCamera();
         
         _camera = _world.CreateEntity();
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
+        _world.AddComponent(_camera, new CameraMover());
         
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "BlenderScene.gltf");
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
@@ -145,7 +155,7 @@ public class Game
             
             _world.AddComponent(entity, transform);
             _world.AddComponent(entity, meshRenderer);
-            _world.AddComponent(entity, rotator);
+            //_world.AddComponent(entity, rotator);
         }
     }
 

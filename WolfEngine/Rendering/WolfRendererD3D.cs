@@ -8,6 +8,7 @@ using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using WolfEngine.Mathematics;
+using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
@@ -80,6 +81,7 @@ public unsafe class WolfRendererD3D : IRenderer
 	private readonly int _height;
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly IArenaAllocator _arenaAllocator;
+	private readonly IInputSystem _inputSystem;
 	private IWindow _window = null!;
 	private IInputContext _inputContext = null!;
 	private Action _startupCallback = static () => { };
@@ -112,13 +114,18 @@ public unsafe class WolfRendererD3D : IRenderer
 	private uint _backbufferIndex;
 	private nint _windowHandle;
 	private Int2 _framebufferSize = Int2.Zero;
+	private readonly List<IKeyboard> _keyboards = new();
+	private readonly List<IMouse> _mice = new();
+	private Vector2 _lastMousePosition;
+	private bool _hasMousePosition;
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator)
+	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem)
 	{
 		_width = 1280;
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
+		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 	}
 
 	public void Run(Action startup, Action<float> update, Action<float> render)
@@ -161,10 +168,8 @@ public unsafe class WolfRendererD3D : IRenderer
 		}
 
 		_inputContext = _window.CreateInput();
-		foreach (var keyboard in _inputContext.Keyboards)
-		{
-			keyboard.KeyDown += HandleKeyDown;
-		}
+		HookKeyboards();
+		HookMice();
 
 		_startupCallback();
 		// Command processing is now handled by the render graph
@@ -173,6 +178,8 @@ public unsafe class WolfRendererD3D : IRenderer
 
 	private void OnWindowUpdate(double deltaTime)
 	{
+		PollGamepads();
+
 		_updateCallback((float) deltaTime);
 		OnUpdate((float) deltaTime);
 	}
@@ -212,11 +219,95 @@ public unsafe class WolfRendererD3D : IRenderer
 		_isInitialized = false;
 	}
 
+	private void HookKeyboards()
+	{
+		_keyboards.Clear();
+		if (_inputContext is null)
+		{
+			return;
+		}
+
+		foreach (var keyboard in _inputContext.Keyboards)
+		{
+			_keyboards.Add(keyboard);
+			keyboard.KeyDown += HandleKeyDown;
+			keyboard.KeyUp += HandleKeyUp;
+		}
+	}
+
+	private void HookMice()
+	{
+		_mice.Clear();
+		if (_inputContext is null)
+		{
+			return;
+		}
+
+		foreach (var mouse in _inputContext.Mice)
+		{
+			_mice.Add(mouse);
+			mouse.MouseMove += HandleMouseMove;
+			mouse.Scroll += HandleMouseScroll;
+			mouse.MouseDown += HandleMouseDown;
+			mouse.MouseUp += HandleMouseUp;
+		}
+	}
+
 	private void HandleKeyDown(IKeyboard keyboard, Key key, int keycode)
 	{
+		if (TryMapKey(key, out var binding))
+		{
+			_inputSystem.SetButton(binding, true);
+		}
+
 		if (key == Key.Escape)
 		{
 			_window?.Close();
+		}
+	}
+
+	private void HandleKeyUp(IKeyboard keyboard, Key key, int keycode)
+	{
+		if (TryMapKey(key, out var binding))
+		{
+			_inputSystem.SetButton(binding, false);
+		}
+	}
+
+	private void HandleMouseMove(IMouse mouse, Vector2 position)
+	{
+		var current = position;
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, current);
+
+		if (_hasMousePosition)
+		{
+			var delta = current - _lastMousePosition;
+			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
+		}
+
+		_lastMousePosition = current;
+		_hasMousePosition = true;
+	}
+
+	private void HandleMouseScroll(IMouse mouse, ScrollWheel scrollWheel)
+	{
+		var scroll = new Vector2((float) scrollWheel.X, (float) scrollWheel.Y);
+		_inputSystem.SetAxis2D(InputActionBinding.MouseScroll, scroll);
+	}
+
+	private void HandleMouseDown(IMouse mouse, MouseButton button)
+	{
+		if (TryMapMouseButton(button, out var binding))
+		{
+			_inputSystem.SetButton(binding, true);
+		}
+	}
+
+	private void HandleMouseUp(IMouse mouse, MouseButton button)
+	{
+		if (TryMapMouseButton(button, out var binding))
+		{
+			_inputSystem.SetButton(binding, false);
 		}
 	}
 
@@ -262,6 +353,203 @@ public unsafe class WolfRendererD3D : IRenderer
 		{
 			_framebufferSize = new(size.X, size.Y);
 		}
+	}
+
+	private void PollGamepads()
+	{
+		if (_inputContext is null)
+		{
+			return;
+		}
+
+		foreach (var gamepad in _inputContext.Gamepads)
+		{
+			foreach (var button in gamepad.Buttons)
+			{
+				if (TryMapGamepadButton(button.Name, out var binding))
+				{
+					_inputSystem.SetButton(binding, button.Pressed);
+				}
+			}
+
+			if (gamepad.Thumbsticks.Count > 0)
+			{
+				var leftThumb = gamepad.Thumbsticks[0];
+				var leftStick = new Vector2((float) leftThumb.X, (float) leftThumb.Y);
+				_inputSystem.SetAxis2D(InputActionBinding.GamepadLeftStick, leftStick);
+			}
+
+			if (gamepad.Thumbsticks.Count > 1)
+			{
+				var rightThumb = gamepad.Thumbsticks[1];
+				var rightStick = new Vector2((float) rightThumb.X, (float) rightThumb.Y);
+				_inputSystem.SetAxis2D(InputActionBinding.GamepadRightStick, rightStick);
+			}
+
+			if (gamepad.Triggers.Count > 0)
+			{
+				_inputSystem.SetAxis1D(InputActionBinding.GamepadLeftTrigger, gamepad.Triggers[0].Position);
+			}
+
+			if (gamepad.Triggers.Count > 1)
+			{
+				_inputSystem.SetAxis1D(InputActionBinding.GamepadRightTrigger, gamepad.Triggers[1].Position);
+			}
+		}
+	}
+
+	private static bool TryMapMouseButton(MouseButton button, out InputActionBinding binding)
+	{
+		binding = button switch
+		{
+			MouseButton.Left => InputActionBinding.MouseButtonLeft,
+			MouseButton.Right => InputActionBinding.MouseButtonRight,
+			MouseButton.Middle => InputActionBinding.MouseButtonMiddle,
+			MouseButton.Button4 => InputActionBinding.MouseButton4,
+			MouseButton.Button5 => InputActionBinding.MouseButton5,
+			_ => InputActionBinding.None
+		};
+
+		return binding != InputActionBinding.None;
+	}
+
+	private static bool TryMapGamepadButton(ButtonName name, out InputActionBinding binding)
+	{
+		binding = name switch
+		{
+			ButtonName.A => InputActionBinding.GamepadFaceSouth,
+			ButtonName.B => InputActionBinding.GamepadFaceEast,
+			ButtonName.X => InputActionBinding.GamepadFaceWest,
+			ButtonName.Y => InputActionBinding.GamepadFaceNorth,
+			ButtonName.LeftBumper => InputActionBinding.GamepadLeftBumper,
+			ButtonName.RightBumper => InputActionBinding.GamepadRightBumper,
+			ButtonName.LeftStick => InputActionBinding.GamepadLeftStickButton,
+			ButtonName.RightStick => InputActionBinding.GamepadRightStickButton,
+			ButtonName.DPadUp => InputActionBinding.GamepadDpadUp,
+			ButtonName.DPadDown => InputActionBinding.GamepadDpadDown,
+			ButtonName.DPadLeft => InputActionBinding.GamepadDpadLeft,
+			ButtonName.DPadRight => InputActionBinding.GamepadDpadRight,
+			ButtonName.Back => InputActionBinding.GamepadBack,
+			ButtonName.Start => InputActionBinding.GamepadStart,
+			ButtonName.Home => InputActionBinding.GamepadGuide,
+			_ => InputActionBinding.None
+		};
+
+		return binding != InputActionBinding.None;
+	}
+
+	private static bool TryMapKey(Key key, out InputActionBinding binding)
+	{
+		binding = key switch
+		{
+			Key.A => InputActionBinding.KeyA,
+			Key.B => InputActionBinding.KeyB,
+			Key.C => InputActionBinding.KeyC,
+			Key.D => InputActionBinding.KeyD,
+			Key.E => InputActionBinding.KeyE,
+			Key.F => InputActionBinding.KeyF,
+			Key.G => InputActionBinding.KeyG,
+			Key.H => InputActionBinding.KeyH,
+			Key.I => InputActionBinding.KeyI,
+			Key.J => InputActionBinding.KeyJ,
+			Key.K => InputActionBinding.KeyK,
+			Key.L => InputActionBinding.KeyL,
+			Key.M => InputActionBinding.KeyM,
+			Key.N => InputActionBinding.KeyN,
+			Key.O => InputActionBinding.KeyO,
+			Key.P => InputActionBinding.KeyP,
+			Key.Q => InputActionBinding.KeyQ,
+			Key.R => InputActionBinding.KeyR,
+			Key.S => InputActionBinding.KeyS,
+			Key.T => InputActionBinding.KeyT,
+			Key.U => InputActionBinding.KeyU,
+			Key.V => InputActionBinding.KeyV,
+			Key.W => InputActionBinding.KeyW,
+			Key.X => InputActionBinding.KeyX,
+			Key.Y => InputActionBinding.KeyY,
+			Key.Z => InputActionBinding.KeyZ,
+			Key.Number0 => InputActionBinding.Key0,
+			Key.Number1 => InputActionBinding.Key1,
+			Key.Number2 => InputActionBinding.Key2,
+			Key.Number3 => InputActionBinding.Key3,
+			Key.Number4 => InputActionBinding.Key4,
+			Key.Number5 => InputActionBinding.Key5,
+			Key.Number6 => InputActionBinding.Key6,
+			Key.Number7 => InputActionBinding.Key7,
+			Key.Number8 => InputActionBinding.Key8,
+			Key.Number9 => InputActionBinding.Key9,
+			Key.F1 => InputActionBinding.KeyF1,
+			Key.F2 => InputActionBinding.KeyF2,
+			Key.F3 => InputActionBinding.KeyF3,
+			Key.F4 => InputActionBinding.KeyF4,
+			Key.F5 => InputActionBinding.KeyF5,
+			Key.F6 => InputActionBinding.KeyF6,
+			Key.F7 => InputActionBinding.KeyF7,
+			Key.F8 => InputActionBinding.KeyF8,
+			Key.F9 => InputActionBinding.KeyF9,
+			Key.F10 => InputActionBinding.KeyF10,
+			Key.F11 => InputActionBinding.KeyF11,
+			Key.F12 => InputActionBinding.KeyF12,
+			Key.Escape => InputActionBinding.KeyEscape,
+			Key.Tab => InputActionBinding.KeyTab,
+			Key.CapsLock => InputActionBinding.KeyCapsLock,
+			Key.ShiftLeft => InputActionBinding.KeyLeftShift,
+			Key.ShiftRight => InputActionBinding.KeyRightShift,
+			Key.ControlLeft => InputActionBinding.KeyLeftControl,
+			Key.ControlRight => InputActionBinding.KeyRightControl,
+			Key.AltLeft => InputActionBinding.KeyLeftAlt,
+			Key.AltRight => InputActionBinding.KeyRightAlt,
+			Key.SuperLeft => InputActionBinding.KeyLeftSuper,
+			Key.SuperRight => InputActionBinding.KeyRightSuper,
+			Key.Menu => InputActionBinding.KeyMenu,
+			Key.Space => InputActionBinding.KeySpace,
+			Key.Enter => InputActionBinding.KeyEnter,
+			Key.Backspace => InputActionBinding.KeyBackspace,
+			Key.Insert => InputActionBinding.KeyInsert,
+			Key.Delete => InputActionBinding.KeyDelete,
+			Key.Home => InputActionBinding.KeyHome,
+			Key.End => InputActionBinding.KeyEnd,
+			Key.PageUp => InputActionBinding.KeyPageUp,
+			Key.PageDown => InputActionBinding.KeyPageDown,
+			Key.Up => InputActionBinding.KeyArrowUp,
+			Key.Down => InputActionBinding.KeyArrowDown,
+			Key.Left => InputActionBinding.KeyArrowLeft,
+			Key.Right => InputActionBinding.KeyArrowRight,
+			Key.Minus => InputActionBinding.KeyMinus,
+			Key.Equal => InputActionBinding.KeyEquals,
+			Key.LeftBracket => InputActionBinding.KeyLeftBracket,
+			Key.RightBracket => InputActionBinding.KeyRightBracket,
+			Key.BackSlash => InputActionBinding.KeyBackslash,
+			Key.Semicolon => InputActionBinding.KeySemicolon,
+			Key.Apostrophe => InputActionBinding.KeyApostrophe,
+			Key.GraveAccent => InputActionBinding.KeyGrave,
+			Key.Comma => InputActionBinding.KeyComma,
+			Key.Period => InputActionBinding.KeyPeriod,
+			Key.Slash => InputActionBinding.KeySlash,
+			Key.PrintScreen => InputActionBinding.KeyPrintScreen,
+			Key.ScrollLock => InputActionBinding.KeyScrollLock,
+			Key.Pause => InputActionBinding.KeyPause,
+			Key.NumLock => InputActionBinding.KeyNumLock,
+			Key.Keypad0 => InputActionBinding.KeyNumpad0,
+			Key.Keypad1 => InputActionBinding.KeyNumpad1,
+			Key.Keypad2 => InputActionBinding.KeyNumpad2,
+			Key.Keypad3 => InputActionBinding.KeyNumpad3,
+			Key.Keypad4 => InputActionBinding.KeyNumpad4,
+			Key.Keypad5 => InputActionBinding.KeyNumpad5,
+			Key.Keypad6 => InputActionBinding.KeyNumpad6,
+			Key.Keypad7 => InputActionBinding.KeyNumpad7,
+			Key.Keypad8 => InputActionBinding.KeyNumpad8,
+			Key.Keypad9 => InputActionBinding.KeyNumpad9,
+			Key.KeypadDivide => InputActionBinding.KeyNumpadDivide,
+			Key.KeypadMultiply => InputActionBinding.KeyNumpadMultiply,
+			Key.KeypadSubtract => InputActionBinding.KeyNumpadSubtract,
+			Key.KeypadAdd => InputActionBinding.KeyNumpadAdd,
+			Key.KeypadDecimal => InputActionBinding.KeyNumpadDecimal,
+			Key.KeypadEnter => InputActionBinding.KeyNumpadEnter,
+			_ => InputActionBinding.None
+		};
+
+		return binding != InputActionBinding.None;
 	}
 
 	private void OnLoad()
@@ -949,10 +1237,23 @@ public unsafe class WolfRendererD3D : IRenderer
 
 		if (_inputContext is not null)
 		{
-			foreach (var keyboard in _inputContext.Keyboards)
+			foreach (var keyboard in _keyboards)
 			{
 				keyboard.KeyDown -= HandleKeyDown;
+				keyboard.KeyUp -= HandleKeyUp;
 			}
+
+			foreach (var mouse in _mice)
+			{
+				mouse.MouseMove -= HandleMouseMove;
+				mouse.Scroll -= HandleMouseScroll;
+				mouse.MouseDown -= HandleMouseDown;
+				mouse.MouseUp -= HandleMouseUp;
+			}
+
+			_keyboards.Clear();
+			_mice.Clear();
+			_hasMousePosition = false;
 
 			//_inputContext.Dispose();
 			_inputContext = null;
