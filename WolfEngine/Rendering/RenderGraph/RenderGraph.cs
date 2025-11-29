@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
@@ -13,27 +15,30 @@ namespace WolfEngine.Rendering;
 public sealed class RenderGraph
 {
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
-	private readonly RenderGraphFrameBuilder _frameBuilder;
-	private readonly IRenderer _renderer;
-	private readonly IArenaAllocator _arenaAllocator;
-	private readonly List<RenderGraphPass> _passes = new();
-	private readonly Queue<RenderGraphPass> _passPool = new();
-	private readonly RenderGraphCompiler _compiler;
-	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
-	private readonly List<DrawPacket> _drawPackets = new();
-	private Camera _camera;
-	private Transform _cameraTransform;
-	private bool _hasCamera;
+private readonly RenderGraphFrameBuilder _frameBuilder;
+private readonly IRenderer _renderer;
+private readonly IArenaAllocator _arenaAllocator;
+private readonly IRenderCommandFactory _renderCommandFactory;
+private readonly List<RenderGraphPass> _passes = new();
+private readonly Queue<RenderGraphPass> _passPool = new();
+private readonly RenderGraphCompiler _compiler;
+private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
+private readonly FrameSnapshotBuffer _snapshotBuffer = new();
+private readonly List<DrawPacket> _renderPackets = new();
+private FrameSnapshot? _currentSnapshot;
+private FrameSnapshot? _activeSnapshot;
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
-		DeferredLightingPass deferredLightingPass)
+		DeferredLightingPass deferredLightingPass,
+		IRenderCommandFactory renderCommandFactory)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
+		_renderCommandFactory = renderCommandFactory;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
 		_compiler = new(resourceRegistry);
 	}
@@ -54,34 +59,36 @@ public sealed class RenderGraph
 
 		var device = _renderer.GetGfxDevice();
 
-		// Build scene data from camera and draw packets
-		SceneDrawData sceneData = null;
-		if (_hasCamera)
+		var snapshot = _activeSnapshot;
+		if (snapshot is null)
 		{
-			var world = _cameraTransform.GetTransform();
-			if (Matrix4x4.Invert(world, out var view) &&
-			    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
-			    Matrix4x4.Invert(_camera.Perspective, out var invProjection))
-			{
-				// Use camera-relative space for draw packets
-				for (var i = 0; i < _drawPackets.Count; i++)
-				{
-					var packet = _drawPackets[i];
-					var relative = packet.Transform;
-					var translation = relative.Translation - cameraPosition;
-					relative.Translation = translation;
-					_drawPackets[i] = new(packet.Mesh, packet.Material, relative);
-				}
-
-				// Remove camera translation from the view matrix since objects are now camera-relative
-				view.Translation = Vector3.Zero;
-				var viewProjection = view * _camera.Perspective;
-				sceneData = new(viewProjection, invProjection, cameraPosition, _drawPackets);
-			}
+			ReleasePasses();
+			return;
 		}
 
-		// Skip all rendering if there's no scene data yet (no camera set)
-		if (sceneData == null)
+		// Build scene data from snapshot
+		SceneDrawData sceneData = null;
+		var world = snapshot.CameraTransform.GetTransform();
+		if (Matrix4x4.Invert(world, out var view) &&
+		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
+		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
+		{
+			_renderPackets.Clear();
+			for (var i = 0; i < snapshot.DrawPackets.Count; i++)
+			{
+				var packet = snapshot.DrawPackets[i];
+				var relative = packet.Transform;
+				relative.Translation -= cameraPosition;
+				_renderPackets.Add(new DrawPacket(packet.Mesh, packet.Material, relative));
+			}
+
+			// Remove camera translation from the view matrix since objects are now camera-relative
+			view.Translation = Vector3.Zero;
+			var viewProjection = view * snapshot.Camera.Perspective;
+			sceneData = new(viewProjection, invProjection, cameraPosition, _renderPackets);
+		}
+
+		if (sceneData is null)
 		{
 			ReleasePasses();
 			return;
@@ -131,6 +138,16 @@ public sealed class RenderGraph
 		_renderer.Run(startup, update, OnRender);
 	}
 
+	public FrameSnapshot BeginSnapshotWrite()
+	{
+		return _snapshotBuffer.BeginWrite();
+	}
+
+	public void PublishSnapshot()
+	{
+		_snapshotBuffer.PublishWrite();
+	}
+
 	public void OnRender(float deltaTime)
 	{
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
@@ -143,19 +160,29 @@ public sealed class RenderGraph
 		// Process pending render commands to build scene data
 		ProcessCommands();
 
+		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+		{
+			snapshot = _currentSnapshot;
+		}
+		_currentSnapshot = snapshot;
+		_activeSnapshot = snapshot;
+		if (snapshot is not null)
+		{
+			EmitCommandsFromSnapshot(snapshot);
+		}
+
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
 		var frameResources = _frameBuilder.BeginFrame(frameBufferSize, backBuffer);
 
 		_frameBuilder.Build(this);
 		Execute();
-
+		
 		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer);
 
 		_resourceRegistry.EndFrame();
 
 		// Clear for next frame
-		_drawPackets.Clear();
 		_arenaAllocator.Reset();
 	}
 
@@ -167,12 +194,6 @@ public sealed class RenderGraph
 			{
 				case RenderCommandType.CreateMesh:
 					HandleCreateMesh(command);
-					break;
-				case RenderCommandType.DrawMesh:
-					HandleDrawMesh(command);
-					break;
-				case RenderCommandType.SetCamera:
-					HandleSetCamera(command);
 					break;
 			}
 		}
@@ -189,26 +210,6 @@ public sealed class RenderGraph
 		payload.MeshHandle.Free();
 	}
 
-	private void HandleDrawMesh(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
-		if (payload.MeshHandle.Target is Mesh mesh && payload.MaterialHandle.Target is Material material)
-		{
-			_drawPackets.Add(new DrawPacket(mesh, material, payload.Transform));
-		}
-
-		payload.MeshHandle.Free();
-		payload.MaterialHandle.Free();
-	}
-
-	private void HandleSetCamera(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
-		_camera = payload.Camera;
-		_cameraTransform = payload.Transform;
-		_hasCamera = true;
-	}
-
 	public IMaterialResources EnsureMaterialResources(Material material)
 	{
 		// TODO: Should probably be handled in resource registry
@@ -218,6 +219,23 @@ public sealed class RenderGraph
 	public void SubmitCommand(RenderCommand command)
 	{
 		_pendingCommands.Enqueue(command);
+	}
+
+	private void EmitCommandsFromSnapshot(FrameSnapshot snapshot)
+	{
+		var camera = snapshot.Camera;
+		var cameraTransform = snapshot.CameraTransform;
+		var setCamera = _renderCommandFactory.SetCamera(ref camera, ref cameraTransform);
+		SubmitCommand(setCamera);
+
+		for (var i = 0; i < snapshot.DrawPackets.Count; i++)
+		{
+			var packet = snapshot.DrawPackets[i];
+			var meshRenderer = new MeshRenderer {Mesh = packet.Mesh, Material = packet.Material};
+			var transform = packet.Transform;
+			var draw = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transform);
+			SubmitCommand(draw);
+		}
 	}
 	private void ReleasePasses()
 	{

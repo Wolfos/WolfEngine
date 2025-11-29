@@ -1,5 +1,5 @@
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
@@ -71,29 +71,7 @@ public class Game
             rotator.CurrentRotation += deltaTime * rotator.RotationSpeed;
             transform.LocalRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, rotator.CurrentRotation); 
         }
-        
-        // TODO: Probably only want one camera per render pass
-        // TODO: Move these two loops to render pass
-        foreach (var entry in _world.View<Transform, Camera>())
-        {
-            ref var transform = ref entry.First;
-            ref var camera = ref entry.Second;
-            
-            var command = _renderCommandFactory.SetCamera(ref camera, ref transform);
-            _renderGraph.SubmitCommand(command);
-        }
-        
-        
-        foreach (var entry in _world.View<Transform, MeshRenderer>())
-        {
-            ref var transform = ref entry.First;
-            ref var meshRenderer = ref entry.Second;
-
-            var transformMatrix = transform.GetTransform();
-            
-            var command = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transformMatrix);
-            _renderGraph.SubmitCommand(command);
-        }
+        PublishSnapshot();
     }
 
     private void Startup()
@@ -111,7 +89,7 @@ public class Game
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
         
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "BlenderScene.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
@@ -136,8 +114,41 @@ public class Game
             
             _world.AddComponent(entity, transform);
             _world.AddComponent(entity, meshRenderer);
-           // _world.AddComponent(entity, rotator);
+            _world.AddComponent(entity, rotator);
         }
+    }
+
+    private void PublishSnapshot()
+    {
+        // Pick first camera if any
+        Transform cameraTransform = default;
+        Camera camera = default;
+        var hasCamera = false;
+        foreach (var entry in _world.View<Transform, Camera>())
+        {
+            cameraTransform = entry.First;
+            camera = entry.Second;
+            hasCamera = true;
+            break;
+        }
+
+        if (hasCamera == false)
+        {
+            return;
+        }
+
+        var snapshot = _renderGraph.BeginSnapshotWrite();
+        snapshot.SetCamera(camera, cameraTransform);
+
+        foreach (var entry in _world.View<Transform, MeshRenderer>())
+        {
+            ref var transform = ref entry.First;
+            ref var meshRenderer = ref entry.Second;
+            var transformMatrix = transform.GetTransform();
+            snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+        }
+
+        _renderGraph.PublishSnapshot();
     }
 
     private static (Camera, Transform) CreateCamera()
