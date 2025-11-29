@@ -1,12 +1,9 @@
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
-using System.Threading;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
 using WolfEngine.TestGame;
-using WolfEngine.Utility;
 
 namespace WolfEngine;
 

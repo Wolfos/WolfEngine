@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Importing;
+using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 
@@ -27,6 +28,7 @@ class Program
         services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
+        services.AddSingleton<IInputSystem, InputSystem>();
         services.AddSingleton<DeferredLightingPass>();
 
         services.AddSingleton<RenderGraphResourceRegistry>();
