@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "WolfEngine": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

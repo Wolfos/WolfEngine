@@ -1,6 +1,8 @@
 #nullable enable
 
+using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -68,12 +70,20 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return x.Width == y.Width &&
 			       x.Height == y.Height &&
 			       x.Format == y.Format &&
-			       x.Usage == y.Usage;
+			       x.Usage == y.Usage &&
+			       x.ClearColor.Equals(y.ClearColor) &&
+			       Math.Abs(x.DepthClear - y.DepthClear) < float.Epsilon;
 		}
 
 		public int GetHashCode(TextureDescriptor obj)
 		{
-			return HashCode.Combine(obj.Width, obj.Height, (int)obj.Format, (int)obj.Usage);
+			return HashCode.Combine(
+				obj.Width,
+				obj.Height,
+				(int)obj.Format,
+				(int)obj.Usage,
+				obj.ClearColor,
+				obj.DepthClear);
 		}
 	}
 	
@@ -171,10 +181,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
 		{
 			clearValue.Format = format;
-			clearValue.Anonymous.Color[0] = 0.0f;
-			clearValue.Anonymous.Color[1] = 0.0f;
-			clearValue.Anonymous.Color[2] = 0.0f;
-			clearValue.Anonymous.Color[3] = 1.0f;
+			clearValue.Anonymous.Color[0] = descriptor.ClearColor.X;
+			clearValue.Anonymous.Color[1] = descriptor.ClearColor.Y;
+			clearValue.Anonymous.Color[2] = descriptor.ClearColor.Z;
+			clearValue.Anonymous.Color[3] = descriptor.ClearColor.W;
 			clearValuePtr = &clearValue;
 		}
 		else if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
@@ -182,7 +192,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			clearValue.Format = format;
 			clearValue.Anonymous.DepthStencil = new DepthStencilValue
 			{
-				Depth = 1.0f,
+				Depth = descriptor.DepthClear,
 				Stencil = 0
 			};
 			clearValuePtr = &clearValue;
@@ -772,39 +782,33 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return;
 		}
 
-		var srvRange = stackalloc DescriptorRange[1];
-		srvRange[0].RangeType = DescriptorRangeType.Srv;
-		srvRange[0].NumDescriptors = 4;
-		srvRange[0].BaseShaderRegister = 0;
-		srvRange[0].RegisterSpace = 0;
-		srvRange[0].OffsetInDescriptorsFromTableStart = 0;
+		var ranges = stackalloc DescriptorRange[2];
+		ranges[0].RangeType = DescriptorRangeType.Srv;
+		ranges[0].NumDescriptors = 4;
+		ranges[0].BaseShaderRegister = 0;
+		ranges[0].RegisterSpace = 0;
+		ranges[0].OffsetInDescriptorsFromTableStart = 0;
 
-		var uavRange = stackalloc DescriptorRange[1];
-		uavRange[0].RangeType = DescriptorRangeType.Uav;
-		uavRange[0].NumDescriptors = 1;
-		uavRange[0].BaseShaderRegister = 0;
-		uavRange[0].RegisterSpace = 0;
-		uavRange[0].OffsetInDescriptorsFromTableStart = 0;
+		ranges[1].RangeType = DescriptorRangeType.Uav;
+		ranges[1].NumDescriptors = 1;
+		ranges[1].BaseShaderRegister = 0;
+		ranges[1].RegisterSpace = 0;
+		ranges[1].OffsetInDescriptorsFromTableStart = 0xFFFFFFFF;
 
-		var rootParameters = stackalloc RootParameter[3];
+		var rootParameters = stackalloc RootParameter[2];
 		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = srvRange;
+		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 2;
+		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
 		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
 
-		rootParameters[1].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = uavRange;
-		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[2].Anonymous.Constants = new()
+		rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[1].Anonymous.Constants = new()
 		{
 			ShaderRegister = 0,
 			RegisterSpace = 0,
 			Num32BitValues = 20
 		};
-		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
 
 		var staticSampler = stackalloc StaticSamplerDesc[1];
 		staticSampler[0] = new()
@@ -826,7 +830,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 3,
+			NumParameters = 2,
 			PParameters = rootParameters,
 			NumStaticSamplers = 1,
 			PStaticSamplers = staticSampler,

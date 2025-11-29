@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace WolfEngine.Rendering;
 
 /// <summary>
@@ -6,12 +8,15 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public readonly struct TextureDescriptor
 {
-	public TextureDescriptor(int width, int height, TextureFormat format, TextureUsage usage)
+	public TextureDescriptor(int width, int height, TextureFormat format, TextureUsage usage, Vector4? clearColor = null,
+		float depthClear = 1.0f)
 	{
 		Width = width;
 		Height = height;
 		Format = format;
 		Usage = usage;
+		ClearColor = clearColor ?? Vector4.Zero;
+		DepthClear = depthClear;
 	}
 
 	public int Width { get; }
@@ -21,6 +26,10 @@ public readonly struct TextureDescriptor
 	public TextureFormat Format { get; }
 
 	public TextureUsage Usage { get; }
+
+	public Vector4 ClearColor { get; }
+
+	public float DepthClear { get; }
 }
 
 public enum TextureFormat

@@ -1,5 +1,7 @@
 #nullable enable
 
+using Silk.NET.Direct3D12;
+
 namespace WolfEngine.Rendering.Abstraction;
 
 /// <summary>
@@ -7,6 +9,10 @@ namespace WolfEngine.Rendering.Abstraction;
 /// </summary>
 public interface IGfxDescriptorSet : IDisposable
 {
+	/// <summary>
+	/// Returns the GPU handle for a given slot within the set.
+	/// </summary>
+	GpuDescriptorHandle GetGpuHandle(uint slot);
 }
 
 /// <summary>

@@ -270,6 +270,7 @@ public unsafe class WolfRendererD3D : IRenderer
 		_dxgi = DXGI.GetApi();
 #pragma warning restore CS0618
 		_d3d12 = D3D12.GetApi();
+		EnableDebugLayerIfRequested();
 
 		CreateDeviceAndQueue();
 		CreateSwapchain();
@@ -293,6 +294,35 @@ public unsafe class WolfRendererD3D : IRenderer
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
 
 		_gfxDevice = new(_device, _commandQueue);
+	}
+
+	private void EnableDebugLayerIfRequested()
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false)
+		{
+			return;
+		}
+
+		if (OperatingSystem.IsWindows() == false)
+		{
+			return;
+		}
+
+		try
+		{
+			ComPtr<ID3D12Debug> debug = default;
+			var hr = _d3d12.GetDebugInterface(out debug);
+			if (hr >= 0 && debug.Handle is not null)
+			{
+				debug.EnableDebugLayer();
+			}
+
+			debug.Dispose();
+		}
+		catch
+		{
+			// Swallow exceptions; debug layer enable is best-effort.
+		}
 	}
 
 	public IMaterialResources CreateMaterialResources(Material material)
@@ -357,8 +387,13 @@ public unsafe class WolfRendererD3D : IRenderer
 			vertexEntryPoint: "vertexShader",
 			pixelEntryPoint: "fragmentShader",
 			computeEntryPoint: null,
-			renderTargets: new(new[] {TextureFormat.Bgra8Unorm}),
-			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderTargets: new(new[]
+			{
+				TextureFormat.Bgra8Unorm,     // Albedo
+				TextureFormat.Rgba16Float,    // Normal
+				TextureFormat.Rgba8Unorm      // Material
+			}),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState);
 
 		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
@@ -823,7 +858,8 @@ public unsafe class WolfRendererD3D : IRenderer
 			Math.Max(width, 1),
 			Math.Max(height, 1),
 			TextureFormat.Bgra8Unorm,
-			TextureUsage.RenderTarget);
+			TextureUsage.RenderTarget,
+			Vector4.Zero);
 
 		var imported = _gfxDevice.ImportExternalTexture(
 			descriptor,

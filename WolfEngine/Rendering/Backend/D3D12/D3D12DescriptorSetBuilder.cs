@@ -76,7 +76,15 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 		}
 
 		var gpuStart = heap.Handle->GetGPUDescriptorHandleForHeapStart();
-		return new D3D12DescriptorSet(heap, gpuStart);
+		var handles = new Dictionary<uint, GpuDescriptorHandle>(_entries.Count);
+		foreach (var entry in _entries)
+		{
+			var handle = gpuStart;
+			handle.Ptr += descriptorSize * entry.Slot;
+			handles[entry.Slot] = handle;
+		}
+
+		return new D3D12DescriptorSet(heap, gpuStart, handles);
 	}
 
 	private void CreateSrv(IGfxResource resource, CpuDescriptorHandle cpuHandle)
@@ -148,15 +156,29 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 
 internal sealed class D3D12DescriptorSet : IGfxDescriptorSet
 {
-	public D3D12DescriptorSet(ComPtr<ID3D12DescriptorHeap> heap, GpuDescriptorHandle gpuHandle)
+	private readonly IReadOnlyDictionary<uint, GpuDescriptorHandle> _handles;
+
+	public D3D12DescriptorSet(ComPtr<ID3D12DescriptorHeap> heap, GpuDescriptorHandle gpuHandle,
+		IReadOnlyDictionary<uint, GpuDescriptorHandle> handles)
 	{
 		DescriptorHeap = heap;
 		GpuHandle = gpuHandle;
+		_handles = handles;
 	}
 
 	public ComPtr<ID3D12DescriptorHeap> DescriptorHeap { get; }
 
 	public GpuDescriptorHandle GpuHandle { get; }
+
+	public GpuDescriptorHandle GetGpuHandle(uint slot)
+	{
+		if (_handles.TryGetValue(slot, out var handle) == false)
+		{
+			throw new ArgumentOutOfRangeException(nameof(slot), slot, "Slot not found in descriptor set.");
+		}
+
+		return handle;
+	}
 
 	public void Dispose()
 	{

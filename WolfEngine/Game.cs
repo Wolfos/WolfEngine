@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using System.Threading;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
@@ -15,6 +16,9 @@ public class Game
     private readonly IThreeDFileImporter _fileImporter;
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
+    private Thread _gameThread = null!;
+    private volatile bool _running;
+    private readonly ManualResetEventSlim _worldReady = new(false);
     
     private World _world;
     private Entity _camera;
@@ -36,8 +40,37 @@ public class Game
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
+    }
 
-        _renderGraph.Startup(Startup, Update);
+    public void Run()
+    {
+        _running = true;
+
+        _gameThread = new Thread(GameLoop) {IsBackground = true, Name = "GameThread"};
+        _gameThread.Start();
+
+        _renderGraph.Startup(Startup, _ => { });
+
+        _running = false;
+        _gameThread.Join();
+    }
+
+    private void GameLoop()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var last = stopwatch.Elapsed;
+        while (_running)
+        {
+            _worldReady.Wait();
+
+            var now = stopwatch.Elapsed;
+            var deltaTime = (float) (now - last).TotalSeconds;
+            last = now;
+
+            Update(deltaTime);
+
+            Thread.Sleep(0);
+        }
     }
 
     private void Update(float deltaTime)
@@ -77,6 +110,7 @@ public class Game
     private void Startup()
     {
         CreateWorld();
+        _worldReady.Set();
     }
 
     private void CreateWorld()

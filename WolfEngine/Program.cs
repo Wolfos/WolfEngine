@@ -13,7 +13,11 @@ class Program
         ConfigureServices(services);
 
         var provider = services.BuildServiceProvider();
-        provider.GetService<Game>();
+        // Toggle D3D12 debug layer here when needed
+        GraphicsConfig.EnableD3DDebugLayer = true;
+
+        var game = provider.GetRequiredService<Game>();
+        game.Run();
     }
 
     private static void ConfigureServices(IServiceCollection services)

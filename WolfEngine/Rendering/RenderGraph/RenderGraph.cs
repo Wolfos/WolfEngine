@@ -15,30 +15,27 @@ namespace WolfEngine.Rendering;
 public sealed class RenderGraph
 {
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
-private readonly RenderGraphFrameBuilder _frameBuilder;
-private readonly IRenderer _renderer;
-private readonly IArenaAllocator _arenaAllocator;
-private readonly IRenderCommandFactory _renderCommandFactory;
-private readonly List<RenderGraphPass> _passes = new();
-private readonly Queue<RenderGraphPass> _passPool = new();
-private readonly RenderGraphCompiler _compiler;
-private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
-private readonly FrameSnapshotBuffer _snapshotBuffer = new();
-private readonly List<DrawPacket> _renderPackets = new();
-private FrameSnapshot? _currentSnapshot;
-private FrameSnapshot? _activeSnapshot;
+	private readonly RenderGraphFrameBuilder _frameBuilder;
+	private readonly IRenderer _renderer;
+	private readonly IArenaAllocator _arenaAllocator;
+	private readonly List<RenderGraphPass> _passes = new();
+	private readonly Queue<RenderGraphPass> _passPool = new();
+	private readonly RenderGraphCompiler _compiler;
+	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
+	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
+	private readonly List<DrawPacket> _renderPackets = new();
+	private FrameSnapshot? _currentSnapshot;
+	private FrameSnapshot? _activeSnapshot;
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
-		DeferredLightingPass deferredLightingPass,
-		IRenderCommandFactory renderCommandFactory)
+		DeferredLightingPass deferredLightingPass)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_renderCommandFactory = renderCommandFactory;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
 		_compiler = new(resourceRegistry);
 	}
@@ -157,19 +154,15 @@ private FrameSnapshot? _activeSnapshot;
 		_resourceRegistry.BeginFrame();
 		ReleasePasses();
 
-		// Process pending render commands to build scene data
-		ProcessCommands();
-
 		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
 		{
 			snapshot = _currentSnapshot;
 		}
 		_currentSnapshot = snapshot;
 		_activeSnapshot = snapshot;
-		if (snapshot is not null)
-		{
-			EmitCommandsFromSnapshot(snapshot);
-		}
+
+		// Process pending render commands to build scene data
+		ProcessCommands();
 
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
@@ -221,22 +214,6 @@ private FrameSnapshot? _activeSnapshot;
 		_pendingCommands.Enqueue(command);
 	}
 
-	private void EmitCommandsFromSnapshot(FrameSnapshot snapshot)
-	{
-		var camera = snapshot.Camera;
-		var cameraTransform = snapshot.CameraTransform;
-		var setCamera = _renderCommandFactory.SetCamera(ref camera, ref cameraTransform);
-		SubmitCommand(setCamera);
-
-		for (var i = 0; i < snapshot.DrawPackets.Count; i++)
-		{
-			var packet = snapshot.DrawPackets[i];
-			var meshRenderer = new MeshRenderer {Mesh = packet.Mesh, Material = packet.Material};
-			var transform = packet.Transform;
-			var draw = _renderCommandFactory.DrawMesh(ref meshRenderer, ref transform);
-			SubmitCommand(draw);
-		}
-	}
 	private void ReleasePasses()
 	{
 		foreach (var pass in _passes)

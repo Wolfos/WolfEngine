@@ -53,32 +53,47 @@ public sealed class FrameSnapshot
 public sealed class FrameSnapshotBuffer
 {
 	private readonly FrameSnapshot[] _buffers = { new(), new() };
+	private readonly object _lock = new();
+	private readonly ManualResetEventSlim _slotFree = new(true);
 	private int _readIndex;
 	private int _writeIndex = 1;
-	private bool _hasSnapshot;
+	private bool _hasPending;
 
 	public FrameSnapshot BeginWrite()
 	{
-		var snapshot = _buffers[_writeIndex];
-		snapshot.Clear();
-		return snapshot;
+		_slotFree.Wait();
+		lock (_lock)
+		{
+			var snapshot = _buffers[_writeIndex];
+			snapshot.Clear();
+			return snapshot;
+		}
 	}
 
 	public void PublishWrite()
 	{
-		(_readIndex, _writeIndex) = (_writeIndex, _readIndex);
-		_hasSnapshot = true;
+		lock (_lock)
+		{
+			(_readIndex, _writeIndex) = (_writeIndex, _readIndex);
+			_hasPending = true;
+			_slotFree.Reset();
+		}
 	}
 
 	public bool TryConsumeLatest(out FrameSnapshot snapshot)
 	{
-		if (_hasSnapshot == false)
+		lock (_lock)
 		{
-			snapshot = _buffers[_readIndex];
-			return false;
-		}
+			if (_hasPending == false)
+			{
+				snapshot = _buffers[_readIndex];
+				return false;
+			}
 
-		snapshot = _buffers[_readIndex];
-		return true;
+			snapshot = _buffers[_readIndex];
+			_hasPending = false;
+			_slotFree.Set();
+			return true;
+		}
 	}
 }

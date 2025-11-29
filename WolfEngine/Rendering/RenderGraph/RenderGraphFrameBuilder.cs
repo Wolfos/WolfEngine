@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
@@ -48,13 +49,16 @@ public sealed class RenderGraphFrameBuilder
 			FramebufferSize = framebufferSize,
 			Backbuffer = backBuffer,
 			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.392f, 0.584f, 0.929f, 1.0f))),
 			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Rgba16Float, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+				framebufferSize.Y, TextureFormat.Rgba16Float, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.5f, 0.5f, 1.0f, 1.0f))),
 			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
+				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
 			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
-				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource)),
+				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource, Vector4.Zero, 1.0f)),
 			LightingBuffer = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
@@ -115,14 +119,6 @@ public sealed class RenderGraphFrameBuilder
 	private void ExecuteDeferredLighting(RenderGraphContext context)
 	{
 		var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
-		try
-		{
-			_deferredLightingPass.Record(context, ref config, context.SceneData!);
-		}
-		finally
-		{
-			config.SrvTable.Dispose();
-			config.UavTable.Dispose();
-		}
+		_deferredLightingPass.Record(context, ref config, context.SceneData!);
 	}
 }

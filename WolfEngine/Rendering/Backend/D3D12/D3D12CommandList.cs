@@ -182,7 +182,8 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
 		CommandList.SetDescriptorHeaps(1, heapPtr);
 
-		CommandList.SetComputeRootDescriptorTable(slot, d3dDescriptorSet.GpuHandle);
+		var handle = d3dDescriptorSet.GetGpuHandle(slot);
+		CommandList.SetComputeRootDescriptorTable(slot, handle);
 	}
 
 	public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)

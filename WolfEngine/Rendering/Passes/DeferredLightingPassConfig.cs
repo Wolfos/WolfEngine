@@ -10,9 +10,7 @@ public struct DeferredLightingPassConfig
 {
 	public required IGfxPipeline Pipeline { get; init; }
 
-	public required IGfxDescriptorSet SrvTable { get; init; }
-
-	public required IGfxDescriptorSet UavTable { get; init; }
+	public required IGfxDescriptorSet DescriptorSet { get; init; }
 
 	public required Int2 DispatchSize { get; init; }
 }

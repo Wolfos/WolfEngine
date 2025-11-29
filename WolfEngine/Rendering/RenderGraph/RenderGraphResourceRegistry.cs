@@ -136,7 +136,7 @@ public void BeginFrame()
 	{
 		var handle = new RenderGraphResourceHandle(_nextHandleId++);
 		var record = _texturePool.Count > 0 ? _texturePool.Pop() : new TextureRecord();
-		record.Initialize(descriptor, true, null, ResourceState.Common);
+		record.Initialize(descriptor, true, null, DetermineInitialState(descriptor.Usage));
 		_textures[handle.Id] = record;
 		return handle;
 	}
@@ -241,5 +241,30 @@ public void BeginFrame()
 		}
 
 		throw new InvalidOperationException($"Resource handle {handle.Id} was not registered.");
+	}
+
+	private static ResourceState DetermineInitialState(TextureUsage usage)
+	{
+		if ((usage & TextureUsage.RenderTarget) != 0)
+		{
+			return ResourceState.RenderTarget;
+		}
+
+		if ((usage & TextureUsage.DepthStencil) != 0)
+		{
+			return ResourceState.DepthWrite;
+		}
+
+		if ((usage & TextureUsage.UnorderedAccess) != 0)
+		{
+			return ResourceState.UnorderedAccess;
+		}
+
+		if ((usage & TextureUsage.ShaderResource) != 0)
+		{
+			return ResourceState.ShaderResource;
+		}
+
+		return ResourceState.Common;
 	}
 }

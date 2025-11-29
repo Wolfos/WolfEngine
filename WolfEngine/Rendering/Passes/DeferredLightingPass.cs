@@ -34,17 +34,13 @@ public sealed class DeferredLightingPass
 		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
 		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
 		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferDepth));
-		var srvTable = srvTableBuilder.Build();
-
-		var uavTableBuilder = device.CreateDescriptorSetBuilder();
-		uavTableBuilder.AddUnorderedAccess(0, context.GetTexture(resources.LightingBuffer));
-		var uavTable = uavTableBuilder.Build();
+		srvTableBuilder.AddUnorderedAccess(4, context.GetTexture(resources.LightingBuffer));
+		var descriptorSet = srvTableBuilder.Build();
 
 		return new DeferredLightingPassConfig
 		{
 			Pipeline = pipeline,
-			SrvTable = srvTable,
-			UavTable = uavTable,
+			DescriptorSet = descriptorSet,
 			DispatchSize = resources.FramebufferSize
 		};
 	}
@@ -59,17 +55,16 @@ public sealed class DeferredLightingPass
 		commandList.BindPipeline(config.Pipeline);
 
 		// Bind descriptor sets for SRVs and UAVs
-		commandList.BindComputeDescriptorSet(0, config.SrvTable);
-		commandList.BindComputeDescriptorSet(1, config.UavTable);
+		commandList.BindComputeDescriptorSet(0, config.DescriptorSet);
 
-		// Set camera constants (Root parameter 2)
+		// Set camera constants (Root parameter 1)
 		Span<float> cameraConstants = stackalloc float[20];
 		WriteMatrix(cameraConstants, sceneData.InverseProjection);
 		cameraConstants[16] = sceneData.CameraOrigin.X;
 		cameraConstants[17] = sceneData.CameraOrigin.Y;
 		cameraConstants[18] = sceneData.CameraOrigin.Z;
 		cameraConstants[19] = 1.0f;
-		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(cameraConstants));
+		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(cameraConstants));
 
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
