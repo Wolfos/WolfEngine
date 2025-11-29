@@ -13,6 +13,7 @@ public sealed class DeferredLightingPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
+	private IGfxDescriptorSet? _descriptorSet;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler)
 	{
@@ -29,6 +30,9 @@ public sealed class DeferredLightingPass
 
 		var pipeline = EnsurePipeline(device);
 
+		_descriptorSet?.Dispose();
+		_descriptorSet = null;
+
 		var srvTableBuilder = device.CreateDescriptorSetBuilder();
 		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
 		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
@@ -36,6 +40,7 @@ public sealed class DeferredLightingPass
 		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferDepth));
 		srvTableBuilder.AddUnorderedAccess(4, context.GetTexture(resources.LightingBuffer));
 		var descriptorSet = srvTableBuilder.Build();
+		_descriptorSet = descriptorSet;
 
 		return new DeferredLightingPassConfig
 		{
