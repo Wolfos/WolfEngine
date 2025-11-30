@@ -50,6 +50,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
     float metallic = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f).r;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0));
+    if (depth >= 0.9999f) // no geometry, keep background untouched
+    {
+        lightingTarget[dispatchThreadId.xy] = float4(albedo, 0);
+        return;
+    }
 
     float3 viewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invProjection);
     float3 viewDir = ComputeViewDir(viewPos);
