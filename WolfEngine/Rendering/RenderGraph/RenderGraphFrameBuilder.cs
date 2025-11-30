@@ -1,9 +1,12 @@
 #nullable enable
 
 using System.Numerics;
+using Silk.NET.Direct3D12;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Backend.D3D12;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Rendering;
 
@@ -24,9 +27,11 @@ public sealed class RenderGraphFrameBuilder
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private RenderGraphFrameResources _frameResources;
+	private UiFrameData _uiFrame = UiFrameData.Empty;
 	
 	private readonly Action<RenderGraphContext> _gbufferExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
+	private readonly Action<RenderGraphContext> _imguiExecute;
 
 	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
@@ -38,6 +43,7 @@ public sealed class RenderGraphFrameBuilder
 		
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
+		_imguiExecute = ExecuteImGui;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
@@ -68,6 +74,11 @@ public sealed class RenderGraphFrameBuilder
 
 		return _frameResources;
 	}
+
+	public void SetUiFrame(UiFrameData uiFrame)
+	{
+		_uiFrame = uiFrame;
+	}
 	
 
 	public bool Build(RenderGraph graph)
@@ -88,6 +99,11 @@ public sealed class RenderGraphFrameBuilder
 			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 			.SetExecute(_deferredLightingExecute);
+
+		graph.AddPass("ImGui", PassKind.Graphics)
+			.ReadTexture(_frameResources.LightingBuffer, ResourceState.CopySource)
+			.WriteTexture(_frameResources.Backbuffer, ResourceState.RenderTarget)
+			.SetExecute(_imguiExecute);
 
 		return true;
 	}
@@ -120,5 +136,43 @@ public sealed class RenderGraphFrameBuilder
 	{
 		var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
+	}
+
+	private unsafe void ExecuteImGui(RenderGraphContext context)
+	{
+		if (_uiFrame.Commands.Length == 0)
+		{
+			return;
+		}
+
+		var backbuffer = context.GetTexture(_frameResources.Backbuffer) as ID3D12BackendTexture;
+		var lighting = context.GetTexture(_frameResources.LightingBuffer) as ID3D12BackendTexture;
+		var commandList = context.CommandList as D3D12CommandList;
+		if (backbuffer is null || lighting is null || commandList is null)
+		{
+			return;
+		}
+
+		var native = commandList.NativeCommandList;
+
+		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		barrier.Anonymous.Transition = new()
+		{
+			PResource = backbuffer.Resource,
+			Subresource = Silk.NET.Direct3D12.D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.CopyDest
+		};
+		native->ResourceBarrier(1, &barrier);
+
+		native->CopyResource(backbuffer.Resource, lighting.Resource);
+
+		barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
+		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
+		native->ResourceBarrier(1, &barrier);
+
+		var imguiRenderer = _renderer.GetImGuiRenderer();
+		imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
+		imguiRenderer.Record(context, _uiFrame, backbuffer);
 	}
 }

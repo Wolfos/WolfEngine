@@ -20,4 +20,5 @@ public interface IRenderer
 		UiFrameData uiFrame);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
+	IImGuiRenderer GetImGuiRenderer();
 }

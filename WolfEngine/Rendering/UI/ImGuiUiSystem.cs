@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Numerics;
 using ImGuiNET;
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;
@@ -63,10 +64,10 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		ImGui.NewFrame();
 	}
 
-	public void RunGui(Action draw)
+	public void RunGui(Action<World> draw, World world)
 	{
 		ImGui.SetCurrentContext(_context);
-		draw();
+		draw(world);
 		ImGui.Render();
 		CaptureFrame();
 	}

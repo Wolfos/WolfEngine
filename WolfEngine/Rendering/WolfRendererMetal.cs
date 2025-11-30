@@ -671,6 +671,11 @@ public unsafe class WolfRendererMetal : IRenderer
         } 
     }
 
+    public IImGuiRenderer GetImGuiRenderer()
+    {
+        return NullImGuiRenderer.Instance;
+    }
+
     private void ProcessPendingCommands()
     {
         while (_pendingCommands.TryDequeue(out var command))

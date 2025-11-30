@@ -1,13 +1,14 @@
 ﻿using ImGuiNET;
+using WolfEngine.ECS;
 
 namespace WolfEngine.TestGame;
 
 public static class GUI
 {
-	public static void Draw()
+	public static void Draw(World world)
 	{
-		ImGui.Begin("Hello World");
-		ImGui.Text("Look at this!");
+		ImGui.Begin("Objects");
+		
 		ImGui.End();
 	}
 }

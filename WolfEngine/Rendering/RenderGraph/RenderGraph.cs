@@ -166,6 +166,16 @@ public sealed class RenderGraph
 		_resourceRegistry.BeginFrame();
 		ReleasePasses();
 
+		UiFrameData uiFrame;
+		if (_imguiSystem.TryConsumeLatest(out var latestUi))
+		{
+			uiFrame = latestUi;
+		}
+		else
+		{
+			uiFrame = UiFrameData.Empty;
+		}
+
 		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
 		{
 			snapshot = _currentSnapshot;
@@ -179,14 +189,10 @@ public sealed class RenderGraph
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
 		var frameResources = _frameBuilder.BeginFrame(frameBufferSize, backBuffer);
+		_frameBuilder.SetUiFrame(uiFrame);
 
 		_frameBuilder.Build(this);
 		Execute();
-		
-		if (_imguiSystem.TryConsumeLatest(out var uiFrame) == false)
-		{
-			uiFrame = UiFrameData.Empty;
-		}
 
 		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer, uiFrame);
 

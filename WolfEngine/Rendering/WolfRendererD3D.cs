@@ -1229,52 +1229,19 @@ private sealed class MeshResources
 		                        ?? throw new InvalidOperationException(
 			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
 
-		var presentedResource = resourceRegistry.GetTexture(presentedTexture) as ID3D12BackendTexture
-		                        ?? throw new InvalidOperationException(
-			                        "Presented texture was not compatible with the Direct3D12 backend.");
-
-		// Copy deferred lighting output into the backbuffer, then present
 		var presentCommandList = _gfxDevice.BeginGraphics() as D3D12CommandList
 		                         ?? throw new InvalidOperationException("Failed to create present command list.");
 		var nativeCommandList = (ID3D12GraphicsCommandList*) presentCommandList.CommandList.Handle;
 
-		ResourceBarrier* barriers = stackalloc ResourceBarrier[2];
-		barriers[0] = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barriers[0].Anonymous.Transition = new()
-		{
-			PResource = presentedResource.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.UnorderedAccess,
-			StateAfter = ResourceStates.CopySource
-		};
-		barriers[1] = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barriers[1].Anonymous.Transition = new()
+		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		barrier.Anonymous.Transition = new()
 		{
 			PResource = backbufferTexture.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.Present,
-			StateAfter = ResourceStates.CopyDest
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.Present
 		};
-		nativeCommandList->ResourceBarrier(2, barriers);
-
-		nativeCommandList->CopyResource(backbufferTexture.Resource, presentedResource.Resource);
-
-		barriers[0].Anonymous.Transition.StateBefore = ResourceStates.CopySource;
-		barriers[0].Anonymous.Transition.StateAfter = ResourceStates.UnorderedAccess;
-		barriers[1].Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
-		barriers[1].Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
-		nativeCommandList->ResourceBarrier(2, barriers);
-
-		_imguiRenderer.EnsureResources(_gfxDevice, uiFrame);
-		var imguiContext = new RenderGraphContext(resourceRegistry, "ImGui")
-		{
-			CommandList = presentCommandList
-		};
-		_imguiRenderer.Record(imguiContext, uiFrame, backbufferResource);
-
-		barriers[1].Anonymous.Transition.StateBefore = ResourceStates.RenderTarget;
-		barriers[1].Anonymous.Transition.StateAfter = ResourceStates.Present;
-		nativeCommandList->ResourceBarrier(1, barriers + 1);
+		nativeCommandList->ResourceBarrier(1, &barrier);
 
 		_gfxDevice.Submit(presentCommandList);
 
@@ -1440,4 +1407,6 @@ private sealed class MeshResources
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern bool CloseHandle(nint hObject);
+
+	public IImGuiRenderer GetImGuiRenderer() => _imguiRenderer;
 }
