@@ -4,6 +4,7 @@ using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
 using WolfEngine.Input;
+using WolfEngine.Rendering.UI;
 using WolfEngine.TestGame;
 
 namespace WolfEngine;
@@ -15,6 +16,7 @@ public class Game
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
     private readonly IInputSystem _inputSystem;
+    private readonly ImGuiUiSystem _imguiSystem;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -36,13 +38,14 @@ public class Game
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph, IInputSystem inputSystem)
+        RenderGraph renderGraph, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
         _inputSystem = inputSystem;
+        _imguiSystem = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
     }
 
     public void Run()
@@ -52,7 +55,7 @@ public class Game
         _gameThread = new Thread(GameLoop) {IsBackground = true, Name = "GameThread"};
         _gameThread.Start();
 
-        _renderGraph.Startup(Startup, _ => { });
+        _renderGraph.Startup(Startup, delta => { });
 
         _running = false;
         _gameThread.Join();
@@ -109,6 +112,9 @@ public class Game
             transform.LocalRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, rotator.CurrentRotation); 
         }
         PublishSnapshot();
+
+        _imguiSystem.NewFrame(deltaTime, _renderGraph.GetFrameBufferSize());
+        _imguiSystem.RunGui(GUI.Draw);
     }
 
     private void Startup()
@@ -213,6 +219,8 @@ public class Game
 
         _renderGraph.PublishSnapshot();
     }
+
+    public ImGuiUiSystem GetImGuiSystem() => _imguiSystem;
 
     private static (Camera, Transform) CreateCamera()
     {

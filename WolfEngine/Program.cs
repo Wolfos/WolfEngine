@@ -3,6 +3,7 @@ using WolfEngine.Importing;
 using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine;
 
@@ -30,6 +31,7 @@ class Program
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
         services.AddSingleton<IInputSystem, InputSystem>();
         services.AddSingleton<DeferredLightingPass>();
+        services.AddSingleton<ImGuiUiSystem>();
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();

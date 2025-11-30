@@ -14,6 +14,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine;
 
@@ -543,7 +544,8 @@ public unsafe class WolfRendererMetal : IRenderer
         float deltaTime,
         RenderGraphResourceRegistry resourceRegistry,
         RenderGraphResourceHandle backBuffer,
-        RenderGraphResourceHandle presentedTexture)
+        RenderGraphResourceHandle presentedTexture,
+        UiFrameData uiFrame)
     {
         throw new NotImplementedException();
     }

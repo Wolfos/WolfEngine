@@ -1,6 +1,7 @@
 using WolfEngine.Mathematics;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.UI;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -15,7 +16,8 @@ public interface IRenderer
 		float deltaTime,
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle presentedTexture);
+		RenderGraphResourceHandle presentedTexture,
+		UiFrameData uiFrame);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 }

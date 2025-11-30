@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.UI;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering;
 
@@ -22,6 +24,7 @@ public sealed class RenderGraph
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
+	private readonly ImGuiUiSystem _imguiSystem;
 	private FrameSnapshot? _currentSnapshot;
 	private FrameSnapshot? _activeSnapshot;
 
@@ -29,12 +32,14 @@ public sealed class RenderGraph
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
-		DeferredLightingPass deferredLightingPass)
+		DeferredLightingPass deferredLightingPass,
+		ImGuiUiSystem imguiSystem)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
+		_imguiSystem = imguiSystem;
 		_compiler = new(resourceRegistry);
 	}
 
@@ -178,13 +183,20 @@ public sealed class RenderGraph
 		_frameBuilder.Build(this);
 		Execute();
 		
-		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer);
+		if (_imguiSystem.TryConsumeLatest(out var uiFrame) == false)
+		{
+			uiFrame = UiFrameData.Empty;
+		}
+
+		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer, uiFrame);
 
 		_resourceRegistry.EndFrame();
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
 	}
+
+	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
 
 	private void ProcessCommands()
 	{

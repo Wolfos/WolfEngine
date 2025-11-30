@@ -13,7 +13,7 @@ using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
-using WolfEngine.TestGame;
+using WolfEngine.Rendering.UI;
 using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
 using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
 using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
@@ -123,7 +123,10 @@ private sealed class MeshResources
 	private readonly List<IMouse> _mice = new();
 	private Vector2 _lastMousePosition;
 	private bool _hasMousePosition;
-	private IntPtr _imGuiContext;
+	private readonly IImGuiInputSink _imguiInputSink;
+	private readonly bool[] _imguiMouseButtons = new bool[5];
+	private Vector2 _imguiMousePosition;
+	private Vector2 _imguiMouseWheel;
 	private ComPtr<ID3D12DescriptorHeap> _imguiSrvHeap;
 	private GpuDescriptorHandle _imguiSrvGpuHandle;
 	private ComPtr<ID3D12Resource> _imguiFontTexture;
@@ -133,18 +136,16 @@ private sealed class MeshResources
 	private ComPtr<ID3D12Resource> _imguiIndexBuffer;
 	private int _imguiVertexBufferSize;
 	private int _imguiIndexBufferSize;
-	private ImDrawDataPtr? _imGuiDrawData;
-	private readonly bool[] _imguiMouseButtons = new bool[5];
-	private Vector2 _imguiMousePosition;
-	private Vector2 _imguiMouseWheel;
+	private bool _fontUploaded;
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem)
+	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
 	{
 		_width = 1280;
 		_height = 720;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
+		_imguiInputSink = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
 	}
 
 	public void Run(Action startup, Action<float> update, Action<float> render)
@@ -189,7 +190,6 @@ private sealed class MeshResources
 		_inputContext = _window.CreateInput();
 		HookKeyboards();
 		HookMice();
-		InitializeImGui();
 
 		_startupCallback();
 		// Command processing is now handled by the render graph
@@ -215,11 +215,6 @@ private sealed class MeshResources
 		{
 			return;
 		}
-
-		BeginImGuiFrame((float) deltaTime);
-		GUI.Draw();
-		ImGui.Render();
-		_imGuiDrawData = ImGui.GetDrawData();
 
 		_renderCallback((float) deltaTime);
 	}
@@ -285,7 +280,10 @@ private sealed class MeshResources
 		{
 			_inputSystem.SetButton(binding, true);
 		}
-		UpdateImGuiKey(key, true);
+		if (TryConvertKey(key, out var imguiKey))
+		{
+			_imguiInputSink.SetKey(imguiKey, true);
+		}
 
 		if (key == Key.Escape)
 		{
@@ -299,18 +297,15 @@ private sealed class MeshResources
 		{
 			_inputSystem.SetButton(binding, false);
 		}
-		UpdateImGuiKey(key, false);
+		if (TryConvertKey(key, out var imguiKey))
+		{
+			_imguiInputSink.SetKey(imguiKey, false);
+		}
 	}
 
 	private void HandleKeyChar(IKeyboard keyboard, char keyChar)
 	{
-		if (_imGuiContext == IntPtr.Zero)
-		{
-			return;
-		}
-
-		ImGui.SetCurrentContext(_imGuiContext);
-		ImGui.GetIO().AddInputCharacter(keyChar);
+		_imguiInputSink.AddChar(keyChar);
 	}
 
 	private void HandleMouseMove(IMouse mouse, Vector2 position)
@@ -318,6 +313,7 @@ private sealed class MeshResources
 		var current = position;
 		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, current);
 		_imguiMousePosition = current;
+		_imguiInputSink.SetMousePosition(current);
 
 		if (_hasMousePosition)
 		{
@@ -334,6 +330,7 @@ private sealed class MeshResources
 		var scroll = new Vector2((float) scrollWheel.X, (float) scrollWheel.Y);
 		_inputSystem.SetAxis2D(InputActionBinding.MouseScroll, scroll);
 		_imguiMouseWheel += scroll;
+		_imguiInputSink.AddMouseScroll(scroll);
 	}
 
 	private void HandleMouseDown(IMouse mouse, MouseButton button)
@@ -346,6 +343,7 @@ private sealed class MeshResources
 		if (button == MouseButton.Left) _imguiMouseButtons[0] = true;
 		if (button == MouseButton.Right) _imguiMouseButtons[1] = true;
 		if (button == MouseButton.Middle) _imguiMouseButtons[2] = true;
+		NotifyImGuiMouseButton(button, true);
 	}
 
 	private void HandleMouseUp(IMouse mouse, MouseButton button)
@@ -358,71 +356,24 @@ private sealed class MeshResources
 		if (button == MouseButton.Left) _imguiMouseButtons[0] = false;
 		if (button == MouseButton.Right) _imguiMouseButtons[1] = false;
 		if (button == MouseButton.Middle) _imguiMouseButtons[2] = false;
+		NotifyImGuiMouseButton(button, false);
 	}
 
-	private void InitializeImGui()
+	private void NotifyImGuiMouseButton(MouseButton button, bool down)
 	{
-		if (_imGuiContext != IntPtr.Zero)
+		var index = button switch
 		{
-			return;
-		}
+			MouseButton.Left => 0,
+			MouseButton.Right => 1,
+			MouseButton.Middle => 2,
+			MouseButton.Button4 => 3,
+			MouseButton.Button5 => 4,
+			_ => -1
+		};
 
-		_imGuiContext = ImGui.CreateContext();
-		ImGui.SetCurrentContext(_imGuiContext);
-
-		var io = ImGui.GetIO();
-		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
-		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-
-		CreateImGuiFontTexture();
-		CreateImGuiPipeline();
-	}
-
-	private void BeginImGuiFrame(float deltaTime)
-	{
-		if (_imGuiContext == IntPtr.Zero)
+		if (index >= 0)
 		{
-			return;
-		}
-
-		ImGui.SetCurrentContext(_imGuiContext);
-		var io = ImGui.GetIO();
-		io.DisplaySize = new System.Numerics.Vector2(_framebufferSize.X, _framebufferSize.Y);
-		io.DeltaTime = Math.Max(deltaTime, 1e-6f);
-		io.DisplayFramebufferScale = System.Numerics.Vector2.One;
-
-		for (var i = 0; i < _imguiMouseButtons.Length; i++)
-		{
-			io.MouseDown[i] = _imguiMouseButtons[i];
-		}
-
-		if (_hasMousePosition)
-		{
-			io.MousePos = _imguiMousePosition;
-		}
-		else
-		{
-			io.MousePos = new System.Numerics.Vector2(-1, -1);
-		}
-
-		io.MouseWheel = _imguiMouseWheel.Y;
-		io.MouseWheelH = _imguiMouseWheel.X;
-		_imguiMouseWheel = Vector2.Zero;
-
-		ImGui.NewFrame();
-	}
-
-	private void UpdateImGuiKey(Key key, bool pressed)
-	{
-		if (_imGuiContext == IntPtr.Zero)
-		{
-			return;
-		}
-
-		ImGui.SetCurrentContext(_imGuiContext);
-		if (TryConvertKey(key, out var imguiKey))
-		{
-			ImGui.GetIO().AddKeyEvent(imguiKey, pressed);
+			_imguiInputSink.SetMouseButton(index, down);
 		}
 	}
 
@@ -515,22 +466,19 @@ private sealed class MeshResources
 		return imguiKey != ImGuiKey.None;
 	}
 
-	private void CreateImGuiFontTexture()
+	private void CreateImGuiFontTexture(in ImGuiFontAtlas atlas)
 	{
-		ImGui.SetCurrentContext(_imGuiContext);
-		var io = ImGui.GetIO();
-		byte* pixels;
-		int width;
-		int height;
-		int bpp;
-		io.Fonts.GetTexDataAsRGBA32(out pixels, out width, out height, out bpp);
+		if (atlas.PixelsRgba.Length == 0 || atlas.Width == 0 || atlas.Height == 0)
+		{
+			return;
+		}
 
 		var textureDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Texture2D,
 			Alignment = 0,
-			Width = (ulong) width,
-			Height = (uint) height,
+			Width = (ulong) atlas.Width,
+			Height = (uint) atlas.Height,
 			DepthOrArraySize = 1,
 			MipLevels = 1,
 			Format = Format.FormatR8G8B8A8Unorm,
@@ -580,12 +528,17 @@ private sealed class MeshResources
 
 		byte* mapped = null;
 		SilkMarshal.ThrowHResult(uploadBuffer.Map(0, (Range*) null, (void**) &mapped));
-		var src = (byte*) pixels;
-		for (var row = 0u; row < numRows; row++)
+		unsafe
 		{
-			var dest = mapped + layout.Offset + row * layout.Footprint.RowPitch;
-			var srcRow = src + row * (ulong) width * 4;
-			Buffer.MemoryCopy(srcRow, dest, layout.Footprint.RowPitch, (ulong) width * 4);
+			fixed (byte* src = atlas.PixelsRgba)
+			{
+				for (var row = 0u; row < numRows; row++)
+				{
+					var dest = mapped + layout.Offset + row * layout.Footprint.RowPitch;
+					var srcRow = src + row * (ulong) atlas.Width * 4;
+					Buffer.MemoryCopy(srcRow, dest, layout.Footprint.RowPitch, (ulong) atlas.Width * 4);
+				}
+			}
 		}
 
 		uploadBuffer.Unmap(0, (Range*) null);
@@ -633,36 +586,6 @@ private sealed class MeshResources
 
 		uploadList.Dispose();
 		uploadBuffer.Dispose();
-
-		var heapDesc = new DescriptorHeapDesc
-		{
-			Type = DescriptorHeapType.CbvSrvUav,
-			NumDescriptors = 1,
-			Flags = DescriptorHeapFlags.ShaderVisible,
-			NodeMask = 0
-		};
-
-		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _imguiSrvHeap));
-		_imguiSrvGpuHandle = _imguiSrvHeap.GetGPUDescriptorHandleForHeapStart();
-		var srvCpuHandle = _imguiSrvHeap.GetCPUDescriptorHandleForHeapStart();
-
-		const uint DefaultShader4ComponentMapping = 5768; // D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
-
-		var srvDesc = new ShaderResourceViewDesc
-		{
-			Shader4ComponentMapping = DefaultShader4ComponentMapping,
-			Format = Format.FormatR8G8B8A8Unorm,
-			ViewDimension = SrvDimension.Texture2D
-		};
-		srvDesc.Anonymous.Texture2D = new Tex2DSrv
-		{
-			MipLevels = 1,
-			MostDetailedMip = 0,
-			ResourceMinLODClamp = 0.0f
-		};
-
-		_device.CreateShaderResourceView(_imguiFontTexture, srvDesc, srvCpuHandle);
-		io.Fonts.SetTexID(new IntPtr((long) _imguiSrvGpuHandle.Ptr));
 	}
 
 	private void CreateImGuiPipeline()
@@ -883,6 +806,53 @@ private sealed class MeshResources
 		}
 	}
 
+	private void EnsureImGuiResources(UiFrameData frame)
+	{
+		if (_imguiPipelineState.Handle is null)
+		{
+			CreateImGuiPipeline();
+		}
+
+		if (_fontUploaded == false && frame.HasFontAtlas)
+		{
+			CreateImGuiFontTexture(frame.FontAtlas);
+			CreateImGuiSrv();
+			_fontUploaded = true;
+		}
+	}
+
+	private void CreateImGuiSrv()
+	{
+		var heapDesc = new DescriptorHeapDesc
+		{
+			Type = DescriptorHeapType.CbvSrvUav,
+			NumDescriptors = 1,
+			Flags = DescriptorHeapFlags.ShaderVisible,
+			NodeMask = 0
+		};
+
+		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out _imguiSrvHeap));
+		_imguiSrvGpuHandle = _imguiSrvHeap.GetGPUDescriptorHandleForHeapStart();
+		var srvCpuHandle = _imguiSrvHeap.GetCPUDescriptorHandleForHeapStart();
+
+		const uint DefaultShader4ComponentMapping = 5768; // D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING
+
+		var srvDesc = new ShaderResourceViewDesc
+		{
+			Shader4ComponentMapping = DefaultShader4ComponentMapping,
+			Format = Format.FormatR8G8B8A8Unorm,
+			ViewDimension = SrvDimension.Texture2D
+		};
+		srvDesc.Anonymous.Texture2D = new Tex2DSrv
+		{
+			MipLevels = 1,
+			MostDetailedMip = 0,
+			ResourceMinLODClamp = 0.0f
+		};
+
+		_device.CreateShaderResourceView(_imguiFontTexture, srvDesc, srvCpuHandle);
+	}
+
 	private static void HandleRootSignatureErrors(int result, ID3D10Blob* errorBlob, string kind)
 	{
 		string? errorMessage = null;
@@ -898,10 +868,10 @@ private sealed class MeshResources
 		}
 	}
 
-	private void EnsureImGuiBuffers(ImDrawDataPtr drawData)
+	private void EnsureImGuiBuffers(UiFrameData frame)
 	{
-		var vertexBytes = drawData.TotalVtxCount * Unsafe.SizeOf<ImDrawVert>();
-		var indexBytes = drawData.TotalIdxCount * sizeof(ushort);
+		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
+		var indexBytes = frame.IndexCount * sizeof(ushort);
 
 		if (_imguiVertexBuffer.Handle is null || _imguiVertexBufferSize < vertexBytes)
 		{
@@ -962,23 +932,22 @@ private sealed class MeshResources
 		}
 	}
 
-	private void RenderImGui(ID3D12GraphicsCommandList* commandList)
+	private void RenderImGui(ID3D12GraphicsCommandList* commandList, UiFrameData frame, ID3D12BackendTexture backbuffer)
 	{
-		if (_imGuiContext == IntPtr.Zero || _imGuiDrawData is null || _imguiPipelineState.Handle is null)
+		if (_imguiPipelineState.Handle is null || _imguiFontTexture.Handle is null)
 		{
 			return;
 		}
 
-		var drawData = _imGuiDrawData.Value;
-		if (drawData.CmdListsCount == 0)
+		if (frame.Commands.Length == 0)
 		{
 			return;
 		}
 
-		EnsureImGuiBuffers(drawData);
+		EnsureImGuiBuffers(frame);
 
-		var vertexBytes = drawData.TotalVtxCount * Unsafe.SizeOf<ImDrawVert>();
-		var indexBytes = drawData.TotalIdxCount * sizeof(ushort);
+		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
+		var indexBytes = frame.IndexCount * sizeof(ushort);
 
 		byte* vertexMapped = null;
 		byte* indexMapped = null;
@@ -986,21 +955,19 @@ private sealed class MeshResources
 		SilkMarshal.ThrowHResult(_imguiVertexBuffer.Map(0, (Range*) null, (void**) &vertexMapped));
 		SilkMarshal.ThrowHResult(_imguiIndexBuffer.Map(0, (Range*) null, (void**) &indexMapped));
 
-		nint vertexOffset = 0;
-		nint indexOffset = 0;
-		var nativeDrawData = drawData.NativePtr;
-		var cmdListArray = (ImDrawList**) nativeDrawData->CmdLists.Data;
-		for (var n = 0; n < nativeDrawData->CmdListsCount; n++)
+		unsafe
 		{
-			var cmdList = new ImDrawListPtr(cmdListArray[n]);
+			fixed (ImDrawVert* srcVerts = frame.Vertices)
+			{
+				var size = frame.Vertices.Length * Unsafe.SizeOf<ImDrawVert>();
+				Buffer.MemoryCopy(srcVerts, vertexMapped, size, size);
+			}
 
-			var vtxSize = cmdList.VtxBuffer.Size * Unsafe.SizeOf<ImDrawVert>();
-			Buffer.MemoryCopy((void*) cmdList.VtxBuffer.Data, vertexMapped + vertexOffset, vertexBytes - vertexOffset, vtxSize);
-			vertexOffset += vtxSize;
-
-			var idxSize = cmdList.IdxBuffer.Size * sizeof(ushort);
-			Buffer.MemoryCopy((void*) cmdList.IdxBuffer.Data, indexMapped + indexOffset, indexBytes - indexOffset, idxSize);
-			indexOffset += idxSize;
+			fixed (ushort* srcIndices = frame.Indices)
+			{
+				var size = frame.Indices.Length * sizeof(ushort);
+				Buffer.MemoryCopy(srcIndices, indexMapped, size, size);
+			}
 		}
 
 		_imguiVertexBuffer.Unmap(0, (Range*) null);
@@ -1013,8 +980,8 @@ private sealed class MeshResources
 		{
 			TopLeftX = 0,
 			TopLeftY = 0,
-			Width = _framebufferSize.X,
-			Height = _framebufferSize.Y,
+			Width = frame.FramebufferSize.X,
+			Height = frame.FramebufferSize.Y,
 			MinDepth = 0.0f,
 			MaxDepth = 1.0f
 		};
@@ -1050,10 +1017,10 @@ private sealed class MeshResources
 			commandList->SetGraphicsRootDescriptorTable(0, *srvHandle);
 		}
 
-		var L = drawData.DisplayPos.X;
-		var R = drawData.DisplayPos.X + drawData.DisplaySize.X;
-		var T = drawData.DisplayPos.Y;
-		var B = drawData.DisplayPos.Y + drawData.DisplaySize.Y;
+		var L = frame.DisplayPos.X;
+		var R = frame.DisplayPos.X + frame.DisplaySize.X;
+		var T = frame.DisplayPos.Y;
+		var B = frame.DisplayPos.Y + frame.DisplaySize.Y;
 		Span<float> projection = stackalloc float[16];
 		projection[0] = 2.0f / (R - L);
 		projection[1] = 0.0f;
@@ -1080,50 +1047,34 @@ private sealed class MeshResources
 			commandList->SetGraphicsRoot32BitConstants(1, 16, projPtr, 0);
 		}
 
-		var globalVtxOffset = 0;
-		var globalIdxOffset = 0;
-		for (var n = 0; n < nativeDrawData->CmdListsCount; n++)
+		for (var i = 0; i < frame.Commands.Length; i++)
 		{
-			var cmdList = new ImDrawListPtr(cmdListArray[n]);
-			for (var cmdIndex = 0; cmdIndex < cmdList.CmdBuffer.Size; cmdIndex++)
+			var cmd = frame.Commands[i];
+			var clip = cmd.ClipRect;
+			var clipX1 = (int) Math.Floor(clip.X - frame.DisplayPos.X);
+			var clipY1 = (int) Math.Floor(clip.Y - frame.DisplayPos.Y);
+			var clipX2 = (int) Math.Ceiling(clip.Z - frame.DisplayPos.X);
+			var clipY2 = (int) Math.Ceiling(clip.W - frame.DisplayPos.Y);
+
+			if (clipX1 < 0) clipX1 = 0;
+			if (clipY1 < 0) clipY1 = 0;
+			if (clipX2 > frame.FramebufferSize.X) clipX2 = (int) frame.FramebufferSize.X;
+			if (clipY2 > frame.FramebufferSize.Y) clipY2 = (int) frame.FramebufferSize.Y;
+			if (clipX2 <= clipX1 || clipY2 <= clipY1)
 			{
-				var cmd = cmdList.CmdBuffer[cmdIndex];
-
-				var clip = cmd.ClipRect;
-				var clipX1 = (int) Math.Floor(clip.X - drawData.DisplayPos.X);
-				var clipY1 = (int) Math.Floor(clip.Y - drawData.DisplayPos.Y);
-				var clipX2 = (int) Math.Ceiling(clip.Z - drawData.DisplayPos.X);
-				var clipY2 = (int) Math.Ceiling(clip.W - drawData.DisplayPos.Y);
-
-				if (clipX1 < 0) clipX1 = 0;
-				if (clipY1 < 0) clipY1 = 0;
-				if (clipX2 > _framebufferSize.X) clipX2 = _framebufferSize.X;
-				if (clipY2 > _framebufferSize.Y) clipY2 = _framebufferSize.Y;
-				if (clipX2 <= clipX1 || clipY2 <= clipY1)
-				{
-					continue;
-				}
-
-				var clipRect = new D3DRect(clipX1, clipY1, clipX2, clipY2);
-				commandList->RSSetScissorRects(1, &clipRect);
-
-				commandList->DrawIndexedInstanced(cmd.ElemCount, 1, (uint) (cmd.IdxOffset + globalIdxOffset),
-					(int) (cmd.VtxOffset + globalVtxOffset), 0);
+				continue;
 			}
 
-			globalIdxOffset += cmdList.IdxBuffer.Size;
-			globalVtxOffset += cmdList.VtxBuffer.Size;
+			var clipRect = new D3DRect(clipX1, clipY1, clipX2, clipY2);
+			commandList->RSSetScissorRects(1, &clipRect);
+
+			commandList->DrawIndexedInstanced((uint) cmd.ElemCount, 1, (uint) cmd.IdxOffset,
+				(int) cmd.VtxOffset, 0);
 		}
 	}
 
 	private void DisposeImGui()
 	{
-		if (_imGuiContext != IntPtr.Zero)
-		{
-			ImGui.DestroyContext(_imGuiContext);
-			_imGuiContext = IntPtr.Zero;
-		}
-
 		if (_imguiVertexBuffer.Handle is not null)
 		{
 			_imguiVertexBuffer.Dispose();
@@ -1927,7 +1878,8 @@ private sealed class MeshResources
 		float deltaTime,
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle presentedTexture)
+		RenderGraphResourceHandle presentedTexture,
+		UiFrameData uiFrame)
 	{
 		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture
@@ -1970,7 +1922,8 @@ private sealed class MeshResources
 		barriers[1].Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
 		nativeCommandList->ResourceBarrier(2, barriers);
 
-		RenderImGui(nativeCommandList);
+		EnsureImGuiResources(uiFrame);
+		RenderImGui(nativeCommandList, uiFrame, backbufferTexture);
 
 		barriers[1].Anonymous.Transition.StateBefore = ResourceStates.RenderTarget;
 		barriers[1].Anonymous.Transition.StateAfter = ResourceStates.Present;
