@@ -1,6 +1,7 @@
 #nullable enable
 
 using System.Numerics;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Rendering;
 
@@ -10,12 +11,13 @@ namespace WolfEngine.Rendering;
 public sealed class SceneDrawData
 {
 	public SceneDrawData(Matrix4x4 viewProjection, Matrix4x4 inverseProjection, Vector3 cameraOrigin,
-		IReadOnlyList<DrawPacket> drawPackets)
+		IReadOnlyList<DrawPacket> drawPackets, IReadOnlyList<LightPacket> lights)
 	{
 		ViewProjection = viewProjection;
 		InverseProjection = inverseProjection;
 		CameraOrigin = cameraOrigin;
 		DrawPackets = drawPackets ?? throw new ArgumentNullException(nameof(drawPackets));
+		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
 	}
 
 	public Matrix4x4 ViewProjection { get; }
@@ -25,6 +27,8 @@ public sealed class SceneDrawData
 	public Vector3 CameraOrigin { get; }
 	
 	public IReadOnlyList<DrawPacket> DrawPackets { get; }
+
+	public IReadOnlyList<LightPacket> Lights { get; }
 }
 
 /// <summary>
@@ -45,5 +49,18 @@ public readonly struct DrawPacket
 	public Material Material { get; }
 	
 	public Matrix4x4 Transform { get; }
+}
+
+public readonly struct LightPacket
+{
+	public LightPacket(Light light, Transform transform)
+	{
+		Light = light;
+		Transform = transform;
+	}
+
+	public Light Light { get; }
+
+	public Transform Transform { get; }
 }
 

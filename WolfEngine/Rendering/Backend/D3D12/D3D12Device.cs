@@ -792,7 +792,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		ranges[1].RegisterSpace = 0;
 		ranges[1].OffsetInDescriptorsFromTableStart = 0xFFFFFFFF;
 
-		var rootParameters = stackalloc RootParameter[2];
+		var rootParameters = stackalloc RootParameter[3];
 		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 2;
 		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
@@ -803,9 +803,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		{
 			ShaderRegister = 0,
 			RegisterSpace = 0,
-			Num32BitValues = 20
+			Num32BitValues = 20 // CameraParams
 		};
 		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[2].Anonymous.Constants = new()
+		{
+			ShaderRegister = 1,
+			RegisterSpace = 0,
+			Num32BitValues = 40 // LightingParams (count + up to 3 lights)
+		};
+		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
 
 		var staticSampler = stackalloc StaticSamplerDesc[1];
 		staticSampler[0] = new()
@@ -827,7 +836,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 2,
+			NumParameters = 3,
 			PParameters = rootParameters,
 			NumStaticSamplers = 1,
 			PStaticSamplers = staticSampler,

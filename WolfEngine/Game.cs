@@ -121,7 +121,8 @@ public class Game
     {
         _world = new();
 
-        _cameraMoverSystem = new CameraMoverSystem(_inputSystem, _world);
+        // Camera
+        _cameraMoverSystem = new(_inputSystem, _world);
 
         var (cameraComponent, cameraTransform) = CreateCamera();
         
@@ -129,7 +130,21 @@ public class Game
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
         _world.AddComponent(_camera, new CameraMover());
+
+        // Light
+        var light = _world.CreateEntity();
+        var lightTransform =
+            new Transform(Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitX, 130), Vector3.One);
+        var directionalLight = new Light
+        {
+            Type = LightType.Directional,
+            Intensity = 1.0f,
+            Color = new (1.0f, 1.0f, 1.0f, 1.0f)
+        };
+        _world.AddComponent(light, lightTransform);
+        _world.AddComponent(light, directionalLight);
         
+        // Scene
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
@@ -187,6 +202,13 @@ public class Game
             ref var meshRenderer = ref entry.Second;
             var transformMatrix = transform.GetTransform();
             snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+        }
+
+        foreach (var entry in _world.View<Transform, Light>())
+        {
+            ref var transform = ref entry.First;
+            ref var light = ref entry.Second;
+            snapshot.AddLight(light, transform);
         }
 
         _renderGraph.PublishSnapshot();

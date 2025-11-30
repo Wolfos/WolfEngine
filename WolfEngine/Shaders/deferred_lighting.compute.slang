@@ -13,6 +13,22 @@ cbuffer CameraParams : register(b0)
     CameraParams camera;
 };
 
+static const uint MAX_LIGHTS = 3;
+
+struct LightData
+{
+    float4 colorIntensity;   // rgb = color, a = intensity
+    float4 directionType;    // xyz = direction (normalized), w = type (0 = directional, 1 = point)
+    float4 positionRange;    // xyz = position, w = range (point only)
+};
+
+cbuffer LightingParams : register(b1)
+{
+    uint lightCount;
+    float3 _lightingPadding;
+    LightData lights[MAX_LIGHTS];
+};
+
 float3 DecodeNormal(float3 encoded)
 {
     return normalize(encoded * 2.0f - 1.0f);
@@ -38,19 +54,41 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 viewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invProjection);
     float3 viewDir = ComputeViewDir(viewPos);
 
-    float3 lightDirection = normalize(float3(-0.5f, -1.0f, -0.2f));
-    float3 lightColor = float3(1.0f, 1.0f, 1.0f);
-    float ambientStrength = 0.5f;
+    float3 color = float3(0.05f, 0.05f, 0.05f) * albedo; // ambient
 
-    float diffuse = max(dot(normal, -lightDirection), 0.0f);
-    float3 ambient = ambientStrength * albedo;
-    float3 diffuseComponent = diffuse * albedo * lightColor;
+    [unroll]
+    for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
+    {
+        LightData light = lights[i];
+        float intensity = light.colorIntensity.a;
+        float3 lightColor = light.colorIntensity.rgb * intensity;
 
-    float roughness = lerp(0.2f, 0.8f, metallic);
-    float3 halfVector = normalize(-lightDirection + viewDir);
-    float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, roughness));
-    float3 specularComponent = specular * lightColor * 0.5f;
+        float type = light.directionType.w;
+        float3 L = -light.directionType.xyz; // assume stored as light-to-surface direction
+        float attenuation = 1.0f;
 
-    float3 color = ambient + diffuseComponent + specularComponent;
+        if (type >= 0.5f) // point
+        {
+            float3 lightPos = light.positionRange.xyz;
+            float range = max(light.positionRange.w, 0.001f);
+            float3 toLight = lightPos - viewPos;
+            float distSq = dot(toLight, toLight);
+            float dist = sqrt(distSq);
+            L = dist > 0.0f ? toLight / dist : float3(0, 1, 0);
+            float falloff = saturate(1.0f - dist / range);
+            attenuation = falloff * falloff;
+        }
+
+        float NdotL = max(dot(normal, L), 0.0f);
+        float3 diffuse = NdotL * albedo * lightColor * attenuation;
+
+        float roughness = lerp(0.2f, 0.8f, metallic);
+        float3 halfVector = normalize(L + viewDir);
+        float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, roughness));
+        float3 specularComponent = specular * lightColor * 0.5f * attenuation;
+
+        color += diffuse + specularComponent;
+    }
+
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

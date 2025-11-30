@@ -14,6 +14,7 @@ public sealed class DeferredLightingPass
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
 	private IGfxDescriptorSet? _descriptorSet;
+	private const int MaxLights = 3;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler)
 	{
@@ -71,6 +72,36 @@ public sealed class DeferredLightingPass
 		cameraConstants[19] = 1.0f;
 		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(cameraConstants));
 
+		Span<ShaderLight> shaderLights = stackalloc ShaderLight[MaxLights];
+		var lightCount = Math.Min(sceneData.Lights.Count, MaxLights);
+		for (var i = 0; i < lightCount; i++)
+		{
+			var packet = sceneData.Lights[i];
+			var light = packet.Light;
+			var rotation = packet.Transform.LocalRotation;
+			var forward = Vector3.Transform(-Vector3.UnitZ, rotation);
+			if (forward == Vector3.Zero)
+			{
+				forward = new Vector3(0, -1, 0);
+			}
+			forward = Vector3.Normalize(forward);
+
+			var position = packet.Transform.LocalPosition;
+
+			shaderLights[i] = new ShaderLight
+			{
+				ColorIntensity = new Vector4(light.Color.X, light.Color.Y, light.Color.Z, light.Intensity),
+				DirectionType = new Vector4(forward, (float) light.Type),
+				PositionRange = new Vector4(position, 25.0f) // TODO: light range from component when available
+			};
+		}
+
+		Span<byte> lightingConstants = stackalloc byte[16 + MaxLights * Marshal.SizeOf<ShaderLight>()];
+		MemoryMarshal.Write(lightingConstants, ref lightCount);
+		var lightBytes = MemoryMarshal.AsBytes(shaderLights[..lightCount]);
+		lightBytes.CopyTo(lightingConstants.Slice(16));
+		commandList.SetComputeConstants(2, lightingConstants);
+
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
 		var dispatchY = (uint)((config.DispatchSize.Y + 7) / 8);
@@ -125,5 +156,12 @@ public sealed class DeferredLightingPass
 		destination[13] = matrix.M42;
 		destination[14] = matrix.M43;
 		destination[15] = matrix.M44;
+	}
+
+	private readonly struct ShaderLight
+	{
+		public Vector4 ColorIntensity { get; init; }
+		public Vector4 DirectionType { get; init; }
+		public Vector4 PositionRange { get; init; }
 	}
 }

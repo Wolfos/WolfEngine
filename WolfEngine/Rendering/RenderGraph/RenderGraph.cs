@@ -21,6 +21,7 @@ public sealed class RenderGraph
 	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<DrawPacket> _renderPackets = new();
+	private readonly List<LightPacket> _renderLights = new();
 	private FrameSnapshot? _currentSnapshot;
 	private FrameSnapshot? _activeSnapshot;
 
@@ -76,10 +77,19 @@ public sealed class RenderGraph
 				_renderPackets.Add(new DrawPacket(packet.Mesh, packet.Material, relative));
 			}
 
+			_renderLights.Clear();
+			for (var i = 0; i < snapshot.LightPackets.Count; i++)
+			{
+				var lightPacket = snapshot.LightPackets[i];
+				var lightTransform = lightPacket.Transform;
+				lightTransform.LocalPosition -= cameraPosition;
+				_renderLights.Add(new LightPacket(lightPacket.Light, lightTransform));
+			}
+
 			// Remove camera translation from the view matrix since objects are now camera-relative
 			view.Translation = Vector3.Zero;
 			var viewProjection = view * snapshot.Camera.Perspective;
-			sceneData = new(viewProjection, invProjection, cameraPosition, _renderPackets);
+			sceneData = new(viewProjection, invProjection, cameraPosition, _renderPackets, _renderLights);
 		}
 
 		if (sceneData is null)
