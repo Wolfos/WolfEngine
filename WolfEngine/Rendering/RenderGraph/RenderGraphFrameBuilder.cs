@@ -159,7 +159,7 @@ public sealed class RenderGraphFrameBuilder
 		barrier.Anonymous.Transition = new()
 		{
 			PResource = backbuffer.Resource,
-			Subresource = Silk.NET.Direct3D12.D3D12.ResourceBarrierAllSubresources,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.RenderTarget,
 			StateAfter = ResourceStates.CopyDest
 		};

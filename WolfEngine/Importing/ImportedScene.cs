@@ -18,6 +18,7 @@ public record struct ImportedTexture(
 );
 
 public record struct ImportedMesh(
+	string Name,
 	Transform Transform,
 	Mesh Mesh,
 	int MaterialIndex

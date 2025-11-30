@@ -1,7 +1,7 @@
 ﻿namespace WolfEngine.ECS;
 
 public readonly ref struct View<T1,T2>
-	where T1:struct where T2:struct
+	where T1:struct, IEntityComponent where T2:struct, IEntityComponent
 {
 	private readonly ComponentPool<T1> _a;
 	private readonly ComponentPool<T2> _b;

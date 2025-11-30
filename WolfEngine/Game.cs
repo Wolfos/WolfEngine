@@ -103,18 +103,10 @@ public class Game
         
         _cameraMoverSystem.Update(deltaTime);
         
-        foreach (var entry in _world.View<Transform, Rotator>())
-        {
-            ref var transform = ref entry.First;
-            ref var rotator = ref entry.Second;
-            
-            rotator.CurrentRotation += deltaTime * rotator.RotationSpeed;
-            transform.LocalRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, rotator.CurrentRotation); 
-        }
         PublishSnapshot();
 
         _imguiSystem.NewFrame(deltaTime, _renderGraph.GetFrameBufferSize());
-        _imguiSystem.RunGui(GUI.Draw, _world);
+        _imguiSystem.RunGui(EditorGui.Draw, _world);
     }
 
     private void Startup()
@@ -132,13 +124,13 @@ public class Game
 
         var (cameraComponent, cameraTransform) = CreateCamera();
         
-        _camera = _world.CreateEntity();
+        _camera = _world.CreateEntity("Camera");
         _world.AddComponent(_camera, cameraComponent);
         _world.AddComponent(_camera, cameraTransform);
         _world.AddComponent(_camera, new CameraMover());
 
         // Light
-        var light = _world.CreateEntity();
+        var light = _world.CreateEntity("Directional Light");
         var lightTransform =
             new Transform(Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitX, 130), Vector3.One);
         var directionalLight = new Light
@@ -155,7 +147,7 @@ public class Game
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
-            var entity = _world.CreateEntity();
+            var entity = _world.CreateEntity(importedMesh.Name);
             var transform = importedMesh.Transform;
 
             var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
@@ -168,15 +160,9 @@ public class Game
                 Mesh = importedMesh.Mesh,
                 Material = material
             };
-
-            var rotator = new Rotator
-            {
-                RotationSpeed = 0.5f
-            };
             
             _world.AddComponent(entity, transform);
             _world.AddComponent(entity, meshRenderer);
-            //_world.AddComponent(entity, rotator);
         }
     }
 

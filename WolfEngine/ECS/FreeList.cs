@@ -58,4 +58,13 @@ public class FreeList
 			_slots[entity.Index].Alive &&
 			_slots[entity.Index].Generation == entity.Generation;
 	}
+
+	public void GetAllEntities(List<Entity> entities)
+	{
+		for (var i = 0; i < _count; i++)
+		{
+			if (_slots[i].Alive)
+				entities.Add(new Entity(i, _slots[i].Generation));
+		}
+	}
 }

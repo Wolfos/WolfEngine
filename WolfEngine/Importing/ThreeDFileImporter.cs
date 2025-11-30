@@ -130,7 +130,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             }
 
             var (mesh, materialIndex) = meshData[meshIndex];
-            output.Add(new (GetTransform(localTransform), mesh, materialIndex));
+            output.Add(new (node->MName.AsString, GetTransform(localTransform), mesh, materialIndex));
         }
 
         for (var childIndex = 0; childIndex < node->MNumChildren; childIndex++)

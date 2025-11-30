@@ -1,7 +1,12 @@
 ﻿namespace WolfEngine.ECS;
 
-internal interface IComponentPool { }
-public class ComponentPool<T> : IComponentPool where T:struct
+internal interface IComponentPool
+{
+	bool Has(Entity entity);
+	bool TryGetComponent(Entity entity, out IEntityComponent component);
+}
+
+public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 {
 	// SparseSet: maps entity index -> dense slot (or -1 if absent)
 	private int[] _sparse = Array.Empty<int>();
@@ -12,6 +17,20 @@ public class ComponentPool<T> : IComponentPool where T:struct
 	public int Count { get; private set; }
 
 	internal ReadOnlySpan<int> EntitiesSpan => _entities.AsSpan(0, Count);
+
+	bool IComponentPool.Has(Entity entity) => Has(entity);
+
+	bool IComponentPool.TryGetComponent(Entity entity, out IEntityComponent component)
+	{
+		if (!Has(entity))
+		{
+			component = default;
+			return false;
+		}
+
+		component = Get(entity);
+		return true;
+	}
 
 	public void Add(Entity e, in T value)
 	{
