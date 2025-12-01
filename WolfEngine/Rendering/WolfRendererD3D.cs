@@ -826,10 +826,12 @@ private sealed class MeshResources
 			{
 				TextureFormat.Bgra8Unorm,     // Albedo
 				TextureFormat.Rgba16Float,    // Normal
-				TextureFormat.Rgba8Unorm      // Material
+				TextureFormat.Rgba8Unorm,     // Material
+				TextureFormat.Rgba8Unorm      // Emissive
 			}),
 			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState);
+			renderState: renderState,
+			layout: GraphicsLayoutKind.Material);
 
 		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
 		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
@@ -1034,6 +1036,57 @@ private sealed class MeshResources
 	public IGfxDevice GetGfxDevice()
 	{
 		return _gfxDevice;
+	}
+
+	public SkyboxResources CreateSkyboxResources(Texture environmentTexture, Mesh skyboxMesh)
+	{
+		if (environmentTexture is null)
+		{
+			throw new ArgumentNullException(nameof(environmentTexture));
+		}
+
+		if (environmentTexture.Resources?.DescriptorSet is null)
+		{
+			throw new InvalidOperationException("Environment texture resources were not created.");
+		}
+
+		EnsureMeshResources(skyboxMesh);
+
+		var vertexShaderBytes = _shaderCompiler.GetDxil("skybox.slang", "vertexShader", "vs_6_0");
+		var pixelShaderBytes = _shaderCompiler.GetDxil("skybox.slang", "fragmentShader", "ps_6_0");
+
+		var renderState = new RenderStateDescriptor(
+			AbstractionFillMode.Solid,
+			AbstractionCullMode.Back,
+			depthTestEnabled: false,
+			depthWriteEnabled: false,
+			BlendMode.Opaque);
+
+		var pipelineKey = new PipelineKey(
+			PassKind.Graphics,
+			vertexEntryPoint: "vertexShader",
+			pixelEntryPoint: "fragmentShader",
+			computeEntryPoint: null,
+			renderTargets: new(new[]
+			{
+				TextureFormat.Bgra8Unorm,     // Albedo
+				TextureFormat.Rgba16Float,    // Normal
+				TextureFormat.Rgba8Unorm,     // Material
+				TextureFormat.Rgba8Unorm      // Emissive
+			}),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.D32Float),
+			renderState: renderState,
+			layout: GraphicsLayoutKind.Skybox);
+
+		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
+		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
+
+		return new SkyboxResources
+		{
+			Pipeline = pipeline,
+			DescriptorSet = environmentTexture.Resources.DescriptorSet!,
+			Mesh = skyboxMesh
+		};
 	}
 
 	public Int2 GetFrameBufferSize()

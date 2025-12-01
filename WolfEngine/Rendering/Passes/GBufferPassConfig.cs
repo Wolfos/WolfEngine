@@ -32,4 +32,10 @@ public struct GBufferPassConfig
 
 
     public float DepthClearValue { get; init; }
+
+    // Optional skybox
+    public IGfxPipeline? SkyboxPipeline { get; set; }
+    public IGfxDescriptorSet? SkyboxDescriptorSet { get; set; }
+    public Matrix4x4? InvViewProjection { get; set; }
+    public Mesh? SkyboxMesh { get; set; }
 }

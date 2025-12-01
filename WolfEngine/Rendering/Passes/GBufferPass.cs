@@ -41,6 +41,34 @@ public static class GBufferPass
 		commandList.ClearColorAttachment(3, config.EmissiveClearColor);
 		commandList.ClearDepthStencil(config.DepthClearValue);
 
+		// Skybox (optional)
+		if (config.SkyboxPipeline is not null &&
+		    config.SkyboxDescriptorSet is not null &&
+		    config.InvViewProjection is Matrix4x4 invViewProj &&
+		    config.SkyboxMesh is Mesh skyboxMesh &&
+		    skyboxMesh.VertexBuffer is not null &&
+		    skyboxMesh.IndexBuffer is not null)
+		{
+			commandList.BindPipeline(config.SkyboxPipeline);
+
+			Span<float> skyboxConstants = stackalloc float[16];
+			WriteMatrix(skyboxConstants, invViewProj);
+			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(skyboxConstants));
+			commandList.BindGraphicsDescriptorSet(1, config.SkyboxDescriptorSet);
+
+			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
+			var skyboxVertexViews = new[]
+			{
+				new VertexBufferView(skyboxMesh.VertexBuffer, skyboxMesh.StrideInBytes, 0)
+			};
+			commandList.SetVertexBuffers(skyboxVertexViews);
+
+			var skyboxIndexView = new IndexBufferView(skyboxMesh.IndexBuffer, IndexFormat.UInt32, 0);
+			commandList.SetIndexBuffer(skyboxIndexView);
+
+			commandList.Draw(new DrawArguments(skyboxMesh.IndexCount, 1));
+		}
+
 		// Build camera constants once
 		Span<float> cameraConstants = stackalloc float[20];
 		WriteMatrix(cameraConstants, sceneData.ViewProjection);

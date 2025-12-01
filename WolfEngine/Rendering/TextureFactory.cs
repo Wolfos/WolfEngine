@@ -11,19 +11,22 @@ public interface ITextureFactory
 	Texture GetWhiteTexture();
 	Texture GetBlackTexture();
 	Texture GetNeutralNormalTexture();
+	Texture LoadFromFile(string path, bool isSrgb = false);
 }
 
 public sealed class TextureFactory : ITextureFactory
 {
 	private readonly RenderGraph _renderGraph;
+	private readonly IImageLoader _imageLoader;
 	private readonly ConcurrentDictionary<string, Texture> _cache = new(StringComparer.OrdinalIgnoreCase);
 	private Texture? _whiteTexture;
 	private Texture? _blackTexture;
 	private Texture? _neutralNormalTexture;
 
-	public TextureFactory(RenderGraph renderGraph)
+	public TextureFactory(RenderGraph renderGraph, IImageLoader imageLoader)
 	{
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 	}
 
 	public Texture GetTexture(ImportedTexture importedTexture)
@@ -87,5 +90,16 @@ public sealed class TextureFactory : ITextureFactory
 		texture.Resources = _renderGraph.EnsureTextureResources(texture);
 		_neutralNormalTexture = texture;
 		return texture;
+	}
+
+	public Texture LoadFromFile(string path, bool isSrgb = false)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+		{
+			throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+		}
+
+		var imported = _imageLoader.Load(path, isSrgb ? TextureSemantic.BaseColor : TextureSemantic.Unknown);
+		return GetTexture(imported);
 	}
 }

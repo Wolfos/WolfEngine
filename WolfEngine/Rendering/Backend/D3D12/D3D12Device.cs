@@ -37,7 +37,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	
 	private readonly Dictionary<PipelineKey, IGfxPipeline> _pipelineCache = new();
 	private readonly object _pipelineLock = new();
-	private ComPtr<ID3D12RootSignature> _graphicsRootSignature;
+	private readonly Dictionary<GraphicsLayoutKind, ComPtr<ID3D12RootSignature>> _graphicsRootSignatures = new();
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
 	private readonly Dictionary<TextureDescriptor, Queue<PooledTexture>> _texturePool = new(new TextureDescriptorComparer());
@@ -570,7 +570,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			throw new InvalidOperationException("Graphics pipelines require both vertex and pixel shaders.");
 		}
 
-		EnsureGraphicsRootSignature();
+		var rootSignature = EnsureGraphicsRootSignature(key.Layout);
 
 		var vertexShader = shaders.Vertex.Value.Span;
 		var pixelShader = shaders.Pixel.Value.Span;
@@ -659,7 +659,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 				var psoDesc = new GraphicsPipelineStateDesc
 				{
-					PRootSignature = _graphicsRootSignature.Handle,
+					PRootSignature = rootSignature.Handle,
 					VS = shaderBytecodeVS,
 					PS = shaderBytecodePS,
 					BlendState = blendState,
@@ -685,7 +685,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 				SilkMarshal.ThrowHResult(
 					_device.CreateGraphicsPipelineState(in psoDesc, out ComPtr<ID3D12PipelineState> pipelineState));
 
-				return new D3D12Pipeline(key, PassKind.Graphics, pipelineState, _graphicsRootSignature);
+				return new D3D12Pipeline(key, PassKind.Graphics, pipelineState, rootSignature);
 			}
 		}
 	}
@@ -720,77 +720,130 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			SilkMarshal.ThrowHResult(
 				_device.CreateComputePipelineState(in pipelineDesc, out ComPtr<ID3D12PipelineState> pipelineState));
 
-			return new D3D12Pipeline(key, PassKind.Compute, pipelineState, _computeRootSignature);
-		}
+		return new D3D12Pipeline(key, PassKind.Compute, pipelineState, _computeRootSignature);
+	}
 	}
 
-	private void EnsureGraphicsRootSignature()
+	private ComPtr<ID3D12RootSignature> EnsureGraphicsRootSignature(GraphicsLayoutKind layout)
 	{
-		if (_graphicsRootSignature.Handle is not null)
+		if (_graphicsRootSignatures.TryGetValue(layout, out var existing) && existing.Handle is not null)
 		{
-			return;
+			return existing;
 		}
 
 		var ranges = stackalloc DescriptorRange[1];
-		ranges[0].RangeType = DescriptorRangeType.Srv;
-		ranges[0].NumDescriptors = 5;
-		ranges[0].BaseShaderRegister = 0;
-		ranges[0].RegisterSpace = 0;
-		ranges[0].OffsetInDescriptorsFromTableStart = 0;
-
 		var rootParameters = stackalloc RootParameter[4];
-		rootParameters[0].ParameterType = RootParameterType.TypeCbv;
-		rootParameters[0].Anonymous.Descriptor = new()
-		{
-			ShaderRegister = 0,
-			RegisterSpace = 0
-		};
-		rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
-
-		rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[1].Anonymous.Constants = new()
-		{
-			ShaderRegister = 1,
-			RegisterSpace = 0,
-			Num32BitValues = 16
-		};
-		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
-
-		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[2].Anonymous.Constants = new()
-		{
-			ShaderRegister = 2,
-			RegisterSpace = 0,
-			Num32BitValues = 20
-		};
-		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[3].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[3].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[3].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
-		rootParameters[3].ShaderVisibility = ShaderVisibility.Pixel;
-
 		var staticSampler = stackalloc StaticSamplerDesc[1];
-		staticSampler[0] = new()
+
+		switch (layout)
 		{
-			Filter = Filter.MinMagMipLinear,
-			AddressU = TextureAddressMode.Wrap,
-			AddressV = TextureAddressMode.Wrap,
-			AddressW = TextureAddressMode.Wrap,
-			MipLODBias = 0.0f,
-			MaxAnisotropy = 0,
-			ComparisonFunc = ComparisonFunc.Always,
-			BorderColor = StaticBorderColor.OpaqueWhite,
-			MinLOD = 0.0f,
-			MaxLOD = float.MaxValue,
-			ShaderRegister = 0,
-			RegisterSpace = 0,
-			ShaderVisibility = ShaderVisibility.Pixel
-		};
+			case GraphicsLayoutKind.Material:
+			case GraphicsLayoutKind.Default:
+			{
+				ranges[0].RangeType = DescriptorRangeType.Srv;
+				ranges[0].NumDescriptors = 5;
+				ranges[0].BaseShaderRegister = 0;
+				ranges[0].RegisterSpace = 0;
+				ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+				rootParameters[0].ParameterType = RootParameterType.TypeCbv;
+				rootParameters[0].Anonymous.Descriptor = new()
+				{
+					ShaderRegister = 0,
+					RegisterSpace = 0
+				};
+				rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
+
+				rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
+				rootParameters[1].Anonymous.Constants = new()
+				{
+					ShaderRegister = 1,
+					RegisterSpace = 0,
+					Num32BitValues = 16
+				};
+				rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
+
+				rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+				rootParameters[2].Anonymous.Constants = new()
+				{
+					ShaderRegister = 2,
+					RegisterSpace = 0,
+					Num32BitValues = 20
+				};
+				rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+
+				rootParameters[3].ParameterType = RootParameterType.TypeDescriptorTable;
+				rootParameters[3].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+				rootParameters[3].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
+				rootParameters[3].ShaderVisibility = ShaderVisibility.Pixel;
+
+				staticSampler[0] = new()
+				{
+					Filter = Filter.MinMagMipLinear,
+					AddressU = TextureAddressMode.Wrap,
+					AddressV = TextureAddressMode.Wrap,
+					AddressW = TextureAddressMode.Wrap,
+					MipLODBias = 0.0f,
+					MaxAnisotropy = 0,
+					ComparisonFunc = ComparisonFunc.Always,
+					BorderColor = StaticBorderColor.OpaqueWhite,
+					MinLOD = 0.0f,
+					MaxLOD = float.MaxValue,
+					ShaderRegister = 0,
+					RegisterSpace = 0,
+					ShaderVisibility = ShaderVisibility.Pixel
+				};
+				break;
+			}
+			case GraphicsLayoutKind.Skybox:
+			{
+				ranges[0].RangeType = DescriptorRangeType.Srv;
+				ranges[0].NumDescriptors = 1;
+				ranges[0].BaseShaderRegister = 0;
+				ranges[0].RegisterSpace = 0;
+				ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+				rootParameters[0].ParameterType = RootParameterType.Type32BitConstants;
+				rootParameters[0].Anonymous.Constants = new()
+				{
+					ShaderRegister = 0,
+					RegisterSpace = 0,
+					Num32BitValues = 16 // viewProjection
+				};
+				rootParameters[0].ShaderVisibility = ShaderVisibility.Vertex;
+
+				rootParameters[1].ParameterType = RootParameterType.TypeDescriptorTable;
+				rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+				rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
+				rootParameters[1].ShaderVisibility = ShaderVisibility.Pixel;
+
+				staticSampler[0] = new()
+				{
+					Filter = Filter.MinMagMipLinear,
+					AddressU = TextureAddressMode.Clamp,
+					AddressV = TextureAddressMode.Clamp,
+					AddressW = TextureAddressMode.Clamp,
+					MipLODBias = 0.0f,
+					MaxAnisotropy = 0,
+					ComparisonFunc = ComparisonFunc.Always,
+					BorderColor = StaticBorderColor.OpaqueWhite,
+					MinLOD = 0.0f,
+					MaxLOD = float.MaxValue,
+					ShaderRegister = 0,
+					RegisterSpace = 0,
+					ShaderVisibility = ShaderVisibility.Pixel
+				};
+				break;
+			}
+			default:
+				throw new NotSupportedException($"Unsupported graphics layout '{layout}'.");
+		}
+
+		var rootParameterCount = layout == GraphicsLayoutKind.Skybox ? 2 : 4;
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 4,
+			NumParameters = (uint)rootParameterCount,
 			PParameters = rootParameters,
 			NumStaticSamplers = 1,
 			PStaticSamplers = staticSampler,
@@ -815,7 +868,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 				0,
 				rootSignatureBlob->GetBufferPointer(),
 				rootSignatureBlob->GetBufferSize(),
-				out _graphicsRootSignature));
+				out ComPtr<ID3D12RootSignature> rootSignature));
+
+			_graphicsRootSignatures[layout] = rootSignature;
+			return rootSignature;
 		}
 		finally
 		{

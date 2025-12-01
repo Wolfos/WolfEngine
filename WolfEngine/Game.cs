@@ -16,9 +16,11 @@ public class Game
     private readonly IThreeDFileImporter _fileImporter;
     private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
+    private readonly IRenderer _renderer;
     private readonly IInputSystem _inputSystem;
     private readonly ImGuiUiSystem _imguiSystem;
     private readonly ITextureFactory _textureFactory;
+    private SkyboxResources? _skybox;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -40,12 +42,13 @@ public class Game
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph, IInputSystem inputSystem, ImGuiUiSystem imguiSystem, ITextureFactory textureFactory)
+        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, ImGuiUiSystem imguiSystem, ITextureFactory textureFactory)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
+        _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _inputSystem = inputSystem;
         _imguiSystem = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
         _textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
@@ -149,6 +152,7 @@ public class Game
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
         var runtimeTextures = scene.Textures.Select(_textureFactory.GetTexture).ToList();
+        LoadSkybox();
         foreach (var importedMesh in scene.Meshes)
         {
             var entity = _world.CreateEntity(importedMesh.Name);
@@ -250,6 +254,48 @@ public class Game
         }
 
         _renderGraph.PublishSnapshot();
+    }
+
+    private void LoadSkybox()
+    {
+        var envPath = Path.Combine(AppContext.BaseDirectory, "Assets", "shanghai_bund_1k.hdr");
+        var envTexture = _textureFactory.LoadFromFile(envPath, isSrgb: false);
+        var skyboxMesh = CreateSkyboxMesh();
+        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(skyboxMesh));
+
+        if (_renderer is WolfRendererD3D d3dRenderer)
+        {
+            var skybox = d3dRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
+            _skybox = skybox;
+            _renderGraph.SetSkybox(skybox);
+        }
+    }
+
+    private static Mesh CreateSkyboxMesh()
+    {
+        var vertices = new[]
+        {
+            new Vector4(-1, -1, -1, 1),
+            new Vector4( 1, -1, -1, 1),
+            new Vector4( 1,  1, -1, 1),
+            new Vector4(-1,  1, -1, 1),
+            new Vector4(-1, -1,  1, 1),
+            new Vector4( 1, -1,  1, 1),
+            new Vector4( 1,  1,  1, 1),
+            new Vector4(-1,  1,  1, 1)
+        };
+
+        var indices = new uint[]
+        {
+            0,1,2, 0,2,3, // -Z
+            4,6,5, 4,7,6, // +Z
+            4,5,1, 4,1,0, // -Y
+            3,2,6, 3,6,7, // +Y
+            4,0,3, 4,3,7, // -X
+            1,5,6, 1,6,2  // +X
+        };
+
+        return new Mesh(vertices, indices);
     }
 
     public ImGuiUiSystem GetImGuiSystem() => _imguiSystem;

@@ -297,7 +297,8 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		string? computeEntryPoint,
 		RenderTargetFormats renderTargets,
 		DepthStencilFormat depthStencil,
-		RenderStateDescriptor renderState)
+		RenderStateDescriptor renderState,
+		GraphicsLayoutKind layout = GraphicsLayoutKind.Default)
 	{
 		PassKind = passKind;
 		VertexEntryPoint = vertexEntryPoint;
@@ -306,6 +307,7 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		RenderTargets = renderTargets;
 		DepthStencil = depthStencil;
 		RenderState = renderState;
+		Layout = layout;
 	}
 
 	public PassKind PassKind { get; }
@@ -322,6 +324,8 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 
 	public RenderStateDescriptor RenderState { get; }
 
+	public GraphicsLayoutKind Layout { get; }
+
 	public bool Equals(PipelineKey other)
 	{
 		return PassKind == other.PassKind
@@ -330,6 +334,7 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		       && ComputeEntryPoint == other.ComputeEntryPoint
 		       && RenderTargets.Equals(other.RenderTargets)
 		       && DepthStencil.Equals(other.DepthStencil)
+		       && Layout == other.Layout
 		       && RenderState.Equals(other.RenderState);
 	}
 
@@ -344,7 +349,8 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 			ComputeEntryPoint,
 			RenderTargets,
 			DepthStencil,
-			RenderState);
+			RenderState,
+			Layout);
 	}
 }
 
@@ -470,4 +476,11 @@ public enum BlendMode
 	Opaque,
 	Additive,
 	AlphaBlend
+}
+
+public enum GraphicsLayoutKind
+{
+	Default = 0,
+	Material = 1,
+	Skybox = 2
 }

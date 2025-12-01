@@ -157,6 +157,11 @@ public sealed class RenderGraph
 		_snapshotBuffer.PublishWrite();
 	}
 
+	public void SetSkybox(SkyboxResources skybox)
+	{
+		_frameBuilder.SetSkybox(skybox);
+	}
+
 	public void OnRender(float deltaTime)
 	{
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());

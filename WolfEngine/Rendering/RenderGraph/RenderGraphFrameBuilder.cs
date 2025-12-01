@@ -28,6 +28,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private SkyboxResources? _skybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
 	
@@ -46,6 +47,11 @@ public sealed class RenderGraphFrameBuilder
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_imguiExecute = ExecuteImGui;
+	}
+
+	public void SetSkybox(SkyboxResources skybox)
+	{
+		_skybox = skybox;
 	}
 
 	public RenderGraphFrameResources BeginFrame(
@@ -140,7 +146,22 @@ public sealed class RenderGraphFrameBuilder
 			DepthClearValue = 1.0f
 		};
 
+		if (_skybox is not null &&
+		    _skybox.Mesh is not null &&
+		    context.SceneData is not null)
+		{
+			ApplySkybox(ref gbufferConfig, _skybox, context.SceneData.ViewProjection);
+		}
+
 		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
+	}
+
+	private static void ApplySkybox(ref GBufferPassConfig config, SkyboxResources skybox, Matrix4x4 viewProj)
+	{
+		config.SkyboxPipeline = skybox.Pipeline;
+		config.SkyboxDescriptorSet = skybox.DescriptorSet;
+		config.InvViewProjection = viewProj;
+		config.SkyboxMesh = skybox.Mesh;
 	}
 	
 	private void ExecuteDeferredLighting(RenderGraphContext context)
