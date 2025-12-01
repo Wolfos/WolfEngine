@@ -7,6 +7,7 @@ Texture2D gbufferNormal : register(t1);
 Texture2D gbufferMaterial : register(t2);
 Texture2D gbufferEmissive : register(t3);
 Texture2D<float> gbufferDepth : register(t4);
+Texture2D environmentTex : register(t5);
 RWTexture2D<float4> lightingTarget : register(u0);
 
 cbuffer CameraParams : register(b0)
@@ -33,6 +34,13 @@ cbuffer LightingParams : register(b1)
 float3 DecodeNormal(float3 encoded)
 {
     return normalize(encoded * 2.0f - 1.0f);
+}
+
+float3 SampleEnvironment(float3 dir)
+{
+    dir = normalize(dir);
+    float2 envUV = float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, -dir.y * 0.5f + 0.5f);
+    return environmentTex.SampleLevel(linearSampler, envUV, 0.0f).rgb;
 }
 
 [numthreads(8, 8, 1)]
@@ -64,7 +72,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 viewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invProjection);
     float3 viewDir = ComputeViewDir(viewPos);
 
-    float3 color = float3(0.05f, 0.05f, 0.05f) * albedo; // ambient
+    
+    float3 color = float3(0.05f, 0.05f, 0.05f) * albedo;
 
     [unroll]
     for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
@@ -99,6 +108,20 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         color += diffuse + specularComponent + emissive;
     }
+
+    float3 envAmbient = SampleEnvironment(normal);
+    color += envAmbient * 0.4 * albedo;
+
+    // Simple image-based reflection from the environment map.
+    float3 reflectionDir = reflect(-viewDir, normal);
+    float3 envColor = SampleEnvironment(reflectionDir);
+
+    // Fresnel-weighted environment reflection. Hack: ignore metallic and drive reflectivity purely by roughness.
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float cosTheta = saturate(dot(normal, -viewDir));
+    float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
+    float gloss = saturate(1.0f - roughness);
+    color += envColor * fresnel * gloss;
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

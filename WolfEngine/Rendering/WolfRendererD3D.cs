@@ -1085,7 +1085,8 @@ private sealed class MeshResources
 		{
 			Pipeline = pipeline,
 			DescriptorSet = environmentTexture.Resources.DescriptorSet!,
-			Mesh = skyboxMesh
+			Mesh = skyboxMesh,
+			EnvironmentTexture = environmentTexture.Resources.Texture
 		};
 	}
 

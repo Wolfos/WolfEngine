@@ -40,7 +40,18 @@ public sealed class DeferredLightingPass
 		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
 		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferEmissive));
 		srvTableBuilder.AddShaderResource(4, context.GetTexture(resources.GBufferDepth));
-		srvTableBuilder.AddUnorderedAccess(5, context.GetTexture(resources.LightingBuffer));
+
+		// Environment map for reflections. If we don't have one, fall back to emissive so the slot stays valid.
+		if (resources.SkyboxEnvironment.IsValid)
+		{
+			srvTableBuilder.AddShaderResource(5, context.GetTexture(resources.SkyboxEnvironment));
+		}
+		else
+		{
+			srvTableBuilder.AddShaderResource(5, context.GetTexture(resources.GBufferEmissive));
+		}
+
+		srvTableBuilder.AddUnorderedAccess(6, context.GetTexture(resources.LightingBuffer));
 		var descriptorSet = srvTableBuilder.Build();
 		_descriptorSet = descriptorSet;
 

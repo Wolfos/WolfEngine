@@ -891,7 +891,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		var ranges = stackalloc DescriptorRange[2];
 		ranges[0].RangeType = DescriptorRangeType.Srv;
-		ranges[0].NumDescriptors = 5;
+		ranges[0].NumDescriptors = 6;
 		ranges[0].BaseShaderRegister = 0;
 		ranges[0].RegisterSpace = 0;
 		ranges[0].OffsetInDescriptorsFromTableStart = 0;

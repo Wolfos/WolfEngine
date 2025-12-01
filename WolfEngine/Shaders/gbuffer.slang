@@ -84,8 +84,9 @@ PSOutput fragmentShader(VSOutput input)
     float4 emissiveSample = emissiveTex.Sample(linearSampler, input.uv);
 
 
-    float metallic = mrSample.g;
-    float roughness = mrSample.b;
+    // glTF: metallic in B, roughness in G
+    float metallic = mrSample.b;
+    float roughness = mrSample.g;
     float4 materialParams = float4(metallic, roughness, 0.0f, 1.0f);
     float4 albedo = baseColor * albedoSample;
     output.albedo = albedo;

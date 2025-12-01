@@ -21,6 +21,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
+	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
 }
 
 public sealed class RenderGraphFrameBuilder
@@ -58,6 +59,13 @@ public sealed class RenderGraphFrameBuilder
 		Int2 framebufferSize,
 		RenderGraphResourceHandle backBuffer)
 	{
+		var skyboxEnvHandle = default(RenderGraphResourceHandle);
+		if (_skybox?.EnvironmentTexture is IGfxTexture envTexture)
+		{
+			skyboxEnvHandle = _resources.ImportTexture(envTexture, takeOwnership: false,
+				initialState: ResourceState.ShaderResource);
+		}
+
 		_frameResources = new()
 		{
 			FramebufferSize = framebufferSize,
@@ -80,7 +88,8 @@ public sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess))
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)),
+			SkyboxEnvironment = skyboxEnvHandle
 		};
 
 		return _frameResources;
@@ -105,12 +114,17 @@ public sealed class RenderGraphFrameBuilder
 			.SetExecute(_gbufferExecute);
 
 		// Register Deferred Lighting pass with proper resource states
-		graph.AddPass("Deferred Lighting", PassKind.Compute)
+		var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 			.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource);
+		if (_frameResources.SkyboxEnvironment.IsValid)
+		{
+			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+		}
+		deferredLightingBuilder
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 			.SetExecute(_deferredLightingExecute);
 
