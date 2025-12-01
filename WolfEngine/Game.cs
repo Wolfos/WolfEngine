@@ -143,7 +143,7 @@ public class Game
         _world.AddComponent(light, directionalLight);
         
         // Scene
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "BlenderScene.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
         foreach (var importedMesh in scene.Meshes)
         {
