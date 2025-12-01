@@ -47,10 +47,10 @@
         <None Update="Shaders\triangle.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="Models\Monkey.obj">
+        <None Update="Assets\Monkey.obj">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-        <None Update="Models\Monkey.mtl">
+        <None Update="Assets\Monkey.mtl">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
         <None Update="Binaries\dxcompiler.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
@@ -61,13 +61,13 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <TargetPath>dxil.dll</TargetPath>
         </None>
-        <None Update="Models\DamagedHelmet.gltf">
+        <None Update="Assets\DamagedHelmet.gltf">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\common.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="Models\BlenderScene.gltf">
+        <None Update="Assets\BlenderScene.gltf">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\imgui.slang">
