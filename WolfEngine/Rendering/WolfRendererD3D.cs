@@ -841,12 +841,31 @@ private sealed class MeshResources
 
 		var albedoResources = material.AlbedoTexture?.Resources
 		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");
+		var mrResources = material.MetallicRoughnessTexture?.Resources
+		                  ?? throw new InvalidOperationException("Material is missing metallic/roughness texture resources.");
+
+		var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
+		descriptorSetBuilder.AddShaderResource(0, albedoResources.Texture);
+		descriptorSetBuilder.AddShaderResource(1, mrResources.Texture);
+		if (material.NormalTexture?.Resources is { } normalRes)
+		{
+			descriptorSetBuilder.AddShaderResource(2, normalRes.Texture);
+		}
+		if (material.OcclusionTexture?.Resources is { } occlusionRes)
+		{
+			descriptorSetBuilder.AddShaderResource(3, occlusionRes.Texture);
+		}
+		if (material.EmissiveTexture?.Resources is { } emissiveRes)
+		{
+			descriptorSetBuilder.AddShaderResource(4, emissiveRes.Texture);
+		}
+		var descriptorSet = descriptorSetBuilder.Build();
 
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
 			ConstantBuffer = constantBuffer,
-			TextureSet = albedoResources.DescriptorSet
+			TextureSet = descriptorSet
 		};
 	}
 

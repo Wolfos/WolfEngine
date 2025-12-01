@@ -156,14 +156,49 @@ public class Game
 
             var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
             Texture? albedoTexture = null;
+            Texture? metallicRoughnessTexture = null;
+            Texture? normalTexture = null;
+            Texture? emissiveTexture = null;
+            Texture? occlusionTexture = null;
             if (importedMaterial.BaseColorTextureIndex is int texIndex &&
                 texIndex >= 0 &&
                 texIndex < runtimeTextures.Count)
             {
                 albedoTexture = runtimeTextures[texIndex];
             }
+            if (importedMaterial.MetallicRoughnessTextureIndex is int mrIndex &&
+                mrIndex >= 0 &&
+                mrIndex < runtimeTextures.Count)
+            {
+                metallicRoughnessTexture = runtimeTextures[mrIndex];
+            }
+            if (importedMaterial.NormalTextureIndex is int normalIndex &&
+                normalIndex >= 0 &&
+                normalIndex < runtimeTextures.Count)
+            {
+                normalTexture = runtimeTextures[normalIndex];
+            }
+            if (importedMaterial.EmissiveTextureIndex is int emissiveIndex &&
+                emissiveIndex >= 0 &&
+                emissiveIndex < runtimeTextures.Count)
+            {
+                emissiveTexture = runtimeTextures[emissiveIndex];
+            }
+            if (importedMaterial.OcclusionTextureIndex is int occlusionIndex &&
+                occlusionIndex >= 0 &&
+                occlusionIndex < runtimeTextures.Count)
+            {
+                occlusionTexture = runtimeTextures[occlusionIndex];
+            }
 
-            var material = _materialFactory.GetMaterial("gbuffer.slang", importedMaterial.BaseColor, albedoTexture);
+            var material = _materialFactory.GetMaterial(
+                "gbuffer.slang",
+                importedMaterial.BaseColor,
+                albedoTexture,
+                metallicRoughnessTexture,
+                normalTexture,
+                emissiveTexture,
+                occlusionTexture);
 
             _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(importedMesh.Mesh));
             var meshRenderer = new MeshRenderer

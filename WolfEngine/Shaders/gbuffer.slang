@@ -4,6 +4,10 @@ cbuffer MaterialParams : register(b0)
 };
 
 Texture2D albedoTex : register(t0);
+Texture2D metallicRoughnessTex : register(t1);
+Texture2D normalTex : register(t2);
+Texture2D occlusionTex : register(t3);
+Texture2D emissiveTex : register(t4);
 SamplerState linearSampler : register(s0);
 
 cbuffer DrawParams : register(b1)
@@ -56,9 +60,13 @@ PSOutput fragmentShader(VSOutput input)
     PSOutput output;
     float3 normal = normalize(input.normal);
     float4 albedoSample = albedoTex.Sample(linearSampler, input.uv);
+    float4 mrSample = metallicRoughnessTex.Sample(linearSampler, input.uv);
+    float metallic = mrSample.g;
+    float roughness = mrSample.b;
+    float4 materialParams = float4(metallic, roughness, 0.0f, 1.0f);
     float4 albedo = baseColor * albedoSample;
     output.albedo = albedo;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
-    output.material = float4(baseColor.a, 0.0f, 0.0f, 1.0f);
+    output.material = materialParams;
     return output;
 }

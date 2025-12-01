@@ -19,6 +19,10 @@ public sealed class Material
 
     public Vector4 Color { get; set; }
     public Texture? AlbedoTexture { get; set; }
+    public Texture? MetallicRoughnessTexture { get; set; }
+    public Texture? NormalTexture { get; set; }
+    public Texture? EmissiveTexture { get; set; }
+    public Texture? OcclusionTexture { get; set; }
     
     internal IMaterialResources Resources { get; set; }
 }

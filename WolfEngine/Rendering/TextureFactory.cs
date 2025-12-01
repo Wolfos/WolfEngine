@@ -9,6 +9,8 @@ public interface ITextureFactory
 {
 	Texture GetTexture(ImportedTexture importedTexture);
 	Texture GetWhiteTexture();
+	Texture GetBlackTexture();
+	Texture GetNeutralNormalTexture();
 }
 
 public sealed class TextureFactory : ITextureFactory
@@ -16,6 +18,8 @@ public sealed class TextureFactory : ITextureFactory
 	private readonly RenderGraph _renderGraph;
 	private readonly ConcurrentDictionary<string, Texture> _cache = new(StringComparer.OrdinalIgnoreCase);
 	private Texture? _whiteTexture;
+	private Texture? _blackTexture;
+	private Texture? _neutralNormalTexture;
 
 	public TextureFactory(RenderGraph renderGraph)
 	{
@@ -54,6 +58,34 @@ public sealed class TextureFactory : ITextureFactory
 		var texture = new Texture("white_fallback", 1, 1, true, pixels);
 		texture.Resources = _renderGraph.EnsureTextureResources(texture);
 		_whiteTexture = texture;
+		return texture;
+	}
+
+	public Texture GetBlackTexture()
+	{
+		if (_blackTexture is not null)
+		{
+			return _blackTexture;
+		}
+
+		var pixels = new byte[] { 0, 0, 0, 255 };
+		var texture = new Texture("black_fallback", 1, 1, true, pixels);
+		texture.Resources = _renderGraph.EnsureTextureResources(texture);
+		_blackTexture = texture;
+		return texture;
+	}
+
+	public Texture GetNeutralNormalTexture()
+	{
+		if (_neutralNormalTexture is not null)
+		{
+			return _neutralNormalTexture;
+		}
+
+		var pixels = new byte[] { 128, 128, 255, 255 };
+		var texture = new Texture("neutral_normal_fallback", 1, 1, false, pixels);
+		texture.Resources = _renderGraph.EnsureTextureResources(texture);
+		_neutralNormalTexture = texture;
 		return texture;
 	}
 }

@@ -48,7 +48,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
     float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
-    float metallic = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f).r;
+    float4 material = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f);
+    float metallic = material.r;
+    float roughness = material.g;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0));
     if (depth >= 0.9999f) // no geometry, keep background untouched
     {
