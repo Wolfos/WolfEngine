@@ -5,7 +5,8 @@ SamplerState linearSampler : register(s0);
 Texture2D gbufferAlbedo : register(t0);
 Texture2D gbufferNormal : register(t1);
 Texture2D gbufferMaterial : register(t2);
-Texture2D<float> gbufferDepth : register(t3);
+Texture2D gbufferEmissive : register(t3);
+Texture2D<float> gbufferDepth : register(t4);
 RWTexture2D<float4> lightingTarget : register(u0);
 
 cbuffer CameraParams : register(b0)
@@ -49,6 +50,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
     float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
     float4 material = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f);
+    float3 emissive = gbufferEmissive.SampleLevel(linearSampler, uv, 0.0f).rgb;
+
     float metallic = material.r;
     float roughness = material.g;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0));
@@ -94,7 +97,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, roughness));
         float3 specularComponent = specular * lightColor * 0.5f * attenuation;
 
-        color += diffuse + specularComponent;
+        color += diffuse + specularComponent + emissive;
     }
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);

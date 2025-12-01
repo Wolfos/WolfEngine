@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Silk.NET.Direct3D12;
 using WolfEngine.Mathematics;
@@ -17,6 +18,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
+	public RenderGraphResourceHandle GBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
 }
@@ -63,6 +65,9 @@ public sealed class RenderGraphFrameBuilder
 			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
 				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
+			GBufferEmissive = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
+				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
 			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
 				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource, Vector4.Zero, 1.0f)),
 			LightingBuffer = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -81,6 +86,7 @@ public sealed class RenderGraphFrameBuilder
 	}
 	
 
+	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public bool Build(RenderGraph graph)
 	{
 		// Register GBuffer pass with proper resource states
@@ -88,6 +94,7 @@ public sealed class RenderGraphFrameBuilder
 			.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
 			.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
 			.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
+			.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
 			.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
 			.SetExecute(_gbufferExecute);
 
@@ -96,6 +103,7 @@ public sealed class RenderGraphFrameBuilder
 			.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 			.SetExecute(_deferredLightingExecute);
@@ -113,6 +121,7 @@ public sealed class RenderGraphFrameBuilder
 		var albedoTexture = context.GetTexture(_frameResources.GBufferAlbedo);
 		var normalTexture = context.GetTexture(_frameResources.GBufferNormal);
 		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
+		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
 
 		var gbufferConfig = new GBufferPassConfig
@@ -122,8 +131,10 @@ public sealed class RenderGraphFrameBuilder
 			AlbedoTarget = albedoTexture,
 			NormalTarget = normalTexture,
 			MaterialTarget = materialTexture,
+			EmissiveTarget = emissiveTexture,
 			DepthTarget = depthTexture,
 			AlbedoClearColor = new(0.392f, 0.584f, 0.929f, 1.0f),
+			EmissiveClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
 			NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
 			MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
 			DepthClearValue = 1.0f

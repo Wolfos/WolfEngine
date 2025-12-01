@@ -10,6 +10,7 @@ public class Mesh
     public Vector4[] Vertices { get; }
     public uint[] Indices { get; }
     public Vector3[] Normals { get; }
+    public Vector4[] Tangents { get; }
     public Vector2[] UVs { get; }
     
     // GPU resources are set by the renderer after creation
@@ -21,7 +22,8 @@ public class Mesh
         IReadOnlyList<Vector4> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<Vector3>? normals = null,
-        IReadOnlyList<Vector2>? uvs = null)
+        IReadOnlyList<Vector2>? uvs = null,
+        IReadOnlyList<Vector4>? tangents = null)
     {
         Vertices = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
         if (Vertices.Length == 0)
@@ -33,6 +35,20 @@ public class Mesh
         if (Indices.Length == 0)
         {
             throw new ArgumentException("Mesh must contain at least one index.", nameof(indices));
+        }
+
+        if (tangents is not null)
+        {
+            if (tangents.Count != Vertices.Length)
+            {
+                throw new ArgumentException("Tangent count must match vertex count.", nameof(tangents));
+            }
+
+            Tangents = tangents.ToArray();
+        }
+        else
+        {
+            Tangents = Enumerable.Repeat(new Vector4(1, 0, 0, 1), Vertices.Length).ToArray();
         }
 
         if (normals is not null)

@@ -19,6 +19,7 @@ public struct GBufferPassConfig
     public required IGfxTexture NormalTarget { get; init; }
 
     public required IGfxTexture MaterialTarget { get; init; }
+    public required IGfxTexture EmissiveTarget { get; init; }
 
     public required IGfxTexture DepthTarget { get; init; }
 
@@ -27,6 +28,8 @@ public struct GBufferPassConfig
     public Vector4 NormalClearColor { get; init; }
 
     public Vector4 MaterialClearColor { get; init; }
+    public Vector4 EmissiveClearColor { get; init; }
+
 
     public float DepthClearValue { get; init; }
 }

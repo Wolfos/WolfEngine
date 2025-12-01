@@ -63,6 +63,7 @@ private sealed class MeshResources
 		public Vector3 Normal;
 		public float Padding;
 		public Vector2 TexCoord;
+		public Vector4 Tangent;
 	}
 
 	private readonly struct DrawInstruction
@@ -1136,6 +1137,7 @@ private sealed class MeshResources
 			vertices[i].Normal = i < mesh.Normals.Length ? mesh.Normals[i] : Vector3.UnitY;
 			vertices[i].Padding = 0.0f;
 			vertices[i].TexCoord = i < mesh.UVs.Length ? mesh.UVs[i] : Vector2.Zero;
+			vertices[i].Tangent = i < mesh.Tangents.Length ? mesh.Tangents[i] : new Vector4(1, 0, 0, 1);
 		}
 
 		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();

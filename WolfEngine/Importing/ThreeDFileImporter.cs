@@ -30,6 +30,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         const PostProcessSteps postProcess = PostProcessSteps.Triangulate
                                              | PostProcessSteps.JoinIdenticalVertices
+                                             | PostProcessSteps.CalculateTangentSpace
                                              | PostProcessSteps.MakeLeftHanded
                                              | PostProcessSteps.FlipWindingOrder
                                              | PostProcessSteps.FlipUVs;
@@ -134,8 +135,11 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 var vertices = new Vector4[vertexCount];
                 var normals = new Vector3[vertexCount];
                 var uvs = new Vector2[vertexCount];
+                var tangents = new Vector4[vertexCount];
                 var rawVertices = mesh->MVertices;
                 var rawNormals = mesh->MNormals;
+                var rawTangents = mesh->MTangents;
+                var rawBitangents = mesh->MBitangents;
                 var texCoords0 = mesh->MTextureCoords[0];
                 var hasTexCoords = texCoords0 is not null;
                 for (var i = 0; i < vertexCount; i++)
@@ -152,6 +156,22 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     {
                         var texCoord = texCoords0[i];
                         uvs[i] = new(texCoord.X, texCoord.Y);
+                    }
+
+                    if (rawTangents is not null && rawBitangents is not null && rawNormals is not null)
+                    {
+                        var tangent = rawTangents[i];
+                        var bitangent = rawBitangents[i];
+                        var normal = rawNormals[i];
+                        var t = new Vector3(tangent.X, tangent.Y, tangent.Z);
+                        var n = new Vector3(normal.X, normal.Y, normal.Z);
+                        var b = new Vector3(bitangent.X, bitangent.Y, bitangent.Z);
+                        var handedness = Vector3.Dot(Vector3.Cross(n, t), b) < 0.0f ? -1.0f : 1.0f;
+                        tangents[i] = new(t.X, t.Y, t.Z, handedness);
+                    }
+                    else
+                    {
+                        tangents[i] = new Vector4(1, 0, 0, 1);
                     }
                 }
 
@@ -171,7 +191,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     vertices,
                     indexList,
                     rawNormals is not null ? normals : null,
-                    hasTexCoords ? uvs : null);
+                    hasTexCoords ? uvs : null,
+                    tangents);
                 meshData.Add((importedMesh, materialIndex));
             }
 

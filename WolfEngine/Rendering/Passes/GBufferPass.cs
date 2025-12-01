@@ -14,7 +14,8 @@ public static class GBufferPass
         {
             new ColorTargetBinding(config.AlbedoTarget),
             new ColorTargetBinding(config.NormalTarget),
-            new ColorTargetBinding(config.MaterialTarget)
+            new ColorTargetBinding(config.MaterialTarget),
+            new ColorTargetBinding(config.EmissiveTarget)
         };
 
         var depthBinding = new DepthTargetBinding(config.DepthTarget);
@@ -37,6 +38,7 @@ public static class GBufferPass
 		commandList.ClearColorAttachment(0, config.AlbedoClearColor);
 		commandList.ClearColorAttachment(1, config.NormalClearColor);
 		commandList.ClearColorAttachment(2, config.MaterialClearColor);
+		commandList.ClearColorAttachment(3, config.EmissiveClearColor);
 		commandList.ClearDepthStencil(config.DepthClearValue);
 
 		// Build camera constants once

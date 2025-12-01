@@ -578,14 +578,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		Span<byte> positionSemantic = stackalloc byte["POSITION".Length + 1];
 		Span<byte> normalSemantic = stackalloc byte["NORMAL".Length + 1];
 		Span<byte> texCoordSemantic = stackalloc byte["TEXCOORD".Length + 1];
+		Span<byte> tangentSemantic = stackalloc byte["TANGENT".Length + 1];
 		CopySemantic("POSITION"u8, positionSemantic);
 		CopySemantic("NORMAL"u8, normalSemantic);
 		CopySemantic("TEXCOORD"u8, texCoordSemantic);
+		CopySemantic("TANGENT"u8, tangentSemantic);
 
-		var inputElements = stackalloc InputElementDesc[3];
+		var inputElements = stackalloc InputElementDesc[4];
 		fixed (byte* positionPtr = positionSemantic)
 		fixed (byte* normalPtr = normalSemantic)
 		fixed (byte* texCoordPtr = texCoordSemantic)
+		fixed (byte* tangentPtr = tangentSemantic)
 		{
 			inputElements[0] = default;
 			inputElements[0].SemanticName = positionPtr;
@@ -614,10 +617,19 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			inputElements[2].InputSlotClass = InputClassification.PerVertexData;
 			inputElements[2].InstanceDataStepRate = 0;
 
+			inputElements[3] = default;
+			inputElements[3].SemanticName = tangentPtr;
+			inputElements[3].SemanticIndex = 0;
+			inputElements[3].Format = Format.FormatR32G32B32A32Float;
+			inputElements[3].InputSlot = 0;
+			inputElements[3].AlignedByteOffset = 40;
+			inputElements[3].InputSlotClass = InputClassification.PerVertexData;
+			inputElements[3].InstanceDataStepRate = 0;
+
 			var inputLayout = new InputLayoutDesc
 			{
 				PInputElementDescs = inputElements,
-				NumElements = 3
+				NumElements = 4
 			};
 
 			var renderState = CreateNormalizedRenderState(key.RenderState);
@@ -823,7 +835,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		var ranges = stackalloc DescriptorRange[2];
 		ranges[0].RangeType = DescriptorRangeType.Srv;
-		ranges[0].NumDescriptors = 4;
+		ranges[0].NumDescriptors = 5;
 		ranges[0].BaseShaderRegister = 0;
 		ranges[0].RegisterSpace = 0;
 		ranges[0].OffsetInDescriptorsFromTableStart = 0;
