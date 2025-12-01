@@ -25,6 +25,7 @@ class Program
     private static void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<IShaderCompiler, ShaderCompiler>();
+        services.AddSingleton<ITextureFactory, TextureFactory>();
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
         services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();

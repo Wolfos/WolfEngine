@@ -11,6 +11,8 @@ internal class MtlMaterialResources: IMaterialResources
 	
 	public required IGfxBuffer? ConstantBuffer { get; init; }
 
+	public IGfxDescriptorSet? TextureSet { get; init; }
+
 	// Internal Metal-specific properties
 	internal MTLRenderPipelineState PipelineState { get; init; }
 

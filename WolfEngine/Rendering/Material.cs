@@ -18,6 +18,7 @@ public sealed class Material
     public string ShaderPath { get; }
 
     public Vector4 Color { get; set; }
+    public Texture? AlbedoTexture { get; set; }
     
     internal IMaterialResources Resources { get; set; }
 }

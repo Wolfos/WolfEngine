@@ -3,6 +3,7 @@ using Silk.NET.Assimp;
 using StbImageSharp;
 using WolfEngine.ECS;
 using File = System.IO.File;
+using AssimpTexture = Silk.NET.Assimp.Texture;
 using AssimpMaterial = Silk.NET.Assimp.Material;
 using InvalidOperationException = System.InvalidOperationException;
 
@@ -132,8 +133,11 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 var vertexCount = mesh->MNumVertices;
                 var vertices = new Vector4[vertexCount];
                 var normals = new Vector3[vertexCount];
+                var uvs = new Vector2[vertexCount];
                 var rawVertices = mesh->MVertices;
                 var rawNormals = mesh->MNormals;
+                var texCoords0 = mesh->MTextureCoords[0];
+                var hasTexCoords = texCoords0 is not null;
                 for (var i = 0; i < vertexCount; i++)
                 {
                     var position = rawVertices[i];
@@ -142,6 +146,12 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     {
                         var normal = rawNormals[i];
                         normals[i] = Vector3.Normalize(new(normal.X, normal.Y, normal.Z));
+                    }
+
+                    if (hasTexCoords)
+                    {
+                        var texCoord = texCoords0[i];
+                        uvs[i] = new(texCoord.X, texCoord.Y);
                     }
                 }
 
@@ -157,7 +167,11 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 }
 
                 var materialIndex = (int)mesh->MMaterialIndex;
-                var importedMesh = new Mesh(vertices, indexList, rawNormals is not null ? normals : null);
+                var importedMesh = new Mesh(
+                    vertices,
+                    indexList,
+                    rawNormals is not null ? normals : null,
+                    hasTexCoords ? uvs : null);
                 meshData.Add((importedMesh, materialIndex));
             }
 
@@ -255,7 +269,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             throw new InvalidOperationException($"Embedded texture index {embeddedIndex} is out of range.");
         }
 
-        var texture = scene->MTextures[embeddedIndex];
+        AssimpTexture* texture = scene->MTextures[embeddedIndex];
         if (texture == null)
         {
             throw new InvalidOperationException($"Embedded texture {embeddedIndex} was null.");
@@ -266,7 +280,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             : LoadRawEmbeddedTexture(texture, embeddedIndex, semantic);
     }
 
-    private static unsafe ImportedTexture LoadCompressedEmbeddedTexture(Texture* texture, int embeddedIndex, TextureSemantic semantic)
+    private static unsafe ImportedTexture LoadCompressedEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
     {
         var byteLength = checked((int)texture->MWidth);
         var data = new byte[byteLength];
@@ -285,7 +299,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             image.Data);
     }
 
-    private static unsafe ImportedTexture LoadRawEmbeddedTexture(Texture* texture, int embeddedIndex, TextureSemantic semantic)
+    private static unsafe ImportedTexture LoadRawEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
     {
         var width = checked((int)texture->MWidth);
         var height = checked((int)texture->MHeight);

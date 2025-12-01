@@ -5,18 +5,21 @@ namespace WolfEngine;
 
 public interface IMaterialFactory
 {
-	public Material GetMaterial(string shader, Vector4 color);
+	Material GetMaterial(string shader, Vector4 color, Texture? albedoTexture = null);
 }
 
 public class MaterialFactory : IMaterialFactory
 {
 	private readonly RenderGraph _renderGraph;
-	public MaterialFactory(IShaderCompiler shaderCompiler, RenderGraph renderGraph)
+	private readonly ITextureFactory _textureFactory;
+
+	public MaterialFactory(IShaderCompiler shaderCompiler, RenderGraph renderGraph, ITextureFactory textureFactory)
 	{
 		_renderGraph = renderGraph;
+		_textureFactory = textureFactory;
 	}
 
-	public Material GetMaterial(string shader, Vector4 color)
+	public Material GetMaterial(string shader, Vector4 color, Texture? albedoTexture = null)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{
@@ -25,6 +28,7 @@ public class MaterialFactory : IMaterialFactory
 
 		var material = new Material(shader);
 		material.Color = color;
+		material.AlbedoTexture = albedoTexture ?? _textureFactory.GetWhiteTexture();
 		material.Resources = _renderGraph.EnsureMaterialResources(material);
 
 		return material;

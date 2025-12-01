@@ -14,6 +14,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
 using WolfEngine.Rendering.UI;
+using BackendD3D12Texture = WolfEngine.Backend.D3D12.D3D12Texture;
 using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
 using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
 using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
@@ -61,6 +62,7 @@ private sealed class MeshResources
 		public Vector4 Position;
 		public Vector3 Normal;
 		public float Padding;
+		public Vector2 TexCoord;
 	}
 
 	private readonly struct DrawInstruction
@@ -837,10 +839,175 @@ private sealed class MeshResources
 			colorBuffer,
 			colorSize);
 
+		var albedoResources = material.AlbedoTexture?.Resources
+		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");
+
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
-			ConstantBuffer = constantBuffer
+			ConstantBuffer = constantBuffer,
+			TextureSet = albedoResources.DescriptorSet
+		};
+	}
+
+	public ITextureResources CreateTextureResources(Texture texture)
+	{
+		if (texture is null)
+		{
+			throw new ArgumentNullException(nameof(texture));
+		}
+
+		if (texture.PixelData is null || texture.PixelData.Length == 0)
+		{
+			throw new ArgumentException("Texture must contain pixel data.", nameof(texture));
+		}
+
+		var texDesc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Texture2D,
+			Alignment = 0,
+			Width = (ulong)texture.Width,
+			Height = (uint)texture.Height,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatR8G8B8A8Unorm,
+			SampleDesc = new(1, 0),
+			Layout = TextureLayout.LayoutUnknown,
+			Flags = ResourceFlags.None
+		};
+
+		var defaultHeap = new HeapProperties(HeapType.Default);
+		ComPtr<ID3D12Resource> gpuTexture;
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommittedResource(
+				&defaultHeap,
+				HeapFlags.None,
+				in texDesc,
+				ResourceStates.CopyDest,
+				null,
+				out gpuTexture));
+
+		PlacedSubresourceFootprint layout = default;
+		uint numRows = 0;
+		ulong rowSizeInBytes = 0;
+		ulong totalSizeInBytes = 0;
+		_device.GetCopyableFootprints(
+			texDesc,
+			0,
+			1,
+			0,
+			&layout,
+			&numRows,
+			&rowSizeInBytes,
+			&totalSizeInBytes);
+
+		var uploadDesc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = totalSizeInBytes,
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.None
+		};
+
+		var uploadHeap = new HeapProperties(HeapType.Upload);
+		ComPtr<ID3D12Resource> uploadBuffer;
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommittedResource(
+				&uploadHeap,
+				HeapFlags.None,
+				in uploadDesc,
+				ResourceStates.GenericRead,
+				null,
+				out uploadBuffer));
+
+		byte* mapped = null;
+		SilkMarshal.ThrowHResult(uploadBuffer.Map(0, (Range*)null, (void**)&mapped));
+		try
+		{
+			fixed (byte* src = texture.PixelData)
+			{
+				var rowPitch = layout.Footprint.RowPitch;
+				var rowSize = (ulong)(texture.Width * 4);
+				for (uint row = 0; row < numRows; row++)
+				{
+					var destRow = mapped + layout.Offset + row * rowPitch;
+					var srcRow = src + row * rowSize;
+					Buffer.MemoryCopy(srcRow, destRow, rowSize, rowSize);
+				}
+			}
+		}
+		finally
+		{
+			uploadBuffer.Unmap(0, (Range*)null);
+		}
+
+		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
+		ComPtr<ID3D12GraphicsCommandList> uploadCommandList;
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0,
+				CommandListType.Direct,
+				_commandAllocators[0],
+				default,
+				out uploadCommandList));
+
+		var destLocation = new TextureCopyLocation
+		{
+			PResource = gpuTexture.Handle,
+			Type = TextureCopyType.SubresourceIndex
+		};
+		destLocation.Anonymous.SubresourceIndex = 0;
+
+		var srcLocation = new TextureCopyLocation
+		{
+			PResource = uploadBuffer.Handle,
+			Type = TextureCopyType.PlacedFootprint
+		};
+		srcLocation.Anonymous.PlacedFootprint = layout;
+
+		uploadCommandList.CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, (Box*)null);
+
+		var textureBarrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+		textureBarrier.Anonymous.Transition = new()
+		{
+			PResource = gpuTexture.Handle,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopyDest,
+			StateAfter = ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource
+		};
+		uploadCommandList.ResourceBarrier(1, &textureBarrier);
+
+		SilkMarshal.ThrowHResult(uploadCommandList.Close());
+		ID3D12CommandList* uploadLists = (ID3D12CommandList*)uploadCommandList.Handle;
+		_commandQueue.ExecuteCommandLists(1, &uploadLists);
+		SignalAndWait();
+
+		uploadCommandList.Dispose();
+		uploadBuffer.Dispose();
+
+		var descriptor = new TextureDescriptor(
+			texture.Width,
+			texture.Height,
+			TextureFormat.Rgba8Unorm,
+			TextureUsage.ShaderResource);
+
+		var backendTexture = new BackendD3D12Texture();
+		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
+
+		var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
+		descriptorSetBuilder.AddShaderResource(0, backendTexture);
+		var descriptorSet = descriptorSetBuilder.Build();
+
+		return new D3D12TextureResources
+		{
+			Texture = backendTexture,
+			DescriptorSet = descriptorSet
 		};
 	}
 
@@ -949,6 +1116,7 @@ private sealed class MeshResources
 			vertices[i].Position = mesh.Vertices[i];
 			vertices[i].Normal = i < mesh.Normals.Length ? mesh.Normals[i] : Vector3.UnitY;
 			vertices[i].Padding = 0.0f;
+			vertices[i].TexCoord = i < mesh.UVs.Length ? mesh.UVs[i] : Vector2.Zero;
 		}
 
 		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();

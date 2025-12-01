@@ -9,6 +9,7 @@ public interface IRenderer
 {
 	void Run(Action startup, Action<float> update, Action<float> render);
 	IMaterialResources CreateMaterialResources(Material material);
+	ITextureResources CreateTextureResources(Texture texture);
 	IGfxDevice GetGfxDevice();
 	Int2 GetFrameBufferSize();
 	void BeginFrame();

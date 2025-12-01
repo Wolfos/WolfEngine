@@ -234,6 +234,11 @@ public sealed class RenderGraph
 		return _renderer.CreateMaterialResources(material);
 	}
 
+	public ITextureResources EnsureTextureResources(Texture texture)
+	{
+		return _renderer.CreateTextureResources(texture);
+	}
+
 	public void SubmitCommand(RenderCommand command)
 	{
 		_pendingCommands.Enqueue(command);

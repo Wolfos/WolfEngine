@@ -4,4 +4,5 @@ public interface IMaterialResources
 {
 	IGfxPipeline Pipeline { get; }
 	IGfxBuffer? ConstantBuffer { get; }
+	IGfxDescriptorSet? TextureSet { get; }
 }

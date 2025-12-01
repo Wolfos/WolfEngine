@@ -1,5 +1,6 @@
 #nullable enable
 using System.Numerics;
+using System.Linq;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
@@ -9,13 +10,18 @@ public class Mesh
     public Vector4[] Vertices { get; }
     public uint[] Indices { get; }
     public Vector3[] Normals { get; }
+    public Vector2[] UVs { get; }
     
     // GPU resources are set by the renderer after creation
     internal IGfxBuffer VertexBuffer { get; set; }
     internal IGfxBuffer IndexBuffer { get; set; }
     internal uint StrideInBytes { get; set; }
     internal uint IndexCount { get; set; }
-    public Mesh(IReadOnlyList<Vector4> vertices, IReadOnlyList<uint> indices, IReadOnlyList<Vector3>? normals = null)
+    public Mesh(
+        IReadOnlyList<Vector4> vertices,
+        IReadOnlyList<uint> indices,
+        IReadOnlyList<Vector3>? normals = null,
+        IReadOnlyList<Vector2>? uvs = null)
     {
         Vertices = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
         if (Vertices.Length == 0)
@@ -41,6 +47,20 @@ public class Mesh
         else
         {
             Normals = GenerateVertexNormals(Vertices, Indices);
+        }
+
+        if (uvs is not null)
+        {
+            if (uvs.Count != Vertices.Length)
+            {
+                throw new ArgumentException("UV count must match vertex count.", nameof(uvs));
+            }
+
+            UVs = uvs.ToArray();
+        }
+        else
+        {
+            UVs = Enumerable.Repeat(Vector2.Zero, Vertices.Length).ToArray();
         }
     }
 

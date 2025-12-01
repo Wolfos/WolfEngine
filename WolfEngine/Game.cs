@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Linq;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
@@ -17,6 +18,7 @@ public class Game
     private readonly RenderGraph _renderGraph;
     private readonly IInputSystem _inputSystem;
     private readonly ImGuiUiSystem _imguiSystem;
+    private readonly ITextureFactory _textureFactory;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -38,7 +40,7 @@ public class Game
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
+        RenderGraph renderGraph, IInputSystem inputSystem, ImGuiUiSystem imguiSystem, ITextureFactory textureFactory)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
@@ -46,6 +48,7 @@ public class Game
         _renderGraph = renderGraph;
         _inputSystem = inputSystem;
         _imguiSystem = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
+        _textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
     }
 
     public void Run()
@@ -145,14 +148,22 @@ public class Game
         // Scene
         var meshPath = Path.Combine(AppContext.BaseDirectory, "Models", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
+        var runtimeTextures = scene.Textures.Select(_textureFactory.GetTexture).ToList();
         foreach (var importedMesh in scene.Meshes)
         {
             var entity = _world.CreateEntity(importedMesh.Name);
             var transform = importedMesh.Transform;
 
             var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
+            Texture? albedoTexture = null;
+            if (importedMaterial.BaseColorTextureIndex is int texIndex &&
+                texIndex >= 0 &&
+                texIndex < runtimeTextures.Count)
+            {
+                albedoTexture = runtimeTextures[texIndex];
+            }
 
-            var material = _materialFactory.GetMaterial("gbuffer.slang", importedMaterial.BaseColor);
+            var material = _materialFactory.GetMaterial("gbuffer.slang", importedMaterial.BaseColor, albedoTexture);
 
             _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(importedMesh.Mesh));
             var meshRenderer = new MeshRenderer

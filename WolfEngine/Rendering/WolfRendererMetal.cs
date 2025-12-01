@@ -520,9 +520,15 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             Pipeline = null!, // TODO: Implement Metal pipeline wrapper
             ConstantBuffer = null, // TODO: Implement Metal buffer wrapper
+            TextureSet = null,
             PipelineState = pipeline,
             ColorBuffer = colorBuffer
         };
+    }
+
+    public ITextureResources CreateTextureResources(Texture texture)
+    {
+        throw new NotSupportedException("Metal renderer texture uploads are not implemented.");
     }
 
     public IGfxDevice GetGfxDevice()

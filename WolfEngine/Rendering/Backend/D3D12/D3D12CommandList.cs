@@ -168,7 +168,17 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void BindGraphicsDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet)
 	{
-		throw new NotSupportedException("Graphics descriptor set binding is not yet implemented for Direct3D12.");
+		if (descriptorSet is not D3D12DescriptorSet d3dDescriptorSet)
+		{
+			throw new InvalidOperationException("Descriptor set was not created by the Direct3D12 backend.");
+		}
+
+		var heapPtr = stackalloc ID3D12DescriptorHeap*[1];
+		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
+		CommandList.SetDescriptorHeaps(1, heapPtr);
+
+		var handle = d3dDescriptorSet.GetGpuHandle(0);
+		CommandList.SetGraphicsRootDescriptorTable(slot, handle);
 	}
 
 	public void BindComputeDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet)
@@ -182,7 +192,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
 		CommandList.SetDescriptorHeaps(1, heapPtr);
 
-		var handle = d3dDescriptorSet.GetGpuHandle(slot);
+		var handle = d3dDescriptorSet.GetGpuHandle(0);
 		CommandList.SetComputeRootDescriptorTable(slot, handle);
 	}
 

@@ -577,12 +577,15 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		Span<byte> positionSemantic = stackalloc byte["POSITION".Length + 1];
 		Span<byte> normalSemantic = stackalloc byte["NORMAL".Length + 1];
+		Span<byte> texCoordSemantic = stackalloc byte["TEXCOORD".Length + 1];
 		CopySemantic("POSITION"u8, positionSemantic);
 		CopySemantic("NORMAL"u8, normalSemantic);
+		CopySemantic("TEXCOORD"u8, texCoordSemantic);
 
-		var inputElements = stackalloc InputElementDesc[2];
+		var inputElements = stackalloc InputElementDesc[3];
 		fixed (byte* positionPtr = positionSemantic)
 		fixed (byte* normalPtr = normalSemantic)
+		fixed (byte* texCoordPtr = texCoordSemantic)
 		{
 			inputElements[0] = default;
 			inputElements[0].SemanticName = positionPtr;
@@ -602,10 +605,19 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			inputElements[1].InputSlotClass = InputClassification.PerVertexData;
 			inputElements[1].InstanceDataStepRate = 0;
 
+			inputElements[2] = default;
+			inputElements[2].SemanticName = texCoordPtr;
+			inputElements[2].SemanticIndex = 0;
+			inputElements[2].Format = Format.FormatR32G32Float;
+			inputElements[2].InputSlot = 0;
+			inputElements[2].AlignedByteOffset = 32;
+			inputElements[2].InputSlotClass = InputClassification.PerVertexData;
+			inputElements[2].InstanceDataStepRate = 0;
+
 			var inputLayout = new InputLayoutDesc
 			{
 				PInputElementDescs = inputElements,
-				NumElements = 2
+				NumElements = 3
 			};
 
 			var renderState = CreateNormalizedRenderState(key.RenderState);
@@ -707,7 +719,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return;
 		}
 
-		var rootParameters = stackalloc RootParameter[3];
+		var ranges = stackalloc DescriptorRange[1];
+		ranges[0].RangeType = DescriptorRangeType.Srv;
+		ranges[0].NumDescriptors = 1;
+		ranges[0].BaseShaderRegister = 0;
+		ranges[0].RegisterSpace = 0;
+		ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+		var rootParameters = stackalloc RootParameter[4];
 		rootParameters[0].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[0].Anonymous.Descriptor = new()
 		{
@@ -734,12 +753,35 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		};
 		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
 
+		rootParameters[3].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[3].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[3].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
+		rootParameters[3].ShaderVisibility = ShaderVisibility.Pixel;
+
+		var staticSampler = stackalloc StaticSamplerDesc[1];
+		staticSampler[0] = new()
+		{
+			Filter = Filter.MinMagMipLinear,
+			AddressU = TextureAddressMode.Wrap,
+			AddressV = TextureAddressMode.Wrap,
+			AddressW = TextureAddressMode.Wrap,
+			MipLODBias = 0.0f,
+			MaxAnisotropy = 0,
+			ComparisonFunc = ComparisonFunc.Always,
+			BorderColor = StaticBorderColor.OpaqueWhite,
+			MinLOD = 0.0f,
+			MaxLOD = float.MaxValue,
+			ShaderRegister = 0,
+			RegisterSpace = 0,
+			ShaderVisibility = ShaderVisibility.Pixel
+		};
+
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 3,
+			NumParameters = 4,
 			PParameters = rootParameters,
-			NumStaticSamplers = 0,
-			PStaticSamplers = null,
+			NumStaticSamplers = 1,
+			PStaticSamplers = staticSampler,
 			Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
 		};
 

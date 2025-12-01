@@ -3,6 +3,9 @@ cbuffer MaterialParams : register(b0)
     float4 baseColor;
 };
 
+Texture2D albedoTex : register(t0);
+SamplerState linearSampler : register(s0);
+
 cbuffer DrawParams : register(b1)
 {
     row_major float4x4 model;
@@ -19,12 +22,14 @@ struct VSInput
 {
     float4 position : POSITION;
     float3 normal : NORMAL;
+    float2 uv : TEXCOORD0;
 };
 
 struct VSOutput
 {
     float4 position : SV_Position;
     float3 normal : TEXCOORD0;
+    float2 uv : TEXCOORD1;
 };
 
 VSOutput vertexShader(VSInput input)
@@ -35,6 +40,7 @@ VSOutput vertexShader(VSInput input)
 
     output.position = mul(worldPosition, viewProjection);
     output.normal = normalize(worldNormal.xyz);
+    output.uv = input.uv;
     return output;
 }
 
@@ -49,7 +55,9 @@ PSOutput fragmentShader(VSOutput input)
 {
     PSOutput output;
     float3 normal = normalize(input.normal);
-    output.albedo = baseColor;
+    float4 albedoSample = albedoTex.Sample(linearSampler, input.uv);
+    float4 albedo = baseColor * albedoSample;
+    output.albedo = albedo;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
     output.material = float4(baseColor.a, 0.0f, 0.0f, 1.0f);
     return output;

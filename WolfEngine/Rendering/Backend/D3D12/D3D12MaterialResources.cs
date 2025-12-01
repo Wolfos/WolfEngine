@@ -6,4 +6,5 @@ internal class D3D12MaterialResources: IMaterialResources
 {
 	public required IGfxPipeline Pipeline { get; init; }
 	public required IGfxBuffer? ConstantBuffer { get; init; }
+	public IGfxDescriptorSet? TextureSet { get; init; }
 }

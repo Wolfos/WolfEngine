@@ -70,6 +70,12 @@ public static class GBufferPass
 				commandList.BindConstantBuffer(0, material.Resources.ConstantBuffer, 0);
 			}
 
+			// Bind albedo texture descriptor set
+			if (material.Resources.TextureSet is not null)
+			{
+				commandList.BindGraphicsDescriptorSet(3, material.Resources.TextureSet);
+			}
+
 			// Set model matrix constants
 			Span<float> modelConstants = stackalloc float[16];
 			WriteMatrix(modelConstants, drawPacket.Transform);
