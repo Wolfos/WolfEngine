@@ -27,6 +27,7 @@ class Program
         services.AddSingleton<IShaderCompiler, ShaderCompiler>();
         services.AddSingleton<ITextureFactory, TextureFactory>();
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
+        services.AddSingleton<IImageLoader, StbImageLoader>();
         services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
         services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();

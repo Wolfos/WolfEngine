@@ -1,6 +1,5 @@
 using System.Numerics;
 using Silk.NET.Assimp;
-using StbImageSharp;
 using WolfEngine.ECS;
 using File = System.IO.File;
 using AssimpTexture = Silk.NET.Assimp.Texture;
@@ -11,6 +10,13 @@ namespace WolfEngine.Importing;
 
 public class ThreeDFileImporter : IThreeDFileImporter
 {
+    private readonly IImageLoader _imageLoader;
+
+    public ThreeDFileImporter(IImageLoader imageLoader)
+    {
+        _imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
+    }
+
     public unsafe ImportedScene Import(string filename)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filename);
@@ -209,7 +215,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
 
-    private static unsafe int? TryLoadMaterialTexture(
+    private unsafe int? TryLoadMaterialTexture(
         Assimp assimp,
         AssimpMaterial* material,
         Scene* scene,
@@ -241,7 +247,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         return null;
     }
 
-    private static unsafe int GetOrLoadTextureIndex(
+    private unsafe int GetOrLoadTextureIndex(
         Scene* scene,
         string texturePath,
         TextureSemantic semantic,
@@ -269,7 +275,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 throw new FileNotFoundException($"Texture file '{key}' was not found.", key);
             }
 
-            importedTexture = LoadExternalTexture(key, semantic);
+            importedTexture = _imageLoader.Load(key, semantic);
         }
 
         var index = textures.Count;
@@ -278,7 +284,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         return index;
     }
 
-    private static unsafe ImportedTexture LoadEmbeddedTexture(Scene* scene, string texturePath, TextureSemantic semantic)
+    private unsafe ImportedTexture LoadEmbeddedTexture(Scene* scene, string texturePath, TextureSemantic semantic)
     {
         if (texturePath.Length < 2 || !int.TryParse(texturePath.AsSpan(1), out var embeddedIndex))
         {
@@ -301,7 +307,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             : LoadRawEmbeddedTexture(texture, embeddedIndex, semantic);
     }
 
-    private static unsafe ImportedTexture LoadCompressedEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
+    private unsafe ImportedTexture LoadCompressedEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
     {
         var byteLength = checked((int)texture->MWidth);
         var data = new byte[byteLength];
@@ -309,18 +315,10 @@ public class ThreeDFileImporter : IThreeDFileImporter
         var source = new ReadOnlySpan<byte>(raw, byteLength);
         source.CopyTo(data);
 
-        var image = ImageResult.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
-
-        return new ImportedTexture(
-            $"embedded_{embeddedIndex}",
-            image.Width,
-            image.Height,
-            (int)image.Comp,
-            IsSrgb(semantic),
-            image.Data);
+        return _imageLoader.LoadEmbedded(data, semantic, $"embedded_{embeddedIndex}");
     }
 
-    private static unsafe ImportedTexture LoadRawEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
+    private unsafe ImportedTexture LoadRawEmbeddedTexture(AssimpTexture* texture, int embeddedIndex, TextureSemantic semantic)
     {
         var width = checked((int)texture->MWidth);
         var height = checked((int)texture->MHeight);
@@ -343,22 +341,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
             width,
             height,
             4,
-            IsSrgb(semantic),
+            StbImageLoader.IsSrgb(semantic),
             dest);
-    }
-
-    private static ImportedTexture LoadExternalTexture(string path, TextureSemantic semantic)
-    {
-        var data = File.ReadAllBytes(path);
-        var image = ImageResult.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
-
-        return new ImportedTexture(
-            path,
-            image.Width,
-            image.Height,
-            (int)image.Comp,
-            IsSrgb(semantic),
-            image.Data);
     }
 
     private static unsafe void TraverseNode(
