@@ -16,7 +16,7 @@ class Program
 
         var provider = services.BuildServiceProvider();
         // Toggle D3D12 debug layer here when needed
-        GraphicsConfig.EnableD3DDebugLayer = true;
+        GraphicsConfig.EnableD3DDebugLayer = false;
 
         var game = provider.GetRequiredService<Game>();
         game.Run();

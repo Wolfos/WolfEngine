@@ -41,17 +41,39 @@ public sealed class DeferredLightingPass
 		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferEmissive));
 		srvTableBuilder.AddShaderResource(4, context.GetTexture(resources.GBufferDepth));
 
-		// Environment map for reflections. If we don't have one, fall back to emissive so the slot stays valid.
-		if (resources.SkyboxEnvironment.IsValid)
+		// Environment/IBL inputs
+		srvTableBuilder.AddShaderResource(5, resources.SkyboxEnvironment.IsValid
+			? context.GetTexture(resources.SkyboxEnvironment)
+			: context.GetTexture(resources.GBufferEmissive)); // dummy fallback
+
+		if (resources.SkyboxIrradiance.IsValid)
 		{
-			srvTableBuilder.AddShaderResource(5, context.GetTexture(resources.SkyboxEnvironment));
+			srvTableBuilder.AddShaderResource(6, context.GetTexture(resources.SkyboxIrradiance));
 		}
 		else
 		{
-			srvTableBuilder.AddShaderResource(5, context.GetTexture(resources.GBufferEmissive));
+			srvTableBuilder.AddShaderResource(6, context.GetTexture(resources.GBufferEmissive));
 		}
 
-		srvTableBuilder.AddUnorderedAccess(6, context.GetTexture(resources.LightingBuffer));
+		if (resources.SkyboxPrefilter.IsValid)
+		{
+			srvTableBuilder.AddShaderResource(7, context.GetTexture(resources.SkyboxPrefilter));
+		}
+		else
+		{
+			srvTableBuilder.AddShaderResource(7, context.GetTexture(resources.GBufferEmissive));
+		}
+
+		if (resources.SkyboxBrdfLut.IsValid)
+		{
+			srvTableBuilder.AddShaderResource(8, context.GetTexture(resources.SkyboxBrdfLut));
+		}
+		else
+		{
+			srvTableBuilder.AddShaderResource(8, context.GetTexture(resources.GBufferEmissive));
+		}
+
+		srvTableBuilder.AddUnorderedAccess(9, context.GetTexture(resources.LightingBuffer));
 		var descriptorSet = srvTableBuilder.Build();
 		_descriptorSet = descriptorSet;
 
@@ -135,7 +157,7 @@ public sealed class DeferredLightingPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "deferred_lighting_CSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default);

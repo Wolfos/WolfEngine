@@ -8,6 +8,9 @@ Texture2D gbufferMaterial : register(t2);
 Texture2D gbufferEmissive : register(t3);
 Texture2D<float> gbufferDepth : register(t4);
 Texture2D environmentTex : register(t5);
+Texture2D irradianceTex : register(t6);
+Texture2D prefilteredTex : register(t7);
+Texture2D brdfLutTex : register(t8);
 RWTexture2D<float4> lightingTarget : register(u0);
 
 cbuffer CameraParams : register(b0)
@@ -36,11 +39,32 @@ float3 DecodeNormal(float3 encoded)
     return normalize(encoded * 2.0f - 1.0f);
 }
 
-float3 SampleEnvironment(float3 dir)
+float2 DirToEnvUV(float3 dir)
 {
     dir = normalize(dir);
-    float2 envUV = float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, -dir.y * 0.5f + 0.5f);
+    return float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, -dir.y * 0.5f + 0.5f);
+}
+
+float3 SampleEnvironment(float3 dir)
+{
+    float2 envUV = DirToEnvUV(dir);
     return environmentTex.SampleLevel(linearSampler, envUV, 0.0f).rgb;
+}
+
+float3 SamplePrefiltered(float3 dir, float roughness)
+{
+    const float sliceCount = 6.0f;
+    float2 uv = DirToEnvUV(dir);
+    float slice = saturate(roughness) * (sliceCount - 1.0f);
+    float slice0 = floor(slice);
+    float slice1 = min(slice0 + 1.0f, sliceCount - 1.0f);
+    float t = slice - slice0;
+    float sliceHeight = 1.0f / sliceCount;
+    float v0 = (uv.y + slice0) * sliceHeight;
+    float v1 = (uv.y + slice1) * sliceHeight;
+    float3 p0 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v0), 0.0f).rgb;
+    float3 p1 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v1), 0.0f).rgb;
+    return lerp(p0, p1, t);
 }
 
 [numthreads(8, 8, 1)]
@@ -73,7 +97,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 viewDir = ComputeViewDir(viewPos);
 
     
-    float3 color = float3(0.05f, 0.05f, 0.05f) * albedo;
+    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
+    float3 color = albedo * (1.0f - metallic);
 
     [unroll]
     for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
@@ -109,19 +134,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color += diffuse + specularComponent + emissive;
     }
 
-    float3 envAmbient = SampleEnvironment(normal);
-    color += envAmbient * 0.4 * albedo;
+    color += envIrradiance;
 
-    // Simple image-based reflection from the environment map.
+    // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
-    float3 envColor = SampleEnvironment(reflectionDir);
+    float3 envColor = SamplePrefiltered(reflectionDir, roughness);
 
-    // Fresnel-weighted environment reflection. Hack: ignore metallic and drive reflectivity purely by roughness.
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float cosTheta = saturate(dot(normal, -viewDir));
     float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
-    float gloss = saturate(1.0f - roughness);
-    color += envColor * fresnel * gloss;
+    float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
+    float3 specular = envColor * (fresnel * brdf.x + brdf.y);
+    color += specular;
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

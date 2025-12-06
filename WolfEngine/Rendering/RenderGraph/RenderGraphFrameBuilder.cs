@@ -22,6 +22,9 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
 	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
+	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
+	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
+	public RenderGraphResourceHandle SkyboxBrdfLut { get; init; }
 }
 
 public sealed class RenderGraphFrameBuilder
@@ -60,10 +63,28 @@ public sealed class RenderGraphFrameBuilder
 		RenderGraphResourceHandle backBuffer)
 	{
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);
+		var skyboxIrrHandle = default(RenderGraphResourceHandle);
+		var skyboxPrefilterHandle = default(RenderGraphResourceHandle);
+		var skyboxBrdfHandle = default(RenderGraphResourceHandle);
 		if (_skybox?.EnvironmentTexture is IGfxTexture envTexture)
 		{
 			skyboxEnvHandle = _resources.ImportTexture(envTexture, takeOwnership: false,
 				initialState: ResourceState.ShaderResource);
+			if (_skybox.IrradianceTexture is IGfxTexture irr)
+			{
+				skyboxIrrHandle = _resources.ImportTexture(irr, takeOwnership: false,
+					initialState: ResourceState.ShaderResource);
+			}
+			if (_skybox.PrefilteredEnvironment is IGfxTexture prefilter)
+			{
+				skyboxPrefilterHandle = _resources.ImportTexture(prefilter, takeOwnership: false,
+					initialState: ResourceState.ShaderResource);
+			}
+			if (_skybox.BrdfLut is IGfxTexture brdf)
+			{
+				skyboxBrdfHandle = _resources.ImportTexture(brdf, takeOwnership: false,
+					initialState: ResourceState.ShaderResource);
+			}
 		}
 
 		_frameResources = new()
@@ -89,7 +110,10 @@ public sealed class RenderGraphFrameBuilder
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)),
-			SkyboxEnvironment = skyboxEnvHandle
+			SkyboxEnvironment = skyboxEnvHandle,
+			SkyboxIrradiance = skyboxIrrHandle,
+			SkyboxPrefilter = skyboxPrefilterHandle,
+			SkyboxBrdfLut = skyboxBrdfHandle
 		};
 
 		return _frameResources;
@@ -123,6 +147,18 @@ public sealed class RenderGraphFrameBuilder
 		if (_frameResources.SkyboxEnvironment.IsValid)
 		{
 			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxIrradiance.IsValid)
+		{
+			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxPrefilter.IsValid)
+		{
+			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxBrdfLut.IsValid)
+		{
+			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
 		}
 		deferredLightingBuilder
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)

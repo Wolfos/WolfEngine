@@ -128,6 +128,9 @@ private sealed class MeshResources
 	private Vector2 _imguiMousePosition;
 	private Vector2 _imguiMouseWheel;
 	private D3D12ImGuiRenderer _imguiRenderer = null!;
+	private IGfxPipeline? _iblIrradiancePipeline;
+	private IGfxPipeline? _iblPrefilterPipeline;
+	private IGfxPipeline? _iblBrdfLutPipeline;
 
 	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
 	{
@@ -1081,13 +1084,183 @@ private sealed class MeshResources
 		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
 		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
 
+		var (irradiance, prefiltered, brdfLut) = GenerateIblMaps(environmentTexture);
+
 		return new SkyboxResources
 		{
 			Pipeline = pipeline,
 			DescriptorSet = environmentTexture.Resources.DescriptorSet!,
 			Mesh = skyboxMesh,
-			EnvironmentTexture = environmentTexture.Resources.Texture
+			EnvironmentTexture = environmentTexture.Resources.Texture,
+			IrradianceTexture = irradiance,
+			PrefilteredEnvironment = prefiltered,
+			BrdfLut = brdfLut
 		};
+	}
+
+	private (IGfxTexture Irradiance, IGfxTexture Prefiltered, IGfxTexture BrdfLut) GenerateIblMaps(Texture environmentTexture)
+	{
+		var envResources = environmentTexture.Resources
+		                  ?? throw new InvalidOperationException("Environment texture resources were not created.");
+		var envTexture = envResources.Texture;
+
+		const int irradianceSize = 64;
+		const int prefilterWidth = 256;
+		const int prefilterSliceHeight = 64;
+		const int prefilterSlices = 6;
+		const int brdfSize = 256;
+
+		var irradianceDesc = new TextureDescriptor(
+			irradianceSize,
+			irradianceSize,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);
+		var prefilterDesc = new TextureDescriptor(
+			prefilterWidth,
+			prefilterSliceHeight * prefilterSlices,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);
+		var brdfDesc = new TextureDescriptor(
+			brdfSize,
+			brdfSize,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);
+
+		var irradianceTex = _gfxDevice.CreateTexture(irradianceDesc);
+		var prefilterTex = _gfxDevice.CreateTexture(prefilterDesc);
+		var brdfTex = _gfxDevice.CreateTexture(brdfDesc);
+
+		// Irradiance
+		{
+			var pipeline = GetIblIrradiancePipeline();
+			var commandList = _gfxDevice.BeginCompute();
+			commandList.BindPipeline(pipeline);
+			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
+			descriptorSetBuilder.AddShaderResource(0, envTexture);
+			descriptorSetBuilder.AddUnorderedAccess(9, irradianceTex);
+			var descriptorSet = descriptorSetBuilder.Build();
+			commandList.BindComputeDescriptorSet(0, descriptorSet);
+
+			Span<float> constants = stackalloc float[20];
+			constants[0] = irradianceSize;
+			constants[1] = irradianceSize;
+			constants[2] = 1;
+			constants[3] = irradianceSize;
+			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
+			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes are fine
+
+			var dispatchX = (uint)((irradianceSize + 7) / 8);
+			var dispatchY = (uint)((irradianceSize + 7) / 8);
+			commandList.Dispatch(dispatchX, dispatchY, 1);
+			_gfxDevice.Submit(commandList);
+		}
+
+		// Prefilter (roughness slices stacked vertically)
+		{
+			var pipeline = GetIblPrefilterPipeline();
+			var commandList = _gfxDevice.BeginCompute();
+			commandList.BindPipeline(pipeline);
+			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
+			descriptorSetBuilder.AddShaderResource(0, envTexture);
+			descriptorSetBuilder.AddUnorderedAccess(9, prefilterTex);
+			var descriptorSet = descriptorSetBuilder.Build();
+			commandList.BindComputeDescriptorSet(0, descriptorSet);
+
+			Span<float> constants = stackalloc float[20];
+			constants[0] = prefilterWidth;
+			constants[1] = prefilterSliceHeight * prefilterSlices;
+			constants[2] = prefilterSlices;
+			constants[3] = prefilterSliceHeight;
+			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
+			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes
+
+			var dispatchX = (uint)((prefilterWidth + 7) / 8);
+			var dispatchY = (uint)(((prefilterSliceHeight * prefilterSlices) + 7) / 8);
+			commandList.Dispatch(dispatchX, dispatchY, 1);
+			_gfxDevice.Submit(commandList);
+		}
+
+		// BRDF LUT
+		{
+			var pipeline = GetIblBrdfPipeline();
+			var commandList = _gfxDevice.BeginCompute();
+			commandList.BindPipeline(pipeline);
+			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
+			descriptorSetBuilder.AddShaderResource(0, envTexture);
+			descriptorSetBuilder.AddUnorderedAccess(9, brdfTex);
+			var descriptorSet = descriptorSetBuilder.Build();
+			commandList.BindComputeDescriptorSet(0, descriptorSet);
+
+			Span<float> constants = stackalloc float[20];
+			constants[0] = brdfSize;
+			constants[1] = brdfSize;
+			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
+			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes
+
+			var dispatchX = (uint)((brdfSize + 7) / 8);
+			var dispatchY = (uint)((brdfSize + 7) / 8);
+			commandList.Dispatch(dispatchX, dispatchY, 1);
+			_gfxDevice.Submit(commandList);
+		}
+
+		return (irradianceTex, prefilterTex, brdfTex);
+	}
+
+	private IGfxPipeline GetIblIrradiancePipeline()
+	{
+		if (_iblIrradiancePipeline is not null)
+			return _iblIrradiancePipeline;
+
+		var shader = _shaderCompiler.GetComputeShader("ibl_irradiance.compute.slang", "CSMain");
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "ibl_irradiance_CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderState: default,
+			layout: GraphicsLayoutKind.Default);
+		_iblIrradiancePipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: shader));
+		return _iblIrradiancePipeline;
+	}
+
+	private IGfxPipeline GetIblPrefilterPipeline()
+	{
+		if (_iblPrefilterPipeline is not null)
+			return _iblPrefilterPipeline;
+
+		var shader = _shaderCompiler.GetComputeShader("ibl_prefilter.compute.slang", "CSMain");
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "ibl_prefilter_CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderState: default,
+			layout: GraphicsLayoutKind.Default);
+		_iblPrefilterPipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: shader));
+		return _iblPrefilterPipeline;
+	}
+
+	private IGfxPipeline GetIblBrdfPipeline()
+	{
+		if (_iblBrdfLutPipeline is not null)
+			return _iblBrdfLutPipeline;
+
+		var shader = _shaderCompiler.GetComputeShader("ibl_brdf_lut.compute.slang", "CSMain");
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "ibl_brdf_CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
+			renderState: default,
+			layout: GraphicsLayoutKind.Default);
+		_iblBrdfLutPipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: shader));
+		return _iblBrdfLutPipeline;
 	}
 
 	public Int2 GetFrameBufferSize()
