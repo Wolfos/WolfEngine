@@ -1,19 +1,22 @@
 import "common.slang";
+import "common_bindless.slang";
 
-SamplerState linearSampler : register(s0);
+cbuffer BindlessHandles : register(b0)
+{
+    uint gbufferAlbedoHandle;
+    uint gbufferNormalHandle;
+    uint gbufferMaterialHandle;
+    uint gbufferEmissiveHandle;
+    uint gbufferDepthHandle;
+    uint environmentHandle;
+    uint irradianceHandle;
+    uint prefilteredHandle;
+    uint brdfLutHandle;
+    uint lightingTargetHandle;
+    uint samplerHandle;
+};
 
-Texture2D gbufferAlbedo : register(t0);
-Texture2D gbufferNormal : register(t1);
-Texture2D gbufferMaterial : register(t2);
-Texture2D gbufferEmissive : register(t3);
-Texture2D<float> gbufferDepth : register(t4);
-Texture2D environmentTex : register(t5);
-Texture2D irradianceTex : register(t6);
-Texture2D prefilteredTex : register(t7);
-Texture2D brdfLutTex : register(t8);
-RWTexture2D<float4> lightingTarget : register(u0);
-
-cbuffer CameraParams : register(b0)
+cbuffer CameraParams : register(b1)
 {
     CameraParams camera;
 };
@@ -27,7 +30,7 @@ struct LightData
     float4 positionRange;    // xyz = position, w = range (point only)
 };
 
-cbuffer LightingParams : register(b1)
+cbuffer LightingParams : register(b2)
 {
     uint lightCount;
     float3 _lightingPadding;
@@ -48,6 +51,8 @@ float2 DirToEnvUV(float3 dir)
 float3 SampleEnvironment(float3 dir)
 {
     float2 envUV = DirToEnvUV(dir);
+    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
+    SamplerState linearSampler = GetSampler(samplerHandle);
     return environmentTex.SampleLevel(linearSampler, envUV, 0.0f).rgb;
 }
 
@@ -62,6 +67,8 @@ float3 SamplePrefiltered(float3 dir, float roughness)
     float sliceHeight = 1.0f / sliceCount;
     float v0 = (uv.y + slice0) * sliceHeight;
     float v1 = (uv.y + slice1) * sliceHeight;
+    Texture2D<float4> prefilteredTex = GetTexture(prefilteredHandle);
+    SamplerState linearSampler = GetSampler(samplerHandle);
     float3 p0 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v0), 0.0f).rgb;
     float3 p1 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v1), 0.0f).rgb;
     return lerp(p0, p1, t);
@@ -71,6 +78,7 @@ float3 SamplePrefiltered(float3 dir, float roughness)
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint width, height;
+    RWTexture2D<float4> lightingTarget = GetRWTexture(lightingTargetHandle);
     lightingTarget.GetDimensions(width, height);
     if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
     {
@@ -79,6 +87,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float2 uv = (float2(dispatchThreadId.xy) + 0.5f) / float2(width, height);
 
+    Texture2D<float4> gbufferAlbedo = GetTexture(gbufferAlbedoHandle);
+    Texture2D<float4> gbufferNormal = GetTexture(gbufferNormalHandle);
+    Texture2D<float4> gbufferMaterial = GetTexture(gbufferMaterialHandle);
+    Texture2D<float4> gbufferEmissive = GetTexture(gbufferEmissiveHandle);
+    Texture2D<float4> gbufferDepth = GetTexture(gbufferDepthHandle);
+    SamplerState linearSampler = GetSampler(samplerHandle);
+
     float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
     float3 normal = DecodeNormal(gbufferNormal.SampleLevel(linearSampler, uv, 0.0f).xyz);
     float4 material = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f);
@@ -86,7 +101,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float metallic = material.r;
     float roughness = material.g;
-    float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0));
+    float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
     if (depth >= 0.9999f) // no geometry, keep background untouched
     {
         lightingTarget[dispatchThreadId.xy] = float4(albedo, 0);
@@ -97,6 +112,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 viewDir = ComputeViewDir(viewPos);
 
     
+    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
     float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
     float3 color = albedo * (1.0f - metallic);
 
@@ -143,6 +159,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float cosTheta = saturate(dot(normal, -viewDir));
     float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
+    Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);
     color += specular;

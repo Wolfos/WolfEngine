@@ -121,6 +121,8 @@ public sealed class RenderGraph
 				? device.BeginGraphics()
 				: device.BeginCompute();
 
+			commandList.SetBindlessTable(device.GlobalTable);
+
 			// Inject barriers before the pass executes
 			for (var i = 0; i < pass.Barriers.Count; i++)
 			{

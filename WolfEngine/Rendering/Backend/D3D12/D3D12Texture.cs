@@ -1,6 +1,7 @@
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
 
 namespace WolfEngine.Backend.D3D12;
@@ -12,6 +13,8 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	private ComPtr<ID3D12DescriptorHeap> _dsvHeap;
 	private CpuDescriptorHandle? _rtvHandle;
 	private CpuDescriptorHandle? _dsvHandle;
+	private DescriptorHandle _srvHandle = DescriptorHandle.Invalid;
+	private DescriptorHandle _uavHandle = DescriptorHandle.Invalid;
 
 	public D3D12Texture(string? name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 	{
@@ -32,6 +35,10 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	public CpuDescriptorHandle? DepthStencilView => _dsvHandle;
 
+	public DescriptorHandle ShaderResourceView => _srvHandle;
+
+	public DescriptorHandle UnorderedAccessView => _uavHandle;
+
 	ID3D12Resource* ID3D12BackendTexture.Resource => Resource.Handle;
 
 	internal void Initialize(string? name, in TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
@@ -43,6 +50,8 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 		DisposeHeap(ref _dsvHeap);
 		_rtvHandle = null;
 		_dsvHandle = null;
+		_srvHandle = DescriptorHandle.Invalid;
+		_uavHandle = DescriptorHandle.Invalid;
 	}
 
 	public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)

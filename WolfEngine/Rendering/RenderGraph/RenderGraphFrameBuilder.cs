@@ -193,7 +193,9 @@ public sealed class RenderGraphFrameBuilder
 			EmissiveClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
 			NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
 			MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
-			DepthClearValue = 1.0f
+			DepthClearValue = 1.0f,
+			SkyboxEnvironment = DescriptorHandle.Invalid,
+			SkyboxSampler = DescriptorHandle.Invalid
 		};
 
 		if (_skybox is not null &&
@@ -209,7 +211,8 @@ public sealed class RenderGraphFrameBuilder
 	private static void ApplySkybox(ref GBufferPassConfig config, SkyboxResources skybox, Matrix4x4 viewProj)
 	{
 		config.SkyboxPipeline = skybox.Pipeline;
-		config.SkyboxDescriptorSet = skybox.DescriptorSet;
+		config.SkyboxEnvironment = skybox.EnvironmentHandle;
+		config.SkyboxSampler = skybox.Sampler;
 		config.InvViewProjection = viewProj;
 		config.SkyboxMesh = skybox.Mesh;
 	}

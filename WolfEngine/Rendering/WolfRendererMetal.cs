@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
@@ -14,7 +15,9 @@ using WolfEngine.Mathematics;
 using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.UI;
+using AbstractionBlendMode = WolfEngine.Rendering.Abstraction.BlendMode;
 
 namespace WolfEngine;
 
@@ -42,15 +45,20 @@ public unsafe class WolfRendererMetal : IRenderer
 
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
+    private MetalDevice _gfxDevice;
     private Window* _window;
     private void* _metalView;
     private CAMetalLayer _metalLayer;
+    private CAMetalDrawable _currentDrawable;
     private bool _isRunning;
     private bool _hasDrawableSize;
     private double _drawableWidth;
     private double _drawableHeight;
+    private DescriptorHandle _linearSamplerHandle = DescriptorHandle.Invalid;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
+    private Action<float> _renderCallback = static deltaTime => { };
+    private bool _useRenderGraph;
 
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
@@ -72,11 +80,13 @@ public unsafe class WolfRendererMetal : IRenderer
         public ulong IndexCount { get; }
     }
     
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct VertexData
     {
         public Vector4 Position;
-        public Vector4 Normal;
+        public Vector3 Normal;
+        public Vector2 UV;
+        public Vector4 Tangent;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -129,13 +139,10 @@ public unsafe class WolfRendererMetal : IRenderer
 
     public void Run(Action startup, Action<float> update, Action<float> render)
     {
-        throw new NotImplementedException();
-    }
-
-    public void Run(Action startup, Action<float> update)
-    {
         _startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
         _updateCallback = update ?? throw new ArgumentNullException(nameof(update));
+        _renderCallback = render ?? throw new ArgumentNullException(nameof(render));
+        _useRenderGraph = true;
 
         try
         {
@@ -151,6 +158,11 @@ public unsafe class WolfRendererMetal : IRenderer
         }
     }
 
+    public void Run(Action startup, Action<float> update)
+    {
+        Run(startup, update, static _ => { });
+    }
+
     private void MainLoop()
     {
         _isRunning = true;
@@ -164,12 +176,16 @@ public unsafe class WolfRendererMetal : IRenderer
 
             // TODO: Delta time
             _updateCallback(0);
-            ProcessPendingCommands();
-            var rendered = RenderFrame();
-
-            if (rendered == false)
+            _renderCallback(0);
+            if (_useRenderGraph == false)
             {
-                _sdl.Delay(1);
+                ProcessPendingCommands();
+                var rendered = RenderFrame();
+
+                if (rendered == false)
+                {
+                    _sdl.Delay(1);
+                }
             }
         }
     }
@@ -255,6 +271,8 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             throw new InvalidOperationException("Failed to create the default Metal device.");
         }
+
+        _gfxDevice = new MetalDevice(_device);
     }
 
     private void CreateCommandQueue()
@@ -503,47 +521,101 @@ public unsafe class WolfRendererMetal : IRenderer
 
     public IMaterialResources CreateMaterialResources(Material material)
     {
-        var library = CreateShaderLibrary(material);
-        var pipeline = CreateRenderPipeline(library);
-
         var color = new[] { material.Color };
         var colorBufferLength = (ulong)Marshal.SizeOf<Vector4>();
-        var colorBuffer = _device.NewBuffer(colorBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+        var colorBuffer = _device.NewBuffer(colorBufferLength, MTLResourceOptions.ResourceStorageModeShared);
         if (colorBuffer.NativePtr == IntPtr.Zero)
         {
             throw new InvalidOperationException("Failed to allocate material buffer.");
         }
         BufferHelper.CopyToBuffer(color, colorBuffer);
-        colorBuffer.DidModifyRange(new NSRange { location = 0, length = colorBufferLength });
+
+        var renderState = new RenderStateDescriptor(
+            FillMode.Solid,
+            CullMode.Back,
+            depthTestEnabled: true,
+            depthWriteEnabled: true,
+            AbstractionBlendMode.Opaque);
+
+        var pipelineKey = new PipelineKey(
+            PassKind.Graphics,
+            vertexEntryPoint: "vertexShader",
+            pixelEntryPoint: "fragmentShader",
+            computeEntryPoint: null,
+            renderTargets: new(new[]
+            {
+                TextureFormat.Bgra8Unorm,
+                TextureFormat.Rgba16Float,
+                TextureFormat.Rgba8Unorm,
+                TextureFormat.Rgba8Unorm
+            }),
+            depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
+            renderState: renderState,
+            layout: GraphicsLayoutKind.Material);
+
+        var shaderSource = _shaderCompiler.GetMetalSource(material.ShaderPath);
+        var shaderBytes = Encoding.UTF8.GetBytes(shaderSource);
+        var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
+        var constantBuffer = new MetalBuffer($"{material.ShaderPath}_ColorBuffer", new(colorBufferLength, BufferUsage.Constant), colorBuffer);
+
+        if (_linearSamplerHandle.IsValid == false)
+        {
+            var sampler = new SamplerDescriptor(FilterMode.Trilinear, AddressMode.Wrap, AddressMode.Wrap, AddressMode.Wrap);
+            _linearSamplerHandle = _gfxDevice.GlobalTable.AllocateSampler(sampler);
+        }
 
         return new MtlMaterialResources
         {
-            Pipeline = null!, // TODO: Implement Metal pipeline wrapper
-            ConstantBuffer = null, // TODO: Implement Metal buffer wrapper
-            TextureSet = null,
-            PipelineState = pipeline,
-            ColorBuffer = colorBuffer
+            Pipeline = pipeline,
+            ConstantBuffer = constantBuffer,
+            PipelineState = default,
+            ColorBuffer = colorBuffer,
+            AlbedoTexture = material.AlbedoTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            MetallicRoughnessTexture = material.MetallicRoughnessTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            NormalTexture = material.NormalTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            OcclusionTexture = material.OcclusionTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            EmissiveTexture = material.EmissiveTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            Sampler = _linearSamplerHandle
         };
     }
 
     public ITextureResources CreateTextureResources(Texture texture)
     {
-        throw new NotSupportedException("Metal renderer texture uploads are not implemented.");
+        if (texture is null)
+        {
+            throw new ArgumentNullException(nameof(texture));
+        }
+
+        var descriptor = new TextureDescriptor(
+            texture.Width,
+            texture.Height,
+            TextureFormat.Rgba8Unorm,
+            TextureUsage.ShaderResource);
+
+        var gfxTexture = _gfxDevice.CreateTexture(descriptor);
+
+        return new MetalTextureResources
+        {
+            Texture = gfxTexture,
+            ShaderResourceView = gfxTexture.ShaderResourceView
+        };
     }
 
     public IGfxDevice GetGfxDevice()
     {
-        throw new NotImplementedException();
+        return _gfxDevice;
     }
 
     public Int2 GetFrameBufferSize()
     {
-        throw new NotImplementedException();
+        var width = _hasDrawableSize ? (int)_drawableWidth : _width;
+        var height = _hasDrawableSize ? (int)_drawableHeight : _height;
+        return new Int2(width, height);
     }
 
     public void BeginFrame()
     {
-        throw new NotImplementedException();
+        UpdateDrawableSize();
     }
 
     public void Render(
@@ -553,22 +625,38 @@ public unsafe class WolfRendererMetal : IRenderer
         RenderGraphResourceHandle presentedTexture,
         UiFrameData uiFrame)
     {
-        throw new NotImplementedException();
+        // Present is handled by MetalCommandList when backbuffer is used as a render target.
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)
     {
-        throw new NotImplementedException();
+        var drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
+        if (drawablePtr == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to acquire CAMetalDrawable.");
+        }
+
+        _currentDrawable = new CAMetalDrawable(drawablePtr);
+
+        var descriptor = new TextureDescriptor(
+            Math.Max(width, 1),
+            Math.Max(height, 1),
+            TextureFormat.Bgra8Unorm,
+            TextureUsage.RenderTarget,
+            Vector4.Zero);
+
+        var backbuffer = new MetalBackbufferTexture(_currentDrawable, descriptor);
+        return registry.ImportTexture(backbuffer, takeOwnership: false, initialState: ResourceState.RenderTarget);
     }
 
     public void ExecuteGBufferPass(RenderGraphContext context, RenderGraphFrameResources resources)
     {
-        throw new NotImplementedException();
+        throw new NotSupportedException("Use render-graph pass execution instead of direct Metal GBuffer calls.");
     }
 
     public void ExecuteDeferredPass(RenderGraphContext context, RenderGraphFrameResources resources)
     {
-        throw new NotImplementedException();
+        throw new NotSupportedException("Use render-graph pass execution instead of direct Metal deferred calls.");
     }
 
     private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)
@@ -630,9 +718,11 @@ public unsafe class WolfRendererMetal : IRenderer
             throw new InvalidOperationException("Mesh must contain vertex data.");
         }
 
-        if (mesh.Normals.Length != mesh.Vertices.Length)
+        if (mesh.Normals.Length != mesh.Vertices.Length ||
+            mesh.UVs.Length != mesh.Vertices.Length ||
+            mesh.Tangents.Length != mesh.Vertices.Length)
         {
-            throw new InvalidOperationException("Mesh must contain a normal for each vertex.");
+            throw new InvalidOperationException("Mesh must contain normals, UVs, and tangents per vertex.");
         }
 
         var vertexCount = mesh.Vertices.Length;
@@ -643,27 +733,35 @@ public unsafe class WolfRendererMetal : IRenderer
             vertexData[i] = new VertexData
             {
                 Position = mesh.Vertices[i],
-                Normal = new Vector4(normal, 0.0f)
+                Normal = normal,
+                UV = mesh.UVs[i],
+                Tangent = mesh.Tangents[i]
             };
         }
 
         var vertexBufferLength = (ulong)(vertexData.Length * Marshal.SizeOf<VertexData>());
-        var vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+        var vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeShared);
         if (vertexBuffer.NativePtr == IntPtr.Zero)
         {
             throw new InvalidOperationException("Failed to allocate vertex buffer.");
         }
         BufferHelper.CopyToBuffer(vertexData, vertexBuffer);
-        vertexBuffer.DidModifyRange(new NSRange { location = 0, length = vertexBufferLength });
 
         var indexBufferLength = (ulong)(mesh.Indices.Length * sizeof(uint));
-        var indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeManaged);
+        var indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeShared);
         if (indexBuffer.NativePtr == IntPtr.Zero)
         {
             throw new InvalidOperationException("Failed to allocate index buffer.");
         }
         BufferHelper.CopyToBuffer(mesh.Indices, indexBuffer);
-        indexBuffer.DidModifyRange(new NSRange { location = 0, length = indexBufferLength });
+
+        var vertexBufferAbstraction = new MetalBuffer("MeshVertexBuffer", new(vertexBufferLength, BufferUsage.Vertex), vertexBuffer);
+        var indexBufferAbstraction = new MetalBuffer("MeshIndexBuffer", new(indexBufferLength, BufferUsage.Index), indexBuffer);
+
+        mesh.VertexBuffer = vertexBufferAbstraction;
+        mesh.IndexBuffer = indexBufferAbstraction;
+        mesh.StrideInBytes = (uint)Marshal.SizeOf<VertexData>();
+        mesh.IndexCount = (uint)mesh.Indices.Length;
 
         return new MeshResources(vertexBuffer, indexBuffer, (ulong)mesh.Indices.Length);
     }

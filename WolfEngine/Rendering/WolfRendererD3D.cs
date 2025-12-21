@@ -849,29 +849,20 @@ private sealed class MeshResources
 		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");
 		var mrResources = material.MetallicRoughnessTexture?.Resources
 		                  ?? throw new InvalidOperationException("Material is missing metallic/roughness texture resources.");
-
-		var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
-		descriptorSetBuilder.AddShaderResource(0, albedoResources.Texture);
-		descriptorSetBuilder.AddShaderResource(1, mrResources.Texture);
-		if (material.NormalTexture?.Resources is { } normalRes)
-		{
-			descriptorSetBuilder.AddShaderResource(2, normalRes.Texture);
-		}
-		if (material.OcclusionTexture?.Resources is { } occlusionRes)
-		{
-			descriptorSetBuilder.AddShaderResource(3, occlusionRes.Texture);
-		}
-		if (material.EmissiveTexture?.Resources is { } emissiveRes)
-		{
-			descriptorSetBuilder.AddShaderResource(4, emissiveRes.Texture);
-		}
-		var descriptorSet = descriptorSetBuilder.Build();
+		var normalResources = material.NormalTexture?.Resources;
+		var occlusionResources = material.OcclusionTexture?.Resources;
+		var emissiveResources = material.EmissiveTexture?.Resources;
 
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
 			ConstantBuffer = constantBuffer,
-			TextureSet = descriptorSet
+			AlbedoTexture = albedoResources.ShaderResourceView,
+			MetallicRoughnessTexture = mrResources.ShaderResourceView,
+			NormalTexture = normalResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+			OcclusionTexture = occlusionResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+			EmissiveTexture = emissiveResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+			Sampler = DescriptorHandle.Invalid
 		};
 	}
 
@@ -1025,14 +1016,10 @@ private sealed class MeshResources
 		var backendTexture = new BackendD3D12Texture();
 		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
 
-		var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
-		descriptorSetBuilder.AddShaderResource(0, backendTexture);
-		var descriptorSet = descriptorSetBuilder.Build();
-
 		return new D3D12TextureResources
 		{
 			Texture = backendTexture,
-			DescriptorSet = descriptorSet
+			ShaderResourceView = DescriptorHandle.Invalid
 		};
 	}
 
@@ -1048,7 +1035,7 @@ private sealed class MeshResources
 			throw new ArgumentNullException(nameof(environmentTexture));
 		}
 
-		if (environmentTexture.Resources?.DescriptorSet is null)
+		if (environmentTexture.Resources is null)
 		{
 			throw new InvalidOperationException("Environment texture resources were not created.");
 		}
@@ -1089,7 +1076,8 @@ private sealed class MeshResources
 		return new SkyboxResources
 		{
 			Pipeline = pipeline,
-			DescriptorSet = environmentTexture.Resources.DescriptorSet!,
+			EnvironmentHandle = environmentTexture.Resources.ShaderResourceView,
+			Sampler = DescriptorHandle.Invalid,
 			Mesh = skyboxMesh,
 			EnvironmentTexture = environmentTexture.Resources.Texture,
 			IrradianceTexture = irradiance,
@@ -1135,11 +1123,11 @@ private sealed class MeshResources
 			var pipeline = GetIblIrradiancePipeline();
 			var commandList = _gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
-			descriptorSetBuilder.AddShaderResource(0, envTexture);
-			descriptorSetBuilder.AddUnorderedAccess(9, irradianceTex);
-			var descriptorSet = descriptorSetBuilder.Build();
-			commandList.BindComputeDescriptorSet(0, descriptorSet);
+			Span<uint> handles = stackalloc uint[3];
+			handles[0] = envTexture.ShaderResourceView.Value;
+			handles[1] = irradianceTex.UnorderedAccessView.Value;
+			handles[2] = DescriptorHandle.Invalid.Value;
+			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
 
 			Span<float> constants = stackalloc float[20];
 			constants[0] = irradianceSize;
@@ -1147,7 +1135,6 @@ private sealed class MeshResources
 			constants[2] = 1;
 			constants[3] = irradianceSize;
 			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
-			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes are fine
 
 			var dispatchX = (uint)((irradianceSize + 7) / 8);
 			var dispatchY = (uint)((irradianceSize + 7) / 8);
@@ -1160,11 +1147,11 @@ private sealed class MeshResources
 			var pipeline = GetIblPrefilterPipeline();
 			var commandList = _gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
-			descriptorSetBuilder.AddShaderResource(0, envTexture);
-			descriptorSetBuilder.AddUnorderedAccess(9, prefilterTex);
-			var descriptorSet = descriptorSetBuilder.Build();
-			commandList.BindComputeDescriptorSet(0, descriptorSet);
+			Span<uint> handles = stackalloc uint[3];
+			handles[0] = envTexture.ShaderResourceView.Value;
+			handles[1] = prefilterTex.UnorderedAccessView.Value;
+			handles[2] = DescriptorHandle.Invalid.Value;
+			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
 
 			Span<float> constants = stackalloc float[20];
 			constants[0] = prefilterWidth;
@@ -1172,7 +1159,6 @@ private sealed class MeshResources
 			constants[2] = prefilterSlices;
 			constants[3] = prefilterSliceHeight;
 			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
-			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes
 
 			var dispatchX = (uint)((prefilterWidth + 7) / 8);
 			var dispatchY = (uint)(((prefilterSliceHeight * prefilterSlices) + 7) / 8);
@@ -1185,17 +1171,14 @@ private sealed class MeshResources
 			var pipeline = GetIblBrdfPipeline();
 			var commandList = _gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			var descriptorSetBuilder = _gfxDevice.CreateDescriptorSetBuilder();
-			descriptorSetBuilder.AddShaderResource(0, envTexture);
-			descriptorSetBuilder.AddUnorderedAccess(9, brdfTex);
-			var descriptorSet = descriptorSetBuilder.Build();
-			commandList.BindComputeDescriptorSet(0, descriptorSet);
+			Span<uint> handles = stackalloc uint[1];
+			handles[0] = brdfTex.UnorderedAccessView.Value;
+			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
 
 			Span<float> constants = stackalloc float[20];
 			constants[0] = brdfSize;
 			constants[1] = brdfSize;
 			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
-			commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(constants)); // zeroes
 
 			var dispatchX = (uint)((brdfSize + 7) / 8);
 			var dispatchY = (uint)((brdfSize + 7) / 8);

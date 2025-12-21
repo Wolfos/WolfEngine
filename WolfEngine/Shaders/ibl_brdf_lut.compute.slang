@@ -1,9 +1,14 @@
-SamplerState linearClamp : register(s0);
-RWTexture2D<float4> brdfLutOut : register(u0);
+import "common_bindless.slang";
+
+cbuffer BindlessHandles : register(b0)
+{
+    uint brdfHandle;
+};
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
+    RWTexture2D<float4> brdfLutOut = GetRWTexture(brdfHandle);
     uint width, height;
     brdfLutOut.GetDimensions(width, height);
     if (id.x >= width || id.y >= height)

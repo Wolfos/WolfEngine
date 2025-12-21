@@ -13,6 +13,8 @@ public interface IGfxResource
 public interface IGfxTexture : IGfxResource
 {
 	TextureDescriptor Descriptor { get; }
+	DescriptorHandle ShaderResourceView { get; }
+	DescriptorHandle UnorderedAccessView { get; }
 }
 
 public interface IGfxBuffer : IGfxResource
@@ -42,25 +44,59 @@ public interface IGfxDescriptorTable
 /// <summary>
 /// Identifier returned when allocating into the descriptor table.
 /// </summary>
+public enum DescriptorKind : uint
+{
+	ShaderResourceView = 0,
+	UnorderedAccessView = 1,
+	ConstantBufferView = 2,
+	Sampler = 3
+}
+
+/// <summary>
+/// Packed descriptor handle: high 2 bits = kind, low 30 bits = index.
+/// </summary>
 public readonly struct DescriptorHandle : IEquatable<DescriptorHandle>
 {
-	public DescriptorHandle(int index)
+	private const uint KindShift = 30;
+	private const uint KindMask = 0b11u;
+	private const uint IndexMask = (1u << (int)KindShift) - 1u;
+	private const uint InvalidValue = 0xFFFFFFFF;
+
+	public DescriptorHandle(DescriptorKind kind, int index)
 	{
-		if (index < 0)
+		if (index < 0 || (uint)index > IndexMask)
 		{
-			throw new ArgumentOutOfRangeException(nameof(index), "Descriptor index must be non-negative.");
+			throw new ArgumentOutOfRangeException(nameof(index), "Descriptor index must be within 0..(2^30-1).");
 		}
 
-		Index = index;
+		var kindBits = ((uint)kind & KindMask) << (int)KindShift;
+		Value = kindBits | (uint)index;
 	}
 
-	public int Index { get; }
+	private DescriptorHandle(uint value)
+	{
+		Value = value;
+	}
 
-	public bool Equals(DescriptorHandle other) => Index == other.Index;
+	public static DescriptorHandle Invalid => new(InvalidValue);
+
+	public bool IsValid => Value != InvalidValue;
+
+	public DescriptorKind Kind => IsValid
+		? (DescriptorKind)((Value >> (int)KindShift) & KindMask)
+		: throw new InvalidOperationException("Descriptor handle is invalid.");
+
+	public int Index => IsValid
+		? (int)(Value & IndexMask)
+		: throw new InvalidOperationException("Descriptor handle is invalid.");
+
+	public uint Value { get; }
+
+	public bool Equals(DescriptorHandle other) => Value == other.Value;
 
 	public override bool Equals(object? obj) => obj is DescriptorHandle other && Equals(other);
 
-	public override int GetHashCode() => Index;
+	public override int GetHashCode() => (int)Value;
 }
 
 /// <summary>

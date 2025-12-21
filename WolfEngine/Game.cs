@@ -159,36 +159,36 @@ public class Game
             var transform = importedMesh.Transform;
 
             var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
-            Texture? albedoTexture = null;
-            Texture? metallicRoughnessTexture = null;
-            Texture? normalTexture = null;
-            Texture? emissiveTexture = null;
-            Texture? occlusionTexture = null;
-            if (importedMaterial.BaseColorTextureIndex is int texIndex &&
+            Texture albedoTexture = null;
+            Texture metallicRoughnessTexture = null;
+            Texture normalTexture = null;
+            Texture emissiveTexture = null;
+            Texture occlusionTexture = null;
+            if (importedMaterial.BaseColorTextureIndex is { } texIndex &&
                 texIndex >= 0 &&
                 texIndex < runtimeTextures.Count)
             {
                 albedoTexture = runtimeTextures[texIndex];
             }
-            if (importedMaterial.MetallicRoughnessTextureIndex is int mrIndex &&
+            if (importedMaterial.MetallicRoughnessTextureIndex is { } mrIndex &&
                 mrIndex >= 0 &&
                 mrIndex < runtimeTextures.Count)
             {
                 metallicRoughnessTexture = runtimeTextures[mrIndex];
             }
-            if (importedMaterial.NormalTextureIndex is int normalIndex &&
+            if (importedMaterial.NormalTextureIndex is { } normalIndex &&
                 normalIndex >= 0 &&
                 normalIndex < runtimeTextures.Count)
             {
                 normalTexture = runtimeTextures[normalIndex];
             }
-            if (importedMaterial.EmissiveTextureIndex is int emissiveIndex &&
+            if (importedMaterial.EmissiveTextureIndex is { } emissiveIndex &&
                 emissiveIndex >= 0 &&
                 emissiveIndex < runtimeTextures.Count)
             {
                 emissiveTexture = runtimeTextures[emissiveIndex];
             }
-            if (importedMaterial.OcclusionTextureIndex is int occlusionIndex &&
+            if (importedMaterial.OcclusionTextureIndex is { } occlusionIndex &&
                 occlusionIndex >= 0 &&
                 occlusionIndex < runtimeTextures.Count)
             {

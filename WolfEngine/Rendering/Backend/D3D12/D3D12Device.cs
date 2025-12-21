@@ -1162,6 +1162,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		public TextureDescriptor Descriptor { get; private set; }
 
+		public DescriptorHandle ShaderResourceView { get; private set; } = DescriptorHandle.Invalid;
+
+		public DescriptorHandle UnorderedAccessView { get; private set; } = DescriptorHandle.Invalid;
+
 		public ID3D12Resource* Resource { get; private set; }
 
 		public CpuDescriptorHandle? RenderTargetView { get; private set; }
@@ -1175,6 +1179,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			Resource = resource;
 			RenderTargetView = rtv;
 			DepthStencilView = dsv;
+			ShaderResourceView = DescriptorHandle.Invalid;
+			UnorderedAccessView = DescriptorHandle.Invalid;
 		}
 
 		public void Reset()
@@ -1183,6 +1189,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			Resource = null;
 			RenderTargetView = null;
 			DepthStencilView = null;
+			ShaderResourceView = DescriptorHandle.Invalid;
+			UnorderedAccessView = DescriptorHandle.Invalid;
 		}
 	}
 	

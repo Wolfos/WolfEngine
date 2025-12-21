@@ -1,14 +1,19 @@
+import "common_bindless.slang";
+
 cbuffer MaterialParams : register(b0)
 {
     float4 baseColor;
 };
 
-Texture2D albedoTex : register(t0);
-Texture2D metallicRoughnessTex : register(t1);
-Texture2D normalTex : register(t2);
-Texture2D occlusionTex : register(t3);
-Texture2D emissiveTex : register(t4);
-SamplerState linearSampler : register(s0);
+cbuffer BindlessMaterial : register(b3)
+{
+    uint albedoHandle;
+    uint metallicRoughnessHandle;
+    uint normalHandle;
+    uint occlusionHandle;
+    uint emissiveHandle;
+    uint samplerHandle;
+};
 
 cbuffer DrawParams : register(b1)
 {
@@ -68,7 +73,14 @@ PSOutput fragmentShader(VSOutput input)
     float3 normal = normalize(input.normal);
 
 
-    float3 tangentNormal = normalize(normalTex.Sample(linearSampler, input.uv).rgb * 2.0f - 1.0f);
+    SamplerState sampler = GetSampler(samplerHandle);
+    Texture2D<float4> albedoTex = GetTexture(albedoHandle);
+    Texture2D<float4> metallicRoughnessTex = GetTexture(metallicRoughnessHandle);
+    Texture2D<float4> normalTex = GetTexture(normalHandle);
+    Texture2D<float4> occlusionTex = GetTexture(occlusionHandle);
+    Texture2D<float4> emissiveTex = GetTexture(emissiveHandle);
+
+    float3 tangentNormal = normalize(normalTex.Sample(sampler, input.uv).rgb * 2.0f - 1.0f);
 
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz - dot(input.tangent.xyz, N) * N);
@@ -79,9 +91,9 @@ PSOutput fragmentShader(VSOutput input)
     float3 worldNormalMap = mul(tangentNormal, TBN);
     normal += worldNormalMap;
 
-    float4 albedoSample = albedoTex.Sample(linearSampler, input.uv);
-    float4 mrSample = metallicRoughnessTex.Sample(linearSampler, input.uv);
-    float4 emissiveSample = emissiveTex.Sample(linearSampler, input.uv);
+    float4 albedoSample = albedoTex.Sample(sampler, input.uv);
+    float4 mrSample = metallicRoughnessTex.Sample(sampler, input.uv);
+    float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
 
 
     // glTF: metallic in B, roughness in G

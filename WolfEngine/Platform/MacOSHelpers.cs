@@ -5,7 +5,6 @@ using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
-using ObjectiveCRuntimeClass = SharpMetal.ObjectiveCRuntime;
 
 namespace WolfEngine.Platform;
 
@@ -311,8 +310,7 @@ internal sealed class NSMenu
     {
         var menuClass = new ObjectiveCClass("NSMenu");
         var alloc = menuClass.Alloc();
-        var nsTitle = NSStringHelper.From(title);
-        NativePtr = ObjectiveCRuntimeClass.IntPtr_objc_msgSend(alloc, new Selector("initWithTitle:").SelPtr, nsTitle);
+        NativePtr = ObjectiveC.IntPtr_objc_msgSend(alloc, new Selector("initWithTitle:"), title);
     }
 
     public void AddItem(NSMenuItem item)

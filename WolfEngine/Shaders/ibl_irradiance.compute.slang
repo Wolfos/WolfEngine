@@ -1,10 +1,14 @@
 import "ibl_common.slang";
+import "common_bindless.slang";
 
-SamplerState linearClamp : register(s0);
-Texture2D environmentTex : register(t0);
-RWTexture2D<float4> irradianceOut : register(u0);
+cbuffer BindlessHandles : register(b0)
+{
+    uint environmentHandle;
+    uint irradianceHandle;
+    uint samplerHandle;
+};
 
-cbuffer IblParams : register(b0)
+cbuffer IblParams : register(b1)
 {
     uint width;
     uint height;
@@ -31,6 +35,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= width || id.y >= height)
         return;
+
+    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
+    RWTexture2D<float4> irradianceOut = GetRWTexture(irradianceHandle);
+    SamplerState linearClamp = GetSampler(samplerHandle);
 
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
     float3 n = EquirectToDir(uv);

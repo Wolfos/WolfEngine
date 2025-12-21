@@ -1,8 +1,8 @@
 using WolfEngine.Rendering.Abstraction;
 
-namespace WolfEngine.Rendering.Backend.D3D12;
+namespace WolfEngine.Rendering.Backend.Metal;
 
-internal sealed class D3D12TextureResources : ITextureResources
+internal sealed class MetalTextureResources : ITextureResources
 {
 	public required IGfxTexture Texture { get; init; }
 	public required DescriptorHandle ShaderResourceView { get; init; }

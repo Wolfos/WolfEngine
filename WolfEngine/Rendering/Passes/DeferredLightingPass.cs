@@ -1,7 +1,9 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -13,7 +15,7 @@ public sealed class DeferredLightingPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
-	private IGfxDescriptorSet? _descriptorSet;
+	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler)
@@ -31,56 +33,47 @@ public sealed class DeferredLightingPass
 
 		var pipeline = EnsurePipeline(device);
 
-		_descriptorSet?.Dispose();
-		_descriptorSet = null;
+		if (_linearSampler.IsValid == false)
+		{
+			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
+			_linearSampler = device.GlobalTable.AllocateSampler(sampler);
+		}
 
-		var srvTableBuilder = device.CreateDescriptorSetBuilder();
-		srvTableBuilder.AddShaderResource(0, context.GetTexture(resources.GBufferAlbedo));
-		srvTableBuilder.AddShaderResource(1, context.GetTexture(resources.GBufferNormal));
-		srvTableBuilder.AddShaderResource(2, context.GetTexture(resources.GBufferMaterial));
-		srvTableBuilder.AddShaderResource(3, context.GetTexture(resources.GBufferEmissive));
-		srvTableBuilder.AddShaderResource(4, context.GetTexture(resources.GBufferDepth));
+		var albedo = context.GetTexture(resources.GBufferAlbedo);
+		var normal = context.GetTexture(resources.GBufferNormal);
+		var material = context.GetTexture(resources.GBufferMaterial);
+		var emissive = context.GetTexture(resources.GBufferEmissive);
+		var depth = context.GetTexture(resources.GBufferDepth);
 
-		// Environment/IBL inputs
-		srvTableBuilder.AddShaderResource(5, resources.SkyboxEnvironment.IsValid
+		var environment = resources.SkyboxEnvironment.IsValid
 			? context.GetTexture(resources.SkyboxEnvironment)
-			: context.GetTexture(resources.GBufferEmissive)); // dummy fallback
+			: emissive;
+		var irradiance = resources.SkyboxIrradiance.IsValid
+			? context.GetTexture(resources.SkyboxIrradiance)
+			: emissive;
+		var prefilter = resources.SkyboxPrefilter.IsValid
+			? context.GetTexture(resources.SkyboxPrefilter)
+			: emissive;
+		var brdfLut = resources.SkyboxBrdfLut.IsValid
+			? context.GetTexture(resources.SkyboxBrdfLut)
+			: emissive;
 
-		if (resources.SkyboxIrradiance.IsValid)
-		{
-			srvTableBuilder.AddShaderResource(6, context.GetTexture(resources.SkyboxIrradiance));
-		}
-		else
-		{
-			srvTableBuilder.AddShaderResource(6, context.GetTexture(resources.GBufferEmissive));
-		}
-
-		if (resources.SkyboxPrefilter.IsValid)
-		{
-			srvTableBuilder.AddShaderResource(7, context.GetTexture(resources.SkyboxPrefilter));
-		}
-		else
-		{
-			srvTableBuilder.AddShaderResource(7, context.GetTexture(resources.GBufferEmissive));
-		}
-
-		if (resources.SkyboxBrdfLut.IsValid)
-		{
-			srvTableBuilder.AddShaderResource(8, context.GetTexture(resources.SkyboxBrdfLut));
-		}
-		else
-		{
-			srvTableBuilder.AddShaderResource(8, context.GetTexture(resources.GBufferEmissive));
-		}
-
-		srvTableBuilder.AddUnorderedAccess(9, context.GetTexture(resources.LightingBuffer));
-		var descriptorSet = srvTableBuilder.Build();
-		_descriptorSet = descriptorSet;
+		var lighting = context.GetTexture(resources.LightingBuffer);
 
 		return new DeferredLightingPassConfig
 		{
 			Pipeline = pipeline,
-			DescriptorSet = descriptorSet,
+			GBufferAlbedo = albedo.ShaderResourceView,
+			GBufferNormal = normal.ShaderResourceView,
+			GBufferMaterial = material.ShaderResourceView,
+			GBufferEmissive = emissive.ShaderResourceView,
+			GBufferDepth = depth.ShaderResourceView,
+			SkyboxEnvironment = environment.ShaderResourceView,
+			SkyboxIrradiance = irradiance.ShaderResourceView,
+			SkyboxPrefilter = prefilter.ShaderResourceView,
+			SkyboxBrdfLut = brdfLut.ShaderResourceView,
+			LightingOutput = lighting.UnorderedAccessView,
+			LinearSampler = _linearSampler,
 			DispatchSize = resources.FramebufferSize
 		};
 	}
@@ -94,8 +87,19 @@ public sealed class DeferredLightingPass
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		// Bind descriptor sets for SRVs and UAVs
-		commandList.BindComputeDescriptorSet(0, config.DescriptorSet);
+		Span<uint> textureHandles = stackalloc uint[11];
+		textureHandles[0] = config.GBufferAlbedo.Value;
+		textureHandles[1] = config.GBufferNormal.Value;
+		textureHandles[2] = config.GBufferMaterial.Value;
+		textureHandles[3] = config.GBufferEmissive.Value;
+		textureHandles[4] = config.GBufferDepth.Value;
+		textureHandles[5] = config.SkyboxEnvironment.Value;
+		textureHandles[6] = config.SkyboxIrradiance.Value;
+		textureHandles[7] = config.SkyboxPrefilter.Value;
+		textureHandles[8] = config.SkyboxBrdfLut.Value;
+		textureHandles[9] = config.LightingOutput.Value;
+		textureHandles[10] = config.LinearSampler.Value;
+		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		// Set camera constants (Root parameter 1)
 		Span<float> cameraConstants = stackalloc float[20];
@@ -149,15 +153,24 @@ public sealed class DeferredLightingPass
 			return _pipeline;
 		}
 
-		_computeShader = _computeShader.IsEmpty
-			? _shaderCompiler.GetComputeShader("deferred_lighting.compute.slang", "CSMain")
-			: _computeShader;
+		if (_computeShader.IsEmpty)
+		{
+			if (device is MetalDevice)
+			{
+				var source = _shaderCompiler.GetMetalComputeSource("deferred_lighting.compute.slang", "CSMain");
+				_computeShader = Encoding.UTF8.GetBytes(source);
+			}
+			else
+			{
+				_computeShader = _shaderCompiler.GetComputeShader("deferred_lighting.compute.slang", "CSMain");
+			}
+		}
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "deferred_lighting_CSMain",
+			computeEntryPoint: "CSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default);

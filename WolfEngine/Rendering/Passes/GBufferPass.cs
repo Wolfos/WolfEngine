@@ -43,7 +43,6 @@ public static class GBufferPass
 
 		// Skybox (optional)
 		if (config.SkyboxPipeline is not null &&
-		    config.SkyboxDescriptorSet is not null &&
 		    config.InvViewProjection is Matrix4x4 invViewProj &&
 		    config.SkyboxMesh is Mesh skyboxMesh &&
 		    skyboxMesh.VertexBuffer is not null &&
@@ -54,7 +53,10 @@ public static class GBufferPass
 			Span<float> skyboxConstants = stackalloc float[16];
 			WriteMatrix(skyboxConstants, invViewProj);
 			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(skyboxConstants));
-			commandList.BindGraphicsDescriptorSet(1, config.SkyboxDescriptorSet);
+			Span<uint> skyboxHandles = stackalloc uint[2];
+			skyboxHandles[0] = config.SkyboxEnvironment.Value;
+			skyboxHandles[1] = config.SkyboxSampler.Value;
+			commandList.SetGraphicsConstants(4, MemoryMarshal.AsBytes(skyboxHandles));
 
 			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 			var skyboxVertexViews = new[]
@@ -101,10 +103,14 @@ public static class GBufferPass
 			}
 
 			// Bind albedo texture descriptor set
-			if (material.Resources.TextureSet is not null)
-			{
-				commandList.BindGraphicsDescriptorSet(3, material.Resources.TextureSet);
-			}
+			Span<uint> materialHandles = stackalloc uint[6];
+			materialHandles[0] = material.Resources.AlbedoTexture.Value;
+			materialHandles[1] = material.Resources.MetallicRoughnessTexture.Value;
+			materialHandles[2] = material.Resources.NormalTexture.Value;
+			materialHandles[3] = material.Resources.OcclusionTexture.Value;
+			materialHandles[4] = material.Resources.EmissiveTexture.Value;
+			materialHandles[5] = material.Resources.Sampler.Value;
+			commandList.SetGraphicsConstants(3, MemoryMarshal.AsBytes(materialHandles));
 
 			// Set model matrix constants
 			Span<float> modelConstants = stackalloc float[16];

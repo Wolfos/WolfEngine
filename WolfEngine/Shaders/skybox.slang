@@ -1,10 +1,15 @@
+import "common_bindless.slang";
+
 cbuffer SkyboxParams : register(b0)
 {
     row_major float4x4 viewProjection;
 };
 
-Texture2D environmentTex : register(t0);
-SamplerState linearClamp : register(s0);
+cbuffer SkyboxBindless : register(b4)
+{
+    uint environmentHandle;
+    uint samplerHandle;
+};
 
 struct VSInput
 {
@@ -31,6 +36,8 @@ float4 fragmentShader(VSOutput input) : SV_Target0
 {
     float3 dir = normalize(input.direction);
     float2 envUV = float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, dir.y * -0.5f + 0.5f);
+    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
+    SamplerState linearClamp = GetSampler(samplerHandle);
     float3 color = environmentTex.Sample(linearClamp, envUV).rgb;
     return float4(color, 1.0f);
 }
