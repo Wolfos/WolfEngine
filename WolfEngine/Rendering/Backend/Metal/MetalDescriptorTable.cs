@@ -135,6 +135,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		descriptor.TAddressMode = ToAddressMode(sampler.AddressV);
 		descriptor.RAddressMode = ToAddressMode(sampler.AddressW);
 		descriptor.MaxAnisotropy = (uint)Math.Clamp(sampler.MaxAnisotropy, 1.0f, 16.0f);
+		descriptor.SupportArgumentBuffers = true;
 
 		var samplerState = _device.NewSamplerState(descriptor);
 		descriptor.Dispose();

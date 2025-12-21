@@ -68,6 +68,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (metalPipeline.Kind == PassKind.Compute)
 		{
 			EnsureComputeEncoder();
+			ApplyBindlessToComputeEncoder();
 			if (metalPipeline.ComputePipelineState.NativePtr == IntPtr.Zero)
 			{
 				throw new InvalidOperationException("Compute pipeline state was null.");
@@ -78,6 +79,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 
 		EnsureRenderEncoder();
+		ApplyBindlessToRenderEncoder();
 		if (metalPipeline.RenderPipelineState.NativePtr == IntPtr.Zero)
 		{
 			throw new InvalidOperationException("Render pipeline state was null.");

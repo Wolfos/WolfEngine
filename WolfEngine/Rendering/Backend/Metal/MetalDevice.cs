@@ -11,10 +11,37 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("macos")]
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 {
+	private readonly struct TexturePoolKey : IEquatable<TexturePoolKey>
+	{
+		public TexturePoolKey(in TextureDescriptor descriptor)
+		{
+			Width = descriptor.Width;
+			Height = descriptor.Height;
+			Format = descriptor.Format;
+			Usage = descriptor.Usage;
+		}
+
+		public int Width { get; }
+		public int Height { get; }
+		public TextureFormat Format { get; }
+		public TextureUsage Usage { get; }
+
+		public bool Equals(TexturePoolKey other) =>
+			Width == other.Width &&
+			Height == other.Height &&
+			Format == other.Format &&
+			Usage == other.Usage;
+
+		public override bool Equals(object? obj) => obj is TexturePoolKey other && Equals(other);
+
+		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage);
+	}
+
 	private readonly MTLDevice _device;
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
+	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 
 	public MetalDevice(MTLDevice device)
 	{
@@ -54,6 +81,12 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		if (descriptor.Width <= 0 || descriptor.Height <= 0)
 		{
 			throw new ArgumentOutOfRangeException(nameof(descriptor), "Textures must have positive dimensions.");
+		}
+
+		var poolKey = new TexturePoolKey(descriptor);
+		if (_texturePool.TryGetValue(poolKey, out var pool) && pool.Count > 0)
+		{
+			return pool.Pop();
 		}
 
 		var textureDescriptor = new MTLTextureDescriptor();
@@ -195,11 +228,33 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 
 	public bool ReturnTexture(IGfxTexture texture, ResourceState lastKnownState)
 	{
-		return false;
+		if (texture is not MetalTexture metalTexture || metalTexture.IsDisposed)
+		{
+			return false;
+		}
+
+		var key = new TexturePoolKey(metalTexture.Descriptor);
+		if (_texturePool.TryGetValue(key, out var pool) == false)
+		{
+			pool = new Stack<MetalTexture>();
+			_texturePool[key] = pool;
+		}
+
+		pool.Push(metalTexture);
+		return true;
 	}
 
 	public void ClearTexturePool()
 	{
+		foreach (var (_, pool) in _texturePool)
+		{
+			while (pool.Count > 0)
+			{
+				pool.Pop().Dispose();
+			}
+		}
+
+		_texturePool.Clear();
 	}
 
 	private MTLLibrary CreateLibraryFromSource(ReadOnlyMemory<byte> sourceBytes)

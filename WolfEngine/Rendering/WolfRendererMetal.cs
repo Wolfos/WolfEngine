@@ -258,7 +258,7 @@ public unsafe class WolfRendererMetal : IRenderer
         _metalLayer = new CAMetalLayer(new IntPtr(layerPtr));
         _metalLayer.Device = _device;
         _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
-        _metalLayer.FramebufferOnly = true;
+        _metalLayer.FramebufferOnly = false;
         _metalLayer.DisplaySyncEnabled = true;
 
         UpdateDrawableSize();
@@ -325,6 +325,11 @@ public unsafe class WolfRendererMetal : IRenderer
 
         var size = new NSPoint(drawableWidth, drawableHeight);
         ObjCNative.ObjcMsgSendDrawableSize(_metalLayer.NativePtr, DrawableSizeSelector.SelPtr, size);
+
+        if (_gfxDevice is ITexturePoolDevice poolDevice)
+        {
+            poolDevice.ClearTexturePool();
+        }
 
         CreateDepthTexture(drawableWidth, drawableHeight);
     }
@@ -625,7 +630,36 @@ public unsafe class WolfRendererMetal : IRenderer
         RenderGraphResourceHandle presentedTexture,
         UiFrameData uiFrame)
     {
-        // Present is handled by MetalCommandList when backbuffer is used as a render target.
+        var backbufferTexture = resourceRegistry.GetTexture(backBuffer) as MetalBackbufferTexture;
+        var lightingTexture = resourceRegistry.GetTexture(presentedTexture) as MetalTexture;
+        if (backbufferTexture is null || lightingTexture is null)
+        {
+            return;
+        }
+
+        if (_commandQueue.NativePtr == IntPtr.Zero || backbufferTexture.Drawable.NativePtr == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var source = lightingTexture.Texture;
+        var destination = backbufferTexture.Drawable.Texture;
+        if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var commandBuffer = _commandQueue.CommandBuffer();
+        var blit = commandBuffer.BlitCommandEncoder();
+        var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
+        var width = Math.Min(source.Width, destination.Width);
+        var height = Math.Min(source.Height, destination.Height);
+        var size = new MTLSize { width = width, height = height, depth = 1 };
+        blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
+        blit.EndEncoding();
+
+        commandBuffer.PresentDrawable(backbufferTexture.Drawable);
+        commandBuffer.Commit();
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)

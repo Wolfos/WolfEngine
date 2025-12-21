@@ -72,12 +72,16 @@ public static class GBufferPass
 		}
 
 		// Build camera constants once
-		Span<float> cameraConstants = stackalloc float[20];
+		Span<float> cameraConstants = stackalloc float[24];
 		WriteMatrix(cameraConstants, sceneData.ViewProjection);
 			cameraConstants[16] = sceneData.CameraOrigin.X;
 			cameraConstants[17] = sceneData.CameraOrigin.Y;
 			cameraConstants[18] = sceneData.CameraOrigin.Z;
 		cameraConstants[19] = 1.0f;
+		cameraConstants[20] = 0.0f;
+		cameraConstants[21] = 0.0f;
+		cameraConstants[22] = 0.0f;
+		cameraConstants[23] = 0.0f;
 		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
 
 		// Draw all meshes
