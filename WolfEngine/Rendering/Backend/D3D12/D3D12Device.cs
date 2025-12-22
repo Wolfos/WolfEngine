@@ -913,7 +913,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		{
 			ShaderRegister = 0,
 			RegisterSpace = 0,
-			Num32BitValues = 20 // CameraParams
+			Num32BitValues = 36 // CameraParams
 		};
 		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
 

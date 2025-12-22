@@ -94,7 +94,12 @@ public sealed class RenderGraph
 			// Remove camera translation from the view matrix since objects are now camera-relative
 			view.Translation = Vector3.Zero;
 			var viewProjection = view * snapshot.Camera.Perspective;
-			sceneData = new(viewProjection, invProjection, cameraPosition, _renderPackets, _renderLights);
+			if (Matrix4x4.Invert(viewProjection, out var invViewProjection) == false)
+			{
+				ReleasePasses();
+				return;
+			}
+			sceneData = new(viewProjection, invProjection, invViewProjection, cameraPosition, _renderPackets, _renderLights);
 		}
 
 		if (sceneData is null)

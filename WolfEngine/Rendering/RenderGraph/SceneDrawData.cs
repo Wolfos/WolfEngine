@@ -10,11 +10,13 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class SceneDrawData
 {
-	public SceneDrawData(Matrix4x4 viewProjection, Matrix4x4 inverseProjection, Vector3 cameraOrigin,
+	public SceneDrawData(Matrix4x4 viewProjection, Matrix4x4 inverseProjection, Matrix4x4 inverseViewProjection,
+		Vector3 cameraOrigin,
 		IReadOnlyList<DrawPacket> drawPackets, IReadOnlyList<LightPacket> lights)
 	{
 		ViewProjection = viewProjection;
 		InverseProjection = inverseProjection;
+		InverseViewProjection = inverseViewProjection;
 		CameraOrigin = cameraOrigin;
 		DrawPackets = drawPackets ?? throw new ArgumentNullException(nameof(drawPackets));
 		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
@@ -23,6 +25,8 @@ public sealed class SceneDrawData
 	public Matrix4x4 ViewProjection { get; }
 
 	public Matrix4x4 InverseProjection { get; }
+
+	public Matrix4x4 InverseViewProjection { get; }
 	
 	public Vector3 CameraOrigin { get; }
 	
@@ -63,4 +67,3 @@ public readonly struct LightPacket
 
 	public Transform Transform { get; }
 }
-
