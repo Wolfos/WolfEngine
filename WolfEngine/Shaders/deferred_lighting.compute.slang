@@ -165,7 +165,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);
-    color += specular;
+    color += specular * 0.5f;
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }
