@@ -43,13 +43,22 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		_fontAtlas = BuildFontAtlas(io);
 	}
 
-	public void NewFrame(float deltaTime, Int2 framebufferSize)
+	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize)
 	{
 		ImGui.SetCurrentContext(_context);
 		var io = ImGui.GetIO();
-		io.DisplaySize = new Vector2(framebufferSize.X, framebufferSize.Y);
+		io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
 		io.DeltaTime = Math.Max(deltaTime, 1e-6f);
-		io.DisplayFramebufferScale = Vector2.One;
+		if (windowSize.X > 0 && windowSize.Y > 0)
+		{
+			io.DisplayFramebufferScale = new Vector2(
+				framebufferSize.X / (float)windowSize.X,
+				framebufferSize.Y / (float)windowSize.Y);
+		}
+		else
+		{
+			io.DisplayFramebufferScale = Vector2.One;
+		}
 
 		for (var i = 0; i < _mouseButtons.Length; i++)
 		{
@@ -125,13 +134,18 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			idxOffset += list.IdxBuffer.Size;
 		}
 
+		var io = ImGui.GetIO();
+		var framebufferSize = new Vector2(
+			io.DisplaySize.X * io.DisplayFramebufferScale.X,
+			io.DisplaySize.Y * io.DisplayFramebufferScale.Y);
+
 		var frame = new UiFrameData
 		{
 			VertexCount = totalVtx,
 			IndexCount = totalIdx,
 			DisplayPos = drawData.DisplayPos,
 			DisplaySize = drawData.DisplaySize,
-			FramebufferSize = ImGui.GetIO().DisplaySize,
+			FramebufferSize = framebufferSize,
 			DeltaTime = ImGui.GetIO().DeltaTime,
 			Vertices = verts,
 			Indices = indices,

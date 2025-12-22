@@ -111,7 +111,7 @@ public class Game
         
         PublishSnapshot();
 
-        _imguiSystem.NewFrame(deltaTime, _renderGraph.GetFrameBufferSize());
+        _imguiSystem.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
         _imguiSystem.RunGui(EditorGui.Draw, _world);
     }
 

@@ -12,6 +12,7 @@ public interface IRenderer
 	ITextureResources CreateTextureResources(Texture texture);
 	IGfxDevice GetGfxDevice();
 	Int2 GetFrameBufferSize();
+	Int2 GetWindowSize();
 	void BeginFrame();
 	void Render(
 		float deltaTime,

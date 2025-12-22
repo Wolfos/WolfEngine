@@ -1245,6 +1245,22 @@ private sealed class MeshResources
 		return _framebufferSize;
 	}
 
+	public Int2 GetWindowSize()
+	{
+		if (_window is null)
+		{
+			return _framebufferSize;
+		}
+
+		var size = _window.Size;
+		if (size.X <= 0 || size.Y <= 0)
+		{
+			return _framebufferSize;
+		}
+
+		return new Int2(size.X, size.Y);
+	}
+
 	private void CreateSwapchain()
 	{
 		var swapChainDesc = new SwapChainDesc1

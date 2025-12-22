@@ -96,14 +96,22 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		bindless[3] = 0;
 		commandList.SetGraphicsConstants(1, MemoryMarshal.AsBytes(bindless));
 
+		var scaleX = 1.0f;
+		var scaleY = 1.0f;
+		if (frame.DisplaySize.X > 0.0f && frame.DisplaySize.Y > 0.0f)
+		{
+			scaleX = frame.FramebufferSize.X / frame.DisplaySize.X;
+			scaleY = frame.FramebufferSize.Y / frame.DisplaySize.Y;
+		}
+
 		for (var i = 0; i < frame.Commands.Length; i++)
 		{
 			var cmd = frame.Commands[i];
 			var clip = cmd.ClipRect;
-			var clipX1 = (int)Math.Floor(clip.X - frame.DisplayPos.X);
-			var clipY1 = (int)Math.Floor(clip.Y - frame.DisplayPos.Y);
-			var clipX2 = (int)Math.Ceiling(clip.Z - frame.DisplayPos.X);
-			var clipY2 = (int)Math.Ceiling(clip.W - frame.DisplayPos.Y);
+			var clipX1 = (int)Math.Floor((clip.X - frame.DisplayPos.X) * scaleX);
+			var clipY1 = (int)Math.Floor((clip.Y - frame.DisplayPos.Y) * scaleY);
+			var clipX2 = (int)Math.Ceiling((clip.Z - frame.DisplayPos.X) * scaleX);
+			var clipY2 = (int)Math.Ceiling((clip.W - frame.DisplayPos.Y) * scaleY);
 
 			if (clipX1 < 0) clipX1 = 0;
 			if (clipY1 < 0) clipY1 = 0;

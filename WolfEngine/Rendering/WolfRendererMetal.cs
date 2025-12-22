@@ -302,20 +302,7 @@ public unsafe class WolfRendererMetal : IRenderer
     {
         var position = new Vector2(motionEvent.X, motionEvent.Y);
         _inputSystem.SetAxis2D(InputActionBinding.MousePosition, position);
-        var imguiPosition = position;
-        if (_window is not null)
-        {
-            int windowWidth = 0;
-            int windowHeight = 0;
-            _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
-            if (windowWidth > 0 && windowHeight > 0 && _hasDrawableSize)
-            {
-                var scaleX = (float)(_drawableWidth / windowWidth);
-                var scaleY = (float)(_drawableHeight / windowHeight);
-                imguiPosition = new Vector2(position.X * scaleX, position.Y * scaleY);
-            }
-        }
-        _imguiInputSink.SetMousePosition(imguiPosition);
+        _imguiInputSink.SetMousePosition(position);
 
         var delta = new Vector2(motionEvent.Xrel, motionEvent.Yrel);
         if (_hasMousePosition || delta != Vector2.Zero)
@@ -1227,6 +1214,24 @@ public unsafe class WolfRendererMetal : IRenderer
         var width = _hasDrawableSize ? (int)_drawableWidth : _width;
         var height = _hasDrawableSize ? (int)_drawableHeight : _height;
         return new Int2(width, height);
+    }
+
+    public Int2 GetWindowSize()
+    {
+        if (_window is null)
+        {
+            return new Int2(_width, _height);
+        }
+
+        int windowWidth = 0;
+        int windowHeight = 0;
+        _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
+        if (windowWidth <= 0 || windowHeight <= 0)
+        {
+            return new Int2(_width, _height);
+        }
+
+        return new Int2(windowWidth, windowHeight);
     }
 
     public void BeginFrame()
