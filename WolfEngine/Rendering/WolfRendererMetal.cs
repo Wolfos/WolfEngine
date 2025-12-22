@@ -18,6 +18,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Input;
 using AbstractionBlendMode = WolfEngine.Rendering.Abstraction.BlendMode;
 
 namespace WolfEngine;
@@ -26,14 +27,13 @@ namespace WolfEngine;
 public unsafe class WolfRendererMetal : IRenderer
 {
     private const string WindowTitle = "WolfEngine";
-    private const uint SdlQuitEvent = 0x100;
-    private const uint SdlWindowEvent = 0x200;
     private static int _textureUploadReadbacks;
 
     private readonly int _width;
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
     private readonly IArenaAllocator _renderCommandAllocator;
+    private readonly IInputSystem _inputSystem;
     private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
@@ -44,6 +44,7 @@ public unsafe class WolfRendererMetal : IRenderer
     private MTLDepthStencilState _depthState;
     private readonly MTLClearColor _clearColor = new() { red = 0.392, green = 0.584, blue = 0.929, alpha = 1.0 };
     private readonly Sdl _sdl;
+    private bool _hasMousePosition;
 
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
@@ -118,7 +119,7 @@ public unsafe class WolfRendererMetal : IRenderer
         public Matrix4x4 Transform { get; }
     }
 
-    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator, IInputSystem inputSystem)
     {
         if (OperatingSystem.IsMacOS() == false)
         {
@@ -129,6 +130,7 @@ public unsafe class WolfRendererMetal : IRenderer
         _height = 720;
         _shaderCompiler = shaderCompiler;
         _renderCommandAllocator = renderCommandAllocator ?? throw new ArgumentNullException(nameof(renderCommandAllocator));
+        _inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -200,16 +202,225 @@ public unsafe class WolfRendererMetal : IRenderer
     {
         while (_sdl.PollEvent(ref @event) != 0)
         {
-            switch (@event.Type)
+            switch ((EventType)@event.Type)
             {
-                case SdlQuitEvent:
+                case EventType.Quit:
                     _isRunning = false;
                     break;
-                case SdlWindowEvent:
+                case EventType.Windowevent:
                     HandleWindowEvent(@event);
+                    break;
+                case EventType.Keydown:
+                    HandleKeyDown(@event.Key);
+                    break;
+                case EventType.Keyup:
+                    HandleKeyUp(@event.Key);
+                    break;
+                case EventType.Mousemotion:
+                    HandleMouseMotion(@event.Motion);
+                    break;
+                case EventType.Mousebuttondown:
+                    HandleMouseButton(@event.Button, true);
+                    break;
+                case EventType.Mousebuttonup:
+                    HandleMouseButton(@event.Button, false);
+                    break;
+                case EventType.Mousewheel:
+                    HandleMouseWheel(@event.Wheel);
                     break;
             }
         }
+    }
+
+    private void HandleKeyDown(KeyboardEvent keyEvent)
+    {
+        var scancode = keyEvent.Keysym.Scancode;
+        if (TryMapKey(scancode, out var binding))
+        {
+            _inputSystem.SetButton(binding, true);
+        }
+
+        if (scancode == Scancode.ScancodeEscape)
+        {
+            _isRunning = false;
+        }
+    }
+
+    private void HandleKeyUp(KeyboardEvent keyEvent)
+    {
+        var scancode = keyEvent.Keysym.Scancode;
+        if (TryMapKey(scancode, out var binding))
+        {
+            _inputSystem.SetButton(binding, false);
+        }
+    }
+
+    private void HandleMouseMotion(MouseMotionEvent motionEvent)
+    {
+        var position = new Vector2(motionEvent.X, motionEvent.Y);
+        _inputSystem.SetAxis2D(InputActionBinding.MousePosition, position);
+
+        var delta = new Vector2(motionEvent.Xrel, motionEvent.Yrel);
+        if (_hasMousePosition || delta != Vector2.Zero)
+        {
+            _inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
+        }
+
+        _hasMousePosition = true;
+    }
+
+    private void HandleMouseButton(MouseButtonEvent buttonEvent, bool isDown)
+    {
+        if (TryMapMouseButton(buttonEvent.Button, out var binding))
+        {
+            _inputSystem.SetButton(binding, isDown);
+        }
+    }
+
+    private void HandleMouseWheel(MouseWheelEvent wheelEvent)
+    {
+        var scroll = new Vector2(wheelEvent.PreciseX, wheelEvent.PreciseY);
+        if (scroll == Vector2.Zero)
+        {
+            scroll = new Vector2(wheelEvent.X, wheelEvent.Y);
+        }
+
+        var direction = (MouseWheelDirection)wheelEvent.Direction;
+        if (direction is MouseWheelDirection.Flipped or MouseWheelDirection.MousewheelFlipped)
+        {
+            scroll = -scroll;
+        }
+
+        _inputSystem.SetAxis2D(InputActionBinding.MouseScroll, scroll);
+    }
+
+    private static bool TryMapMouseButton(byte button, out InputActionBinding binding)
+    {
+        binding = button switch
+        {
+            Sdl.ButtonLeft => InputActionBinding.MouseButtonLeft,
+            Sdl.ButtonRight => InputActionBinding.MouseButtonRight,
+            Sdl.ButtonMiddle => InputActionBinding.MouseButtonMiddle,
+            Sdl.ButtonX1 => InputActionBinding.MouseButton4,
+            Sdl.ButtonX2 => InputActionBinding.MouseButton5,
+            _ => InputActionBinding.None
+        };
+
+        return binding != InputActionBinding.None;
+    }
+
+    private static bool TryMapKey(Scancode scancode, out InputActionBinding binding)
+    {
+        binding = scancode switch
+        {
+            Scancode.ScancodeA => InputActionBinding.KeyA,
+            Scancode.ScancodeB => InputActionBinding.KeyB,
+            Scancode.ScancodeC => InputActionBinding.KeyC,
+            Scancode.ScancodeD => InputActionBinding.KeyD,
+            Scancode.ScancodeE => InputActionBinding.KeyE,
+            Scancode.ScancodeF => InputActionBinding.KeyF,
+            Scancode.ScancodeG => InputActionBinding.KeyG,
+            Scancode.ScancodeH => InputActionBinding.KeyH,
+            Scancode.ScancodeI => InputActionBinding.KeyI,
+            Scancode.ScancodeJ => InputActionBinding.KeyJ,
+            Scancode.ScancodeK => InputActionBinding.KeyK,
+            Scancode.ScancodeL => InputActionBinding.KeyL,
+            Scancode.ScancodeM => InputActionBinding.KeyM,
+            Scancode.ScancodeN => InputActionBinding.KeyN,
+            Scancode.ScancodeO => InputActionBinding.KeyO,
+            Scancode.ScancodeP => InputActionBinding.KeyP,
+            Scancode.ScancodeQ => InputActionBinding.KeyQ,
+            Scancode.ScancodeR => InputActionBinding.KeyR,
+            Scancode.ScancodeS => InputActionBinding.KeyS,
+            Scancode.ScancodeT => InputActionBinding.KeyT,
+            Scancode.ScancodeU => InputActionBinding.KeyU,
+            Scancode.ScancodeV => InputActionBinding.KeyV,
+            Scancode.ScancodeW => InputActionBinding.KeyW,
+            Scancode.ScancodeX => InputActionBinding.KeyX,
+            Scancode.ScancodeY => InputActionBinding.KeyY,
+            Scancode.ScancodeZ => InputActionBinding.KeyZ,
+            Scancode.Scancode0 => InputActionBinding.Key0,
+            Scancode.Scancode1 => InputActionBinding.Key1,
+            Scancode.Scancode2 => InputActionBinding.Key2,
+            Scancode.Scancode3 => InputActionBinding.Key3,
+            Scancode.Scancode4 => InputActionBinding.Key4,
+            Scancode.Scancode5 => InputActionBinding.Key5,
+            Scancode.Scancode6 => InputActionBinding.Key6,
+            Scancode.Scancode7 => InputActionBinding.Key7,
+            Scancode.Scancode8 => InputActionBinding.Key8,
+            Scancode.Scancode9 => InputActionBinding.Key9,
+            Scancode.ScancodeF1 => InputActionBinding.KeyF1,
+            Scancode.ScancodeF2 => InputActionBinding.KeyF2,
+            Scancode.ScancodeF3 => InputActionBinding.KeyF3,
+            Scancode.ScancodeF4 => InputActionBinding.KeyF4,
+            Scancode.ScancodeF5 => InputActionBinding.KeyF5,
+            Scancode.ScancodeF6 => InputActionBinding.KeyF6,
+            Scancode.ScancodeF7 => InputActionBinding.KeyF7,
+            Scancode.ScancodeF8 => InputActionBinding.KeyF8,
+            Scancode.ScancodeF9 => InputActionBinding.KeyF9,
+            Scancode.ScancodeF10 => InputActionBinding.KeyF10,
+            Scancode.ScancodeF11 => InputActionBinding.KeyF11,
+            Scancode.ScancodeF12 => InputActionBinding.KeyF12,
+            Scancode.ScancodeEscape => InputActionBinding.KeyEscape,
+            Scancode.ScancodeTab => InputActionBinding.KeyTab,
+            Scancode.ScancodeCapslock => InputActionBinding.KeyCapsLock,
+            Scancode.ScancodeLshift => InputActionBinding.KeyLeftShift,
+            Scancode.ScancodeRshift => InputActionBinding.KeyRightShift,
+            Scancode.ScancodeLctrl => InputActionBinding.KeyLeftControl,
+            Scancode.ScancodeRctrl => InputActionBinding.KeyRightControl,
+            Scancode.ScancodeLalt => InputActionBinding.KeyLeftAlt,
+            Scancode.ScancodeRalt => InputActionBinding.KeyRightAlt,
+            Scancode.ScancodeLgui => InputActionBinding.KeyLeftSuper,
+            Scancode.ScancodeRgui => InputActionBinding.KeyRightSuper,
+            Scancode.ScancodeMenu => InputActionBinding.KeyMenu,
+            Scancode.ScancodeSpace => InputActionBinding.KeySpace,
+            Scancode.ScancodeReturn => InputActionBinding.KeyEnter,
+            Scancode.ScancodeBackspace => InputActionBinding.KeyBackspace,
+            Scancode.ScancodeInsert => InputActionBinding.KeyInsert,
+            Scancode.ScancodeDelete => InputActionBinding.KeyDelete,
+            Scancode.ScancodeHome => InputActionBinding.KeyHome,
+            Scancode.ScancodeEnd => InputActionBinding.KeyEnd,
+            Scancode.ScancodePageup => InputActionBinding.KeyPageUp,
+            Scancode.ScancodePagedown => InputActionBinding.KeyPageDown,
+            Scancode.ScancodeUp => InputActionBinding.KeyArrowUp,
+            Scancode.ScancodeDown => InputActionBinding.KeyArrowDown,
+            Scancode.ScancodeLeft => InputActionBinding.KeyArrowLeft,
+            Scancode.ScancodeRight => InputActionBinding.KeyArrowRight,
+            Scancode.ScancodeMinus => InputActionBinding.KeyMinus,
+            Scancode.ScancodeEquals => InputActionBinding.KeyEquals,
+            Scancode.ScancodeLeftbracket => InputActionBinding.KeyLeftBracket,
+            Scancode.ScancodeRightbracket => InputActionBinding.KeyRightBracket,
+            Scancode.ScancodeBackslash => InputActionBinding.KeyBackslash,
+            Scancode.ScancodeSemicolon => InputActionBinding.KeySemicolon,
+            Scancode.ScancodeApostrophe => InputActionBinding.KeyApostrophe,
+            Scancode.ScancodeGrave => InputActionBinding.KeyGrave,
+            Scancode.ScancodeComma => InputActionBinding.KeyComma,
+            Scancode.ScancodePeriod => InputActionBinding.KeyPeriod,
+            Scancode.ScancodeSlash => InputActionBinding.KeySlash,
+            Scancode.ScancodePrintscreen => InputActionBinding.KeyPrintScreen,
+            Scancode.ScancodeScrolllock => InputActionBinding.KeyScrollLock,
+            Scancode.ScancodePause => InputActionBinding.KeyPause,
+            Scancode.ScancodeNumlockclear => InputActionBinding.KeyNumLock,
+            Scancode.ScancodeKP0 => InputActionBinding.KeyNumpad0,
+            Scancode.ScancodeKP1 => InputActionBinding.KeyNumpad1,
+            Scancode.ScancodeKP2 => InputActionBinding.KeyNumpad2,
+            Scancode.ScancodeKP3 => InputActionBinding.KeyNumpad3,
+            Scancode.ScancodeKP4 => InputActionBinding.KeyNumpad4,
+            Scancode.ScancodeKP5 => InputActionBinding.KeyNumpad5,
+            Scancode.ScancodeKP6 => InputActionBinding.KeyNumpad6,
+            Scancode.ScancodeKP7 => InputActionBinding.KeyNumpad7,
+            Scancode.ScancodeKP8 => InputActionBinding.KeyNumpad8,
+            Scancode.ScancodeKP9 => InputActionBinding.KeyNumpad9,
+            Scancode.ScancodeKPDivide => InputActionBinding.KeyNumpadDivide,
+            Scancode.ScancodeKPMultiply => InputActionBinding.KeyNumpadMultiply,
+            Scancode.ScancodeKPMinus => InputActionBinding.KeyNumpadSubtract,
+            Scancode.ScancodeKPPlus => InputActionBinding.KeyNumpadAdd,
+            Scancode.ScancodeKPPeriod => InputActionBinding.KeyNumpadDecimal,
+            Scancode.ScancodeKPEnter => InputActionBinding.KeyNumpadEnter,
+            _ => InputActionBinding.None
+        };
+
+        return binding != InputActionBinding.None;
     }
 
     private void HandleWindowEvent(Event @event)

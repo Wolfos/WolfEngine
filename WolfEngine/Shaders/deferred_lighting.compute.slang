@@ -153,7 +153,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color += diffuse + specularComponent + emissive;
     }
 
-    color += envIrradiance;
+    //color += envIrradiance;
 
     // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
