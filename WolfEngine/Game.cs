@@ -263,6 +263,7 @@ public class Game
         var skyboxMesh = CreateSkyboxMesh();
         _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(skyboxMesh));
 
+        // TODO: Renderer should probably not know about skybox to begin with
         if (_renderer is WolfRendererD3D d3dRenderer)
         {
             var skybox = d3dRenderer.CreateSkyboxResources(envTexture, skyboxMesh);

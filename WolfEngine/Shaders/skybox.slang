@@ -35,7 +35,7 @@ VSOutput vertexShader(VSInput input)
 float4 fragmentShader(VSOutput input) : SV_Target0
 {
     float3 dir = normalize(input.direction);
-    float2 envUV = float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, dir.y * -0.5f + 0.5f);
+    float2 envUV = float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, dir.y * 0.5f + 0.5f);
     Texture2D<float4> environmentTex = GetTexture(environmentHandle);
     SamplerState linearClamp = GetSampler(samplerHandle);
     float3 color = environmentTex.Sample(linearClamp, envUV).rgb;

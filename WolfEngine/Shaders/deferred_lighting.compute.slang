@@ -45,7 +45,7 @@ float3 DecodeNormal(float3 encoded)
 float2 DirToEnvUV(float3 dir)
 {
     dir = normalize(dir);
-    return float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, -dir.y * 0.5f + 0.5f);
+    return float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, dir.y * 0.5f + 0.5f);
 }
 
 float3 SampleEnvironment(float3 dir)
@@ -102,9 +102,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float metallic = material.r;
     float roughness = material.g;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
-    if (depth >= 0.9999f) // no geometry, keep background untouched
+    if (depth >= 0.9999f) // no geometry, render skybox
     {
-        lightingTarget[dispatchThreadId.xy] = float4(albedo, 0);
+        float3 farViewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invProjection);
+        float3 skyDir = ComputeViewDir(farViewPos);
+        float3 skyColor = SampleEnvironment(skyDir);
+        lightingTarget[dispatchThreadId.xy] = float4(skyColor, 1.0f);
         return;
     }
 

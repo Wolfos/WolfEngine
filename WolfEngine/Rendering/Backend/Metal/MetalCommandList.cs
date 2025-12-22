@@ -98,7 +98,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			CullMode.Back => MTLCullMode.Back,
 			_ => MTLCullMode.None
 		});
-		_renderEncoder.SetFrontFacingWinding(MTLWinding.Clockwise);
+		var winding = metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox
+			? MTLWinding.CounterClockwise
+			: MTLWinding.Clockwise;
+		_renderEncoder.SetFrontFacingWinding(winding);
 	}
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
