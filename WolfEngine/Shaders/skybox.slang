@@ -13,7 +13,7 @@ cbuffer SkyboxBindless : register(b4)
 
 struct VSInput
 {
-    float3 position : POSITION;
+    float4 position : POSITION;
 };
 
 struct VSOutput
@@ -25,7 +25,7 @@ struct VSOutput
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    float3 dir = normalize(input.position);
+    float3 dir = normalize(input.position.xyz);
     float4 clipPos = mul(float4(dir, 1.0f), viewProjection);
     output.position = clipPos;
     output.direction = dir;

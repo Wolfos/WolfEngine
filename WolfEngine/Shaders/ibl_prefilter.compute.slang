@@ -6,15 +6,11 @@ cbuffer BindlessHandles : register(b0)
     uint environmentHandle;
     uint prefilterHandle;
     uint samplerHandle;
-};
-
-cbuffer PrefilterParams : register(b1)
-{
     uint width;
     uint height;
     uint sliceCount;
     uint sliceHeight;
-}
+};
 
 float3 ImportanceSampleGGX(float2 xi, float roughness, float3 n)
 {
@@ -32,7 +28,7 @@ float3 ImportanceSampleGGX(float2 xi, float roughness, float3 n)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
+void IblPrefilterCSMain(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= width || id.y >= height)
         return;

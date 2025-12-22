@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using SharpMetal.Foundation;
@@ -147,15 +148,16 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 
 			var computeLibrary = CreateLibraryFromSource(shaders.Compute.Value);
 			var function = computeLibrary.NewFunction(NSStringHelper.From(key.ComputeEntryPoint ?? "CSMain"));
-			var computeTextureEncoder = function.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-			var computeRwTextureEncoder = function.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
-			var computeSamplerEncoder = function.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 			var pipelineStateError = new NSError(IntPtr.Zero);
-			var pipelineState = _device.NewComputePipelineState(function, ref pipelineStateError);
+			var computeReflection = CreateComputeReflection(function, ref pipelineStateError, out var pipelineState);
 			if (pipelineStateError != IntPtr.Zero)
 			{
 				throw new InvalidOperationException($"Failed to create Metal compute pipeline state: {pipelineStateError.LocalizedDescription.ToManagedString()}");
 			}
+
+			var computeTextureEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+			var computeRwTextureEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
+			var computeSamplerEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 
 			var pipeline = new MetalPipeline(key, PassKind.Compute, default, pipelineState, default,
 				computeTextureEncoder, computeRwTextureEncoder, computeSamplerEncoder, key.RenderState);
@@ -167,13 +169,11 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		{
 			throw new InvalidOperationException("Graphics pipeline requires vertex and pixel shader sources.");
 		}
-
+		
 		var source = shaders.Vertex.Value;
 		var graphicsLibrary = CreateLibraryFromSource(source);
 		var vertexFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.VertexEntryPoint ?? "vertexShader"));
 		var fragmentFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.PixelEntryPoint ?? "fragmentShader"));
-		var graphicsTextureEncoder = fragmentFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-		var graphicsSamplerEncoder = fragmentFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 
 		var pipelineDescriptor = new MTLRenderPipelineDescriptor
 		{
@@ -197,11 +197,14 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		pipelineDescriptor.VertexDescriptor = CreateVertexDescriptor(key.Layout);
 
 		var renderStateError = new NSError(IntPtr.Zero);
-		var renderState = _device.NewRenderPipelineState(pipelineDescriptor, ref renderStateError);
+		var renderReflection = CreateRenderReflection(pipelineDescriptor, ref renderStateError, out var renderState);
 		if (renderStateError != IntPtr.Zero)
 		{
 			throw new InvalidOperationException($"Failed to create Metal render pipeline state: {renderStateError.LocalizedDescription.ToManagedString()}");
 		}
+
+		var graphicsTextureEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+		var graphicsSamplerEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 
 		MTLDepthStencilState depthState = default;
 		if (key.DepthStencil.Format != TextureFormat.Unknown)
@@ -273,6 +276,83 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		return library;
 	}
 
+	private MTLComputePipelineReflection? CreateComputeReflection(
+		MTLFunction function,
+		ref NSError error,
+		out MTLComputePipelineState pipelineState)
+	{
+		var reflectionStorage = AllocateReflectionStorage();
+		pipelineState = _device.NewComputePipelineState(function, MTLPipelineOption.ArgumentInfo, reflectionStorage, ref error);
+		return ReadComputeReflection(reflectionStorage);
+	}
+
+	private MTLRenderPipelineReflection? CreateRenderReflection(
+		MTLRenderPipelineDescriptor descriptor,
+		ref NSError error,
+		out MTLRenderPipelineState pipelineState)
+	{
+		var reflectionStorage = AllocateReflectionStorage();
+		pipelineState = _device.NewRenderPipelineState(descriptor, MTLPipelineOption.ArgumentInfo, reflectionStorage, ref error);
+		return ReadRenderReflection(reflectionStorage);
+	}
+
+	private static IntPtr AllocateReflectionStorage()
+	{
+		var storage = Marshal.AllocHGlobal(IntPtr.Size);
+		Marshal.WriteIntPtr(storage, IntPtr.Zero);
+		return storage;
+	}
+
+	private static MTLComputePipelineReflection? ReadComputeReflection(IntPtr storage)
+	{
+		var reflectionPtr = Marshal.ReadIntPtr(storage);
+		Marshal.FreeHGlobal(storage);
+		return reflectionPtr == IntPtr.Zero ? null : new MTLComputePipelineReflection(reflectionPtr);
+	}
+
+	private static MTLRenderPipelineReflection? ReadRenderReflection(IntPtr storage)
+	{
+		var reflectionPtr = Marshal.ReadIntPtr(storage);
+		Marshal.FreeHGlobal(storage);
+		return reflectionPtr == IntPtr.Zero ? null : new MTLRenderPipelineReflection(reflectionPtr);
+	}
+
+	private static MTLArgumentEncoder CreateArgumentEncoder(
+		MTLFunction function,
+		NSArray? arguments,
+		int bufferIndex)
+	{
+		if (arguments is null || HasArgumentBuffer(arguments.Value, (ulong)bufferIndex) == false)
+		{
+			return default;
+		}
+
+		return function.NewArgumentEncoder((ulong)bufferIndex);
+	}
+
+	private static bool HasArgumentBuffer(NSArray arguments, ulong bufferIndex)
+	{
+		var count = arguments.Count;
+		for (ulong i = 0; i < count; i++)
+		{
+			var argumentPtr = arguments.Object(i);
+			if (argumentPtr == IntPtr.Zero)
+			{
+				continue;
+			}
+
+			var argument = new MTLArgument(argumentPtr);
+			if (argument.Type == MTLArgumentType.Buffer &&
+			    argument.Index == bufferIndex &&
+			    argument.BufferPointerType.ElementIsArgumentBuffer)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private static MTLPixelFormat ToPixelFormat(TextureFormat format) => format switch
 	{
 		TextureFormat.Bgra8Unorm => MTLPixelFormat.BGRA8Unorm,
@@ -309,13 +389,13 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 			case GraphicsLayoutKind.Skybox:
 			{
 				var position = attributes.Object(0);
-				position.Format = MTLVertexFormat.Float3;
+				position.Format = MTLVertexFormat.Float4;
 				position.Offset = 0;
 				position.BufferIndex = 0;
 				attributes.SetObject(position, 0);
 
 				var layoutDesc = layouts.Object(0);
-				layoutDesc.Stride = 12;
+				layoutDesc.Stride = 52;
 				layoutDesc.StepFunction = MTLVertexStepFunction.PerVertex;
 				layoutDesc.StepRate = 1;
 				layouts.SetObject(layoutDesc, 0);

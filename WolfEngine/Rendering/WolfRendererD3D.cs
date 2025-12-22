@@ -1123,18 +1123,15 @@ private sealed class MeshResources
 			var pipeline = GetIblIrradiancePipeline();
 			var commandList = _gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			Span<uint> handles = stackalloc uint[3];
+			Span<uint> handles = stackalloc uint[7];
 			handles[0] = envTexture.ShaderResourceView.Value;
 			handles[1] = irradianceTex.UnorderedAccessView.Value;
 			handles[2] = DescriptorHandle.Invalid.Value;
+			handles[3] = irradianceSize;
+			handles[4] = irradianceSize;
+			handles[5] = 1;
+			handles[6] = irradianceSize;
 			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
-
-			Span<float> constants = stackalloc float[20];
-			constants[0] = irradianceSize;
-			constants[1] = irradianceSize;
-			constants[2] = 1;
-			constants[3] = irradianceSize;
-			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
 
 			var dispatchX = (uint)((irradianceSize + 7) / 8);
 			var dispatchY = (uint)((irradianceSize + 7) / 8);
@@ -1147,18 +1144,15 @@ private sealed class MeshResources
 			var pipeline = GetIblPrefilterPipeline();
 			var commandList = _gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			Span<uint> handles = stackalloc uint[3];
+			Span<uint> handles = stackalloc uint[7];
 			handles[0] = envTexture.ShaderResourceView.Value;
 			handles[1] = prefilterTex.UnorderedAccessView.Value;
 			handles[2] = DescriptorHandle.Invalid.Value;
+			handles[3] = prefilterWidth;
+			handles[4] = prefilterSliceHeight * prefilterSlices;
+			handles[5] = prefilterSlices;
+			handles[6] = prefilterSliceHeight;
 			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
-
-			Span<float> constants = stackalloc float[20];
-			constants[0] = prefilterWidth;
-			constants[1] = prefilterSliceHeight * prefilterSlices;
-			constants[2] = prefilterSlices;
-			constants[3] = prefilterSliceHeight;
-			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
 
 			var dispatchX = (uint)((prefilterWidth + 7) / 8);
 			var dispatchY = (uint)(((prefilterSliceHeight * prefilterSlices) + 7) / 8);
@@ -1194,12 +1188,12 @@ private sealed class MeshResources
 		if (_iblIrradiancePipeline is not null)
 			return _iblIrradiancePipeline;
 
-		var shader = _shaderCompiler.GetComputeShader("ibl_irradiance.compute.slang", "CSMain");
+		var shader = _shaderCompiler.GetComputeShader("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "ibl_irradiance_CSMain",
+			computeEntryPoint: "IblIrradianceCSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -1213,12 +1207,12 @@ private sealed class MeshResources
 		if (_iblPrefilterPipeline is not null)
 			return _iblPrefilterPipeline;
 
-		var shader = _shaderCompiler.GetComputeShader("ibl_prefilter.compute.slang", "CSMain");
+		var shader = _shaderCompiler.GetComputeShader("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "ibl_prefilter_CSMain",
+			computeEntryPoint: "IblPrefilterCSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -1232,12 +1226,12 @@ private sealed class MeshResources
 		if (_iblBrdfLutPipeline is not null)
 			return _iblBrdfLutPipeline;
 
-		var shader = _shaderCompiler.GetComputeShader("ibl_brdf_lut.compute.slang", "CSMain");
+		var shader = _shaderCompiler.GetComputeShader("ibl_brdf_lut.compute.slang", "IblBrdfCSMain");
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "ibl_brdf_CSMain",
+			computeEntryPoint: "IblBrdfCSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,

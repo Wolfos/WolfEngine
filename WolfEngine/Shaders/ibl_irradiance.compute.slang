@@ -6,15 +6,11 @@ cbuffer BindlessHandles : register(b0)
     uint environmentHandle;
     uint irradianceHandle;
     uint samplerHandle;
-};
-
-cbuffer IblParams : register(b1)
-{
     uint width;
     uint height;
     uint sliceCount;     // unused here
     uint sliceHeight;    // unused here
-}
+};
 
 static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
 {
@@ -31,7 +27,7 @@ static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
+void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= width || id.y >= height)
         return;

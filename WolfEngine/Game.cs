@@ -269,6 +269,12 @@ public class Game
             _skybox = skybox;
             _renderGraph.SetSkybox(skybox);
         }
+        else if (_renderer is WolfRendererMetal metalRenderer)
+        {
+            var skybox = metalRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
+            _skybox = skybox;
+            _renderGraph.SetSkybox(skybox);
+        }
     }
 
     private static Mesh CreateSkyboxMesh()

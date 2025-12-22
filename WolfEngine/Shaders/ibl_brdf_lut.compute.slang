@@ -6,7 +6,7 @@ cbuffer BindlessHandles : register(b0)
 };
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
+void IblBrdfCSMain(uint3 id : SV_DispatchThreadID)
 {
     RWTexture2D<float4> brdfLutOut = GetRWTexture(brdfHandle);
     uint width, height;
@@ -17,6 +17,14 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
     float NdotV = uv.x;
     float roughness = uv.y;
+
+    // Keep bindless texture/sampler argument buffers alive in Metal.
+    if (brdfHandle == 0xFFFFFFFFu)
+    {
+        Texture2D<float4> dummyTex = GetTexture(brdfHandle);
+        SamplerState dummySampler = GetSampler(brdfHandle);
+        dummyTex.SampleLevel(dummySampler, float2(0.0f, 0.0f), 0.0f);
+    }
 
     // Heitz-style BRDF integration
     const uint SAMPLE_COUNT = 128;
