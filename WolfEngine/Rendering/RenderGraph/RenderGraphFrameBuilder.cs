@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Silk.NET.Direct3D12;
@@ -7,6 +8,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Backend.D3D12;
+using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Rendering;
@@ -225,39 +227,77 @@ public sealed class RenderGraphFrameBuilder
 
 	private unsafe void ExecuteImGui(RenderGraphContext context)
 	{
-		if (_uiFrame.Commands.Length == 0)
-		{
-			return;
-		}
-
-		var backbuffer = context.GetTexture(_frameResources.Backbuffer) as ID3D12BackendTexture;
-		var lighting = context.GetTexture(_frameResources.LightingBuffer) as ID3D12BackendTexture;
-		var commandList = context.CommandList as D3D12CommandList;
-		if (backbuffer is null || lighting is null || commandList is null)
-		{
-			return;
-		}
-
-		var native = commandList.NativeCommandList;
-
-		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrier.Anonymous.Transition = new()
-		{
-			PResource = backbuffer.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.CopyDest
-		};
-		native->ResourceBarrier(1, &barrier);
-
-		native->CopyResource(backbuffer.Resource, lighting.Resource);
-
-		barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
-		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
-		native->ResourceBarrier(1, &barrier);
-
 		var imguiRenderer = _renderer.GetImGuiRenderer();
-		imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		imguiRenderer.Record(context, _uiFrame, backbuffer);
+
+		if (context.CommandList is D3D12CommandList commandList)
+		{
+			var backbuffer = context.GetTexture(_frameResources.Backbuffer) as ID3D12BackendTexture;
+			var lighting = context.GetTexture(_frameResources.LightingBuffer) as ID3D12BackendTexture;
+			if (backbuffer is null || lighting is null)
+			{
+				return;
+			}
+
+			var native = commandList.NativeCommandList;
+
+			ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+			barrier.Anonymous.Transition = new()
+			{
+				PResource = backbuffer.Resource,
+				Subresource = D3D12.ResourceBarrierAllSubresources,
+				StateBefore = ResourceStates.RenderTarget,
+				StateAfter = ResourceStates.CopyDest
+			};
+			native->ResourceBarrier(1, &barrier);
+
+			native->CopyResource(backbuffer.Resource, lighting.Resource);
+
+			barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
+			barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
+			native->ResourceBarrier(1, &barrier);
+
+			if (_uiFrame.Commands.Length == 0)
+			{
+				return;
+			}
+
+			imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
+			imguiRenderer.Record(context, _uiFrame, backbuffer);
+			return;
+		}
+
+		if (context.CommandList is MetalCommandList metalCommandList)
+		{
+			var backbuffer = context.GetTexture(_frameResources.Backbuffer) as MetalBackbufferTexture;
+			var lighting = context.GetTexture(_frameResources.LightingBuffer) as MetalTexture;
+			if (backbuffer is null || lighting is null)
+			{
+				return;
+			}
+
+			var source = lighting.Texture;
+			var destination = backbuffer.Drawable.Texture;
+			if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
+			{
+				return;
+			}
+
+			var width = Math.Min(source.Width, destination.Width);
+			var height = Math.Min(source.Height, destination.Height);
+			metalCommandList.CopyTexture(source, destination, (uint)width, (uint)height);
+			metalCommandList.SetPresentDrawable(backbuffer.Drawable);
+
+			if (_uiFrame.Commands.Length == 0)
+			{
+				return;
+			}
+
+			var targets = new PassTargets(new[] { new ColorTargetBinding(backbuffer) });
+			var viewport = new WolfEngine.Rendering.Abstraction.Viewport(0, 0, backbuffer.Descriptor.Width, backbuffer.Descriptor.Height);
+			metalCommandList.BeginPass(targets, viewport);
+			imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
+			imguiRenderer.Record(context, _uiFrame, backbuffer);
+			metalCommandList.EndPass();
+		}
 	}
 }

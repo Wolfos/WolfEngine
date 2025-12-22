@@ -103,13 +103,18 @@ public sealed class DeferredLightingPass
 		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		// Set camera constants (Root parameter 1)
-		Span<float> cameraConstants = stackalloc float[36];
+		var cameraConstantCount = commandList is MetalCommandList ? 40 : 36;
+		Span<float> cameraConstants = stackalloc float[cameraConstantCount];
 		WriteMatrix(cameraConstants, sceneData.InverseProjection);
 		WriteMatrix(cameraConstants.Slice(16), sceneData.InverseViewProjection);
 		cameraConstants[32] = sceneData.CameraOrigin.X;
 		cameraConstants[33] = sceneData.CameraOrigin.Y;
 		cameraConstants[34] = sceneData.CameraOrigin.Z;
 		cameraConstants[35] = 0.0f;
+		for (var i = 36; i < cameraConstants.Length; i++)
+		{
+			cameraConstants[i] = 0.0f;
+		}
 		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(cameraConstants));
 
 		Span<ShaderLight> shaderLights = stackalloc ShaderLight[MaxLights];

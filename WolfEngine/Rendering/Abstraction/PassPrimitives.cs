@@ -482,5 +482,6 @@ public enum GraphicsLayoutKind
 {
 	Default = 0,
 	Material = 1,
-	Skybox = 2
+	Skybox = 2,
+	ImGui = 3
 }

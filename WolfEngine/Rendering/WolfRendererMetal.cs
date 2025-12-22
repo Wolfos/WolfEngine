@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using ImGuiNET;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
@@ -34,6 +36,8 @@ public unsafe class WolfRendererMetal : IRenderer
     private readonly IShaderCompiler _shaderCompiler;
     private readonly IArenaAllocator _renderCommandAllocator;
     private readonly IInputSystem _inputSystem;
+    private readonly IImGuiInputSink _imguiInputSink;
+    private readonly MetalImGuiRenderer _imguiRenderer;
     private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
@@ -119,7 +123,7 @@ public unsafe class WolfRendererMetal : IRenderer
         public Matrix4x4 Transform { get; }
     }
 
-    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator, IInputSystem inputSystem)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
     {
         if (OperatingSystem.IsMacOS() == false)
         {
@@ -131,6 +135,8 @@ public unsafe class WolfRendererMetal : IRenderer
         _shaderCompiler = shaderCompiler;
         _renderCommandAllocator = renderCommandAllocator ?? throw new ArgumentNullException(nameof(renderCommandAllocator));
         _inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
+        _imguiInputSink = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
+        _imguiRenderer = new MetalImGuiRenderer(shaderCompiler);
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -216,6 +222,9 @@ public unsafe class WolfRendererMetal : IRenderer
                 case EventType.Keyup:
                     HandleKeyUp(@event.Key);
                     break;
+                case EventType.Textinput:
+                    HandleTextInput(@event.Text);
+                    break;
                 case EventType.Mousemotion:
                     HandleMouseMotion(@event.Motion);
                     break;
@@ -239,6 +248,10 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             _inputSystem.SetButton(binding, true);
         }
+        if (TryConvertKey(scancode, out var imguiKey))
+        {
+            _imguiInputSink.SetKey(imguiKey, true);
+        }
 
         if (scancode == Scancode.ScancodeEscape)
         {
@@ -253,12 +266,56 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             _inputSystem.SetButton(binding, false);
         }
+        if (TryConvertKey(scancode, out var imguiKey))
+        {
+            _imguiInputSink.SetKey(imguiKey, false);
+        }
+    }
+
+    private void HandleTextInput(TextInputEvent textEvent)
+    {
+        const int textSize = 32;
+        unsafe
+        {
+            var textPtr = (byte*)Unsafe.AsPointer(ref textEvent.Text[0]);
+            var span = new ReadOnlySpan<byte>(textPtr, textSize);
+            var terminator = span.IndexOf((byte)0);
+            if (terminator >= 0)
+            {
+                span = span[..terminator];
+            }
+
+            if (span.IsEmpty)
+            {
+                return;
+            }
+
+            var text = Encoding.UTF8.GetString(span);
+            for (var i = 0; i < text.Length; i++)
+            {
+                _imguiInputSink.AddChar(text[i]);
+            }
+        }
     }
 
     private void HandleMouseMotion(MouseMotionEvent motionEvent)
     {
         var position = new Vector2(motionEvent.X, motionEvent.Y);
         _inputSystem.SetAxis2D(InputActionBinding.MousePosition, position);
+        var imguiPosition = position;
+        if (_window is not null)
+        {
+            int windowWidth = 0;
+            int windowHeight = 0;
+            _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
+            if (windowWidth > 0 && windowHeight > 0 && _hasDrawableSize)
+            {
+                var scaleX = (float)(_drawableWidth / windowWidth);
+                var scaleY = (float)(_drawableHeight / windowHeight);
+                imguiPosition = new Vector2(position.X * scaleX, position.Y * scaleY);
+            }
+        }
+        _imguiInputSink.SetMousePosition(imguiPosition);
 
         var delta = new Vector2(motionEvent.Xrel, motionEvent.Yrel);
         if (_hasMousePosition || delta != Vector2.Zero)
@@ -275,6 +332,20 @@ public unsafe class WolfRendererMetal : IRenderer
         {
             _inputSystem.SetButton(binding, isDown);
         }
+
+        var imguiIndex = buttonEvent.Button switch
+        {
+            Sdl.ButtonLeft => 0,
+            Sdl.ButtonRight => 1,
+            Sdl.ButtonMiddle => 2,
+            Sdl.ButtonX1 => 3,
+            Sdl.ButtonX2 => 4,
+            _ => -1
+        };
+        if (imguiIndex >= 0)
+        {
+            _imguiInputSink.SetMouseButton(imguiIndex, isDown);
+        }
     }
 
     private void HandleMouseWheel(MouseWheelEvent wheelEvent)
@@ -286,12 +357,13 @@ public unsafe class WolfRendererMetal : IRenderer
         }
 
         var direction = (MouseWheelDirection)wheelEvent.Direction;
-        if (direction is MouseWheelDirection.Flipped or MouseWheelDirection.MousewheelFlipped)
+        if (direction == MouseWheelDirection.Flipped)
         {
             scroll = -scroll;
         }
 
         _inputSystem.SetAxis2D(InputActionBinding.MouseScroll, scroll);
+        _imguiInputSink.AddMouseScroll(scroll);
     }
 
     private static bool TryMapMouseButton(byte button, out InputActionBinding binding)
@@ -421,6 +493,95 @@ public unsafe class WolfRendererMetal : IRenderer
         };
 
         return binding != InputActionBinding.None;
+    }
+
+    private static bool TryConvertKey(Scancode scancode, out ImGuiKey imguiKey)
+    {
+        imguiKey = scancode switch
+        {
+            Scancode.ScancodeTab => ImGuiKey.Tab,
+            Scancode.ScancodeLshift => ImGuiKey.LeftShift,
+            Scancode.ScancodeRshift => ImGuiKey.RightShift,
+            Scancode.ScancodeLctrl => ImGuiKey.LeftCtrl,
+            Scancode.ScancodeRctrl => ImGuiKey.RightCtrl,
+            Scancode.ScancodeLalt => ImGuiKey.LeftAlt,
+            Scancode.ScancodeRalt => ImGuiKey.RightAlt,
+            Scancode.ScancodeLgui => ImGuiKey.LeftSuper,
+            Scancode.ScancodeRgui => ImGuiKey.RightSuper,
+            Scancode.ScancodeMenu => ImGuiKey.Menu,
+            Scancode.ScancodeUp => ImGuiKey.UpArrow,
+            Scancode.ScancodeDown => ImGuiKey.DownArrow,
+            Scancode.ScancodeLeft => ImGuiKey.LeftArrow,
+            Scancode.ScancodeRight => ImGuiKey.RightArrow,
+            Scancode.ScancodeEscape => ImGuiKey.Escape,
+            Scancode.ScancodeReturn => ImGuiKey.Enter,
+            Scancode.ScancodeSpace => ImGuiKey.Space,
+            Scancode.ScancodeBackspace => ImGuiKey.Backspace,
+            Scancode.ScancodeInsert => ImGuiKey.Insert,
+            Scancode.ScancodeDelete => ImGuiKey.Delete,
+            Scancode.ScancodeHome => ImGuiKey.Home,
+            Scancode.ScancodeEnd => ImGuiKey.End,
+            Scancode.ScancodePageup => ImGuiKey.PageUp,
+            Scancode.ScancodePagedown => ImGuiKey.PageDown,
+            Scancode.ScancodeA => ImGuiKey.A,
+            Scancode.ScancodeC => ImGuiKey.C,
+            Scancode.ScancodeV => ImGuiKey.V,
+            Scancode.ScancodeX => ImGuiKey.X,
+            Scancode.ScancodeY => ImGuiKey.Y,
+            Scancode.ScancodeZ => ImGuiKey.Z,
+            Scancode.Scancode0 => ImGuiKey._0,
+            Scancode.Scancode1 => ImGuiKey._1,
+            Scancode.Scancode2 => ImGuiKey._2,
+            Scancode.Scancode3 => ImGuiKey._3,
+            Scancode.Scancode4 => ImGuiKey._4,
+            Scancode.Scancode5 => ImGuiKey._5,
+            Scancode.Scancode6 => ImGuiKey._6,
+            Scancode.Scancode7 => ImGuiKey._7,
+            Scancode.Scancode8 => ImGuiKey._8,
+            Scancode.Scancode9 => ImGuiKey._9,
+            Scancode.ScancodeF1 => ImGuiKey.F1,
+            Scancode.ScancodeF2 => ImGuiKey.F2,
+            Scancode.ScancodeF3 => ImGuiKey.F3,
+            Scancode.ScancodeF4 => ImGuiKey.F4,
+            Scancode.ScancodeF5 => ImGuiKey.F5,
+            Scancode.ScancodeF6 => ImGuiKey.F6,
+            Scancode.ScancodeF7 => ImGuiKey.F7,
+            Scancode.ScancodeF8 => ImGuiKey.F8,
+            Scancode.ScancodeF9 => ImGuiKey.F9,
+            Scancode.ScancodeF10 => ImGuiKey.F10,
+            Scancode.ScancodeF11 => ImGuiKey.F11,
+            Scancode.ScancodeF12 => ImGuiKey.F12,
+            Scancode.ScancodeGrave => ImGuiKey.GraveAccent,
+            Scancode.ScancodeMinus => ImGuiKey.Minus,
+            Scancode.ScancodeEquals => ImGuiKey.Equal,
+            Scancode.ScancodeLeftbracket => ImGuiKey.LeftBracket,
+            Scancode.ScancodeRightbracket => ImGuiKey.RightBracket,
+            Scancode.ScancodeSemicolon => ImGuiKey.Semicolon,
+            Scancode.ScancodeApostrophe => ImGuiKey.Apostrophe,
+            Scancode.ScancodeBackslash => ImGuiKey.Backslash,
+            Scancode.ScancodeComma => ImGuiKey.Comma,
+            Scancode.ScancodePeriod => ImGuiKey.Period,
+            Scancode.ScancodeSlash => ImGuiKey.Slash,
+            Scancode.ScancodeKP0 => ImGuiKey.Keypad0,
+            Scancode.ScancodeKP1 => ImGuiKey.Keypad1,
+            Scancode.ScancodeKP2 => ImGuiKey.Keypad2,
+            Scancode.ScancodeKP3 => ImGuiKey.Keypad3,
+            Scancode.ScancodeKP4 => ImGuiKey.Keypad4,
+            Scancode.ScancodeKP5 => ImGuiKey.Keypad5,
+            Scancode.ScancodeKP6 => ImGuiKey.Keypad6,
+            Scancode.ScancodeKP7 => ImGuiKey.Keypad7,
+            Scancode.ScancodeKP8 => ImGuiKey.Keypad8,
+            Scancode.ScancodeKP9 => ImGuiKey.Keypad9,
+            Scancode.ScancodeKPPeriod => ImGuiKey.KeypadDecimal,
+            Scancode.ScancodeKPDivide => ImGuiKey.KeypadDivide,
+            Scancode.ScancodeKPMultiply => ImGuiKey.KeypadMultiply,
+            Scancode.ScancodeKPMinus => ImGuiKey.KeypadSubtract,
+            Scancode.ScancodeKPPlus => ImGuiKey.KeypadAdd,
+            Scancode.ScancodeKPEnter => ImGuiKey.KeypadEnter,
+            _ => ImGuiKey.None
+        };
+
+        return imguiKey != ImGuiKey.None;
     }
 
     private void HandleWindowEvent(Event @event)
@@ -1080,6 +1241,11 @@ public unsafe class WolfRendererMetal : IRenderer
         RenderGraphResourceHandle presentedTexture,
         UiFrameData uiFrame)
     {
+        if (_useRenderGraph)
+        {
+            return;
+        }
+
         var backbufferTexture = resourceRegistry.GetTexture(backBuffer) as MetalBackbufferTexture;
         var lightingTexture = resourceRegistry.GetTexture(presentedTexture) as MetalTexture;
         if (backbufferTexture is null || lightingTexture is null)
@@ -1294,7 +1460,7 @@ public unsafe class WolfRendererMetal : IRenderer
 
     public IImGuiRenderer GetImGuiRenderer()
     {
-        return NullImGuiRenderer.Instance;
+        return _imguiRenderer;
     }
 
     private void ProcessPendingCommands()

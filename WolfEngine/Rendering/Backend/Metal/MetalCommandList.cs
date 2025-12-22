@@ -254,13 +254,17 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 
 		EnsureRenderEncoder();
+		var indexSize = _indexType == MTLIndexType.UInt16 ? 2u : 4u;
+		var startOffset = (nuint)(arguments.StartIndex * indexSize);
 		_renderEncoder.DrawIndexedPrimitives(
 			_primitiveType,
 			arguments.IndexCount,
 			_indexType,
 			_indexBuffer,
-			_indexOffset,
-			arguments.InstanceCount);
+			_indexOffset + startOffset,
+			arguments.InstanceCount,
+			arguments.BaseVertex,
+			arguments.StartInstance);
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -279,6 +283,32 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
 		// Metal handles resource hazards implicitly for most use cases.
+	}
+
+	public void CopyTexture(MTLTexture source, MTLTexture destination, uint width, uint height)
+	{
+		if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		if (_renderEncoder.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.EndEncoding();
+			_renderEncoder = default;
+		}
+
+		if (_computeEncoder.NativePtr != IntPtr.Zero)
+		{
+			_computeEncoder.EndEncoding();
+			_computeEncoder = default;
+		}
+
+		var blit = _commandBuffer.BlitCommandEncoder();
+		var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
+		var size = new MTLSize { width = width, height = height, depth = 1 };
+		blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
+		blit.EndEncoding();
 	}
 
 	public void Commit()
@@ -302,6 +332,16 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 
 		_commandBuffer.Commit();
+	}
+
+	public void SetPresentDrawable(CAMetalDrawable drawable)
+	{
+		if (drawable.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		_presentDrawable = drawable;
 	}
 
 	private void EnsureRenderEncoder()

@@ -186,6 +186,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		{
 			var attachment = pipelineDescriptor.ColorAttachments.Object((nuint)i);
 			attachment.PixelFormat = ToPixelFormat(formats[i]);
+			ApplyBlendState(attachment, key.RenderState.BlendMode);
 			pipelineDescriptor.ColorAttachments.SetObject(attachment, (nuint)i);
 		}
 
@@ -401,6 +402,33 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 				layouts.SetObject(layoutDesc, 0);
 				break;
 			}
+			case GraphicsLayoutKind.ImGui:
+			{
+				var position = attributes.Object(0);
+				position.Format = MTLVertexFormat.Float2;
+				position.Offset = 0;
+				position.BufferIndex = 2;
+				attributes.SetObject(position, 0);
+
+				var uv = attributes.Object(1);
+				uv.Format = MTLVertexFormat.Float2;
+				uv.Offset = 8;
+				uv.BufferIndex = 2;
+				attributes.SetObject(uv, 1);
+
+				var color = attributes.Object(2);
+				color.Format = MTLVertexFormat.UChar4Normalized;
+				color.Offset = 16;
+				color.BufferIndex = 2;
+				attributes.SetObject(color, 2);
+
+				var layoutDesc = layouts.Object(2);
+				layoutDesc.Stride = 20;
+				layoutDesc.StepFunction = MTLVertexStepFunction.PerVertex;
+				layoutDesc.StepRate = 1;
+				layouts.SetObject(layoutDesc, 2);
+				break;
+			}
 			case GraphicsLayoutKind.Material:
 			case GraphicsLayoutKind.Default:
 			default:
@@ -439,5 +467,37 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		}
 
 		return descriptor;
+	}
+
+	private static void ApplyBlendState(MTLRenderPipelineColorAttachmentDescriptor attachment, BlendMode blendMode)
+	{
+        switch (blendMode)
+        {
+            case BlendMode.Additive:
+                attachment.IsBlendingEnabled = true;
+                attachment.RgbBlendOperation = MTLBlendOperation.Add;
+                attachment.AlphaBlendOperation = MTLBlendOperation.Add;
+                attachment.SourceRGBBlendFactor = MTLBlendFactor.One;
+                attachment.DestinationRGBBlendFactor = MTLBlendFactor.One;
+                attachment.SourceAlphaBlendFactor = MTLBlendFactor.One;
+                attachment.DestinationAlphaBlendFactor = MTLBlendFactor.One;
+                attachment.WriteMask = MTLColorWriteMask.All;
+                break;
+            case BlendMode.AlphaBlend:
+                attachment.IsBlendingEnabled = true;
+                attachment.RgbBlendOperation = MTLBlendOperation.Add;
+                attachment.AlphaBlendOperation = MTLBlendOperation.Add;
+                attachment.SourceRGBBlendFactor = MTLBlendFactor.SourceAlpha;
+                attachment.DestinationRGBBlendFactor = MTLBlendFactor.OneMinusSourceAlpha;
+                attachment.SourceAlphaBlendFactor = MTLBlendFactor.One;
+                attachment.DestinationAlphaBlendFactor = MTLBlendFactor.OneMinusSourceAlpha;
+                attachment.WriteMask = MTLColorWriteMask.All;
+                break;
+            case BlendMode.Opaque:
+            default:
+                attachment.IsBlendingEnabled = false;
+                attachment.WriteMask = MTLColorWriteMask.All;
+                break;
+        }
 	}
 }
