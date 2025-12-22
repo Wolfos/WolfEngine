@@ -116,8 +116,9 @@ public sealed class DeferredLightingPass
 		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(cameraConstants));
 
 		Span<ShaderLight> shaderLights = stackalloc ShaderLight[MaxLights];
-		var lightCount = Math.Min(sceneData.Lights.Count, MaxLights);
-		for (var i = 0; i < lightCount; i++)
+		shaderLights.Clear();
+		var lightCountInt = Math.Min(sceneData.Lights.Count, MaxLights);
+		for (var i = 0; i < lightCountInt; i++)
 		{
 			var packet = sceneData.Lights[i];
 			var light = packet.Light;
@@ -139,12 +140,14 @@ public sealed class DeferredLightingPass
 			};
 		}
 
-		var lightBytesSize = MaxLights * Marshal.SizeOf<ShaderLight>();
-		var lightingConstantsSize = 16 + lightBytesSize + 16;
+		var lightBytes = MemoryMarshal.AsBytes(shaderLights);
+		const int headerSize = 32; // uint + float3 padding, float3 aligns to 16 in MSL.
+		var lightingConstantsSize = headerSize + lightBytes.Length;
 		Span<byte> lightingConstants = stackalloc byte[lightingConstantsSize];
+		lightingConstants.Clear();
+		var lightCount = (uint)lightCountInt;
 		MemoryMarshal.Write(lightingConstants, ref lightCount);
-		var lightBytes = MemoryMarshal.AsBytes(shaderLights[..lightCount]);
-		lightBytes.CopyTo(lightingConstants.Slice(16));
+		lightBytes.CopyTo(lightingConstants.Slice(headerSize));
 		commandList.SetComputeConstants(2, lightingConstants);
 
 		// Dispatch the compute shader
@@ -212,10 +215,11 @@ public sealed class DeferredLightingPass
 		destination[15] = matrix.M44;
 	}
 
-	private readonly struct ShaderLight
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	private struct ShaderLight
 	{
-		public Vector4 ColorIntensity { get; init; }
-		public Vector4 DirectionType { get; init; }
-		public Vector4 PositionRange { get; init; }
+		public Vector4 ColorIntensity;
+		public Vector4 DirectionType;
+		public Vector4 PositionRange;
 	}
 }

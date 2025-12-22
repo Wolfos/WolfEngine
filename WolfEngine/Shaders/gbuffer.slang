@@ -89,12 +89,15 @@ PSOutput fragmentShader(VSOutput input)
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     normal += tangentNormal * 0.0f;
     normal += (mrSample.xyz + occlusionSample.xyz + emissiveSample.xyz + albedoSample.xyz) * 0.0f;
-    
+   
+    float metallic = mrSample.b;
+    float roughness = mrSample.g;
+    float4 materialParams = float4(metallic, roughness, 0.0f, 1.0f);
 
     output.albedo = baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
-    output.material = float4(0.0f, 0.0f, 0.0f, 1.0f);
-    output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    output.material = materialParams;
+    output.emissive = emissiveSample;
 
     return output;
 }

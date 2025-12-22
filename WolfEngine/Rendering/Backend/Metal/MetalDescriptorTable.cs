@@ -32,7 +32,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private int _uavCount;
 	private int _cbvCount;
 	private int _samplerCount;
-	private static bool _loggedBindlessState;
 
 	public MetalDescriptorTable(MTLDevice device)
 	{
@@ -231,17 +230,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 
 		EncodeAll();
-
-		if (_loggedBindlessState == false)
-		{
-			Console.WriteLine(
-				$"Bindless encoders: tex=0x{_textureEncoder.NativePtr:x}, rw=0x{_rwTextureEncoder.NativePtr:x}, samp=0x{_samplerEncoder.NativePtr:x}");
-			Console.WriteLine(
-				$"Bindless buffers: tex={_textureArgumentBuffer.Length}, rw={_rwTextureArgumentBuffer.Length}, samp={_samplerArgumentBuffer.Length}");
-			Console.WriteLine(
-				$"Bindless counts: srv={_srvCount}, uav={_uavCount}, samp={_samplerCount}, srv0={( _srvTextures[0] is null ? "null" : $"0x{_srvTextures[0].Texture.NativePtr:x}")}");
-			_loggedBindlessState = true;
-		}
 	}
 
 	private static MTLSamplerAddressMode ToAddressMode(AddressMode mode) => mode switch
@@ -292,11 +280,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		_singleTexture[0] = texture;
 		_textureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)index, length = 1 });
-
-		if (index == 0)
-		{
-			Console.WriteLine($"Bindless SRV[0] texture ptr=0x{texture.NativePtr:x}");
-		}
 	}
 
 	private void EncodeUav(int index)
