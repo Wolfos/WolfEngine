@@ -37,7 +37,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage);
 	}
 
-	private readonly MTLDevice _device;
+	private MTLDevice _device;
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
@@ -96,7 +96,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		textureDescriptor.MipmapLevelCount = 1;
 		textureDescriptor.PixelFormat = ToPixelFormat(descriptor.Format);
 		textureDescriptor.TextureType = MTLTextureType.Type2D;
-		textureDescriptor.StorageMode = MTLStorageMode.Shared;
+		textureDescriptor.StorageMode = MTLStorageMode.Managed;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
 
 		var texture = _device.NewTexture(textureDescriptor);
@@ -172,8 +172,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		var graphicsLibrary = CreateLibraryFromSource(source);
 		var vertexFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.VertexEntryPoint ?? "vertexShader"));
 		var fragmentFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.PixelEntryPoint ?? "fragmentShader"));
-		var graphicsTextureEncoder = vertexFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-		var graphicsSamplerEncoder = vertexFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+		var graphicsTextureEncoder = fragmentFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+		var graphicsSamplerEncoder = fragmentFunction.NewArgumentEncoder((ulong)MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 
 		var pipelineDescriptor = new MTLRenderPipelineDescriptor
 		{

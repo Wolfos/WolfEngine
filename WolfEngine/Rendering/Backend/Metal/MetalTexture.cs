@@ -9,7 +9,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 	private bool _isDisposed;
 	private readonly MetalDescriptorTable _descriptorTable;
 
-	public MetalTexture(string? name, TextureDescriptor descriptor, MTLTexture texture, MetalDescriptorTable descriptorTable)
+	public MetalTexture(string name, TextureDescriptor descriptor, MTLTexture texture, MetalDescriptorTable descriptorTable)
 	{
 		Name = name;
 		Descriptor = descriptor;

@@ -417,6 +417,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			_renderEncoder.SetVertexBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 		}
+
+		UseBindlessResourcesForRender();
 	}
 
 	private void ApplyBindlessToComputeEncoder()
@@ -441,6 +443,54 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.SetBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+		}
+
+		UseBindlessResourcesForCompute();
+	}
+
+	private void UseBindlessResourcesForRender()
+	{
+		var srvCount = _descriptorTable.SrvCount;
+		for (var i = 0; i < srvCount; i++)
+		{
+			var texture = _descriptorTable.GetSrvTexture(i);
+			if (texture.NativePtr != IntPtr.Zero)
+			{
+				_renderEncoder.UseResource(texture, MTLResourceUsage.Read);
+			}
+		}
+
+		var uavCount = _descriptorTable.UavCount;
+		for (var i = 0; i < uavCount; i++)
+		{
+			var texture = _descriptorTable.GetUavTexture(i);
+			if (texture.NativePtr != IntPtr.Zero)
+			{
+				_renderEncoder.UseResource(texture, MTLResourceUsage.Read | MTLResourceUsage.Write);
+			}
+		}
+	}
+
+	private void UseBindlessResourcesForCompute()
+	{
+		var srvCount = _descriptorTable.SrvCount;
+		for (var i = 0; i < srvCount; i++)
+		{
+			var texture = _descriptorTable.GetSrvTexture(i);
+			if (texture.NativePtr != IntPtr.Zero)
+			{
+				_computeEncoder.UseResource(texture, MTLResourceUsage.Read);
+			}
+		}
+
+		var uavCount = _descriptorTable.UavCount;
+		for (var i = 0; i < uavCount; i++)
+		{
+			var texture = _descriptorTable.GetUavTexture(i);
+			if (texture.NativePtr != IntPtr.Zero)
+			{
+				_computeEncoder.UseResource(texture, MTLResourceUsage.Read | MTLResourceUsage.Write);
+			}
 		}
 	}
 }

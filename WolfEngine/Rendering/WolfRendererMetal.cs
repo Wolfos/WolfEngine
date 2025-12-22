@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -27,6 +28,7 @@ public unsafe class WolfRendererMetal : IRenderer
     private const string WindowTitle = "WolfEngine";
     private const uint SdlQuitEvent = 0x100;
     private const uint SdlWindowEvent = 0x200;
+    private static int _textureUploadReadbacks;
 
     private readonly int _width;
     private readonly int _height;
@@ -591,6 +593,11 @@ public unsafe class WolfRendererMetal : IRenderer
             throw new ArgumentNullException(nameof(texture));
         }
 
+        if (texture.PixelData is null || texture.PixelData.Length == 0)
+        {
+            throw new ArgumentException("Texture must contain pixel data.", nameof(texture));
+        }
+
         var descriptor = new TextureDescriptor(
             texture.Width,
             texture.Height,
@@ -598,11 +605,17 @@ public unsafe class WolfRendererMetal : IRenderer
             TextureUsage.ShaderResource);
 
         var gfxTexture = _gfxDevice.CreateTexture(descriptor);
+        if (gfxTexture is not MetalTexture metalTexture)
+        {
+            throw new InvalidOperationException("Metal renderer expected a Metal texture.");
+        }
+
+        UploadTextureData(metalTexture.Texture, texture);
 
         return new MetalTextureResources
         {
-            Texture = gfxTexture,
-            ShaderResourceView = gfxTexture.ShaderResourceView
+            Texture = metalTexture,
+            ShaderResourceView = metalTexture.ShaderResourceView
         };
     }
 
@@ -692,6 +705,39 @@ public unsafe class WolfRendererMetal : IRenderer
     {
         throw new NotSupportedException("Use render-graph pass execution instead of direct Metal deferred calls.");
     }
+
+    private static void UploadTextureData(MTLTexture texture, Texture source)
+    {
+        var bytesPerPixel = GetBytesPerPixel(texture.PixelFormat);
+        var expectedBytes = source.Width * source.Height * bytesPerPixel;
+        if (source.PixelData.Length < expectedBytes)
+        {
+            throw new ArgumentException(
+                $"Texture pixel data is smaller than the expected size for {texture.PixelFormat}.",
+                nameof(source));
+        }
+
+        var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
+        var size = new MTLSize { width = (ulong)source.Width, height = (ulong)source.Height, depth = 1 };
+        var region = new MTLRegion { origin = origin, size = size };
+        var bytesPerRow = (ulong)(source.Width * bytesPerPixel);
+
+        fixed (byte* ptr = source.PixelData)
+        {
+            texture.ReplaceRegion(region, 0, (IntPtr)ptr, bytesPerRow);
+        }
+    }
+
+    private static int GetBytesPerPixel(MTLPixelFormat format) => format switch
+    {
+        MTLPixelFormat.RGBA8Unorm => 4,
+        MTLPixelFormat.BGRA8Unorm => 4,
+        MTLPixelFormat.RGBA8UnormsRGB => 4,
+        MTLPixelFormat.BGRA8UnormsRGB => 4,
+        MTLPixelFormat.RGBA16Float => 8,
+        MTLPixelFormat.RGBA32Float => 16,
+        _ => throw new InvalidOperationException($"Unsupported pixel format for upload: {format}.")
+    };
 
     private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)
     {

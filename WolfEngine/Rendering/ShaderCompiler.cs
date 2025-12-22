@@ -67,6 +67,7 @@ public class ShaderCompiler : IShaderCompiler
 
 		var compiled = SlangCompiler.Compile(args);
 		var metalSource = InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
+		DumpMetalSourceIfRequested(shaderPath, metalSource);
 		_cachedShaders.Add(filename, metalSource);
 		return metalSource;
 	}
@@ -104,7 +105,21 @@ public class ShaderCompiler : IShaderCompiler
 		};
 
 		var compiled = SlangCompiler.Compile(args);
-		return InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
+		var metalSource = InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
+		DumpMetalSourceIfRequested(shaderPath, metalSource);
+		return metalSource;
+	}
+
+	private static void DumpMetalSourceIfRequested(string shaderPath, string metalSource)
+	{
+		if (Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") != "1")
+		{
+			return;
+		}
+
+		var fileName = Path.GetFileNameWithoutExtension(shaderPath) + ".metal.msl";
+		var outputPath = Path.Combine(AppContext.BaseDirectory, "Shaders", fileName);
+		File.WriteAllText(outputPath, metalSource);
 	}
 
 

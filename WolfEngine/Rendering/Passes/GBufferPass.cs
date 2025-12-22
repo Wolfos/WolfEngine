@@ -34,12 +34,12 @@ public static class GBufferPass
         var targets = CreatePassTargets(config);
 		var viewport = CreateViewport(config);
 		commandList.BeginPass(targets, viewport);
-		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
 		commandList.ClearColorAttachment(0, config.AlbedoClearColor);
 		commandList.ClearColorAttachment(1, config.NormalClearColor);
 		commandList.ClearColorAttachment(2, config.MaterialClearColor);
 		commandList.ClearColorAttachment(3, config.EmissiveClearColor);
 		commandList.ClearDepthStencil(config.DepthClearValue);
+		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
 
 		// Skybox (optional)
 		if (config.SkyboxPipeline is not null &&
@@ -53,9 +53,11 @@ public static class GBufferPass
 			Span<float> skyboxConstants = stackalloc float[16];
 			WriteMatrix(skyboxConstants, invViewProj);
 			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(skyboxConstants));
-			Span<uint> skyboxHandles = stackalloc uint[2];
+			Span<uint> skyboxHandles = stackalloc uint[4];
 			skyboxHandles[0] = config.SkyboxEnvironment.Value;
 			skyboxHandles[1] = config.SkyboxSampler.Value;
+			skyboxHandles[2] = 0;
+			skyboxHandles[3] = 0;
 			commandList.SetGraphicsConstants(4, MemoryMarshal.AsBytes(skyboxHandles));
 
 			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
@@ -107,13 +109,15 @@ public static class GBufferPass
 			}
 
 			// Bind albedo texture descriptor set
-			Span<uint> materialHandles = stackalloc uint[6];
+			Span<uint> materialHandles = stackalloc uint[8];
 			materialHandles[0] = material.Resources.AlbedoTexture.Value;
 			materialHandles[1] = material.Resources.MetallicRoughnessTexture.Value;
 			materialHandles[2] = material.Resources.NormalTexture.Value;
 			materialHandles[3] = material.Resources.OcclusionTexture.Value;
 			materialHandles[4] = material.Resources.EmissiveTexture.Value;
 			materialHandles[5] = material.Resources.Sampler.Value;
+			materialHandles[6] = 0;
+			materialHandles[7] = 0;
 			commandList.SetGraphicsConstants(3, MemoryMarshal.AsBytes(materialHandles));
 
 			// Set model matrix constants

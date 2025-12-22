@@ -87,7 +87,7 @@ public sealed class DeferredLightingPass
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		Span<uint> textureHandles = stackalloc uint[11];
+		Span<uint> textureHandles = stackalloc uint[12];
 		textureHandles[0] = config.GBufferAlbedo.Value;
 		textureHandles[1] = config.GBufferNormal.Value;
 		textureHandles[2] = config.GBufferMaterial.Value;
@@ -99,6 +99,7 @@ public sealed class DeferredLightingPass
 		textureHandles[8] = config.SkyboxBrdfLut.Value;
 		textureHandles[9] = config.LightingOutput.Value;
 		textureHandles[10] = config.LinearSampler.Value;
+		textureHandles[11] = 0;
 		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		// Set camera constants (Root parameter 1)
