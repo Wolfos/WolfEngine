@@ -85,6 +85,9 @@
         <None Update="Shaders\common_bindless.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Assets\Fonts\Inter-VariableFont_opsz,wght.ttf">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

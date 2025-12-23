@@ -31,7 +31,7 @@ public static partial class EditorGui
         {
             ref var name = ref Unsafe.As<T, NameComponent>(ref component);
             var value = name.Name ?? string.Empty;
-            if (ImGui.InputText("Name", ref value, 256))
+            if (DrawLabeledField("Name", () => ImGui.InputText("##value", ref value, 256)))
                 name.Name = value;
 
             ImGui.Separator();
@@ -39,7 +39,7 @@ public static partial class EditorGui
             return;
         }
 
-        if (ImGui.CollapsingHeader(typeof(T).Name) == false)
+        if (ImGui.CollapsingHeader(typeof(T).Name, ImGuiTreeNodeFlags.DefaultOpen) == false)
         {
             ImGui.PopID();
             return;
@@ -54,43 +54,58 @@ public static partial class EditorGui
             if (fieldType == typeof(Vector3))
             {
                 var v = (Vector3) field.GetValueDirect(typedRef);
-                if (ImGui.InputFloat3(label, ref v))
+                if (DrawLabeledField(label, () => ImGui.InputFloat3("##value", ref v)))
                     field.SetValueDirect(typedRef, v);
             }
             else if (fieldType == typeof(Vector4))
             {
                 var v = (Vector4) field.GetValueDirect(typedRef);
-                if (ImGui.ColorEdit4(label, ref v))
+                if (DrawLabeledField(label, () => ImGui.ColorEdit4("##value", ref v)))
                     field.SetValueDirect(typedRef, v);
             }
             else if (fieldType == typeof(Quaternion))
             {
                 var q = (Quaternion) field.GetValueDirect(typedRef);
                 var v = new Vector4(q.X, q.Y, q.Z, q.W);
-                if (ImGui.InputFloat4(label, ref v))
+                if (DrawLabeledField(label, () => ImGui.InputFloat4("##value", ref v)))
                     field.SetValueDirect(typedRef, new Quaternion(v.X, v.Y, v.Z, v.W));
             }
             else if (fieldType == typeof(string))
             {
                 var s = (string) field.GetValueDirect(typedRef) ?? string.Empty;
-                if (ImGui.InputText(label, ref s, 256))
+                if (DrawLabeledField(label, () => ImGui.InputText("##value", ref s, 256)))
                     field.SetValueDirect(typedRef, s);
             }
             else if (fieldType == typeof(float))
             {
                 var f = (float) field.GetValueDirect(typedRef);
-                if (ImGui.InputFloat(label, ref f))
+                if (DrawLabeledField(label, () => ImGui.InputFloat("##value", ref f)))
                     field.SetValueDirect(typedRef, f);
             }
             else if (fieldType == typeof(int))
             {
                 var i = (int) field.GetValueDirect(typedRef);
-                if (ImGui.InputInt(label, ref i))
+                if (DrawLabeledField(label, () => ImGui.InputInt("##value", ref i)))
                     field.SetValueDirect(typedRef, i);
             }
         }
 
         ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private static bool DrawLabeledField(string label, Func<bool> drawControl)
+    {
+        const float labelWidth = 140.0f;
+        ImGui.PushID(label);
+        var startX = ImGui.GetCursorPosX();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine();
+        ImGui.SetCursorPosX(startX + labelWidth);
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        var changed = drawControl();
+        ImGui.PopID();
+        return changed;
     }
 }
