@@ -21,7 +21,7 @@ internal sealed class MetalPipeline : IGfxPipeline
 		RenderState = renderStateDescriptor;
 	}
 
-	public string? Name => null;
+	public string Name => null;
 
 	public PipelineKey Key { get; }
 

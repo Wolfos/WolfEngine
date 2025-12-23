@@ -71,7 +71,7 @@ public static partial class EditorGui
             }
             else if (fieldType == typeof(string))
             {
-                var s = (string?) field.GetValueDirect(typedRef) ?? string.Empty;
+                var s = (string) field.GetValueDirect(typedRef) ?? string.Empty;
                 if (ImGui.InputText(label, ref s, 256))
                     field.SetValueDirect(typedRef, s);
             }

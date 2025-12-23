@@ -20,7 +20,7 @@ public class Game
     private readonly IInputSystem _inputSystem;
     private readonly IUiFrameProvider _imguiSystem;
     private readonly ITextureFactory _textureFactory;
-    private SkyboxResources _skybox;
+    private readonly SkyboxRenderer _skyboxRenderer;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -42,7 +42,8 @@ public class Game
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider, ITextureFactory textureFactory)
+        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider,
+        ITextureFactory textureFactory, SkyboxRenderer skyboxRenderer)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
@@ -52,6 +53,7 @@ public class Game
         _inputSystem = inputSystem;
         _imguiSystem = uiFrameProvider ?? throw new ArgumentNullException(nameof(uiFrameProvider));
         _textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
+        _skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
     }
 
     public void Run()
@@ -263,19 +265,8 @@ public class Game
         var skyboxMesh = CreateSkyboxMesh();
         _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(skyboxMesh));
 
-        // TODO: Renderer should probably not know about skybox to begin with
-        if (_renderer is WolfRendererD3D d3dRenderer)
-        {
-            var skybox = d3dRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
-            _skybox = skybox;
-            _renderGraph.SetSkybox(skybox);
-        }
-        else if (_renderer is WolfRendererMetal metalRenderer)
-        {
-            var skybox = metalRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
-            _skybox = skybox;
-            _renderGraph.SetSkybox(skybox);
-        }
+        var skybox = _skyboxRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
+        _renderGraph.SetSkybox(skybox);
     }
 
     private static Mesh CreateSkyboxMesh()

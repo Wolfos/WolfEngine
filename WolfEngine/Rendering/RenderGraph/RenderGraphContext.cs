@@ -8,8 +8,8 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphContext
 {
-	private IGfxCommandList? _commandList;
-	private SceneDrawData? _sceneData;
+	private IGfxCommandList _commandList;
+	private SceneDrawData _sceneData;
 
 	internal RenderGraphContext(RenderGraphResourceRegistry resourceRegistry, string passName)
 	{
@@ -27,7 +27,7 @@ public sealed class RenderGraphContext
 		internal set => _commandList = value;
 	}
 	
-	public SceneDrawData? SceneData
+	public SceneDrawData SceneData
 	{
 		get => _sceneData;
 		internal set => _sceneData = value;

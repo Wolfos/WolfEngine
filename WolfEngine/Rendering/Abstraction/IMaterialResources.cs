@@ -3,7 +3,7 @@
 public interface IMaterialResources
 {
 	IGfxPipeline Pipeline { get; }
-	IGfxBuffer? ConstantBuffer { get; }
+	IGfxBuffer ConstantBuffer { get; }
 	DescriptorHandle AlbedoTexture { get; }
 	DescriptorHandle MetallicRoughnessTexture { get; }
 	DescriptorHandle NormalTexture { get; }

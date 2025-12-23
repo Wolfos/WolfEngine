@@ -18,7 +18,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		UnorderedAccessView = DescriptorHandle.Invalid;
 	}
 
-	public string? Name { get; }
+	public string Name { get; }
 
 	public TextureDescriptor Descriptor { get; }
 

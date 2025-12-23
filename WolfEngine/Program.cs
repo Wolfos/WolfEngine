@@ -40,6 +40,7 @@ class Program
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();
+        services.AddSingleton<SkyboxRenderer>();
         
         if (OperatingSystem.IsMacOS())
         {

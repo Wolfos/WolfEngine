@@ -5,14 +5,14 @@ namespace WolfEngine.Rendering.Backend.Metal;
 
 internal sealed class MetalBuffer : IGfxBuffer, IDisposable
 {
-	public MetalBuffer(string? name, BufferDescriptor descriptor, MTLBuffer buffer)
+	public MetalBuffer(string name, BufferDescriptor descriptor, MTLBuffer buffer)
 	{
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
 	}
 
-	public string? Name { get; }
+	public string Name { get; }
 
 	public BufferDescriptor Descriptor { get; }
 

@@ -8,7 +8,7 @@ internal sealed class D3D12Buffer : IGfxBuffer
 {
 	private readonly BufferDescriptor _descriptor;
 
-	public D3D12Buffer(string? name, BufferDescriptor descriptor, ComPtr<ID3D12Resource> resource,
+	public D3D12Buffer(string name, BufferDescriptor descriptor, ComPtr<ID3D12Resource> resource,
 		ulong sizeInBytes)
 	{
 		Name = name;
@@ -17,7 +17,7 @@ internal sealed class D3D12Buffer : IGfxBuffer
 		SizeInBytes = sizeInBytes;
 	}
 
-	public string? Name { get; }
+	public string Name { get; }
 
 	public BufferDescriptor Descriptor => _descriptor;
 

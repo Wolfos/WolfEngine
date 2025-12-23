@@ -11,7 +11,7 @@ internal sealed class MetalBackbufferTexture : IGfxTexture
 		Descriptor = descriptor;
 	}
 
-	public string? Name => "MetalBackbuffer";
+	public string Name => "MetalBackbuffer";
 
 	public TextureDescriptor Descriptor { get; }
 

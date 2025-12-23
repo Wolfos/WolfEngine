@@ -32,7 +32,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 			Format == other.Format &&
 			Usage == other.Usage;
 
-		public override bool Equals(object? obj) => obj is TexturePoolKey other && Equals(other);
+		public override bool Equals(object obj) => obj is TexturePoolKey other && Equals(other);
 
 		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage);
 	}

@@ -5,7 +5,7 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 internal class D3D12MaterialResources: IMaterialResources
 {
 	public required IGfxPipeline Pipeline { get; init; }
-	public required IGfxBuffer? ConstantBuffer { get; init; }
+	public required IGfxBuffer ConstantBuffer { get; init; }
 	public DescriptorHandle AlbedoTexture { get; init; }
 	public DescriptorHandle MetallicRoughnessTexture { get; init; }
 	public DescriptorHandle NormalTexture { get; init; }

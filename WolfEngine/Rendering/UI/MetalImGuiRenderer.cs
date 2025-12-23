@@ -12,13 +12,13 @@ namespace WolfEngine.Rendering.UI;
 internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 {
 	private readonly IShaderCompiler _shaderCompiler;
-	private IGfxDevice? _device;
-	private IGfxPipeline? _pipeline;
-	private MetalBuffer? _vertexBuffer;
-	private MetalBuffer? _indexBuffer;
+	private IGfxDevice _device;
+	private IGfxPipeline _pipeline;
+	private MetalBuffer _vertexBuffer;
+	private MetalBuffer _indexBuffer;
 	private int _vertexBufferSize;
 	private int _indexBufferSize;
-	private MetalTexture? _fontTexture;
+	private MetalTexture _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
 	private bool _fontUploaded;

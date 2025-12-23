@@ -16,7 +16,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	private DescriptorHandle _srvHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _uavHandle = DescriptorHandle.Invalid;
 
-	public D3D12Texture(string? name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
+	public D3D12Texture(string name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 	{
 		Initialize(name, descriptor, resource);
 	}
@@ -25,7 +25,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	{
 	}
 
-	public string? Name { get; private set; }
+	public string Name { get; private set; }
 
 	public TextureDescriptor Descriptor => _descriptor;
 
@@ -41,7 +41,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	ID3D12Resource* ID3D12BackendTexture.Resource => Resource.Handle;
 
-	internal void Initialize(string? name, in TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
+	internal void Initialize(string name, in TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 	{
 		Name = name;
 		_descriptor = descriptor;
