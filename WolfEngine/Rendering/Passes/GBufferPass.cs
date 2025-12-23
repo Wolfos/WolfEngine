@@ -41,38 +41,6 @@ public static class GBufferPass
 		commandList.ClearDepthStencil(config.DepthClearValue);
 		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
 
-		// Skybox (optional)
-		if (config.SkyboxPipeline is not null &&
-		    config.InvViewProjection is Matrix4x4 invViewProj &&
-		    config.SkyboxMesh is Mesh skyboxMesh &&
-		    skyboxMesh.VertexBuffer is not null &&
-		    skyboxMesh.IndexBuffer is not null)
-		{
-			commandList.BindPipeline(config.SkyboxPipeline);
-
-			Span<float> skyboxConstants = stackalloc float[16];
-			WriteMatrix(skyboxConstants, invViewProj);
-			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(skyboxConstants));
-			Span<uint> skyboxHandles = stackalloc uint[4];
-			skyboxHandles[0] = config.SkyboxEnvironment.Value;
-			skyboxHandles[1] = config.SkyboxSampler.Value;
-			skyboxHandles[2] = 0;
-			skyboxHandles[3] = 0;
-			commandList.SetGraphicsConstants(4, MemoryMarshal.AsBytes(skyboxHandles));
-
-			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-			var skyboxVertexViews = new[]
-			{
-				new VertexBufferView(skyboxMesh.VertexBuffer, skyboxMesh.StrideInBytes, 0)
-			};
-			commandList.SetVertexBuffers(skyboxVertexViews);
-
-			var skyboxIndexView = new IndexBufferView(skyboxMesh.IndexBuffer, IndexFormat.UInt32, 0);
-			commandList.SetIndexBuffer(skyboxIndexView);
-
-			commandList.Draw(new DrawArguments(skyboxMesh.IndexCount, 1));
-		}
-
 		// Build camera constants once
 		Span<float> cameraConstants = stackalloc float[24];
 		WriteMatrix(cameraConstants, sceneData.ViewProjection);

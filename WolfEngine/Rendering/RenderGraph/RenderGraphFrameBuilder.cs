@@ -199,24 +199,9 @@ public sealed class RenderGraphFrameBuilder
 			SkyboxSampler = DescriptorHandle.Invalid
 		};
 
-		if (_skybox is not null &&
-		    _skybox.Mesh is not null &&
-		    context.SceneData is not null)
-		{
-			ApplySkybox(ref gbufferConfig, _skybox, context.SceneData.ViewProjection);
-		}
-
 		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
 	}
-
-	private static void ApplySkybox(ref GBufferPassConfig config, SkyboxResources skybox, Matrix4x4 viewProj)
-	{
-		config.SkyboxPipeline = skybox.Pipeline;
-		config.SkyboxEnvironment = skybox.EnvironmentHandle;
-		config.SkyboxSampler = skybox.Sampler;
-		config.InvViewProjection = viewProj;
-		config.SkyboxMesh = skybox.Mesh;
-	}
+	
 	
 	private void ExecuteDeferredLighting(RenderGraphContext context)
 	{

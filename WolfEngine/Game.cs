@@ -262,38 +262,9 @@ public class Game
     {
         var envPath = Path.Combine(AppContext.BaseDirectory, "Assets", "shanghai_bund_1k.hdr");
         var envTexture = _textureFactory.LoadFromFile(envPath, isSrgb: false);
-        var skyboxMesh = CreateSkyboxMesh();
-        _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(skyboxMesh));
 
-        var skybox = _skyboxRenderer.CreateSkyboxResources(envTexture, skyboxMesh);
+        var skybox = _skyboxRenderer.CreateSkyboxResources(envTexture);
         _renderGraph.SetSkybox(skybox);
-    }
-
-    private static Mesh CreateSkyboxMesh()
-    {
-        var vertices = new[]
-        {
-            new Vector4(-1, -1, -1, 1),
-            new Vector4( 1, -1, -1, 1),
-            new Vector4( 1,  1, -1, 1),
-            new Vector4(-1,  1, -1, 1),
-            new Vector4(-1, -1,  1, 1),
-            new Vector4( 1, -1,  1, 1),
-            new Vector4( 1,  1,  1, 1),
-            new Vector4(-1,  1,  1, 1)
-        };
-
-        var indices = new uint[]
-        {
-            0,1,2, 0,2,3, // -Z
-            4,6,5, 4,7,6, // +Z
-            4,5,1, 4,1,0, // -Y
-            3,2,6, 3,6,7, // +Y
-            4,0,3, 4,3,7, // -X
-            1,5,6, 1,6,2  // +X
-        };
-
-        return new Mesh(vertices, indices);
     }
     
     private static (Camera, Transform) CreateCamera()

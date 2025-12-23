@@ -35,16 +35,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="Shaders\default.slang">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
         <None Update="Shaders\gbuffer.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\deferred_lighting.compute.slang">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\triangle.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Assets\Monkey.obj">
@@ -75,9 +69,6 @@
         </None>
         <None Update="Assets\shanghai_bund_1k.hdr">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\skybox.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\ibl_brdf_lut.compute.slang">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

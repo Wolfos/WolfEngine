@@ -20,7 +20,7 @@ public sealed class SkyboxRenderer
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}
 
-	public SkyboxResources CreateSkyboxResources(Texture environmentTexture, Mesh skyboxMesh)
+	public SkyboxResources CreateSkyboxResources(Texture environmentTexture)
 	{
 		if (environmentTexture is null)
 		{
@@ -31,11 +31,8 @@ public sealed class SkyboxRenderer
 		{
 			throw new InvalidOperationException("Environment texture resources were not created.");
 		}
-
-		_renderer.EnsureMeshResources(skyboxMesh);
-
+		
 		var gfxDevice = GetGfxDevice();
-		var pipeline = CreateSkyboxPipeline(gfxDevice);
 
 		var samplerHandle = DescriptorHandle.Invalid;
 		if (IsMetalRenderer())
@@ -54,53 +51,11 @@ public sealed class SkyboxRenderer
 
 		return new SkyboxResources
 		{
-			Pipeline = pipeline,
-			EnvironmentHandle = environmentTexture.Resources.ShaderResourceView,
-			Sampler = samplerHandle,
-			Mesh = skyboxMesh,
 			EnvironmentTexture = environmentTexture.Resources.Texture,
 			IrradianceTexture = irradiance,
 			PrefilteredEnvironment = prefiltered,
 			BrdfLut = brdfLut
 		};
-	}
-
-	private IGfxPipeline CreateSkyboxPipeline(IGfxDevice gfxDevice)
-	{
-		var renderState = new RenderStateDescriptor(
-			FillMode.Solid,
-			CullMode.Back,
-			depthTestEnabled: false,
-			depthWriteEnabled: false,
-			BlendMode.Opaque);
-
-		var pipelineKey = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[]
-			{
-				TextureFormat.Bgra8Unorm,
-				TextureFormat.Rgba16Float,
-				TextureFormat.Rgba8Unorm,
-				TextureFormat.Rgba8Unorm
-			}),
-			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.Skybox);
-
-		if (IsMetalRenderer())
-		{
-			var shaderSource = _shaderCompiler.GetMetalSource("skybox.slang");
-			var shaderBytes = Encoding.UTF8.GetBytes(shaderSource);
-			return gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
-		}
-
-		var vertexShaderBytes = _shaderCompiler.GetDxil("skybox.slang", "vertexShader", "vs_6_0");
-		var pixelShaderBytes = _shaderCompiler.GetDxil("skybox.slang", "fragmentShader", "ps_6_0");
-		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
-		return gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
 	}
 
 	private (IGfxTexture Irradiance, IGfxTexture Prefiltered, IGfxTexture BrdfLut) GenerateIblMaps(
