@@ -9,5 +9,5 @@ public interface IImGuiRenderer
 {
 	void EnsureResources(IGfxDevice device, UiFrameData frame);
 
-	void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture renderTarget);
+	void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbuffer, IGfxTexture lightingSource);
 }

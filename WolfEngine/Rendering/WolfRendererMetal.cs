@@ -467,8 +467,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public void Render(
         RenderGraphResourceRegistry resourceRegistry,
-        RenderGraphResourceHandle backBuffer,
-        RenderGraphResourceHandle presentedTexture)
+        RenderGraphResourceHandle backBuffer)
     {
         // TODO: DirectX needs this method but Metal does not, can that be more elegant?
     }

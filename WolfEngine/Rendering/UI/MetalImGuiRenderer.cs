@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using ImGuiNET;
 using SharpMetal.Metal;
@@ -9,6 +10,7 @@ using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.UI;
 
+[SupportedOSPlatform("MacOS")]
 internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 {
 	private readonly IShaderCompiler _shaderCompiler;
@@ -43,14 +45,47 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture renderTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbufferTexture, IGfxTexture lightingSource)
 	{
-		if (_pipeline is null || _fontTexture is null || frame.Commands.Length == 0)
+		var commandList = context.CommandList as MetalCommandList;
+		if (commandList is null)
 		{
 			return;
 		}
 
-		var commandList = context.CommandList;
+		var backbuffer = backbufferTexture as MetalBackbufferTexture;
+		var lighting = lightingSource as MetalTexture;
+		if (backbuffer is null || lighting is null)
+		{
+			return;
+		}
+
+		var source = lighting.Texture;
+		var destination = backbuffer.Drawable.Texture;
+		if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var width = Math.Min(source.Width, destination.Width);
+		var height = Math.Min(source.Height, destination.Height);
+		commandList.CopyTexture(source, destination, (uint)width, (uint)height);
+		commandList.SetPresentDrawable(backbuffer.Drawable);
+
+		if (frame.Commands.Length == 0)
+		{
+			return;
+		}
+
+		if (_pipeline is null || _fontTexture is null)
+		{
+			return;
+		}
+
+		var targets = new PassTargets(new[] { new ColorTargetBinding(backbuffer) });
+		var viewport = new Viewport(0, 0, backbuffer.Descriptor.Width, backbuffer.Descriptor.Height);
+		commandList.BeginPass(targets, viewport);
+
 		EnsureBuffers(frame);
 
 		commandList.BindPipeline(_pipeline);
@@ -127,6 +162,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 				cmd.VtxOffset,
 				0));
 		}
+
+		commandList.EndPass();
 	}
 
 	private void EnsureBuffers(UiFrameData frame)

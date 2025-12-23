@@ -8,7 +8,7 @@ namespace WolfEngine.TestGame;
 
 public static partial class EditorGui
 {
-    public static void DrawComponentEditor(World world, Entity entity, Type componentType)
+    private static void DrawComponentEditor(World world, Entity entity, Type componentType)
     {
         if (componentType.GetInterface(nameof(IEntityComponent)) is null)
             return;
@@ -34,6 +34,7 @@ public static partial class EditorGui
             if (ImGui.InputText("Name", ref value, 256))
                 name.Name = value;
 
+            ImGui.Separator();
             ImGui.PopID();
             return;
         }
@@ -89,6 +90,7 @@ public static partial class EditorGui
             }
         }
 
+        ImGui.Separator();
         ImGui.PopID();
     }
 }

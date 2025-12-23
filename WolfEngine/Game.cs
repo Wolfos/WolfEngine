@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Numerics;
-using System.Linq;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;

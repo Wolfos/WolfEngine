@@ -54,15 +54,44 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture renderTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbufferTexture, IGfxTexture lightingSource)
 	{
-		if (_pipelineState.Handle is null || _fontTexture.Handle is null || frame.Commands.Length == 0)
+		var backbuffer = backbufferTexture as ID3D12BackendTexture;
+		var lighting = lightingSource as ID3D12BackendTexture;
+		if (backbuffer is null || lighting is null)
 		{
 			return;
 		}
 
-		var backbuffer = renderTarget as ID3D12BackendTexture
-		                 ?? throw new InvalidOperationException("Render target was not a D3D12 texture.");
+		var commandList = (context.CommandList as Backend.D3D12.D3D12CommandList)
+		                  ?? throw new InvalidOperationException("ImGui renderer requires D3D12 command list.");
+		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
+
+		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		barrier.Anonymous.Transition = new()
+		{
+			PResource = backbuffer.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.CopyDest
+		};
+		native->ResourceBarrier(1, &barrier);
+
+		native->CopyResource(backbuffer.Resource, lighting.Resource);
+
+		barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
+		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
+		native->ResourceBarrier(1, &barrier);
+
+		if (frame.Commands.Length == 0)
+		{
+			return;
+		}
+
+		if (_pipelineState.Handle is null || _fontTexture.Handle is null)
+		{
+			return;
+		}
 
 		EnsureBuffers(frame);
 
@@ -86,10 +115,6 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 		_vertexBuffer.Unmap(0, (D3DRange*) null);
 		_indexBuffer.Unmap(0, (D3DRange*) null);
-
-		var commandList = (context.CommandList as Backend.D3D12.D3D12CommandList)
-		                  ?? throw new InvalidOperationException("ImGui renderer requires D3D12 command list.");
-		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
 
 		var rtvHandle = backbuffer.RenderTargetView
 		                ?? throw new InvalidOperationException("Backbuffer missing RTV.");

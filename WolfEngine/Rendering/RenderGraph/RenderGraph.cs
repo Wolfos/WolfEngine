@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
@@ -197,13 +196,13 @@ public sealed class RenderGraph
 		
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-		var frameResources = _frameBuilder.BeginFrame(frameBufferSize, backBuffer);
+		_frameBuilder.BeginFrame(frameBufferSize, backBuffer);
 		_frameBuilder.SetUiFrame(uiFrame);
 
 		_frameBuilder.Build(this);
 		Execute();
 
-		_renderer.Render(_resourceRegistry, backBuffer, frameResources.LightingBuffer);
+		_renderer.Render(_resourceRegistry, backBuffer);
 
 		_resourceRegistry.EndFrame();
 

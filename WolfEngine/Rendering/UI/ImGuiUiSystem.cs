@@ -42,6 +42,7 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var io = ImGui.GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
+		ApplyStyle();
 		_fontAtlas = BuildFontAtlas(io);
 	}
 
@@ -224,5 +225,33 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			Height = height,
 			PixelsRgba = fontPixels
 		};
+	}
+
+	private static void ApplyStyle()
+	{
+		var style = ImGui.GetStyle();
+		var textColor = new Vector4(0.93333334f, 0.93333334f, 0.93333334f, 1.0f);
+		var bgColor = new Vector4(0.20784314f, 0.21176471f, 0.23137255f, 1.0f);
+		var titleColor = new Vector4(0.11764706f, 0.12156863f, 0.13725491f, 1.0f);
+		var buttonColor = new Vector4(0.14117648f, 0.14509805f, 0.16078432f, 1.0f);
+		
+		style.Colors[(int)ImGuiCol.Text] = textColor;
+		style.Colors[(int)ImGuiCol.WindowBg] = bgColor;
+		style.Colors[(int)ImGuiCol.PopupBg] = bgColor;
+		style.Colors[(int)ImGuiCol.TitleBg] = titleColor;
+		style.Colors[(int)ImGuiCol.TitleBgCollapsed] = titleColor;
+		style.Colors[(int)ImGuiCol.TitleBgActive] = titleColor;
+		style.Colors[(int)ImGuiCol.Button] = buttonColor;
+		style.Colors[(int)ImGuiCol.FrameBg] = buttonColor;
+		style.Colors[(int)ImGuiCol.Header] = bgColor;
+		style.Colors[(int)ImGuiCol.Border] = bgColor;
+		
+		style.Colors[(int)ImGuiCol.Tab] = bgColor;
+		style.Colors[(int)ImGuiCol.TabDimmed] = bgColor;
+		style.Colors[(int)ImGuiCol.TabSelected] = bgColor;
+		style.Colors[(int)ImGuiCol.TabDimmedSelected] = bgColor;
+		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = bgColor;
+		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
+		style.Colors[(int)ImGuiCol.TabSelectedOverline] = bgColor;
 	}
 }

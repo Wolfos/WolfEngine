@@ -1413,8 +1413,7 @@ private sealed class MeshResources
 
 	public void Render(
 		RenderGraphResourceRegistry resourceRegistry,
-		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle presentedTexture)
+		RenderGraphResourceHandle backBuffer)
 	{
 		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture
