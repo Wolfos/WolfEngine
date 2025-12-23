@@ -15,11 +15,9 @@ public interface IRenderer
 	Int2 GetWindowSize();
 	void BeginFrame();
 	void Render(
-		float deltaTime,
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle presentedTexture,
-		UiFrameData uiFrame);
+		RenderGraphResourceHandle presentedTexture);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	IImGuiRenderer GetImGuiRenderer();

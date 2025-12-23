@@ -596,11 +596,9 @@ internal unsafe class WolfRendererMetal : IRenderer
     }
 
     public void Render(
-        float deltaTime,
         RenderGraphResourceRegistry resourceRegistry,
         RenderGraphResourceHandle backBuffer,
-        RenderGraphResourceHandle presentedTexture,
-        UiFrameData uiFrame)
+        RenderGraphResourceHandle presentedTexture)
     {
         if (_useRenderGraph)
         {

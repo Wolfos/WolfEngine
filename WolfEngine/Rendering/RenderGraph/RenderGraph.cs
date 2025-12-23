@@ -206,7 +206,7 @@ public sealed class RenderGraph
 		_frameBuilder.Build(this);
 		Execute();
 
-		_renderer.Render(deltaTime, _resourceRegistry, backBuffer, frameResources.LightingBuffer, uiFrame);
+		_renderer.Render(_resourceRegistry, backBuffer, frameResources.LightingBuffer);
 
 		_resourceRegistry.EndFrame();
 

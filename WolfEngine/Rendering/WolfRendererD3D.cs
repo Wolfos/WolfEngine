@@ -1412,11 +1412,9 @@ private sealed class MeshResources
 	}
 
 	public void Render(
-		float deltaTime,
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle backBuffer,
-		RenderGraphResourceHandle presentedTexture,
-		UiFrameData uiFrame)
+		RenderGraphResourceHandle presentedTexture)
 	{
 		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
 		var backbufferTexture = backbufferResource as ID3D12BackendTexture

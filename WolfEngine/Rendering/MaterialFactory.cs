@@ -8,11 +8,11 @@ public interface IMaterialFactory
 	Material GetMaterial(
 		string shader,
 		Vector4 color,
-		Texture? albedoTexture = null,
-		Texture? metallicRoughnessTexture = null,
-		Texture? normalTexture = null,
-		Texture? emissiveTexture = null,
-		Texture? occlusionTexture = null);
+		Texture albedoTexture = null,
+		Texture metallicRoughnessTexture = null,
+		Texture normalTexture = null,
+		Texture emissiveTexture = null,
+		Texture occlusionTexture = null);
 }
 
 public class MaterialFactory : IMaterialFactory
@@ -29,11 +29,11 @@ public class MaterialFactory : IMaterialFactory
 	public Material GetMaterial(
 		string shader,
 		Vector4 color,
-		Texture? albedoTexture = null,
-		Texture? metallicRoughnessTexture = null,
-		Texture? normalTexture = null,
-		Texture? emissiveTexture = null,
-		Texture? occlusionTexture = null)
+		Texture albedoTexture = null,
+		Texture metallicRoughnessTexture = null,
+		Texture normalTexture = null,
+		Texture emissiveTexture = null,
+		Texture occlusionTexture = null)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{
