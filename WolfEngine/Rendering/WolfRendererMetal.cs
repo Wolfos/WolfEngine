@@ -32,7 +32,6 @@ internal unsafe class WolfRendererMetal : IRenderer
     private readonly IArenaAllocator _renderCommandAllocator;
     private readonly IMacOSInputHandler _inputHandler;
     private readonly MetalImGuiRenderer _imguiRenderer;
-    private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private readonly List<DrawInstruction> _drawCommands = new();
     private Camera _camera;
@@ -160,7 +159,6 @@ internal unsafe class WolfRendererMetal : IRenderer
             _renderCallback(0);
             if (_useRenderGraph == false)
             {
-                ProcessPendingCommands();
                 var rendered = RenderFrame();
 
                 if (rendered == false)
@@ -810,64 +808,6 @@ internal unsafe class WolfRendererMetal : IRenderer
     public IImGuiRenderer GetImGuiRenderer()
     {
         return _imguiRenderer;
-    }
-
-    private void ProcessPendingCommands()
-    {
-        while (_pendingCommands.TryDequeue(out var command))
-        {
-            switch (command.Type)
-            {
-                case RenderCommandType.CreateMesh:
-                    HandleCreateMeshCommand(command);
-                    break;
-                case RenderCommandType.DrawMesh:
-                    HandleDrawMeshCommand(command);
-                    break;
-                case RenderCommandType.SetCamera:
-                    HandleSetCameraCommand(command);
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(command.Type), command.Type, "Unsupported render command type.");
-            }
-        }
-    }
-
-    private void HandleCreateMeshCommand(RenderCommand command)
-    {
-        var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
-        if (payload.MeshHandle.Target is not Mesh mesh)
-        {
-            throw new InvalidOperationException("Mesh payload target was null.");
-        }
-        payload.MeshHandle.Free();
-        EnsureMeshResources(mesh);
-    }
-
-    private void HandleDrawMeshCommand(RenderCommand command)
-    {
-        var payload = command.ReadPayload<RenderCommand.DrawMeshPayload>();
-        if (payload.MeshHandle.Target is not Mesh mesh)
-        {
-            throw new InvalidOperationException("Mesh payload target was null.");
-        }
-        if (payload.MaterialHandle.Target is not Material material)
-        {
-            throw new InvalidOperationException("Material payload target was null.");
-        }
-        payload.MeshHandle.Free();
-        payload.MaterialHandle.Free();
-        EnsureMeshResources(mesh);
-        _drawCommands.Add(new DrawInstruction(mesh, material, payload.Transform));
-    }
-
-    private void HandleSetCameraCommand(RenderCommand command)
-    {
-        var payload = command.ReadPayload<RenderCommand.SetCameraPayload>();
-
-        _camera = payload.Camera;
-        _cameraTransform = payload.Transform;
-        _hasCamera = true;
     }
 
     private bool TryGetCameraMatrices(out Matrix4x4 viewProjection, out Vector3 position)

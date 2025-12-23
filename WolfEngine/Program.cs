@@ -31,7 +31,6 @@ class Program
         services.AddSingleton<IMaterialFactory, MaterialFactory>();
         services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
         services.AddSingleton<IArenaAllocator, ArenaAllocator>();
-        services.AddSingleton<IRenderCommandFactory, RenderCommandFactory>();
         services.AddSingleton<IInputSystem, InputSystem>();
         services.AddSingleton<DeferredLightingPass>();
         services.AddSingleton<ImGuiUiSystem>();

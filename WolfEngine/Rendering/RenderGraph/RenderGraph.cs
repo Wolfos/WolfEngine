@@ -20,7 +20,6 @@ public sealed class RenderGraph
 	private readonly List<RenderGraphPass> _passes = new();
 	private readonly Queue<RenderGraphPass> _passPool = new();
 	private readonly RenderGraphCompiler _compiler;
-	private readonly ConcurrentQueue<RenderCommand> _pendingCommands = new();
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
@@ -194,10 +193,7 @@ public sealed class RenderGraph
 		}
 		_currentSnapshot = snapshot;
 		_activeSnapshot = snapshot;
-
-		// Process pending render commands to build scene data
-		ProcessCommands();
-
+		
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
 		var frameResources = _frameBuilder.BeginFrame(frameBufferSize, backBuffer);
@@ -216,33 +212,8 @@ public sealed class RenderGraph
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
 
-	private void ProcessCommands()
-	{
-		while (_pendingCommands.TryDequeue(out var command))
-		{
-			switch (command.Type)
-			{
-				case RenderCommandType.CreateMesh:
-					HandleCreateMesh(command);
-					break;
-			}
-		}
-	}
-
-	private void HandleCreateMesh(RenderCommand command)
-	{
-		var payload = command.ReadPayload<RenderCommand.CreateMeshPayload>();
-		if (payload.MeshHandle.Target is Mesh mesh)
-		{
-			_renderer.EnsureMeshResources(mesh);
-		}
-
-		payload.MeshHandle.Free();
-	}
-
 	public IMaterialResources EnsureMaterialResources(Material material)
 	{
-		// TODO: Should probably be handled in resource registry
 		return _renderer.CreateMaterialResources(material);
 	}
 
@@ -251,10 +222,11 @@ public sealed class RenderGraph
 		return _renderer.CreateTextureResources(texture);
 	}
 
-	public void SubmitCommand(RenderCommand command)
+	public void EnsureMeshResources(Mesh mesh)
 	{
-		_pendingCommands.Enqueue(command);
+		_renderer.EnsureMeshResources(mesh);
 	}
+
 
 	private void ReleasePasses()
 	{

@@ -14,7 +14,6 @@ public class Game
 {
     private readonly IMaterialFactory _materialFactory;
     private readonly IThreeDFileImporter _fileImporter;
-    private readonly IRenderCommandFactory _renderCommandFactory;
     private readonly RenderGraph _renderGraph;
     private readonly IRenderer _renderer;
     private readonly IInputSystem _inputSystem;
@@ -41,13 +40,11 @@ public class Game
     public Game(
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
-        IRenderCommandFactory renderCommandFactory,
         RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider,
         ITextureFactory textureFactory, SkyboxRenderer skyboxRenderer)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
-        _renderCommandFactory = renderCommandFactory ?? throw new ArgumentNullException(nameof(renderCommandFactory));
         _renderGraph = renderGraph;
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _inputSystem = inputSystem;
@@ -206,7 +203,7 @@ public class Game
                 emissiveTexture,
                 occlusionTexture);
 
-            _renderGraph.SubmitCommand(_renderCommandFactory.CreateMesh(importedMesh.Mesh));
+            _renderGraph.EnsureMeshResources(importedMesh.Mesh);
             var meshRenderer = new MeshRenderer
             {
                 Mesh = importedMesh.Mesh,
