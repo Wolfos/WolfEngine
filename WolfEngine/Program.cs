@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Importing;
 using WolfEngine.Input;
+using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
@@ -34,12 +35,15 @@ class Program
         services.AddSingleton<IInputSystem, InputSystem>();
         services.AddSingleton<DeferredLightingPass>();
         services.AddSingleton<ImGuiUiSystem>();
+        services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+        services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();
         
         if (OperatingSystem.IsMacOS())
         {
+            services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
             services.AddSingleton<IRenderer, WolfRendererMetal>();
             services.AddSingleton<Game>();
         }

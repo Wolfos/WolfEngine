@@ -1,6 +1,5 @@
 #nullable enable
 using System.Numerics;
-using System.Linq;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;

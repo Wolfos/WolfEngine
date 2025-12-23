@@ -18,9 +18,9 @@ public class Game
     private readonly RenderGraph _renderGraph;
     private readonly IRenderer _renderer;
     private readonly IInputSystem _inputSystem;
-    private readonly ImGuiUiSystem _imguiSystem;
+    private readonly IUiFrameProvider _imguiSystem;
     private readonly ITextureFactory _textureFactory;
-    private SkyboxResources? _skybox;
+    private SkyboxResources _skybox;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -42,7 +42,7 @@ public class Game
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
         IRenderCommandFactory renderCommandFactory,
-        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, ImGuiUiSystem imguiSystem, ITextureFactory textureFactory)
+        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider, ITextureFactory textureFactory)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
@@ -50,7 +50,7 @@ public class Game
         _renderGraph = renderGraph;
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _inputSystem = inputSystem;
-        _imguiSystem = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
+        _imguiSystem = uiFrameProvider ?? throw new ArgumentNullException(nameof(uiFrameProvider));
         _textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
     }
 
@@ -304,9 +304,7 @@ public class Game
 
         return new Mesh(vertices, indices);
     }
-
-    public ImGuiUiSystem GetImGuiSystem() => _imguiSystem;
-
+    
     private static (Camera, Transform) CreateCamera()
     {
         const int screenWidth = 1280;

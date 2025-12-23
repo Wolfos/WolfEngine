@@ -3,7 +3,6 @@ using System.Runtime.Versioning;
 using System.Text;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Platform;
 

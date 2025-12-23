@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
-using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
 

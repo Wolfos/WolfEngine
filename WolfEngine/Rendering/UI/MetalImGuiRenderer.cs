@@ -1,5 +1,3 @@
-using System;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -8,7 +6,6 @@ using SharpMetal.Metal;
 using WolfEngine.Platform;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
-using WolfEngine.Rendering;
 
 namespace WolfEngine.Rendering.UI;
 

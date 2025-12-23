@@ -1,5 +1,4 @@
-﻿using System;
-using System.Numerics;
+﻿using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Input;
 

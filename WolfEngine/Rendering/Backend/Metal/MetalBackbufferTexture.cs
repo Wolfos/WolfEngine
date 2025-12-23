@@ -1,5 +1,4 @@
 using SharpMetal.QuartzCore;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;

@@ -1,4 +1,3 @@
-using System;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;

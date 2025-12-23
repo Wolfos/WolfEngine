@@ -24,22 +24,22 @@ public sealed class RenderGraph
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
-	private readonly ImGuiUiSystem _imguiSystem;
-	private FrameSnapshot? _currentSnapshot;
-	private FrameSnapshot? _activeSnapshot;
+	private readonly IUiFrameProvider _uiFrameProvider;
+	private FrameSnapshot _currentSnapshot;
+	private FrameSnapshot _activeSnapshot;
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
 		DeferredLightingPass deferredLightingPass,
-		ImGuiUiSystem imguiSystem)
+		IUiFrameProvider uiFrameProvider)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
-		_imguiSystem = imguiSystem;
+		_uiFrameProvider = uiFrameProvider;
 		_compiler = new(resourceRegistry);
 	}
 
@@ -179,7 +179,7 @@ public sealed class RenderGraph
 		ReleasePasses();
 
 		UiFrameData uiFrame;
-		if (_imguiSystem.TryConsumeLatest(out var latestUi))
+		if (_uiFrameProvider.TryConsumeLatest(out var latestUi))
 		{
 			uiFrame = latestUi;
 		}

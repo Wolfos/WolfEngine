@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Concurrent;
 using System.Numerics;
 using ImGuiNET;
@@ -19,6 +18,9 @@ public interface IImGuiInputSink
 public interface IUiFrameProvider
 {
 	bool TryConsumeLatest(out UiFrameData frame);
+	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize);
+	public void RunGui(Action<World> draw, World world);
+
 }
 
 /// <summary>

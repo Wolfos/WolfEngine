@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using ImGuiNET;
 using WolfEngine.ECS;
 
@@ -16,6 +14,8 @@ public static partial class EditorGui
     {
         DockSpace();
 
+        ImGui.SetNextWindowPos(new System.Numerics.Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new System.Numerics.Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Entities");
         world.GetAllEntities(_allEntities);
 
@@ -32,6 +32,8 @@ public static partial class EditorGui
         ImGui.End();
 
 
+        ImGui.SetNextWindowPos(new System.Numerics.Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new System.Numerics.Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Components");
         if (_hasSelectedEntity)
         {

@@ -1,6 +1,5 @@
 #nullable enable
 
-using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Silk.NET.Direct3D12;
