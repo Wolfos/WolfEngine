@@ -33,6 +33,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private readonly IImGuiRenderer _imGuiRenderer;
 	private SkyboxResources? _skybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
@@ -43,12 +44,13 @@ public sealed class RenderGraphFrameBuilder
 
 	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
-		DeferredLightingPass deferredLightingPass)
+		DeferredLightingPass deferredLightingPass, IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		_deferredLightingPass = deferredLightingPass;
-		
+		_imGuiRenderer = imGuiRenderer;
+
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_imguiExecute = ExecuteImGui;
@@ -211,8 +213,6 @@ public sealed class RenderGraphFrameBuilder
 
 	private unsafe void ExecuteImGui(RenderGraphContext context)
 	{
-		var imguiRenderer = _renderer.GetImGuiRenderer();
-
 		if (context.CommandList is D3D12CommandList commandList)
 		{
 			var backbuffer = context.GetTexture(_frameResources.Backbuffer) as ID3D12BackendTexture;
@@ -245,8 +245,8 @@ public sealed class RenderGraphFrameBuilder
 				return;
 			}
 
-			imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-			imguiRenderer.Record(context, _uiFrame, backbuffer);
+			_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
+			_imGuiRenderer.Record(context, _uiFrame, backbuffer);
 			return;
 		}
 
@@ -279,8 +279,8 @@ public sealed class RenderGraphFrameBuilder
 			var targets = new PassTargets(new[] { new ColorTargetBinding(backbuffer) });
 			var viewport = new WolfEngine.Rendering.Abstraction.Viewport(0, 0, backbuffer.Descriptor.Width, backbuffer.Descriptor.Height);
 			metalCommandList.BeginPass(targets, viewport);
-			imguiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-			imguiRenderer.Record(context, _uiFrame, backbuffer);
+			_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
+			_imGuiRenderer.Record(context, _uiFrame, backbuffer);
 			metalCommandList.EndPass();
 		}
 	}

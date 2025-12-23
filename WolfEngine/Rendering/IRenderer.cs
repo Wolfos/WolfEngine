@@ -20,5 +20,4 @@ public interface IRenderer
 		RenderGraphResourceHandle presentedTexture);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
-	IImGuiRenderer GetImGuiRenderer();
 }

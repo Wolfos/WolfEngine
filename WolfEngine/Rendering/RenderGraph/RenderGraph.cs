@@ -32,12 +32,13 @@ public sealed class RenderGraph
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
 		DeferredLightingPass deferredLightingPass,
-		IUiFrameProvider uiFrameProvider)
+		IUiFrameProvider uiFrameProvider, 
+		IImGuiRenderer imGuiRenderer)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass);
+		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, imGuiRenderer);
 		_uiFrameProvider = uiFrameProvider;
 		_compiler = new(resourceRegistry);
 	}

@@ -1,22 +1,18 @@
-using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
-using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using Silk.NET.Core.Native;
 using Silk.NET.SDL;
 using WolfEngine.Backend.Metal;
-using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
-using WolfEngine.Rendering.UI;
 using AbstractionBlendMode = WolfEngine.Rendering.Abstraction.BlendMode;
 
 namespace WolfEngine;
@@ -29,17 +25,10 @@ internal unsafe class WolfRendererMetal : IRenderer
     private readonly int _width;
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
-    private readonly IArenaAllocator _renderCommandAllocator;
     private readonly IMacOSInputHandler _inputHandler;
-    private readonly MetalImGuiRenderer _imguiRenderer;
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
-    private readonly List<DrawInstruction> _drawCommands = new();
-    private Camera _camera;
-    private Transform _cameraTransform;
-    private bool _hasCamera;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
-    private readonly MTLClearColor _clearColor = new() { red = 0.392, green = 0.584, blue = 0.929, alpha = 1.0 };
     private readonly Sdl _sdl;
 
     private MTLDevice _device;
@@ -57,7 +46,6 @@ internal unsafe class WolfRendererMetal : IRenderer
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
-    private bool _useRenderGraph;
 
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
@@ -87,31 +75,13 @@ internal unsafe class WolfRendererMetal : IRenderer
         public Vector2 UV;
         public Vector4 Tangent;
     }
-    
-    private readonly struct DrawInstruction
-    {
-        public DrawInstruction(Mesh mesh, Material material, Matrix4x4 transform)
-        {
-            Mesh = mesh;
-            Material = material;
-            Transform = transform;
-        }
 
-        public Mesh Mesh { get; }
-
-        public Material Material { get; }
-
-        public Matrix4x4 Transform { get; }
-    }
-
-    public WolfRendererMetal(IShaderCompiler shaderCompiler, IArenaAllocator renderCommandAllocator, IMacOSInputHandler inputHandler)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler, IMacOSInputHandler inputHandler)
     {
         _width = 1280;
         _height = 720;
         _shaderCompiler = shaderCompiler;
-        _renderCommandAllocator = renderCommandAllocator ?? throw new ArgumentNullException(nameof(renderCommandAllocator));
         _inputHandler = inputHandler;
-        _imguiRenderer = new MetalImGuiRenderer(shaderCompiler);
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -126,7 +96,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         _startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
         _updateCallback = update ?? throw new ArgumentNullException(nameof(update));
         _renderCallback = render ?? throw new ArgumentNullException(nameof(render));
-        _useRenderGraph = true;
 
         try
         {
@@ -157,15 +126,6 @@ internal unsafe class WolfRendererMetal : IRenderer
             // TODO: Delta time
             _updateCallback(0);
             _renderCallback(0);
-            if (_useRenderGraph == false)
-            {
-                var rendered = RenderFrame();
-
-                if (rendered == false)
-                {
-                    _sdl.Delay(1);
-                }
-            }
         }
     }
 
@@ -348,94 +308,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
     }
 
-    private bool RenderFrame()
-    {
-        if (_commandQueue.NativePtr == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        if (_drawCommands.Count == 0)
-        {
-            _renderCommandAllocator.Reset();
-            return false;
-        }
-
-        if (_hasCamera == false)
-        {
-            _drawCommands.Clear();
-            _renderCommandAllocator.Reset();
-            return false;
-        }
-
-        if (TryGetCameraMatrices(out var viewProjection, out var cameraPosition) == false)
-        {
-            _renderCommandAllocator.Reset();
-            return false;
-        }
-
-        UpdateDrawableSize();
-
-        var drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
-        if (drawablePtr == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        if (_depthTexture.NativePtr == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        using var renderPassDescriptor = new MTLRenderPassDescriptor();
-        var drawable = new CAMetalDrawable(drawablePtr);
-
-        var colorAttachment = renderPassDescriptor.ColorAttachments.Object(0);
-        colorAttachment.Texture = drawable.Texture;
-        colorAttachment.LoadAction = MTLLoadAction.Clear;
-        colorAttachment.StoreAction = MTLStoreAction.Store;
-        colorAttachment.ClearColor = _clearColor;
-        renderPassDescriptor.ColorAttachments.SetObject(colorAttachment, 0);
-
-        var depthAttachment = renderPassDescriptor.DepthAttachment;
-        depthAttachment.Texture = _depthTexture;
-        depthAttachment.LoadAction = MTLLoadAction.Clear;
-        depthAttachment.StoreAction = MTLStoreAction.DontCare;
-        depthAttachment.ClearDepth = 1.0;
-
-        var commandBuffer = _commandQueue.CommandBuffer();
-        var encoder = commandBuffer.RenderCommandEncoder(renderPassDescriptor);
-
-        if (_hasDrawableSize)
-        {
-            var viewport = new MTLViewport
-            {
-                originX = 0,
-                originY = 0,
-                width = _drawableWidth,
-                height = _drawableHeight,
-                znear = 0,
-                zfar = 1
-            };
-            encoder.SetViewport(viewport);
-        }
-
-        if (_depthState.NativePtr != IntPtr.Zero)
-        {
-            encoder.SetDepthStencilState(_depthState);
-        }
-        encoder.SetCullMode(MTLCullMode.Back);
-        encoder.SetFrontFacingWinding(MTLWinding.Clockwise);
-
-        encoder.EndEncoding();
-        commandBuffer.PresentDrawable(drawable);
-        commandBuffer.Commit();
-
-        _drawCommands.Clear();
-        _renderCommandAllocator.Reset();
-        return true;
-    }
-
     private void Shutdown()
     {
         if (_depthTexture.NativePtr != IntPtr.Zero)
@@ -598,41 +470,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         RenderGraphResourceHandle backBuffer,
         RenderGraphResourceHandle presentedTexture)
     {
-        if (_useRenderGraph)
-        {
-            return;
-        }
-
-        var backbufferTexture = resourceRegistry.GetTexture(backBuffer) as MetalBackbufferTexture;
-        var lightingTexture = resourceRegistry.GetTexture(presentedTexture) as MetalTexture;
-        if (backbufferTexture is null || lightingTexture is null)
-        {
-            return;
-        }
-
-        if (_commandQueue.NativePtr == IntPtr.Zero || backbufferTexture.Drawable.NativePtr == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var source = lightingTexture.Texture;
-        var destination = backbufferTexture.Drawable.Texture;
-        if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var commandBuffer = _commandQueue.CommandBuffer();
-        var blit = commandBuffer.BlitCommandEncoder();
-        var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
-        var width = Math.Min(source.Width, destination.Width);
-        var height = Math.Min(source.Height, destination.Height);
-        var size = new MTLSize { width = width, height = height, depth = 1 };
-        blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
-        blit.EndEncoding();
-
-        commandBuffer.PresentDrawable(backbufferTexture.Drawable);
-        commandBuffer.Commit();
+        // TODO: DirectX needs this method but Metal does not, can that be more elegant?
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)
@@ -688,58 +526,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         MTLPixelFormat.RGBA32Float => 16,
         _ => throw new InvalidOperationException($"Unsupported pixel format for upload: {format}.")
     };
-
-    private MTLRenderPipelineState CreateRenderPipeline(MTLLibrary shaderLibrary)
-    {
-        var vertexShader = shaderLibrary.NewFunction(NSStringHelper.From("vertexShader"));
-        var fragmentShader = shaderLibrary.NewFunction(NSStringHelper.From("fragmentShader"));
-
-        var pipeline = new MTLRenderPipelineDescriptor();
-        pipeline.VertexFunction = vertexShader;
-        pipeline.FragmentFunction = fragmentShader;
-        pipeline.VertexDescriptor = CreateVertexDescriptor();
-        pipeline.DepthAttachmentPixelFormat = MTLPixelFormat.Depth32Float;
-
-        var colorAttachment = pipeline.ColorAttachments.Object(0);
-        colorAttachment.PixelFormat = MTLPixelFormat.BGRA8Unorm;
-        pipeline.ColorAttachments.SetObject(colorAttachment, 0);
-
-        var pipelineStateError = new NSError(IntPtr.Zero);
-        var pipelineState = _device.NewRenderPipelineState(pipeline, ref pipelineStateError);
-        if (pipelineStateError != IntPtr.Zero)
-        {
-            throw new Exception($"Failed to create render pipeline state! {pipelineStateError.LocalizedDescription.ToManagedString()}");
-        }
-
-        return pipelineState;
-    }
-
-    private static MTLVertexDescriptor CreateVertexDescriptor()
-    {
-        var descriptor = new MTLVertexDescriptor();
-
-        var attributes = descriptor.Attributes;
-        var positionAttribute = attributes.Object(0);
-        positionAttribute.Format = MTLVertexFormat.Float4;
-        positionAttribute.Offset = 0;
-        positionAttribute.BufferIndex = 0;
-        attributes.SetObject(positionAttribute, 0);
-
-        var normalAttribute = attributes.Object(1);
-        normalAttribute.Format = MTLVertexFormat.Float4;
-        normalAttribute.Offset = (ulong)Marshal.SizeOf<Vector4>();
-        normalAttribute.BufferIndex = 0;
-        attributes.SetObject(normalAttribute, 1);
-
-        var layouts = descriptor.Layouts;
-        var layout = layouts.Object(0);
-        layout.Stride = (ulong)Marshal.SizeOf<VertexData>();
-        layout.StepFunction = MTLVertexStepFunction.PerVertex;
-        layout.StepRate = 1;
-        layouts.SetObject(layout, 0);
-
-        return descriptor;
-    }
 
     private MeshResources UploadMesh(Mesh mesh)
     {
@@ -804,27 +590,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             _meshResources[mesh] = resources;
         } 
     }
-
-    public IImGuiRenderer GetImGuiRenderer()
-    {
-        return _imguiRenderer;
-    }
-
-    private bool TryGetCameraMatrices(out Matrix4x4 viewProjection, out Vector3 position)
-    {
-        var world = _cameraTransform.GetTransform();
-        if (Matrix4x4.Invert(world, out var view) == false ||
-            Matrix4x4.Decompose(world, out _, out _, out position) == false)
-        {
-            viewProjection = Matrix4x4.Identity;
-            position = Vector3.Zero;
-            return false;
-        }
-
-        viewProjection = view * _camera.Perspective;
-        return true;
-    }
-
+    
     private static bool NearlyEqual(double a, double b)
     {
         const double epsilon = 0.5;

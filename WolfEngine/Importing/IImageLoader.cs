@@ -1,5 +1,3 @@
-using WolfEngine.Importing;
-
 namespace WolfEngine.Importing;
 
 public interface IImageLoader

@@ -1599,6 +1599,4 @@ private sealed class MeshResources
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern bool CloseHandle(nint hObject);
-
-	public IImGuiRenderer GetImGuiRenderer() => _imguiRenderer;
 }

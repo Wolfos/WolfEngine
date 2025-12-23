@@ -44,11 +44,13 @@ class Program
         if (OperatingSystem.IsMacOS())
         {
             services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
+            services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererMetal>();
             services.AddSingleton<Game>();
         }
         else if (OperatingSystem.IsWindows())
         {
+            services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererD3D>();
             services.AddSingleton<Game>();
         }
