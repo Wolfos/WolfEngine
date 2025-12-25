@@ -45,7 +45,9 @@ float3 DecodeNormal(float3 encoded)
 float2 DirToEnvUV(float3 dir)
 {
     dir = normalize(dir);
-    return float2(atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f, dir.y * 0.5f + 0.5f);
+    float u = atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f;
+    float v = dir.y * 0.5f + 0.5f;
+    return float2(1.0f - u, v);
 }
 
 float3 SampleEnvironment(float3 dir)
@@ -72,6 +74,17 @@ float3 SamplePrefiltered(float3 dir, float roughness)
     float3 p0 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v0), 0.0f).rgb;
     float3 p1 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v1), 0.0f).rgb;
     return lerp(p0, p1, t);
+}
+
+float3 ReconstructWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
+{
+    float2 ndc;
+    ndc.x = (float(pixel.x) + 0.5f) / float(size.x) * 2.0f - 1.0f;
+    ndc.y = -((float(pixel.y) + 0.5f) / float(size.y) * 2.0f - 1.0f);
+
+    float4 clip = float4(ndc, depth, 1.0f);
+    float4 worldPosH = mul(clip, invViewProjection);
+    return worldPosH.xyz / worldPosH.w;
 }
 
 [numthreads(8, 8, 1)]
@@ -111,13 +124,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float3 viewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invProjection);
-    float3 viewDir = ComputeViewDir(viewPos);
-
-    
-    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
-    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
+    float3 worldPos = ReconstructWorldPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invViewProjection);
+    float3 viewDir = normalize(-worldPos);
     float3 color = albedo * (1.0f - metallic);
+
 
     [unroll]
     for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
@@ -132,9 +142,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         if (type >= 0.5f) // point
         {
-            float3 lightPos = light.positionRange.xyz;
+            float3 lightPos = light.positionRange.xyz - camera.cameraOrigin;
             float range = max(light.positionRange.w, 0.001f);
-            float3 toLight = lightPos - viewPos;
+            float3 toLight = lightPos - worldPos;
             float distSq = dot(toLight, toLight);
             float dist = sqrt(distSq);
             L = dist > 0.0f ? toLight / dist : float3(0, 1, 0);
@@ -145,18 +155,21 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float NdotL = max(dot(normal, L), 0.0f);
         float3 diffuse = NdotL * albedo * lightColor * attenuation;
 
-        float roughness = lerp(0.2f, 0.8f, metallic);
+        float directRoughness = lerp(0.2f, 0.8f, metallic);
         float3 halfVector = normalize(L + viewDir);
-        float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, roughness));
+        float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, directRoughness));
         float3 specularComponent = specular * lightColor * 0.5f * attenuation;
 
         color += diffuse + specularComponent + emissive;
     }
 
-    //color += envIrradiance;
+    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
+    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
 
+    color += envIrradiance * 0.25f;
     // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
+    reflectionDir.y = -reflectionDir.y;
     float3 envColor = SamplePrefiltered(reflectionDir, roughness);
 
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);

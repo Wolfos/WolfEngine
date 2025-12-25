@@ -68,11 +68,8 @@ struct PSOutput
 PSOutput fragmentShader(VSOutput input)
 {
     PSOutput output;
-
-    
     
     float3 normal = normalize(input.normal);
-
 
     SamplerState sampler = GetSampler(samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(albedoHandle);
@@ -81,14 +78,16 @@ PSOutput fragmentShader(VSOutput input)
     Texture2D<float4> occlusionTex = GetTexture(occlusionHandle);
     Texture2D<float4> emissiveTex = GetTexture(emissiveHandle);
 
-
     float4 albedoSample = albedoTex.Sample(sampler, input.uv);
     float3 tangentNormal = normalize(normalTex.Sample(sampler, input.uv).rgb * 2.0f - 1.0f);
     float4 mrSample = metallicRoughnessTex.Sample(sampler, input.uv);
     float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
-    normal += tangentNormal * 0.0f;
-    normal += (mrSample.xyz + occlusionSample.xyz + emissiveSample.xyz + albedoSample.xyz) * 0.0f;
+    float3 N = normal;
+    float3 T = normalize(input.tangent.xyz);
+    float3 B = normalize(cross(N, T) * input.tangent.w);
+    float3x3 TBN = float3x3(T, B, N);
+    normal = normalize(mul(tangentNormal, TBN));
    
     float metallic = mrSample.b;
     float roughness = mrSample.g;
