@@ -39,7 +39,7 @@ void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
     float3 n = EquirectToDir(uv);
 
-    const uint SAMPLE_COUNT = 64;
+    const uint SAMPLE_COUNT = 1024;
     float3 sum = 0.0f;
     float weight = 0.0f;
     [loop]
@@ -50,12 +50,14 @@ void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
         if (NdotL > 0.0f)
         {
             float2 envUV = DirToEquirect(l);
+            envUV.x = frac(envUV.x);
+            envUV.y = saturate(envUV.y);
             float3 c = environmentTex.SampleLevel(linearClamp, envUV, 0.0f).rgb;
             sum += c * NdotL;
             weight += NdotL;
         }
     }
 
-    float3 irradiance = weight > 0.0f ? sum / weight : 0.0f;
+    float3 irradiance = weight > 0.0f ? (sum / weight) * 3.14159265f : 0.0f;
     irradianceOut[id.xy] = float4(irradiance, 1.0f);
 }

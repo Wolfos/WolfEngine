@@ -203,10 +203,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     color += emissive;
 
     Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
-    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
+    float3 envNormal = normal;
+    envNormal.y = -envNormal.y;
+    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(envNormal), 0.0f).rgb;
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    float3 kS = FresnelSchlick(saturate(dot(normal, viewDir)), F0);
-    float3 kD = (1.0f - kS) * (1.0f - metallic);
+    float3 kD = (1.0f - metallic) * (1.0f - F0);
     color += envIrradiance * kD * albedo / PI;
 
     // Image-based reflection (prefiltered)
