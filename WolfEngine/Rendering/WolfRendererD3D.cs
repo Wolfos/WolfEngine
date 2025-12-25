@@ -1377,6 +1377,7 @@ private sealed class MeshResources
 			return;
 		}
 
+		Screen.CurrentResolution = newSize;
 		_framebufferSize = newSize;
 
 		WaitForGpu();

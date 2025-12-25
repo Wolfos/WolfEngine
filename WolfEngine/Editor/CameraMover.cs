@@ -13,7 +13,7 @@ public struct CameraMover : IEntityComponent
 	public bool Initialized;
 }
 
-public class CameraMoverSystem
+public class CameraMoverSystem: IUpdateable
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly World _world;

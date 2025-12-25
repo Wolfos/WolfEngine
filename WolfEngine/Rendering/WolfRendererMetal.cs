@@ -277,6 +277,9 @@ internal unsafe class WolfRendererMetal : IRenderer
         var size = new NSPoint(drawableWidth, drawableHeight);
         ObjCNative.ObjcMsgSendDrawableSize(_metalLayer.NativePtr, DrawableSizeSelector.SelPtr, size);
 
+        var sizeInt2 = new Int2(drawableWidth, drawableHeight);
+        Screen.CurrentResolution = sizeInt2;
+
         if (_gfxDevice is ITexturePoolDevice poolDevice)
         {
             poolDevice.ClearTexturePool();

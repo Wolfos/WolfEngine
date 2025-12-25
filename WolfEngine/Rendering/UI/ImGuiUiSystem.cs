@@ -28,12 +28,17 @@ public interface IUiFrameProvider
 /// </summary>
 public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 {
+	private const string FontPath = "Assets/Fonts/Inter-VariableFont_opsz,wght.ttf";
+	private const float BaseFontSize = 14.0f;
+	private const float FontScaleEpsilon = 0.01f;
 	private readonly ConcurrentQueue<UiFrameData> _pendingFrames = new();
 	private readonly IntPtr _context;
 	private readonly bool[] _mouseButtons = new bool[5];
 	private Vector2 _mousePosition = new(-1, -1);
 	private Vector2 _mouseWheel = Vector2.Zero;
-	private readonly ImGuiFontAtlas _fontAtlas;
+	private ImGuiFontAtlas _fontAtlas;
+	private float _fontDpiScale = 1.0f;
+	private bool _fontAtlasDirty = true;
 
 	public ImGuiUiSystem()
 	{
@@ -42,10 +47,8 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var io = ImGui.GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-		io.Fonts.Clear();
-		io.Fonts.AddFontFromFileTTF("Assets/Fonts/Inter-VariableFont_opsz,wght.ttf", 14.0f);
 		ApplyStyle();
-		_fontAtlas = BuildFontAtlas(io);
+		RebuildFonts(1.0f);
 	}
 
 	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize)
@@ -63,6 +66,11 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		else
 		{
 			io.DisplayFramebufferScale = Vector2.One;
+		}
+		var dpiScale = (io.DisplayFramebufferScale.X + io.DisplayFramebufferScale.Y) * 0.5f;
+		if (dpiScale > 0.0f && Math.Abs(dpiScale - _fontDpiScale) > FontScaleEpsilon)
+		{
+			RebuildFonts(dpiScale);
 		}
 
 		for (var i = 0; i < _mouseButtons.Length; i++)
@@ -155,11 +163,12 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			Vertices = verts,
 			Indices = indices,
 			Commands = commands.ToArray(),
-			HasFontAtlas = _fontAtlas.PixelsRgba.Length > 0,
+			HasFontAtlas = _fontAtlasDirty && _fontAtlas.PixelsRgba.Length > 0,
 			FontAtlas = _fontAtlas
 		};
 
 		_pendingFrames.Enqueue(frame);
+		_fontAtlasDirty = false;
 		while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out _))
 		{
 		}
@@ -204,6 +213,18 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	public void AddMouseScroll(Vector2 scroll)
 	{
 		_mouseWheel += scroll;
+	}
+
+	private void RebuildFonts(float dpiScale)
+	{
+		ImGui.SetCurrentContext(_context);
+		var io = ImGui.GetIO();
+		_fontDpiScale = dpiScale;
+		io.FontGlobalScale = dpiScale > 0.0f ? 1.0f / dpiScale : 1.0f;
+		io.Fonts.Clear();
+		io.Fonts.AddFontFromFileTTF(FontPath, BaseFontSize * dpiScale);
+		_fontAtlas = BuildFontAtlas(io);
+		_fontAtlasDirty = true;
 	}
 
 	private static ImGuiFontAtlas BuildFontAtlas(ImGuiIOPtr io)

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Numerics;
+using Silk.NET.SDL;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 using WolfEngine.Importing;
 using WolfEngine.Input;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Editor;
+using Thread = System.Threading.Thread;
 
 namespace WolfEngine;
 
@@ -14,11 +16,11 @@ public class Game
     private readonly IMaterialFactory _materialFactory;
     private readonly IThreeDFileImporter _fileImporter;
     private readonly RenderGraph _renderGraph;
-    private readonly IRenderer _renderer;
     private readonly IInputSystem _inputSystem;
     private readonly IUiFrameProvider _imguiSystem;
     private readonly ITextureFactory _textureFactory;
     private readonly SkyboxRenderer _skyboxRenderer;
+    private readonly IRenderer _renderer;
     
     private Thread _gameThread = null!;
     private volatile bool _running;
@@ -26,7 +28,6 @@ public class Game
     
     private World _world;
     private Entity _camera;
-    private Entity _monkey;
 
     private readonly Stopwatch _frameStopwatch = Stopwatch.StartNew();
     private readonly Stopwatch _statsStopwatch = Stopwatch.StartNew();
@@ -34,22 +35,22 @@ public class Game
     private double _maxFrameTimeMs;
     private int _frameCount;
 
-    private CameraMoverSystem _cameraMoverSystem;
+    private List<IUpdateable> _updateSystems = new();
     
     public Game(
         IMaterialFactory materialFactory,
         IThreeDFileImporter fileImporter,
-        RenderGraph renderGraph, IRenderer renderer, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider,
-        ITextureFactory textureFactory, SkyboxRenderer skyboxRenderer)
+        RenderGraph renderGraph, IInputSystem inputSystem, IUiFrameProvider uiFrameProvider,
+        ITextureFactory textureFactory, SkyboxRenderer skyboxRenderer, IRenderer renderer)
     {
         _materialFactory = materialFactory;
         _fileImporter = fileImporter ?? throw new ArgumentNullException(nameof(fileImporter));
         _renderGraph = renderGraph;
-        _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
         _inputSystem = inputSystem;
         _imguiSystem = uiFrameProvider ?? throw new ArgumentNullException(nameof(uiFrameProvider));
         _textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
         _skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
+        _renderer = renderer;
     }
 
     public void Run()
@@ -104,8 +105,11 @@ public class Game
             _frameCount = 0;
             _statsStopwatch.Restart();
         }
-        
-        _cameraMoverSystem.Update(deltaTime);
+
+        foreach (var system in _updateSystems)
+        {
+            system.Update(deltaTime);
+        }
         
         PublishSnapshot();
 
@@ -124,7 +128,11 @@ public class Game
         _world = new();
 
         // Camera
-        _cameraMoverSystem = new(_inputSystem, _world);
+        var cameraMoverSystem = new CameraMoverSystem(_inputSystem, _world);
+        var cameraResolutionUpdater = new CameraResolutionUpdater(_world);
+        
+        _updateSystems.Add(cameraMoverSystem);
+        _updateSystems.Add(cameraResolutionUpdater);
 
         var (cameraComponent, cameraTransform) = CreateCamera();
         
@@ -147,7 +155,7 @@ public class Game
         _world.AddComponent(light, directionalLight);
         
         // Scene
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "DamagedHelmet.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "test.glb");
         var scene = _fileImporter.Import(meshPath);
         var runtimeTextures = scene.Textures.Select(_textureFactory.GetTexture).ToList();
         LoadSkybox();
@@ -267,14 +275,11 @@ public class Game
     
     private static (Camera, Transform) CreateCamera()
     {
-        const int screenWidth = 1280;
-        const int screenHeight = 720;
         const float fieldOfView = 70.0f;
 
         var camera = new Camera
         {
-            ScreenResolutionX = screenWidth,
-            ScreenResolutionY = screenHeight
+            ScreenResolution = Screen.CurrentResolution
         };
         camera.SetPerspective(fieldOfView);
 
