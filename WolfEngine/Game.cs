@@ -147,7 +147,7 @@ public class Game
         _world.AddComponent(light, directionalLight);
         
         // Scene
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "DamagedHelmet.gltf");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "test.glb");
         var scene = _fileImporter.Import(meshPath);
         var runtimeTextures = scene.Textures.Select(_textureFactory.GetTexture).ToList();
         LoadSkybox();
@@ -196,6 +196,8 @@ public class Game
             var material = _materialFactory.GetMaterial(
                 "gbuffer.slang",
                 importedMaterial.BaseColor,
+                importedMaterial.MetallicFactor,
+                importedMaterial.RoughnessFactor,
                 albedoTexture,
                 metallicRoughnessTexture,
                 normalTexture,

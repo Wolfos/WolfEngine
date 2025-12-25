@@ -3,6 +3,8 @@ import "common_bindless.slang";
 cbuffer MaterialParams : register(b0)
 {
     float4 baseColor;
+    float2 metallicRoughnessFactor;
+    float2 padding;
 };
 
 cbuffer BindlessMaterial : register(b3)
@@ -89,8 +91,8 @@ PSOutput fragmentShader(VSOutput input)
     float3x3 TBN = float3x3(T, B, N);
     normal = normalize(mul(tangentNormal, TBN));
    
-    float metallic = mrSample.b;
-    float roughness = mrSample.g;
+    float metallic = saturate(mrSample.b * metallicRoughnessFactor.x);
+    float roughness = saturate(mrSample.g * metallicRoughnessFactor.y);
     float4 materialParams = float4(metallic, roughness, 0.0f, 1.0f);
 
     output.albedo = baseColor * albedoSample;

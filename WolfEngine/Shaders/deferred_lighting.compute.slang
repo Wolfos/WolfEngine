@@ -22,6 +22,7 @@ cbuffer CameraParams : register(b1)
 };
 
 static const uint MAX_LIGHTS = 3;
+static const float PI = 3.14159265f;
 
 struct LightData
 {
@@ -76,6 +77,33 @@ float3 SamplePrefiltered(float3 dir, float roughness)
     return lerp(p0, p1, t);
 }
 
+float3 FresnelSchlick(float cosTheta, float3 F0)
+{
+    float f = pow(1.0f - cosTheta, 5.0f);
+    return F0 + (1.0f - F0) * f;
+}
+
+float DistributionGGX(float NdotH, float alpha)
+{
+    float a2 = alpha * alpha;
+    float denom = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
+    return a2 / max(PI * denom * denom, 1e-5f);
+}
+
+float GeometrySchlickGGX(float NdotV, float alpha)
+{
+    float k = (alpha + 1.0f);
+    k = (k * k) / 8.0f;
+    return NdotV / max(NdotV * (1.0f - k) + k, 1e-5f);
+}
+
+float GeometrySmith(float NdotV, float NdotL, float alpha)
+{
+    float ggxV = GeometrySchlickGGX(NdotV, alpha);
+    float ggxL = GeometrySchlickGGX(NdotL, alpha);
+    return ggxV * ggxL;
+}
+
 float3 ReconstructWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
 {
     float2 ndc;
@@ -126,8 +154,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 worldPos = ReconstructWorldPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invViewProjection);
     float3 viewDir = normalize(-worldPos);
-    float3 color = albedo * (1.0f - metallic);
-
+    float3 color = float3(0.0f, 0.0f, 0.0f);
 
     [unroll]
     for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
@@ -152,29 +179,43 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             attenuation = falloff * falloff;
         }
 
+        float3 H = normalize(L + viewDir);
         float NdotL = max(dot(normal, L), 0.0f);
-        float3 diffuse = NdotL * albedo * lightColor * attenuation;
+        float NdotV = max(dot(normal, viewDir), 0.0f);
+        float NdotH = max(dot(normal, H), 0.0f);
+        float VdotH = max(dot(viewDir, H), 0.0f);
 
-        float directRoughness = lerp(0.2f, 0.8f, metallic);
-        float3 halfVector = normalize(L + viewDir);
-        float specular = pow(max(dot(normal, halfVector), 0.0f), lerp(32.0f, 4.0f, directRoughness));
-        float3 specularComponent = specular * lightColor * 0.5f * attenuation;
+        float alpha = max(roughness * roughness, 0.04f);
+        float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+        float3 F = FresnelSchlick(VdotH, F0);
+        float D = DistributionGGX(NdotH, alpha);
+        float G = GeometrySmith(NdotV, NdotL, alpha);
 
-        color += diffuse + specularComponent + emissive;
+        float3 specular = (D * G * F) / max(4.0f * NdotV * NdotL, 1e-5f);
+        float3 kS = F;
+        float3 kD = (1.0f - kS) * (1.0f - metallic);
+        float3 diffuse = kD * albedo / PI;
+
+        float3 radiance = lightColor * attenuation;
+        color += (diffuse + specular) * radiance * NdotL;
     }
+
+    color += emissive;
 
     Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
     float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb;
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float3 kS = FresnelSchlick(saturate(dot(normal, viewDir)), F0);
+    float3 kD = (1.0f - kS) * (1.0f - metallic);
+    color += envIrradiance * kD * albedo / PI;
 
-    color += envIrradiance * 0.25f;
     // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
     reflectionDir.y = -reflectionDir.y;
     float3 envColor = SamplePrefiltered(reflectionDir, roughness);
 
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float cosTheta = saturate(dot(normal, -viewDir));
-    float3 fresnel = F0 + (1.0f - F0) * pow(1.0f - cosTheta, 5.0f);
+    float3 fresnel = FresnelSchlick(cosTheta, F0);
     Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);

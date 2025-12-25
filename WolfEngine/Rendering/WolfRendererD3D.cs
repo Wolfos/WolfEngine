@@ -26,6 +26,14 @@ namespace WolfEngine;
 
 public unsafe class WolfRendererD3D : IRenderer
 {
+	[StructLayout(LayoutKind.Sequential)]
+	private struct MaterialParams
+	{
+		public Vector4 BaseColor;
+		public Vector2 MetallicRoughnessFactor;
+		public Vector2 Padding;
+	}
+
 private const int FrameCount = 2;
 
 private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
@@ -770,7 +778,7 @@ private sealed class MeshResources
 		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
 		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
 
-		var colorSize = Align((ulong) Unsafe.SizeOf<Vector4>(),
+		var colorSize = Align((ulong) Unsafe.SizeOf<MaterialParams>(),
 			D3D12.ConstantBufferDataPlacementAlignment);
 		var uploadProps = new HeapProperties(HeapType.Upload);
 		var bufferDesc = new ResourceDesc
@@ -801,8 +809,13 @@ private sealed class MeshResources
 		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Range*) null, &mappedData));
 		try
 		{
-			var color = material.Color;
-			Unsafe.Write((Vector4*) mappedData, color);
+			var materialParams = new MaterialParams
+			{
+				BaseColor = material.Color,
+				MetallicRoughnessFactor = new(material.MetallicFactor, material.RoughnessFactor),
+				Padding = Vector2.Zero
+			};
+			Unsafe.Write((MaterialParams*) mappedData, materialParams);
 		}
 		finally
 		{

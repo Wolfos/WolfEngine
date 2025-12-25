@@ -65,6 +65,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
                 var emissiveColor = Vector4.Zero;
                 assimp.GetMaterialColor(material, Assimp.MaterialColorEmissive, 0, 0, ref emissiveColor);
+                var metallicFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyMetallicFactor, 1.0f);
+                var roughnessFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyRoughnessFactor, 1.0f);
 
                 var baseColorTextureIndex = TryLoadMaterialTexture(
                     assimp,
@@ -122,8 +124,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
                 materials.Add(new ImportedMaterial(
                     baseColor,
-                    MetallicFactor: 1.0f,
-                    RoughnessFactor: 1.0f,
+                    MetallicFactor: metallicFactor,
+                    RoughnessFactor: roughnessFactor,
                     EmissiveFactor: new(emissiveColor.X, emissiveColor.Y, emissiveColor.Z),
                     BaseColorTextureIndex: baseColorTextureIndex,
                     NormalTextureIndex: normalTextureIndex,
@@ -214,6 +216,18 @@ public class ThreeDFileImporter : IThreeDFileImporter
     }
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
+
+    private static unsafe float GetMaterialFloat(Assimp assimp, AssimpMaterial* material, string key, float defaultValue)
+    {
+        float value = defaultValue;
+        uint max = 1;
+        var result = assimp.GetMaterialFloatArray(material, key, 0, 0, ref value, ref max);
+        if (result != Return.Success || max == 0)
+        {
+            return defaultValue;
+        }
+        return Math.Clamp(value, 0.0f, 1.0f);
+    }
 
     private unsafe int? TryLoadMaterialTexture(
         Assimp assimp,

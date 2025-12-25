@@ -8,6 +8,8 @@ public interface IMaterialFactory
 	Material GetMaterial(
 		string shader,
 		Vector4 color,
+		float metallicFactor = 1.0f,
+		float roughnessFactor = 1.0f,
 		Texture albedoTexture = null,
 		Texture metallicRoughnessTexture = null,
 		Texture normalTexture = null,
@@ -29,6 +31,8 @@ public class MaterialFactory : IMaterialFactory
 	public Material GetMaterial(
 		string shader,
 		Vector4 color,
+		float metallicFactor = 1.0f,
+		float roughnessFactor = 1.0f,
 		Texture albedoTexture = null,
 		Texture metallicRoughnessTexture = null,
 		Texture normalTexture = null,
@@ -42,6 +46,8 @@ public class MaterialFactory : IMaterialFactory
 
 		var material = new Material(shader);
 		material.Color = color;
+		material.MetallicFactor = metallicFactor;
+		material.RoughnessFactor = roughnessFactor;
 		material.AlbedoTexture = albedoTexture ?? _textureFactory.GetWhiteTexture();
 		material.MetallicRoughnessTexture = metallicRoughnessTexture ?? _textureFactory.GetWhiteTexture();
 		material.NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture();
