@@ -2,7 +2,7 @@
 using WolfEngine.ECS;
 using WolfEngine.Input;
 
-namespace WolfEngine.TestGame;
+namespace WolfEngine.Editor;
 
 public struct CameraMover : IEntityComponent
 {

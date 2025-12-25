@@ -43,7 +43,7 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
 		io.Fonts.Clear();
-		io.Fonts.AddFontFromFileTTF("Assets/Fonts/Inter-VariableFont_opsz,wght.ttf", 16.0f);
+		io.Fonts.AddFontFromFileTTF("Assets/Fonts/Inter-VariableFont_opsz,wght.ttf", 14.0f);
 		ApplyStyle();
 		_fontAtlas = BuildFontAtlas(io);
 	}

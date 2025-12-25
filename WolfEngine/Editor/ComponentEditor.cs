@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using ImGuiNET;
 using WolfEngine.ECS;
 
-namespace WolfEngine.TestGame;
+namespace WolfEngine.Editor;
 
 public static partial class EditorGui
 {

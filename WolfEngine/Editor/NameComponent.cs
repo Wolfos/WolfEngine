@@ -1,6 +1,6 @@
 ﻿using WolfEngine.ECS;
 
-namespace WolfEngine.TestGame;
+namespace WolfEngine.Editor;
 
 public struct NameComponent: IEntityComponent
 {
