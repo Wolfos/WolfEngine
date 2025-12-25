@@ -1,3 +1,4 @@
+import "ibl_common.slang";
 import "common_bindless.slang";
 
 cbuffer BindlessHandles : register(b0)
@@ -26,7 +27,7 @@ void IblBrdfCSMain(uint3 id : SV_DispatchThreadID)
         dummyTex.SampleLevel(dummySampler, float2(0.0f, 0.0f), 0.0f);
     }
 
-    // Heitz-style BRDF integration
+    // Split-sum GGX BRDF integration
     const uint SAMPLE_COUNT = 128;
     float3 V;
     V.x = sqrt(1.0f - NdotV * NdotV);
@@ -38,17 +39,7 @@ void IblBrdfCSMain(uint3 id : SV_DispatchThreadID)
 
     for (uint i = 0; i < SAMPLE_COUNT; ++i)
     {
-        float2 xi;
-        // simple Hammersley
-        xi.x = float(i) / float(SAMPLE_COUNT);
-        uint bits = i;
-        bits = (bits << 16u) | (bits >> 16u);
-        bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-        bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-        bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-        bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-        xi.y = float(bits) * 2.3283064365386963e-10;
-
+        float2 xi = Hammersley(i, SAMPLE_COUNT);
         float a = roughness * roughness;
         float phi = 2.0f * 3.14159265f * xi.x;
         float cosTheta = sqrt((1.0f - xi.y) / (1.0f + (a * a - 1.0f) * xi.y));
@@ -63,9 +54,12 @@ void IblBrdfCSMain(uint3 id : SV_DispatchThreadID)
 
         if (NdotL > 0.0f)
         {
-            float G = (2.0f * NdotH * NdotV) / max(VdotH, 1e-4f);
-            float G2 = (2.0f * NdotH * NdotL) / max(VdotH, 1e-4f);
-            float Gvis = (G * G2) * 0.5f;
+            float k = (roughness + 1.0f);
+            k = (k * k) / 8.0f;
+            float Gv = NdotV / max(NdotV * (1.0f - k) + k, 1e-4f);
+            float Gl = NdotL / max(NdotL * (1.0f - k) + k, 1e-4f);
+            float G = Gv * Gl;
+            float Gvis = (G * VdotH) / max(NdotH * NdotV, 1e-4f);
             float Fc = pow(1.0f - VdotH, 5.0f);
             A += (1.0f - Fc) * Gvis;
             B += Fc * Gvis;

@@ -93,7 +93,8 @@ PSOutput fragmentShader(VSOutput input)
    
     float metallic = saturate(mrSample.b * metallicRoughnessFactor.x);
     float roughness = saturate(mrSample.g * metallicRoughnessFactor.y);
-    float4 materialParams = float4(metallic, roughness, 0.0f, 1.0f);
+    float occlusion = saturate(occlusionSample.r);
+    float4 materialParams = float4(metallic, roughness, occlusion, 1.0f);
 
     output.albedo = baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);

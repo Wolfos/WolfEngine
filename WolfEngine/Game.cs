@@ -147,7 +147,7 @@ public class Game
         _world.AddComponent(light, directionalLight);
         
         // Scene
-        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "test.glb");
+        var meshPath = Path.Combine(AppContext.BaseDirectory, "Assets", "DamagedHelmet.gltf");
         var scene = _fileImporter.Import(meshPath);
         var runtimeTextures = scene.Textures.Select(_textureFactory.GetTexture).ToList();
         LoadSkybox();

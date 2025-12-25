@@ -142,6 +142,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float metallic = material.r;
     float roughness = material.g;
+    float occlusion = material.b;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
     if (depth >= 0.9999f) // no geometry, render skybox
     {
@@ -208,19 +209,19 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(envNormal), 0.0f).rgb;
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float3 kD = (1.0f - metallic) * (1.0f - F0);
-    color += envIrradiance * kD * albedo / PI;
+    color += envIrradiance * kD * albedo / PI * occlusion;
 
     // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
     reflectionDir.y = -reflectionDir.y;
     float3 envColor = SamplePrefiltered(reflectionDir, roughness);
 
-    float cosTheta = saturate(dot(normal, -viewDir));
+    float cosTheta = saturate(dot(normal, viewDir));
     float3 fresnel = FresnelSchlick(cosTheta, F0);
     Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);
-    color += specular * 0.5f;
+    color += specular * 0.5f * occlusion;
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }
