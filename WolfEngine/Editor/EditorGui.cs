@@ -46,6 +46,9 @@ public static partial class EditorGui
             }
         }
         ImGui.End();
+        
+        EditorPreferencesMenu.Draw();
+
     }
 
     private static void SelectEntity(Entity entity, World world)

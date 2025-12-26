@@ -9,6 +9,10 @@ public static class MenuBar
 		if (ImGui.BeginMainMenuBar())
 		{
 			if (ImGui.BeginMenu("File")) {
+				if (ImGui.MenuItem("Preferences"))
+				{
+					EditorPreferencesMenu.Open();
+				}
 				ImGui.EndMenu();
 			}
 			if (ImGui.BeginMenu("Edit")) {

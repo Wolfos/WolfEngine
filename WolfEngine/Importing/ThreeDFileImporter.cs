@@ -390,7 +390,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         }
     }
 
-    private static Transform GetTransform(Matrix4x4 m)
+    private static LocalTransform GetTransform(Matrix4x4 m)
     {
         // Convert Assimp matrix to column major
         var packed = new Matrix4x4(

@@ -85,7 +85,7 @@ public class CameraMoverSystem: IUpdateable
 
 	public void Update(float deltaTime)
 	{
-		foreach (var entry in _world.View<Transform, CameraMover>())
+		foreach (var entry in _world.View<LocalTransform, CameraMover>())
 		{
 			ref var transform = ref entry.First;
 			ref var mover = ref entry.Second;
@@ -128,14 +128,14 @@ public class CameraMoverSystem: IUpdateable
 		}
 	}
 
-	private static void EnsureOrientationFromTransform(ref CameraMover mover, Transform transform)
+	private static void EnsureOrientationFromTransform(ref CameraMover mover, LocalTransform localTransform)
 	{
 		if (mover.Initialized)
 		{
 			return;
 		}
 
-		var forward = Vector3.Transform(Vector3.UnitZ, transform.LocalRotation);
+		var forward = Vector3.Transform(Vector3.UnitZ, localTransform.LocalRotation);
 		if (forward != Vector3.Zero)
 		{
 			forward = Vector3.Normalize(forward);

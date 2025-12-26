@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Editor;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;
@@ -47,7 +48,9 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		var io = ImGui.GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-		ApplyStyle();
+		ApplyDefaultStyle();
+		EditorPreferences.Load(); // May override default style
+
 		RebuildFonts(1.0f);
 	}
 
@@ -250,7 +253,7 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		};
 	}
 
-	private static void ApplyStyle()
+	private static void ApplyDefaultStyle()
 	{
 		var style = ImGui.GetStyle();
 		var textColor = new Vector4(0.93333334f, 0.93333334f, 0.93333334f, 1.0f);

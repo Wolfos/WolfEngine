@@ -17,14 +17,14 @@ public sealed class FrameSnapshot
 	}
 
 	public Camera Camera { get; private set; }
-	public Transform CameraTransform { get; private set; }
+	public LocalTransform CameraLocalTransform { get; private set; }
 	public List<DrawPacket> DrawPackets { get; }
 	public List<LightPacket> LightPackets { get; }
 
-	public void SetCamera(Camera camera, Transform transform)
+	public void SetCamera(Camera camera, LocalTransform localTransform)
 	{
 		Camera = camera;
-		CameraTransform = transform;
+		CameraLocalTransform = localTransform;
 	}
 
 	public void Clear()
@@ -38,9 +38,9 @@ public sealed class FrameSnapshot
 		DrawPackets.Add(new DrawPacket(mesh, material, transform));
 	}
 
-	public void AddLight(Light light, Transform transform)
+	public void AddLight(Light light, LocalTransform localTransform)
 	{
-		LightPackets.Add(new LightPacket(light, transform));
+		LightPackets.Add(new LightPacket(light, localTransform));
 	}
 
 	public readonly struct DrawPacket
@@ -59,14 +59,14 @@ public sealed class FrameSnapshot
 
 	public readonly struct LightPacket
 	{
-		public LightPacket(Light light, Transform transform)
+		public LightPacket(Light light, LocalTransform localTransform)
 		{
 			Light = light;
-			Transform = transform;
+			LocalTransform = localTransform;
 		}
 
 		public Light Light { get; }
-		public Transform Transform { get; }
+		public LocalTransform LocalTransform { get; }
 	}
 }
 

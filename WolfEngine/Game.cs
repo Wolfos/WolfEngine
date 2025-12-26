@@ -144,7 +144,7 @@ public class Game
         // Light
         var light = _world.CreateEntity("Directional Light");
         var lightTransform =
-            new Transform(Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitX, 130), Vector3.One);
+            new LocalTransform(Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitX, 130), Vector3.One);
         var directionalLight = new Light
         {
             Type = LightType.Directional,
@@ -162,7 +162,7 @@ public class Game
         foreach (var importedMesh in scene.Meshes)
         {
             var entity = _world.CreateEntity(importedMesh.Name);
-            var transform = importedMesh.Transform;
+            var transform = importedMesh.LocalTransform;
 
             var importedMaterial = scene.Materials[importedMesh.MaterialIndex];
             Texture albedoTexture = null;
@@ -227,12 +227,12 @@ public class Game
     private void PublishSnapshot()
     {
         // Pick first camera if any
-        Transform cameraTransform = default;
+        LocalTransform cameraLocalTransform = default;
         Camera camera = default;
         var hasCamera = false;
-        foreach (var entry in _world.View<Transform, Camera>())
+        foreach (var entry in _world.View<LocalTransform, Camera>())
         {
-            cameraTransform = entry.First;
+            cameraLocalTransform = entry.First;
             camera = entry.Second;
             hasCamera = true;
             break;
@@ -244,9 +244,9 @@ public class Game
         }
 
         var snapshot = _renderGraph.BeginSnapshotWrite();
-        snapshot.SetCamera(camera, cameraTransform);
+        snapshot.SetCamera(camera, cameraLocalTransform);
 
-        foreach (var entry in _world.View<Transform, MeshRenderer>())
+        foreach (var entry in _world.View<LocalTransform, MeshRenderer>())
         {
             ref var transform = ref entry.First;
             ref var meshRenderer = ref entry.Second;
@@ -254,7 +254,7 @@ public class Game
             snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
         }
 
-        foreach (var entry in _world.View<Transform, Light>())
+        foreach (var entry in _world.View<LocalTransform, Light>())
         {
             ref var transform = ref entry.First;
             ref var light = ref entry.Second;
@@ -273,7 +273,7 @@ public class Game
         _renderGraph.SetSkybox(skybox);
     }
     
-    private static (Camera, Transform) CreateCamera()
+    private static (Camera, LocalTransform) CreateCamera()
     {
         const float fieldOfView = 70.0f;
 
@@ -290,7 +290,7 @@ public class Game
         var view = CreateLookAtLeftHanded(cameraPosition, target, up);
         Matrix4x4.Invert(view, out var world);
 
-        var transform = new Transform(world);
+        var transform = new LocalTransform(world);
 
         return (camera, transform);
     }

@@ -124,7 +124,7 @@ public sealed class DeferredLightingPass
 		{
 			var packet = sceneData.Lights[i];
 			var light = packet.Light;
-			var rotation = packet.Transform.LocalRotation;
+			var rotation = packet.LocalTransform.LocalRotation;
 			var forward = Vector3.Transform(-Vector3.UnitZ, rotation);
 			if (forward == Vector3.Zero)
 			{
@@ -132,7 +132,7 @@ public sealed class DeferredLightingPass
 			}
 			forward = Vector3.Normalize(forward);
 
-			var position = packet.Transform.LocalPosition;
+			var position = packet.LocalTransform.LocalPosition;
 
 			shaderLights[i] = new ShaderLight
 			{
