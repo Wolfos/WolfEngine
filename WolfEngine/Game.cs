@@ -36,6 +36,8 @@ public class Game
     private int _frameCount;
 
     private List<IUpdateable> _updateSystems = new();
+
+    private TransformSystem _transformSystem;
     
     public Game(
         IMaterialFactory materialFactory,
@@ -111,6 +113,7 @@ public class Game
             system.Update(deltaTime);
         }
         
+        _transformSystem.Update(deltaTime);
         PublishSnapshot();
 
         _imguiSystem.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
@@ -126,6 +129,7 @@ public class Game
     private void CreateWorld()
     {
         _world = new();
+        _transformSystem = new(_world);
 
         // Camera
         var cameraMoverSystem = new CameraMoverSystem(_inputSystem, _world);
@@ -138,7 +142,7 @@ public class Game
         
         _camera = _world.CreateEntity("Camera");
         _world.AddComponent(_camera, cameraComponent);
-        _world.AddComponent(_camera, cameraTransform);
+        _world.AddTransform(_camera, cameraTransform);
         _world.AddComponent(_camera, new CameraMover());
 
         // Light
@@ -151,7 +155,7 @@ public class Game
             Intensity = 1.0f,
             Color = new (1.0f, 1.0f, 1.0f, 1.0f)
         };
-        _world.AddComponent(light, lightTransform);
+        _world.AddTransform(light, lightTransform);
         _world.AddComponent(light, directionalLight);
         
         // Scene
@@ -219,7 +223,7 @@ public class Game
                 Material = material
             };
             
-            _world.AddComponent(entity, transform);
+            _world.AddTransform(entity, transform);
             _world.AddComponent(entity, meshRenderer);
         }
     }
@@ -227,12 +231,12 @@ public class Game
     private void PublishSnapshot()
     {
         // Pick first camera if any
-        LocalTransform cameraLocalTransform = default;
+        WorldTransform cameraWorldTransform = default;
         Camera camera = default;
         var hasCamera = false;
-        foreach (var entry in _world.View<LocalTransform, Camera>())
+        foreach (var entry in _world.View<WorldTransform, Camera>())
         {
-            cameraLocalTransform = entry.First;
+            cameraWorldTransform = entry.First;
             camera = entry.Second;
             hasCamera = true;
             break;
@@ -244,21 +248,21 @@ public class Game
         }
 
         var snapshot = _renderGraph.BeginSnapshotWrite();
-        snapshot.SetCamera(camera, cameraLocalTransform);
+        snapshot.SetCamera(camera, cameraWorldTransform);
 
-        foreach (var entry in _world.View<LocalTransform, MeshRenderer>())
+        foreach (var entry in _world.View<WorldTransform, MeshRenderer>())
         {
             ref var transform = ref entry.First;
             ref var meshRenderer = ref entry.Second;
-            var transformMatrix = transform.GetTransform();
+            var transformMatrix = transform.LocalToWorld;
             snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
         }
 
-        foreach (var entry in _world.View<LocalTransform, Light>())
+        foreach (var entry in _world.View<WorldTransform, Light>())
         {
             ref var transform = ref entry.First;
             ref var light = ref entry.Second;
-            snapshot.AddLight(light, transform);
+            snapshot.AddLight(light, transform.LocalToWorld);
         }
 
         _renderGraph.PublishSnapshot();

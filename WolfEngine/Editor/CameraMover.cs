@@ -101,7 +101,7 @@ public class CameraMoverSystem: IUpdateable
 			}
 
 			var rotation = Quaternion.CreateFromYawPitchRoll(mover.Yaw, mover.Pitch, 0.0f);
-			transform.LocalRotation = rotation;
+			_world.SetLocalRotation(entry.Entity, rotation);
 
 			var forward = Vector3.Transform(Vector3.UnitZ, rotation);
 			var right = Vector3.Transform(Vector3.UnitX, rotation);
@@ -109,7 +109,8 @@ public class CameraMoverSystem: IUpdateable
 
 			var move = right * _moveInput.X + up * _moveInput.Y + forward * _moveInput.Z;
 			var speed = mover.MoveSpeed * (_speedBoost ? 2.0f : 1.0f);
-			transform.LocalPosition += move * speed * deltaTime;
+			
+			_world.Translate(entry.Entity, move * speed * deltaTime, true);
 		}
 
 		_lookDelta = Vector2.Zero;

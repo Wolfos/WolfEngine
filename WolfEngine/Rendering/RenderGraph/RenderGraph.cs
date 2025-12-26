@@ -67,7 +67,7 @@ public sealed class RenderGraph
 
 		// Build scene data from snapshot
 		SceneDrawData sceneData = null;
-		var world = snapshot.CameraLocalTransform.GetTransform();
+		var world = snapshot.CameraWorldTransform.LocalToWorld;
 		if (Matrix4x4.Invert(world, out var view) &&
 		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
 		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
@@ -85,8 +85,8 @@ public sealed class RenderGraph
 			for (var i = 0; i < snapshot.LightPackets.Count; i++)
 			{
 				var lightPacket = snapshot.LightPackets[i];
-				var lightTransform = lightPacket.LocalTransform;
-				lightTransform.LocalPosition -= cameraPosition;
+				var lightTransform = lightPacket.Transform;
+				lightTransform.Translation -= cameraPosition;
 				_renderLights.Add(new LightPacket(lightPacket.Light, lightTransform));
 			}
 

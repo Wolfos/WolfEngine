@@ -14,9 +14,9 @@ public class CameraResolutionUpdater: IUpdateable
 	public void Update(float deltaTime)
 	{
 		var screenResolution = Screen.CurrentResolution;
-		foreach (var entry in _world.View<LocalTransform, Camera>())
+		foreach (var entry in _world.View<Camera>())
 		{
-			ref var camera = ref entry.Second;
+			ref var camera = ref entry.First;
 
 			if (camera.ScreenResolution == screenResolution) continue;
 			

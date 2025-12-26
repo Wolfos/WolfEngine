@@ -57,13 +57,13 @@ public readonly struct DrawPacket
 
 public readonly struct LightPacket
 {
-	public LightPacket(Light light, LocalTransform localTransform)
+	public LightPacket(Light light, Matrix4x4 transform)
 	{
 		Light = light;
-		LocalTransform = localTransform;
+		Transform = transform;
 	}
 
 	public Light Light { get; }
 
-	public LocalTransform LocalTransform { get; }
+	public Matrix4x4 Transform { get; }
 }

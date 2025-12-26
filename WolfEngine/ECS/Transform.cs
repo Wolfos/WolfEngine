@@ -4,24 +4,28 @@ namespace WolfEngine.ECS;
 
 public struct LocalTransform: IEntityComponent
 {
-	internal Vector3 LocalPosition;
-	internal Quaternion LocalRotation;
-	internal Vector3 LocalScale;
+	// TODO: Move ECS into its own library so NOBODY else can set this
+	public Vector3 LocalPosition { get; internal set; }
+	public Quaternion LocalRotation { get; internal set; }
+	public Vector3 LocalScale { get; internal set; }
 
-	internal bool IsDirty;
+	public bool IsDirty { get; internal set; }
 
-	public LocalTransform(Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
+	internal LocalTransform(Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
 	{
 		LocalPosition = localPosition;
 		LocalRotation = localRotation;
 		LocalScale = localScale;
 	}
 
-	public LocalTransform(Matrix4x4 fromTransform)
+	internal LocalTransform(Matrix4x4 fromTransform)
 	{
-		Matrix4x4.Decompose(fromTransform, out LocalScale, out LocalRotation, out LocalPosition);
+		Matrix4x4.Decompose(fromTransform, out var scale, out var rotation,  out var position);
+		LocalPosition = position;
+		LocalRotation = rotation;
+		LocalScale = scale;
 	}
-
+	
 	public Matrix4x4 GetTransform()
 	{
 		var scale = Matrix4x4.CreateScale(LocalScale);
@@ -32,3 +36,27 @@ public struct LocalTransform: IEntityComponent
 	}
 }
 
+public struct WorldTransform : IEntityComponent
+{
+	public Matrix4x4 LocalToWorld;
+	public Matrix4x4 WorldToLocal;
+}
+
+public struct Parent : IEntityComponent
+{
+	public Entity Value;
+}
+
+public struct Children : IEntityComponent
+{
+	public Entity First;
+}
+
+public struct Sibling : IEntityComponent
+{
+	public Entity Next;
+}
+
+public struct DirtyTransformRoot : IEntityComponent
+{
+}
