@@ -42,7 +42,7 @@ public record struct ImportedTexture(
 
 public record struct ImportedMesh(
     string Name,
-    LocalTransform LocalTransform,
+    Matrix4x4 Transform,
     Mesh Mesh,
     int MaterialIndex
 );

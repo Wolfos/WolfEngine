@@ -4,17 +4,10 @@ namespace WolfEngine.Rendering;
 
 public class CameraResolutionUpdater: IUpdateable
 {
-	private readonly World _world;
-
-	public CameraResolutionUpdater(World world)
-	{
-		_world = world;
-	}
-
-	public void Update(float deltaTime)
+	public void Update(float deltaTime, World world)
 	{
 		var screenResolution = Screen.CurrentResolution;
-		foreach (var entry in _world.View<Camera>())
+		foreach (var entry in world.View<Camera>())
 		{
 			ref var camera = ref entry.First;
 
@@ -24,4 +17,6 @@ public class CameraResolutionUpdater: IUpdateable
 			camera.SetPerspective(camera.Fov);
 		}
 	}
+
+	public WorldTag GetTag() => WorldTag.All;
 }

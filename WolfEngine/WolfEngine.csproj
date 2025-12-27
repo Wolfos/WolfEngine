@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
@@ -88,13 +87,14 @@
         <None Update="Assets\Fonts\Inter-VariableFont_opsz,wght.ttf">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-        <None Update="Assets\test.glb">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
     </ItemGroup>
 
     <ItemGroup>
         <Folder Include="Binaries\"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
     </ItemGroup>
 
 </Project>

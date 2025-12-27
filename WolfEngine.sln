@@ -2,6 +2,10 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine", "WolfEngine\WolfEngine.csproj", "{4FE11541-C523-4A31-A7CC-45C3CCC5E69B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.ECS", "WolfEngine.ECS\WolfEngine.ECS.csproj", "{5C02AD05-2804-4CFD-BBAE-30320EB637EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Editor", "WolfEngine.Editor\WolfEngine.Editor.csproj", "{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +16,13 @@ Global
 		{4FE11541-C523-4A31-A7CC-45C3CCC5E69B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4FE11541-C523-4A31-A7CC-45C3CCC5E69B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4FE11541-C523-4A31-A7CC-45C3CCC5E69B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C02AD05-2804-4CFD-BBAE-30320EB637EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C02AD05-2804-4CFD-BBAE-30320EB637EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C02AD05-2804-4CFD-BBAE-30320EB637EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C02AD05-2804-4CFD-BBAE-30320EB637EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

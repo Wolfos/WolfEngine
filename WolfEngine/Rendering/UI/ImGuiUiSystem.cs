@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
-using WolfEngine.Editor;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;
@@ -27,7 +26,7 @@ public interface IUiFrameProvider
 /// <summary>
 /// Game-thread owner of ImGui context; produces UiFrameData snapshots for the render thread.
 /// </summary>
-public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
+public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 {
 	private const string FontPath = "Assets/Fonts/Inter-VariableFont_opsz,wght.ttf";
 	private const float BaseFontSize = 14.0f;
@@ -49,7 +48,6 @@ public unsafe sealed class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 		io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
 		ApplyDefaultStyle();
-		EditorPreferences.Load(); // May override default style
 
 		RebuildFonts(1.0f);
 	}

@@ -16,10 +16,8 @@ class Program
         ConfigureServices(services);
 
         var provider = services.BuildServiceProvider();
-        // Toggle D3D12 debug layer here when needed
-        GraphicsConfig.EnableD3DDebugLayer = false;
 
-        var game = provider.GetRequiredService<Game>();
+        var game = provider.GetRequiredService<RenderPipeline>();
         game.Run();
     }
 
@@ -46,13 +44,13 @@ class Program
             services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
             services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererMetal>();
-            services.AddSingleton<Game>();
+            services.AddSingleton<RenderPipeline>();
         }
         else if (OperatingSystem.IsWindows())
         {
             services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererD3D>();
-            services.AddSingleton<Game>();
+            services.AddSingleton<RenderPipeline>();
         }
     }
 }
