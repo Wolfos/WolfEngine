@@ -17,8 +17,8 @@ class Program
 
         var provider = services.BuildServiceProvider();
 
-        var game = provider.GetRequiredService<RenderPipeline>();
-        game.Run();
+        var pipeline = provider.GetRequiredService<IRenderPipeline>();
+        pipeline.Run();
     }
 
     private static void ConfigureServices(IServiceCollection services)
@@ -44,13 +44,13 @@ class Program
             services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
             services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererMetal>();
-            services.AddSingleton<RenderPipeline>();
+            services.AddSingleton<IRenderPipeline, RenderPipeline>();
         }
         else if (OperatingSystem.IsWindows())
         {
             services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
             services.AddSingleton<IRenderer, WolfRendererD3D>();
-            services.AddSingleton<RenderPipeline>();
+            services.AddSingleton<IRenderPipeline, RenderPipeline>();
         }
     }
 }

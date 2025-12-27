@@ -46,7 +46,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			CreatePipeline();
 		}
 
-		if (_fontUploaded == false && frame.HasFontAtlas)
+		if (frame.HasFontAtlas)
 		{
 			CreateFontTexture(frame.FontAtlas);
 			CreateSrv();

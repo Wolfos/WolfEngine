@@ -4,11 +4,14 @@ public interface IWorldManager
 {
 	public World CreateWorld(WorldTag tag);
 	public void AddSystem<T>() where T : ISystem, new();
+	public void AddSystem(ISystem system);
+	public void Update(float deltaTime, WorldTag tag);
+	public void OnPreRender(float deltaTime, WorldTag tag);
 }
 
 public class WorldManager: IWorldManager
 {
-	private List<World> _worlds;
+	private readonly List<World> _worlds = new();
 	private Dictionary<WorldTag, IUpdateable> _updateables = new();
 	private Dictionary<WorldTag, IPreRender> _preRenders = new();
 	
@@ -23,15 +26,22 @@ public class WorldManager: IWorldManager
 	public void AddSystem<T>() where T : ISystem, new()
 	{
 		var system = new T();
+		AddSystem(system);
+	}
+
+	public void AddSystem(ISystem system)
+	{
 		// ReSharper disable once ConvertIfStatementToSwitchStatement, systems implementing multiple is *valid*
 		if (system is IUpdateable u) _updateables.Add(u.GetTag(), u);
 		if (system is IPreRender p) _preRenders.Add(p.GetTag(), p);
 	}
 
-	public void Update(float deltaTime)
+	public void Update(float deltaTime, WorldTag tag)
 	{
 		foreach (var world in _worlds)
 		{
+			if ((world.Tag & tag) == 0) continue;
+
 			foreach (var system in _updateables)
 			{
 				if ((system.Key & world.Tag) != 0)
@@ -42,10 +52,12 @@ public class WorldManager: IWorldManager
 		}
 	}
 
-	public void OnPreRender(float deltaTime)
+	public void OnPreRender(float deltaTime, WorldTag tag)
 	{
 		foreach (var world in _worlds)
 		{
+			if ((world.Tag & tag) == 0) continue;
+			
 			foreach (var system in _preRenders)
 			{
 				if ((system.Key & world.Tag) != 0)

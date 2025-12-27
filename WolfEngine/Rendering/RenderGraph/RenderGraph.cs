@@ -25,6 +25,7 @@ public sealed class RenderGraph
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
+	public Action? FrameCompleted { get; set; }
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
@@ -208,6 +209,7 @@ public sealed class RenderGraph
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
+		FrameCompleted?.Invoke();
 	}
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();

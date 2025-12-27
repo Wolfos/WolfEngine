@@ -32,7 +32,10 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private const float BaseFontSize = 14.0f;
 	private const float FontScaleEpsilon = 0.01f;
 	private readonly ConcurrentQueue<UiFrameData> _pendingFrames = new();
+	private readonly ConcurrentQueue<(ImGuiKey key, bool down)> _pendingKeys = new();
+	private readonly ConcurrentQueue<char> _pendingChars = new();
 	private readonly IntPtr _context;
+	private readonly object _contextLock = new();
 	private readonly bool[] _mouseButtons = new bool[5];
 	private Vector2 _mousePosition = new(-1, -1);
 	private Vector2 _mouseWheel = Vector2.Zero;
@@ -54,45 +57,61 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 
 	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize)
 	{
-		ImGui.SetCurrentContext(_context);
-		var io = ImGui.GetIO();
-		io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
-		io.DeltaTime = Math.Max(deltaTime, 1e-6f);
-		if (windowSize.X > 0 && windowSize.Y > 0)
+		lock (_contextLock)
 		{
-			io.DisplayFramebufferScale = new Vector2(
-				framebufferSize.X / (float)windowSize.X,
-				framebufferSize.Y / (float)windowSize.Y);
-		}
-		else
-		{
-			io.DisplayFramebufferScale = Vector2.One;
-		}
-		var dpiScale = (io.DisplayFramebufferScale.X + io.DisplayFramebufferScale.Y) * 0.5f;
-		if (dpiScale > 0.0f && Math.Abs(dpiScale - _fontDpiScale) > FontScaleEpsilon)
-		{
-			RebuildFonts(dpiScale);
-		}
+			ImGui.SetCurrentContext(_context);
+			var io = ImGui.GetIO();
+			io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
+			io.DeltaTime = Math.Max(deltaTime, 1e-6f);
+			if (windowSize.X > 0 && windowSize.Y > 0)
+			{
+				io.DisplayFramebufferScale = new Vector2(
+					framebufferSize.X / (float)windowSize.X,
+					framebufferSize.Y / (float)windowSize.Y);
+			}
+			else
+			{
+				io.DisplayFramebufferScale = Vector2.One;
+			}
+			var dpiScale = (io.DisplayFramebufferScale.X + io.DisplayFramebufferScale.Y) * 0.5f;
+			if (dpiScale > 0.0f && Math.Abs(dpiScale - _fontDpiScale) > FontScaleEpsilon)
+			{
+				RebuildFonts(dpiScale);
+			}
 
-		for (var i = 0; i < _mouseButtons.Length; i++)
-		{
-			io.MouseDown[i] = _mouseButtons[i];
+			for (var i = 0; i < _mouseButtons.Length; i++)
+			{
+				io.MouseDown[i] = _mouseButtons[i];
+			}
+
+			while (_pendingKeys.TryDequeue(out var keyEvent))
+			{
+				io.AddKeyEvent(keyEvent.key, keyEvent.down);
+			}
+
+			while (_pendingChars.TryDequeue(out var character))
+			{
+				io.AddInputCharacter(character);
+			}
+
+			io.MousePos = _mousePosition;
+			io.MouseWheel = _mouseWheel.Y;
+			io.MouseWheelH = _mouseWheel.X;
+			_mouseWheel = Vector2.Zero;
+
+			ImGui.NewFrame();
 		}
-
-		io.MousePos = _mousePosition;
-		io.MouseWheel = _mouseWheel.Y;
-		io.MouseWheelH = _mouseWheel.X;
-		_mouseWheel = Vector2.Zero;
-
-		ImGui.NewFrame();
 	}
 
 	public void RunGui(Action<World> draw, World world)
 	{
-		ImGui.SetCurrentContext(_context);
-		draw(world);
-		ImGui.Render();
-		CaptureFrame();
+		lock (_contextLock)
+		{
+			ImGui.SetCurrentContext(_context);
+			draw(world);
+			ImGui.Render();
+			CaptureFrame();
+		}
 	}
 
 	private void CaptureFrame()
@@ -169,7 +188,6 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		};
 
 		_pendingFrames.Enqueue(frame);
-		_fontAtlasDirty = false;
 		while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out _))
 		{
 		}
@@ -183,19 +201,22 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			frame = candidate;
 		}
 
+		if (frame.HasFontAtlas)
+		{
+			_fontAtlasDirty = false;
+		}
+
 		return frame != UiFrameData.Empty && frame.VertexCount + frame.IndexCount > 0;
 	}
 
 	public void SetKey(ImGuiKey key, bool down)
 	{
-		ImGui.SetCurrentContext(_context);
-		ImGui.GetIO().AddKeyEvent(key, down);
+		_pendingKeys.Enqueue((key, down));
 	}
 
 	public void AddChar(char c)
 	{
-		ImGui.SetCurrentContext(_context);
-		ImGui.GetIO().AddInputCharacter(c);
+		_pendingChars.Enqueue(c);
 	}
 
 	public void SetMousePosition(Vector2 position)

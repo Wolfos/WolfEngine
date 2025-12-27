@@ -1,19 +1,140 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Numerics;
+using System.Threading;
+using WolfEngine;
 using WolfEngine.ECS;
+using WolfEngine.Input;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor;
 
 public class WolfEngineEditor
 {
-	private World _editorWorld;
+	private const float EditorCameraFov = 70.0f;
+	private static readonly Vector3 EditorCameraPosition = new(0.0f, 1.0f, -5.0f);
 
-	public WolfEngineEditor()
+	private readonly IWorldManager _worldManager;
+	private readonly IRenderPipeline _renderPipeline;
+	private readonly IUiFrameProvider _uiFrameProvider;
+	private readonly IRenderer _renderer;
+	private readonly RenderGraph _renderGraph;
+	private readonly IInputSystem _inputSystem;
+	private readonly List<World> _renderWorlds = new(2);
+
+	private World _editorWorld = null!;
+	private World _gameWorld = null!;
+	private Entity _editorCamera;
+	private volatile bool _running;
+
+	public WolfEngineEditor(
+		IWorldManager worldManager,
+		IRenderPipeline renderPipeline,
+		IUiFrameProvider uiFrameProvider,
+		IRenderer renderer,
+		RenderGraph renderGraph,
+		IInputSystem inputSystem)
 	{
-		CreateWorld();
+		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
+		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
+		_uiFrameProvider = uiFrameProvider ?? throw new ArgumentNullException(nameof(uiFrameProvider));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 	}
 
-	private void CreateWorld()
+	public void Run()
 	{
-		_editorWorld = new World(WorldTag.Editor);
+		_running = true;
+		CreateWorlds();
+		EditorLoop();
+	}
 
+	public void Stop()
+	{
+		_running = false;
+	}
+
+	private void CreateWorlds()
+	{
+		_editorWorld = _worldManager.CreateWorld(WorldTag.Editor);
+		_gameWorld = _worldManager.CreateWorld(WorldTag.Game);
+
+		_worldManager.AddSystem<CameraResolutionUpdater>();
+		_worldManager.AddSystem<TransformSystem>();
+		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem));
+
+		_editorCamera = CreateEditorCamera(_editorWorld);
+
+		_renderWorlds.Clear();
+		_renderWorlds.Add(_editorWorld);
+		_renderWorlds.Add(_gameWorld);
+	}
+
+	private void EditorLoop()
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var last = stopwatch.Elapsed;
+
+		while (_running)
+		{
+			var now = stopwatch.Elapsed;
+			var deltaTime = (float)(now - last).TotalSeconds;
+			last = now;
+
+			_worldManager.Update(deltaTime, WorldTag.All);
+			_worldManager.OnPreRender(deltaTime, WorldTag.All);
+
+			PublishSnapshot();
+
+			_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
+			_uiFrameProvider.RunGui(EditorGui.Draw, _gameWorld);
+
+			Thread.Sleep(0);
+		}
+	}
+
+	private void PublishSnapshot()
+	{
+		ref var camera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
+		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
+		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
+	}
+
+	private static Entity CreateEditorCamera(World world)
+	{
+		var camera = new Camera
+		{
+			ScreenResolution = Screen.CurrentResolution
+		};
+		camera.SetPerspective(EditorCameraFov);
+
+		var target = Vector3.Zero;
+		var up = Vector3.UnitY;
+		var view = CreateLookAtLeftHanded(EditorCameraPosition, target, up);
+		Matrix4x4.Invert(view, out var worldTransform);
+
+		var entity = world.CreateEntity("Editor Camera", worldTransform);
+		world.AddComponent(entity, camera);
+		world.AddComponent(entity, new CameraMover());
+		return entity;
+	}
+
+	private static Matrix4x4 CreateLookAtLeftHanded(Vector3 position, Vector3 target, Vector3 up)
+	{
+		var zAxis = Vector3.Normalize(target - position);
+		var xAxis = Vector3.Normalize(Vector3.Cross(up, zAxis));
+		var yAxis = Vector3.Cross(zAxis, xAxis);
+
+		return new Matrix4x4(
+			xAxis.X, yAxis.X, zAxis.X, 0.0f,
+			xAxis.Y, yAxis.Y, zAxis.Y, 0.0f,
+			xAxis.Z, yAxis.Z, zAxis.Z, 0.0f,
+			-Vector3.Dot(xAxis, position),
+			-Vector3.Dot(yAxis, position),
+			-Vector3.Dot(zAxis, position),
+			1.0f);
 	}
 }

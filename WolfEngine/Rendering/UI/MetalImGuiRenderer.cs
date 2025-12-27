@@ -38,7 +38,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			_pipeline = CreatePipeline(device);
 		}
 
-		if (_fontUploaded == false && frame.HasFontAtlas)
+		if (frame.HasFontAtlas)
 		{
 			CreateFontTexture(device, frame.FontAtlas);
 			_fontUploaded = true;
