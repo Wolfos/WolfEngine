@@ -5,6 +5,7 @@ using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Platform;
 
@@ -233,6 +234,9 @@ internal static class ObjCNative
 {
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern void ObjcMsgSendDrawableSize(IntPtr receiver, IntPtr selector, NSPoint size);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    public static extern long ObjcMsgSendLong(IntPtr receiver, IntPtr selector);
 }
 
 [SupportedOSPlatform("macos")]
@@ -357,6 +361,88 @@ internal sealed class NSMenuItem
     {
         var nsKey = NSStringHelper.From(key);
         ObjectiveC.objc_msgSend(NativePtr, new Selector("setKeyEquivalent:"), nsKey);
+    }
+}
+
+[SupportedOSPlatform("macos")]
+internal static class MacOSFileDialog
+{
+    private const long ModalResponseOk = 1;
+
+    public static string? OpenFile(FileDialogOptions options)
+    {
+        var panelClass = new ObjectiveCClass("NSOpenPanel");
+        var panel = ObjectiveC.IntPtr_objc_msgSend(panelClass, "openPanel");
+
+        ObjectiveC.objc_msgSend(panel, "setCanChooseFiles:", true);
+        ObjectiveC.objc_msgSend(panel, "setCanChooseDirectories:", false);
+        ObjectiveC.objc_msgSend(panel, "setAllowsMultipleSelection:", false);
+
+        if (string.IsNullOrWhiteSpace(options.Title) == false)
+        {
+            var title = NSStringHelper.From(options.Title);
+            ObjectiveC.objc_msgSend(panel, "setTitle:", title);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
+        {
+            var urlClass = new ObjectiveCClass("NSURL");
+            var nsPath = NSStringHelper.From(options.InitialDirectory).ToString();
+            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", nsPath);
+            ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
+        }
+
+        if (options.AllowedExtensions is not null && options.AllowedExtensions.Length > 0)
+        {
+            var allowed = CreateAllowedFileTypes(options.AllowedExtensions);
+            if (allowed != IntPtr.Zero)
+            {
+                ObjectiveC.objc_msgSend(panel, "setAllowedFileTypes:", allowed);
+            }
+        }
+
+        var response = ObjCNative.ObjcMsgSendLong(panel, new Selector("runModal").SelPtr);
+        if (response != ModalResponseOk)
+        {
+            return null;
+        }
+
+        var urlPtr = ObjectiveC.IntPtr_objc_msgSend(panel, "URL");
+        if (urlPtr == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var pathPtr = ObjectiveC.IntPtr_objc_msgSend(urlPtr, "path");
+        return new NSString(pathPtr).ToManagedString();
+    }
+
+    private static IntPtr CreateAllowedFileTypes(string[] extensions)
+    {
+        var arrayClass = new ObjectiveCClass("NSMutableArray");
+        var array = ObjectiveC.IntPtr_objc_msgSend(arrayClass.Alloc(), new Selector("init"));
+
+        var hasEntries = false;
+        for (var i = 0; i < extensions.Length; i++)
+        {
+            var entry = extensions[i];
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            var trimmed = entry.Trim().TrimStart('.');
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            var nsEntry = NSStringHelper.From(trimmed);
+            ObjectiveC.objc_msgSend(array, new Selector("addObject:"), nsEntry);
+            hasEntries = true;
+        }
+
+        return hasEntries ? array : IntPtr.Zero;
     }
 }
 

@@ -3,6 +3,7 @@ using System.Threading;
 using WolfEngine;
 using WolfEngine.Rendering.UI;
 using WolfEngine.ECS;
+using WolfEngine.Editor.UI;
 
 namespace WolfEngine.Editor;
 
@@ -34,5 +35,8 @@ public static class Program
 	public static void ConfigureServices(ServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
+		services.AddSingleton<IComponentEditor, ComponentEditor>();
+		services.AddSingleton<IMenuBar, MenuBar>();
+		services.AddSingleton<EditorGui>();
 	}
 }

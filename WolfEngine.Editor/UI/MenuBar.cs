@@ -1,0 +1,53 @@
+using ImGuiNET;
+using WolfEngine.ECS;
+using WolfEngine.Utility;
+
+namespace WolfEngine.Editor.UI;
+
+public interface IMenuBar
+{
+	public void Draw(World world);
+}
+public class MenuBar: IMenuBar
+{
+	private readonly IFileDialogService _fileDialogService;
+	private readonly ISceneBuilder _sceneBuilder;
+
+	public MenuBar(IFileDialogService fileDialogService, ISceneBuilder sceneBuilder)
+	{
+		_fileDialogService = fileDialogService;
+		_sceneBuilder = sceneBuilder;
+	}
+
+	public void Draw(World world)
+	{
+		if (ImGui.BeginMainMenuBar() == false) return;
+		
+		if (ImGui.BeginMenu("File")) {
+			if (ImGui.MenuItem("Preferences"))
+			{
+				EditorPreferencesMenu.Open();
+			}
+			ImGui.EndMenu();
+		}
+		if (ImGui.BeginMenu("Edit")) {
+			ImGui.EndMenu();
+		}
+		if (ImGui.BeginMenu("Import")) {
+			if (ImGui.MenuItem("Import GLTF"))
+			{
+				var path = _fileDialogService.OpenFile(new FileDialogOptions
+				{
+					Title = "Import GLTF",
+					AllowedExtensions = ["gltf", "glb"]
+				});
+				if (string.IsNullOrEmpty(path) == false)
+				{
+					_sceneBuilder.Import3DScene(path, world);
+				}
+			}
+			ImGui.EndMenu();
+		}
+		ImGui.EndMainMenuBar();
+	}
+}

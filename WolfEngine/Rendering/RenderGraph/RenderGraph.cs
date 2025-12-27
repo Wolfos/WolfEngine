@@ -3,6 +3,7 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
@@ -23,6 +24,7 @@ public sealed class RenderGraph
 	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
+	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
 	public Action? FrameCompleted { get; set; }
@@ -32,7 +34,8 @@ public sealed class RenderGraph
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
 		DeferredLightingPass deferredLightingPass,
-		IUiFrameProvider uiFrameProvider, 
+		IUiFrameProvider uiFrameProvider,
+		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer)
 	{
 		_resourceRegistry = resourceRegistry;
@@ -40,6 +43,7 @@ public sealed class RenderGraph
 		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, imGuiRenderer);
 		_uiFrameProvider = uiFrameProvider;
+		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 	}
 
@@ -171,6 +175,7 @@ public sealed class RenderGraph
 
 	public void OnRender(float deltaTime)
 	{
+		_mainThreadDispatcher.ExecutePending();
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 
 		_renderer.BeginFrame();

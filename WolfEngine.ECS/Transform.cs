@@ -4,7 +4,6 @@ namespace WolfEngine.ECS;
 
 public struct LocalTransform: IEntityComponent
 {
-	// TODO: Move ECS into its own library so NOBODY else can set this
 	public Vector3 LocalPosition { get; internal set; }
 	public Quaternion LocalRotation { get; internal set; }
 	public Vector3 LocalScale { get; internal set; }

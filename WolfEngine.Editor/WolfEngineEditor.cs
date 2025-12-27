@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Threading;
 using WolfEngine;
 using WolfEngine.ECS;
+using WolfEngine.Editor.UI;
 using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -23,6 +24,7 @@ public class WolfEngineEditor
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
 	private readonly List<World> _renderWorlds = new(2);
+	private readonly EditorGui _editorGui;
 
 	private World _editorWorld = null!;
 	private World _gameWorld = null!;
@@ -35,7 +37,7 @@ public class WolfEngineEditor
 		IUiFrameProvider uiFrameProvider,
 		IRenderer renderer,
 		RenderGraph renderGraph,
-		IInputSystem inputSystem)
+		IInputSystem inputSystem, EditorGui editorGui)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -43,6 +45,7 @@ public class WolfEngineEditor
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
+		_editorGui = editorGui;
 	}
 
 	public void Run()
@@ -90,7 +93,7 @@ public class WolfEngineEditor
 			PublishSnapshot();
 
 			_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
-			_uiFrameProvider.RunGui(EditorGui.Draw, _gameWorld);
+			_uiFrameProvider.RunGui(_editorGui.Draw, _gameWorld);
 
 			Thread.Sleep(0);
 		}

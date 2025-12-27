@@ -105,6 +105,11 @@ public class World
         MarkDirty(entity);
     }
 
+    public void AddTransform(Entity entity, Matrix4x4 transform)
+    {
+        AddTransform(entity, new LocalTransform(transform));
+    }
+
     public void MarkDirty(Entity entity)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(entity);

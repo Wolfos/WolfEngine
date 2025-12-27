@@ -6,13 +6,12 @@ using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Utility;
 
 namespace WolfEngine;
 
 public static class WolfEngine
 {
-	public static Action<float> OnUpdate;
-	public static Action<float> OnPreRender;
 	public static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<IShaderCompiler, ShaderCompiler>();
@@ -26,10 +25,14 @@ public static class WolfEngine
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
+		services.AddSingleton<IFileDialogService, FileDialogService>();
 
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();
 		services.AddSingleton<SkyboxRenderer>();
+		
+		services.AddSingleton<ISceneBuilder, SceneBuilder>();
 		
 		if (OperatingSystem.IsMacOS())
 		{

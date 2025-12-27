@@ -5,6 +5,7 @@ using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Utility;
 
 namespace WolfEngine;
 
@@ -34,6 +35,8 @@ class Program
         services.AddSingleton<ImGuiUiSystem>();
         services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
         services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+        services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
+        services.AddSingleton<IFileDialogService, FileDialogService>();
 
         services.AddSingleton<RenderGraphResourceRegistry>();
         services.AddSingleton<RenderGraph>();
