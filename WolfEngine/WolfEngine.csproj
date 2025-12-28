@@ -66,6 +66,9 @@
         <None Update="Shaders\imgui.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\procedural_skybox.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Assets\shanghai_bund_1k.hdr">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>

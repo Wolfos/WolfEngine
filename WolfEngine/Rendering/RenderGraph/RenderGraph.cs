@@ -27,7 +27,7 @@ public sealed class RenderGraph
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
-	public Action? FrameCompleted { get; set; }
+	public event Action? FrameCompleted;
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,

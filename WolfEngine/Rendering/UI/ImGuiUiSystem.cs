@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
@@ -28,7 +29,11 @@ public interface IUiFrameProvider
 /// </summary>
 public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 {
-	private const string FontPath = "Assets/Fonts/Inter-VariableFont_opsz,wght.ttf";
+	private static readonly string FontPath = Path.Combine(
+		AppContext.BaseDirectory,
+		"Assets",
+		"Fonts",
+		"Inter-VariableFont_opsz,wght.ttf");
 	private const float BaseFontSize = 14.0f;
 	private const float FontScaleEpsilon = 0.01f;
 	private readonly ConcurrentQueue<UiFrameData> _pendingFrames = new();

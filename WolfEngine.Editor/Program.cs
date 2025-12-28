@@ -1,8 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using System.Threading;
-using WolfEngine;
 using WolfEngine.Rendering.UI;
-using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 
 namespace WolfEngine.Editor;

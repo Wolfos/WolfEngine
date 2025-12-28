@@ -25,7 +25,7 @@ public class RenderPipeline : IRenderPipeline
 
     public void Run()
     {
-        _renderGraph.FrameCompleted = () => _frameReady.Set();
+        _renderGraph.FrameCompleted += _frameReady.Set;
         _renderGraph.Startup(static () => { }, static _ => { });
     }
 

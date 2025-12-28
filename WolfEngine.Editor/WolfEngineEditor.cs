@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
-using System.Threading;
-using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
@@ -23,6 +19,7 @@ public class WolfEngineEditor
 	private readonly IRenderer _renderer;
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
+	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 
@@ -30,6 +27,7 @@ public class WolfEngineEditor
 	private World _gameWorld = null!;
 	private Entity _editorCamera;
 	private volatile bool _running;
+	private volatile bool _renderReady;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -37,7 +35,9 @@ public class WolfEngineEditor
 		IUiFrameProvider uiFrameProvider,
 		IRenderer renderer,
 		RenderGraph renderGraph,
-		IInputSystem inputSystem, EditorGui editorGui)
+		IInputSystem inputSystem,
+		SkyboxRenderer skyboxRenderer,
+		EditorGui editorGui)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -45,7 +45,9 @@ public class WolfEngineEditor
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
+		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_editorGui = editorGui;
+		_renderGraph.FrameCompleted += OnFrameCompleted;
 	}
 
 	public void Run()
@@ -69,6 +71,14 @@ public class WolfEngineEditor
 		_worldManager.AddSystem<TransformSystem>();
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem));
 
+		var sun = _gameWorld.CreateEntity("Sun");
+		var light = new Light
+		{
+			Color = Vector4.One, Intensity = 1, Type = LightType.Directional
+		};
+		_gameWorld.AddTransform(sun, Matrix4x4.Identity);
+		_gameWorld.AddComponent(sun, light);
+
 		_editorCamera = CreateEditorCamera(_editorWorld);
 
 		_renderWorlds.Clear();
@@ -90,6 +100,7 @@ public class WolfEngineEditor
 			_worldManager.Update(deltaTime, WorldTag.All);
 			_worldManager.OnPreRender(deltaTime, WorldTag.All);
 
+			UpdateSkybox();
 			PublishSnapshot();
 
 			_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
@@ -104,6 +115,50 @@ public class WolfEngineEditor
 		ref var camera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
+	}
+
+	private void UpdateSkybox()
+	{
+		if (_renderReady == false)
+		{
+			return;
+		}
+
+		var sunDirection = GetSunDirection();
+		var skybox = _skyboxRenderer.UpdateProceduralSkybox(sunDirection);
+		_renderGraph.SetSkybox(skybox);
+	}
+
+	private Vector3 GetSunDirection()
+	{
+		for (var i = 0; i < _renderWorlds.Count; i++)
+		{
+			var world = _renderWorlds[i];
+			foreach (var entry in world.View<WorldTransform, Light>())
+			{
+				ref var transform = ref entry.First;
+				ref var light = ref entry.Second;
+				if (light.Type != LightType.Directional)
+				{
+					continue;
+				}
+
+				var forward = Vector3.Transform(-Vector3.UnitZ, transform.LocalToWorld);
+				if (forward == Vector3.Zero)
+				{
+					forward = new Vector3(0, -1, 0);
+				}
+				forward = Vector3.Normalize(forward);
+				return -forward;
+			}
+		}
+
+		return Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
+	}
+
+	private void OnFrameCompleted()
+	{
+		_renderReady = true;
 	}
 
 	private static Entity CreateEditorCamera(World world)

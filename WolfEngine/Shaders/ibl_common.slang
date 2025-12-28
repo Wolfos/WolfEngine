@@ -10,7 +10,7 @@ static float2 DirToEquirect(float3 dir)
 {
     dir = normalize(dir);
     float phi = atan2(dir.z, dir.x);
-    float theta = acos(saturate(dir.y));
+    float theta = acos(clamp(dir.y, -1.0f, 1.0f));
     float u = phi / (2.0f * 3.14159265f) + 0.5f;
     float v = theta / 3.14159265f;
     return float2(u, v);

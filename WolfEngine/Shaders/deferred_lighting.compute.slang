@@ -48,7 +48,7 @@ float2 DirToEnvUV(float3 dir)
 {
     dir = normalize(dir);
     float u = atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f;
-    float v = dir.y * 0.5f + 0.5f;
+    float v = acos(clamp(dir.y, -1.0f, 1.0f)) / 3.14159265f;
     return float2(1.0f - u, v);
 }
 
@@ -148,7 +148,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (depth >= 0.9999f) // no geometry, render skybox
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
-        skyDir.y = -skyDir.y;
         float3 skyColor = SampleEnvironment(skyDir);
         lightingTarget[dispatchThreadId.xy] = float4(skyColor, 1.0f);
         return;
@@ -206,7 +205,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
     float3 envNormal = normal;
-    envNormal.y = -envNormal.y;
     float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(envNormal), 0.0f).rgb * IBL_EXPOSURE;
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float3 kD = (1.0f - metallic) * (1.0f - F0);
@@ -214,7 +212,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // Image-based reflection (prefiltered)
     float3 reflectionDir = reflect(-viewDir, normal);
-    reflectionDir.y = -reflectionDir.y;
     float3 envColor = SamplePrefiltered(reflectionDir, roughness) * IBL_EXPOSURE;
 
     float cosTheta = saturate(dot(normal, viewDir));
