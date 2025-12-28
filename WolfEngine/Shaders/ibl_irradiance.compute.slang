@@ -39,7 +39,7 @@ void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
     float3 n = EquirectToDir(uv);
 
-    const uint SAMPLE_COUNT = 4096;
+    const uint SAMPLE_COUNT = 128;
     float3 sum = 0.0f;
     float weight = 0.0f;
     [loop]
