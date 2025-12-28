@@ -23,7 +23,7 @@ cbuffer CameraParams : register(b1)
 
 static const uint MAX_LIGHTS = 3;
 static const float PI = 3.14159265f;
-static const float IBL_EXPOSURE = 2.1f;
+static const float IBL_EXPOSURE = 1.0f;
 
 struct LightData
 {
