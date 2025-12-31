@@ -170,7 +170,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         if (type >= 0.5f) // point
         {
-            float3 lightPos = light.positionRange.xyz - camera.cameraOrigin;
+            float3 lightPos = light.positionRange.xyz;
             float range = max(light.positionRange.w, 0.001f);
             float3 toLight = lightPos - worldPos;
             float distSq = dot(toLight, toLight);

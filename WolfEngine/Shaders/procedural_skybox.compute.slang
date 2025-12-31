@@ -28,7 +28,7 @@ void ProceduralSkyboxCSMain(uint3 id : SV_DispatchThreadID)
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
     float3 dir = EquirectToDir(uv);
 
-    float3 sunDir = normalize(sunDirectionIntensity.xyz);
+    float3 sunDir = normalize(float3(-sunDirectionIntensity.x, -sunDirectionIntensity.y, sunDirectionIntensity.z));
     float sunDot = saturate(dot(dir, sunDir));
     float sun = pow(sunDot, sunColorSharpness.w) * sunDirectionIntensity.w;
 

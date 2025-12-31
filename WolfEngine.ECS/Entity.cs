@@ -4,12 +4,14 @@ public readonly struct Entity : IEquatable<Entity>
 {
 	public readonly int Index;
 	public readonly int Generation;
+	public bool IsValid => Generation != 0;
 
 	public Entity(int index, int generation)
 	{
 		Index = index;
 		Generation = generation;
 	}
+	
 
 	public bool Equals(Entity other)
 	{

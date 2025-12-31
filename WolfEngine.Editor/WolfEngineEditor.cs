@@ -143,13 +143,12 @@ public class WolfEngineEditor
 					continue;
 				}
 
-				var forward = Vector3.Transform(-Vector3.UnitZ, transform.LocalToWorld);
+				var forward = Vector3.TransformNormal(Vector3.UnitZ, transform.LocalToWorld);
 				if (forward == Vector3.Zero)
 				{
 					forward = new Vector3(0, -1, 0);
 				}
-				forward = Vector3.Normalize(forward);
-				return -forward;
+				return forward;
 			}
 		}
 

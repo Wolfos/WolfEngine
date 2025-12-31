@@ -34,12 +34,12 @@ public class MenuBar: IMenuBar
 			ImGui.EndMenu();
 		}
 		if (ImGui.BeginMenu("Import")) {
-			if (ImGui.MenuItem("Import GLTF"))
+			if (ImGui.MenuItem("Import 3D file"))
 			{
 				var path = _fileDialogService.OpenFile(new FileDialogOptions
 				{
-					Title = "Import GLTF",
-					AllowedExtensions = ["gltf", "glb"]
+					Title = "Import 3D file",
+					AllowedExtensions = ["gltf", "glb", "fbx"]
 				});
 				if (string.IsNullOrEmpty(path) == false)
 				{

@@ -120,7 +120,7 @@ public class CameraMoverSystem: IUpdateable
 	{
 		if (mover.MoveSpeed <= 0.0f)
 		{
-			mover.MoveSpeed = 1.0f;
+			mover.MoveSpeed = 5.0f;
 		}
 
 		if (mover.LookSensitivity <= 0.0f)

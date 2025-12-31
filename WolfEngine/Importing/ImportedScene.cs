@@ -14,6 +14,7 @@ public enum TextureSemantic
 }
 
 public record ImportedScene(
+    String Name,
     List<ImportedMaterial> Materials,
     List<ImportedTexture> Textures,
     List<ImportedMesh> Meshes

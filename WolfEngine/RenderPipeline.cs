@@ -58,7 +58,7 @@ public class RenderPipeline : IRenderPipeline
                 snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
             }
 
-            foreach (var entry in world.View<WorldTransform, Rendering.Light>())
+            foreach (var entry in world.View<WorldTransform, Light>())
             {
                 ref var transform = ref entry.First;
                 ref var light = ref entry.Second;

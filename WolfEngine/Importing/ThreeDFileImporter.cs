@@ -52,6 +52,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         var textures = new List<ImportedTexture>();
         var meshData = new List<(Mesh mesh, int materialIndex)>();
         var textureLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var sceneName = scene->MRootNode->MName.AsString;
 
         try
         {
@@ -212,7 +213,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             assimp.ReleaseImport(scene);
         }
 
-        return new ImportedScene(materials, textures, meshes);
+        return new ImportedScene(sceneName, materials, textures, meshes);
     }
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
@@ -254,8 +255,18 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 continue;
             }
 
-            var index = GetOrLoadTextureIndex(scene, texturePath, semantic, modelDirectory, textureLookup, textures);
-            return index;
+            try
+            {
+                var index = GetOrLoadTextureIndex(scene, texturePath, semantic, modelDirectory, textureLookup,
+                    textures);
+                return index;
+            }
+            catch (Exception e)
+            {
+                Console.Out.WriteLine($"Error loading texture {texturePath}");
+                Console.Out.WriteLine(e.Message);
+                return 0;
+            }
         }
 
         return null;
@@ -270,7 +281,13 @@ public class ThreeDFileImporter : IThreeDFileImporter
         List<ImportedTexture> textures)
     {
         var isEmbedded = texturePath.Length > 0 && texturePath[0] == '*';
-        var key = isEmbedded ? texturePath : Path.GetFullPath(Path.Combine(modelDirectory, texturePath));
+        var normalizedTexturePath = isEmbedded ? texturePath : NormalizeRelativePath(texturePath);
+        var key = isEmbedded
+            ? texturePath
+            : Path.GetFullPath(
+                Path.IsPathRooted(normalizedTexturePath)
+                    ? normalizedTexturePath
+                    : Path.Combine(modelDirectory, normalizedTexturePath));
 
         if (textureLookup.TryGetValue(key, out var existing))
         {
@@ -296,6 +313,17 @@ public class ThreeDFileImporter : IThreeDFileImporter
         textures.Add(importedTexture);
         textureLookup[key] = index;
         return index;
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return path;
+        }
+
+        var normalized = path.Replace('\\', Path.DirectorySeparatorChar);
+        return normalized.Replace('/', Path.DirectorySeparatorChar);
     }
 
     private unsafe ImportedTexture LoadEmbeddedTexture(Scene* scene, string texturePath, TextureSemantic semantic)

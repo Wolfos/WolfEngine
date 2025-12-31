@@ -84,7 +84,7 @@ public class TransformSystem : IPreRender
             if (world.HasComponent<Children>(e))
             {
                 var childEntity = world.GetComponent<Children>(e).First;
-                while (childEntity.Generation != 0)
+                while (childEntity.IsValid)
                 {
                     Push(ref heapStack, stack, ref stackSize, childEntity, in worldM);
 

@@ -57,9 +57,4 @@ public static class WolfEngine
 		worldManager.AddSystem<CameraResolutionUpdater>();
 		worldManager.AddSystem<TransformSystem>();
 	}
-
-	public static void GameLoop(float deltaTime)
-	{
-		
-	}
 }
