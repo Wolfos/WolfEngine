@@ -15,6 +15,9 @@ public class ComponentEditor: IComponentEditor
 {
     public void Draw(World world, Entity entity, Type componentType)
     {
+        if (Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)))
+            return;
+
         if (componentType.GetInterface(nameof(IEntityComponent)) is null)
             return;
 

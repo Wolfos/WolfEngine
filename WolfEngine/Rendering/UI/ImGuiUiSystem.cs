@@ -296,8 +296,8 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.Header] = bgColor;
 		style.Colors[(int)ImGuiCol.Border] = bgColor;
 		
-		style.Colors[(int)ImGuiCol.Tab] = bgColor;
-		style.Colors[(int)ImGuiCol.TabDimmed] = bgColor;
+		style.Colors[(int)ImGuiCol.Tab] = titleColor;
+		style.Colors[(int)ImGuiCol.TabDimmed] = titleColor;
 		style.Colors[(int)ImGuiCol.TabSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = bgColor;

@@ -35,27 +35,32 @@ public struct LocalTransform: IEntityComponent
 	}
 }
 
+[ExcludeFromEditor]
 public struct WorldTransform : IEntityComponent
 {
 	public Matrix4x4 LocalToWorld;
 	public Matrix4x4 WorldToLocal;
 }
 
+[ExcludeFromEditor]
 public struct Parent : IEntityComponent
 {
 	public Entity Value;
 }
 
+[ExcludeFromEditor]
 public struct Children : IEntityComponent
 {
 	public Entity First;
 }
 
+[ExcludeFromEditor]
 public struct Sibling : IEntityComponent
 {
 	public Entity Next;
 }
 
+[ExcludeFromEditor]
 public struct DirtyTransformRoot : IEntityComponent
 {
 }
