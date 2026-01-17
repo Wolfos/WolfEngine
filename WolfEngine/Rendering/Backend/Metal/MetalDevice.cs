@@ -66,6 +66,18 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		return new MetalCommandList(_commandQueue, _descriptorTable);
 	}
 
+	public void WaitForIdle()
+	{
+		var buffer = _commandQueue.CommandBuffer();
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		buffer.Commit();
+		buffer.WaitUntilCompleted();
+	}
+
 	public void Submit(IGfxCommandList commandList)
 	{
 		if (commandList is not MetalCommandList metalCommandList)

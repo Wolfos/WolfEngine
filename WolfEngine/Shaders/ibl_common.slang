@@ -1,7 +1,9 @@
+import "constants.slang";
+
 static float3 EquirectToDir(float2 uv)
 {
-    float phi = (uv.x * 2.0f - 1.0f) * 3.14159265f;
-    float theta = uv.y * 3.14159265f;
+    float phi = (uv.x * 2.0f - 1.0f) * PI;
+    float theta = uv.y * PI;
     float sinTheta = sin(theta);
     return float3(cos(phi) * sinTheta, cos(theta), sin(phi) * sinTheta);
 }
@@ -11,8 +13,8 @@ static float2 DirToEquirect(float3 dir)
     dir = normalize(dir);
     float phi = atan2(dir.z, dir.x);
     float theta = acos(clamp(dir.y, -1.0f, 1.0f));
-    float u = phi / (2.0f * 3.14159265f) + 0.5f;
-    float v = theta / 3.14159265f;
+    float u = phi / (2.0f * PI) + 0.5f;
+    float v = theta / PI;
     return float2(u, v);
 }
 

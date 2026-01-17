@@ -1,4 +1,5 @@
 import "ibl_common.slang";
+import "constants.slang";
 import "common_bindless.slang";
 
 cbuffer BindlessHandles : register(b0)
@@ -15,7 +16,7 @@ cbuffer BindlessHandles : register(b0)
 static float3 ImportanceSampleHemisphere(uint i, uint sampleCount, float3 n)
 {
     float2 xi = Hammersley(i, sampleCount);
-    float phi = xi.y * 2.0f * 3.14159265f;
+    float phi = xi.y * 2.0f * PI;
     float cosTheta = 1.0f - xi.x;
     float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
 
@@ -58,6 +59,6 @@ void IblIrradianceCSMain(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    float3 irradiance = weight > 0.0f ? (sum / weight) * 3.14159265f : 0.0f;
+    float3 irradiance = weight > 0.0f ? (sum / weight) * PI : 0.0f;
     irradianceOut[id.xy] = float4(irradiance, 1.0f);
 }

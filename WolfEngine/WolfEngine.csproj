@@ -90,6 +90,9 @@
         <None Update="Assets\Fonts\Inter-VariableFont_opsz,wght.ttf">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\constants.slang">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

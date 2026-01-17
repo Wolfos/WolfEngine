@@ -1,4 +1,5 @@
 import "common.slang";
+import "constants.slang";
 import "common_bindless.slang";
 
 cbuffer BindlessHandles : register(b0)
@@ -22,7 +23,6 @@ cbuffer CameraParams : register(b1)
 };
 
 static const uint MAX_LIGHTS = 3;
-static const float PI = 3.14159265f;
 static const float IBL_EXPOSURE = 1.0f;
 
 struct LightData
@@ -47,8 +47,8 @@ float3 DecodeNormal(float3 encoded)
 float2 DirToEnvUV(float3 dir)
 {
     dir = normalize(dir);
-    float u = atan2(dir.z, dir.x) / (2.0f * 3.14159265f) + 0.5f;
-    float v = acos(clamp(dir.y, -1.0f, 1.0f)) / 3.14159265f;
+    float u = atan2(dir.z, dir.x) / (2.0f * PI) + 0.5f;
+    float v = acos(clamp(dir.y, -1.0f, 1.0f)) / PI;
     return float2(1.0f - u, v);
 }
 

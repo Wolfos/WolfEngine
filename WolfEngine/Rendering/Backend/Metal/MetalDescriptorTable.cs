@@ -31,6 +31,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private int _uavCount;
 	private int _cbvCount;
 	private int _samplerCount;
+	private uint _bindlessVersion;
+	private uint _encodedVersion;
+	private bool _forceEncode;
+	private int _forceEncodeFrames;
 
 	public MetalDescriptorTable(MTLDevice device)
 	{
@@ -59,6 +63,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			index = _srvCount++;
 		}
 		_srvTextures[index] = metalTexture;
+		MarkDirty();
 		EncodeSrv(index);
 		return new DescriptorHandle(DescriptorKind.ShaderResourceView, index);
 	}
@@ -85,6 +90,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			index = _uavCount++;
 		}
 		_uavTextures[index] = metalTexture;
+		MarkDirty();
 		EncodeUav(index);
 		return new DescriptorHandle(DescriptorKind.UnorderedAccessView, index);
 	}
@@ -147,6 +153,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		var index = _freeSamplerIndices.Count > 0 ? _freeSamplerIndices.Pop() : _samplerCount++;
 		_samplers[index] = samplerState;
+		MarkDirty();
 		EncodeSampler(index);
 		return new DescriptorHandle(DescriptorKind.Sampler, index);
 	}
@@ -185,6 +192,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 					return;
 				}
 				_srvTextures[index] = null;
+				MarkDirty();
 				_freeSrvIndices.Push(index);
 				break;
 			case DescriptorKind.UnorderedAccessView:
@@ -193,6 +201,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 					return;
 				}
 				_uavTextures[index] = null;
+				MarkDirty();
 				_freeUavIndices.Push(index);
 				break;
 			case DescriptorKind.Sampler:
@@ -202,6 +211,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 				}
 				_samplers[index].Dispose();
 				_samplers[index] = default;
+				MarkDirty();
 				_freeSamplerIndices.Push(index);
 				break;
 		}
@@ -213,22 +223,54 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_rwTextureEncoder = rwTextureEncoder;
 		_samplerEncoder = samplerEncoder;
 
+		var needsEncode = _forceEncode || _forceEncodeFrames > 0 || _bindlessVersion != _encodedVersion;
+
 		if (_textureEncoder.NativePtr != IntPtr.Zero)
 		{
-			EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder);
+			if (_textureEncoder.EncodedLength == 0)
+			{
+				_textureEncoder = default;
+			}
+			else
+			{
+				EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder, forceRecreate: needsEncode);
+			}
 		}
 
 		if (_rwTextureEncoder.NativePtr != IntPtr.Zero)
 		{
-			EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder);
+			if (_rwTextureEncoder.EncodedLength == 0)
+			{
+				_rwTextureEncoder = default;
+			}
+			else
+			{
+				EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder, forceRecreate: needsEncode);
+			}
 		}
 
 		if (_samplerEncoder.NativePtr != IntPtr.Zero)
 		{
-			EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder);
+			if (_samplerEncoder.EncodedLength == 0)
+			{
+				_samplerEncoder = default;
+			}
+			else
+			{
+				EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder, forceRecreate: needsEncode);
+			}
 		}
 
-		EncodeAll();
+		if (needsEncode)
+		{
+			EncodeAll();
+			_encodedVersion = _bindlessVersion;
+			_forceEncode = false;
+			if (_forceEncodeFrames > 0)
+			{
+				_forceEncodeFrames--;
+			}
+		}
 	}
 
 	private static MTLSamplerAddressMode ToAddressMode(AddressMode mode) => mode switch
@@ -256,6 +298,26 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		{
 			EncodeSampler(i);
 		}
+	}
+
+	internal void MarkDirty()
+	{
+		_bindlessVersion++;
+	}
+
+	internal void ForceEncode()
+	{
+		_forceEncode = true;
+	}
+
+	internal void ForceEncodeForFrames(int count)
+	{
+		if (count <= 0)
+		{
+			return;
+		}
+
+		_forceEncodeFrames = Math.Max(_forceEncodeFrames, count);
 	}
 
 	private void EncodeSrv(int index)
@@ -321,14 +383,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_samplerEncoder.SetSamplerStates(_singleSampler, new NSRange { location = (ulong)index, length = 1 });
 	}
 
-	private void EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder)
+	private void EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder, bool forceRecreate)
 	{
 		var requiredSize = encoder.EncodedLength;
-		if (requiredSize == 0)
-		{
-			throw new InvalidOperationException("Metal argument encoder has zero encoded length; bindless heap is not an argument buffer.");
-		}
-		if (buffer.NativePtr == IntPtr.Zero || buffer.Length < requiredSize)
+		if (forceRecreate || buffer.NativePtr == IntPtr.Zero || buffer.Length < requiredSize)
 		{
 			buffer = _device.NewBuffer(requiredSize, MTLResourceOptions.ResourceStorageModeShared);
 			if (buffer.NativePtr == IntPtr.Zero)

@@ -1,4 +1,5 @@
 import "ibl_common.slang";
+import "constants.slang";
 import "common_bindless.slang";
 
 cbuffer BindlessHandles : register(b0)
@@ -16,7 +17,7 @@ float3 ImportanceSampleGGX(float2 xi, float roughness, float3 n)
 {
     float a = roughness * roughness;
 
-    float phi = 2.0f * 3.14159265f * xi.x;
+    float phi = 2.0f * PI * xi.x;
     float cosTheta = sqrt((1.0f - xi.y) / (1.0f + (a * a - 1.0f) * xi.y));
     float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
 

@@ -119,12 +119,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 	public void SetScissorRect(in RectInt rect)
 	{
 		EnsureRenderEncoder();
+		var maxWidth = Math.Max(0, (int)_viewport.Width);
+		var maxHeight = Math.Max(0, (int)_viewport.Height);
+		var x = Math.Clamp(rect.X, 0, maxWidth);
+		var y = Math.Clamp(rect.Y, 0, maxHeight);
+		var width = Math.Max(0, Math.Min(rect.Width, maxWidth - x));
+		var height = Math.Max(0, Math.Min(rect.Height, maxHeight - y));
 		var scissor = new MTLScissorRect
 		{
-			x = (nuint)Math.Max(rect.X, 0),
-			y = (nuint)Math.Max(rect.Y, 0),
-			width = (nuint)Math.Max(rect.Width, 0),
-			height = (nuint)Math.Max(rect.Height, 0)
+			x = (nuint)x,
+			y = (nuint)y,
+			width = (nuint)width,
+			height = (nuint)height
 		};
 		_renderEncoder.SetScissorRect(scissor);
 	}

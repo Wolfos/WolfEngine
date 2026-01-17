@@ -202,7 +202,9 @@ public sealed class RenderGraph
 		
 		var frameBufferSize = _renderer.GetFrameBufferSize();
 		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-		_frameBuilder.BeginFrame(frameBufferSize, backBuffer);
+		var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
+		var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
+		_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
 		_frameBuilder.SetUiFrame(uiFrame);
 
 		_frameBuilder.Build(this);

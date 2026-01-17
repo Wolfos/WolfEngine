@@ -50,6 +50,8 @@ internal unsafe class WolfRendererMetal : IRenderer
     private bool _hasDrawableSize;
     private double _drawableWidth;
     private double _drawableHeight;
+    private bool _skipFrameAfterResize;
+    private bool _needsBindlessRefresh;
     private DescriptorHandle _linearSamplerHandle = DescriptorHandle.Invalid;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
@@ -270,9 +272,16 @@ internal unsafe class WolfRendererMetal : IRenderer
             return;
         }
 
+        if (_gfxDevice is MetalDevice metalDevice)
+        {
+            metalDevice.WaitForIdle();
+        }
+
         _drawableWidth = drawableWidth;
         _drawableHeight = drawableHeight;
         _hasDrawableSize = true;
+        _skipFrameAfterResize = true;
+        _needsBindlessRefresh = true;
 
         var size = new NSPoint(drawableWidth, drawableHeight);
         ObjCNative.ObjcMsgSendDrawableSize(_metalLayer.NativePtr, DrawableSizeSelector.SelPtr, size);
@@ -280,12 +289,23 @@ internal unsafe class WolfRendererMetal : IRenderer
         var sizeInt2 = new Int2(drawableWidth, drawableHeight);
         Screen.CurrentResolution = sizeInt2;
 
-        if (_gfxDevice is ITexturePoolDevice poolDevice)
+        CreateDepthTexture(drawableWidth, drawableHeight);
+        if (_gfxDevice.GlobalTable is MetalDescriptorTable metalTable)
         {
-            poolDevice.ClearTexturePool();
+            metalTable.MarkDirty();
+            metalTable.ForceEncodeForFrames(2);
+        }
+    }
+
+    internal bool ConsumeBindlessRefresh()
+    {
+        if (_needsBindlessRefresh == false)
+        {
+            return false;
         }
 
-        CreateDepthTexture(drawableWidth, drawableHeight);
+        _needsBindlessRefresh = false;
+        return true;
     }
 
     private void CreateDepthTexture(int width, int height)
@@ -481,6 +501,17 @@ internal unsafe class WolfRendererMetal : IRenderer
         UpdateDrawableSize();
     }
 
+    internal bool ConsumeResizeSkip()
+    {
+        if (_skipFrameAfterResize == false)
+        {
+            return false;
+        }
+
+        _skipFrameAfterResize = false;
+        return true;
+    }
+
     public void Render(
         RenderGraphResourceRegistry resourceRegistry,
         RenderGraphResourceHandle backBuffer)
@@ -497,10 +528,13 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         _currentDrawable = new CAMetalDrawable(drawablePtr);
+        var drawableTexture = _currentDrawable.Texture;
+        var drawableWidth = (int)drawableTexture.Width;
+        var drawableHeight = (int)drawableTexture.Height;
 
         var descriptor = new TextureDescriptor(
-            Math.Max(width, 1),
-            Math.Max(height, 1),
+            Math.Max(drawableWidth, 1),
+            Math.Max(drawableHeight, 1),
             TextureFormat.Bgra8Unorm,
             TextureUsage.RenderTarget,
             Vector4.Zero);
