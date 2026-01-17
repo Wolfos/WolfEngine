@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using WolfEngine.ECS;
+using WolfEngine.Editor.Profiling;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
 using WolfEngine.Rendering;
@@ -93,19 +94,39 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
+			FrameProfiler.Instance.BeginFrame();
+
 			var now = stopwatch.Elapsed;
 			var deltaTime = (float)(now - last).TotalSeconds;
 			last = now;
 
-			_worldManager.Update(deltaTime, WorldTag.All);
-			_worldManager.OnPreRender(deltaTime, WorldTag.All);
+			using (FrameProfiler.Instance.Measure("World Update"))
+			{
+				_worldManager.Update(deltaTime, WorldTag.All);
+			}
 
-			UpdateSkybox();
-			PublishSnapshot();
+			using (FrameProfiler.Instance.Measure("Pre-Render"))
+			{
+				_worldManager.OnPreRender(deltaTime, WorldTag.All);
+			}
 
-			_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
-			_uiFrameProvider.RunGui(_editorGui.Draw, _gameWorld);
+			using (FrameProfiler.Instance.Measure("Update Skybox"))
+			{
+				UpdateSkybox();
+			}
 
+			using (FrameProfiler.Instance.Measure("Publish Snapshot"))
+			{
+				PublishSnapshot();
+			}
+
+			using (FrameProfiler.Instance.Measure("UI"))
+			{
+				_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
+				_uiFrameProvider.RunGui(_editorGui.Draw, _gameWorld);
+			}
+
+			FrameProfiler.Instance.EndFrame();
 			Thread.Sleep(0);
 		}
 	}

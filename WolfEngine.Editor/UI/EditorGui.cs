@@ -1,5 +1,6 @@
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Editor.Profiling;
 
 namespace WolfEngine.Editor.UI;
 
@@ -22,25 +23,41 @@ public class EditorGui
     public void Draw(World world)
     {
         DockSpace();
-        
-        _menuBar.Draw(world);
-        
-        EntitiesWindow.Draw(world);
-        
-        ImGui.SetNextWindowPos(new System.Numerics.Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new System.Numerics.Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
-        ImGui.Begin("Components");
-        if (HasSelectedEntity)
-        {
-            foreach (var componentType in SelectedComponentTypes)
-            {
-                _componentEditor.Draw(world, SelectedEntity, componentType);
-            }
-        }
-        ImGui.End();
-        
-        EditorPreferencesMenu.Draw();
 
+        using (FrameProfiler.Instance.Measure("Menu Bar"))
+        {
+            _menuBar.Draw(world);
+        }
+
+        using (FrameProfiler.Instance.Measure("Entities Window"))
+        {
+            EntitiesWindow.Draw(world);
+        }
+
+        using (FrameProfiler.Instance.Measure("Components Window"))
+        {
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
+            ImGui.Begin("Components");
+            if (HasSelectedEntity)
+            {
+                foreach (var componentType in SelectedComponentTypes)
+                {
+                    _componentEditor.Draw(world, SelectedEntity, componentType);
+                }
+            }
+            ImGui.End();
+        }
+
+        using (FrameProfiler.Instance.Measure("Preferences"))
+        {
+            EditorPreferencesMenu.Draw();
+        }
+
+        using (FrameProfiler.Instance.Measure("Profiler"))
+        {
+            ProfilerWindow.Draw();
+        }
     }
     
 

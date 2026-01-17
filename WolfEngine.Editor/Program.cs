@@ -33,6 +33,7 @@ public static class Program
 	{
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<IComponentEditor, ComponentEditor>();
+		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<EditorGui>();
 	}

@@ -12,11 +12,13 @@ public class MenuBar: IMenuBar
 {
 	private readonly IFileDialogService _fileDialogService;
 	private readonly ISceneBuilder _sceneBuilder;
+	private readonly FramerateTool _framerateTool;
 
-	public MenuBar(IFileDialogService fileDialogService, ISceneBuilder sceneBuilder)
+	public MenuBar(IFileDialogService fileDialogService, ISceneBuilder sceneBuilder, FramerateTool framerateTool)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneBuilder = sceneBuilder;
+		_framerateTool = framerateTool;
 	}
 
 	public void Draw(World world)
@@ -48,6 +50,9 @@ public class MenuBar: IMenuBar
 			}
 			ImGui.EndMenu();
 		}
+
+		_framerateTool.DrawRightAlignedInMenuBar();
+
 		ImGui.EndMainMenuBar();
 	}
 }
