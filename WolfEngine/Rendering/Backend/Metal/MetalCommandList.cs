@@ -27,6 +27,12 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 	private MTLBuffer _indexBuffer;
 	private MTLIndexType _indexType;
 	private nuint _indexOffset;
+	private MetalPipeline _currentGraphicsPipeline;
+	private MetalPipeline _currentComputePipeline;
+	private bool _bindlessBuffersSetRender;
+	private bool _bindlessBuffersSetCompute;
+	private uint _lastBindlessVersionRender = uint.MaxValue;
+	private uint _lastBindlessVersionCompute = uint.MaxValue;
 
 	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
 	{
@@ -42,6 +48,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		_hasTargets = true;
 		Array.Clear(_clearColorSet, 0, _clearColorSet.Length);
 		_clearDepthSet = false;
+		_currentGraphicsPipeline = null;
+		_bindlessBuffersSetRender = false;
+		_lastBindlessVersionRender = uint.MaxValue;
 	}
 
 	public void EndPass()
@@ -52,6 +61,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			_renderEncoder = default;
 		}
 
+		_currentGraphicsPipeline = null;
+		_bindlessBuffersSetRender = false;
+		_lastBindlessVersionRender = uint.MaxValue;
 		_hasTargets = false;
 	}
 
@@ -62,45 +74,57 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			throw new InvalidOperationException("Pipeline was not created by the Metal backend.");
 		}
 
-		_descriptorTable.SetArgumentEncoders(metalPipeline.TextureEncoder, metalPipeline.RWTextureEncoder, metalPipeline.SamplerEncoder);
-
 		if (metalPipeline.Kind == PassKind.Compute)
 		{
 			EnsureComputeEncoder();
-			ApplyBindlessToComputeEncoder();
-			if (metalPipeline.ComputePipelineState.NativePtr == IntPtr.Zero)
+			if (ReferenceEquals(_currentComputePipeline, metalPipeline) == false)
 			{
-				throw new InvalidOperationException("Compute pipeline state was null.");
+				_descriptorTable.SetArgumentEncoders(metalPipeline.TextureEncoder, metalPipeline.RWTextureEncoder, metalPipeline.SamplerEncoder);
+				_bindlessBuffersSetCompute = false;
+				_currentComputePipeline = metalPipeline;
+				if (metalPipeline.ComputePipelineState.NativePtr == IntPtr.Zero)
+				{
+					throw new InvalidOperationException("Compute pipeline state was null.");
+				}
+
+				_computeEncoder.SetComputePipelineState(metalPipeline.ComputePipelineState);
 			}
 
-			_computeEncoder.SetComputePipelineState(metalPipeline.ComputePipelineState);
+			ApplyBindlessToComputeEncoder();
 			return;
 		}
 
 		EnsureRenderEncoder();
+		if (ReferenceEquals(_currentGraphicsPipeline, metalPipeline) == false)
+		{
+			_descriptorTable.SetArgumentEncoders(metalPipeline.TextureEncoder, metalPipeline.RWTextureEncoder, metalPipeline.SamplerEncoder);
+			_bindlessBuffersSetRender = false;
+			_currentGraphicsPipeline = metalPipeline;
+			if (metalPipeline.RenderPipelineState.NativePtr == IntPtr.Zero)
+			{
+				throw new InvalidOperationException("Render pipeline state was null.");
+			}
+
+			_renderEncoder.SetRenderPipelineState(metalPipeline.RenderPipelineState);
+			if (metalPipeline.DepthStencilState.NativePtr != IntPtr.Zero)
+			{
+				_renderEncoder.SetDepthStencilState(metalPipeline.DepthStencilState);
+			}
+
+			_renderEncoder.SetCullMode(metalPipeline.RenderState.CullMode switch
+			{
+				CullMode.None => MTLCullMode.None,
+				CullMode.Front => MTLCullMode.Front,
+				CullMode.Back => MTLCullMode.Back,
+				_ => MTLCullMode.None
+			});
+			var winding = metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox
+				? MTLWinding.CounterClockwise
+				: MTLWinding.Clockwise;
+			_renderEncoder.SetFrontFacingWinding(winding);
+		}
+
 		ApplyBindlessToRenderEncoder();
-		if (metalPipeline.RenderPipelineState.NativePtr == IntPtr.Zero)
-		{
-			throw new InvalidOperationException("Render pipeline state was null.");
-		}
-
-		_renderEncoder.SetRenderPipelineState(metalPipeline.RenderPipelineState);
-		if (metalPipeline.DepthStencilState.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.SetDepthStencilState(metalPipeline.DepthStencilState);
-		}
-
-		_renderEncoder.SetCullMode(metalPipeline.RenderState.CullMode switch
-		{
-			CullMode.None => MTLCullMode.None,
-			CullMode.Front => MTLCullMode.Front,
-			CullMode.Back => MTLCullMode.Back,
-			_ => MTLCullMode.None
-		});
-		var winding = metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox
-			? MTLWinding.CounterClockwise
-			: MTLWinding.Clockwise;
-		_renderEncoder.SetFrontFacingWinding(winding);
 	}
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
@@ -307,6 +331,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		{
 			_computeEncoder.EndEncoding();
 			_computeEncoder = default;
+			_currentComputePipeline = null;
+			_bindlessBuffersSetCompute = false;
+			_lastBindlessVersionCompute = uint.MaxValue;
 		}
 
 		var blit = _commandBuffer.BlitCommandEncoder();
@@ -322,12 +349,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		{
 			_renderEncoder.EndEncoding();
 			_renderEncoder = default;
+			_currentGraphicsPipeline = null;
+			_bindlessBuffersSetRender = false;
+			_lastBindlessVersionRender = uint.MaxValue;
 		}
 
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.EndEncoding();
 			_computeEncoder = default;
+			_currentComputePipeline = null;
+			_bindlessBuffersSetCompute = false;
+			_lastBindlessVersionCompute = uint.MaxValue;
 		}
 
 		if (_presentDrawable.NativePtr != IntPtr.Zero)
@@ -414,6 +447,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 
 		_renderEncoder = _commandBuffer.RenderCommandEncoder(descriptor);
+		_currentGraphicsPipeline = null;
+		_bindlessBuffersSetRender = false;
+		_lastBindlessVersionRender = uint.MaxValue;
 		var viewport = new MTLViewport
 		{
 			originX = _viewport.X,
@@ -436,6 +472,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 
 		_computeEncoder = _commandBuffer.ComputeCommandEncoder();
+		_currentComputePipeline = null;
+		_bindlessBuffersSetCompute = false;
+		_lastBindlessVersionCompute = uint.MaxValue;
 		ApplyBindlessToComputeEncoder();
 	}
 
@@ -448,24 +487,33 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			return;
 		}
 
-		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetRender == false && _descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.SetVertexBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
 		}
 
-		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetRender == false && _descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.SetVertexBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 		}
 
-		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetRender == false && _descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.SetVertexBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 		}
 
+		_bindlessBuffersSetRender = true;
+
+		var bindlessVersion = _descriptorTable.BindlessVersion;
+		if (_lastBindlessVersionRender == bindlessVersion)
+		{
+			return;
+		}
+
+		_lastBindlessVersionRender = bindlessVersion;
 		UseBindlessResourcesForRender();
 	}
 
@@ -478,21 +526,30 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			return;
 		}
 
-		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetCompute == false && _descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.SetBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
 		}
 
-		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetCompute == false && _descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.SetBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 		}
 
-		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
+		if (_bindlessBuffersSetCompute == false && _descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.SetBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 		}
 
+		_bindlessBuffersSetCompute = true;
+
+		var bindlessVersion = _descriptorTable.BindlessVersion;
+		if (_lastBindlessVersionCompute == bindlessVersion)
+		{
+			return;
+		}
+
+		_lastBindlessVersionCompute = bindlessVersion;
 		UseBindlessResourcesForCompute();
 	}
 

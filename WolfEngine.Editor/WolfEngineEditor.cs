@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Numerics;
 using WolfEngine.ECS;
-using WolfEngine.Editor.Profiling;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
@@ -94,7 +94,7 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
-			FrameProfiler.Instance.BeginFrame();
+			FrameProfiler.Instance.BeginFrame("Editor Frame");
 
 			var now = stopwatch.Elapsed;
 			var deltaTime = (float)(now - last).TotalSeconds;

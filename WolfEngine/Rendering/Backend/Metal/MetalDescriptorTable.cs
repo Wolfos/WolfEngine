@@ -166,6 +166,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 	public int SamplerCount => _samplerCount;
 
+	internal uint BindlessVersion => _bindlessVersion;
+
 	public MTLTexture GetSrvTexture(int index) => _srvTextures[index]?.Texture ?? default;
 
 	public MTLTexture GetUavTexture(int index) => _uavTextures[index]?.Texture ?? default;

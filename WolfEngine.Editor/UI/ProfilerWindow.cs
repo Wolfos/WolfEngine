@@ -1,5 +1,5 @@
 using ImGuiNET;
-using WolfEngine.Editor.Profiling;
+using WolfEngine.Profiling;
 
 namespace WolfEngine.Editor.UI;
 
@@ -25,18 +25,26 @@ public class ProfilerWindow
 		}
 
 		ImGui.Begin("Profiler", ref _isOpen);
-		var root = FrameProfiler.Instance.LastFrameRoot;
-		if (root == null)
+		var frames = FrameProfiler.Instance.GetLastFrames();
+		if (frames.Count == 0)
 		{
 			ImGui.TextUnformatted("No profiler data available.");
 			ImGui.End();
 			return;
 		}
 
-		double frameMs = root.DurationMs;
-		ImGui.Text($"Frame: {frameMs:0.00} ms");
-		ImGui.Separator();
-		DrawNodes(root, frameMs);
+		for (int i = 0; i < frames.Count; i++)
+		{
+			var frame = frames[i];
+			var header = $"{frame.ThreadName} ({frame.ThreadId})";
+			if (ImGui.CollapsingHeader(header, ImGuiTreeNodeFlags.DefaultOpen))
+			{
+				double frameMs = frame.Root.DurationMs;
+				ImGui.Text($"Frame: {frameMs:0.00} ms");
+				ImGui.Separator();
+				DrawNodes(frame.Root, frameMs);
+			}
+		}
 		ImGui.End();
 	}
 
@@ -47,11 +55,15 @@ public class ProfilerWindow
 			var child = node.Children[i];
 			double ms = child.DurationMs;
 			double pct = frameMs > 0.0 ? (ms / frameMs) * 100.0 : 0.0;
-			var label = $"{child.Name} - {ms:0.00} ms ({pct:0.0}%)";
+			var details = $"{ms:0.00} ms ({pct:0.0}%)";
 
+			ImGui.PushID(i);
 			if (child.Children.Count > 0)
 			{
-				if (ImGui.TreeNode(label))
+				bool open = ImGui.TreeNodeEx(child.Name, ImGuiTreeNodeFlags.DefaultOpen);
+				ImGui.SameLine();
+				ImGui.TextUnformatted(details);
+				if (open)
 				{
 					DrawNodes(child, frameMs);
 					ImGui.TreePop();
@@ -59,8 +71,11 @@ public class ProfilerWindow
 			}
 			else
 			{
-				ImGui.TextUnformatted(label);
+				ImGui.TreeNodeEx(child.Name, ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen);
+				ImGui.SameLine();
+				ImGui.TextUnformatted(details);
 			}
+			ImGui.PopID();
 		}
 	}
 }

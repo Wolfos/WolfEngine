@@ -1,7 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
 using WolfEngine.ECS;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 
 namespace WolfEngine;
@@ -36,36 +34,42 @@ public class RenderPipeline : IRenderPipeline
             return;
         }
 
-        _frameReady.Wait();
+        using (FrameProfiler.Instance.Measure("Render Thread Wait"))
+        {
+            _frameReady.Wait();
+        }
         _frameReady.Reset();
 
-        var snapshot = _renderGraph.BeginSnapshotWrite();
-        snapshot.SetCamera(camera, cameraWorldTransform);
-
-        for (var i = 0; i < worlds.Count; i++)
+        using (FrameProfiler.Instance.Measure("Build Snapshot"))
         {
-            var world = worlds[i];
-            if (world is null)
+            var snapshot = _renderGraph.BeginSnapshotWrite();
+            snapshot.SetCamera(camera, cameraWorldTransform);
+
+            for (var i = 0; i < worlds.Count; i++)
             {
-                continue;
+                var world = worlds[i];
+                if (world is null)
+                {
+                    continue;
+                }
+
+                foreach (var entry in world.View<WorldTransform, MeshRenderer>())
+                {
+                    ref var transform = ref entry.First;
+                    ref var meshRenderer = ref entry.Second;
+                    var transformMatrix = transform.LocalToWorld;
+                    snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+                }
+
+                foreach (var entry in world.View<WorldTransform, Light>())
+                {
+                    ref var transform = ref entry.First;
+                    ref var light = ref entry.Second;
+                    snapshot.AddLight(light, transform.LocalToWorld);
+                }
             }
 
-            foreach (var entry in world.View<WorldTransform, MeshRenderer>())
-            {
-                ref var transform = ref entry.First;
-                ref var meshRenderer = ref entry.Second;
-                var transformMatrix = transform.LocalToWorld;
-                snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
-            }
-
-            foreach (var entry in world.View<WorldTransform, Light>())
-            {
-                ref var transform = ref entry.First;
-                ref var light = ref entry.Second;
-                snapshot.AddLight(light, transform.LocalToWorld);
-            }
+            _renderGraph.PublishSnapshot();
         }
-
-        _renderGraph.PublishSnapshot();
     }
 }

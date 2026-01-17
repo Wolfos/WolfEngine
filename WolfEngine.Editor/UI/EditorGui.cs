@@ -1,6 +1,6 @@
 using ImGuiNET;
 using WolfEngine.ECS;
-using WolfEngine.Editor.Profiling;
+using WolfEngine.Profiling;
 
 namespace WolfEngine.Editor.UI;
 

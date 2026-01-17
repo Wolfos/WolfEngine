@@ -3,6 +3,7 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
+using WolfEngine.Profiling;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
@@ -114,40 +115,43 @@ public sealed class RenderGraph
 
 		foreach (var pass in _passes)
 		{
-			// Materialize resources used by this pass
-			for (var i = 0; i < pass.Reads.Count; i++)
+			using (FrameProfiler.Instance.Measure($"Pass: {pass.Name}"))
 			{
-				_resourceRegistry.GetTexture(pass.Reads[i]);
+				// Materialize resources used by this pass
+				for (var i = 0; i < pass.Reads.Count; i++)
+				{
+					_resourceRegistry.GetTexture(pass.Reads[i]);
+				}
+
+				for (var i = 0; i < pass.Writes.Count; i++)
+				{
+					_resourceRegistry.GetTexture(pass.Writes[i]);
+				}
+
+				// Create command list for this pass based on its kind
+				var commandList = pass.Kind == PassKind.Graphics
+					? device.BeginGraphics()
+					: device.BeginCompute();
+
+				commandList.SetBindlessTable(device.GlobalTable);
+
+				// Inject barriers before the pass executes
+				for (var i = 0; i < pass.Barriers.Count; i++)
+				{
+					commandList.Barrier(pass.Barriers[i]);
+				}
+
+				// Execute the pass with the command list and scene data
+				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
+				{
+					CommandList = commandList,
+					SceneData = sceneData
+				};
+				pass.Execute(context);
+
+				// Submit the command list
+				device.Submit(commandList);
 			}
-
-			for (var i = 0; i < pass.Writes.Count; i++)
-			{
-				_resourceRegistry.GetTexture(pass.Writes[i]);
-			}
-
-			// Create command list for this pass based on its kind
-			var commandList = pass.Kind == PassKind.Graphics
-				? device.BeginGraphics()
-				: device.BeginCompute();
-
-			commandList.SetBindlessTable(device.GlobalTable);
-
-			// Inject barriers before the pass executes
-			for (var i = 0; i < pass.Barriers.Count; i++)
-			{
-				commandList.Barrier(pass.Barriers[i]);
-			}
-
-			// Execute the pass with the command list and scene data
-			var context = new RenderGraphContext(_resourceRegistry, pass.Name)
-			{
-				CommandList = commandList,
-				SceneData = sceneData
-			};
-			pass.Execute(context);
-
-			// Submit the command list
-			device.Submit(commandList);
 		}
 
 		ReleasePasses();
@@ -175,48 +179,57 @@ public sealed class RenderGraph
 
 	public void OnRender(float deltaTime)
 	{
+		FrameProfiler.Instance.BeginFrame("Render Frame");
+
 		_mainThreadDispatcher.ExecutePending();
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 
-		_renderer.BeginFrame();
-
-		_resourceRegistry.BeginFrame();
-		ReleasePasses();
-
-		UiFrameData uiFrame;
-		if (_uiFrameProvider.TryConsumeLatest(out var latestUi))
+		using (FrameProfiler.Instance.Measure("Begin Frame"))
 		{
-			uiFrame = latestUi;
-		}
-		else
-		{
-			uiFrame = UiFrameData.Empty;
+			_renderer.BeginFrame();
 		}
 
-		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
-			snapshot = _currentSnapshot;
+			_resourceRegistry.BeginFrame();
+			ReleasePasses();
+
+			UiFrameData uiFrame;
+			if (_uiFrameProvider.TryConsumeLatest(out var latestUi))
+			{
+				uiFrame = latestUi;
+			}
+			else
+			{
+				uiFrame = UiFrameData.Empty;
+			}
+
+			if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+			{
+				snapshot = _currentSnapshot;
+			}
+			_currentSnapshot = snapshot;
+			_activeSnapshot = snapshot;
+			
+			var frameBufferSize = _renderer.GetFrameBufferSize();
+			var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
+			var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
+			var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
+			_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
+			_frameBuilder.SetUiFrame(uiFrame);
+
+			_frameBuilder.Build(this);
+			Execute();
+
+			_renderer.Render(_resourceRegistry, backBuffer);
+
+			_resourceRegistry.EndFrame();
 		}
-		_currentSnapshot = snapshot;
-		_activeSnapshot = snapshot;
-		
-		var frameBufferSize = _renderer.GetFrameBufferSize();
-		var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-		var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
-		var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
-		_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
-		_frameBuilder.SetUiFrame(uiFrame);
-
-		_frameBuilder.Build(this);
-		Execute();
-
-		_renderer.Render(_resourceRegistry, backBuffer);
-
-		_resourceRegistry.EndFrame();
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
 		FrameCompleted?.Invoke();
+		FrameProfiler.Instance.EndFrame();
 	}
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
