@@ -32,7 +32,9 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private int _cbvCount;
 	private int _samplerCount;
 	private uint _bindlessVersion;
-	private uint _encodedVersion;
+	private uint _encodedSrvVersion;
+	private uint _encodedUavVersion;
+	private uint _encodedSamplerVersion;
 	private bool _forceEncode;
 	private int _forceEncodeFrames;
 
@@ -223,7 +225,11 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_rwTextureEncoder = rwTextureEncoder;
 		_samplerEncoder = samplerEncoder;
 
-		var needsEncode = _forceEncode || _forceEncodeFrames > 0 || _bindlessVersion != _encodedVersion;
+		var forceEncode = _forceEncode || _forceEncodeFrames > 0;
+		var needsEncodeSrv = forceEncode || _bindlessVersion != _encodedSrvVersion;
+		var needsEncodeUav = forceEncode || _bindlessVersion != _encodedUavVersion;
+		var needsEncodeSampler = forceEncode || _bindlessVersion != _encodedSamplerVersion;
+		var encodedAny = false;
 
 		if (_textureEncoder.NativePtr != IntPtr.Zero)
 		{
@@ -233,7 +239,17 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder, forceRecreate: needsEncode);
+				EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder);
+				if (needsEncodeSrv)
+				{
+					for (var i = 0; i < _srvCount; i++)
+					{
+						EncodeSrv(i);
+					}
+
+					_encodedSrvVersion = _bindlessVersion;
+					encodedAny = true;
+				}
 			}
 		}
 
@@ -245,7 +261,17 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder, forceRecreate: needsEncode);
+				EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder);
+				if (needsEncodeUav)
+				{
+					for (var i = 0; i < _uavCount; i++)
+					{
+						EncodeUav(i);
+					}
+
+					_encodedUavVersion = _bindlessVersion;
+					encodedAny = true;
+				}
 			}
 		}
 
@@ -257,14 +283,22 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder, forceRecreate: needsEncode);
+				EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder);
+				if (needsEncodeSampler)
+				{
+					for (var i = 0; i < _samplerCount; i++)
+					{
+						EncodeSampler(i);
+					}
+
+					_encodedSamplerVersion = _bindlessVersion;
+					encodedAny = true;
+				}
 			}
 		}
 
-		if (needsEncode)
+		if (encodedAny)
 		{
-			EncodeAll();
-			_encodedVersion = _bindlessVersion;
 			_forceEncode = false;
 			if (_forceEncodeFrames > 0)
 			{
@@ -281,24 +315,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		AddressMode.Border => MTLSamplerAddressMode.ClampToBorderColor,
 		_ => MTLSamplerAddressMode.ClampToEdge
 	};
-
-	private void EncodeAll()
-	{
-		for (var i = 0; i < _srvCount; i++)
-		{
-			EncodeSrv(i);
-		}
-
-		for (var i = 0; i < _uavCount; i++)
-		{
-			EncodeUav(i);
-		}
-
-		for (var i = 0; i < _samplerCount; i++)
-		{
-			EncodeSampler(i);
-		}
-	}
 
 	internal void MarkDirty()
 	{
@@ -383,11 +399,15 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_samplerEncoder.SetSamplerStates(_singleSampler, new NSRange { location = (ulong)index, length = 1 });
 	}
 
-	private void EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder, bool forceRecreate)
+	private void EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder)
 	{
 		var requiredSize = encoder.EncodedLength;
-		if (forceRecreate || buffer.NativePtr == IntPtr.Zero || buffer.Length < requiredSize)
+		if (buffer.NativePtr == IntPtr.Zero || buffer.Length < requiredSize)
 		{
+			if (buffer.NativePtr != IntPtr.Zero)
+			{
+				buffer.Dispose();
+			}
 			buffer = _device.NewBuffer(requiredSize, MTLResourceOptions.ResourceStorageModeShared);
 			if (buffer.NativePtr == IntPtr.Zero)
 			{
