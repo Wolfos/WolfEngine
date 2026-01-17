@@ -12,7 +12,7 @@ public sealed class FrameSnapshot
 {
 	public FrameSnapshot()
 	{
-		DrawPackets = new List<DrawPacket>(128);
+		DrawPackets = new List<DrawPacket>(4096);
 		LightPackets = new List<LightPacket>(16);
 	}
 

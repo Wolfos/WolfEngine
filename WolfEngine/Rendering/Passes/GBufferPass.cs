@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -54,6 +55,9 @@ public static class GBufferPass
 		cameraConstants[23] = 0.0f;
 		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
 
+		Span<Vector4> frustumPlanes = stackalloc Vector4[6];
+		ExtractFrustumPlanes(sceneData.ViewProjection, frustumPlanes);
+
 		// Draw all meshes
 		for (var i = 0; i < sceneData.DrawPackets.Count; i++)
 		{
@@ -63,6 +67,15 @@ public static class GBufferPass
 
 			// Skip if mesh resources aren't loaded yet
 			if (mesh.VertexBuffer == null || mesh.IndexBuffer == null || material.Resources == null)
+			{
+				continue;
+			}
+
+			var bounds = mesh.BoundingSphere;
+			var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
+			var maxScale = GetMaxScale(drawPacket.Transform);
+			var boundsRadius = bounds.Radius * maxScale;
+			if (IsSphereVisible(boundsCenter, boundsRadius, frustumPlanes) == false)
 			{
 				continue;
 			}
@@ -139,5 +152,61 @@ public static class GBufferPass
 		destination[13] = matrix.M42;
 		destination[14] = matrix.M43;
 		destination[15] = matrix.M44;
+	}
+
+	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)
+	{
+		if (planes.Length < 6)
+		{
+			throw new ArgumentException("Plane span must contain at least 6 elements.", nameof(planes));
+		}
+
+		var col1 = new Vector4(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
+		var col2 = new Vector4(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
+		var col3 = new Vector4(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
+		var col4 = new Vector4(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
+
+		planes[0] = NormalizePlane(col4 + col1); // Left
+		planes[1] = NormalizePlane(col4 - col1); // Right
+		planes[2] = NormalizePlane(col4 + col2); // Bottom
+		planes[3] = NormalizePlane(col4 - col2); // Top
+		planes[4] = NormalizePlane(col3);        // Near (LH, 0..1 depth)
+		planes[5] = NormalizePlane(col4 - col3); // Far
+	}
+
+	private static Vector4 NormalizePlane(Vector4 plane)
+	{
+		var normal = new Vector3(plane.X, plane.Y, plane.Z);
+		var length = normal.Length();
+		if (length <= 0.0f)
+		{
+			return plane;
+		}
+
+		var invLength = 1.0f / length;
+		return plane * invLength;
+	}
+
+	private static bool IsSphereVisible(Vector3 center, float radius, ReadOnlySpan<Vector4> planes)
+	{
+		for (var i = 0; i < planes.Length; i++)
+		{
+			var plane = planes[i];
+			var distance = plane.X * center.X + plane.Y * center.Y + plane.Z * center.Z + plane.W;
+			if (distance < -radius)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static float GetMaxScale(Matrix4x4 matrix)
+	{
+		var scaleX = new Vector3(matrix.M11, matrix.M12, matrix.M13).Length();
+		var scaleY = new Vector3(matrix.M21, matrix.M22, matrix.M23).Length();
+		var scaleZ = new Vector3(matrix.M31, matrix.M32, matrix.M33).Length();
+		return MathF.Max(scaleX, MathF.Max(scaleY, scaleZ));
 	}
 }

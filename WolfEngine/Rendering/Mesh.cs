@@ -1,5 +1,6 @@
 #nullable enable
 using System.Numerics;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
@@ -11,6 +12,7 @@ public class Mesh
     public Vector3[] Normals { get; }
     public Vector4[] Tangents { get; }
     public Vector2[] UVs { get; }
+    public BoundingSphere BoundingSphere { get; }
     
     // GPU resources are set by the renderer after creation
     internal IGfxBuffer VertexBuffer { get; set; }
@@ -77,6 +79,8 @@ public class Mesh
         {
             UVs = Enumerable.Repeat(Vector2.Zero, Vertices.Length).ToArray();
         }
+
+        BoundingSphere = ComputeBoundingSphere(Vertices);
     }
 
 
@@ -132,5 +136,32 @@ public class Mesh
     private static Vector3 ToVector3(Vector4 vector)
     {
         return new Vector3(vector.X, vector.Y, vector.Z);
+    }
+
+    private static BoundingSphere ComputeBoundingSphere(Vector4[] vertices)
+    {
+        var min = ToVector3(vertices[0]);
+        var max = min;
+
+        for (var i = 1; i < vertices.Length; i++)
+        {
+            var point = ToVector3(vertices[i]);
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+
+        var center = (min + max) * 0.5f;
+        var radiusSquared = 0.0f;
+        for (var i = 0; i < vertices.Length; i++)
+        {
+            var point = ToVector3(vertices[i]);
+            var distanceSquared = Vector3.DistanceSquared(center, point);
+            if (distanceSquared > radiusSquared)
+            {
+                radiusSquared = distanceSquared;
+            }
+        }
+
+        return new BoundingSphere(center, MathF.Sqrt(radiusSquared));
     }
 }
