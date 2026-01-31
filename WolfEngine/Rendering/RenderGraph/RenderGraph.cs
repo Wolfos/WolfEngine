@@ -24,8 +24,11 @@ public sealed class RenderGraph
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
+	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
+	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly GpuDrawDatabase _drawDatabase;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
 	public event Action? FrameCompleted;
@@ -35,6 +38,9 @@ public sealed class RenderGraph
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
 		DeferredLightingPass deferredLightingPass,
+		GpuDrawPass gpuDrawPass,
+		GpuDrawResources gpuDrawResources,
+		GpuDrawDatabase drawDatabase,
 		IUiFrameProvider uiFrameProvider,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer)
@@ -42,7 +48,9 @@ public sealed class RenderGraph
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, imGuiRenderer);
+		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, gpuDrawPass, gpuDrawResources, imGuiRenderer);
+		_gpuDrawResources = gpuDrawResources;
+		_drawDatabase = drawDatabase;
 		_uiFrameProvider = uiFrameProvider;
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
@@ -78,14 +86,15 @@ public sealed class RenderGraph
 		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
 		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
 		{
-			_renderPackets.Clear();
-			for (var i = 0; i < snapshot.DrawPackets.Count; i++)
-			{
-				var packet = snapshot.DrawPackets[i];
-				var relative = packet.Transform;
-				relative.Translation -= cameraPosition;
-				_renderPackets.Add(new DrawPacket(packet.Mesh, packet.Material, relative));
-			}
+		_drawDatabase.CollectDrawEntries(_drawEntries);
+		_renderPackets.Clear();
+		for (var i = 0; i < _drawEntries.Count; i++)
+		{
+			var entry = _drawEntries[i];
+			var relative = entry.World;
+			relative.Translation -= cameraPosition;
+			_renderPackets.Add(new DrawPacket(entry.Mesh, entry.Material, relative, entry.InstanceId));
+		}
 
 			_renderLights.Clear();
 			for (var i = 0; i < snapshot.LightPackets.Count; i++)
@@ -183,6 +192,7 @@ public sealed class RenderGraph
 
 		_mainThreadDispatcher.ExecutePending();
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
+		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
 
 		using (FrameProfiler.Instance.Measure("Begin Frame"))
 		{

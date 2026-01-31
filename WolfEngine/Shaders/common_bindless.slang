@@ -30,15 +30,6 @@ struct DescriptorHeapTextures
 #endif
 };
 
-struct DescriptorHeapRWTextures
-{
-#if defined(WOLF_BINDLESS_FIXED_SIZE)
-    [[id(0)]] RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_MAX];
-#else
-    [[id(0)]] RWTexture2D<float4> g_RWTextures[];
-#endif
-};
-
 struct DescriptorHeapSamplers
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
@@ -49,7 +40,18 @@ struct DescriptorHeapSamplers
 };
 
 [[argument_buffer]] ParameterBlock<DescriptorHeapTextures> g_TextureHeap : register(b28, space1);
+#if !defined(WOLF_NO_RW_TEXTURES)
+struct DescriptorHeapRWTextures
+{
+#if defined(WOLF_BINDLESS_FIXED_SIZE)
+    [[id(0)]] RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_MAX];
+#else
+    [[id(0)]] RWTexture2D<float4> g_RWTextures[];
+#endif
+};
+
 [[argument_buffer]] ParameterBlock<DescriptorHeapRWTextures> g_RWTextureHeap : register(b29, space1);
+#endif
 [[argument_buffer]] ParameterBlock<DescriptorHeapSamplers> g_SamplerHeap : register(b30, space1);
 
 Texture2D<float4> GetTexture(uint handle)
@@ -57,10 +59,12 @@ Texture2D<float4> GetTexture(uint handle)
     return g_TextureHeap.g_Textures[GetDescriptorIndex(handle)];
 }
 
+#if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> GetRWTexture(uint handle)
 {
     return g_RWTextureHeap.g_RWTextures[GetDescriptorIndex(handle)];
 }
+#endif
 
 SamplerState GetSampler(uint handle)
 {

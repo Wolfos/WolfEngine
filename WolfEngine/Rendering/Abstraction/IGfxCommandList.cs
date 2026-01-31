@@ -47,6 +47,8 @@ public interface IGfxCommandList
 
 	void SetComputeConstants(uint slot, ReadOnlySpan<byte> data);
 
+	void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0);
+
 	void PushConstants<T>(in T data) where T : unmanaged;
 
 	void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers);

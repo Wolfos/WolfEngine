@@ -17,6 +17,7 @@ public sealed class SkyboxRenderer
 
 	private readonly IRenderer _renderer;
 	private readonly IShaderCompiler _shaderCompiler;
+	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private DescriptorHandle _skyboxSamplerHandle = DescriptorHandle.Invalid;
 	private IGfxPipeline _iblIrradiancePipeline;
 	private IGfxPipeline _iblPrefilterPipeline;
@@ -29,10 +30,11 @@ public sealed class SkyboxRenderer
 	private IGfxTexture? _proceduralBrdfLut;
 	private bool _brdfLutInitialized;
 
-	public SkyboxRenderer(IRenderer renderer, IShaderCompiler shaderCompiler)
+	public SkyboxRenderer(IRenderer renderer, IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
 	public SkyboxResources CreateSkyboxResources(Texture environmentTexture)
@@ -307,7 +309,8 @@ public sealed class SkyboxRenderer
 		{
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp,
 				AddressMode.Clamp);
-			_skyboxSamplerHandle = gfxDevice.GlobalTable.AllocateSampler(sampler);
+			_bindlessRegistry.EnsureInitialized(gfxDevice);
+			_skyboxSamplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
 
 		return _skyboxSamplerHandle;

@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
@@ -241,6 +242,17 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		}
 	}
 
+	public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
+	{
+		if (buffer is not MetalBuffer metalBuffer)
+		{
+			throw new InvalidOperationException("Buffer was not created by the Metal backend.");
+		}
+
+		EnsureComputeEncoder();
+		_computeEncoder.SetBuffer(metalBuffer.Buffer, (nuint)offset, slot);
+	}
+
 	public void PushConstants<T>(in T data) where T : unmanaged
 	{
 		Span<T> payload = stackalloc T[1];
@@ -294,6 +306,73 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			arguments.InstanceCount,
 			arguments.BaseVertex,
 			arguments.StartInstance);
+	}
+
+	public void ExecuteIndirect(MetalIndirectCommandBuffer buffer, uint commandCount)
+	{
+		if (commandCount == 0) return;
+		
+		if (buffer is null)
+		{
+			throw new ArgumentNullException(nameof(buffer));
+		}
+
+		EnsureRenderEncoder();
+		var range = new NSRange{
+			location = 0, length = commandCount
+		};
+		_renderEncoder.ExecuteCommandsInBuffer(buffer.Buffer, range);
+	}
+
+	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
+	{
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		EnsureRenderEncoder();
+		_renderEncoder.UseResource(buffer, usage);
+	}
+
+	public void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command)
+	{
+		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			command.SetVertexBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+			command.SetFragmentBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+		}
+
+		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			command.SetFragmentBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
+		}
+
+		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			command.SetVertexBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+			command.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+		}
+	}
+
+	public void UseBindlessArgumentBuffers()
+	{
+		EnsureRenderEncoder();
+
+		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.UseResource(_descriptorTable.TextureArgumentBuffer, MTLResourceUsage.Read);
+		}
+
+		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.UseResource(_descriptorTable.RWTextureArgumentBuffer, MTLResourceUsage.Read);
+		}
+
+		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.UseResource(_descriptorTable.SamplerArgumentBuffer, MTLResourceUsage.Read);
+		}
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -495,7 +574,6 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 		if (_bindlessBuffersSetRender == false && _descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
-			_renderEncoder.SetVertexBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 		}
 

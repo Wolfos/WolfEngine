@@ -13,14 +13,16 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class DeferredLightingPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
+	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
 
-	public DeferredLightingPass(IShaderCompiler shaderCompiler)
+	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
 	public DeferredLightingPassConfig BuildConfig(
@@ -32,11 +34,12 @@ public sealed class DeferredLightingPass
 		ArgumentNullException.ThrowIfNull(device);
 
 		var pipeline = EnsurePipeline(device);
+		_bindlessRegistry.EnsureInitialized(device);
 
 		if (_linearSampler.IsValid == false)
 		{
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
-			_linearSampler = device.GlobalTable.AllocateSampler(sampler);
+			_linearSampler = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
 
 		var albedo = context.GetTexture(resources.GBufferAlbedo);
@@ -63,16 +66,16 @@ public sealed class DeferredLightingPass
 		return new DeferredLightingPassConfig
 		{
 			Pipeline = pipeline,
-			GBufferAlbedo = albedo.ShaderResourceView,
-			GBufferNormal = normal.ShaderResourceView,
-			GBufferMaterial = material.ShaderResourceView,
-			GBufferEmissive = emissive.ShaderResourceView,
-			GBufferDepth = depth.ShaderResourceView,
-			SkyboxEnvironment = environment.ShaderResourceView,
-			SkyboxIrradiance = irradiance.ShaderResourceView,
-			SkyboxPrefilter = prefilter.ShaderResourceView,
-			SkyboxBrdfLut = brdfLut.ShaderResourceView,
-			LightingOutput = lighting.UnorderedAccessView,
+			GBufferAlbedo = _bindlessRegistry.GetTextureHandle(albedo),
+			GBufferNormal = _bindlessRegistry.GetTextureHandle(normal),
+			GBufferMaterial = _bindlessRegistry.GetTextureHandle(material),
+			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
+			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
+			SkyboxEnvironment = _bindlessRegistry.GetTextureHandle(environment),
+			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
+			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
+			SkyboxBrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
+			LightingOutput = _bindlessRegistry.RegisterRwTexture(lighting),
 			LinearSampler = _linearSampler,
 			DispatchSize = resources.FramebufferSize
 		};

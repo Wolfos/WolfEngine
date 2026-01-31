@@ -30,6 +30,8 @@ public sealed class RenderGraphFrameBuilder
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private readonly GpuDrawPass _gpuDrawPass;
+	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private SkyboxResources? _skybox;
 	private RenderGraphFrameResources _frameResources;
@@ -38,19 +40,25 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gbufferExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
+	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
+	private readonly Action<RenderGraphContext> _gpuDrawCullExecute;
 
 	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
-		DeferredLightingPass deferredLightingPass, IImGuiRenderer imGuiRenderer)
+		DeferredLightingPass deferredLightingPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		_deferredLightingPass = deferredLightingPass;
+		_gpuDrawPass = gpuDrawPass;
+		_gpuDrawResources = gpuDrawResources;
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_imguiExecute = ExecuteImGui;
+		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
+		_gpuDrawCullExecute = ExecuteGpuDrawCull;
 	}
 
 	public void SetSkybox(SkyboxResources skybox)
@@ -126,6 +134,12 @@ public sealed class RenderGraphFrameBuilder
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public bool Build(RenderGraph graph)
 	{
+		graph.AddPass("GpuDraw Update", PassKind.Compute)
+			.SetExecute(_gpuDrawUpdateExecute);
+
+		graph.AddPass("GpuDraw Cull", PassKind.Compute)
+			.SetExecute(_gpuDrawCullExecute);
+
 		// Register GBuffer pass with proper resource states
 		graph.AddPass("GBuffer", PassKind.Graphics)
 			.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
@@ -170,6 +184,16 @@ public sealed class RenderGraphFrameBuilder
 		return true;
 	}
 
+	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
+	{
+		_gpuDrawPass.RecordUpdate(context);
+	}
+
+	private void ExecuteGpuDrawCull(RenderGraphContext context)
+	{
+		_gpuDrawPass.RecordCull(context, context.SceneData!);
+	}
+
 	private void ExecuteGBuffer(RenderGraphContext context)
 	{
 		var albedoTexture = context.GetTexture(_frameResources.GBufferAlbedo);
@@ -192,6 +216,10 @@ public sealed class RenderGraphFrameBuilder
 			NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
 			MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
 			DepthClearValue = 1.0f,
+			GfxDevice = _renderer.GetGfxDevice(),
+			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
+			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
+			CameraBuffer = _gpuDrawResources.CameraBuffer,
 			SkyboxEnvironment = DescriptorHandle.Invalid,
 			SkyboxSampler = DescriptorHandle.Invalid
 		};

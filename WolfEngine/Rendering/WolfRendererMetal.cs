@@ -34,6 +34,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
     private readonly IMacOSInputHandler _inputHandler;
+    private readonly BindlessResourceRegistry _bindlessRegistry;
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
@@ -86,12 +87,13 @@ internal unsafe class WolfRendererMetal : IRenderer
         public Vector4 Tangent;
     }
 
-    public WolfRendererMetal(IShaderCompiler shaderCompiler, IMacOSInputHandler inputHandler)
+    public WolfRendererMetal(IShaderCompiler shaderCompiler, IMacOSInputHandler inputHandler, BindlessResourceRegistry bindlessRegistry)
     {
         _width = 1280;
         _height = 720;
         _shaderCompiler = shaderCompiler;
         _inputHandler = inputHandler;
+        _bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -226,6 +228,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         _gfxDevice = new MetalDevice(_device);
+        _bindlessRegistry.EnsureInitialized(_gfxDevice);
     }
 
     private void CreateCommandQueue()
@@ -415,7 +418,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         if (_linearSamplerHandle.IsValid == false)
         {
             var sampler = new SamplerDescriptor(FilterMode.Trilinear, AddressMode.Wrap, AddressMode.Wrap, AddressMode.Wrap);
-            _linearSamplerHandle = _gfxDevice.GlobalTable.AllocateSampler(sampler);
+            _linearSamplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
         }
 
         return new MtlMaterialResources
@@ -424,11 +427,11 @@ internal unsafe class WolfRendererMetal : IRenderer
             ConstantBuffer = constantBuffer,
             PipelineState = default,
             ColorBuffer = colorBuffer,
-            AlbedoTexture = material.AlbedoTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-            MetallicRoughnessTexture = material.MetallicRoughnessTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-            NormalTexture = material.NormalTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-            OcclusionTexture = material.OcclusionTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-            EmissiveTexture = material.EmissiveTexture?.Resources?.ShaderResourceView ?? DescriptorHandle.Invalid,
+            AlbedoTexture = _bindlessRegistry.GetTextureHandle(material.AlbedoTexture?.Resources),
+            MetallicRoughnessTexture = _bindlessRegistry.GetTextureHandle(material.MetallicRoughnessTexture?.Resources),
+            NormalTexture = _bindlessRegistry.GetTextureHandle(material.NormalTexture?.Resources),
+            OcclusionTexture = _bindlessRegistry.GetTextureHandle(material.OcclusionTexture?.Resources),
+            EmissiveTexture = _bindlessRegistry.GetTextureHandle(material.EmissiveTexture?.Resources),
             Sampler = _linearSamplerHandle
         };
     }
@@ -458,6 +461,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         UploadTextureData(metalTexture.Texture, texture);
+
+        _bindlessRegistry.RegisterTexture(metalTexture);
 
         return new MetalTextureResources
         {
@@ -627,6 +632,9 @@ internal unsafe class WolfRendererMetal : IRenderer
         mesh.IndexBuffer = indexBufferAbstraction;
         mesh.StrideInBytes = (uint)Marshal.SizeOf<VertexData>();
         mesh.IndexCount = (uint)mesh.Indices.Length;
+
+        _bindlessRegistry.RegisterBuffer(vertexBufferAbstraction);
+        _bindlessRegistry.RegisterBuffer(indexBufferAbstraction);
 
         return new MeshResources(vertexBuffer, indexBuffer, (ulong)mesh.Indices.Length);
     }

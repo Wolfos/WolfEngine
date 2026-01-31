@@ -22,11 +22,15 @@ public static class WolfEngine
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
 		services.AddSingleton<IInputSystem, InputSystem>();
 		services.AddSingleton<DeferredLightingPass>();
+		services.AddSingleton<GpuDrawPass>();
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
+		services.AddSingleton<GpuDrawResources>();
+		services.AddSingleton<GpuDrawDatabase>();
+		services.AddSingleton<BindlessResourceRegistry>();
 
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();

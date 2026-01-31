@@ -251,6 +251,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
+	{
+		throw new NotSupportedException("Compute buffer binding is not supported on the Direct3D12 backend yet.");
+	}
+
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
 	{
 		var d3d12Topology = topology switch
@@ -529,4 +534,3 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.ResourceBarrier(1, &native);
 	}
 }
-

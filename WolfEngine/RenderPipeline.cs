@@ -13,12 +13,15 @@ public interface IRenderPipeline
 public class RenderPipeline : IRenderPipeline
 {
     private readonly RenderGraph _renderGraph;
+    private readonly GpuDrawDatabase _drawDatabase;
     private readonly ManualResetEventSlim _frameReady = new(true);
     
     public RenderPipeline(
-        RenderGraph renderGraph)
+        RenderGraph renderGraph,
+        GpuDrawDatabase drawDatabase)
     {
         _renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+        _drawDatabase = drawDatabase ?? throw new ArgumentNullException(nameof(drawDatabase));
     }
 
     public void Run()
@@ -29,11 +32,6 @@ public class RenderPipeline : IRenderPipeline
 
     public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, IReadOnlyList<World> worlds)
     {
-        if (worlds is null || worlds.Count == 0)
-        {
-            return;
-        }
-
         using (FrameProfiler.Instance.Measure("Render Thread Wait"))
         {
             _frameReady.Wait();
@@ -44,8 +42,9 @@ public class RenderPipeline : IRenderPipeline
         {
             var snapshot = _renderGraph.BeginSnapshotWrite();
             snapshot.SetCamera(camera, cameraWorldTransform);
+            _drawDatabase.BeginSync();
 
-            for (var i = 0; i < worlds.Count; i++)
+            for (var i = 0; i < (worlds?.Count ?? 0); i++)
             {
                 var world = worlds[i];
                 if (world is null)
@@ -58,7 +57,7 @@ public class RenderPipeline : IRenderPipeline
                     ref var transform = ref entry.First;
                     ref var meshRenderer = ref entry.Second;
                     var transformMatrix = transform.LocalToWorld;
-                    snapshot.AddDraw(meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+                    _drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
                 }
 
                 foreach (var entry in world.View<WorldTransform, Light>())
@@ -69,6 +68,7 @@ public class RenderPipeline : IRenderPipeline
                 }
             }
 
+            _drawDatabase.EndSync();
             _renderGraph.PublishSnapshot();
         }
     }

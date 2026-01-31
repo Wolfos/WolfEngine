@@ -14,6 +14,7 @@ namespace WolfEngine.Rendering.UI;
 internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 {
 	private readonly IShaderCompiler _shaderCompiler;
+	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxDevice _device;
 	private IGfxPipeline _pipeline;
 	private MetalBuffer _vertexBuffer;
@@ -25,9 +26,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
 	private bool _fontUploaded;
 
-	public MetalImGuiRenderer(IShaderCompiler shaderCompiler)
+	public MetalImGuiRenderer(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
@@ -255,7 +257,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		if (_samplerHandle.IsValid == false)
 		{
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
-			_samplerHandle = device.GlobalTable.AllocateSampler(sampler);
+			_bindlessRegistry.EnsureInitialized(device);
+			_samplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
 	}
 

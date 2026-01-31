@@ -1,9 +1,13 @@
 #nullable enable
 
+using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Platform;
+using SharpMetal.Metal;
+using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -54,63 +58,156 @@ public static class GBufferPass
 		cameraConstants[22] = 0.0f;
 		cameraConstants[23] = 0.0f;
 		var cameraBytes = MemoryMarshal.AsBytes(cameraConstants);
+		MetalBuffer? cameraBuffer = null;
+		if (config.CameraBuffer is MetalBuffer metalCameraBuffer)
+		{
+			var cameraArray = cameraConstants.ToArray();
+			BufferHelper.CopyToBuffer(cameraArray, metalCameraBuffer.Buffer);
+			cameraBuffer = metalCameraBuffer;
+		}
 
 		Span<Vector4> frustumPlanes = stackalloc Vector4[6];
 		ExtractFrustumPlanes(sceneData.ViewProjection, frustumPlanes);
 
-		// Draw all meshes
+		// Bind camera constants once
+		commandList.SetGraphicsConstants(2, cameraBytes);
+
+		// Bind GPU draw tables once
+		if (config.InstanceBuffer is not null)
+		{
+			commandList.BindConstantBuffer(10, config.InstanceBuffer);
+		}
+
+		if (config.MaterialBuffer is not null)
+		{
+			commandList.BindConstantBuffer(11, config.MaterialBuffer);
+		}
+
+		if (commandList is MetalCommandList metalCommandList &&
+		    config.GfxDevice is MetalDevice metalDevice)
+		{
+			var icb = metalDevice.GetOrCreateIndirectCommandBuffer((uint)sceneData.DrawPackets.Count);
+			uint commandCount = 0;
+			icb.Reset((uint)sceneData.DrawPackets.Count);
+			var instanceStride = (ulong)Marshal.SizeOf<GpuInstanceData>();
+			var usedResources = new HashSet<IntPtr>();
+			void UseIfNeeded(MTLBuffer buffer)
+			{
+				if (buffer.NativePtr == IntPtr.Zero)
+				{
+					return;
+				}
+
+				if (usedResources.Add(buffer.NativePtr))
+				{
+					metalCommandList.UseResource(buffer, MTLResourceUsage.Read);
+				}
+			}
+
+			if (config.InstanceBuffer is MetalBuffer sharedInstanceBuffer)
+			{
+				UseIfNeeded(sharedInstanceBuffer.Buffer);
+			}
+
+			if (config.MaterialBuffer is MetalBuffer sharedMaterialBuffer)
+			{
+				UseIfNeeded(sharedMaterialBuffer.Buffer);
+			}
+
+			if (cameraBuffer is not null)
+			{
+				UseIfNeeded(cameraBuffer.Buffer);
+			}
+
+			metalCommandList.UseBindlessArgumentBuffers();
+
+			for (var i = 0; i < sceneData.DrawPackets.Count; i++)
+			{
+				var drawPacket = sceneData.DrawPackets[i];
+				var mesh = drawPacket.Mesh;
+				var material = drawPacket.Material;
+
+				if (mesh.VertexBuffer == null || mesh.IndexBuffer == null || material.Resources == null)
+				{
+					continue;
+				}
+
+				var bounds = mesh.BoundingSphere;
+				var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
+				var maxScale = GetMaxScale(drawPacket.Transform);
+				var boundsRadius = bounds.Radius * maxScale;
+				if (IsSphereVisible(boundsCenter, boundsRadius, frustumPlanes) == false)
+				{
+					continue;
+				}
+
+				if (material.Resources.Pipeline is not MetalPipeline metalPipeline)
+				{
+					continue;
+				}
+
+				var vertexBuffer = mesh.VertexBuffer as MetalBuffer;
+				var indexBuffer = mesh.IndexBuffer as MetalBuffer;
+				if (vertexBuffer is null || indexBuffer is null)
+				{
+					continue;
+				}
+
+				UseIfNeeded(vertexBuffer.Buffer);
+				UseIfNeeded(indexBuffer.Buffer);
+
+				var command = icb.GetRenderCommand(commandCount);
+				command.SetRenderPipelineState(metalPipeline.RenderPipelineState);
+				metalCommandList.BindBindlessArgumentBuffers(command);
+				command.SetVertexBuffer(vertexBuffer.Buffer, 0, mesh.StrideInBytes, 0);
+				if (config.InstanceBuffer is MetalBuffer instanceBuffer)
+				{
+					var instanceOffset = (ulong)drawPacket.InstanceId * instanceStride;
+					command.SetVertexBuffer(instanceBuffer.Buffer, instanceOffset, 10);
+					command.SetFragmentBuffer(instanceBuffer.Buffer, instanceOffset, 10);
+				}
+				if (config.MaterialBuffer is MetalBuffer materialBuffer)
+				{
+					command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
+					command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
+				}
+				if (cameraBuffer is not null)
+				{
+					command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
+					command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
+				}
+				command.DrawIndexedPrimitives(
+					MTLPrimitiveType.Triangle,
+					mesh.IndexCount,
+					MTLIndexType.UInt32,
+					indexBuffer.Buffer,
+					0,
+					1,
+					0,
+					0);
+
+				commandCount++;
+			}
+
+			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
+			metalCommandList.ExecuteIndirect(icb, commandCount);
+			commandList.EndPass();
+			return;
+		}
+
+		// Fallback for non-Metal backends
 		for (var i = 0; i < sceneData.DrawPackets.Count; i++)
 		{
 			var drawPacket = sceneData.DrawPackets[i];
 			var mesh = drawPacket.Mesh;
 			var material = drawPacket.Material;
 
-			// Skip if mesh resources aren't loaded yet
 			if (mesh.VertexBuffer == null || mesh.IndexBuffer == null || material.Resources == null)
 			{
 				continue;
 			}
 
-			var bounds = mesh.BoundingSphere;
-			var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
-			var maxScale = GetMaxScale(drawPacket.Transform);
-			var boundsRadius = bounds.Radius * maxScale;
-			if (IsSphereVisible(boundsCenter, boundsRadius, frustumPlanes) == false)
-			{
-				continue;
-			}
-
-			// Bind pipeline
 			commandList.BindPipeline(material.Resources.Pipeline);
-
-			// Bind constant buffer (material color)
-			if (material.Resources.ConstantBuffer != null)
-			{
-				commandList.BindConstantBuffer(0, material.Resources.ConstantBuffer, 0);
-			}
-
-			// Bind albedo texture descriptor set
-			Span<uint> materialHandles = stackalloc uint[8];
-			materialHandles[0] = material.Resources.AlbedoTexture.Value;
-			materialHandles[1] = material.Resources.MetallicRoughnessTexture.Value;
-			materialHandles[2] = material.Resources.NormalTexture.Value;
-			materialHandles[3] = material.Resources.OcclusionTexture.Value;
-			materialHandles[4] = material.Resources.EmissiveTexture.Value;
-			materialHandles[5] = material.Resources.Sampler.Value;
-			materialHandles[6] = 0;
-			materialHandles[7] = 0;
-			commandList.SetGraphicsConstants(3, MemoryMarshal.AsBytes(materialHandles));
-
-			// Set model matrix constants
-			Span<float> modelConstants = stackalloc float[16];
-			WriteMatrix(modelConstants, drawPacket.Transform);
-			var modelBytes = MemoryMarshal.AsBytes(modelConstants);
-			commandList.SetGraphicsConstants(1, modelBytes);
-
-			// Set camera constants
-			commandList.SetGraphicsConstants(2, cameraBytes);
-
-			// Set topology and buffers
 			commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
 			var vertexViews = new[]
@@ -122,8 +219,7 @@ public static class GBufferPass
 			var indexView = new IndexBufferView(mesh.IndexBuffer, IndexFormat.UInt32, 0);
 			commandList.SetIndexBuffer(indexView);
 
-			// Draw
-			commandList.Draw(new DrawArguments(mesh.IndexCount, 1));
+			commandList.Draw(new DrawArguments(mesh.IndexCount, 1, 0, 0, (uint)drawPacket.InstanceId));
 		}
 
 		commandList.EndPass();
