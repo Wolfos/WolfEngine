@@ -47,4 +47,6 @@ public struct GBufferPassConfig
     public IGfxBuffer? MaterialBuffer { get; set; }
 
     public IGfxBuffer? CameraBuffer { get; set; }
+
+    public IGfxBuffer? DrawArgsBuffer { get; set; }
 }

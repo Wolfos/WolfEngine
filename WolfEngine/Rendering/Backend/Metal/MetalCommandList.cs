@@ -308,6 +308,29 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			arguments.StartInstance);
 	}
 
+	public void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset)
+	{
+		if (indexBuffer.Buffer is not MetalBuffer metalIndexBuffer)
+		{
+			throw new InvalidOperationException("Index buffer was not created by the Metal backend.");
+		}
+
+		if (indirectArgsBuffer is not MetalBuffer metalArgsBuffer)
+		{
+			throw new InvalidOperationException("Indirect args buffer was not created by the Metal backend.");
+		}
+
+		EnsureRenderEncoder();
+		var indexType = indexBuffer.Format == IndexFormat.UInt16 ? MTLIndexType.UInt16 : MTLIndexType.UInt32;
+		_renderEncoder.DrawIndexedPrimitives(
+			_primitiveType,
+			indexType,
+			metalIndexBuffer.Buffer,
+			(nuint)indexBuffer.Offset,
+			metalArgsBuffer.Buffer,
+			(nuint)indirectArgsOffset);
+	}
+
 	public void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount)
 	{
 		if (commandCount == 0) return;

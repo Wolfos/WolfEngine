@@ -41,11 +41,12 @@ public sealed class SceneDrawData
 /// </summary>
 public readonly struct DrawPacket
 {
-	public DrawPacket(Mesh mesh, Material material, Matrix4x4 transform, int instanceId)
+	public DrawPacket(Mesh mesh, Material material, Matrix4x4 transform, int drawId, int instanceId)
 	{
 		Mesh = mesh ?? throw new ArgumentNullException(nameof(mesh));
 		Material = material ?? throw new ArgumentNullException(nameof(material));
 		Transform = transform;
+		DrawId = drawId;
 		InstanceId = instanceId;
 	}
 
@@ -54,6 +55,8 @@ public readonly struct DrawPacket
 	public Material Material { get; }
 	
 	public Matrix4x4 Transform { get; }
+
+	public int DrawId { get; }
 
 	public int InstanceId { get; }
 }

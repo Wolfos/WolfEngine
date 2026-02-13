@@ -41,6 +41,14 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    GpuDrawArgs args;
+    args.indexCount = 0;
+    args.instanceCount = 1;
+    args.startIndex = 0;
+    args.baseVertex = 0;
+    args.startInstance = 0;
+    g_DrawArgs[drawId] = args;
+
     GpuDrawCommand cmd = g_DrawCommands[drawId];
     if (cmd.flags == 0)
     {
@@ -65,14 +73,13 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     GpuMeshData meshData = g_MeshTable[instanceData.meshId];
 
-    uint drawIndex;
-    InterlockedAdd(g_DrawCount[0], 1, drawIndex);
+    uint visibleDrawIndexIgnored;
+    InterlockedAdd(g_DrawCount[0], 1, visibleDrawIndexIgnored);
 
-    GpuDrawArgs args;
     args.indexCount = meshData.indexCount;
     args.instanceCount = 1;
     args.startIndex = 0;
     args.baseVertex = meshData.baseVertex;
     args.startInstance = 0;
-    g_DrawArgs[drawIndex] = args;
+    g_DrawArgs[drawId] = args;
 }

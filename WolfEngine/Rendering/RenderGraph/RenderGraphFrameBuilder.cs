@@ -218,6 +218,7 @@ public sealed class RenderGraphFrameBuilder
 			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
 			CameraBuffer = _gpuDrawResources.CameraBuffer,
+			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
 			SkyboxEnvironment = DescriptorHandle.Invalid,
 			SkyboxSampler = DescriptorHandle.Invalid
 		};

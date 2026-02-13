@@ -66,8 +66,13 @@ public static class GBufferPass
 			cameraBuffer = metalCameraBuffer;
 		}
 
+		var drawArgsBuffer = config.DrawArgsBuffer as MetalBuffer;
+		var useGpuDrawArgs = drawArgsBuffer is not null;
 		Span<Vector4> frustumPlanes = stackalloc Vector4[6];
-		ExtractFrustumPlanes(sceneData.ViewProjection, frustumPlanes);
+		if (useGpuDrawArgs == false)
+		{
+			ExtractFrustumPlanes(sceneData.ViewProjection, frustumPlanes);
+		}
 
 		// Bind camera constants once
 		commandList.SetGraphicsConstants(2, cameraBytes);
@@ -83,15 +88,26 @@ public static class GBufferPass
 			commandList.BindConstantBuffer(11, config.MaterialBuffer);
 		}
 
-
-		var icb = config.GfxDevice.GetOrCreateIndirectCommandBuffer((uint)sceneData.DrawPackets.Count);
+		IIndirectCommandBuffer? icb = null;
 		uint commandCount = 0;
 		var totalPackets = sceneData.DrawPackets.Count;
 		var skippedNoMesh = 0;
 		var skippedNoMaterial = 0;
 		var skippedNoPipeline = 0;
 		var skippedCulled = 0;
-		icb.Reset((uint)sceneData.DrawPackets.Count);
+		var skippedOutOfRange = 0;
+
+		if (useGpuDrawArgs == false)
+		{
+			if (config.GfxDevice is null)
+			{
+				throw new InvalidOperationException("GBuffer pass requires a graphics device when not using GPU draw args.");
+			}
+
+			icb = config.GfxDevice.GetOrCreateIndirectCommandBuffer((uint)sceneData.DrawPackets.Count);
+			icb.Reset((uint)sceneData.DrawPackets.Count);
+		}
+
 		var instanceStride = (ulong)Marshal.SizeOf<GpuInstanceData>();
 		var usedResources = new HashSet<IntPtr>();
 
@@ -124,7 +140,13 @@ public static class GBufferPass
 			UseIfNeeded(cameraBuffer.Buffer);
 		}
 
+		if (useGpuDrawArgs)
+		{
+			UseIfNeeded(drawArgsBuffer!.Buffer);
+		}
+
 		commandList.UseBindlessArgumentBuffers();
+		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
 		IGfxPipeline? previousPipeline = null;
 		
@@ -133,6 +155,14 @@ public static class GBufferPass
 			var drawPacket = sceneData.DrawPackets[i];
 			var mesh = drawPacket.Mesh;
 			var material = drawPacket.Material;
+			if (drawPacket.DrawId <= 0 ||
+			    drawPacket.DrawId >= global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount ||
+			    drawPacket.InstanceId <= 0 ||
+			    drawPacket.InstanceId >= global::WolfEngine.Rendering.GpuDrawResources.MaxInstanceCount)
+			{
+				skippedOutOfRange++;
+				continue;
+			}
 
 			if (mesh.VertexBuffer == null || mesh.IndexBuffer == null)
 			{
@@ -145,14 +175,17 @@ public static class GBufferPass
 				continue;
 			}
 
-			var bounds = mesh.BoundingSphere;
-			var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
-			var maxScale = GetMaxScale(drawPacket.Transform);
-			var boundsRadius = bounds.Radius * maxScale;
-			if (IsSphereVisible(boundsCenter, boundsRadius, frustumPlanes) == false)
+			if (useGpuDrawArgs == false)
 			{
-				skippedCulled++;
-				continue;
+				var bounds = mesh.BoundingSphere;
+				var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
+				var maxScale = GetMaxScale(drawPacket.Transform);
+				var boundsRadius = bounds.Radius * maxScale;
+				if (IsSphereVisible(boundsCenter, boundsRadius, frustumPlanes) == false)
+				{
+					skippedCulled++;
+					continue;
+				}
 			}
 			
 			// TODO: No Metal types in this class
@@ -179,7 +212,25 @@ public static class GBufferPass
 			UseIfNeeded(vertexBuffer.Buffer);
 			UseIfNeeded(indexBuffer.Buffer);
 
-			var command = icb.GetRenderCommand(commandCount);
+				if (useGpuDrawArgs)
+				{
+					if (config.InstanceBuffer is not null)
+					{
+						var instanceOffset = (ulong)drawPacket.InstanceId * instanceStride;
+						commandList.BindConstantBuffer(10, config.InstanceBuffer, instanceOffset);
+					}
+
+					commandList.SetVertexBuffers(new[] { new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, 0) });
+					var drawArgsOffset = (ulong)drawPacket.DrawId * (ulong)Marshal.SizeOf<GpuDrawArgs>();
+					commandList.DrawIndexedIndirect(
+						new IndexBufferView(mesh.IndexBuffer, IndexFormat.UInt32, 0),
+					drawArgsBuffer!,
+					drawArgsOffset);
+				commandCount++;
+				continue;
+			}
+
+			var command = icb!.GetRenderCommand(commandCount);
 			command.SetRenderPipelineState(metalPipeline.RenderPipelineState);
 			commandList.BindBindlessArgumentBuffers(command);
 			command.SetVertexBuffer(vertexBuffer.Buffer, 0, mesh.StrideInBytes, 0);
@@ -215,8 +266,18 @@ public static class GBufferPass
 			commandCount++;
 		}
 
-		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-		commandList.ExecuteIndirect(icb, commandCount);
+		if (icb is not null)
+		{
+			commandList.ExecuteIndirect(icb, commandCount);
+		}
+		
+		if ((totalPackets > 0) && (commandCount != totalPackets))
+		{
+			Console.WriteLine($"GBuffer: packets={totalPackets}, draws={commandCount}, " +
+			                  $"skippedNoMesh={skippedNoMesh}, skippedNoMaterial={skippedNoMaterial}, " +
+			                  $"skippedNoPipeline={skippedNoPipeline}, skippedCulled={skippedCulled}, " +
+			                  $"skippedOutOfRange={skippedOutOfRange}, gpuArgs={(useGpuDrawArgs ? 1 : 0)}");
+		}
 
 		commandList.EndPass();
 	}

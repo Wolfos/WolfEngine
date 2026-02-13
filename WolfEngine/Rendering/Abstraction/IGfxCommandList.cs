@@ -59,6 +59,8 @@ public interface IGfxCommandList
 
 	void Draw(in DrawArguments arguments);
 
+	void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset);
+
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void Barrier(in ResourceBarrierDescription barrier);

@@ -97,7 +97,7 @@ public sealed class RenderGraph
 			var entry = _drawEntries[i];
 			var relative = entry.World;
 			relative.Translation -= cameraPosition;
-			_renderPackets.Add(new DrawPacket(entry.Mesh, entry.Material, relative, entry.InstanceId));
+			_renderPackets.Add(new DrawPacket(entry.Mesh, entry.Material, relative, entry.DrawId, entry.InstanceId));
 		}
 
 			_renderLights.Clear();

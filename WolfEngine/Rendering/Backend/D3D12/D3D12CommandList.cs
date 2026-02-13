@@ -405,6 +405,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			arguments.StartInstance);
 	}
 
+	public void DrawIndexedIndirect(in AbstractionIndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset)
+	{
+		throw new NotSupportedException("Indirect indexed draws are not implemented for the Direct3D12 backend yet.");
+	}
+
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
 		CommandList.Dispatch(groupCountX, groupCountY, groupCountZ);
