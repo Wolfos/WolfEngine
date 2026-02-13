@@ -10,6 +10,7 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawDatabase
 {
+	private const bool DisableIdReuse = false;
 	private readonly object _lock = new();
 	private readonly Dictionary<Entity, DrawRecord> _records = new(new EntityComparer());
 	private readonly Dictionary<Mesh, ResourceId> _meshIds = new(new ReferenceComparer<Mesh>());
@@ -200,8 +201,11 @@ public sealed class GpuDrawDatabase
 
 	private void ReleaseRecord(DrawRecord record)
 	{
-		_freeDrawIds.Push(record.DrawId);
-		_freeInstanceIds.Push(record.InstanceId);
+		if (DisableIdReuse == false)
+		{
+			_freeDrawIds.Push(record.DrawId);
+			_freeInstanceIds.Push(record.InstanceId);
+		}
 		ReleaseMesh(record.MeshId, record.Mesh);
 		ReleaseMaterial(record.MaterialId, record.Material);
 	}
@@ -267,12 +271,15 @@ public sealed class GpuDrawDatabase
 		}
 
 		_materialIds.Remove(material);
-		_freeMaterialIds.Push(id);
+		if (DisableIdReuse == false)
+		{
+			_freeMaterialIds.Push(id);
+		}
 	}
 
 	private static int AcquireId(Stack<int> freeIds, ref int nextId)
 	{
-		return freeIds.Count > 0 ? freeIds.Pop() : nextId++;
+		return DisableIdReuse ? nextId++ : (freeIds.Count > 0 ? freeIds.Pop() : nextId++);
 	}
 
 	private static void ComputeBounds(DrawRecord record, Mesh mesh)

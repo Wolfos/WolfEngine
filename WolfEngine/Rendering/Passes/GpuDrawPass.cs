@@ -1,7 +1,5 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -22,7 +20,7 @@ public sealed class GpuDrawPass
 	private IGfxPipeline? _cullPipeline;
 	private readonly List<GpuDrawUpdate> _updates = new();
 	private readonly List<GpuDrawUpdateData> _updateData = new();
-
+	
 	public GpuDrawPass(IShaderCompiler shaderCompiler, GpuDrawDatabase drawDatabase,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, IRenderer renderer)
 	{
@@ -43,6 +41,7 @@ public sealed class GpuDrawPass
 		_updateData.Clear();
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
+
 		for (var i = 0; i < updateCount; i++)
 		{
 			var update = _updates[i];
@@ -100,6 +99,14 @@ public sealed class GpuDrawPass
 					: _bindlessRegistry.ErrorSamplerHandle.Value;
 				baseColor = material!.Color;
 				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, 0, 0);
+			}
+
+			if ((albedoHandle >> 30) != 0 || (mrHandle >> 30) != 0 ||
+			    (normalHandle >> 30) != 0 || (occlusionHandle >> 30) != 0 ||
+			    (emissiveHandle >> 30) != 0 || (samplerHandle >> 30) != 3)
+			{
+				Console.WriteLine($"Bindless handle kind mismatch (drawId {update.DrawId}, matId {update.MaterialId}): " +
+				                  $"A={albedoHandle} MR={mrHandle} N={normalHandle} O={occlusionHandle} E={emissiveHandle} S={samplerHandle}");
 			}
 
 			_updateData.Add(new GpuDrawUpdateData(

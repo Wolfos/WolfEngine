@@ -1,5 +1,8 @@
 import "draw_data.slang";
 
+#define WOLF_MAX_INSTANCE_COUNT 10000
+#define WOLF_MAX_MESH_COUNT 4096
+
 cbuffer CullParams : register(b5)
 {
     float4 planes[6];
@@ -26,12 +29,13 @@ bool IsSphereVisible(float3 center, float radius)
     return true;
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(8, 8, 1)]
 void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     float3 cameraPosition = cameraPositionAndMaxDrawCount.xyz;
     uint maxDrawCount = (uint)cameraPositionAndMaxDrawCount.w;
-    uint drawId = dispatchThreadId.x;
+    uint dispatchWidth = ((maxDrawCount + 63) / 64) * 8;
+    uint drawId = dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
     if (drawId >= maxDrawCount)
     {
         return;
@@ -43,7 +47,16 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    if (cmd.instanceId >= WOLF_MAX_INSTANCE_COUNT)
+    {
+        return;
+    }
+
     GpuInstanceData instanceData = g_InstanceTable[cmd.instanceId];
+    if (instanceData.meshId >= WOLF_MAX_MESH_COUNT)
+    {
+        return;
+    }
     float3 relativeCenter = instanceData.boundsCenterRadius.xyz - cameraPosition;
     if (!IsSphereVisible(relativeCenter, instanceData.boundsCenterRadius.w))
     {

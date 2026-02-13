@@ -1,6 +1,7 @@
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Platform;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
@@ -8,9 +9,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
 	private const int MaxUavDescriptors = 16384;
-	internal const int BindlessArgumentBufferIndexTextures = 28;
-	internal const int BindlessArgumentBufferIndexRWTextures = 29;
-	internal const int BindlessArgumentBufferIndexSamplers = 30;
+internal const int BindlessArgumentBufferIndexCounts = 27;
+internal const int BindlessArgumentBufferIndexTextures = 28;
+internal const int BindlessArgumentBufferIndexRWTextures = 29;
+internal const int BindlessArgumentBufferIndexSamplers = 30;
 	private readonly MTLDevice _device;
 	private readonly MetalTexture[] _srvTextures = new MetalTexture[MaxDescriptors];
 	private readonly MetalTexture[] _uavTextures = new MetalTexture[MaxDescriptors];
@@ -27,6 +29,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private MTLBuffer _textureArgumentBuffer;
 	private MTLBuffer _rwTextureArgumentBuffer;
 	private MTLBuffer _samplerArgumentBuffer;
+	private MTLBuffer _countBuffer;
 	private int _srvCount;
 	private int _uavCount;
 	private int _cbvCount;
@@ -65,6 +68,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			index = _srvCount++;
 		}
 		_srvTextures[index] = metalTexture;
+		UpdateCountBuffer();
 		MarkDirty();
 		EncodeSrv(index);
 		return new DescriptorHandle(DescriptorKind.ShaderResourceView, index);
@@ -92,6 +96,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			index = _uavCount++;
 		}
 		_uavTextures[index] = metalTexture;
+		UpdateCountBuffer();
 		MarkDirty();
 		EncodeUav(index);
 		return new DescriptorHandle(DescriptorKind.UnorderedAccessView, index);
@@ -111,6 +116,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		var index = _cbvCount++;
 		_cbvBuffers[index] = metalBuffer.Buffer;
+		UpdateCountBuffer();
 		return new DescriptorHandle(DescriptorKind.ConstantBufferView, index);
 	}
 
@@ -155,9 +161,33 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		var index = _freeSamplerIndices.Count > 0 ? _freeSamplerIndices.Pop() : _samplerCount++;
 		_samplers[index] = samplerState;
+		UpdateCountBuffer();
 		MarkDirty();
 		EncodeSampler(index);
 		return new DescriptorHandle(DescriptorKind.Sampler, index);
+	}
+
+	internal void UpdateCountBuffer()
+	{
+		if (_countBuffer.NativePtr == IntPtr.Zero)
+		{
+			_countBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
+		}
+
+		var counts = new uint[4];
+		counts[0] = (uint)_srvCount;
+		counts[1] = (uint)_uavCount;
+		counts[2] = (uint)_samplerCount;
+		counts[3] = 0;
+		BufferHelper.CopyToBuffer(counts, _countBuffer);
+	}
+
+	internal string GetArgumentBufferStats()
+	{
+		ulong textureBytes = _textureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _textureArgumentBuffer.Length;
+		ulong rwTextureBytes = _rwTextureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _rwTextureArgumentBuffer.Length;
+		ulong samplerBytes = _samplerArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _samplerArgumentBuffer.Length;
+		return $"ArgBuffers: textures={textureBytes / (1024.0 * 1024.0):F1} MiB, rwTextures={rwTextureBytes / (1024.0 * 1024.0):F1} MiB, samplers={samplerBytes / (1024.0 * 1024.0):F1} MiB";
 	}
 
 	public int SrvCount => _srvCount;
@@ -179,6 +209,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	public MTLBuffer RWTextureArgumentBuffer => _rwTextureArgumentBuffer;
 
 	public MTLBuffer SamplerArgumentBuffer => _samplerArgumentBuffer;
+
+	public MTLBuffer CountBuffer => _countBuffer;
 
 	internal void Free(DescriptorHandle handle)
 	{

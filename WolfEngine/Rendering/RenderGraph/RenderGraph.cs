@@ -5,6 +5,7 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Utility;
+using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering;
 
@@ -31,6 +32,8 @@ public sealed class RenderGraph
 	private readonly GpuDrawDatabase _drawDatabase;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
+	private int _frameIndex;
+	private int _lastDrawEntryCount;
 	public event Action? FrameCompleted;
 
 	public RenderGraph(
@@ -87,6 +90,7 @@ public sealed class RenderGraph
 		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
 		{
 		_drawDatabase.CollectDrawEntries(_drawEntries);
+		_lastDrawEntryCount = _drawEntries.Count;
 		_renderPackets.Clear();
 		for (var i = 0; i < _drawEntries.Count; i++)
 		{
@@ -238,6 +242,16 @@ public sealed class RenderGraph
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
+		_frameIndex++;
+		if ((_frameIndex % 120) == 0)
+		{
+			//Console.WriteLine(GpuResourceDiagnostics.Snapshot());
+			//Console.WriteLine($"GpuDraw: entries={_lastDrawEntryCount}, maxInstanceId={_lastMaxInstanceId}, maxDrawId={_lastMaxDrawId}");
+			if (_renderer.GetGfxDevice() is MetalDevice metalDevice)
+			{
+				//Console.WriteLine(metalDevice.GetDiagnosticsSnapshot());
+			}
+		}
 		FrameCompleted?.Invoke();
 		FrameProfiler.Instance.EndFrame();
 	}

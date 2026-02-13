@@ -1,12 +1,14 @@
 #nullable enable
 
 using System;
+using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
-internal sealed class MetalIndirectCommandBuffer : IDisposable
+public sealed class MetalIndirectCommandBuffer : IIndirectCommandBuffer, IDisposable
 {
 	private readonly MTLIndirectCommandBuffer _buffer;
 	private readonly uint _maxCommandCount;

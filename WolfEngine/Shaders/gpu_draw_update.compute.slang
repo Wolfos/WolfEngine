@@ -1,5 +1,10 @@
 import "draw_data.slang";
 
+#define WOLF_MAX_DRAW_COUNT 10000
+#define WOLF_MAX_INSTANCE_COUNT 10000
+#define WOLF_MAX_MATERIAL_COUNT 4096
+#define WOLF_MAX_MESH_COUNT 4096
+
 static const uint UPDATE_ADD = 0;
 static const uint UPDATE_REMOVE = 1;
 static const uint UPDATE_TRANSFORM = 2;
@@ -20,16 +25,24 @@ RWStructuredBuffer<GpuMaterialData> g_MaterialTable : register(u2);
 RWStructuredBuffer<GpuMeshData> g_MeshTable : register(u3);
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u4);
 
-[numthreads(64, 1, 1)]
+[numthreads(8, 8, 1)]
 void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint index = dispatchThreadId.x;
+    uint dispatchWidth = ((updateCount + 63) / 64) * 8;
+    uint index = dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
     if (index >= updateCount)
     {
         return;
     }
 
     GpuDrawUpdateData update = g_Updates[index];
+    if (update.drawId >= WOLF_MAX_DRAW_COUNT ||
+        update.instanceId >= WOLF_MAX_INSTANCE_COUNT ||
+        update.materialId >= WOLF_MAX_MATERIAL_COUNT ||
+        update.meshId >= WOLF_MAX_MESH_COUNT)
+    {
+        return;
+    }
 
     if (update.type == UPDATE_REMOVE)
     {

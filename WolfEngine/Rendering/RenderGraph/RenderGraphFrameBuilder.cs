@@ -131,8 +131,7 @@ public sealed class RenderGraphFrameBuilder
 	}
 	
 
-	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
-	public bool Build(RenderGraph graph)
+	public void Build(RenderGraph graph)
 	{
 		graph.AddPass("GpuDraw Update", PassKind.Compute)
 			.SetExecute(_gpuDrawUpdateExecute);
@@ -181,7 +180,6 @@ public sealed class RenderGraphFrameBuilder
 			.WriteTexture(_frameResources.Backbuffer, ResourceState.RenderTarget)
 			.SetExecute(_imguiExecute);
 
-		return true;
 	}
 
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)

@@ -57,6 +57,19 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
 
+	public string GetDiagnosticsSnapshot()
+	{
+		var totalPools = 0;
+		var totalTextures = 0;
+		foreach (var entry in _texturePool)
+		{
+			totalPools++;
+			totalTextures += entry.Value.Count;
+		}
+
+		return $"TexturePool: buckets={totalPools}, textures={totalTextures}, {_descriptorTable.GetArgumentBufferStats()}";
+	}
+
 	public IGfxCommandList BeginGraphics()
 	{
 		return new MetalCommandList(_commandQueue, _descriptorTable);
@@ -144,7 +157,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		return new MetalBuffer(null, descriptor, buffer);
 	}
 
-	internal MetalIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands)
+	public IIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands)
 	{
 		if (_sharedIndirectCommandBuffer is not null && _sharedIndirectCommandBuffer.MaxCommandCount >= maxCommands)
 		{

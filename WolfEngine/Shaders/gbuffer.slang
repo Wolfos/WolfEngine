@@ -2,6 +2,9 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 
+#define WOLF_MAX_INSTANCE_COUNT 10000
+#define WOLF_MAX_MATERIAL_COUNT 4096
+
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 
@@ -33,6 +36,15 @@ struct VSOutput
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
+    if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
+    {
+        output.position = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        output.normal = float3(0.0f, 1.0f, 0.0f);
+        output.uv = float2(0.0f, 0.0f);
+        output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
+        output.instanceId = 0;
+        return output;
+    }
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
     float4 worldPosition = mul(input.position, instanceData.world);
     worldPosition.xyz -= cameraPosition;
@@ -59,7 +71,25 @@ PSOutput fragmentShader(VSOutput input)
 {
     PSOutput output;
     
+    if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
+    {
+        output.albedo = float4(1.0f, 0.0f, 1.0f, 1.0f);
+        output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
+        output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
+        output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return output;
+    }
+
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
+    if (instanceData.materialId >= WOLF_MAX_MATERIAL_COUNT)
+    {
+        output.albedo = float4(1.0f, 0.0f, 1.0f, 1.0f);
+        output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
+        output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
+        output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        return output;
+    }
+
     GpuMaterialData materialData = g_MaterialTable[instanceData.materialId];
     float3 normal = normalize(input.normal);
 

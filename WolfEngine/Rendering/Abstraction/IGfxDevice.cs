@@ -46,6 +46,8 @@ public interface IGfxDevice
 	/// Creates a backend-specific descriptor set builder.
 	/// </summary>
 	IGfxDescriptorSetBuilder CreateDescriptorSetBuilder();
+
+	IIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands);
 }
 
 /// <summary>

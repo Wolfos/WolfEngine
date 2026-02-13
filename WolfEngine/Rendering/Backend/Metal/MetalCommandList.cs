@@ -308,11 +308,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			arguments.StartInstance);
 	}
 
-	public void ExecuteIndirect(MetalIndirectCommandBuffer buffer, uint commandCount)
+	public void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount)
 	{
 		if (commandCount == 0) return;
-		
-		if (buffer is null)
+
+		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
 		{
 			throw new ArgumentNullException(nameof(buffer));
 		}
@@ -321,7 +321,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		var range = new NSRange{
 			location = 0, length = commandCount
 		};
-		_renderEncoder.ExecuteCommandsInBuffer(buffer.Buffer, range);
+		_renderEncoder.ExecuteCommandsInBuffer(metalBuffer.Buffer, range);
 	}
 
 	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
@@ -353,6 +353,12 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			command.SetVertexBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 			command.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 		}
+
+		if (_descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
+		{
+			command.SetVertexBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
+			command.SetFragmentBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
+		}
 	}
 
 	public void UseBindlessArgumentBuffers()
@@ -372,6 +378,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.UseResource(_descriptorTable.SamplerArgumentBuffer, MTLResourceUsage.Read);
+		}
+
+		if (_descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.UseResource(_descriptorTable.CountBuffer, MTLResourceUsage.Read);
 		}
 	}
 
@@ -583,6 +594,12 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			_renderEncoder.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 		}
 
+		if (_bindlessBuffersSetRender == false && _descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.SetVertexBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
+			_renderEncoder.SetFragmentBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
+		}
+
 		_bindlessBuffersSetRender = true;
 
 		var bindlessVersion = _descriptorTable.BindlessVersion;
@@ -617,6 +634,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (_bindlessBuffersSetCompute == false && _descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.SetBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+		}
+
+		if (_bindlessBuffersSetCompute == false && _descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
+		{
+			_computeEncoder.SetBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
 		}
 
 		_bindlessBuffersSetCompute = true;

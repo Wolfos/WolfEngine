@@ -1,6 +1,8 @@
 #nullable enable
 
 using System.Numerics;
+using SharpMetal.Metal;
+using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Abstraction;
 
@@ -60,4 +62,12 @@ public interface IGfxCommandList
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void Barrier(in ResourceBarrierDescription barrier);
+
+	void UseResource(MTLBuffer buffer, MTLResourceUsage usage);
+
+	void UseBindlessArgumentBuffers();
+
+	void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command);
+
+	void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount);
 }

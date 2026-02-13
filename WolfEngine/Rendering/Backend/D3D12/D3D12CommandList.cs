@@ -5,6 +5,8 @@ using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using Silk.NET.Maths;
 using WolfEngine.Rendering.Abstraction;
+using SharpMetal.Metal;
+using WolfEngine.Rendering.Backend.Metal;
 
 using AbstractionViewport = WolfEngine.Rendering.Abstraction.Viewport;
 using AbstractionVertexBufferView = WolfEngine.Rendering.Abstraction.VertexBufferView;
@@ -532,5 +534,26 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		native.Anonymous.Transition = transition;
 
 		CommandList.ResourceBarrier(1, &native);
+	}
+
+	// TODO: Obviously this section should not have Metal types!
+	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
+	{
+		throw new NotImplementedException("UseResource is only implemented for the Metal backend.");
+	}
+
+	public void UseBindlessArgumentBuffers()
+	{
+		throw new NotImplementedException("Bindless argument buffers are only implemented for the Metal backend.");
+	}
+
+	public void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command)
+	{
+		throw new NotImplementedException("Bindless argument buffers are only implemented for the Metal backend.");
+	}
+
+	public void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount)
+	{
+		throw new NotImplementedException();
 	}
 }

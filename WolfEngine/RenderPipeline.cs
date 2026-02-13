@@ -46,7 +46,7 @@ public class RenderPipeline : IRenderPipeline
 
             for (var i = 0; i < (worlds?.Count ?? 0); i++)
             {
-                var world = worlds[i];
+                var world = worlds![i];
                 if (world is null)
                 {
                     continue;
