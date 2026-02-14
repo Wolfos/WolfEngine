@@ -90,6 +90,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 
 		buffer.Commit();
 		buffer.WaitUntilCompleted();
+		buffer.Dispose();
 	}
 
 	public void Submit(IGfxCommandList commandList)
@@ -99,7 +100,14 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 			throw new InvalidOperationException("Command list was not created by the Metal backend.");
 		}
 
-		metalCommandList.Commit();
+		try
+		{
+			metalCommandList.Commit();
+		}
+		finally
+		{
+			metalCommandList.Dispose();
+		}
 	}
 
 	public IGfxTexture CreateTexture(in TextureDescriptor descriptor)

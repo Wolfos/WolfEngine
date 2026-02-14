@@ -9,7 +9,7 @@ using WolfEngine.Rendering.Abstraction;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("MacOS")]
-internal sealed unsafe class MetalCommandList : IGfxCommandList
+internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 {
 	private readonly MTLCommandQueue _queue;
 	private readonly MetalDescriptorTable _descriptorTable;
@@ -34,6 +34,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 	private bool _bindlessBuffersSetCompute;
 	private uint _lastBindlessVersionRender = uint.MaxValue;
 	private uint _lastBindlessVersionCompute = uint.MaxValue;
+	private bool _disposed;
 
 	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
 	{
@@ -56,9 +57,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void EndPass()
 	{
+		ThrowIfDisposed();
 		if (_renderEncoder.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.EndEncoding();
+			_renderEncoder.Dispose();
 			_renderEncoder = default;
 		}
 
@@ -70,6 +73,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void BindPipeline(IGfxPipeline pipeline)
 	{
+		ThrowIfDisposed();
 		if (pipeline is not MetalPipeline metalPipeline)
 		{
 			throw new InvalidOperationException("Pipeline was not created by the Metal backend.");
@@ -130,6 +134,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
 	{
+		ThrowIfDisposed();
 		_primitiveType = topology switch
 		{
 			PrimitiveTopology.TriangleList => MTLPrimitiveType.Triangle,
@@ -143,6 +148,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetScissorRect(in RectInt rect)
 	{
+		ThrowIfDisposed();
 		EnsureRenderEncoder();
 		var maxWidth = Math.Max(0, (int)_viewport.Width);
 		var maxHeight = Math.Max(0, (int)_viewport.Height);
@@ -162,6 +168,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void ClearColorAttachment(uint index, Vector4 color)
 	{
+		ThrowIfDisposed();
 		if (index >= _clearColors.Length)
 		{
 			return;
@@ -179,6 +186,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void ClearDepthStencil(float depth)
 	{
+		ThrowIfDisposed();
 		_clearDepth = depth;
 		_clearDepthSet = true;
 	}
@@ -195,6 +203,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetBindlessTable(IGfxDescriptorTable table)
 	{
+		ThrowIfDisposed();
 		if (table is not MetalDescriptorTable)
 		{
 			throw new InvalidOperationException("Bindless table was not created by the Metal backend.");
@@ -203,6 +212,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
 	{
+		ThrowIfDisposed();
 		if (buffer is not MetalBuffer metalBuffer)
 		{
 			throw new InvalidOperationException("Buffer was not created by the Metal backend.");
@@ -215,6 +225,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data)
 	{
+		ThrowIfDisposed();
 		if (data.IsEmpty)
 		{
 			return;
@@ -230,6 +241,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data)
 	{
+		ThrowIfDisposed();
 		if (data.IsEmpty)
 		{
 			return;
@@ -244,6 +256,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
 	{
+		ThrowIfDisposed();
 		if (buffer is not MetalBuffer metalBuffer)
 		{
 			throw new InvalidOperationException("Buffer was not created by the Metal backend.");
@@ -262,6 +275,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers)
 	{
+		ThrowIfDisposed();
 		EnsureRenderEncoder();
 		for (var i = 0; i < vertexBuffers.Length; i++)
 		{
@@ -277,6 +291,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetIndexBuffer(in IndexBufferView indexBuffer)
 	{
+		ThrowIfDisposed();
 		if (indexBuffer.Buffer is not MetalBuffer metalBuffer)
 		{
 			throw new InvalidOperationException("Index buffer was not created by the Metal backend.");
@@ -289,6 +304,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void Draw(in DrawArguments arguments)
 	{
+		ThrowIfDisposed();
 		if (_indexBuffer.NativePtr == IntPtr.Zero)
 		{
 			throw new InvalidOperationException("Index buffer was not bound.");
@@ -310,6 +326,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset)
 	{
+		ThrowIfDisposed();
 		if (indexBuffer.Buffer is not MetalBuffer metalIndexBuffer)
 		{
 			throw new InvalidOperationException("Index buffer was not created by the Metal backend.");
@@ -333,6 +350,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount)
 	{
+		ThrowIfDisposed();
 		if (commandCount == 0) return;
 
 		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
@@ -349,6 +367,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void ExecuteIndirect(IIndirectCommandBuffer buffer, IGfxBuffer indirectRangeBuffer, ulong indirectRangeOffset)
 	{
+		ThrowIfDisposed();
 		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
 		{
 			throw new ArgumentNullException(nameof(buffer));
@@ -365,6 +384,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
 	{
+		ThrowIfDisposed();
 		if (buffer.NativePtr == IntPtr.Zero)
 		{
 			return;
@@ -376,6 +396,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command)
 	{
+		ThrowIfDisposed();
 		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
 		{
 			command.SetVertexBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
@@ -402,6 +423,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void UseBindlessArgumentBuffers()
 	{
+		ThrowIfDisposed();
 		EnsureRenderEncoder();
 
 		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
@@ -427,6 +449,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
+		ThrowIfDisposed();
 		EnsureComputeEncoder();
 		var threadgroups = new MTLSize
 		{
@@ -440,11 +463,13 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
+		ThrowIfDisposed();
 		// Metal handles resource hazards implicitly for most use cases.
 	}
 
 	public void CopyTexture(MTLTexture source, MTLTexture destination, uint width, uint height)
 	{
+		ThrowIfDisposed();
 		if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
 		{
 			return;
@@ -459,6 +484,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.EndEncoding();
+			_computeEncoder.Dispose();
 			_computeEncoder = default;
 			_currentComputePipeline = null;
 			_bindlessBuffersSetCompute = false;
@@ -470,13 +496,19 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		var size = new MTLSize { width = width, height = height, depth = 1 };
 		blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
 		blit.EndEncoding();
+		if (blit.NativePtr != IntPtr.Zero)
+		{
+			blit.Dispose();
+		}
 	}
 
 	public void Commit()
 	{
+		ThrowIfDisposed();
 		if (_renderEncoder.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.EndEncoding();
+			_renderEncoder.Dispose();
 			_renderEncoder = default;
 			_currentGraphicsPipeline = null;
 			_bindlessBuffersSetRender = false;
@@ -486,6 +518,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
 			_computeEncoder.EndEncoding();
+			_computeEncoder.Dispose();
 			_computeEncoder = default;
 			_currentComputePipeline = null;
 			_bindlessBuffersSetCompute = false;
@@ -503,6 +536,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	public void SetPresentDrawable(CAMetalDrawable drawable)
 	{
+		ThrowIfDisposed();
 		if (drawable.NativePtr == IntPtr.Zero)
 		{
 			return;
@@ -511,8 +545,40 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		_presentDrawable = drawable;
 	}
 
+	public void Dispose()
+	{
+		if (_disposed)
+		{
+			return;
+		}
+
+		if (_renderEncoder.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.EndEncoding();
+			_renderEncoder.Dispose();
+			_renderEncoder = default;
+		}
+
+		if (_computeEncoder.NativePtr != IntPtr.Zero)
+		{
+			_computeEncoder.EndEncoding();
+			_computeEncoder.Dispose();
+			_computeEncoder = default;
+		}
+
+		_presentDrawable = default;
+
+		if (_commandBuffer.NativePtr != IntPtr.Zero)
+		{
+			_commandBuffer.Dispose();
+		}
+
+		_disposed = true;
+	}
+
 	private void EnsureRenderEncoder()
 	{
+		ThrowIfDisposed();
 		if (_renderEncoder.NativePtr != IntPtr.Zero)
 		{
 			return;
@@ -529,7 +595,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			var binding = _currentTargets.ColorAttachments[i];
 			if (binding.Texture is MetalBackbufferTexture backbuffer)
 			{
-				_presentDrawable = backbuffer.Drawable;
+				SetPresentDrawable(backbuffer.Drawable);
 				var backAttachment = descriptor.ColorAttachments.Object((nuint)i);
 				backAttachment.Texture = backbuffer.Drawable.Texture;
 				backAttachment.LoadAction = _clearColorSet[i] ? MTLLoadAction.Clear : MTLLoadAction.Load;
@@ -595,6 +661,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 
 	private void EnsureComputeEncoder()
 	{
+		ThrowIfDisposed();
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
 			return;
@@ -735,6 +802,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 			{
 				_computeEncoder.UseResource(texture, MTLResourceUsage.Read | MTLResourceUsage.Write);
 			}
+		}
+	}
+
+	private void ThrowIfDisposed()
+	{
+		if (_disposed)
+		{
+			throw new ObjectDisposedException(nameof(MetalCommandList));
 		}
 	}
 }
