@@ -108,7 +108,6 @@ public static class GBufferPass
 			icb.Reset((uint)sceneData.DrawPackets.Count);
 		}
 
-		var instanceStride = (ulong)Marshal.SizeOf<GpuInstanceData>();
 		var usedResources = new HashSet<IntPtr>();
 
 		// TODO: No Metal types!
@@ -148,35 +147,112 @@ public static class GBufferPass
 		commandList.UseBindlessArgumentBuffers();
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
-		IGfxPipeline? previousPipeline = null;
-		
-		for (var i = 0; i < sceneData.DrawPackets.Count; i++)
+		if (useGpuDrawArgs)
 		{
-			var drawPacket = sceneData.DrawPackets[i];
-			var mesh = drawPacket.Mesh;
-			var material = drawPacket.Material;
-			if (drawPacket.DrawId <= 0 ||
-			    drawPacket.DrawId >= global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount ||
-			    drawPacket.InstanceId <= 0 ||
-			    drawPacket.InstanceId >= global::WolfEngine.Rendering.GpuDrawResources.MaxInstanceCount)
+			var pipelineBuckets = new Dictionary<IGfxPipeline, List<int>>();
+			for (var i = 0; i < sceneData.DrawPackets.Count; i++)
 			{
-				skippedOutOfRange++;
-				continue;
+				var drawPacket = sceneData.DrawPackets[i];
+				var mesh = drawPacket.Mesh;
+				var material = drawPacket.Material;
+
+				if (drawPacket.DrawId <= 0 ||
+				    drawPacket.DrawId >= global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount ||
+				    drawPacket.InstanceId <= 0 ||
+				    drawPacket.InstanceId >= global::WolfEngine.Rendering.GpuDrawResources.MaxInstanceCount)
+				{
+					skippedOutOfRange++;
+					continue;
+				}
+
+				if (mesh.VertexBuffer == null || mesh.IndexBuffer == null)
+				{
+					skippedNoMesh++;
+					continue;
+				}
+
+				if (material.Resources == null)
+				{
+					skippedNoMaterial++;
+					continue;
+				}
+
+				if (material.Resources.Pipeline is not MetalPipeline)
+				{
+					skippedNoPipeline++;
+					continue;
+				}
+
+				var vertexBuffer = mesh.VertexBuffer as MetalBuffer;
+				var indexBuffer = mesh.IndexBuffer as MetalBuffer;
+				if (vertexBuffer is null || indexBuffer is null)
+				{
+					skippedNoMesh++;
+					continue;
+				}
+
+				UseIfNeeded(vertexBuffer.Buffer);
+				UseIfNeeded(indexBuffer.Buffer);
+
+				if (pipelineBuckets.TryGetValue(material.Resources.Pipeline, out var bucket) == false)
+				{
+					bucket = new List<int>();
+					pipelineBuckets.Add(material.Resources.Pipeline, bucket);
+				}
+
+				bucket.Add(i);
 			}
 
-			if (mesh.VertexBuffer == null || mesh.IndexBuffer == null)
+			foreach (var (pipeline, bucket) in pipelineBuckets)
 			{
-				skippedNoMesh++;
-				continue;
-			}
-			if (material.Resources == null)
-			{
-				skippedNoMaterial++;
-				continue;
-			}
+				commandList.BindPipeline(pipeline);
 
-			if (useGpuDrawArgs == false)
+				for (var j = 0; j < bucket.Count; j++)
+				{
+					var drawPacket = sceneData.DrawPackets[bucket[j]];
+					var mesh = drawPacket.Mesh;
+
+					commandList.SetVertexBuffers(new[] { new VertexBufferView(mesh.VertexBuffer!, mesh.StrideInBytes, 0) });
+					var drawArgsOffset = (ulong)drawPacket.DrawId * (ulong)Marshal.SizeOf<GpuDrawArgs>();
+					commandList.DrawIndexedIndirect(
+						new IndexBufferView(mesh.IndexBuffer!, IndexFormat.UInt32, 0),
+						drawArgsBuffer!,
+						drawArgsOffset);
+					commandCount++;
+				}
+			}
+		}
+		else
+		{
+			IGfxPipeline? previousPipeline = null;
+
+			for (var i = 0; i < sceneData.DrawPackets.Count; i++)
 			{
+				var drawPacket = sceneData.DrawPackets[i];
+				var mesh = drawPacket.Mesh;
+				var material = drawPacket.Material;
+
+				if (drawPacket.DrawId <= 0 ||
+				    drawPacket.DrawId >= global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount ||
+				    drawPacket.InstanceId <= 0 ||
+				    drawPacket.InstanceId >= global::WolfEngine.Rendering.GpuDrawResources.MaxInstanceCount)
+				{
+					skippedOutOfRange++;
+					continue;
+				}
+
+				if (mesh.VertexBuffer == null || mesh.IndexBuffer == null)
+				{
+					skippedNoMesh++;
+					continue;
+				}
+
+				if (material.Resources == null)
+				{
+					skippedNoMaterial++;
+					continue;
+				}
+
 				var bounds = mesh.BoundingSphere;
 				var boundsCenter = Vector3.Transform(bounds.Center, drawPacket.Transform);
 				var maxScale = GetMaxScale(drawPacket.Transform);
@@ -186,84 +262,66 @@ public static class GBufferPass
 					skippedCulled++;
 					continue;
 				}
-			}
-			
-			// TODO: No Metal types in this class
-			if (material.Resources.Pipeline is not MetalPipeline metalPipeline)
-			{
-				skippedNoPipeline++;
-				continue;
-			}
 
-			var vertexBuffer = mesh.VertexBuffer as MetalBuffer;
-			var indexBuffer = mesh.IndexBuffer as MetalBuffer;
-			if (vertexBuffer is null || indexBuffer is null)
-			{
-				continue;
-			}
-
-			if (material.Resources.Pipeline != previousPipeline)
-			{
-				commandList.BindPipeline(material.Resources.Pipeline);
-				previousPipeline = material.Resources.Pipeline;
-			}
-
-
-			UseIfNeeded(vertexBuffer.Buffer);
-			UseIfNeeded(indexBuffer.Buffer);
-
-				if (useGpuDrawArgs)
+				if (material.Resources.Pipeline is not MetalPipeline metalPipeline)
 				{
-					if (config.InstanceBuffer is not null)
-					{
-						var instanceOffset = (ulong)drawPacket.InstanceId * instanceStride;
-						commandList.BindConstantBuffer(10, config.InstanceBuffer, instanceOffset);
-					}
+					skippedNoPipeline++;
+					continue;
+				}
 
-					commandList.SetVertexBuffers(new[] { new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, 0) });
-					var drawArgsOffset = (ulong)drawPacket.DrawId * (ulong)Marshal.SizeOf<GpuDrawArgs>();
-					commandList.DrawIndexedIndirect(
-						new IndexBufferView(mesh.IndexBuffer, IndexFormat.UInt32, 0),
-					drawArgsBuffer!,
-					drawArgsOffset);
+				var vertexBuffer = mesh.VertexBuffer as MetalBuffer;
+				var indexBuffer = mesh.IndexBuffer as MetalBuffer;
+				if (vertexBuffer is null || indexBuffer is null)
+				{
+					skippedNoMesh++;
+					continue;
+				}
+
+				if (material.Resources.Pipeline != previousPipeline)
+				{
+					commandList.BindPipeline(material.Resources.Pipeline);
+					previousPipeline = material.Resources.Pipeline;
+				}
+
+				UseIfNeeded(vertexBuffer.Buffer);
+				UseIfNeeded(indexBuffer.Buffer);
+
+				var command = icb!.GetRenderCommand(commandCount);
+				command.SetRenderPipelineState(metalPipeline.RenderPipelineState);
+				commandList.BindBindlessArgumentBuffers(command);
+				command.SetVertexBuffer(vertexBuffer.Buffer, 0, mesh.StrideInBytes, 0);
+
+				if (config.InstanceBuffer is MetalBuffer instanceBuffer)
+				{
+					var instanceOffset = (ulong)drawPacket.InstanceId * (ulong)Marshal.SizeOf<GpuInstanceData>();
+					command.SetVertexBuffer(instanceBuffer.Buffer, instanceOffset, 10);
+					command.SetFragmentBuffer(instanceBuffer.Buffer, instanceOffset, 10);
+				}
+
+				if (config.MaterialBuffer is MetalBuffer materialBuffer)
+				{
+					command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
+					command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
+				}
+
+				if (cameraBuffer is not null)
+				{
+					command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
+					command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
+				}
+
+				command.DrawIndexedPrimitives(
+					MTLPrimitiveType.Triangle,
+					mesh.IndexCount,
+					MTLIndexType.UInt32,
+					indexBuffer.Buffer,
+					0,
+					1,
+					0,
+					0);
+
 				commandCount++;
-				continue;
 			}
-
-			var command = icb!.GetRenderCommand(commandCount);
-			command.SetRenderPipelineState(metalPipeline.RenderPipelineState);
-			commandList.BindBindlessArgumentBuffers(command);
-			command.SetVertexBuffer(vertexBuffer.Buffer, 0, mesh.StrideInBytes, 0);
-			if (config.InstanceBuffer is MetalBuffer instanceBuffer)
-			{
-				var instanceOffset = (ulong)drawPacket.InstanceId * instanceStride;
-				command.SetVertexBuffer(instanceBuffer.Buffer, instanceOffset, 10);
-				command.SetFragmentBuffer(instanceBuffer.Buffer, instanceOffset, 10);
-			}
-
-			if (config.MaterialBuffer is MetalBuffer materialBuffer)
-			{
-				command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
-				command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
-			}
-
-			if (cameraBuffer is not null)
-			{
-				command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
-				command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
-			}
-
-			command.DrawIndexedPrimitives(
-				MTLPrimitiveType.Triangle,
-				mesh.IndexCount,
-				MTLIndexType.UInt32,
-				indexBuffer.Buffer,
-				0,
-				1,
-				0,
-				0);
-
-			commandCount++;
 		}
 
 		if (icb is not null)
