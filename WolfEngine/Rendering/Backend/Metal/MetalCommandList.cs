@@ -347,6 +347,22 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList
 		_renderEncoder.ExecuteCommandsInBuffer(metalBuffer.Buffer, range);
 	}
 
+	public void ExecuteIndirect(IIndirectCommandBuffer buffer, IGfxBuffer indirectRangeBuffer, ulong indirectRangeOffset)
+	{
+		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
+		{
+			throw new ArgumentNullException(nameof(buffer));
+		}
+
+		if (indirectRangeBuffer is not MetalBuffer metalRangeBuffer)
+		{
+			throw new InvalidOperationException("Indirect range buffer was not created by the Metal backend.");
+		}
+
+		EnsureRenderEncoder();
+		_renderEncoder.ExecuteCommandsInBuffer(metalBuffer.Buffer, metalRangeBuffer.Buffer, indirectRangeOffset);
+	}
+
 	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
 	{
 		if (buffer.NativePtr == IntPtr.Zero)

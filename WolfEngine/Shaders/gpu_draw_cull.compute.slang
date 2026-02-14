@@ -3,7 +3,7 @@ import "draw_data.slang";
 #define WOLF_MAX_INSTANCE_COUNT 10000
 #define WOLF_MAX_MESH_COUNT 4096
 
-cbuffer CullParams : register(b5)
+cbuffer CullParams : register(b7)
 {
     float4 planes[6];
     float4 cameraPositionAndMaxDrawCount;
@@ -14,6 +14,8 @@ RWStructuredBuffer<GpuInstanceData> g_InstanceTable : register(u1);
 RWStructuredBuffer<GpuMeshData> g_MeshTable : register(u2);
 RWStructuredBuffer<GpuDrawArgs> g_DrawArgs : register(u3);
 RWStructuredBuffer<uint> g_DrawCount : register(u4);
+RWStructuredBuffer<uint> g_VisibleDrawIds : register(u5);
+RWStructuredBuffer<uint> g_DrawExecutionRange : register(u6);
 
 bool IsSphereVisible(float3 center, float radius)
 {
@@ -73,8 +75,10 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     GpuMeshData meshData = g_MeshTable[instanceData.meshId];
 
-    uint visibleDrawIndexIgnored;
-    InterlockedAdd(g_DrawCount[0], 1, visibleDrawIndexIgnored);
+    uint visibleDrawIndex;
+    InterlockedAdd(g_DrawCount[0], 1, visibleDrawIndex);
+    g_VisibleDrawIds[visibleDrawIndex] = drawId;
+    InterlockedMax(g_DrawExecutionRange[1], visibleDrawIndex + 1);
 
     args.indexCount = meshData.indexCount;
     args.instanceCount = 1;

@@ -176,6 +176,13 @@ public sealed class GpuDrawPass
 			reset[0] = 0;
 			BufferHelper.CopyToBuffer(reset.ToArray(), countBuffer.Buffer);
 		}
+		if (_gpuDrawResources.DrawExecutionRangeBuffer is MetalBuffer rangeBuffer)
+		{
+			Span<uint> resetRange = stackalloc uint[2];
+			resetRange[0] = 0;
+			resetRange[1] = 0;
+			BufferHelper.CopyToBuffer(resetRange.ToArray(), rangeBuffer.Buffer);
+		}
 
 		var pipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
@@ -197,13 +204,15 @@ public sealed class GpuDrawPass
 				GpuDrawResources.MaxDrawCount)
 		};
 
-		commandList.SetComputeConstants(5, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref cullParams, 1)));
+		commandList.SetComputeConstants(7, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref cullParams, 1)));
 
 		commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
 		commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 		commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
 		commandList.SetComputeBuffer(3, _gpuDrawResources.DrawArgsBuffer!);
 		commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCountBuffer!);
+		commandList.SetComputeBuffer(5, _gpuDrawResources.VisibleDrawIdsBuffer!);
+		commandList.SetComputeBuffer(6, _gpuDrawResources.DrawExecutionRangeBuffer!);
 
 		var groupCount = (uint)((GpuDrawResources.MaxDrawCount + 63) / 64);
 		commandList.Dispatch(groupCount, 1, 1);

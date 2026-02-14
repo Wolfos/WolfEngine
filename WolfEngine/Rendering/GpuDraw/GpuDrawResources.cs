@@ -19,6 +19,8 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
 	public IGfxBuffer? DrawCountBuffer { get; private set; }
+	public IGfxBuffer? VisibleDrawIdsBuffer { get; private set; }
+	public IGfxBuffer? DrawExecutionRangeBuffer { get; private set; }
 	public IGfxBuffer? UpdateBuffer { get; private set; }
 	public IGfxBuffer? CameraBuffer { get; private set; }
 
@@ -59,6 +61,16 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
+		VisibleDrawIdsBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(MaxDrawCount * sizeof(uint)),
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+		DrawExecutionRangeBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(2 * sizeof(uint)),
+			BufferUsage.Indirect,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
 		UpdateBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawUpdateData>()),
 			BufferUsage.Structured,
@@ -78,6 +90,8 @@ public sealed class GpuDrawResources : IDisposable
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
 		(DrawCountBuffer as IDisposable)?.Dispose();
+		(VisibleDrawIdsBuffer as IDisposable)?.Dispose();
+		(DrawExecutionRangeBuffer as IDisposable)?.Dispose();
 		(UpdateBuffer as IDisposable)?.Dispose();
 		(CameraBuffer as IDisposable)?.Dispose();
 	}

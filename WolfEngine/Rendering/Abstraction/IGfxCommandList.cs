@@ -72,4 +72,9 @@ public interface IGfxCommandList
 	void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command);
 
 	void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount);
+
+	void ExecuteIndirect(IIndirectCommandBuffer buffer, IGfxBuffer indirectRangeBuffer, ulong indirectRangeOffset)
+	{
+		throw new global::System.NotSupportedException("Indirect execution with an indirect range buffer is not supported by this backend.");
+	}
 }
