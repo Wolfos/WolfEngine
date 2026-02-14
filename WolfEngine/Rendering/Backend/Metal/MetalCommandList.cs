@@ -478,6 +478,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		if (_renderEncoder.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.EndEncoding();
+			_renderEncoder.Dispose();
 			_renderEncoder = default;
 		}
 

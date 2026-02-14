@@ -46,7 +46,6 @@ internal unsafe class WolfRendererMetal : IRenderer
     private Window* _window;
     private void* _metalView;
     private CAMetalLayer _metalLayer;
-    private CAMetalDrawable _currentDrawable;
     private bool _isRunning;
     private bool _hasDrawableSize;
     private double _drawableWidth;
@@ -532,8 +531,8 @@ internal unsafe class WolfRendererMetal : IRenderer
             throw new InvalidOperationException("Failed to acquire CAMetalDrawable.");
         }
 
-        _currentDrawable = new CAMetalDrawable(drawablePtr);
-        var drawableTexture = _currentDrawable.Texture;
+        var drawable = new CAMetalDrawable(drawablePtr);
+        var drawableTexture = drawable.Texture;
         var drawableWidth = (int)drawableTexture.Width;
         var drawableHeight = (int)drawableTexture.Height;
 
@@ -544,7 +543,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             TextureUsage.RenderTarget,
             Vector4.Zero);
 
-        var backbuffer = new MetalBackbufferTexture(_currentDrawable, descriptor);
+        var backbuffer = new MetalBackbufferTexture(drawable, descriptor);
         return registry.ImportTexture(backbuffer, takeOwnership: false, initialState: ResourceState.RenderTarget);
     }
     

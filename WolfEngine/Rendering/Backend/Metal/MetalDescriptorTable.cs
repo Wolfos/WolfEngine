@@ -198,6 +198,18 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 
 	internal uint BindlessVersion => _bindlessVersion;
 
+	internal int FreeSrvCount => _freeSrvIndices.Count;
+
+	internal int FreeUavCount => _freeUavIndices.Count;
+
+	internal int FreeSamplerCount => _freeSamplerIndices.Count;
+
+	internal ulong TextureArgumentBufferBytes => _textureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _textureArgumentBuffer.Length;
+
+	internal ulong RwTextureArgumentBufferBytes => _rwTextureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _rwTextureArgumentBuffer.Length;
+
+	internal ulong SamplerArgumentBufferBytes => _samplerArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _samplerArgumentBuffer.Length;
+
 	public MTLTexture GetSrvTexture(int index) => _srvTextures[index]?.Texture ?? default;
 
 	public MTLTexture GetUavTexture(int index) => _uavTextures[index]?.Texture ?? default;

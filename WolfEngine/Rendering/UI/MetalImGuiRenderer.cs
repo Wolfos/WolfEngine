@@ -74,7 +74,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.CopyTexture(source, destination, (uint)width, (uint)height);
 		commandList.SetPresentDrawable(backbuffer.Drawable);
 
-		if (frame.Commands.Length == 0)
+		if (frame.CommandCount == 0)
 		{
 			return;
 		}
@@ -138,7 +138,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			scaleY = frame.FramebufferSize.Y / frame.DisplaySize.Y;
 		}
 
-		for (var i = 0; i < frame.Commands.Length; i++)
+		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
 			var clip = cmd.ClipRect;
@@ -180,24 +180,26 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 
 		if (_vertexBuffer is null || _vertexBufferSize < vertexBytes)
 		{
+			_vertexBuffer?.Dispose();
 			_vertexBufferSize = (int)Math.Max(vertexBytes, 65536);
 			_vertexBuffer = CreateBuffer(_device, _vertexBufferSize, BufferUsage.Vertex);
 		}
 
 		if (_indexBuffer is null || _indexBufferSize < indexBytes)
 		{
+			_indexBuffer?.Dispose();
 			_indexBufferSize = (int)Math.Max(indexBytes, 65536);
 			_indexBuffer = CreateBuffer(_device, _indexBufferSize, BufferUsage.Index);
 		}
 
-		if (frame.Vertices.Length > 0)
+		if (frame.VertexCount > 0)
 		{
-			BufferHelper.CopyToBuffer(frame.Vertices, _vertexBuffer!.Buffer);
+			BufferHelper.CopyToBuffer<ImDrawVert>(frame.Vertices.AsSpan(0, frame.VertexCount), _vertexBuffer!.Buffer);
 		}
 
-		if (frame.Indices.Length > 0)
+		if (frame.IndexCount > 0)
 		{
-			BufferHelper.CopyToBuffer(frame.Indices, _indexBuffer!.Buffer);
+			BufferHelper.CopyToBuffer<ushort>(frame.Indices.AsSpan(0, frame.IndexCount), _indexBuffer!.Buffer);
 		}
 	}
 
@@ -251,6 +253,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 
 		UploadTextureData(texture.Texture, atlas);
+		_fontTexture?.Dispose();
 		_fontTexture = texture;
 		_fontHandle = texture.ShaderResourceView;
 

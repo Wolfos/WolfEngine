@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers;
 using System.IO;
 using System.Numerics;
 using ImGuiNET;
@@ -129,13 +130,19 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 
 		var totalVtx = drawData.TotalVtxCount;
 		var totalIdx = drawData.TotalIdxCount;
+		var totalCmd = 0;
+		for (var n = 0; n < drawData.CmdListsCount; n++)
+		{
+			totalCmd += drawData.CmdLists[n].CmdBuffer.Size;
+		}
 
-		var verts = new ImDrawVert[totalVtx];
-		var indices = new ushort[totalIdx];
-		var commands = new List<UiDrawCommand>(drawData.CmdListsCount * 4);
+		var verts = ArrayPool<ImDrawVert>.Shared.Rent(Math.Max(totalVtx, 1));
+		var indices = ArrayPool<ushort>.Shared.Rent(Math.Max(totalIdx, 1));
+		var commands = ArrayPool<UiDrawCommand>.Shared.Rent(Math.Max(totalCmd, 1));
 
 		var vtxOffset = 0;
 		var idxOffset = 0;
+		var cmdOffset = 0;
 
 		for (var n = 0; n < drawData.CmdListsCount; n++)
 		{
@@ -160,12 +167,11 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			{
 				var cmd = list.CmdBuffer[c];
 				var clip = cmd.ClipRect;
-				var cmdEntry = new UiDrawCommand(
+				commands[cmdOffset++] = new UiDrawCommand(
 					(int) cmd.ElemCount,
 					idxOffset + (int) cmd.IdxOffset,
 					vtxOffset + (int) cmd.VtxOffset,
 					new Vector4(clip.X, clip.Y, clip.Z, clip.W));
-				commands.Add(cmdEntry);
 			}
 
 			vtxOffset += list.VtxBuffer.Size;
@@ -181,20 +187,23 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		{
 			VertexCount = totalVtx,
 			IndexCount = totalIdx,
+			CommandCount = cmdOffset,
 			DisplayPos = drawData.DisplayPos,
 			DisplaySize = drawData.DisplaySize,
 			FramebufferSize = framebufferSize,
 			DeltaTime = ImGui.GetIO().DeltaTime,
 			Vertices = verts,
 			Indices = indices,
-			Commands = commands.ToArray(),
+			Commands = commands,
 			HasFontAtlas = _fontAtlasDirty && _fontAtlas.PixelsRgba.Length > 0,
 			FontAtlas = _fontAtlas
 		};
+		frame.SetRelease(ReturnPooledFrame);
 
 		_pendingFrames.Enqueue(frame);
-		while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out _))
+		while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out var dropped))
 		{
+			dropped.Release();
 		}
 	}
 
@@ -203,7 +212,16 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		frame = UiFrameData.Empty;
 		while (_pendingFrames.TryDequeue(out var candidate))
 		{
+			if (ReferenceEquals(frame, UiFrameData.Empty) == false)
+			{
+				frame.Release();
+			}
 			frame = candidate;
+		}
+
+		if (ReferenceEquals(frame, UiFrameData.Empty))
+		{
+			return false;
 		}
 
 		if (frame.HasFontAtlas)
@@ -211,7 +229,14 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			_fontAtlasDirty = false;
 		}
 
-		return frame != UiFrameData.Empty && frame.VertexCount + frame.IndexCount > 0;
+		if (frame.VertexCount + frame.IndexCount == 0)
+		{
+			frame.Release();
+			frame = UiFrameData.Empty;
+			return false;
+		}
+
+		return true;
 	}
 
 	public void SetKey(ImGuiKey key, bool down)
@@ -303,5 +328,23 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = bgColor;
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
 		style.Colors[(int)ImGuiCol.TabSelectedOverline] = bgColor;
+	}
+
+	private static void ReturnPooledFrame(UiFrameData frame)
+	{
+		if (frame.Vertices.Length > 0)
+		{
+			ArrayPool<ImDrawVert>.Shared.Return(frame.Vertices, clearArray: false);
+		}
+
+		if (frame.Indices.Length > 0)
+		{
+			ArrayPool<ushort>.Shared.Return(frame.Indices, clearArray: false);
+		}
+
+		if (frame.Commands.Length > 0)
+		{
+			ArrayPool<UiDrawCommand>.Shared.Return(frame.Commands, clearArray: false);
+		}
 	}
 }

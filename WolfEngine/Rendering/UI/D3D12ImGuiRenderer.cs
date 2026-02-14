@@ -83,7 +83,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
 		native->ResourceBarrier(1, &barrier);
 
-		if (frame.Commands.Length == 0)
+		if (frame.CommandCount == 0)
 		{
 			return;
 		}
@@ -103,13 +103,13 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 		fixed (ImDrawVert* srcVerts = frame.Vertices)
 		{
-			var size = frame.Vertices.Length * Unsafe.SizeOf<ImDrawVert>();
+			var size = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
 			Buffer.MemoryCopy(srcVerts, vertexMapped, size, size);
 		}
 
 		fixed (ushort* srcIndices = frame.Indices)
 		{
-			var size = frame.Indices.Length * sizeof(ushort);
+			var size = frame.IndexCount * sizeof(ushort);
 			Buffer.MemoryCopy(srcIndices, indexMapped, size, size);
 		}
 
@@ -199,7 +199,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			scaleY = frame.FramebufferSize.Y / frame.DisplaySize.Y;
 		}
 
-		for (var i = 0; i < frame.Commands.Length; i++)
+		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
 			var clip = cmd.ClipRect;

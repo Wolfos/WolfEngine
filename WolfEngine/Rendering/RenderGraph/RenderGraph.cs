@@ -30,8 +30,12 @@ public sealed class RenderGraph
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawDatabase _drawDatabase;
+	private readonly bool _metalLeakDiagnosticsEnabled;
+	private readonly int _metalLeakDiagnosticsInterval;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
+	private long _lastProcessWorkingSetBytes;
+	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
 	private int _lastDrawEntryCount;
 	public event Action? FrameCompleted;
@@ -57,6 +61,11 @@ public sealed class RenderGraph
 		_uiFrameProvider = uiFrameProvider;
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
+		_metalLeakDiagnosticsEnabled = string.Equals(
+			Environment.GetEnvironmentVariable("WOLF_METAL_LEAK_DIAG"),
+			"1",
+			StringComparison.Ordinal);
+		_metalLeakDiagnosticsInterval = ParsePositiveIntEnvironmentVariable("WOLF_METAL_LEAK_DIAG_INTERVAL", 120);
 	}
 
 
@@ -205,53 +214,48 @@ public sealed class RenderGraph
 
 		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
-			_resourceRegistry.BeginFrame();
-			ReleasePasses();
-
-			UiFrameData uiFrame;
-			if (_uiFrameProvider.TryConsumeLatest(out var latestUi))
+			var uiFrame = UiFrameData.Empty;
+			try
 			{
-				uiFrame = latestUi;
+				_resourceRegistry.BeginFrame();
+				ReleasePasses();
+
+				if (_uiFrameProvider.TryConsumeLatest(out var latestUi))
+				{
+					uiFrame = latestUi;
+				}
+
+				if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+				{
+					snapshot = _currentSnapshot;
+				}
+				_currentSnapshot = snapshot;
+				_activeSnapshot = snapshot;
+				
+				var frameBufferSize = _renderer.GetFrameBufferSize();
+				var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
+				var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
+				var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
+				_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
+				_frameBuilder.SetUiFrame(uiFrame);
+
+				_frameBuilder.Build(this);
+				Execute();
+
+				_renderer.Render(_resourceRegistry, backBuffer);
+
+				_resourceRegistry.EndFrame();
 			}
-			else
+			finally
 			{
-				uiFrame = UiFrameData.Empty;
+				uiFrame.Release();
 			}
-
-			if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
-			{
-				snapshot = _currentSnapshot;
-			}
-			_currentSnapshot = snapshot;
-			_activeSnapshot = snapshot;
-			
-			var frameBufferSize = _renderer.GetFrameBufferSize();
-			var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-			var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
-			var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
-			_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
-			_frameBuilder.SetUiFrame(uiFrame);
-
-			_frameBuilder.Build(this);
-			Execute();
-
-			_renderer.Render(_resourceRegistry, backBuffer);
-
-			_resourceRegistry.EndFrame();
 		}
 
 		// Clear for next frame
 		_arenaAllocator.Reset();
 		_frameIndex++;
-		if ((_frameIndex % 120) == 0)
-		{
-			//Console.WriteLine(GpuResourceDiagnostics.Snapshot());
-			//Console.WriteLine($"GpuDraw: entries={_lastDrawEntryCount}, maxInstanceId={_lastMaxInstanceId}, maxDrawId={_lastMaxDrawId}");
-			if (_renderer.GetGfxDevice() is MetalDevice metalDevice)
-			{
-				//Console.WriteLine(metalDevice.GetDiagnosticsSnapshot());
-			}
-		}
+		LogMetalLeakDiagnosticsIfNeeded();
 		FrameCompleted?.Invoke();
 		FrameProfiler.Instance.EndFrame();
 	}
@@ -284,4 +288,53 @@ public sealed class RenderGraph
 
 		_passes.Clear();
 	}
+
+	private static int ParsePositiveIntEnvironmentVariable(string name, int fallback)
+	{
+		var raw = Environment.GetEnvironmentVariable(name);
+		if (int.TryParse(raw, out var parsed) && parsed > 0)
+		{
+			return parsed;
+		}
+
+		return fallback;
+	}
+
+#pragma warning disable CA1416
+	private void LogMetalLeakDiagnosticsIfNeeded()
+	{
+		if (_metalLeakDiagnosticsEnabled == false)
+		{
+			return;
+		}
+
+		if ((_frameIndex % _metalLeakDiagnosticsInterval) != 0)
+		{
+			return;
+		}
+
+		if (_renderer.GetGfxDevice() is not MetalDevice)
+		{
+			return;
+		}
+
+		var workingSetBytes = Environment.WorkingSet;
+		if (_hasLastProcessMemorySnapshot)
+		{
+			Console.WriteLine(
+				$"[MetalLeakDiag] frame={_frameIndex} " +
+				$"procWorkingSetMiB={(workingSetBytes / (1024.0 * 1024.0)):F2} " +
+				$"({(workingSetBytes - _lastProcessWorkingSetBytes) / (1024.0 * 1024.0):+#.##;-#.##;0.00})");
+		}
+		else
+		{
+			Console.WriteLine(
+				$"[MetalLeakDiag] frame={_frameIndex} baseline " +
+				$"procWorkingSetMiB={(workingSetBytes / (1024.0 * 1024.0)):F2}");
+		}
+
+		_lastProcessWorkingSetBytes = workingSetBytes;
+		_hasLastProcessMemorySnapshot = true;
+	}
+#pragma warning restore CA1416
 }

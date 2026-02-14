@@ -13,6 +13,7 @@ public sealed class UiFrameData
 
 	public int VertexCount { get; init; }
 	public int IndexCount { get; init; }
+	public int CommandCount { get; init; }
 	public Vector2 DisplayPos { get; init; }
 	public Vector2 DisplaySize { get; init; }
 	public Vector2 FramebufferSize { get; init; }
@@ -24,6 +25,20 @@ public sealed class UiFrameData
 	public UiDrawCommand[] Commands { get; init; } = Array.Empty<UiDrawCommand>();
 	public ImDrawVert[] Vertices { get; init; } = Array.Empty<ImDrawVert>();
 	public ushort[] Indices { get; init; } = Array.Empty<ushort>();
+
+	private Action<UiFrameData>? _releaseAction;
+
+	internal void SetRelease(Action<UiFrameData>? releaseAction)
+	{
+		_releaseAction = releaseAction;
+	}
+
+	public void Release()
+	{
+		var releaseAction = _releaseAction;
+		_releaseAction = null;
+		releaseAction?.Invoke(this);
+	}
 }
 
 public sealed class ImGuiFontAtlas

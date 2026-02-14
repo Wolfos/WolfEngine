@@ -449,11 +449,21 @@ internal static class MacOSFileDialog
 [SupportedOSPlatform("macos")]
 public static class BufferHelper
 {
-    public static unsafe void CopyToBuffer<T>(T[] source, MTLBuffer buffer)
-    {
-        var span = new Span<T>(buffer.Contents.ToPointer(), source.Length);
-        source.CopyTo(span);
-    }
+	public static unsafe void CopyToBuffer<T>(T[] source, MTLBuffer buffer)
+	{
+		CopyToBuffer<T>((ReadOnlySpan<T>)source.AsSpan(), buffer);
+	}
+
+	public static unsafe void CopyToBuffer<T>(ReadOnlySpan<T> source, MTLBuffer buffer)
+	{
+		if (source.IsEmpty)
+		{
+			return;
+		}
+
+		var span = new Span<T>(buffer.Contents.ToPointer(), source.Length);
+		source.CopyTo(span);
+	}
 }
 
 [Flags]
