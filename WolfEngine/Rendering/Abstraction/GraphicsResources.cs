@@ -32,6 +32,11 @@ public interface IGfxPipeline : IGfxResource
 	PipelineKey Key { get; }
 }
 
+public interface IGfxIndirectCommandBuffer : IGfxResource
+{
+	IndirectCommandBufferDescriptor Descriptor { get; }
+}
+
 /// <summary>
 /// Represents the bindless descriptor table shared across passes.
 /// </summary>

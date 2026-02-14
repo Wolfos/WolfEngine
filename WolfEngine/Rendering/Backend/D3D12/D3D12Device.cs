@@ -268,6 +268,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		throw new NotSupportedException("Direct3D12 buffer allocation is not yet implemented.");
 	}
 
+	public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor)
+	{
+		throw new NotSupportedException("Indirect command buffers are not implemented for the Direct3D12 backend yet.");
+	}
+
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
 	{
 		lock (_pipelineLock)

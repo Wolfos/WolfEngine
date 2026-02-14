@@ -410,6 +410,21 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		throw new NotSupportedException("Indirect indexed draws are not implemented for the Direct3D12 backend yet.");
 	}
 
+	public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount)
+	{
+		throw new NotSupportedException("Indirect command buffer execution is not implemented for the Direct3D12 backend yet.");
+	}
+
+	public void ExecuteIndirectCommandBufferIndexed(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer commandIndicesBuffer,
+		ulong indicesOffsetBytes,
+		IGfxBuffer commandCountBuffer,
+		ulong commandCountOffsetBytes)
+	{
+		throw new NotSupportedException("Indexed indirect command buffer execution is not implemented for the Direct3D12 backend yet.");
+	}
+
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
 		CommandList.Dispatch(groupCountX, groupCountY, groupCountZ);

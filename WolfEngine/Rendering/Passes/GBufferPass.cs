@@ -51,106 +51,33 @@ public static class GBufferPass
 		cameraConstants[21] = 0.0f;
 		cameraConstants[22] = 0.0f;
 		cameraConstants[23] = 0.0f;
-		commandList.SetGraphicsConstants(2, MemoryMarshal.AsBytes(cameraConstants));
-
-		if (config.InstanceBuffer is not null)
+		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
 		{
-			commandList.BindConstantBuffer(10, config.InstanceBuffer);
+			writableCameraBuffer.Write<float>(cameraConstants);
+		}
+		else
+		{
+			commandList.SetGraphicsConstants(2, MemoryMarshal.AsBytes(cameraConstants));
 		}
 
-		if (config.MaterialBuffer is not null)
+		if (config.InstanceBuffer is null ||
+		    config.MaterialBuffer is null ||
+		    config.DrawArgsBuffer is null ||
+		    config.CameraBuffer is null ||
+		    config.GBufferPipeline is null ||
+		    config.IndirectCommandBuffer is null)
 		{
-			commandList.BindConstantBuffer(11, config.MaterialBuffer);
+			commandList.EndPass();
+			return;
 		}
-
-		if (config.DrawArgsBuffer is null)
-		{
-			throw new InvalidOperationException("GBuffer pass requires DrawArgsBuffer for GPU-driven rendering.");
-		}
-
-		var drawArgsBuffer = config.DrawArgsBuffer;
-		var commandCount = 0u;
-		var totalPackets = sceneData.DrawPackets.Count;
-		var skippedNoMesh = 0;
-		var skippedNoMaterial = 0;
-		var skippedNoPipeline = 0;
-		var skippedOutOfRange = 0;
 
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-
-		var pipelineBuckets = new Dictionary<IGfxPipeline, List<int>>();
-		for (var i = 0; i < sceneData.DrawPackets.Count; i++)
-		{
-			var drawPacket = sceneData.DrawPackets[i];
-			var mesh = drawPacket.Mesh;
-			var material = drawPacket.Material;
-
-			if (drawPacket.DrawId <= 0 ||
-			    drawPacket.DrawId >= global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount ||
-			    drawPacket.InstanceId <= 0 ||
-			    drawPacket.InstanceId >= global::WolfEngine.Rendering.GpuDrawResources.MaxInstanceCount)
-			{
-				skippedOutOfRange++;
-				continue;
-			}
-
-			if (mesh.VertexBuffer is null || mesh.IndexBuffer is null)
-			{
-				skippedNoMesh++;
-				continue;
-			}
-
-			if (material.Resources is null)
-			{
-				skippedNoMaterial++;
-				continue;
-			}
-
-			if (material.Resources.Pipeline is null)
-			{
-				skippedNoPipeline++;
-				continue;
-			}
-
-			if (pipelineBuckets.TryGetValue(material.Resources.Pipeline, out var bucket) == false)
-			{
-				bucket = new List<int>();
-				pipelineBuckets.Add(material.Resources.Pipeline, bucket);
-			}
-
-			bucket.Add(i);
-		}
-
-		foreach (var (pipeline, bucket) in pipelineBuckets)
-		{
-			commandList.BindPipeline(pipeline);
-
-			for (var j = 0; j < bucket.Count; j++)
-			{
-				var drawPacket = sceneData.DrawPackets[bucket[j]];
-				var mesh = drawPacket.Mesh;
-				if (mesh.VertexBuffer is null || mesh.IndexBuffer is null)
-				{
-					skippedNoMesh++;
-					continue;
-				}
-
-				commandList.SetVertexBuffers(new[] { new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, 0) });
-				var drawArgsOffset = (ulong)drawPacket.DrawId * (ulong)Marshal.SizeOf<GpuDrawArgs>();
-				commandList.DrawIndexedIndirect(
-					new IndexBufferView(mesh.IndexBuffer, IndexFormat.UInt32, 0),
-					drawArgsBuffer,
-					drawArgsOffset);
-				commandCount++;
-			}
-		}
-
-		if ((totalPackets > 0) && (commandCount != totalPackets))
-		{
-			Console.WriteLine($"GBuffer: packets={totalPackets}, draws={commandCount}, " +
-			                  $"skippedNoMesh={skippedNoMesh}, skippedNoMaterial={skippedNoMaterial}, " +
-			                  $"skippedNoPipeline={skippedNoPipeline}, skippedOutOfRange={skippedOutOfRange}, gpuArgs=1");
-		}
+		commandList.BindPipeline(config.GBufferPipeline);
+		commandList.BindConstantBuffer(10, config.InstanceBuffer);
+		commandList.BindConstantBuffer(11, config.MaterialBuffer);
+		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+		commandList.BindConstantBuffer(2, config.CameraBuffer);
+		commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, (uint)global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount);
 
 		commandList.EndPass();
 	}

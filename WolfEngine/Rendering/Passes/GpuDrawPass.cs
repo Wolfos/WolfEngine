@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -18,6 +19,11 @@ public sealed class GpuDrawPass
 	private IGfxPipeline? _cullPipeline;
 	private readonly List<GpuDrawUpdate> _updates = new();
 	private readonly List<GpuDrawUpdateData> _updateData = new();
+	private readonly List<GpuDrawEntry> _drawEntries = new();
+	private nint _lastBindlessCountBufferPtr;
+	private nint _lastBindlessTextureBufferPtr;
+	private nint _lastBindlessRwTextureBufferPtr;
+	private nint _lastBindlessSamplerBufferPtr;
 	
 	public GpuDrawPass(IShaderCompiler shaderCompiler, GpuDrawDatabase drawDatabase,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, IRenderer renderer)
@@ -34,11 +40,38 @@ public sealed class GpuDrawPass
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
+		EnsureGBufferPipeline(device);
+		EnsureBindlessArgumentBuffersForGBuffer(device);
+
+		if (device is MetalDevice metalDevice &&
+		    device.GlobalTable is MetalDescriptorTable metalTable &&
+		    BindlessPointersChanged(metalTable))
+		{
+			metalDevice.WaitForIdle();
+			ReencodeAllIndirectCommands(metalTable);
+			CacheBindlessPointers(metalTable);
+		}
 
 		_drawDatabase.ConsumeUpdates(_updates);
 		_updateData.Clear();
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
+		var requiresIndirectCommandMutation = false;
+		for (var i = 0; i < updateCount; i++)
+		{
+			var type = _updates[i].Type;
+			if (type is GpuDrawUpdateType.Add or GpuDrawUpdateType.Remove or GpuDrawUpdateType.UpdateMesh)
+			{
+				requiresIndirectCommandMutation = true;
+				break;
+			}
+		}
+
+		// Structural command rewrites must not race in-flight ICB execution on Metal.
+		if (requiresIndirectCommandMutation && device is MetalDevice metalDeviceForMutation)
+		{
+			metalDeviceForMutation.WaitForIdle();
+		}
 
 		for (var i = 0; i < updateCount; i++)
 		{
@@ -75,6 +108,24 @@ public sealed class GpuDrawPass
 			var metallicRoughness = Vector4.One;
 
 			var materialResources = material?.Resources;
+			var hasPipelineMismatch = false;
+			if (materialResources?.Pipeline is IGfxPipeline materialPipeline)
+			{
+				if (_gpuDrawResources.GBufferPipeline is null)
+				{
+					_gpuDrawResources.GBufferPipeline = materialPipeline;
+				}
+				else if (ReferenceEquals(_gpuDrawResources.GBufferPipeline, materialPipeline) == false)
+				{
+					hasPipelineMismatch = true;
+					Console.WriteLine(
+						$"GpuDraw: material pipeline mismatch for drawId={update.DrawId}, matId={update.MaterialId}. Using error material.");
+					materialResources = null;
+				}
+			}
+
+			UpdateIndirectCommand(update, mesh);
+
 			if (materialResources is not null)
 			{
 				albedoHandle = materialResources.AlbedoTexture.IsValid
@@ -97,6 +148,11 @@ public sealed class GpuDrawPass
 					: _bindlessRegistry.ErrorSamplerHandle.Value;
 				baseColor = material!.Color;
 				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, 0, 0);
+			}
+			else if (hasPipelineMismatch)
+			{
+				baseColor = new Vector4(1.0f, 0.0f, 1.0f, 1.0f);
+				metallicRoughness = new Vector4(0.0f, 1.0f, 1.0f, 0.0f);
 			}
 
 			if ((albedoHandle >> 30) != 0 || (mrHandle >> 30) != 0 ||
@@ -235,6 +291,39 @@ public sealed class GpuDrawPass
 		return _cullPipeline;
 	}
 
+	private void EnsureGBufferPipeline(IGfxDevice device)
+	{
+		if (_gpuDrawResources.GBufferPipeline is not null)
+		{
+			return;
+		}
+
+		var source = _shaderCompiler.GetMetalSource("gbuffer.slang");
+		var bytes = Encoding.UTF8.GetBytes(source);
+		var renderState = new RenderStateDescriptor(
+			FillMode.Solid,
+			CullMode.Back,
+			depthTestEnabled: true,
+			depthWriteEnabled: true,
+			BlendMode.Opaque);
+		var pipelineKey = new PipelineKey(
+			PassKind.Graphics,
+			vertexEntryPoint: "vertexShader",
+			pixelEntryPoint: "fragmentShader",
+			computeEntryPoint: null,
+			renderTargets: new(new[]
+			{
+				TextureFormat.Bgra8Unorm,
+				TextureFormat.Rgba16Float,
+				TextureFormat.Rgba8Unorm,
+				TextureFormat.Rgba8Unorm
+			}),
+			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
+			renderState: renderState,
+			layout: GraphicsLayoutKind.Material);
+		_gpuDrawResources.GBufferPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(bytes, bytes));
+	}
+
 	private static void WriteBuffer<T>(IGfxBuffer buffer, ReadOnlySpan<T> data, string bufferName) where T : unmanaged
 	{
 		if (buffer is not IWritableGpuBuffer writableBuffer)
@@ -244,6 +333,147 @@ public sealed class GpuDrawPass
 		}
 
 		writableBuffer.Write(data);
+	}
+
+	private void UpdateIndirectCommand(in GpuDrawUpdate update, Mesh? mesh)
+	{
+		if (_gpuDrawResources.GBufferIndirectCommands is not MetalIndirectCommandBuffer indirectCommands)
+		{
+			return;
+		}
+
+		if (update.DrawId <= 0 || update.DrawId >= GpuDrawResources.MaxDrawCount)
+		{
+			return;
+		}
+
+		var commandIndex = (uint)update.DrawId;
+		if (update.Type == GpuDrawUpdateType.Remove)
+		{
+			indirectCommands.ResetCommand(commandIndex);
+			return;
+		}
+
+		if (update.Type != GpuDrawUpdateType.Add && update.Type != GpuDrawUpdateType.UpdateMesh)
+		{
+			return;
+		}
+
+		if (mesh is null)
+		{
+			indirectCommands.ResetCommand(commandIndex);
+			return;
+		}
+
+		if (_renderer.GetGfxDevice().GlobalTable is not MetalDescriptorTable metalTable)
+		{
+			indirectCommands.ResetCommand(commandIndex);
+			return;
+		}
+
+		if (TryEncodeIndirectCommand(commandIndex, mesh, metalTable, indirectCommands) == false)
+		{
+			indirectCommands.ResetCommand(commandIndex);
+		}
+	}
+
+	private void EnsureBindlessArgumentBuffersForGBuffer(IGfxDevice device)
+	{
+		if (_gpuDrawResources.GBufferPipeline is not MetalPipeline metalPipeline ||
+		    device.GlobalTable is not MetalDescriptorTable metalTable)
+		{
+			return;
+		}
+
+		metalTable.SetArgumentEncoders(
+			metalPipeline.TextureEncoder,
+			metalPipeline.RWTextureEncoder,
+			metalPipeline.SamplerEncoder);
+	}
+
+	private bool BindlessPointersChanged(MetalDescriptorTable table)
+	{
+		return _lastBindlessCountBufferPtr != table.CountBuffer.NativePtr ||
+		       _lastBindlessTextureBufferPtr != table.TextureArgumentBuffer.NativePtr ||
+		       _lastBindlessRwTextureBufferPtr != table.RWTextureArgumentBuffer.NativePtr ||
+		       _lastBindlessSamplerBufferPtr != table.SamplerArgumentBuffer.NativePtr;
+	}
+
+	private void CacheBindlessPointers(MetalDescriptorTable table)
+	{
+		_lastBindlessCountBufferPtr = table.CountBuffer.NativePtr;
+		_lastBindlessTextureBufferPtr = table.TextureArgumentBuffer.NativePtr;
+		_lastBindlessRwTextureBufferPtr = table.RWTextureArgumentBuffer.NativePtr;
+		_lastBindlessSamplerBufferPtr = table.SamplerArgumentBuffer.NativePtr;
+	}
+
+	private void ReencodeAllIndirectCommands(MetalDescriptorTable table)
+	{
+		if (_gpuDrawResources.GBufferIndirectCommands is not MetalIndirectCommandBuffer indirectCommands)
+		{
+			return;
+		}
+
+		for (var i = 1u; i < GpuDrawResources.MaxDrawCount; i++)
+		{
+			indirectCommands.ResetCommand(i);
+		}
+
+		_drawDatabase.CollectDrawEntries(_drawEntries);
+		for (var i = 0; i < _drawEntries.Count; i++)
+		{
+			var entry = _drawEntries[i];
+			if (entry.DrawId <= 0 || entry.DrawId >= GpuDrawResources.MaxDrawCount)
+			{
+				continue;
+			}
+
+			_renderer.EnsureMeshResources(entry.Mesh);
+			TryEncodeIndirectCommand((uint)entry.DrawId, entry.Mesh, table, indirectCommands);
+		}
+	}
+
+	private bool TryEncodeIndirectCommand(
+		uint commandIndex,
+		Mesh mesh,
+		MetalDescriptorTable table,
+		MetalIndirectCommandBuffer indirectCommands)
+	{
+		if (_gpuDrawResources.GBufferPipeline is null ||
+		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
+		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
+		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
+		    _gpuDrawResources.InstanceBuffer is not MetalBuffer instanceBuffer ||
+		    _gpuDrawResources.MaterialBuffer is not MetalBuffer materialBuffer ||
+		    _gpuDrawResources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer)
+		{
+			return false;
+		}
+
+		if (table.CountBuffer.NativePtr == IntPtr.Zero ||
+		    table.TextureArgumentBuffer.NativePtr == IntPtr.Zero ||
+		    table.SamplerArgumentBuffer.NativePtr == IntPtr.Zero)
+		{
+			return false;
+		}
+
+		indirectCommands.EncodeIndexedDrawCommand(
+			commandIndex,
+			metalVertexBuffer,
+			metalIndexBuffer,
+			IndexFormat.UInt32,
+			mesh.IndexCount,
+			0,
+			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
+			cameraBuffer,
+			instanceBuffer,
+			materialBuffer,
+			drawArgsBuffer,
+			table.CountBuffer,
+			table.TextureArgumentBuffer,
+			table.RWTextureArgumentBuffer,
+			table.SamplerArgumentBuffer);
+		return true;
 	}
 
 	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)

@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
@@ -33,6 +34,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private bool _bindlessBuffersSetCompute;
 	private uint _lastBindlessVersionRender = uint.MaxValue;
 	private uint _lastBindlessVersionCompute = uint.MaxValue;
+	private readonly List<MTLBuffer> _indirectReferencedBuffers = new();
+	private readonly HashSet<nint> _indirectReferencedPointers = new();
 	private bool _disposed;
 
 	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
@@ -347,6 +350,41 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			(nuint)indexBuffer.Offset,
 			metalArgsBuffer.Buffer,
 			(nuint)indirectArgsOffset);
+	}
+
+	public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount)
+	{
+		ThrowIfDisposed();
+		if (commandBuffer is not MetalIndirectCommandBuffer metalCommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Metal backend.");
+		}
+
+		var maxAvailable = Math.Min(maxCommandCount, metalCommandBuffer.Descriptor.MaxCommandCount);
+		if (maxAvailable == 0)
+		{
+			return;
+		}
+
+		EnsureRenderEncoder();
+		metalCommandBuffer.CollectReferencedBuffers(maxAvailable, _indirectReferencedBuffers, _indirectReferencedPointers);
+		for (var i = 0; i < _indirectReferencedBuffers.Count; i++)
+		{
+			_renderEncoder.UseResource(_indirectReferencedBuffers[i], MTLResourceUsage.Read);
+		}
+		_renderEncoder.ExecuteCommandsInBuffer(
+			metalCommandBuffer.Buffer,
+			new NSRange { location = 0, length = maxAvailable });
+	}
+
+	public void ExecuteIndirectCommandBufferIndexed(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer commandIndicesBuffer,
+		ulong indicesOffsetBytes,
+		IGfxBuffer commandCountBuffer,
+		ulong commandCountOffsetBytes)
+	{
+		throw new NotSupportedException("Indexed indirect command buffer execution is not implemented for the Metal backend yet.");
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)

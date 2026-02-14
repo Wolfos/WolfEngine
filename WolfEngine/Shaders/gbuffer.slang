@@ -7,6 +7,7 @@ import "draw_data.slang";
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
+StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 
 cbuffer CameraParams : register(b2)
 {
@@ -36,7 +37,8 @@ struct VSOutput
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
+    GpuDrawArgs drawArgs = g_DrawArgsTable[0];
+    if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(0.0f, 0.0f, 0.0f, 0.0f);
         output.normal = float3(0.0f, 1.0f, 0.0f);
@@ -45,7 +47,9 @@ VSOutput vertexShader(VSInput input)
         output.instanceId = 0;
         return output;
     }
-    GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
+
+    uint instanceId = drawArgs.startInstance;
+    GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(input.position, instanceData.world);
     worldPosition.xyz -= cameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
@@ -55,7 +59,7 @@ VSOutput vertexShader(VSInput input)
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
     output.tangent = float4(normalize(worldTangent), input.tangent.w);
-    output.instanceId = input.instanceId;
+    output.instanceId = instanceId;
     return output;
 }
 

@@ -23,6 +23,8 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DrawExecutionRangeBuffer { get; private set; }
 	public IGfxBuffer? UpdateBuffer { get; private set; }
 	public IGfxBuffer? CameraBuffer { get; private set; }
+	public IGfxIndirectCommandBuffer? GBufferIndirectCommands { get; private set; }
+	public IGfxPipeline? GBufferPipeline { get; set; }
 
 	public void EnsureCreated(IGfxDevice device)
 	{
@@ -80,6 +82,10 @@ public sealed class GpuDrawResources : IDisposable
 			(ulong)(sizeof(float) * 24),
 			BufferUsage.Constant,
 			BufferFlags.AllowShaderResource));
+
+		GBufferIndirectCommands ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
+			PassKind.Graphics,
+			(uint)MaxDrawCount));
 	}
 
 	public void Dispose()
@@ -94,6 +100,7 @@ public sealed class GpuDrawResources : IDisposable
 		(DrawExecutionRangeBuffer as IDisposable)?.Dispose();
 		(UpdateBuffer as IDisposable)?.Dispose();
 		(CameraBuffer as IDisposable)?.Dispose();
+		(GBufferIndirectCommands as IDisposable)?.Dispose();
 	}
 
 }

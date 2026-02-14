@@ -46,7 +46,9 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? DrawArgsBuffer { get; set; }
 
-    public IGfxBuffer? VisibleDrawIdsBuffer { get; set; }
+	public IGfxBuffer? CameraBuffer { get; set; }
 
-    public IGfxBuffer? DrawExecutionRangeBuffer { get; set; }
+	public IGfxPipeline? GBufferPipeline { get; set; }
+
+	public IGfxIndirectCommandBuffer? IndirectCommandBuffer { get; set; }
 }

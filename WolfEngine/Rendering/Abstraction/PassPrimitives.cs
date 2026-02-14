@@ -202,6 +202,30 @@ public readonly struct DrawArguments
 }
 
 /// <summary>
+/// Describes a backend-agnostic indirect command buffer allocation.
+/// </summary>
+public readonly struct IndirectCommandBufferDescriptor
+{
+	public IndirectCommandBufferDescriptor(PassKind passKind, uint maxCommandCount, bool supportsIndexedExecution = false)
+	{
+		if (maxCommandCount == 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(maxCommandCount), "Command count must be greater than zero.");
+		}
+
+		PassKind = passKind;
+		MaxCommandCount = maxCommandCount;
+		SupportsIndexedExecution = supportsIndexedExecution;
+	}
+
+	public PassKind PassKind { get; }
+
+	public uint MaxCommandCount { get; }
+
+	public bool SupportsIndexedExecution { get; }
+}
+
+/// <summary>
 /// High-level resource state transitions requested by the render graph.
 /// </summary>
 public readonly struct ResourceBarrierDescription

@@ -23,13 +23,10 @@ public sealed class RenderGraph
 	private readonly Queue<RenderGraphPass> _passPool = new();
 	private readonly RenderGraphCompiler _compiler;
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
-	private readonly List<DrawPacket> _renderPackets = new();
 	private readonly List<LightPacket> _renderLights = new();
-	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly GpuDrawResources _gpuDrawResources;
-	private readonly GpuDrawDatabase _drawDatabase;
 	private readonly bool _metalLeakDiagnosticsEnabled;
 	private readonly int _metalLeakDiagnosticsInterval;
 	private FrameSnapshot _currentSnapshot;
@@ -37,7 +34,6 @@ public sealed class RenderGraph
 	private long _lastProcessWorkingSetBytes;
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
-	private int _lastDrawEntryCount;
 	public event Action? FrameCompleted;
 
 	public RenderGraph(
@@ -47,7 +43,6 @@ public sealed class RenderGraph
 		DeferredLightingPass deferredLightingPass,
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
-		GpuDrawDatabase drawDatabase,
 		IUiFrameProvider uiFrameProvider,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer)
@@ -57,7 +52,6 @@ public sealed class RenderGraph
 		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, gpuDrawPass, gpuDrawResources, imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
-		_drawDatabase = drawDatabase;
 		_uiFrameProvider = uiFrameProvider;
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
@@ -98,17 +92,6 @@ public sealed class RenderGraph
 		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
 		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
 		{
-		_drawDatabase.CollectDrawEntries(_drawEntries);
-		_lastDrawEntryCount = _drawEntries.Count;
-		_renderPackets.Clear();
-		for (var i = 0; i < _drawEntries.Count; i++)
-		{
-			var entry = _drawEntries[i];
-			var relative = entry.World;
-			relative.Translation -= cameraPosition;
-			_renderPackets.Add(new DrawPacket(entry.Mesh, entry.Material, relative, entry.DrawId, entry.InstanceId));
-		}
-
 			_renderLights.Clear();
 			for (var i = 0; i < snapshot.LightPackets.Count; i++)
 			{
@@ -126,7 +109,8 @@ public sealed class RenderGraph
 				ReleasePasses();
 				return;
 			}
-			sceneData = new(viewProjection, invProjection, invViewProjection, cameraPosition, _renderPackets, _renderLights);
+
+			sceneData = new(viewProjection, invProjection, invViewProjection, cameraPosition, _renderLights);
 		}
 
 		if (sceneData is null)

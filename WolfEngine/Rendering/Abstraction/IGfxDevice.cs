@@ -35,6 +35,11 @@ public interface IGfxDevice
 	IGfxBuffer CreateBuffer(in BufferDescriptor descriptor);
 
 	/// <summary>
+	/// Allocates a new indirect command buffer from the supplied descriptor.
+	/// </summary>
+	IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor);
+
+	/// <summary>
 	/// Retrieves an existing pipeline matching the key or creates one using the provided shader bytecodes.
 	/// </summary>
 	IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders);

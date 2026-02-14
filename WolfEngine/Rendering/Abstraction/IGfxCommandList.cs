@@ -61,6 +61,15 @@ public interface IGfxCommandList
 
 	void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset);
 
+	void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount);
+
+	void ExecuteIndirectCommandBufferIndexed(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer commandIndicesBuffer,
+		ulong indicesOffsetBytes,
+		IGfxBuffer commandCountBuffer,
+		ulong commandCountOffsetBytes);
+
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void Barrier(in ResourceBarrierDescription barrier);

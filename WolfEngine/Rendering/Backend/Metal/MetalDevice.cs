@@ -204,6 +204,40 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		return new MetalBuffer(null, descriptor, buffer);
 	}
 
+	public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor)
+	{
+		if (descriptor.PassKind != PassKind.Graphics)
+		{
+			throw new NotSupportedException("Metal indirect command buffers currently support graphics pass encoding only.");
+		}
+
+		var indirectDescriptor = new MTLIndirectCommandBufferDescriptor();
+		try
+		{
+			indirectDescriptor.CommandTypes = MTLIndirectCommandType.DrawIndexed;
+			indirectDescriptor.InheritPipelineState = true;
+			indirectDescriptor.InheritBuffers = false;
+			indirectDescriptor.MaxVertexBufferBindCount = 31;
+			indirectDescriptor.MaxFragmentBufferBindCount = 31;
+
+			var commandBuffer = _device.NewIndirectCommandBuffer(
+				indirectDescriptor,
+				descriptor.MaxCommandCount,
+				MTLResourceOptions.ResourceStorageModeShared);
+			if (commandBuffer.NativePtr == IntPtr.Zero)
+			{
+				throw new InvalidOperationException("Failed to create Metal indirect command buffer.");
+			}
+
+			commandBuffer.Reset(new NSRange { location = 0, length = descriptor.MaxCommandCount });
+			return new MetalIndirectCommandBuffer(null, descriptor, commandBuffer);
+		}
+		finally
+		{
+			indirectDescriptor.Dispose();
+		}
+	}
+
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
 	{
 		if (_pipelines.TryGetValue(key, out var cached))

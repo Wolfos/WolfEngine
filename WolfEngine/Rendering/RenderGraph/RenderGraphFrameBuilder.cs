@@ -214,11 +214,12 @@ public sealed class RenderGraphFrameBuilder
 			NormalClearColor = new(0.5f, 0.5f, 1.0f, 1.0f),
 			MaterialClearColor = new(0.0f, 0.0f, 0.0f, 1.0f),
 			DepthClearValue = 1.0f,
-			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
-			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
-			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
-			VisibleDrawIdsBuffer = _gpuDrawResources.VisibleDrawIdsBuffer,
-			DrawExecutionRangeBuffer = _gpuDrawResources.DrawExecutionRangeBuffer,
+				InstanceBuffer = _gpuDrawResources.InstanceBuffer,
+				MaterialBuffer = _gpuDrawResources.MaterialBuffer,
+				DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
+				CameraBuffer = _gpuDrawResources.CameraBuffer,
+				GBufferPipeline = _gpuDrawResources.GBufferPipeline,
+				IndirectCommandBuffer = _gpuDrawResources.GBufferIndirectCommands,
 			SkyboxEnvironment = DescriptorHandle.Invalid,
 			SkyboxSampler = DescriptorHandle.Invalid
 		};
