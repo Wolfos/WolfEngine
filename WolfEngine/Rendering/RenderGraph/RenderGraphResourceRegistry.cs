@@ -79,51 +79,36 @@ public void SetDevice(IGfxDevice device)
 
 public void BeginFrame()
 {
-	foreach (var (_, record) in _textures)
+	foreach (var record in _textures.Values)
 	{
-		if (record.OwnsTexture == false)
-		{
-			continue;
-		}
-
-		if (record.Texture is not null)
+		if (record.Texture is not null && record.OwnsTexture)
 		{
 			var recycled = _texturePoolDevice?.ReturnTexture(record.Texture, record.CurrentState) ?? false;
-			if (recycled == false && record.OwnsTexture && record.Texture is IDisposable disposable)
+			if (recycled == false && record.Texture is IDisposable disposable)
 			{
 				disposable.Dispose();
 			}
 		}
 
-		record.Texture = null;
+		// Always clear pooled records so external/imported references (e.g. CAMetalDrawable) are released.
+		record.Reset();
+		_texturePool.Push(record);
 	}
-		
-		foreach (var (_, record) in _buffers)
-		{
-			if (record.OwnsBuffer == false)
-			{
-				continue;
-			}
 
-			if (record.Buffer is IDisposable disposable)
-			{
-				disposable.Dispose();
-			}
+	foreach (var record in _buffers.Values)
+	{
+		if (record.OwnsBuffer && record.Buffer is IDisposable disposable)
+		{
+			disposable.Dispose();
 		}
 
-		foreach (var record in _textures.Values)
-		{
-			_texturePool.Push(record);
-		}
+		record.Reset();
+		_bufferPool.Push(record);
+	}
 
-		foreach (var record in _buffers.Values)
-		{
-			_bufferPool.Push(record);
-		}
-
-		_textures.Clear();
-		_buffers.Clear();
-		_nextHandleId = 1;
+	_textures.Clear();
+	_buffers.Clear();
+	_nextHandleId = 1;
 	}
 
 	public void EndFrame()

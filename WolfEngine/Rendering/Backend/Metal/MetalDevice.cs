@@ -242,8 +242,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 				throw new InvalidOperationException("Compute shader source was not provided.");
 			}
 
-			var computeLibrary = CreateLibraryFromSource(shaders.Compute.Value);
-			var function = computeLibrary.NewFunction(NSStringHelper.From(key.ComputeEntryPoint ?? "CSMain"));
+			using var computeLibrary = CreateLibraryFromSource(shaders.Compute.Value);
+			using var computeEntry = NSStringHelper.From(key.ComputeEntryPoint ?? "CSMain");
+			using var function = computeLibrary.NewFunction(computeEntry);
 			var pipelineStateError = new NSError(IntPtr.Zero);
 			var computeReflection = CreateComputeReflection(function, ref pipelineStateError, out var pipelineState);
 			if (pipelineStateError != IntPtr.Zero)
@@ -267,9 +268,11 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		}
 		
 		var source = shaders.Vertex.Value;
-		var graphicsLibrary = CreateLibraryFromSource(source);
-		var vertexFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.VertexEntryPoint ?? "vertexShader"));
-		var fragmentFunction = graphicsLibrary.NewFunction(NSStringHelper.From(key.PixelEntryPoint ?? "fragmentShader"));
+		using var graphicsLibrary = CreateLibraryFromSource(source);
+		using var vertexEntry = NSStringHelper.From(key.VertexEntryPoint ?? "vertexShader");
+		using var fragmentEntry = NSStringHelper.From(key.PixelEntryPoint ?? "fragmentShader");
+		using var vertexFunction = graphicsLibrary.NewFunction(vertexEntry);
+		using var fragmentFunction = graphicsLibrary.NewFunction(fragmentEntry);
 
 		var pipelineDescriptor = new MTLRenderPipelineDescriptor
 		{
@@ -278,48 +281,56 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 			SupportIndirectCommandBuffers = true
 		};
 
-		var formats = key.RenderTargets.Formats.Span;
-		for (var i = 0; i < formats.Length; i++)
+		try
 		{
-			var attachment = pipelineDescriptor.ColorAttachments.Object((nuint)i);
-			attachment.PixelFormat = ToPixelFormat(formats[i]);
-			ApplyBlendState(attachment, key.RenderState.BlendMode);
-			pipelineDescriptor.ColorAttachments.SetObject(attachment, (nuint)i);
-		}
+			var formats = key.RenderTargets.Formats.Span;
+			for (var i = 0; i < formats.Length; i++)
+			{
+				var attachment = pipelineDescriptor.ColorAttachments.Object((nuint)i);
+				attachment.PixelFormat = ToPixelFormat(formats[i]);
+				ApplyBlendState(attachment, key.RenderState.BlendMode);
+				pipelineDescriptor.ColorAttachments.SetObject(attachment, (nuint)i);
+			}
 
-		if (key.DepthStencil.Format != TextureFormat.Unknown)
+			if (key.DepthStencil.Format != TextureFormat.Unknown)
+			{
+				pipelineDescriptor.DepthAttachmentPixelFormat = ToPixelFormat(key.DepthStencil.Format);
+			}
+
+			using var vertexDescriptor = CreateVertexDescriptor(key.Layout);
+			pipelineDescriptor.VertexDescriptor = vertexDescriptor;
+
+			var renderStateError = new NSError(IntPtr.Zero);
+			var renderReflection = CreateRenderReflection(pipelineDescriptor, ref renderStateError, out var renderState);
+			if (renderStateError != IntPtr.Zero)
+			{
+				throw new InvalidOperationException($"Failed to create Metal render pipeline state: {renderStateError.LocalizedDescription.ToManagedString()}");
+			}
+
+			var graphicsTextureEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
+			var graphicsSamplerEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
+
+			MTLDepthStencilState depthState = default;
+			if (key.DepthStencil.Format != TextureFormat.Unknown)
+			{
+				var depthDescriptor = new MTLDepthStencilDescriptor();
+				depthDescriptor.DepthCompareFunction = key.RenderState.DepthTestEnabled
+					? MTLCompareFunction.Less
+					: MTLCompareFunction.Always;
+				depthDescriptor.DepthWriteEnabled = key.RenderState.DepthWriteEnabled;
+				depthState = _device.NewDepthStencilState(depthDescriptor);
+				depthDescriptor.Dispose();
+			}
+
+			var pipelineObj = new MetalPipeline(key, PassKind.Graphics, renderState, default, depthState,
+				graphicsTextureEncoder, default, graphicsSamplerEncoder, key.RenderState);
+			_pipelines[key] = pipelineObj;
+			return pipelineObj;
+		}
+		finally
 		{
-			pipelineDescriptor.DepthAttachmentPixelFormat = ToPixelFormat(key.DepthStencil.Format);
+			pipelineDescriptor.Dispose();
 		}
-
-		pipelineDescriptor.VertexDescriptor = CreateVertexDescriptor(key.Layout);
-
-		var renderStateError = new NSError(IntPtr.Zero);
-		var renderReflection = CreateRenderReflection(pipelineDescriptor, ref renderStateError, out var renderState);
-		if (renderStateError != IntPtr.Zero)
-		{
-			throw new InvalidOperationException($"Failed to create Metal render pipeline state: {renderStateError.LocalizedDescription.ToManagedString()}");
-		}
-
-		var graphicsTextureEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-		var graphicsSamplerEncoder = CreateArgumentEncoder(fragmentFunction, renderReflection?.FragmentArguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
-
-		MTLDepthStencilState depthState = default;
-		if (key.DepthStencil.Format != TextureFormat.Unknown)
-		{
-			var depthDescriptor = new MTLDepthStencilDescriptor();
-			depthDescriptor.DepthCompareFunction = key.RenderState.DepthTestEnabled
-				? MTLCompareFunction.Less
-				: MTLCompareFunction.Always;
-			depthDescriptor.DepthWriteEnabled = key.RenderState.DepthWriteEnabled;
-			depthState = _device.NewDepthStencilState(depthDescriptor);
-			depthDescriptor.Dispose();
-		}
-
-		var pipelineObj = new MetalPipeline(key, PassKind.Graphics, renderState, default, depthState,
-			graphicsTextureEncoder, default, graphicsSamplerEncoder, key.RenderState);
-		_pipelines[key] = pipelineObj;
-		return pipelineObj;
 	}
 
 	public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder()
@@ -364,7 +375,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		var libraryError = new NSError(IntPtr.Zero);
 		var options = new MTLCompileOptions(IntPtr.Zero);
 		options.LanguageVersion = MTLLanguageVersion.Version32;
-		var library = _device.NewLibrary(NSStringHelper.From(source), options, ref libraryError);
+		using var sourceString = NSStringHelper.From(source);
+		var library = _device.NewLibrary(sourceString, options, ref libraryError);
 		options.Dispose();
 		if (libraryError != IntPtr.Zero)
 		{
