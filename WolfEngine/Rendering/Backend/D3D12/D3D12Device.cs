@@ -108,6 +108,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		_submissionFenceValue = 0;
 	}
 
+	public GraphicsBackendKind BackendKind => GraphicsBackendKind.D3D12;
+
 	public IGfxCommandList BeginGraphics()
 	{
 		return CreateCommandList(CommandListType.Direct);
@@ -290,11 +292,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder()
 	{
 		return new D3D12DescriptorSetBuilder(_device);
-	}
-
-	public IIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands)
-	{
-		throw new NotImplementedException("Indirect command buffers are not yet implemented for the Direct3D12 backend.");
 	}
 
 	public IGfxDescriptorTable GlobalTable => _globalTable;

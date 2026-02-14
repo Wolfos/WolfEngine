@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
@@ -42,6 +41,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_descriptorTable = descriptorTable;
 		_commandBuffer = _queue.CommandBuffer();
 	}
+
+	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 
 	public void BeginPass(in PassTargets targets, in Viewport viewport)
 	{
@@ -346,105 +347,6 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			(nuint)indexBuffer.Offset,
 			metalArgsBuffer.Buffer,
 			(nuint)indirectArgsOffset);
-	}
-
-	public void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount)
-	{
-		ThrowIfDisposed();
-		if (commandCount == 0) return;
-
-		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
-		{
-			throw new ArgumentNullException(nameof(buffer));
-		}
-
-		EnsureRenderEncoder();
-		var range = new NSRange{
-			location = 0, length = commandCount
-		};
-		_renderEncoder.ExecuteCommandsInBuffer(metalBuffer.Buffer, range);
-	}
-
-	public void ExecuteIndirect(IIndirectCommandBuffer buffer, IGfxBuffer indirectRangeBuffer, ulong indirectRangeOffset)
-	{
-		ThrowIfDisposed();
-		if (buffer is not MetalIndirectCommandBuffer metalBuffer)
-		{
-			throw new ArgumentNullException(nameof(buffer));
-		}
-
-		if (indirectRangeBuffer is not MetalBuffer metalRangeBuffer)
-		{
-			throw new InvalidOperationException("Indirect range buffer was not created by the Metal backend.");
-		}
-
-		EnsureRenderEncoder();
-		_renderEncoder.ExecuteCommandsInBuffer(metalBuffer.Buffer, metalRangeBuffer.Buffer, indirectRangeOffset);
-	}
-
-	public void UseResource(MTLBuffer buffer, MTLResourceUsage usage)
-	{
-		ThrowIfDisposed();
-		if (buffer.NativePtr == IntPtr.Zero)
-		{
-			return;
-		}
-
-		EnsureRenderEncoder();
-		_renderEncoder.UseResource(buffer, usage);
-	}
-
-	public void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command)
-	{
-		ThrowIfDisposed();
-		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			command.SetVertexBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-			command.SetFragmentBuffer(_descriptorTable.TextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
-		}
-
-		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			command.SetFragmentBuffer(_descriptorTable.RWTextureArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
-		}
-
-		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			command.SetVertexBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
-			command.SetFragmentBuffer(_descriptorTable.SamplerArgumentBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
-		}
-
-		if (_descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
-		{
-			command.SetVertexBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
-			command.SetFragmentBuffer(_descriptorTable.CountBuffer, 0, MetalDescriptorTable.BindlessArgumentBufferIndexCounts);
-		}
-	}
-
-	public void UseBindlessArgumentBuffers()
-	{
-		ThrowIfDisposed();
-		EnsureRenderEncoder();
-
-		if (_descriptorTable.TextureArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.UseResource(_descriptorTable.TextureArgumentBuffer, MTLResourceUsage.Read);
-		}
-
-		if (_descriptorTable.RWTextureArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.UseResource(_descriptorTable.RWTextureArgumentBuffer, MTLResourceUsage.Read);
-		}
-
-		if (_descriptorTable.SamplerArgumentBuffer.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.UseResource(_descriptorTable.SamplerArgumentBuffer, MTLResourceUsage.Read);
-		}
-
-		if (_descriptorTable.CountBuffer.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.UseResource(_descriptorTable.CountBuffer, MTLResourceUsage.Read);
-		}
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)

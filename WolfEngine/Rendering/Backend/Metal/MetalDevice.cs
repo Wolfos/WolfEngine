@@ -54,7 +54,6 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 	private MTLDevice _device;
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
-	private MetalIndirectCommandBuffer? _sharedIndirectCommandBuffer;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 
@@ -70,6 +69,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 	}
 
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
+
+	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 
 	public string GetDiagnosticsSnapshot()
 	{
@@ -201,31 +202,6 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 		}
 
 		return new MetalBuffer(null, descriptor, buffer);
-	}
-
-	public IIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands)
-	{
-		if (_sharedIndirectCommandBuffer is not null && _sharedIndirectCommandBuffer.MaxCommandCount >= maxCommands)
-		{
-			return _sharedIndirectCommandBuffer;
-		}
-
-		_sharedIndirectCommandBuffer?.Dispose();
-
-		var descriptor = new MTLIndirectCommandBufferDescriptor
-		{
-			CommandTypes = MTLIndirectCommandType.DrawIndexed,
-			InheritPipelineState = false,
-			InheritBuffers = false,
-			SupportDynamicAttributeStride = true,
-			MaxVertexBufferBindCount = 31,
-			MaxFragmentBufferBindCount = 31
-		};
-
-		var buffer = _device.NewIndirectCommandBuffer(descriptor, maxCommands, MTLResourceOptions.ResourceStorageModeShared);
-		descriptor.Dispose();
-		_sharedIndirectCommandBuffer = new MetalIndirectCommandBuffer(buffer, maxCommands);
-		return _sharedIndirectCommandBuffer;
 	}
 
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)

@@ -22,6 +22,11 @@ public interface IGfxBuffer : IGfxResource
 	BufferDescriptor Descriptor { get; }
 }
 
+public interface IWritableGpuBuffer : IGfxBuffer
+{
+	void Write<T>(ReadOnlySpan<T> source, ulong elementOffset = 0) where T : unmanaged;
+}
+
 public interface IGfxPipeline : IGfxResource
 {
 	PipelineKey Key { get; }

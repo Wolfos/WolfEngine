@@ -4,7 +4,7 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-internal sealed class D3D12Buffer : IGfxBuffer
+internal sealed class D3D12Buffer : IWritableGpuBuffer
 {
 	private readonly BufferDescriptor _descriptor;
 
@@ -24,4 +24,9 @@ internal sealed class D3D12Buffer : IGfxBuffer
 	public ComPtr<ID3D12Resource> Resource { get; private set; }
 
 	public ulong SizeInBytes { get; }
+
+	public void Write<T>(ReadOnlySpan<T> source, ulong elementOffset = 0) where T : unmanaged
+	{
+		throw new NotImplementedException("CPU writes to D3D12 buffers are not implemented yet.");
+	}
 }

@@ -3,9 +3,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using WolfEngine.Platform;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -137,11 +135,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		var updateBuffer = _gpuDrawResources.UpdateBuffer;
-		if (updateBuffer is MetalBuffer metalBuffer)
-		{
-			BufferHelper.CopyToBuffer(_updateData.ToArray(), metalBuffer.Buffer);
-		}
+		WriteBuffer<GpuDrawUpdateData>(_gpuDrawResources.UpdateBuffer!, CollectionsMarshal.AsSpan(_updateData), "UpdateBuffer");
 
 		var pipeline = EnsureUpdatePipeline(device);
 		var commandList = context.CommandList;
@@ -170,19 +164,14 @@ public sealed class GpuDrawPass
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
 
-		if (_gpuDrawResources.DrawCountBuffer is MetalBuffer countBuffer)
-		{
-			Span<uint> reset = stackalloc uint[1];
-			reset[0] = 0;
-			BufferHelper.CopyToBuffer(reset.ToArray(), countBuffer.Buffer);
-		}
-		if (_gpuDrawResources.DrawExecutionRangeBuffer is MetalBuffer rangeBuffer)
-		{
-			Span<uint> resetRange = stackalloc uint[2];
-			resetRange[0] = 0;
-			resetRange[1] = 0;
-			BufferHelper.CopyToBuffer(resetRange.ToArray(), rangeBuffer.Buffer);
-		}
+		Span<uint> reset = stackalloc uint[1];
+		reset[0] = 0;
+		WriteBuffer<uint>(_gpuDrawResources.DrawCountBuffer!, reset, "DrawCountBuffer");
+
+		Span<uint> resetRange = stackalloc uint[2];
+		resetRange[0] = 0;
+		resetRange[1] = 0;
+		WriteBuffer<uint>(_gpuDrawResources.DrawExecutionRangeBuffer!, resetRange, "DrawExecutionRangeBuffer");
 
 		var pipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
@@ -244,6 +233,17 @@ public sealed class GpuDrawPass
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
 		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
 		return _cullPipeline;
+	}
+
+	private static void WriteBuffer<T>(IGfxBuffer buffer, ReadOnlySpan<T> data, string bufferName) where T : unmanaged
+	{
+		if (buffer is not IWritableGpuBuffer writableBuffer)
+		{
+			throw new NotImplementedException(
+				$"Buffer '{bufferName}' does not support CPU writes on this backend.");
+		}
+
+		writableBuffer.Write(data);
 	}
 
 	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)

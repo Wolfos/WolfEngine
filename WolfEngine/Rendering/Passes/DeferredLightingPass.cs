@@ -3,7 +3,6 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -106,7 +105,7 @@ public sealed class DeferredLightingPass
 		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		// Set camera constants (Root parameter 1)
-		var cameraConstantCount = commandList is MetalCommandList ? 40 : 36;
+		var cameraConstantCount = commandList.BackendKind == GraphicsBackendKind.Metal ? 40 : 36;
 		Span<float> cameraConstants = stackalloc float[cameraConstantCount];
 		WriteMatrix(cameraConstants, sceneData.InverseProjection);
 		WriteMatrix(cameraConstants.Slice(16), sceneData.InverseViewProjection);
@@ -169,7 +168,7 @@ public sealed class DeferredLightingPass
 
 		if (_computeShader.IsEmpty)
 		{
-			if (device is MetalDevice)
+			if (device.BackendKind == GraphicsBackendKind.Metal)
 			{
 				var source = _shaderCompiler.GetMetalComputeSource("deferred_lighting.compute.slang", "CSMain");
 				_computeShader = Encoding.UTF8.GetBytes(source);

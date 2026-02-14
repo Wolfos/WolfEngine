@@ -1,8 +1,6 @@
 #nullable enable
 
 using System.Numerics;
-using SharpMetal.Metal;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Abstraction;
 
@@ -23,6 +21,8 @@ public enum PrimitiveTopology
 /// </summary>
 public interface IGfxCommandList
 {
+	GraphicsBackendKind BackendKind { get; }
+
 	void BeginPass(in PassTargets targets, in Viewport viewport);
 
 	void EndPass();
@@ -64,17 +64,4 @@ public interface IGfxCommandList
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void Barrier(in ResourceBarrierDescription barrier);
-
-	void UseResource(MTLBuffer buffer, MTLResourceUsage usage);
-
-	void UseBindlessArgumentBuffers();
-
-	void BindBindlessArgumentBuffers(MTLIndirectRenderCommand command);
-
-	void ExecuteIndirect(IIndirectCommandBuffer buffer, uint commandCount);
-
-	void ExecuteIndirect(IIndirectCommandBuffer buffer, IGfxBuffer indirectRangeBuffer, ulong indirectRangeOffset)
-	{
-		throw new global::System.NotSupportedException("Indirect execution with an indirect range buffer is not supported by this backend.");
-	}
 }

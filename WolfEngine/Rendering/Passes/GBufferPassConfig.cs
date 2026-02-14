@@ -38,17 +38,13 @@ public struct GBufferPassConfig
     public DescriptorHandle SkyboxEnvironment { get; set; }
     public DescriptorHandle SkyboxSampler { get; set; }
     public Matrix4x4? InvViewProjection { get; set; }
-    public Mesh? SkyboxMesh { get; set; }
+	public Mesh? SkyboxMesh { get; set; }
 
-    public IGfxDevice? GfxDevice { get; set; }
+	public IGfxBuffer? InstanceBuffer { get; set; }
 
-    public IGfxBuffer? InstanceBuffer { get; set; }
+	public IGfxBuffer? MaterialBuffer { get; set; }
 
-    public IGfxBuffer? MaterialBuffer { get; set; }
-
-    public IGfxBuffer? CameraBuffer { get; set; }
-
-    public IGfxBuffer? DrawArgsBuffer { get; set; }
+	public IGfxBuffer? DrawArgsBuffer { get; set; }
 
     public IGfxBuffer? VisibleDrawIdsBuffer { get; set; }
 

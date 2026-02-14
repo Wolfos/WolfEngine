@@ -7,6 +7,8 @@ namespace WolfEngine.Rendering.Abstraction;
 /// </summary>
 public interface IGfxDevice
 {
+	GraphicsBackendKind BackendKind { get; }
+
 	/// <summary>
 	/// Begins recording a graphics command list targeting the primary graphics queue.
 	/// </summary>
@@ -46,8 +48,6 @@ public interface IGfxDevice
 	/// Creates a backend-specific descriptor set builder.
 	/// </summary>
 	IGfxDescriptorSetBuilder CreateDescriptorSetBuilder();
-
-	IIndirectCommandBuffer GetOrCreateIndirectCommandBuffer(uint maxCommands);
 }
 
 /// <summary>
