@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
@@ -35,6 +36,10 @@ public sealed class RenderGraph
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
 	public event Action? FrameCompleted;
+
+	private readonly ConcurrentQueue<Material> _ensureMaterialQueue = new();
+	private readonly ConcurrentQueue<Texture> _ensureTextureQueue = new();
+	private readonly ConcurrentQueue<Mesh> _ensureMeshQueue = new();
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
@@ -187,6 +192,34 @@ public sealed class RenderGraph
 	{
 		FrameProfiler.Instance.BeginFrame("Render Frame");
 
+		using (FrameProfiler.Instance.Measure("Upload resources"))
+		{
+			while (_ensureTextureQueue.TryDequeue(out var texture))
+			{
+				EnsureTextureResource(texture);
+			}
+
+			while (_ensureMaterialQueue.TryDequeue(out var material))
+			{
+				if (material is null || material.Resources is not null)
+				{
+					continue;
+				}
+
+				material.Resources = _renderer.CreateMaterialResources(material);
+			}
+
+			while (_ensureMeshQueue.TryDequeue(out var mesh))
+			{
+				if (mesh is null)
+				{
+					continue;
+				}
+
+				_renderer.EnsureMeshResources(mesh);
+			}
+		}
+
 		_mainThreadDispatcher.ExecutePending();
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
@@ -195,6 +228,7 @@ public sealed class RenderGraph
 		{
 			_renderer.BeginFrame();
 		}
+		
 
 		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
@@ -246,19 +280,34 @@ public sealed class RenderGraph
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
 
-	public IMaterialResources EnsureMaterialResources(Material material)
+	public void EnsureMaterialResources(Material material)
 	{
-		return _renderer.CreateMaterialResources(material);
+		if (material is null)
+		{
+			throw new ArgumentNullException(nameof(material));
+		}
+
+		_ensureMaterialQueue.Enqueue(material);
 	}
 
-	public ITextureResources EnsureTextureResources(Texture texture)
+	public void EnsureTextureResources(Texture texture)
 	{
-		return _renderer.CreateTextureResources(texture);
+		if (texture is null)
+		{
+			throw new ArgumentNullException(nameof(texture));
+		}
+
+		_ensureTextureQueue.Enqueue(texture);
 	}
 
 	public void EnsureMeshResources(Mesh mesh)
 	{
-		_renderer.EnsureMeshResources(mesh);
+		if (mesh is null)
+		{
+			throw new ArgumentNullException(nameof(mesh));
+		}
+
+		_ensureMeshQueue.Enqueue(mesh);
 	}
 
 
@@ -282,6 +331,16 @@ public sealed class RenderGraph
 		}
 
 		return fallback;
+	}
+
+	private void EnsureTextureResource(Texture? texture)
+	{
+		if (texture is null || texture.Resources is not null)
+		{
+			return;
+		}
+
+		texture.Resources = _renderer.CreateTextureResources(texture);
 	}
 
 #pragma warning disable CA1416

@@ -53,7 +53,7 @@ public class MaterialFactory : IMaterialFactory
 		material.NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture();
 		material.EmissiveTexture = emissiveTexture ?? _textureFactory.GetBlackTexture();
 		material.OcclusionTexture = occlusionTexture ?? _textureFactory.GetWhiteTexture();
-		material.Resources = _renderGraph.EnsureMaterialResources(material);
+		_renderGraph.EnsureMaterialResources(material);
 
 		return material;
 	}

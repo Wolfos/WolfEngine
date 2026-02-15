@@ -36,7 +36,6 @@ public sealed class RenderGraphCompiler
 		for(int i = 0; i < passes.Count; i++)
 		{
 			var pass = passes[i];
-			Profiler.StartBlock(pass.Name);
 
 			// Generate barriers for resources this pass uses
 			for (var j = 0; j < pass.ResourceUsages.Count; j++)
@@ -64,8 +63,6 @@ public sealed class RenderGraphCompiler
 				}
 			}
 			
-			Profiler.EndBlock(pass.Name);
-
 		}
 		
 

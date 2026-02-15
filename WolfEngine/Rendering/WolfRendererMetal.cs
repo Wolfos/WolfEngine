@@ -213,7 +213,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         _metalLayer.Device = _device;
         _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
         _metalLayer.FramebufferOnly = false;
-        _metalLayer.DisplaySyncEnabled = true;
+        _metalLayer.DisplaySyncEnabled = false;
 
         UpdateDrawableSize();
     }

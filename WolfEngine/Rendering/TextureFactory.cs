@@ -44,7 +44,7 @@ public sealed class TextureFactory : ITextureFactory
 				importedTexture.IsSrgb,
 				importedTexture.PixelData);
 
-			texture.Resources = _renderGraph.EnsureTextureResources(texture);
+			_renderGraph.EnsureTextureResources(texture);
 			return texture;
 		});
 	}
@@ -58,7 +58,7 @@ public sealed class TextureFactory : ITextureFactory
 
 		var pixels = new byte[] { 255, 255, 255, 255 };
 		var texture = new Texture("white_fallback", 1, 1, true, pixels);
-		texture.Resources = _renderGraph.EnsureTextureResources(texture);
+		_renderGraph.EnsureTextureResources(texture);
 		_whiteTexture = texture;
 		return texture;
 	}
@@ -72,7 +72,7 @@ public sealed class TextureFactory : ITextureFactory
 
 		var pixels = new byte[] { 0, 0, 0, 255 };
 		var texture = new Texture("black_fallback", 1, 1, true, pixels);
-		texture.Resources = _renderGraph.EnsureTextureResources(texture);
+		_renderGraph.EnsureTextureResources(texture);
 		_blackTexture = texture;
 		return texture;
 	}
@@ -86,7 +86,7 @@ public sealed class TextureFactory : ITextureFactory
 
 		var pixels = new byte[] { 128, 128, 255, 255 };
 		var texture = new Texture("neutral_normal_fallback", 1, 1, false, pixels);
-		texture.Resources = _renderGraph.EnsureTextureResources(texture);
+		_renderGraph.EnsureTextureResources(texture);
 		_neutralNormalTexture = texture;
 		return texture;
 	}
