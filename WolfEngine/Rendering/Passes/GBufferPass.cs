@@ -77,7 +77,7 @@ public static class GBufferPass
 		commandList.BindConstantBuffer(11, config.MaterialBuffer);
 		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
 		commandList.BindConstantBuffer(2, config.CameraBuffer);
-		commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, (uint)global::WolfEngine.Rendering.GpuDrawResources.MaxDrawCount);
+		commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, GpuDrawResources.MaxDrawCount);
 
 		commandList.EndPass();
 	}
