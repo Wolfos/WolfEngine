@@ -367,10 +367,22 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 
 		EnsureRenderEncoder();
-		metalCommandBuffer.CollectReferencedBuffers(maxAvailable, _indirectReferencedBuffers, _indirectReferencedPointers);
-		for (var i = 0; i < _indirectReferencedBuffers.Count; i++)
+		if (maxAvailable >= metalCommandBuffer.Descriptor.MaxCommandCount)
 		{
-			_renderEncoder.UseResource(_indirectReferencedBuffers[i], MTLResourceUsage.Read);
+			var referenced = metalCommandBuffer.GetReferencedBuffers();
+			for (var i = 0; i < referenced.Count; i++)
+			{
+				_renderEncoder.UseResource(referenced[i], MTLResourceUsage.Read);
+			}
+		}
+		else
+		{
+			metalCommandBuffer.CollectReferencedBuffers(maxAvailable, _indirectReferencedBuffers,
+				_indirectReferencedPointers);
+			for (var i = 0; i < _indirectReferencedBuffers.Count; i++)
+			{
+				_renderEncoder.UseResource(_indirectReferencedBuffers[i], MTLResourceUsage.Read);
+			}
 		}
 		_renderEncoder.ExecuteCommandsInBuffer(
 			metalCommandBuffer.Buffer,

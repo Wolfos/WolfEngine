@@ -10,6 +10,22 @@ namespace WolfEngine.Rendering.Backend.Metal;
 internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
 {
 	private readonly Dictionary<uint, CommandBufferReferences> _commandReferences = new();
+	private readonly Dictionary<nint, BufferRefEntry> _bufferRefsByPointer = new();
+	private readonly List<MTLBuffer> _referencedBuffers = new();
+
+	private readonly struct BufferRefEntry
+	{
+		public BufferRefEntry(MTLBuffer buffer, int refCount, int index)
+		{
+			Buffer = buffer;
+			RefCount = refCount;
+			Index = index;
+		}
+
+		public MTLBuffer Buffer { get; }
+		public int RefCount { get; }
+		public int Index { get; }
+	}
 
 	private readonly struct CommandBufferReferences
 	{
@@ -66,7 +82,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		ValidateCommandIndex(commandIndex);
 		Buffer.Reset(new NSRange { location = commandIndex, length = 1 });
-		_commandReferences.Remove(commandIndex);
+		if (_commandReferences.TryGetValue(commandIndex, out var refs))
+		{
+			RemoveBufferRefs(in refs);
+			_commandReferences.Remove(commandIndex);
+		}
 	}
 
 	public void EncodeIndexedDrawCommand(
@@ -87,6 +107,10 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		MTLBuffer bindlessSamplerBuffer)
 	{
 		ValidateCommandIndex(commandIndex);
+		if (_commandReferences.TryGetValue(commandIndex, out var previousRefs))
+		{
+			RemoveBufferRefs(in previousRefs);
+		}
 
 		using var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
@@ -147,7 +171,10 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			bindlessTextureBuffer,
 			bindlessRwTextureBuffer,
 			bindlessSamplerBuffer);
+		AddBufferRefs(_commandReferences[commandIndex]);
 	}
+
+	internal IReadOnlyList<MTLBuffer> GetReferencedBuffers() => _referencedBuffers;
 
 	public void CollectReferencedBuffers(
 		uint maxCommandCount,
@@ -156,6 +183,12 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		destination.Clear();
 		seenPointers.Clear();
+
+		if (maxCommandCount >= Descriptor.MaxCommandCount)
+		{
+			destination.AddRange(_referencedBuffers);
+			return;
+		}
 
 		foreach (var (commandIndex, refs) in _commandReferences)
 		{
@@ -179,6 +212,9 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	public void Dispose()
 	{
+		_bufferRefsByPointer.Clear();
+		_referencedBuffers.Clear();
+		_commandReferences.Clear();
 		if (Buffer.NativePtr != IntPtr.Zero)
 		{
 			Buffer.Dispose();
@@ -204,5 +240,88 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		{
 			destination.Add(buffer);
 		}
+	}
+
+	private void AddBufferRefs(in CommandBufferReferences refs)
+	{
+		AddBufferRef(refs.VertexBuffer);
+		AddBufferRef(refs.IndexBuffer);
+		AddBufferRef(refs.CameraBuffer);
+		AddBufferRef(refs.InstanceBuffer);
+		AddBufferRef(refs.MaterialBuffer);
+		AddBufferRef(refs.DrawArgsBuffer);
+		AddBufferRef(refs.BindlessCountBuffer);
+		AddBufferRef(refs.BindlessTextureBuffer);
+		AddBufferRef(refs.BindlessRwTextureBuffer);
+		AddBufferRef(refs.BindlessSamplerBuffer);
+	}
+
+	private void RemoveBufferRefs(in CommandBufferReferences refs)
+	{
+		RemoveBufferRef(refs.VertexBuffer);
+		RemoveBufferRef(refs.IndexBuffer);
+		RemoveBufferRef(refs.CameraBuffer);
+		RemoveBufferRef(refs.InstanceBuffer);
+		RemoveBufferRef(refs.MaterialBuffer);
+		RemoveBufferRef(refs.DrawArgsBuffer);
+		RemoveBufferRef(refs.BindlessCountBuffer);
+		RemoveBufferRef(refs.BindlessTextureBuffer);
+		RemoveBufferRef(refs.BindlessRwTextureBuffer);
+		RemoveBufferRef(refs.BindlessSamplerBuffer);
+	}
+
+	private void AddBufferRef(MTLBuffer buffer)
+	{
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var key = buffer.NativePtr;
+		if (_bufferRefsByPointer.TryGetValue(key, out var entry))
+		{
+			_bufferRefsByPointer[key] = new BufferRefEntry(entry.Buffer, entry.RefCount + 1, entry.Index);
+			return;
+		}
+
+		var index = _referencedBuffers.Count;
+		_referencedBuffers.Add(buffer);
+		_bufferRefsByPointer[key] = new BufferRefEntry(buffer, 1, index);
+	}
+
+	private void RemoveBufferRef(MTLBuffer buffer)
+	{
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var key = buffer.NativePtr;
+		if (_bufferRefsByPointer.TryGetValue(key, out var entry) == false)
+		{
+			return;
+		}
+
+		if (entry.RefCount > 1)
+		{
+			_bufferRefsByPointer[key] = new BufferRefEntry(entry.Buffer, entry.RefCount - 1, entry.Index);
+			return;
+		}
+
+		var removeIndex = entry.Index;
+		var lastIndex = _referencedBuffers.Count - 1;
+		if (removeIndex != lastIndex)
+		{
+			var movedBuffer = _referencedBuffers[lastIndex];
+			_referencedBuffers[removeIndex] = movedBuffer;
+			var movedKey = movedBuffer.NativePtr;
+			if (_bufferRefsByPointer.TryGetValue(movedKey, out var movedEntry))
+			{
+				_bufferRefsByPointer[movedKey] = new BufferRefEntry(movedEntry.Buffer, movedEntry.RefCount, removeIndex);
+			}
+		}
+
+		_referencedBuffers.RemoveAt(lastIndex);
+		_bufferRefsByPointer.Remove(key);
 	}
 }
