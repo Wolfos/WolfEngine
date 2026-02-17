@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
@@ -53,6 +55,9 @@ internal unsafe class WolfRendererMetal : IRenderer
     private bool _skipFrameAfterResize;
     private bool _needsBindlessRefresh;
     private DescriptorHandle _linearSamplerHandle = DescriptorHandle.Invalid;
+    private bool _isGpuCaptureActive;
+    private bool _gpuCaptureWritesTraceFile;
+    private string _lastGpuCapturePath = string.Empty;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
@@ -343,6 +348,11 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void Shutdown()
     {
+        if (_isGpuCaptureActive)
+        {
+            TryStopGpuCapture(out _);
+        }
+
         if (_depthTexture.NativePtr != IntPtr.Zero)
         {
             _depthTexture.Dispose();
@@ -646,10 +656,145 @@ internal unsafe class WolfRendererMetal : IRenderer
             _meshResources[mesh] = resources;
         } 
     }
+
+    public bool SupportsGpuCapture => true;
+
+    public bool IsGpuCaptureActive => _isGpuCaptureActive;
+
+    public string LastGpuCapturePath => _lastGpuCapturePath;
+
+    public bool TryStartGpuCapture(string outputPath, out string error)
+    {
+        if (_isGpuCaptureActive)
+        {
+            error = "GPU capture is already active.";
+            return false;
+        }
+
+        if (_commandQueue.NativePtr == IntPtr.Zero)
+        {
+            error = "Metal command queue is not initialized.";
+            return false;
+        }
+
+        try
+        {
+            var captureManager = MTLCaptureManager.SharedCaptureManager;
+            if (captureManager.NativePtr == IntPtr.Zero)
+            {
+                error = "MTLCaptureManager is unavailable.";
+                return false;
+            }
+
+            var supportsFileTrace = captureManager.SupportsDestination(MTLCaptureDestination.GPUTraceDocument);
+            var supportsDeveloperTools = captureManager.SupportsDestination(MTLCaptureDestination.DeveloperTools);
+            if (supportsFileTrace == false && supportsDeveloperTools == false)
+            {
+                error = "This system does not support Metal capture for this process.";
+                return false;
+            }
+
+            var fullPath = supportsFileTrace
+                ? NormalizeCapturePath(outputPath)
+                : string.Empty;
+            var captureDescriptor = new MTLCaptureDescriptor();
+            try
+            {
+                captureDescriptor.Destination = supportsFileTrace
+                    ? MTLCaptureDestination.GPUTraceDocument
+                    : MTLCaptureDestination.DeveloperTools;
+
+                if (supportsFileTrace)
+                {
+                    using var nsPath = NSStringHelper.From(fullPath);
+                    captureDescriptor.OutputURL = NSURL.FileURLWithPath(nsPath);
+                }
+                captureDescriptor.CaptureObject = new NSObject(_commandQueue.NativePtr);
+
+                var captureError = new NSError(IntPtr.Zero);
+                var started = captureManager.StartCapture(captureDescriptor, ref captureError);
+                if (started == false || captureError != IntPtr.Zero)
+                {
+                    var details = captureError != IntPtr.Zero
+                        ? captureError.LocalizedDescription.ToManagedString()
+                        : "Metal returned an unknown error while starting capture.";
+                    error = $"Failed to start GPU capture: {details}";
+                    return false;
+                }
+            }
+            finally
+            {
+                captureDescriptor.Dispose();
+            }
+
+            _isGpuCaptureActive = true;
+            _gpuCaptureWritesTraceFile = supportsFileTrace;
+            _lastGpuCapturePath = supportsFileTrace ? fullPath : string.Empty;
+            error = supportsFileTrace
+                ? string.Empty
+                : "GPU capture started with DeveloperTools destination (no .gputrace file output on this system).";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"Failed to start GPU capture: {ex.Message}";
+            return false;
+        }
+    }
+
+    public bool TryStopGpuCapture(out string error)
+    {
+        if (_isGpuCaptureActive == false)
+        {
+            error = "GPU capture is not active.";
+            return false;
+        }
+
+        try
+        {
+            var captureManager = MTLCaptureManager.SharedCaptureManager;
+            if (captureManager.NativePtr == IntPtr.Zero)
+            {
+                error = "MTLCaptureManager is unavailable.";
+                return false;
+            }
+
+            captureManager.StopCapture();
+            _isGpuCaptureActive = false;
+            _gpuCaptureWritesTraceFile = false;
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"Failed to stop GPU capture: {ex.Message}";
+            return false;
+        }
+    }
     
     private static bool NearlyEqual(double a, double b)
     {
         const double epsilon = 0.5;
         return Math.Abs(a - b) < epsilon;
+    }
+
+    private static string NormalizeCapturePath(string outputPath)
+    {
+        var path = string.IsNullOrWhiteSpace(outputPath)
+            ? Path.Combine(Path.GetTempPath(), "WolfEngineCaptures", $"capture-{DateTime.Now:yyyyMMdd-HHmmss}.gputrace")
+            : outputPath.Trim();
+        if (Path.HasExtension(path) == false)
+        {
+            path += ".gputrace";
+        }
+
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory) == false)
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        return fullPath;
     }
 }

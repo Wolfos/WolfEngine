@@ -1360,6 +1360,24 @@ private sealed class MeshResources
 		_meshResources.Add(mesh, resources);
 	}
 
+	public bool SupportsGpuCapture => false;
+
+	public bool IsGpuCaptureActive => false;
+
+	public string LastGpuCapturePath => string.Empty;
+
+	public bool TryStartGpuCapture(string outputPath, out string error)
+	{
+		error = "Programmatic GPU capture is only supported on the Metal renderer.";
+		return false;
+	}
+
+	public bool TryStopGpuCapture(out string error)
+	{
+		error = "Programmatic GPU capture is only supported on the Metal renderer.";
+		return false;
+	}
+
 	private static ulong Align(ulong size, ulong alignment)
 	{
 		return (size + alignment - 1) & ~(alignment - 1);

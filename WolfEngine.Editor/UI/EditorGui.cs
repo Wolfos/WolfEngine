@@ -13,11 +13,13 @@ public class EditorGui
 
     private readonly IComponentEditor _componentEditor;
     private readonly IMenuBar _menuBar;
+    private readonly IRenderer _renderer;
 
-    public EditorGui(IComponentEditor componentEditor, IMenuBar menuBar)
+    public EditorGui(IComponentEditor componentEditor, IMenuBar menuBar, IRenderer renderer)
     {
         _componentEditor = componentEditor;
         _menuBar = menuBar;
+        _renderer = renderer;
     }
     
     public void Draw(World world)
@@ -56,7 +58,7 @@ public class EditorGui
 
         using (FrameProfiler.Instance.Measure("Profiler"))
         {
-            ProfilerWindow.Draw();
+            ProfilerWindow.Draw(_renderer);
         }
     }
     

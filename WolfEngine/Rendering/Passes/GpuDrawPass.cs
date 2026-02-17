@@ -24,6 +24,7 @@ public sealed class GpuDrawPass
 	private nint _lastBindlessTextureBufferPtr;
 	private nint _lastBindlessRwTextureBufferPtr;
 	private nint _lastBindlessSamplerBufferPtr;
+	private bool _loggedCapacityExceeded;
 	
 	public GpuDrawPass(IShaderCompiler shaderCompiler, GpuDrawDatabase drawDatabase,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, IRenderer renderer)
@@ -76,6 +77,25 @@ public sealed class GpuDrawPass
 		for (var i = 0; i < updateCount; i++)
 		{
 			var update = _updates[i];
+			var drawIdInRange = update.DrawId > 0 && update.DrawId < GpuDrawResources.MaxDrawCount;
+			if (drawIdInRange == false)
+			{
+				LogCapacityExceededOnce(in update);
+				continue;
+			}
+
+			if (update.Type != GpuDrawUpdateType.Remove)
+			{
+				var instanceIdInRange = update.InstanceId > 0 && update.InstanceId < GpuDrawResources.MaxInstanceCount;
+				var meshIdInRange = update.MeshId > 0 && update.MeshId < GpuDrawResources.MaxMeshCount;
+				var materialIdInRange = update.MaterialId > 0 && update.MaterialId < GpuDrawResources.MaxMaterialCount;
+				if (instanceIdInRange == false || meshIdInRange == false || materialIdInRange == false)
+				{
+					LogCapacityExceededOnce(in update);
+					update = GpuDrawUpdate.CreateRemove(update.DrawId);
+				}
+			}
+
 			var mesh = update.Mesh;
 			var material = update.Material;
 
@@ -92,10 +112,16 @@ public sealed class GpuDrawPass
 
 			if (mesh?.VertexBuffer is not null && mesh.IndexBuffer is not null)
 			{
-				vertexHandle = _bindlessRegistry.RegisterBuffer(mesh.VertexBuffer).Value;
-				indexHandle = _bindlessRegistry.RegisterBuffer(mesh.IndexBuffer).Value;
-				indexCount = mesh.IndexCount;
-				indexFormat = 0;
+				var registeredVertexHandle = _bindlessRegistry.RegisterBuffer(mesh.VertexBuffer).Value;
+				var registeredIndexHandle = _bindlessRegistry.RegisterBuffer(mesh.IndexBuffer).Value;
+				if (registeredVertexHandle != _bindlessRegistry.ErrorBufferHandle.Value &&
+				    registeredIndexHandle != _bindlessRegistry.ErrorBufferHandle.Value)
+				{
+					vertexHandle = registeredVertexHandle;
+					indexHandle = registeredIndexHandle;
+					indexCount = mesh.IndexCount;
+					indexFormat = 0;
+				}
 			}
 
 			uint albedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
@@ -502,6 +528,18 @@ public sealed class GpuDrawPass
 
 		var invLength = 1.0f / length;
 		return plane * invLength;
+	}
+
+	private void LogCapacityExceededOnce(in GpuDrawUpdate update)
+	{
+		if (_loggedCapacityExceeded)
+		{
+			return;
+		}
+
+		_loggedCapacityExceeded = true;
+		Console.WriteLine(
+			$"GpuDraw capacity exceeded; some renderables are skipped. drawId={update.DrawId}, instanceId={update.InstanceId}, meshId={update.MeshId}, materialId={update.MaterialId}. Limits: draw<{GpuDrawResources.MaxDrawCount}, instance<{GpuDrawResources.MaxInstanceCount}, mesh<{GpuDrawResources.MaxMeshCount}, material<{GpuDrawResources.MaxMaterialCount}.");
 	}
 
 	[StructLayout(LayoutKind.Sequential)]

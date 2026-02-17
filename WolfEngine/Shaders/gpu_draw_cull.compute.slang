@@ -1,7 +1,7 @@
 import "draw_data.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 10000
-#define WOLF_MAX_MESH_COUNT 4096
+#define WOLF_MAX_INSTANCE_COUNT 40000
+#define WOLF_MAX_MESH_COUNT 8192
 
 cbuffer CullParams : register(b7)
 {

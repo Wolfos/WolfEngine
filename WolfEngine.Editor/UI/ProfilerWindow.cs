@@ -1,4 +1,6 @@
 using ImGuiNET;
+using System;
+using System.IO;
 using WolfEngine.Profiling;
 
 namespace WolfEngine.Editor.UI;
@@ -6,6 +8,8 @@ namespace WolfEngine.Editor.UI;
 public class ProfilerWindow
 {
 	private static bool _isOpen;
+	private static string _capturePath = BuildDefaultCapturePath();
+	private static string _captureStatus = string.Empty;
 
 	public static void Open()
 	{
@@ -17,7 +21,7 @@ public class ProfilerWindow
 		_isOpen = false;
 	}
 
-	public static void Draw()
+	public static void Draw(IRenderer renderer)
 	{
 		if (_isOpen == false)
 		{
@@ -25,6 +29,9 @@ public class ProfilerWindow
 		}
 
 		ImGui.Begin("Profiler", ref _isOpen);
+		DrawGpuCaptureControls(renderer);
+
+		ImGui.Separator();
 		var frames = FrameProfiler.Instance.GetLastFrames();
 		if (frames.Count == 0)
 		{
@@ -46,6 +53,75 @@ public class ProfilerWindow
 			}
 		}
 		ImGui.End();
+	}
+
+	private static void DrawGpuCaptureControls(IRenderer renderer)
+	{
+		ImGui.TextUnformatted("GPU Capture");
+		if (renderer.SupportsGpuCapture == false)
+		{
+			ImGui.TextDisabled("Programmatic GPU capture is unavailable for this renderer.");
+			return;
+		}
+
+		ImGui.InputText("Output (.gputrace)", ref _capturePath, 1024);
+		if (renderer.IsGpuCaptureActive)
+		{
+			if (ImGui.Button("Stop GPU Capture"))
+			{
+				if (renderer.TryStopGpuCapture(out var message))
+				{
+					if (string.IsNullOrWhiteSpace(message) == false)
+					{
+						_captureStatus = message;
+					}
+					else
+					{
+						_captureStatus = string.IsNullOrWhiteSpace(renderer.LastGpuCapturePath)
+							? "GPU capture stopped."
+							: $"Saved capture: {renderer.LastGpuCapturePath}";
+					}
+					_capturePath = BuildDefaultCapturePath();
+				}
+				else
+				{
+					_captureStatus = message;
+				}
+			}
+		}
+		else if (ImGui.Button("Start GPU Capture"))
+		{
+			if (renderer.TryStartGpuCapture(_capturePath, out var message))
+			{
+				if (string.IsNullOrWhiteSpace(message) == false)
+				{
+					_captureStatus = message;
+				}
+				else
+				{
+					_captureStatus = string.IsNullOrWhiteSpace(renderer.LastGpuCapturePath)
+						? "GPU capture started."
+						: $"GPU capture started: {renderer.LastGpuCapturePath}";
+				}
+			}
+			else
+			{
+				_captureStatus = message;
+			}
+		}
+
+		if (string.IsNullOrWhiteSpace(_captureStatus) == false)
+		{
+			ImGui.TextWrapped(_captureStatus);
+		}
+	}
+
+	private static string BuildDefaultCapturePath()
+	{
+		return Path.Combine(
+			Path.GetTempPath(),
+			"WolfEngineCaptures",
+			$"capture-{DateTime.Now:yyyyMMdd-HHmmss}.gputrace");
 	}
 
 	private static void DrawNodes(FrameProfiler.ProfileNode node, double frameMs)

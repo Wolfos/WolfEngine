@@ -119,6 +119,8 @@ public class SceneBuilder: ISceneBuilder
 
         if (entities.Count == 0) return;
         
+        Console.Out.WriteLine($"Imported {entities.Count} entities");
+        
         var children = new Children
         {
             First = entities.First()

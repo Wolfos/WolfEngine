@@ -21,6 +21,10 @@ public sealed class BindlessResourceRegistry
 	private DescriptorHandle _errorBufferHandle = DescriptorHandle.Invalid;
 	private IGfxTexture? _errorTexture;
 	private IGfxBuffer? _errorBuffer;
+	private bool _loggedSrvTableFull;
+	private bool _loggedUavTableFull;
+	private bool _loggedCbvTableFull;
+	private bool _loggedSamplerTableFull;
 
 	public void EnsureInitialized(IGfxDevice device)
 	{
@@ -39,6 +43,10 @@ public sealed class BindlessResourceRegistry
 		_cbvHandles.Clear();
 		_uavHandles.Clear();
 		_samplerHandles.Clear();
+		_loggedSrvTableFull = false;
+		_loggedUavTableFull = false;
+		_loggedCbvTableFull = false;
+		_loggedSamplerTableFull = false;
 		CreateErrorResources(device);
 	}
 
@@ -74,9 +82,20 @@ public sealed class BindlessResourceRegistry
 			return handle;
 		}
 
-		handle = texture.ShaderResourceView.IsValid
-			? texture.ShaderResourceView
-			: _device.GlobalTable.AllocateShaderResourceView(texture);
+		try
+		{
+			handle = texture.ShaderResourceView.IsValid
+				? texture.ShaderResourceView
+				: _device.GlobalTable.AllocateShaderResourceView(texture);
+		}
+		catch (InvalidOperationException ex) when (IsTableFullException(ex))
+		{
+			LogTableFullOnce(
+				ref _loggedSrvTableFull,
+				"SRV",
+				GpuDrawResources.MaxDrawCount);
+			return _errorTextureHandle;
+		}
 		_srvHandles[texture] = handle;
 		return handle.IsValid ? handle : _errorTextureHandle;
 	}
@@ -93,9 +112,20 @@ public sealed class BindlessResourceRegistry
 			return handle;
 		}
 
-		handle = texture.UnorderedAccessView.IsValid
-			? texture.UnorderedAccessView
-			: _device.GlobalTable.AllocateUnorderedAccessView(texture);
+		try
+		{
+			handle = texture.UnorderedAccessView.IsValid
+				? texture.UnorderedAccessView
+				: _device.GlobalTable.AllocateUnorderedAccessView(texture);
+		}
+		catch (InvalidOperationException ex) when (IsTableFullException(ex))
+		{
+			LogTableFullOnce(
+				ref _loggedUavTableFull,
+				"UAV",
+				GpuDrawResources.MaxDrawCount);
+			return _errorTextureHandle;
+		}
 		_uavHandles[texture] = handle;
 		return handle.IsValid ? handle : _errorTextureHandle;
 	}
@@ -112,7 +142,18 @@ public sealed class BindlessResourceRegistry
 			return handle;
 		}
 
-		handle = _device.GlobalTable.AllocateConstantBufferView(buffer);
+		try
+		{
+			handle = _device.GlobalTable.AllocateConstantBufferView(buffer);
+		}
+		catch (InvalidOperationException ex) when (IsTableFullException(ex))
+		{
+			LogTableFullOnce(
+				ref _loggedCbvTableFull,
+				"CBV",
+				GpuDrawResources.MaxDrawCount);
+			return _errorBufferHandle;
+		}
 		_cbvHandles[buffer] = handle;
 		return handle.IsValid ? handle : _errorBufferHandle;
 	}
@@ -129,7 +170,18 @@ public sealed class BindlessResourceRegistry
 			return handle;
 		}
 
-		handle = _device.GlobalTable.AllocateSampler(descriptor);
+		try
+		{
+			handle = _device.GlobalTable.AllocateSampler(descriptor);
+		}
+		catch (InvalidOperationException ex) when (IsTableFullException(ex))
+		{
+			LogTableFullOnce(
+				ref _loggedSamplerTableFull,
+				"Sampler",
+				GpuDrawResources.MaxDrawCount);
+			return _errorSamplerHandle;
+		}
 		_samplerHandles[descriptor] = handle;
 		return handle.IsValid ? handle : _errorSamplerHandle;
 	}
@@ -183,6 +235,23 @@ public sealed class BindlessResourceRegistry
 		};
 
 		texture.ReplaceRegion(region, 0, (nint)color, 4);
+	}
+
+	private static bool IsTableFullException(InvalidOperationException exception)
+	{
+		return exception.Message.Contains("descriptor table is full", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static void LogTableFullOnce(ref bool flag, string tableKind, int drawLimit)
+	{
+		if (flag)
+		{
+			return;
+		}
+
+		flag = true;
+		Console.WriteLine(
+			$"Bindless {tableKind} table is full. Falling back to error resources for new bindings. Draw limit={drawLimit}.");
 	}
 
 	private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class
