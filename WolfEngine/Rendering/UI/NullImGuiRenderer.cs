@@ -10,7 +10,7 @@ internal sealed class NullImGuiRenderer : IImGuiRenderer
 	{
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbuffer, IGfxTexture lightingSource)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, IGfxTexture lightingSource)
 	{
 	}
 }

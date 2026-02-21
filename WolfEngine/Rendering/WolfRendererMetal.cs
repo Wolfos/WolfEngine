@@ -12,6 +12,7 @@ using Silk.NET.SDL;
 using WolfEngine.Backend.Metal;
 using WolfEngine.Mathematics;
 using WolfEngine.Platform;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
@@ -58,6 +59,8 @@ internal unsafe class WolfRendererMetal : IRenderer
     private bool _isGpuCaptureActive;
     private bool _gpuCaptureWritesTraceFile;
     private string _lastGpuCapturePath = string.Empty;
+    private int _presentFrameIndex;
+    private int _lastDrawableAcquireFailureLogFrame = int.MinValue;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
@@ -528,9 +531,56 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public void Render(
         RenderGraphResourceRegistry resourceRegistry,
-        RenderGraphResourceHandle backBuffer)
+        RenderGraphResourceHandle finalColor)
     {
-        // TODO: DirectX needs this method but Metal does not, can that be more elegant?
+        var finalColorTexture = resourceRegistry.GetTexture(finalColor) as MetalTexture;
+        if (finalColorTexture is null || finalColorTexture.Texture.NativePtr == IntPtr.Zero)
+        {
+            return;
+        }
+
+        nint drawablePtr;
+        using (FrameProfiler.Instance.Measure("AcquireDrawableLate"))
+        {
+            drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
+        }
+
+        if (drawablePtr == IntPtr.Zero)
+        {
+            if (_presentFrameIndex - _lastDrawableAcquireFailureLogFrame >= 120)
+            {
+                Console.WriteLine("Metal late present: nextDrawable unavailable; skipping present this frame.");
+                _lastDrawableAcquireFailureLogFrame = _presentFrameIndex;
+            }
+
+            _presentFrameIndex++;
+            return;
+        }
+
+        using (FrameProfiler.Instance.Measure("PresentCopy"))
+        {
+            var drawable = new CAMetalDrawable(drawablePtr);
+            var destination = drawable.Texture;
+            if (destination.NativePtr != IntPtr.Zero)
+            {
+                var source = finalColorTexture.Texture;
+                var width = Math.Min(source.Width, destination.Width);
+                var height = Math.Min(source.Height, destination.Height);
+
+                if (width > 0 && height > 0)
+                {
+                    var commandList = _gfxDevice.BeginGraphics() as MetalCommandList;
+                    if (commandList is not null)
+                    {
+                        commandList.CopyTexture(source, destination, (uint)width, (uint)height);
+                        commandList.SetPresentDrawable(drawable);
+                        _gfxDevice.Submit(commandList);
+                    }
+                }
+            }
+        }
+
+        _presentFrameIndex++;
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)

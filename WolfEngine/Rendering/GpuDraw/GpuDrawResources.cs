@@ -8,6 +8,7 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawResources : IDisposable
 {
+	public const int IndirectCommandBufferSlotCount = 4;
 	public const int MaxDrawCount = 40000;
 	public const int MaxInstanceCount = 40000;
 	public const int MaxMaterialCount = 8192;
@@ -23,8 +24,24 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DrawExecutionRangeBuffer { get; private set; }
 	public IGfxBuffer? UpdateBuffer { get; private set; }
 	public IGfxBuffer? CameraBuffer { get; private set; }
-	public IGfxIndirectCommandBuffer? GBufferIndirectCommands { get; private set; }
+	private readonly IGfxIndirectCommandBuffer?[] _gbufferIndirectCommandSlots = new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount];
+	private int _activeIndirectCommandSlot;
+	public IGfxIndirectCommandBuffer? GBufferIndirectCommands => _gbufferIndirectCommandSlots[_activeIndirectCommandSlot];
 	public IGfxPipeline? GBufferPipeline { get; set; }
+
+	public int ActiveIndirectCommandSlot
+	{
+		get => _activeIndirectCommandSlot;
+		set
+		{
+			if (value < 0 || value >= IndirectCommandBufferSlotCount)
+			{
+				throw new ArgumentOutOfRangeException(nameof(value), value, "Indirect command buffer slot is out of range.");
+			}
+
+			_activeIndirectCommandSlot = value;
+		}
+	}
 
 	public void EnsureCreated(IGfxDevice device)
 	{
@@ -83,9 +100,22 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Constant,
 			BufferFlags.AllowShaderResource));
 
-		GBufferIndirectCommands ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-			PassKind.Graphics,
-			(uint)MaxDrawCount));
+		for (var i = 0; i < _gbufferIndirectCommandSlots.Length; i++)
+		{
+			_gbufferIndirectCommandSlots[i] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
+				PassKind.Graphics,
+				(uint)MaxDrawCount));
+		}
+	}
+
+	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex)
+	{
+		if (slotIndex < 0 || slotIndex >= _gbufferIndirectCommandSlots.Length)
+		{
+			throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Indirect command buffer slot is out of range.");
+		}
+
+		return _gbufferIndirectCommandSlots[slotIndex];
 	}
 
 	public void Dispose()
@@ -100,7 +130,11 @@ public sealed class GpuDrawResources : IDisposable
 		(DrawExecutionRangeBuffer as IDisposable)?.Dispose();
 		(UpdateBuffer as IDisposable)?.Dispose();
 		(CameraBuffer as IDisposable)?.Dispose();
-		(GBufferIndirectCommands as IDisposable)?.Dispose();
+		for (var i = 0; i < _gbufferIndirectCommandSlots.Length; i++)
+		{
+			(_gbufferIndirectCommandSlots[i] as IDisposable)?.Dispose();
+			_gbufferIndirectCommandSlots[i] = null;
+		}
 	}
 
 }

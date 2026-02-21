@@ -251,16 +251,13 @@ public sealed class RenderGraph
 				_activeSnapshot = snapshot;
 				
 				var frameBufferSize = _renderer.GetFrameBufferSize();
-				var backBuffer = _renderer.ImportBackbuffer(_resourceRegistry, frameBufferSize.X, frameBufferSize.Y);
-				var backbufferTexture = _resourceRegistry.GetTexture(backBuffer);
-				var actualFrameSize = new Int2(backbufferTexture.Descriptor.Width, backbufferTexture.Descriptor.Height);
-				_frameBuilder.BeginFrame(actualFrameSize, backBuffer);
+				_frameBuilder.BeginFrame(frameBufferSize);
 				_frameBuilder.SetUiFrame(uiFrame);
 
 				_frameBuilder.Build(this);
 				Execute();
 
-				_renderer.Render(_resourceRegistry, backBuffer);
+				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());
 
 				_resourceRegistry.EndFrame();
 			}

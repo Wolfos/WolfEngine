@@ -47,7 +47,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbufferTexture, IGfxTexture lightingSource)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, IGfxTexture lightingSource)
 	{
 		var commandList = context.CommandList as MetalCommandList;
 		if (commandList is null)
@@ -55,15 +55,15 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			return;
 		}
 
-		var backbuffer = backbufferTexture as MetalBackbufferTexture;
+		var finalColor = finalColorTarget as MetalTexture;
 		var lighting = lightingSource as MetalTexture;
-		if (backbuffer is null || lighting is null)
+		if (finalColor is null || lighting is null)
 		{
 			return;
 		}
 
 		var source = lighting.Texture;
-		var destination = backbuffer.Drawable.Texture;
+		var destination = finalColor.Texture;
 		if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
 		{
 			return;
@@ -72,7 +72,6 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		var width = Math.Min(source.Width, destination.Width);
 		var height = Math.Min(source.Height, destination.Height);
 		commandList.CopyTexture(source, destination, (uint)width, (uint)height);
-		commandList.SetPresentDrawable(backbuffer.Drawable);
 
 		if (frame.CommandCount == 0)
 		{
@@ -84,8 +83,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			return;
 		}
 
-		var targets = new PassTargets(new[] { new ColorTargetBinding(backbuffer) });
-		var viewport = new Viewport(0, 0, backbuffer.Descriptor.Width, backbuffer.Descriptor.Height);
+		var targets = new PassTargets(new[] { new ColorTargetBinding(finalColor) });
+		var viewport = new Viewport(0, 0, finalColor.Descriptor.Width, finalColor.Descriptor.Height);
 		commandList.BeginPass(targets, viewport);
 
 		EnsureBuffers(frame);

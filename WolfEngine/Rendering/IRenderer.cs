@@ -15,7 +15,7 @@ public interface IRenderer
 	void BeginFrame();
 	void Render(
 		RenderGraphResourceRegistry resourceRegistry,
-		RenderGraphResourceHandle backBuffer);
+		RenderGraphResourceHandle finalColor);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	bool SupportsGpuCapture { get; }

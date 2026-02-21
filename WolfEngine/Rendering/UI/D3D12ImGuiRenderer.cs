@@ -54,11 +54,11 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture backbufferTexture, IGfxTexture lightingSource)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, IGfxTexture lightingSource)
 	{
-		var backbuffer = backbufferTexture as ID3D12BackendTexture;
+		var finalColor = finalColorTarget as ID3D12BackendTexture;
 		var lighting = lightingSource as ID3D12BackendTexture;
-		if (backbuffer is null || lighting is null)
+		if (finalColor is null || lighting is null)
 		{
 			return;
 		}
@@ -70,14 +70,14 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
 		barrier.Anonymous.Transition = new()
 		{
-			PResource = backbuffer.Resource,
+			PResource = finalColor.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.RenderTarget,
 			StateAfter = ResourceStates.CopyDest
 		};
 		native->ResourceBarrier(1, &barrier);
 
-		native->CopyResource(backbuffer.Resource, lighting.Resource);
+		native->CopyResource(finalColor.Resource, lighting.Resource);
 
 		barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
 		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
@@ -116,8 +116,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		_vertexBuffer.Unmap(0, (D3DRange*) null);
 		_indexBuffer.Unmap(0, (D3DRange*) null);
 
-		var rtvHandle = backbuffer.RenderTargetView
-		                ?? throw new InvalidOperationException("Backbuffer missing RTV.");
+		var rtvHandle = finalColor.RenderTargetView
+		                ?? throw new InvalidOperationException("Final color target missing RTV.");
 		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
 
 		var viewport = new D3DViewport

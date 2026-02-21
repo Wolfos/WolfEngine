@@ -1445,26 +1445,63 @@ private sealed class MeshResources
 
 	public void Render(
 		RenderGraphResourceRegistry resourceRegistry,
-		RenderGraphResourceHandle backBuffer)
+		RenderGraphResourceHandle finalColor)
 	{
-		var backbufferResource = resourceRegistry.GetTexture(backBuffer);
-		var backbufferTexture = backbufferResource as ID3D12BackendTexture
+		var finalColorResource = resourceRegistry.GetTexture(finalColor);
+		var finalColorTexture = finalColorResource as ID3D12BackendTexture
 		                        ?? throw new InvalidOperationException(
 			                        "Render graph returned a texture incompatible with the Direct3D12 backend.");
+		var swapchainBackbuffer = _renderTargets[_backbufferIndex].Handle;
+		if (swapchainBackbuffer is null)
+		{
+			throw new InvalidOperationException("Active swapchain backbuffer is unavailable.");
+		}
 
 		var presentCommandList = _gfxDevice.BeginGraphics() as D3D12CommandList
 		                         ?? throw new InvalidOperationException("Failed to create present command list.");
 		var nativeCommandList = (ID3D12GraphicsCommandList*) presentCommandList.CommandList.Handle;
 
-		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrier.Anonymous.Transition = new()
+		ResourceBarrier finalColorToCopySource = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		finalColorToCopySource.Anonymous.Transition = new()
 		{
-			PResource = backbufferTexture.Resource,
+			PResource = finalColorTexture.Resource,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.RenderTarget,
+			StateAfter = ResourceStates.CopySource
+		};
+		nativeCommandList->ResourceBarrier(1, &finalColorToCopySource);
+
+		ResourceBarrier swapchainToCopyDest = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		swapchainToCopyDest.Anonymous.Transition = new()
+		{
+			PResource = swapchainBackbuffer,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.Present,
+			StateAfter = ResourceStates.CopyDest
+		};
+		nativeCommandList->ResourceBarrier(1, &swapchainToCopyDest);
+
+		nativeCommandList->CopyResource(swapchainBackbuffer, finalColorTexture.Resource);
+
+		ResourceBarrier finalColorBackToRenderTarget = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		finalColorBackToRenderTarget.Anonymous.Transition = new()
+		{
+			PResource = finalColorTexture.Resource,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopySource,
+			StateAfter = ResourceStates.RenderTarget
+		};
+		nativeCommandList->ResourceBarrier(1, &finalColorBackToRenderTarget);
+
+		ResourceBarrier swapchainToPresent = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
+		swapchainToPresent.Anonymous.Transition = new()
+		{
+			PResource = swapchainBackbuffer,
+			Subresource = D3D12.ResourceBarrierAllSubresources,
+			StateBefore = ResourceStates.CopyDest,
 			StateAfter = ResourceStates.Present
 		};
-		nativeCommandList->ResourceBarrier(1, &barrier);
+		nativeCommandList->ResourceBarrier(1, &swapchainToPresent);
 
 		_gfxDevice.Submit(presentCommandList);
 

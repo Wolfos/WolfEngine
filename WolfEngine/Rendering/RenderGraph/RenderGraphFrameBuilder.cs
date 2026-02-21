@@ -12,7 +12,7 @@ namespace WolfEngine.Rendering;
 public readonly struct RenderGraphFrameResources
 {
 	public Int2 FramebufferSize { get; init; }
-	public RenderGraphResourceHandle Backbuffer { get; init; }
+	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
@@ -67,8 +67,7 @@ public sealed class RenderGraphFrameBuilder
 	}
 
 	public void BeginFrame(
-		Int2 framebufferSize,
-		RenderGraphResourceHandle backBuffer)
+		Int2 framebufferSize)
 	{
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);
 		var skyboxIrrHandle = default(RenderGraphResourceHandle);
@@ -98,7 +97,11 @@ public sealed class RenderGraphFrameBuilder
 		_frameResources = new()
 		{
 			FramebufferSize = framebufferSize,
-			Backbuffer = backBuffer,
+			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Bgra8Unorm,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
 			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
 				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new Vector4(0.392f, 0.584f, 0.929f, 1.0f))),
@@ -177,10 +180,12 @@ public sealed class RenderGraphFrameBuilder
 
 		graph.AddPass("ImGui", PassKind.Graphics)
 			.ReadTexture(_frameResources.LightingBuffer, ResourceState.CopySource)
-			.WriteTexture(_frameResources.Backbuffer, ResourceState.RenderTarget)
+			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
 			.SetExecute(_imguiExecute);
 
 	}
+
+	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
 
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
@@ -236,9 +241,9 @@ public sealed class RenderGraphFrameBuilder
 
 	private unsafe void ExecuteImGui(RenderGraphContext context)
 	{
-		var backbuffer = context.GetTexture(_frameResources.Backbuffer);
+		var finalColor = context.GetTexture(_frameResources.FinalColor);
 		var lighting = context.GetTexture(_frameResources.LightingBuffer);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, backbuffer, lighting);
+		_imGuiRenderer.Record(context, _uiFrame, finalColor, lighting);
 	}
 }
