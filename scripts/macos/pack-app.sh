@@ -6,7 +6,7 @@ PROJECT_PATH="$ROOT_DIR/WolfEngine.Editor/WolfEngine.Editor.csproj"
 
 APP_NAME="${APP_NAME:-WolfEngine.Editor}"
 RUNTIME="${RUNTIME:-osx-arm64}"
-CONFIGURATION="${CONFIGURATION:-Release}"
+CONFIGURATION="${CONFIGURATION:-Debug}"
 
 PUBLISH_DIR="$ROOT_DIR/dist/publish/$RUNTIME"
 APP_BUNDLE="$ROOT_DIR/dist/${APP_NAME}.app"
