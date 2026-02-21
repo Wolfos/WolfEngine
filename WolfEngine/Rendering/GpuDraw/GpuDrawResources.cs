@@ -28,6 +28,7 @@ public sealed class GpuDrawResources : IDisposable
 	private int _activeIndirectCommandSlot;
 	public IGfxIndirectCommandBuffer? GBufferIndirectCommands => _gbufferIndirectCommandSlots[_activeIndirectCommandSlot];
 	public IGfxPipeline? GBufferPipeline { get; set; }
+	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
 	public int ActiveIndirectCommandSlot
 	{
@@ -104,7 +105,8 @@ public sealed class GpuDrawResources : IDisposable
 		{
 			_gbufferIndirectCommandSlots[i] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
 				PassKind.Graphics,
-				(uint)MaxDrawCount));
+				(uint)MaxDrawCount,
+				supportsIndexedExecution: true));
 		}
 	}
 

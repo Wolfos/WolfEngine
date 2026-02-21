@@ -3,6 +3,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using WolfEngine;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
@@ -76,6 +77,12 @@ public sealed class GpuDrawPass
 		{
 			metalTable = table;
 			activeIndirectCommands = _gpuDrawResources.GetIndirectCommandBufferSlot(activeSlot) as MetalIndirectCommandBuffer;
+			if (_renderer is WolfRendererMetal metalRenderer &&
+			    metalRenderer.ConsumePackedGeometryRefresh())
+			{
+				_bindlessEpoch++;
+			}
+
 			if (BindlessPointersChanged(table))
 			{
 				_bindlessEpoch++;
@@ -106,6 +113,7 @@ public sealed class GpuDrawPass
 		}
 
 		_drawDatabase.ConsumeUpdates(_updates);
+		_gpuDrawResources.ActiveDrawCommandUpperBound = _drawDatabase.GetActiveDrawCommandUpperBound();
 		_updateData.Clear();
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
@@ -157,6 +165,7 @@ public sealed class GpuDrawPass
 					indexHandle = registeredIndexHandle;
 					indexCount = mesh.IndexCount;
 					indexFormat = 0;
+					baseVertex = mesh.PackedBaseVertex;
 				}
 			}
 
@@ -623,9 +632,11 @@ public sealed class GpuDrawPass
 		indirectCommands.EncodeIndexedDrawCommand(
 			commandIndex,
 			metalVertexBuffer,
+			mesh.PackedVertexOffsetBytes,
 			metalIndexBuffer,
 			IndexFormat.UInt32,
 			mesh.IndexCount,
+			mesh.PackedIndexOffsetBytes,
 			0,
 			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
 			cameraBuffer,

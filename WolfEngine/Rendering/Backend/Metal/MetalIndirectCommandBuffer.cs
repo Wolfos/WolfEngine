@@ -92,9 +92,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	public void EncodeIndexedDrawCommand(
 		uint commandIndex,
 		MetalBuffer vertexBuffer,
+		ulong vertexBufferOffsetBytes,
 		MetalBuffer indexBuffer,
 		IndexFormat indexFormat,
 		uint indexCount,
+		ulong indexBufferOffsetBytes,
 		int baseVertex,
 		ulong drawArgsOffsetBytes,
 		MetalBuffer cameraBuffer,
@@ -114,7 +116,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 		using var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
-		command.SetVertexBuffer(vertexBuffer.Buffer, 0, 0);
+		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
 		command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
 		command.SetVertexBuffer(instanceBuffer.Buffer, 0, 10);
 		command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
@@ -155,7 +157,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 				indexCount,
 				metalIndexType,
 				indexBuffer.Buffer,
-				0,
+				indexBufferOffsetBytes,
 				1,
 				baseVertex,
 				0);

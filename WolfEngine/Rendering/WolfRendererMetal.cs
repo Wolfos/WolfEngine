@@ -32,6 +32,8 @@ internal unsafe class WolfRendererMetal : IRenderer
     }
 
     private const string WindowTitle = "WolfEngine";
+    private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
+    private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
     private readonly int _width;
     private readonly int _height;
@@ -39,6 +41,11 @@ internal unsafe class WolfRendererMetal : IRenderer
     private readonly IMacOSInputHandler _inputHandler;
     private readonly BindlessResourceRegistry _bindlessRegistry;
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+    private MetalBuffer? _packedVertexBuffer;
+    private MetalBuffer? _packedIndexBuffer;
+    private ulong _packedVertexBufferUsedBytes;
+    private ulong _packedIndexBufferUsedBytes;
+    private bool _needsPackedGeometryReencode;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
     private readonly Sdl _sdl;
@@ -71,16 +78,19 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private sealed class MeshResources
     {
-        public MeshResources(MTLBuffer vertexBuffer, MTLBuffer indexBuffer, ulong indexCount)
+        public MeshResources(ulong vertexOffsetBytes, ulong indexOffsetBytes, int baseVertex, ulong indexCount)
         {
-            VertexBuffer = vertexBuffer;
-            IndexBuffer = indexBuffer;
+            VertexOffsetBytes = vertexOffsetBytes;
+            IndexOffsetBytes = indexOffsetBytes;
+            BaseVertex = baseVertex;
             IndexCount = indexCount;
         }
 
-        public MTLBuffer VertexBuffer { get; }
+        public ulong VertexOffsetBytes { get; }
 
-        public MTLBuffer IndexBuffer { get; }
+        public ulong IndexOffsetBytes { get; }
+
+        public int BaseVertex { get; }
 
         public ulong IndexCount { get; }
     }
@@ -221,7 +231,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         _metalLayer.Device = _device;
         _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
         _metalLayer.FramebufferOnly = false;
-        _metalLayer.DisplaySyncEnabled = false;
+        _metalLayer.DisplaySyncEnabled = true;
 
         UpdateDrawableSize();
     }
@@ -318,6 +328,17 @@ internal unsafe class WolfRendererMetal : IRenderer
         return true;
     }
 
+    internal bool ConsumePackedGeometryRefresh()
+    {
+        if (_needsPackedGeometryReencode == false)
+        {
+            return false;
+        }
+
+        _needsPackedGeometryReencode = false;
+        return true;
+    }
+
     private void CreateDepthTexture(int width, int height)
     {
         if (_device.NativePtr == IntPtr.Zero || width <= 0 || height <= 0)
@@ -367,6 +388,14 @@ internal unsafe class WolfRendererMetal : IRenderer
             _depthState.Dispose();
             _depthState = default;
         }
+
+        (_packedVertexBuffer as IDisposable)?.Dispose();
+        (_packedIndexBuffer as IDisposable)?.Dispose();
+        _packedVertexBuffer = null;
+        _packedIndexBuffer = null;
+        _packedVertexBufferUsedBytes = 0;
+        _packedIndexBufferUsedBytes = 0;
+        _meshResources.Clear();
 
         if (_metalView is not null)
         {
@@ -640,6 +669,147 @@ internal unsafe class WolfRendererMetal : IRenderer
         _ => throw new InvalidOperationException($"Unsupported pixel format for upload: {format}.")
     };
 
+    private void EnsurePackedGeometryBuffers()
+    {
+        if (_packedVertexBuffer is null)
+        {
+            var vertexBuffer = _device.NewBuffer(DefaultPackedVertexBufferBytes, MTLResourceOptions.ResourceStorageModeShared);
+            if (vertexBuffer.NativePtr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to allocate packed vertex buffer.");
+            }
+
+            _packedVertexBuffer = new MetalBuffer("PackedMeshVertexBuffer",
+                new BufferDescriptor(DefaultPackedVertexBufferBytes, BufferUsage.Vertex), vertexBuffer);
+            _bindlessRegistry.RegisterBuffer(_packedVertexBuffer);
+        }
+
+        if (_packedIndexBuffer is null)
+        {
+            var indexBuffer = _device.NewBuffer(DefaultPackedIndexBufferBytes, MTLResourceOptions.ResourceStorageModeShared);
+            if (indexBuffer.NativePtr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to allocate packed index buffer.");
+            }
+
+            _packedIndexBuffer = new MetalBuffer("PackedMeshIndexBuffer",
+                new BufferDescriptor(DefaultPackedIndexBufferBytes, BufferUsage.Index), indexBuffer);
+            _bindlessRegistry.RegisterBuffer(_packedIndexBuffer);
+        }
+    }
+
+    private static ulong GrowCapacity(ulong currentCapacity, ulong requiredCapacity, ulong minimumCapacity)
+    {
+        var capacity = currentCapacity > 0 ? currentCapacity : minimumCapacity;
+        while (capacity < requiredCapacity)
+        {
+            capacity = checked(capacity * 2);
+        }
+
+        return capacity;
+    }
+
+    private static unsafe void CopyBufferBytes(MTLBuffer source, MTLBuffer destination, ulong byteCount)
+    {
+        if (byteCount == 0)
+        {
+            return;
+        }
+
+        var copyBytes = checked((int)byteCount);
+        var src = new ReadOnlySpan<byte>((byte*)source.Contents.ToPointer(), copyBytes);
+        var dst = new Span<byte>((byte*)destination.Contents.ToPointer(), copyBytes);
+        src.CopyTo(dst);
+    }
+
+    private void EnsurePackedGeometryCapacity(ulong requiredVertexBytes, ulong requiredIndexBytes)
+    {
+        EnsurePackedGeometryBuffers();
+        if (_packedVertexBuffer is null || _packedIndexBuffer is null)
+        {
+            throw new InvalidOperationException("Packed geometry buffers are unavailable.");
+        }
+
+        var currentVertexCapacity = _packedVertexBuffer.Descriptor.SizeInBytes;
+        var currentIndexCapacity = _packedIndexBuffer.Descriptor.SizeInBytes;
+        var targetVertexCapacity = GrowCapacity(currentVertexCapacity, requiredVertexBytes, DefaultPackedVertexBufferBytes);
+        var targetIndexCapacity = GrowCapacity(currentIndexCapacity, requiredIndexBytes, DefaultPackedIndexBufferBytes);
+        var growVertex = targetVertexCapacity > currentVertexCapacity;
+        var growIndex = targetIndexCapacity > currentIndexCapacity;
+        if (growVertex == false && growIndex == false)
+        {
+            return;
+        }
+
+        _gfxDevice.WaitForIdle();
+        if (growVertex)
+        {
+            var newVertexMetalBuffer = _device.NewBuffer(targetVertexCapacity, MTLResourceOptions.ResourceStorageModeShared);
+            if (newVertexMetalBuffer.NativePtr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to grow packed vertex buffer.");
+            }
+
+            CopyBufferBytes(_packedVertexBuffer.Buffer, newVertexMetalBuffer, _packedVertexBufferUsedBytes);
+            var newVertexBuffer = new MetalBuffer("PackedMeshVertexBuffer", new BufferDescriptor(targetVertexCapacity, BufferUsage.Vertex), newVertexMetalBuffer);
+            _bindlessRegistry.RegisterBuffer(newVertexBuffer);
+
+            foreach (var mesh in _meshResources.Keys)
+            {
+                mesh.VertexBuffer = newVertexBuffer;
+            }
+
+            (_packedVertexBuffer as IDisposable)?.Dispose();
+            _packedVertexBuffer = newVertexBuffer;
+        }
+
+        if (growIndex)
+        {
+            var newIndexMetalBuffer = _device.NewBuffer(targetIndexCapacity, MTLResourceOptions.ResourceStorageModeShared);
+            if (newIndexMetalBuffer.NativePtr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to grow packed index buffer.");
+            }
+
+            CopyBufferBytes(_packedIndexBuffer.Buffer, newIndexMetalBuffer, _packedIndexBufferUsedBytes);
+            var newIndexBuffer = new MetalBuffer("PackedMeshIndexBuffer", new BufferDescriptor(targetIndexCapacity, BufferUsage.Index), newIndexMetalBuffer);
+            _bindlessRegistry.RegisterBuffer(newIndexBuffer);
+
+            foreach (var mesh in _meshResources.Keys)
+            {
+                mesh.IndexBuffer = newIndexBuffer;
+            }
+
+            (_packedIndexBuffer as IDisposable)?.Dispose();
+            _packedIndexBuffer = newIndexBuffer;
+        }
+
+        _needsPackedGeometryReencode = true;
+    }
+
+    private static ulong AlignUp(ulong value, ulong alignment)
+    {
+        if (alignment == 0)
+        {
+            return value;
+        }
+
+        var mask = alignment - 1;
+        return (value + mask) & ~mask;
+    }
+
+    private static unsafe void CopyToBufferAtOffset<T>(ReadOnlySpan<T> source, MTLBuffer buffer, ulong byteOffset) where T : unmanaged
+    {
+        if (source.IsEmpty)
+        {
+            return;
+        }
+
+        var bytes = MemoryMarshal.AsBytes(source);
+        var destination = new Span<byte>((byte*)buffer.Contents.ToPointer() + (nint)byteOffset, bytes.Length);
+        bytes.CopyTo(destination);
+    }
+
     private MeshResources UploadMesh(Mesh mesh)
     {
         if (mesh.Vertices.Length == 0)
@@ -653,6 +823,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         {
             throw new InvalidOperationException("Mesh must contain normals, UVs, and tangents per vertex.");
         }
+
+        EnsurePackedGeometryBuffers();
 
         var vertexCount = mesh.Vertices.Length;
         var vertexData = new VertexData[vertexCount];
@@ -668,34 +840,39 @@ internal unsafe class WolfRendererMetal : IRenderer
             };
         }
 
+        var vertexStrideBytes = (ulong)Marshal.SizeOf<VertexData>();
         var vertexBufferLength = (ulong)(vertexData.Length * Marshal.SizeOf<VertexData>());
-        var vertexBuffer = _device.NewBuffer(vertexBufferLength, MTLResourceOptions.ResourceStorageModeShared);
-        if (vertexBuffer.NativePtr == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Failed to allocate vertex buffer.");
-        }
-        BufferHelper.CopyToBuffer(vertexData, vertexBuffer);
-
         var indexBufferLength = (ulong)(mesh.Indices.Length * sizeof(uint));
-        var indexBuffer = _device.NewBuffer(indexBufferLength, MTLResourceOptions.ResourceStorageModeShared);
-        if (indexBuffer.NativePtr == IntPtr.Zero)
+
+        if (_packedVertexBuffer is null || _packedIndexBuffer is null)
         {
-            throw new InvalidOperationException("Failed to allocate index buffer.");
+            throw new InvalidOperationException("Packed mesh geometry buffers were not initialized.");
         }
-        BufferHelper.CopyToBuffer(mesh.Indices, indexBuffer);
 
-        var vertexBufferAbstraction = new MetalBuffer("MeshVertexBuffer", new(vertexBufferLength, BufferUsage.Vertex), vertexBuffer);
-        var indexBufferAbstraction = new MetalBuffer("MeshIndexBuffer", new(indexBufferLength, BufferUsage.Index), indexBuffer);
+        // baseVertex addressing requires offsets aligned to full vertex strides.
+        var vertexOffsetBytes = AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
+        var indexOffsetBytes = AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
+        EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, indexOffsetBytes + indexBufferLength);
+        if (_packedVertexBuffer is null || _packedIndexBuffer is null)
+        {
+            throw new InvalidOperationException("Packed geometry buffers were lost during growth.");
+        }
 
-        mesh.VertexBuffer = vertexBufferAbstraction;
-        mesh.IndexBuffer = indexBufferAbstraction;
-        mesh.StrideInBytes = (uint)Marshal.SizeOf<VertexData>();
+        CopyToBufferAtOffset<VertexData>(vertexData, _packedVertexBuffer.Buffer, vertexOffsetBytes);
+        CopyToBufferAtOffset<uint>(mesh.Indices, _packedIndexBuffer.Buffer, indexOffsetBytes);
+
+        mesh.VertexBuffer = _packedVertexBuffer;
+        mesh.IndexBuffer = _packedIndexBuffer;
+        mesh.StrideInBytes = (uint)vertexStrideBytes;
         mesh.IndexCount = (uint)mesh.Indices.Length;
+        mesh.PackedVertexOffsetBytes = vertexOffsetBytes;
+        mesh.PackedIndexOffsetBytes = indexOffsetBytes;
+        mesh.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStrideBytes));
 
-        _bindlessRegistry.RegisterBuffer(vertexBufferAbstraction);
-        _bindlessRegistry.RegisterBuffer(indexBufferAbstraction);
+        _packedVertexBufferUsedBytes = vertexOffsetBytes + vertexBufferLength;
+        _packedIndexBufferUsedBytes = indexOffsetBytes + indexBufferLength;
 
-        return new MeshResources(vertexBuffer, indexBuffer, (ulong)mesh.Indices.Length);
+        return new MeshResources(vertexOffsetBytes, indexOffsetBytes, mesh.PackedBaseVertex, (ulong)mesh.Indices.Length);
     }
 
     public void EnsureMeshResources(Mesh mesh)

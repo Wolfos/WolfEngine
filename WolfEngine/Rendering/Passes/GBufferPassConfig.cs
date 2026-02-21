@@ -51,4 +51,12 @@ public struct GBufferPassConfig
 	public IGfxPipeline? GBufferPipeline { get; set; }
 
 	public IGfxIndirectCommandBuffer? IndirectCommandBuffer { get; set; }
+
+	public IGfxBuffer? VisibleDrawIdsBuffer { get; set; }
+
+	public IGfxBuffer? DrawCountBuffer { get; set; }
+
+	public IGfxBuffer? DrawExecutionRangeBuffer { get; set; }
+
+	public uint FallbackMaxCommandCount { get; set; }
 }

@@ -19,6 +19,9 @@ public class Mesh
     internal IGfxBuffer IndexBuffer { get; set; }
     internal uint StrideInBytes { get; set; }
     internal uint IndexCount { get; set; }
+    internal ulong PackedVertexOffsetBytes { get; set; }
+    internal ulong PackedIndexOffsetBytes { get; set; }
+    internal int PackedBaseVertex { get; set; }
     public Mesh(
         IReadOnlyList<Vector4> vertices,
         IReadOnlyList<uint> indices,

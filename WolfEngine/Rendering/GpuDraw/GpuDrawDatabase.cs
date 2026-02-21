@@ -25,6 +25,8 @@ public sealed class GpuDrawDatabase
 	private int _nextMeshId = 1;
 	private int _nextMaterialId = 1;
 	private int _syncStamp;
+	private int _maxActiveDrawId;
+	private bool _maxActiveDrawIdDirty;
 
 	public void BeginSync()
 	{
@@ -48,6 +50,10 @@ public sealed class GpuDrawDatabase
 
 			var newRecord = CreateRecord(entity, mesh, material, worldTransform);
 			_records.Add(entity, newRecord);
+			if (newRecord.DrawId > _maxActiveDrawId)
+			{
+				_maxActiveDrawId = newRecord.DrawId;
+			}
 			_updates.Add(GpuDrawUpdate.CreateAdd(
 				newRecord.DrawId,
 				newRecord.InstanceId,
@@ -83,6 +89,10 @@ public sealed class GpuDrawDatabase
 
 				_records.Remove(entity);
 				ReleaseRecord(record);
+				if (record.DrawId == _maxActiveDrawId)
+				{
+					_maxActiveDrawIdDirty = true;
+				}
 				_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawId));
 			}
 		}
@@ -115,6 +125,36 @@ public sealed class GpuDrawDatabase
 			destination.Clear();
 			destination.AddRange(_updates);
 			_updates.Clear();
+		}
+	}
+
+	public uint GetActiveDrawCommandUpperBound()
+	{
+		lock (_lock)
+		{
+			if (_records.Count == 0)
+			{
+				_maxActiveDrawId = 0;
+				_maxActiveDrawIdDirty = false;
+				return 1;
+			}
+
+			if (_maxActiveDrawIdDirty)
+			{
+				var maxDrawId = 0;
+				foreach (var record in _records.Values)
+				{
+					if (record.DrawId > maxDrawId)
+					{
+						maxDrawId = record.DrawId;
+					}
+				}
+
+				_maxActiveDrawId = maxDrawId;
+				_maxActiveDrawIdDirty = false;
+			}
+
+			return (uint)(_maxActiveDrawId + 1);
 		}
 	}
 

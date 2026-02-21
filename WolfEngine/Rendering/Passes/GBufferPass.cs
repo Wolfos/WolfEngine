@@ -77,7 +77,24 @@ public static class GBufferPass
 		commandList.BindConstantBuffer(11, config.MaterialBuffer);
 		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
 		commandList.BindConstantBuffer(2, config.CameraBuffer);
-		commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, GpuDrawResources.MaxDrawCount);
+		if (commandList.BackendKind == GraphicsBackendKind.Metal &&
+		    config.VisibleDrawIdsBuffer is not null &&
+		    config.DrawExecutionRangeBuffer is not null)
+		{
+			commandList.ExecuteIndirectCommandBufferIndexed(
+				config.IndirectCommandBuffer,
+				config.VisibleDrawIdsBuffer,
+				0,
+				config.DrawExecutionRangeBuffer,
+				0);
+		}
+		else
+		{
+			var fallbackCount = config.FallbackMaxCommandCount == 0
+				? (uint)GpuDrawResources.MaxDrawCount
+				: config.FallbackMaxCommandCount;
+			commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, fallbackCount);
+		}
 
 		commandList.EndPass();
 	}

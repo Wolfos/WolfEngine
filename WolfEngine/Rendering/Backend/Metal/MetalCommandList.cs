@@ -396,7 +396,38 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		IGfxBuffer commandCountBuffer,
 		ulong commandCountOffsetBytes)
 	{
-		throw new NotSupportedException("Indexed indirect command buffer execution is not implemented for the Metal backend yet.");
+		ThrowIfDisposed();
+		if (commandBuffer is not MetalIndirectCommandBuffer metalCommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Metal backend.");
+		}
+
+		if (commandIndicesBuffer is not MetalBuffer metalIndicesBuffer)
+		{
+			throw new InvalidOperationException("Command indices buffer was not created by the Metal backend.");
+		}
+
+		if (commandCountBuffer is not MetalBuffer metalRangeBuffer)
+		{
+			throw new InvalidOperationException("Command count/range buffer was not created by the Metal backend.");
+		}
+		_ = indicesOffsetBytes;
+
+		EnsureRenderEncoder();
+		var referenced = metalCommandBuffer.GetReferencedBuffers();
+		for (var i = 0; i < referenced.Count; i++)
+		{
+			_renderEncoder.UseResource(referenced[i], MTLResourceUsage.Read);
+		}
+
+		// SharpMetal currently exposes indirect-range execution (range buffer) rather than index-list execution.
+		// The caller provides a two-uint execution range buffer: { start, length }.
+		_renderEncoder.UseResource(metalIndicesBuffer.Buffer, MTLResourceUsage.Read);
+		_renderEncoder.UseResource(metalRangeBuffer.Buffer, MTLResourceUsage.Read);
+		_renderEncoder.ExecuteCommandsInBuffer(
+			metalCommandBuffer.Buffer,
+			metalRangeBuffer.Buffer,
+			(nuint)commandCountOffsetBytes);
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)

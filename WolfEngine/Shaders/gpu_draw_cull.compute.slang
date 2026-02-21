@@ -78,7 +78,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint visibleDrawIndex;
     InterlockedAdd(g_DrawCount[0], 1, visibleDrawIndex);
     g_VisibleDrawIds[visibleDrawIndex] = drawId;
-    InterlockedMax(g_DrawExecutionRange[1], visibleDrawIndex + 1);
+    InterlockedMax(g_DrawExecutionRange[1], drawId + 1);
 
     args.indexCount = meshData.indexCount;
     args.instanceCount = 1;
