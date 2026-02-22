@@ -85,7 +85,9 @@ public class SceneBuilder : ISceneBuilder
 				metallicRoughnessTexture,
 				normalTexture,
 				emissiveTexture,
-				occlusionTexture);
+				occlusionTexture,
+				importedMaterial.AlphaMode,
+				importedMaterial.AlphaCutoff);
 
 			materials.Add(material);
 		}

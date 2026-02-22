@@ -70,6 +70,25 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 var metallicFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyMetallicFactor, 1.0f);
                 var roughnessFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyRoughnessFactor, 1.0f);
 
+                var aMode = GetMaterialString(assimp, material, "$mat.gltf.alphaMode", "OPAQUE");
+                var alphaCutoff = aMode == "MASK"
+                    ? GetMaterialFloat(assimp, material, "$mat.gltf.alphaCutoff", 0.5f)
+                    : 0.0f; // or ignore for non-MASK
+
+                AlphaMode alphaMode = AlphaMode.Opaque;
+                switch (aMode)
+                {
+                    case "OPAQUE":
+                        alphaMode = AlphaMode.Opaque;
+                        break;
+                    case "MASK":
+                        alphaMode = AlphaMode.AlphaTest;
+                        break;
+                    case "BLEND":
+                        alphaMode = AlphaMode.AlphaBlend;
+                        break;
+                }
+                
                 var baseColorTextureIndex = TryLoadMaterialTexture(
                     assimp,
                     material,
@@ -133,7 +152,10 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     NormalTextureIndex: normalTextureIndex,
                     MetallicRoughnessTextureIndex: metallicRoughnessTextureIndex,
                     OcclusionTextureIndex: occlusionTextureIndex,
-                    EmissiveTextureIndex: emissiveTextureIndex));
+                    EmissiveTextureIndex: emissiveTextureIndex,
+                    AlphaMode: alphaMode,
+                    AlphaCutoff: alphaCutoff
+                    ));
             }
 
             // Mesh data (geometry + material index)
@@ -232,6 +254,31 @@ public class ThreeDFileImporter : IThreeDFileImporter
             return defaultValue;
         }
         return Math.Clamp(value, 0.0f, 1.0f);
+    }
+
+    private static unsafe string GetMaterialString(
+        Assimp assimp,
+        AssimpMaterial* material,
+        string key,
+        string defaultValue,
+        uint type = 0,
+        uint index = 0)
+    {
+        AssimpString value = default;
+        var result = assimp.GetMaterialString(material, key, type, index, ref value);
+        return result == Return.Success ? value.AsString : defaultValue;
+    }
+    
+    private static unsafe int GetMaterialInt(Assimp assimp, AssimpMaterial* material, string key, int defaultValue)
+    {
+        int value = defaultValue;
+        uint max = 1;
+        var result = assimp.GetMaterialIntegerArray(material, key, 0, 0, ref value, ref max);
+        if (result != Return.Success || max == 0)
+        {
+            return defaultValue;
+        }
+        return value;
     }
 
     private unsafe int? TryLoadMaterialTexture(

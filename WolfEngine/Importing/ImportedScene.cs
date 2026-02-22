@@ -28,7 +28,9 @@ public record struct ImportedMaterial(
     int? NormalTextureIndex,
     int? MetallicRoughnessTextureIndex,
     int? OcclusionTextureIndex,
-    int? EmissiveTextureIndex
+    int? EmissiveTextureIndex,
+    TransparencyMode TransparencyMode,
+    float Cutoff
 );
 
 public record struct ImportedTexture(

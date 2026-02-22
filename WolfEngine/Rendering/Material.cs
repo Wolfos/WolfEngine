@@ -16,6 +16,7 @@ public sealed class Material
     }
 
     public string ShaderPath { get; }
+    
 
     public Vector4 Color { get; set; }
     public float MetallicFactor { get; set; } = 1.0f;
@@ -26,5 +27,15 @@ public sealed class Material
     public Texture EmissiveTexture { get; set; }
     public Texture OcclusionTexture { get; set; }
     
+    public AlphaMode AlphaMode { get; set; }
+    public float AlphaCutoff { get; set; }
+    
     internal IMaterialResources Resources { get; set; }
+}
+
+public enum AlphaMode
+{
+    Opaque,
+    AlphaTest,
+    AlphaBlend
 }

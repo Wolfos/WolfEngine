@@ -14,7 +14,9 @@ public interface IMaterialFactory
 		Texture metallicRoughnessTexture = null,
 		Texture normalTexture = null,
 		Texture emissiveTexture = null,
-		Texture occlusionTexture = null);
+		Texture occlusionTexture = null,
+		AlphaMode alphaMode = AlphaMode.Opaque,
+		float alphaCutoff = 0);
 }
 
 public class MaterialFactory : IMaterialFactory
@@ -37,22 +39,28 @@ public class MaterialFactory : IMaterialFactory
 		Texture metallicRoughnessTexture = null,
 		Texture normalTexture = null,
 		Texture emissiveTexture = null,
-		Texture occlusionTexture = null)
+		Texture occlusionTexture = null,
+		AlphaMode alphaMode = AlphaMode.Opaque,
+		float alphaCutoff = 0)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{
 			throw new ArgumentException("Shader path cannot be empty.", nameof(shader));
 		}
 
-		var material = new Material(shader);
-		material.Color = color;
-		material.MetallicFactor = metallicFactor;
-		material.RoughnessFactor = roughnessFactor;
-		material.AlbedoTexture = albedoTexture ?? _textureFactory.GetWhiteTexture();
-		material.MetallicRoughnessTexture = metallicRoughnessTexture ?? _textureFactory.GetWhiteTexture();
-		material.NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture();
-		material.EmissiveTexture = emissiveTexture ?? _textureFactory.GetBlackTexture();
-		material.OcclusionTexture = occlusionTexture ?? _textureFactory.GetWhiteTexture();
+		var material = new Material(shader)
+		{
+			Color = color,
+			MetallicFactor = metallicFactor,
+			RoughnessFactor = roughnessFactor,
+			AlbedoTexture = albedoTexture ?? _textureFactory.GetWhiteTexture(),
+			MetallicRoughnessTexture = metallicRoughnessTexture ?? _textureFactory.GetWhiteTexture(),
+			NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture(),
+			EmissiveTexture = emissiveTexture ?? _textureFactory.GetBlackTexture(),
+			OcclusionTexture = occlusionTexture ?? _textureFactory.GetWhiteTexture(),
+			AlphaMode = alphaMode,
+			AlphaCutoff = alphaCutoff
+		};
 		_renderGraph.EnsureMaterialResources(material);
 
 		return material;
