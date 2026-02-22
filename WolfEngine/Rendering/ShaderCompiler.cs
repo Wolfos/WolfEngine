@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using Slangc.NET;
@@ -7,6 +8,7 @@ namespace WolfEngine;
 public interface IShaderCompiler
 {
 	string GetMetalSource(string filename);
+	string GetMetalSource(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines);
 	string GetMetalComputeSource(string filename, string entryPoint);
 	byte[] GetDxil(string filename, string entryPoint, string profile);
 	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
@@ -14,7 +16,7 @@ public interface IShaderCompiler
 
 public class ShaderCompiler : IShaderCompiler
 {
-	private Dictionary<string, string> _cachedShaders = new();
+	private readonly Dictionary<string, string> _cachedShaders = new();
 	private Dictionary<(string file, string entry, string profile), byte[]> _cachedDxil = new();
 
 	private static string InjectArgumentBufferIds(string source)
@@ -36,12 +38,34 @@ public class ShaderCompiler : IShaderCompiler
 	
 	public string GetMetalSource(string filename)
 	{
+		return GetMetalSource(filename, "vertexShader", "fragmentShader");
+	}
+
+	public string GetMetalSource(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines)
+	{
 		if (string.IsNullOrWhiteSpace(filename))
 		{
 			throw new ArgumentException("Shader filename cannot be null or empty.", nameof(filename));
 		}
 
-		if (_cachedShaders.TryGetValue(filename, out var source)) return source;
+		if (string.IsNullOrWhiteSpace(vertexEntryPoint))
+		{
+			throw new ArgumentException("Vertex entry point cannot be null or empty.", nameof(vertexEntryPoint));
+		}
+
+		if (string.IsNullOrWhiteSpace(pixelEntryPoint))
+		{
+			throw new ArgumentException("Pixel entry point cannot be null or empty.", nameof(pixelEntryPoint));
+		}
+
+		var definesSuffix = defines is { Length: > 0 }
+			? string.Join(";", defines)
+			: string.Empty;
+		var cacheKey = $"{filename}|vs={vertexEntryPoint}|ps={pixelEntryPoint}|defs={definesSuffix}";
+		if (_cachedShaders.TryGetValue(cacheKey, out var source))
+		{
+			return source;
+		}
 
 		var shaderPath = Path.IsPathRooted(filename)
 			? filename
@@ -52,23 +76,37 @@ public class ShaderCompiler : IShaderCompiler
 			throw new FileNotFoundException($"Shader file '{shaderPath}' was not found.", shaderPath);
 		}
 
-		var args = new[]
+		var args = new List<string>
 		{
 			shaderPath,
 			"-target", "metal",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
-			"-entry", "vertexShader",
+			"-entry", vertexEntryPoint,
 			"-stage", "vertex",
-			"-entry", "fragmentShader",
+			"-entry", pixelEntryPoint,
 			"-stage", "fragment",
 			"-o", "-"
 		};
 
-		var compiled = SlangCompiler.Compile(args);
+		if (defines is { Length: > 0 })
+		{
+			for (var i = 0; i < defines.Length; i++)
+			{
+				if (string.IsNullOrWhiteSpace(defines[i]))
+				{
+					continue;
+				}
+
+				args.Add("-D");
+				args.Add(defines[i]);
+			}
+		}
+
+		var compiled = SlangCompiler.Compile(args.ToArray());
 		var metalSource = InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
 		DumpMetalSourceIfRequested(shaderPath, metalSource);
-		_cachedShaders.Add(filename, metalSource);
+		_cachedShaders.Add(cacheKey, metalSource);
 		return metalSource;
 	}
 	

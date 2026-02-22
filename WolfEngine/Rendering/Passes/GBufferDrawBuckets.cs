@@ -9,16 +9,19 @@ public readonly struct GBufferDrawBucketDefinition
 {
 	public GBufferDrawBucketDefinition(
 		string debugName,
-		string pixelEntryPoint,
+		string shaderVariant,
+		string preprocessorDefine,
 		params AlphaMode[] supportedAlphaModes)
 	{
 		DebugName = debugName;
-		PixelEntryPoint = pixelEntryPoint;
+		ShaderVariant = shaderVariant;
+		PreprocessorDefine = preprocessorDefine;
 		SupportedAlphaModes = supportedAlphaModes ?? Array.Empty<AlphaMode>();
 	}
 
 	public string DebugName { get; }
-	public string PixelEntryPoint { get; }
+	public string ShaderVariant { get; }
+	public string PreprocessorDefine { get; }
 	public AlphaMode[] SupportedAlphaModes { get; }
 }
 
@@ -28,12 +31,14 @@ public static class GBufferDrawBuckets
 	{
 		new GBufferDrawBucketDefinition(
 			"GBuffer.ExecuteOpaque",
-			"fragmentShader",
+			"Opaque",
+			string.Empty,
 			AlphaMode.Opaque,
 			AlphaMode.AlphaBlend),
 		new GBufferDrawBucketDefinition(
 			"GBuffer.ExecuteAlphaTest",
-			"fragmentShaderAlphaTest",
+			"AlphaTest",
+			"WOLF_ALPHA_CLIP",
 			AlphaMode.AlphaTest)
 	};
 

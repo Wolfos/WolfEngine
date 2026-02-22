@@ -322,7 +322,8 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		RenderTargetFormats renderTargets,
 		DepthStencilFormat depthStencil,
 		RenderStateDescriptor renderState,
-		GraphicsLayoutKind layout = GraphicsLayoutKind.Default)
+		GraphicsLayoutKind layout = GraphicsLayoutKind.Default,
+		string? shaderVariant = null)
 	{
 		PassKind = passKind;
 		VertexEntryPoint = vertexEntryPoint;
@@ -332,6 +333,7 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		DepthStencil = depthStencil;
 		RenderState = renderState;
 		Layout = layout;
+		ShaderVariant = shaderVariant;
 	}
 
 	public PassKind PassKind { get; }
@@ -350,6 +352,8 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 
 	public GraphicsLayoutKind Layout { get; }
 
+	public string? ShaderVariant { get; }
+
 	public bool Equals(PipelineKey other)
 	{
 		return PassKind == other.PassKind
@@ -359,6 +363,7 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 		       && RenderTargets.Equals(other.RenderTargets)
 		       && DepthStencil.Equals(other.DepthStencil)
 		       && Layout == other.Layout
+		       && ShaderVariant == other.ShaderVariant
 		       && RenderState.Equals(other.RenderState);
 	}
 
@@ -366,15 +371,17 @@ public readonly struct PipelineKey : IEquatable<PipelineKey>
 
 	public override int GetHashCode()
 	{
-		return HashCode.Combine(
-			PassKind,
-			VertexEntryPoint,
-			PixelEntryPoint,
-			ComputeEntryPoint,
-			RenderTargets,
-			DepthStencil,
-			RenderState,
-			Layout);
+		var hash = new HashCode();
+		hash.Add(PassKind);
+		hash.Add(VertexEntryPoint);
+		hash.Add(PixelEntryPoint);
+		hash.Add(ComputeEntryPoint);
+		hash.Add(RenderTargets);
+		hash.Add(DepthStencil);
+		hash.Add(RenderState);
+		hash.Add(Layout);
+		hash.Add(ShaderVariant);
+		return hash.ToHashCode();
 	}
 }
 

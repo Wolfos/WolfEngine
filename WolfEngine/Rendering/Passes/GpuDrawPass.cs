@@ -440,8 +440,6 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		var source = _shaderCompiler.GetMetalSource("gbuffer.slang");
-		var bytes = Encoding.UTF8.GetBytes(source);
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.Back,
@@ -456,10 +454,16 @@ public sealed class GpuDrawPass
 				continue;
 			}
 
+			var source = _shaderCompiler.GetMetalSource(
+				"gbuffer.slang",
+				"vertexShader",
+				"fragmentShader",
+				bucket.PreprocessorDefine);
+			var bytes = Encoding.UTF8.GetBytes(source);
 			var pipelineKey = new PipelineKey(
 				PassKind.Graphics,
 				vertexEntryPoint: "vertexShader",
-				pixelEntryPoint: bucket.PixelEntryPoint,
+				pixelEntryPoint: "fragmentShader",
 				computeEntryPoint: null,
 				renderTargets: new(new[]
 				{
@@ -470,7 +474,8 @@ public sealed class GpuDrawPass
 				}),
 				depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 				renderState: renderState,
-				layout: GraphicsLayoutKind.Material);
+				layout: GraphicsLayoutKind.Material,
+				shaderVariant: $"GBuffer:{bucket.ShaderVariant}");
 			_gpuDrawResources.SetGBufferPipeline(
 				i,
 				device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(bytes, bytes)));
