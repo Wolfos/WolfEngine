@@ -110,6 +110,144 @@ public class World
         AddTransform(entity, new LocalTransform(transform));
     }
 
+    public void SetParent(Entity child, Entity parent)
+    {
+        if (!parent.IsValid)
+        {
+            throw new ArgumentException("Parent entity must be valid.", nameof(parent));
+        }
+
+        if (child == parent)
+        {
+            throw new InvalidOperationException("An entity cannot be parented to itself.");
+        }
+
+        if (HasComponent<Parent>(child))
+        {
+            var currentParent = GetComponent<Parent>(child).Value;
+            if (currentParent == parent)
+            {
+                return;
+            }
+
+            RemoveParent(child);
+        }
+
+        if (HasComponent<Sibling>(child))
+        {
+            RemoveComponent<Sibling>(child);
+        }
+
+        AddComponent(child, new Parent { Value = parent });
+
+        if (HasComponent<Children>(parent))
+        {
+            ref var children = ref GetComponent<Children>(parent);
+            if (!children.First.IsValid)
+            {
+                children.First = child;
+            }
+            else
+            {
+                var current = children.First;
+                while (HasComponent<Sibling>(current))
+                {
+                    ref var currentSibling = ref GetComponent<Sibling>(current);
+                    if (!currentSibling.Next.IsValid)
+                    {
+                        currentSibling.Next = child;
+                        if (HasComponent<LocalTransform>(child))
+                        {
+                            MarkDirty(child);
+                        }
+
+                        return;
+                    }
+
+                    current = currentSibling.Next;
+                }
+
+                AddComponent(current, new Sibling { Next = child });
+            }
+        }
+        else
+        {
+            AddComponent(parent, new Children { First = child });
+        }
+
+        if (HasComponent<LocalTransform>(child))
+        {
+            MarkDirty(child);
+        }
+    }
+
+    public void RemoveParent(Entity child)
+    {
+        if (!HasComponent<Parent>(child))
+        {
+            if (HasComponent<Sibling>(child))
+            {
+                RemoveComponent<Sibling>(child);
+            }
+
+            return;
+        }
+
+        var parent = GetComponent<Parent>(child).Value;
+        if (HasComponent<Children>(parent))
+        {
+            ref var children = ref GetComponent<Children>(parent);
+            if (children.First == child)
+            {
+                var childNext = HasComponent<Sibling>(child) ? GetComponent<Sibling>(child).Next : default;
+                if (childNext.IsValid)
+                {
+                    children.First = childNext;
+                }
+                else
+                {
+                    RemoveComponent<Children>(parent);
+                }
+            }
+            else
+            {
+                var current = children.First;
+                while (current.IsValid && HasComponent<Sibling>(current))
+                {
+                    ref var currentSibling = ref GetComponent<Sibling>(current);
+                    if (currentSibling.Next == child)
+                    {
+                        var childNext = HasComponent<Sibling>(child) ? GetComponent<Sibling>(child).Next : default;
+                        if (childNext.IsValid)
+                        {
+                            currentSibling.Next = childNext;
+                        }
+                        else
+                        {
+                            RemoveComponent<Sibling>(current);
+                        }
+
+                        break;
+                    }
+
+                    current = currentSibling.Next;
+                }
+            }
+        }
+
+        RemoveComponent<Parent>(child);
+
+        if (HasComponent<Sibling>(child))
+        {
+            RemoveComponent<Sibling>(child);
+        }
+
+        if (HasComponent<LocalTransform>(child))
+        {
+            MarkDirty(child);
+        }
+    }
+
     public void MarkDirty(Entity entity)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(entity);

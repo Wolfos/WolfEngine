@@ -1,9 +1,9 @@
 import "draw_data.slang";
 
-#define WOLF_MAX_DRAW_COUNT 40000
-#define WOLF_MAX_INSTANCE_COUNT 40000
+#define WOLF_MAX_DRAW_COUNT 20000
+#define WOLF_MAX_INSTANCE_COUNT 20000
 #define WOLF_MAX_MATERIAL_COUNT 8192
-#define WOLF_MAX_MESH_COUNT 8192
+#define WOLF_MAX_MESH_COUNT 20000
 
 static const uint UPDATE_ADD = 0;
 static const uint UPDATE_REMOVE = 1;

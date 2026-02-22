@@ -9,10 +9,10 @@ namespace WolfEngine.Rendering;
 public sealed class GpuDrawResources : IDisposable
 {
 	public const int IndirectCommandBufferSlotCount = 4;
-	public const int MaxDrawCount = 40000;
-	public const int MaxInstanceCount = 40000;
+	public const int MaxDrawCount = 20000;
+	public const int MaxInstanceCount = 20000;
 	public const int MaxMaterialCount = 8192;
-	public const int MaxMeshCount = 8192;
+	public const int MaxMeshCount = 20000;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }

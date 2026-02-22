@@ -1,6 +1,5 @@
 using System.Numerics;
 using Silk.NET.Assimp;
-using WolfEngine.ECS;
 using File = System.IO.File;
 using AssimpTexture = Silk.NET.Assimp.Texture;
 using AssimpMaterial = Silk.NET.Assimp.Material;
@@ -47,12 +46,14 @@ public class ThreeDFileImporter : IThreeDFileImporter
             throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
         }
 
-        var meshes = new List<ImportedMesh>();
+        var rootNodes = new List<ImportedNode>();
         var materials = new List<ImportedMaterial>();
         var textures = new List<ImportedTexture>();
-        var meshData = new List<(Mesh mesh, int materialIndex)>();
+        var meshData = new List<(string meshName, Mesh mesh, int materialIndex)>();
         var textureLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var sceneName = scene->MRootNode->MName.AsString;
+        var sceneName = string.IsNullOrWhiteSpace(scene->MRootNode->MName.AsString)
+            ? Path.GetFileNameWithoutExtension(fullPath)
+            : scene->MRootNode->MName.AsString;
 
         try
         {
@@ -196,24 +197,27 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 }
 
                 var materialIndex = (int)mesh->MMaterialIndex;
+                var meshName = string.IsNullOrWhiteSpace(mesh->MName.AsString)
+                    ? $"Mesh_{meshIndex}"
+                    : mesh->MName.AsString;
                 var importedMesh = new Mesh(
                     vertices,
                     indexList,
                     rawNormals is not null ? normals : null,
                     hasTexCoords ? uvs : null,
                     tangents);
-                meshData.Add((importedMesh, materialIndex));
+                meshData.Add((meshName, importedMesh, materialIndex));
             }
 
-            // Traverse node graph to create placed meshes with transforms
-            TraverseNode(scene->MRootNode, scene, meshData, meshes);
+            // Traverse node graph to preserve hierarchy and local transforms.
+            BuildRootNodes(scene->MRootNode, meshData, rootNodes);
         }
         finally
         {
             assimp.ReleaseImport(scene);
         }
 
-        return new ImportedScene(sceneName, materials, textures, meshes);
+        return new ImportedScene(sceneName, materials, textures, rootNodes);
     }
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
@@ -387,18 +391,63 @@ public class ThreeDFileImporter : IThreeDFileImporter
             dest);
     }
 
-    private static unsafe void TraverseNode(
-        Node* node,
-        Scene* scene,
-        IReadOnlyList<(Mesh mesh, int materialIndex)> meshData,
-        List<ImportedMesh> output)
+    private static unsafe void BuildRootNodes(
+        Node* root,
+        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
+        List<ImportedNode> output)
     {
-        if (node is null)
+        if (root is null)
         {
             return;
         }
 
-        var localTransform = node->MTransformation;
+        if (ShouldTreatChildrenAsRoots(root))
+        {
+            for (var childIndex = 0; childIndex < root->MNumChildren; childIndex++)
+            {
+                var child = root->MChildren[childIndex];
+                if (child is null)
+                {
+                    continue;
+                }
+
+                output.Add(BuildNodeRecursive(
+                    child,
+                    meshData,
+                    $"Node_{childIndex}"));
+            }
+
+            return;
+        }
+
+        output.Add(BuildNodeRecursive(root, meshData, "Node_0"));
+    }
+
+    private static unsafe bool ShouldTreatChildrenAsRoots(Node* root)
+    {
+        if (root is null || root->MNumMeshes > 0 || root->MNumChildren == 0)
+        {
+            return false;
+        }
+
+        return IsApproximatelyIdentity(GetTransform(root->MTransformation));
+    }
+
+    private static unsafe ImportedNode BuildNodeRecursive(
+        Node* node,
+        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
+        string fallbackName)
+    {
+        if (node is null)
+        {
+            return new ImportedNode(
+                fallbackName,
+                Matrix4x4.Identity,
+                new List<ImportedNodeMesh>(),
+                new List<ImportedNode>());
+        }
+
+        var meshes = new List<ImportedNodeMesh>((int)node->MNumMeshes);
 
         for (var i = 0; i < node->MNumMeshes; i++)
         {
@@ -408,14 +457,48 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 continue;
             }
 
-            var (mesh, materialIndex) = meshData[meshIndex];
-            output.Add(new(node->MName.AsString, GetTransform(localTransform), mesh, materialIndex));
+            var (meshName, mesh, materialIndex) = meshData[meshIndex];
+            meshes.Add(new ImportedNodeMesh(meshName, mesh, materialIndex));
         }
 
+        var children = new List<ImportedNode>((int)node->MNumChildren);
         for (var childIndex = 0; childIndex < node->MNumChildren; childIndex++)
         {
-            TraverseNode(node->MChildren[childIndex], scene, meshData, output);
+            var child = node->MChildren[childIndex];
+            if (child is null)
+            {
+                continue;
+            }
+
+            children.Add(BuildNodeRecursive(
+                child,
+                meshData,
+                $"{fallbackName}_{childIndex}"));
         }
+
+        var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
+        return new ImportedNode(nodeName, GetTransform(node->MTransformation), meshes, children);
+    }
+
+    private static bool IsApproximatelyIdentity(Matrix4x4 matrix, float epsilon = 0.0001f)
+    {
+        return
+            MathF.Abs(matrix.M11 - 1.0f) <= epsilon &&
+            MathF.Abs(matrix.M22 - 1.0f) <= epsilon &&
+            MathF.Abs(matrix.M33 - 1.0f) <= epsilon &&
+            MathF.Abs(matrix.M44 - 1.0f) <= epsilon &&
+            MathF.Abs(matrix.M12) <= epsilon &&
+            MathF.Abs(matrix.M13) <= epsilon &&
+            MathF.Abs(matrix.M14) <= epsilon &&
+            MathF.Abs(matrix.M21) <= epsilon &&
+            MathF.Abs(matrix.M23) <= epsilon &&
+            MathF.Abs(matrix.M24) <= epsilon &&
+            MathF.Abs(matrix.M31) <= epsilon &&
+            MathF.Abs(matrix.M32) <= epsilon &&
+            MathF.Abs(matrix.M34) <= epsilon &&
+            MathF.Abs(matrix.M41) <= epsilon &&
+            MathF.Abs(matrix.M42) <= epsilon &&
+            MathF.Abs(matrix.M43) <= epsilon;
     }
 
     private static Matrix4x4 GetTransform(Matrix4x4 m)

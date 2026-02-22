@@ -1,5 +1,4 @@
 using System.Numerics;
-using WolfEngine.ECS;
 
 namespace WolfEngine.Importing;
 
@@ -14,10 +13,10 @@ public enum TextureSemantic
 }
 
 public record ImportedScene(
-    String Name,
+    string Name,
     List<ImportedMaterial> Materials,
     List<ImportedTexture> Textures,
-    List<ImportedMesh> Meshes
+    List<ImportedNode> RootNodes
 );
 
 public record struct ImportedMaterial(
@@ -41,9 +40,15 @@ public record struct ImportedTexture(
     byte[] PixelData
 );
 
-public record struct ImportedMesh(
+public record ImportedNode(
     string Name,
-    Matrix4x4 Transform,
+    Matrix4x4 LocalTransform,
+    List<ImportedNodeMesh> Meshes,
+    List<ImportedNode> Children
+);
+
+public record struct ImportedNodeMesh(
+    string Name,
     Mesh Mesh,
     int MaterialIndex
 );

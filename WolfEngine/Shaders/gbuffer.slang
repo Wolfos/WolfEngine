@@ -2,7 +2,7 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 40000
+#define WOLF_MAX_INSTANCE_COUNT 20000
 #define WOLF_MAX_MATERIAL_COUNT 8192
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);

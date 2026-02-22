@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.IO;
 using WolfEngine.ECS;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
@@ -30,9 +31,6 @@ public class SceneBuilder : ISceneBuilder
 	{
 		var importedScene = _fileImporter.Import(path);
 		var runtimeTextures = importedScene.Textures.Select(_textureFactory.GetTexture).ToList();
-
-		var parent = world.CreateEntity(importedScene.Name);
-		world.AddTransform(parent, Matrix4x4.Identity);
 
 		var materials = new List<Material>();
 		for (var i = 0; i < importedScene.Materials.Count; i++)
@@ -92,58 +90,118 @@ public class SceneBuilder : ISceneBuilder
 			materials.Add(material);
 		}
 
-		var entities = new List<Entity>();
-		foreach (var importedMesh in importedScene.Meshes)
+		if (importedScene.RootNodes.Count == 0)
 		{
-			try
+			return;
+		}
+
+		var entityCount = 0;
+		if (importedScene.RootNodes.Count == 1)
+		{
+			entityCount += CreateNodeEntity(importedScene.RootNodes[0], world, materials, null);
+		}
+		else
+		{
+			var sceneName = string.IsNullOrWhiteSpace(importedScene.Name)
+				? Path.GetFileNameWithoutExtension(path)
+				: importedScene.Name;
+			var wrapper = world.CreateEntity(sceneName);
+			world.AddTransform(wrapper, Matrix4x4.Identity);
+			entityCount++;
+
+			foreach (var rootNode in importedScene.RootNodes)
 			{
-				var entity = world.CreateEntity(importedMesh.Name);
-				var transform = importedMesh.Transform;
-
-				var material = materials[importedMesh.MaterialIndex];
-
-				_rendergraph.EnsureMeshResources(importedMesh.Mesh);
-				var meshRenderer = new MeshRenderer
-				{
-					Mesh = importedMesh.Mesh,
-					Material = material
-				};
-
-
-				world.AddTransform(entity, transform);
-				world.AddComponent(entity, meshRenderer);
-				var parentComponent = new Parent
-				{
-					Value = parent
-				};
-				world.AddComponent(entity, parentComponent);
-				entities.Add(entity);
-			}
-			catch (Exception e)
-			{
-				Console.Out.WriteLine($"Error importing object {importedMesh.Name}");
-				Console.Out.WriteLine(e.Message);
+				entityCount += CreateNodeEntity(rootNode, world, materials, wrapper);
 			}
 		}
 
-		if (entities.Count == 0) return;
+		if (entityCount == 0) return;
 
-		Console.Out.WriteLine($"Imported {entities.Count} entities");
+		Console.Out.WriteLine($"Imported {entityCount} entities");
+	}
 
-		var children = new Children
+	private int CreateNodeEntity(ImportedNode node, World world, IReadOnlyList<Material> materials, Entity? parent)
+	{
+		Entity nodeEntity;
+		try
 		{
-			First = entities.First()
-		};
-		world.AddComponent(parent, children);
-
-		for (int i = 0; i < entities.Count - 1; i++)
-		{
-			var sibling = new Sibling
+			nodeEntity = world.CreateEntity(node.Name);
+			if (parent is { } parentEntity)
 			{
-				Next = entities[i + 1]
-			};
+				world.SetParent(nodeEntity, parentEntity);
+			}
 
-			world.AddComponent(entities[i], sibling);
+			world.AddTransform(nodeEntity, node.LocalTransform);
+		}
+		catch (Exception e)
+		{
+			Console.Out.WriteLine($"Error importing node {node.Name}");
+			Console.Out.WriteLine(e.Message);
+			return 0;
+		}
+
+		var entityCount = 1;
+
+		if (node.Meshes.Count == 1)
+		{
+			TryAttachMeshRenderer(nodeEntity, node.Meshes[0], node.Name, world, materials);
+		}
+		else if (node.Meshes.Count > 1)
+		{
+			foreach (var meshNode in node.Meshes)
+			{
+				Entity meshEntity;
+				try
+				{
+					meshEntity = world.CreateEntity(meshNode.Name);
+					world.SetParent(meshEntity, nodeEntity);
+					world.AddTransform(meshEntity, Matrix4x4.Identity);
+				}
+				catch (Exception e)
+				{
+					Console.Out.WriteLine($"Error importing mesh node {meshNode.Name}");
+					Console.Out.WriteLine(e.Message);
+					continue;
+				}
+
+				entityCount++;
+				TryAttachMeshRenderer(meshEntity, meshNode, meshNode.Name, world, materials);
+			}
+		}
+
+		foreach (var child in node.Children)
+		{
+			entityCount += CreateNodeEntity(child, world, materials, nodeEntity);
+		}
+
+		return entityCount;
+	}
+
+	private void TryAttachMeshRenderer(
+		Entity entity,
+		ImportedNodeMesh importedMesh,
+		string ownerName,
+		World world,
+		IReadOnlyList<Material> materials)
+	{
+		try
+		{
+			if (importedMesh.MaterialIndex < 0 || importedMesh.MaterialIndex >= materials.Count)
+			{
+				throw new InvalidOperationException($"Material index {importedMesh.MaterialIndex} was out of range.");
+			}
+
+			_rendergraph.EnsureMeshResources(importedMesh.Mesh);
+			world.AddComponent(entity, new MeshRenderer
+			{
+				Mesh = importedMesh.Mesh,
+				Material = materials[importedMesh.MaterialIndex]
+			});
+		}
+		catch (Exception e)
+		{
+			Console.Out.WriteLine($"Error importing object {ownerName}");
+			Console.Out.WriteLine(e.Message);
 		}
 	}
 }
