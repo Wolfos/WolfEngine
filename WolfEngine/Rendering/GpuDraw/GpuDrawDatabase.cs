@@ -33,7 +33,6 @@ public sealed class GpuDrawDatabase
 		lock (_lock)
 		{
 			_syncStamp++;
-			_updates.Clear();
 		}
 	}
 
