@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
@@ -204,6 +205,25 @@ public sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
 		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketList = new List<GBufferExecutionBucket>(bucketDefinitions.Length);
+		var activeIndirectSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			var bucketDefinition = bucketDefinitions[i];
+			var pipeline = _gpuDrawResources.GetGBufferPipeline(i);
+			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, i);
+			if (pipeline is null || indirectCommandBuffer is null)
+			{
+				continue;
+			}
+
+			bucketList.Add(new GBufferExecutionBucket(
+				i,
+				bucketDefinition.DebugName,
+				pipeline,
+				indirectCommandBuffer));
+		}
 
 		var gbufferConfig = new GBufferPassConfig
 		{
@@ -222,13 +242,12 @@ public sealed class RenderGraphFrameBuilder
 			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
-			VisibleDrawIdsBuffer = _gpuDrawResources.VisibleDrawIdsBuffer,
-			DrawCountBuffer = _gpuDrawResources.DrawCountBuffer,
-			DrawExecutionRangeBuffer = _gpuDrawResources.DrawExecutionRangeBuffer,
+			VisibleDrawIdsPerBucketBuffer = _gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
+			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
+			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
+			Buckets = bucketList.ToArray(),
 			FallbackMaxCommandCount = _gpuDrawResources.ActiveDrawCommandUpperBound,
 			CameraBuffer = _gpuDrawResources.CameraBuffer,
-			GBufferPipeline = _gpuDrawResources.GBufferPipeline,
-			IndirectCommandBuffer = _gpuDrawResources.GBufferIndirectCommands,
 			SkyboxEnvironment = DescriptorHandle.Invalid,
 			SkyboxSampler = DescriptorHandle.Invalid
 		};

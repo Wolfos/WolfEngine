@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -51,52 +52,67 @@ public static class GBufferPass
 		cameraConstants[21] = 0.0f;
 		cameraConstants[22] = 0.0f;
 		cameraConstants[23] = 0.0f;
-		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
-		{
-			writableCameraBuffer.Write<float>(cameraConstants);
-		}
-		else
-		{
-			commandList.SetGraphicsConstants(2, MemoryMarshal.AsBytes(cameraConstants));
-		}
+		UploadCameraConstants(config, commandList, cameraConstants);
 
 		if (config.InstanceBuffer is null ||
 		    config.MaterialBuffer is null ||
 		    config.DrawArgsBuffer is null ||
-		    config.CameraBuffer is null ||
-		    config.GBufferPipeline is null ||
-		    config.IndirectCommandBuffer is null)
+		    config.CameraBuffer is null)
 		{
 			commandList.EndPass();
 			return;
 		}
 
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-		commandList.BindPipeline(config.GBufferPipeline);
 		commandList.BindConstantBuffer(10, config.InstanceBuffer);
 		commandList.BindConstantBuffer(11, config.MaterialBuffer);
 		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
 		commandList.BindConstantBuffer(2, config.CameraBuffer);
-		if (commandList.BackendKind == GraphicsBackendKind.Metal &&
-		    config.VisibleDrawIdsBuffer is not null &&
-		    config.DrawExecutionRangeBuffer is not null)
+		var buckets = config.Buckets.Span;
+		if (buckets.Length == 0)
 		{
-			commandList.ExecuteIndirectCommandBufferIndexed(
-				config.IndirectCommandBuffer,
-				config.VisibleDrawIdsBuffer,
-				0,
-				config.DrawExecutionRangeBuffer,
-				0);
+			commandList.EndPass();
+			return;
 		}
-		else
+
+		var fallbackCount = config.FallbackMaxCommandCount == 0
+			? (uint)GpuDrawResources.MaxDrawCount
+			: config.FallbackMaxCommandCount;
+		if (commandList.BackendKind != GraphicsBackendKind.Metal)
 		{
-			var fallbackCount = config.FallbackMaxCommandCount == 0
-				? (uint)GpuDrawResources.MaxDrawCount
-				: config.FallbackMaxCommandCount;
-			commandList.ExecuteIndirectCommandBuffer(config.IndirectCommandBuffer, fallbackCount);
+			var fallbackBucket = buckets[0];
+			commandList.BindPipeline(fallbackBucket.Pipeline);
+			commandList.ExecuteIndirectCommandBuffer(fallbackBucket.IndirectCommandBuffer, fallbackCount);
+
+			commandList.EndPass();
+			return;
+		}
+
+		for (var i = 0; i < buckets.Length; i++)
+		{
+			var bucket = buckets[i];
+			using (FrameProfiler.Instance.Measure(bucket.DebugName))
+			{
+				commandList.BindPipeline(bucket.Pipeline);
+				commandList.ExecuteIndirectCommandBuffer(bucket.IndirectCommandBuffer, (uint)GpuDrawResources.MaxDrawCount);
+			}
 		}
 
 		commandList.EndPass();
+	}
+
+	private static void UploadCameraConstants(
+		in GBufferPassConfig config,
+		IGfxCommandList commandList,
+		Span<float> cameraConstants)
+	{
+		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
+		{
+			writableCameraBuffer.Write<float>(cameraConstants);
+			return;
+		}
+
+		commandList.SetGraphicsConstants(2, MemoryMarshal.AsBytes(cameraConstants));
 	}
 
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)

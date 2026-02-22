@@ -29,25 +29,34 @@ public sealed class GpuDrawPass
 	private nint _lastBindlessSamplerBufferPtr;
 	private readonly ulong[] _slotAppliedVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _slotBindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly Dictionary<int, uint> _materialDrawFlags = new();
 	private int _activeIndirectSlot = -1;
 	private ulong _latestStructuralVersion;
 	private ulong _nextStructuralVersion = 1;
 	private uint _bindlessEpoch = 1;
 	private bool _loggedCapacityExceeded;
+	private bool _loggedUpdateOverflowRecovery;
+	private bool _gpuStateBootstrapPending = true;
+
+	private const uint DrawFlagActive = GpuDrawFlags.Active;
+	private const int DrawFlagBucketShift = GpuDrawFlags.BucketShift;
+	private const uint DrawFlagBucketMask = GpuDrawFlags.BucketMask;
 
 	private readonly struct StructuralCommandRecord
 	{
-		public StructuralCommandRecord(ulong version, GpuDrawUpdateType type, uint drawId, Mesh? mesh)
+		public StructuralCommandRecord(ulong version, GpuDrawUpdateType type, uint drawId, int bucketIndex, Mesh? mesh)
 		{
 			Version = version;
 			Type = type;
 			DrawId = drawId;
+			BucketIndex = bucketIndex;
 			Mesh = mesh;
 		}
 
 		public ulong Version { get; }
 		public GpuDrawUpdateType Type { get; }
 		public uint DrawId { get; }
+		public int BucketIndex { get; }
 		public Mesh? Mesh { get; }
 	}
 	
@@ -66,17 +75,21 @@ public sealed class GpuDrawPass
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
-		EnsureGBufferPipeline(device);
+		EnsureGBufferPipelines(device);
 		EnsureBindlessArgumentBuffersForGBuffer(device);
 
 		var activeSlot = AdvanceActiveIndirectSlot();
 		_gpuDrawResources.ActiveIndirectCommandSlot = activeSlot;
 		MetalDescriptorTable? metalTable = null;
-		MetalIndirectCommandBuffer? activeIndirectCommands = null;
+		MetalIndirectCommandBuffer[]? activeIndirectCommands = null;
+		var requireFullGpuStateRefresh = false;
 		if (device is MetalDevice && device.GlobalTable is MetalDescriptorTable table)
 		{
 			metalTable = table;
-			activeIndirectCommands = _gpuDrawResources.GetIndirectCommandBufferSlot(activeSlot) as MetalIndirectCommandBuffer;
+			if (TryGetSlotIndirectCommands(activeSlot, out var slotCommands))
+			{
+				activeIndirectCommands = slotCommands;
+			}
 			if (_renderer is WolfRendererMetal metalRenderer &&
 			    metalRenderer.ConsumePackedGeometryRefresh())
 			{
@@ -89,19 +102,20 @@ public sealed class GpuDrawPass
 				CacheBindlessPointers(table);
 			}
 
-			if (activeIndirectCommands is not null)
+			if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
 			{
-				if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch)
-				{
-					using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
+					if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch)
 					{
-						ReencodeAllIndirectCommands(table, activeIndirectCommands);
-					}
+						using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
+						{
+							ReencodeAllIndirectCommands(table, activeIndirectCommands);
+						}
+						requireFullGpuStateRefresh = true;
 
-					_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
-					_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
-					CompactStructuralReplayRecords();
-				}
+						_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
+						_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
+						CompactStructuralReplayRecords();
+					}
 				else
 				{
 					using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
@@ -113,6 +127,32 @@ public sealed class GpuDrawPass
 		}
 
 		_drawDatabase.ConsumeUpdates(_updates);
+		if (_gpuStateBootstrapPending)
+		{
+			var appended = AppendFullGpuStateRefreshUpdates(_updates);
+			if (appended > 0)
+			{
+				_gpuStateBootstrapPending = false;
+			}
+		}
+		if (requireFullGpuStateRefresh)
+		{
+			AppendFullGpuStateRefreshUpdates(_updates);
+		}
+
+		if (_updates.Count > GpuDrawResources.MaxDrawCount)
+		{
+			var droppedDeltaCount = _updates.Count;
+			_updates.Clear();
+			var rebuiltCount = AppendFullGpuStateRefreshUpdates(_updates);
+			if (_loggedUpdateOverflowRecovery == false)
+			{
+				_loggedUpdateOverflowRecovery = true;
+				Console.WriteLine(
+					$"GpuDraw: update backlog overflow ({droppedDeltaCount} > {GpuDrawResources.MaxDrawCount}); switched to full-state refresh ({rebuiltCount} updates).");
+			}
+		}
+
 		_gpuDrawResources.ActiveDrawCommandUpperBound = _drawDatabase.GetActiveDrawCommandUpperBound();
 		_updateData.Clear();
 
@@ -177,30 +217,37 @@ public sealed class GpuDrawPass
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
 			var baseColor = Vector4.One;
 			var metallicRoughness = Vector4.One;
+			var bucketIndex = 0;
+			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+			var alphaCutoff = 0.0f;
 
 			var materialResources = material?.Resources;
-			var hasPipelineMismatch = false;
-			if (materialResources?.Pipeline is IGfxPipeline materialPipeline)
+			if (material is not null)
 			{
-				if (_gpuDrawResources.GBufferPipeline is null)
+				bucketIndex = GetMaterialBucketIndex(material.AlphaMode);
+				switch (material.AlphaMode)
 				{
-					_gpuDrawResources.GBufferPipeline = materialPipeline;
+					case AlphaMode.AlphaTest:
+						alphaCutoff = Math.Clamp(material.AlphaCutoff, 0.0f, 1.0f);
+						break;
 				}
-				else if (ReferenceEquals(_gpuDrawResources.GBufferPipeline, materialPipeline) == false)
-				{
-					hasPipelineMismatch = true;
-					Console.WriteLine(
-						$"GpuDraw: material pipeline mismatch for drawId={update.DrawId}, matId={update.MaterialId}. Using error material.");
-					materialResources = null;
-				}
+
+				drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+				_materialDrawFlags[update.MaterialId] = drawFlags;
+			}
+			else if (update.Type != GpuDrawUpdateType.Remove &&
+			         _materialDrawFlags.TryGetValue(update.MaterialId, out var cachedFlags))
+			{
+				drawFlags = cachedFlags;
+				bucketIndex = (int)((cachedFlags >> DrawFlagBucketShift) & DrawFlagBucketMask);
 			}
 
 			if (activeIndirectCommands is not null &&
 			    metalTable is not null &&
 			    IsStructuralUpdateType(update.Type) &&
-			    ApplyStructuralUpdate(update, mesh, metalTable, activeIndirectCommands))
+			    ApplyStructuralUpdate(update, mesh, metalTable, activeIndirectCommands, bucketIndex))
 			{
-				AppendStructuralRecord(update, mesh);
+				AppendStructuralRecord(update, mesh, bucketIndex);
 			}
 
 			if (materialResources is not null)
@@ -224,46 +271,34 @@ public sealed class GpuDrawPass
 					? materialResources.Sampler.Value
 					: _bindlessRegistry.ErrorSamplerHandle.Value;
 				baseColor = material!.Color;
-				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, 0, 0);
-			}
-			else if (hasPipelineMismatch)
-			{
-				baseColor = new Vector4(1.0f, 0.0f, 1.0f, 1.0f);
-				metallicRoughness = new Vector4(0.0f, 1.0f, 1.0f, 0.0f);
+				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, alphaCutoff, 0.0f);
 			}
 
-			if ((albedoHandle >> 30) != 0 || (mrHandle >> 30) != 0 ||
-			    (normalHandle >> 30) != 0 || (occlusionHandle >> 30) != 0 ||
-			    (emissiveHandle >> 30) != 0 || (samplerHandle >> 30) != 3)
-			{
-				Console.WriteLine($"Bindless handle kind mismatch (drawId {update.DrawId}, matId {update.MaterialId}): " +
-				                  $"A={albedoHandle} MR={mrHandle} N={normalHandle} O={occlusionHandle} E={emissiveHandle} S={samplerHandle}");
-			}
-
-			_updateData.Add(new GpuDrawUpdateData(
-				update.World,
-				update.BoundsCenterRadius,
-				baseColor,
+				_updateData.Add(new GpuDrawUpdateData(
+					update.World,
+					update.BoundsCenterRadius,
+					baseColor,
 				metallicRoughness,
 				(uint)update.Type,
 				(uint)update.DrawId,
-				(uint)update.InstanceId,
-				(uint)update.MeshId,
-				(uint)update.MaterialId,
-				vertexHandle,
-				indexHandle,
-				indexCount,
+					(uint)update.InstanceId,
+					(uint)update.MeshId,
+					(uint)update.MaterialId,
+					drawFlags,
+					vertexHandle,
+					indexHandle,
+					indexCount,
 				indexFormat,
 				baseVertex,
 				albedoHandle,
 				mrHandle,
 				normalHandle,
-				occlusionHandle,
+					occlusionHandle,
 				emissiveHandle,
-				samplerHandle));
-		}
+					samplerHandle));
+			}
 
-		if (activeIndirectCommands is not null)
+		if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
 		{
 			_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
 			CompactStructuralReplayRecords();
@@ -278,23 +313,26 @@ public sealed class GpuDrawPass
 
 		var pipeline = EnsureUpdatePipeline(device);
 		var commandList = context.CommandList;
-		commandList.BindPipeline(pipeline);
+		using (FrameProfiler.Instance.Measure("GpuDraw.Update"))
+		{
+			commandList.BindPipeline(pipeline);
 
-		Span<uint> updateParams = stackalloc uint[4];
-		updateParams[0] = (uint)_updateData.Count;
-		updateParams[1] = 0;
-		updateParams[2] = 0;
-		updateParams[3] = 0;
-		commandList.SetComputeConstants(5, MemoryMarshal.AsBytes(updateParams));
+			Span<uint> updateParams = stackalloc uint[4];
+			updateParams[0] = (uint)_updateData.Count;
+			updateParams[1] = 0;
+			updateParams[2] = 0;
+			updateParams[3] = 0;
+			commandList.SetComputeConstants(5, MemoryMarshal.AsBytes(updateParams));
 
-		commandList.SetComputeBuffer(0, _gpuDrawResources.UpdateBuffer!);
-		commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
-		commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialBuffer!);
-		commandList.SetComputeBuffer(3, _gpuDrawResources.MeshBuffer!);
-		commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCommandBuffer!);
+			commandList.SetComputeBuffer(0, _gpuDrawResources.UpdateBuffer!);
+			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
+			commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialBuffer!);
+			commandList.SetComputeBuffer(3, _gpuDrawResources.MeshBuffer!);
+			commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCommandBuffer!);
 
-		var groupCount = (uint)((_updateData.Count + 63) / 64);
-		commandList.Dispatch(groupCount, 1, 1);
+			var groupCount = (uint)((_updateData.Count + 63) / 64);
+			commandList.Dispatch(groupCount, 1, 1);
+		}
 	}
 
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
@@ -303,47 +341,57 @@ public sealed class GpuDrawPass
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
 
-		Span<uint> reset = stackalloc uint[1];
-		reset[0] = 0;
-		WriteBuffer<uint>(_gpuDrawResources.DrawCountBuffer!, reset, "DrawCountBuffer");
+		var bucketCount = GBufferDrawBuckets.Definitions.Length;
+		if ((uint)bucketCount > (DrawFlagBucketMask + 1))
+		{
+			throw new InvalidOperationException(
+				$"Configured bucket count {bucketCount} exceeds encoded bucket capacity {DrawFlagBucketMask + 1}.");
+		}
+		Span<uint> resetCounts = stackalloc uint[bucketCount];
+		resetCounts.Clear();
+		WriteBuffer<uint>(_gpuDrawResources.DrawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
 
-		Span<uint> resetRange = stackalloc uint[2];
-		resetRange[0] = 0;
-		resetRange[1] = 0;
-		WriteBuffer<uint>(_gpuDrawResources.DrawExecutionRangeBuffer!, resetRange, "DrawExecutionRangeBuffer");
+		Span<uint> resetRanges = stackalloc uint[bucketCount * 2];
+		resetRanges.Clear();
+		WriteBuffer<uint>(_gpuDrawResources.DrawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
 
 		var pipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
-		commandList.BindPipeline(pipeline);
-
-		Span<Vector4> planes = stackalloc Vector4[6];
-		ExtractFrustumPlanes(sceneData.ViewProjection, planes);
-
-		var cullParams = new CullParams
+		using (FrameProfiler.Instance.Measure("GpuDraw.Cull"))
 		{
-			Plane0 = planes[0],
-			Plane1 = planes[1],
-			Plane2 = planes[2],
-			Plane3 = planes[3],
-			Plane4 = planes[4],
-			Plane5 = planes[5],
-			CameraPositionAndMaxDrawCount = new Vector4(
-				sceneData.CameraOrigin,
-				GpuDrawResources.MaxDrawCount)
-		};
+			commandList.BindPipeline(pipeline);
 
-		commandList.SetComputeConstants(7, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref cullParams, 1)));
+			Span<Vector4> planes = stackalloc Vector4[6];
+			ExtractFrustumPlanes(sceneData.ViewProjection, planes);
 
-		commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
-		commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
-		commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
-		commandList.SetComputeBuffer(3, _gpuDrawResources.DrawArgsBuffer!);
-		commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCountBuffer!);
-		commandList.SetComputeBuffer(5, _gpuDrawResources.VisibleDrawIdsBuffer!);
-		commandList.SetComputeBuffer(6, _gpuDrawResources.DrawExecutionRangeBuffer!);
+			var cullParams = new CullParams
+			{
+				Plane0 = planes[0],
+				Plane1 = planes[1],
+				Plane2 = planes[2],
+				Plane3 = planes[3],
+				Plane4 = planes[4],
+				Plane5 = planes[5],
+				CameraPositionAndMaxDrawCount = new Vector4(
+					sceneData.CameraOrigin,
+					GpuDrawResources.MaxDrawCount),
+				BucketCount = (uint)bucketCount
+			};
 
-		var groupCount = (uint)((GpuDrawResources.MaxDrawCount + 63) / 64);
-		commandList.Dispatch(groupCount, 1, 1);
+			commandList.SetComputeConstants(7, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref cullParams, 1)));
+
+			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
+			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
+			commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
+			commandList.SetComputeBuffer(3, _gpuDrawResources.DrawArgsBuffer!);
+			commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCountPerBucketBuffer!);
+			commandList.SetComputeBuffer(5, _gpuDrawResources.VisibleDrawIdsPerBucketBuffer!);
+			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawExecutionRangePerBucketBuffer!);
+
+			var groupCount = (uint)((GpuDrawResources.MaxDrawCount + 63) / 64);
+			commandList.Dispatch(groupCount, 1, 1);
+		}
+
 	}
 
 	private IGfxPipeline EnsureUpdatePipeline(IGfxDevice device)
@@ -374,9 +422,20 @@ public sealed class GpuDrawPass
 		return _cullPipeline;
 	}
 
-	private void EnsureGBufferPipeline(IGfxDevice device)
+	private void EnsureGBufferPipelines(IGfxDevice device)
 	{
-		if (_gpuDrawResources.GBufferPipeline is not null)
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var allPipelinesReady = true;
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			if (_gpuDrawResources.GetGBufferPipeline(i) is null)
+			{
+				allPipelinesReady = false;
+				break;
+			}
+		}
+
+		if (allPipelinesReady)
 		{
 			return;
 		}
@@ -389,22 +448,33 @@ public sealed class GpuDrawPass
 			depthTestEnabled: true,
 			depthWriteEnabled: true,
 			BlendMode.Opaque);
-		var pipelineKey = new PipelineKey(
-			PassKind.Graphics,
-			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
-			computeEntryPoint: null,
-			renderTargets: new(new[]
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			var bucket = bucketDefinitions[i];
+			if (_gpuDrawResources.GetGBufferPipeline(i) is not null)
 			{
-				TextureFormat.Bgra8Unorm,
-				TextureFormat.Rgba16Float,
-				TextureFormat.Rgba8Unorm,
-				TextureFormat.Rgba8Unorm
-			}),
-			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
-			renderState: renderState,
-			layout: GraphicsLayoutKind.Material);
-		_gpuDrawResources.GBufferPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(bytes, bytes));
+				continue;
+			}
+
+			var pipelineKey = new PipelineKey(
+				PassKind.Graphics,
+				vertexEntryPoint: "vertexShader",
+				pixelEntryPoint: bucket.PixelEntryPoint,
+				computeEntryPoint: null,
+				renderTargets: new(new[]
+				{
+					TextureFormat.Bgra8Unorm,
+					TextureFormat.Rgba16Float,
+					TextureFormat.Rgba8Unorm,
+					TextureFormat.Rgba8Unorm
+				}),
+				depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
+				renderState: renderState,
+				layout: GraphicsLayoutKind.Material);
+			_gpuDrawResources.SetGBufferPipeline(
+				i,
+				device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(bytes, bytes)));
+		}
 	}
 
 	private static void WriteBuffer<T>(IGfxBuffer buffer, ReadOnlySpan<T> data, string bufferName) where T : unmanaged
@@ -431,7 +501,8 @@ public sealed class GpuDrawPass
 		in GpuDrawUpdate update,
 		Mesh? mesh,
 		MetalDescriptorTable table,
-		MetalIndirectCommandBuffer indirectCommands)
+		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands,
+		int bucketIndex)
 	{
 		if (IsStructuralUpdateType(update.Type) == false)
 		{
@@ -446,20 +517,35 @@ public sealed class GpuDrawPass
 		var commandIndex = (uint)update.DrawId;
 		if (update.Type == GpuDrawUpdateType.Remove)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
 			return true;
 		}
 
 		if (mesh is null)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
 			return true;
 		}
 
-		_renderer.EnsureMeshResources(mesh);
-		if (TryEncodeIndirectCommand(commandIndex, mesh, table, indirectCommands) == false)
+		if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			bucketIndex = 0;
+		}
+
+		_renderer.EnsureMeshResources(mesh);
+		for (var i = 0; i < indirectCommands.Count; i++)
+		{
+			if (i == bucketIndex)
+			{
+				if (TryEncodeIndirectCommand(commandIndex, mesh, table, indirectCommands[i]) == false)
+				{
+					indirectCommands[i].ResetCommand(commandIndex);
+				}
+			}
+			else
+			{
+				indirectCommands[i].ResetCommand(commandIndex);
+			}
 		}
 
 		return true;
@@ -468,7 +554,7 @@ public sealed class GpuDrawPass
 	private void ReplayPendingStructuralRecords(
 		int slotIndex,
 		MetalDescriptorTable table,
-		MetalIndirectCommandBuffer indirectCommands)
+		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
 	{
 		var appliedVersion = _slotAppliedVersions[slotIndex];
 		if (_latestStructuralVersion <= appliedVersion)
@@ -493,7 +579,7 @@ public sealed class GpuDrawPass
 	private void ApplyStructuralRecord(
 		in StructuralCommandRecord record,
 		MetalDescriptorTable table,
-		MetalIndirectCommandBuffer indirectCommands)
+		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
 	{
 		if (record.DrawId == 0 || record.DrawId >= GpuDrawResources.MaxDrawCount)
 		{
@@ -503,28 +589,44 @@ public sealed class GpuDrawPass
 		var commandIndex = record.DrawId;
 		if (record.Type == GpuDrawUpdateType.Remove)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
 			return;
 		}
 
 		if (record.Mesh is null)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
 			return;
 		}
 
-		_renderer.EnsureMeshResources(record.Mesh);
-		if (TryEncodeIndirectCommand(commandIndex, record.Mesh, table, indirectCommands) == false)
+		var bucketIndex = record.BucketIndex;
+		if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
 		{
-			indirectCommands.ResetCommand(commandIndex);
+			bucketIndex = 0;
+		}
+
+		_renderer.EnsureMeshResources(record.Mesh);
+		for (var i = 0; i < indirectCommands.Count; i++)
+		{
+			if (i == bucketIndex)
+			{
+				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, table, indirectCommands[i]) == false)
+				{
+					indirectCommands[i].ResetCommand(commandIndex);
+				}
+			}
+			else
+			{
+				indirectCommands[i].ResetCommand(commandIndex);
+			}
 		}
 	}
 
-	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh)
+	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, int bucketIndex)
 	{
 		var version = _nextStructuralVersion++;
 		var type = update.Type == GpuDrawUpdateType.Remove ? GpuDrawUpdateType.Remove : update.Type;
-		_structuralReplayRecords.Add(new StructuralCommandRecord(version, type, (uint)update.DrawId, mesh));
+		_structuralReplayRecords.Add(new StructuralCommandRecord(version, type, (uint)update.DrawId, bucketIndex, mesh));
 		_latestStructuralVersion = version;
 	}
 
@@ -556,7 +658,14 @@ public sealed class GpuDrawPass
 
 	private void EnsureBindlessArgumentBuffersForGBuffer(IGfxDevice device)
 	{
-		if (_gpuDrawResources.GBufferPipeline is not MetalPipeline metalPipeline ||
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		if (bucketDefinitions.Length == 0)
+		{
+			return;
+		}
+
+		var primaryPipeline = _gpuDrawResources.GetGBufferPipeline(0);
+		if (primaryPipeline is not MetalPipeline metalPipeline ||
 		    device.GlobalTable is not MetalDescriptorTable metalTable)
 		{
 			return;
@@ -584,11 +693,14 @@ public sealed class GpuDrawPass
 		_lastBindlessSamplerBufferPtr = table.SamplerArgumentBuffer.NativePtr;
 	}
 
-	private void ReencodeAllIndirectCommands(MetalDescriptorTable table, MetalIndirectCommandBuffer indirectCommands)
+	private void ReencodeAllIndirectCommands(MetalDescriptorTable table, IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
 	{
-		for (var i = 1u; i < GpuDrawResources.MaxDrawCount; i++)
+		for (var bucketIndex = 0; bucketIndex < indirectCommands.Count; bucketIndex++)
 		{
-			indirectCommands.ResetCommand(i);
+			for (var i = 1u; i < GpuDrawResources.MaxDrawCount; i++)
+			{
+				indirectCommands[bucketIndex].ResetCommand(i);
+			}
 		}
 
 		_drawDatabase.CollectDrawEntries(_drawEntries);
@@ -601,7 +713,45 @@ public sealed class GpuDrawPass
 			}
 
 			_renderer.EnsureMeshResources(entry.Mesh);
-			TryEncodeIndirectCommand((uint)entry.DrawId, entry.Mesh, table, indirectCommands);
+			var bucketIndex = GetMaterialBucketIndex(entry.Material.AlphaMode);
+			if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
+			{
+				bucketIndex = 0;
+			}
+
+			TryEncodeIndirectCommand((uint)entry.DrawId, entry.Mesh, table, indirectCommands[bucketIndex]);
+		}
+	}
+
+	private bool TryGetSlotIndirectCommands(int slotIndex, out MetalIndirectCommandBuffer[] commandBuffers)
+	{
+		commandBuffers = Array.Empty<MetalIndirectCommandBuffer>();
+		var bucketCount = GBufferDrawBuckets.BucketCount;
+		if (bucketCount <= 0)
+		{
+			return false;
+		}
+
+		var resolved = new MetalIndirectCommandBuffer[bucketCount];
+		for (var i = 0; i < bucketCount; i++)
+		{
+			if (_gpuDrawResources.GetIndirectCommandBufferSlot(slotIndex, i) is not MetalIndirectCommandBuffer commandBuffer)
+			{
+				return false;
+			}
+
+			resolved[i] = commandBuffer;
+		}
+
+		commandBuffers = resolved;
+		return true;
+	}
+
+	private static void ResetCommandAcrossBuckets(uint commandIndex, IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
+	{
+		for (var i = 0; i < indirectCommands.Count; i++)
+		{
+			indirectCommands[i].ResetCommand(commandIndex);
 		}
 	}
 
@@ -611,7 +761,9 @@ public sealed class GpuDrawPass
 		MetalDescriptorTable table,
 		MetalIndirectCommandBuffer indirectCommands)
 	{
-		if (_gpuDrawResources.GBufferPipeline is null ||
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		if (bucketDefinitions.Length == 0 ||
+		    _gpuDrawResources.GetGBufferPipeline(0) is null ||
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
 		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
@@ -678,6 +830,55 @@ public sealed class GpuDrawPass
 		return plane * invLength;
 	}
 
+	private static uint CreateDrawFlags(int bucketIndex)
+	{
+		return DrawFlagActive | ((uint)bucketIndex & DrawFlagBucketMask) << DrawFlagBucketShift;
+	}
+
+	private static int GetMaterialBucketIndex(AlphaMode alphaMode)
+	{
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		if (bucketDefinitions.Length == 0)
+		{
+			return 0;
+		}
+
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			var supportedModes = bucketDefinitions[i].SupportedAlphaModes;
+			for (var modeIndex = 0; modeIndex < supportedModes.Length; modeIndex++)
+			{
+				if (supportedModes[modeIndex] == alphaMode)
+				{
+					return i;
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	private int AppendFullGpuStateRefreshUpdates(List<GpuDrawUpdate> destination)
+	{
+		var initialCount = destination.Count;
+		_drawDatabase.CollectDrawEntries(_drawEntries);
+		for (var i = 0; i < _drawEntries.Count; i++)
+		{
+			var entry = _drawEntries[i];
+			destination.Add(GpuDrawUpdate.CreateAdd(
+				entry.DrawId,
+				entry.InstanceId,
+				entry.MeshId,
+				entry.MaterialId,
+				entry.World,
+				entry.BoundsCenterRadius,
+				entry.Mesh,
+				entry.Material));
+		}
+
+		return destination.Count - initialCount;
+	}
+
 	private void LogCapacityExceededOnce(in GpuDrawUpdate update)
 	{
 		if (_loggedCapacityExceeded)
@@ -700,5 +901,9 @@ public sealed class GpuDrawPass
 		public Vector4 Plane4;
 		public Vector4 Plane5;
 		public Vector4 CameraPositionAndMaxDrawCount;
+		public uint BucketCount;
+		public uint Pad0;
+		public uint Pad1;
+		public uint Pad2;
 	}
 }

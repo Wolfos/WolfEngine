@@ -1,9 +1,26 @@
 #nullable enable
 
+using System;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
+
+public readonly struct GBufferExecutionBucket
+{
+    public GBufferExecutionBucket(int bucketIndex, string debugName, IGfxPipeline pipeline, IGfxIndirectCommandBuffer indirectCommandBuffer)
+    {
+        BucketIndex = bucketIndex;
+        DebugName = debugName;
+        Pipeline = pipeline;
+		IndirectCommandBuffer = indirectCommandBuffer;
+    }
+
+    public int BucketIndex { get; }
+    public string DebugName { get; }
+    public IGfxPipeline Pipeline { get; }
+	public IGfxIndirectCommandBuffer IndirectCommandBuffer { get; }
+}
 
 /// <summary>
 /// Describes the API-agnostic parameters required to record the G-buffer pass.
@@ -48,15 +65,13 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? CameraBuffer { get; set; }
 
-	public IGfxPipeline? GBufferPipeline { get; set; }
+	public IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; set; }
 
-	public IGfxIndirectCommandBuffer? IndirectCommandBuffer { get; set; }
+	public IGfxBuffer? DrawCountPerBucketBuffer { get; set; }
 
-	public IGfxBuffer? VisibleDrawIdsBuffer { get; set; }
+	public IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; set; }
 
-	public IGfxBuffer? DrawCountBuffer { get; set; }
-
-	public IGfxBuffer? DrawExecutionRangeBuffer { get; set; }
+	public ReadOnlyMemory<GBufferExecutionBucket> Buckets { get; set; }
 
 	public uint FallbackMaxCommandCount { get; set; }
 }

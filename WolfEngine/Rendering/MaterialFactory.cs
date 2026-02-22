@@ -16,7 +16,7 @@ public interface IMaterialFactory
 		Texture emissiveTexture = null,
 		Texture occlusionTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
-		float alphaCutoff = 0);
+		float alphaCutoff = 0.5f);
 }
 
 public class MaterialFactory : IMaterialFactory
@@ -41,7 +41,7 @@ public class MaterialFactory : IMaterialFactory
 		Texture emissiveTexture = null,
 		Texture occlusionTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
-		float alphaCutoff = 0)
+		float alphaCutoff = 0.5f)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{

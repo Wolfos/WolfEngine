@@ -5,6 +5,13 @@ using System.Runtime.InteropServices;
 
 namespace WolfEngine.Rendering;
 
+public static class GpuDrawFlags
+{
+	public const uint Active = 1u << 0;
+	public const int BucketShift = 1;
+	public const uint BucketMask = 0x7FFFFFFFu;
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuInstanceData
 {
@@ -20,8 +27,7 @@ public readonly struct GpuInstanceData
 public readonly struct GpuMaterialData
 {
 	public readonly Vector4 BaseColor;
-	public readonly Vector2 MetallicRoughness;
-	private readonly Vector2 _padding;
+	public readonly Vector4 MetallicRoughness;
 	public readonly uint AlbedoHandle;
 	public readonly uint MetallicRoughnessHandle;
 	public readonly uint NormalHandle;
@@ -77,6 +83,7 @@ public readonly struct GpuDrawUpdateData
 		uint instanceId,
 		uint meshId,
 		uint materialId,
+		uint drawFlags,
 		uint vertexBufferHandle,
 		uint indexBufferHandle,
 		uint indexCount,
@@ -98,6 +105,7 @@ public readonly struct GpuDrawUpdateData
 		InstanceId = instanceId;
 		MeshId = meshId;
 		MaterialId = materialId;
+		DrawFlags = drawFlags;
 		VertexBufferHandle = vertexBufferHandle;
 		IndexBufferHandle = indexBufferHandle;
 		IndexCount = indexCount;
@@ -108,7 +116,10 @@ public readonly struct GpuDrawUpdateData
 		NormalHandle = normalHandle;
 		OcclusionHandle = occlusionHandle;
 		EmissiveHandle = emissiveHandle;
-		SamplerHandle = samplerHandle; 
+		SamplerHandle = samplerHandle;
+		_pad0 = 0;
+		_pad1 = 0;
+		_pad2 = 0;
 	}
 
 	public readonly Matrix4x4 World;
@@ -120,6 +131,7 @@ public readonly struct GpuDrawUpdateData
 	public readonly uint InstanceId;
 	public readonly uint MeshId;
 	public readonly uint MaterialId;
+	public readonly uint DrawFlags;
 	public readonly uint VertexBufferHandle;
 	public readonly uint IndexBufferHandle;
 	public readonly uint IndexCount;
@@ -131,4 +143,7 @@ public readonly struct GpuDrawUpdateData
 	public readonly uint OcclusionHandle;
 	public readonly uint EmissiveHandle;
 	public readonly uint SamplerHandle;
+	private readonly uint _pad0;
+	private readonly uint _pad1;
+	private readonly uint _pad2;
 }

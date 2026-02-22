@@ -64,6 +64,7 @@ struct GpuDrawUpdateData
     uint32_t instanceId;
     uint32_t meshId;
     uint32_t materialId;
+    uint32_t drawFlags;
     uint32_t vertexBufferHandle;
     uint32_t indexBufferHandle;
     uint32_t indexCount;
@@ -75,4 +76,7 @@ struct GpuDrawUpdateData
     uint32_t occlusionHandle;
     uint32_t emissiveHandle;
     uint32_t samplerHandle;
+    uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
 };

@@ -10,6 +10,7 @@ static const uint UPDATE_REMOVE = 1;
 static const uint UPDATE_TRANSFORM = 2;
 static const uint UPDATE_MATERIAL = 3;
 static const uint UPDATE_MESH = 4;
+static const uint DRAW_FLAG_ACTIVE = 1;
 
 cbuffer UpdateParams : register(b5)
 {
@@ -57,7 +58,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
     instanceData.boundsCenterRadius = update.boundsCenterRadius;
     instanceData.materialId = update.materialId;
     instanceData.meshId = update.meshId;
-    instanceData.flags = 1;
+    instanceData.flags = update.drawFlags;
     instanceData.pad0 = 0;
     g_InstanceTable[update.instanceId] = instanceData;
 
@@ -94,7 +95,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
     GpuDrawCommand drawCommand;
     drawCommand.instanceId = update.instanceId;
     drawCommand.drawId = update.drawId;
-    drawCommand.flags = 1;
+    drawCommand.flags = update.drawFlags | DRAW_FLAG_ACTIVE;
     drawCommand.pad0 = 0;
     g_DrawCommands[update.drawId] = drawCommand;
 }
