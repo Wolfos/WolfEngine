@@ -59,6 +59,8 @@ public sealed class TransparentForwardPass
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
 			CameraBuffer = gpuDrawResources.CameraBuffer,
+			TransparentEnvironmentBuffer = gpuDrawResources.TransparentEnvironmentBuffer,
+			TransparentLightingBuffer = gpuDrawResources.TransparentLightingBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
 			VisibleDrawIdsPerBucketBuffer = gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
@@ -108,7 +110,6 @@ public sealed class TransparentForwardPass
 		textureHandles[5] = 0;
 		textureHandles[6] = 0;
 		textureHandles[7] = 0;
-		commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		Span<ShaderLight> shaderLights = stackalloc ShaderLight[MaxLights];
 		shaderLights.Clear();
@@ -134,15 +135,29 @@ public sealed class TransparentForwardPass
 			};
 		}
 
-		var lightBytes = MemoryMarshal.AsBytes(shaderLights);
-		const int headerSize = 32;
-		var lightingConstantsSize = headerSize + lightBytes.Length;
-		Span<byte> lightingConstants = stackalloc byte[lightingConstantsSize];
+		var lightWords = MemoryMarshal.Cast<ShaderLight, uint>(shaderLights);
+		Span<uint> lightingConstants = stackalloc uint[44];
 		lightingConstants.Clear();
-		var lightCount = (uint)lightCountInt;
-		MemoryMarshal.Write(lightingConstants, ref lightCount);
-		lightBytes.CopyTo(lightingConstants.Slice(headerSize));
-		commandList.SetGraphicsConstants(3, lightingConstants);
+		lightingConstants[0] = (uint)lightCountInt;
+		lightWords.CopyTo(lightingConstants.Slice(8));
+
+		if (commandList.BackendKind == GraphicsBackendKind.Metal)
+		{
+			if (config.TransparentEnvironmentBuffer is not IWritableGpuBuffer writableEnvironmentBuffer ||
+			    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer)
+			{
+				commandList.EndPass();
+				return;
+			}
+
+			writableEnvironmentBuffer.Write<uint>(textureHandles);
+			writableLightingBuffer.Write<uint>(lightingConstants);
+		}
+		else
+		{
+			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(textureHandles));
+			commandList.SetGraphicsConstants(3, MemoryMarshal.AsBytes(lightingConstants));
+		}
 
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)

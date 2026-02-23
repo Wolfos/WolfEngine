@@ -88,6 +88,8 @@ public class SceneBuilder : ISceneBuilder
 				occlusionTexture,
 				importedMaterial.AlphaMode,
 				importedMaterial.AlphaCutoff);
+			
+			Console.WriteLine($"imported material as {material.AlphaMode}");
 
 			materials.Add(material);
 		}

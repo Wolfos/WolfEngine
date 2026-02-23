@@ -39,6 +39,8 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? MaterialBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
+	public required IGfxBuffer? TransparentEnvironmentBuffer { get; init; }
+	public required IGfxBuffer? TransparentLightingBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
 	public required IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }

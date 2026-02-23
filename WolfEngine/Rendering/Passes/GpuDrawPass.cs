@@ -889,6 +889,8 @@ public sealed class GpuDrawPass
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
 		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
+		    _gpuDrawResources.TransparentEnvironmentBuffer is not MetalBuffer transparentEnvironmentBuffer ||
+		    _gpuDrawResources.TransparentLightingBuffer is not MetalBuffer transparentLightingBuffer ||
 		    _gpuDrawResources.InstanceBuffer is not MetalBuffer instanceBuffer ||
 		    _gpuDrawResources.MaterialBuffer is not MetalBuffer materialBuffer ||
 		    _gpuDrawResources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer)
@@ -915,6 +917,8 @@ public sealed class GpuDrawPass
 			0,
 			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
 			cameraBuffer,
+			transparentEnvironmentBuffer,
+			transparentLightingBuffer,
 			instanceBuffer,
 			materialBuffer,
 			materialGenerationBuffer,
