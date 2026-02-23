@@ -20,7 +20,6 @@ public class WolfEngineEditor
 	private readonly IRenderer _renderer;
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
-	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 
@@ -28,7 +27,6 @@ public class WolfEngineEditor
 	private World _gameWorld = null!;
 	private Entity _editorCamera;
 	private volatile bool _running;
-	private volatile bool _renderReady;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -37,7 +35,6 @@ public class WolfEngineEditor
 		IRenderer renderer,
 		RenderGraph renderGraph,
 		IInputSystem inputSystem,
-		SkyboxRenderer skyboxRenderer,
 		EditorGui editorGui)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
@@ -46,9 +43,7 @@ public class WolfEngineEditor
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
-		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_editorGui = editorGui;
-		_renderGraph.FrameCompleted += OnFrameCompleted;
 	}
 
 	public void Run()
@@ -110,11 +105,6 @@ public class WolfEngineEditor
 				_worldManager.OnPreRender(deltaTime, WorldTag.All);
 			}
 
-			using (FrameProfiler.Instance.Measure("Update Skybox"))
-			{
-				UpdateSkybox();
-			}
-
 			using (FrameProfiler.Instance.Measure("Publish Snapshot"))
 			{
 				PublishSnapshot();
@@ -136,49 +126,6 @@ public class WolfEngineEditor
 		ref var camera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
-	}
-
-	private void UpdateSkybox()
-	{
-		if (_renderReady == false)
-		{
-			return;
-		}
-
-		var sunDirection = GetSunDirection();
-		var skybox = _skyboxRenderer.UpdateProceduralSkybox(sunDirection);
-		_renderGraph.SetSkybox(skybox);
-	}
-
-	private Vector3 GetSunDirection()
-	{
-		for (var i = 0; i < _renderWorlds.Count; i++)
-		{
-			var world = _renderWorlds[i];
-			foreach (var entry in world.View<WorldTransform, Light>())
-			{
-				ref var transform = ref entry.First;
-				ref var light = ref entry.Second;
-				if (light.Type != LightType.Directional)
-				{
-					continue;
-				}
-
-				var forward = Vector3.TransformNormal(Vector3.UnitZ, transform.LocalToWorld);
-				if (forward == Vector3.Zero)
-				{
-					forward = new Vector3(0, -1, 0);
-				}
-				return forward;
-			}
-		}
-
-		return Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
-	}
-
-	private void OnFrameCompleted()
-	{
-		_renderReady = true;
 	}
 
 	private static Entity CreateEditorCamera(World world)

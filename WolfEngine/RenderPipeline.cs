@@ -1,6 +1,7 @@
 using WolfEngine.ECS;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using System.Numerics;
 
 namespace WolfEngine;
 
@@ -43,6 +44,8 @@ public class RenderPipeline : IRenderPipeline
         {
             var snapshot = _renderGraph.BeginSnapshotWrite();
             snapshot.SetCamera(camera, cameraWorldTransform);
+            var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
+            var hasSunDirection = false;
             _drawDatabase.BeginSync();
 
             for (var i = 0; i < (worlds?.Count ?? 0); i++)
@@ -83,10 +86,22 @@ public class RenderPipeline : IRenderPipeline
                     ref var transform = ref entry.First;
                     ref var light = ref entry.Second;
                     snapshot.AddLight(light, transform.LocalToWorld);
+                    if (hasSunDirection == false && light.Type == LightType.Directional)
+                    {
+                        var forward = Vector3.TransformNormal(Vector3.UnitZ, transform.LocalToWorld);
+                        if (forward == Vector3.Zero)
+                        {
+                            forward = new Vector3(0, -1, 0);
+                        }
+
+                        sunDirection = Vector3.Normalize(forward);
+                        hasSunDirection = true;
+                    }
                 }
             }
 
             _drawDatabase.EndSync();
+            snapshot.SetSunDirection(sunDirection);
             _renderGraph.PublishSnapshot();
             _stressFrame++;
         }

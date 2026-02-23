@@ -10,14 +10,18 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class FrameSnapshot
 {
+	private static readonly Vector3 DefaultSunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
+
 	public FrameSnapshot()
 	{
 		LightPackets = new List<LightPacket>(16);
+		SunDirection = DefaultSunDirection;
 	}
 
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
 	public List<LightPacket> LightPackets { get; }
+	public Vector3 SunDirection { get; private set; }
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
@@ -28,11 +32,19 @@ public sealed class FrameSnapshot
 	public void Clear()
 	{
 		LightPackets.Clear();
+		SunDirection = DefaultSunDirection;
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)
 	{
 		LightPackets.Add(new LightPacket(light, transform));
+	}
+
+	public void SetSunDirection(Vector3 sunDirection)
+	{
+		SunDirection = sunDirection == Vector3.Zero
+			? DefaultSunDirection
+			: Vector3.Normalize(sunDirection);
 	}
 
 	public readonly struct LightPacket

@@ -27,6 +27,7 @@ public sealed class RenderGraph
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
+	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly bool _metalLeakDiagnosticsEnabled;
@@ -53,6 +54,7 @@ public sealed class RenderGraph
 		GpuDrawHardeningStats hardeningStats,
 		IUiFrameProvider uiFrameProvider,
 		IMainThreadDispatcher mainThreadDispatcher,
+		SkyboxRenderer skyboxRenderer,
 		IImGuiRenderer imGuiRenderer)
 	{
 		_resourceRegistry = resourceRegistry;
@@ -64,6 +66,7 @@ public sealed class RenderGraph
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
 		_mainThreadDispatcher = mainThreadDispatcher;
+		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_compiler = new(resourceRegistry);
 		_metalLeakDiagnosticsEnabled = string.Equals(
 			Environment.GetEnvironmentVariable("WOLF_METAL_LEAK_DIAG"),
@@ -260,6 +263,13 @@ public sealed class RenderGraph
 
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
+
+				using (FrameProfiler.Instance.Measure("Update Skybox"))
+				{
+					var skybox = _skyboxRenderer.UpdateProceduralSkybox(snapshot.SunDirection);
+					_frameBuilder.SetSkybox(skybox);
+				}
+
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				_frameBuilder.BeginFrame(frameBufferSize);
