@@ -116,20 +116,62 @@ float ComputeDirectionalShadow(
 
     Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
     SamplerState shadowSampler = GetSampler(shadowSamplerHandle);
-    float visibility = 0.0f;
-    [unroll]
-    for (int y = -1; y <= 1; ++y)
-    {
-        [unroll]
-        for (int x = -1; x <= 1; ++x)
-        {
-            float2 offset = float2(float(x), float(y)) * shadowTexelSize;
-            float mapDepth = shadowMap.SampleLevel(shadowSampler, uv + offset, 0.0f).r;
-            visibility += (shadowPos.z - depthBias) <= mapDepth ? 1.0f : 0.0f;
-        }
-    }
+    // Optimized 5x5 tent PCF with 9 taps (phase-aware; bilinear filtered).
+    float2 shadowMapSize = 1.0f / max(shadowTexelSize, 1e-6f.xx);
+    float2 texelPos = uv * shadowMapSize + 0.5f;
+    float2 baseTexel = floor(texelPos);
+    float2 s = texelPos - baseTexel;
 
-    return visibility / 9.0f;
+    float uw0 = 4.0f - 3.0f * s.x;
+    float uw1 = 7.0f;
+    float uw2 = 1.0f + 3.0f * s.x;
+    float u0 = (3.0f - 2.0f * s.x) / uw0 - 2.0f;
+    float u1 = (3.0f + s.x) / uw1;
+    float u2 = s.x / uw2 + 2.0f;
+
+    float vw0 = 4.0f - 3.0f * s.y;
+    float vw1 = 7.0f;
+    float vw2 = 1.0f + 3.0f * s.y;
+    float v0 = (3.0f - 2.0f * s.y) / vw0 - 2.0f;
+    float v1 = (3.0f + s.y) / vw1;
+    float v2 = s.y / vw2 + 2.0f;
+
+    float receiverDepth = shadowPos.z - depthBias;
+    float visibility = 0.0f;
+    float weightSum = 0.0f;
+
+    float2 sampleUV00 = (baseTexel + float2(u0, v0) - 0.5f) * shadowTexelSize;
+    float2 sampleUV10 = (baseTexel + float2(u1, v0) - 0.5f) * shadowTexelSize;
+    float2 sampleUV20 = (baseTexel + float2(u2, v0) - 0.5f) * shadowTexelSize;
+    float2 sampleUV01 = (baseTexel + float2(u0, v1) - 0.5f) * shadowTexelSize;
+    float2 sampleUV11 = (baseTexel + float2(u1, v1) - 0.5f) * shadowTexelSize;
+    float2 sampleUV21 = (baseTexel + float2(u2, v1) - 0.5f) * shadowTexelSize;
+    float2 sampleUV02 = (baseTexel + float2(u0, v2) - 0.5f) * shadowTexelSize;
+    float2 sampleUV12 = (baseTexel + float2(u1, v2) - 0.5f) * shadowTexelSize;
+    float2 sampleUV22 = (baseTexel + float2(u2, v2) - 0.5f) * shadowTexelSize;
+
+    float w00 = uw0 * vw0;
+    float w10 = uw1 * vw0;
+    float w20 = uw2 * vw0;
+    float w01 = uw0 * vw1;
+    float w11 = uw1 * vw1;
+    float w21 = uw2 * vw1;
+    float w02 = uw0 * vw2;
+    float w12 = uw1 * vw2;
+    float w22 = uw2 * vw2;
+
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV00, 0.0f).r) ? w00 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV10, 0.0f).r) ? w10 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV20, 0.0f).r) ? w20 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV01, 0.0f).r) ? w01 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV11, 0.0f).r) ? w11 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV21, 0.0f).r) ? w21 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV02, 0.0f).r) ? w02 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV12, 0.0f).r) ? w12 : 0.0f;
+    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV22, 0.0f).r) ? w22 : 0.0f;
+
+    weightSum = w00 + w10 + w20 + w01 + w11 + w21 + w02 + w12 + w22;
+    return weightSum > 0.0f ? visibility / weightSum : 1.0f;
 }
 
 float3 EvaluateDirectLighting(

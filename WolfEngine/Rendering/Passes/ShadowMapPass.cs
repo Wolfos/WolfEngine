@@ -289,95 +289,63 @@ public sealed class ShadowMapPass
 			return false;
 		}
 
-		Span<Vector3> corners = stackalloc Vector3[8];
-		var cornerIndex = 0;
-		for (var z = 0; z <= 1; z++)
+		// Keep the shadow volume anchored to the camera origin in camera-relative space.
+		// This avoids rotation-driven recentering shimmer from per-frame frustum fitting.
+		var frustumCenter = Vector3.Zero;
+		var minCornerRayZ = 1.0f;
+		for (var y = -1; y <= 1; y += 2)
 		{
-			for (var y = -1; y <= 1; y += 2)
+			for (var x = -1; x <= 1; x += 2)
 			{
-				for (var x = -1; x <= 1; x += 2)
+				var farClip = new Vector4(x, y, 1.0f, 1.0f);
+				var farView = Vector4.Transform(farClip, sceneData.InverseProjection);
+				if (farView.W == 0.0f)
 				{
-					var clip = new Vector4(x, y, z, 1.0f);
-					var world = Vector4.Transform(clip, sceneData.InverseViewProjection);
-					corners[cornerIndex++] = world.W != 0.0f
-						? world.XYZ() / world.W
-						: Vector3.Zero;
+					continue;
+				}
+
+				var ray = farView.XYZ() / farView.W;
+				var rayLength = ray.Length();
+				if (rayLength <= float.Epsilon)
+				{
+					continue;
+				}
+
+				var rayZ = ray.Z / rayLength;
+				if (rayZ > float.Epsilon)
+				{
+					minCornerRayZ = MathF.Min(minCornerRayZ, rayZ);
 				}
 			}
 		}
 
-		for (var i = 0; i < 4; i++)
-		{
-			var nearCorner = corners[i];
-			var farCorner = corners[i + 4];
-			var ray = farCorner - nearCorner;
-			var length = ray.Length();
-			if (length <= MaxShadowDistance || length <= float.Epsilon)
-			{
-				continue;
-			}
-
-			corners[i + 4] = nearCorner + (ray / length) * MaxShadowDistance;
-		}
-
-		var frustumCenter = Vector3.Zero;
-		for (var i = 0; i < corners.Length; i++)
-		{
-			frustumCenter += corners[i];
-		}
-		frustumCenter /= corners.Length;
-
-		var radius = 1.0f;
-		for (var i = 0; i < corners.Length; i++)
-		{
-			var distance = Vector3.Distance(corners[i], frustumCenter);
-			if (distance > radius)
-			{
-				radius = distance;
-			}
-		}
+		var safeMinCornerRayZ = MathF.Max(minCornerRayZ, 0.1f);
+		var receiverRadius = MathF.Max(MaxShadowDistance / safeMinCornerRayZ, MaxShadowDistance);
 
 		var up = Math.Abs(Vector3.Dot(lightDirection, Vector3.UnitY)) > 0.99f
 			? Vector3.UnitZ
 			: Vector3.UnitY;
-		var eye = frustumCenter - (lightDirection * (radius + 64.0f));
+		var eye = frustumCenter - (lightDirection * (receiverRadius + 64.0f));
 		var lightView = Matrix4x4.CreateLookAtLeftHanded(eye, frustumCenter, up);
 
-		var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-		var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-		for (var i = 0; i < corners.Length; i++)
-		{
-			var cornerLs = Vector3.Transform(corners[i], lightView);
-			min = Vector3.Min(min, cornerLs);
-			max = Vector3.Max(max, cornerLs);
-		}
+		// Use a fixed XY extent from the frustum bounding sphere to keep texel scale constant.
+		var halfExtent = receiverRadius + ReceiverPadding + CasterPaddingXY;
+		var centerLs = Vector3.Transform(frustumCenter, lightView);
 
-		// Expand XY for off-frustum casters that still project into the visible receiver area.
-		var halfWidth = ((max.X - min.X) * 0.5f) + ReceiverPadding + CasterPaddingXY;
-		var halfHeight = ((max.Y - min.Y) * 0.5f) + ReceiverPadding + CasterPaddingXY;
-		var centerLs = (min + max) * 0.5f;
+		// Snap the projection center to shadow texels for camera-motion stability.
+		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / ShadowMapResolution, 1e-6f);
+		centerLs.X = MathF.Round(centerLs.X / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
+		centerLs.Y = MathF.Round(centerLs.Y / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
 
-		// Stabilize shadow projection in light space to reduce angle-dependent shimmering/popping.
-		var extentWidth = MathF.Max(halfWidth * 2.0f, 1e-3f);
-		var extentHeight = MathF.Max(halfHeight * 2.0f, 1e-3f);
-		var texelSizeX = extentWidth / ShadowMapResolution;
-		var texelSizeY = extentHeight / ShadowMapResolution;
-		if (texelSizeX > 0.0f)
-		{
-			centerLs.X = MathF.Floor(centerLs.X / texelSizeX) * texelSizeX;
-		}
-		if (texelSizeY > 0.0f)
-		{
-			centerLs.Y = MathF.Floor(centerLs.Y / texelSizeY) * texelSizeY;
-		}
+		var minX = centerLs.X - halfExtent;
+		var maxX = centerLs.X + halfExtent;
+		var minY = centerLs.Y - halfExtent;
+		var maxY = centerLs.Y + halfExtent;
 
-		var minX = centerLs.X - halfWidth;
-		var maxX = centerLs.X + halfWidth;
-		var minY = centerLs.Y - halfHeight;
-		var maxY = centerLs.Y + halfHeight;
-
-		var nearPlane = MathF.Max(0.1f, min.Z - CasterPaddingNear);
-		var farPlane = MathF.Max(nearPlane + 1.0f, max.Z + CasterPaddingFar);
+		// Keep depth span stable to avoid temporal shimmer from per-frame depth re-normalization.
+		var nearPlane = MathF.Max(0.1f, centerLs.Z - (receiverRadius + CasterPaddingNear));
+		var depthSpan = MathF.Max((receiverRadius * 2.0f) + CasterPaddingNear + CasterPaddingFar, 1.0f);
+		var farPlane = nearPlane + depthSpan;
 		var lightProjection = Matrix4x4.CreateOrthographicOffCenterLeftHanded(
 			minX,
 			maxX,
@@ -386,6 +354,8 @@ public sealed class ShadowMapPass
 			nearPlane,
 			farPlane);
 
+		// Keep the shadow matrix in camera-relative space to preserve precision when the
+		// world origin is far from zero. Inputs to this matrix are camera-relative positions.
 		shadowViewProjection = lightView * lightProjection;
 		return true;
 	}
