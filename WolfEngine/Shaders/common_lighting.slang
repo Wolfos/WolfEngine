@@ -219,7 +219,8 @@ float3 EvaluateDirectLighting(
     float2 shadowTexelSize,
     float shadowDepthBias,
     float shadowStrength,
-    uint shadowsEnabled)
+    uint shadowsEnabled,
+    float shadowMaxDistance)
 {
     float3 color = float3(0.0f, 0.0f, 0.0f);
     float3 normal = normalize(surface.normal);
@@ -271,14 +272,19 @@ float3 EvaluateDirectLighting(
         float shadow = 1.0f;
         if (shadowsEnabled != 0 && type < 0.5f && i == shadowLightIndex)
         {
-            float pcf = ComputeDirectionalShadow(
-                surface.worldPos,
-                shadowViewProjection,
-                shadowMapHandle,
-                shadowSamplerHandle,
-                shadowTexelSize,
-                shadowDepthBias);
-            shadow = lerp(1.0f, pcf, saturate(shadowStrength));
+            float maxShadowDistanceSq = shadowMaxDistance * shadowMaxDistance;
+            float receiverDistanceSq = dot(surface.worldPos, surface.worldPos);
+            if (shadowMaxDistance <= 0.0f || receiverDistanceSq <= maxShadowDistanceSq)
+            {
+                float pcf = ComputeDirectionalShadow(
+                    surface.worldPos,
+                    shadowViewProjection,
+                    shadowMapHandle,
+                    shadowSamplerHandle,
+                    shadowTexelSize,
+                    shadowDepthBias);
+                shadow = lerp(1.0f, pcf, saturate(shadowStrength));
+            }
         }
 
         color += (diffuse + specular) * radiance * NdotL * shadow;
@@ -335,6 +341,7 @@ float3 EvaluateSurfaceLighting(
     float shadowDepthBias,
     float shadowStrength,
     uint shadowsEnabled,
+    float shadowMaxDistance,
     uint irradianceHandle,
     uint prefilteredHandle,
     uint brdfLutHandle,
@@ -353,7 +360,8 @@ float3 EvaluateSurfaceLighting(
         shadowTexelSize,
         shadowDepthBias,
         shadowStrength,
-        shadowsEnabled);
+        shadowsEnabled,
+        shadowMaxDistance);
     color += EvaluateImageBasedLighting(
         surface,
         viewDir,

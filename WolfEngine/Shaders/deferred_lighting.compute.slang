@@ -35,7 +35,7 @@ cbuffer LightingParams : register(b2)
     float4 shadowTexelSizeBiasStrength;
     uint shadowLightIndex;
     uint shadowsEnabled;
-    uint _shadowPadding0;
+    float shadowMaxDistance;
     uint _shadowPadding1;
 };
 
@@ -112,6 +112,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowTexelSizeBiasStrength.z,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
+        shadowMaxDistance,
         irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,

@@ -171,7 +171,7 @@ public sealed class TransparentForwardPass
 			lightingConstants[63] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
 			lightingConstants[64] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
 			lightingConstants[65] = config.ShadowsEnabled ? 1u : 0u;
-			lightingConstants[66] = 0;
+			lightingConstants[66] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
 			lightingConstants[67] = 0;
 
 		if (commandList.BackendKind == GraphicsBackendKind.Metal)

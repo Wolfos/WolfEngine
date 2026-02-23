@@ -10,11 +10,9 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class ShadowMapPass
 {
 	public const int ShadowMapResolution = 2048;
-	private const float MaxShadowDistance = 3.0f;
+	public const float MaxShadowDistance = 50.0f;
 	private const float DefaultDepthBias = 0.0015f;
 	private const float DefaultStrength = 1.0f;
-	private const float ReceiverPadding = 12.0f;
-	private const float CasterPaddingXY = 24.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
 
@@ -300,8 +298,9 @@ public sealed class ShadowMapPass
 		var eye = frustumCenter - (lightDirection * (receiverRadius + 64.0f));
 		var lightView = Matrix4x4.CreateLookAtLeftHanded(eye, frustumCenter, up);
 
-		// Use a fixed XY extent from the frustum bounding sphere to keep texel scale constant.
-		var halfExtent = receiverRadius + ReceiverPadding + CasterPaddingXY;
+		// Keep XY coverage tied directly to MaxShadowDistance so texel density matches
+		// the configured shadow distance in world units.
+		var halfExtent = receiverRadius;
 		var centerLs = Vector3.Transform(frustumCenter, lightView);
 
 		// Snap the projection center to shadow texels for camera-motion stability.

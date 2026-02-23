@@ -42,7 +42,7 @@ cbuffer LightingParams : register(b3)
     float4 shadowTexelSizeBiasStrength;
     uint shadowLightIndex;
     uint shadowsEnabled;
-    uint _shadowPadding0;
+    float shadowMaxDistance;
     uint _shadowPadding1;
 };
 
@@ -167,6 +167,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
         shadowTexelSizeBiasStrength.z,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
+        shadowMaxDistance,
         irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,

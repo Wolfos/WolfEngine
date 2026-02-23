@@ -291,8 +291,8 @@ public sealed class SkyboxRenderer
 		parameters[13] = 0.75f;
 		parameters[14] = 0.9f;
 		parameters[15] = 1.0f;
-		parameters[16] = 0.05f;
-		parameters[17] = 0.06f;
+		parameters[16] = 0.15f;
+		parameters[17] = 0.1f;
 		parameters[18] = 0.07f;
 		parameters[19] = 0.0f;
 		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(parameters));
@@ -324,6 +324,7 @@ public sealed class SkyboxRenderer
 		}
 
 		ShaderBytecodeSet shaders;
+		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
 			var source = _shaderCompiler.GetMetalComputeSource("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain");
@@ -357,6 +358,7 @@ public sealed class SkyboxRenderer
 		}
 
 		ShaderBytecodeSet shaders;
+		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
 			var source = _shaderCompiler.GetMetalComputeSource("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
@@ -390,6 +392,7 @@ public sealed class SkyboxRenderer
 		}
 
 		ShaderBytecodeSet shaders;
+		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
 			var source = _shaderCompiler.GetMetalComputeSource("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
