@@ -10,7 +10,7 @@ StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
-cbuffer CameraParams : register(b2)
+cbuffer CameraParams : register(b14)
 {
     row_major float4x4 viewProjection;
     float3 cameraPosition;

@@ -251,7 +251,7 @@ public sealed class RenderGraphFrameBuilder
 			return;
 		}
 
-		_gpuDrawPass.RecordCullForView(context, shadowData.ViewProjection, sceneData.CameraOrigin);
+		_gpuDrawPass.RecordCullForView(context, shadowData.ViewProjection, sceneData.CameraOrigin, useShadowBuffers: true);
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)

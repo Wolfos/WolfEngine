@@ -30,10 +30,13 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DiagnosticsCounterBuffer { get; private set; }
 	private readonly IGfxBuffer?[] _updateBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _cameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _shadowCameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentEnvironmentBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentLightingBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _shadowDrawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _shadowDrawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _instanceGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -76,14 +79,20 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? UpdateBuffer => _updateBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? CameraBuffer => _cameraBuffers[_activeFrameSlot];
+	
+	public IGfxBuffer? ShadowCameraBuffer => _shadowCameraBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? TransparentEnvironmentBuffer => _transparentEnvironmentBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? TransparentLightingBuffer => _transparentLightingBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DrawCountPerBucketBuffer => _drawCountPerBucketBuffers[_activeFrameSlot];
+	
+	public IGfxBuffer? ShadowDrawCountPerBucketBuffer => _shadowDrawCountPerBucketBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DrawExecutionRangePerBucketBuffer => _drawExecutionRangePerBucketBuffers[_activeFrameSlot];
+	
+	public IGfxBuffer? ShadowDrawExecutionRangePerBucketBuffer => _shadowDrawExecutionRangePerBucketBuffers[_activeFrameSlot];
 
 	public void EnsureCreated(IGfxDevice device)
 	{
@@ -144,6 +153,11 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(sizeof(float) * 24),
 				BufferUsage.Constant,
 				BufferFlags.AllowShaderResource));
+			
+			_shadowCameraBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(sizeof(float) * 24),
+				BufferUsage.Constant,
+				BufferFlags.AllowShaderResource));
 
 			_transparentEnvironmentBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(sizeof(uint) * 12),
@@ -159,8 +173,18 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(GBufferDrawBuckets.BucketCount * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			
+			_shadowDrawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(GBufferDrawBuckets.BucketCount * sizeof(uint)),
+				BufferUsage.Indirect,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
 			_drawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(GBufferDrawBuckets.BucketCount * 2 * sizeof(uint)),
+				BufferUsage.Indirect,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			
+			_shadowDrawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(GBufferDrawBuckets.BucketCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
@@ -271,20 +295,26 @@ public sealed class GpuDrawResources : IDisposable
 		{
 			(_updateBuffers[i] as IDisposable)?.Dispose();
 			(_cameraBuffers[i] as IDisposable)?.Dispose();
+			(_shadowCameraBuffers[i] as IDisposable)?.Dispose();
 			(_transparentEnvironmentBuffers[i] as IDisposable)?.Dispose();
 			(_transparentLightingBuffers[i] as IDisposable)?.Dispose();
 			(_drawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
+			(_shadowDrawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_drawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
+			(_shadowDrawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_drawGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_instanceGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_materialGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_meshGenerationBuffers[i] as IDisposable)?.Dispose();
 			_updateBuffers[i] = null;
 			_cameraBuffers[i] = null;
+			_shadowCameraBuffers[i] = null;
 			_transparentEnvironmentBuffers[i] = null;
 			_transparentLightingBuffers[i] = null;
 			_drawCountPerBucketBuffers[i] = null;
+			_shadowDrawCountPerBucketBuffers[i] = null;
 			_drawExecutionRangePerBucketBuffers[i] = null;
+			_shadowDrawExecutionRangePerBucketBuffers[i] = null;
 			_drawGenerationBuffers[i] = null;
 			_instanceGenerationBuffers[i] = null;
 			_materialGenerationBuffers[i] = null;

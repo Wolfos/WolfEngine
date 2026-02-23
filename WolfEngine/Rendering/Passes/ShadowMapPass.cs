@@ -13,6 +13,10 @@ public sealed class ShadowMapPass
 	private const float MaxShadowDistance = 50.0f;
 	private const float DefaultDepthBias = 0.0015f;
 	private const float DefaultStrength = 1.0f;
+	private const float ReceiverPadding = 12.0f;
+	private const float CasterPaddingXY = 24.0f;
+	private const float CasterPaddingNear = 96.0f;
+	private const float CasterPaddingFar = 24.0f;
 
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<int, IGfxPipeline> _pipelinesByBucketIndex = new();
@@ -100,10 +104,10 @@ public sealed class ShadowMapPass
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
-			CameraBuffer = gpuDrawResources.CameraBuffer,
+			CameraBuffer = gpuDrawResources.ShadowCameraBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
 			VisibleDrawIdsPerBucketBuffer = gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
-			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
+			DrawExecutionRangePerBucketBuffer = gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer,
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
 		};
@@ -142,7 +146,7 @@ public sealed class ShadowMapPass
 		{
 			commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
 		}
-		commandList.BindConstantBuffer(2, config.CameraBuffer);
+		commandList.BindConstantBuffer(14, config.CameraBuffer);
 
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)
@@ -248,7 +252,7 @@ public sealed class ShadowMapPass
 			return;
 		}
 
-		commandList.SetGraphicsConstants(2, MemoryMarshal.AsBytes(cameraConstants));
+		commandList.SetGraphicsConstants(14, MemoryMarshal.AsBytes(cameraConstants));
 	}
 
 	private static bool TryBuildShadowViewProjection(SceneDrawData sceneData, out Matrix4x4 shadowViewProjection, out int shadowedLightIndex)
@@ -348,14 +352,37 @@ public sealed class ShadowMapPass
 			max = Vector3.Max(max, cornerLs);
 		}
 
-		const float padding = 10.0f;
-		var nearPlane = MathF.Max(0.1f, min.Z - padding);
-		var farPlane = MathF.Max(nearPlane + 1.0f, max.Z + padding);
+		// Expand XY for off-frustum casters that still project into the visible receiver area.
+		var halfWidth = ((max.X - min.X) * 0.5f) + ReceiverPadding + CasterPaddingXY;
+		var halfHeight = ((max.Y - min.Y) * 0.5f) + ReceiverPadding + CasterPaddingXY;
+		var centerLs = (min + max) * 0.5f;
+
+		// Stabilize shadow projection in light space to reduce angle-dependent shimmering/popping.
+		var extentWidth = MathF.Max(halfWidth * 2.0f, 1e-3f);
+		var extentHeight = MathF.Max(halfHeight * 2.0f, 1e-3f);
+		var texelSizeX = extentWidth / ShadowMapResolution;
+		var texelSizeY = extentHeight / ShadowMapResolution;
+		if (texelSizeX > 0.0f)
+		{
+			centerLs.X = MathF.Floor(centerLs.X / texelSizeX) * texelSizeX;
+		}
+		if (texelSizeY > 0.0f)
+		{
+			centerLs.Y = MathF.Floor(centerLs.Y / texelSizeY) * texelSizeY;
+		}
+
+		var minX = centerLs.X - halfWidth;
+		var maxX = centerLs.X + halfWidth;
+		var minY = centerLs.Y - halfHeight;
+		var maxY = centerLs.Y + halfHeight;
+
+		var nearPlane = MathF.Max(0.1f, min.Z - CasterPaddingNear);
+		var farPlane = MathF.Max(nearPlane + 1.0f, max.Z + CasterPaddingFar);
 		var lightProjection = Matrix4x4.CreateOrthographicOffCenterLeftHanded(
-			min.X - padding,
-			max.X + padding,
-			min.Y - padding,
-			max.Y + padding,
+			minX,
+			maxX,
+			minY,
+			maxY,
 			nearPlane,
 			farPlane);
 

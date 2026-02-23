@@ -398,14 +398,20 @@ public sealed class GpuDrawPass
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(sceneData);
-		RecordCullForView(context, sceneData.ViewProjection, sceneData.CameraOrigin);
+		RecordCullForView(context, sceneData.ViewProjection, sceneData.CameraOrigin, useShadowBuffers: false);
 	}
 
-	public void RecordCullForView(RenderGraphContext context, Matrix4x4 viewProjection, Vector3 cameraOrigin)
+	public void RecordCullForView(RenderGraphContext context, Matrix4x4 viewProjection, Vector3 cameraOrigin, bool useShadowBuffers = false)
 	{
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
+		var drawCountPerBucketBuffer = useShadowBuffers
+			? _gpuDrawResources.ShadowDrawCountPerBucketBuffer
+			: _gpuDrawResources.DrawCountPerBucketBuffer;
+		var drawExecutionRangePerBucketBuffer = useShadowBuffers
+			? _gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer
+			: _gpuDrawResources.DrawExecutionRangePerBucketBuffer;
 
 		var bucketCount = GBufferDrawBuckets.Definitions.Length;
 		if ((uint)bucketCount > (DrawFlagBucketMask + 1))
@@ -415,7 +421,7 @@ public sealed class GpuDrawPass
 		}
 		Span<uint> resetCounts = stackalloc uint[bucketCount];
 		resetCounts.Clear();
-		WriteBuffer<uint>(_gpuDrawResources.DrawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
+		WriteBuffer<uint>(drawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
 
 		Span<uint> resetRanges = stackalloc uint[bucketCount * 2];
 		for (var i = 0; i < bucketCount; i++)
@@ -423,7 +429,7 @@ public sealed class GpuDrawPass
 			resetRanges[(i * 2) + 0] = 0;
 			resetRanges[(i * 2) + 1] = 0;
 		}
-		WriteBuffer<uint>(_gpuDrawResources.DrawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
+		WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
 
 		var pipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
@@ -456,9 +462,9 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 			commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
 			commandList.SetComputeBuffer(3, _gpuDrawResources.DrawArgsBuffer!);
-			commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCountPerBucketBuffer!);
+			commandList.SetComputeBuffer(4, drawCountPerBucketBuffer!);
 			commandList.SetComputeBuffer(5, _gpuDrawResources.VisibleDrawIdsPerBucketBuffer!);
-			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawExecutionRangePerBucketBuffer!);
+			commandList.SetComputeBuffer(6, drawExecutionRangePerBucketBuffer!);
 			commandList.SetComputeBuffer(7, _gpuDrawResources.DrawGenerationBuffer!);
 			commandList.SetComputeBuffer(8, _gpuDrawResources.InstanceGenerationBuffer!);
 			commandList.SetComputeBuffer(9, _gpuDrawResources.MeshGenerationBuffer!);
@@ -895,6 +901,7 @@ public sealed class GpuDrawPass
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
 		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
+		    _gpuDrawResources.ShadowCameraBuffer is not MetalBuffer shadowCameraBuffer ||
 		    _gpuDrawResources.TransparentEnvironmentBuffer is not MetalBuffer transparentEnvironmentBuffer ||
 		    _gpuDrawResources.TransparentLightingBuffer is not MetalBuffer transparentLightingBuffer ||
 		    _gpuDrawResources.InstanceBuffer is not MetalBuffer instanceBuffer ||
@@ -923,6 +930,7 @@ public sealed class GpuDrawPass
 			0,
 			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
 			cameraBuffer,
+			shadowCameraBuffer,
 			transparentEnvironmentBuffer,
 			transparentLightingBuffer,
 			instanceBuffer,

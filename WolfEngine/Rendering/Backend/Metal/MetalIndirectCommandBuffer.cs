@@ -33,6 +33,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 				MTLBuffer vertexBuffer,
 				MTLBuffer indexBuffer,
 				MTLBuffer cameraBuffer,
+				MTLBuffer shadowCameraBuffer,
 				MTLBuffer transparentEnvironmentBuffer,
 				MTLBuffer transparentLightingBuffer,
 				MTLBuffer instanceBuffer,
@@ -47,6 +48,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			VertexBuffer = vertexBuffer;
 			IndexBuffer = indexBuffer;
 				CameraBuffer = cameraBuffer;
+				ShadowCameraBuffer = shadowCameraBuffer;
 				TransparentEnvironmentBuffer = transparentEnvironmentBuffer;
 				TransparentLightingBuffer = transparentLightingBuffer;
 				InstanceBuffer = instanceBuffer;
@@ -62,6 +64,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MTLBuffer VertexBuffer { get; }
 		public MTLBuffer IndexBuffer { get; }
 			public MTLBuffer CameraBuffer { get; }
+			public MTLBuffer ShadowCameraBuffer { get; }
 			public MTLBuffer TransparentEnvironmentBuffer { get; }
 			public MTLBuffer TransparentLightingBuffer { get; }
 			public MTLBuffer InstanceBuffer { get; }
@@ -109,6 +112,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		int baseVertex,
 			ulong drawArgsOffsetBytes,
 			MetalBuffer cameraBuffer,
+			MetalBuffer shadowCameraBuffer,
 			MetalBuffer transparentEnvironmentBuffer,
 			MetalBuffer transparentLightingBuffer,
 			MetalBuffer instanceBuffer,
@@ -130,12 +134,14 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
 			command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
+			command.SetVertexBuffer(shadowCameraBuffer.Buffer, 0, 14);
 			command.SetVertexBuffer(instanceBuffer.Buffer, 0, 10);
 			command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
 			command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, 13);
 			command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
 			command.SetFragmentBuffer(transparentEnvironmentBuffer.Buffer, 0, 0);
 			command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
+			command.SetFragmentBuffer(shadowCameraBuffer.Buffer, 0, 14);
 			command.SetFragmentBuffer(transparentLightingBuffer.Buffer, 0, 3);
 			command.SetFragmentBuffer(instanceBuffer.Buffer, 0, 10);
 			command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
@@ -182,6 +188,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			vertexBuffer.Buffer,
 			indexBuffer.Buffer,
 				cameraBuffer.Buffer,
+				shadowCameraBuffer.Buffer,
 				transparentEnvironmentBuffer.Buffer,
 				transparentLightingBuffer.Buffer,
 				instanceBuffer.Buffer,
@@ -221,6 +228,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			AddBuffer(refs.VertexBuffer, destination, seenPointers);
 			AddBuffer(refs.IndexBuffer, destination, seenPointers);
 				AddBuffer(refs.CameraBuffer, destination, seenPointers);
+				AddBuffer(refs.ShadowCameraBuffer, destination, seenPointers);
 				AddBuffer(refs.TransparentEnvironmentBuffer, destination, seenPointers);
 				AddBuffer(refs.TransparentLightingBuffer, destination, seenPointers);
 				AddBuffer(refs.InstanceBuffer, destination, seenPointers);
@@ -271,6 +279,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		AddBufferRef(refs.VertexBuffer);
 		AddBufferRef(refs.IndexBuffer);
 			AddBufferRef(refs.CameraBuffer);
+			AddBufferRef(refs.ShadowCameraBuffer);
 			AddBufferRef(refs.TransparentEnvironmentBuffer);
 			AddBufferRef(refs.TransparentLightingBuffer);
 			AddBufferRef(refs.InstanceBuffer);
@@ -288,6 +297,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		RemoveBufferRef(refs.VertexBuffer);
 		RemoveBufferRef(refs.IndexBuffer);
 			RemoveBufferRef(refs.CameraBuffer);
+			RemoveBufferRef(refs.ShadowCameraBuffer);
 			RemoveBufferRef(refs.TransparentEnvironmentBuffer);
 			RemoveBufferRef(refs.TransparentLightingBuffer);
 			RemoveBufferRef(refs.InstanceBuffer);
