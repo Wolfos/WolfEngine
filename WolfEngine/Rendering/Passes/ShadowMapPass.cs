@@ -333,9 +333,17 @@ public sealed class ShadowMapPass
 		var centerLs = Vector3.Transform(frustumCenter, lightView);
 
 		// Snap the projection center to shadow texels for camera-motion stability.
+		// The extra offset anchors snapping to world-space camera movement so translation
+		// does not cause continuous sub-texel drift.
 		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / ShadowMapResolution, 1e-6f);
-		centerLs.X = MathF.Round(centerLs.X / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
-		centerLs.Y = MathF.Round(centerLs.Y / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
+		var lightAxisX = new Vector3(lightView.M11, lightView.M21, lightView.M31);
+		var lightAxisY = new Vector3(lightView.M12, lightView.M22, lightView.M32);
+		var cameraLsX = Vector3.Dot(sceneData.CameraOrigin, lightAxisX);
+		var cameraLsY = Vector3.Dot(sceneData.CameraOrigin, lightAxisY);
+		var snappedCameraLsX = MathF.Round(cameraLsX / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
+		var snappedCameraLsY = MathF.Round(cameraLsY / worldUnitsPerTexel, MidpointRounding.AwayFromZero) * worldUnitsPerTexel;
+		centerLs.X += snappedCameraLsX - cameraLsX;
+		centerLs.Y += snappedCameraLsY - cameraLsY;
 
 		var minX = centerLs.X - halfExtent;
 		var maxX = centerLs.X + halfExtent;
