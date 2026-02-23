@@ -23,15 +23,19 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
 	public IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; private set; }
-	public IGfxBuffer? DrawGenerationBuffer { get; private set; }
-	public IGfxBuffer? InstanceGenerationBuffer { get; private set; }
-	public IGfxBuffer? MaterialGenerationBuffer { get; private set; }
-	public IGfxBuffer? MeshGenerationBuffer { get; private set; }
+	public IGfxBuffer? DrawGenerationBuffer => _drawGenerationBuffers[_activeFrameSlot];
+	public IGfxBuffer? InstanceGenerationBuffer => _instanceGenerationBuffers[_activeFrameSlot];
+	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
+	public IGfxBuffer? MeshGenerationBuffer => _meshGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? DiagnosticsCounterBuffer { get; private set; }
 	private readonly IGfxBuffer?[] _updateBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _cameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _drawGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _instanceGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private int _activeFrameSlot;
 	private readonly IGfxIndirectCommandBuffer?[] _gbufferIndirectCommandSlots =
 		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GBufferDrawBuckets.BucketCount];
@@ -82,6 +86,12 @@ public sealed class GpuDrawResources : IDisposable
 			throw new ArgumentNullException(nameof(device));
 		}
 
+		if (MaxFramesInFlight != IndirectCommandBufferSlotCount)
+		{
+			throw new InvalidOperationException(
+				$"GpuDraw requires MaxFramesInFlight ({MaxFramesInFlight}) to match IndirectCommandBufferSlotCount ({IndirectCommandBufferSlotCount}).");
+		}
+
 		InstanceBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxInstanceCount * Marshal.SizeOf<GpuInstanceData>()),
 			BufferUsage.Structured,
@@ -112,26 +122,6 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
-		DrawGenerationBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)((MaxDrawCount + 1) * sizeof(uint)),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-		InstanceGenerationBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)((MaxInstanceCount + 1) * sizeof(uint)),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-		MaterialGenerationBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)((MaxMaterialCount + 1) * sizeof(uint)),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-		MeshGenerationBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)((MaxMeshCount + 1) * sizeof(uint)),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
 		DiagnosticsCounterBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(HardeningCounterCount * sizeof(uint)),
 			BufferUsage.Structured,
@@ -158,6 +148,26 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(GBufferDrawBuckets.BucketCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_drawGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)((MaxDrawCount + 1) * sizeof(uint)),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_instanceGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)((MaxInstanceCount + 1) * sizeof(uint)),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_materialGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)((MaxMaterialCount + 1) * sizeof(uint)),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_meshGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)((MaxMeshCount + 1) * sizeof(uint)),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		}
 
 		for (var slotIndex = 0; slotIndex < IndirectCommandBufferSlotCount; slotIndex++)
@@ -170,7 +180,7 @@ public sealed class GpuDrawResources : IDisposable
 					(uint)MaxDrawCount,
 					supportsIndexedExecution: true));
 			}
-		}
+	}
 	}
 
 	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int bucketIndex)
@@ -186,6 +196,30 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, bucketIndex)];
+	}
+
+	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
+	{
+		ValidateFrameSlot(frameSlot);
+		return _drawGenerationBuffers[frameSlot];
+	}
+
+	public IGfxBuffer? GetInstanceGenerationBufferSlot(int frameSlot)
+	{
+		ValidateFrameSlot(frameSlot);
+		return _instanceGenerationBuffers[frameSlot];
+	}
+
+	public IGfxBuffer? GetMeshGenerationBufferSlot(int frameSlot)
+	{
+		ValidateFrameSlot(frameSlot);
+		return _meshGenerationBuffers[frameSlot];
+	}
+
+	public IGfxBuffer? GetMaterialGenerationBufferSlot(int frameSlot)
+	{
+		ValidateFrameSlot(frameSlot);
+		return _materialGenerationBuffers[frameSlot];
 	}
 
 	public IGfxPipeline? GetGBufferPipeline(int bucketIndex)
@@ -216,10 +250,6 @@ public sealed class GpuDrawResources : IDisposable
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
 		(VisibleDrawIdsPerBucketBuffer as IDisposable)?.Dispose();
-		(DrawGenerationBuffer as IDisposable)?.Dispose();
-		(InstanceGenerationBuffer as IDisposable)?.Dispose();
-		(MaterialGenerationBuffer as IDisposable)?.Dispose();
-		(MeshGenerationBuffer as IDisposable)?.Dispose();
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
@@ -227,10 +257,18 @@ public sealed class GpuDrawResources : IDisposable
 			(_cameraBuffers[i] as IDisposable)?.Dispose();
 			(_drawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_drawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
+			(_drawGenerationBuffers[i] as IDisposable)?.Dispose();
+			(_instanceGenerationBuffers[i] as IDisposable)?.Dispose();
+			(_materialGenerationBuffers[i] as IDisposable)?.Dispose();
+			(_meshGenerationBuffers[i] as IDisposable)?.Dispose();
 			_updateBuffers[i] = null;
 			_cameraBuffers[i] = null;
 			_drawCountPerBucketBuffers[i] = null;
 			_drawExecutionRangePerBucketBuffers[i] = null;
+			_drawGenerationBuffers[i] = null;
+			_instanceGenerationBuffers[i] = null;
+			_materialGenerationBuffers[i] = null;
+			_meshGenerationBuffers[i] = null;
 		}
 		for (var i = 0; i < _gbufferIndirectCommandSlots.Length; i++)
 		{
@@ -243,5 +281,13 @@ public sealed class GpuDrawResources : IDisposable
 
 	private static int FlattenSlotBucketIndex(int slotIndex, int bucketIndex) =>
 		(slotIndex * GBufferDrawBuckets.BucketCount) + bucketIndex;
+
+	private static void ValidateFrameSlot(int frameSlot)
+	{
+		if (frameSlot < 0 || frameSlot >= MaxFramesInFlight)
+		{
+			throw new ArgumentOutOfRangeException(nameof(frameSlot), frameSlot, "Frame slot is out of range.");
+		}
+	}
 
 }

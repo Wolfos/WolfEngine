@@ -36,6 +36,7 @@ public sealed class GpuDrawPass
 	private nint _lastBindlessSamplerBufferPtr;
 	private readonly ulong[] _slotAppliedVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _slotBindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly int[] _slotFrameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly Dictionary<uint, uint> _materialDrawFlags = new();
 	private int _activeIndirectSlot = -1;
 	private ulong _latestStructuralVersion;
@@ -76,6 +77,7 @@ public sealed class GpuDrawPass
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		Array.Fill(_slotFrameBindings, -1);
 	}
 
 	public void RecordUpdate(RenderGraphContext context)
@@ -115,21 +117,23 @@ public sealed class GpuDrawPass
 				CacheBindlessPointers(table);
 			}
 
-			if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
-			{
-					if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch)
-					{
-						using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
+				if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
+				{
+					var slotFrameMismatch = _slotFrameBindings[activeSlot] != _gpuDrawResources.ActiveFrameSlot;
+					if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch || slotFrameMismatch)
 						{
-							ReencodeAllIndirectCommands(table, activeIndirectCommands);
-						}
-						requireFullGpuStateRefresh = true;
+							using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
+							{
+								ReencodeAllIndirectCommands(table, activeIndirectCommands);
+							}
+							requireFullGpuStateRefresh = true;
 
-						_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
-						_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
-						CompactStructuralReplayRecords();
-					}
-				else
+							_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
+							_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
+							_slotFrameBindings[activeSlot] = _gpuDrawResources.ActiveFrameSlot;
+							CompactStructuralReplayRecords();
+						}
+					else
 				{
 					using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
 					{
@@ -452,7 +456,8 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(7, _gpuDrawResources.DrawGenerationBuffer!);
 			commandList.SetComputeBuffer(8, _gpuDrawResources.InstanceGenerationBuffer!);
 			commandList.SetComputeBuffer(9, _gpuDrawResources.MeshGenerationBuffer!);
-			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			commandList.SetComputeBuffer(10, _gpuDrawResources.MaterialGenerationBuffer!);
+			commandList.SetComputeBuffer(11, _gpuDrawResources.DiagnosticsCounterBuffer!);
 
 			var groupCount = (uint)((GpuDrawResources.MaxDrawCount + 63) / 64);
 			commandList.Dispatch(groupCount, 1, 1);
@@ -1034,12 +1039,15 @@ public sealed class GpuDrawPass
 				case 1:
 					_hardeningStats.AddFallbackProxySubstitutions(delta);
 					break;
-				case 4:
-					_hardeningStats.AddVisibleListClampHits(delta);
-					break;
+					case 4:
+						_hardeningStats.AddVisibleListClampHits(delta);
+						break;
+					case 5:
+						_hardeningStats.AddMaterialFallbackDrawHits(delta);
+						break;
+				}
 			}
 		}
-	}
 
 	private void UploadFallbackTableEntries()
 	{

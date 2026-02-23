@@ -58,7 +58,8 @@ public sealed class RenderGraph
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, gpuDrawPass, gpuDrawResources, imGuiRenderer);
+		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, gpuDrawPass, gpuDrawResources,
+			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
@@ -237,7 +238,7 @@ public sealed class RenderGraph
 		{
 			_renderer.BeginFrame();
 		}
-		
+
 
 		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
@@ -256,9 +257,10 @@ public sealed class RenderGraph
 				{
 					snapshot = _currentSnapshot;
 				}
+
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
-				
+
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				_frameBuilder.BeginFrame(frameBufferSize);
 				_frameBuilder.SetUiFrame(uiFrame);
@@ -343,7 +345,8 @@ public sealed class RenderGraph
 
 	private void LogGpuHardeningStatsIfNeeded()
 	{
-		if (GraphicsConfig.GpuHardeningStressEnabled == false || _gpuHardeningLogInterval <= 0 || (_frameIndex % _gpuHardeningLogInterval) != 0)
+		if (GraphicsConfig.GpuHardeningStressEnabled == false || _gpuHardeningLogInterval <= 0 ||
+		    (_frameIndex % _gpuHardeningLogInterval) != 0)
 		{
 			return;
 		}
@@ -353,6 +356,7 @@ public sealed class RenderGraph
 			$"[GpuHardening] frame={_frameIndex} staleRejects={snapshot.StaleHandleRejects} " +
 			$"fallbackSubs={snapshot.FallbackProxySubstitutions} overflowRecoveries={snapshot.UpdateOverflowRecoveries} " +
 			$"packedCapacityFailures={snapshot.PackedCapacityFailures} visibleClampHits={snapshot.VisibleListClampHits} " +
+			$"materialFallbackDrawHits={snapshot.MaterialFallbackDrawHits} " +
 			$"deferredBacklog={snapshot.DeferredReleaseBacklog} icbStarvationStalls={snapshot.IcbSlotStarvationStalls}");
 	}
 

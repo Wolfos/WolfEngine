@@ -2,6 +2,7 @@ import "draw_data.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 20000
 #define WOLF_MAX_MESH_COUNT 20000
+#define WOLF_MAX_MATERIAL_COUNT 8192
 
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
@@ -10,6 +11,7 @@ static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
 static const uint HARDEN_COUNTER_FALLBACK_SUBSTITUTE = 1;
 static const uint HARDEN_COUNTER_VISIBLE_CLAMP = 4;
+static const uint HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW = 5;
 
 cbuffer CullParams : register(b12)
 {
@@ -31,7 +33,8 @@ RWStructuredBuffer<uint> g_DrawExecutionRangePerBucket : register(u6);
 RWStructuredBuffer<uint> g_DrawGenerations : register(u7);
 RWStructuredBuffer<uint> g_InstanceGenerations : register(u8);
 RWStructuredBuffer<uint> g_MeshGenerations : register(u9);
-RWStructuredBuffer<uint> g_Diagnostics : register(u10);
+RWStructuredBuffer<uint> g_MaterialGenerations : register(u10);
+RWStructuredBuffer<uint> g_Diagnostics : register(u11);
 
 bool IsSphereVisible(float3 center, float radius)
 {
@@ -109,6 +112,22 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     GpuInstanceData instanceData = g_InstanceTable[instanceIndex];
+    uint materialHandle = instanceData.materialHandle;
+    if (!IsPackedHandleValid(materialHandle))
+    {
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW], 1);
+    }
+    else
+    {
+        uint materialIndex = GetHandleIndex(materialHandle);
+        uint materialGeneration = GetHandleGeneration(materialHandle);
+        if (materialIndex == 0 ||
+            materialIndex >= WOLF_MAX_MATERIAL_COUNT ||
+            g_MaterialGenerations[materialIndex] != materialGeneration)
+        {
+            InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW], 1);
+        }
+    }
 
     uint meshIndex = 0;
     uint meshHandle = instanceData.meshHandle;

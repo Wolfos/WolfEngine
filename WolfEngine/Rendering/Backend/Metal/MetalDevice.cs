@@ -57,6 +57,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
+	private readonly object _submissionSync = new();
 	private ulong _lastSubmittedId;
 	private ulong _completedId;
 
@@ -87,9 +88,27 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 
-	public ulong LastSubmittedId => _lastSubmittedId;
+	public ulong LastSubmittedId
+	{
+		get
+		{
+			lock (_submissionSync)
+			{
+				return _lastSubmittedId;
+			}
+		}
+	}
 
-	public ulong CompletedId => _completedId;
+	public ulong CompletedId
+	{
+		get
+		{
+			lock (_submissionSync)
+			{
+				return _completedId;
+			}
+		}
+	}
 
 	public string GetDiagnosticsSnapshot()
 	{
@@ -140,9 +159,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	public void WaitForIdle()
 	{
-		while (_pendingSubmissions.Count > 0)
+		while (TryDequeueSubmission(onlyWhenOverLimit: false, out var submission))
 		{
-			RetireOldestSubmission(waitForCompletion: true);
+			RetireSubmission(submission, waitForCompletion: true);
 		}
 	}
 
@@ -154,8 +173,12 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 
 		metalCommandList.Commit();
-		var submissionId = ++_lastSubmittedId;
-		_pendingSubmissions.Enqueue(new PendingSubmission(submissionId, metalCommandList));
+		ulong submissionId;
+		lock (_submissionSync)
+		{
+			submissionId = ++_lastSubmittedId;
+			_pendingSubmissions.Enqueue(new PendingSubmission(submissionId, metalCommandList));
+		}
 		PumpCompleted();
 	}
 
@@ -163,31 +186,72 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	{
 		// SharpMetal does not currently expose a portable non-blocking completion query in this layer.
 		// Keep a bounded in-flight queue and retire oldest submissions when the queue is full.
-		while (_pendingSubmissions.Count > GpuDrawResources.MaxFramesInFlight)
+		while (TryDequeueSubmission(onlyWhenOverLimit: true, out var submission))
 		{
-			RetireOldestSubmission(waitForCompletion: true);
+			RetireSubmission(submission, waitForCompletion: true);
 		}
 	}
 
-	private void RetireOldestSubmission(bool waitForCompletion)
+	private bool TryDequeueSubmission(bool onlyWhenOverLimit, out PendingSubmission submission)
 	{
-		if (_pendingSubmissions.Count == 0)
+		lock (_submissionSync)
 		{
+			if (_pendingSubmissions.Count == 0)
+			{
+				submission = default;
+				return false;
+			}
+
+			if (onlyWhenOverLimit && _pendingSubmissions.Count <= GpuDrawResources.MaxFramesInFlight)
+			{
+				submission = default;
+				return false;
+			}
+
+			submission = _pendingSubmissions.Dequeue();
+			return true;
+		}
+	}
+
+	private void RetireSubmission(PendingSubmission submission, bool waitForCompletion)
+	{
+		var commandList = submission.CommandList;
+		if (commandList is null)
+		{
+			MarkSubmissionCompleted(submission.Id);
 			return;
 		}
 
-		var submission = _pendingSubmissions.Dequeue();
 		try
 		{
 			if (waitForCompletion)
 			{
-				submission.CommandList.WaitUntilCompleted();
+				commandList.WaitUntilCompleted();
 			}
+		}
+		catch (NullReferenceException)
+		{
+			// SharpMetal can surface managed null wrappers when native command buffers are torn down unexpectedly.
 		}
 		finally
 		{
-			submission.CommandList.Dispose();
-			_completedId = Math.Max(_completedId, submission.Id);
+			try
+			{
+				commandList.Dispose();
+			}
+			catch (NullReferenceException)
+			{
+			}
+
+			MarkSubmissionCompleted(submission.Id);
+		}
+	}
+
+	private void MarkSubmissionCompleted(ulong submissionId)
+	{
+		lock (_submissionSync)
+		{
+			_completedId = Math.Max(_completedId, submissionId);
 		}
 	}
 
