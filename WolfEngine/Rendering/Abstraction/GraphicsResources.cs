@@ -14,6 +14,7 @@ public interface IGfxTexture : IGfxResource
 {
 	TextureDescriptor Descriptor { get; }
 	DescriptorHandle ShaderResourceView { get; }
+	DescriptorHandle DepthShaderResourceView { get; }
 	DescriptorHandle UnorderedAccessView { get; }
 }
 
@@ -43,6 +44,8 @@ public interface IGfxIndirectCommandBuffer : IGfxResource
 public interface IGfxDescriptorTable
 {
 	DescriptorHandle AllocateShaderResourceView(IGfxResource resource);
+
+	DescriptorHandle AllocateDepthShaderResourceView(IGfxTexture texture);
 
 	DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource);
 

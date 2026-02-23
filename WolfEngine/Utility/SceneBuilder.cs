@@ -89,8 +89,6 @@ public class SceneBuilder : ISceneBuilder
 				importedMaterial.AlphaMode,
 				importedMaterial.AlphaCutoff);
 			
-			Console.WriteLine($"imported material as {material.AlphaMode}");
-
 			materials.Add(material);
 		}
 
