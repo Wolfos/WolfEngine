@@ -88,6 +88,34 @@ float GeometrySmith(float NdotV, float NdotL, float alpha)
     return ggxV * ggxL;
 }
 
+float ShadowCompare(Texture2D<float4> shadowMap, int2 texel, int2 shadowMapSize, float receiverDepth)
+{
+    if (texel.x < 0 || texel.y < 0 || texel.x >= shadowMapSize.x || texel.y >= shadowMapSize.y)
+    {
+        return 1.0f;
+    }
+
+    float depth = shadowMap.Load(int3(texel, 0)).r;
+    return receiverDepth <= depth ? 1.0f : 0.0f;
+}
+
+// Emulates SampleCmp + bilinear filtering using 4 depth compares around the sample UV.
+float SampleShadowBilinearPCF(Texture2D<float4> shadowMap, float2 sampleUV, int2 shadowMapSize, float receiverDepth)
+{
+    float2 texelPos = sampleUV * float2(shadowMapSize) - 0.5f;
+    int2 texel00 = int2(floor(texelPos));
+    float2 fracPos = saturate(texelPos - float2(texel00));
+
+    float s00 = ShadowCompare(shadowMap, texel00, shadowMapSize, receiverDepth);
+    float s10 = ShadowCompare(shadowMap, texel00 + int2(1, 0), shadowMapSize, receiverDepth);
+    float s01 = ShadowCompare(shadowMap, texel00 + int2(0, 1), shadowMapSize, receiverDepth);
+    float s11 = ShadowCompare(shadowMap, texel00 + int2(1, 1), shadowMapSize, receiverDepth);
+
+    float sx0 = lerp(s00, s10, fracPos.x);
+    float sx1 = lerp(s01, s11, fracPos.x);
+    return lerp(sx0, sx1, fracPos.y);
+}
+
 float ComputeDirectionalShadow(
     float3 worldPos,
     float4x4 shadowViewProjection,
@@ -115,8 +143,13 @@ float ComputeDirectionalShadow(
     }
 
     Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
-    SamplerState shadowSampler = GetSampler(shadowSamplerHandle);
+    // Sampler handle is currently kept for interface compatibility.
+    float shadowSamplerCompat = (shadowSamplerHandle == 0u) ? 0.0f : 0.0f;
     // Optimized 5x5 tent PCF with 9 taps (phase-aware; bilinear filtered).
+    uint shadowWidth, shadowHeight;
+    shadowMap.GetDimensions(shadowWidth, shadowHeight);
+    int2 shadowMapSizeInt = int2(max(int(shadowWidth), 1), max(int(shadowHeight), 1));
+
     float2 shadowMapSize = 1.0f / max(shadowTexelSize, 1e-6f.xx);
     float2 texelPos = uv * shadowMapSize + 0.5f;
     float2 baseTexel = floor(texelPos);
@@ -136,7 +169,7 @@ float ComputeDirectionalShadow(
     float v1 = (3.0f + s.y) / vw1;
     float v2 = s.y / vw2 + 2.0f;
 
-    float receiverDepth = shadowPos.z - depthBias;
+    float receiverDepth = shadowPos.z - depthBias + shadowSamplerCompat;
     float visibility = 0.0f;
     float weightSum = 0.0f;
 
@@ -160,15 +193,15 @@ float ComputeDirectionalShadow(
     float w12 = uw1 * vw2;
     float w22 = uw2 * vw2;
 
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV00, 0.0f).r) ? w00 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV10, 0.0f).r) ? w10 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV20, 0.0f).r) ? w20 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV01, 0.0f).r) ? w01 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV11, 0.0f).r) ? w11 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV21, 0.0f).r) ? w21 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV02, 0.0f).r) ? w02 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV12, 0.0f).r) ? w12 : 0.0f;
-    visibility += (receiverDepth <= shadowMap.SampleLevel(shadowSampler, sampleUV22, 0.0f).r) ? w22 : 0.0f;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV00, shadowMapSizeInt, receiverDepth) * w00;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV10, shadowMapSizeInt, receiverDepth) * w10;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV20, shadowMapSizeInt, receiverDepth) * w20;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV01, shadowMapSizeInt, receiverDepth) * w01;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV11, shadowMapSizeInt, receiverDepth) * w11;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV21, shadowMapSizeInt, receiverDepth) * w21;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV02, shadowMapSizeInt, receiverDepth) * w02;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV12, shadowMapSizeInt, receiverDepth) * w12;
+    visibility += SampleShadowBilinearPCF(shadowMap, sampleUV22, shadowMapSizeInt, receiverDepth) * w22;
 
     weightSum = w00 + w10 + w20 + w01 + w11 + w21 + w02 + w12 + w22;
     return weightSum > 0.0f ? visibility / weightSum : 1.0f;
