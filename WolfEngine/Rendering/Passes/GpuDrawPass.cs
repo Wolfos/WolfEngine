@@ -397,6 +397,12 @@ public sealed class GpuDrawPass
 
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
 	{
+		ArgumentNullException.ThrowIfNull(sceneData);
+		RecordCullForView(context, sceneData.ViewProjection, sceneData.CameraOrigin);
+	}
+
+	public void RecordCullForView(RenderGraphContext context, Matrix4x4 viewProjection, Vector3 cameraOrigin)
+	{
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
@@ -426,7 +432,7 @@ public sealed class GpuDrawPass
 			commandList.BindPipeline(pipeline);
 
 			Span<Vector4> planes = stackalloc Vector4[6];
-			ExtractFrustumPlanes(sceneData.ViewProjection, planes);
+			ExtractFrustumPlanes(viewProjection, planes);
 
 			var cullParams = new CullParams
 			{
@@ -437,7 +443,7 @@ public sealed class GpuDrawPass
 				Plane4 = planes[4],
 				Plane5 = planes[5],
 				CameraPositionAndMaxDrawCount = new Vector4(
-					sceneData.CameraOrigin,
+					cameraOrigin,
 					GpuDrawResources.MaxDrawCount),
 				BucketCount = (uint)bucketCount,
 				MaxVisiblePerBucket = GpuDrawResources.MaxDrawCount,

@@ -13,6 +13,7 @@ public sealed class BindlessResourceRegistry
 {
 	private IGfxDevice? _device;
 	private readonly Dictionary<IGfxResource, DescriptorHandle> _srvHandles = new(new ReferenceComparer<IGfxResource>());
+	private readonly Dictionary<IGfxTexture, DescriptorHandle> _depthSrvHandles = new(new ReferenceComparer<IGfxTexture>());
 	private readonly Dictionary<IGfxResource, DescriptorHandle> _uavHandles = new(new ReferenceComparer<IGfxResource>());
 	private readonly Dictionary<IGfxBuffer, DescriptorHandle> _cbvHandles = new(new ReferenceComparer<IGfxBuffer>());
 	private readonly Dictionary<SamplerDescriptor, DescriptorHandle> _samplerHandles = new(new SamplerDescriptorComparer());
@@ -40,6 +41,7 @@ public sealed class BindlessResourceRegistry
 
 		_device = device;
 		_srvHandles.Clear();
+		_depthSrvHandles.Clear();
 		_cbvHandles.Clear();
 		_uavHandles.Clear();
 		_samplerHandles.Clear();
@@ -97,6 +99,37 @@ public sealed class BindlessResourceRegistry
 			return _errorTextureHandle;
 		}
 		_srvHandles[texture] = handle;
+		return handle.IsValid ? handle : _errorTextureHandle;
+	}
+
+	public DescriptorHandle RegisterDepthTexture(IGfxTexture texture)
+	{
+		if (_device is null)
+		{
+			throw new InvalidOperationException("Bindless registry is not initialized.");
+		}
+
+		if (_depthSrvHandles.TryGetValue(texture, out var handle))
+		{
+			return handle;
+		}
+
+		try
+		{
+			handle = texture.DepthShaderResourceView.IsValid
+				? texture.DepthShaderResourceView
+				: _device.GlobalTable.AllocateDepthShaderResourceView(texture);
+		}
+		catch (InvalidOperationException ex) when (IsTableFullException(ex))
+		{
+			LogTableFullOnce(
+				ref _loggedSrvTableFull,
+				"Depth SRV",
+				GpuDrawResources.MaxDrawCount);
+			return _errorTextureHandle;
+		}
+
+		_depthSrvHandles[texture] = handle;
 		return handle.IsValid ? handle : _errorTextureHandle;
 	}
 
@@ -209,6 +242,26 @@ public sealed class BindlessResourceRegistry
 		{
 			metalTable.Free(handle);
 		}
+	}
+
+	public DescriptorHandle GetDepthTextureHandle(IGfxTexture? texture)
+	{
+		if (texture is null)
+		{
+			return _errorTextureHandle;
+		}
+
+		if (texture.DepthShaderResourceView.IsValid)
+		{
+			return texture.DepthShaderResourceView;
+		}
+
+		if (_depthSrvHandles.TryGetValue(texture, out var handle))
+		{
+			return handle;
+		}
+
+		return _errorTextureHandle;
 	}
 
 	private void CreateErrorResources(IGfxDevice device)

@@ -1,4 +1,5 @@
 using WolfEngine.Rendering.Abstraction;
+using System.Numerics;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -28,12 +29,23 @@ public struct TransparentForwardPassConfig
 
 	public required IGfxTexture LightingTarget { get; init; }
 	public required IGfxTexture DepthTarget { get; init; }
+	public required IGfxTexture ShadowMapDepth { get; init; }
 
 	public required DescriptorHandle SkyboxEnvironment { get; init; }
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
 	public required DescriptorHandle SkyboxBrdfLut { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }
+	public required DescriptorHandle ShadowMapHandle { get; init; }
+	public required DescriptorHandle ShadowSampler { get; init; }
+
+	public required Matrix4x4 ShadowViewProjection { get; init; }
+	public required int ShadowedDirectionalLightIndex { get; init; }
+	public required float ShadowDepthBias { get; init; }
+	public required float ShadowStrength { get; init; }
+	public required bool ShadowsEnabled { get; init; }
+	public required float ShadowTexelSizeX { get; init; }
+	public required float ShadowTexelSizeY { get; init; }
 
 	public required IGfxBuffer? InstanceBuffer { get; init; }
 	public required IGfxBuffer? MaterialBuffer { get; init; }

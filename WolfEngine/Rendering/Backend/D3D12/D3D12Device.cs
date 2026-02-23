@@ -1144,6 +1144,12 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
+		public DescriptorHandle AllocateDepthShaderResourceView(IGfxTexture texture)
+		{
+			throw new NotImplementedException(
+				"Depth SRV descriptor allocation is not yet implemented for the Direct3D12 backend.");
+		}
+
 		public DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource)
 		{
 			throw new NotSupportedException(
@@ -1170,6 +1176,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		public TextureDescriptor Descriptor { get; private set; }
 
 		public DescriptorHandle ShaderResourceView { get; private set; } = DescriptorHandle.Invalid;
+
+		public DescriptorHandle DepthShaderResourceView =>
+			throw new NotImplementedException("Depth SRV is not yet implemented for external Direct3D12 textures.");
 
 		public DescriptorHandle UnorderedAccessView { get; private set; } = DescriptorHandle.Invalid;
 

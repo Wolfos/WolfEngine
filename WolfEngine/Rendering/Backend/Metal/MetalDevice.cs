@@ -289,12 +289,16 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		var srvHandle = (descriptor.Usage & TextureUsage.ShaderResource) != 0
 			? _descriptorTable.AllocateShaderResourceView(metalTexture)
 			: DescriptorHandle.Invalid;
+		var depthSrvHandle = (descriptor.Usage & TextureUsage.ShaderResource) != 0 &&
+		                     (descriptor.Usage & TextureUsage.DepthStencil) != 0
+			? _descriptorTable.AllocateDepthShaderResourceView(metalTexture)
+			: DescriptorHandle.Invalid;
 
 		var uavHandle = (descriptor.Usage & TextureUsage.UnorderedAccess) != 0
 			? _descriptorTable.AllocateUnorderedAccessView(metalTexture)
 			: DescriptorHandle.Invalid;
 
-		metalTexture.SetHandles(srvHandle, uavHandle);
+		metalTexture.SetHandles(srvHandle, depthSrvHandle, uavHandle);
 		return metalTexture;
 	}
 

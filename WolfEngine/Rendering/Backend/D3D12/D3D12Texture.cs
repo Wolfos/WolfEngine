@@ -37,6 +37,9 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	public DescriptorHandle ShaderResourceView => _srvHandle;
 
+	public DescriptorHandle DepthShaderResourceView =>
+		throw new NotImplementedException("Depth SRV is not yet implemented for the Direct3D12 backend.");
+
 	public DescriptorHandle UnorderedAccessView => _uavHandle;
 
 	ID3D12Resource* ID3D12BackendTexture.Resource => Resource.Handle;

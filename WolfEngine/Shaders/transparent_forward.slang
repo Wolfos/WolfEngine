@@ -18,9 +18,12 @@ cbuffer TransparentEnvironmentParams : register(b0)
     uint prefilteredHandle;
     uint brdfLutHandle;
     uint samplerHandle;
+    uint shadowMapHandle;
+    uint shadowSamplerHandle;
     uint _envPadding0;
     uint _envPadding1;
     uint _envPadding2;
+    uint _envPadding3;
 };
 
 cbuffer CameraParams : register(b2)
@@ -35,6 +38,12 @@ cbuffer LightingParams : register(b3)
     uint lightCount;
     float3 _lightingPadding;
     LightData lights[MAX_LIGHTS];
+    row_major float4x4 shadowViewProjection;
+    float4 shadowTexelSizeBiasStrength;
+    uint shadowLightIndex;
+    uint shadowsEnabled;
+    uint _shadowPadding0;
+    uint _shadowPadding1;
 };
 
 struct VSInput
@@ -150,6 +159,14 @@ float4 fragmentShader(VSOutput input) : SV_Target0
         viewDir,
         lightCount,
         lights,
+        shadowViewProjection,
+        shadowMapHandle,
+        shadowSamplerHandle,
+        shadowLightIndex,
+        shadowTexelSizeBiasStrength.xy,
+        shadowTexelSizeBiasStrength.z,
+        shadowTexelSizeBiasStrength.w,
+        shadowsEnabled,
         irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,

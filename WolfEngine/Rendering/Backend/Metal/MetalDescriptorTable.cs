@@ -74,6 +74,16 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 		return new DescriptorHandle(DescriptorKind.ShaderResourceView, index);
 	}
 
+	public DescriptorHandle AllocateDepthShaderResourceView(IGfxTexture texture)
+	{
+		if (texture is not MetalTexture metalTexture)
+		{
+			throw new InvalidOperationException("Texture was not created by the Metal backend.");
+		}
+
+		return AllocateShaderResourceView(metalTexture);
+	}
+
 	public DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource)
 	{
 		if (resource is not MetalTexture metalTexture)

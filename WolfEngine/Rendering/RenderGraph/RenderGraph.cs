@@ -50,6 +50,7 @@ public sealed class RenderGraph
 		IArenaAllocator arenaAllocator,
 		DeferredLightingPass deferredLightingPass,
 		TransparentForwardPass transparentForwardPass,
+		ShadowMapPass shadowMapPass,
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
@@ -61,7 +62,7 @@ public sealed class RenderGraph
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
-		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, transparentForwardPass, gpuDrawPass, gpuDrawResources,
+		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, transparentForwardPass, shadowMapPass, gpuDrawPass, gpuDrawResources,
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));

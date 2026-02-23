@@ -88,7 +88,63 @@ float GeometrySmith(float NdotV, float NdotL, float alpha)
     return ggxV * ggxL;
 }
 
-float3 EvaluateDirectLighting(SurfaceLightingInput surface, float3 viewDir, uint lightCount, LightData lights[MAX_LIGHTS])
+float ComputeDirectionalShadow(
+    float3 worldPos,
+    float4x4 shadowViewProjection,
+    uint shadowMapHandle,
+    uint shadowSamplerHandle,
+    float2 shadowTexelSize,
+    float depthBias)
+{
+    float4 shadowPosH = mul(float4(worldPos, 1.0f), shadowViewProjection);
+    if (shadowPosH.w <= 0.0f)
+    {
+        return 1.0f;
+    }
+
+    float3 shadowPos = shadowPosH.xyz / shadowPosH.w;
+    float2 uv = float2(shadowPos.x * 0.5f + 0.5f, 1.0f - (shadowPos.y * 0.5f + 0.5f));
+    if (uv.x <= 0.0f || uv.x >= 1.0f || uv.y <= 0.0f || uv.y >= 1.0f)
+    {
+        return 1.0f;
+    }
+
+    if (shadowPos.z <= 0.0f || shadowPos.z >= 1.0f)
+    {
+        return 1.0f;
+    }
+
+    Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
+    SamplerState shadowSampler = GetSampler(shadowSamplerHandle);
+    float visibility = 0.0f;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            float2 offset = float2(float(x), float(y)) * shadowTexelSize;
+            float mapDepth = shadowMap.SampleLevel(shadowSampler, uv + offset, 0.0f).r;
+            visibility += (shadowPos.z - depthBias) <= mapDepth ? 1.0f : 0.0f;
+        }
+    }
+
+    return visibility / 9.0f;
+}
+
+float3 EvaluateDirectLighting(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    uint lightCount,
+    LightData lights[MAX_LIGHTS],
+    float4x4 shadowViewProjection,
+    uint shadowMapHandle,
+    uint shadowSamplerHandle,
+    uint shadowLightIndex,
+    float2 shadowTexelSize,
+    float shadowDepthBias,
+    float shadowStrength,
+    uint shadowsEnabled)
 {
     float3 color = float3(0.0f, 0.0f, 0.0f);
     float3 normal = normalize(surface.normal);
@@ -137,7 +193,20 @@ float3 EvaluateDirectLighting(SurfaceLightingInput surface, float3 viewDir, uint
         float3 diffuse = kD * albedo / PI;
 
         float3 radiance = lightColor * attenuation;
-        color += (diffuse + specular) * radiance * NdotL;
+        float shadow = 1.0f;
+        if (shadowsEnabled != 0 && type < 0.5f && i == shadowLightIndex)
+        {
+            float pcf = ComputeDirectionalShadow(
+                surface.worldPos,
+                shadowViewProjection,
+                shadowMapHandle,
+                shadowSamplerHandle,
+                shadowTexelSize,
+                shadowDepthBias);
+            shadow = lerp(1.0f, pcf, saturate(shadowStrength));
+        }
+
+        color += (diffuse + specular) * radiance * NdotL * shadow;
     }
 
     return color;
@@ -183,13 +252,33 @@ float3 EvaluateSurfaceLighting(
     float3 viewDir,
     uint lightCount,
     LightData lights[MAX_LIGHTS],
+    float4x4 shadowViewProjection,
+    uint shadowMapHandle,
+    uint shadowSamplerHandle,
+    uint shadowLightIndex,
+    float2 shadowTexelSize,
+    float shadowDepthBias,
+    float shadowStrength,
+    uint shadowsEnabled,
     uint irradianceHandle,
     uint prefilteredHandle,
     uint brdfLutHandle,
     uint samplerHandle,
     float iblExposure)
 {
-    float3 color = EvaluateDirectLighting(surface, viewDir, lightCount, lights);
+    float3 color = EvaluateDirectLighting(
+        surface,
+        viewDir,
+        lightCount,
+        lights,
+        shadowViewProjection,
+        shadowMapHandle,
+        shadowSamplerHandle,
+        shadowLightIndex,
+        shadowTexelSize,
+        shadowDepthBias,
+        shadowStrength,
+        shadowsEnabled);
     color += EvaluateImageBasedLighting(
         surface,
         viewDir,

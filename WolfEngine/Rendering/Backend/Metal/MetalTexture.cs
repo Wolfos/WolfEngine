@@ -15,6 +15,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		Texture = texture;
 		_descriptorTable = descriptorTable;
 		ShaderResourceView = DescriptorHandle.Invalid;
+		DepthShaderResourceView = DescriptorHandle.Invalid;
 		UnorderedAccessView = DescriptorHandle.Invalid;
 	}
 
@@ -24,15 +25,18 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 
 	public DescriptorHandle ShaderResourceView { get; private set; }
 
+	public DescriptorHandle DepthShaderResourceView { get; private set; }
+
 	public DescriptorHandle UnorderedAccessView { get; private set; }
 
 	public MTLTexture Texture { get; }
 
 	public bool IsDisposed => _isDisposed;
 
-	public void SetHandles(DescriptorHandle srvHandle, DescriptorHandle uavHandle)
+	public void SetHandles(DescriptorHandle srvHandle, DescriptorHandle depthSrvHandle, DescriptorHandle uavHandle)
 	{
 		ShaderResourceView = srvHandle;
+		DepthShaderResourceView = depthSrvHandle;
 		UnorderedAccessView = uavHandle;
 	}
 
@@ -48,6 +52,12 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		{
 			_descriptorTable.Free(ShaderResourceView);
 			ShaderResourceView = DescriptorHandle.Invalid;
+		}
+
+		if (DepthShaderResourceView.IsValid)
+		{
+			_descriptorTable.Free(DepthShaderResourceView);
+			DepthShaderResourceView = DescriptorHandle.Invalid;
 		}
 
 		if (UnorderedAccessView.IsValid)

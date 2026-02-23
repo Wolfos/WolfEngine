@@ -10,7 +10,8 @@ public enum DrawPassParticipation
 {
 	None = 0,
 	GBuffer = 1 << 0,
-	ForwardTransparent = 1 << 1
+	ForwardTransparent = 1 << 1,
+	ShadowCaster = 1 << 2
 }
 
 public readonly struct GBufferDrawBucketDefinition
@@ -46,7 +47,7 @@ public static class GBufferDrawBuckets
 			"GBuffer.ExecuteOpaque",
 			"Opaque",
 			string.Empty,
-			DrawPassParticipation.GBuffer,
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster,
 			AlphaMode.Opaque),
 		new GBufferDrawBucketDefinition(
 			"ForwardTransparent.ExecuteAlphaBlend",
@@ -58,7 +59,7 @@ public static class GBufferDrawBuckets
 			"GBuffer.ExecuteAlphaTest",
 			"AlphaTest",
 			"WOLF_ALPHA_CLIP",
-			DrawPassParticipation.GBuffer,
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster,
 			AlphaMode.AlphaTest)
 	};
 

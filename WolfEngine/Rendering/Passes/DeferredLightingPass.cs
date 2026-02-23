@@ -16,6 +16,7 @@ public sealed class DeferredLightingPass
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
+	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
@@ -27,7 +28,8 @@ public sealed class DeferredLightingPass
 	public DeferredLightingPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderGraphFrameResources resources,
-		IGfxDevice device)
+		IGfxDevice device,
+		ShadowFrameData shadowData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
@@ -40,12 +42,18 @@ public sealed class DeferredLightingPass
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
 			_linearSampler = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
+		if (_shadowSampler.IsValid == false)
+		{
+			var shadowSampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
+			_shadowSampler = _bindlessRegistry.GetSamplerHandle(shadowSampler);
+		}
 
 		var albedo = context.GetTexture(resources.GBufferAlbedo);
 		var normal = context.GetTexture(resources.GBufferNormal);
 		var material = context.GetTexture(resources.GBufferMaterial);
 		var emissive = context.GetTexture(resources.GBufferEmissive);
 		var depth = context.GetTexture(resources.GBufferDepth);
+		var shadowMapDepth = context.GetTexture(resources.ShadowMapDepth);
 
 		var environment = resources.SkyboxEnvironment.IsValid
 			? context.GetTexture(resources.SkyboxEnvironment)
@@ -61,6 +69,7 @@ public sealed class DeferredLightingPass
 			: emissive;
 
 		var lighting = context.GetTexture(resources.LightingBuffer);
+		var shadowResolution = Math.Max(1, shadowData.MapResolution);
 
 		return new DeferredLightingPassConfig
 		{
@@ -70,12 +79,21 @@ public sealed class DeferredLightingPass
 			GBufferMaterial = _bindlessRegistry.GetTextureHandle(material),
 			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
+			ShadowMapDepth = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth),
 			SkyboxEnvironment = _bindlessRegistry.GetTextureHandle(environment),
 			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
 			SkyboxBrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
 			LightingOutput = _bindlessRegistry.RegisterRwTexture(lighting),
 			LinearSampler = _linearSampler,
+			ShadowSampler = _shadowSampler,
+			ShadowViewProjection = shadowData.ViewProjection,
+			ShadowedDirectionalLightIndex = shadowData.ShadowedDirectionalLightIndex,
+			ShadowDepthBias = shadowData.DepthBias,
+			ShadowStrength = shadowData.Strength,
+			ShadowsEnabled = shadowData.Enabled,
+			ShadowTexelSizeX = 1.0f / shadowResolution,
+			ShadowTexelSizeY = 1.0f / shadowResolution,
 			DispatchSize = resources.FramebufferSize
 		};
 	}
@@ -89,7 +107,7 @@ public sealed class DeferredLightingPass
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		Span<uint> textureHandles = stackalloc uint[12];
+		Span<uint> textureHandles = stackalloc uint[14];
 		textureHandles[0] = config.GBufferAlbedo.Value;
 		textureHandles[1] = config.GBufferNormal.Value;
 		textureHandles[2] = config.GBufferMaterial.Value;
@@ -101,7 +119,9 @@ public sealed class DeferredLightingPass
 		textureHandles[8] = config.SkyboxBrdfLut.Value;
 		textureHandles[9] = config.LightingOutput.Value;
 		textureHandles[10] = config.LinearSampler.Value;
-		textureHandles[11] = 0;
+		textureHandles[11] = config.ShadowMapDepth.Value;
+		textureHandles[12] = config.ShadowSampler.Value;
+		textureHandles[13] = 0;
 		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
 
 		// Set camera constants (Root parameter 1)
@@ -143,15 +163,23 @@ public sealed class DeferredLightingPass
 			};
 		}
 
-		var lightBytes = MemoryMarshal.AsBytes(shaderLights);
-		const int headerSize = 32; // uint + float3 padding, float3 aligns to 16 in MSL.
-		var lightingConstantsSize = headerSize + lightBytes.Length;
-		Span<byte> lightingConstants = stackalloc byte[lightingConstantsSize];
+		Span<uint> lightingConstants = stackalloc uint[68];
 		lightingConstants.Clear();
-		var lightCount = (uint)lightCountInt;
-		MemoryMarshal.Write(lightingConstants, ref lightCount);
-		lightBytes.CopyTo(lightingConstants.Slice(headerSize));
-		commandList.SetComputeConstants(2, lightingConstants);
+		lightingConstants[0] = (uint)lightCountInt;
+		var lightWords = MemoryMarshal.Cast<ShaderLight, uint>(shaderLights);
+		lightWords.CopyTo(lightingConstants.Slice(8));
+
+		var shadowMatrix = MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(44, 16));
+		WriteMatrix(shadowMatrix, config.ShadowViewProjection);
+		lightingConstants[60] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
+		lightingConstants[61] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
+		lightingConstants[62] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
+		lightingConstants[63] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
+		lightingConstants[64] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
+		lightingConstants[65] = config.ShadowsEnabled ? 1u : 0u;
+		lightingConstants[66] = 0;
+		lightingConstants[67] = 0;
+		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(lightingConstants));
 
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);

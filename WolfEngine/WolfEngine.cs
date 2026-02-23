@@ -23,6 +23,7 @@ public static class WolfEngine
 		services.AddSingleton<IInputSystem, InputSystem>();
 		services.AddSingleton<DeferredLightingPass>();
 		services.AddSingleton<TransparentForwardPass>();
+		services.AddSingleton<ShadowMapPass>();
 		services.AddSingleton<GpuDrawPass>();
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());

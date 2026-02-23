@@ -17,6 +17,8 @@ internal sealed class MetalBackbufferTexture : IGfxTexture
 
 	public DescriptorHandle ShaderResourceView => DescriptorHandle.Invalid;
 
+	public DescriptorHandle DepthShaderResourceView => DescriptorHandle.Invalid;
+
 	public DescriptorHandle UnorderedAccessView => DescriptorHandle.Invalid;
 
 	public CAMetalDrawable Drawable { get; }

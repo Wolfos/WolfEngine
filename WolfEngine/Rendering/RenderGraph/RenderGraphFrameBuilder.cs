@@ -19,6 +19,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
 	public RenderGraphResourceHandle GBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
+	public RenderGraphResourceHandle ShadowMapDepth { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
 	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
@@ -32,6 +33,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly TransparentForwardPass _transparentForwardPass;
+	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly IImGuiRenderer _imGuiRenderer;
@@ -44,16 +46,19 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
-	private readonly Action<RenderGraphContext> _gpuDrawCullExecute;
+	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
+	private readonly Action<RenderGraphContext> _shadowMapExecute;
+	private readonly Action<RenderGraphContext> _gpuDrawCameraCullExecute;
 
 	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
-		DeferredLightingPass deferredLightingPass, TransparentForwardPass transparentForwardPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
+		DeferredLightingPass deferredLightingPass, TransparentForwardPass transparentForwardPass, ShadowMapPass shadowMapPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		_deferredLightingPass = deferredLightingPass;
 		_transparentForwardPass = transparentForwardPass;
+		_shadowMapPass = shadowMapPass;
 		_gpuDrawPass = gpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_imGuiRenderer = imGuiRenderer;
@@ -63,7 +68,9 @@ public sealed class RenderGraphFrameBuilder
 		_transparentForwardExecute = ExecuteTransparentForward;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
-		_gpuDrawCullExecute = ExecuteGpuDrawCull;
+		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
+		_shadowMapExecute = ExecuteShadowMap;
+		_gpuDrawCameraCullExecute = ExecuteGpuDrawCullCamera;
 	}
 
 	public void SetSkybox(SkyboxResources skybox)
@@ -121,6 +128,13 @@ public sealed class RenderGraphFrameBuilder
 				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
 			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
 				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource, Vector4.Zero, 1.0f)),
+			ShadowMapDepth = _resources.CreateTransientTexture(new TextureDescriptor(
+				ShadowMapPass.ShadowMapResolution,
+				ShadowMapPass.ShadowMapResolution,
+				TextureFormat.D32Float,
+				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+				Vector4.Zero,
+				1.0f)),
 			LightingBuffer = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
@@ -144,8 +158,15 @@ public sealed class RenderGraphFrameBuilder
 		graph.AddPass("GpuDraw Update", PassKind.Compute)
 			.SetExecute(_gpuDrawUpdateExecute);
 
-		graph.AddPass("GpuDraw Cull", PassKind.Compute)
-			.SetExecute(_gpuDrawCullExecute);
+		graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
+			.SetExecute(_gpuDrawShadowCullExecute);
+
+		graph.AddPass("Shadow Map", PassKind.Graphics)
+			.WriteTexture(_frameResources.ShadowMapDepth, ResourceState.DepthWrite)
+			.SetExecute(_shadowMapExecute);
+
+		graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
+			.SetExecute(_gpuDrawCameraCullExecute);
 
 		// Register GBuffer pass with proper resource states
 		graph.AddPass("GBuffer", PassKind.Graphics)
@@ -162,7 +183,8 @@ public sealed class RenderGraphFrameBuilder
 			.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource);
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource);
 		if (_frameResources.SkyboxEnvironment.IsValid)
 		{
 			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
@@ -185,6 +207,7 @@ public sealed class RenderGraphFrameBuilder
 
 		var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
 			.ReadTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
+			.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource)
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
 		if (_frameResources.SkyboxEnvironment.IsValid)
 		{
@@ -218,7 +241,26 @@ public sealed class RenderGraphFrameBuilder
 		_gpuDrawPass.RecordUpdate(context);
 	}
 
-	private void ExecuteGpuDrawCull(RenderGraphContext context)
+	private void ExecuteGpuDrawCullShadow(RenderGraphContext context)
+	{
+		var sceneData = context.SceneData!;
+		_shadowMapPass.PrepareFrame(sceneData);
+		var shadowData = _shadowMapPass.GetCurrentFrameData();
+		if (shadowData.Enabled == false)
+		{
+			return;
+		}
+
+		_gpuDrawPass.RecordCullForView(context, shadowData.ViewProjection, sceneData.CameraOrigin);
+	}
+
+	private void ExecuteShadowMap(RenderGraphContext context)
+	{
+		var config = _shadowMapPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice(), _gpuDrawResources);
+		_shadowMapPass.Record(context, in config);
+	}
+
+	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
 	{
 		_gpuDrawPass.RecordCull(context, context.SceneData!);
 	}
@@ -289,7 +331,11 @@ public sealed class RenderGraphFrameBuilder
 	
 	private void ExecuteDeferredLighting(RenderGraphContext context)
 	{
-		var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
+		var config = _deferredLightingPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			_shadowMapPass.GetCurrentFrameData());
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
 	}
 
@@ -299,7 +345,8 @@ public sealed class RenderGraphFrameBuilder
 			context,
 			_frameResources,
 			_renderer.GetGfxDevice(),
-			_gpuDrawResources);
+			_gpuDrawResources,
+			_shadowMapPass.GetCurrentFrameData());
 		_transparentForwardPass.Record(context, in config, context.SceneData!);
 	}
 
