@@ -192,6 +192,25 @@ public sealed class BindlessResourceRegistry
 
 	public DescriptorHandle ErrorBufferHandle => _errorBufferHandle;
 
+	public void UnregisterBuffer(IGfxBuffer? buffer)
+	{
+		if (buffer is null)
+		{
+			return;
+		}
+
+		if (_cbvHandles.TryGetValue(buffer, out var handle) == false)
+		{
+			return;
+		}
+
+		_cbvHandles.Remove(buffer);
+		if (handle.IsValid && _device?.GlobalTable is MetalDescriptorTable metalTable)
+		{
+			metalTable.Free(handle);
+		}
+	}
+
 	private void CreateErrorResources(IGfxDevice device)
 	{
 		_errorTextureHandle = DescriptorHandle.Invalid;

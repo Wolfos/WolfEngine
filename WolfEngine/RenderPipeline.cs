@@ -15,6 +15,7 @@ public class RenderPipeline : IRenderPipeline
     private readonly RenderGraph _renderGraph;
     private readonly GpuDrawDatabase _drawDatabase;
     private readonly ManualResetEventSlim _frameReady = new(true);
+    private int _stressFrame;
     
     public RenderPipeline(
         RenderGraph renderGraph,
@@ -56,6 +57,23 @@ public class RenderPipeline : IRenderPipeline
                 {
                     ref var transform = ref entry.First;
                     ref var meshRenderer = ref entry.Second;
+                    if (GraphicsConfig.GpuHardeningStressEnabled)
+                    {
+                        var churnKey = entry.Entity.Index + _stressFrame;
+                        if ((churnKey % 7) == 0)
+                        {
+                            // Force structural remove/add churn by skipping this entity for the frame.
+                            continue;
+                        }
+
+                        if (meshRenderer.Material is not null && (churnKey % 5) == 0)
+                        {
+                            var toggled = ((_stressFrame / 30) & 1) == 0;
+                            meshRenderer.Material.AlphaMode = toggled ? AlphaMode.AlphaTest : AlphaMode.Opaque;
+                            meshRenderer.Material.AlphaCutoff = toggled ? 0.4f : 0.0f;
+                        }
+                    }
+
                     var transformMatrix = transform.LocalToWorld;
                     _drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
                 }
@@ -70,6 +88,7 @@ public class RenderPipeline : IRenderPipeline
 
             _drawDatabase.EndSync();
             _renderGraph.PublishSnapshot();
+            _stressFrame++;
         }
     }
 }

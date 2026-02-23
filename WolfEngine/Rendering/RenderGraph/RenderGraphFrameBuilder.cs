@@ -245,6 +245,7 @@ public sealed class RenderGraphFrameBuilder
 			VisibleDrawIdsPerBucketBuffer = _gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
+			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,
 			Buckets = bucketList.ToArray(),
 			FallbackMaxCommandCount = _gpuDrawResources.ActiveDrawCommandUpperBound,
 			CameraBuffer = _gpuDrawResources.CameraBuffer,

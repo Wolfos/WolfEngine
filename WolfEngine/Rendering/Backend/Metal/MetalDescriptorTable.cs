@@ -235,31 +235,34 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 		switch (handle.Kind)
 		{
 			case DescriptorKind.ShaderResourceView:
-				if (index < 0 || index >= _srvCount || _srvTextures[index] is null)
+				if (index == 0 || index < 0 || index >= _srvCount || _srvTextures[index] is null)
 				{
 					return;
 				}
-				_srvTextures[index] = null;
+				_srvTextures[index] = _srvTextures[0];
 				MarkDirty();
+				EncodeSrv(index);
 				_freeSrvIndices.Push(index);
 				break;
 			case DescriptorKind.UnorderedAccessView:
-				if (index < 0 || index >= _uavCount || _uavTextures[index] is null)
+				if (index == 0 || index < 0 || index >= _uavCount || _uavTextures[index] is null)
 				{
 					return;
 				}
-				_uavTextures[index] = null;
+				_uavTextures[index] = _uavTextures[0];
 				MarkDirty();
+				EncodeUav(index);
 				_freeUavIndices.Push(index);
 				break;
 			case DescriptorKind.Sampler:
-				if (index < 0 || index >= _samplerCount || _samplers[index].NativePtr == IntPtr.Zero)
+				if (index == 0 || index < 0 || index >= _samplerCount || _samplers[index].NativePtr == IntPtr.Zero)
 				{
 					return;
 				}
 				_samplers[index].Dispose();
-				_samplers[index] = default;
+				_samplers[index] = _samplers[0];
 				MarkDirty();
+				EncodeSampler(index);
 				_freeSamplerIndices.Push(index);
 				break;
 		}

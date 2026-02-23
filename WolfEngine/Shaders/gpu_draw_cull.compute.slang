@@ -7,14 +7,18 @@ static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
 static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
 
-cbuffer CullParams : register(b7)
+static const uint HARDEN_COUNTER_STALE_REJECT = 0;
+static const uint HARDEN_COUNTER_FALLBACK_SUBSTITUTE = 1;
+static const uint HARDEN_COUNTER_VISIBLE_CLAMP = 4;
+
+cbuffer CullParams : register(b12)
 {
     float4 planes[6];
     float4 cameraPositionAndMaxDrawCount;
     uint bucketCount;
+    uint maxVisiblePerBucket;
+    uint fallbackMeshHandle;
     uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u0);
@@ -24,6 +28,10 @@ RWStructuredBuffer<GpuDrawArgs> g_DrawArgs : register(u3);
 RWStructuredBuffer<uint> g_DrawCountPerBucket : register(u4);
 RWStructuredBuffer<uint> g_VisibleDrawIdsPerBucket : register(u5);
 RWStructuredBuffer<uint> g_DrawExecutionRangePerBucket : register(u6);
+RWStructuredBuffer<uint> g_DrawGenerations : register(u7);
+RWStructuredBuffer<uint> g_InstanceGenerations : register(u8);
+RWStructuredBuffer<uint> g_MeshGenerations : register(u9);
+RWStructuredBuffer<uint> g_Diagnostics : register(u10);
 
 bool IsSphereVisible(float3 center, float radius)
 {
@@ -48,6 +56,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
+
     uint dispatchWidth = ((maxDrawCount + 63) / 64) * 8;
     uint drawId = dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
     if (drawId >= maxDrawCount)
@@ -69,26 +78,64 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    if (cmd.instanceId >= WOLF_MAX_INSTANCE_COUNT)
+    if (!IsPackedHandleValid(cmd.drawHandle) ||
+        GetHandleIndex(cmd.drawHandle) != drawId ||
+        g_DrawGenerations[drawId] != GetHandleGeneration(cmd.drawHandle))
     {
+        cmd.flags = 0;
+        g_DrawCommands[drawId] = cmd;
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
         return;
     }
 
-    GpuInstanceData instanceData = g_InstanceTable[cmd.instanceId];
-    if (instanceData.meshId >= WOLF_MAX_MESH_COUNT)
+    if (!IsPackedHandleValid(cmd.instanceHandle))
     {
+        cmd.flags = 0;
+        g_DrawCommands[drawId] = cmd;
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
         return;
     }
-      
-    // View frustum culling
+
+    uint instanceIndex = GetHandleIndex(cmd.instanceHandle);
+    uint instanceGeneration = GetHandleGeneration(cmd.instanceHandle);
+    if (instanceIndex == 0 ||
+        instanceIndex >= WOLF_MAX_INSTANCE_COUNT ||
+        g_InstanceGenerations[instanceIndex] != instanceGeneration)
+    {
+        cmd.flags = 0;
+        g_DrawCommands[drawId] = cmd;
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
+        return;
+    }
+
+    GpuInstanceData instanceData = g_InstanceTable[instanceIndex];
+
+    uint meshIndex = 0;
+    uint meshHandle = instanceData.meshHandle;
+    if (IsPackedHandleValid(meshHandle))
+    {
+        uint candidateIndex = GetHandleIndex(meshHandle);
+        uint candidateGeneration = GetHandleGeneration(meshHandle);
+        if (candidateIndex < WOLF_MAX_MESH_COUNT &&
+            g_MeshGenerations[candidateIndex] == candidateGeneration)
+        {
+            meshIndex = candidateIndex;
+        }
+    }
+
+    if (meshIndex == 0)
+    {
+        meshIndex = GetHandleIndex(fallbackMeshHandle);
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_FALLBACK_SUBSTITUTE], 1);
+    }
+
     float3 relativeCenter = instanceData.boundsCenterRadius.xyz - cameraPosition;
     if (IsSphereVisible(relativeCenter, instanceData.boundsCenterRadius.w) == false)
     {
         return;
     }
-    
 
-    GpuMeshData meshData = g_MeshTable[instanceData.meshId];
+    GpuMeshData meshData = g_MeshTable[meshIndex];
 
     uint bucketIndex = (cmd.flags >> DRAW_FLAG_BUCKET_SHIFT) & DRAW_FLAG_BUCKET_MASK;
     if (bucketIndex >= bucketCount)
@@ -98,13 +145,21 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint visibleDrawIndex;
     InterlockedAdd(g_DrawCountPerBucket[bucketIndex], 1, visibleDrawIndex);
-    g_VisibleDrawIdsPerBucket[(bucketIndex * maxDrawCount) + visibleDrawIndex] = drawId;
-    InterlockedMax(g_DrawExecutionRangePerBucket[(bucketIndex * 2) + 1], drawId + 1);
+    if (visibleDrawIndex >= maxVisiblePerBucket)
+    {
+        InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_VISIBLE_CLAMP], 1);
+        return;
+    }
+
+    g_VisibleDrawIdsPerBucket[(bucketIndex * maxVisiblePerBucket) + visibleDrawIndex] = drawId;
+
+    uint rangeBase = bucketIndex * 2;
+    InterlockedMax(g_DrawExecutionRangePerBucket[rangeBase + 1], drawId + 1);
 
     args.indexCount = meshData.indexCount;
     args.instanceCount = 1;
     args.startIndex = 0;
     args.baseVertex = meshData.baseVertex;
-    args.startInstance = cmd.instanceId;
+    args.startInstance = instanceIndex;
     g_DrawArgs[drawId] = args;
 }

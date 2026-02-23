@@ -27,41 +27,44 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public int Index { get; }
 	}
 
-	private readonly struct CommandBufferReferences
-	{
-		public CommandBufferReferences(
-			MTLBuffer vertexBuffer,
-			MTLBuffer indexBuffer,
-			MTLBuffer cameraBuffer,
-			MTLBuffer instanceBuffer,
-			MTLBuffer materialBuffer,
-			MTLBuffer drawArgsBuffer,
-			MTLBuffer bindlessCountBuffer,
-			MTLBuffer bindlessTextureBuffer,
-			MTLBuffer bindlessRwTextureBuffer,
-			MTLBuffer bindlessSamplerBuffer)
+		private readonly struct CommandBufferReferences
+		{
+			public CommandBufferReferences(
+				MTLBuffer vertexBuffer,
+				MTLBuffer indexBuffer,
+				MTLBuffer cameraBuffer,
+				MTLBuffer instanceBuffer,
+				MTLBuffer materialBuffer,
+				MTLBuffer materialGenerationBuffer,
+				MTLBuffer drawArgsBuffer,
+				MTLBuffer bindlessCountBuffer,
+				MTLBuffer bindlessTextureBuffer,
+				MTLBuffer bindlessRwTextureBuffer,
+				MTLBuffer bindlessSamplerBuffer)
 		{
 			VertexBuffer = vertexBuffer;
 			IndexBuffer = indexBuffer;
-			CameraBuffer = cameraBuffer;
-			InstanceBuffer = instanceBuffer;
-			MaterialBuffer = materialBuffer;
-			DrawArgsBuffer = drawArgsBuffer;
-			BindlessCountBuffer = bindlessCountBuffer;
-			BindlessTextureBuffer = bindlessTextureBuffer;
-			BindlessRwTextureBuffer = bindlessRwTextureBuffer;
+				CameraBuffer = cameraBuffer;
+				InstanceBuffer = instanceBuffer;
+				MaterialBuffer = materialBuffer;
+				MaterialGenerationBuffer = materialGenerationBuffer;
+				DrawArgsBuffer = drawArgsBuffer;
+				BindlessCountBuffer = bindlessCountBuffer;
+				BindlessTextureBuffer = bindlessTextureBuffer;
+				BindlessRwTextureBuffer = bindlessRwTextureBuffer;
 			BindlessSamplerBuffer = bindlessSamplerBuffer;
 		}
 
 		public MTLBuffer VertexBuffer { get; }
 		public MTLBuffer IndexBuffer { get; }
-		public MTLBuffer CameraBuffer { get; }
-		public MTLBuffer InstanceBuffer { get; }
-		public MTLBuffer MaterialBuffer { get; }
-		public MTLBuffer DrawArgsBuffer { get; }
-		public MTLBuffer BindlessCountBuffer { get; }
-		public MTLBuffer BindlessTextureBuffer { get; }
-		public MTLBuffer BindlessRwTextureBuffer { get; }
+			public MTLBuffer CameraBuffer { get; }
+			public MTLBuffer InstanceBuffer { get; }
+			public MTLBuffer MaterialBuffer { get; }
+			public MTLBuffer MaterialGenerationBuffer { get; }
+			public MTLBuffer DrawArgsBuffer { get; }
+			public MTLBuffer BindlessCountBuffer { get; }
+			public MTLBuffer BindlessTextureBuffer { get; }
+			public MTLBuffer BindlessRwTextureBuffer { get; }
 		public MTLBuffer BindlessSamplerBuffer { get; }
 	}
 
@@ -98,14 +101,15 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		uint indexCount,
 		ulong indexBufferOffsetBytes,
 		int baseVertex,
-		ulong drawArgsOffsetBytes,
-		MetalBuffer cameraBuffer,
-		MetalBuffer instanceBuffer,
-		MetalBuffer materialBuffer,
-		MetalBuffer drawArgsBuffer,
-		MTLBuffer bindlessCountBuffer,
-		MTLBuffer bindlessTextureBuffer,
-		MTLBuffer bindlessRwTextureBuffer,
+			ulong drawArgsOffsetBytes,
+			MetalBuffer cameraBuffer,
+			MetalBuffer instanceBuffer,
+			MetalBuffer materialBuffer,
+			MetalBuffer materialGenerationBuffer,
+			MetalBuffer drawArgsBuffer,
+			MTLBuffer bindlessCountBuffer,
+			MTLBuffer bindlessTextureBuffer,
+			MTLBuffer bindlessRwTextureBuffer,
 		MTLBuffer bindlessSamplerBuffer)
 	{
 		ValidateCommandIndex(commandIndex);
@@ -117,14 +121,16 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		using var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
-		command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
-		command.SetVertexBuffer(instanceBuffer.Buffer, 0, 10);
-		command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
-		command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
-		command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
-		command.SetFragmentBuffer(instanceBuffer.Buffer, 0, 10);
-		command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
-		command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
+			command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
+			command.SetVertexBuffer(instanceBuffer.Buffer, 0, 10);
+			command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
+			command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, 13);
+			command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
+			command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
+			command.SetFragmentBuffer(instanceBuffer.Buffer, 0, 10);
+			command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
+			command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, 13);
+			command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
 
 		if (bindlessCountBuffer.NativePtr != IntPtr.Zero)
 		{
@@ -165,13 +171,14 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		_commandReferences[commandIndex] = new CommandBufferReferences(
 			vertexBuffer.Buffer,
 			indexBuffer.Buffer,
-			cameraBuffer.Buffer,
-			instanceBuffer.Buffer,
-			materialBuffer.Buffer,
-			drawArgsBuffer.Buffer,
-			bindlessCountBuffer,
-			bindlessTextureBuffer,
-			bindlessRwTextureBuffer,
+				cameraBuffer.Buffer,
+				instanceBuffer.Buffer,
+				materialBuffer.Buffer,
+				materialGenerationBuffer.Buffer,
+				drawArgsBuffer.Buffer,
+				bindlessCountBuffer,
+				bindlessTextureBuffer,
+				bindlessRwTextureBuffer,
 			bindlessSamplerBuffer);
 		AddBufferRefs(_commandReferences[commandIndex]);
 	}
@@ -201,12 +208,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 			AddBuffer(refs.VertexBuffer, destination, seenPointers);
 			AddBuffer(refs.IndexBuffer, destination, seenPointers);
-			AddBuffer(refs.CameraBuffer, destination, seenPointers);
-			AddBuffer(refs.InstanceBuffer, destination, seenPointers);
-			AddBuffer(refs.MaterialBuffer, destination, seenPointers);
-			AddBuffer(refs.DrawArgsBuffer, destination, seenPointers);
-			AddBuffer(refs.BindlessCountBuffer, destination, seenPointers);
-			AddBuffer(refs.BindlessTextureBuffer, destination, seenPointers);
+				AddBuffer(refs.CameraBuffer, destination, seenPointers);
+				AddBuffer(refs.InstanceBuffer, destination, seenPointers);
+				AddBuffer(refs.MaterialBuffer, destination, seenPointers);
+				AddBuffer(refs.MaterialGenerationBuffer, destination, seenPointers);
+				AddBuffer(refs.DrawArgsBuffer, destination, seenPointers);
+				AddBuffer(refs.BindlessCountBuffer, destination, seenPointers);
+				AddBuffer(refs.BindlessTextureBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessRwTextureBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessSamplerBuffer, destination, seenPointers);
 		}
@@ -248,12 +256,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		AddBufferRef(refs.VertexBuffer);
 		AddBufferRef(refs.IndexBuffer);
-		AddBufferRef(refs.CameraBuffer);
-		AddBufferRef(refs.InstanceBuffer);
-		AddBufferRef(refs.MaterialBuffer);
-		AddBufferRef(refs.DrawArgsBuffer);
-		AddBufferRef(refs.BindlessCountBuffer);
-		AddBufferRef(refs.BindlessTextureBuffer);
+			AddBufferRef(refs.CameraBuffer);
+			AddBufferRef(refs.InstanceBuffer);
+			AddBufferRef(refs.MaterialBuffer);
+			AddBufferRef(refs.MaterialGenerationBuffer);
+			AddBufferRef(refs.DrawArgsBuffer);
+			AddBufferRef(refs.BindlessCountBuffer);
+			AddBufferRef(refs.BindlessTextureBuffer);
 		AddBufferRef(refs.BindlessRwTextureBuffer);
 		AddBufferRef(refs.BindlessSamplerBuffer);
 	}
@@ -262,12 +271,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		RemoveBufferRef(refs.VertexBuffer);
 		RemoveBufferRef(refs.IndexBuffer);
-		RemoveBufferRef(refs.CameraBuffer);
-		RemoveBufferRef(refs.InstanceBuffer);
-		RemoveBufferRef(refs.MaterialBuffer);
-		RemoveBufferRef(refs.DrawArgsBuffer);
-		RemoveBufferRef(refs.BindlessCountBuffer);
-		RemoveBufferRef(refs.BindlessTextureBuffer);
+			RemoveBufferRef(refs.CameraBuffer);
+			RemoveBufferRef(refs.InstanceBuffer);
+			RemoveBufferRef(refs.MaterialBuffer);
+			RemoveBufferRef(refs.MaterialGenerationBuffer);
+			RemoveBufferRef(refs.DrawArgsBuffer);
+			RemoveBufferRef(refs.BindlessCountBuffer);
+			RemoveBufferRef(refs.BindlessTextureBuffer);
 		RemoveBufferRef(refs.BindlessRwTextureBuffer);
 		RemoveBufferRef(refs.BindlessSamplerBuffer);
 	}

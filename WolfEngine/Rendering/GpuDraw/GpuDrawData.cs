@@ -17,8 +17,8 @@ public readonly struct GpuInstanceData
 {
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
-	public readonly uint MaterialId;
-	public readonly uint MeshId;
+	public readonly uint MaterialHandle;
+	public readonly uint MeshHandle;
 	public readonly uint Flags;
 	private readonly uint _pad0;
 }
@@ -26,6 +26,28 @@ public readonly struct GpuInstanceData
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuMaterialData
 {
+	public GpuMaterialData(
+		Vector4 baseColor,
+		Vector4 metallicRoughness,
+		uint albedoHandle,
+		uint metallicRoughnessHandle,
+		uint normalHandle,
+		uint occlusionHandle,
+		uint emissiveHandle,
+		uint samplerHandle)
+	{
+		BaseColor = baseColor;
+		MetallicRoughness = metallicRoughness;
+		AlbedoHandle = albedoHandle;
+		MetallicRoughnessHandle = metallicRoughnessHandle;
+		NormalHandle = normalHandle;
+		OcclusionHandle = occlusionHandle;
+		EmissiveHandle = emissiveHandle;
+		SamplerHandle = samplerHandle;
+		_pad0 = 0;
+		_pad1 = 0;
+	}
+
 	public readonly Vector4 BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly uint AlbedoHandle;
@@ -41,6 +63,18 @@ public readonly struct GpuMaterialData
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuMeshData
 {
+	public GpuMeshData(uint vertexBufferHandle, uint indexBufferHandle, uint indexCount, uint indexFormat, uint baseVertex)
+	{
+		VertexBufferHandle = vertexBufferHandle;
+		IndexBufferHandle = indexBufferHandle;
+		IndexCount = indexCount;
+		IndexFormat = indexFormat;
+		BaseVertex = baseVertex;
+		_pad0 = 0;
+		_pad1 = 0;
+		_pad2 = 0;
+	}
+
 	public readonly uint VertexBufferHandle;
 	public readonly uint IndexBufferHandle;
 	public readonly uint IndexCount;
@@ -54,8 +88,8 @@ public readonly struct GpuMeshData
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuDrawCommand
 {
-	public readonly uint InstanceId;
-	public readonly uint DrawId;
+	public readonly uint InstanceHandle;
+	public readonly uint DrawHandle;
 	public readonly uint Flags;
 	private readonly uint _pad0;
 }
@@ -79,10 +113,10 @@ public readonly struct GpuDrawUpdateData
 		Vector4 baseColor,
 		Vector4 metallicRoughness,
 		uint type,
-		uint drawId,
-		uint instanceId,
-		uint meshId,
-		uint materialId,
+		uint drawHandle,
+		uint instanceHandle,
+		uint meshHandle,
+		uint materialHandle,
 		uint drawFlags,
 		uint vertexBufferHandle,
 		uint indexBufferHandle,
@@ -101,10 +135,10 @@ public readonly struct GpuDrawUpdateData
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
 		Type = type;
-		DrawId = drawId;
-		InstanceId = instanceId;
-		MeshId = meshId;
-		MaterialId = materialId;
+		DrawHandle = drawHandle;
+		InstanceHandle = instanceHandle;
+		MeshHandle = meshHandle;
+		MaterialHandle = materialHandle;
 		DrawFlags = drawFlags;
 		VertexBufferHandle = vertexBufferHandle;
 		IndexBufferHandle = indexBufferHandle;
@@ -127,10 +161,10 @@ public readonly struct GpuDrawUpdateData
 	public readonly Vector4 BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly uint Type;
-	public readonly uint DrawId;
-	public readonly uint InstanceId;
-	public readonly uint MeshId;
-	public readonly uint MaterialId;
+	public readonly uint DrawHandle;
+	public readonly uint InstanceHandle;
+	public readonly uint MeshHandle;
+	public readonly uint MaterialHandle;
 	public readonly uint DrawFlags;
 	public readonly uint VertexBufferHandle;
 	public readonly uint IndexBufferHandle;

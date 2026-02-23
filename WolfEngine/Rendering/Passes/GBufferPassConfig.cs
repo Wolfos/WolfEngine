@@ -65,6 +65,8 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? CameraBuffer { get; set; }
 
+	public IGfxBuffer? MaterialGenerationBuffer { get; set; }
+
 	public IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; set; }
 
 	public IGfxBuffer? DrawCountPerBucketBuffer { get; set; }

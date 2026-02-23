@@ -28,8 +28,10 @@ public sealed class RenderGraph
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly bool _metalLeakDiagnosticsEnabled;
 	private readonly int _metalLeakDiagnosticsInterval;
+	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
 	private long _lastProcessWorkingSetBytes;
@@ -48,6 +50,7 @@ public sealed class RenderGraph
 		DeferredLightingPass deferredLightingPass,
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
+		GpuDrawHardeningStats hardeningStats,
 		IUiFrameProvider uiFrameProvider,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer)
@@ -57,6 +60,7 @@ public sealed class RenderGraph
 		_arenaAllocator = arenaAllocator;
 		_frameBuilder = new(resourceRegistry, renderer, deferredLightingPass, gpuDrawPass, gpuDrawResources, imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
+		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
@@ -65,6 +69,7 @@ public sealed class RenderGraph
 			"1",
 			StringComparison.Ordinal);
 		_metalLeakDiagnosticsInterval = ParsePositiveIntEnvironmentVariable("WOLF_METAL_LEAK_DIAG_INTERVAL", 120);
+		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
 	}
 
 
@@ -191,6 +196,10 @@ public sealed class RenderGraph
 	public void OnRender(float deltaTime)
 	{
 		FrameProfiler.Instance.BeginFrame("Render Frame");
+		if (_renderer.GetGfxDevice() is IGpuSubmissionTimeline submissionTimeline)
+		{
+			submissionTimeline.PumpCompleted();
+		}
 
 		using (FrameProfiler.Instance.Measure("Upload resources"))
 		{
@@ -270,6 +279,8 @@ public sealed class RenderGraph
 		// Clear for next frame
 		_arenaAllocator.Reset();
 		_frameIndex++;
+		_hardeningStats.SetDeferredReleaseBacklog(_resourceRegistry.PendingDeferredReleaseCount);
+		LogGpuHardeningStatsIfNeeded();
 		LogMetalLeakDiagnosticsIfNeeded();
 		FrameCompleted?.Invoke();
 		FrameProfiler.Instance.EndFrame();
@@ -328,6 +339,21 @@ public sealed class RenderGraph
 		}
 
 		return fallback;
+	}
+
+	private void LogGpuHardeningStatsIfNeeded()
+	{
+		if (GraphicsConfig.GpuHardeningStressEnabled == false || _gpuHardeningLogInterval <= 0 || (_frameIndex % _gpuHardeningLogInterval) != 0)
+		{
+			return;
+		}
+
+		var snapshot = _hardeningStats.Snapshot();
+		Console.WriteLine(
+			$"[GpuHardening] frame={_frameIndex} staleRejects={snapshot.StaleHandleRejects} " +
+			$"fallbackSubs={snapshot.FallbackProxySubstitutions} overflowRecoveries={snapshot.UpdateOverflowRecoveries} " +
+			$"packedCapacityFailures={snapshot.PackedCapacityFailures} visibleClampHits={snapshot.VisibleListClampHits} " +
+			$"deferredBacklog={snapshot.DeferredReleaseBacklog} icbStarvationStalls={snapshot.IcbSlotStarvationStalls}");
 	}
 
 	private void EnsureTextureResource(Texture? texture)

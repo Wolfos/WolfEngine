@@ -8,6 +8,7 @@ import "draw_data.slang";
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
+StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
 cbuffer CameraParams : register(b2)
 {
@@ -86,16 +87,20 @@ PSOutput EvaluateFragment(VSOutput input)
     }
 
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
-    if (instanceData.materialId >= WOLF_MAX_MATERIAL_COUNT)
+    uint materialIndex = 0;
+    uint materialHandle = instanceData.materialHandle;
+    if (IsPackedHandleValid(materialHandle))
     {
-        output.albedo = float4(1.0f, 0.0f, 1.0f, 1.0f);
-        output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
-        output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
-        output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        return output;
+        uint candidateIndex = GetHandleIndex(materialHandle);
+        uint candidateGeneration = GetHandleGeneration(materialHandle);
+        if (candidateIndex < WOLF_MAX_MATERIAL_COUNT &&
+            g_MaterialGenerations[candidateIndex] == candidateGeneration)
+        {
+            materialIndex = candidateIndex;
+        }
     }
 
-    GpuMaterialData materialData = g_MaterialTable[instanceData.materialId];
+    GpuMaterialData materialData = g_MaterialTable[materialIndex];
     float3 normal = normalize(input.normal);
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);

@@ -9,7 +9,7 @@ using WolfEngine.Platform;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
-internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
+internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline
 {
 	public readonly record struct MetalDiagnosticsSnapshot(
 		int TexturePoolBuckets,
@@ -56,6 +56,21 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
+	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
+	private ulong _lastSubmittedId;
+	private ulong _completedId;
+
+	private readonly struct PendingSubmission
+	{
+		public PendingSubmission(ulong id, MetalCommandList commandList)
+		{
+			Id = id;
+			CommandList = commandList;
+		}
+
+		public ulong Id { get; }
+		public MetalCommandList CommandList { get; }
+	}
 
 	public MetalDevice(MTLDevice device)
 	{
@@ -71,6 +86,10 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
+
+	public ulong LastSubmittedId => _lastSubmittedId;
+
+	public ulong CompletedId => _completedId;
 
 	public string GetDiagnosticsSnapshot()
 	{
@@ -121,15 +140,10 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 
 	public void WaitForIdle()
 	{
-		var buffer = _commandQueue.CommandBuffer();
-		if (buffer.NativePtr == IntPtr.Zero)
+		while (_pendingSubmissions.Count > 0)
 		{
-			return;
+			RetireOldestSubmission(waitForCompletion: true);
 		}
-
-		buffer.Commit();
-		buffer.WaitUntilCompleted();
-		buffer.Dispose();
 	}
 
 	public void Submit(IGfxCommandList commandList)
@@ -139,13 +153,41 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice
 			throw new InvalidOperationException("Command list was not created by the Metal backend.");
 		}
 
+		metalCommandList.Commit();
+		var submissionId = ++_lastSubmittedId;
+		_pendingSubmissions.Enqueue(new PendingSubmission(submissionId, metalCommandList));
+		PumpCompleted();
+	}
+
+	public void PumpCompleted()
+	{
+		// SharpMetal does not currently expose a portable non-blocking completion query in this layer.
+		// Keep a bounded in-flight queue and retire oldest submissions when the queue is full.
+		while (_pendingSubmissions.Count > GpuDrawResources.MaxFramesInFlight)
+		{
+			RetireOldestSubmission(waitForCompletion: true);
+		}
+	}
+
+	private void RetireOldestSubmission(bool waitForCompletion)
+	{
+		if (_pendingSubmissions.Count == 0)
+		{
+			return;
+		}
+
+		var submission = _pendingSubmissions.Dequeue();
 		try
 		{
-			metalCommandList.Commit();
+			if (waitForCompletion)
+			{
+				submission.CommandList.WaitUntilCompleted();
+			}
 		}
 		finally
 		{
-			metalCommandList.Dispose();
+			submission.CommandList.Dispose();
+			_completedId = Math.Max(_completedId, submission.Id);
 		}
 	}
 

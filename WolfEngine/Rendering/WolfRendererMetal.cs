@@ -34,12 +34,19 @@ internal unsafe class WolfRendererMetal : IRenderer
     private const string WindowTitle = "WolfEngine";
     private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
     private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
+    private static readonly ulong MaxPackedVertexBufferBytes = ParsePositiveUlongEnvironmentVariable(
+        "WOLF_MAX_PACKED_VERTEX_BYTES",
+        2UL * 1024UL * 1024UL * 1024UL);
+    private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvironmentVariable(
+        "WOLF_MAX_PACKED_INDEX_BYTES",
+        1UL * 1024UL * 1024UL * 1024UL);
 
     private readonly int _width;
     private readonly int _height;
     private readonly IShaderCompiler _shaderCompiler;
     private readonly IMacOSInputHandler _inputHandler;
     private readonly BindlessResourceRegistry _bindlessRegistry;
+    private readonly GpuDrawHardeningStats _hardeningStats;
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
     private MetalBuffer? _packedVertexBuffer;
     private MetalBuffer? _packedIndexBuffer;
@@ -62,6 +69,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private double _drawableHeight;
     private bool _skipFrameAfterResize;
     private bool _needsBindlessRefresh;
+    private bool _loggedPackedCapacityLimit;
     private DescriptorHandle _linearSamplerHandle = DescriptorHandle.Invalid;
     private bool _isGpuCaptureActive;
     private bool _gpuCaptureWritesTraceFile;
@@ -104,13 +112,18 @@ internal unsafe class WolfRendererMetal : IRenderer
         public Vector4 Tangent;
     }
 
-    public WolfRendererMetal(IShaderCompiler shaderCompiler, IMacOSInputHandler inputHandler, BindlessResourceRegistry bindlessRegistry)
+    public WolfRendererMetal(
+        IShaderCompiler shaderCompiler,
+        IMacOSInputHandler inputHandler,
+        BindlessResourceRegistry bindlessRegistry,
+        GpuDrawHardeningStats hardeningStats)
     {
         _width = 1280;
         _height = 720;
         _shaderCompiler = shaderCompiler;
         _inputHandler = inputHandler;
         _bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+        _hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
@@ -391,6 +404,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         (_packedVertexBuffer as IDisposable)?.Dispose();
         (_packedIndexBuffer as IDisposable)?.Dispose();
+        _bindlessRegistry.UnregisterBuffer(_packedVertexBuffer);
+        _bindlessRegistry.UnregisterBuffer(_packedIndexBuffer);
         _packedVertexBuffer = null;
         _packedIndexBuffer = null;
         _packedVertexBufferUsedBytes = 0;
@@ -709,6 +724,22 @@ internal unsafe class WolfRendererMetal : IRenderer
         return capacity;
     }
 
+    private void LogPackedCapacityLimitOnce(
+        ulong requiredVertexBytes,
+        ulong requiredIndexBytes,
+        ulong targetVertexCapacity,
+        ulong targetIndexCapacity)
+    {
+        if (_loggedPackedCapacityLimit)
+        {
+            return;
+        }
+
+        _loggedPackedCapacityLimit = true;
+        Console.WriteLine(
+            $"Packed geometry capacity cap reached. requiredVertexBytes={requiredVertexBytes}, requiredIndexBytes={requiredIndexBytes}, targetVertexCapacity={targetVertexCapacity}, targetIndexCapacity={targetIndexCapacity}, maxVertexBytes={MaxPackedVertexBufferBytes}, maxIndexBytes={MaxPackedIndexBufferBytes}.");
+    }
+
     private static unsafe void CopyBufferBytes(MTLBuffer source, MTLBuffer destination, ulong byteCount)
     {
         if (byteCount == 0)
@@ -722,7 +753,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         src.CopyTo(dst);
     }
 
-    private void EnsurePackedGeometryCapacity(ulong requiredVertexBytes, ulong requiredIndexBytes)
+    private bool EnsurePackedGeometryCapacity(ulong requiredVertexBytes, ulong requiredIndexBytes)
     {
         EnsurePackedGeometryBuffers();
         if (_packedVertexBuffer is null || _packedIndexBuffer is null)
@@ -734,57 +765,118 @@ internal unsafe class WolfRendererMetal : IRenderer
         var currentIndexCapacity = _packedIndexBuffer.Descriptor.SizeInBytes;
         var targetVertexCapacity = GrowCapacity(currentVertexCapacity, requiredVertexBytes, DefaultPackedVertexBufferBytes);
         var targetIndexCapacity = GrowCapacity(currentIndexCapacity, requiredIndexBytes, DefaultPackedIndexBufferBytes);
+        if (targetVertexCapacity > MaxPackedVertexBufferBytes || targetIndexCapacity > MaxPackedIndexBufferBytes)
+        {
+            LogPackedCapacityLimitOnce(requiredVertexBytes, requiredIndexBytes, targetVertexCapacity, targetIndexCapacity);
+            _hardeningStats.IncrementPackedCapacityFailures();
+            return false;
+        }
+
         var growVertex = targetVertexCapacity > currentVertexCapacity;
         var growIndex = targetIndexCapacity > currentIndexCapacity;
         if (growVertex == false && growIndex == false)
         {
-            return;
+            return true;
         }
 
         _gfxDevice.WaitForIdle();
-        if (growVertex)
+        MTLBuffer newVertexMetalBuffer = default;
+        MTLBuffer newIndexMetalBuffer = default;
+        MetalBuffer? newVertexBuffer = null;
+        MetalBuffer? newIndexBuffer = null;
+        var vertexPublished = false;
+        var indexPublished = false;
+        try
         {
-            var newVertexMetalBuffer = _device.NewBuffer(targetVertexCapacity, MTLResourceOptions.ResourceStorageModeShared);
-            if (newVertexMetalBuffer.NativePtr == IntPtr.Zero)
+            if (growVertex)
             {
-                throw new InvalidOperationException("Failed to grow packed vertex buffer.");
+                newVertexMetalBuffer = _device.NewBuffer(targetVertexCapacity, MTLResourceOptions.ResourceStorageModeShared);
+                if (newVertexMetalBuffer.NativePtr == IntPtr.Zero)
+                {
+                    _hardeningStats.IncrementPackedCapacityFailures();
+                    return false;
+                }
+
+                CopyBufferBytes(_packedVertexBuffer.Buffer, newVertexMetalBuffer, _packedVertexBufferUsedBytes);
+                newVertexBuffer = new MetalBuffer(
+                    "PackedMeshVertexBuffer",
+                    new BufferDescriptor(targetVertexCapacity, BufferUsage.Vertex),
+                    newVertexMetalBuffer);
             }
 
-            CopyBufferBytes(_packedVertexBuffer.Buffer, newVertexMetalBuffer, _packedVertexBufferUsedBytes);
-            var newVertexBuffer = new MetalBuffer("PackedMeshVertexBuffer", new BufferDescriptor(targetVertexCapacity, BufferUsage.Vertex), newVertexMetalBuffer);
-            _bindlessRegistry.RegisterBuffer(newVertexBuffer);
-
-            foreach (var mesh in _meshResources.Keys)
+            if (growIndex)
             {
-                mesh.VertexBuffer = newVertexBuffer;
+                newIndexMetalBuffer = _device.NewBuffer(targetIndexCapacity, MTLResourceOptions.ResourceStorageModeShared);
+                if (newIndexMetalBuffer.NativePtr == IntPtr.Zero)
+                {
+                    _hardeningStats.IncrementPackedCapacityFailures();
+                    return false;
+                }
+
+                CopyBufferBytes(_packedIndexBuffer.Buffer, newIndexMetalBuffer, _packedIndexBufferUsedBytes);
+                newIndexBuffer = new MetalBuffer(
+                    "PackedMeshIndexBuffer",
+                    new BufferDescriptor(targetIndexCapacity, BufferUsage.Index),
+                    newIndexMetalBuffer);
             }
 
-            (_packedVertexBuffer as IDisposable)?.Dispose();
-            _packedVertexBuffer = newVertexBuffer;
+            if (newVertexBuffer is not null)
+            {
+                foreach (var mesh in _meshResources.Keys)
+                {
+                    mesh.VertexBuffer = newVertexBuffer;
+                }
+
+                _bindlessRegistry.RegisterBuffer(newVertexBuffer);
+                _bindlessRegistry.UnregisterBuffer(_packedVertexBuffer);
+                (_packedVertexBuffer as IDisposable)?.Dispose();
+                _packedVertexBuffer = newVertexBuffer;
+                vertexPublished = true;
+            }
+
+            if (newIndexBuffer is not null)
+            {
+                foreach (var mesh in _meshResources.Keys)
+                {
+                    mesh.IndexBuffer = newIndexBuffer;
+                }
+
+                _bindlessRegistry.RegisterBuffer(newIndexBuffer);
+                _bindlessRegistry.UnregisterBuffer(_packedIndexBuffer);
+                (_packedIndexBuffer as IDisposable)?.Dispose();
+                _packedIndexBuffer = newIndexBuffer;
+                indexPublished = true;
+            }
+
+            _needsPackedGeometryReencode = true;
+            return true;
         }
-
-        if (growIndex)
+        catch
         {
-            var newIndexMetalBuffer = _device.NewBuffer(targetIndexCapacity, MTLResourceOptions.ResourceStorageModeShared);
-            if (newIndexMetalBuffer.NativePtr == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("Failed to grow packed index buffer.");
-            }
-
-            CopyBufferBytes(_packedIndexBuffer.Buffer, newIndexMetalBuffer, _packedIndexBufferUsedBytes);
-            var newIndexBuffer = new MetalBuffer("PackedMeshIndexBuffer", new BufferDescriptor(targetIndexCapacity, BufferUsage.Index), newIndexMetalBuffer);
-            _bindlessRegistry.RegisterBuffer(newIndexBuffer);
-
-            foreach (var mesh in _meshResources.Keys)
-            {
-                mesh.IndexBuffer = newIndexBuffer;
-            }
-
-            (_packedIndexBuffer as IDisposable)?.Dispose();
-            _packedIndexBuffer = newIndexBuffer;
+            _hardeningStats.IncrementPackedCapacityFailures();
+            throw;
         }
+        finally
+        {
+            // On transactional failure we keep old packed buffers alive and release temporary allocations.
+            if (vertexPublished == false && newVertexBuffer is not null)
+            {
+                newVertexBuffer.Dispose();
+            }
+            else if (vertexPublished == false && newVertexMetalBuffer.NativePtr != IntPtr.Zero)
+            {
+                newVertexMetalBuffer.Dispose();
+            }
 
-        _needsPackedGeometryReencode = true;
+            if (indexPublished == false && newIndexBuffer is not null)
+            {
+                newIndexBuffer.Dispose();
+            }
+            else if (indexPublished == false && newIndexMetalBuffer.NativePtr != IntPtr.Zero)
+            {
+                newIndexMetalBuffer.Dispose();
+            }
+        }
     }
 
     private static ulong AlignUp(ulong value, ulong alignment)
@@ -852,7 +944,12 @@ internal unsafe class WolfRendererMetal : IRenderer
         // baseVertex addressing requires offsets aligned to full vertex strides.
         var vertexOffsetBytes = AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
         var indexOffsetBytes = AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
-        EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, indexOffsetBytes + indexBufferLength);
+        if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, indexOffsetBytes + indexBufferLength) == false)
+        {
+            _hardeningStats.IncrementFallbackProxySubstitutions();
+            throw new InvalidOperationException(
+                $"Packed geometry capacity exceeded for mesh upload. requiredVertexBytes={vertexOffsetBytes + vertexBufferLength}, requiredIndexBytes={indexOffsetBytes + indexBufferLength}.");
+        }
         if (_packedVertexBuffer is null || _packedIndexBuffer is null)
         {
             throw new InvalidOperationException("Packed geometry buffers were lost during growth.");
@@ -879,7 +976,35 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         if (_meshResources.TryGetValue(mesh, out var resources) == false)
         {
-            resources = UploadMesh(mesh);
+            try
+            {
+                resources = UploadMesh(mesh);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _hardeningStats.IncrementPackedCapacityFailures();
+                _hardeningStats.IncrementFallbackProxySubstitutions();
+                EnsurePackedGeometryBuffers();
+                if (_packedVertexBuffer is null || _packedIndexBuffer is null)
+                {
+                    throw;
+                }
+
+                mesh.VertexBuffer = _packedVertexBuffer;
+                mesh.IndexBuffer = _packedIndexBuffer;
+                mesh.StrideInBytes = (uint)Marshal.SizeOf<VertexData>();
+                mesh.IndexCount = 0;
+                mesh.PackedVertexOffsetBytes = 0;
+                mesh.PackedIndexOffsetBytes = 0;
+                mesh.PackedBaseVertex = 0;
+                resources = new MeshResources(0, 0, 0, 0);
+                if (_loggedPackedCapacityLimit == false)
+                {
+                    _loggedPackedCapacityLimit = true;
+                    Console.WriteLine($"GpuDraw packed geometry fallback proxy activated: {ex.Message}");
+                }
+            }
+
             _meshResources[mesh] = resources;
         } 
     }
@@ -1023,5 +1148,16 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         return fullPath;
+    }
+
+    private static ulong ParsePositiveUlongEnvironmentVariable(string name, ulong fallback)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        if (ulong.TryParse(raw, out var parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+
+        return fallback;
     }
 }

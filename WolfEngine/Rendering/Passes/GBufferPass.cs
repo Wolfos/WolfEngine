@@ -67,6 +67,10 @@ public static class GBufferPass
 		commandList.BindConstantBuffer(10, config.InstanceBuffer);
 		commandList.BindConstantBuffer(11, config.MaterialBuffer);
 		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+		if (config.MaterialGenerationBuffer is not null)
+		{
+			commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+		}
 		commandList.BindConstantBuffer(2, config.CameraBuffer);
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)
@@ -94,7 +98,22 @@ public static class GBufferPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
-				commandList.ExecuteIndirectCommandBuffer(bucket.IndirectCommandBuffer, (uint)GpuDrawResources.MaxDrawCount);
+				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
+				    config.DrawExecutionRangePerBucketBuffer is not null)
+				{
+					var indicesOffsetBytes = (ulong)(bucket.BucketIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
+					var rangeOffsetBytes = (ulong)(bucket.BucketIndex * 2 * sizeof(uint));
+					commandList.ExecuteIndirectCommandBufferIndexed(
+						bucket.IndirectCommandBuffer,
+						config.VisibleDrawIdsPerBucketBuffer,
+						indicesOffsetBytes,
+						config.DrawExecutionRangePerBucketBuffer,
+						rangeOffsetBytes);
+				}
+				else
+				{
+					commandList.ExecuteIndirectCommandBuffer(bucket.IndirectCommandBuffer, (uint)GpuDrawResources.MaxDrawCount);
+				}
 			}
 		}
 

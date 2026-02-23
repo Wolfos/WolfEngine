@@ -10,23 +10,18 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawDatabase
 {
-	private const bool DisableIdReuse = false;
 	private readonly object _lock = new();
 	private readonly Dictionary<Entity, DrawRecord> _records = new(new EntityComparer());
-	private readonly Dictionary<Mesh, ResourceId> _meshIds = new(new ReferenceComparer<Mesh>());
-	private readonly Dictionary<Material, ResourceId> _materialIds = new(new ReferenceComparer<Material>());
-	private readonly Stack<int> _freeDrawIds = new();
-	private readonly Stack<int> _freeInstanceIds = new();
-	private readonly Stack<int> _freeMeshIds = new();
-	private readonly Stack<int> _freeMaterialIds = new();
+	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
+	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
 	private readonly List<GpuDrawUpdate> _updates = new();
-	private int _nextDrawId = 1;
-	private int _nextInstanceId = 1;
-	private int _nextMeshId = 1;
-	private int _nextMaterialId = 1;
+	private readonly GpuDrawHandlePool _drawHandlePool = new(GpuDrawResources.MaxDrawCount - 1);
+	private readonly GpuDrawHandlePool _instanceHandlePool = new(GpuDrawResources.MaxInstanceCount - 1);
+	private readonly GpuDrawHandlePool _meshHandlePool = new(GpuDrawResources.MaxMeshCount - 1);
+	private readonly GpuDrawHandlePool _materialHandlePool = new(GpuDrawResources.MaxMaterialCount - 1);
 	private int _syncStamp;
-	private int _maxActiveDrawId;
-	private bool _maxActiveDrawIdDirty;
+	private int _maxActiveDrawIndex;
+	private bool _maxActiveDrawIndexDirty;
 
 	public void BeginSync()
 	{
@@ -49,17 +44,18 @@ public sealed class GpuDrawDatabase
 
 			var newRecord = CreateRecord(entity, mesh, material, worldTransform);
 			_records.Add(entity, newRecord);
-			if (newRecord.DrawId > _maxActiveDrawId)
+			if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 			{
-				_maxActiveDrawId = newRecord.DrawId;
+				_maxActiveDrawIndex = newRecord.DrawHandle.Index;
 			}
+
 			_updates.Add(GpuDrawUpdate.CreateAdd(
-				newRecord.DrawId,
-				newRecord.InstanceId,
-				newRecord.MeshId,
-				newRecord.MaterialId,
+				newRecord.DrawHandle,
+				newRecord.InstanceHandle,
+				newRecord.MeshHandle,
+				newRecord.MaterialHandle,
 				newRecord.World,
-				newRecord.boundsCenterRadius,
+				newRecord.BoundsCenterRadius,
 				mesh,
 				material));
 		}
@@ -87,12 +83,12 @@ public sealed class GpuDrawDatabase
 				}
 
 				_records.Remove(entity);
+				_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawHandle, record.InstanceHandle));
 				ReleaseRecord(record);
-				if (record.DrawId == _maxActiveDrawId)
+				if (record.DrawHandle.Index == _maxActiveDrawIndex)
 				{
-					_maxActiveDrawIdDirty = true;
+					_maxActiveDrawIndexDirty = true;
 				}
-				_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawId));
 			}
 		}
 	}
@@ -105,14 +101,14 @@ public sealed class GpuDrawDatabase
 			foreach (var record in _records.Values)
 			{
 				destination.Add(new GpuDrawEntry(
-					record.DrawId,
-					record.InstanceId,
-					record.MeshId,
-					record.MaterialId,
+					record.DrawHandle,
+					record.InstanceHandle,
+					record.MeshHandle,
+					record.MaterialHandle,
 					record.Mesh,
 					record.Material,
 					record.World,
-					record.boundsCenterRadius));
+					record.BoundsCenterRadius));
 			}
 		}
 	}
@@ -133,27 +129,54 @@ public sealed class GpuDrawDatabase
 		{
 			if (_records.Count == 0)
 			{
-				_maxActiveDrawId = 0;
-				_maxActiveDrawIdDirty = false;
+				_maxActiveDrawIndex = 0;
+				_maxActiveDrawIndexDirty = false;
 				return 1;
 			}
 
-			if (_maxActiveDrawIdDirty)
+			if (_maxActiveDrawIndexDirty)
 			{
-				var maxDrawId = 0;
+				var maxDrawIndex = 0;
 				foreach (var record in _records.Values)
 				{
-					if (record.DrawId > maxDrawId)
+					if (record.DrawHandle.Index > maxDrawIndex)
 					{
-						maxDrawId = record.DrawId;
+						maxDrawIndex = record.DrawHandle.Index;
 					}
 				}
 
-				_maxActiveDrawId = maxDrawId;
-				_maxActiveDrawIdDirty = false;
+				_maxActiveDrawIndex = maxDrawIndex;
+				_maxActiveDrawIndexDirty = false;
 			}
 
-			return (uint)(_maxActiveDrawId + 1);
+			return (uint)(_maxActiveDrawIndex + 1);
+		}
+	}
+
+	public void CopyGenerationTables(
+		List<uint> drawGenerations,
+		List<uint> instanceGenerations,
+		List<uint> meshGenerations,
+		List<uint> materialGenerations)
+	{
+		lock (_lock)
+		{
+			_drawHandlePool.WriteGenerations(drawGenerations);
+			_instanceHandlePool.WriteGenerations(instanceGenerations);
+			_meshHandlePool.WriteGenerations(meshGenerations);
+			_materialHandlePool.WriteGenerations(materialGenerations);
+		}
+	}
+
+	public GpuDrawHandle FallbackMeshHandle => _meshHandlePool.FallbackHandle;
+
+	public GpuDrawHandle FallbackMaterialHandle => _materialHandlePool.FallbackHandle;
+
+	public bool IsCurrentDrawHandle(in GpuDrawHandle handle)
+	{
+		lock (_lock)
+		{
+			return _drawHandlePool.IsCurrent(handle);
 		}
 	}
 
@@ -165,16 +188,16 @@ public sealed class GpuDrawDatabase
 
 		if (meshChanged)
 		{
-			ReleaseMesh(record.MeshId, record.Mesh);
+			ReleaseMesh(record.MeshHandle, record.Mesh);
 			record.Mesh = mesh;
-			record.MeshId = AcquireMeshId(mesh);
+			record.MeshHandle = AcquireMeshHandle(mesh);
 		}
 
 		if (materialChanged)
 		{
-			ReleaseMaterial(record.MaterialId, record.Material);
+			ReleaseMaterial(record.MaterialHandle, record.Material);
 			record.Material = material;
-			record.MaterialId = AcquireMaterialId(material);
+			record.MaterialHandle = AcquireMaterialHandle(material);
 		}
 
 		if (transformChanged || meshChanged)
@@ -186,36 +209,36 @@ public sealed class GpuDrawDatabase
 		if (meshChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
-				record.DrawId,
-				record.InstanceId,
-				record.MeshId,
-				record.MaterialId,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
 				record.World,
-				record.boundsCenterRadius,
+				record.BoundsCenterRadius,
 				mesh));
 		}
 
 		if (materialChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
-				record.DrawId,
-				record.InstanceId,
-				record.MeshId,
-				record.MaterialId,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
 				record.World,
-				record.boundsCenterRadius,
+				record.BoundsCenterRadius,
 				material));
 		}
 
 		if (transformChanged || meshChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
-				record.DrawId,
-				record.InstanceId,
-				record.MeshId,
-				record.MaterialId,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
 				worldTransform,
-				record.boundsCenterRadius));
+				record.BoundsCenterRadius));
 		}
 	}
 
@@ -224,12 +247,12 @@ public sealed class GpuDrawDatabase
 		var record = new DrawRecord
 		{
 			Entity = entity,
-			DrawId = AcquireId(_freeDrawIds, ref _nextDrawId),
-			InstanceId = AcquireId(_freeInstanceIds, ref _nextInstanceId),
+			DrawHandle = _drawHandlePool.Acquire(),
+			InstanceHandle = _instanceHandlePool.Acquire(),
 			Mesh = mesh,
 			Material = material,
-			MeshId = AcquireMeshId(mesh),
-			MaterialId = AcquireMaterialId(material),
+			MeshHandle = AcquireMeshHandle(mesh),
+			MaterialHandle = AcquireMaterialHandle(material),
 			World = worldTransform,
 			LastSeenStamp = _syncStamp
 		};
@@ -240,32 +263,29 @@ public sealed class GpuDrawDatabase
 
 	private void ReleaseRecord(DrawRecord record)
 	{
-		if (DisableIdReuse == false)
-		{
-			_freeDrawIds.Push(record.DrawId);
-			_freeInstanceIds.Push(record.InstanceId);
-		}
-		ReleaseMesh(record.MeshId, record.Mesh);
-		ReleaseMaterial(record.MaterialId, record.Material);
+		_drawHandlePool.Release(record.DrawHandle);
+		_instanceHandlePool.Release(record.InstanceHandle);
+		ReleaseMesh(record.MeshHandle, record.Mesh);
+		ReleaseMaterial(record.MaterialHandle, record.Material);
 	}
 
-	private int AcquireMeshId(Mesh mesh)
+	private GpuDrawHandle AcquireMeshHandle(Mesh mesh)
 	{
-		if (_meshIds.TryGetValue(mesh, out var entry))
+		if (_meshHandles.TryGetValue(mesh, out var entry))
 		{
 			entry.RefCount++;
-			_meshIds[mesh] = entry;
-			return entry.Id;
+			_meshHandles[mesh] = entry;
+			return entry.Handle;
 		}
 
-		var id = AcquireId(_freeMeshIds, ref _nextMeshId);
-		_meshIds[mesh] = new ResourceId(id, 1);
-		return id;
+		var handle = _meshHandlePool.Acquire();
+		_meshHandles[mesh] = new ResourceId(handle, 1);
+		return handle;
 	}
 
-	private void ReleaseMesh(int id, Mesh mesh)
+	private void ReleaseMesh(GpuDrawHandle handle, Mesh mesh)
 	{
-		if (_meshIds.TryGetValue(mesh, out var entry) == false)
+		if (_meshHandles.TryGetValue(mesh, out var entry) == false)
 		{
 			return;
 		}
@@ -273,31 +293,31 @@ public sealed class GpuDrawDatabase
 		entry.RefCount--;
 		if (entry.RefCount > 0)
 		{
-			_meshIds[mesh] = entry;
+			_meshHandles[mesh] = entry;
 			return;
 		}
 
-		_meshIds.Remove(mesh);
-		_freeMeshIds.Push(id);
+		_meshHandles.Remove(mesh);
+		_meshHandlePool.Release(handle);
 	}
 
-	private int AcquireMaterialId(Material material)
+	private GpuDrawHandle AcquireMaterialHandle(Material material)
 	{
-		if (_materialIds.TryGetValue(material, out var entry))
+		if (_materialHandles.TryGetValue(material, out var entry))
 		{
 			entry.RefCount++;
-			_materialIds[material] = entry;
-			return entry.Id;
+			_materialHandles[material] = entry;
+			return entry.Handle;
 		}
 
-		var id = AcquireId(_freeMaterialIds, ref _nextMaterialId);
-		_materialIds[material] = new ResourceId(id, 1);
-		return id;
+		var handle = _materialHandlePool.Acquire();
+		_materialHandles[material] = new ResourceId(handle, 1);
+		return handle;
 	}
 
-	private void ReleaseMaterial(int id, Material material)
+	private void ReleaseMaterial(GpuDrawHandle handle, Material material)
 	{
-		if (_materialIds.TryGetValue(material, out var entry) == false)
+		if (_materialHandles.TryGetValue(material, out var entry) == false)
 		{
 			return;
 		}
@@ -305,26 +325,18 @@ public sealed class GpuDrawDatabase
 		entry.RefCount--;
 		if (entry.RefCount > 0)
 		{
-			_materialIds[material] = entry;
+			_materialHandles[material] = entry;
 			return;
 		}
 
-		_materialIds.Remove(material);
-		if (DisableIdReuse == false)
-		{
-			_freeMaterialIds.Push(id);
-		}
-	}
-
-	private static int AcquireId(Stack<int> freeIds, ref int nextId)
-	{
-		return DisableIdReuse ? nextId++ : (freeIds.Count > 0 ? freeIds.Pop() : nextId++);
+		_materialHandles.Remove(material);
+		_materialHandlePool.Release(handle);
 	}
 
 	private static void ComputeBounds(DrawRecord record, Mesh mesh)
 	{
 		var bounds = mesh.BoundingSphere;
-		record.boundsCenterRadius = new(Vector3.Transform(bounds.Center, record.World),
+		record.BoundsCenterRadius = new(Vector3.Transform(bounds.Center, record.World),
 			bounds.Radius * GetMaxScale(record.World));
 	}
 
@@ -339,26 +351,26 @@ public sealed class GpuDrawDatabase
 	internal sealed class DrawRecord
 	{
 		public Entity Entity = default;
-		public int DrawId;
-		public int InstanceId;
-		public int MeshId;
-		public int MaterialId;
+		public GpuDrawHandle DrawHandle;
+		public GpuDrawHandle InstanceHandle;
+		public GpuDrawHandle MeshHandle;
+		public GpuDrawHandle MaterialHandle;
 		public Mesh Mesh = null!;
 		public Material Material = null!;
 		public Matrix4x4 World;
-		public Vector4 boundsCenterRadius;
+		public Vector4 BoundsCenterRadius;
 		public int LastSeenStamp;
 	}
 
 	private struct ResourceId
 	{
-		public ResourceId(int id, int refCount)
+		public ResourceId(GpuDrawHandle handle, int refCount)
 		{
-			Id = id;
+			Handle = handle;
 			RefCount = refCount;
 		}
 
-		public int Id { get; set; }
+		public GpuDrawHandle Handle { get; set; }
 
 		public int RefCount { get; set; }
 	}
@@ -380,47 +392,59 @@ public sealed class GpuDrawDatabase
 
 public readonly struct GpuDrawEntry
 {
-	public GpuDrawEntry(int drawId, int instanceId, int meshId, int materialId, Mesh mesh, Material material,
-		Matrix4x4 world, Vector4 boundsCenterRadius)
+	public GpuDrawEntry(
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		Mesh mesh,
+		Material material,
+		Matrix4x4 world,
+		Vector4 boundsCenterRadius)
 	{
-		DrawId = drawId;
-		InstanceId = instanceId;
-		MeshId = meshId;
-		MaterialId = materialId;
+		DrawHandle = drawHandle;
+		InstanceHandle = instanceHandle;
+		MeshHandle = meshHandle;
+		MaterialHandle = materialHandle;
 		Mesh = mesh;
 		Material = material;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 	}
 
-	public int DrawId { get; }
-
-	public int InstanceId { get; }
-
-	public int MeshId { get; }
-
-	public int MaterialId { get; }
-
+	public GpuDrawHandle DrawHandle { get; }
+	public GpuDrawHandle InstanceHandle { get; }
+	public GpuDrawHandle MeshHandle { get; }
+	public GpuDrawHandle MaterialHandle { get; }
 	public Mesh Mesh { get; }
-
 	public Material Material { get; }
-
 	public Matrix4x4 World { get; }
-
 	public Vector4 BoundsCenterRadius { get; }
 
+	public int DrawIndex => DrawHandle.Index;
+	public int InstanceIndex => InstanceHandle.Index;
+	public int MeshIndex => MeshHandle.Index;
+	public int MaterialIndex => MaterialHandle.Index;
 }
 
 public readonly struct GpuDrawUpdate
 {
-	private GpuDrawUpdate(GpuDrawUpdateType type, int drawId, int instanceId, int meshId, int materialId,
-		Matrix4x4 world, Vector4 boundsCenterRadius, Mesh? mesh, Material? material)
+	private GpuDrawUpdate(
+		GpuDrawUpdateType type,
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		Matrix4x4 world,
+		Vector4 boundsCenterRadius,
+		Mesh? mesh,
+		Material? material)
 	{
 		Type = type;
-		DrawId = drawId;
-		InstanceId = instanceId;
-		MeshId = meshId;
-		MaterialId = materialId;
+		DrawHandle = drawHandle;
+		InstanceHandle = instanceHandle;
+		MeshHandle = meshHandle;
+		MaterialHandle = materialHandle;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 		Mesh = mesh;
@@ -428,53 +452,116 @@ public readonly struct GpuDrawUpdate
 	}
 
 	public GpuDrawUpdateType Type { get; }
-
-	public int DrawId { get; }
-
-	public int InstanceId { get; }
-
-	public int MeshId { get; }
-
-	public int MaterialId { get; }
-
+	public GpuDrawHandle DrawHandle { get; }
+	public GpuDrawHandle InstanceHandle { get; }
+	public GpuDrawHandle MeshHandle { get; }
+	public GpuDrawHandle MaterialHandle { get; }
 	public Matrix4x4 World { get; }
-
 	public Vector4 BoundsCenterRadius { get; }
-	
 	public Mesh? Mesh { get; }
-
 	public Material? Material { get; }
 
-	public static GpuDrawUpdate CreateAdd(int drawId, int instanceId, int meshId, int materialId, in Matrix4x4 world,
-		Vector4 boundsCenterRadius, Mesh mesh, Material material)
+	public int DrawIndex => DrawHandle.Index;
+	public int InstanceIndex => InstanceHandle.Index;
+	public int MeshIndex => MeshHandle.Index;
+	public int MaterialIndex => MaterialHandle.Index;
+
+	public static GpuDrawUpdate CreateAdd(
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		in Matrix4x4 world,
+		Vector4 boundsCenterRadius,
+		Mesh mesh,
+		Material material)
 	{
-		return new GpuDrawUpdate(GpuDrawUpdateType.Add, drawId, instanceId, meshId, materialId, world, boundsCenterRadius, mesh, material);
+		return new GpuDrawUpdate(
+			GpuDrawUpdateType.Add,
+			drawHandle,
+			instanceHandle,
+			meshHandle,
+			materialHandle,
+			world,
+			boundsCenterRadius,
+			mesh,
+			material);
 	}
 
-	public static GpuDrawUpdate CreateRemove(int drawId)
+	public static GpuDrawUpdate CreateRemove(GpuDrawHandle drawHandle, GpuDrawHandle instanceHandle)
 	{
-		return new GpuDrawUpdate(GpuDrawUpdateType.Remove, drawId, 0, 0, 0, Matrix4x4.Identity, Vector4.Zero, null, null);
+		return new GpuDrawUpdate(
+			GpuDrawUpdateType.Remove,
+			drawHandle,
+			instanceHandle,
+			GpuDrawHandle.Invalid,
+			GpuDrawHandle.Invalid,
+			Matrix4x4.Identity,
+			Vector4.Zero,
+			null,
+			null);
 	}
 
-	public static GpuDrawUpdate CreateTransformUpdate(int drawId, int instanceId, int meshId, int materialId,
-		in Matrix4x4 world, Vector4 boundsCenterRadius)
+	public static GpuDrawUpdate CreateTransformUpdate(
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		in Matrix4x4 world,
+		Vector4 boundsCenterRadius)
 	{
-		return new GpuDrawUpdate(GpuDrawUpdateType.UpdateTransform, drawId, instanceId, meshId, materialId,
-			world, boundsCenterRadius, null, null);
+		return new GpuDrawUpdate(
+			GpuDrawUpdateType.UpdateTransform,
+			drawHandle,
+			instanceHandle,
+			meshHandle,
+			materialHandle,
+			world,
+			boundsCenterRadius,
+			null,
+			null);
 	}
 
-	public static GpuDrawUpdate CreateMaterialUpdate(int drawId, int instanceId, int meshId, int materialId,
-		in Matrix4x4 world, Vector4 boundsCenterRadius, Material material)
+	public static GpuDrawUpdate CreateMaterialUpdate(
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		in Matrix4x4 world,
+		Vector4 boundsCenterRadius,
+		Material material)
 	{
-		return new GpuDrawUpdate(GpuDrawUpdateType.UpdateMaterial, drawId, instanceId, meshId, materialId,
-			world, boundsCenterRadius, null, material);
+		return new GpuDrawUpdate(
+			GpuDrawUpdateType.UpdateMaterial,
+			drawHandle,
+			instanceHandle,
+			meshHandle,
+			materialHandle,
+			world,
+			boundsCenterRadius,
+			null,
+			material);
 	}
 
-	public static GpuDrawUpdate CreateMeshUpdate(int drawId, int instanceId, int meshId, int materialId,
-		in Matrix4x4 world, Vector4 boundsCenterRadius, Mesh mesh)
+	public static GpuDrawUpdate CreateMeshUpdate(
+		GpuDrawHandle drawHandle,
+		GpuDrawHandle instanceHandle,
+		GpuDrawHandle meshHandle,
+		GpuDrawHandle materialHandle,
+		in Matrix4x4 world,
+		Vector4 boundsCenterRadius,
+		Mesh mesh)
 	{
-		return new GpuDrawUpdate(GpuDrawUpdateType.UpdateMesh, drawId, instanceId, meshId, materialId,
-			world, boundsCenterRadius, mesh, null);
+		return new GpuDrawUpdate(
+			GpuDrawUpdateType.UpdateMesh,
+			drawHandle,
+			instanceHandle,
+			meshHandle,
+			materialHandle,
+			world,
+			boundsCenterRadius,
+			mesh,
+			null);
 	}
 }
 

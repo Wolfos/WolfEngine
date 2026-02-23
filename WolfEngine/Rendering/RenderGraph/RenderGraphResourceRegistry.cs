@@ -68,26 +68,35 @@ private readonly Dictionary<int, TextureRecord> _textures = new();
 private readonly Dictionary<int, BufferRecord> _buffers = new();
 private readonly Stack<TextureRecord> _texturePool = new();
 private readonly Stack<BufferRecord> _bufferPool = new();
+private readonly List<PendingTextureRelease> _pendingTextureReleases = new();
+private readonly List<PendingBufferRelease> _pendingBufferReleases = new();
 private IGfxDevice _device = null!;
 private ITexturePoolDevice? _texturePoolDevice;
+private IGpuSubmissionTimeline? _submissionTimeline;
+
+private readonly record struct PendingTextureRelease(IGfxTexture Texture, ResourceState LastKnownState, ulong RetireSubmissionId);
+private readonly record struct PendingBufferRelease(IGfxBuffer Buffer, ulong RetireSubmissionId);
+
+internal int PendingDeferredReleaseCount => _pendingTextureReleases.Count + _pendingBufferReleases.Count;
 
 public void SetDevice(IGfxDevice device)
 {
 	_device = device;
 	_texturePoolDevice = device as ITexturePoolDevice;
+	_submissionTimeline = device as IGpuSubmissionTimeline;
 }
 
 public void BeginFrame()
 {
+	_submissionTimeline?.PumpCompleted();
+	RetireDeferredResources();
+	var retireSubmissionId = _submissionTimeline?.LastSubmittedId ?? 0;
+
 	foreach (var record in _textures.Values)
 	{
 		if (record.Texture is not null && record.OwnsTexture)
 		{
-			var recycled = _texturePoolDevice?.ReturnTexture(record.Texture, record.CurrentState) ?? false;
-			if (recycled == false && record.Texture is IDisposable disposable)
-			{
-				disposable.Dispose();
-			}
+			_pendingTextureReleases.Add(new PendingTextureRelease(record.Texture, record.CurrentState, retireSubmissionId));
 		}
 
 		// Always clear pooled records so external/imported references (e.g. CAMetalDrawable) are released.
@@ -97,9 +106,9 @@ public void BeginFrame()
 
 	foreach (var record in _buffers.Values)
 	{
-		if (record.OwnsBuffer && record.Buffer is IDisposable disposable)
+		if (record.OwnsBuffer && record.Buffer is not null)
 		{
-			disposable.Dispose();
+			_pendingBufferReleases.Add(new PendingBufferRelease(record.Buffer, retireSubmissionId));
 		}
 
 		record.Reset();
@@ -250,5 +259,43 @@ public void BeginFrame()
 		}
 
 		return ResourceState.Common;
+	}
+
+	private void RetireDeferredResources()
+	{
+		var completedId = _submissionTimeline?.CompletedId ?? ulong.MaxValue;
+
+		for (var i = _pendingTextureReleases.Count - 1; i >= 0; i--)
+		{
+			var pending = _pendingTextureReleases[i];
+			if (pending.RetireSubmissionId > completedId)
+			{
+				continue;
+			}
+
+			var recycled = _texturePoolDevice?.ReturnTexture(pending.Texture, pending.LastKnownState) ?? false;
+			if (recycled == false && pending.Texture is IDisposable disposableTexture)
+			{
+				disposableTexture.Dispose();
+			}
+
+			_pendingTextureReleases.RemoveAt(i);
+		}
+
+		for (var i = _pendingBufferReleases.Count - 1; i >= 0; i--)
+		{
+			var pending = _pendingBufferReleases[i];
+			if (pending.RetireSubmissionId > completedId)
+			{
+				continue;
+			}
+
+			if (pending.Buffer is IDisposable disposableBuffer)
+			{
+				disposableBuffer.Dispose();
+			}
+
+			_pendingBufferReleases.RemoveAt(i);
+		}
 	}
 }

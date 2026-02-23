@@ -37,6 +37,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly List<MTLBuffer> _indirectReferencedBuffers = new();
 	private readonly HashSet<nint> _indirectReferencedPointers = new();
 	private bool _disposed;
+	private bool _committed;
 
 	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
 	{
@@ -489,6 +490,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	public void Commit()
 	{
 		ThrowIfDisposed();
+		if (_committed)
+		{
+			return;
+		}
 		if (_renderEncoder.NativePtr != IntPtr.Zero)
 		{
 			_renderEncoder.EndEncoding();
@@ -516,6 +521,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 
 		_commandBuffer.Commit();
+		_committed = true;
+	}
+
+	internal void WaitUntilCompleted()
+	{
+		ThrowIfDisposed();
+		if (_committed == false)
+		{
+			return;
+		}
+
+		_commandBuffer.WaitUntilCompleted();
 	}
 
 	public void SetPresentDrawable(CAMetalDrawable drawable)
