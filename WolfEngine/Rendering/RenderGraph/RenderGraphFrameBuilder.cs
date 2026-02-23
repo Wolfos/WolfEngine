@@ -31,6 +31,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private readonly TransparentForwardPass _transparentForwardPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly IImGuiRenderer _imGuiRenderer;
@@ -40,23 +41,26 @@ public sealed class RenderGraphFrameBuilder
 	
 	private readonly Action<RenderGraphContext> _gbufferExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
+	private readonly Action<RenderGraphContext> _transparentForwardExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawCullExecute;
 
 	
 	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
-		DeferredLightingPass deferredLightingPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
+		DeferredLightingPass deferredLightingPass, TransparentForwardPass transparentForwardPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
 		_renderer = renderer;
 		_deferredLightingPass = deferredLightingPass;
+		_transparentForwardPass = transparentForwardPass;
 		_gpuDrawPass = gpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
+		_transparentForwardExecute = ExecuteTransparentForward;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawCullExecute = ExecuteGpuDrawCull;
@@ -121,7 +125,7 @@ public sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)),
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)),
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
@@ -179,6 +183,27 @@ public sealed class RenderGraphFrameBuilder
 			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 			.SetExecute(_deferredLightingExecute);
 
+		var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
+			.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
+		if (_frameResources.SkyboxEnvironment.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxIrradiance.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxPrefilter.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxBrdfLut.IsValid)
+		{
+			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
+		}
+		transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
 		graph.AddPass("ImGui", PassKind.Graphics)
 			.ReadTexture(_frameResources.LightingBuffer, ResourceState.CopySource)
 			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
@@ -211,6 +236,11 @@ public sealed class RenderGraphFrameBuilder
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucketDefinition = bucketDefinitions[i];
+			if (bucketDefinition.SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
 			var pipeline = _gpuDrawResources.GetGBufferPipeline(i);
 			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, i);
 			if (pipeline is null || indirectCommandBuffer is null)
@@ -261,6 +291,16 @@ public sealed class RenderGraphFrameBuilder
 	{
 		var config = _deferredLightingPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice());
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
+	}
+
+	private void ExecuteTransparentForward(RenderGraphContext context)
+	{
+		var config = _transparentForwardPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources);
+		_transparentForwardPass.Record(context, in config, context.SceneData!);
 	}
 
 	private unsafe void ExecuteImGui(RenderGraphContext context)

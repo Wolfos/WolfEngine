@@ -499,6 +499,12 @@ public sealed class GpuDrawPass
 		var allPipelinesReady = true;
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
+			var bucket = bucketDefinitions[i];
+			if (bucket.SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
 			if (_gpuDrawResources.GetGBufferPipeline(i) is null)
 			{
 				allPipelinesReady = false;
@@ -520,17 +526,23 @@ public sealed class GpuDrawPass
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucket = bucketDefinitions[i];
+			if (bucket.SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
 			if (_gpuDrawResources.GetGBufferPipeline(i) is not null)
 			{
 				continue;
 			}
 
-			var source = _shaderCompiler.GetMetalSource(
+			var shaderSet = GraphicsShaderCompiler.Compile(
+				_shaderCompiler,
+				device.BackendKind,
 				"gbuffer.slang",
 				"vertexShader",
 				"fragmentShader",
 				bucket.PreprocessorDefine);
-			var bytes = Encoding.UTF8.GetBytes(source);
 			var pipelineKey = new PipelineKey(
 				PassKind.Graphics,
 				vertexEntryPoint: "vertexShader",
@@ -549,7 +561,7 @@ public sealed class GpuDrawPass
 				shaderVariant: $"GBuffer:{bucket.ShaderVariant}");
 			_gpuDrawResources.SetGBufferPipeline(
 				i,
-				device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(bytes, bytes)));
+				device.GetOrCreatePipeline(pipelineKey, shaderSet));
 		}
 	}
 
@@ -754,7 +766,21 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		var primaryPipeline = _gpuDrawResources.GetGBufferPipeline(0);
+		var primaryPipeline = default(IGfxPipeline);
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
+			primaryPipeline = _gpuDrawResources.GetGBufferPipeline(i);
+			if (primaryPipeline is not null)
+			{
+				break;
+			}
+		}
+
 		if (primaryPipeline is not MetalPipeline metalPipeline ||
 		    device.GlobalTable is not MetalDescriptorTable metalTable)
 		{
@@ -859,7 +885,7 @@ public sealed class GpuDrawPass
 	{
 		var bucketDefinitions = GBufferDrawBuckets.Definitions;
 		if (bucketDefinitions.Length == 0 ||
-		    _gpuDrawResources.GetGBufferPipeline(0) is null ||
+		    HasAnyGBufferPipeline() == false ||
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
 		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
@@ -898,6 +924,25 @@ public sealed class GpuDrawPass
 			table.RWTextureArgumentBuffer,
 			table.SamplerArgumentBuffer);
 		return true;
+	}
+
+	private bool HasAnyGBufferPipeline()
+	{
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
+			if (_gpuDrawResources.GetGBufferPipeline(i) is not null)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)

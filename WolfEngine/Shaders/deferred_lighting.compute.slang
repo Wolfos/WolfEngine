@@ -1,6 +1,6 @@
 import "common.slang";
-import "constants.slang";
 import "common_bindless.slang";
+import "common_lighting.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -22,88 +22,12 @@ cbuffer CameraParams : register(b1)
     CameraParams camera;
 };
 
-static const uint MAX_LIGHTS = 3;
-static const float IBL_EXPOSURE = 1.0f;
-
-struct LightData
-{
-    float4 colorIntensity;   // rgb = color, a = intensity
-    float4 directionType;    // xyz = direction (normalized), w = type (0 = directional, 1 = point)
-    float4 positionRange;    // xyz = position, w = range (point only)
-};
-
 cbuffer LightingParams : register(b2)
 {
     uint lightCount;
     float3 _lightingPadding;
     LightData lights[MAX_LIGHTS];
 };
-
-float3 DecodeNormal(float3 encoded)
-{
-    return normalize(encoded * 2.0f - 1.0f);
-}
-
-float2 DirToEnvUV(float3 dir)
-{
-    dir = normalize(dir);
-    float u = atan2(dir.z, dir.x) / (2.0f * PI) + 0.5f;
-    float v = acos(clamp(dir.y, -1.0f, 1.0f)) / PI;
-    return float2(1.0f - u, v);
-}
-
-float3 SampleEnvironment(float3 dir)
-{
-    float2 envUV = DirToEnvUV(dir);
-    Texture2D<float4> environmentTex = GetTexture(environmentHandle);
-    SamplerState linearSampler = GetSampler(samplerHandle);
-    return environmentTex.SampleLevel(linearSampler, envUV, 0.0f).rgb;
-}
-
-float3 SamplePrefiltered(float3 dir, float roughness)
-{
-    const float sliceCount = 6.0f;
-    float2 uv = DirToEnvUV(dir);
-    float slice = saturate(roughness) * (sliceCount - 1.0f);
-    float slice0 = floor(slice);
-    float slice1 = min(slice0 + 1.0f, sliceCount - 1.0f);
-    float t = slice - slice0;
-    float sliceHeight = 1.0f / sliceCount;
-    float v0 = (uv.y + slice0) * sliceHeight;
-    float v1 = (uv.y + slice1) * sliceHeight;
-    Texture2D<float4> prefilteredTex = GetTexture(prefilteredHandle);
-    SamplerState linearSampler = GetSampler(samplerHandle);
-    float3 p0 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v0), 0.0f).rgb;
-    float3 p1 = prefilteredTex.SampleLevel(linearSampler, float2(uv.x, v1), 0.0f).rgb;
-    return lerp(p0, p1, t);
-}
-
-float3 FresnelSchlick(float cosTheta, float3 F0)
-{
-    float f = pow(1.0f - cosTheta, 5.0f);
-    return F0 + (1.0f - F0) * f;
-}
-
-float DistributionGGX(float NdotH, float alpha)
-{
-    float a2 = alpha * alpha;
-    float denom = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / max(PI * denom * denom, 1e-5f);
-}
-
-float GeometrySchlickGGX(float NdotV, float alpha)
-{
-    float k = (alpha + 1.0f);
-    k = (k * k) / 8.0f;
-    return NdotV / max(NdotV * (1.0f - k) + k, 1e-5f);
-}
-
-float GeometrySmith(float NdotV, float NdotL, float alpha)
-{
-    float ggxV = GeometrySchlickGGX(NdotV, alpha);
-    float ggxL = GeometrySchlickGGX(NdotL, alpha);
-    return ggxV * ggxL;
-}
 
 float3 ReconstructWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
 {
@@ -145,81 +69,36 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float roughness = material.g;
     float occlusion = material.b;
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
-    if (depth >= 0.9999f) // no geometry, render skybox
+    if (depth >= 0.9999f)
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
-        float3 skyColor = SampleEnvironment(skyDir);
+        float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
         lightingTarget[dispatchThreadId.xy] = float4(skyColor, 1.0f);
         return;
     }
 
     float3 worldPos = ReconstructWorldPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invViewProjection);
     float3 viewDir = normalize(-worldPos);
-    float3 color = float3(0.0f, 0.0f, 0.0f);
 
-    [unroll]
-    for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
-    {
-        LightData light = lights[i];
-        float intensity = light.colorIntensity.a;
-        float3 lightColor = light.colorIntensity.rgb * intensity;
+    SurfaceLightingInput surface;
+    surface.worldPos = worldPos;
+    surface.normal = normal;
+    surface.albedo = albedo;
+    surface.metallic = metallic;
+    surface.roughness = roughness;
+    surface.occlusion = occlusion;
+    surface.emissive = emissive;
 
-        float type = light.directionType.w;
-        float3 L = -light.directionType.xyz; // assume stored as light-to-surface direction
-        float attenuation = 1.0f;
-
-        if (type >= 0.5f) // point
-        {
-            float3 lightPos = light.positionRange.xyz;
-            float range = max(light.positionRange.w, 0.001f);
-            float3 toLight = lightPos - worldPos;
-            float distSq = dot(toLight, toLight);
-            float dist = sqrt(distSq);
-            L = dist > 0.0f ? toLight / dist : float3(0, 1, 0);
-            float falloff = saturate(1.0f - dist / range);
-            attenuation = falloff * falloff;
-        }
-
-        float3 H = normalize(L + viewDir);
-        float NdotL = max(dot(normal, L), 0.0f);
-        float NdotV = max(dot(normal, viewDir), 0.0f);
-        float NdotH = max(dot(normal, H), 0.0f);
-        float VdotH = max(dot(viewDir, H), 0.0f);
-
-        float alpha = max(roughness * roughness, 0.04f);
-        float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-        float3 F = FresnelSchlick(VdotH, F0);
-        float D = DistributionGGX(NdotH, alpha);
-        float G = GeometrySmith(NdotV, NdotL, alpha);
-
-        float3 specular = (D * G * F) / max(4.0f * NdotV * NdotL, 1e-5f);
-        float3 kS = F;
-        float3 kD = (1.0f - kS) * (1.0f - metallic);
-        float3 diffuse = kD * albedo / PI;
-
-        float3 radiance = lightColor * attenuation;
-        color += (diffuse + specular) * radiance * NdotL;
-    }
-
-    color += emissive;
-
-    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
-    float3 envNormal = normal;
-    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(envNormal), 0.0f).rgb * IBL_EXPOSURE;
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    float3 kD = (1.0f - metallic) * (1.0f - F0);
-    color += envIrradiance * kD * albedo / PI * occlusion;
-
-    // Image-based reflection (prefiltered)
-    float3 reflectionDir = reflect(-viewDir, normal);
-    float3 envColor = SamplePrefiltered(reflectionDir, roughness) * IBL_EXPOSURE;
-
-    float cosTheta = saturate(dot(normal, viewDir));
-    float3 fresnel = FresnelSchlick(cosTheta, F0);
-    Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
-    float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
-    float3 specular = envColor * (fresnel * brdf.x + brdf.y);
-    color += specular * 0.5f * occlusion;
+    float3 color = EvaluateSurfaceLighting(
+        surface,
+        viewDir,
+        lightCount,
+        lights,
+        irradianceHandle,
+        prefilteredHandle,
+        brdfLutHandle,
+        samplerHandle,
+        IBL_EXPOSURE);
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }
