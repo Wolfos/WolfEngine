@@ -6,7 +6,6 @@ import "draw_data.slang";
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
 static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
-static const bool WOLF_DISABLE_FRUSTUM_CULL = true;
 
 cbuffer CullParams : register(b7)
 {
@@ -80,14 +79,14 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
-    if (!WOLF_DISABLE_FRUSTUM_CULL)
+      
+    // View frustum culling
+    float3 relativeCenter = instanceData.boundsCenterRadius.xyz - cameraPosition;
+    if (IsSphereVisible(relativeCenter, instanceData.boundsCenterRadius.w) == false)
     {
-        float3 relativeCenter = instanceData.boundsCenterRadius.xyz - cameraPosition;
-        if (!IsSphereVisible(relativeCenter, instanceData.boundsCenterRadius.w))
-        {
-            return;
-        }
+        return;
     }
+    
 
     GpuMeshData meshData = g_MeshTable[instanceData.meshId];
 
