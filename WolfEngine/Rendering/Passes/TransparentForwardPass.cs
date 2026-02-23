@@ -159,20 +159,20 @@ public sealed class TransparentForwardPass
 		}
 
 		var lightWords = MemoryMarshal.Cast<ShaderLight, uint>(shaderLights);
-		Span<uint> lightingConstants = stackalloc uint[64];
-		lightingConstants.Clear();
-		lightingConstants[0] = (uint)lightCountInt;
-		lightWords.CopyTo(lightingConstants.Slice(4));
-		var shadowMatrix = MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(40, 16));
-		WriteMatrix(shadowMatrix, config.ShadowViewProjection);
-		lightingConstants[56] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
-		lightingConstants[57] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
-		lightingConstants[58] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
-		lightingConstants[59] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
-		lightingConstants[60] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
-		lightingConstants[61] = config.ShadowsEnabled ? 1u : 0u;
-		lightingConstants[62] = 0;
-		lightingConstants[63] = 0;
+			Span<uint> lightingConstants = stackalloc uint[68];
+			lightingConstants.Clear();
+			lightingConstants[0] = (uint)lightCountInt;
+			lightWords.CopyTo(lightingConstants.Slice(8));
+			var shadowMatrix = MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(44, 16));
+			WriteMatrix(shadowMatrix, config.ShadowViewProjection);
+			lightingConstants[60] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
+			lightingConstants[61] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
+			lightingConstants[62] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
+			lightingConstants[63] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
+			lightingConstants[64] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
+			lightingConstants[65] = config.ShadowsEnabled ? 1u : 0u;
+			lightingConstants[66] = 0;
+			lightingConstants[67] = 0;
 
 		if (commandList.BackendKind == GraphicsBackendKind.Metal)
 		{

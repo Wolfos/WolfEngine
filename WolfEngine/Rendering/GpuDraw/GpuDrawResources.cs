@@ -165,7 +165,7 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowShaderResource));
 
 			_transparentLightingBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(uint) * 64),
+				(ulong)(sizeof(uint) * 68),
 				BufferUsage.Constant,
 				BufferFlags.AllowShaderResource));
 
