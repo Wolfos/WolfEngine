@@ -10,7 +10,7 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class ShadowMapPass
 {
 	public const int ShadowMapResolution = 2048;
-	private const float MaxShadowDistance = 50.0f;
+	private const float MaxShadowDistance = 3.0f;
 	private const float DefaultDepthBias = 0.0015f;
 	private const float DefaultStrength = 1.0f;
 	private const float ReceiverPadding = 12.0f;
@@ -292,35 +292,7 @@ public sealed class ShadowMapPass
 		// Keep the shadow volume anchored to the camera origin in camera-relative space.
 		// This avoids rotation-driven recentering shimmer from per-frame frustum fitting.
 		var frustumCenter = Vector3.Zero;
-		var minCornerRayZ = 1.0f;
-		for (var y = -1; y <= 1; y += 2)
-		{
-			for (var x = -1; x <= 1; x += 2)
-			{
-				var farClip = new Vector4(x, y, 1.0f, 1.0f);
-				var farView = Vector4.Transform(farClip, sceneData.InverseProjection);
-				if (farView.W == 0.0f)
-				{
-					continue;
-				}
-
-				var ray = farView.XYZ() / farView.W;
-				var rayLength = ray.Length();
-				if (rayLength <= float.Epsilon)
-				{
-					continue;
-				}
-
-				var rayZ = ray.Z / rayLength;
-				if (rayZ > float.Epsilon)
-				{
-					minCornerRayZ = MathF.Min(minCornerRayZ, rayZ);
-				}
-			}
-		}
-
-		var safeMinCornerRayZ = MathF.Max(minCornerRayZ, 0.1f);
-		var receiverRadius = MathF.Max(MaxShadowDistance / safeMinCornerRayZ, MaxShadowDistance);
+		var receiverRadius = MaxShadowDistance;
 
 		var up = Math.Abs(Vector3.Dot(lightDirection, Vector3.UnitY)) > 0.99f
 			? Vector3.UnitZ
