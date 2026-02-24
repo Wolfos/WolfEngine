@@ -18,7 +18,12 @@ public class CameraMoverSystem: IUpdateable
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;
-	private Vector3 _moveInput;
+	private bool _moveForwardHeld;
+	private bool _moveBackHeld;
+	private bool _moveLeftHeld;
+	private bool _moveRightHeld;
+	private bool _moveUpHeld;
+	private bool _moveDownHeld;
 	private bool _speedBoost;
 	private bool _isLooking;
 	private Vector2 _lookDelta;
@@ -60,12 +65,12 @@ public class CameraMoverSystem: IUpdateable
 		};
 	}
 
-	private void OnMoveForward(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(0, 0, 1), callback.Value);
-	private void OnMoveLeft(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(-1, 0, 0), callback.Value);
-	private void OnMoveRight(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(1, 0, 0), callback.Value);
-	private void OnMoveBack(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(0, 0, -1), callback.Value);
-	private void OnMoveUp(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(0, 1, 0), callback.Value);
-	private void OnMoveDown(InputActionCallback<bool> callback) => ApplyMoveDelta(new Vector3(0, -1, 0), callback.Value);
+	private void OnMoveForward(InputActionCallback<bool> callback) => _moveForwardHeld = callback.Value;
+	private void OnMoveLeft(InputActionCallback<bool> callback) => _moveLeftHeld = callback.Value;
+	private void OnMoveRight(InputActionCallback<bool> callback) => _moveRightHeld = callback.Value;
+	private void OnMoveBack(InputActionCallback<bool> callback) => _moveBackHeld = callback.Value;
+	private void OnMoveUp(InputActionCallback<bool> callback) => _moveUpHeld = callback.Value;
+	private void OnMoveDown(InputActionCallback<bool> callback) => _moveDownHeld = callback.Value;
 	private void OnSpeedUp(InputActionCallback<bool> callback) => _speedBoost = callback.Value;
 	private void OnLookButton(InputActionCallback<bool> callback) => _isLooking = callback.Value;
 
@@ -79,12 +84,6 @@ public class CameraMoverSystem: IUpdateable
 		_lookDelta += callback.Value;
 	}
 
-	private void ApplyMoveDelta(Vector3 direction, bool isPressed)
-	{
-		// Accumulate movement intent; releases subtract the previously added direction.
-		_moveInput += direction * (isPressed ? 1.0f : -1.0f);
-	}
-
 	public void Update(float deltaTime, World world)
 	{
 		var viewportState = _viewportStateBus.GetUiState();
@@ -93,7 +92,7 @@ public class CameraMoverSystem: IUpdateable
 		{
 			if (_hadViewportControl)
 			{
-				_moveInput = Vector3.Zero;
+				ClearMovementState();
 				_lookDelta = Vector2.Zero;
 			}
 
@@ -126,7 +125,7 @@ public class CameraMoverSystem: IUpdateable
 			var right = Vector3.Transform(Vector3.UnitX, rotation);
 			var up = Vector3.Transform(Vector3.UnitY, rotation);
 
-			var moveInput = viewportControlActive ? _moveInput : Vector3.Zero;
+			var moveInput = viewportControlActive ? GetMoveInput() : Vector3.Zero;
 			var move = right * moveInput.X + up * moveInput.Y + forward * moveInput.Z;
 			var speed = mover.MoveSpeed * (_speedBoost ? 2.0f : 1.0f);
 			
@@ -137,6 +136,25 @@ public class CameraMoverSystem: IUpdateable
 	}
 
 	public WorldTag GetTag() => WorldTag.Editor;
+
+	private Vector3 GetMoveInput()
+	{
+		return new Vector3(
+			(_moveRightHeld ? 1.0f : 0.0f) - (_moveLeftHeld ? 1.0f : 0.0f),
+			(_moveUpHeld ? 1.0f : 0.0f) - (_moveDownHeld ? 1.0f : 0.0f),
+			(_moveForwardHeld ? 1.0f : 0.0f) - (_moveBackHeld ? 1.0f : 0.0f));
+	}
+
+	private void ClearMovementState()
+	{
+		_moveForwardHeld = false;
+		_moveBackHeld = false;
+		_moveLeftHeld = false;
+		_moveRightHeld = false;
+		_moveUpHeld = false;
+		_moveDownHeld = false;
+		_speedBoost = false;
+	}
 
 	private static void EnsureDefaults(ref CameraMover mover)
 	{
