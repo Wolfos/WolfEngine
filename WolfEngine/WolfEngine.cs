@@ -28,6 +28,7 @@ public static class WolfEngine
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+		services.AddSingleton<EditorViewportStateBus>();
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<GpuDrawResources>();

@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using WolfEngine.ECS;
 using WolfEngine.Input;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor;
 
@@ -16,14 +17,17 @@ public struct CameraMover : IEntityComponent
 public class CameraMoverSystem: IUpdateable
 {
 	private readonly IInputSystem _inputSystem;
+	private readonly EditorViewportStateBus _viewportStateBus;
 	private Vector3 _moveInput;
 	private bool _speedBoost;
 	private bool _isLooking;
 	private Vector2 _lookDelta;
+	private bool _hadViewportControl;
 
-	public CameraMoverSystem(IInputSystem inputSystem)
+	public CameraMoverSystem(IInputSystem inputSystem, EditorViewportStateBus viewportStateBus)
 	{
 		_inputSystem = inputSystem;
+		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 
 		inputSystem.RegisterButton(NewAction("MoveForward", InputActionBinding.KeyW), OnMoveForward);
 		inputSystem.RegisterButton(NewAction("MoveBack", InputActionBinding.KeyS), OnMoveBack);
@@ -83,6 +87,23 @@ public class CameraMoverSystem: IUpdateable
 
 	public void Update(float deltaTime, World world)
 	{
+		var viewportState = _viewportStateBus.GetUiState();
+		var viewportControlActive = viewportState.Visible && (viewportState.Hovered || viewportState.Focused) && _isLooking;
+		if (viewportControlActive == false)
+		{
+			if (_hadViewportControl)
+			{
+				_moveInput = Vector3.Zero;
+				_lookDelta = Vector2.Zero;
+			}
+
+			_hadViewportControl = false;
+		}
+		else
+		{
+			_hadViewportControl = true;
+		}
+
 		foreach (var entry in world.View<LocalTransform, CameraMover>())
 		{
 			ref var transform = ref entry.First;
@@ -91,7 +112,7 @@ public class CameraMoverSystem: IUpdateable
 			EnsureDefaults(ref mover);
 			EnsureOrientationFromTransform(ref mover, transform);
 
-			if (_isLooking && _lookDelta != Vector2.Zero)
+			if (viewportControlActive && _lookDelta != Vector2.Zero)
 			{
 				mover.Yaw += _lookDelta.X * mover.LookSensitivity;
 				mover.Pitch += _lookDelta.Y * mover.LookSensitivity;
@@ -105,7 +126,8 @@ public class CameraMoverSystem: IUpdateable
 			var right = Vector3.Transform(Vector3.UnitX, rotation);
 			var up = Vector3.Transform(Vector3.UnitY, rotation);
 
-			var move = right * _moveInput.X + up * _moveInput.Y + forward * _moveInput.Z;
+			var moveInput = viewportControlActive ? _moveInput : Vector3.Zero;
+			var move = right * moveInput.X + up * moveInput.Y + forward * moveInput.Z;
 			var speed = mover.MoveSpeed * (_speedBoost ? 2.0f : 1.0f);
 			
 			world.Translate(entry.Entity, move * speed * deltaTime, true);

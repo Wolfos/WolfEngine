@@ -50,16 +50,18 @@ public sealed class ImGuiFontAtlas
 
 public readonly struct UiDrawCommand
 {
-	public UiDrawCommand(int elemCount, int idxOffset, int vtxOffset, Vector4 clipRect)
+	public UiDrawCommand(int elemCount, int idxOffset, int vtxOffset, Vector4 clipRect, nint textureId)
 	{
 		ElemCount = elemCount;
 		IdxOffset = idxOffset;
 		VtxOffset = vtxOffset;
 		ClipRect = clipRect;
+		TextureId = textureId;
 	}
 
 	public int ElemCount { get; }
 	public int IdxOffset { get; }
 	public int VtxOffset { get; }
 	public Vector4 ClipRect { get; }
+	public nint TextureId { get; }
 }

@@ -54,11 +54,10 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, IGfxTexture lightingSource)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget)
 	{
 		var finalColor = finalColorTarget as ID3D12BackendTexture;
-		var lighting = lightingSource as ID3D12BackendTexture;
-		if (finalColor is null || lighting is null)
+		if (finalColor is null)
 		{
 			return;
 		}
@@ -67,21 +66,11 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		                  ?? throw new InvalidOperationException("ImGui renderer requires D3D12 command list.");
 		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
 
-		ResourceBarrier barrier = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrier.Anonymous.Transition = new()
-		{
-			PResource = finalColor.Resource,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.RenderTarget,
-			StateAfter = ResourceStates.CopyDest
-		};
-		native->ResourceBarrier(1, &barrier);
-
-		native->CopyResource(finalColor.Resource, lighting.Resource);
-
-		barrier.Anonymous.Transition.StateBefore = ResourceStates.CopyDest;
-		barrier.Anonymous.Transition.StateAfter = ResourceStates.RenderTarget;
-		native->ResourceBarrier(1, &barrier);
+		var rtvHandle = finalColor.RenderTargetView
+		                ?? throw new InvalidOperationException("Final color target missing RTV.");
+		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
+		var clearColor = stackalloc float[4] { 0.05f, 0.05f, 0.05f, 1.0f };
+		native->ClearRenderTargetView(rtvHandle, clearColor, 0, null);
 
 		if (frame.CommandCount == 0)
 		{
@@ -115,10 +104,6 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 		_vertexBuffer.Unmap(0, (D3DRange*) null);
 		_indexBuffer.Unmap(0, (D3DRange*) null);
-
-		var rtvHandle = finalColor.RenderTargetView
-		                ?? throw new InvalidOperationException("Final color target missing RTV.");
-		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
 
 		var viewport = new D3DViewport
 		{

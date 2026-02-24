@@ -17,6 +17,7 @@ public class EditorPreferences
 	private const string PreferencesFileName = "EditorPreferences.json";
 	
 	public Dictionary<ImGuiCol, Vector4> EditorColors { get; set; } = new();
+	public float SceneViewportResolutionScale { get; set; } = 1.0f;
 
 	public EditorPreferences()
 	{
@@ -30,6 +31,26 @@ public class EditorPreferences
 			_instance = new EditorPreferences();
 		}
 		_instance.EditorColors[id] = color;
+	}
+
+	public static float GetSceneViewportResolutionScale()
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		return _instance.SceneViewportResolutionScale;
+	}
+
+	public static void SetSceneViewportResolutionScale(float scale)
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		_instance.SceneViewportResolutionScale = Math.Clamp(scale, 0.5f, 1.0f);
 	}
 
 	public static void Load()
@@ -47,12 +68,14 @@ public class EditorPreferences
 				_instance = new EditorPreferences();
 			}
 		}
-		else
-		{
-			_instance = new EditorPreferences();
-		}
+			else
+			{
+				_instance = new EditorPreferences();
+			}
 
-		var style = ImGui.GetStyle();
+			_instance.SceneViewportResolutionScale = Math.Clamp(_instance.SceneViewportResolutionScale, 0.5f, 1.0f);
+
+			var style = ImGui.GetStyle();
 		foreach (var (id, color) in _instance.EditorColors)
 		{
 			style.Colors[(int)id] = color;

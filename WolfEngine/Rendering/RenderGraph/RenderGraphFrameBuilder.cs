@@ -13,6 +13,8 @@ namespace WolfEngine.Rendering;
 public readonly struct RenderGraphFrameResources
 {
 	public Int2 FramebufferSize { get; init; }
+	public Int2 SceneFramebufferSize { get; init; }
+	public bool SceneEnabled { get; init; }
 	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
@@ -79,7 +81,10 @@ public sealed class RenderGraphFrameBuilder
 	}
 
 	public void BeginFrame(
-		Int2 framebufferSize)
+		Int2 framebufferSize,
+		Int2 sceneFramebufferSize,
+		RenderGraphResourceHandle sceneColorHandle,
+		bool sceneEnabled)
 	{
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);
 		var skyboxIrrHandle = default(RenderGraphResourceHandle);
@@ -106,40 +111,80 @@ public sealed class RenderGraphFrameBuilder
 			}
 		}
 
-		_frameResources = new()
+		var lightingHandle = default(RenderGraphResourceHandle);
+		var gbufferAlbedoHandle = default(RenderGraphResourceHandle);
+		var gbufferNormalHandle = default(RenderGraphResourceHandle);
+		var gbufferMaterialHandle = default(RenderGraphResourceHandle);
+		var gbufferEmissiveHandle = default(RenderGraphResourceHandle);
+		var gbufferDepthHandle = default(RenderGraphResourceHandle);
+		var shadowMapHandle = default(RenderGraphResourceHandle);
+		if (sceneEnabled)
 		{
-			FramebufferSize = framebufferSize,
-			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
+			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+				sceneFramebufferSize.X,
+				sceneFramebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource)),
-			GBufferAlbedo = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Bgra8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.392f, 0.584f, 0.929f, 1.0f))),
-			GBufferNormal = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Rgba16Float, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.5f, 0.5f, 1.0f, 1.0f))),
-			GBufferMaterial = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
-			GBufferEmissive = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X,
-				framebufferSize.Y, TextureFormat.Rgba8Unorm, TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.0f, 0.0f, 0.0f, 1.0f))),
-			GBufferDepth = _resources.CreateTransientTexture(new TextureDescriptor(framebufferSize.X, framebufferSize.Y,
-				TextureFormat.D32Float, TextureUsage.DepthStencil | TextureUsage.ShaderResource, Vector4.Zero, 1.0f)),
-			ShadowMapDepth = _resources.CreateTransientTexture(new TextureDescriptor(
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.392f, 0.584f, 0.929f, 1.0f)));
+			gbufferNormalHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+				sceneFramebufferSize.X,
+				sceneFramebufferSize.Y,
+				TextureFormat.Rgba16Float,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.5f, 0.5f, 1.0f, 1.0f)));
+			gbufferMaterialHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+				sceneFramebufferSize.X,
+				sceneFramebufferSize.Y,
+				TextureFormat.Rgba8Unorm,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
+			gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+				sceneFramebufferSize.X,
+				sceneFramebufferSize.Y,
+				TextureFormat.Rgba8Unorm,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
+			gbufferDepthHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+				sceneFramebufferSize.X,
+				sceneFramebufferSize.Y,
+				TextureFormat.D32Float,
+				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+				Vector4.Zero,
+				1.0f));
+			shadowMapHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				ShadowMapPass.ShadowMapResolution,
 				ShadowMapPass.ShadowMapResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				Vector4.Zero,
-				1.0f)),
-			LightingBuffer = _resources.CreateTransientTexture(new TextureDescriptor(
+				1.0f));
+			lightingHandle = sceneColorHandle.IsValid
+				? sceneColorHandle
+				: _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Bgra8Unorm,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+		}
+
+		_frameResources = new()
+		{
+			FramebufferSize = framebufferSize,
+			SceneFramebufferSize = sceneFramebufferSize,
+			SceneEnabled = sceneEnabled,
+			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess)),
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				new Vector4(0.05f, 0.05f, 0.05f, 1.0f))),
+			GBufferAlbedo = gbufferAlbedoHandle,
+			GBufferNormal = gbufferNormalHandle,
+			GBufferMaterial = gbufferMaterialHandle,
+			GBufferEmissive = gbufferEmissiveHandle,
+			GBufferDepth = gbufferDepthHandle,
+			ShadowMapDepth = shadowMapHandle,
+			LightingBuffer = lightingHandle,
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
@@ -155,80 +200,82 @@ public sealed class RenderGraphFrameBuilder
 
 	public void Build(RenderGraph graph)
 	{
-		graph.AddPass("GpuDraw Update", PassKind.Compute)
-			.SetExecute(_gpuDrawUpdateExecute);
+		if (_frameResources.SceneEnabled)
+		{
+			graph.AddPass("GpuDraw Update", PassKind.Compute)
+				.SetExecute(_gpuDrawUpdateExecute);
 
-		graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
-			.SetExecute(_gpuDrawShadowCullExecute);
+			graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
+				.SetExecute(_gpuDrawShadowCullExecute);
 
-		graph.AddPass("Shadow Map", PassKind.Graphics)
-			.WriteTexture(_frameResources.ShadowMapDepth, ResourceState.DepthWrite)
-			.SetExecute(_shadowMapExecute);
+			graph.AddPass("Shadow Map", PassKind.Graphics)
+				.WriteTexture(_frameResources.ShadowMapDepth, ResourceState.DepthWrite)
+				.SetExecute(_shadowMapExecute);
 
-		graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
-			.SetExecute(_gpuDrawCameraCullExecute);
+			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
+				.SetExecute(_gpuDrawCameraCullExecute);
 
-		// Register GBuffer pass with proper resource states
-		graph.AddPass("GBuffer", PassKind.Graphics)
-			.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
-			.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
-			.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
-			.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
-			.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-			.SetExecute(_gbufferExecute);
+			// Register GBuffer pass with proper resource states
+			graph.AddPass("GBuffer", PassKind.Graphics)
+				.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
+				.SetExecute(_gbufferExecute);
 
-		// Register Deferred Lighting pass with proper resource states
-		var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
-			.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
-			.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource);
-		if (_frameResources.SkyboxEnvironment.IsValid)
-		{
-			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
-		}
-		if (_frameResources.SkyboxIrradiance.IsValid)
-		{
-			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
-		}
-		if (_frameResources.SkyboxPrefilter.IsValid)
-		{
-			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
-		}
-		if (_frameResources.SkyboxBrdfLut.IsValid)
-		{
-			deferredLightingBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
-		}
-		deferredLightingBuilder
-			.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
-			.SetExecute(_deferredLightingExecute);
+			// Register Deferred Lighting pass with proper resource states
+			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
+				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource);
+			if (_frameResources.SkyboxEnvironment.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxIrradiance.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxPrefilter.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxBrdfLut.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
+			}
+			deferredLightingBuilder
+				.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
+				.SetExecute(_deferredLightingExecute);
 
-		var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
-			.ReadTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-			.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource)
-			.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
-		if (_frameResources.SkyboxEnvironment.IsValid)
-		{
-			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
+				.ReadTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
+				.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource)
+				.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
+			if (_frameResources.SkyboxEnvironment.IsValid)
+			{
+				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxIrradiance.IsValid)
+			{
+				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxPrefilter.IsValid)
+			{
+				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+			}
+			if (_frameResources.SkyboxBrdfLut.IsValid)
+			{
+				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
+			}
+			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 		}
-		if (_frameResources.SkyboxIrradiance.IsValid)
-		{
-			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
-		}
-		if (_frameResources.SkyboxPrefilter.IsValid)
-		{
-			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
-		}
-		if (_frameResources.SkyboxBrdfLut.IsValid)
-		{
-			transparentForwardBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
-		}
-		transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
 		graph.AddPass("ImGui", PassKind.Graphics)
-			.ReadTexture(_frameResources.LightingBuffer, ResourceState.CopySource)
 			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
 			.SetExecute(_imguiExecute);
 
@@ -299,8 +346,8 @@ public sealed class RenderGraphFrameBuilder
 
 		var gbufferConfig = new GBufferPassConfig
 		{
-			FramebufferWidth = _frameResources.FramebufferSize.X,
-			FramebufferHeight = _frameResources.FramebufferSize.Y,
+			FramebufferWidth = _frameResources.SceneFramebufferSize.X,
+			FramebufferHeight = _frameResources.SceneFramebufferSize.Y,
 			AlbedoTarget = albedoTexture,
 			NormalTarget = normalTexture,
 			MaterialTarget = materialTexture,
@@ -350,11 +397,10 @@ public sealed class RenderGraphFrameBuilder
 		_transparentForwardPass.Record(context, in config, context.SceneData!);
 	}
 
-	private unsafe void ExecuteImGui(RenderGraphContext context)
+	private void ExecuteImGui(RenderGraphContext context)
 	{
 		var finalColor = context.GetTexture(_frameResources.FinalColor);
-		var lighting = context.GetTexture(_frameResources.LightingBuffer);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, finalColor, lighting);
+		_imGuiRenderer.Record(context, _uiFrame, finalColor);
 	}
 }

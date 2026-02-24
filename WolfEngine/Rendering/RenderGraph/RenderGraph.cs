@@ -26,10 +26,12 @@ public sealed class RenderGraph
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
+	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
+	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly bool _metalLeakDiagnosticsEnabled;
 	private readonly int _metalLeakDiagnosticsInterval;
 	private readonly int _gpuHardeningLogInterval;
@@ -55,6 +57,7 @@ public sealed class RenderGraph
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
 		IUiFrameProvider uiFrameProvider,
+		EditorViewportStateBus viewportStateBus,
 		IMainThreadDispatcher mainThreadDispatcher,
 		SkyboxRenderer skyboxRenderer,
 		IImGuiRenderer imGuiRenderer)
@@ -67,6 +70,7 @@ public sealed class RenderGraph
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
+		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_compiler = new(resourceRegistry);
@@ -274,7 +278,28 @@ public sealed class RenderGraph
 
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
-				_frameBuilder.BeginFrame(frameBufferSize);
+				var sceneViewportState = _viewportStateBus.GetUiState();
+				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
+				var renderSceneToViewport = sceneEnabled && _renderer.GetGfxDevice().BackendKind == GraphicsBackendKind.Metal;
+				var sceneColorHandle = default(RenderGraphResourceHandle);
+				if (renderSceneToViewport)
+				{
+					var sceneTarget = _sceneRenderTargetManager.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
+					sceneColorHandle = _resourceRegistry.ImportTexture(
+						sceneTarget,
+						takeOwnership: false,
+						initialState: ResourceState.RenderTarget);
+					var textureId = sceneTarget.ShaderResourceView.IsValid
+						? (nint)sceneTarget.ShaderResourceView.Value
+						: 0;
+					_viewportStateBus.PublishRenderState(new SceneViewportRenderState(textureId, sceneRenderSize));
+				}
+				else
+				{
+					_viewportStateBus.PublishRenderState(SceneViewportRenderState.Empty);
+				}
+
+				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport);
 				_frameBuilder.SetUiFrame(uiFrame);
 
 				_frameBuilder.Build(this);
@@ -342,6 +367,21 @@ public sealed class RenderGraph
 		}
 
 		_passes.Clear();
+	}
+
+	private static bool TryComputeSceneRenderSize(SceneViewportUiState state, out Int2 sceneRenderSize)
+	{
+		if (state.Visible == false || state.ContentSizePixels.X <= 0 || state.ContentSizePixels.Y <= 0)
+		{
+			sceneRenderSize = Int2.Zero;
+			return false;
+		}
+
+		var scale = Math.Clamp(state.ResolutionScale, 0.5f, 1.0f);
+		var width = Math.Max(1, (int)MathF.Round(state.ContentSizePixels.X * scale));
+		var height = Math.Max(1, (int)MathF.Round(state.ContentSizePixels.Y * scale));
+		sceneRenderSize = new Int2(width, height);
+		return true;
 	}
 
 	private static int ParsePositiveIntEnvironmentVariable(string name, int fallback)

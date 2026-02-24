@@ -55,8 +55,8 @@ public sealed class TransparentForwardPass
 
 		return new TransparentForwardPassConfig
 		{
-			FramebufferWidth = resources.FramebufferSize.X,
-			FramebufferHeight = resources.FramebufferSize.Y,
+			FramebufferWidth = resources.SceneFramebufferSize.X,
+			FramebufferHeight = resources.SceneFramebufferSize.Y,
 			LightingTarget = lighting,
 			DepthTarget = depth,
 			ShadowMapDepth = shadowMap,

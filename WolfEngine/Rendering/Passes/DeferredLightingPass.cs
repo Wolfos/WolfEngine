@@ -94,7 +94,7 @@ public sealed class DeferredLightingPass
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
-			DispatchSize = resources.FramebufferSize
+			DispatchSize = resources.SceneFramebufferSize
 		};
 	}
 

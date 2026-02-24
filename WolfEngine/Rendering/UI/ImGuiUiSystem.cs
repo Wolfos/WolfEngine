@@ -167,11 +167,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			{
 				var cmd = list.CmdBuffer[c];
 				var clip = cmd.ClipRect;
-				commands[cmdOffset++] = new UiDrawCommand(
-					(int) cmd.ElemCount,
-					idxOffset + (int) cmd.IdxOffset,
-					vtxOffset + (int) cmd.VtxOffset,
-					new Vector4(clip.X, clip.Y, clip.Z, clip.W));
+					commands[cmdOffset++] = new UiDrawCommand(
+						(int) cmd.ElemCount,
+						idxOffset + (int) cmd.IdxOffset,
+						vtxOffset + (int) cmd.VtxOffset,
+						new Vector4(clip.X, clip.Y, clip.Z, clip.W),
+						cmd.TextureId);
 			}
 
 			vtxOffset += list.VtxBuffer.Size;

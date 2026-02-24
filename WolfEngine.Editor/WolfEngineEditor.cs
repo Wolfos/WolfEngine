@@ -6,6 +6,7 @@ using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Editor;
 
@@ -20,6 +21,7 @@ public class WolfEngineEditor
 	private readonly IRenderer _renderer;
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
+	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 
@@ -35,6 +37,7 @@ public class WolfEngineEditor
 		IRenderer renderer,
 		RenderGraph renderGraph,
 		IInputSystem inputSystem,
+		EditorViewportStateBus viewportStateBus,
 		EditorGui editorGui)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
@@ -43,6 +46,7 @@ public class WolfEngineEditor
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
+		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorGui = editorGui;
 	}
 
@@ -65,7 +69,7 @@ public class WolfEngineEditor
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
-		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem));
+		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
 
 		var sun = _gameWorld.CreateEntity("Sun");
 		var light = new Light
@@ -124,6 +128,14 @@ public class WolfEngineEditor
 	private void PublishSnapshot()
 	{
 		ref var camera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
+		var viewportRenderState = _viewportStateBus.GetRenderState();
+		var renderSize = viewportRenderState.RenderSizePixels;
+		if (renderSize.X > 0 && renderSize.Y > 0 && camera.ScreenResolution != renderSize)
+		{
+			camera.ScreenResolution = renderSize;
+			camera.SetPerspective(camera.Fov);
+		}
+
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
 	}
@@ -132,7 +144,8 @@ public class WolfEngineEditor
 	{
 		var camera = new Camera
 		{
-			ScreenResolution = Screen.CurrentResolution
+			ScreenResolution = Screen.CurrentResolution,
+			AutoResolution = false
 		};
 		camera.SetPerspective(EditorCameraFov);
 

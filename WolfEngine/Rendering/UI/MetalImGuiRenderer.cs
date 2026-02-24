@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -47,7 +48,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, IGfxTexture lightingSource)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget)
 	{
 		var commandList = context.CommandList as MetalCommandList;
 		if (commandList is null)
@@ -56,29 +57,13 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 
 		var finalColor = finalColorTarget as MetalTexture;
-		var lighting = lightingSource as MetalTexture;
-		if (finalColor is null || lighting is null)
+		if (finalColor is null)
 		{
 			return;
 		}
 
-		var source = lighting.Texture;
 		var destination = finalColor.Texture;
-		if (source.NativePtr == IntPtr.Zero || destination.NativePtr == IntPtr.Zero)
-		{
-			return;
-		}
-
-		var width = Math.Min(source.Width, destination.Width);
-		var height = Math.Min(source.Height, destination.Height);
-		commandList.CopyTexture(source, destination, (uint)width, (uint)height);
-
-		if (frame.CommandCount == 0)
-		{
-			return;
-		}
-
-		if (_pipeline is null || _fontTexture is null)
+		if (destination.NativePtr == IntPtr.Zero)
 		{
 			return;
 		}
@@ -86,6 +71,13 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		var targets = new PassTargets(new[] { new ColorTargetBinding(finalColor) });
 		var viewport = new Viewport(0, 0, finalColor.Descriptor.Width, finalColor.Descriptor.Height);
 		commandList.BeginPass(targets, viewport);
+		commandList.ClearColorAttachment(0, new Vector4(0.05f, 0.05f, 0.05f, 1.0f));
+
+		if (frame.CommandCount == 0 || _pipeline is null || _fontTexture is null)
+		{
+			commandList.EndPass();
+			return;
+		}
 
 		EnsureBuffers(frame);
 
@@ -123,11 +115,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(projection));
 
 		Span<uint> bindless = stackalloc uint[4];
-		bindless[0] = _fontHandle.Value;
 		bindless[1] = _samplerHandle.Value;
 		bindless[2] = 0;
 		bindless[3] = 0;
-		commandList.SetGraphicsConstants(1, MemoryMarshal.AsBytes(bindless));
+		uint activeTextureHandle = uint.MaxValue;
 
 		var scaleX = 1.0f;
 		var scaleY = 1.0f;
@@ -140,6 +131,16 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
+			var textureHandle = cmd.TextureId != 0
+				? unchecked((uint)cmd.TextureId)
+				: _fontHandle.Value;
+			if (textureHandle != activeTextureHandle)
+			{
+				bindless[0] = textureHandle;
+				commandList.SetGraphicsConstants(1, MemoryMarshal.AsBytes(bindless));
+				activeTextureHandle = textureHandle;
+			}
+
 			var clip = cmd.ClipRect;
 			var clipX1 = (int)Math.Floor((clip.X - frame.DisplayPos.X) * scaleX);
 			var clipY1 = (int)Math.Floor((clip.Y - frame.DisplayPos.Y) * scaleY);

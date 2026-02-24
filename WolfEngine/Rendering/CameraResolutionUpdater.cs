@@ -10,6 +10,10 @@ public class CameraResolutionUpdater: IUpdateable
 		foreach (var entry in world.View<Camera>())
 		{
 			ref var camera = ref entry.First;
+			if (camera.AutoResolution == false)
+			{
+				continue;
+			}
 
 			if (camera.ScreenResolution == screenResolution) continue;
 			
