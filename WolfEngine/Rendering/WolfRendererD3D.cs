@@ -1505,7 +1505,8 @@ private sealed class MeshResources
 
 		_gfxDevice.Submit(presentCommandList);
 
-		var presentResult = _swapchain.Present(1, 0);
+		var presentInterval = Screen.VSyncEnabled ? 1u : 0u;
+		var presentResult = _swapchain.Present(presentInterval, 0);
 		if (presentResult < 0)
 		{
 			var removalReason = _device.GetDeviceRemovedReason();

@@ -76,6 +76,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private string _lastGpuCapturePath = string.Empty;
     private int _presentFrameIndex;
     private int _lastDrawableAcquireFailureLogFrame = int.MinValue;
+    private bool _vsyncEnabled = Screen.VSyncEnabled;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
@@ -244,7 +245,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         _metalLayer.Device = _device;
         _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
         _metalLayer.FramebufferOnly = false;
-        _metalLayer.DisplaySyncEnabled = true;
+        _metalLayer.DisplaySyncEnabled = Screen.VSyncEnabled;
+        _vsyncEnabled = Screen.VSyncEnabled;
 
         UpdateDrawableSize();
     }
@@ -559,6 +561,13 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public void BeginFrame()
     {
+        var desiredVSync = Screen.VSyncEnabled;
+        if (_vsyncEnabled != desiredVSync)
+        {
+            _metalLayer.DisplaySyncEnabled = desiredVSync;
+            _vsyncEnabled = desiredVSync;
+        }
+
         UpdateDrawableSize();
     }
 

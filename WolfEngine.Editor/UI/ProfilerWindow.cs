@@ -1,5 +1,6 @@
 using ImGuiNET;
 using WolfEngine.Profiling;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
 
@@ -25,6 +26,11 @@ public class ProfilerWindow
 		}
 
 		ImGui.Begin("Profiler", ref _isOpen);
+		var vsyncEnabled = Screen.VSyncEnabled;
+		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
+		{
+			Screen.VSyncEnabled = vsyncEnabled;
+		}
 
 		ImGui.Separator();
 		var frames = FrameProfiler.Instance.GetLastFrames();

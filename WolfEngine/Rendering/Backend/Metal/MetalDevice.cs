@@ -11,6 +11,8 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("macos")]
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline
 {
+	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * 16;
+
 	public readonly record struct MetalDiagnosticsSnapshot(
 		int TexturePoolBuckets,
 		int TexturePoolTextures,
@@ -202,7 +204,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				return false;
 			}
 
-			if (onlyWhenOverLimit && _pendingSubmissions.Count <= GpuDrawResources.MaxFramesInFlight)
+			if (onlyWhenOverLimit && _pendingSubmissions.Count <= MaxPendingCommandLists)
 			{
 				submission = default;
 				return false;
