@@ -12,6 +12,8 @@ namespace WolfEngine.Rendering.Backend.Metal;
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline
 {
 	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * 16;
+	private const int MaxPooledTextures = 256;
+	private const int MaxPooledTexturesPerDescriptor = 2;
 
 	public readonly record struct MetalDiagnosticsSnapshot(
 		int TexturePoolBuckets,
@@ -60,6 +62,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
 	private readonly object _submissionSync = new();
+	private int _pooledTextureCount;
 	private ulong _lastSubmittedId;
 	private ulong _completedId;
 
@@ -267,7 +270,14 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		var poolKey = new TexturePoolKey(descriptor);
 		if (_texturePool.TryGetValue(poolKey, out var pool) && pool.Count > 0)
 		{
-			return pool.Pop();
+			var pooled = pool.Pop();
+			_pooledTextureCount = Math.Max(0, _pooledTextureCount - 1);
+			if (pool.Count == 0)
+			{
+				_texturePool.Remove(poolKey);
+			}
+
+			return pooled;
 		}
 
 		var textureDescriptor = new MTLTextureDescriptor();
@@ -467,6 +477,14 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			return false;
 		}
 
+		// Resize-heavy workloads (editor scene viewport) can generate many unique descriptors.
+		// Keep the pool bounded so descriptor-table high-water does not grow unbounded.
+		if (_pooledTextureCount >= MaxPooledTextures)
+		{
+			metalTexture.Dispose();
+			return true;
+		}
+
 		var key = new TexturePoolKey(metalTexture.Descriptor);
 		if (_texturePool.TryGetValue(key, out var pool) == false)
 		{
@@ -474,7 +492,14 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			_texturePool[key] = pool;
 		}
 
+		if (pool.Count >= MaxPooledTexturesPerDescriptor)
+		{
+			metalTexture.Dispose();
+			return true;
+		}
+
 		pool.Push(metalTexture);
+		_pooledTextureCount++;
 		return true;
 	}
 
@@ -489,6 +514,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 
 		_texturePool.Clear();
+		_pooledTextureCount = 0;
 	}
 
 	private MTLLibrary CreateLibraryFromSource(ReadOnlyMemory<byte> sourceBytes)

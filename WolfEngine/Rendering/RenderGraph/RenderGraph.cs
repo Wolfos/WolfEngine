@@ -294,6 +294,7 @@ public sealed class RenderGraph
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
 				var renderSceneToViewport = sceneEnabled && _editorSceneOverlayHook.SupportsSceneViewportRenderTarget;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
+				var nextSceneRenderState = SceneViewportRenderState.Empty;
 				if (renderSceneToViewport)
 				{
 					var sceneTarget = _sceneRenderTargetManager.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
@@ -304,11 +305,7 @@ public sealed class RenderGraph
 					var textureId = sceneTarget.ShaderResourceView.IsValid
 						? (nint)sceneTarget.ShaderResourceView.Value
 						: 0;
-					_viewportStateBus.PublishRenderState(new SceneViewportRenderState(textureId, sceneRenderSize));
-				}
-				else
-				{
-					_viewportStateBus.PublishRenderState(SceneViewportRenderState.Empty);
+					nextSceneRenderState = new SceneViewportRenderState(textureId, sceneRenderSize);
 				}
 
 				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport);
@@ -318,6 +315,7 @@ public sealed class RenderGraph
 				Execute();
 
 				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());
+				_viewportStateBus.PublishRenderState(nextSceneRenderState);
 
 				_resourceRegistry.EndFrame();
 			}
