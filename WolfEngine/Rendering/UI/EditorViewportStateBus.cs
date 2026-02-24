@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;
@@ -9,15 +10,26 @@ public readonly struct SceneViewportUiState
 		contentSizePixels: Int2.Zero,
 		resolutionScale: 1.0f,
 		hovered: false,
-		focused: false);
+		focused: false,
+		imageMin: Vector2.Zero,
+		imageMax: Vector2.Zero);
 
-	public SceneViewportUiState(bool visible, Int2 contentSizePixels, float resolutionScale, bool hovered, bool focused)
+	public SceneViewportUiState(
+		bool visible,
+		Int2 contentSizePixels,
+		float resolutionScale,
+		bool hovered,
+		bool focused,
+		Vector2 imageMin,
+		Vector2 imageMax)
 	{
 		Visible = visible;
 		ContentSizePixels = contentSizePixels;
 		ResolutionScale = resolutionScale;
 		Hovered = hovered;
 		Focused = focused;
+		ImageMin = imageMin;
+		ImageMax = imageMax;
 	}
 
 	public bool Visible { get; }
@@ -25,6 +37,8 @@ public readonly struct SceneViewportUiState
 	public float ResolutionScale { get; }
 	public bool Hovered { get; }
 	public bool Focused { get; }
+	public Vector2 ImageMin { get; }
+	public Vector2 ImageMax { get; }
 }
 
 public readonly struct SceneViewportRenderState
@@ -46,6 +60,7 @@ public sealed class EditorViewportStateBus
 	private readonly object _sync = new();
 	private SceneViewportUiState _uiState = SceneViewportUiState.Hidden;
 	private SceneViewportRenderState _renderState = SceneViewportRenderState.Empty;
+	private bool _gizmoDragging;
 
 	public SceneViewportUiState GetUiState()
 	{
@@ -76,6 +91,22 @@ public sealed class EditorViewportStateBus
 		lock (_sync)
 		{
 			_renderState = state;
+		}
+	}
+
+	public bool IsGizmoDragging()
+	{
+		lock (_sync)
+		{
+			return _gizmoDragging;
+		}
+	}
+
+	public void PublishGizmoDragging(bool dragging)
+	{
+		lock (_sync)
+		{
+			_gizmoDragging = dragging;
 		}
 	}
 }

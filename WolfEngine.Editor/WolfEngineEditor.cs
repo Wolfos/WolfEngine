@@ -22,6 +22,7 @@ public class WolfEngineEditor
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly EditorCameraContext _cameraContext;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 
@@ -38,6 +39,7 @@ public class WolfEngineEditor
 		RenderGraph renderGraph,
 		IInputSystem inputSystem,
 		EditorViewportStateBus viewportStateBus,
+		EditorCameraContext cameraContext,
 		EditorGui editorGui)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
@@ -47,6 +49,7 @@ public class WolfEngineEditor
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_editorGui = editorGui;
 	}
 
@@ -137,6 +140,7 @@ public class WolfEngineEditor
 		}
 
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
+		_cameraContext.Publish(camera, cameraWorldTransform);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
 	}
 

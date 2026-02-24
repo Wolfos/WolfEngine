@@ -19,19 +19,25 @@ public class EditorGui
     private readonly IRenderer _renderer;
     private readonly EditorViewportStateBus _viewportStateBus;
     private readonly IIconManager _icons;
+    private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
+    private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
+    private TransformSpace _transformSpace = TransformSpace.Local;
 
     public EditorGui(
         IComponentEditor componentEditor,
         IMenuBar menuBar,
         IRenderer renderer,
-        EditorViewportStateBus viewportStateBus, IIconManager icons)
+        EditorViewportStateBus viewportStateBus,
+        IIconManager icons,
+        TransformGizmoController transformGizmoController)
     {
         _componentEditor = componentEditor;
         _menuBar = menuBar;
         _renderer = renderer;
         _viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
         _icons = icons;
+        _transformGizmoController = transformGizmoController ?? throw new ArgumentNullException(nameof(transformGizmoController));
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
     
@@ -51,7 +57,7 @@ public class EditorGui
 
         using (FrameProfiler.Instance.Measure("Scene Window"))
         {
-            DrawSceneWindow();
+            DrawSceneWindow(world);
         }
 
         using (FrameProfiler.Instance.Measure("Components Window"))
@@ -80,16 +86,37 @@ public class EditorGui
         }
     }
 
-    private void DrawSceneWindow()
+    private void DrawSceneWindow(World world)
     {
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Scene");
         
-        ImGui.ImageButton("Translate", _icons.Get("translate"), Vector2.One * 15);
+        if (ImGui.ImageButton("Translate", _icons.Get("translate"), Vector2.One * 15))
+        {
+            _gizmoMode = TransformGizmoMode.Translate;
+        }
         ImGui.SameLine();
-        ImGui.ImageButton("Rotate", _icons.Get("rotate"), Vector2.One * 15);
+        if (ImGui.ImageButton("Rotate", _icons.Get("rotate"), Vector2.One * 15))
+        {
+            _gizmoMode = TransformGizmoMode.Rotate;
+        }
         ImGui.SameLine();
-        ImGui.ImageButton("Scale", _icons.Get("scale"), Vector2.One * 15);
+        if (ImGui.ImageButton("Scale", _icons.Get("scale"), Vector2.One * 15))
+        {
+            _gizmoMode = TransformGizmoMode.Scale;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Local", _transformSpace == TransformSpace.Local))
+        {
+            _transformSpace = TransformSpace.Local;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.RadioButton("World", _transformSpace == TransformSpace.World))
+        {
+            _transformSpace = TransformSpace.World;
+        }
         
         ImGui.SameLine();
         var scale = _sceneViewportScale;
@@ -110,15 +137,37 @@ public class EditorGui
         var visible = ImGui.IsWindowCollapsed() == false && contentPixels.X > 0 && contentPixels.Y > 0;
         var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows);
+        if ((hovered || focused) && io.WantTextInput == false)
+        {
+            if (ImGui.IsKeyPressed(ImGuiKey.W))
+            {
+                _gizmoMode = TransformGizmoMode.Translate;
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.E))
+            {
+                _gizmoMode = TransformGizmoMode.Rotate;
+            }
+            else if (ImGui.IsKeyPressed(ImGuiKey.R))
+            {
+                _gizmoMode = TransformGizmoMode.Scale;
+            }
+        }
 
         var renderState = _viewportStateBus.GetRenderState();
+        var imageMin = ImGui.GetCursorScreenPos();
+        var imageMax = imageMin + contentSize;
         if (renderState.TextureId != 0 && contentSize.X > 0.0f && contentSize.Y > 0.0f)
         {
             ImGui.Image(renderState.TextureId, contentSize);
         }
         else
         {
-            ImGui.TextUnformatted("Scene render target unavailable.");
+            ImGui.Dummy(contentSize);
+            var drawList = ImGui.GetWindowDrawList();
+            drawList.AddText(
+                imageMin + new Vector2(10.0f, 10.0f),
+                ImGui.ColorConvertFloat4ToU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f)),
+                "Scene render target unavailable.");
         }
 
         _viewportStateBus.PublishUiState(new SceneViewportUiState(
@@ -126,7 +175,11 @@ public class EditorGui
             contentPixels,
             _sceneViewportScale,
             hovered,
-            focused));
+            focused,
+            imageMin,
+            imageMax));
+
+        _transformGizmoController.DrawAndHandle(world, SelectedEntity, HasSelectedEntity, _gizmoMode, _transformSpace);
 
         ImGui.End();
     }

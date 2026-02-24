@@ -87,7 +87,11 @@ public class CameraMoverSystem: IUpdateable
 	public void Update(float deltaTime, World world)
 	{
 		var viewportState = _viewportStateBus.GetUiState();
-		var viewportControlActive = viewportState.Visible && (viewportState.Hovered || viewportState.Focused) && _isLooking;
+		var viewportControlActive =
+			viewportState.Visible &&
+			(viewportState.Hovered || viewportState.Focused) &&
+			_isLooking &&
+			_viewportStateBus.IsGizmoDragging() == false;
 		if (viewportControlActive == false)
 		{
 			if (_hadViewportControl)

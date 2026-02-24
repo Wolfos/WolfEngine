@@ -39,6 +39,7 @@ public static class WolfEngine
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();
 		services.AddSingleton<SkyboxRenderer>();
+		services.AddSingleton<IEditorSceneOverlayHook, NullEditorSceneOverlayHook>();
 		
 		services.AddSingleton<ISceneBuilder, SceneBuilder>();
 		
@@ -48,12 +49,14 @@ public static class WolfEngine
 			services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
+			services.AddSingleton<IEditorSceneOverlayHook, MetalEditorSceneOverlayHook>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
 			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
+			services.AddSingleton<IEditorSceneOverlayHook, D3DEditorSceneOverlayHook>();
 		}
 		
 		Ecs.ConfigureServices(services);

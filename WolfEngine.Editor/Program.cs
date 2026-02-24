@@ -33,11 +33,13 @@ public static class Program
 	public static void ConfigureServices(ServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
+		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<IComponentEditor, ComponentEditor>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
+		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<EditorGui>();
 	}
 }

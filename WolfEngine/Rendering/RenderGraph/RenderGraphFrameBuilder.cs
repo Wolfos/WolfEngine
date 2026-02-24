@@ -39,6 +39,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly IImGuiRenderer _imGuiRenderer;
+	private readonly IEditorSceneOverlayHook _editorSceneOverlayHook;
 	private SkyboxResources? _skybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
@@ -53,8 +54,16 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gpuDrawCameraCullExecute;
 
 	
-	public RenderGraphFrameBuilder(RenderGraphResourceRegistry resources, IRenderer renderer,
-		DeferredLightingPass deferredLightingPass, TransparentForwardPass transparentForwardPass, ShadowMapPass shadowMapPass, GpuDrawPass gpuDrawPass, GpuDrawResources gpuDrawResources, IImGuiRenderer imGuiRenderer)
+	public RenderGraphFrameBuilder(
+		RenderGraphResourceRegistry resources,
+		IRenderer renderer,
+		DeferredLightingPass deferredLightingPass,
+		TransparentForwardPass transparentForwardPass,
+		ShadowMapPass shadowMapPass,
+		GpuDrawPass gpuDrawPass,
+		GpuDrawResources gpuDrawResources,
+		IImGuiRenderer imGuiRenderer,
+		IEditorSceneOverlayHook editorSceneOverlayHook)
 	{
 		_resources = resources;
 		_renderer = renderer;
@@ -64,6 +73,7 @@ public sealed class RenderGraphFrameBuilder
 		_gpuDrawPass = gpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_imGuiRenderer = imGuiRenderer;
+		_editorSceneOverlayHook = editorSceneOverlayHook ?? throw new ArgumentNullException(nameof(editorSceneOverlayHook));
 
 		_gbufferExecute = ExecuteGBuffer;
 		_deferredLightingExecute = ExecuteDeferredLighting;
@@ -273,6 +283,8 @@ public sealed class RenderGraphFrameBuilder
 				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
 			}
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			_editorSceneOverlayHook.BuildOverlayPasses(graph, _frameResources);
 		}
 
 		graph.AddPass("ImGui", PassKind.Graphics)
