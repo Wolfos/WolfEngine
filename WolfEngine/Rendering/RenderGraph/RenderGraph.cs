@@ -242,6 +242,7 @@ public sealed class RenderGraph
 		_mainThreadDispatcher.ExecutePending();
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
+		_sceneRenderTargetManager.Advance(_renderer.GetGfxDevice());
 
 		using (FrameProfiler.Instance.Measure("Begin Frame"))
 		{
