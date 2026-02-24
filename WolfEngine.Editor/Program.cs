@@ -16,6 +16,7 @@ public static class Program
 		var provider = services.BuildServiceProvider();
 		
 		provider.GetRequiredService<IUiFrameProvider>();
+		provider.GetRequiredService<IIconManager>();
 		EditorPreferences.Load();
 		
 		var editor = provider.GetRequiredService<WolfEngineEditor>();
@@ -35,6 +36,8 @@ public static class Program
 		services.AddSingleton<IComponentEditor, ComponentEditor>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMenuBar, MenuBar>();
+		services.AddSingleton<IImageLoader, ImageLoader>();
+		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<EditorGui>();
 	}
 }

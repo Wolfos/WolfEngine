@@ -18,18 +18,20 @@ public class EditorGui
     private readonly IMenuBar _menuBar;
     private readonly IRenderer _renderer;
     private readonly EditorViewportStateBus _viewportStateBus;
+    private readonly IIconManager _icons;
     private float _sceneViewportScale;
 
     public EditorGui(
         IComponentEditor componentEditor,
         IMenuBar menuBar,
         IRenderer renderer,
-        EditorViewportStateBus viewportStateBus)
+        EditorViewportStateBus viewportStateBus, IIconManager icons)
     {
         _componentEditor = componentEditor;
         _menuBar = menuBar;
         _renderer = renderer;
         _viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+        _icons = icons;
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
     
@@ -82,17 +84,22 @@ public class EditorGui
     {
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Scene");
-
+        
+        ImGui.ImageButton("Translate", _icons.Get("translate"), Vector2.One * 15);
+        ImGui.SameLine();
+        ImGui.ImageButton("Rotate", _icons.Get("rotate"), Vector2.One * 15);
+        ImGui.SameLine();
+        ImGui.ImageButton("Scale", _icons.Get("scale"), Vector2.One * 15);
+        
+        ImGui.SameLine();
         var scale = _sceneViewportScale;
         ImGui.SetNextItemWidth(100);
-        if (ImGui.SliderFloat("Res", ref scale, 0.5f, 1.0f, "%.2fx"))
+        if (ImGui.SliderFloat("Resolution", ref scale, 0.5f, 1.0f, "%.2fx"))
         {
             var snapped = (float)Math.Round(scale / 0.05f) * 0.05f;
             _sceneViewportScale = Math.Clamp(snapped, 0.5f, 1.0f);
             EditorPreferences.SetSceneViewportResolutionScale(_sceneViewportScale);
         }
-        ImGui.SameLine();
-        ImGui.Button("F");
 
         var contentSize = ImGui.GetContentRegionAvail();
         var io = ImGui.GetIO();

@@ -31,7 +31,7 @@
       <None Update="Assets\Icons\scale.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
-      <None Update="Assets\Icons\transform.png">
+      <None Update="Assets\Icons\translate.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
     </ItemGroup>
