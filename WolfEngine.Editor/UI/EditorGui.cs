@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
@@ -53,8 +54,8 @@ public class EditorGui
 
         using (FrameProfiler.Instance.Measure("Components Window"))
         {
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
             ImGui.Begin("Components");
             if (HasSelectedEntity)
             {
@@ -79,16 +80,19 @@ public class EditorGui
 
     private void DrawSceneWindow()
     {
-        ImGui.SetNextWindowSize(new System.Numerics.Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Scene");
 
         var scale = _sceneViewportScale;
-        if (ImGui.SliderFloat("Resolution Scale", ref scale, 0.5f, 1.0f, "%.2fx"))
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.SliderFloat("Res", ref scale, 0.5f, 1.0f, "%.2fx"))
         {
             var snapped = (float)Math.Round(scale / 0.05f) * 0.05f;
             _sceneViewportScale = Math.Clamp(snapped, 0.5f, 1.0f);
             EditorPreferences.SetSceneViewportResolutionScale(_sceneViewportScale);
         }
+        ImGui.SameLine();
+        ImGui.Button("F");
 
         var contentSize = ImGui.GetContentRegionAvail();
         var io = ImGui.GetIO();
@@ -100,21 +104,14 @@ public class EditorGui
         var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows);
 
-        if (OperatingSystem.IsMacOS())
+        var renderState = _viewportStateBus.GetRenderState();
+        if (renderState.TextureId != 0 && contentSize.X > 0.0f && contentSize.Y > 0.0f)
         {
-            var renderState = _viewportStateBus.GetRenderState();
-            if (renderState.TextureId != 0 && contentSize.X > 0.0f && contentSize.Y > 0.0f)
-            {
-                ImGui.Image(renderState.TextureId, contentSize);
-            }
-            else
-            {
-                ImGui.TextUnformatted("Scene render target unavailable.");
-            }
+            ImGui.Image(renderState.TextureId, contentSize);
         }
         else
         {
-            ImGui.TextUnformatted("Scene viewport preview is Metal-only in this build.");
+            ImGui.TextUnformatted("Scene render target unavailable.");
         }
 
         _viewportStateBus.PublishUiState(new SceneViewportUiState(
@@ -136,7 +133,7 @@ public class EditorGui
 
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0.0f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0.0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, System.Numerics.Vector2.Zero);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
 
         const ImGuiWindowFlags flags = ImGuiWindowFlags.NoDocking
                                        | ImGuiWindowFlags.NoTitleBar
@@ -150,7 +147,7 @@ public class EditorGui
         ImGui.Begin("DockSpace", flags);
         ImGui.PopStyleVar(3);
 
-        ImGui.DockSpace(ImGui.GetID("MainDockSpace"), System.Numerics.Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
+        ImGui.DockSpace(ImGui.GetID("MainDockSpace"), Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
         ImGui.End();
     }
 }
