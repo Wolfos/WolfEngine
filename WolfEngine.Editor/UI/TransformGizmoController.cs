@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.UI;
 
@@ -43,10 +44,12 @@ public sealed class TransformGizmoController
 
 		ref var worldTransform = ref world.GetComponent<WorldTransform>(entity);
 		ref var localTransform = ref world.GetComponent<LocalTransform>(entity);
-		if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out _, out var objectWorldRotation, out var objectWorldPosition) == false)
+		var entityWorldPosition = worldTransform.LocalToWorld.Translation;
+		var gizmoPivotWorld = ResolveGizmoPivotWorld(world, entity, worldTransform);
+		Quaternion objectWorldRotation;
+		if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out _, out objectWorldRotation, out _) == false)
 		{
-			EndDrag();
-			return;
+			objectWorldRotation = localTransform.LocalRotation;
 		}
 
 		objectWorldRotation = NormalizeOrIdentity(objectWorldRotation);
@@ -71,11 +74,11 @@ public sealed class TransformGizmoController
 		var axisZ = SafeNormalize(Vector3.Transform(Vector3.UnitZ, axisRotation), Vector3.UnitZ);
 
 		var cameraPosition = cameraWorldTransform.LocalToWorld.Translation;
-		var distanceToCamera = Vector3.Distance(cameraPosition, objectWorldPosition);
+		var distanceToCamera = Vector3.Distance(cameraPosition, gizmoPivotWorld);
 		var handleLength = MathF.Max(MinHandleLength, distanceToCamera * HandleLengthDistanceScale);
 		var ringRadius = handleLength * 0.8f;
 
-		if (TryProjectToScreen(objectWorldPosition, viewProjection, viewportState.ImageMin, viewportState.ImageMax, out var pivotScreen) ==
+		if (TryProjectToScreen(gizmoPivotWorld, viewProjection, viewportState.ImageMin, viewportState.ImageMax, out var pivotScreen) ==
 		    false)
 		{
 			EndDrag();
@@ -102,7 +105,7 @@ public sealed class TransformGizmoController
 				viewProjection,
 				viewportState.ImageMin,
 				viewportState.ImageMax,
-				objectWorldPosition,
+				gizmoPivotWorld,
 				axisX,
 				axisY,
 				axisZ,
@@ -120,7 +123,8 @@ public sealed class TransformGizmoController
 					mousePosition,
 					inverseViewProjection,
 					cameraPosition,
-					objectWorldPosition,
+					gizmoPivotWorld,
+					entityWorldPosition,
 					objectWorldRotation,
 					localTransform.LocalScale,
 					axisX,
@@ -143,7 +147,7 @@ public sealed class TransformGizmoController
 			viewProjection,
 			viewportState.ImageMin,
 			viewportState.ImageMax,
-			objectWorldPosition,
+			gizmoPivotWorld,
 			pivotScreen,
 			axisX,
 			axisY,
@@ -163,7 +167,8 @@ public sealed class TransformGizmoController
 		Vector2 mousePosition,
 		Matrix4x4 inverseViewProjection,
 		Vector3 cameraPosition,
-		Vector3 objectWorldPosition,
+		Vector3 gizmoPivotWorld,
+		Vector3 entityWorldPosition,
 		Quaternion objectWorldRotation,
 		Vector3 objectLocalScale,
 		Vector3 axisX,
@@ -187,22 +192,22 @@ public sealed class TransformGizmoController
 		_dragState.Mode = mode;
 		_dragState.Space = space;
 		_dragState.Axis = axis;
-		_dragState.PivotWorld = objectWorldPosition;
+		_dragState.PivotWorld = gizmoPivotWorld;
 		_dragState.AxisWorld = axisWorld;
-		_dragState.StartWorldPosition = objectWorldPosition;
+		_dragState.StartEntityWorldPosition = entityWorldPosition;
 		_dragState.StartWorldRotation = objectWorldRotation;
 		_dragState.StartLocalScale = objectLocalScale;
 		_dragState.HandleLength = MathF.Max(handleLength, MinHandleLength);
 
 		if (mode == TransformGizmoMode.Rotate)
 		{
-			if (TryIntersectRayPlane(ray, objectWorldPosition, axisWorld, out var hitPoint) == false)
+			if (TryIntersectRayPlane(ray, gizmoPivotWorld, axisWorld, out var hitPoint) == false)
 			{
 				EndDrag();
 				return;
 			}
 
-			var startVector = hitPoint - objectWorldPosition;
+			var startVector = hitPoint - gizmoPivotWorld;
 			if (startVector.LengthSquared() < 1e-8f)
 			{
 				EndDrag();
@@ -213,15 +218,15 @@ public sealed class TransformGizmoController
 			return;
 		}
 
-		var dragPlaneNormal = BuildAxisDragPlaneNormal(axisWorld, cameraPosition, objectWorldPosition);
-		if (TryIntersectRayPlane(ray, objectWorldPosition, dragPlaneNormal, out var planeHitPoint) == false)
+		var dragPlaneNormal = BuildAxisDragPlaneNormal(axisWorld, cameraPosition, gizmoPivotWorld);
+		if (TryIntersectRayPlane(ray, gizmoPivotWorld, dragPlaneNormal, out var planeHitPoint) == false)
 		{
 			EndDrag();
 			return;
 		}
 
 		_dragState.DragPlaneNormal = dragPlaneNormal;
-		_dragState.StartAxisParameter = Vector3.Dot(planeHitPoint - objectWorldPosition, axisWorld);
+		_dragState.StartAxisParameter = Vector3.Dot(planeHitPoint - gizmoPivotWorld, axisWorld);
 	}
 
 	private void UpdateDrag(World world, Vector2 mousePosition, Matrix4x4 inverseViewProjection)
@@ -242,7 +247,7 @@ public sealed class TransformGizmoController
 
 				var currentParameter = Vector3.Dot(hitPoint - _dragState.PivotWorld, _dragState.AxisWorld);
 				var delta = currentParameter - _dragState.StartAxisParameter;
-				var worldPosition = _dragState.StartWorldPosition + (_dragState.AxisWorld * delta);
+				var worldPosition = _dragState.StartEntityWorldPosition + (_dragState.AxisWorld * delta);
 				world.SetWorldPosition(_dragState.Entity, worldPosition);
 				break;
 			}
@@ -751,6 +756,98 @@ public sealed class TransformGizmoController
 		};
 	}
 
+	private static Vector3 ResolveGizmoPivotWorld(World world, Entity entity, in WorldTransform worldTransform)
+	{
+		if (TryGetVisualCenterWorld(world, entity, out var visualCenter))
+		{
+			return visualCenter;
+		}
+
+		return worldTransform.LocalToWorld.Translation;
+	}
+
+	private static bool TryGetVisualCenterWorld(World world, Entity entity, out Vector3 visualCenter)
+	{
+		visualCenter = Vector3.Zero;
+		if (TryGetEntityMeshCenter(world, entity, out visualCenter))
+		{
+			return true;
+		}
+
+		if (world.HasComponent<Children>(entity) == false)
+		{
+			return false;
+		}
+
+		var sum = Vector3.Zero;
+		var count = 0;
+		var child = world.GetComponent<Children>(entity).First;
+		while (child.IsValid)
+		{
+			AccumulateDescendantMeshCenters(world, child, ref sum, ref count);
+			if (world.HasComponent<Sibling>(child) == false)
+			{
+				break;
+			}
+
+			child = world.GetComponent<Sibling>(child).Next;
+		}
+
+		if (count == 0)
+		{
+			return false;
+		}
+
+		visualCenter = sum / count;
+		return true;
+	}
+
+	private static void AccumulateDescendantMeshCenters(World world, Entity entity, ref Vector3 sum, ref int count)
+	{
+		if (TryGetEntityMeshCenter(world, entity, out var center))
+		{
+			sum += center;
+			count++;
+		}
+
+		if (world.HasComponent<Children>(entity) == false)
+		{
+			return;
+		}
+
+		var child = world.GetComponent<Children>(entity).First;
+		while (child.IsValid)
+		{
+			AccumulateDescendantMeshCenters(world, child, ref sum, ref count);
+			if (world.HasComponent<Sibling>(child) == false)
+			{
+				break;
+			}
+
+			child = world.GetComponent<Sibling>(child).Next;
+		}
+	}
+
+	private static bool TryGetEntityMeshCenter(World world, Entity entity, out Vector3 centerWorld)
+	{
+		centerWorld = Vector3.Zero;
+		if (world.HasComponent<MeshRenderer>(entity) == false || world.HasComponent<WorldTransform>(entity) == false)
+		{
+			return false;
+		}
+
+		ref var meshRenderer = ref world.GetComponent<MeshRenderer>(entity);
+		if (meshRenderer.Mesh is null)
+		{
+			return false;
+		}
+
+		ref var entityWorldTransform = ref world.GetComponent<WorldTransform>(entity);
+		var centerLocal = meshRenderer.Mesh.BoundingSphere.Center;
+		centerWorld = Vector3.Transform(centerLocal, entityWorldTransform.LocalToWorld);
+		return true;
+	}
+
 	private static bool IsViewportValid(in SceneViewportUiState state)
 	{
 		return state.Visible &&
@@ -819,7 +916,7 @@ public sealed class TransformGizmoController
 		_dragState.AxisWorld = Vector3.Zero;
 		_dragState.DragPlaneNormal = Vector3.Zero;
 		_dragState.StartPlaneVector = Vector3.Zero;
-		_dragState.StartWorldPosition = Vector3.Zero;
+		_dragState.StartEntityWorldPosition = Vector3.Zero;
 		_dragState.StartWorldRotation = Quaternion.Identity;
 		_dragState.StartLocalScale = Vector3.One;
 		_dragState.StartAxisParameter = 0.0f;
@@ -859,7 +956,7 @@ public sealed class TransformGizmoController
 		public Vector3 AxisWorld;
 		public Vector3 DragPlaneNormal;
 		public Vector3 StartPlaneVector;
-		public Vector3 StartWorldPosition;
+		public Vector3 StartEntityWorldPosition;
 		public Quaternion StartWorldRotation = Quaternion.Identity;
 		public Vector3 StartLocalScale = Vector3.One;
 		public float StartAxisParameter;
