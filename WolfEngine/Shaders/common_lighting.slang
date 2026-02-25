@@ -2,7 +2,7 @@ import "constants.slang";
 import "common_bindless.slang";
 
 static const uint MAX_LIGHTS = 3;
-static const float IBL_EXPOSURE = 1.0f;
+static const float IBL_EXPOSURE = 0.75f;
 
 struct LightData
 {
