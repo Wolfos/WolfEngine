@@ -35,7 +35,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		"Assets",
 		"Fonts",
 		"Inter-VariableFont_opsz,wght.ttf");
-	private const float BaseFontSize = 14.0f;
+	private const float BaseFontSize = 15.0f;
 	private const float FontScaleEpsilon = 0.01f;
 	private readonly ConcurrentQueue<UiFrameData> _pendingFrames = new();
 	private readonly ConcurrentQueue<(ImGuiKey key, bool down)> _pendingKeys = new();
@@ -277,6 +277,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		io.Fonts.Clear();
 		io.Fonts.AddFontFromFileTTF(FontPath, BaseFontSize * dpiScale);
 		_fontAtlas = BuildFontAtlas(io);
+		io.Fonts.SetTexID(UiTextureIds.FontAtlas);
 		_fontAtlasDirty = true;
 	}
 
@@ -307,28 +308,59 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	{
 		var style = ImGui.GetStyle();
 		var textColor = new Vector4(0.93333334f, 0.93333334f, 0.93333334f, 1.0f);
-		var bgColor = new Vector4(0.20784314f, 0.21176471f, 0.23137255f, 1.0f);
-		var titleColor = new Vector4(0.11764706f, 0.12156863f, 0.13725491f, 1.0f);
-		var buttonColor = new Vector4(0.14117648f, 0.14509805f, 0.16078432f, 1.0f);
+		var bgColor = new Vector4(0.157f,0.165f,0.184f, 1.0f);
+		var bgBright = new Vector4(0.22f,0.224f,0.243f, 1.0f);
+		var bgDark = new Vector4(0.067f,0.075f,0.094f, 1.0f);
+		var buttonColor = bgColor;
+		var primary = new Vector4(0.675f,0.78f,0.984f, 1.0f);
+		var secondary = new Vector4(0.745f,0.776f,0.855f, 1.0f);
+		var secondaryContainer = new Vector4(0.247f,0.275f,0.337f, 1.0f);
+
+		style.FramePadding = new Vector2(5, 7);
+		style.WindowPadding = new Vector2(10, 3);
+		style.WindowBorderSize = 0;
+		
+		style.FrameRounding = 4.0f;
+		style.ChildRounding = 4.0f;
+		style.GrabRounding = 4.0f;
+		style.PopupRounding = 4.0f;
+		style.ScrollbarRounding = 4.0f;
+		style.TabRounding = 4.0f;
+		style.WindowRounding = 4.0f;
 		
 		style.Colors[(int)ImGuiCol.Text] = textColor;
 		style.Colors[(int)ImGuiCol.WindowBg] = bgColor;
+		style.Colors[(int)ImGuiCol.MenuBarBg] = bgDark;
 		style.Colors[(int)ImGuiCol.PopupBg] = bgColor;
-		style.Colors[(int)ImGuiCol.TitleBg] = titleColor;
-		style.Colors[(int)ImGuiCol.TitleBgCollapsed] = titleColor;
-		style.Colors[(int)ImGuiCol.TitleBgActive] = titleColor;
+		style.Colors[(int)ImGuiCol.TitleBg] = bgDark;
+		style.Colors[(int)ImGuiCol.TitleBgCollapsed] = bgDark;
+		style.Colors[(int)ImGuiCol.TitleBgActive] = bgDark;
 		style.Colors[(int)ImGuiCol.Button] = buttonColor;
-		style.Colors[(int)ImGuiCol.FrameBg] = buttonColor;
+		style.Colors[(int)ImGuiCol.ButtonHovered] = bgBright;
+		style.Colors[(int)ImGuiCol.ButtonActive] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.Header] = bgColor;
+		style.Colors[(int)ImGuiCol.HeaderActive] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.HeaderHovered] = bgBright;
 		style.Colors[(int)ImGuiCol.Border] = bgColor;
 		
-		style.Colors[(int)ImGuiCol.Tab] = titleColor;
-		style.Colors[(int)ImGuiCol.TabDimmed] = titleColor;
+		style.Colors[(int)ImGuiCol.Tab] = bgDark;
+		style.Colors[(int)ImGuiCol.TabDimmed] = bgDark;
 		style.Colors[(int)ImGuiCol.TabSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = bgColor;
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
 		style.Colors[(int)ImGuiCol.TabSelectedOverline] = bgColor;
+		
+		style.Colors[(int)ImGuiCol.FrameBg] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.FrameBgHovered] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.FrameBgActive] = secondaryContainer;
+		style.Colors[(int)ImGuiCol.CheckMark] = primary;
+		style.Colors[(int)ImGuiCol.SliderGrab] = primary;
+		style.Colors[(int)ImGuiCol.SliderGrabActive] = primary;
+		style.Colors[(int)ImGuiCol.SliderGrabActive] = primary;
+		style.Colors[(int)ImGuiCol.ResizeGrip] = primary;
+		style.Colors[(int)ImGuiCol.ResizeGripActive] = primary;
+		style.Colors[(int)ImGuiCol.ResizeGripHovered] = primary;
 	}
 
 	private static void ReturnPooledFrame(UiFrameData frame)

@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
 
@@ -10,17 +11,27 @@ public class EntitiesWindow
 
 	public static void Draw(World world)
 	{
-		ImGui.SetNextWindowPos(new System.Numerics.Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
-		ImGui.SetNextWindowSize(new System.Numerics.Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
+		ImGui.SetNextWindowPos(new Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
+		ImGui.SetNextWindowSize(new Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
 
+		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
 		ImGui.Begin("Entities");
+		ImGui.PopStyleVar();
+		
 		world.GetAllEntities(AllEntities);
 
 		BuildRootList(world);
+		
+		var style = ImGui.GetStyle();
+		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
+		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, 4.0f));
+
 		foreach (var entity in RootEntities)
 		{
 			DrawEntityNode(entity, world);
 		}
+		
+		ImGui.PopStyleVar(2);
 
 		ImGui.End();
 	}
@@ -44,14 +55,14 @@ public class EntitiesWindow
 		}
 	}
 
-	private static void DrawEntityNode(Entity entity, World world)
+	private static unsafe void DrawEntityNode(Entity entity, World world)
 	{
 		ImGui.PushID(entity.Index);
 
 		var isSelected = EditorGui.HasSelectedEntity && EditorGui.SelectedEntity == entity;
 		var hasChildren = world.HasComponent<Children>(entity)
 		                 && world.GetComponent<Children>(entity).First.IsValid;
-		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow;
+		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (!hasChildren)
 		{
 			flags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
@@ -59,14 +70,11 @@ public class EntitiesWindow
 
 		if (isSelected)
 		{
-			unsafe
-			{
-				flags |= ImGuiTreeNodeFlags.Selected;
-				var selectedColor = ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
-				ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
-				ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
-				ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
-			}
+			flags |= ImGuiTreeNodeFlags.Selected;
+			var selectedColor = ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
+			ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
 		}
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);

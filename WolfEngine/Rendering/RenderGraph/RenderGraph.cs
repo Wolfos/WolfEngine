@@ -308,6 +308,8 @@ public sealed class RenderGraph
 					nextSceneRenderState = new SceneViewportRenderState(textureId, sceneRenderSize);
 				}
 
+				ResolveSpecialUiTextureIds(uiFrame, nextSceneRenderState.TextureId);
+
 				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport);
 				_frameBuilder.SetUiFrame(uiFrame);
 
@@ -403,6 +405,30 @@ public sealed class RenderGraph
 		}
 
 		return fallback;
+	}
+
+	private static void ResolveSpecialUiTextureIds(UiFrameData uiFrame, nint sceneTextureId)
+	{
+		if (ReferenceEquals(uiFrame, UiFrameData.Empty) || uiFrame.CommandCount == 0)
+		{
+			return;
+		}
+
+		for (var i = 0; i < uiFrame.CommandCount; i++)
+		{
+			var command = uiFrame.Commands[i];
+			if (command.TextureId != UiTextureIds.SceneViewport)
+			{
+				continue;
+			}
+
+			uiFrame.Commands[i] = new UiDrawCommand(
+				command.ElemCount,
+				command.IdxOffset,
+				command.VtxOffset,
+				command.ClipRect,
+				sceneTextureId);
+		}
 	}
 
 	private void LogGpuHardeningStatsIfNeeded()

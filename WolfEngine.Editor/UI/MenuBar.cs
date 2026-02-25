@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Utility;
@@ -24,6 +25,15 @@ public class MenuBar: IMenuBar
 	public void Draw(World world)
 	{
 		if (ImGui.BeginMainMenuBar() == false) return;
+
+		if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+		{
+			const float macTitlebarButtonInset = 70.0f;
+			if (ImGui.GetCursorPosX() < macTitlebarButtonInset)
+			{
+				ImGui.SetCursorPosX(macTitlebarButtonInset);
+			}
+		}
 		
 		if (ImGui.BeginMenu("File")) {
 			if (ImGui.MenuItem("Preferences"))

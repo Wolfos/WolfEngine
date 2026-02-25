@@ -63,6 +63,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private Window* _window;
     private void* _metalView;
     private CAMetalLayer _metalLayer;
+    private IntPtr _nativeWindow = IntPtr.Zero;
     private bool _isRunning;
     private bool _hasDrawableSize;
     private double _drawableWidth;
@@ -84,6 +85,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
     private static readonly Selector DrawableSizeSelector = new("setDrawableSize:");
+    private const int MacTitlebarDoubleClickHeight = 28;
+    private const int MacTrafficLightExclusionWidth = 70;
 
     private sealed class MeshResources
     {
@@ -184,6 +187,13 @@ internal unsafe class WolfRendererMetal : IRenderer
                 case EventType.Windowevent:
                     HandleWindowEvent(@event);
                     break;
+                case EventType.Mousebuttondown:
+                    if (HandleMacTitlebarDoubleClick(@event.Button))
+                    {
+                        break;
+                    }
+                    _inputHandler.HandleInputEvents(ref @event);
+                    break;
                 default:
                     _inputHandler.HandleInputEvents(ref @event);
                     break;
@@ -249,6 +259,48 @@ internal unsafe class WolfRendererMetal : IRenderer
         _vsyncEnabled = Screen.VSyncEnabled;
 
         UpdateDrawableSize();
+        ConfigureNativeWindowChrome();
+        UpdateDrawableSize();
+    }
+
+    private void ConfigureNativeWindowChrome()
+    {
+        if (_metalView is null)
+        {
+            return;
+        }
+
+        var nsView = new IntPtr(_metalView);
+        var nsWindow = ObjectiveC.IntPtr_objc_msgSend(nsView, "window");
+        if (nsWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _nativeWindow = nsWindow;
+        var window = new NSWindowInstance(nsWindow);
+        window.EnableUnifiedTitlebarChrome(includeFullSizeContentView: true);
+    }
+
+    private bool HandleMacTitlebarDoubleClick(MouseButtonEvent buttonEvent)
+    {
+        if (_nativeWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (buttonEvent.Button != Sdl.ButtonLeft || buttonEvent.Clicks < 2)
+        {
+            return false;
+        }
+
+        if (buttonEvent.Y > MacTitlebarDoubleClickHeight || buttonEvent.X < MacTrafficLightExclusionWidth)
+        {
+            return false;
+        }
+
+        ObjectiveC.objc_msgSend(_nativeWindow, "zoom:", IntPtr.Zero);
+        return true;
     }
 
     private void CreateDevice()

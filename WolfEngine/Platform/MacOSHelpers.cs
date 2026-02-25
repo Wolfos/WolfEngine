@@ -137,6 +137,11 @@ internal sealed class NSApplicationInstance
 [SupportedOSPlatform("macos")]
 internal sealed class NSWindowInstance
 {
+    private static readonly Selector StyleMaskSelector = new("styleMask");
+    private static readonly Selector SetStyleMaskSelector = new("setStyleMask:");
+    private const ulong FullSizeContentViewStyleMask = 1UL << 15;
+    private const ulong DeprecatedUnscaledWindowMask = 1UL << 11;
+
     public IntPtr NativePtr { get; }
 
     public NSWindowInstance(NSRect rect, ulong styleMask)
@@ -144,6 +149,11 @@ internal sealed class NSWindowInstance
         var windowClass = new ObjectiveCClass("NSWindow");
         NativePtr = windowClass.Alloc();
         ObjectiveC.objc_msgSend(NativePtr, "initWithContentRect:styleMask:backing:defer:", rect, styleMask, 2, false);
+    }
+
+    public NSWindowInstance(IntPtr ptr)
+    {
+        NativePtr = ptr;
     }
 
     public NSString Title
@@ -170,6 +180,22 @@ internal sealed class NSWindowInstance
     public void SetDelegate(NSWindowDelegate @delegate)
     {
         ObjectiveC.objc_msgSend(NativePtr, "setDelegate:", @delegate.NativePtr);
+    }
+
+    public void EnableUnifiedTitlebarChrome(bool includeFullSizeContentView = false)
+    {
+        if (includeFullSizeContentView)
+        {
+            var styleMask = ObjCNative.ObjcMsgSendULong(NativePtr, StyleMaskSelector.SelPtr);
+            styleMask &= ~DeprecatedUnscaledWindowMask;
+            styleMask |= FullSizeContentViewStyleMask;
+            ObjCNative.ObjcMsgSendSetULong(NativePtr, SetStyleMaskSelector.SelPtr, styleMask);
+        }
+
+        ObjectiveC.objc_msgSend(NativePtr, "setTitleVisibility:", (long)NSWindowTitleVisibility.Hidden);
+        ObjectiveC.objc_msgSend(NativePtr, "setTitlebarAppearsTransparent:", true);
+        ObjectiveC.objc_msgSend(NativePtr, "setMovableByWindowBackground:", false);
+        SetTitle(string.Empty);
     }
 }
 
@@ -237,6 +263,12 @@ internal static class ObjCNative
 
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern long ObjcMsgSendLong(IntPtr receiver, IntPtr selector);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    public static extern ulong ObjcMsgSendULong(IntPtr receiver, IntPtr selector);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    public static extern void ObjcMsgSendSetULong(IntPtr receiver, IntPtr selector, ulong value);
 }
 
 [SupportedOSPlatform("macos")]
@@ -474,4 +506,10 @@ internal enum NSWindowStyleMask : ulong
     Closable = 1 << 1,
     Miniaturizable = 1 << 2,
     Resizable = 1 << 3
+}
+
+internal enum NSWindowTitleVisibility : long
+{
+    Visible = 0,
+    Hidden = 1
 }

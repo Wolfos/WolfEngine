@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using System.Collections.Generic;
 using ImGuiNET;
 using SharpMetal.Metal;
 using WolfEngine.Platform;
@@ -14,17 +15,25 @@ namespace WolfEngine.Rendering.UI;
 [SupportedOSPlatform("MacOS")]
 internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 {
+	private sealed class UiBufferSet
+	{
+		public required MetalBuffer VertexBuffer { get; init; }
+		public required MetalBuffer IndexBuffer { get; init; }
+		public required int VertexBufferSize { get; init; }
+		public required int IndexBufferSize { get; init; }
+		public ulong SubmissionId { get; set; }
+	}
+
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxDevice _device;
 	private IGfxPipeline _pipeline;
-	private MetalBuffer _vertexBuffer;
-	private MetalBuffer _indexBuffer;
-	private int _vertexBufferSize;
-	private int _indexBufferSize;
 	private MetalTexture _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
+	private readonly Queue<UiBufferSet> _inFlightBuffers = new();
+	private readonly List<UiBufferSet> _availableBuffers = new();
+	private UiBufferSet? _recordingBuffers;
 	private bool _fontUploaded;
 
 	public MetalImGuiRenderer(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
@@ -84,9 +93,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.BindPipeline(_pipeline);
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
-		var vertexView = new VertexBufferView(_vertexBuffer!, (uint)Unsafe.SizeOf<ImDrawVert>());
+		var buffers = _recordingBuffers ?? throw new InvalidOperationException("ImGui buffers were not prepared.");
+		var vertexView = new VertexBufferView(buffers.VertexBuffer, (uint)Unsafe.SizeOf<ImDrawVert>());
 		commandList.SetVertexBuffers(new[] { vertexView, vertexView, vertexView });
-		commandList.SetIndexBuffer(new IndexBufferView(_indexBuffer!, IndexFormat.UInt16, 0));
+		commandList.SetIndexBuffer(new IndexBufferView(buffers.IndexBuffer, IndexFormat.UInt16, 0));
 
 		Span<float> projection = stackalloc float[16];
 		var L = frame.DisplayPos.X;
@@ -118,7 +128,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		bindless[1] = _samplerHandle.Value;
 		bindless[2] = 0;
 		bindless[3] = 0;
-		uint activeTextureHandle = uint.MaxValue;
+		uint activeTextureHandle = 0;
+		var hasActiveTextureHandle = false;
 
 		var scaleX = 1.0f;
 		var scaleY = 1.0f;
@@ -131,14 +142,13 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
-			var textureHandle = cmd.TextureId != 0
-				? unchecked((uint)cmd.TextureId)
-				: _fontHandle.Value;
-			if (textureHandle != activeTextureHandle)
+			var textureHandle = ResolveTextureHandle(cmd.TextureId);
+			if (hasActiveTextureHandle == false || textureHandle != activeTextureHandle)
 			{
 				bindless[0] = textureHandle;
 				commandList.SetGraphicsConstants(1, MemoryMarshal.AsBytes(bindless));
 				activeTextureHandle = textureHandle;
+				hasActiveTextureHandle = true;
 			}
 
 			var clip = cmd.ClipRect;
@@ -166,6 +176,34 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 
 		commandList.EndPass();
+		FinalizeFrameBuffers();
+	}
+
+	private uint ResolveTextureHandle(nint textureId)
+	{
+		if (textureId == UiTextureIds.FontAtlas)
+		{
+			return _fontHandle.Value;
+		}
+
+		if (textureId == UiTextureIds.SceneViewport)
+		{
+			var errorHandle = _bindlessRegistry.ErrorTextureHandle;
+			return errorHandle.IsValid ? errorHandle.Value : _fontHandle.Value;
+		}
+
+		if (textureId == 0)
+		{
+			var errorHandle = _bindlessRegistry.ErrorTextureHandle;
+			if (errorHandle.IsValid)
+			{
+				return errorHandle.Value;
+			}
+
+			return _fontHandle.Value;
+		}
+
+		return unchecked((uint)textureId);
 	}
 
 	private void EnsureBuffers(UiFrameData frame)
@@ -175,31 +213,85 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			throw new InvalidOperationException("ImGui renderer has no device.");
 		}
 
+		RetireCompletedBuffers();
+
 		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
 		var indexBytes = frame.IndexCount * sizeof(ushort);
-
-		if (_vertexBuffer is null || _vertexBufferSize < vertexBytes)
-		{
-			_vertexBuffer?.Dispose();
-			_vertexBufferSize = (int)Math.Max(vertexBytes, 65536);
-			_vertexBuffer = CreateBuffer(_device, _vertexBufferSize, BufferUsage.Vertex);
-		}
-
-		if (_indexBuffer is null || _indexBufferSize < indexBytes)
-		{
-			_indexBuffer?.Dispose();
-			_indexBufferSize = (int)Math.Max(indexBytes, 65536);
-			_indexBuffer = CreateBuffer(_device, _indexBufferSize, BufferUsage.Index);
-		}
+		_recordingBuffers = AcquireBufferSet(_device, vertexBytes, indexBytes);
 
 		if (frame.VertexCount > 0)
 		{
-			BufferHelper.CopyToBuffer<ImDrawVert>(frame.Vertices.AsSpan(0, frame.VertexCount), _vertexBuffer!.Buffer);
+			BufferHelper.CopyToBuffer<ImDrawVert>(
+				frame.Vertices.AsSpan(0, frame.VertexCount),
+				_recordingBuffers.VertexBuffer.Buffer);
 		}
 
 		if (frame.IndexCount > 0)
 		{
-			BufferHelper.CopyToBuffer<ushort>(frame.Indices.AsSpan(0, frame.IndexCount), _indexBuffer!.Buffer);
+			BufferHelper.CopyToBuffer<ushort>(
+				frame.Indices.AsSpan(0, frame.IndexCount),
+				_recordingBuffers.IndexBuffer.Buffer);
+		}
+	}
+
+	private UiBufferSet AcquireBufferSet(IGfxDevice device, int vertexBytes, int indexBytes)
+	{
+		var requiredVertexBytes = (int)Math.Max(vertexBytes, 65536);
+		var requiredIndexBytes = (int)Math.Max(indexBytes, 65536);
+		for (var i = 0; i < _availableBuffers.Count; i++)
+		{
+			var candidate = _availableBuffers[i];
+			if (candidate.VertexBufferSize < requiredVertexBytes || candidate.IndexBufferSize < requiredIndexBytes)
+			{
+				continue;
+			}
+
+			_availableBuffers.RemoveAt(i);
+			return candidate;
+		}
+
+		return new UiBufferSet
+		{
+			VertexBuffer = CreateBuffer(device, requiredVertexBytes, BufferUsage.Vertex),
+			IndexBuffer = CreateBuffer(device, requiredIndexBytes, BufferUsage.Index),
+			VertexBufferSize = requiredVertexBytes,
+			IndexBufferSize = requiredIndexBytes,
+			SubmissionId = 0
+		};
+	}
+
+	private void FinalizeFrameBuffers()
+	{
+		if (_recordingBuffers is null)
+		{
+			return;
+		}
+
+		var used = _recordingBuffers;
+		_recordingBuffers = null;
+		if (_device is IGpuSubmissionTimeline submissionTimeline)
+		{
+			used.SubmissionId = submissionTimeline.LastSubmittedId + 1;
+			_inFlightBuffers.Enqueue(used);
+			return;
+		}
+
+		_availableBuffers.Add(used);
+	}
+
+	private void RetireCompletedBuffers()
+	{
+		if (_device is not IGpuSubmissionTimeline submissionTimeline)
+		{
+			return;
+		}
+
+		submissionTimeline.PumpCompleted();
+		var completedId = submissionTimeline.CompletedId;
+		while (_inFlightBuffers.Count > 0 && _inFlightBuffers.Peek().SubmissionId <= completedId)
+		{
+			var retired = _inFlightBuffers.Dequeue();
+			_availableBuffers.Add(retired);
 		}
 	}
 

@@ -560,14 +560,14 @@ public sealed class TransformGizmoController
 		}
 
 		var packedColor = ImGui.ColorConvertFloat4ToU32(color);
-		drawList.AddLine(pivotScreen, endScreen, packedColor, 2.0f);
+		drawList.AddLine(pivotScreen, endScreen, packedColor, 3.0f);
 		if (mode == TransformGizmoMode.Scale)
 		{
 			drawList.AddCircleFilled(endScreen, 5.0f, packedColor);
 			return;
 		}
 
-		drawList.AddCircle(endScreen, 4.0f, packedColor, 10, 2.0f);
+		drawList.AddCircle(endScreen, 4.0f, packedColor, 10, 3.0f);
 	}
 
 	private static void DrawRing(

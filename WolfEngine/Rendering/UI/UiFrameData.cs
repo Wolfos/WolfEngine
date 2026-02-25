@@ -3,6 +3,12 @@ using ImGuiNET;
 
 namespace WolfEngine.Rendering.UI;
 
+public static class UiTextureIds
+{
+	public static readonly nint FontAtlas = unchecked((nint)(-2));
+	public static readonly nint SceneViewport = unchecked((nint)(-3));
+}
+
 /// <summary>
 /// Immutable snapshot of ImGui draw data produced on the game thread.
 /// Flattened for easy upload on the render thread.
