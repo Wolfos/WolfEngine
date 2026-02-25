@@ -675,12 +675,20 @@ public sealed class TransformGizmoController
 	{
 		screenPoint = Vector2.Zero;
 		var clip = Vector4.Transform(new Vector4(worldPoint, 1.0f), viewProjection);
-		if (MathF.Abs(clip.W) <= 1e-6f)
+		// Reject points at/behind the camera to avoid mirrored projection artifacts.
+		if (clip.W <= 1e-6f)
 		{
 			return false;
 		}
 
 		var ndc = new Vector3(clip.X, clip.Y, clip.Z) / clip.W;
+		// Left-handed perspective in this engine maps visible depth to [0, 1].
+		// Ignore points outside clip depth so gizmos do not appear when behind camera.
+		if (ndc.Z < 0.0f || ndc.Z > 1.0f)
+		{
+			return false;
+		}
+
 		var width = viewportMax.X - viewportMin.X;
 		var height = viewportMax.Y - viewportMin.Y;
 		if (width <= 1e-5f || height <= 1e-5f)
