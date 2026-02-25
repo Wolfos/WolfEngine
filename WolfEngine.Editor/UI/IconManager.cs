@@ -15,6 +15,7 @@ public sealed class IconManager : IIconManager
 
 	private readonly IImageLoader _imageLoader;
 	private readonly ConcurrentDictionary<string, IconEntry> _icons = new(StringComparer.OrdinalIgnoreCase);
+	private readonly string[] _iconNames;
 	private volatile bool _hasPendingIcons;
 
 	private sealed class IconEntry
@@ -27,6 +28,7 @@ public sealed class IconManager : IIconManager
 	{
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		ScanIcons();
+		_iconNames = _icons.Keys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray();
 		_hasPendingIcons = _icons.IsEmpty == false;
 		TryLoadAll();
 	}
@@ -73,6 +75,11 @@ public sealed class IconManager : IIconManager
 		}
 
 		return false;
+	}
+
+	public IReadOnlyList<string> GetNames()
+	{
+		return _iconNames;
 	}
 
 	private void ScanIcons()

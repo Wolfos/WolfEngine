@@ -8,33 +8,32 @@ public class EntitiesWindow
 {
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
+	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 
-	public static void Draw(EditorScene scene)
+	public static void Draw(EditorScene scene, IIconManager icons)
 	{
 		var world = scene.World;
-		
+
 		ImGui.SetNextWindowPos(new Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
 		ImGui.SetNextWindowSize(new Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
 
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
 		ImGui.Begin("Entities");
 		ImGui.PopStyleVar();
-		
-		world.GetAllEntities(AllEntities);
 
+		world.GetAllEntities(AllEntities);
 		BuildRootList(world);
-		
+
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
 		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, 4.0f));
 
 		foreach (var entity in RootEntities)
 		{
-			DrawEntityNode(entity, world);
+			DrawEntityNode(entity, world, scene, icons);
 		}
-		
-		ImGui.PopStyleVar(2);
 
+		ImGui.PopStyleVar(2);
 		ImGui.End();
 	}
 
@@ -57,7 +56,7 @@ public class EntitiesWindow
 		}
 	}
 
-	private static unsafe void DrawEntityNode(Entity entity, World world)
+	private static unsafe void DrawEntityNode(Entity entity, World world, EditorScene scene, IIconManager icons)
 	{
 		ImGui.PushID(entity.Index);
 
@@ -79,11 +78,19 @@ public class EntitiesWindow
 			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
 		}
 
+		var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
+			? assignedIconName
+			: "box";
+		var iconTexture = ResolveIconTexture(icons, iconName);
+
 		var nameComponent = world.GetComponent<NameComponent>(entity);
 		var name = nameComponent.Name ?? "Unnamed";
-		var open = ImGui.TreeNodeEx(name, flags);
+		var nodeCursorPosition = ImGui.GetCursorScreenPos();
+		var open = ImGui.TreeNodeEx("##EntityNode", flags);
+		var nodeClicked = ImGui.IsItemClicked();
+		DrawEntityLabelWithIcon(name, iconTexture, nodeCursorPosition.X);
 
-		if (ImGui.IsItemClicked())
+		if (nodeClicked)
 		{
 			SelectEntity(entity, world);
 		}
@@ -93,7 +100,7 @@ public class EntitiesWindow
 			var childEntity = world.GetComponent<Children>(entity).First;
 			while (childEntity.IsValid)
 			{
-				DrawEntityNode(childEntity, world);
+				DrawEntityNode(childEntity, world, scene, icons);
 
 				if (world.HasComponent<Sibling>(childEntity))
 				{
@@ -115,7 +122,45 @@ public class EntitiesWindow
 
 		ImGui.PopID();
 	}
-	
+
+	private static nint ResolveIconTexture(IIconManager icons, string iconName)
+	{
+		if (icons.TryGet(iconName, out var textureId))
+		{
+			return textureId;
+		}
+
+		if (icons.TryGet("box", out textureId))
+		{
+			return textureId;
+		}
+
+		return 0;
+	}
+
+	private static void DrawEntityLabelWithIcon(string label, nint iconTexture, float nodeCursorX)
+	{
+		var itemMin = ImGui.GetItemRectMin();
+		var itemMax = ImGui.GetItemRectMax();
+		var rowHeight = itemMax.Y - itemMin.Y;
+
+		var labelStartX = nodeCursorX + ImGui.GetTreeNodeToLabelSpacing();
+		var iconSize = MathF.Min(EntityIconSize.X, MathF.Max(1.0f, rowHeight - 2.0f));
+		var iconPosition = new Vector2(labelStartX, itemMin.Y + (rowHeight - iconSize) * 0.5f);
+		var textSize = ImGui.CalcTextSize(label);
+		var textPosition = new Vector2(
+			iconPosition.X + iconSize + 4.0f,
+			itemMin.Y + (rowHeight - textSize.Y) * 0.5f);
+		var drawList = ImGui.GetWindowDrawList();
+
+		if (iconTexture != 0)
+		{
+			drawList.AddImage(iconTexture, iconPosition, iconPosition + Vector2.One * iconSize);
+		}
+
+		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), label);
+	}
+
 	private static void SelectEntity(Entity entity, World world)
 	{
 		EditorGui.HasSelectedEntity = true;

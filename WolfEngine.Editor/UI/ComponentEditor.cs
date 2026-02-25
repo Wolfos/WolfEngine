@@ -13,6 +13,15 @@ public interface IComponentEditor
 
 public class ComponentEditor: IComponentEditor
 {
+    private static IIconManager _icons;
+    private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
+    private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
+
+    public ComponentEditor(IIconManager icons)
+    {
+        _icons = icons;
+    }
+
     public void Draw(EditorScene scene, Entity entity, Type componentType)
     {
         if (Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)))
@@ -20,15 +29,18 @@ public class ComponentEditor: IComponentEditor
 
         if (componentType.GetInterface(nameof(IEntityComponent)) is null)
             return;
+        
 
         var method = typeof(ComponentEditor).GetMethod(nameof(DrawComponentEditorGeneric),
             BindingFlags.NonPublic | BindingFlags.Static);
-        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene.World, entity });
+        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity });
     }
 
-    private static void DrawComponentEditorGeneric<T>(World world, Entity entity)
+    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity)
         where T : struct, IEntityComponent
     {
+        var world = scene.World;
+        
         if (world.HasComponent<T>(entity) == false)
             return;
 
@@ -39,8 +51,24 @@ public class ComponentEditor: IComponentEditor
         {
             ref var name = ref Unsafe.As<T, NameComponent>(ref component);
             var value = name.Name ?? string.Empty;
-            if (EditorUIUtility.DrawLabeledField("Name", () => ImGui.InputText("##value", ref value, 256)))
+            if (scene.EntityIcons.TryGetValue(entity, out var iconName) == false)
+            {
+                iconName = "box";
+            }
+
+            var iconTexture = ResolveIconTexture(iconName);
+            var iconPickerPopupId = $"Icon Picker##{entity.Index}:{entity.Generation}";
+            if(ImGui.ImageButton("IconButton", iconTexture, EntityIconSize))
+            {
+                ImGui.OpenPopup(iconPickerPopupId);
+            }
+
+            DrawIconPickerModal(scene, entity, iconPickerPopupId);
+            ImGui.SameLine();
+            if (ImGui.InputText("##value", ref value, 256))
+            {
                 name.Name = value;
+            }
 
             ImGui.Separator();
             ImGui.PopID();
@@ -128,6 +156,76 @@ public class ComponentEditor: IComponentEditor
 
         ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private static nint ResolveIconTexture(string iconName)
+    {
+        if (_icons.TryGet(iconName, out var textureId))
+        {
+            return textureId;
+        }
+
+        if (_icons.TryGet("box", out textureId))
+        {
+            return textureId;
+        }
+
+        return 0;
+    }
+
+    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId)
+    {
+        var isOpen = true;
+        ImGui.SetNextWindowSize(new Vector2(360.0f, 260.0f), ImGuiCond.Appearing);
+        if (ImGui.BeginPopupModal(popupId, ref isOpen, ImGuiWindowFlags.NoResize))
+        {
+            var iconNames = _icons.GetNames();
+            if (iconNames.Count == 0)
+            {
+                ImGui.TextUnformatted("No icons were found in Assets/Icons.");
+            }
+            else
+            {
+                var rowWidth = MathF.Max(ImGui.GetContentRegionAvail().X, PickerIconSize.X);
+                var iconsPerRow = Math.Max(1, (int)(rowWidth / (PickerIconSize.X + 8.0f)));
+                var drawnCount = 0;
+
+                foreach (var name in iconNames)
+                {
+                    if (_icons.TryGet(name, out var textureId) == false)
+                    {
+                        continue;
+                    }
+
+                    ImGui.PushID(name);
+                    if (ImGui.ImageButton("##icon", textureId, PickerIconSize))
+                    {
+                        scene.EntityIcons[entity] = name;
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(name);
+                    }
+
+                    ImGui.PopID();
+                    drawnCount++;
+                    if (drawnCount % iconsPerRow != 0)
+                    {
+                        ImGui.SameLine();
+                    }
+                }
+            }
+
+            ImGui.Separator();
+            if (ImGui.Button("Close"))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
     }
 
     private static Vector3 QuaternionToEulerDegrees(Quaternion rotation)

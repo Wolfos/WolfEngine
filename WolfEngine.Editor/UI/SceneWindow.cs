@@ -1,6 +1,5 @@
 using System.Numerics;
 using ImGuiNET;
-using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.UI;
 
@@ -51,7 +50,7 @@ public static class SceneWindow
         }
 
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120.0f);
+        ImGui.SetNextItemWidth(80.0f);
         if (ImGui.BeginCombo("##Space", _transformSpace == TransformSpace.Local ? "Local" : "World"))
         {
             if (ImGui.Selectable("Local", _transformSpace == TransformSpace.Local))

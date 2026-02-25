@@ -15,6 +15,7 @@ public class EditorGui
     public static bool HasSelectedEntity = false;
 
     private readonly IComponentEditor _componentEditor;
+    private readonly IIconManager _icons;
     private readonly IMenuBar _menuBar;
     private readonly IRenderer _renderer;
 
@@ -29,6 +30,7 @@ public class EditorGui
         _componentEditor = componentEditor;
         _menuBar = menuBar;
         _renderer = renderer;
+        _icons = icons;
         SceneWindow.Init(viewportStateBus, icons, transformGizmoController); 
     }
     
@@ -43,7 +45,7 @@ public class EditorGui
 
         using (FrameProfiler.Instance.Measure("Entities Window"))
         {
-            EntitiesWindow.Draw(scene);
+            EntitiesWindow.Draw(scene, _icons);
         }
 
         using (FrameProfiler.Instance.Measure("Scene Window"))
