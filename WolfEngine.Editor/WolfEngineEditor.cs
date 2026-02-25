@@ -71,11 +71,17 @@ public class WolfEngineEditor
 	{
 		_editorWorld = _worldManager.CreateWorld(WorldTag.Editor);
 		_gameWorld = _worldManager.CreateWorld(WorldTag.Game);
+		
+		_currentScene = new EditorScene
+		{
+			World = _gameWorld,
+			EntityIcons = new()
+		};
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
-
+		
 		var sun = _gameWorld.CreateEntity("Sun");
 		var light = new Light
 		{
@@ -83,18 +89,14 @@ public class WolfEngineEditor
 		};
 		_gameWorld.AddTransform(sun, Matrix4x4.Identity);
 		_gameWorld.AddComponent(sun, light);
+		
+		_currentScene.EntityIcons.Add(sun, "light");
 
 		_editorCamera = CreateEditorCamera(_editorWorld);
 
 		_renderWorlds.Clear();
 		_renderWorlds.Add(_editorWorld);
 		_renderWorlds.Add(_gameWorld);
-
-		_currentScene = new EditorScene
-		{
-			World = _gameWorld,
-			EntityIcons = new()
-		};
 	}
 
 	private void EditorLoop()

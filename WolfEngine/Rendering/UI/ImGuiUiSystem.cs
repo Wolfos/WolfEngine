@@ -319,6 +319,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.FramePadding = new Vector2(5, 7);
 		style.WindowPadding = new Vector2(10, 3);
 		style.WindowBorderSize = 0;
+		style.ChildBorderSize = 0;
+		style.PopupBorderSize = 0;
+		style.TabBorderSize = 0;
+		style.TabBarBorderSize = 0;
+		style.FrameBorderSize = 0;
+		style.DockingSeparatorSize = 0;
 		
 		style.FrameRounding = 4.0f;
 		style.ChildRounding = 4.0f;
@@ -327,11 +333,13 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.ScrollbarRounding = 4.0f;
 		style.TabRounding = 4.0f;
 		style.WindowRounding = 4.0f;
+		style.WindowMenuButtonPosition = ImGuiDir.None;
 		
 		style.Colors[(int)ImGuiCol.Text] = textColor;
 		style.Colors[(int)ImGuiCol.WindowBg] = bgColor;
 		style.Colors[(int)ImGuiCol.MenuBarBg] = bgDark;
 		style.Colors[(int)ImGuiCol.PopupBg] = bgColor;
+		style.Colors[(int)ImGuiCol.DockingEmptyBg] = bgColor;
 		style.Colors[(int)ImGuiCol.TitleBg] = bgDark;
 		style.Colors[(int)ImGuiCol.TitleBgCollapsed] = bgDark;
 		style.Colors[(int)ImGuiCol.TitleBgActive] = bgDark;
@@ -341,7 +349,11 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.Header] = bgColor;
 		style.Colors[(int)ImGuiCol.HeaderActive] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.HeaderHovered] = bgBright;
-		style.Colors[(int)ImGuiCol.Border] = bgColor;
+		style.Colors[(int)ImGuiCol.Border] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.BorderShadow] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.Separator] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.SeparatorHovered] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.SeparatorActive] = Vector4.Zero;
 		
 		style.Colors[(int)ImGuiCol.Tab] = bgDark;
 		style.Colors[(int)ImGuiCol.TabDimmed] = bgDark;

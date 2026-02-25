@@ -80,7 +80,7 @@ public class EntitiesWindow
 
 		var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
 			? assignedIconName
-			: "box";
+			: "object";
 		var iconTexture = ResolveIconTexture(icons, iconName);
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
@@ -130,7 +130,7 @@ public class EntitiesWindow
 			return textureId;
 		}
 
-		if (icons.TryGet("box", out textureId))
+		if (icons.TryGet("object", out textureId))
 		{
 			return textureId;
 		}

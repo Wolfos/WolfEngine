@@ -53,7 +53,7 @@ public class ComponentEditor: IComponentEditor
             var value = name.Name ?? string.Empty;
             if (scene.EntityIcons.TryGetValue(entity, out var iconName) == false)
             {
-                iconName = "box";
+                iconName = "object";
             }
 
             var iconTexture = ResolveIconTexture(iconName);
@@ -166,7 +166,7 @@ public class ComponentEditor: IComponentEditor
             return textureId;
         }
 
-        if (_icons.TryGet("box", out textureId))
+        if (_icons.TryGet("object", out textureId))
         {
             return textureId;
         }
