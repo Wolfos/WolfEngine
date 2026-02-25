@@ -32,23 +32,23 @@ public class EditorGui
         SceneWindow.Init(viewportStateBus, icons, transformGizmoController); 
     }
     
-    public void Draw(World world)
+    public void Draw(EditorScene scene)
     {
         DockSpace();
 
         using (FrameProfiler.Instance.Measure("Menu Bar"))
         {
-            _menuBar.Draw(world);
+            _menuBar.Draw(scene);
         }
 
         using (FrameProfiler.Instance.Measure("Entities Window"))
         {
-            EntitiesWindow.Draw(world);
+            EntitiesWindow.Draw(scene);
         }
 
         using (FrameProfiler.Instance.Measure("Scene Window"))
         {
-            SceneWindow.DrawSceneWindow(world);
+            SceneWindow.Draw(scene);
         }
 
         using (FrameProfiler.Instance.Measure("Components Window"))
@@ -60,7 +60,7 @@ public class EditorGui
             {
                 foreach (var componentType in SelectedComponentTypes)
                 {
-                    _componentEditor.Draw(world, SelectedEntity, componentType);
+                    _componentEditor.Draw(scene, SelectedEntity, componentType);
                 }
             }
             ImGui.End();

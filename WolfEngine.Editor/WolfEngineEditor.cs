@@ -26,6 +26,8 @@ public class WolfEngineEditor
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 
+	private EditorScene _currentScene;
+
 	private World _editorWorld = null!;
 	private World _gameWorld = null!;
 	private Entity _editorCamera;
@@ -87,6 +89,12 @@ public class WolfEngineEditor
 		_renderWorlds.Clear();
 		_renderWorlds.Add(_editorWorld);
 		_renderWorlds.Add(_gameWorld);
+
+		_currentScene = new EditorScene
+		{
+			World = _gameWorld,
+			EntityIcons = new()
+		};
 	}
 
 	private void EditorLoop()
@@ -120,7 +128,10 @@ public class WolfEngineEditor
 			using (FrameProfiler.Instance.Measure("UI"))
 			{
 				_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
-				_uiFrameProvider.RunGui(_editorGui.Draw, _gameWorld);
+				_uiFrameProvider.RunGui(() =>
+				{
+					_editorGui.Draw(_currentScene);
+				});
 			}
 
 			FrameProfiler.Instance.EndFrame();

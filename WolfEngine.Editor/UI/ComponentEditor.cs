@@ -8,12 +8,12 @@ namespace WolfEngine.Editor.UI;
 
 public interface IComponentEditor
 {
-    void Draw(World world, Entity entity, Type componentType);
+    void Draw(EditorScene scene, Entity entity, Type componentType);
 }
 
 public class ComponentEditor: IComponentEditor
 {
-    public void Draw(World world, Entity entity, Type componentType)
+    public void Draw(EditorScene scene, Entity entity, Type componentType)
     {
         if (Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)))
             return;
@@ -23,7 +23,7 @@ public class ComponentEditor: IComponentEditor
 
         var method = typeof(ComponentEditor).GetMethod(nameof(DrawComponentEditorGeneric),
             BindingFlags.NonPublic | BindingFlags.Static);
-        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { world, entity });
+        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene.World, entity });
     }
 
     private static void DrawComponentEditorGeneric<T>(World world, Entity entity)

@@ -26,8 +26,10 @@ public static class SceneWindow
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
     
-    public static void DrawSceneWindow(World world)
+    public static void Draw(EditorScene scene)
     {
+        var world = scene.World;
+        
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
         ImGui.Begin("Scene");

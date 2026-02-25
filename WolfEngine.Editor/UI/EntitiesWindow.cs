@@ -9,8 +9,10 @@ public class EntitiesWindow
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
 
-	public static void Draw(World world)
+	public static void Draw(EditorScene scene)
 	{
+		var world = scene.World;
+		
 		ImGui.SetNextWindowPos(new Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
 		ImGui.SetNextWindowSize(new Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
 

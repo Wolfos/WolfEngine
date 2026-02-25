@@ -7,7 +7,7 @@ namespace WolfEngine.Editor.UI;
 
 public interface IMenuBar
 {
-	public void Draw(World world);
+	public void Draw(EditorScene scene);
 }
 public class MenuBar: IMenuBar
 {
@@ -22,7 +22,7 @@ public class MenuBar: IMenuBar
 		_framerateTool = framerateTool;
 	}
 
-	public void Draw(World world)
+	public void Draw(EditorScene scene)
 	{
 		if (ImGui.BeginMainMenuBar() == false) return;
 
@@ -55,7 +55,7 @@ public class MenuBar: IMenuBar
 				});
 				if (string.IsNullOrEmpty(path) == false)
 				{
-					_sceneBuilder.Import3DScene(path, world);
+					_sceneBuilder.Import3DScene(path, scene.World);
 				}
 			}
 			ImGui.EndMenu();

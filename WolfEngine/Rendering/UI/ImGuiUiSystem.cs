@@ -21,7 +21,7 @@ public interface IUiFrameProvider
 {
 	bool TryConsumeLatest(out UiFrameData frame);
 	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize);
-	public void RunGui(Action<World> draw, World world);
+	public void RunGui(Action draw);
 
 }
 
@@ -109,12 +109,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		}
 	}
 
-	public void RunGui(Action<World> draw, World world)
+	public void RunGui(Action draw)
 	{
 		lock (_contextLock)
 		{
 			ImGui.SetCurrentContext(_context);
-			draw(world);
+			draw();
 			ImGui.Render();
 			CaptureFrame();
 		}
