@@ -65,6 +65,7 @@ public class ComponentEditor: IComponentEditor
 
             DrawIconPickerModal(scene, entity, iconPickerPopupId);
             ImGui.SameLine();
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (ImGui.InputText("##value", ref value, 256))
             {
                 name.Name = value;
