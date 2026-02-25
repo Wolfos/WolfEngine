@@ -23,6 +23,7 @@ public class EditorGui
     private float _sceneViewportScale;
     private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
     private TransformSpace _transformSpace = TransformSpace.Local;
+    private TransformPivotMode _pivotMode = TransformPivotMode.Center;
 
     public EditorGui(
         IComponentEditor componentEditor,
@@ -107,15 +108,38 @@ public class EditorGui
         }
 
         ImGui.SameLine();
-        if (ImGui.RadioButton("Local", _transformSpace == TransformSpace.Local))
+        ImGui.SetNextItemWidth(120.0f);
+        if (ImGui.BeginCombo("Space", _transformSpace == TransformSpace.Local ? "Local" : "World"))
         {
-            _transformSpace = TransformSpace.Local;
+            if (ImGui.Selectable("Local", _transformSpace == TransformSpace.Local))
+            {
+                _transformSpace = TransformSpace.Local;
+            }
+
+            if (ImGui.Selectable("World", _transformSpace == TransformSpace.World))
+            {
+                _transformSpace = TransformSpace.World;
+            }
+
+            ImGui.EndCombo();
         }
 
         ImGui.SameLine();
-        if (ImGui.RadioButton("World", _transformSpace == TransformSpace.World))
+        ImGui.SetNextItemWidth(170.0f);
+        var pivotLabel = _pivotMode == TransformPivotMode.Center ? "Center" : "Transform Pivot";
+        if (ImGui.BeginCombo("Pivot", pivotLabel))
         {
-            _transformSpace = TransformSpace.World;
+            if (ImGui.Selectable("Center", _pivotMode == TransformPivotMode.Center))
+            {
+                _pivotMode = TransformPivotMode.Center;
+            }
+
+            if (ImGui.Selectable("Transform Pivot", _pivotMode == TransformPivotMode.TransformPivot))
+            {
+                _pivotMode = TransformPivotMode.TransformPivot;
+            }
+
+            ImGui.EndCombo();
         }
         
         ImGui.SameLine();
@@ -179,7 +203,13 @@ public class EditorGui
             imageMin,
             imageMax));
 
-        _transformGizmoController.DrawAndHandle(world, SelectedEntity, HasSelectedEntity, _gizmoMode, _transformSpace);
+        _transformGizmoController.DrawAndHandle(
+            world,
+            SelectedEntity,
+            HasSelectedEntity,
+            _gizmoMode,
+            _transformSpace,
+            _pivotMode);
 
         ImGui.End();
     }

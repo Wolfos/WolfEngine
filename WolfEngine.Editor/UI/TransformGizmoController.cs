@@ -26,7 +26,13 @@ public sealed class TransformGizmoController
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 	}
 
-	public void DrawAndHandle(World world, Entity entity, bool hasSelectedEntity, TransformGizmoMode mode, TransformSpace space)
+	public void DrawAndHandle(
+		World world,
+		Entity entity,
+		bool hasSelectedEntity,
+		TransformGizmoMode mode,
+		TransformSpace space,
+		TransformPivotMode pivotMode)
 	{
 		var viewportState = _viewportStateBus.GetUiState();
 		if (IsViewportValid(viewportState) == false ||
@@ -45,7 +51,7 @@ public sealed class TransformGizmoController
 		ref var worldTransform = ref world.GetComponent<WorldTransform>(entity);
 		ref var localTransform = ref world.GetComponent<LocalTransform>(entity);
 		var entityWorldPosition = worldTransform.LocalToWorld.Translation;
-		var gizmoPivotWorld = ResolveGizmoPivotWorld(world, entity, worldTransform);
+		var gizmoPivotWorld = ResolveGizmoPivotWorld(world, entity, worldTransform, pivotMode);
 		Quaternion objectWorldRotation;
 		if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out _, out objectWorldRotation, out _) == false)
 		{
@@ -764,8 +770,17 @@ public sealed class TransformGizmoController
 		};
 	}
 
-	private static Vector3 ResolveGizmoPivotWorld(World world, Entity entity, in WorldTransform worldTransform)
+	private static Vector3 ResolveGizmoPivotWorld(
+		World world,
+		Entity entity,
+		in WorldTransform worldTransform,
+		TransformPivotMode pivotMode)
 	{
+		if (pivotMode == TransformPivotMode.TransformPivot)
+		{
+			return worldTransform.LocalToWorld.Translation;
+		}
+
 		if (TryGetVisualCenterWorld(world, entity, out var visualCenter))
 		{
 			return visualCenter;

@@ -12,3 +12,9 @@ public enum TransformSpace
 	Local,
 	World
 }
+
+public enum TransformPivotMode
+{
+	Center,
+	TransformPivot
+}
