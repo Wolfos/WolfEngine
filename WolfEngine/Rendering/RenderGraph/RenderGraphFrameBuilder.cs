@@ -21,7 +21,9 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
 	public RenderGraphResourceHandle GBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
-	public RenderGraphResourceHandle ShadowMapDepth { get; init; }
+	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
+	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
+	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
 	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
@@ -127,7 +129,9 @@ public sealed class RenderGraphFrameBuilder
 		var gbufferMaterialHandle = default(RenderGraphResourceHandle);
 		var gbufferEmissiveHandle = default(RenderGraphResourceHandle);
 		var gbufferDepthHandle = default(RenderGraphResourceHandle);
-		var shadowMapHandle = default(RenderGraphResourceHandle);
+		var shadowMapHandle0 = default(RenderGraphResourceHandle);
+		var shadowMapHandle1 = default(RenderGraphResourceHandle);
+		var shadowMapHandle2 = default(RenderGraphResourceHandle);
 		if (sceneEnabled)
 		{
 			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -161,9 +165,23 @@ public sealed class RenderGraphFrameBuilder
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				Vector4.Zero,
 				1.0f));
-			shadowMapHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-				ShadowMapPass.ShadowMapResolution,
-				ShadowMapPass.ShadowMapResolution,
+			shadowMapHandle0 = _resources.CreateTransientTexture(new TextureDescriptor(
+				ShadowMapPass.CascadeResolution,
+				ShadowMapPass.CascadeResolution,
+				TextureFormat.D32Float,
+				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+				Vector4.Zero,
+				1.0f));
+			shadowMapHandle1 = _resources.CreateTransientTexture(new TextureDescriptor(
+				ShadowMapPass.CascadeResolution,
+				ShadowMapPass.CascadeResolution,
+				TextureFormat.D32Float,
+				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+				Vector4.Zero,
+				1.0f));
+			shadowMapHandle2 = _resources.CreateTransientTexture(new TextureDescriptor(
+				ShadowMapPass.CascadeResolution,
+				ShadowMapPass.CascadeResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				Vector4.Zero,
@@ -193,7 +211,9 @@ public sealed class RenderGraphFrameBuilder
 			GBufferMaterial = gbufferMaterialHandle,
 			GBufferEmissive = gbufferEmissiveHandle,
 			GBufferDepth = gbufferDepthHandle,
-			ShadowMapDepth = shadowMapHandle,
+			ShadowMapDepth0 = shadowMapHandle0,
+			ShadowMapDepth1 = shadowMapHandle1,
+			ShadowMapDepth2 = shadowMapHandle2,
 			LightingBuffer = lightingHandle,
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
@@ -219,7 +239,9 @@ public sealed class RenderGraphFrameBuilder
 				.SetExecute(_gpuDrawShadowCullExecute);
 
 			graph.AddPass("Shadow Map", PassKind.Graphics)
-				.WriteTexture(_frameResources.ShadowMapDepth, ResourceState.DepthWrite)
+				.WriteTexture(_frameResources.ShadowMapDepth0, ResourceState.DepthWrite)
+				.WriteTexture(_frameResources.ShadowMapDepth1, ResourceState.DepthWrite)
+				.WriteTexture(_frameResources.ShadowMapDepth2, ResourceState.DepthWrite)
 				.SetExecute(_shadowMapExecute);
 
 			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
@@ -241,7 +263,9 @@ public sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.GBufferEmissive, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
-				.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource);
+				.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource);
 			if (_frameResources.SkyboxEnvironment.IsValid)
 			{
 				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
@@ -264,7 +288,9 @@ public sealed class RenderGraphFrameBuilder
 
 			var transparentForwardBuilder = graph.AddPass("Transparent Forward", PassKind.Graphics)
 				.ReadTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-				.ReadTexture(_frameResources.ShadowMapDepth, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
 			if (_frameResources.SkyboxEnvironment.IsValid)
 			{
@@ -310,13 +336,27 @@ public sealed class RenderGraphFrameBuilder
 			return;
 		}
 
-		_gpuDrawPass.RecordCullForView(context, shadowData.ViewProjection, sceneData.CameraOrigin, useShadowBuffers: true);
+		_gpuDrawPass.RecordCullForView(
+			context,
+			shadowData.GetCascadeViewProjection(ShadowMapPass.CascadeCount - 1),
+			sceneData.CameraOrigin,
+			useShadowBuffers: true);
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
 	{
-		var config = _shadowMapPass.BuildConfig(context, _frameResources, _renderer.GetGfxDevice(), _gpuDrawResources);
-		_shadowMapPass.Record(context, in config);
+		for (var cascadeIndex = 0; cascadeIndex < ShadowMapPass.CascadeCount; cascadeIndex++)
+		{
+			var shadowMapHandle = GetShadowMapHandle(_frameResources, cascadeIndex);
+			var depthTexture = context.GetTexture(shadowMapHandle);
+			var config = _shadowMapPass.BuildConfig(
+				context,
+				depthTexture,
+				_renderer.GetGfxDevice(),
+				_gpuDrawResources,
+				cascadeIndex);
+			_shadowMapPass.Record(context, in config);
+		}
 	}
 
 	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
@@ -414,5 +454,16 @@ public sealed class RenderGraphFrameBuilder
 		var finalColor = context.GetTexture(_frameResources.FinalColor);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
 		_imGuiRenderer.Record(context, _uiFrame, finalColor);
+	}
+
+	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderGraphFrameResources resources, int cascadeIndex)
+	{
+		return cascadeIndex switch
+		{
+			0 => resources.ShadowMapDepth0,
+			1 => resources.ShadowMapDepth1,
+			2 => resources.ShadowMapDepth2,
+			_ => throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.")
+		};
 	}
 }

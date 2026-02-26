@@ -10,14 +10,14 @@ public interface IShaderCompiler
 	string GetMetalSource(string filename);
 	string GetMetalSource(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines);
 	string GetMetalComputeSource(string filename, string entryPoint);
-	byte[] GetDxil(string filename, string entryPoint, string profile);
+	byte[] GetDxil(string filename, string entryPoint, string profile, params string[] defines);
 	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
 }
 
 public class ShaderCompiler : IShaderCompiler
 {
 	private readonly Dictionary<string, string> _cachedShaders = new();
-	private Dictionary<(string file, string entry, string profile), byte[]> _cachedDxil = new();
+	private Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
 
 	private static string InjectArgumentBufferIds(string source)
 	{
@@ -161,7 +161,7 @@ public class ShaderCompiler : IShaderCompiler
 	}
 
 
-	public byte[] GetDxil(string filename, string entryPoint, string profile)
+	public byte[] GetDxil(string filename, string entryPoint, string profile, params string[] defines)
 	{
 		if (string.IsNullOrWhiteSpace(filename))
 		{
@@ -178,7 +178,10 @@ public class ShaderCompiler : IShaderCompiler
 			throw new ArgumentException("Profile cannot be null or empty.", nameof(profile));
 		}
 
-		var key = (filename, entryPoint, profile);
+		var definesSuffix = defines is { Length: > 0 }
+			? string.Join(";", defines)
+			: string.Empty;
+		var key = (filename, entryPoint, profile, definesSuffix);
 		if (_cachedDxil.TryGetValue(key, out var cached))
 		{
 			return cached;
@@ -202,6 +205,19 @@ public class ShaderCompiler : IShaderCompiler
 			"-entry", entryPoint,
 			"-o", "-"
 		};
+		if (defines is { Length: > 0 })
+		{
+			for (var i = 0; i < defines.Length; i++)
+			{
+				if (string.IsNullOrWhiteSpace(defines[i]))
+				{
+					continue;
+				}
+
+				args.Add("-D");
+				args.Add(defines[i]);
+			}
+		}
 
 		var compiled = SlangCompiler.Compile(args.ToArray());
 		_cachedDxil.Add(key, compiled);

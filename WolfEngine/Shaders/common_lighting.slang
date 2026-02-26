@@ -207,14 +207,155 @@ float ComputeDirectionalShadow(
     return weightSum > 0.0f ? visibility / weightSum : 1.0f;
 }
 
+float SampleDirectionalShadowCascade(
+    float3 worldPos,
+    uint cascadeIndex,
+    float4x4 shadowViewProjection0,
+    float4x4 shadowViewProjection1,
+    float4x4 shadowViewProjection2,
+    uint shadowMapHandle0,
+    uint shadowMapHandle1,
+    uint shadowMapHandle2,
+    uint shadowSamplerHandle,
+    float2 shadowTexelSize,
+    float shadowDepthBias)
+{
+    if (cascadeIndex == 0u)
+    {
+        return ComputeDirectionalShadow(
+            worldPos,
+            shadowViewProjection0,
+            shadowMapHandle0,
+            shadowSamplerHandle,
+            shadowTexelSize,
+            shadowDepthBias);
+    }
+
+    if (cascadeIndex == 1u)
+    {
+        return ComputeDirectionalShadow(
+            worldPos,
+            shadowViewProjection1,
+            shadowMapHandle1,
+            shadowSamplerHandle,
+            shadowTexelSize,
+            shadowDepthBias);
+    }
+
+    return ComputeDirectionalShadow(
+        worldPos,
+        shadowViewProjection2,
+        shadowMapHandle2,
+        shadowSamplerHandle,
+        shadowTexelSize,
+        shadowDepthBias);
+}
+
+float ComputeCascadedDirectionalShadow(
+    float3 worldPos,
+    float receiverDistance,
+    float4x4 shadowViewProjection0,
+    float4x4 shadowViewProjection1,
+    float4x4 shadowViewProjection2,
+    uint shadowMapHandle0,
+    uint shadowMapHandle1,
+    uint shadowMapHandle2,
+    uint shadowSamplerHandle,
+    float3 shadowSplits,
+    float shadowCascadeBlendDistance,
+    float2 shadowTexelSize,
+    float shadowDepthBias)
+{
+    uint cascadeIndex = 2u;
+    if (receiverDistance <= shadowSplits.x)
+    {
+        cascadeIndex = 0u;
+    }
+    else if (receiverDistance <= shadowSplits.y)
+    {
+        cascadeIndex = 1u;
+    }
+
+    float primary = SampleDirectionalShadowCascade(
+        worldPos,
+        cascadeIndex,
+        shadowViewProjection0,
+        shadowViewProjection1,
+        shadowViewProjection2,
+        shadowMapHandle0,
+        shadowMapHandle1,
+        shadowMapHandle2,
+        shadowSamplerHandle,
+        shadowTexelSize,
+        shadowDepthBias);
+
+    if (shadowCascadeBlendDistance <= 0.0f)
+    {
+        return primary;
+    }
+
+    if (cascadeIndex < 2u)
+    {
+        float boundary = cascadeIndex == 0u ? shadowSplits.x : shadowSplits.y;
+        if (abs(receiverDistance - boundary) <= shadowCascadeBlendDistance)
+        {
+            float nextShadow = SampleDirectionalShadowCascade(
+                worldPos,
+                cascadeIndex + 1u,
+                shadowViewProjection0,
+                shadowViewProjection1,
+                shadowViewProjection2,
+                shadowMapHandle0,
+                shadowMapHandle1,
+                shadowMapHandle2,
+                shadowSamplerHandle,
+                shadowTexelSize,
+                shadowDepthBias);
+            float blendRange = max(shadowCascadeBlendDistance * 2.0f, 1e-6f);
+            float t = saturate((receiverDistance - (boundary - shadowCascadeBlendDistance)) / blendRange);
+            return lerp(primary, nextShadow, t);
+        }
+    }
+    else
+    {
+        float boundary = shadowSplits.y;
+        if (abs(receiverDistance - boundary) <= shadowCascadeBlendDistance)
+        {
+            float prevShadow = SampleDirectionalShadowCascade(
+                worldPos,
+                1u,
+                shadowViewProjection0,
+                shadowViewProjection1,
+                shadowViewProjection2,
+                shadowMapHandle0,
+                shadowMapHandle1,
+                shadowMapHandle2,
+                shadowSamplerHandle,
+                shadowTexelSize,
+                shadowDepthBias);
+            float blendRange = max(shadowCascadeBlendDistance * 2.0f, 1e-6f);
+            float t = saturate((receiverDistance - (boundary - shadowCascadeBlendDistance)) / blendRange);
+            return lerp(prevShadow, primary, t);
+        }
+    }
+
+    return primary;
+}
+
 float3 EvaluateDirectLighting(
     SurfaceLightingInput surface,
     float3 viewDir,
     uint lightCount,
     LightData lights[MAX_LIGHTS],
-    float4x4 shadowViewProjection,
-    uint shadowMapHandle,
+    float4x4 shadowViewProjection0,
+    float4x4 shadowViewProjection1,
+    float4x4 shadowViewProjection2,
+    uint shadowMapHandle0,
+    uint shadowMapHandle1,
+    uint shadowMapHandle2,
     uint shadowSamplerHandle,
+    float3 shadowSplits,
+    float shadowCascadeBlendDistance,
     uint shadowLightIndex,
     float2 shadowTexelSize,
     float shadowDepthBias,
@@ -276,11 +417,19 @@ float3 EvaluateDirectLighting(
             float receiverDistanceSq = dot(surface.worldPos, surface.worldPos);
             if (shadowMaxDistance <= 0.0f || receiverDistanceSq <= maxShadowDistanceSq)
             {
-                float pcf = ComputeDirectionalShadow(
+                float receiverDistance = sqrt(receiverDistanceSq);
+                float pcf = ComputeCascadedDirectionalShadow(
                     surface.worldPos,
-                    shadowViewProjection,
-                    shadowMapHandle,
+                    receiverDistance,
+                    shadowViewProjection0,
+                    shadowViewProjection1,
+                    shadowViewProjection2,
+                    shadowMapHandle0,
+                    shadowMapHandle1,
+                    shadowMapHandle2,
                     shadowSamplerHandle,
+                    shadowSplits,
+                    shadowCascadeBlendDistance,
                     shadowTexelSize,
                     shadowDepthBias);
                 shadow = lerp(1.0f, pcf, saturate(shadowStrength));
@@ -333,9 +482,15 @@ float3 EvaluateSurfaceLighting(
     float3 viewDir,
     uint lightCount,
     LightData lights[MAX_LIGHTS],
-    float4x4 shadowViewProjection,
-    uint shadowMapHandle,
+    float4x4 shadowViewProjection0,
+    float4x4 shadowViewProjection1,
+    float4x4 shadowViewProjection2,
+    uint shadowMapHandle0,
+    uint shadowMapHandle1,
+    uint shadowMapHandle2,
     uint shadowSamplerHandle,
+    float3 shadowSplits,
+    float shadowCascadeBlendDistance,
     uint shadowLightIndex,
     float2 shadowTexelSize,
     float shadowDepthBias,
@@ -353,9 +508,15 @@ float3 EvaluateSurfaceLighting(
         viewDir,
         lightCount,
         lights,
-        shadowViewProjection,
-        shadowMapHandle,
+        shadowViewProjection0,
+        shadowViewProjection1,
+        shadowViewProjection2,
+        shadowMapHandle0,
+        shadowMapHandle1,
+        shadowMapHandle2,
         shadowSamplerHandle,
+        shadowSplits,
+        shadowCascadeBlendDistance,
         shadowLightIndex,
         shadowTexelSize,
         shadowDepthBias,

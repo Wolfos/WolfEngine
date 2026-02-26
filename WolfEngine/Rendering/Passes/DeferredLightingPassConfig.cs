@@ -16,7 +16,9 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle GBufferMaterial { get; init; }
 	public required DescriptorHandle GBufferEmissive { get; init; }
 	public required DescriptorHandle GBufferDepth { get; init; }
-	public required DescriptorHandle ShadowMapDepth { get; init; }
+	public required DescriptorHandle ShadowMapDepth0 { get; init; }
+	public required DescriptorHandle ShadowMapDepth1 { get; init; }
+	public required DescriptorHandle ShadowMapDepth2 { get; init; }
 	public required DescriptorHandle SkyboxEnvironment { get; init; }
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
@@ -25,7 +27,13 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle LinearSampler { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
 
-	public required Matrix4x4 ShadowViewProjection { get; init; }
+	public required Matrix4x4 ShadowViewProjection0 { get; init; }
+	public required Matrix4x4 ShadowViewProjection1 { get; init; }
+	public required Matrix4x4 ShadowViewProjection2 { get; init; }
+	public required float ShadowSplit0 { get; init; }
+	public required float ShadowSplit1 { get; init; }
+	public required float ShadowSplit2 { get; init; }
+	public required float ShadowCascadeBlendDistance { get; init; }
 	public required int ShadowedDirectionalLightIndex { get; init; }
 	public required float ShadowDepthBias { get; init; }
 	public required float ShadowStrength { get; init; }

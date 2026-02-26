@@ -9,22 +9,22 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class ShadowMapPass
 {
-	public const int ShadowMapResolution = 2048;
+	public const int CascadeCount = 3;
+	public const int CascadeResolution = 2048;
 	public const float MaxShadowDistance = 50.0f;
+
 	private const float DefaultDepthBias = 0.0015f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
+	private const float SplitLambda = 0.7f;
+	private const float SplitNear = 1.0f;
+	private const float DefaultCascadeBlendDistance = 2.0f;
+	private const int ShadowCameraConstantsFloatCount = (16 * CascadeCount) + 4;
 
 	private readonly IShaderCompiler _shaderCompiler;
-	private readonly Dictionary<int, IGfxPipeline> _pipelinesByBucketIndex = new();
-	private ShadowFrameData _currentFrameData = new(
-		enabled: false,
-		viewProjection: Matrix4x4.Identity,
-		shadowedDirectionalLightIndex: -1,
-		DefaultDepthBias,
-		DefaultStrength,
-		ShadowMapResolution);
+	private readonly Dictionary<(int CascadeIndex, int BucketIndex), IGfxPipeline> _pipelinesByCascadeBucket = new();
+	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 
 	public ShadowMapPass(IShaderCompiler shaderCompiler)
 	{
@@ -35,40 +35,46 @@ public sealed class ShadowMapPass
 	{
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		if (TryBuildShadowViewProjection(sceneData, out var viewProjection, out var shadowedLightIndex))
+		if (TryBuildShadowCascades(sceneData, out var matrices, out var splits, out var shadowedLightIndex))
 		{
 			_currentFrameData = new ShadowFrameData(
 				enabled: true,
-				viewProjection: viewProjection,
+				cascadeViewProjection0: matrices[0],
+				cascadeViewProjection1: matrices[1],
+				cascadeViewProjection2: matrices[2],
+				cascadeSplit0: splits[0],
+				cascadeSplit1: splits[1],
+				cascadeSplit2: splits[2],
+				cascadeBlendDistance: DefaultCascadeBlendDistance,
 				shadowedDirectionalLightIndex: shadowedLightIndex,
-				DefaultDepthBias,
-				DefaultStrength,
-				ShadowMapResolution);
+				depthBias: DefaultDepthBias,
+				strength: DefaultStrength,
+				mapResolution: CascadeResolution);
 			return;
 		}
 
-		_currentFrameData = new ShadowFrameData(
-			enabled: false,
-			viewProjection: Matrix4x4.Identity,
-			shadowedDirectionalLightIndex: -1,
-			DefaultDepthBias,
-			DefaultStrength,
-			ShadowMapResolution);
+		_currentFrameData = CreateDisabledFrameData();
 	}
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
 
 	public ShadowMapPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		IGfxTexture depthTarget,
 		IGfxDevice device,
-		GpuDrawResources gpuDrawResources)
+		GpuDrawResources gpuDrawResources,
+		int cascadeIndex)
 	{
 		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(depthTarget);
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 
-		var depth = context.GetTexture(resources.ShadowMapDepth);
+		if (cascadeIndex < 0 || cascadeIndex >= CascadeCount)
+		{
+			throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.");
+		}
+
 		var bucketDefinitions = GBufferDrawBuckets.Definitions;
 		var buckets = new List<ShadowMapExecutionBucket>(bucketDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
@@ -86,7 +92,7 @@ public sealed class ShadowMapPass
 				continue;
 			}
 
-			var pipeline = EnsurePipeline(device, bucketDefinition, i);
+			var pipeline = EnsurePipeline(device, bucketDefinition, i, cascadeIndex);
 			buckets.Add(new ShadowMapExecutionBucket(
 				i,
 				bucketDefinition.DebugName,
@@ -96,9 +102,10 @@ public sealed class ShadowMapPass
 
 		return new ShadowMapPassConfig
 		{
-			FramebufferWidth = depth.Descriptor.Width,
-			FramebufferHeight = depth.Descriptor.Height,
-			DepthTarget = depth,
+			CascadeIndex = cascadeIndex,
+			FramebufferWidth = depthTarget.Descriptor.Width,
+			FramebufferHeight = depthTarget.Descriptor.Height,
+			DepthTarget = depthTarget,
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
@@ -168,7 +175,7 @@ public sealed class ShadowMapPass
 		for (var i = 0; i < buckets.Length; i++)
 		{
 			var bucket = buckets[i];
-			using (FrameProfiler.Instance.Measure($"Shadow.{bucket.DebugName}"))
+			using (FrameProfiler.Instance.Measure($"Shadow.C{config.CascadeIndex}.{bucket.DebugName}"))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
@@ -193,9 +200,14 @@ public sealed class ShadowMapPass
 		commandList.EndPass();
 	}
 
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GBufferDrawBucketDefinition bucket, int bucketIndex)
+	private IGfxPipeline EnsurePipeline(
+		IGfxDevice device,
+		in GBufferDrawBucketDefinition bucket,
+		int bucketIndex,
+		int cascadeIndex)
 	{
-		if (_pipelinesByBucketIndex.TryGetValue(bucketIndex, out var pipeline))
+		var pipelineKeyByCascadeBucket = (cascadeIndex, bucketIndex);
+		if (_pipelinesByCascadeBucket.TryGetValue(pipelineKeyByCascadeBucket, out var pipeline))
 		{
 			return pipeline;
 		}
@@ -216,33 +228,33 @@ public sealed class ShadowMapPass
 			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material,
-			shaderVariant: $"Shadow:{bucket.ShaderVariant}");
+			shaderVariant: $"Shadow:{bucket.ShaderVariant}:C{cascadeIndex}");
 
+		var cascadeDefine = $"WOLF_SHADOW_CASCADE_INDEX={cascadeIndex}";
 		var shaders = GraphicsShaderCompiler.Compile(
 			_shaderCompiler,
 			device.BackendKind,
 			"shadow_map.slang",
 			"vertexShader",
 			"fragmentShader",
-			bucket.PreprocessorDefine);
+			bucket.PreprocessorDefine,
+			cascadeDefine);
 		pipeline = device.GetOrCreatePipeline(key, shaders);
-		_pipelinesByBucketIndex[bucketIndex] = pipeline;
+		_pipelinesByCascadeBucket[pipelineKeyByCascadeBucket] = pipeline;
 		return pipeline;
 	}
 
 	private void UploadCameraConstants(RenderGraphContext context, in ShadowMapPassConfig config, IGfxCommandList commandList)
 	{
-		Span<float> cameraConstants = stackalloc float[24];
-		WriteMatrix(cameraConstants, _currentFrameData.ViewProjection);
+		Span<float> cameraConstants = stackalloc float[ShadowCameraConstantsFloatCount];
+		WriteMatrix(cameraConstants, _currentFrameData.CascadeViewProjection0);
+		WriteMatrix(cameraConstants.Slice(16), _currentFrameData.CascadeViewProjection1);
+		WriteMatrix(cameraConstants.Slice(32), _currentFrameData.CascadeViewProjection2);
 		var sceneData = context.SceneData!;
-		cameraConstants[16] = sceneData.CameraOrigin.X;
-		cameraConstants[17] = sceneData.CameraOrigin.Y;
-		cameraConstants[18] = sceneData.CameraOrigin.Z;
-		cameraConstants[19] = 1.0f;
-		cameraConstants[20] = 0.0f;
-		cameraConstants[21] = 0.0f;
-		cameraConstants[22] = 0.0f;
-		cameraConstants[23] = 0.0f;
+		cameraConstants[48] = sceneData.CameraOrigin.X;
+		cameraConstants[49] = sceneData.CameraOrigin.Y;
+		cameraConstants[50] = sceneData.CameraOrigin.Z;
+		cameraConstants[51] = 0.0f;
 
 		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
 		{
@@ -253,16 +265,56 @@ public sealed class ShadowMapPass
 		commandList.SetGraphicsConstants(14, MemoryMarshal.AsBytes(cameraConstants));
 	}
 
-	private static bool TryBuildShadowViewProjection(SceneDrawData sceneData, out Matrix4x4 shadowViewProjection, out int shadowedLightIndex)
+	private static ShadowFrameData CreateDisabledFrameData() => new(
+		enabled: false,
+		cascadeViewProjection0: Matrix4x4.Identity,
+		cascadeViewProjection1: Matrix4x4.Identity,
+		cascadeViewProjection2: Matrix4x4.Identity,
+		cascadeSplit0: MaxShadowDistance / CascadeCount,
+		cascadeSplit1: (MaxShadowDistance * 2.0f) / CascadeCount,
+		cascadeSplit2: MaxShadowDistance,
+		cascadeBlendDistance: DefaultCascadeBlendDistance,
+		shadowedDirectionalLightIndex: -1,
+		depthBias: DefaultDepthBias,
+		strength: DefaultStrength,
+		mapResolution: CascadeResolution);
+
+	private static bool TryBuildShadowCascades(
+		SceneDrawData sceneData,
+		out Matrix4x4[] cascadeMatrices,
+		out float[] cascadeSplits,
+		out int shadowedLightIndex)
 	{
-		shadowViewProjection = Matrix4x4.Identity;
+		cascadeMatrices = new Matrix4x4[CascadeCount];
+		cascadeSplits = new float[CascadeCount];
+		shadowedLightIndex = -1;
+
+		if (TryGetShadowedDirectionalLight(sceneData, out var lightDirection, out shadowedLightIndex) == false)
+		{
+			return false;
+		}
+
+		BuildPracticalCascadeSplits(cascadeSplits);
+		for (var i = 0; i < CascadeCount; i++)
+		{
+			cascadeMatrices[i] = BuildCascadeViewProjection(sceneData, lightDirection, cascadeSplits[i]);
+		}
+
+		return true;
+	}
+
+	private static bool TryGetShadowedDirectionalLight(
+		SceneDrawData sceneData,
+		out Vector3 lightDirection,
+		out int shadowedLightIndex)
+	{
+		lightDirection = Vector3.Zero;
 		shadowedLightIndex = -1;
 		if (sceneData.Lights.Count == 0)
 		{
 			return false;
 		}
 
-		var lightDirection = Vector3.Zero;
 		for (var i = 0; i < sceneData.Lights.Count; i++)
 		{
 			var packet = sceneData.Lights[i];
@@ -279,34 +331,51 @@ public sealed class ShadowMapPass
 
 			lightDirection = Vector3.Normalize(forward);
 			shadowedLightIndex = i;
-			break;
+			return true;
 		}
 
-		if (shadowedLightIndex < 0)
+		return false;
+	}
+
+	private static void BuildPracticalCascadeSplits(Span<float> destination)
+	{
+		if (destination.Length < CascadeCount)
 		{
-			return false;
+			throw new ArgumentException("Destination span must contain all cascade splits.", nameof(destination));
 		}
 
-		// Keep the shadow volume anchored to the camera origin in camera-relative space.
-		// This avoids rotation-driven recentering shimmer from per-frame frustum fitting.
-		var frustumCenter = Vector3.Zero;
-		var receiverRadius = MaxShadowDistance;
+		var farDistance = MaxShadowDistance;
+		var nearDistance = Math.Clamp(SplitNear, 0.01f, farDistance - 0.01f);
+		var ratio = farDistance / nearDistance;
 
+		for (var i = 0; i < CascadeCount; i++)
+		{
+			var p = (i + 1.0f) / CascadeCount;
+			var logarithmic = nearDistance * MathF.Pow(ratio, p);
+			var linear = nearDistance + ((farDistance - nearDistance) * p);
+			destination[i] = Math.Clamp(Lerp(linear, logarithmic, SplitLambda), nearDistance, farDistance);
+		}
+
+		destination[0] = Math.Clamp(destination[0], nearDistance, farDistance);
+		destination[1] = Math.Clamp(destination[1], destination[0], farDistance);
+		destination[2] = farDistance;
+	}
+
+	private static Matrix4x4 BuildCascadeViewProjection(SceneDrawData sceneData, Vector3 lightDirection, float receiverRadius)
+	{
+		// Keep the shadow volume anchored to the camera origin in camera-relative space.
+		var frustumCenter = Vector3.Zero;
 		var up = Math.Abs(Vector3.Dot(lightDirection, Vector3.UnitY)) > 0.99f
 			? Vector3.UnitZ
 			: Vector3.UnitY;
 		var eye = frustumCenter - (lightDirection * (receiverRadius + 64.0f));
 		var lightView = Matrix4x4.CreateLookAtLeftHanded(eye, frustumCenter, up);
 
-		// Keep XY coverage tied directly to MaxShadowDistance so texel density matches
-		// the configured shadow distance in world units.
 		var halfExtent = receiverRadius;
 		var centerLs = Vector3.Transform(frustumCenter, lightView);
 
 		// Snap the projection center to shadow texels for camera-motion stability.
-		// The extra offset anchors snapping to world-space camera movement so translation
-		// does not cause continuous sub-texel drift.
-		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / ShadowMapResolution, 1e-6f);
+		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / CascadeResolution, 1e-6f);
 		var lightAxisX = new Vector3(lightView.M11, lightView.M21, lightView.M31);
 		var lightAxisY = new Vector3(lightView.M12, lightView.M22, lightView.M32);
 		var cameraLsX = Vector3.Dot(sceneData.CameraOrigin, lightAxisX);
@@ -321,7 +390,6 @@ public sealed class ShadowMapPass
 		var minY = centerLs.Y - halfExtent;
 		var maxY = centerLs.Y + halfExtent;
 
-		// Keep depth span stable to avoid temporal shimmer from per-frame depth re-normalization.
 		var nearPlane = MathF.Max(0.1f, centerLs.Z - (receiverRadius + CasterPaddingNear));
 		var depthSpan = MathF.Max((receiverRadius * 2.0f) + CasterPaddingNear + CasterPaddingFar, 1.0f);
 		var farPlane = nearPlane + depthSpan;
@@ -332,12 +400,10 @@ public sealed class ShadowMapPass
 			maxY,
 			nearPlane,
 			farPlane);
-
-		// Keep the shadow matrix in camera-relative space to preserve precision when the
-		// world origin is far from zero. Inputs to this matrix are camera-relative positions.
-		shadowViewProjection = lightView * lightProjection;
-		return true;
+		return lightView * lightProjection;
 	}
+
+	private static float Lerp(float a, float b, float t) => a + ((b - a) * t);
 
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
 	{
@@ -363,9 +429,4 @@ public sealed class ShadowMapPass
 		destination[14] = matrix.M43;
 		destination[15] = matrix.M44;
 	}
-}
-
-file static class ShadowMapPassVectorExtensions
-{
-	public static Vector3 XYZ(this Vector4 vector) => new(vector.X, vector.Y, vector.Z);
 }

@@ -15,10 +15,10 @@ cbuffer BindlessHandles : register(b0)
     uint brdfLutHandle;
     uint lightingTargetHandle;
     uint samplerHandle;
-    uint shadowMapHandle;
+    uint shadowMapHandle0;
+    uint shadowMapHandle1;
+    uint shadowMapHandle2;
     uint shadowSamplerHandle;
-    uint _bindlessPadding0;
-    uint _bindlessPadding1;
 };
 
 cbuffer CameraParams : register(b1)
@@ -31,7 +31,10 @@ cbuffer LightingParams : register(b2)
     uint lightCount;
     float3 _lightingPadding;
     LightData lights[MAX_LIGHTS];
-    row_major float4x4 shadowViewProjection;
+    row_major float4x4 shadowViewProjection0;
+    row_major float4x4 shadowViewProjection1;
+    row_major float4x4 shadowViewProjection2;
+    float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
     uint shadowLightIndex;
     uint shadowsEnabled;
@@ -104,9 +107,15 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         viewDir,
         lightCount,
         lights,
-        shadowViewProjection,
-        shadowMapHandle,
+        shadowViewProjection0,
+        shadowViewProjection1,
+        shadowViewProjection2,
+        shadowMapHandle0,
+        shadowMapHandle1,
+        shadowMapHandle2,
         shadowSamplerHandle,
+        shadowSplitsBlend.xyz,
+        shadowSplitsBlend.w,
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
         shadowTexelSizeBiasStrength.z,

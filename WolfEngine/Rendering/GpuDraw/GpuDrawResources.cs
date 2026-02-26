@@ -155,7 +155,7 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowShaderResource));
 			
 			_shadowCameraBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(float) * 24),
+				(ulong)(sizeof(float) * ((16 * ShadowMapPass.CascadeCount) + 4)),
 				BufferUsage.Constant,
 				BufferFlags.AllowShaderResource));
 
@@ -165,7 +165,7 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowShaderResource));
 
 			_transparentLightingBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(uint) * 68),
+				(ulong)(sizeof(uint) * 104),
 				BufferUsage.Constant,
 				BufferFlags.AllowShaderResource));
 

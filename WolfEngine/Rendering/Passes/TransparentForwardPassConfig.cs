@@ -29,17 +29,27 @@ public struct TransparentForwardPassConfig
 
 	public required IGfxTexture LightingTarget { get; init; }
 	public required IGfxTexture DepthTarget { get; init; }
-	public required IGfxTexture ShadowMapDepth { get; init; }
+	public required IGfxTexture ShadowMapDepth0 { get; init; }
+	public required IGfxTexture ShadowMapDepth1 { get; init; }
+	public required IGfxTexture ShadowMapDepth2 { get; init; }
 
 	public required DescriptorHandle SkyboxEnvironment { get; init; }
 	public required DescriptorHandle SkyboxIrradiance { get; init; }
 	public required DescriptorHandle SkyboxPrefilter { get; init; }
 	public required DescriptorHandle SkyboxBrdfLut { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }
-	public required DescriptorHandle ShadowMapHandle { get; init; }
+	public required DescriptorHandle ShadowMapHandle0 { get; init; }
+	public required DescriptorHandle ShadowMapHandle1 { get; init; }
+	public required DescriptorHandle ShadowMapHandle2 { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
 
-	public required Matrix4x4 ShadowViewProjection { get; init; }
+	public required Matrix4x4 ShadowViewProjection0 { get; init; }
+	public required Matrix4x4 ShadowViewProjection1 { get; init; }
+	public required Matrix4x4 ShadowViewProjection2 { get; init; }
+	public required float ShadowSplit0 { get; init; }
+	public required float ShadowSplit1 { get; init; }
+	public required float ShadowSplit2 { get; init; }
+	public required float ShadowCascadeBlendDistance { get; init; }
 	public required int ShadowedDirectionalLightIndex { get; init; }
 	public required float ShadowDepthBias { get; init; }
 	public required float ShadowStrength { get; init; }

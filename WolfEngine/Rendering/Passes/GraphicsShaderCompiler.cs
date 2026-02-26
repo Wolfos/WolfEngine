@@ -24,8 +24,8 @@ internal static class GraphicsShaderCompiler
 			return new ShaderBytecodeSet(bytes, bytes);
 		}
 
-		var vertex = shaderCompiler.GetDxil(shaderPath, vertexEntryPoint, "vs_6_0");
-		var pixel = shaderCompiler.GetDxil(shaderPath, pixelEntryPoint, "ps_6_0");
+		var vertex = shaderCompiler.GetDxil(shaderPath, vertexEntryPoint, "vs_6_0", defines);
+		var pixel = shaderCompiler.GetDxil(shaderPath, pixelEntryPoint, "ps_6_0", defines);
 		return new ShaderBytecodeSet(vertex, pixel);
 	}
 }

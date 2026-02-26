@@ -12,10 +12,16 @@ StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
 cbuffer CameraParams : register(b14)
 {
-    row_major float4x4 viewProjection;
+    row_major float4x4 viewProjection0;
+    row_major float4x4 viewProjection1;
+    row_major float4x4 viewProjection2;
     float3 cameraPosition;
     float padding;
 };
+
+#ifndef WOLF_SHADOW_CASCADE_INDEX
+#define WOLF_SHADOW_CASCADE_INDEX 0
+#endif
 
 struct VSInput
 {
@@ -50,6 +56,12 @@ VSOutput vertexShader(VSInput input)
     float4 worldPosition = mul(input.position, instanceData.world);
     worldPosition.xyz -= cameraPosition;
 
+    row_major float4x4 viewProjection = viewProjection0;
+#if WOLF_SHADOW_CASCADE_INDEX == 1
+    viewProjection = viewProjection1;
+#elif WOLF_SHADOW_CASCADE_INDEX == 2
+    viewProjection = viewProjection2;
+#endif
     output.position = mul(worldPosition, viewProjection);
     output.uv = input.uv;
     output.instanceId = instanceId;
