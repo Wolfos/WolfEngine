@@ -1,7 +1,6 @@
 #nullable enable
 
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Utility;
 
 namespace WolfEngine.Rendering;
 
@@ -10,6 +9,36 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphCompiler
 {
+	private readonly struct TransientLifetime
+	{
+		public TransientLifetime(int handleId, int firstUse, int lastUse, TextureDescriptor descriptor)
+		{
+			HandleId = handleId;
+			FirstUse = firstUse;
+			LastUse = lastUse;
+			Descriptor = descriptor;
+		}
+
+		public int HandleId { get; }
+		public int FirstUse { get; }
+		public int LastUse { get; }
+		public TextureDescriptor Descriptor { get; }
+	}
+
+	private struct AliasSlot
+	{
+		public AliasSlot(int slotId, int lastUse, TextureDescriptor descriptor)
+		{
+			SlotId = slotId;
+			LastUse = lastUse;
+			Descriptor = descriptor;
+		}
+
+		public int SlotId;
+		public int LastUse;
+		public TextureDescriptor Descriptor;
+	}
+
 	private readonly RenderGraphResourceRegistry _registry;
 	private readonly Dictionary<int, ResourceState> _resourceStates = new();
 
@@ -28,52 +57,39 @@ public sealed class RenderGraphCompiler
 			return;
 		}
 
-		// Track the last state each resource was in
+		var aliasAssignments = BuildTransientAliasAssignments(passes);
+		_registry.AssignTransientTextureSlots(aliasAssignments);
+
 		var resourceStates = _resourceStates;
 		resourceStates.Clear();
-		
 
-		for(int i = 0; i < passes.Count; i++)
+		for (var passIndex = 0; passIndex < passes.Count; passIndex++)
 		{
-			var pass = passes[i];
+			var pass = passes[passIndex];
 
-			// Generate barriers for resources this pass uses
-			for (var j = 0; j < pass.ResourceUsages.Count; j++)
+			for (var usageIndex = 0; usageIndex < pass.ResourceUsages.Count; usageIndex++)
 			{
-				var usage = pass.ResourceUsages[j];
-				var currentState = resourceStates.TryGetValue(usage.Handle.Id, out var state)
+				var usage = pass.ResourceUsages[usageIndex];
+				var resource = _registry.GetResource(usage.Handle);
+				var trackingKey = _registry.GetStateTrackingKey(usage.Handle);
+				var currentState = resourceStates.TryGetValue(trackingKey, out var state)
 					? state
-					: _registry.GetResourceState(usage.Handle);
-				
-				// If the required state differs from current state, we need a barrier
+					: _registry.GetResourceStateByTrackingKey(usage.Handle, trackingKey);
+
 				if (currentState != usage.State && (currentState & usage.State) != usage.State)
 				{
-					var resource = _registry.GetResource(usage.Handle);
-					
 					var barrier = new ResourceBarrierDescription(resource, currentState, usage.State);
 					pass.AddBarrier(barrier);
+				}
 
-					// Update tracked state
-					resourceStates[usage.Handle.Id] = usage.State;
-				}
-				else
-				{
-					// Even if no barrier needed, update state tracking
-					resourceStates[usage.Handle.Id] = usage.State;
-				}
+				resourceStates[trackingKey] = usage.State;
 			}
-			
 		}
-		
 
-
-		// Update registry with final states
-		foreach (var (handleId, finalState) in resourceStates)
+		foreach (var (trackingKey, finalState) in resourceStates)
 		{
-			var handle = new RenderGraphResourceHandle(handleId);
-			_registry.SetResourceState(handle, finalState);
+			_registry.SetResourceStateByTrackingKey(trackingKey, finalState);
 		}
-		
 
 		resourceStates.Clear();
 	}
@@ -99,5 +115,96 @@ public sealed class RenderGraphCompiler
 			}
 		}
 	}
-}
 
+	private Dictionary<int, int> BuildTransientAliasAssignments(IReadOnlyList<RenderGraphPass> passes)
+	{
+		var lifetimesByHandle = new Dictionary<int, (int FirstUse, int LastUse, TextureDescriptor Descriptor)>();
+		for (var passIndex = 0; passIndex < passes.Count; passIndex++)
+		{
+			var pass = passes[passIndex];
+			for (var usageIndex = 0; usageIndex < pass.ResourceUsages.Count; usageIndex++)
+			{
+				var usage = pass.ResourceUsages[usageIndex];
+				if (_registry.TryGetTransientTextureDescriptor(usage.Handle, out var descriptor) == false)
+				{
+					continue;
+				}
+
+				var handleId = usage.Handle.Id;
+				if (lifetimesByHandle.TryGetValue(handleId, out var lifetime))
+				{
+					lifetime.LastUse = passIndex;
+					lifetimesByHandle[handleId] = lifetime;
+				}
+				else
+				{
+					lifetimesByHandle[handleId] = (passIndex, passIndex, descriptor);
+				}
+			}
+		}
+
+		if (lifetimesByHandle.Count == 0)
+		{
+			return new Dictionary<int, int>();
+		}
+
+		var lifetimes = new List<TransientLifetime>(lifetimesByHandle.Count);
+		foreach (var (handleId, lifetime) in lifetimesByHandle)
+		{
+			lifetimes.Add(new TransientLifetime(handleId, lifetime.FirstUse, lifetime.LastUse, lifetime.Descriptor));
+		}
+
+		lifetimes.Sort(static (a, b) =>
+		{
+			var firstCmp = a.FirstUse.CompareTo(b.FirstUse);
+			return firstCmp != 0 ? firstCmp : a.LastUse.CompareTo(b.LastUse);
+		});
+
+		var assignments = new Dictionary<int, int>(lifetimes.Count);
+		var slots = new List<AliasSlot>();
+		var nextSlotId = 1;
+		for (var i = 0; i < lifetimes.Count; i++)
+		{
+			var lifetime = lifetimes[i];
+			var assignedSlot = 0;
+			for (var slotIndex = 0; slotIndex < slots.Count; slotIndex++)
+			{
+				var slot = slots[slotIndex];
+				if (slot.LastUse >= lifetime.FirstUse)
+				{
+					continue;
+				}
+
+				if (AreDescriptorsCompatible(slot.Descriptor, lifetime.Descriptor) == false)
+				{
+					continue;
+				}
+
+				slot.LastUse = lifetime.LastUse;
+				slots[slotIndex] = slot;
+				assignedSlot = slot.SlotId;
+				break;
+			}
+
+			if (assignedSlot == 0)
+			{
+				assignedSlot = nextSlotId++;
+				slots.Add(new AliasSlot(assignedSlot, lifetime.LastUse, lifetime.Descriptor));
+			}
+
+			assignments[lifetime.HandleId] = assignedSlot;
+		}
+
+		return assignments;
+	}
+
+	private static bool AreDescriptorsCompatible(TextureDescriptor a, TextureDescriptor b)
+	{
+		return a.Width == b.Width &&
+		       a.Height == b.Height &&
+		       a.Format == b.Format &&
+		       a.Usage == b.Usage &&
+		       a.ClearColor.Equals(b.ClearColor) &&
+		       a.DepthClear.Equals(b.DepthClear);
+	}
+}

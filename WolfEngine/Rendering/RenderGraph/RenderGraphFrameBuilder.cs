@@ -45,6 +45,10 @@ public sealed class RenderGraphFrameBuilder
 	private SkyboxResources? _skybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
+	private bool _hasPreviousFrameShape;
+	private Int2 _previousFramebufferSize;
+	private Int2 _previousSceneFramebufferSize;
+	private bool _previousSceneEnabled;
 	
 	private readonly Action<RenderGraphContext> _gbufferExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
@@ -98,6 +102,8 @@ public sealed class RenderGraphFrameBuilder
 		RenderGraphResourceHandle sceneColorHandle,
 		bool sceneEnabled)
 	{
+		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, sceneEnabled);
+
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);
 		var skyboxIrrHandle = default(RenderGraphResourceHandle);
 		var skyboxPrefilterHandle = default(RenderGraphResourceHandle);
@@ -465,5 +471,25 @@ public sealed class RenderGraphFrameBuilder
 			2 => resources.ShadowMapDepth2,
 			_ => throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.")
 		};
+	}
+
+	private void InvalidateTransientPoolIfFrameShapeChanged(Int2 framebufferSize, Int2 sceneFramebufferSize, bool sceneEnabled)
+	{
+		var changed = _hasPreviousFrameShape == false ||
+		              _previousFramebufferSize.X != framebufferSize.X ||
+		              _previousFramebufferSize.Y != framebufferSize.Y ||
+		              _previousSceneFramebufferSize.X != sceneFramebufferSize.X ||
+		              _previousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
+		              _previousSceneEnabled != sceneEnabled;
+		if (changed == false)
+		{
+			return;
+		}
+
+		_resources.InvalidateTransientTexturePool();
+		_previousFramebufferSize = framebufferSize;
+		_previousSceneFramebufferSize = sceneFramebufferSize;
+		_previousSceneEnabled = sceneEnabled;
+		_hasPreviousFrameShape = true;
 	}
 }

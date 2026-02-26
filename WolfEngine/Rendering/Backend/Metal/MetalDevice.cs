@@ -15,20 +15,6 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private const int MaxPooledTextures = 256;
 	private const int MaxPooledTexturesPerDescriptor = 2;
 
-	public readonly record struct MetalDiagnosticsSnapshot(
-		int TexturePoolBuckets,
-		int TexturePoolTextures,
-		int SrvCount,
-		int UavCount,
-		int SamplerCount,
-		int FreeSrvCount,
-		int FreeUavCount,
-		int FreeSamplerCount,
-		ulong TextureArgumentBufferBytes,
-		ulong RwTextureArgumentBufferBytes,
-		ulong SamplerArgumentBufferBytes,
-		uint BindlessVersion);
-
 	private readonly struct TexturePoolKey : IEquatable<TexturePoolKey>
 	{
 		public TexturePoolKey(in TextureDescriptor descriptor)
@@ -113,43 +99,6 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				return _completedId;
 			}
 		}
-	}
-
-	public string GetDiagnosticsSnapshot()
-	{
-		var snapshot = CaptureDiagnosticsSnapshot();
-		return $"TexturePool: buckets={snapshot.TexturePoolBuckets}, textures={snapshot.TexturePoolTextures}, " +
-		       $"Bindless: srv={snapshot.SrvCount}, uav={snapshot.UavCount}, samp={snapshot.SamplerCount}, " +
-		       $"freeSrv={snapshot.FreeSrvCount}, freeUav={snapshot.FreeUavCount}, freeSamp={snapshot.FreeSamplerCount}, " +
-		       $"bindlessVer={snapshot.BindlessVersion}, " +
-		       $"ArgBuffers: textures={snapshot.TextureArgumentBufferBytes / (1024.0 * 1024.0):F1} MiB, " +
-		       $"rwTextures={snapshot.RwTextureArgumentBufferBytes / (1024.0 * 1024.0):F1} MiB, " +
-		       $"samplers={snapshot.SamplerArgumentBufferBytes / (1024.0 * 1024.0):F1} MiB";
-	}
-
-	public MetalDiagnosticsSnapshot CaptureDiagnosticsSnapshot()
-	{
-		var totalPools = 0;
-		var totalTextures = 0;
-		foreach (var entry in _texturePool)
-		{
-			totalPools++;
-			totalTextures += entry.Value.Count;
-		}
-
-		return new MetalDiagnosticsSnapshot(
-			totalPools,
-			totalTextures,
-			_descriptorTable.SrvCount,
-			_descriptorTable.UavCount,
-			_descriptorTable.SamplerCount,
-			_descriptorTable.FreeSrvCount,
-			_descriptorTable.FreeUavCount,
-			_descriptorTable.FreeSamplerCount,
-			_descriptorTable.TextureArgumentBufferBytes,
-			_descriptorTable.RwTextureArgumentBufferBytes,
-			_descriptorTable.SamplerArgumentBufferBytes,
-			_descriptorTable.BindlessVersion);
 	}
 
 	public IGfxCommandList BeginGraphics()
