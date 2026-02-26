@@ -10,17 +10,22 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class ShadowMapPass
 {
 	public const int CascadeCount = 3;
-	public const int CascadeResolution = 2048;
-	public const float MaxShadowDistance = 50.0f;
+	public const int CascadeResolution = 4096;
+	public const float MaxShadowDistance = 150.0f;
 
 	private const float DefaultDepthBias = 0.0015f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
-	private const float SplitLambda = 0.7f;
-	private const float SplitNear = 1.0f;
 	private const float DefaultCascadeBlendDistance = 2.0f;
 	private const int ShadowCameraConstantsFloatCount = (16 * CascadeCount) + 4;
+
+	private static readonly List<float> CascadeSplitDistances = new()
+	{
+		6.0f,
+		30.0f,
+		MaxShadowDistance
+	};
 
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, int BucketIndex), IGfxPipeline> _pipelinesByCascadeBucket = new();
@@ -270,9 +275,9 @@ public sealed class ShadowMapPass
 		cascadeViewProjection0: Matrix4x4.Identity,
 		cascadeViewProjection1: Matrix4x4.Identity,
 		cascadeViewProjection2: Matrix4x4.Identity,
-		cascadeSplit0: MaxShadowDistance / CascadeCount,
-		cascadeSplit1: (MaxShadowDistance * 2.0f) / CascadeCount,
-		cascadeSplit2: MaxShadowDistance,
+		cascadeSplit0: CascadeSplitDistances[0],
+		cascadeSplit1: CascadeSplitDistances[1],
+		cascadeSplit2: CascadeSplitDistances[2],
 		cascadeBlendDistance: DefaultCascadeBlendDistance,
 		shadowedDirectionalLightIndex: -1,
 		depthBias: DefaultDepthBias,
@@ -294,7 +299,7 @@ public sealed class ShadowMapPass
 			return false;
 		}
 
-		BuildPracticalCascadeSplits(cascadeSplits);
+		BuildConfiguredCascadeSplits(cascadeSplits);
 		for (var i = 0; i < CascadeCount; i++)
 		{
 			cascadeMatrices[i] = BuildCascadeViewProjection(sceneData, lightDirection, cascadeSplits[i]);
@@ -337,28 +342,26 @@ public sealed class ShadowMapPass
 		return false;
 	}
 
-	private static void BuildPracticalCascadeSplits(Span<float> destination)
+	private static void BuildConfiguredCascadeSplits(Span<float> destination)
 	{
 		if (destination.Length < CascadeCount)
 		{
 			throw new ArgumentException("Destination span must contain all cascade splits.", nameof(destination));
 		}
 
-		var farDistance = MaxShadowDistance;
-		var nearDistance = Math.Clamp(SplitNear, 0.01f, farDistance - 0.01f);
-		var ratio = farDistance / nearDistance;
-
-		for (var i = 0; i < CascadeCount; i++)
+		if (CascadeSplitDistances.Count != CascadeCount)
 		{
-			var p = (i + 1.0f) / CascadeCount;
-			var logarithmic = nearDistance * MathF.Pow(ratio, p);
-			var linear = nearDistance + ((farDistance - nearDistance) * p);
-			destination[i] = Math.Clamp(Lerp(linear, logarithmic, SplitLambda), nearDistance, farDistance);
+			throw new InvalidOperationException(
+				$"Cascade split list must contain exactly {CascadeCount} elements.");
 		}
 
-		destination[0] = Math.Clamp(destination[0], nearDistance, farDistance);
-		destination[1] = Math.Clamp(destination[1], destination[0], farDistance);
-		destination[2] = farDistance;
+		var previous = 0.01f;
+		for (var i = 0; i < CascadeCount; i++)
+		{
+			var split = CascadeSplitDistances[i];
+			destination[i] = Math.Clamp(split, previous, MaxShadowDistance);
+			previous = destination[i];
+		}
 	}
 
 	private static Matrix4x4 BuildCascadeViewProjection(SceneDrawData sceneData, Vector3 lightDirection, float receiverRadius)
@@ -402,8 +405,6 @@ public sealed class ShadowMapPass
 			farPlane);
 		return lightView * lightProjection;
 	}
-
-	private static float Lerp(float a, float b, float t) => a + ((b - a) * t);
 
 	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
 	{

@@ -193,7 +193,7 @@ public sealed class DeferredLightingPass
 		lightingConstants[99] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
 		lightingConstants[100] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
 		lightingConstants[101] = config.ShadowsEnabled ? 1u : 0u;
-		lightingConstants[102] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
+		lightingConstants[102] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
 		lightingConstants[103] = 0;
 		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(lightingConstants));
 
