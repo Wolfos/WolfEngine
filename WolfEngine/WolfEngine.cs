@@ -4,6 +4,8 @@ using WolfEngine.Importing;
 using WolfEngine.Input;
 using WolfEngine.Platform;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Backend.D3D12;
+using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
@@ -45,12 +47,14 @@ public static class WolfEngine
 		if (OperatingSystem.IsMacOS())
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
+			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
 			services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
+			services.AddSingleton<IGpuDrawBackendBridge, D3D12GpuDrawBackendBridge>();
 			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();

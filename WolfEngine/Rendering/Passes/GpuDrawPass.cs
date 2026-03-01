@@ -2,11 +2,8 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using WolfEngine;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -18,6 +15,7 @@ public sealed class GpuDrawPass
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly IRenderer _renderer;
+	private readonly IGpuDrawBackendBridge _backendBridge;
 	private IGfxPipeline? _updatePipeline;
 	private IGfxPipeline? _cullPipeline;
 	private readonly List<GpuDrawUpdate> _updates = new();
@@ -29,10 +27,6 @@ public sealed class GpuDrawPass
 	private readonly List<uint> _materialGenerations = new();
 	private readonly uint[] _lastGpuDiagnosticCounters = new uint[GpuDrawResources.HardeningCounterCount];
 	private readonly List<StructuralCommandRecord> _structuralReplayRecords = new();
-	private nint _lastBindlessCountBufferPtr;
-	private nint _lastBindlessTextureBufferPtr;
-	private nint _lastBindlessRwTextureBufferPtr;
-	private nint _lastBindlessSamplerBufferPtr;
 	private readonly ulong[] _slotAppliedVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _slotBindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _slotFrameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
@@ -68,7 +62,8 @@ public sealed class GpuDrawPass
 	}
 	
 	public GpuDrawPass(IShaderCompiler shaderCompiler, GpuDrawDatabase drawDatabase,
-		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, GpuDrawHardeningStats hardeningStats, IRenderer renderer)
+		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, GpuDrawHardeningStats hardeningStats, IRenderer renderer,
+		IGpuDrawBackendBridge backendBridge)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_drawDatabase = drawDatabase ?? throw new ArgumentNullException(nameof(drawDatabase));
@@ -76,78 +71,61 @@ public sealed class GpuDrawPass
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_backendBridge = backendBridge ?? throw new ArgumentNullException(nameof(backendBridge));
 		Array.Fill(_slotFrameBindings, -1);
 	}
 
 	public void RecordUpdate(RenderGraphContext context)
 	{
-		var isMacOS = OperatingSystem.IsMacOS();
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
 		EnsureGBufferPipelines(device);
-		if (isMacOS)
+		var primaryGBufferPipeline = GetPrimaryGBufferPipeline();
+		var backendSignals = _backendBridge.PrepareFrame(device, _renderer, _gpuDrawResources, primaryGBufferPipeline);
+		if (backendSignals.RequiresFullSlotReencode)
 		{
-			EnsureBindlessArgumentBuffersForGBuffer(device);
+			_bindlessEpoch++;
 		}
 
 		var activeSlot = AdvanceActiveIndirectSlot();
 		_gpuDrawResources.ActiveIndirectCommandSlot = activeSlot;
 		_gpuDrawResources.ActiveFrameSlot = activeSlot;
-		MetalDescriptorTable? metalTable = null;
-		MetalIndirectCommandBuffer[]? activeIndirectCommands = null;
+		IGfxIndirectCommandBuffer[]? activeIndirectCommands = null;
 		var requireFullGpuStateRefresh = false;
-		if (isMacOS && device is MetalDevice && device.GlobalTable is MetalDescriptorTable table)
+		if (backendSignals.SupportsIndirectStructuralUpdates &&
+		    _backendBridge.TryGetSlotIndirectCommands(_gpuDrawResources, activeSlot, out var slotCommands))
 		{
-			metalTable = table;
-			if (TryGetSlotIndirectCommands(activeSlot, out var slotCommands))
+			activeIndirectCommands = slotCommands;
+			if (activeIndirectCommands.Length > 0)
 			{
-				activeIndirectCommands = slotCommands;
-			}
-			if (_renderer is WolfRendererMetal metalRenderer &&
-			    metalRenderer.ConsumePackedGeometryRefresh())
-			{
-				_bindlessEpoch++;
-			}
-
-			if (BindlessPointersChanged(table))
-			{
-				_bindlessEpoch++;
-				CacheBindlessPointers(table);
-			}
-
-				if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
+				var slotFrameMismatch = _slotFrameBindings[activeSlot] != _gpuDrawResources.ActiveFrameSlot;
+				if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch || slotFrameMismatch)
 				{
-					var slotFrameMismatch = _slotFrameBindings[activeSlot] != _gpuDrawResources.ActiveFrameSlot;
-					if (_slotBindlessEpochs[activeSlot] != _bindlessEpoch || slotFrameMismatch)
-						{
-							using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
-							{
-								ReencodeAllIndirectCommands(table, activeIndirectCommands);
-							}
-							requireFullGpuStateRefresh = true;
+					using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
+					{
+						ReencodeAllIndirectCommands(activeIndirectCommands);
+					}
+					requireFullGpuStateRefresh = true;
 
-							_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
-							_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
-							_slotFrameBindings[activeSlot] = _gpuDrawResources.ActiveFrameSlot;
-							CompactStructuralReplayRecords();
-						}
-					else
+					_slotBindlessEpochs[activeSlot] = _bindlessEpoch;
+					_slotAppliedVersions[activeSlot] = _latestStructuralVersion;
+					_slotFrameBindings[activeSlot] = _gpuDrawResources.ActiveFrameSlot;
+					CompactStructuralReplayRecords();
+				}
+				else
 				{
 					using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
 					{
-						ReplayPendingStructuralRecords(activeSlot, table, activeIndirectCommands);
+						ReplayPendingStructuralRecords(activeSlot, activeIndirectCommands);
 					}
 				}
 			}
 		}
 
 		_drawDatabase.ConsumeUpdates(_updates);
-			UploadGenerationTables();
-			if (isMacOS)
-			{
-				SampleGpuDiagnosticCounters();
-			}
+		UploadGenerationTables();
+		SampleGpuDiagnosticCounters();
 		if (_gpuStateBootstrapPending)
 		{
 			var appended = AppendFullGpuStateRefreshUpdates(_updates);
@@ -271,17 +249,16 @@ public sealed class GpuDrawPass
 				bucketIndex = (int)((cachedFlags >> DrawFlagBucketShift) & DrawFlagBucketMask);
 			}
 
-			if (isMacOS &&
+			if (backendSignals.SupportsIndirectStructuralUpdates &&
 			    activeIndirectCommands is not null &&
-			    metalTable is not null &&
 			    IsStructuralUpdateType(update.Type) &&
-			    ApplyStructuralUpdate(update, mesh, metalTable, activeIndirectCommands, bucketIndex))
+			    ApplyStructuralUpdate(update, mesh, activeIndirectCommands, bucketIndex))
 			{
 				AppendStructuralRecord(update, mesh, bucketIndex);
 			}
 			else if (update.Type == GpuDrawUpdateType.UpdateMaterial &&
-			         activeIndirectCommands is not null &&
-			         metalTable is not null)
+			         backendSignals.SupportsIndirectStructuralUpdates &&
+			         activeIndirectCommands is not null)
 			{
 				reencodeAfterUpdates = true;
 			}
@@ -343,13 +320,12 @@ public sealed class GpuDrawPass
 					samplerHandle));
 			}
 
-		if (isMacOS &&
+		if (backendSignals.SupportsIndirectStructuralUpdates &&
 		    reencodeAfterUpdates &&
 		    activeIndirectCommands is not null &&
-		    activeIndirectCommands.Length > 0 &&
-		    metalTable is not null)
+		    activeIndirectCommands.Length > 0)
 		{
-			ReencodeAllIndirectCommands(metalTable, activeIndirectCommands);
+			ReencodeAllIndirectCommands(activeIndirectCommands);
 		}
 
 		if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
@@ -574,6 +550,26 @@ public sealed class GpuDrawPass
 		}
 	}
 
+	private IGfxPipeline? GetPrimaryGBufferPipeline()
+	{
+		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		for (var i = 0; i < bucketDefinitions.Length; i++)
+		{
+			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
+			{
+				continue;
+			}
+
+			var pipeline = _gpuDrawResources.GetGBufferPipeline(i);
+			if (pipeline is not null)
+			{
+				return pipeline;
+			}
+		}
+
+		return null;
+	}
+
 	private static void WriteBuffer<T>(IGfxBuffer buffer, ReadOnlySpan<T> data, string bufferName) where T : unmanaged
 	{
 		if (buffer is not IWritableGpuBuffer writableBuffer)
@@ -594,12 +590,10 @@ public sealed class GpuDrawPass
 	private static bool IsStructuralUpdateType(GpuDrawUpdateType type) =>
 		type is GpuDrawUpdateType.Add or GpuDrawUpdateType.Remove or GpuDrawUpdateType.UpdateMesh;
 
-	[SupportedOSPlatform("macos")]
 	private bool ApplyStructuralUpdate(
 		in GpuDrawUpdate update,
 		Mesh? mesh,
-		MetalDescriptorTable table,
-		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands,
+		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands,
 		int bucketIndex)
 	{
 		if (IsStructuralUpdateType(update.Type) == false)
@@ -640,25 +634,23 @@ public sealed class GpuDrawPass
 		{
 			if (i == bucketIndex)
 			{
-				if (TryEncodeIndirectCommand(commandIndex, mesh, table, indirectCommands[i]) == false)
+				if (TryEncodeIndirectCommand(commandIndex, mesh, indirectCommands[i]) == false)
 				{
-					indirectCommands[i].ResetCommand(commandIndex);
+					_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 				}
 			}
 			else
 			{
-				indirectCommands[i].ResetCommand(commandIndex);
+				_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 			}
 		}
 
 		return true;
 	}
 
-	[SupportedOSPlatform("macos")]
 	private void ReplayPendingStructuralRecords(
 		int slotIndex,
-		MetalDescriptorTable table,
-		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
+		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
 		var appliedVersion = _slotAppliedVersions[slotIndex];
 		if (_latestStructuralVersion <= appliedVersion)
@@ -674,17 +666,15 @@ public sealed class GpuDrawPass
 				continue;
 			}
 
-			ApplyStructuralRecord(record, table, indirectCommands);
+			ApplyStructuralRecord(record, indirectCommands);
 		}
 
 		_slotAppliedVersions[slotIndex] = _latestStructuralVersion;
 	}
 
-	[SupportedOSPlatform("macos")]
 	private void ApplyStructuralRecord(
 		in StructuralCommandRecord record,
-		MetalDescriptorTable table,
-		IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
+		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
 		if (_drawDatabase.IsCurrentDrawHandle(record.DrawHandle) == false)
 		{
@@ -720,14 +710,14 @@ public sealed class GpuDrawPass
 		{
 			if (i == bucketIndex)
 			{
-				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, table, indirectCommands[i]) == false)
+				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, indirectCommands[i]) == false)
 				{
-					indirectCommands[i].ResetCommand(commandIndex);
+					_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 				}
 			}
 			else
 			{
-				indirectCommands[i].ResetCommand(commandIndex);
+				_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 			}
 		}
 	}
@@ -766,68 +756,13 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	[SupportedOSPlatform("macos")]
-	private void EnsureBindlessArgumentBuffersForGBuffer(IGfxDevice device)
-	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
-		if (bucketDefinitions.Length == 0)
-		{
-			return;
-		}
-
-		var primaryPipeline = default(IGfxPipeline);
-		for (var i = 0; i < bucketDefinitions.Length; i++)
-		{
-			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			primaryPipeline = _gpuDrawResources.GetGBufferPipeline(i);
-			if (primaryPipeline is not null)
-			{
-				break;
-			}
-		}
-
-		if (primaryPipeline is not MetalPipeline metalPipeline ||
-		    device.GlobalTable is not MetalDescriptorTable metalTable)
-		{
-			return;
-		}
-
-		metalTable.SetArgumentEncoders(
-			metalPipeline.TextureEncoder,
-			metalPipeline.RWTextureEncoder,
-			metalPipeline.SamplerEncoder);
-	}
-
-	[SupportedOSPlatform("macos")]
-	private bool BindlessPointersChanged(MetalDescriptorTable table)
-	{
-		return _lastBindlessCountBufferPtr != table.CountBuffer.NativePtr ||
-		       _lastBindlessTextureBufferPtr != table.TextureArgumentBuffer.NativePtr ||
-		       _lastBindlessRwTextureBufferPtr != table.RWTextureArgumentBuffer.NativePtr ||
-		       _lastBindlessSamplerBufferPtr != table.SamplerArgumentBuffer.NativePtr;
-	}
-
-	[SupportedOSPlatform("macos")]
-	private void CacheBindlessPointers(MetalDescriptorTable table)
-	{
-		_lastBindlessCountBufferPtr = table.CountBuffer.NativePtr;
-		_lastBindlessTextureBufferPtr = table.TextureArgumentBuffer.NativePtr;
-		_lastBindlessRwTextureBufferPtr = table.RWTextureArgumentBuffer.NativePtr;
-		_lastBindlessSamplerBufferPtr = table.SamplerArgumentBuffer.NativePtr;
-	}
-
-	[SupportedOSPlatform("macos")]
-	private void ReencodeAllIndirectCommands(MetalDescriptorTable table, IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
+	private void ReencodeAllIndirectCommands(IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
 		for (var bucketIndex = 0; bucketIndex < indirectCommands.Count; bucketIndex++)
 		{
 			for (var i = 1u; i < GpuDrawResources.MaxDrawCount; i++)
 			{
-				indirectCommands[bucketIndex].ResetCommand(i);
+				_backendBridge.ResetCommand(indirectCommands[bucketIndex], i);
 			}
 		}
 
@@ -847,98 +782,31 @@ public sealed class GpuDrawPass
 				bucketIndex = 0;
 			}
 
-			TryEncodeIndirectCommand((uint)entry.DrawIndex, entry.Mesh, table, indirectCommands[bucketIndex]);
+			TryEncodeIndirectCommand((uint)entry.DrawIndex, entry.Mesh, indirectCommands[bucketIndex]);
 		}
 	}
 
-	[SupportedOSPlatform("macos")]
-	private bool TryGetSlotIndirectCommands(int slotIndex, out MetalIndirectCommandBuffer[] commandBuffers)
-	{
-		commandBuffers = Array.Empty<MetalIndirectCommandBuffer>();
-		var bucketCount = GBufferDrawBuckets.BucketCount;
-		if (bucketCount <= 0)
-		{
-			return false;
-		}
-
-		var resolved = new MetalIndirectCommandBuffer[bucketCount];
-		for (var i = 0; i < bucketCount; i++)
-		{
-			if (_gpuDrawResources.GetIndirectCommandBufferSlot(slotIndex, i) is not MetalIndirectCommandBuffer commandBuffer)
-			{
-				return false;
-			}
-
-			resolved[i] = commandBuffer;
-		}
-
-		commandBuffers = resolved;
-		return true;
-	}
-
-	[SupportedOSPlatform("macos")]
-	private static void ResetCommandAcrossBuckets(uint commandIndex, IReadOnlyList<MetalIndirectCommandBuffer> indirectCommands)
+	private void ResetCommandAcrossBuckets(uint commandIndex, IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
 		for (var i = 0; i < indirectCommands.Count; i++)
 		{
-			indirectCommands[i].ResetCommand(commandIndex);
+			_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 		}
 	}
 
-	[SupportedOSPlatform("macos")]
 	private bool TryEncodeIndirectCommand(
 		uint commandIndex,
 		Mesh mesh,
-		MetalDescriptorTable table,
-		MetalIndirectCommandBuffer indirectCommands)
+		IGfxIndirectCommandBuffer indirectCommands)
 	{
 		var bucketDefinitions = GBufferDrawBuckets.Definitions;
 		if (bucketDefinitions.Length == 0 ||
-		    HasAnyGBufferPipeline() == false ||
-		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
-		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
-		    _gpuDrawResources.CameraBuffer is not MetalBuffer cameraBuffer ||
-		    _gpuDrawResources.ShadowCameraBuffer is not MetalBuffer shadowCameraBuffer ||
-		    _gpuDrawResources.TransparentEnvironmentBuffer is not MetalBuffer transparentEnvironmentBuffer ||
-		    _gpuDrawResources.TransparentLightingBuffer is not MetalBuffer transparentLightingBuffer ||
-		    _gpuDrawResources.InstanceBuffer is not MetalBuffer instanceBuffer ||
-		    _gpuDrawResources.MaterialBuffer is not MetalBuffer materialBuffer ||
-		    _gpuDrawResources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer)
+		    HasAnyGBufferPipeline() == false)
 		{
 			return false;
 		}
 
-		if (table.CountBuffer.NativePtr == IntPtr.Zero ||
-		    table.TextureArgumentBuffer.NativePtr == IntPtr.Zero ||
-		    table.SamplerArgumentBuffer.NativePtr == IntPtr.Zero ||
-		    _gpuDrawResources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer)
-		{
-			return false;
-		}
-
-		indirectCommands.EncodeIndexedDrawCommand(
-			commandIndex,
-			metalVertexBuffer,
-			mesh.PackedVertexOffsetBytes,
-			metalIndexBuffer,
-			IndexFormat.UInt32,
-			mesh.IndexCount,
-			mesh.PackedIndexOffsetBytes,
-			0,
-			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
-			cameraBuffer,
-			shadowCameraBuffer,
-			transparentEnvironmentBuffer,
-			transparentLightingBuffer,
-			instanceBuffer,
-			materialBuffer,
-			materialGenerationBuffer,
-			drawArgsBuffer,
-			table.CountBuffer,
-			table.TextureArgumentBuffer,
-			table.RWTextureArgumentBuffer,
-			table.SamplerArgumentBuffer);
-		return true;
+		return _backendBridge.TryEncodeIndexedDrawCommand(indirectCommands, commandIndex, mesh, _gpuDrawResources);
 	}
 
 	private bool HasAnyGBufferPipeline()
@@ -1062,52 +930,13 @@ public sealed class GpuDrawPass
 		UploadFallbackTableEntries();
 	}
 
-	[SupportedOSPlatform("macos")]
-	private unsafe void SampleGpuDiagnosticCounters()
+	private void SampleGpuDiagnosticCounters()
 	{
-		if (_gpuDrawResources.DiagnosticsCounterBuffer is not MetalBuffer diagnosticsBuffer ||
-		    diagnosticsBuffer.Buffer.NativePtr == IntPtr.Zero)
-		{
-			return;
-		}
-
-		var counters = new ReadOnlySpan<uint>(
-			(void*)diagnosticsBuffer.Buffer.Contents.ToPointer(),
-			GpuDrawResources.HardeningCounterCount);
-		for (var i = 0; i < counters.Length; i++)
-		{
-			var current = counters[i];
-			var previous = _lastGpuDiagnosticCounters[i];
-			if (current < previous)
-			{
-				_lastGpuDiagnosticCounters[i] = current;
-				continue;
-			}
-
-			var delta = current - previous;
-			if (delta == 0)
-			{
-				continue;
-			}
-
-			_lastGpuDiagnosticCounters[i] = current;
-			switch (i)
-			{
-				case 0:
-					_hardeningStats.AddStaleHandleRejects(delta);
-					break;
-				case 1:
-					_hardeningStats.AddFallbackProxySubstitutions(delta);
-					break;
-					case 4:
-						_hardeningStats.AddVisibleListClampHits(delta);
-						break;
-					case 5:
-						_hardeningStats.AddMaterialFallbackDrawHits(delta);
-						break;
-				}
-			}
-		}
+		_backendBridge.SampleGpuDiagnosticCounters(
+			_gpuDrawResources.DiagnosticsCounterBuffer,
+			_lastGpuDiagnosticCounters,
+			_hardeningStats);
+	}
 
 	private void UploadFallbackTableEntries()
 	{

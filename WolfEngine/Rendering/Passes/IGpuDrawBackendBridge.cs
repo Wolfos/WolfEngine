@@ -1,0 +1,45 @@
+#nullable enable
+
+using WolfEngine.Rendering.Abstraction;
+
+namespace WolfEngine.Rendering.Passes;
+
+public readonly struct GpuDrawBackendFrameSignals
+{
+	public GpuDrawBackendFrameSignals(bool requiresFullSlotReencode, bool supportsIndirectStructuralUpdates)
+	{
+		RequiresFullSlotReencode = requiresFullSlotReencode;
+		SupportsIndirectStructuralUpdates = supportsIndirectStructuralUpdates;
+	}
+
+	public bool RequiresFullSlotReencode { get; }
+
+	public bool SupportsIndirectStructuralUpdates { get; }
+}
+
+public interface IGpuDrawBackendBridge
+{
+	GpuDrawBackendFrameSignals PrepareFrame(
+		IGfxDevice device,
+		IRenderer renderer,
+		GpuDrawResources resources,
+		IGfxPipeline? primaryGBufferPipeline);
+
+	bool TryGetSlotIndirectCommands(
+		GpuDrawResources resources,
+		int slotIndex,
+		out IGfxIndirectCommandBuffer[] commandBuffers);
+
+	void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex);
+
+	bool TryEncodeIndexedDrawCommand(
+		IGfxIndirectCommandBuffer commandBuffer,
+		uint commandIndex,
+		Mesh mesh,
+		GpuDrawResources resources);
+
+	void SampleGpuDiagnosticCounters(
+		IGfxBuffer? diagnosticsCounterBuffer,
+		uint[] lastCounters,
+		GpuDrawHardeningStats stats);
+}
