@@ -26,7 +26,6 @@ public sealed class RenderGraph
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly EditorViewportStateBus _viewportStateBus;
-	private readonly IEditorSceneOverlayHook _editorSceneOverlayHook;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -56,7 +55,6 @@ public sealed class RenderGraph
 		GpuDrawHardeningStats hardeningStats,
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
-		IEditorSceneOverlayHook editorSceneOverlayHook,
 		IMainThreadDispatcher mainThreadDispatcher,
 		SkyboxRenderer skyboxRenderer,
 		IImGuiRenderer imGuiRenderer)
@@ -72,13 +70,11 @@ public sealed class RenderGraph
 			shadowMapPass,
 			gpuDrawPass,
 			gpuDrawResources,
-			imGuiRenderer,
-			editorSceneOverlayHook);
+			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
-		_editorSceneOverlayHook = editorSceneOverlayHook ?? throw new ArgumentNullException(nameof(editorSceneOverlayHook));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_compiler = new(resourceRegistry);
@@ -284,7 +280,7 @@ public sealed class RenderGraph
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
-				var renderSceneToViewport = sceneEnabled && _editorSceneOverlayHook.SupportsSceneViewportRenderTarget;
+				var renderSceneToViewport = sceneEnabled;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
 				var nextSceneRenderState = SceneViewportRenderState.Empty;
 				if (renderSceneToViewport)
