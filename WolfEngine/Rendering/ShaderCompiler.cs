@@ -1,47 +1,28 @@
 using System.Collections.Generic;
-using System.Text;
-using System.Text.RegularExpressions;
 using Slangc.NET;
 
 namespace WolfEngine;
 
 public interface IShaderCompiler
 {
-	string GetMetalSource(string filename);
-	string GetMetalSource(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines);
-	string GetMetalComputeSource(string filename, string entryPoint);
+	ReadOnlyMemory<byte> GetMetalLibrary(string filename);
+	ReadOnlyMemory<byte> GetMetalLibrary(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines);
+	ReadOnlyMemory<byte> GetMetalComputeLibrary(string filename, string entryPoint);
 	byte[] GetDxil(string filename, string entryPoint, string profile, params string[] defines);
 	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
 }
 
 public class ShaderCompiler : IShaderCompiler
 {
-	private readonly Dictionary<string, string> _cachedShaders = new();
+	private readonly Dictionary<string, ReadOnlyMemory<byte>> _cachedMetalLibraries = new();
 	private Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
 
-	private static string InjectArgumentBufferIds(string source)
+	public ReadOnlyMemory<byte> GetMetalLibrary(string filename)
 	{
-		source = Regex.Replace(
-			source,
-			@"array<sampler, int\((\d+)\)>\s+(g_Samplers_\d+);",
-			"array<sampler, int($1)> $2 [[id(0)]];");
-		source = Regex.Replace(
-			source,
-			@"array<texture2d<float, access::sample>, int\((\d+)\)>\s+(g_Textures_\d+);",
-			"array<texture2d<float, access::sample>, int($1)> $2 [[id(0)]];");
-		source = Regex.Replace(
-			source,
-			@"array<texture2d<float, access::read_write>, int\((\d+)\)>\s+(g_RWTextures_\d+);",
-			"array<texture2d<float, access::read_write>, int($1)> $2 [[id(0)]];");
-		return source;
-	}
-	
-	public string GetMetalSource(string filename)
-	{
-		return GetMetalSource(filename, "vertexShader", "fragmentShader");
+		return GetMetalLibrary(filename, "vertexShader", "fragmentShader");
 	}
 
-	public string GetMetalSource(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines)
+	public ReadOnlyMemory<byte> GetMetalLibrary(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines)
 	{
 		if (string.IsNullOrWhiteSpace(filename))
 		{
@@ -62,9 +43,9 @@ public class ShaderCompiler : IShaderCompiler
 			? string.Join(";", defines)
 			: string.Empty;
 		var cacheKey = $"{filename}|vs={vertexEntryPoint}|ps={pixelEntryPoint}|defs={definesSuffix}";
-		if (_cachedShaders.TryGetValue(cacheKey, out var source))
+		if (_cachedMetalLibraries.TryGetValue(cacheKey, out var cachedLibrary))
 		{
-			return source;
+			return cachedLibrary;
 		}
 
 		var shaderPath = Path.IsPathRooted(filename)
@@ -79,7 +60,7 @@ public class ShaderCompiler : IShaderCompiler
 		var args = new List<string>
 		{
 			shaderPath,
-			"-target", "metal",
+			"-target", "metallib",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
 			"-entry", vertexEntryPoint,
@@ -103,14 +84,13 @@ public class ShaderCompiler : IShaderCompiler
 			}
 		}
 
-		var compiled = SlangCompiler.Compile(args.ToArray());
-		var metalSource = InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
-		DumpMetalSourceIfRequested(shaderPath, metalSource);
-		_cachedShaders.Add(cacheKey, metalSource);
-		return metalSource;
+		var metalLibrary = SlangCompiler.Compile(args.ToArray());
+		DumpMetalLibraryIfRequested(shaderPath, metalLibrary);
+		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
+		return metalLibrary;
 	}
 	
-	public string GetMetalComputeSource(string filename, string entryPoint)
+	public ReadOnlyMemory<byte> GetMetalComputeLibrary(string filename, string entryPoint)
 	{
 		if (string.IsNullOrWhiteSpace(filename))
 		{
@@ -131,33 +111,42 @@ public class ShaderCompiler : IShaderCompiler
 			throw new FileNotFoundException($"Shader file '{shaderPath}' was not found.", shaderPath);
 		}
 
+		var cacheKey = $"{filename}|cs={entryPoint}";
+		if (_cachedMetalLibraries.TryGetValue(cacheKey, out var cachedLibrary))
+		{
+			return cachedLibrary;
+		}
+
 		var args = new[]
 		{
 			shaderPath,
-			"-target", "metal",
+			"-target", "metallib",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
 			"-entry", entryPoint,
 			"-stage", "compute",
 			"-o", "-"
 		};
+		var argsWithDownstream = new List<string>(args);
 
-		var compiled = SlangCompiler.Compile(args);
-		var metalSource = InjectArgumentBufferIds(Encoding.UTF8.GetString(compiled));
-		DumpMetalSourceIfRequested(shaderPath, metalSource);
-		return metalSource;
+		var metalLibrary = SlangCompiler.Compile(argsWithDownstream.ToArray());
+		DumpMetalLibraryIfRequested(shaderPath, metalLibrary);
+		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
+		return metalLibrary;
 	}
 
-	private static void DumpMetalSourceIfRequested(string shaderPath, string metalSource)
+	private static void DumpMetalLibraryIfRequested(string shaderPath, ReadOnlySpan<byte> metalLibrary)
 	{
-		if (Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") != "1")
+		var shouldDump = Environment.GetEnvironmentVariable("WOLF_DUMP_METALLIB") == "1" ||
+		                 Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") == "1";
+		if (shouldDump == false)
 		{
 			return;
 		}
 
-		var fileName = Path.GetFileNameWithoutExtension(shaderPath) + ".metal.msl";
+		var fileName = Path.GetFileNameWithoutExtension(shaderPath) + ".metallib";
 		var outputPath = Path.Combine(AppContext.BaseDirectory, "Shaders", fileName);
-		File.WriteAllText(outputPath, metalSource);
+		File.WriteAllBytes(outputPath, metalLibrary.ToArray());
 	}
 
 

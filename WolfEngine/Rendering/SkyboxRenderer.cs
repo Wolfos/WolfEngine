@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
@@ -325,8 +324,7 @@ public sealed class SkyboxRenderer
 		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
-			var source = _shaderCompiler.GetMetalComputeSource("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain");
-			var shaderBytes = Encoding.UTF8.GetBytes(source);
+			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain");
 			shaders = new ShaderBytecodeSet(compute: shaderBytes);
 		}
 		else
@@ -359,8 +357,7 @@ public sealed class SkyboxRenderer
 		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
-			var source = _shaderCompiler.GetMetalComputeSource("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
-			var shaderBytes = Encoding.UTF8.GetBytes(source);
+			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
 			shaders = new ShaderBytecodeSet(compute: shaderBytes);
 		}
 		else
@@ -393,8 +390,7 @@ public sealed class SkyboxRenderer
 		// TODO: No metal here
 		if (IsMetalRenderer())
 		{
-			var source = _shaderCompiler.GetMetalComputeSource("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
-			var shaderBytes = Encoding.UTF8.GetBytes(source);
+			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
 			shaders = new ShaderBytecodeSet(compute: shaderBytes);
 		}
 		else
@@ -426,8 +422,7 @@ public sealed class SkyboxRenderer
 		ShaderBytecodeSet shaders;
 		if (IsMetalRenderer())
 		{
-			var source = _shaderCompiler.GetMetalComputeSource("ibl_brdf_lut.compute.slang", "IblBrdfCSMain");
-			var shaderBytes = Encoding.UTF8.GetBytes(source);
+			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_brdf_lut.compute.slang", "IblBrdfCSMain");
 			shaders = new ShaderBytecodeSet(compute: shaderBytes);
 		}
 		else

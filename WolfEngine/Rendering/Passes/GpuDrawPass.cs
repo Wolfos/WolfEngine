@@ -3,7 +3,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using WolfEngine;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
@@ -484,8 +483,7 @@ public sealed class GpuDrawPass
 			return _updatePipeline;
 		}
 
-		var source = _shaderCompiler.GetMetalComputeSource("gpu_draw_update.compute.slang", "CSUpdate");
-		var bytes = Encoding.UTF8.GetBytes(source);
+		var bytes = _shaderCompiler.GetMetalComputeLibrary("gpu_draw_update.compute.slang", "CSUpdate");
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdate", default, default, default);
 		_updatePipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
 		return _updatePipeline;
@@ -498,8 +496,7 @@ public sealed class GpuDrawPass
 			return _cullPipeline;
 		}
 
-		var source = _shaderCompiler.GetMetalComputeSource("gpu_draw_cull.compute.slang", "CSCull");
-		var bytes = Encoding.UTF8.GetBytes(source);
+		var bytes = _shaderCompiler.GetMetalComputeLibrary("gpu_draw_cull.compute.slang", "CSCull");
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
 		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
 		return _cullPipeline;

@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Collections.Generic;
 using ImGuiNET;
 using SharpMetal.Metal;
@@ -308,8 +307,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 
 	private IGfxPipeline CreatePipeline(IGfxDevice device)
 	{
-		var source = _shaderCompiler.GetMetalSource("imgui.slang");
-		var shaderBytes = Encoding.UTF8.GetBytes(source);
+		var shaderBytes = _shaderCompiler.GetMetalLibrary("imgui.slang");
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.None,

@@ -1,6 +1,5 @@
 #nullable enable
 
-using System.Text;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -19,9 +18,8 @@ internal static class GraphicsShaderCompiler
 
 		if (backendKind == GraphicsBackendKind.Metal)
 		{
-			var source = shaderCompiler.GetMetalSource(shaderPath, vertexEntryPoint, pixelEntryPoint, defines);
-			var bytes = Encoding.UTF8.GetBytes(source);
-			return new ShaderBytecodeSet(bytes, bytes);
+			var library = shaderCompiler.GetMetalLibrary(shaderPath, vertexEntryPoint, pixelEntryPoint, defines);
+			return new ShaderBytecodeSet(library, library);
 		}
 
 		var vertex = shaderCompiler.GetDxil(shaderPath, vertexEntryPoint, "vs_6_0", defines);

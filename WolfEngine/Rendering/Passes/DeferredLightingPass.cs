@@ -1,7 +1,6 @@
 
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -214,8 +213,7 @@ public sealed class DeferredLightingPass
 		{
 			if (device.BackendKind == GraphicsBackendKind.Metal)
 			{
-				var source = _shaderCompiler.GetMetalComputeSource("deferred_lighting.compute.slang", "CSMain");
-				_computeShader = Encoding.UTF8.GetBytes(source);
+				_computeShader = _shaderCompiler.GetMetalComputeLibrary("deferred_lighting.compute.slang", "CSMain");
 			}
 			else
 			{

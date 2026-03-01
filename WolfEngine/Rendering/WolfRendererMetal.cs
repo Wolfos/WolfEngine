@@ -2,7 +2,6 @@ using System.Numerics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using ThreadingThread = System.Threading.Thread;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -571,8 +570,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             renderState: renderState,
             layout: GraphicsLayoutKind.Material);
 
-        var shaderSource = _shaderCompiler.GetMetalSource(material.ShaderPath);
-        var shaderBytes = Encoding.UTF8.GetBytes(shaderSource);
+        var shaderBytes = _shaderCompiler.GetMetalLibrary(material.ShaderPath);
         var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
         var constantBuffer = new MetalBuffer($"{material.ShaderPath}_ColorBuffer", new(colorBufferLength, BufferUsage.Constant), colorBuffer);
 

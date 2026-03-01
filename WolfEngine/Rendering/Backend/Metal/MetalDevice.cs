@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
+using System.Security.Cryptography;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
@@ -45,6 +45,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
+	private readonly string _metallibCacheDirectory;
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
 	private readonly object _submissionSync = new();
@@ -73,6 +74,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			throw new InvalidOperationException("Failed to create Metal command queue.");
 		}
 		_descriptorTable = new MetalDescriptorTable(_device);
+		_metallibCacheDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine", "metallib-cache");
+		Directory.CreateDirectory(_metallibCacheDirectory);
 	}
 
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
@@ -323,7 +326,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				throw new InvalidOperationException("Compute shader source was not provided.");
 			}
 
-			using var computeLibrary = CreateLibraryFromSource(shaders.Compute.Value);
+			using var computeLibrary = CreateLibraryFromMetallib(shaders.Compute.Value);
 			using var computeEntry = NSStringHelper.From(key.ComputeEntryPoint ?? "CSMain");
 			using var function = computeLibrary.NewFunction(computeEntry);
 			var pipelineStateError = new NSError(IntPtr.Zero);
@@ -349,7 +352,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 		
 		var source = shaders.Vertex.Value;
-		using var graphicsLibrary = CreateLibraryFromSource(source);
+		using var graphicsLibrary = CreateLibraryFromMetallib(source);
 		using var vertexEntry = NSStringHelper.From(key.VertexEntryPoint ?? "vertexShader");
 		using var fragmentEntry = NSStringHelper.From(key.PixelEntryPoint ?? "fragmentShader");
 		using var vertexFunction = graphicsLibrary.NewFunction(vertexEntry);
@@ -466,15 +469,20 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		_pooledTextureCount = 0;
 	}
 
-	private MTLLibrary CreateLibraryFromSource(ReadOnlyMemory<byte> sourceBytes)
+	private MTLLibrary CreateLibraryFromMetallib(ReadOnlyMemory<byte> metallibBytes)
 	{
-		var source = Encoding.UTF8.GetString(sourceBytes.Span);
+		var cacheKey = Convert.ToHexString(SHA256.HashData(metallibBytes.Span)).ToLowerInvariant();
+		var metallibPath = Path.Combine(_metallibCacheDirectory, $"{cacheKey}.metallib");
+		if (File.Exists(metallibPath) == false)
+		{
+			var tempPath = $"{metallibPath}.tmp-{Guid.NewGuid():N}";
+			File.WriteAllBytes(tempPath, metallibBytes.ToArray());
+			File.Move(tempPath, metallibPath, overwrite: true);
+		}
+
 		var libraryError = new NSError(IntPtr.Zero);
-		var options = new MTLCompileOptions(IntPtr.Zero);
-		options.LanguageVersion = MTLLanguageVersion.Version32;
-		using var sourceString = NSStringHelper.From(source);
-		var library = _device.NewLibrary(sourceString, options, ref libraryError);
-		options.Dispose();
+		using var libraryPath = NSStringHelper.From(metallibPath);
+		var library = _device.NewLibrary(libraryPath, ref libraryError);
 		if (libraryError != IntPtr.Zero)
 		{
 			throw new InvalidOperationException($"Failed to create Metal library: {libraryError.LocalizedDescription.ToManagedString()}");

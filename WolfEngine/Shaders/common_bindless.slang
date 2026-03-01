@@ -56,18 +56,18 @@ uint SafeDescriptorIndex(uint handle)
 struct DescriptorHeapTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    [[id(0)]] Texture2D<float4> g_Textures[WOLF_BINDLESS_MAX];
+    Texture2D<float4> g_Textures[WOLF_BINDLESS_MAX];
 #else
-    [[id(0)]] Texture2D<float4> g_Textures[];
+    Texture2D<float4> g_Textures[];
 #endif
 };
 
 struct DescriptorHeapSamplers
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    [[id(0)]] SamplerState g_Samplers[WOLF_BINDLESS_MAX];
+    SamplerState g_Samplers[WOLF_BINDLESS_MAX];
 #else
-    [[id(0)]] SamplerState g_Samplers[];
+    SamplerState g_Samplers[];
 #endif
 };
 
@@ -76,9 +76,9 @@ struct DescriptorHeapSamplers
 struct DescriptorHeapRWTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    [[id(0)]] RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_MAX];
+    RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_MAX];
 #else
-    [[id(0)]] RWTexture2D<float4> g_RWTextures[];
+    RWTexture2D<float4> g_RWTextures[];
 #endif
 };
 
