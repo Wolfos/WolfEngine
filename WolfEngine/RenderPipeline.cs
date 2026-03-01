@@ -56,46 +56,52 @@ public class RenderPipeline : IRenderPipeline
                     continue;
                 }
 
-                foreach (var entry in world.View<WorldTransform, MeshRenderer>())
+                using (FrameProfiler.Instance.Measure("Gather meshes"))
                 {
-                    ref var transform = ref entry.First;
-                    ref var meshRenderer = ref entry.Second;
-                    if (GraphicsConfig.GpuHardeningStressEnabled)
+                    foreach (var entry in world.View<WorldTransform, MeshRenderer>())
                     {
-                        var churnKey = entry.Entity.Index + _stressFrame;
-                        if ((churnKey % 7) == 0)
+                        ref var transform = ref entry.First;
+                        ref var meshRenderer = ref entry.Second;
+                        if (GraphicsConfig.GpuHardeningStressEnabled)
                         {
-                            // Force structural remove/add churn by skipping this entity for the frame.
-                            continue;
+                            var churnKey = entry.Entity.Index + _stressFrame;
+                            if ((churnKey % 7) == 0)
+                            {
+                                // Force structural remove/add churn by skipping this entity for the frame.
+                                continue;
+                            }
+
+                            if (meshRenderer.Material is not null && (churnKey % 5) == 0)
+                            {
+                                var toggled = ((_stressFrame / 30) & 1) == 0;
+                                meshRenderer.Material.AlphaMode = toggled ? AlphaMode.AlphaTest : AlphaMode.Opaque;
+                                meshRenderer.Material.AlphaCutoff = toggled ? 0.4f : 0.0f;
+                            }
                         }
 
-                        if (meshRenderer.Material is not null && (churnKey % 5) == 0)
-                        {
-                            var toggled = ((_stressFrame / 30) & 1) == 0;
-                            meshRenderer.Material.AlphaMode = toggled ? AlphaMode.AlphaTest : AlphaMode.Opaque;
-                            meshRenderer.Material.AlphaCutoff = toggled ? 0.4f : 0.0f;
-                        }
+                        var transformMatrix = transform.LocalToWorld;
+                        _drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
                     }
-
-                    var transformMatrix = transform.LocalToWorld;
-                    _drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
                 }
 
-                foreach (var entry in world.View<WorldTransform, Light>())
+                using (FrameProfiler.Instance.Measure("Gather lights"))
                 {
-                    ref var transform = ref entry.First;
-                    ref var light = ref entry.Second;
-                    snapshot.AddLight(light, transform.LocalToWorld);
-                    if (hasSunDirection == false && light.Type == LightType.Directional)
+                    foreach (var entry in world.View<WorldTransform, Light>())
                     {
-                        var forward = Vector3.TransformNormal(Vector3.UnitZ, transform.LocalToWorld);
-                        if (forward == Vector3.Zero)
+                        ref var transform = ref entry.First;
+                        ref var light = ref entry.Second;
+                        snapshot.AddLight(light, transform.LocalToWorld);
+                        if (hasSunDirection == false && light.Type == LightType.Directional)
                         {
-                            forward = new Vector3(0, -1, 0);
-                        }
+                            var forward = Vector3.TransformNormal(Vector3.UnitZ, transform.LocalToWorld);
+                            if (forward == Vector3.Zero)
+                            {
+                                forward = new Vector3(0, -1, 0);
+                            }
 
-                        sunDirection = Vector3.Normalize(forward);
-                        hasSunDirection = true;
+                            sunDirection = Vector3.Normalize(forward);
+                            hasSunDirection = true;
+                        }
                     }
                 }
             }

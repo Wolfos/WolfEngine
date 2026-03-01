@@ -20,12 +20,12 @@ public sealed class ShadowMapPass
 	private const float DefaultCascadeBlendDistance = 2.0f;
 	private const int ShadowCameraConstantsFloatCount = (16 * CascadeCount) + 4;
 
-	private static readonly List<float> CascadeSplitDistances = new()
-	{
+	private static readonly List<float> CascadeSplitDistances =
+	[
 		6.0f,
 		30.0f,
 		MaxShadowDistance
-	};
+	];
 
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, int BucketIndex), IGfxPipeline> _pipelinesByCascadeBucket = new();

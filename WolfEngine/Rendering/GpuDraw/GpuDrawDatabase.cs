@@ -74,9 +74,8 @@ public sealed class GpuDrawDatabase
 				}
 			}
 
-			for (var i = 0; i < toRemove.Count; i++)
+			foreach (var entity in toRemove)
 			{
-				var entity = toRemove[i];
 				if (_records.TryGetValue(entity, out var record) == false)
 				{
 					continue;
@@ -185,6 +184,11 @@ public sealed class GpuDrawDatabase
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
+
+		if ((transformChanged || meshChanged || materialChanged) == false)
+		{
+			return;
+		}
 
 		if (meshChanged)
 		{
