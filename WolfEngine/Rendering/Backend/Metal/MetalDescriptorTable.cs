@@ -1,4 +1,4 @@
-using System;
+using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
@@ -6,6 +6,7 @@ using WolfEngine.Platform;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
+[SupportedOSPlatform("macos")]
 internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
@@ -270,14 +271,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		counts[2] = (uint)_samplerCount;
 		counts[3] = 0;
 		BufferHelper.CopyToBuffer(counts, _countBuffer);
-	}
-
-	internal string GetArgumentBufferStats()
-	{
-		ulong textureBytes = _textureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _textureArgumentBuffer.Length;
-		ulong rwTextureBytes = _rwTextureArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _rwTextureArgumentBuffer.Length;
-		ulong samplerBytes = _samplerArgumentBuffer.NativePtr == IntPtr.Zero ? 0UL : _samplerArgumentBuffer.Length;
-		return $"ArgBuffers: textures={textureBytes / (1024.0 * 1024.0):F1} MiB, rwTextures={rwTextureBytes / (1024.0 * 1024.0):F1} MiB, samplers={samplerBytes / (1024.0 * 1024.0):F1} MiB";
 	}
 
 	public int SrvCount => _srvCount;

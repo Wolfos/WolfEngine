@@ -6,7 +6,6 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Utility;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering;
 
@@ -33,8 +32,6 @@ public sealed class RenderGraph
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
-	private readonly bool _metalLeakDiagnosticsEnabled;
-	private readonly int _metalLeakDiagnosticsInterval;
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
@@ -85,11 +82,6 @@ public sealed class RenderGraph
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_compiler = new(resourceRegistry);
-		_metalLeakDiagnosticsEnabled = string.Equals(
-			Environment.GetEnvironmentVariable("WOLF_METAL_LEAK_DIAG"),
-			"1",
-			StringComparison.Ordinal);
-		_metalLeakDiagnosticsInterval = ParsePositiveIntEnvironmentVariable("WOLF_METAL_LEAK_DIAG_INTERVAL", 120);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
 	}
 
@@ -332,7 +324,6 @@ public sealed class RenderGraph
 		_frameIndex++;
 		_hardeningStats.SetDeferredReleaseBacklog(_resourceRegistry.PendingDeferredReleaseCount);
 		LogGpuHardeningStatsIfNeeded();
-		LogMetalLeakDiagnosticsIfNeeded();
 		FrameCompleted?.Invoke();
 		FrameProfiler.Instance.EndFrame();
 	}
@@ -457,42 +448,4 @@ public sealed class RenderGraph
 
 		texture.Resources = _renderer.CreateTextureResources(texture);
 	}
-
-#pragma warning disable CA1416
-	private void LogMetalLeakDiagnosticsIfNeeded()
-	{
-		if (_metalLeakDiagnosticsEnabled == false)
-		{
-			return;
-		}
-
-		if ((_frameIndex % _metalLeakDiagnosticsInterval) != 0)
-		{
-			return;
-		}
-
-		if (_renderer.GetGfxDevice() is not MetalDevice)
-		{
-			return;
-		}
-
-		var workingSetBytes = Environment.WorkingSet;
-		if (_hasLastProcessMemorySnapshot)
-		{
-			Console.WriteLine(
-				$"[MetalLeakDiag] frame={_frameIndex} " +
-				$"procWorkingSetMiB={(workingSetBytes / (1024.0 * 1024.0)):F2} " +
-				$"({(workingSetBytes - _lastProcessWorkingSetBytes) / (1024.0 * 1024.0):+#.##;-#.##;0.00})");
-		}
-		else
-		{
-			Console.WriteLine(
-				$"[MetalLeakDiag] frame={_frameIndex} baseline " +
-				$"procWorkingSetMiB={(workingSetBytes / (1024.0 * 1024.0)):F2}");
-		}
-
-		_lastProcessWorkingSetBytes = workingSetBytes;
-		_hasLastProcessMemorySnapshot = true;
-	}
-#pragma warning restore CA1416
 }
