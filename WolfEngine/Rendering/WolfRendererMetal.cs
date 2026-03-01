@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using ThreadingThread = System.Threading.Thread;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
@@ -78,6 +79,11 @@ internal unsafe class WolfRendererMetal : IRenderer
     private int _presentFrameIndex;
     private int _lastDrawableAcquireFailureLogFrame = int.MinValue;
     private bool _vsyncEnabled = Screen.VSyncEnabled;
+    private readonly object _queuedDrawableLock = new();
+    private ThreadingThread? _drawableAcquireThread;
+    private volatile bool _drawableAcquireRunning;
+    private IntPtr _queuedDrawablePtr = IntPtr.Zero;
+    private IntPtr _queuedDrawableLayerPtr = IntPtr.Zero;
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
@@ -85,6 +91,12 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
     private static readonly Selector DrawableSizeSelector = new("setDrawableSize:");
+    private static readonly Selector SetDisplaySyncEnabledSelector = new("setDisplaySyncEnabled:");
+    private static readonly Selector DisplaySyncEnabledSelector = new("displaySyncEnabled");
+    private static readonly Selector SetPresentsWithTransactionSelector = new("setPresentsWithTransaction:");
+    private static readonly Selector PresentsWithTransactionSelector = new("presentsWithTransaction");
+    private static readonly Selector SetAllowsNextDrawableTimeoutSelector = new("setAllowsNextDrawableTimeout:");
+    private static readonly Selector AllowsNextDrawableTimeoutSelector = new("allowsNextDrawableTimeout");
     private const int MacTitlebarDoubleClickHeight = 28;
     private const int MacTrafficLightExclusionWidth = 70;
 
@@ -162,6 +174,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         _isRunning = true;
         var @event = new Event();
+        StartDrawableAcquireThread();
 
         _startupCallback();
 
@@ -245,18 +258,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             throw new InvalidOperationException("Failed to create Metal view for SDL window.");
         }
 
-        var layerPtr = _sdl.MetalGetLayer(_metalView);
-        if (layerPtr is null)
-        {
-            throw new InvalidOperationException("Failed to retrieve CAMetalLayer from SDL view.");
-        }
-
-        _metalLayer = new CAMetalLayer(new IntPtr(layerPtr));
-        _metalLayer.Device = _device;
-        _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
-        _metalLayer.FramebufferOnly = false;
-        _metalLayer.DisplaySyncEnabled = Screen.VSyncEnabled;
-        _vsyncEnabled = Screen.VSyncEnabled;
+        RefreshMetalLayer();
 
         UpdateDrawableSize();
         ConfigureNativeWindowChrome();
@@ -280,6 +282,53 @@ internal unsafe class WolfRendererMetal : IRenderer
         _nativeWindow = nsWindow;
         var window = new NSWindowInstance(nsWindow);
         window.EnableUnifiedTitlebarChrome(includeFullSizeContentView: true);
+        RecreateMetalViewAndLayer();
+    }
+
+    private void RefreshMetalLayer()
+    {
+        if (_metalView is null)
+        {
+            return;
+        }
+
+        var layerPtr = _sdl.MetalGetLayer(_metalView);
+        if (layerPtr is null)
+        {
+            throw new InvalidOperationException("Failed to retrieve CAMetalLayer from SDL view.");
+        }
+
+        _metalLayer = new CAMetalLayer(new IntPtr(layerPtr));
+        _metalLayer.Device = _device;
+        _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
+        _metalLayer.FramebufferOnly = false;
+        ClearQueuedDrawable();
+        ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetPresentsWithTransactionSelector.SelPtr, false);
+        ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetAllowsNextDrawableTimeoutSelector.SelPtr, false);
+        ApplyDisplaySync(Screen.VSyncEnabled);
+        _hasDrawableSize = false;
+    }
+
+    private void RecreateMetalViewAndLayer()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        if (_metalView is not null)
+        {
+            _sdl.MetalDestroyView(_metalView);
+            _metalView = null;
+        }
+
+        _metalView = _sdl.MetalCreateView(_window);
+        if (_metalView is null)
+        {
+            throw new InvalidOperationException("Failed to recreate Metal view for SDL window.");
+        }
+
+        RefreshMetalLayer();
     }
 
     private bool HandleMacTitlebarDoubleClick(MouseButtonEvent buttonEvent)
@@ -439,6 +488,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void Shutdown()
     {
+        StopDrawableAcquireThread();
+
         if (_isGpuCaptureActive)
         {
             TryStopGpuCapture(out _);
@@ -613,11 +664,13 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public void BeginFrame()
     {
+        EnsureLayerPresentFlags();
+
         var desiredVSync = Screen.VSyncEnabled;
+        _vsyncEnabled = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, DisplaySyncEnabledSelector.SelPtr) != 0;
         if (_vsyncEnabled != desiredVSync)
         {
-            _metalLayer.DisplaySyncEnabled = desiredVSync;
-            _vsyncEnabled = desiredVSync;
+            ApplyDisplaySync(desiredVSync);
         }
 
         UpdateDrawableSize();
@@ -645,9 +698,19 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         nint drawablePtr;
-        using (FrameProfiler.Instance.Measure("AcquireDrawableLate"))
+        var releaseDrawableAfterSubmit = Screen.VSyncEnabled == false;
+        if (Screen.VSyncEnabled)
         {
-            drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
+            using (FrameProfiler.Instance.Measure("AcquireDrawableLate"))
+            {
+                drawablePtr = ObjectiveC.IntPtr_objc_msgSend(_metalLayer.NativePtr, NextDrawableSelector);
+            }
+        }
+        else
+        {
+            drawablePtr = TryDequeueDrawableForLayer(_metalLayer.NativePtr, out var queuedDrawablePtr)
+                ? queuedDrawablePtr
+                : IntPtr.Zero;
         }
 
         if (drawablePtr == IntPtr.Zero)
@@ -662,26 +725,36 @@ internal unsafe class WolfRendererMetal : IRenderer
             return;
         }
 
-        using (FrameProfiler.Instance.Measure("PresentCopy"))
+        try
         {
-            var drawable = new CAMetalDrawable(drawablePtr);
-            var destination = drawable.Texture;
-            if (destination.NativePtr != IntPtr.Zero)
+            using (FrameProfiler.Instance.Measure("PresentCopy"))
             {
-                var source = finalColorTexture.Texture;
-                var width = Math.Min(source.Width, destination.Width);
-                var height = Math.Min(source.Height, destination.Height);
-
-                if (width > 0 && height > 0)
+                var drawable = new CAMetalDrawable(drawablePtr);
+                var destination = drawable.Texture;
+                if (destination.NativePtr != IntPtr.Zero)
                 {
-                    var commandList = _gfxDevice.BeginGraphics() as MetalCommandList;
-                    if (commandList is not null)
+                    var source = finalColorTexture.Texture;
+                    var width = Math.Min(source.Width, destination.Width);
+                    var height = Math.Min(source.Height, destination.Height);
+
+                    if (width > 0 && height > 0)
                     {
-                        commandList.CopyTexture(source, destination, (uint)width, (uint)height);
-                        commandList.SetPresentDrawable(drawable);
-                        _gfxDevice.Submit(commandList);
+                        var commandList = _gfxDevice.BeginGraphics() as MetalCommandList;
+                        if (commandList is not null)
+                        {
+                            commandList.CopyTexture(source, destination, (uint)width, (uint)height);
+                            commandList.SetPresentDrawable(drawable);
+                            _gfxDevice.Submit(commandList);
+                        }
                     }
                 }
+            }
+        }
+        finally
+        {
+            if (releaseDrawableAfterSubmit)
+            {
+                ObjCNative.ObjcRelease(drawablePtr);
             }
         }
 
@@ -1189,6 +1262,176 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         const double epsilon = 0.5;
         return Math.Abs(a - b) < epsilon;
+    }
+
+    private void ApplyDisplaySync(bool enabled)
+    {
+        ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetDisplaySyncEnabledSelector.SelPtr, enabled);
+        _vsyncEnabled = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, DisplaySyncEnabledSelector.SelPtr) != 0;
+        if (enabled)
+        {
+            ClearQueuedDrawable();
+        }
+    }
+
+    private void StartDrawableAcquireThread()
+    {
+        if (_drawableAcquireRunning)
+        {
+            return;
+        }
+
+        _drawableAcquireRunning = true;
+        _drawableAcquireThread = new ThreadingThread(DrawableAcquireLoop)
+        {
+            IsBackground = true,
+            Name = "MetalDrawableAcquire"
+        };
+        _drawableAcquireThread.Start();
+    }
+
+    private void StopDrawableAcquireThread()
+    {
+        _drawableAcquireRunning = false;
+        var thread = _drawableAcquireThread;
+        if (thread is not null && thread.IsAlive)
+        {
+            thread.Join(250);
+        }
+        _drawableAcquireThread = null;
+        ClearQueuedDrawable();
+    }
+
+    private void DrawableAcquireLoop()
+    {
+        while (_drawableAcquireRunning)
+        {
+            if (Screen.VSyncEnabled)
+            {
+                ThreadingThread.Sleep(1);
+                continue;
+            }
+
+            var layerPtr = _metalLayer.NativePtr;
+            if (layerPtr == IntPtr.Zero)
+            {
+                ThreadingThread.Sleep(1);
+                continue;
+            }
+
+            if (HasQueuedDrawableForLayer(layerPtr))
+            {
+                ThreadingThread.Sleep(0);
+                continue;
+            }
+
+            var pool = ObjCNative.ObjcAutoreleasePoolPush();
+            IntPtr drawablePtr = IntPtr.Zero;
+            try
+            {
+                drawablePtr = ObjectiveC.IntPtr_objc_msgSend(layerPtr, NextDrawableSelector);
+                if (drawablePtr != IntPtr.Zero)
+                {
+                    drawablePtr = ObjCNative.ObjcRetain(drawablePtr);
+                }
+            }
+            finally
+            {
+                ObjCNative.ObjcAutoreleasePoolPop(pool);
+            }
+
+            if (drawablePtr == IntPtr.Zero)
+            {
+                continue;
+            }
+
+            if (TryQueueDrawable(layerPtr, drawablePtr) == false)
+            {
+                ObjCNative.ObjcRelease(drawablePtr);
+            }
+        }
+    }
+
+    private bool HasQueuedDrawableForLayer(IntPtr layerPtr)
+    {
+        lock (_queuedDrawableLock)
+        {
+            return _queuedDrawablePtr != IntPtr.Zero && _queuedDrawableLayerPtr == layerPtr;
+        }
+    }
+
+    private bool TryQueueDrawable(IntPtr layerPtr, IntPtr drawablePtr)
+    {
+        lock (_queuedDrawableLock)
+        {
+            if (_drawableAcquireRunning == false || _metalLayer.NativePtr != layerPtr || _queuedDrawablePtr != IntPtr.Zero)
+            {
+                return false;
+            }
+
+            _queuedDrawableLayerPtr = layerPtr;
+            _queuedDrawablePtr = drawablePtr;
+            return true;
+        }
+    }
+
+    private bool TryDequeueDrawableForLayer(IntPtr layerPtr, out IntPtr drawablePtr)
+    {
+        lock (_queuedDrawableLock)
+        {
+            if (_queuedDrawablePtr == IntPtr.Zero)
+            {
+                drawablePtr = IntPtr.Zero;
+                return false;
+            }
+
+            if (_queuedDrawableLayerPtr != layerPtr)
+            {
+                var stale = _queuedDrawablePtr;
+                _queuedDrawablePtr = IntPtr.Zero;
+                _queuedDrawableLayerPtr = IntPtr.Zero;
+                ObjCNative.ObjcRelease(stale);
+                drawablePtr = IntPtr.Zero;
+                return false;
+            }
+
+            drawablePtr = _queuedDrawablePtr;
+            _queuedDrawablePtr = IntPtr.Zero;
+            _queuedDrawableLayerPtr = IntPtr.Zero;
+            return true;
+        }
+    }
+
+    private void ClearQueuedDrawable()
+    {
+        IntPtr stale = IntPtr.Zero;
+        lock (_queuedDrawableLock)
+        {
+            if (_queuedDrawablePtr != IntPtr.Zero)
+            {
+                stale = _queuedDrawablePtr;
+                _queuedDrawablePtr = IntPtr.Zero;
+                _queuedDrawableLayerPtr = IntPtr.Zero;
+            }
+        }
+
+        if (stale != IntPtr.Zero)
+        {
+            ObjCNative.ObjcRelease(stale);
+        }
+    }
+
+    private void EnsureLayerPresentFlags()
+    {
+        var presentsWithTransaction = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, PresentsWithTransactionSelector.SelPtr) != 0;
+        var allowsNextDrawableTimeout = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, AllowsNextDrawableTimeoutSelector.SelPtr) != 0;
+        if (presentsWithTransaction == false && allowsNextDrawableTimeout == false)
+        {
+            return;
+        }
+
+        ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetPresentsWithTransactionSelector.SelPtr, false);
+        ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetAllowsNextDrawableTimeoutSelector.SelPtr, false);
     }
 
     private static string NormalizeCapturePath(string outputPath)

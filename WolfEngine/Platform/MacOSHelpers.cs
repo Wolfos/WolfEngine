@@ -140,7 +140,6 @@ internal sealed class NSWindowInstance
     private static readonly Selector StyleMaskSelector = new("styleMask");
     private static readonly Selector SetStyleMaskSelector = new("setStyleMask:");
     private const ulong FullSizeContentViewStyleMask = 1UL << 15;
-    private const ulong DeprecatedUnscaledWindowMask = 1UL << 11;
 
     public IntPtr NativePtr { get; }
 
@@ -187,7 +186,6 @@ internal sealed class NSWindowInstance
         if (includeFullSizeContentView)
         {
             var styleMask = ObjCNative.ObjcMsgSendULong(NativePtr, StyleMaskSelector.SelPtr);
-            styleMask &= ~DeprecatedUnscaledWindowMask;
             styleMask |= FullSizeContentViewStyleMask;
             ObjCNative.ObjcMsgSendSetULong(NativePtr, SetStyleMaskSelector.SelPtr, styleMask);
         }
@@ -269,6 +267,29 @@ internal static class ObjCNative
 
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern void ObjcMsgSendSetULong(IntPtr receiver, IntPtr selector, ulong value);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    public static extern byte ObjcMsgSendBool(IntPtr receiver, IntPtr selector);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    private static extern void ObjcMsgSendSetBoolNative(IntPtr receiver, IntPtr selector, byte value);
+
+    public static void ObjcMsgSendSetBool(IntPtr receiver, IntPtr selector, bool value)
+    {
+        ObjcMsgSendSetBoolNative(receiver, selector, value ? (byte)1 : (byte)0);
+    }
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_retain")]
+    public static extern IntPtr ObjcRetain(IntPtr value);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_release")]
+    public static extern void ObjcRelease(IntPtr value);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_autoreleasePoolPush")]
+    public static extern IntPtr ObjcAutoreleasePoolPush();
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_autoreleasePoolPop")]
+    public static extern void ObjcAutoreleasePoolPop(IntPtr pool);
 }
 
 [SupportedOSPlatform("macos")]
