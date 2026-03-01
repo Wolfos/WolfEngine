@@ -127,9 +127,8 @@ public class ShaderCompiler : IShaderCompiler
 			"-stage", "compute",
 			"-o", "-"
 		};
-		var argsWithDownstream = new List<string>(args);
 
-		var metalLibrary = SlangCompiler.Compile(argsWithDownstream.ToArray());
+		var metalLibrary = SlangCompiler.Compile(args);
 		DumpMetalLibraryIfRequested(shaderPath, metalLibrary);
 		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
 		return metalLibrary;
