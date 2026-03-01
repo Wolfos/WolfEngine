@@ -1,3 +1,4 @@
+using System;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
@@ -9,10 +10,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
 	private const int MaxUavDescriptors = 16384;
-internal const int BindlessArgumentBufferIndexCounts = 27;
-internal const int BindlessArgumentBufferIndexTextures = 28;
-internal const int BindlessArgumentBufferIndexRWTextures = 29;
-internal const int BindlessArgumentBufferIndexSamplers = 30;
+	internal const int BindlessArgumentBufferIndexCounts = 27;
+	internal const int BindlessArgumentBufferIndexTextures = 28;
+	internal const int BindlessArgumentBufferIndexRWTextures = 29;
+	internal const int BindlessArgumentBufferIndexSamplers = 30;
 	private readonly MTLDevice _device;
 	private readonly MetalTexture[] _srvTextures = new MetalTexture[MaxDescriptors];
 	private readonly MetalTexture[] _uavTextures = new MetalTexture[MaxDescriptors];
@@ -22,6 +23,7 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 	private readonly MTLSamplerState[] _singleSampler = new MTLSamplerState[1];
 	private readonly Stack<int> _freeSrvIndices = new();
 	private readonly Stack<int> _freeUavIndices = new();
+	private readonly Stack<int> _freeCbvIndices = new();
 	private readonly Stack<int> _freeSamplerIndices = new();
 	private MTLArgumentEncoder _textureEncoder;
 	private MTLArgumentEncoder _rwTextureEncoder;
@@ -40,6 +42,10 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 	private uint _encodedSamplerVersion;
 	private bool _forceEncode;
 	private int _forceEncodeFrames;
+	private bool _fallbackHandlesInitialized;
+	private BindlessFallbackHandles _fallbackHandles;
+	private MetalTexture? _fallbackTexture;
+	private MetalBuffer? _fallbackConstantBuffer;
 
 	public MetalDescriptorTable(MTLDevice device)
 	{
@@ -119,12 +125,21 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 			throw new InvalidOperationException("Buffer was not created by the Metal backend.");
 		}
 
-		if (_cbvCount >= MaxDescriptors)
+		int index;
+		if (_freeCbvIndices.Count > 0)
 		{
-			throw new InvalidOperationException("Metal CBV descriptor table is full.");
+			index = _freeCbvIndices.Pop();
+		}
+		else
+		{
+			if (_cbvCount >= MaxDescriptors)
+			{
+				throw new InvalidOperationException("Metal CBV descriptor table is full.");
+			}
+
+			index = _cbvCount++;
 		}
 
-		var index = _cbvCount++;
 		_cbvBuffers[index] = metalBuffer.Buffer;
 		UpdateCountBuffer();
 		return new DescriptorHandle(DescriptorKind.ConstantBufferView, index);
@@ -175,6 +190,71 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 		MarkDirty();
 		EncodeSampler(index);
 		return new DescriptorHandle(DescriptorKind.Sampler, index);
+	}
+
+	public BindlessFallbackHandles GetOrCreateFallbackHandles()
+	{
+		if (_fallbackHandlesInitialized)
+		{
+			return _fallbackHandles;
+		}
+
+		if (_srvCount != 0 || _uavCount != 0 || _cbvCount != 0 || _samplerCount != 0)
+		{
+			throw new InvalidOperationException("Bindless fallback handles must be initialized before other descriptor allocations.");
+		}
+
+		var textureDescriptor = new TextureDescriptor(
+			1,
+			1,
+			TextureFormat.Rgba8Unorm,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess);
+		var metalTextureDescriptor = new MTLTextureDescriptor
+		{
+			Width = 1,
+			Height = 1,
+			Depth = 1,
+			MipmapLevelCount = 1,
+			PixelFormat = MTLPixelFormat.RGBA8Unorm,
+			TextureType = MTLTextureType.Type2D,
+			StorageMode = MTLStorageMode.Managed,
+			Usage = MTLTextureUsage.ShaderRead | MTLTextureUsage.ShaderWrite
+		};
+
+		var texture = _device.NewTexture(metalTextureDescriptor);
+		metalTextureDescriptor.Dispose();
+		if (texture.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bindless fallback texture.");
+		}
+
+		UploadFallbackTexture(texture);
+		_fallbackTexture = new MetalTexture("__BindlessFallbackTexture", textureDescriptor, texture, this);
+		var srvHandle = AllocateShaderResourceView(_fallbackTexture);
+		var uavHandle = AllocateUnorderedAccessView(_fallbackTexture);
+		_fallbackTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, uavHandle);
+
+		var fallbackBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
+		if (fallbackBuffer.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bindless fallback constant buffer.");
+		}
+
+		_fallbackConstantBuffer = new MetalBuffer(
+			"__BindlessFallbackBuffer",
+			new BufferDescriptor(16, BufferUsage.Constant, BufferFlags.AllowShaderResource),
+			fallbackBuffer);
+		var cbvHandle = AllocateConstantBufferView(_fallbackConstantBuffer);
+
+		var samplerHandle = AllocateSampler(new SamplerDescriptor(
+			FilterMode.Point,
+			AddressMode.Clamp,
+			AddressMode.Clamp,
+			AddressMode.Clamp));
+
+		_fallbackHandles = new BindlessFallbackHandles(srvHandle, uavHandle, cbvHandle, samplerHandle);
+		_fallbackHandlesInitialized = true;
+		return _fallbackHandles;
 	}
 
 	internal void UpdateCountBuffer()
@@ -263,6 +343,14 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 				MarkDirty();
 				EncodeUav(index);
 				_freeUavIndices.Push(index);
+				break;
+			case DescriptorKind.ConstantBufferView:
+				if (index == 0 || index < 0 || index >= _cbvCount || _cbvBuffers[index].NativePtr == IntPtr.Zero)
+				{
+					return;
+				}
+				_cbvBuffers[index] = _cbvBuffers[0];
+				_freeCbvIndices.Push(index);
 				break;
 			case DescriptorKind.Sampler:
 				if (index == 0 || index < 0 || index >= _samplerCount || _samplers[index].NativePtr == IntPtr.Zero)
@@ -364,6 +452,23 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 				_forceEncodeFrames--;
 			}
 		}
+	}
+
+	private static unsafe void UploadFallbackTexture(MTLTexture texture)
+	{
+		var color = stackalloc byte[4];
+		color[0] = 255;
+		color[1] = 0;
+		color[2] = 255;
+		color[3] = 255;
+
+		var region = new MTLRegion
+		{
+			origin = new MTLOrigin { x = 0, y = 0, z = 0 },
+			size = new MTLSize { width = 1, height = 1, depth = 1 }
+		};
+
+		texture.ReplaceRegion(region, 0, (nint)color, 4);
 	}
 
 	private static MTLSamplerAddressMode ToAddressMode(AddressMode mode) => mode switch

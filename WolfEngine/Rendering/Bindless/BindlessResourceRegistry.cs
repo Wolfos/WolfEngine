@@ -3,9 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
-using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Rendering;
 
@@ -18,10 +16,9 @@ public sealed class BindlessResourceRegistry
 	private readonly Dictionary<IGfxBuffer, DescriptorHandle> _cbvHandles = new(new ReferenceComparer<IGfxBuffer>());
 	private readonly Dictionary<SamplerDescriptor, DescriptorHandle> _samplerHandles = new(new SamplerDescriptorComparer());
 	private DescriptorHandle _errorTextureHandle = DescriptorHandle.Invalid;
+	private DescriptorHandle _errorRwTextureHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _errorSamplerHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _errorBufferHandle = DescriptorHandle.Invalid;
-	private IGfxTexture? _errorTexture;
-	private IGfxBuffer? _errorBuffer;
 	private bool _loggedSrvTableFull;
 	private bool _loggedUavTableFull;
 	private bool _loggedCbvTableFull;
@@ -157,10 +154,10 @@ public sealed class BindlessResourceRegistry
 				ref _loggedUavTableFull,
 				"UAV",
 				GpuDrawResources.MaxDrawCount);
-			return _errorTextureHandle;
+			return _errorRwTextureHandle;
 		}
 		_uavHandles[texture] = handle;
-		return handle.IsValid ? handle : _errorTextureHandle;
+		return handle.IsValid ? handle : _errorRwTextureHandle;
 	}
 
 	public DescriptorHandle RegisterBuffer(IGfxBuffer buffer)
@@ -247,46 +244,17 @@ public sealed class BindlessResourceRegistry
 	private void CreateErrorResources(IGfxDevice device)
 	{
 		_errorTextureHandle = DescriptorHandle.Invalid;
+		_errorRwTextureHandle = DescriptorHandle.Invalid;
 		_errorSamplerHandle = DescriptorHandle.Invalid;
 		_errorBufferHandle = DescriptorHandle.Invalid;
 
-		_errorTexture = device.CreateTexture(new TextureDescriptor(
-			1,
-			1,
-			TextureFormat.Rgba8Unorm,
-			TextureUsage.ShaderResource));
-		_errorTextureHandle = RegisterTexture(_errorTexture);
-
-		_errorBuffer = device.CreateBuffer(new BufferDescriptor(
-			16,
-			BufferUsage.Constant,
-			BufferFlags.AllowShaderResource));
-		_errorBufferHandle = RegisterBuffer(_errorBuffer);
-
-		var sampler = new SamplerDescriptor(FilterMode.Point, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
-		_errorSamplerHandle = GetSamplerHandle(sampler);
-
-		if (_errorTexture is MetalTexture metalTexture)
-		{
-			UploadErrorTexture(metalTexture.Texture);
-		}
-	}
-
-	private static unsafe void UploadErrorTexture(MTLTexture texture)
-	{
-		var color = stackalloc byte[4];
-		color[0] = 255;
-		color[1] = 0;
-		color[2] = 255;
-		color[3] = 255;
-
-		var region = new MTLRegion
-		{
-			origin = new MTLOrigin { x = 0, y = 0, z = 0 },
-			size = new MTLSize { width = 1, height = 1, depth = 1 }
-		};
-
-		texture.ReplaceRegion(region, 0, (nint)color, 4);
+		var fallback = device.GlobalTable.GetOrCreateFallbackHandles();
+		_errorTextureHandle = fallback.ShaderResourceView;
+		_errorRwTextureHandle = fallback.UnorderedAccessView.IsValid
+			? fallback.UnorderedAccessView
+			: fallback.ShaderResourceView;
+		_errorBufferHandle = fallback.ConstantBufferView;
+		_errorSamplerHandle = fallback.Sampler;
 	}
 
 	private static bool IsTableFullException(InvalidOperationException exception)

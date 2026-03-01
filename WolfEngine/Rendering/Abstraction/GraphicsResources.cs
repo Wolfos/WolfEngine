@@ -52,7 +52,34 @@ public interface IGfxDescriptorTable
 	DescriptorHandle AllocateConstantBufferView(IGfxBuffer buffer);
 
 	DescriptorHandle AllocateSampler(in SamplerDescriptor sampler);
+	BindlessFallbackHandles GetOrCreateFallbackHandles();
 	void Free(DescriptorHandle handle);
+}
+
+/// <summary>
+/// Fallback descriptors used when a bindless handle is invalid or unavailable.
+/// </summary>
+public readonly struct BindlessFallbackHandles
+{
+	public BindlessFallbackHandles(
+		DescriptorHandle shaderResourceView,
+		DescriptorHandle unorderedAccessView,
+		DescriptorHandle constantBufferView,
+		DescriptorHandle sampler)
+	{
+		ShaderResourceView = shaderResourceView;
+		UnorderedAccessView = unorderedAccessView;
+		ConstantBufferView = constantBufferView;
+		Sampler = sampler;
+	}
+
+	public DescriptorHandle ShaderResourceView { get; }
+
+	public DescriptorHandle UnorderedAccessView { get; }
+
+	public DescriptorHandle ConstantBufferView { get; }
+
+	public DescriptorHandle Sampler { get; }
 }
 
 /// <summary>

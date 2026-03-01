@@ -1140,7 +1140,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	{
 		public DescriptorHandle AllocateShaderResourceView(IGfxResource resource)
 		{
-			throw new NotSupportedException(
+			throw new NotImplementedException(
 				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
@@ -1152,22 +1152,36 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		public DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource)
 		{
-			throw new NotSupportedException(
+			throw new NotImplementedException(
 				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
 		public DescriptorHandle AllocateConstantBufferView(IGfxBuffer buffer)
 		{
-			throw new NotSupportedException(
+			throw new NotImplementedException(
 				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
 		}
 
-		public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler)
-		{
-			throw new NotSupportedException(
-				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler)
+			{
+				throw new NotImplementedException(
+					"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
+			}
+
+			public BindlessFallbackHandles GetOrCreateFallbackHandles()
+			{
+				return new BindlessFallbackHandles(
+					DescriptorHandle.Invalid,
+					DescriptorHandle.Invalid,
+					DescriptorHandle.Invalid,
+					DescriptorHandle.Invalid);
+			}
+
+			public void Free(DescriptorHandle handle)
+			{
+				throw new NotImplementedException();
+			}
 		}
-	}
 
 	private sealed class ExternalD3D12Texture : ID3D12BackendTexture
 	{
