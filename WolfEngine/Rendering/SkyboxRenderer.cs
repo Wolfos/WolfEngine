@@ -51,9 +51,7 @@ public sealed class SkyboxRenderer
 		
 		var gfxDevice = GetGfxDevice();
 
-		var samplerHandle = IsMetalRenderer()
-			? GetSkyboxSamplerHandle(gfxDevice)
-			: DescriptorHandle.Invalid;
+		var samplerHandle = GetSkyboxSamplerHandle(gfxDevice);
 
 		var (irradiance, prefiltered, brdfLut) = GenerateIblMaps(gfxDevice, environmentTexture, samplerHandle);
 

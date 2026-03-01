@@ -191,24 +191,17 @@ public sealed class TransparentForwardPass
 		lightingConstants[101] = config.ShadowsEnabled ? 1u : 0u;
 		lightingConstants[102] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
 		lightingConstants[103] = 0;
-
-		if (commandList.BackendKind == GraphicsBackendKind.Metal)
+		
+		if (config.TransparentEnvironmentBuffer is not IWritableGpuBuffer writableEnvironmentBuffer ||
+		    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer)
 		{
-			if (config.TransparentEnvironmentBuffer is not IWritableGpuBuffer writableEnvironmentBuffer ||
-			    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer)
-			{
-				commandList.EndPass();
-				return;
-			}
+			commandList.EndPass();
+			return;
+		}
 
-			writableEnvironmentBuffer.Write<uint>(textureHandles);
-			writableLightingBuffer.Write<uint>(lightingConstants);
-		}
-		else
-		{
-			commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(textureHandles));
-			commandList.SetGraphicsConstants(3, MemoryMarshal.AsBytes(lightingConstants));
-		}
+		writableEnvironmentBuffer.Write<uint>(textureHandles);
+		writableLightingBuffer.Write<uint>(lightingConstants);
+
 
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)

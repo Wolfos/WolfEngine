@@ -79,19 +79,6 @@ public static class GBufferPass
 			return;
 		}
 
-		var fallbackCount = config.FallbackMaxCommandCount == 0
-			? (uint)GpuDrawResources.MaxDrawCount
-			: config.FallbackMaxCommandCount;
-		if (commandList.BackendKind != GraphicsBackendKind.Metal)
-		{
-			var fallbackBucket = buckets[0];
-			commandList.BindPipeline(fallbackBucket.Pipeline);
-			commandList.ExecuteIndirectCommandBuffer(fallbackBucket.IndirectCommandBuffer, fallbackCount);
-
-			commandList.EndPass();
-			return;
-		}
-
 		for (var i = 0; i < buckets.Length; i++)
 		{
 			var bucket = buckets[i];

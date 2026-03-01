@@ -234,7 +234,7 @@ internal const int BindlessArgumentBufferIndexSamplers = 30;
 
 	public MTLBuffer CountBuffer => _countBuffer;
 
-	internal void Free(DescriptorHandle handle)
+	public void Free(DescriptorHandle handle)
 	{
 		if (handle.IsValid == false)
 		{

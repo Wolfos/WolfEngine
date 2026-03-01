@@ -238,30 +238,10 @@ public sealed class BindlessResourceRegistry
 		}
 
 		_cbvHandles.Remove(buffer);
-		if (handle.IsValid && _device?.GlobalTable is MetalDescriptorTable metalTable)
+		if (handle.IsValid)
 		{
-			metalTable.Free(handle);
+			_device?.GlobalTable.Free(handle);
 		}
-	}
-
-	public DescriptorHandle GetDepthTextureHandle(IGfxTexture? texture)
-	{
-		if (texture is null)
-		{
-			return _errorTextureHandle;
-		}
-
-		if (texture.DepthShaderResourceView.IsValid)
-		{
-			return texture.DepthShaderResourceView;
-		}
-
-		if (_depthSrvHandles.TryGetValue(texture, out var handle))
-		{
-			return handle;
-		}
-
-		return _errorTextureHandle;
 	}
 
 	private void CreateErrorResources(IGfxDevice device)

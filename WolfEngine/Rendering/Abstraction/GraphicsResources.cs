@@ -52,6 +52,7 @@ public interface IGfxDescriptorTable
 	DescriptorHandle AllocateConstantBufferView(IGfxBuffer buffer);
 
 	DescriptorHandle AllocateSampler(in SamplerDescriptor sampler);
+	void Free(DescriptorHandle handle);
 }
 
 /// <summary>
