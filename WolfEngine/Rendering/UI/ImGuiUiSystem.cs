@@ -331,7 +331,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.GrabRounding = 4.0f;
 		style.PopupRounding = 4.0f;
 		style.ScrollbarRounding = 4.0f;
-		style.TabRounding = 4.0f;
+		style.TabRounding = 6.0f;
 		style.WindowRounding = 4.0f;
 		style.WindowMenuButtonPosition = ImGuiDir.None;
 		
@@ -359,9 +359,9 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.TabDimmed] = bgDark;
 		style.Colors[(int)ImGuiCol.TabSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelected] = bgColor;
-		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = bgColor;
+		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
-		style.Colors[(int)ImGuiCol.TabSelectedOverline] = bgColor;
+		style.Colors[(int)ImGuiCol.TabSelectedOverline] = Vector4.Zero;
 		
 		style.Colors[(int)ImGuiCol.FrameBg] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.FrameBgHovered] = secondaryContainer;

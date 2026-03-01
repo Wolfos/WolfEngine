@@ -88,12 +88,15 @@ public class EditorPreferences
 		style.TabBarBorderSize = 0.0f;
 		style.FrameBorderSize = 0.0f;
 		style.DockingSeparatorSize = 0.0f;
+		style.TabRounding = 6.0f;
 		style.WindowMenuButtonPosition = ImGuiDir.None;
 		style.Colors[(int)ImGuiCol.Border] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.BorderShadow] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.Separator] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.SeparatorHovered] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.SeparatorActive] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.TabSelectedOverline] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = Vector4.Zero;
 		style.Colors[(int)ImGuiCol.DockingEmptyBg] = style.Colors[(int)ImGuiCol.WindowBg];
 	}
 
