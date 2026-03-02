@@ -19,8 +19,12 @@ namespace WolfEngine.Rendering.UI;
 
 internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 {
+	private const uint InvalidDescriptorValue = 0xFFFFFFFF;
+
 	private ComPtr<ID3D12Device> _device;
 	private readonly IShaderCompiler _shaderCompiler;
+	private D3D12DescriptorTable? _bindlessTable;
+	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
 
 	private ComPtr<ID3D12DescriptorHeap> _srvHeap;
 	private GpuDescriptorHandle _srvGpuHandle;
@@ -48,6 +52,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			}
 
 			_device = d3d12Device.NativeDevice;
+			_bindlessTable = d3d12Device.BindlessDescriptorTable;
+			_fallbackTextureHandleValue = _bindlessTable.GetOrCreateFallbackHandles().ShaderResourceView.Value;
 		}
 
 		if (_pipelineState.Handle is null)
@@ -150,11 +156,6 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		native->IASetVertexBuffers(0, 1, &vbView);
 		native->IASetIndexBuffer(&ibView);
 
-		fixed (GpuDescriptorHandle* srvHandle = &_srvGpuHandle)
-		{
-			native->SetGraphicsRootDescriptorTable(0, *srvHandle);
-		}
-
 		var L = frame.DisplayPos.X;
 		var R = frame.DisplayPos.X + frame.DisplaySize.X;
 		var T = frame.DisplayPos.Y;
@@ -193,9 +194,21 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			scaleY = frame.FramebufferSize.Y / frame.DisplaySize.Y;
 		}
 
+		var activeTextureId = nint.Zero;
+		var hasActiveTexture = false;
+
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
+			if (hasActiveTexture == false || cmd.TextureId != activeTextureId)
+			{
+				ResolveTextureBinding(cmd.TextureId, out var heap, out var textureHandle);
+				native->SetDescriptorHeaps(1, &heap);
+				native->SetGraphicsRootDescriptorTable(0, textureHandle);
+				activeTextureId = cmd.TextureId;
+				hasActiveTexture = true;
+			}
+
 			var clip = cmd.ClipRect;
 			var clipX1 = (int) Math.Floor((clip.X - frame.DisplayPos.X) * scaleX);
 			var clipY1 = (int) Math.Floor((clip.Y - frame.DisplayPos.Y) * scaleY);
@@ -216,6 +229,50 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 			native->DrawIndexedInstanced((uint) cmd.ElemCount, 1, (uint) cmd.IdxOffset, (int) cmd.VtxOffset, 0);
 		}
+	}
+
+	private void ResolveTextureBinding(
+		nint textureId,
+		out ID3D12DescriptorHeap* heap,
+		out GpuDescriptorHandle handle)
+	{
+		if (textureId == UiTextureIds.FontAtlas)
+		{
+			heap = _srvHeap.Handle;
+			handle = _srvGpuHandle;
+			return;
+		}
+
+		if (_bindlessTable is null)
+		{
+			heap = _srvHeap.Handle;
+			handle = _srvGpuHandle;
+			return;
+		}
+
+		var packedHandle = textureId switch
+		{
+			0 => _fallbackTextureHandleValue,
+			_ when textureId == UiTextureIds.SceneViewport => _fallbackTextureHandleValue,
+			_ => unchecked((uint)(nuint)textureId)
+		};
+
+		if (_bindlessTable.TryGetShaderResourceGpuHandle(packedHandle, out var resolvedHandle))
+		{
+			heap = _bindlessTable.DescriptorHeap.Handle;
+			handle = resolvedHandle;
+			return;
+		}
+
+		if (_bindlessTable.TryGetShaderResourceGpuHandle(_fallbackTextureHandleValue, out var fallbackHandle))
+		{
+			heap = _bindlessTable.DescriptorHeap.Handle;
+			handle = fallbackHandle;
+			return;
+		}
+
+		heap = _srvHeap.Handle;
+		handle = _srvGpuHandle;
 	}
 
 	private void EnsureBuffers(UiFrameData frame)

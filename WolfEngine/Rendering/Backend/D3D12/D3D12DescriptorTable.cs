@@ -85,6 +85,37 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 	public ulong CountsBufferGpuAddress =>
 		_countsBuffer.Handle is null ? 0UL : _countsBuffer.Handle->GetGPUVirtualAddress();
 
+	internal bool TryGetShaderResourceGpuHandle(uint packedHandle, out GpuDescriptorHandle gpuHandle)
+	{
+		const uint invalid = 0xFFFFFFFF;
+		const uint kindShift = 30;
+		const uint kindMask = 0b11;
+		const uint indexMask = (1u << (int)kindShift) - 1u;
+
+		if (packedHandle == invalid)
+		{
+			gpuHandle = default;
+			return false;
+		}
+
+		var kind = (packedHandle >> (int)kindShift) & kindMask;
+		if (kind != (uint)DescriptorKind.ShaderResourceView)
+		{
+			gpuHandle = default;
+			return false;
+		}
+
+		var index = (int)(packedHandle & indexMask);
+		if (index < 0 || index >= MaxSrvDescriptors)
+		{
+			gpuHandle = default;
+			return false;
+		}
+
+		gpuHandle = GetGpuHandle(_descriptorHeap, index, _descriptorIncrement);
+		return true;
+	}
+
 	public DescriptorHandle AllocateShaderResourceView(IGfxResource resource)
 	{
 		lock (_sync)
