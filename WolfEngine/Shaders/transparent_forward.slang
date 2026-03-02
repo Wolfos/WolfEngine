@@ -37,7 +37,7 @@ cbuffer CameraParams : register(b2)
 cbuffer LightingParams : register(b3)
 {
     uint lightCount;
-    float3 _lightingPadding;
+    uint3 _lightingPadding;
     LightData lights[MAX_LIGHTS];
     row_major float4x4 shadowViewProjection0;
     row_major float4x4 shadowViewProjection1;

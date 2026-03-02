@@ -23,6 +23,7 @@ public sealed class BindlessResourceRegistry
 	private bool _loggedUavTableFull;
 	private bool _loggedCbvTableFull;
 	private bool _loggedSamplerTableFull;
+	private bool _loggedDepthSrvFallback;
 
 	public void EnsureInitialized(IGfxDevice device)
 	{
@@ -46,6 +47,7 @@ public sealed class BindlessResourceRegistry
 		_loggedUavTableFull = false;
 		_loggedCbvTableFull = false;
 		_loggedSamplerTableFull = false;
+		_loggedDepthSrvFallback = false;
 		CreateErrorResources(device);
 	}
 
@@ -78,7 +80,17 @@ public sealed class BindlessResourceRegistry
 
 		if (_srvHandles.TryGetValue(texture, out var handle))
 		{
-			return handle;
+			var currentSrv = texture.ShaderResourceView;
+			if (currentSrv.IsValid && currentSrv.Value != handle.Value)
+			{
+				_srvHandles[texture] = currentSrv;
+				return currentSrv;
+			}
+
+			if (handle.IsValid)
+			{
+				return handle;
+			}
 		}
 
 		try
@@ -108,14 +120,34 @@ public sealed class BindlessResourceRegistry
 
 		if (_depthSrvHandles.TryGetValue(texture, out var handle))
 		{
-			return handle;
+			var currentDepthSrv = texture.DepthShaderResourceView;
+			if (currentDepthSrv.IsValid && currentDepthSrv.Value != handle.Value)
+			{
+				_depthSrvHandles[texture] = currentDepthSrv;
+				return currentDepthSrv;
+			}
+
+			if (handle.IsValid)
+			{
+				return handle;
+			}
 		}
 
 		try
 		{
-			handle = texture.DepthShaderResourceView.IsValid
-				? texture.DepthShaderResourceView
-				: _device.GlobalTable.AllocateDepthShaderResourceView(texture);
+			if (texture.DepthShaderResourceView.IsValid)
+			{
+				handle = texture.DepthShaderResourceView;
+			}
+			else if (texture.ShaderResourceView.IsValid)
+			{
+				handle = texture.ShaderResourceView;
+				LogDepthSrvFallbackOnce();
+			}
+			else
+			{
+				handle = _device.GlobalTable.AllocateDepthShaderResourceView(texture);
+			}
 		}
 		catch (InvalidOperationException ex) when (IsTableFullException(ex))
 		{
@@ -124,6 +156,12 @@ public sealed class BindlessResourceRegistry
 				"Depth SRV",
 				GpuDrawResources.MaxDrawCount);
 			return _errorTextureHandle;
+		}
+
+		if (handle.IsValid == false && texture.ShaderResourceView.IsValid)
+		{
+			handle = texture.ShaderResourceView;
+			LogDepthSrvFallbackOnce();
 		}
 
 		_depthSrvHandles[texture] = handle;
@@ -139,7 +177,17 @@ public sealed class BindlessResourceRegistry
 
 		if (_uavHandles.TryGetValue(texture, out var handle))
 		{
-			return handle;
+			var currentUav = texture.UnorderedAccessView;
+			if (currentUav.IsValid && currentUav.Value != handle.Value)
+			{
+				_uavHandles[texture] = currentUav;
+				return currentUav;
+			}
+
+			if (handle.IsValid)
+			{
+				return handle;
+			}
 		}
 
 		try
@@ -272,6 +320,17 @@ public sealed class BindlessResourceRegistry
 		flag = true;
 		Console.WriteLine(
 			$"Bindless {tableKind} table is full. Falling back to error resources for new bindings. Draw limit={drawLimit}.");
+	}
+
+	private void LogDepthSrvFallbackOnce()
+	{
+		if (_loggedDepthSrvFallback)
+		{
+			return;
+		}
+
+		_loggedDepthSrvFallback = true;
+		Console.WriteLine("Bindless depth texture fallback: using regular SRV handle.");
 	}
 
 	private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class

@@ -102,6 +102,9 @@ public readonly struct GpuDrawArgs
 	public readonly uint StartIndex;
 	public readonly int BaseVertex;
 	public readonly uint StartInstance;
+	private readonly uint _pad0;
+	private readonly uint _pad1;
+	private readonly uint _pad2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

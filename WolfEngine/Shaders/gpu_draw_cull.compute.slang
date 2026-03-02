@@ -73,6 +73,9 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     args.startIndex = 0;
     args.baseVertex = 0;
     args.startInstance = 0;
+    args.pad0 = 0;
+    args.pad1 = 0;
+    args.pad2 = 0;
     g_DrawArgs[drawId] = args;
 
     GpuDrawCommand cmd = g_DrawCommands[drawId];
@@ -180,5 +183,8 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     args.startIndex = 0;
     args.baseVertex = meshData.baseVertex;
     args.startInstance = instanceIndex;
+    args.pad0 = 0;
+    args.pad1 = 0;
+    args.pad2 = 0;
     g_DrawArgs[drawId] = args;
 }

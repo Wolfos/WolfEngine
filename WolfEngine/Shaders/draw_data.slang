@@ -69,6 +69,9 @@ struct GpuDrawArgs
     uint startIndex;
     int baseVertex;
     uint startInstance;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 struct GpuDrawUpdateData

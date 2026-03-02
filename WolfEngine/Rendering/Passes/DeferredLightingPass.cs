@@ -17,7 +17,7 @@ public sealed class DeferredLightingPass
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
-	private const int LightingConstantsCount = 104;
+	private const int LightingConstantsCount = 100;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -81,9 +81,9 @@ public sealed class DeferredLightingPass
 			GBufferMaterial = _bindlessRegistry.GetTextureHandle(material),
 			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
-			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
-			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
-			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
+			ShadowMapDepth0 = _bindlessRegistry.RegisterTexture(shadowMapDepth0),
+			ShadowMapDepth1 = _bindlessRegistry.RegisterTexture(shadowMapDepth1),
+			ShadowMapDepth2 = _bindlessRegistry.RegisterTexture(shadowMapDepth2),
 			SkyboxEnvironment = _bindlessRegistry.GetTextureHandle(environment),
 			SkyboxIrradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			SkyboxPrefilter = _bindlessRegistry.GetTextureHandle(prefilter),
@@ -177,23 +177,23 @@ public sealed class DeferredLightingPass
 		lightingConstants.Clear();
 		lightingConstants[0] = (uint)lightCountInt;
 		var lightWords = MemoryMarshal.Cast<ShaderLight, uint>(shaderLights);
-		lightWords.CopyTo(lightingConstants.Slice(8));
+		lightWords.CopyTo(lightingConstants.Slice(4));
 
-		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(44, 16)), config.ShadowViewProjection0);
-		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(60, 16)), config.ShadowViewProjection1);
-		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(76, 16)), config.ShadowViewProjection2);
-		lightingConstants[92] = BitConverter.SingleToUInt32Bits(config.ShadowSplit0);
-		lightingConstants[93] = BitConverter.SingleToUInt32Bits(config.ShadowSplit1);
-		lightingConstants[94] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
-		lightingConstants[95] = BitConverter.SingleToUInt32Bits(config.ShadowCascadeBlendDistance);
-		lightingConstants[96] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
-		lightingConstants[97] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
-		lightingConstants[98] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
-		lightingConstants[99] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
-		lightingConstants[100] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
-		lightingConstants[101] = config.ShadowsEnabled ? 1u : 0u;
-		lightingConstants[102] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
-		lightingConstants[103] = 0;
+		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(40, 16)), config.ShadowViewProjection0);
+		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(56, 16)), config.ShadowViewProjection1);
+		WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(72, 16)), config.ShadowViewProjection2);
+		lightingConstants[88] = BitConverter.SingleToUInt32Bits(config.ShadowSplit0);
+		lightingConstants[89] = BitConverter.SingleToUInt32Bits(config.ShadowSplit1);
+		lightingConstants[90] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
+		lightingConstants[91] = BitConverter.SingleToUInt32Bits(config.ShadowCascadeBlendDistance);
+		lightingConstants[92] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
+		lightingConstants[93] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
+		lightingConstants[94] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
+		lightingConstants[95] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
+		lightingConstants[96] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
+		lightingConstants[97] = config.ShadowsEnabled ? 1u : 0u;
+		lightingConstants[98] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
+		lightingConstants[99] = 0;
 		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(lightingConstants));
 
 		// Dispatch the compute shader
