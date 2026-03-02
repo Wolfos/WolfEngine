@@ -133,12 +133,10 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 			throw new InvalidOperationException("Constant buffer was not created by the Direct3D12 backend.");
 		}
 
-		var size = (uint)((d3d12Buffer.SizeInBytes + 255) & ~255u);
-
 		var cbvDesc = new ConstantBufferViewDesc
 		{
 			BufferLocation = d3d12Buffer.Resource.Handle->GetGPUVirtualAddress(),
-			SizeInBytes = size
+			SizeInBytes = d3d12Buffer.GetConstantBufferViewSizeInBytes()
 		};
 
 		_device.Handle->CreateConstantBufferView(cbvDesc, cpuHandle);

@@ -244,12 +244,24 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		var gpuAddress = resource->GetGPUVirtualAddress() + offset;
 		if (D3D12RootBindings.TryGetGraphicsSrvIndex(slot, out var srvRootIndex))
 		{
+			if (d3d12Buffer.IsCpuWritableDirect == false)
+			{
+				TransitionBufferIfNeeded(
+					d3d12Buffer,
+					ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+			}
+
 			CommandList.SetGraphicsRootShaderResourceView(srvRootIndex, gpuAddress);
 			return;
 		}
 
 		if (D3D12RootBindings.TryGetGraphicsCbvIndex(slot, out var cbvRootIndex))
 		{
+			if (d3d12Buffer.IsCpuWritableDirect == false)
+			{
+				TransitionBufferIfNeeded(d3d12Buffer, ResourceStates.VertexAndConstantBuffer);
+			}
+
 			CommandList.SetGraphicsRootConstantBufferView(cbvRootIndex, gpuAddress);
 			return;
 		}
@@ -319,6 +331,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		if (D3D12RootBindings.TryGetComputeUavIndex(slot, out var rootIndex) == false)
 		{
 			throw new NotSupportedException($"Compute buffer slot {slot} is not supported by the D3D12 root signature.");
+		}
+
+		if (d3d12Buffer.IsCpuWritableDirect == false)
+		{
+			TransitionBufferIfNeeded(d3d12Buffer, ResourceStates.UnorderedAccess);
 		}
 
 		var gpuAddress = d3d12Buffer.Resource.Handle->GetGPUVirtualAddress() + offset;

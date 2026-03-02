@@ -197,11 +197,10 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 
 			var index = AllocateIndex(_freeCbv, ref _cbvCount, MaxCbvDescriptors, "CBV");
 			var cpuHandle = GetCpuHandle(_descriptorHeap, _cbvBase + index, _descriptorIncrement);
-			var alignedSize = (uint)((d3dBuffer.SizeInBytes + 255UL) & ~255UL);
 			var cbvDesc = new ConstantBufferViewDesc
 			{
 				BufferLocation = d3dBuffer.Resource.Handle->GetGPUVirtualAddress(),
-				SizeInBytes = alignedSize
+				SizeInBytes = d3dBuffer.GetConstantBufferViewSizeInBytes()
 			};
 			_device.Handle->CreateConstantBufferView(cbvDesc, cpuHandle);
 			return new DescriptorHandle(DescriptorKind.ConstantBufferView, index);

@@ -318,7 +318,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor)
 	{
-		var sizeInBytes = Align(descriptor.SizeInBytes, 16);
+		var bufferAlignment = descriptor.Usage.HasFlag(BufferUsage.Constant)
+			? (ulong)Silk.NET.Direct3D12.D3D12.ConstantBufferDataPlacementAlignment
+			: 16UL;
+		var sizeInBytes = Align(descriptor.SizeInBytes, bufferAlignment);
 		var allowsUav = (descriptor.Flags & BufferFlags.AllowUnorderedAccess) != 0;
 		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant) || descriptor.Usage.HasFlag(BufferUsage.Staging);
 		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
@@ -373,6 +376,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			upload,
 			cpuWritableDirect: cpuWritableDirect,
 			flushUploadRange: cpuWritableDirect ? null : FlushUploadRange,
+			getDeviceRemovedReason: () => _device.GetDeviceRemovedReason(),
 			initialState: cpuWritableDirect ? ResourceStates.GenericRead : initialState);
 		return buffer;
 	}

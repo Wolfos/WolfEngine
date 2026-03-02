@@ -136,6 +136,7 @@ private sealed class MeshResources
 	private Vector2 _imguiMousePosition;
 	private Vector2 _imguiMouseWheel;
 	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
+	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
 	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
 	{
@@ -215,7 +216,15 @@ private sealed class MeshResources
 			return;
 		}
 
-		_renderCallback((float) deltaTime);
+		try
+		{
+			_renderCallback((float) deltaTime);
+		}
+		catch
+		{
+			DumpDxgiDebugMessages("OnWindowRender failure");
+			throw;
+		}
 	}
 
 	private void OnWindowFramebufferResize(Vector2D<int> newSize)
@@ -715,6 +724,7 @@ private sealed class MeshResources
 		EnableDebugLayerIfRequested();
 
 		CreateDeviceAndQueue();
+		ConfigureDxgiDebugQueueIfRequested();
 		CreateSwapchain();
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
@@ -1160,7 +1170,8 @@ private sealed class MeshResources
 		}
 
 		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();
-		var vertexBufferSize = (ulong) (vertexStride * (uint) vertexCount);
+		var vertexDataSize = (ulong)(vertexStride * (uint)vertexCount);
+		var vertexBufferSize = Align(vertexDataSize, D3D12.ConstantBufferDataPlacementAlignment);
 		var vertexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1184,7 +1195,7 @@ private sealed class MeshResources
 				&defaultHeapProps,
 				HeapFlags.None,
 				in vertexBufferDesc,
-				ResourceStates.CopyDest,
+				ResourceStates.Common,
 				null,
 				out vertexBuffer));
 
@@ -1204,7 +1215,7 @@ private sealed class MeshResources
 		{
 			fixed (VertexData* srcVertices = vertices)
 			{
-				Buffer.MemoryCopy(srcVertices, mappedVertices, vertexBufferSize, vertexBufferSize);
+				Buffer.MemoryCopy(srcVertices, mappedVertices, vertexDataSize, vertexDataSize);
 			}
 		}
 		finally
@@ -1218,7 +1229,8 @@ private sealed class MeshResources
 			throw new InvalidOperationException("Mesh must contain index data.");
 		}
 
-		var indexBufferSize = (ulong) (sizeof(uint) * indices.Length);
+		var indexDataSize = (ulong)(sizeof(uint) * indices.Length);
+		var indexBufferSize = Align(indexDataSize, D3D12.ConstantBufferDataPlacementAlignment);
 		var indexBufferDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Buffer,
@@ -1239,7 +1251,7 @@ private sealed class MeshResources
 				&defaultHeapProps,
 				HeapFlags.None,
 				in indexBufferDesc,
-				ResourceStates.CopyDest,
+				ResourceStates.Common,
 				null,
 				out indexBuffer));
 
@@ -1259,7 +1271,7 @@ private sealed class MeshResources
 		{
 			fixed (uint* srcIndices = indices)
 			{
-				Buffer.MemoryCopy(srcIndices, mappedIndices, indexBufferSize, indexBufferSize);
+				Buffer.MemoryCopy(srcIndices, mappedIndices, indexDataSize, indexDataSize);
 			}
 		}
 		finally
@@ -1279,8 +1291,8 @@ private sealed class MeshResources
 				default,
 				out uploadCommandList));
 
-		uploadCommandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexBufferSize);
-		uploadCommandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexBufferSize);
+		uploadCommandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexDataSize);
+		uploadCommandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexDataSize);
 
 		var vertexBarrier = new ResourceBarrier
 			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
@@ -1317,27 +1329,27 @@ private sealed class MeshResources
 		var vertexView = new D3DVertexBufferView
 		{
 			BufferLocation = vertexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint) vertexBufferSize,
+			SizeInBytes = (uint)vertexDataSize,
 			StrideInBytes = vertexStride
 		};
 
 		var indexView = new D3DIndexBufferView
 		{
 			BufferLocation = indexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint) indexBufferSize,
+			SizeInBytes = (uint)indexDataSize,
 			Format = Format.FormatR32Uint
 		};
 
 		// Wrap in abstraction and set on mesh
 		var vertexBufferAbstraction = new D3D12Buffer(
 			"MeshVertexBuffer",
-			new(vertexBufferSize, BufferUsage.Vertex),
+			new(vertexDataSize, BufferUsage.Vertex),
 			vertexBuffer,
 			vertexBufferSize);
 
 		var indexBufferAbstraction = new D3D12Buffer(
 			"MeshIndexBuffer",
-			new(indexBufferSize, BufferUsage.Index),
+			new(indexDataSize, BufferUsage.Index),
 			indexBuffer,
 			indexBufferSize);
 
@@ -1526,6 +1538,7 @@ private sealed class MeshResources
 		var presentResult = _swapchain.Present(presentInterval, 0);
 		if (presentResult < 0)
 		{
+			DumpDxgiDebugMessages("Present failure");
 			var removalReason = _device.GetDeviceRemovedReason();
 			var message =
 				$"IDXGISwapChain::Present failed with HRESULT 0x{presentResult:X8}. DeviceRemovedReason=0x{removalReason:X8}.";
@@ -1538,6 +1551,111 @@ private sealed class MeshResources
 		_frameFenceValues[_backbufferIndex] = _fenceValue;
 
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
+	}
+
+	private void DumpDxgiDebugMessages(string context)
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false)
+		{
+			return;
+		}
+
+		ComPtr<IDXGIInfoQueue> infoQueue = default;
+		try
+		{
+			var hr = _dxgi.GetDebugInterface1(0, out infoQueue);
+			if (hr < 0 || infoQueue.Handle is null)
+			{
+				return;
+			}
+
+			var messageCount = infoQueue.GetNumStoredMessages(DxgiDebugAll);
+			if (messageCount == 0)
+			{
+				return;
+			}
+
+			Console.WriteLine($"DXGI debug messages ({context}): {messageCount}");
+			for (ulong i = 0; i < messageCount; i++)
+			{
+				nuint messageLength = 0;
+				hr = infoQueue.GetMessageA(DxgiDebugAll, i, (InfoQueueMessage*)null, ref messageLength);
+				if (hr < 0 || messageLength == 0)
+				{
+					continue;
+				}
+
+				var messageMemory = NativeMemory.Alloc(messageLength);
+				try
+				{
+					var message = (InfoQueueMessage*)messageMemory;
+					hr = infoQueue.GetMessageA(DxgiDebugAll, i, message, ref messageLength);
+					if (hr < 0)
+					{
+						continue;
+					}
+
+					var descriptionLength = checked((int)message->DescriptionByteLength);
+					if (descriptionLength > 0)
+					{
+						descriptionLength--;
+					}
+
+					var description = Marshal.PtrToStringAnsi((nint)message->PDescription, descriptionLength) ?? string.Empty;
+					Console.WriteLine($"[DXGI {message->Severity}] ({message->Category}/{message->ID}) {description}");
+				}
+				finally
+				{
+					NativeMemory.Free(messageMemory);
+				}
+			}
+
+			infoQueue.ClearStoredMessages(DxgiDebugAll);
+		}
+		catch
+		{
+			// Best-effort diagnostics only.
+		}
+		finally
+		{
+			if (infoQueue.Handle is not null)
+			{
+				infoQueue.Dispose();
+			}
+		}
+	}
+
+	private void ConfigureDxgiDebugQueueIfRequested()
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false)
+		{
+			return;
+		}
+
+		ComPtr<IDXGIInfoQueue> infoQueue = default;
+		try
+		{
+			var hr = _dxgi.GetDebugInterface1(0, out infoQueue);
+			if (hr < 0 || infoQueue.Handle is null)
+			{
+				return;
+			}
+
+			infoQueue.SetMuteDebugOutput(DxgiDebugAll, new Silk.NET.Core.Bool32(0));
+			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Corruption, new Silk.NET.Core.Bool32(1));
+			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Error, new Silk.NET.Core.Bool32(1));
+		}
+		catch
+		{
+			// Best-effort diagnostics only.
+		}
+		finally
+		{
+			if (infoQueue.Handle is not null)
+			{
+				infoQueue.Dispose();
+			}
+		}
 	}
 
 	public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry,
@@ -1668,7 +1786,14 @@ private sealed class MeshResources
 			_window.Render -= OnWindowRender;
 			_window.FramebufferResize -= OnWindowFramebufferResize;
 			_window.Closing -= OnWindowClosing;
-			_window.Dispose();
+			try
+			{
+				_window.Dispose();
+			}
+			catch (InvalidOperationException ex) when (ex.Message.Contains("inside of the render loop", StringComparison.Ordinal))
+			{
+				// Silk.NET can still report render-loop context while unwinding from callback exceptions.
+			}
 			_window = null;
 		}
 

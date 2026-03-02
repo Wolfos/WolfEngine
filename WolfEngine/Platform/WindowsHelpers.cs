@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Platform;
@@ -17,28 +16,38 @@ internal static class WindowsHelpers
 
 	public static string? OpenFile(FileDialogOptions options)
 	{
-		var buffer = new StringBuilder(1024);
+		const int maxPathChars = 1024;
 		var filter = BuildFilterString(options.AllowedExtensions);
-		var ofn = new OPENFILENAME
-		{
-			lStructSize = Marshal.SizeOf<OPENFILENAME>(),
-			hwndOwner = IntPtr.Zero,
-			lpstrFilter = filter,
-			lpstrFile = buffer,
-			nMaxFile = buffer.Capacity,
-			lpstrTitle = options.Title,
-			lpstrInitialDir = options.InitialDirectory,
-			Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
-			lpstrDefExt = GetDefaultExtension(options.AllowedExtensions)
-		};
+		var fileBuffer = Marshal.AllocHGlobal(maxPathChars * sizeof(char));
 
-		if (GetOpenFileNameW(ref ofn) == false)
+		try
 		{
-			return null;
+			Marshal.WriteInt16(fileBuffer, 0);
+			var ofn = new OPENFILENAME
+			{
+				lStructSize = Marshal.SizeOf<OPENFILENAME>(),
+				hwndOwner = IntPtr.Zero,
+				lpstrFilter = filter,
+				lpstrFile = fileBuffer,
+				nMaxFile = maxPathChars,
+				lpstrTitle = options.Title,
+				lpstrInitialDir = options.InitialDirectory,
+				Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+				lpstrDefExt = GetDefaultExtension(options.AllowedExtensions)
+			};
+
+			if (GetOpenFileNameW(ref ofn) == false)
+			{
+				return null;
+			}
+
+			var result = Marshal.PtrToStringUni(fileBuffer);
+			return string.IsNullOrWhiteSpace(result) ? null : result;
 		}
-
-		var result = buffer.ToString();
-		return string.IsNullOrWhiteSpace(result) ? null : result;
+		finally
+		{
+			Marshal.FreeHGlobal(fileBuffer);
+		}
 	}
 
 	private static string BuildFilterString(string[]? extensions)
@@ -108,12 +117,12 @@ internal static class WindowsHelpers
 		public IntPtr hwndOwner;
 		public IntPtr hInstance;
 		public string? lpstrFilter;
-		public StringBuilder? lpstrCustomFilter;
+		public IntPtr lpstrCustomFilter;
 		public int nMaxCustFilter;
 		public int nFilterIndex;
-		public StringBuilder lpstrFile;
+		public IntPtr lpstrFile;
 		public int nMaxFile;
-		public StringBuilder? lpstrFileTitle;
+		public IntPtr lpstrFileTitle;
 		public int nMaxFileTitle;
 		public string? lpstrInitialDir;
 		public string? lpstrTitle;
