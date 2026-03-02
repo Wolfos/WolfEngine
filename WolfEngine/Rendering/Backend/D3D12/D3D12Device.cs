@@ -17,10 +17,6 @@ using Fence = Silk.NET.Direct3D12.ID3D12Fence;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-/// <summary>
-/// Placeholder Direct3D12 backend that satisfies the abstraction surface.
-/// Provides a staging point for wiring real D3D12 behaviour without blocking compilation.
-/// </summary>
 public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 {
 	private readonly ComPtr<ID3D12Device> _device;
@@ -28,10 +24,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private readonly ComPtr<ID3D12CommandQueue> _computeQueue;
 	private readonly D3D12Api _d3d12 = D3D12Api.GetApi();
 
-	private readonly IGfxDescriptorTable _globalTable = new NullDescriptorTable();
+	private readonly D3D12DescriptorTable _globalTable;
 
 	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
+	private readonly object _uploadLock = new();
 	private readonly ComPtr<Fence> _submissionFence;
 	private ulong _submissionFenceValue;
 	
@@ -45,6 +42,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private readonly object _texturePoolLock = new();
 	private ComPtr<ID3D12CommandAllocator> _transitionAllocator;
 	private ComPtr<ID3D12GraphicsCommandList> _transitionCommandList;
+	private ComPtr<ID3D12CommandAllocator> _uploadAllocator;
+	private ComPtr<ID3D12GraphicsCommandList> _uploadCommandList;
+	private ComPtr<ID3D12CommandSignature> _drawIndexedIndirectSignature;
+	private ComPtr<ID3D12CommandSignature> _graphicsExecuteIndirectSignature;
 	private nint _submissionFenceEvent;
 
 	private readonly struct PooledTexture
@@ -104,6 +105,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		_device = device;
 		_graphicsQueue = graphicsQueue;
 		_computeQueue = computeQueue ?? graphicsQueue;
+		_globalTable = new D3D12DescriptorTable(_device);
 		SilkMarshal.ThrowHResult(_device.CreateFence(0, FenceFlags.None, out _submissionFence));
 		_submissionFenceValue = 0;
 	}
@@ -156,7 +158,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return pooledTexture;
 		}
 
-		var format = ToDxgiFormat(descriptor.Format);
+		var viewFormat = ToDxgiFormat(descriptor.Format);
+		var isDepthTexture = (descriptor.Usage & TextureUsage.DepthStencil) != 0;
+		var resourceFormat = isDepthTexture && (descriptor.Usage & TextureUsage.ShaderResource) != 0
+			? Format.FormatR32Typeless
+			: viewFormat;
 
 		var resourceDesc = new ResourceDesc
 		{
@@ -166,7 +172,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			Height = (uint)descriptor.Height,
 			DepthOrArraySize = 1,
 			MipLevels = 1,
-			Format = format,
+			Format = resourceFormat,
 			SampleDesc = new SampleDesc(1, 0),
 			Layout = TextureLayout.LayoutUnknown,
 			Flags = DetermineResourceFlags(descriptor.Usage)
@@ -179,7 +185,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
 		{
-			clearValue.Format = format;
+			clearValue.Format = viewFormat;
 			clearValue.Anonymous.Color[0] = descriptor.ClearColor.X;
 			clearValue.Anonymous.Color[1] = descriptor.ClearColor.Y;
 			clearValue.Anonymous.Color[2] = descriptor.ClearColor.Z;
@@ -188,7 +194,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		}
 		else if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
 		{
-			clearValue.Format = format;
+			clearValue.Format = viewFormat;
 			clearValue.Anonymous.DepthStencil = new DepthStencilValue
 			{
 				Depth = descriptor.DepthClear,
@@ -239,10 +245,39 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			SilkMarshal.ThrowHResult(
 				_device.CreateDescriptorHeap(in dsvHeapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
 			var handle = heap.GetCPUDescriptorHandleForHeapStart();
-			_device.CreateDepthStencilView(resource, null, handle);
+			var depthStencilViewDesc = new DepthStencilViewDesc
+			{
+				Format = Format.FormatD32Float,
+				ViewDimension = DsvDimension.Texture2D,
+				Flags = DsvFlags.None
+			};
+			depthStencilViewDesc.Anonymous.Texture2D = new Tex2DDsv
+			{
+				MipSlice = 0
+			};
+			_device.CreateDepthStencilView(resource, &depthStencilViewDesc, handle);
 
 			texture.SetDepthStencilView(heap, handle);
 		}
+
+		var srvHandle = DescriptorHandle.Invalid;
+		var depthSrvHandle = DescriptorHandle.Invalid;
+		var uavHandle = DescriptorHandle.Invalid;
+		if ((descriptor.Usage & TextureUsage.ShaderResource) != 0)
+		{
+			srvHandle = _globalTable.AllocateShaderResourceView(texture);
+			if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
+			{
+				depthSrvHandle = _globalTable.AllocateDepthShaderResourceView(texture);
+			}
+		}
+
+		if ((descriptor.Usage & TextureUsage.UnorderedAccess) != 0)
+		{
+			uavHandle = _globalTable.AllocateUnorderedAccessView(texture);
+		}
+
+		texture.SetHandles(srvHandle, depthSrvHandle, uavHandle);
 
 		return texture;
 	}
@@ -260,17 +295,97 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		var wrapper = RentExternalTextureWrapper();
 		wrapper.Initialize(descriptor, resource, rtvHandle, dsvHandle);
+		var srvHandle = DescriptorHandle.Invalid;
+		var depthSrvHandle = DescriptorHandle.Invalid;
+		var uavHandle = DescriptorHandle.Invalid;
+		if ((descriptor.Usage & TextureUsage.ShaderResource) != 0)
+		{
+			srvHandle = _globalTable.AllocateShaderResourceView(wrapper);
+			if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)
+			{
+				depthSrvHandle = _globalTable.AllocateDepthShaderResourceView(wrapper);
+			}
+		}
+
+		if ((descriptor.Usage & TextureUsage.UnorderedAccess) != 0)
+		{
+			uavHandle = _globalTable.AllocateUnorderedAccessView(wrapper);
+		}
+
+		wrapper.SetHandles(srvHandle, depthSrvHandle, uavHandle);
 		return wrapper;
 	}
 
 	public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor)
 	{
-		throw new NotSupportedException("Direct3D12 buffer allocation is not yet implemented.");
+		var sizeInBytes = Align(descriptor.SizeInBytes, 16);
+		var allowsUav = (descriptor.Flags & BufferFlags.AllowUnorderedAccess) != 0;
+		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant) || descriptor.Usage.HasFlag(BufferUsage.Staging);
+		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
+		var initialState = allowsUav ? ResourceStates.UnorderedAccess : ResourceStates.Common;
+
+		var resourceDesc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = sizeInBytes,
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = resourceFlags
+		};
+
+		var defaultHeap = new HeapProperties(cpuWritableDirect ? HeapType.Upload : HeapType.Default);
+		var defaultState = cpuWritableDirect ? ResourceStates.GenericRead : initialState;
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+			&defaultHeap,
+			HeapFlags.None,
+			in resourceDesc,
+			defaultState,
+			null,
+			out ComPtr<ID3D12Resource> resource));
+
+		ComPtr<ID3D12Resource> upload = default;
+		if (cpuWritableDirect == false)
+		{
+			var uploadDesc = resourceDesc;
+			// Upload heap buffers cannot use UAV resource flags.
+			uploadDesc.Flags = ResourceFlags.None;
+
+			var uploadHeap = new HeapProperties(HeapType.Upload);
+			SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+				&uploadHeap,
+				HeapFlags.None,
+				in uploadDesc,
+				ResourceStates.GenericRead,
+				null,
+				out upload));
+		}
+
+		var buffer = new D3D12Buffer(
+			name: null,
+			descriptor,
+			resource,
+			sizeInBytes,
+			upload,
+			cpuWritableDirect: cpuWritableDirect,
+			flushUploadRange: cpuWritableDirect ? null : FlushUploadRange,
+			initialState: cpuWritableDirect ? ResourceStates.GenericRead : initialState);
+		return buffer;
 	}
 
 	public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor)
 	{
-		throw new NotSupportedException("Indirect command buffers are not implemented for the Direct3D12 backend yet.");
+		if (descriptor.PassKind != PassKind.Graphics)
+		{
+			throw new NotSupportedException("D3D12 indirect command buffers currently support graphics pass encoding only.");
+		}
+
+		var signature = EnsureGraphicsExecuteIndirectSignature();
+		return new D3D12IndirectCommandBuffer(null, descriptor, _device, signature);
 	}
 
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
@@ -300,6 +415,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	}
 
 	public IGfxDescriptorTable GlobalTable => _globalTable;
+
+	internal ComPtr<ID3D12CommandSignature> DrawIndexedIndirectSignature => EnsureDrawIndexedIndirectSignature();
+
+	internal ComPtr<ID3D12CommandSignature> GraphicsExecuteIndirectSignature => EnsureGraphicsExecuteIndirectSignature();
+
+	internal D3D12DescriptorTable BindlessDescriptorTable => _globalTable;
+
+	internal ComPtr<ID3D12Device> NativeDevice => _device;
 	
 	private static ulong Align(ulong size, ulong alignment)
 	{
@@ -327,7 +450,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 				default,
 				out ComPtr<ID3D12GraphicsCommandList> commandList));
 
-		var wrapper = new D3D12CommandList(type, allocator, commandList);
+		var wrapper = new D3D12CommandList(this, type, allocator, commandList);
 
 		return wrapper;
 	}
@@ -544,6 +667,175 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		SilkMarshal.ThrowHResult(_transitionCommandList.Close());
 	}
 
+	private void FlushUploadRange(D3D12Buffer buffer, ulong byteOffset, ulong byteCount)
+	{
+		if (buffer.Resource.Handle is null || buffer.UploadResource.Handle is null || byteCount == 0)
+		{
+			return;
+		}
+
+		lock (_uploadLock)
+		{
+			EnsureUploadCommandList();
+			SilkMarshal.ThrowHResult(_uploadAllocator.Reset());
+			SilkMarshal.ThrowHResult(_uploadCommandList.Reset(_uploadAllocator, (ID3D12PipelineState*)null));
+
+			var previousState = buffer.CurrentState;
+			if (previousState != ResourceStates.CopyDest)
+			{
+				var toCopyDest = new ResourceBarrier
+				{
+					Type = ResourceBarrierType.Transition,
+					Flags = ResourceBarrierFlags.None
+				};
+				toCopyDest.Anonymous.Transition = new ResourceTransitionBarrier
+				{
+					PResource = buffer.Resource.Handle,
+					Subresource = D3D12Api.ResourceBarrierAllSubresources,
+					StateBefore = previousState,
+					StateAfter = ResourceStates.CopyDest
+				};
+				_uploadCommandList.ResourceBarrier(1, &toCopyDest);
+			}
+
+			_uploadCommandList.CopyBufferRegion(
+				buffer.Resource,
+				byteOffset,
+				buffer.UploadResource,
+				byteOffset,
+				byteCount);
+
+			if (previousState != ResourceStates.CopyDest)
+			{
+				var toOriginal = new ResourceBarrier
+				{
+					Type = ResourceBarrierType.Transition,
+					Flags = ResourceBarrierFlags.None
+				};
+				toOriginal.Anonymous.Transition = new ResourceTransitionBarrier
+				{
+					PResource = buffer.Resource.Handle,
+					Subresource = D3D12Api.ResourceBarrierAllSubresources,
+					StateBefore = ResourceStates.CopyDest,
+					StateAfter = previousState
+				};
+				_uploadCommandList.ResourceBarrier(1, &toOriginal);
+			}
+
+			SilkMarshal.ThrowHResult(_uploadCommandList.Close());
+			ID3D12CommandList* uploadLists = (ID3D12CommandList*)_uploadCommandList.Handle;
+			_graphicsQueue.ExecuteCommandLists(1, &uploadLists);
+
+			var fenceValue = ++_submissionFenceValue;
+			SilkMarshal.ThrowHResult(_graphicsQueue.Signal(_submissionFence, fenceValue));
+			WaitForFence(fenceValue);
+		}
+	}
+
+	private void EnsureUploadCommandList()
+	{
+		if (_uploadCommandList.Handle is not null)
+		{
+			return;
+		}
+
+		SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(CommandListType.Direct, out _uploadAllocator));
+		SilkMarshal.ThrowHResult(
+			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
+				0,
+				CommandListType.Direct,
+				_uploadAllocator,
+				default,
+				out _uploadCommandList));
+		SilkMarshal.ThrowHResult(_uploadCommandList.Close());
+	}
+
+	private ComPtr<ID3D12CommandSignature> EnsureDrawIndexedIndirectSignature()
+	{
+		if (_drawIndexedIndirectSignature.Handle is not null)
+		{
+			return _drawIndexedIndirectSignature;
+		}
+
+		var argument = new IndirectArgumentDesc
+		{
+			Type = IndirectArgumentType.DrawIndexed
+		};
+
+		var signatureDesc = new CommandSignatureDesc
+		{
+			ByteStride = (uint)sizeof(DrawIndexedArguments),
+			NumArgumentDescs = 1,
+			PArgumentDescs = &argument,
+			NodeMask = 0
+		};
+
+		var nullRootSignature = default(ComPtr<ID3D12RootSignature>);
+		SilkMarshal.ThrowHResult(
+			_device.Handle->CreateCommandSignature(
+				&signatureDesc,
+				nullRootSignature,
+				out _drawIndexedIndirectSignature));
+		return _drawIndexedIndirectSignature;
+	}
+
+	private ComPtr<ID3D12CommandSignature> EnsureGraphicsExecuteIndirectSignature()
+	{
+		if (_graphicsExecuteIndirectSignature.Handle is not null)
+		{
+			return _graphicsExecuteIndirectSignature;
+		}
+
+		var argumentDescs = stackalloc IndirectArgumentDesc[11];
+
+		argumentDescs[0].Type = IndirectArgumentType.VertexBufferView;
+		argumentDescs[0].Anonymous.VertexBuffer.Slot = 0;
+
+		argumentDescs[1].Type = IndirectArgumentType.IndexBufferView;
+
+		argumentDescs[2].Type = IndirectArgumentType.ConstantBufferView;
+		argumentDescs[2].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB0;
+
+		argumentDescs[3].Type = IndirectArgumentType.ConstantBufferView;
+		argumentDescs[3].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB2;
+
+		argumentDescs[4].Type = IndirectArgumentType.ConstantBufferView;
+		argumentDescs[4].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB3;
+
+		argumentDescs[5].Type = IndirectArgumentType.ConstantBufferView;
+		argumentDescs[5].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB14;
+
+		argumentDescs[6].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
+
+		argumentDescs[7].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[7].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
+
+		argumentDescs[8].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[8].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
+
+		argumentDescs[9].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[9].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
+
+		argumentDescs[10].Type = IndirectArgumentType.DrawIndexed;
+
+		var signatureDesc = new CommandSignatureDesc
+		{
+			ByteStride = (uint)sizeof(D3D12IndirectCommandBuffer.CommandRecord),
+			NumArgumentDescs = 11,
+			PArgumentDescs = argumentDescs,
+			NodeMask = 0
+		};
+
+		var rootSignature = EnsureGraphicsRootSignature(GraphicsLayoutKind.Material);
+		SilkMarshal.ThrowHResult(
+			_device.Handle->CreateCommandSignature(
+				&signatureDesc,
+				rootSignature,
+				out _graphicsExecuteIndirectSignature));
+		return _graphicsExecuteIndirectSignature;
+	}
+
 	private void WaitForFence(ulong fenceValue)
 	{
 		if (_submissionFence.Handle->GetCompletedValue() >= fenceValue)
@@ -738,122 +1030,95 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return existing;
 		}
 
-		var ranges = stackalloc DescriptorRange[1];
-		var rootParameters = stackalloc RootParameter[4];
-		var staticSampler = stackalloc StaticSamplerDesc[1];
+		const uint maxSrvDescriptors = 16384;
+		const uint maxUavDescriptors = 16384;
+		const uint maxSamplerDescriptors = 2048;
 
-		switch (layout)
+		var ranges = stackalloc DescriptorRange[3];
+		ranges[0] = new DescriptorRange
 		{
-			case GraphicsLayoutKind.Material:
-			case GraphicsLayoutKind.Default:
-			{
-				ranges[0].RangeType = DescriptorRangeType.Srv;
-				ranges[0].NumDescriptors = 5;
-				ranges[0].BaseShaderRegister = 0;
-				ranges[0].RegisterSpace = 0;
-				ranges[0].OffsetInDescriptorsFromTableStart = 0;
+			RangeType = DescriptorRangeType.Srv,
+			NumDescriptors = maxSrvDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[1] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[2] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Sampler,
+			NumDescriptors = maxSamplerDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
+		};
 
-				rootParameters[0].ParameterType = RootParameterType.TypeCbv;
-				rootParameters[0].Anonymous.Descriptor = new()
-				{
-					ShaderRegister = 0,
-					RegisterSpace = 0
-				};
-				rootParameters[0].ShaderVisibility = ShaderVisibility.Pixel;
+		var rootParameters = stackalloc RootParameter[12];
 
-				rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
-				rootParameters[1].Anonymous.Constants = new()
-				{
-					ShaderRegister = 1,
-					RegisterSpace = 0,
-					Num32BitValues = 16
-				};
-				rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[0];
+		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
-				rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-				rootParameters[2].Anonymous.Constants = new()
-				{
-					ShaderRegister = 2,
-					RegisterSpace = 0,
-					Num32BitValues = 20
-				};
-				rootParameters[2].ShaderVisibility = ShaderVisibility.All;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[1];
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
-				rootParameters[3].ParameterType = RootParameterType.TypeDescriptorTable;
-				rootParameters[3].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-				rootParameters[3].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
-				rootParameters[3].ShaderVisibility = ShaderVisibility.Pixel;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
-				staticSampler[0] = new()
-				{
-					Filter = Filter.MinMagMipLinear,
-					AddressU = TextureAddressMode.Wrap,
-					AddressV = TextureAddressMode.Wrap,
-					AddressW = TextureAddressMode.Wrap,
-					MipLODBias = 0.0f,
-					MaxAnisotropy = 0,
-					ComparisonFunc = ComparisonFunc.Always,
-					BorderColor = StaticBorderColor.OpaqueWhite,
-					MinLOD = 0.0f,
-					MaxLOD = float.MaxValue,
-					ShaderRegister = 0,
-					RegisterSpace = 0,
-					ShaderVisibility = ShaderVisibility.Pixel
-				};
-				break;
-			}
-			case GraphicsLayoutKind.Skybox:
-			{
-				ranges[0].RangeType = DescriptorRangeType.Srv;
-				ranges[0].NumDescriptors = 1;
-				ranges[0].BaseShaderRegister = 0;
-				ranges[0].RegisterSpace = 0;
-				ranges[0].OffsetInDescriptorsFromTableStart = 0;
+		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].Anonymous.Descriptor = new RootDescriptor(27, 0);
+		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].ShaderVisibility = ShaderVisibility.All;
 
-				rootParameters[0].ParameterType = RootParameterType.Type32BitConstants;
-				rootParameters[0].Anonymous.Constants = new()
-				{
-					ShaderRegister = 0,
-					RegisterSpace = 0,
-					Num32BitValues = 16 // viewProjection
-				};
-				rootParameters[0].ShaderVisibility = ShaderVisibility.Vertex;
+		rootParameters[D3D12RootBindings.Graphics.CbvB0].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB0].Anonymous.Descriptor = new RootDescriptor(0, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB0].ShaderVisibility = ShaderVisibility.All;
 
-				rootParameters[1].ParameterType = RootParameterType.TypeDescriptorTable;
-				rootParameters[1].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-				rootParameters[1].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
-				rootParameters[1].ShaderVisibility = ShaderVisibility.Pixel;
+		rootParameters[D3D12RootBindings.Graphics.CbvB2].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB2].Anonymous.Descriptor = new RootDescriptor(2, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB2].ShaderVisibility = ShaderVisibility.All;
 
-				staticSampler[0] = new()
-				{
-					Filter = Filter.MinMagMipLinear,
-					AddressU = TextureAddressMode.Clamp,
-					AddressV = TextureAddressMode.Clamp,
-					AddressW = TextureAddressMode.Clamp,
-					MipLODBias = 0.0f,
-					MaxAnisotropy = 0,
-					ComparisonFunc = ComparisonFunc.Always,
-					BorderColor = StaticBorderColor.OpaqueWhite,
-					MinLOD = 0.0f,
-					MaxLOD = float.MaxValue,
-					ShaderRegister = 0,
-					RegisterSpace = 0,
-					ShaderVisibility = ShaderVisibility.Pixel
-				};
-				break;
-			}
-			default:
-				throw new NotSupportedException($"Unsupported graphics layout '{layout}'.");
-		}
+		rootParameters[D3D12RootBindings.Graphics.CbvB3].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB3].Anonymous.Descriptor = new RootDescriptor(3, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB3].ShaderVisibility = ShaderVisibility.All;
 
-		var rootParameterCount = layout == GraphicsLayoutKind.Skybox ? 2 : 4;
+		rootParameters[D3D12RootBindings.Graphics.CbvB14].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB14].Anonymous.Descriptor = new RootDescriptor(14, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB14].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.SrvT10].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT10].Anonymous.Descriptor = new RootDescriptor(10, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT10].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.SrvT11].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT11].Anonymous.Descriptor = new RootDescriptor(11, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT11].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.SrvT12].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT12].Anonymous.Descriptor = new RootDescriptor(12, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT12].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.SrvT13].ParameterType = RootParameterType.TypeSrv;
+		rootParameters[D3D12RootBindings.Graphics.SrvT13].Anonymous.Descriptor = new RootDescriptor(13, 0);
+		rootParameters[D3D12RootBindings.Graphics.SrvT13].ShaderVisibility = ShaderVisibility.All;
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = (uint)rootParameterCount,
+			NumParameters = 12,
 			PParameters = rootParameters,
-			NumStaticSamplers = 1,
-			PStaticSamplers = staticSampler,
+			NumStaticSamplers = 0,
+			PStaticSamplers = null,
 			Flags = RootSignatureFlags.AllowInputAssemblerInputLayout
 		};
 
@@ -896,67 +1161,91 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			return;
 		}
 
-		var ranges = stackalloc DescriptorRange[2];
-		ranges[0].RangeType = DescriptorRangeType.Srv;
-		ranges[0].NumDescriptors = 9;
-		ranges[0].BaseShaderRegister = 0;
-		ranges[0].RegisterSpace = 0;
-		ranges[0].OffsetInDescriptorsFromTableStart = 0;
+		const uint maxSrvDescriptors = 16384;
+		const uint maxUavDescriptors = 16384;
+		const uint maxSamplerDescriptors = 2048;
 
-		ranges[1].RangeType = DescriptorRangeType.Uav;
-		ranges[1].NumDescriptors = 1;
-		ranges[1].BaseShaderRegister = 0;
-		ranges[1].RegisterSpace = 0;
-		ranges[1].OffsetInDescriptorsFromTableStart = 0xFFFFFFFF;
-
-		var rootParameters = stackalloc RootParameter[3];
-		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[0].Anonymous.DescriptorTable.NumDescriptorRanges = 2;
-		rootParameters[0].Anonymous.DescriptorTable.PDescriptorRanges = ranges;
-		rootParameters[0].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[1].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[1].Anonymous.Constants = new()
+		var ranges = stackalloc DescriptorRange[3];
+		ranges[0] = new DescriptorRange
 		{
-			ShaderRegister = 0,
-			RegisterSpace = 0,
-			Num32BitValues = 36 // CameraParams
+			RangeType = DescriptorRangeType.Srv,
+			NumDescriptors = maxSrvDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
 		};
-		rootParameters[1].ShaderVisibility = ShaderVisibility.All;
-
-		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
-		rootParameters[2].Anonymous.Constants = new()
+		ranges[1] = new DescriptorRange
 		{
-			ShaderRegister = 1,
-			RegisterSpace = 0,
-			Num32BitValues = 40 // LightingParams (count + up to 3 lights)
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
 		};
-		rootParameters[2].ShaderVisibility = ShaderVisibility.All;
-
-		var staticSampler = stackalloc StaticSamplerDesc[1];
-		staticSampler[0] = new()
+		ranges[2] = new DescriptorRange
 		{
-			Filter = Filter.MinMagMipLinear,
-			AddressU = TextureAddressMode.Clamp,
-			AddressV = TextureAddressMode.Clamp,
-			AddressW = TextureAddressMode.Clamp,
-			MipLODBias = 0.0f,
-			MaxAnisotropy = 0,
-			ComparisonFunc = ComparisonFunc.Always,
-			BorderColor = StaticBorderColor.TransparentBlack,
-			MinLOD = 0.0f,
-			MaxLOD = float.MaxValue,
-			ShaderRegister = 0,
-			RegisterSpace = 0,
-			ShaderVisibility = ShaderVisibility.All
+			RangeType = DescriptorRangeType.Sampler,
+			NumDescriptors = maxSamplerDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 1,
+			OffsetInDescriptorsFromTableStart = 0
 		};
+
+		var rootParameters = stackalloc RootParameter[21];
+
+		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[0];
+		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[1];
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].Anonymous.Descriptor = new RootDescriptor(27, 0);
+		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.CbvB0].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.CbvB0].Anonymous.Descriptor = new RootDescriptor(0, 0);
+		rootParameters[D3D12RootBindings.Compute.CbvB0].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.CbvB1].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.CbvB1].Anonymous.Descriptor = new RootDescriptor(1, 0);
+		rootParameters[D3D12RootBindings.Compute.CbvB1].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.CbvB2].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.CbvB2].Anonymous.Descriptor = new RootDescriptor(2, 0);
+		rootParameters[D3D12RootBindings.Compute.CbvB2].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.CbvB11].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.CbvB11].Anonymous.Descriptor = new RootDescriptor(11, 0);
+		rootParameters[D3D12RootBindings.Compute.CbvB11].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Compute.CbvB12].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Compute.CbvB12].Anonymous.Descriptor = new RootDescriptor(12, 0);
+		rootParameters[D3D12RootBindings.Compute.CbvB12].ShaderVisibility = ShaderVisibility.All;
+
+		for (var u = 0u; u <= 11u; u++)
+		{
+			var rootIndex = D3D12RootBindings.Compute.UavU0 + u;
+			rootParameters[rootIndex].ParameterType = RootParameterType.TypeUav;
+			rootParameters[rootIndex].Anonymous.Descriptor = new RootDescriptor(u, 0);
+			rootParameters[rootIndex].ShaderVisibility = ShaderVisibility.All;
+		}
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 3,
+			NumParameters = 21,
 			PParameters = rootParameters,
-			NumStaticSamplers = 1,
-			PStaticSamplers = staticSampler,
+			NumStaticSamplers = 0,
+			PStaticSamplers = null,
 			Flags = RootSignatureFlags.None
 		};
 
@@ -1136,53 +1425,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		};
 	}
 
-	private sealed class NullDescriptorTable : IGfxDescriptorTable
-	{
-		public DescriptorHandle AllocateShaderResourceView(IGfxResource resource)
-		{
-			throw new NotImplementedException(
-				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
-		}
-
-		public DescriptorHandle AllocateDepthShaderResourceView(IGfxTexture texture)
-		{
-			throw new NotImplementedException(
-				"Depth SRV descriptor allocation is not yet implemented for the Direct3D12 backend.");
-		}
-
-		public DescriptorHandle AllocateUnorderedAccessView(IGfxResource resource)
-		{
-			throw new NotImplementedException(
-				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
-		}
-
-		public DescriptorHandle AllocateConstantBufferView(IGfxBuffer buffer)
-		{
-			throw new NotImplementedException(
-				"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
-		}
-
-			public DescriptorHandle AllocateSampler(in SamplerDescriptor sampler)
-			{
-				throw new NotImplementedException(
-					"Bindless descriptor allocation is not yet implemented for the Direct3D12 backend.");
-			}
-
-			public BindlessFallbackHandles GetOrCreateFallbackHandles()
-			{
-				return new BindlessFallbackHandles(
-					DescriptorHandle.Invalid,
-					DescriptorHandle.Invalid,
-					DescriptorHandle.Invalid,
-					DescriptorHandle.Invalid);
-			}
-
-			public void Free(DescriptorHandle handle)
-			{
-				throw new NotImplementedException();
-			}
-		}
-
 	private sealed class ExternalD3D12Texture : ID3D12BackendTexture
 	{
 		public string? Name => null;
@@ -1191,8 +1433,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 		public DescriptorHandle ShaderResourceView { get; private set; } = DescriptorHandle.Invalid;
 
-		public DescriptorHandle DepthShaderResourceView =>
-			throw new NotImplementedException("Depth SRV is not yet implemented for external Direct3D12 textures.");
+		public DescriptorHandle DepthShaderResourceView { get; private set; } = DescriptorHandle.Invalid;
 
 		public DescriptorHandle UnorderedAccessView { get; private set; } = DescriptorHandle.Invalid;
 
@@ -1210,7 +1451,15 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			RenderTargetView = rtv;
 			DepthStencilView = dsv;
 			ShaderResourceView = DescriptorHandle.Invalid;
+			DepthShaderResourceView = DescriptorHandle.Invalid;
 			UnorderedAccessView = DescriptorHandle.Invalid;
+		}
+
+		public void SetHandles(DescriptorHandle srv, DescriptorHandle depthSrv, DescriptorHandle uav)
+		{
+			ShaderResourceView = srv;
+			DepthShaderResourceView = depthSrv;
+			UnorderedAccessView = uav;
 		}
 
 		public void Reset()
@@ -1220,6 +1469,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			RenderTargetView = null;
 			DepthStencilView = null;
 			ShaderResourceView = DescriptorHandle.Invalid;
+			DepthShaderResourceView = DescriptorHandle.Invalid;
 			UnorderedAccessView = DescriptorHandle.Invalid;
 		}
 	}

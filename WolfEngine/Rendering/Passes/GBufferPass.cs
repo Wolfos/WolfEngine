@@ -63,21 +63,13 @@ public static class GBufferPass
 			return;
 		}
 
-		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-		commandList.BindConstantBuffer(10, config.InstanceBuffer);
-		commandList.BindConstantBuffer(11, config.MaterialBuffer);
-		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
-		if (config.MaterialGenerationBuffer is not null)
-		{
-			commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
-		}
-		commandList.BindConstantBuffer(2, config.CameraBuffer);
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)
 		{
 			commandList.EndPass();
 			return;
 		}
+		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
 		for (var i = 0; i < buckets.Length; i++)
 		{
@@ -85,6 +77,15 @@ public static class GBufferPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
+				commandList.BindConstantBuffer(10, config.InstanceBuffer);
+				commandList.BindConstantBuffer(11, config.MaterialBuffer);
+				commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+				if (config.MaterialGenerationBuffer is not null)
+				{
+					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+				}
+
+				commandList.BindConstantBuffer(2, config.CameraBuffer);
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{

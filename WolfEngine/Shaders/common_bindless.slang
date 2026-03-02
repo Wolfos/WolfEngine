@@ -12,6 +12,18 @@ static const uint WOLF_INVALID_DESCRIPTOR_INDEX = 0xFFFFFFFF;
 #define WOLF_BINDLESS_MAX 65536
 #endif
 
+#ifndef WOLF_BINDLESS_TEXTURE_MAX
+#define WOLF_BINDLESS_TEXTURE_MAX WOLF_BINDLESS_MAX
+#endif
+
+#ifndef WOLF_BINDLESS_RW_TEXTURE_MAX
+#define WOLF_BINDLESS_RW_TEXTURE_MAX WOLF_BINDLESS_MAX
+#endif
+
+#ifndef WOLF_BINDLESS_SAMPLER_MAX
+#define WOLF_BINDLESS_SAMPLER_MAX WOLF_BINDLESS_MAX
+#endif
+
 uint GetDescriptorKind(uint handle)
 {
     return (handle >> DESCRIPTOR_KIND_SHIFT);
@@ -53,10 +65,11 @@ uint SafeDescriptorIndex(uint handle)
     return index;
 }
 
+#if defined(WOLF_TARGET_METAL)
 struct DescriptorHeapTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    Texture2D<float4> g_Textures[WOLF_BINDLESS_MAX];
+    Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX];
 #else
     Texture2D<float4> g_Textures[];
 #endif
@@ -65,7 +78,7 @@ struct DescriptorHeapTextures
 struct DescriptorHeapSamplers
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    SamplerState g_Samplers[WOLF_BINDLESS_MAX];
+    SamplerState g_Samplers[WOLF_BINDLESS_SAMPLER_MAX];
 #else
     SamplerState g_Samplers[];
 #endif
@@ -76,7 +89,7 @@ struct DescriptorHeapSamplers
 struct DescriptorHeapRWTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
-    RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_MAX];
+    RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX];
 #else
     RWTexture2D<float4> g_RWTextures[];
 #endif
@@ -117,3 +130,50 @@ SamplerState GetSampler(uint handle)
     }
     return g_SamplerHeap.g_Samplers[index];
 }
+#else
+#if defined(WOLF_BINDLESS_FIXED_SIZE)
+Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space1);
+SamplerState g_Samplers[WOLF_BINDLESS_SAMPLER_MAX] : register(s0, space1);
+#if !defined(WOLF_NO_RW_TEXTURES)
+RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space1);
+#endif
+#else
+Texture2D<float4> g_Textures[] : register(t0, space1);
+SamplerState g_Samplers[] : register(s0, space1);
+#if !defined(WOLF_NO_RW_TEXTURES)
+RWTexture2D<float4> g_RWTextures[] : register(u0, space1);
+#endif
+#endif
+
+Texture2D<float4> GetTexture(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_Textures[0];
+    }
+    return g_Textures[index];
+}
+
+#if !defined(WOLF_NO_RW_TEXTURES)
+RWTexture2D<float4> GetRWTexture(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_RWTextures[0];
+    }
+    return g_RWTextures[index];
+}
+#endif
+
+SamplerState GetSampler(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_Samplers[0];
+    }
+    return g_Samplers[index];
+}
+#endif

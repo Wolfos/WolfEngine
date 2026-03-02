@@ -16,14 +16,23 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 {
+	private readonly D3D12Device _owner;
 	private readonly CpuDescriptorHandle[] _currentRtvHandles = new CpuDescriptorHandle[8];
+	private readonly List<ComPtr<ID3D12Resource>> _transientUploads = new();
+	private D3D12DescriptorTable? _bindlessTable;
+	private PassKind? _activePipelineKind;
 	private uint _currentRtvCount;
 	private CpuDescriptorHandle? _currentDsvHandle;
 	private bool _isClosed;
+	private bool _bindlessHeapsDirty = true;
 
-	public D3D12CommandList(CommandListType type, ComPtr<ID3D12CommandAllocator> allocator,
+	public D3D12CommandList(
+		D3D12Device owner,
+		CommandListType type,
+		ComPtr<ID3D12CommandAllocator> allocator,
 		ComPtr<ID3D12GraphicsCommandList> commandList)
 	{
+		_owner = owner;
 		Type = type;
 		Allocator = allocator;
 		CommandList = commandList;
@@ -52,6 +61,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void Dispose()
 	{
+		DisposeTransientUploads();
 		CommandList.Dispose();
 		Allocator.Dispose();
 	}
@@ -59,10 +69,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	public void Reset()
 	{
 		SilkMarshal.ThrowHResult(Allocator.Reset());
-		SilkMarshal.ThrowHResult(CommandList.Reset(Allocator, (ID3D12PipelineState*) null));
+		SilkMarshal.ThrowHResult(CommandList.Reset(Allocator, (ID3D12PipelineState*)null));
 		_isClosed = false;
 		_currentRtvCount = 0;
 		_currentDsvHandle = null;
+		_activePipelineKind = null;
+		_bindlessHeapsDirty = true;
+		DisposeTransientUploads();
 	}
 
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
@@ -79,15 +92,15 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		CommandList.RSSetViewports(1, &nativeViewport);
 
-		var left = (int) Math.Floor(viewport.X);
-		var top = (int) Math.Floor(viewport.Y);
-		var right = (int) Math.Ceiling(viewport.X + viewport.Width);
-		var bottom = (int) Math.Ceiling(viewport.Y + viewport.Height);
+		var left = (int)Math.Floor(viewport.X);
+		var top = (int)Math.Floor(viewport.Y);
+		var right = (int)Math.Ceiling(viewport.X + viewport.Width);
+		var bottom = (int)Math.Ceiling(viewport.Y + viewport.Height);
 		var scissor = new Box2D<int>(left, top, right, bottom);
 		CommandList.RSSetScissorRects(1, &scissor);
 
 		var colorCount = targets.ColorAttachments.Count;
-		_currentRtvCount = (uint) colorCount;
+		_currentRtvCount = (uint)colorCount;
 		CpuDescriptorHandle* dsvHandle = null;
 		CpuDescriptorHandle depthStorage = default;
 		if (targets.DepthAttachment is DepthTargetBinding depthBinding)
@@ -126,19 +139,18 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 			fixed (CpuDescriptorHandle* rtvPtr = rtvSpan)
 			{
-				CommandList.OMSetRenderTargets((uint) colorCount, rtvPtr, singleHandle, dsvHandle);
+				CommandList.OMSetRenderTargets((uint)colorCount, rtvPtr, singleHandle, dsvHandle);
 			}
 
 			return;
 		}
 
-		CommandList.OMSetRenderTargets(0, (CpuDescriptorHandle*) null, singleHandle, dsvHandle);
+		CommandList.OMSetRenderTargets(0, (CpuDescriptorHandle*)null, singleHandle, dsvHandle);
 		_currentRtvCount = 0;
 	}
 
 	public void EndPass()
 	{
-		// No-op for now. The application is responsible for inserting any necessary barriers.
 		_currentRtvCount = 0;
 		_currentDsvHandle = null;
 	}
@@ -151,6 +163,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		CommandList.SetPipelineState(nativePipeline.PipelineState.Handle);
+		_activePipelineKind = nativePipeline.Kind;
 
 		if (nativePipeline.Kind == PassKind.Graphics)
 		{
@@ -160,12 +173,22 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		{
 			CommandList.SetComputeRootSignature(nativePipeline.RootSignature.Handle);
 		}
+
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
 	}
 
 	public void SetBindlessTable(IGfxDescriptorTable table)
 	{
-		throw new NotSupportedException(
-			"Bindless descriptor tables are not yet implemented for the Direct3D12 backend.");
+		if (table is not D3D12DescriptorTable d3d12Table)
+		{
+			throw new InvalidOperationException("Bindless table was not created by the Direct3D12 backend.");
+		}
+
+		_bindlessTable = d3d12Table;
+		_bindlessHeapsDirty = true;
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
 	}
 
 	public void BindGraphicsDescriptorSet(uint slot, IGfxDescriptorSet descriptorSet)
@@ -178,6 +201,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		var heapPtr = stackalloc ID3D12DescriptorHeap*[1];
 		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
 		CommandList.SetDescriptorHeaps(1, heapPtr);
+		_bindlessHeapsDirty = true;
 
 		var handle = d3dDescriptorSet.GetGpuHandle(0);
 		CommandList.SetGraphicsRootDescriptorTable(slot, handle);
@@ -193,6 +217,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		var heapPtr = stackalloc ID3D12DescriptorHeap*[1];
 		heapPtr[0] = d3dDescriptorSet.DescriptorHeap.Handle;
 		CommandList.SetDescriptorHeaps(1, heapPtr);
+		_bindlessHeapsDirty = true;
 
 		var handle = d3dDescriptorSet.GetGpuHandle(0);
 		CommandList.SetComputeRootDescriptorTable(slot, handle);
@@ -200,11 +225,16 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
 	{
+		if (_activePipelineKind != PassKind.Graphics)
+		{
+			throw new InvalidOperationException("BindConstantBuffer requires a bound graphics pipeline on the D3D12 backend.");
+		}
+
 		if (buffer is not D3D12Buffer d3d12Buffer)
 		{
 			throw new InvalidOperationException("Buffer was not created by the Direct3D12 backend.");
 		}
-		
+
 		var resource = d3d12Buffer.Resource.Handle;
 		if (resource is null)
 		{
@@ -212,6 +242,18 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		var gpuAddress = resource->GetGPUVirtualAddress() + offset;
+		if (D3D12RootBindings.TryGetGraphicsSrvIndex(slot, out var srvRootIndex))
+		{
+			CommandList.SetGraphicsRootShaderResourceView(srvRootIndex, gpuAddress);
+			return;
+		}
+
+		if (D3D12RootBindings.TryGetGraphicsCbvIndex(slot, out var cbvRootIndex))
+		{
+			CommandList.SetGraphicsRootConstantBufferView(cbvRootIndex, gpuAddress);
+			return;
+		}
+
 		CommandList.SetGraphicsRootConstantBufferView(slot, gpuAddress);
 	}
 
@@ -222,12 +264,19 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		var num32BitValues = (uint)data.Length / 4;
 		if (data.Length % 4 != 0)
 		{
 			throw new ArgumentException("Data size must be a multiple of 4 bytes.", nameof(data));
 		}
 
+		if (D3D12RootBindings.TryGetGraphicsCbvIndex(slot, out var rootIndex))
+		{
+			var gpuAddress = UploadConstants(data);
+			CommandList.SetGraphicsRootConstantBufferView(rootIndex, gpuAddress);
+			return;
+		}
+
+		var num32BitValues = (uint)data.Length / 4;
 		fixed (byte* dataPtr = data)
 		{
 			CommandList.SetGraphicsRoot32BitConstants(slot, num32BitValues, dataPtr, 0);
@@ -241,12 +290,19 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		var num32BitValues = (uint)data.Length / 4;
 		if (data.Length % 4 != 0)
 		{
 			throw new ArgumentException("Data size must be a multiple of 4 bytes.", nameof(data));
 		}
 
+		if (D3D12RootBindings.TryGetComputeCbvIndex(slot, out var rootIndex))
+		{
+			var gpuAddress = UploadConstants(data);
+			CommandList.SetComputeRootConstantBufferView(rootIndex, gpuAddress);
+			return;
+		}
+
+		var num32BitValues = (uint)data.Length / 4;
 		fixed (byte* dataPtr = data)
 		{
 			CommandList.SetComputeRoot32BitConstants(slot, num32BitValues, dataPtr, 0);
@@ -255,7 +311,18 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
 	{
-		throw new NotSupportedException("Compute buffer binding is not supported on the Direct3D12 backend yet.");
+		if (buffer is not D3D12Buffer d3d12Buffer || d3d12Buffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Buffer was not created by the Direct3D12 backend.");
+		}
+
+		if (D3D12RootBindings.TryGetComputeUavIndex(slot, out var rootIndex) == false)
+		{
+			throw new NotSupportedException($"Compute buffer slot {slot} is not supported by the D3D12 root signature.");
+		}
+
+		var gpuAddress = d3d12Buffer.Resource.Handle->GetGPUVirtualAddress() + offset;
+		CommandList.SetComputeRootUnorderedAccessView(rootIndex, gpuAddress);
 	}
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
@@ -287,7 +354,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		var colorValues = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
-		CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorValues, 0, (Box2D<int>*) null);
+		CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorValues, 0, (Box2D<int>*)null);
 	}
 
 	public void ClearDepthStencil(float depth)
@@ -297,12 +364,15 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		CommandList.ClearDepthStencilView(_currentDsvHandle.Value, ClearFlags.Depth, depth, 0, 0, (Box2D<int>*) null);
+		CommandList.ClearDepthStencilView(_currentDsvHandle.Value, ClearFlags.Depth, depth, 0, 0, (Box2D<int>*)null);
 	}
 
 	public void PushConstants<T>(in T data) where T : unmanaged
 	{
-		ReadOnlySpan<byte> bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref System.Runtime.CompilerServices.Unsafe.AsRef(in data), 1));
+		ReadOnlySpan<byte> bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+			System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
+				ref System.Runtime.CompilerServices.Unsafe.AsRef(in data),
+				1));
 		SetGraphicsConstants(0, bytes);
 	}
 
@@ -335,22 +405,21 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			var start = view.Offset;
 			if (start >= size)
 			{
-				throw new ArgumentOutOfRangeException(nameof(vertexBuffers),
-					"Vertex buffer offset exceeds buffer size.");
+				throw new ArgumentOutOfRangeException(nameof(vertexBuffers), "Vertex buffer offset exceeds buffer size.");
 			}
 
 			var remaining = size - start;
 			var spanSize = Math.Min(remaining, uint.MaxValue);
 
-			views[i] = new()
+			views[i] = new Silk.NET.Direct3D12.VertexBufferView
 			{
 				BufferLocation = gpuAddress + start,
 				StrideInBytes = view.Stride,
-				SizeInBytes = (uint) spanSize
+				SizeInBytes = (uint)spanSize
 			};
 		}
 
-		CommandList.IASetVertexBuffers(0, (uint) vertexBuffers.Length, views);
+		CommandList.IASetVertexBuffers(0, (uint)vertexBuffers.Length, views);
 	}
 
 	public void SetIndexBuffer(in AbstractionIndexBufferView indexBuffer)
@@ -381,14 +450,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		{
 			IndexFormat.UInt16 => Format.FormatR16Uint,
 			IndexFormat.UInt32 => Format.FormatR32Uint,
-			_ => throw new ArgumentOutOfRangeException(nameof(indexBuffer), indexBuffer.Format,
-				"Unsupported index format.")
+			_ => throw new ArgumentOutOfRangeException(nameof(indexBuffer), indexBuffer.Format, "Unsupported index format.")
 		};
 
 		var view = new Silk.NET.Direct3D12.IndexBufferView
 		{
 			BufferLocation = gpuAddress + offset,
-			SizeInBytes = (uint) spanSize,
+			SizeInBytes = (uint)spanSize,
 			Format = format
 		};
 
@@ -397,6 +465,8 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void Draw(in AbstractionDrawArguments arguments)
 	{
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
 		CommandList.DrawIndexedInstanced(
 			arguments.IndexCount,
 			arguments.InstanceCount,
@@ -407,12 +477,49 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void DrawIndexedIndirect(in AbstractionIndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset)
 	{
-		throw new NotSupportedException("Indirect indexed draws are not implemented for the Direct3D12 backend yet.");
+		if (indirectArgsBuffer is not D3D12Buffer argsBuffer || argsBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Indirect args buffer was not created by the Direct3D12 backend.");
+		}
+
+		SetIndexBuffer(indexBuffer);
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
+
+		var previousState = argsBuffer.CurrentState;
+		TransitionBufferIfNeeded(argsBuffer, ResourceStates.IndirectArgument);
+		CommandList.ExecuteIndirect(
+			_owner.DrawIndexedIndirectSignature,
+			1,
+			argsBuffer.Resource,
+			indirectArgsOffset,
+			(ID3D12Resource*)null,
+			0);
+		TransitionBufferIfNeeded(argsBuffer, previousState);
 	}
 
 	public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount)
 	{
-		throw new NotSupportedException("Indirect command buffer execution is not implemented for the Direct3D12 backend yet.");
+		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Direct3D12 backend.");
+		}
+
+		var maxAvailable = Math.Min(maxCommandCount, d3d12CommandBuffer.Descriptor.MaxCommandCount);
+		if (maxAvailable == 0)
+		{
+			return;
+		}
+
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
+		CommandList.ExecuteIndirect(
+			d3d12CommandBuffer.CommandSignature,
+			maxAvailable,
+			d3d12CommandBuffer.ArgumentBuffer,
+			0,
+			(ID3D12Resource*)null,
+			0);
 	}
 
 	public void ExecuteIndirectCommandBufferIndexed(
@@ -422,36 +529,199 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		IGfxBuffer commandCountBuffer,
 		ulong commandCountOffsetBytes)
 	{
-		throw new NotSupportedException("Indexed indirect command buffer execution is not implemented for the Direct3D12 backend yet.");
+		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Direct3D12 backend.");
+		}
+
+		if (commandCountBuffer is not D3D12Buffer countBuffer || countBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Command count/range buffer was not created by the Direct3D12 backend.");
+		}
+
+		_ = commandIndicesBuffer;
+		_ = indicesOffsetBytes;
+
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
+
+		// Range mode: consume {start,count} and execute from command 0 using the count value only.
+		var countOffset = commandCountOffsetBytes + sizeof(uint);
+		var previousState = countBuffer.CurrentState;
+		TransitionBufferIfNeeded(countBuffer, ResourceStates.IndirectArgument);
+		CommandList.ExecuteIndirect(
+			d3d12CommandBuffer.CommandSignature,
+			d3d12CommandBuffer.Descriptor.MaxCommandCount,
+			d3d12CommandBuffer.ArgumentBuffer,
+			0,
+			countBuffer.Resource,
+			countOffset);
+		TransitionBufferIfNeeded(countBuffer, previousState);
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
 		CommandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 	}
 
-	/// <summary>
-	/// Sets the descriptor heaps to be used by the command list.
-	/// This is a D3D12-specific operation required before any descriptor tables can be bound.
-	/// </summary>
 	public void SetDescriptorHeaps(ComPtr<ID3D12DescriptorHeap>[] heaps)
 	{
 		var heapPtrs = stackalloc ID3D12DescriptorHeap*[heaps.Length];
-		for (int i = 0; i < heaps.Length; i++)
+		for (var i = 0; i < heaps.Length; i++)
 		{
 			heapPtrs[i] = heaps[i].Handle;
 		}
+
 		CommandList.SetDescriptorHeaps((uint)heaps.Length, heapPtrs);
 	}
 
-	/// <summary>
-	/// Sets a compute root descriptor table.
-	/// </summary>
 	public void SetComputeRootDescriptorTable(uint rootParameterIndex, GpuDescriptorHandle baseDescriptor)
 	{
 		CommandList.SetComputeRootDescriptorTable(rootParameterIndex, baseDescriptor);
 	}
-	
+
+	private void EnsureBindlessDescriptorHeaps()
+	{
+		if (_bindlessTable is null || _bindlessHeapsDirty == false)
+		{
+			return;
+		}
+
+		var heaps = stackalloc ID3D12DescriptorHeap*[2];
+		heaps[0] = _bindlessTable.DescriptorHeap.Handle;
+		heaps[1] = _bindlessTable.SamplerHeap.Handle;
+		CommandList.SetDescriptorHeaps(2, heaps);
+		_bindlessHeapsDirty = false;
+	}
+
+	private void ApplyBindlessRootBindings()
+	{
+		if (_bindlessTable is null || _activePipelineKind.HasValue == false)
+		{
+			return;
+		}
+
+		if (_activePipelineKind.Value == PassKind.Graphics)
+		{
+			CommandList.SetGraphicsRootDescriptorTable(
+				D3D12RootBindings.Graphics.BindlessSrvTable,
+				_bindlessTable.SrvTableStart);
+			CommandList.SetGraphicsRootDescriptorTable(
+				D3D12RootBindings.Graphics.BindlessUavTable,
+				_bindlessTable.UavTableStart);
+			CommandList.SetGraphicsRootDescriptorTable(
+				D3D12RootBindings.Graphics.BindlessSamplerTable,
+				_bindlessTable.SamplerTableStart);
+			if (_bindlessTable.CountsBufferGpuAddress != 0)
+			{
+				CommandList.SetGraphicsRootConstantBufferView(
+					D3D12RootBindings.Graphics.BindlessCountsCbv,
+					_bindlessTable.CountsBufferGpuAddress);
+			}
+
+			return;
+		}
+
+		CommandList.SetComputeRootDescriptorTable(
+			D3D12RootBindings.Compute.BindlessSrvTable,
+			_bindlessTable.SrvTableStart);
+		CommandList.SetComputeRootDescriptorTable(
+			D3D12RootBindings.Compute.BindlessUavTable,
+			_bindlessTable.UavTableStart);
+		CommandList.SetComputeRootDescriptorTable(
+			D3D12RootBindings.Compute.BindlessSamplerTable,
+			_bindlessTable.SamplerTableStart);
+		if (_bindlessTable.CountsBufferGpuAddress != 0)
+		{
+			CommandList.SetComputeRootConstantBufferView(
+				D3D12RootBindings.Compute.BindlessCountsCbv,
+				_bindlessTable.CountsBufferGpuAddress);
+		}
+	}
+
+	private ulong UploadConstants(ReadOnlySpan<byte> data)
+	{
+		var alignedSize = Align((ulong)data.Length, 256);
+		var desc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = alignedSize,
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.None
+		};
+		var heapProps = new HeapProperties(HeapType.Upload);
+		SilkMarshal.ThrowHResult(_owner.NativeDevice.CreateCommittedResource(
+			&heapProps,
+			HeapFlags.None,
+			in desc,
+			ResourceStates.GenericRead,
+			null,
+			out ComPtr<ID3D12Resource> resource));
+
+		void* mapped = null;
+		SilkMarshal.ThrowHResult(resource.Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped));
+		fixed (byte* source = data)
+		{
+			Buffer.MemoryCopy(source, mapped, alignedSize, (ulong)data.Length);
+		}
+		resource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+
+		var gpuAddress = resource.Handle->GetGPUVirtualAddress();
+		_transientUploads.Add(resource);
+		return gpuAddress;
+	}
+
+	private void DisposeTransientUploads()
+	{
+		for (var i = 0; i < _transientUploads.Count; i++)
+		{
+			if (_transientUploads[i].Handle is not null)
+			{
+				_transientUploads[i].Dispose();
+			}
+		}
+
+		_transientUploads.Clear();
+	}
+
+	private static ulong Align(ulong size, ulong alignment)
+	{
+		return (size + alignment - 1) & ~(alignment - 1);
+	}
+
+	private void TransitionBufferIfNeeded(D3D12Buffer buffer, ResourceStates targetState)
+	{
+		if (buffer.Resource.Handle is null || buffer.CurrentState == targetState)
+		{
+			return;
+		}
+
+		var transition = new ResourceTransitionBarrier
+		{
+			PResource = buffer.Resource.Handle,
+			Subresource = D3D12Api.ResourceBarrierAllSubresources,
+			StateBefore = buffer.CurrentState,
+			StateAfter = targetState
+		};
+
+		var native = new ResourceBarrier
+		{
+			Type = ResourceBarrierType.Transition,
+			Flags = ResourceBarrierFlags.None
+		};
+		native.Anonymous.Transition = transition;
+		CommandList.ResourceBarrier(1, &native);
+		buffer.CurrentState = targetState;
+	}
+
 	private static ResourceStates ConvertResourceState(ResourceState state)
 	{
 		if (state == ResourceState.None)
@@ -509,10 +779,10 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		return result == 0 ? ResourceStates.Common : result;
 	}
 
-
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
 		ID3D12Resource* resource = null;
+		D3D12Buffer? trackedBuffer = null;
 		if (barrier.Resource is ID3D12BackendTexture texture)
 		{
 			resource = texture.Resource;
@@ -520,6 +790,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		else if (barrier.Resource is D3D12Buffer buffer)
 		{
 			resource = buffer.Resource.Handle;
+			trackedBuffer = buffer;
 		}
 		else
 		{
@@ -554,6 +825,9 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		native.Anonymous.Transition = transition;
 
 		CommandList.ResourceBarrier(1, &native);
+		if (trackedBuffer is not null)
+		{
+			trackedBuffer.CurrentState = after;
+		}
 	}
-
 }

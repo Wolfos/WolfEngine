@@ -42,7 +42,7 @@ public sealed class FrameProfiler
 		var thread = Thread.CurrentThread;
 		var threadId = thread.ManagedThreadId;
 		var threadName = string.IsNullOrWhiteSpace(thread.Name) ? $"Thread {threadId}" : thread.Name;
-		_threadFrames[threadId] = new ThreadFrameData(threadId, threadName, state.Root);
+		_threadFrames[threadId] = new(threadId, threadName, state.Root);
 	}
 
 	public Scope Measure(string name)

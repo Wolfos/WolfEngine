@@ -459,7 +459,9 @@ public sealed class GpuDrawPass
 			return _updatePipeline;
 		}
 
-		var bytes = _shaderCompiler.GetMetalComputeLibrary("gpu_draw_update.compute.slang", "CSUpdate");
+		var bytes = device.BackendKind == GraphicsBackendKind.Metal
+			? _shaderCompiler.GetMetalComputeLibrary("gpu_draw_update.compute.slang", "CSUpdate")
+			: _shaderCompiler.GetComputeShader("gpu_draw_update.compute.slang", "CSUpdate");
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdate", default, default, default);
 		_updatePipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
 		return _updatePipeline;
@@ -472,7 +474,9 @@ public sealed class GpuDrawPass
 			return _cullPipeline;
 		}
 
-		var bytes = _shaderCompiler.GetMetalComputeLibrary("gpu_draw_cull.compute.slang", "CSCull");
+		var bytes = device.BackendKind == GraphicsBackendKind.Metal
+			? _shaderCompiler.GetMetalComputeLibrary("gpu_draw_cull.compute.slang", "CSCull")
+			: _shaderCompiler.GetComputeShader("gpu_draw_cull.compute.slang", "CSCull");
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
 		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
 		return _cullPipeline;

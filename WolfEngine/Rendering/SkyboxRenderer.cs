@@ -65,11 +65,6 @@ public sealed class SkyboxRenderer
 
 	public SkyboxResources UpdateProceduralSkybox(Vector3 sunDirection)
 	{
-		if (IsMetalRenderer() == false)
-		{
-			throw new NotSupportedException("Procedural skybox requires bindless descriptor support.");
-		}
-
 		var gfxDevice = GetGfxDevice();
 		var samplerHandle = GetSkyboxSamplerHandle(gfxDevice);
 		EnsureProceduralResources(gfxDevice);

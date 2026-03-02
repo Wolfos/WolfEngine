@@ -19,7 +19,7 @@ namespace WolfEngine.Rendering.UI;
 
 internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 {
-	private readonly ComPtr<ID3D12Device> _device;
+	private ComPtr<ID3D12Device> _device;
 	private readonly IShaderCompiler _shaderCompiler;
 
 	private ComPtr<ID3D12DescriptorHeap> _srvHeap;
@@ -33,14 +33,23 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private int _indexBufferSize;
 	private bool _fontUploaded;
 
-	public D3D12ImGuiRenderer(ComPtr<ID3D12Device> device, IShaderCompiler shaderCompiler)
+	public D3D12ImGuiRenderer(IShaderCompiler shaderCompiler)
 	{
-		_device = device;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
 	{
+		if (_device.Handle is null)
+		{
+			if (device is not D3D12Device d3d12Device)
+			{
+				return;
+			}
+
+			_device = d3d12Device.NativeDevice;
+		}
+
 		if (_pipelineState.Handle is null)
 		{
 			CreatePipeline();

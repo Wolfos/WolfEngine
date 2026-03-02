@@ -135,7 +135,7 @@ private sealed class MeshResources
 	private readonly bool[] _imguiMouseButtons = new bool[5];
 	private Vector2 _imguiMousePosition;
 	private Vector2 _imguiMouseWheel;
-	private D3D12ImGuiRenderer _imguiRenderer = null!;
+	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
 
 	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
 	{
@@ -719,7 +719,6 @@ private sealed class MeshResources
 		CreateRtvHeapAndTargets();
 		CreateCommandAllocatorsAndList();
 		CreateSyncObjects();
-		_imguiRenderer = new D3D12ImGuiRenderer(_device, _shaderCompiler);
 	}
 
 	private void CreateDeviceAndQueue()
@@ -872,7 +871,7 @@ private sealed class MeshResources
 			NormalTexture = normalResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
 			OcclusionTexture = occlusionResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
 			EmissiveTexture = emissiveResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-			Sampler = DescriptorHandle.Invalid
+			Sampler = GetOrCreateDefaultMaterialSampler()
 		};
 	}
 
@@ -1025,11 +1024,13 @@ private sealed class MeshResources
 
 		var backendTexture = new BackendD3D12Texture();
 		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
+		var srvHandle = _gfxDevice.GlobalTable.AllocateShaderResourceView(backendTexture);
+		backendTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, DescriptorHandle.Invalid);
 
 		return new D3D12TextureResources
 		{
 			Texture = backendTexture,
-			ShaderResourceView = DescriptorHandle.Invalid
+			ShaderResourceView = srvHandle
 		};
 	}
 
@@ -1383,6 +1384,22 @@ private sealed class MeshResources
 		return (size + alignment - 1) & ~(alignment - 1);
 	}
 
+	private DescriptorHandle GetOrCreateDefaultMaterialSampler()
+	{
+		if (_defaultMaterialSamplerHandle.IsValid)
+		{
+			return _defaultMaterialSamplerHandle;
+		}
+
+		var sampler = new SamplerDescriptor(
+			FilterMode.Trilinear,
+			AddressMode.Wrap,
+			AddressMode.Wrap,
+			AddressMode.Wrap);
+		_defaultMaterialSamplerHandle = _gfxDevice.GlobalTable.AllocateSampler(sampler);
+		return _defaultMaterialSamplerHandle;
+	}
+
 	private void OnUpdate(double deltaSeconds)
 	{
 		// Command processing is now handled by the render graph
@@ -1608,8 +1625,6 @@ private sealed class MeshResources
 		{
 			poolDevice.ClearTexturePool();
 		}
-
-		_imguiRenderer.Dispose();
 
 		_device.Dispose();
 		_d3d12.Dispose();

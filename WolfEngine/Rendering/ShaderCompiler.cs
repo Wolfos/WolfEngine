@@ -61,6 +61,7 @@ public class ShaderCompiler : IShaderCompiler
 		{
 			shaderPath,
 			"-target", "metallib",
+			"-D", "WOLF_TARGET_METAL=1",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
 			"-entry", vertexEntryPoint,
@@ -121,6 +122,7 @@ public class ShaderCompiler : IShaderCompiler
 		{
 			shaderPath,
 			"-target", "metallib",
+			"-D", "WOLF_TARGET_METAL=1",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
 			"-entry", entryPoint,
@@ -189,6 +191,10 @@ public class ShaderCompiler : IShaderCompiler
 		{
 			shaderPath,
 			"-target", "dxil",
+			"-D", "WOLF_TARGET_D3D12=1",
+			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
+			"-D", "WOLF_BINDLESS_MAX=16384",
+			"-D", "WOLF_BINDLESS_SAMPLER_MAX=2048",
 			"-profile", profile,
 			"-entry", entryPoint,
 			"-o", "-"

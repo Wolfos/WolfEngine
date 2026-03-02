@@ -7,16 +7,25 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 {
-	private static NotImplementedException CreateNotImplementedException() =>
-		new("GpuDraw backend bridge is not implemented for D3D12.");
-
 	public GpuDrawBackendFrameSignals PrepareFrame(
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources resources,
 		IGfxPipeline? primaryGBufferPipeline)
 	{
-		throw CreateNotImplementedException();
+		if (device is not D3D12Device)
+		{
+			return new GpuDrawBackendFrameSignals(
+				requiresFullSlotReencode: false,
+				supportsIndirectStructuralUpdates: false);
+		}
+
+		_ = renderer;
+		_ = resources;
+		_ = primaryGBufferPipeline;
+		return new GpuDrawBackendFrameSignals(
+			requiresFullSlotReencode: false,
+			supportsIndirectStructuralUpdates: true);
 	}
 
 	public bool TryGetSlotIndirectCommands(
@@ -24,12 +33,36 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		int slotIndex,
 		out IGfxIndirectCommandBuffer[] commandBuffers)
 	{
-		throw CreateNotImplementedException();
+		commandBuffers = Array.Empty<IGfxIndirectCommandBuffer>();
+		var bucketCount = GBufferDrawBuckets.BucketCount;
+		if (bucketCount <= 0)
+		{
+			return false;
+		}
+
+		var resolved = new IGfxIndirectCommandBuffer[bucketCount];
+		for (var i = 0; i < bucketCount; i++)
+		{
+			if (resources.GetIndirectCommandBufferSlot(slotIndex, i) is not D3D12IndirectCommandBuffer commandBuffer)
+			{
+				return false;
+			}
+
+			resolved[i] = commandBuffer;
+		}
+
+		commandBuffers = resolved;
+		return true;
 	}
 
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
 	{
-		throw CreateNotImplementedException();
+		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Direct3D12 backend.");
+		}
+
+		d3d12CommandBuffer.ResetCommand(commandIndex);
 	}
 
 	public bool TryEncodeIndexedDrawCommand(
@@ -38,7 +71,31 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		Mesh mesh,
 		GpuDrawResources resources)
 	{
-		throw CreateNotImplementedException();
+		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer ||
+		    resources.InstanceBuffer is not D3D12Buffer instanceBuffer ||
+		    resources.MaterialBuffer is not D3D12Buffer materialBuffer ||
+		    resources.DrawArgsBuffer is not D3D12Buffer drawArgsBuffer ||
+		    resources.MaterialGenerationBuffer is not D3D12Buffer materialGenerationBuffer ||
+		    resources.CameraBuffer is not D3D12Buffer cameraBuffer ||
+		    resources.ShadowCameraBuffer is not D3D12Buffer shadowCameraBuffer ||
+		    resources.TransparentEnvironmentBuffer is not D3D12Buffer transparentEnvironmentBuffer ||
+		    resources.TransparentLightingBuffer is not D3D12Buffer transparentLightingBuffer)
+		{
+			return false;
+		}
+
+		d3d12CommandBuffer.EncodeIndexedDrawCommand(
+			commandIndex,
+			mesh,
+			instanceBuffer,
+			materialBuffer,
+			drawArgsBuffer,
+			materialGenerationBuffer,
+			cameraBuffer,
+			shadowCameraBuffer,
+			transparentEnvironmentBuffer,
+			transparentLightingBuffer);
+		return true;
 	}
 
 	public void SampleGpuDiagnosticCounters(
@@ -46,6 +103,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		uint[] lastCounters,
 		GpuDrawHardeningStats stats)
 	{
-		throw CreateNotImplementedException();
+		_ = diagnosticsCounterBuffer;
+		_ = lastCounters;
+		_ = stats;
 	}
 }

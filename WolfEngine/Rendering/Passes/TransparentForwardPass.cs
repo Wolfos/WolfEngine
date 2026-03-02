@@ -123,16 +123,6 @@ public sealed class TransparentForwardPass
 			return;
 		}
 
-		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-		commandList.BindConstantBuffer(10, config.InstanceBuffer);
-		commandList.BindConstantBuffer(11, config.MaterialBuffer);
-		commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
-		if (config.MaterialGenerationBuffer is not null)
-		{
-			commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
-		}
-		commandList.BindConstantBuffer(2, config.CameraBuffer);
-
 		Span<uint> textureHandles = stackalloc uint[12];
 		textureHandles[0] = config.SkyboxEnvironment.Value;
 		textureHandles[1] = config.SkyboxIrradiance.Value;
@@ -213,14 +203,7 @@ public sealed class TransparentForwardPass
 		var fallbackCount = config.FallbackMaxCommandCount == 0
 			? (uint)GpuDrawResources.MaxDrawCount
 			: config.FallbackMaxCommandCount;
-		if (commandList.BackendKind != GraphicsBackendKind.Metal)
-		{
-			var fallbackBucket = buckets[0];
-			commandList.BindPipeline(fallbackBucket.Pipeline);
-			commandList.ExecuteIndirectCommandBuffer(fallbackBucket.IndirectCommandBuffer, fallbackCount);
-			commandList.EndPass();
-			return;
-		}
+		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
 		for (var i = 0; i < buckets.Length; i++)
 		{
@@ -228,6 +211,15 @@ public sealed class TransparentForwardPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
+				commandList.BindConstantBuffer(10, config.InstanceBuffer);
+				commandList.BindConstantBuffer(11, config.MaterialBuffer);
+				commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+				if (config.MaterialGenerationBuffer is not null)
+				{
+					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+				}
+
+				commandList.BindConstantBuffer(2, config.CameraBuffer);
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{

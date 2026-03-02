@@ -270,6 +270,7 @@ public sealed class RenderGraph
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
 
+				// TODO: This should probably not live here
 				using (FrameProfiler.Instance.Measure("Update Skybox"))
 				{
 					var skybox = _skyboxRenderer.UpdateProceduralSkybox(snapshot.SunDirection);

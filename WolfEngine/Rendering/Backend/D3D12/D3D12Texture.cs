@@ -14,6 +14,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	private CpuDescriptorHandle? _rtvHandle;
 	private CpuDescriptorHandle? _dsvHandle;
 	private DescriptorHandle _srvHandle = DescriptorHandle.Invalid;
+	private DescriptorHandle _depthSrvHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _uavHandle = DescriptorHandle.Invalid;
 
 	public D3D12Texture(string name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
@@ -37,8 +38,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	public DescriptorHandle ShaderResourceView => _srvHandle;
 
-	public DescriptorHandle DepthShaderResourceView =>
-		throw new NotImplementedException("Depth SRV is not yet implemented for the Direct3D12 backend.");
+	public DescriptorHandle DepthShaderResourceView => _depthSrvHandle;
 
 	public DescriptorHandle UnorderedAccessView => _uavHandle;
 
@@ -54,7 +54,15 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 		_rtvHandle = null;
 		_dsvHandle = null;
 		_srvHandle = DescriptorHandle.Invalid;
+		_depthSrvHandle = DescriptorHandle.Invalid;
 		_uavHandle = DescriptorHandle.Invalid;
+	}
+
+	public void SetHandles(DescriptorHandle srvHandle, DescriptorHandle depthSrvHandle, DescriptorHandle uavHandle)
+	{
+		_srvHandle = srvHandle;
+		_depthSrvHandle = depthSrvHandle;
+		_uavHandle = uavHandle;
 	}
 
 	public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
@@ -92,5 +100,8 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 		_rtvHandle = null;
 		_dsvHandle = null;
+		_srvHandle = DescriptorHandle.Invalid;
+		_depthSrvHandle = DescriptorHandle.Invalid;
+		_uavHandle = DescriptorHandle.Invalid;
 	}
 }
