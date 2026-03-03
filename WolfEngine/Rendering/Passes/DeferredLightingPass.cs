@@ -1,6 +1,5 @@
 
 using System.Numerics;
-using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -14,11 +13,13 @@ public sealed class DeferredLightingPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
+	private GraphicsBackendKind? _compiledBackendKind;
+	private ShaderPropertyWriter? _bindlessWriter;
+	private ShaderPropertyWriter? _cameraWriter;
+	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
-	private const int LightingConstantsCount = 100;
-	private const int MetalLightingConstantsCount = 104;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -109,7 +110,7 @@ public sealed class DeferredLightingPass
 		};
 	}
 
-	public unsafe void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
+	public void Record(RenderGraphContext context, ref DeferredLightingPassConfig config, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 
@@ -118,108 +119,80 @@ public sealed class DeferredLightingPass
 		// Bind pipeline
 		commandList.BindPipeline(config.Pipeline);
 
-		Span<uint> textureHandles = stackalloc uint[15];
-		textureHandles[0] = config.GBufferAlbedo.Value;
-		textureHandles[1] = config.GBufferNormal.Value;
-		textureHandles[2] = config.GBufferMaterial.Value;
-		textureHandles[3] = config.GBufferEmissive.Value;
-		textureHandles[4] = config.GBufferDepth.Value;
-		textureHandles[5] = config.SkyboxEnvironment.Value;
-		textureHandles[6] = config.SkyboxIrradiance.Value;
-		textureHandles[7] = config.SkyboxPrefilter.Value;
-		textureHandles[8] = config.SkyboxBrdfLut.Value;
-		textureHandles[9] = config.LightingOutput.Value;
-		textureHandles[10] = config.LinearSampler.Value;
-		textureHandles[11] = config.ShadowMapDepth0.Value;
-		textureHandles[12] = config.ShadowMapDepth1.Value;
-		textureHandles[13] = config.ShadowMapDepth2.Value;
-		textureHandles[14] = config.ShadowSampler.Value;
-		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(textureHandles));
+		var bindlessWriter = _bindlessWriter
+			?? throw new InvalidOperationException("Deferred lighting bindless reflection writer was not initialized.");
+		bindlessWriter.Clear();
+		bindlessWriter.SetUInt("gbufferAlbedoHandle", config.GBufferAlbedo.Value);
+		bindlessWriter.SetUInt("gbufferNormalHandle", config.GBufferNormal.Value);
+		bindlessWriter.SetUInt("gbufferMaterialHandle", config.GBufferMaterial.Value);
+		bindlessWriter.SetUInt("gbufferEmissiveHandle", config.GBufferEmissive.Value);
+		bindlessWriter.SetUInt("gbufferDepthHandle", config.GBufferDepth.Value);
+		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
+		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
+		bindlessWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);
+		bindlessWriter.SetUInt("brdfLutHandle", config.SkyboxBrdfLut.Value);
+		bindlessWriter.SetUInt("lightingTargetHandle", config.LightingOutput.Value);
+		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
+		bindlessWriter.SetUInt("shadowMapHandle0", config.ShadowMapDepth0.Value);
+		bindlessWriter.SetUInt("shadowMapHandle1", config.ShadowMapDepth1.Value);
+		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMapDepth2.Value);
+		bindlessWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
+		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		// Set camera constants (Root parameter 1)
-		Span<float> cameraConstants = stackalloc float[40];
-		WriteMatrix(cameraConstants, sceneData.InverseProjection);
-		WriteMatrix(cameraConstants.Slice(16), sceneData.InverseViewProjection);
-		cameraConstants[32] = sceneData.CameraOrigin.X;
-		cameraConstants[33] = sceneData.CameraOrigin.Y;
-		cameraConstants[34] = sceneData.CameraOrigin.Z;
-		cameraConstants[35] = 0.0f;
-		cameraConstants[36] = 0.0f;
-		cameraConstants[37] = 0.0f;
-		cameraConstants[38] = 0.0f;
-		cameraConstants[39] = 0.0f;
-		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(cameraConstants));
+		var cameraWriter = _cameraWriter
+			?? throw new InvalidOperationException("Deferred lighting camera reflection writer was not initialized.");
+		cameraWriter.Clear();
+		cameraWriter.SetMatrix4x4("camera.invProjection", sceneData.InverseProjection);
+		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
+		cameraWriter.SetVector3("camera.cameraOrigin", sceneData.CameraOrigin);
+		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
-		Span<ShaderLight> shaderLights = stackalloc ShaderLight[MaxLights];
-		shaderLights.Clear();
+		var lightingWriter = _lightingWriter
+			?? throw new InvalidOperationException("Deferred lighting lighting reflection writer was not initialized.");
+		lightingWriter.Clear();
 		var lightCountInt = Math.Min(sceneData.Lights.Count, MaxLights);
+		lightingWriter.SetUInt("lightCount", (uint)lightCountInt);
 		for (var i = 0; i < lightCountInt; i++)
 		{
 			var packet = sceneData.Lights[i];
 			var light = packet.Light;
-			
+
 			var forward = Vector3.TransformNormal(Vector3.UnitZ, packet.Transform);
 			if (forward == Vector3.Zero)
 			{
 				forward = new Vector3(0, -1, 0);
 			}
-			
+
 			var position = packet.Transform.Translation;
 
-			shaderLights[i] = new ShaderLight
-			{
-				ColorIntensity = new Vector4(light.Color.X, light.Color.Y, light.Color.Z, light.Intensity),
-				DirectionType = new Vector4(forward, (float) light.Type),
-				PositionRange = new Vector4(position, 25.0f) // TODO: light range from component when available
-			};
+			lightingWriter.SetVector4($"lights[{i}].colorIntensity", new Vector4(light.Color.X, light.Color.Y, light.Color.Z, light.Intensity));
+			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
+			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, 25.0f)); // TODO: light range from component when available
 		}
 
-		var useMetalLayout = commandList.BackendKind == GraphicsBackendKind.Metal;
-		var lightingConstantCount = useMetalLayout ? MetalLightingConstantsCount : LightingConstantsCount;
-		Span<uint> lightingConstants = stackalloc uint[MetalLightingConstantsCount];
-		lightingConstants.Clear();
-		lightingConstants[0] = (uint)lightCountInt;
-		var lightWords = MemoryMarshal.Cast<ShaderLight, uint>(shaderLights);
-		if (useMetalLayout)
-		{
-			lightWords.CopyTo(lightingConstants.Slice(8));
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(44, 16)), config.ShadowViewProjection0);
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(60, 16)), config.ShadowViewProjection1);
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(76, 16)), config.ShadowViewProjection2);
-			lightingConstants[92] = BitConverter.SingleToUInt32Bits(config.ShadowSplit0);
-			lightingConstants[93] = BitConverter.SingleToUInt32Bits(config.ShadowSplit1);
-			lightingConstants[94] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
-			lightingConstants[95] = BitConverter.SingleToUInt32Bits(config.ShadowCascadeBlendDistance);
-			lightingConstants[96] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
-			lightingConstants[97] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
-			lightingConstants[98] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
-			lightingConstants[99] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
-			lightingConstants[100] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
-			lightingConstants[101] = config.ShadowsEnabled ? 1u : 0u;
-			lightingConstants[102] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
-			lightingConstants[103] = 0;
-		}
-		else
-		{
-			lightWords.CopyTo(lightingConstants.Slice(4));
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(40, 16)), config.ShadowViewProjection0);
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(56, 16)), config.ShadowViewProjection1);
-			WriteMatrix(MemoryMarshal.Cast<uint, float>(lightingConstants.Slice(72, 16)), config.ShadowViewProjection2);
-			lightingConstants[88] = BitConverter.SingleToUInt32Bits(config.ShadowSplit0);
-			lightingConstants[89] = BitConverter.SingleToUInt32Bits(config.ShadowSplit1);
-			lightingConstants[90] = BitConverter.SingleToUInt32Bits(config.ShadowSplit2);
-			lightingConstants[91] = BitConverter.SingleToUInt32Bits(config.ShadowCascadeBlendDistance);
-			lightingConstants[92] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeX);
-			lightingConstants[93] = BitConverter.SingleToUInt32Bits(config.ShadowTexelSizeY);
-			lightingConstants[94] = BitConverter.SingleToUInt32Bits(config.ShadowDepthBias);
-			lightingConstants[95] = BitConverter.SingleToUInt32Bits(config.ShadowStrength);
-			lightingConstants[96] = config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0;
-			lightingConstants[97] = config.ShadowsEnabled ? 1u : 0u;
-			lightingConstants[98] = BitConverter.SingleToUInt32Bits(ShadowMapPass.MaxShadowDistance);
-			lightingConstants[99] = 0;
-		}
-
-		commandList.SetComputeConstants(2, MemoryMarshal.AsBytes(lightingConstants.Slice(0, lightingConstantCount)));
+		lightingWriter.SetMatrix4x4("shadowViewProjection0", config.ShadowViewProjection0);
+		lightingWriter.SetMatrix4x4("shadowViewProjection1", config.ShadowViewProjection1);
+		lightingWriter.SetMatrix4x4("shadowViewProjection2", config.ShadowViewProjection2);
+		lightingWriter.SetVector4(
+			"shadowSplitsBlend",
+			new Vector4(
+				config.ShadowSplit0,
+				config.ShadowSplit1,
+				config.ShadowSplit2,
+				config.ShadowCascadeBlendDistance));
+		lightingWriter.SetVector4(
+			"shadowTexelSizeBiasStrength",
+			new Vector4(
+				config.ShadowTexelSizeX,
+				config.ShadowTexelSizeY,
+				config.ShadowDepthBias,
+				config.ShadowStrength));
+		lightingWriter.SetUInt(
+			"shadowLightIndex",
+			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
+		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
+		lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
+		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
 
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
@@ -231,20 +204,17 @@ public sealed class DeferredLightingPass
 	{
 		if (_pipeline is not null)
 		{
+			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
+			{
+				throw new InvalidOperationException(
+					$"DeferredLightingPass is already compiled for backend '{_compiledBackendKind.Value}', " +
+					$"but was requested for '{device.BackendKind}'.");
+			}
+
 			return _pipeline;
 		}
 
-		if (_computeShader.IsEmpty)
-		{
-			if (device.BackendKind == GraphicsBackendKind.Metal)
-			{
-				_computeShader = _shaderCompiler.GetMetalComputeLibrary("deferred_lighting.compute.slang", "CSMain");
-			}
-			else
-			{
-				_computeShader = _shaderCompiler.GetComputeShader("deferred_lighting.compute.slang", "CSMain");
-			}
-		}
+		EnsureReflectionWriters(device.BackendKind);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -260,36 +230,28 @@ public sealed class DeferredLightingPass
 		return _pipeline;
 	}
 
-	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
+	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
 	{
-		if (destination.Length < 16)
+		if (_compiledBackendKind.HasValue &&
+		    _compiledBackendKind.Value == backendKind &&
+		    _computeShader.IsEmpty == false &&
+		    _bindlessWriter is not null &&
+		    _cameraWriter is not null &&
+		    _lightingWriter is not null)
 		{
-			throw new ArgumentException("Destination span must contain at least 16 elements.", nameof(destination));
+			return;
 		}
 
-		destination[0] = matrix.M11;
-		destination[1] = matrix.M12;
-		destination[2] = matrix.M13;
-		destination[3] = matrix.M14;
-		destination[4] = matrix.M21;
-		destination[5] = matrix.M22;
-		destination[6] = matrix.M23;
-		destination[7] = matrix.M24;
-		destination[8] = matrix.M31;
-		destination[9] = matrix.M32;
-		destination[10] = matrix.M33;
-		destination[11] = matrix.M34;
-		destination[12] = matrix.M41;
-		destination[13] = matrix.M42;
-		destination[14] = matrix.M43;
-		destination[15] = matrix.M44;
-	}
+		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"deferred_lighting.compute.slang",
+			"CSMain",
+			backendKind);
 
-	[StructLayout(LayoutKind.Sequential, Pack = 4)]
-	private struct ShaderLight
-	{
-		public Vector4 ColorIntensity;
-		public Vector4 DirectionType;
-		public Vector4 PositionRange;
+		_computeShader = compiled.Bytecode;
+		var reflection = compiled.ReflectionLayout;
+		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
+		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
+		_lightingWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("LightingParams"));
+		_compiledBackendKind = backendKind;
 	}
 }

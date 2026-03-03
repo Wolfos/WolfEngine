@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using Slangc.NET;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine;
 
@@ -10,12 +12,18 @@ public interface IShaderCompiler
 	ReadOnlyMemory<byte> GetMetalComputeLibrary(string filename, string entryPoint);
 	byte[] GetDxil(string filename, string entryPoint, string profile, params string[] defines);
 	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
+	CompiledComputeShaderWithReflection GetComputeShaderWithReflection(
+		string filename,
+		string entryPoint,
+		GraphicsBackendKind backendKind,
+		params string[] defines);
 }
 
 public class ShaderCompiler : IShaderCompiler
 {
 	private readonly Dictionary<string, ReadOnlyMemory<byte>> _cachedMetalLibraries = new();
-	private Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
+	private readonly Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
+	private readonly Dictionary<(string file, string entry, string target, string profile, string stage, string defines), CompiledComputeShaderWithReflection> _cachedComputeWithReflection = new();
 
 	public ReadOnlyMemory<byte> GetMetalLibrary(string filename)
 	{
@@ -223,4 +231,113 @@ public class ShaderCompiler : IShaderCompiler
 		return GetDxil(filename, entryPoint, "cs_6_6");
 	}
 
+	public CompiledComputeShaderWithReflection GetComputeShaderWithReflection(
+		string filename,
+		string entryPoint,
+		GraphicsBackendKind backendKind,
+		params string[] defines)
+	{
+		if (string.IsNullOrWhiteSpace(filename))
+		{
+			throw new ArgumentException("Shader filename cannot be null or empty.", nameof(filename));
+		}
+
+		if (string.IsNullOrWhiteSpace(entryPoint))
+		{
+			throw new ArgumentException("Entry point cannot be null or empty.", nameof(entryPoint));
+		}
+
+		var shaderPath = Path.IsPathRooted(filename)
+			? filename
+			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+
+		if (!File.Exists(shaderPath))
+		{
+			throw new FileNotFoundException($"Shader file '{shaderPath}' was not found.", shaderPath);
+		}
+
+		var normalizedDefines = BuildDefineSuffix(defines);
+		var target = backendKind == GraphicsBackendKind.Metal ? "metallib" : "dxil";
+		var profile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "cs_6_6";
+		var stage = backendKind == GraphicsBackendKind.Metal ? "compute" : string.Empty;
+		var cacheKey = (filename, entryPoint, target, profile, stage, normalizedDefines);
+		if (_cachedComputeWithReflection.TryGetValue(cacheKey, out var cached))
+		{
+			return cached;
+		}
+
+		List<string> args;
+		if (backendKind == GraphicsBackendKind.Metal)
+		{
+			args =
+			[
+				shaderPath,
+				"-target", "metallib",
+				"-D", "WOLF_TARGET_METAL=1",
+				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
+				"-D", "WOLF_BINDLESS_MAX=16384",
+				"-entry", entryPoint,
+				"-stage", "compute",
+				"-o", "-"
+			];
+		}
+		else
+		{
+			args =
+			[
+				shaderPath,
+				"-target", "dxil",
+				"-D", "WOLF_TARGET_D3D12=1",
+				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
+				"-D", "WOLF_BINDLESS_MAX=16384",
+				"-D", "WOLF_BINDLESS_SAMPLER_MAX=2048",
+				"-profile", "cs_6_6",
+				"-entry", entryPoint,
+				"-o", "-"
+			];
+		}
+
+		if (defines is { Length: > 0 })
+		{
+			for (var i = 0; i < defines.Length; i++)
+			{
+				if (string.IsNullOrWhiteSpace(defines[i]))
+				{
+					continue;
+				}
+
+				args.Add("-D");
+				args.Add(defines[i]);
+			}
+		}
+
+		var compiled = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
+		var reflectionLayout = ShaderReflectionLayoutBuilder.Build(reflection);
+		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout);
+		_cachedComputeWithReflection[cacheKey] = result;
+		return result;
+	}
+
+	private static string BuildDefineSuffix(params string[] defines)
+	{
+		if (defines is not { Length: > 0 })
+		{
+			return string.Empty;
+		}
+
+		var normalized = new List<string>(defines.Length);
+		for (var i = 0; i < defines.Length; i++)
+		{
+			if (string.IsNullOrWhiteSpace(defines[i]))
+			{
+				continue;
+			}
+
+			normalized.Add(defines[i]);
+		}
+
+		return normalized.Count == 0
+			? string.Empty
+			: string.Join(";", normalized);
+	}
 }
