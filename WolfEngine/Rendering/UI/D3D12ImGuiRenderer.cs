@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Numerics;
 using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -25,6 +26,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private readonly IShaderCompiler _shaderCompiler;
 	private D3D12DescriptorTable? _bindlessTable;
 	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
+	private ShaderPropertyWriter? _projectionWriter;
 
 	private ComPtr<ID3D12DescriptorHeap> _srvHeap;
 	private GpuDescriptorHandle _srvGpuHandle;
@@ -160,30 +162,21 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		var R = frame.DisplayPos.X + frame.DisplaySize.X;
 		var T = frame.DisplayPos.Y;
 		var B = frame.DisplayPos.Y + frame.DisplaySize.Y;
-		Span<float> projection = stackalloc float[16];
-		projection[0] = 2.0f / (R - L);
-		projection[1] = 0.0f;
-		projection[2] = 0.0f;
-		projection[3] = 0.0f;
 
-		projection[4] = 0.0f;
-		projection[5] = 2.0f / (T - B);
-		projection[6] = 0.0f;
-		projection[7] = 0.0f;
-
-		projection[8] = 0.0f;
-		projection[9] = 0.0f;
-		projection[10] = 0.5f;
-		projection[11] = 0.0f;
-
-		projection[12] = (R + L) / (L - R);
-		projection[13] = (T + B) / (B - T);
-		projection[14] = 0.5f;
-		projection[15] = 1.0f;
-
-		fixed (float* projPtr = projection)
+		var projectionWriter = _projectionWriter
+			?? throw new InvalidOperationException("D3D12 ImGui projection writer was not initialized.");
+		projectionWriter.Clear();
+		projectionWriter.SetMatrix4x4(
+			"ProjectionMatrix",
+			new Matrix4x4(
+				2.0f / (R - L), 0.0f, 0.0f, 0.0f,
+				0.0f, 2.0f / (T - B), 0.0f, 0.0f,
+				0.0f, 0.0f, 0.5f, 0.0f,
+				(R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f));
+		var projectionBytes = projectionWriter.AsBytes();
+		fixed (byte* projPtr = projectionBytes)
 		{
-			native->SetGraphicsRoot32BitConstants(1, 16, projPtr, 0);
+			native->SetGraphicsRoot32BitConstants(1, (uint)projectionBytes.Length / 4, projPtr, 0);
 		}
 
 		var scaleX = 1.0f;
@@ -514,6 +507,18 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
+		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"imgui.slang",
+			"vertexShader",
+			"fragmentShader",
+			GraphicsBackendKind.D3D12);
+		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
+		if (_projectionWriter.RegisterIndex != 0)
+		{
+			throw new InvalidOperationException(
+				$"Expected ImGui projection constants at b0, but reflection returned b{_projectionWriter.RegisterIndex}.");
+		}
+
 		var rootParameters = stackalloc RootParameter[2];
 		rootParameters[0] = default;
 		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
@@ -530,7 +535,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		{
 			ShaderRegister = 0,
 			RegisterSpace = 0,
-			Num32BitValues = 16
+			Num32BitValues = (uint)_projectionWriter.AsBytes().Length / 4
 		};
 		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
 
@@ -576,8 +581,10 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			}
 		}
 
-		var vertexShader = _shaderCompiler.GetDxil("imgui.slang", "vertexShader", "vs_6_0");
-		var pixelShader = _shaderCompiler.GetDxil("imgui.slang", "fragmentShader", "ps_6_0");
+		var vertexShader = (compiled.Bytecode.Vertex
+			?? throw new InvalidOperationException("ImGui D3D12 vertex bytecode was missing from reflection compile result.")).ToArray();
+		var pixelShader = (compiled.Bytecode.Pixel
+			?? throw new InvalidOperationException("ImGui D3D12 pixel bytecode was missing from reflection compile result.")).ToArray();
 
 		Span<byte> positionSemantic = stackalloc byte["POSITION".Length + 1];
 		Span<byte> texcoordSemantic = stackalloc byte["TEXCOORD".Length + 1];

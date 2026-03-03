@@ -420,6 +420,7 @@ public sealed class RenderGraphFrameBuilder
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,
 			Buckets = bucketList.ToArray(),
 			FallbackMaxCommandCount = _gpuDrawResources.ActiveDrawCommandUpperBound,
+			CameraLayout = _gpuDrawResources.GBufferCameraLayout,
 			CameraBuffer = _gpuDrawResources.CameraBuffer,
 			SkyboxEnvironment = DescriptorHandle.Invalid,
 			SkyboxSampler = DescriptorHandle.Invalid

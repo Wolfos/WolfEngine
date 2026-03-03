@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
@@ -22,6 +21,12 @@ public sealed class SkyboxRenderer
 	private IGfxPipeline _iblPrefilterPipeline;
 	private IGfxPipeline _iblBrdfLutPipeline;
 	private IGfxPipeline _proceduralSkyboxPipeline;
+	private GraphicsBackendKind? _reflectionBackendKind;
+	private ShaderPropertyWriter? _iblIrradianceWriter;
+	private ShaderPropertyWriter? _iblPrefilterWriter;
+	private ShaderPropertyWriter? _iblBrdfWriter;
+	private ShaderPropertyWriter? _proceduralBindlessWriter;
+	private ShaderPropertyWriter? _proceduralSkyParamsWriter;
 	private SkyboxResources? _proceduralSkybox;
 	private IGfxTexture? _proceduralEnvironment;
 	private IGfxTexture? _proceduralIrradiance;
@@ -151,15 +156,17 @@ public sealed class SkyboxRenderer
 			var pipeline = GetIblIrradiancePipeline(gfxDevice);
 			var commandList = gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			Span<uint> handles = stackalloc uint[7];
-			handles[0] = envTexture.ShaderResourceView.Value;
-			handles[1] = irradianceTex.UnorderedAccessView.Value;
-			handles[2] = samplerHandle.Value;
-			handles[3] = IrradianceSize;
-			handles[4] = IrradianceSize;
-			handles[5] = 1;
-			handles[6] = IrradianceSize;
-			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
+			var writer = _iblIrradianceWriter
+				?? throw new InvalidOperationException("IBL irradiance reflection writer was not initialized.");
+			writer.Clear();
+			writer.SetUInt("environmentHandle", envTexture.ShaderResourceView.Value);
+			writer.SetUInt("irradianceHandle", irradianceTex.UnorderedAccessView.Value);
+			writer.SetUInt("samplerHandle", samplerHandle.Value);
+			writer.SetUInt("width", IrradianceSize);
+			writer.SetUInt("height", IrradianceSize);
+			writer.SetUInt("sliceCount", 1);
+			writer.SetUInt("sliceHeight", IrradianceSize);
+			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 
 			var dispatchX = (uint)((IrradianceSize + 7) / 8);
 			var dispatchY = (uint)((IrradianceSize + 7) / 8);
@@ -172,15 +179,17 @@ public sealed class SkyboxRenderer
 			var pipeline = GetIblPrefilterPipeline(gfxDevice);
 			var commandList = gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			Span<uint> handles = stackalloc uint[7];
-			handles[0] = envTexture.ShaderResourceView.Value;
-			handles[1] = prefilterTex.UnorderedAccessView.Value;
-			handles[2] = samplerHandle.Value;
-			handles[3] = PrefilterWidth;
-			handles[4] = PrefilterSliceHeight * PrefilterSlices;
-			handles[5] = PrefilterSlices;
-			handles[6] = PrefilterSliceHeight;
-			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
+			var writer = _iblPrefilterWriter
+				?? throw new InvalidOperationException("IBL prefilter reflection writer was not initialized.");
+			writer.Clear();
+			writer.SetUInt("environmentHandle", envTexture.ShaderResourceView.Value);
+			writer.SetUInt("prefilterHandle", prefilterTex.UnorderedAccessView.Value);
+			writer.SetUInt("samplerHandle", samplerHandle.Value);
+			writer.SetUInt("width", PrefilterWidth);
+			writer.SetUInt("height", PrefilterSliceHeight * PrefilterSlices);
+			writer.SetUInt("sliceCount", PrefilterSlices);
+			writer.SetUInt("sliceHeight", PrefilterSliceHeight);
+			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 
 			var dispatchX = (uint)((PrefilterWidth + 7) / 8);
 			var dispatchY = (uint)(((PrefilterSliceHeight * PrefilterSlices) + 7) / 8);
@@ -193,14 +202,11 @@ public sealed class SkyboxRenderer
 			var pipeline = GetIblBrdfPipeline(gfxDevice);
 			var commandList = gfxDevice.BeginCompute();
 			commandList.BindPipeline(pipeline);
-			Span<uint> handles = stackalloc uint[1];
-			handles[0] = brdfTex.UnorderedAccessView.Value;
-			commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
-
-			Span<float> constants = stackalloc float[20];
-			constants[0] = BrdfSize;
-			constants[1] = BrdfSize;
-			commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(constants));
+			var writer = _iblBrdfWriter
+				?? throw new InvalidOperationException("IBL BRDF reflection writer was not initialized.");
+			writer.Clear();
+			writer.SetUInt("brdfHandle", brdfTex.UnorderedAccessView.Value);
+			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 
 			var dispatchX = (uint)((BrdfSize + 7) / 8);
 			var dispatchY = (uint)((BrdfSize + 7) / 8);
@@ -259,35 +265,23 @@ public sealed class SkyboxRenderer
 		var commandList = gfxDevice.BeginCompute();
 		commandList.BindPipeline(pipeline);
 
-		Span<uint> handles = stackalloc uint[4];
-		handles[0] = environment.UnorderedAccessView.Value;
-		handles[1] = (uint)ProceduralEnvWidth;
-		handles[2] = (uint)ProceduralEnvHeight;
-		handles[3] = 0;
-		commandList.SetComputeConstants(0, MemoryMarshal.AsBytes(handles));
+		var bindlessWriter = _proceduralBindlessWriter
+			?? throw new InvalidOperationException("Procedural skybox bindless writer was not initialized.");
+		bindlessWriter.Clear();
+		bindlessWriter.SetUInt("environmentHandle", environment.UnorderedAccessView.Value);
+		bindlessWriter.SetUInt("width", (uint)ProceduralEnvWidth);
+		bindlessWriter.SetUInt("height", (uint)ProceduralEnvHeight);
+		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
-		Span<float> parameters = stackalloc float[20];
-		parameters[0] = sunDirection.X;
-		parameters[1] = sunDirection.Y;
-		parameters[2] = sunDirection.Z;
-		parameters[3] = 25.0f;
-		parameters[4] = 1.0f;
-		parameters[5] = 0.95f;
-		parameters[6] = 0.8f;
-		parameters[7] = 256.0f;
-		parameters[8] = 0.2f;
-		parameters[9] = 0.45f;
-		parameters[10] = 0.85f;
-		parameters[11] = 1.4f;
-		parameters[12] = 0.65f;
-		parameters[13] = 0.75f;
-		parameters[14] = 0.9f;
-		parameters[15] = 1.0f;
-		parameters[16] = 0.15f;
-		parameters[17] = 0.1f;
-		parameters[18] = 0.07f;
-		parameters[19] = 0.0f;
-		commandList.SetComputeConstants(1, MemoryMarshal.AsBytes(parameters));
+		var skyParamsWriter = _proceduralSkyParamsWriter
+			?? throw new InvalidOperationException("Procedural skybox parameter writer was not initialized.");
+		skyParamsWriter.Clear();
+		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(sunDirection, 25.0f));
+		skyParamsWriter.SetVector4("sunColorSharpness", new Vector4(1.0f, 0.95f, 0.8f, 256.0f));
+		skyParamsWriter.SetVector4("skyTop", new Vector4(0.2f, 0.45f, 0.85f, 1.4f));
+		skyParamsWriter.SetVector4("skyHorizon", new Vector4(0.65f, 0.75f, 0.9f, 1.0f));
+		skyParamsWriter.SetVector4("ground", new Vector4(0.15f, 0.1f, 0.07f, 0.0f));
+		commandList.SetComputeConstants(skyParamsWriter.RegisterIndex, skyParamsWriter.AsBytes());
 
 		var dispatchX = (uint)((ProceduralEnvWidth + 7) / 8);
 		var dispatchY = (uint)((ProceduralEnvHeight + 7) / 8);
@@ -315,18 +309,13 @@ public sealed class SkyboxRenderer
 			return _proceduralSkyboxPipeline;
 		}
 
-		ShaderBytecodeSet shaders;
-		// TODO: No metal here
-		if (IsMetalRenderer())
-		{
-			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain");
-			shaders = new ShaderBytecodeSet(compute: shaderBytes);
-		}
-		else
-		{
-			var shader = _shaderCompiler.GetComputeShader("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain");
-			shaders = new ShaderBytecodeSet(compute: shader);
-		}
+		var compiled = CompileComputeWithReflection(
+			"procedural_skybox.compute.slang",
+			"ProceduralSkyboxCSMain",
+			gfxDevice.BackendKind);
+		_proceduralBindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_proceduralSkyParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SkyParams"));
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -348,18 +337,12 @@ public sealed class SkyboxRenderer
 			return _iblIrradiancePipeline;
 		}
 
-		ShaderBytecodeSet shaders;
-		// TODO: No metal here
-		if (IsMetalRenderer())
-		{
-			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
-			shaders = new ShaderBytecodeSet(compute: shaderBytes);
-		}
-		else
-		{
-			var shader = _shaderCompiler.GetComputeShader("ibl_irradiance.compute.slang", "IblIrradianceCSMain");
-			shaders = new ShaderBytecodeSet(compute: shader);
-		}
+		var compiled = CompileComputeWithReflection(
+			"ibl_irradiance.compute.slang",
+			"IblIrradianceCSMain",
+			gfxDevice.BackendKind);
+		_iblIrradianceWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -381,18 +364,12 @@ public sealed class SkyboxRenderer
 			return _iblPrefilterPipeline;
 		}
 
-		ShaderBytecodeSet shaders;
-		// TODO: No metal here
-		if (IsMetalRenderer())
-		{
-			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
-			shaders = new ShaderBytecodeSet(compute: shaderBytes);
-		}
-		else
-		{
-			var shader = _shaderCompiler.GetComputeShader("ibl_prefilter.compute.slang", "IblPrefilterCSMain");
-			shaders = new ShaderBytecodeSet(compute: shader);
-		}
+		var compiled = CompileComputeWithReflection(
+			"ibl_prefilter.compute.slang",
+			"IblPrefilterCSMain",
+			gfxDevice.BackendKind);
+		_iblPrefilterWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -414,17 +391,12 @@ public sealed class SkyboxRenderer
 			return _iblBrdfLutPipeline;
 		}
 
-		ShaderBytecodeSet shaders;
-		if (IsMetalRenderer())
-		{
-			var shaderBytes = _shaderCompiler.GetMetalComputeLibrary("ibl_brdf_lut.compute.slang", "IblBrdfCSMain");
-			shaders = new ShaderBytecodeSet(compute: shaderBytes);
-		}
-		else
-		{
-			var shader = _shaderCompiler.GetComputeShader("ibl_brdf_lut.compute.slang", "IblBrdfCSMain");
-			shaders = new ShaderBytecodeSet(compute: shader);
-		}
+		var compiled = CompileComputeWithReflection(
+			"ibl_brdf_lut.compute.slang",
+			"IblBrdfCSMain",
+			gfxDevice.BackendKind);
+		_iblBrdfWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -450,8 +422,19 @@ public sealed class SkyboxRenderer
 		return device;
 	}
 
-	private bool IsMetalRenderer()
+	private CompiledComputeShaderWithReflection CompileComputeWithReflection(
+		string shaderFile,
+		string entryPoint,
+		GraphicsBackendKind backendKind)
 	{
-		return _renderer is WolfRendererMetal;
+		if (_reflectionBackendKind.HasValue && _reflectionBackendKind.Value != backendKind)
+		{
+			throw new InvalidOperationException(
+				$"SkyboxRenderer was already compiled for backend '{_reflectionBackendKind.Value}', " +
+				$"but was requested for '{backendKind}'.");
+		}
+
+		_reflectionBackendKind = backendKind;
+		return _shaderCompiler.GetComputeShaderWithReflection(shaderFile, entryPoint, backendKind);
 	}
 }

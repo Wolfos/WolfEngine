@@ -1,7 +1,6 @@
 #nullable enable
 
 using System.Numerics;
-using System.Runtime.InteropServices;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 
@@ -18,7 +17,6 @@ public sealed class ShadowMapPass
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
 	private const float DefaultCascadeBlendDistance = 2.0f;
-	private const int ShadowCameraConstantsFloatCount = (16 * CascadeCount) + 4;
 
 	private static readonly List<float> CascadeSplitDistances =
 	[
@@ -30,6 +28,8 @@ public sealed class ShadowMapPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, int BucketIndex), IGfxPipeline> _pipelinesByCascadeBucket = new();
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
+	private GraphicsBackendKind? _reflectionBackendKind;
+	private ShaderPropertyWriter? _cameraWriter;
 
 	public ShadowMapPass(IShaderCompiler shaderCompiler)
 	{
@@ -74,6 +74,7 @@ public sealed class ShadowMapPass
 		ArgumentNullException.ThrowIfNull(depthTarget);
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
+		EnsureCameraWriter(device.BackendKind);
 
 		if (cascadeIndex < 0 || cascadeIndex >= CascadeCount)
 		{
@@ -170,7 +171,9 @@ public sealed class ShadowMapPass
 					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
 				}
 
-				commandList.BindConstantBuffer(14, config.CameraBuffer);
+				commandList.BindConstantBuffer(
+					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
+					config.CameraBuffer);
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{
@@ -235,23 +238,41 @@ public sealed class ShadowMapPass
 
 	private void UploadCameraConstants(RenderGraphContext context, in ShadowMapPassConfig config, IGfxCommandList commandList)
 	{
-		Span<float> cameraConstants = stackalloc float[ShadowCameraConstantsFloatCount];
-		WriteMatrix(cameraConstants, _currentFrameData.CascadeViewProjection0);
-		WriteMatrix(cameraConstants.Slice(16), _currentFrameData.CascadeViewProjection1);
-		WriteMatrix(cameraConstants.Slice(32), _currentFrameData.CascadeViewProjection2);
+		var cameraWriter = _cameraWriter
+			?? throw new InvalidOperationException("Shadow camera writer was not initialized.");
+		cameraWriter.Clear();
+		cameraWriter.SetMatrix4x4("viewProjection0", _currentFrameData.CascadeViewProjection0);
+		cameraWriter.SetMatrix4x4("viewProjection1", _currentFrameData.CascadeViewProjection1);
+		cameraWriter.SetMatrix4x4("viewProjection2", _currentFrameData.CascadeViewProjection2);
 		var sceneData = context.SceneData!;
-		cameraConstants[48] = sceneData.CameraOrigin.X;
-		cameraConstants[49] = sceneData.CameraOrigin.Y;
-		cameraConstants[50] = sceneData.CameraOrigin.Z;
-		cameraConstants[51] = 0.0f;
+		cameraWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
 
 		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)
 		{
-			writableCameraBuffer.Write<float>(cameraConstants);
+			writableCameraBuffer.Write<byte>(cameraWriter.AsBytes());
 			return;
 		}
 
-		commandList.SetGraphicsConstants(14, MemoryMarshal.AsBytes(cameraConstants));
+		commandList.SetGraphicsConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
+	}
+
+	private void EnsureCameraWriter(GraphicsBackendKind backendKind)
+	{
+		if (_reflectionBackendKind.HasValue &&
+		    _reflectionBackendKind.Value == backendKind &&
+		    _cameraWriter is not null)
+		{
+			return;
+		}
+
+		var compiled = GraphicsShaderCompiler.CompileWithReflection(
+			_shaderCompiler,
+			backendKind,
+			"shadow_map.slang",
+			"vertexShader",
+			"fragmentShader");
+		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
+		_reflectionBackendKind = backendKind;
 	}
 
 	private static ShadowFrameData CreateDisabledFrameData() => new(
@@ -390,28 +411,4 @@ public sealed class ShadowMapPass
 		return lightView * lightProjection;
 	}
 
-	private static void WriteMatrix(Span<float> destination, Matrix4x4 matrix)
-	{
-		if (destination.Length < 16)
-		{
-			throw new ArgumentException("Destination span must contain at least 16 elements.", nameof(destination));
-		}
-
-		destination[0] = matrix.M11;
-		destination[1] = matrix.M12;
-		destination[2] = matrix.M13;
-		destination[3] = matrix.M14;
-		destination[4] = matrix.M21;
-		destination[5] = matrix.M22;
-		destination[6] = matrix.M23;
-		destination[7] = matrix.M24;
-		destination[8] = matrix.M31;
-		destination[9] = matrix.M32;
-		destination[10] = matrix.M33;
-		destination[11] = matrix.M34;
-		destination[12] = matrix.M41;
-		destination[13] = matrix.M42;
-		destination[14] = matrix.M43;
-		destination[15] = matrix.M44;
-	}
 }

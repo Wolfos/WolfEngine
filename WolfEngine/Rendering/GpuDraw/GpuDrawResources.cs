@@ -16,6 +16,7 @@ public sealed class GpuDrawResources : IDisposable
 	public const int MaxMaterialCount = 8192;
 	public const int MaxMeshCount = 20000;
 	public const int HardeningCounterCount = 16;
+	private readonly IShaderCompiler _shaderCompiler;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }
@@ -46,7 +47,18 @@ public sealed class GpuDrawResources : IDisposable
 		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GBufferDrawBuckets.BucketCount];
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GBufferDrawBuckets.BucketCount];
 	private int _activeIndirectCommandSlot;
+	private GraphicsBackendKind? _constantBufferLayoutBackend;
+	private ShaderConstantBufferLayout? _gBufferCameraLayout;
+	private int _cameraBufferSizeInBytes;
+	private int _shadowCameraBufferSizeInBytes;
+	private int _transparentEnvironmentBufferSizeInBytes;
+	private int _transparentLightingBufferSizeInBytes;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
+
+	public GpuDrawResources(IShaderCompiler shaderCompiler)
+	{
+		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+	}
 
 	public int ActiveIndirectCommandSlot
 	{
@@ -94,6 +106,9 @@ public sealed class GpuDrawResources : IDisposable
 	
 	public IGfxBuffer? ShadowDrawExecutionRangePerBucketBuffer => _shadowDrawExecutionRangePerBucketBuffers[_activeFrameSlot];
 
+	public ShaderConstantBufferLayout GBufferCameraLayout => _gBufferCameraLayout
+		?? throw new InvalidOperationException("GpuDraw camera layout was not initialized.");
+
 	public void EnsureCreated(IGfxDevice device)
 	{
 		if (device is null)
@@ -106,6 +121,8 @@ public sealed class GpuDrawResources : IDisposable
 			throw new InvalidOperationException(
 				$"GpuDraw requires MaxFramesInFlight ({MaxFramesInFlight}) to match IndirectCommandBufferSlotCount ({IndirectCommandBufferSlotCount}).");
 		}
+
+		EnsureConstantBufferLayouts(device.BackendKind);
 
 		InstanceBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxInstanceCount * Marshal.SizeOf<GpuInstanceData>()),
@@ -149,25 +166,29 @@ public sealed class GpuDrawResources : IDisposable
 				BufferUsage.Structured,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
-			_cameraBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(float) * 24),
-				BufferUsage.Constant,
-				BufferFlags.AllowShaderResource));
+			_cameraBuffers[i] = EnsureConstantBufferCapacity(
+				device,
+				_cameraBuffers[i],
+				_cameraBufferSizeInBytes,
+				$"CameraBuffer[{i}]");
 			
-			_shadowCameraBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(float) * ((16 * ShadowMapPass.CascadeCount) + 4)),
-				BufferUsage.Constant,
-				BufferFlags.AllowShaderResource));
+			_shadowCameraBuffers[i] = EnsureConstantBufferCapacity(
+				device,
+				_shadowCameraBuffers[i],
+				_shadowCameraBufferSizeInBytes,
+				$"ShadowCameraBuffer[{i}]");
 
-			_transparentEnvironmentBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(uint) * 12),
-				BufferUsage.Constant,
-				BufferFlags.AllowShaderResource));
+			_transparentEnvironmentBuffers[i] = EnsureConstantBufferCapacity(
+				device,
+				_transparentEnvironmentBuffers[i],
+				_transparentEnvironmentBufferSizeInBytes,
+				$"TransparentEnvironmentBuffer[{i}]");
 
-			_transparentLightingBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(sizeof(uint) * 104),
-				BufferUsage.Constant,
-				BufferFlags.AllowShaderResource));
+			_transparentLightingBuffers[i] = EnsureConstantBufferCapacity(
+				device,
+				_transparentLightingBuffers[i],
+				_transparentLightingBufferSizeInBytes,
+				$"TransparentLightingBuffer[{i}]");
 
 			_drawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(GBufferDrawBuckets.BucketCount * sizeof(uint)),
@@ -338,6 +359,69 @@ public sealed class GpuDrawResources : IDisposable
 		{
 			throw new ArgumentOutOfRangeException(nameof(frameSlot), frameSlot, "Frame slot is out of range.");
 		}
+	}
+
+	private void EnsureConstantBufferLayouts(GraphicsBackendKind backendKind)
+	{
+		if (_constantBufferLayoutBackend.HasValue && _constantBufferLayoutBackend.Value == backendKind)
+		{
+			return;
+		}
+
+		var gbuffer = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"gbuffer.slang",
+			"vertexShader",
+			"fragmentShader",
+			backendKind);
+		_gBufferCameraLayout = gbuffer.ReflectionLayout.GetConstantBuffer("CameraParams");
+		_cameraBufferSizeInBytes = _gBufferCameraLayout.SizeInBytes;
+
+		var shadow = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"shadow_map.slang",
+			"vertexShader",
+			"fragmentShader",
+			backendKind);
+		_shadowCameraBufferSizeInBytes = shadow.ReflectionLayout.GetConstantBuffer("CameraParams").SizeInBytes;
+
+		var transparent = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"transparent_forward.slang",
+			"vertexShader",
+			"fragmentShader",
+			backendKind);
+		_transparentEnvironmentBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("TransparentEnvironmentParams").SizeInBytes;
+		_transparentLightingBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
+
+		_constantBufferLayoutBackend = backendKind;
+	}
+
+	private static IGfxBuffer EnsureConstantBufferCapacity(
+		IGfxDevice device,
+		IGfxBuffer? existingBuffer,
+		int minimumSizeInBytes,
+		string debugName)
+	{
+		if (minimumSizeInBytes <= 0)
+		{
+			throw new InvalidOperationException($"Reflected constant-buffer size for '{debugName}' must be positive.");
+		}
+
+		if (existingBuffer is null)
+		{
+			return device.CreateBuffer(new BufferDescriptor(
+				(ulong)minimumSizeInBytes,
+				BufferUsage.Constant,
+				BufferFlags.AllowShaderResource));
+		}
+
+		var existingSize = checked((int)existingBuffer.Descriptor.SizeInBytes);
+		if (existingSize < minimumSizeInBytes)
+		{
+			throw new InvalidOperationException(
+				$"Existing constant buffer '{debugName}' is too small ({existingSize} bytes). " +
+				$"Reflected shader layout requires at least {minimumSizeInBytes} bytes.");
+		}
+
+		return existingBuffer;
 	}
 
 }

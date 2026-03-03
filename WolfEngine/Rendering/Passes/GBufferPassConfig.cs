@@ -65,6 +65,8 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? CameraBuffer { get; set; }
 
+	public required ShaderConstantBufferLayout CameraLayout { get; init; }
+
 	public IGfxBuffer? MaterialGenerationBuffer { get; set; }
 
 	public IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; set; }

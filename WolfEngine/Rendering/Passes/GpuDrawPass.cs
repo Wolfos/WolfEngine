@@ -18,6 +18,11 @@ public sealed class GpuDrawPass
 	private readonly IGpuDrawBackendBridge _backendBridge;
 	private IGfxPipeline? _updatePipeline;
 	private IGfxPipeline? _cullPipeline;
+	private GraphicsBackendKind? _computeReflectionBackendKind;
+	private ReadOnlyMemory<byte> _updateShaderBytecode;
+	private ReadOnlyMemory<byte> _cullShaderBytecode;
+	private ShaderPropertyWriter? _updateParamsWriter;
+	private ShaderPropertyWriter? _cullParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
 	private readonly List<GpuDrawUpdateData> _updateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
@@ -347,12 +352,11 @@ public sealed class GpuDrawPass
 		{
 			commandList.BindPipeline(pipeline);
 
-			Span<uint> updateParams = stackalloc uint[4];
-			updateParams[0] = (uint)_updateData.Count;
-			updateParams[1] = 0;
-			updateParams[2] = 0;
-			updateParams[3] = 0;
-				commandList.SetComputeConstants(11, MemoryMarshal.AsBytes(updateParams));
+			var updateParamsWriter = _updateParamsWriter
+				?? throw new InvalidOperationException("GpuDraw update reflection writer was not initialized.");
+			updateParamsWriter.Clear();
+			updateParamsWriter.SetUInt("updateCount", (uint)_updateData.Count);
+			commandList.SetComputeConstants(updateParamsWriter.RegisterIndex, updateParamsWriter.AsBytes());
 
 			commandList.SetComputeBuffer(0, _gpuDrawResources.UpdateBuffer!);
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
@@ -414,24 +418,22 @@ public sealed class GpuDrawPass
 
 			Span<Vector4> planes = stackalloc Vector4[6];
 			ExtractFrustumPlanes(viewProjection, planes);
-
-			var cullParams = new CullParams
+			var cullParamsWriter = _cullParamsWriter
+				?? throw new InvalidOperationException("GpuDraw cull reflection writer was not initialized.");
+			cullParamsWriter.Clear();
+			for (var i = 0; i < planes.Length; i++)
 			{
-				Plane0 = planes[0],
-				Plane1 = planes[1],
-				Plane2 = planes[2],
-				Plane3 = planes[3],
-				Plane4 = planes[4],
-				Plane5 = planes[5],
-				CameraPositionAndMaxDrawCount = new Vector4(
+				cullParamsWriter.SetVector4($"planes[{i}]", planes[i]);
+			}
+			cullParamsWriter.SetVector4(
+				"cameraPositionAndMaxDrawCount",
+				new Vector4(
 					cameraOrigin,
-					GpuDrawResources.MaxDrawCount),
-				BucketCount = (uint)bucketCount,
-				MaxVisiblePerBucket = GpuDrawResources.MaxDrawCount,
-				FallbackMeshHandle = _drawDatabase.FallbackMeshHandle.Value
-			};
-
-				commandList.SetComputeConstants(12, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref cullParams, 1)));
+					GpuDrawResources.MaxDrawCount));
+			cullParamsWriter.SetUInt("bucketCount", (uint)bucketCount);
+			cullParamsWriter.SetUInt("maxVisiblePerBucket", GpuDrawResources.MaxDrawCount);
+			cullParamsWriter.SetUInt("fallbackMeshHandle", _drawDatabase.FallbackMeshHandle.Value);
+			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
 
 			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
@@ -459,11 +461,9 @@ public sealed class GpuDrawPass
 			return _updatePipeline;
 		}
 
-		var bytes = device.BackendKind == GraphicsBackendKind.Metal
-			? _shaderCompiler.GetMetalComputeLibrary("gpu_draw_update.compute.slang", "CSUpdate")
-			: _shaderCompiler.GetComputeShader("gpu_draw_update.compute.slang", "CSUpdate");
+		EnsureComputeReflectionResources(device.BackendKind);
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdate", default, default, default);
-		_updatePipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
+		_updatePipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _updateShaderBytecode));
 		return _updatePipeline;
 	}
 
@@ -474,12 +474,39 @@ public sealed class GpuDrawPass
 			return _cullPipeline;
 		}
 
-		var bytes = device.BackendKind == GraphicsBackendKind.Metal
-			? _shaderCompiler.GetMetalComputeLibrary("gpu_draw_cull.compute.slang", "CSCull")
-			: _shaderCompiler.GetComputeShader("gpu_draw_cull.compute.slang", "CSCull");
+		EnsureComputeReflectionResources(device.BackendKind);
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
-		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: bytes));
+		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _cullShaderBytecode));
 		return _cullPipeline;
+	}
+
+	private void EnsureComputeReflectionResources(GraphicsBackendKind backendKind)
+	{
+		if (_computeReflectionBackendKind.HasValue &&
+		    _computeReflectionBackendKind.Value == backendKind &&
+		    _updateParamsWriter is not null &&
+		    _cullParamsWriter is not null &&
+		    _updateShaderBytecode.IsEmpty == false &&
+		    _cullShaderBytecode.IsEmpty == false)
+		{
+			return;
+		}
+
+		var updateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_update.compute.slang",
+			"CSUpdate",
+			backendKind);
+		_updateShaderBytecode = updateCompiled.Bytecode;
+		_updateParamsWriter = new ShaderPropertyWriter(updateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+
+		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_cull.compute.slang",
+			"CSCull",
+			backendKind);
+		_cullShaderBytecode = cullCompiled.Bytecode;
+		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));
+
+		_computeReflectionBackendKind = backendKind;
 	}
 
 	private void EnsureGBufferPipelines(IGfxDevice device)
@@ -987,21 +1014,5 @@ public sealed class GpuDrawPass
 		Span<T> tmp = stackalloc T[1];
 		tmp[0] = data;
 		writableBuffer.Write<T>(tmp, elementOffset);
-	}
-
-	[StructLayout(LayoutKind.Sequential)]
-	private struct CullParams
-	{
-		public Vector4 Plane0;
-		public Vector4 Plane1;
-		public Vector4 Plane2;
-		public Vector4 Plane3;
-		public Vector4 Plane4;
-		public Vector4 Plane5;
-		public Vector4 CameraPositionAndMaxDrawCount;
-		public uint BucketCount;
-		public uint MaxVisiblePerBucket;
-		public uint FallbackMeshHandle;
-		public uint Pad0;
 	}
 }

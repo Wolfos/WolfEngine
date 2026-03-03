@@ -17,6 +17,12 @@ public interface IShaderCompiler
 		string entryPoint,
 		GraphicsBackendKind backendKind,
 		params string[] defines);
+	CompiledGraphicsShaderWithReflection GetGraphicsShaderWithReflection(
+		string filename,
+		string vertexEntryPoint,
+		string pixelEntryPoint,
+		GraphicsBackendKind backendKind,
+		params string[] defines);
 }
 
 public class ShaderCompiler : IShaderCompiler
@@ -24,6 +30,7 @@ public class ShaderCompiler : IShaderCompiler
 	private readonly Dictionary<string, ReadOnlyMemory<byte>> _cachedMetalLibraries = new();
 	private readonly Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
 	private readonly Dictionary<(string file, string entry, string target, string profile, string stage, string defines), CompiledComputeShaderWithReflection> _cachedComputeWithReflection = new();
+	private readonly Dictionary<(string file, string vsEntry, string psEntry, string target, string vsProfile, string psProfile, string defines), CompiledGraphicsShaderWithReflection> _cachedGraphicsWithReflection = new();
 
 	public ReadOnlyMemory<byte> GetMetalLibrary(string filename)
 	{
@@ -316,6 +323,147 @@ public class ShaderCompiler : IShaderCompiler
 		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout);
 		_cachedComputeWithReflection[cacheKey] = result;
 		return result;
+	}
+
+	public CompiledGraphicsShaderWithReflection GetGraphicsShaderWithReflection(
+		string filename,
+		string vertexEntryPoint,
+		string pixelEntryPoint,
+		GraphicsBackendKind backendKind,
+		params string[] defines)
+	{
+		if (string.IsNullOrWhiteSpace(filename))
+		{
+			throw new ArgumentException("Shader filename cannot be null or empty.", nameof(filename));
+		}
+
+		if (string.IsNullOrWhiteSpace(vertexEntryPoint))
+		{
+			throw new ArgumentException("Vertex entry point cannot be null or empty.", nameof(vertexEntryPoint));
+		}
+
+		if (string.IsNullOrWhiteSpace(pixelEntryPoint))
+		{
+			throw new ArgumentException("Pixel entry point cannot be null or empty.", nameof(pixelEntryPoint));
+		}
+
+		var shaderPath = Path.IsPathRooted(filename)
+			? filename
+			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+
+		if (!File.Exists(shaderPath))
+		{
+			throw new FileNotFoundException($"Shader file '{shaderPath}' was not found.", shaderPath);
+		}
+
+		var normalizedDefines = BuildDefineSuffix(defines);
+		var target = backendKind == GraphicsBackendKind.Metal ? "metallib" : "dxil";
+		var vsProfile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "vs_6_0";
+		var psProfile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "ps_6_0";
+		var cacheKey = (filename, vertexEntryPoint, pixelEntryPoint, target, vsProfile, psProfile, normalizedDefines);
+		if (_cachedGraphicsWithReflection.TryGetValue(cacheKey, out var cached))
+		{
+			return cached;
+		}
+
+		CompiledGraphicsShaderWithReflection compiledWithReflection;
+		if (backendKind == GraphicsBackendKind.Metal)
+		{
+			var bytecode = GetMetalLibrary(filename, vertexEntryPoint, pixelEntryPoint, defines);
+			var vertexLayout = CompileGraphicsStageReflection(shaderPath, backendKind, vertexEntryPoint, "vertex", string.Empty, defines);
+			var pixelLayout = CompileGraphicsStageReflection(shaderPath, backendKind, pixelEntryPoint, "fragment", string.Empty, defines);
+			var mergedLayout = ShaderReflectionLayoutMerger.Merge(vertexLayout, pixelLayout);
+			compiledWithReflection = new CompiledGraphicsShaderWithReflection(
+				new ShaderBytecodeSet(bytecode, bytecode),
+				mergedLayout);
+		}
+		else
+		{
+			var vertexResult = CompileGraphicsStageWithReflection(shaderPath, backendKind, vertexEntryPoint, "vs_6_0", defines);
+			var pixelResult = CompileGraphicsStageWithReflection(shaderPath, backendKind, pixelEntryPoint, "ps_6_0", defines);
+			var mergedLayout = ShaderReflectionLayoutMerger.Merge(vertexResult.ReflectionLayout, pixelResult.ReflectionLayout);
+			compiledWithReflection = new CompiledGraphicsShaderWithReflection(
+				new ShaderBytecodeSet(vertexResult.Bytecode, pixelResult.Bytecode),
+				mergedLayout);
+		}
+
+		_cachedGraphicsWithReflection[cacheKey] = compiledWithReflection;
+		return compiledWithReflection;
+	}
+
+	private static ShaderReflectionLayout CompileGraphicsStageReflection(
+		string shaderPath,
+		GraphicsBackendKind backendKind,
+		string entryPoint,
+		string stage,
+		string profile,
+		params string[] defines)
+	{
+		var result = CompileGraphicsStageWithReflection(shaderPath, backendKind, entryPoint, profile, defines, stage);
+		return result.ReflectionLayout;
+	}
+
+	private static (ReadOnlyMemory<byte> Bytecode, ShaderReflectionLayout ReflectionLayout) CompileGraphicsStageWithReflection(
+		string shaderPath,
+		GraphicsBackendKind backendKind,
+		string entryPoint,
+		string profile,
+		string[] defines,
+		string? explicitStage = null)
+	{
+		List<string> args;
+		if (backendKind == GraphicsBackendKind.Metal)
+		{
+			var stage = explicitStage ?? throw new InvalidOperationException("Metal stage must be provided.");
+			args =
+			[
+				shaderPath,
+				"-target", "metallib",
+				"-D", "WOLF_TARGET_METAL=1",
+				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
+				"-D", "WOLF_BINDLESS_MAX=16384",
+				"-entry", entryPoint,
+				"-stage", stage,
+				"-o", "-"
+			];
+		}
+		else
+		{
+			if (string.IsNullOrWhiteSpace(profile))
+			{
+				throw new InvalidOperationException("DX12 reflection compilation requires a shader profile.");
+			}
+
+			args =
+			[
+				shaderPath,
+				"-target", "dxil",
+				"-D", "WOLF_TARGET_D3D12=1",
+				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
+				"-D", "WOLF_BINDLESS_MAX=16384",
+				"-D", "WOLF_BINDLESS_SAMPLER_MAX=2048",
+				"-profile", profile,
+				"-entry", entryPoint,
+				"-o", "-"
+			];
+		}
+
+		if (defines is { Length: > 0 })
+		{
+			for (var i = 0; i < defines.Length; i++)
+			{
+				if (string.IsNullOrWhiteSpace(defines[i]))
+				{
+					continue;
+				}
+
+				args.Add("-D");
+				args.Add(defines[i]);
+			}
+		}
+
+		var bytecode = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
+		return (bytecode, ShaderReflectionLayoutBuilder.Build(reflection));
 	}
 
 	private static string BuildDefineSuffix(params string[] defines)

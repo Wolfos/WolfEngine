@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Collections.Generic;
 using ImGuiNET;
@@ -30,6 +29,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private MetalTexture _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
+	private ShaderPropertyWriter? _projectionWriter;
+	private ShaderPropertyWriter? _bindlessWriter;
 	private readonly Queue<UiBufferSet> _inFlightBuffers = new();
 	private readonly List<UiBufferSet> _availableBuffers = new();
 	private UiBufferSet? _recordingBuffers;
@@ -97,36 +98,24 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.SetVertexBuffers(new[] { vertexView, vertexView, vertexView });
 		commandList.SetIndexBuffer(new IndexBufferView(buffers.IndexBuffer, IndexFormat.UInt16, 0));
 
-		Span<float> projection = stackalloc float[16];
 		var L = frame.DisplayPos.X;
 		var R = frame.DisplayPos.X + frame.DisplaySize.X;
 		var T = frame.DisplayPos.Y;
 		var B = frame.DisplayPos.Y + frame.DisplaySize.Y;
-		projection[0] = 2.0f / (R - L);
-		projection[1] = 0.0f;
-		projection[2] = 0.0f;
-		projection[3] = 0.0f;
+		var projectionWriter = _projectionWriter
+			?? throw new InvalidOperationException("Metal ImGui projection writer was not initialized.");
+		projectionWriter.Clear();
+		projectionWriter.SetMatrix4x4(
+			"ProjectionMatrix",
+			new Matrix4x4(
+				2.0f / (R - L), 0.0f, 0.0f, 0.0f,
+				0.0f, 2.0f / (T - B), 0.0f, 0.0f,
+				0.0f, 0.0f, 0.5f, 0.0f,
+				(R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f));
+		commandList.SetGraphicsConstants(projectionWriter.RegisterIndex, projectionWriter.AsBytes());
 
-		projection[4] = 0.0f;
-		projection[5] = 2.0f / (T - B);
-		projection[6] = 0.0f;
-		projection[7] = 0.0f;
-
-		projection[8] = 0.0f;
-		projection[9] = 0.0f;
-		projection[10] = 0.5f;
-		projection[11] = 0.0f;
-
-		projection[12] = (R + L) / (L - R);
-		projection[13] = (T + B) / (B - T);
-		projection[14] = 0.5f;
-		projection[15] = 1.0f;
-		commandList.SetGraphicsConstants(0, MemoryMarshal.AsBytes(projection));
-
-		Span<uint> bindless = stackalloc uint[4];
-		bindless[1] = _samplerHandle.Value;
-		bindless[2] = 0;
-		bindless[3] = 0;
+		var bindlessWriter = _bindlessWriter
+			?? throw new InvalidOperationException("Metal ImGui bindless writer was not initialized.");
 		uint activeTextureHandle = 0;
 		var hasActiveTextureHandle = false;
 
@@ -144,8 +133,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			var textureHandle = ResolveTextureHandle(cmd.TextureId);
 			if (hasActiveTextureHandle == false || textureHandle != activeTextureHandle)
 			{
-				bindless[0] = textureHandle;
-				commandList.SetGraphicsConstants(1, MemoryMarshal.AsBytes(bindless));
+				bindlessWriter.Clear();
+				bindlessWriter.SetUInt("textureHandle", textureHandle);
+				bindlessWriter.SetUInt("samplerHandle", _samplerHandle.Value);
+				commandList.SetGraphicsConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 				activeTextureHandle = textureHandle;
 				hasActiveTextureHandle = true;
 			}
@@ -307,7 +298,15 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 
 	private IGfxPipeline CreatePipeline(IGfxDevice device)
 	{
-		var shaderBytes = _shaderCompiler.GetMetalLibrary("imgui.slang");
+		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"imgui.slang",
+			"vertexShader",
+			"fragmentShader",
+			GraphicsBackendKind.Metal);
+		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
+		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("ImGuiBindless"));
+		var shaderBytes = compiled.Bytecode.Vertex
+			?? throw new InvalidOperationException("ImGui Metal vertex bytecode was missing from reflection compile result.");
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
 			CullMode.None,
