@@ -57,7 +57,9 @@ public class EditorGui
         {
             ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
+            var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
             ImGui.Begin("Components");
+            var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
             if (HasSelectedEntity)
             {
                 foreach (var componentType in SelectedComponentTypes)
@@ -65,7 +67,9 @@ public class EditorGui
                     _componentEditor.Draw(scene, SelectedEntity, componentType);
                 }
             }
+            ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
             ImGui.End();
+            ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
         }
 
         using (FrameProfiler.Instance.Measure("Preferences"))

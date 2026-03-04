@@ -31,9 +31,12 @@ public static class SceneWindow
         
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
+        var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
         ImGui.Begin("Scene");
+        var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
         ImGui.PopStyleVar();
-        
+
+        ImGui.SetCursorPosX(3);
         if (DrawTransformModeButton("Translate", "translate", TransformGizmoMode.Translate))
         {
             _gizmoMode = TransformGizmoMode.Translate;
@@ -86,7 +89,7 @@ public static class SceneWindow
 
         ImGui.SameLine();
         const float resolutionSliderWidth = 100.0f;
-        var resolutionSliderX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - resolutionSliderWidth - 1;
+        var resolutionSliderX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - resolutionSliderWidth - 3;
         if (resolutionSliderX > ImGui.GetCursorPosX())
         {
             ImGui.SetCursorPosX(resolutionSliderX);
@@ -160,7 +163,9 @@ public static class SceneWindow
             _transformSpace,
             _pivotMode);
 
+        ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
         ImGui.End();
+        ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
     }
 
     private static bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)

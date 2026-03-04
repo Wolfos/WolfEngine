@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -17,12 +18,14 @@ public class EditorPreferencesMenu
 
 	public static void Draw()
 	{
-		if (_isOpen == false) return;
+			if (_isOpen == false) return;
 
-		ImGui.Begin("Preferences", ref _isOpen);
-		if (ImGui.Button("Save"))
-		{
-			EditorPreferences.Save();
+			var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
+			ImGui.Begin("Preferences", ref _isOpen);
+			var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
+			if (ImGui.Button("Save"))
+			{
+				EditorPreferences.Save();
 		}
 		var style = ImGui.GetStyle();
 		for (int i = 0; i < (int)ImGuiCol.COUNT; i++)
@@ -31,9 +34,11 @@ public class EditorPreferencesMenu
 			if (EditorUIUtility.DrawLabeledField(((ImGuiCol)i).ToString(), () => ImGui.ColorEdit4("##value", ref v)))
 			{
 				style.Colors[i] = v;
-				EditorPreferences.SetColor((ImGuiCol)i, v);
+					EditorPreferences.SetColor((ImGuiCol)i, v);
+				}
 			}
+			ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
+			ImGui.End();
+			ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
 		}
-		ImGui.End();
 	}
-}

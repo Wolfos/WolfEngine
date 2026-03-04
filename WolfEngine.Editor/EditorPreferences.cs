@@ -8,14 +8,16 @@ namespace WolfEngine.Editor;
 public class EditorPreferences
 {
 	private static EditorPreferences _instance;
+
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
 		IncludeFields = true,
 		Converters = { new JsonStringEnumConverter() }
 	};
+
 	private const string PreferencesFileName = "EditorPreferences.json";
-	
+
 	public Dictionary<ImGuiCol, Vector4> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
 
@@ -30,6 +32,7 @@ public class EditorPreferences
 		{
 			_instance = new EditorPreferences();
 		}
+
 		_instance.EditorColors[id] = color;
 	}
 
@@ -68,36 +71,18 @@ public class EditorPreferences
 				_instance = new EditorPreferences();
 			}
 		}
-			else
-			{
-				_instance = new EditorPreferences();
-			}
+		else
+		{
+			_instance = new EditorPreferences();
+		}
 
-			_instance.SceneViewportResolutionScale = Math.Clamp(_instance.SceneViewportResolutionScale, 0.5f, 1.0f);
+		_instance.SceneViewportResolutionScale = Math.Clamp(_instance.SceneViewportResolutionScale, 0.5f, 1.0f);
 
 		var style = ImGui.GetStyle();
 		foreach (var (id, color) in _instance.EditorColors)
 		{
 			style.Colors[(int)id] = color;
 		}
-
-		style.WindowBorderSize = 0.0f;
-		style.ChildBorderSize = 0.0f;
-		style.PopupBorderSize = 0.0f;
-		style.TabBorderSize = 0.0f;
-		style.TabBarBorderSize = 0.0f;
-		style.FrameBorderSize = 0.0f;
-		style.DockingSeparatorSize = 0.0f;
-		style.TabRounding = 6.0f;
-		style.WindowMenuButtonPosition = ImGuiDir.None;
-		style.Colors[(int)ImGuiCol.Border] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.BorderShadow] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.Separator] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.SeparatorHovered] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.SeparatorActive] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.TabSelectedOverline] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = Vector4.Zero;
-		style.Colors[(int)ImGuiCol.DockingEmptyBg] = style.Colors[(int)ImGuiCol.WindowBg];
 	}
 
 	public static void Save()

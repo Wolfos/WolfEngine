@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -17,8 +18,10 @@ public class EntitiesWindow
 		ImGui.SetNextWindowPos(new Vector2(0.0f, 0.0f), ImGuiCond.FirstUseEver);
 		ImGui.SetNextWindowSize(new Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
 
-		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
+		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(2, 3.0f));
+		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
 		ImGui.Begin("Entities");
+		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		ImGui.PopStyleVar();
 
 		world.GetAllEntities(AllEntities);
@@ -34,7 +37,9 @@ public class EntitiesWindow
 		}
 
 		ImGui.PopStyleVar(2);
+		ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
 		ImGui.End();
+		ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
 	}
 
 	private static void BuildRootList(World world)

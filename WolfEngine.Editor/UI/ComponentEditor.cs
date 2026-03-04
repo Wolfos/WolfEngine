@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -104,7 +105,12 @@ public class ComponentEditor: IComponentEditor
             return;
         }
 
-        if (ImGui.CollapsingHeader(typeof(T).Name, ImGuiTreeNodeFlags.DefaultOpen) == false)
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
+        var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
+        var isOpen = ImGui.CollapsingHeader(typeof(T).Name, ImGuiTreeNodeFlags.DefaultOpen);
+        ImGuiUiSystem.PopFontIfPushed(pushedBoldHeader);
+        ImGui.PopStyleVar();
+        if (isOpen == false)
         {
             ImGui.PopID();
             return;
