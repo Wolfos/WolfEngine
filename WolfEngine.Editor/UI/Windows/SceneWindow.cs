@@ -5,35 +5,36 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public static class SceneWindow
+public class SceneWindow: EditorWindow
 {
-    private static EditorViewportStateBus _viewportStateBus;
-    private static IIconManager _icons;
-    private static TransformGizmoController _transformGizmoController;
-    private static float _sceneViewportScale;
+    private readonly EditorViewportStateBus _viewportStateBus;
+    private readonly IIconManager _icons;
+    private readonly TransformGizmoController _transformGizmoController;
+    private float _sceneViewportScale;
     
-    private static TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
-    private static TransformSpace _transformSpace = TransformSpace.Local;
-    private static TransformPivotMode _pivotMode = TransformPivotMode.Center;
+    private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
+    private TransformSpace _transformSpace = TransformSpace.Local;
+    private TransformPivotMode _pivotMode = TransformPivotMode.Center;
 
 
-    public static void Init(EditorViewportStateBus viewportStateBus, IIconManager icons, TransformGizmoController transformGizmoController)
+    public SceneWindow(EditorViewportStateBus viewportStateBus, IIconManager icons, TransformGizmoController transformGizmoController)
     {
-        _viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+        _viewportStateBus = viewportStateBus;
         _icons = icons;
-        _transformGizmoController = transformGizmoController ?? throw new ArgumentNullException(nameof(transformGizmoController));
+        _transformGizmoController = transformGizmoController;
+        
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
-    
-    public static void Draw(EditorScene scene)
+
+    public override string Name => "Scene";
+
+    public override void Draw(EditorScene scene)
     {
         var world = scene.World;
         
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
-        var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-        ImGui.Begin("Scene");
-        var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
+        Begin();
         ImGui.PopStyleVar();
 
         ImGui.SetCursorPosX(3);
@@ -163,12 +164,10 @@ public static class SceneWindow
             _transformSpace,
             _pivotMode);
 
-        ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
         ImGui.End();
-        ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
     }
 
-    private static bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
+    private bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
     {
         var isSelected = _gizmoMode == mode;
         if (isSelected)

@@ -12,13 +12,13 @@ public interface IComponentEditor
     void Draw(EditorScene scene, Entity entity, Type componentType);
 }
 
-public class ComponentEditor: IComponentEditor
+public class ComponentsWindow: IComponentEditor
 {
-    private static IIconManager _icons;
+    private readonly IIconManager _icons;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
-    public ComponentEditor(IIconManager icons)
+    public ComponentsWindow(IIconManager icons)
     {
         _icons = icons;
     }
@@ -32,12 +32,12 @@ public class ComponentEditor: IComponentEditor
             return;
         
 
-        var method = typeof(ComponentEditor).GetMethod(nameof(DrawComponentEditorGeneric),
+        var method = typeof(ComponentsWindow).GetMethod(nameof(DrawComponentEditorGeneric),
             BindingFlags.NonPublic | BindingFlags.Static);
-        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity });
+        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons });
     }
 
-    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity)
+    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons)
         where T : struct, IEntityComponent
     {
         var world = scene.World;
@@ -57,14 +57,14 @@ public class ComponentEditor: IComponentEditor
                 iconName = "object";
             }
 
-            var iconTexture = ResolveIconTexture(iconName);
+            var iconTexture = ResolveIconTexture(iconName, icons);
             var iconPickerPopupId = $"Icon Picker##{entity.Index}:{entity.Generation}";
             if(ImGui.ImageButton("IconButton", iconTexture, EntityIconSize))
             {
                 ImGui.OpenPopup(iconPickerPopupId);
             }
 
-            DrawIconPickerModal(scene, entity, iconPickerPopupId);
+            DrawIconPickerModal(scene, entity, iconPickerPopupId, icons);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (ImGui.InputText("##value", ref value, 256))
@@ -165,14 +165,14 @@ public class ComponentEditor: IComponentEditor
         ImGui.PopID();
     }
 
-    private static nint ResolveIconTexture(string iconName)
+    private static nint ResolveIconTexture(string iconName, IIconManager icons)
     {
-        if (_icons.TryGet(iconName, out var textureId))
+        if (icons.TryGet(iconName, out var textureId))
         {
             return textureId;
         }
 
-        if (_icons.TryGet("object", out textureId))
+        if (icons.TryGet("object", out textureId))
         {
             return textureId;
         }
@@ -180,13 +180,13 @@ public class ComponentEditor: IComponentEditor
         return 0;
     }
 
-    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId)
+    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId, IIconManager icons)
     {
         var isOpen = true;
         ImGui.SetNextWindowSize(new Vector2(360.0f, 260.0f), ImGuiCond.Appearing);
         if (ImGui.BeginPopupModal(popupId, ref isOpen, ImGuiWindowFlags.NoResize))
         {
-            var iconNames = _icons.GetNames();
+            var iconNames = icons.GetNames();
             if (iconNames.Count == 0)
             {
                 ImGui.TextUnformatted("No icons were found in Assets/Icons.");
@@ -199,7 +199,7 @@ public class ComponentEditor: IComponentEditor
 
                 foreach (var name in iconNames)
                 {
-                    if (_icons.TryGet(name, out var textureId) == false)
+                    if (icons.TryGet(name, out var textureId) == false)
                     {
                         continue;
                     }

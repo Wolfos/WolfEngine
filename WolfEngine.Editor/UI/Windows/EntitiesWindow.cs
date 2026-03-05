@@ -5,13 +5,22 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public class EntitiesWindow
+public class EntitiesWindow: EditorWindow
 {
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 
-	public static void Draw(EditorScene scene, IIconManager icons)
+	private readonly IIconManager _iconManager;
+
+	public EntitiesWindow(IIconManager iconManager)
+	{
+		_iconManager = iconManager;
+	}
+
+	public override string Name => "Entities";
+
+	public override void Draw(EditorScene scene)
 	{
 		var world = scene.World;
 
@@ -19,9 +28,7 @@ public class EntitiesWindow
 		ImGui.SetNextWindowSize(new Vector2(188.0f, 720.0f), ImGuiCond.FirstUseEver);
 
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(2, 3.0f));
-		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-		ImGui.Begin("Entities");
-		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
+		Begin();
 		ImGui.PopStyleVar();
 
 		world.GetAllEntities(AllEntities);
@@ -33,13 +40,11 @@ public class EntitiesWindow
 
 		foreach (var entity in RootEntities)
 		{
-			DrawEntityNode(entity, world, scene, icons);
+			DrawEntityNode(entity, world, scene);
 		}
 
 		ImGui.PopStyleVar(2);
-		ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
 		ImGui.End();
-		ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
 	}
 
 	private static void BuildRootList(World world)
@@ -61,7 +66,7 @@ public class EntitiesWindow
 		}
 	}
 
-	private static unsafe void DrawEntityNode(Entity entity, World world, EditorScene scene, IIconManager icons)
+	private unsafe void DrawEntityNode(Entity entity, World world, EditorScene scene)
 	{
 		ImGui.PushID(entity.Index);
 
@@ -86,7 +91,7 @@ public class EntitiesWindow
 		var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
 			? assignedIconName
 			: "object";
-		var iconTexture = ResolveIconTexture(icons, iconName);
+		var iconTexture = ResolveIconTexture(_iconManager, iconName);
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
 		var name = nameComponent.Name ?? "Unnamed";
@@ -105,7 +110,7 @@ public class EntitiesWindow
 			var childEntity = world.GetComponent<Children>(entity).First;
 			while (childEntity.IsValid)
 			{
-				DrawEntityNode(childEntity, world, scene, icons);
+				DrawEntityNode(childEntity, world, scene);
 
 				if (world.HasComponent<Sibling>(childEntity))
 				{

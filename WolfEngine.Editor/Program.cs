@@ -30,16 +30,25 @@ public static class Program
 		editorThread.Join();
 	}
 
-	public static void ConfigureServices(ServiceCollection services)
+	private static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<EditorCameraContext>();
-		services.AddSingleton<IComponentEditor, ComponentEditor>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<EditorGui>();
+		
+		ConfigureEditorWindows(services);
+	}
+
+	private static void ConfigureEditorWindows(IServiceCollection services)
+	{
+		services.AddSingleton<IComponentEditor, ComponentsWindow>();
+		services.AddTransient<EntitiesWindow>();
+		services.AddTransient<ProfilerWindow>();
+		services.AddTransient<SceneWindow>();
 	}
 }

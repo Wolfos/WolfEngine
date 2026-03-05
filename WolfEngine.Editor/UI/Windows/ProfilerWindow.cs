@@ -5,7 +5,7 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public class ProfilerWindow
+public class ProfilerWindow: EditorWindow
 {
 	private static bool _isOpen;
 
@@ -19,7 +19,9 @@ public class ProfilerWindow
 		_isOpen = false;
 	}
 
-	public static void Draw(IRenderer renderer)
+	public override string Name => "Profiler";
+
+	public override void Draw(EditorScene scene)
 	{
 		if (_isOpen == false)
 		{
