@@ -183,8 +183,8 @@ public sealed class MenuBar : IMenuBar
 	private void DrawNewProjectPopup()
 	{
 		var isOpen = true;
-		ImGui.SetNextWindowSize(new Vector2(520.0f, 0.0f), ImGuiCond.Appearing);
-		if (ImGui.BeginPopupModal(NewProjectPopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
+		ImGui.SetNextWindowSizeConstraints(new Vector2(520.0f, 0.0f), new Vector2(520.0f, float.MaxValue));
+		if (ImGui.BeginPopupModal(NewProjectPopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoResize) == false)
 		{
 			return;
 		}
