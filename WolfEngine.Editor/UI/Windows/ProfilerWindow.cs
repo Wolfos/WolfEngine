@@ -28,9 +28,7 @@ public class ProfilerWindow: EditorWindow
 			return;
 		}
 
-		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
 		ImGui.Begin("Profiler", ref _isOpen);
-		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		var vsyncEnabled = Screen.VSyncEnabled;
 		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
 		{
@@ -42,9 +40,7 @@ public class ProfilerWindow: EditorWindow
 		if (frames.Count == 0)
 		{
 			ImGui.TextUnformatted("No profiler data available.");
-			ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
 			ImGui.End();
-			ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
 			return;
 		}
 
@@ -65,9 +61,7 @@ public class ProfilerWindow: EditorWindow
 				DrawNodes(frame.Root, frameMs);
 			}
 		}
-		ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
 		ImGui.End();
-		ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
 	}
 	
 

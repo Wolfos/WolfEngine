@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using ImGuiNET;
-using WolfEngine.ECS;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.UI;
