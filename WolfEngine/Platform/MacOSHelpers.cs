@@ -440,8 +440,7 @@ internal static class MacOSFileDialog
         if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
         {
             var urlClass = new ObjectiveCClass("NSURL");
-            var nsPath = NSStringHelper.From(options.InitialDirectory).ToString();
-            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", nsPath);
+            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", options.InitialDirectory);
             ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
         }
 
@@ -452,6 +451,44 @@ internal static class MacOSFileDialog
             {
                 ObjectiveC.objc_msgSend(panel, "setAllowedFileTypes:", allowed);
             }
+        }
+
+        var response = ObjCNative.ObjcMsgSendLong(panel, new Selector("runModal").SelPtr);
+        if (response != ModalResponseOk)
+        {
+            return null;
+        }
+
+        var urlPtr = ObjectiveC.IntPtr_objc_msgSend(panel, "URL");
+        if (urlPtr == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var pathPtr = ObjectiveC.IntPtr_objc_msgSend(urlPtr, "path");
+        return new NSString(pathPtr).ToManagedString();
+    }
+
+    public static string? OpenFolder(FileDialogOptions options)
+    {
+        var panelClass = new ObjectiveCClass("NSOpenPanel");
+        var panel = ObjectiveC.IntPtr_objc_msgSend(panelClass, "openPanel");
+
+        ObjectiveC.objc_msgSend(panel, "setCanChooseFiles:", false);
+        ObjectiveC.objc_msgSend(panel, "setCanChooseDirectories:", true);
+        ObjectiveC.objc_msgSend(panel, "setAllowsMultipleSelection:", false);
+
+        if (string.IsNullOrWhiteSpace(options.Title) == false)
+        {
+            var title = NSStringHelper.From(options.Title);
+            ObjectiveC.objc_msgSend(panel, "setTitle:", title);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
+        {
+            var urlClass = new ObjectiveCClass("NSURL");
+            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", options.InitialDirectory);
+            ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
         }
 
         var response = ObjCNative.ObjcMsgSendLong(panel, new Selector("runModal").SelPtr);

@@ -13,6 +13,7 @@ public sealed class FileDialogOptions
 public interface IFileDialogService
 {
 	string? OpenFile(FileDialogOptions? options = null);
+	string? OpenFolder(FileDialogOptions? options = null);
 }
 
 public sealed class FileDialogService : IFileDialogService
@@ -30,6 +31,12 @@ public sealed class FileDialogService : IFileDialogService
 		return _mainThreadDispatcher.Invoke(() => OpenFileOnMainThread(resolved));
 	}
 
+	public string? OpenFolder(FileDialogOptions? options = null)
+	{
+		var resolved = options ?? new FileDialogOptions();
+		return _mainThreadDispatcher.Invoke(() => OpenFolderOnMainThread(resolved));
+	}
+
 	private static string? OpenFileOnMainThread(FileDialogOptions options)
 	{
 		if (OperatingSystem.IsMacOS())
@@ -40,6 +47,21 @@ public sealed class FileDialogService : IFileDialogService
 		if (OperatingSystem.IsWindows())
 		{
 			return WindowsHelpers.OpenFile(options);
+		}
+
+		return null;
+	}
+
+	private static string? OpenFolderOnMainThread(FileDialogOptions options)
+	{
+		if (OperatingSystem.IsMacOS())
+		{
+			return MacOSFileDialog.OpenFolder(options);
+		}
+
+		if (OperatingSystem.IsWindows())
+		{
+			return WindowsHelpers.OpenFolder(options);
 		}
 
 		return null;

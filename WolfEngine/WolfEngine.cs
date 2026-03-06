@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.ECS;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Input;
 using WolfEngine.Platform;
@@ -21,6 +22,7 @@ public static class WolfEngine
 		services.AddSingleton<ITextureFactory, TextureFactory>();
 		services.AddSingleton<IMaterialFactory, MaterialFactory>();
 		services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
+		services.AddSingleton<IAssetDatabaseStore, AssetDatabaseStore>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
 		services.AddSingleton<IInputSystem, InputSystem>();
 		services.AddSingleton<DeferredLightingPass>();

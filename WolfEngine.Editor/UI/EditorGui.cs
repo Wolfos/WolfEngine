@@ -30,6 +30,7 @@ public class EditorGui
 		_serviceProvider = serviceProvider;
 		
 		NewWindow<EntitiesWindow>();
+		NewWindow<AssetsWindow>();
 		NewWindow<ProfilerWindow>();
 		NewWindow<SceneWindow>(); }
 
