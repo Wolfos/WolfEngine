@@ -5,6 +5,7 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor;
 
+[EditorOnly]
 public struct CameraMover : IEntityComponent
 {
 	public float MoveSpeed;

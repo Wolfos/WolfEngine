@@ -2,6 +2,7 @@
 
 namespace WolfEngine.ECS;
 
+[ExcludeFromAddComponent]
 public struct LocalTransform: IEntityComponent
 {
 	public Vector3 LocalPosition { get; internal set; }

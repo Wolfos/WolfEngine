@@ -12,3 +12,8 @@ public class EditorOnly: Attribute
 {
 	
 }
+[AttributeUsage(AttributeTargets.Struct, Inherited = false)]
+public class ExcludeFromAddComponentAttribute: Attribute
+{
+	
+}
