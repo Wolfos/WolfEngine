@@ -31,6 +31,7 @@ public class EditorGui
 		
 		NewWindow<EntitiesWindow>();
 		NewWindow<AssetsWindow>();
+		NewWindow<AssetEditorWindow>();
 		NewWindow<ProfilerWindow>();
 		NewWindow<SceneWindow>(); }
 

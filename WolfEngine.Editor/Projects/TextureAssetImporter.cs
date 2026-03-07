@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Utility;
@@ -33,27 +31,21 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 		"hdr"
 	];
 
-	private static readonly JsonSerializerOptions MetaJsonOptions = new()
-	{
-		WriteIndented = true,
-		Converters = { new JsonStringEnumConverter() }
-	};
-
 	private readonly IFileDialogService _fileDialogService;
 	private readonly IEditorProjectService _projectService;
 	private readonly ImportImageLoader _imageLoader;
-	private readonly IAssetDatabaseStore _assetDatabaseStore;
+	private readonly ITextureAssetMetaStore _textureAssetMetaStore;
 
 	public TextureAssetImporter(
 		IFileDialogService fileDialogService,
 		IEditorProjectService projectService,
 		ImportImageLoader imageLoader,
-		IAssetDatabaseStore assetDatabaseStore)
+		ITextureAssetMetaStore textureAssetMetaStore)
 	{
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
-		_assetDatabaseStore = assetDatabaseStore ?? throw new ArgumentNullException(nameof(assetDatabaseStore));
+		_textureAssetMetaStore = textureAssetMetaStore ?? throw new ArgumentNullException(nameof(textureAssetMetaStore));
 	}
 
 	public TextureImportOperationResult ImportTexture()
@@ -103,25 +95,33 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 		var destinationMetaPath = _projectService.GetAbsolutePath(relativeMetaPath);
 		var destinationRawImagePath = _projectService.GetAbsolutePath(relativeRawImagePath);
 
+		var summary = new TextureAssetSummary
+		{
+			RelativeRawImagePath = relativeRawImagePath,
+			Width = importedTexture.Width,
+			Height = importedTexture.Height,
+			Channels = importedTexture.Channels,
+			IsSrgb = isSrgb,
+			SourceExtension = Path.GetExtension(fileName).ToLowerInvariant()
+		};
+
 		var metaFile = new TextureAssetMetaFile
 		{
 			AssetId = assetId,
-			AssetType = AssetType.Texture2D,
 			SourceFileName = fileName,
 			ImportSettings = new TextureImportSettings
 			{
-				IsSrgb = isSrgb
+				IsSrgb = isSrgb,
+				MaxResolution = 8192
 			},
-			ImportResult = new TextureImportResultMetadata
+			Artifacts = new TextureImportArtifacts
 			{
-				Width = importedTexture.Width,
-				Height = importedTexture.Height,
-				Channels = importedTexture.Channels,
 				RelativeRawImagePath = relativeRawImagePath
-			}
+			},
+			Summary = summary
 		};
 
-		var updatedDatabase = CloneDatabase(_projectService.CurrentAssetDatabase);
+		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		updatedDatabase.Assets.Add(new AssetDatabaseEntry
 		{
 			Id = assetId,
@@ -129,29 +129,30 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 			Name = Path.GetFileNameWithoutExtension(fileName),
 			RelativeAssetPath = relativeAssetPath,
 			RelativeMetaPath = relativeMetaPath,
-			RelativeRawImagePath = relativeRawImagePath,
-			Width = importedTexture.Width,
-			Height = importedTexture.Height,
-			Channels = importedTexture.Channels,
-			IsSrgb = isSrgb,
-			SourceExtension = Path.GetExtension(fileName).ToLowerInvariant()
+			TextureSummary = new TextureAssetSummary
+			{
+				RelativeRawImagePath = summary.RelativeRawImagePath,
+				Width = summary.Width,
+				Height = summary.Height,
+				Channels = summary.Channels,
+				IsSrgb = summary.IsSrgb,
+				SourceExtension = summary.SourceExtension
+			}
 		});
 
-		var databaseFilePath = Path.Combine(_projectService.DatabasePath!, AssetDatabase.FileName);
 		var createdFiles = new List<string>(3);
 		try
 		{
 			File.Copy(sourcePath, destinationAssetPath, overwrite: false);
 			createdFiles.Add(destinationAssetPath);
 
-			WriteTextAtomically(destinationMetaPath, JsonSerializer.Serialize(metaFile, MetaJsonOptions));
+			_textureAssetMetaStore.Save(destinationMetaPath, metaFile);
 			createdFiles.Add(destinationMetaPath);
 
 			TextureRawImageSerializer.Write(destinationRawImagePath, importedTexture);
 			createdFiles.Add(destinationRawImagePath);
 
-			_assetDatabaseStore.Save(databaseFilePath, updatedDatabase);
-			_projectService.ReloadAssetDatabase();
+			_projectService.SaveAssetDatabase(updatedDatabase);
 			return TextureImportOperationResult.Succeeded();
 		}
 		catch
@@ -161,44 +162,9 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 		}
 	}
 
-	private static AssetDatabase CloneDatabase(AssetDatabase source)
-	{
-		return new AssetDatabase
-		{
-			Version = source.Version,
-			Assets = source.Assets.Select(asset => new AssetDatabaseEntry
-			{
-				Id = asset.Id,
-				Type = asset.Type,
-				Name = asset.Name,
-				RelativeAssetPath = asset.RelativeAssetPath,
-				RelativeMetaPath = asset.RelativeMetaPath,
-				RelativeRawImagePath = asset.RelativeRawImagePath,
-				Width = asset.Width,
-				Height = asset.Height,
-				Channels = asset.Channels,
-				IsSrgb = asset.IsSrgb,
-				SourceExtension = asset.SourceExtension
-			}).ToList()
-		};
-	}
-
 	private static string NormalizeRelativePath(string path)
 	{
 		return path.Replace('\\', '/');
-	}
-
-	private static void WriteTextAtomically(string path, string content)
-	{
-		var directory = Path.GetDirectoryName(path);
-		if (string.IsNullOrWhiteSpace(directory) == false)
-		{
-			Directory.CreateDirectory(directory);
-		}
-
-		var tempPath = path + ".tmp";
-		File.WriteAllText(tempPath, content);
-		File.Move(tempPath, path, true);
 	}
 
 	private static void RollbackCreatedFiles(IEnumerable<string> files)

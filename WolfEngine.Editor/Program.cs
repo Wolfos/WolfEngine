@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Editor.UI;
@@ -36,7 +37,13 @@ public static class Program
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
+		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
+		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
+		services.AddSingleton<ITextureAssetMetaStore, TextureAssetMetaStore>();
+		services.AddSingleton<IMaterialAssetStore, MaterialAssetStore>();
+		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
+		services.AddSingleton<IMaterialAssetRuntimeBuilder, MaterialAssetRuntimeBuilder>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
@@ -52,6 +59,7 @@ public static class Program
 		services.AddSingleton<IComponentEditor, ComponentsWindow>();
 		services.AddTransient<EntitiesWindow>();
 		services.AddTransient<AssetsWindow>();
+		services.AddTransient<AssetEditorWindow>();
 		services.AddTransient<ProfilerWindow>();
 		services.AddTransient<SceneWindow>();
 	}

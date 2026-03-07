@@ -14,6 +14,9 @@ public interface IEditorProjectService
 	bool OpenProject(string projectRoot, out string errorMessage);
 	void CloseProject();
 	void ReloadAssetDatabase();
+	void SaveAssetDatabase(AssetDatabase database);
+	AssetDatabase CloneCurrentAssetDatabase();
+	bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset);
 	string GetAbsolutePath(string relativePath);
 }
 
@@ -154,6 +157,40 @@ public sealed class EditorProjectService : IEditorProjectService
 		_currentAssetDatabase = _assetDatabaseStore.Load(Path.Combine(DatabasePath!, AssetDatabase.FileName));
 	}
 
+	public void SaveAssetDatabase(AssetDatabase database)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		ArgumentNullException.ThrowIfNull(database);
+		var databaseFilePath = Path.Combine(DatabasePath!, AssetDatabase.FileName);
+		_assetDatabaseStore.Save(databaseFilePath, database);
+		_currentAssetDatabase = CloneAssetDatabase(database);
+	}
+
+	public AssetDatabase CloneCurrentAssetDatabase()
+	{
+		return CloneAssetDatabase(_currentAssetDatabase);
+	}
+
+	public bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset)
+	{
+		for (var i = 0; i < _currentAssetDatabase.Assets.Count; i++)
+		{
+			var candidate = _currentAssetDatabase.Assets[i];
+			if (candidate.Id == assetId)
+			{
+				asset = candidate;
+				return true;
+			}
+		}
+
+		asset = null!;
+		return false;
+	}
+
 	public string GetAbsolutePath(string relativePath)
 	{
 		if (HasOpenProject == false)
@@ -168,5 +205,43 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
 		return Path.GetFullPath(Path.Combine(_projectRootPath!, normalized));
+	}
+
+	private static AssetDatabase CloneAssetDatabase(AssetDatabase source)
+	{
+		return new AssetDatabase
+		{
+			Version = source.Version,
+			Assets = source.Assets.Select(CloneEntry).ToList()
+		};
+	}
+
+	private static AssetDatabaseEntry CloneEntry(AssetDatabaseEntry asset)
+	{
+		return new AssetDatabaseEntry
+		{
+			Id = asset.Id,
+			Type = asset.Type,
+			Name = asset.Name,
+			RelativeAssetPath = asset.RelativeAssetPath,
+			RelativeMetaPath = asset.RelativeMetaPath,
+			TextureSummary = asset.TextureSummary is null
+				? null
+				: new TextureAssetSummary
+				{
+					RelativeRawImagePath = asset.TextureSummary.RelativeRawImagePath,
+					Width = asset.TextureSummary.Width,
+					Height = asset.TextureSummary.Height,
+					Channels = asset.TextureSummary.Channels,
+					IsSrgb = asset.TextureSummary.IsSrgb,
+					SourceExtension = asset.TextureSummary.SourceExtension
+				},
+			MaterialSummary = asset.MaterialSummary is null
+				? null
+				: new MaterialAssetSummary
+				{
+					MaterialType = asset.MaterialSummary.MaterialType
+				}
+		};
 	}
 }

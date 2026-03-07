@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -12,12 +11,6 @@ public interface IAssetDatabaseStore
 
 public sealed class AssetDatabaseStore : IAssetDatabaseStore
 {
-	private static readonly JsonSerializerOptions JsonOptions = new()
-	{
-		WriteIndented = true,
-		Converters = { new JsonStringEnumConverter() }
-	};
-
 	public AssetDatabase CreateEmpty()
 	{
 		return new AssetDatabase();
@@ -31,7 +24,7 @@ public sealed class AssetDatabaseStore : IAssetDatabaseStore
 		}
 
 		var json = File.ReadAllText(databaseFilePath);
-		var database = JsonSerializer.Deserialize<AssetDatabase>(json, JsonOptions)
+		var database = JsonSerializer.Deserialize<AssetDatabase>(json, AssetJson.SerializerOptions)
 			?? throw new InvalidOperationException($"Failed to deserialize asset database '{databaseFilePath}'.");
 
 		if (database.Version != AssetDatabase.CurrentVersion)
@@ -61,7 +54,7 @@ public sealed class AssetDatabaseStore : IAssetDatabaseStore
 			Directory.CreateDirectory(directory);
 		}
 
-		var json = JsonSerializer.Serialize(database, JsonOptions);
+		var json = JsonSerializer.Serialize(database, AssetJson.SerializerOptions);
 		WriteTextAtomically(databaseFilePath, json);
 	}
 
