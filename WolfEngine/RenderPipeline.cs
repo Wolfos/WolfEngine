@@ -62,6 +62,9 @@ public class RenderPipeline : IRenderPipeline
                     {
                         ref var transform = ref entry.First;
                         ref var meshRenderer = ref entry.Second;
+                        
+                        if (meshRenderer.IsValid == false) continue;
+
                         if (GraphicsConfig.GpuHardeningStressEnabled)
                         {
                             var churnKey = entry.Entity.Index + _stressFrame;
@@ -78,6 +81,7 @@ public class RenderPipeline : IRenderPipeline
                                 meshRenderer.Material.AlphaCutoff = toggled ? 0.4f : 0.0f;
                             }
                         }
+
 
                         var transformMatrix = transform.LocalToWorld;
                         _drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);

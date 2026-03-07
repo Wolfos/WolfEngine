@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using ImGuiNET;
@@ -10,11 +11,23 @@ namespace WolfEngine.Editor.UI;
 public interface IComponentEditor
 {
     void Draw(EditorScene scene, Entity entity, Type componentType);
+    void DrawAddComponentControls(EditorScene scene, Entity entity);
 }
 
 public class ComponentsWindow: IComponentEditor
 {
+    private const string AddComponentPopupId = "AddComponentPopup";
+    private static readonly MethodInfo DrawComponentEditorGenericMethod = typeof(ComponentsWindow).GetMethod(
+        nameof(DrawComponentEditorGeneric),
+        BindingFlags.NonPublic | BindingFlags.Static)!;
+    private static readonly MethodInfo AddComponentGenericMethod = typeof(ComponentsWindow).GetMethod(
+        nameof(AddComponentGeneric),
+        BindingFlags.NonPublic | BindingFlags.Static)!;
+    private static readonly ConcurrentDictionary<Type, MethodInfo> AddComponentMethods = new();
+
     private readonly IIconManager _icons;
+    private readonly List<Type> _addableComponentTypes = new();
+    private readonly List<Type> _existingComponentTypes = new();
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
@@ -28,13 +41,53 @@ public class ComponentsWindow: IComponentEditor
         if (Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)))
             return;
 
-        if (componentType.GetInterface(nameof(IEntityComponent)) is null)
+        if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
         
+        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons });
+    }
 
-        var method = typeof(ComponentsWindow).GetMethod(nameof(DrawComponentEditorGeneric),
-            BindingFlags.NonPublic | BindingFlags.Static);
-        method?.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons });
+    public void DrawAddComponentControls(EditorScene scene, Entity entity)
+    {
+        PopulateAddableComponentTypes(scene.World, entity);
+
+        var hasAddableComponents = _addableComponentTypes.Count > 0;
+        if (hasAddableComponents == false)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        var buttonLabel = hasAddableComponents ? "Add Component" : "No Components Available";
+        if (ImGui.Button(buttonLabel, new Vector2(ImGui.GetContentRegionAvail().X, 0.0f)) && hasAddableComponents)
+        {
+            ImGui.OpenPopup(AddComponentPopupId);
+        }
+
+        if (hasAddableComponents == false)
+        {
+            ImGui.EndDisabled();
+            return;
+        }
+
+        if (ImGui.BeginPopup(AddComponentPopupId) == false)
+        {
+            return;
+        }
+
+        foreach (var componentType in _addableComponentTypes)
+        {
+            if (ImGui.MenuItem(componentType.Name) == false)
+            {
+                continue;
+            }
+
+            AddComponent(scene.World, entity, componentType);
+            EditorGui.SelectEntity(entity, scene.World);
+            ImGui.CloseCurrentPopup();
+            break;
+        }
+
+        ImGui.EndPopup();
     }
 
     private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons)
@@ -284,5 +337,83 @@ public class ComponentsWindow: IComponentEditor
         return degrees;
     }
 
-    
+    private void PopulateAddableComponentTypes(World world, Entity entity)
+    {
+        _addableComponentTypes.Clear();
+        world.GetComponentTypes(entity, _existingComponentTypes);
+
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            foreach (var componentType in GetLoadableTypes(assembly))
+            {
+                if (IsAddableComponentType(componentType, _existingComponentTypes) == false)
+                {
+                    continue;
+                }
+
+                if (_addableComponentTypes.Contains(componentType))
+                {
+                    continue;
+                }
+
+                _addableComponentTypes.Add(componentType);
+            }
+        }
+
+        _addableComponentTypes.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name));
+    }
+
+    private static bool IsAddableComponentType(Type componentType, List<Type> existingComponentTypes)
+    {
+        if (componentType is null)
+        {
+            return false;
+        }
+
+        if (componentType.IsValueType == false || typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+        {
+            return false;
+        }
+
+        if (Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)) ||
+            Attribute.IsDefined(componentType, typeof(EditorOnlyAttribute)) ||
+            Attribute.IsDefined(componentType, typeof(ExcludeFromAddComponentAttribute)))
+        {
+            return false;
+        }
+
+        return existingComponentTypes.Contains(componentType) == false;
+    }
+
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException exception)
+        {
+            var loadableTypes = new List<Type>(exception.Types.Length);
+            foreach (var type in exception.Types)
+            {
+                if (type is not null)
+                {
+                    loadableTypes.Add(type);
+                }
+            }
+
+            return loadableTypes;
+        }
+    }
+
+    private static void AddComponent(World world, Entity entity, Type componentType)
+    {
+        var addMethod = AddComponentMethods.GetOrAdd(componentType, static type => AddComponentGenericMethod.MakeGenericMethod(type));
+        addMethod.Invoke(null, new object[] { world, entity });
+    }
+
+    private static void AddComponentGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
+    {
+        world.AddComponent<T>(entity);
+    }
 }

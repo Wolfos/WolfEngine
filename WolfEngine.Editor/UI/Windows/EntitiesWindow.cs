@@ -43,6 +43,7 @@ public class EntitiesWindow: EditorWindow
 			DrawEntityNode(entity, world, scene);
 		}
 
+		DrawContextMenu(scene);
 		ImGui.PopStyleVar(2);
 		ImGui.End();
 	}
@@ -102,7 +103,7 @@ public class EntitiesWindow: EditorWindow
 
 		if (nodeClicked)
 		{
-			SelectEntity(entity, world);
+			EditorGui.SelectEntity(entity, world);
 		}
 
 		if (hasChildren && open)
@@ -170,11 +171,24 @@ public class EntitiesWindow: EditorWindow
 
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), label);
 	}
-
-	private static void SelectEntity(Entity entity, World world)
+	private static void DrawContextMenu(EditorScene scene)
 	{
-		EditorGui.HasSelectedEntity = true;
-		EditorGui.SelectedEntity = entity;
-		world.GetComponentTypes(entity, EditorGui.SelectedComponentTypes);
+		if (ImGui.BeginPopupContextWindow("EntitiesContextMenu", ImGuiPopupFlags.MouseButtonRight) == false)
+		{
+			return;
+		}
+
+		if (ImGui.BeginMenu("Create"))
+		{
+			if (ImGui.MenuItem("Entity"))
+			{
+				var entity = scene.World.CreateEntity("Entity", Matrix4x4.Identity);
+				EditorGui.SelectEntity(entity, scene.World);
+			}
+
+			ImGui.EndMenu();
+		}
+
+		ImGui.EndPopup();
 	}
 }

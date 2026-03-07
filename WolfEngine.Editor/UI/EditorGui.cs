@@ -68,10 +68,19 @@ public class EditorGui
 			var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 			if (HasSelectedEntity)
 			{
+				var footerHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().ItemSpacing.Y + 4.0f;
+				ImGui.BeginChild("ComponentsList", new Vector2(0.0f, -footerHeight));
 				foreach (var componentType in SelectedComponentTypes)
 				{
 					_componentEditor.Draw(scene, SelectedEntity, componentType);
 				}
+				ImGui.EndChild();
+				ImGui.Separator();
+				_componentEditor.DrawAddComponentControls(scene, SelectedEntity);
+			}
+			else
+			{
+				ImGui.TextUnformatted("No entity selected.");
 			}
 
 			ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
@@ -83,6 +92,13 @@ public class EditorGui
 		{
 			EditorPreferencesMenu.Draw();
 		}
+	}
+
+	public static void SelectEntity(Entity entity, World world)
+	{
+		HasSelectedEntity = true;
+		SelectedEntity = entity;
+		world.GetComponentTypes(entity, SelectedComponentTypes);
 	}
 
 	private static void DockSpace()
