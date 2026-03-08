@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using WolfEngine.ECS;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;
 
@@ -16,12 +17,14 @@ public sealed class FrameSnapshot
 	{
 		LightPackets = new List<LightPacket>(16);
 		SunDirection = DefaultSunDirection;
+		Config = new();
 	}
 
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
 	public List<LightPacket> LightPackets { get; }
 	public Vector3 SunDirection { get; private set; }
+	public RenderConfig Config { get; private set; }
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
@@ -45,6 +48,11 @@ public sealed class FrameSnapshot
 		SunDirection = sunDirection == Vector3.Zero
 			? DefaultSunDirection
 			: Vector3.Normalize(sunDirection);
+	}
+
+	public void SetConfig(RenderConfig config)
+	{
+		Config.SkyboxConfig = config.SkyboxConfig;
 	}
 
 	public readonly struct LightPacket

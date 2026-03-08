@@ -1,7 +1,5 @@
 #nullable enable
 
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
@@ -29,6 +27,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
 	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
 	public RenderGraphResourceHandle SkyboxBrdfLut { get; init; }
+	public RenderConfig Config { get; init; }
 }
 
 public sealed class RenderGraphFrameBuilder
@@ -113,7 +112,8 @@ public sealed class RenderGraphFrameBuilder
 		Int2 sceneFramebufferSize,
 		RenderGraphResourceHandle sceneColorHandle,
 		bool sceneEnabled,
-		Vector3 sunDirection)
+		Vector3 sunDirection,
+		RenderConfig config)
 	{
 		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, sceneEnabled);
 
@@ -243,7 +243,8 @@ public sealed class RenderGraphFrameBuilder
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
-			SkyboxBrdfLut = skyboxBrdfHandle
+			SkyboxBrdfLut = skyboxBrdfHandle,
+			Config = config
 		};
 	}
 
@@ -272,7 +273,6 @@ public sealed class RenderGraphFrameBuilder
 			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
 				.SetExecute(_gpuDrawCameraCullExecute);
 
-			// Register GBuffer pass with proper resource states
 			graph.AddPass("GBuffer", PassKind.Graphics)
 				.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
@@ -305,7 +305,6 @@ public sealed class RenderGraphFrameBuilder
 					.SetExecute(_skyboxBrdfExecute);
 			}
 
-			// Register Deferred Lighting pass with proper resource states
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
@@ -363,7 +362,6 @@ public sealed class RenderGraphFrameBuilder
 		graph.AddPass("ImGui", PassKind.Graphics)
 			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
 			.SetExecute(_imguiExecute);
-
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
@@ -413,7 +411,7 @@ public sealed class RenderGraphFrameBuilder
 
 	private void ExecuteSkyboxEnvironment(RenderGraphContext context)
 	{
-		_skyboxPass.RecordEnvironment(context);
+		_skyboxPass.RecordEnvironment(context, _frameResources.Config.SkyboxConfig);
 	}
 
 	private void ExecuteSkyboxIrradiance(RenderGraphContext context)

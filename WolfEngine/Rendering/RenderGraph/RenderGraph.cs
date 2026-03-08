@@ -289,9 +289,10 @@ public sealed class RenderGraph
 				}
 
 				ResolveSpecialUiTextureIds(uiFrame, nextSceneRenderState.TextureId);
-
-				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection);
+				
+				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection, snapshot.Config);
 				_frameBuilder.SetUiFrame(uiFrame);
+
 
 				_frameBuilder.Build(this);
 				Execute();
