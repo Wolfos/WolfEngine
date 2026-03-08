@@ -20,6 +20,7 @@ public class EditorPreferences
 
 	public Dictionary<ImGuiCol, Vector4> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
+	public string? LastProjectPath { get; set; }
 
 	public EditorPreferences()
 	{
@@ -54,6 +55,28 @@ public class EditorPreferences
 		}
 
 		_instance.SceneViewportResolutionScale = Math.Clamp(scale, 0.5f, 1.0f);
+	}
+
+	public static string? GetLastProjectPath()
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		return _instance.LastProjectPath;
+	}
+
+	public static void SetLastProjectPath(string? projectPath)
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		_instance.LastProjectPath = string.IsNullOrWhiteSpace(projectPath)
+			? null
+			: Path.GetFullPath(projectPath);
 	}
 
 	public static void Load()

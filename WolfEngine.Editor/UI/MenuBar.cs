@@ -96,10 +96,16 @@ public sealed class MenuBar : IMenuBar
 			{
 				Title = "Open Project"
 			});
-			if (string.IsNullOrWhiteSpace(selectedFolder) == false &&
-			    _projectService.OpenProject(selectedFolder, out var errorMessage) == false)
+			if (string.IsNullOrWhiteSpace(selectedFolder) == false)
 			{
-				ShowError(errorMessage);
+				if (_projectService.OpenProject(selectedFolder, out var errorMessage))
+				{
+					PersistLastOpenedProject();
+				}
+				else
+				{
+					ShowError(errorMessage);
+				}
 			}
 		}
 
@@ -215,6 +221,7 @@ public sealed class MenuBar : IMenuBar
 		{
 			if (_projectService.CreateProject(_newProjectParentFolder, _newProjectName, out var errorMessage))
 			{
+				PersistLastOpenedProject();
 				ImGui.CloseCurrentPopup();
 			}
 			else
@@ -256,5 +263,11 @@ public sealed class MenuBar : IMenuBar
 	{
 		_errorMessage = errorMessage;
 		_openErrorPopup = true;
+	}
+
+	private void PersistLastOpenedProject()
+	{
+		EditorPreferences.SetLastProjectPath(_projectService.ProjectRootPath);
+		EditorPreferences.Save();
 	}
 }

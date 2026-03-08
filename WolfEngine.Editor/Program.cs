@@ -20,6 +20,12 @@ public static class Program
 		provider.GetRequiredService<IUiFrameProvider>();
 		provider.GetRequiredService<IIconManager>();
 		EditorPreferences.Load();
+		var projectService = provider.GetRequiredService<IEditorProjectService>();
+		var lastProjectPath = EditorPreferences.GetLastProjectPath();
+		if (string.IsNullOrWhiteSpace(lastProjectPath) == false)
+		{
+			projectService.OpenProject(lastProjectPath, out _);
+		}
 		
 		var editor = provider.GetRequiredService<WolfEngineEditor>();
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };
