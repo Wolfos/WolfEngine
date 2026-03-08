@@ -85,7 +85,7 @@ public class WolfEngineEditor
 		var sun = _gameWorld.CreateEntity("Sun");
 		var light = new Light
 		{
-			Color = Vector4.One, Intensity = 1, Type = LightType.Directional
+			Color = ColorRGBA.White, Intensity = 1, Type = LightType.Directional
 		};
 		_gameWorld.AddTransform(sun, Matrix4x4.Identity);
 		_gameWorld.AddComponent(sun, light);

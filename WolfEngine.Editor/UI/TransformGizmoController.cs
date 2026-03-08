@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WolfEngine;
 using WolfEngine.ECS;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -541,7 +542,7 @@ public sealed class TransformGizmoController
 		DrawAxisLine(drawList, pivotScreen, pivotWorld + axisX * handleLength, viewProjection, viewportMin, viewportMax, AxisColor(GizmoAxis.X, hoveredAxis, activeAxis), mode);
 		DrawAxisLine(drawList, pivotScreen, pivotWorld + axisY * handleLength, viewProjection, viewportMin, viewportMax, AxisColor(GizmoAxis.Y, hoveredAxis, activeAxis), mode);
 		DrawAxisLine(drawList, pivotScreen, pivotWorld + axisZ * handleLength, viewProjection, viewportMin, viewportMax, AxisColor(GizmoAxis.Z, hoveredAxis, activeAxis), mode);
-		drawList.AddCircleFilled(pivotScreen, 4.0f, ImGui.ColorConvertFloat4ToU32(new Vector4(0.95f, 0.95f, 0.95f, 1.0f)));
+		drawList.AddCircleFilled(pivotScreen, 4.0f, ImGui.ColorConvertFloat4ToU32(new ColorRGBA(0.95f, 0.95f, 0.95f, 1.0f)));
 	}
 
 	private static void DrawAxisLine(
@@ -551,7 +552,7 @@ public sealed class TransformGizmoController
 		Matrix4x4 viewProjection,
 		Vector2 viewportMin,
 		Vector2 viewportMax,
-		Vector4 color,
+		ColorRGBA color,
 		TransformGizmoMode mode)
 	{
 		if (TryProjectToScreen(endWorld, viewProjection, viewportMin, viewportMax, out var endScreen) == false)
@@ -578,7 +579,7 @@ public sealed class TransformGizmoController
 		Matrix4x4 viewProjection,
 		Vector2 viewportMin,
 		Vector2 viewportMax,
-		Vector4 color)
+		ColorRGBA color)
 	{
 		Span<Vector2> ringPoints = stackalloc Vector2[RingSegments + 1];
 		if (TryBuildRingScreenPoints(
@@ -600,19 +601,19 @@ public sealed class TransformGizmoController
 		}
 	}
 
-	private static Vector4 AxisColor(GizmoAxis axis, GizmoAxis hoveredAxis, GizmoAxis activeAxis)
+	private static ColorRGBA AxisColor(GizmoAxis axis, GizmoAxis hoveredAxis, GizmoAxis activeAxis)
 	{
 		var baseColor = axis switch
 		{
-			GizmoAxis.X => new Vector4(0.93f, 0.25f, 0.25f, 1.0f),
-			GizmoAxis.Y => new Vector4(0.25f, 0.85f, 0.35f, 1.0f),
-			GizmoAxis.Z => new Vector4(0.28f, 0.52f, 0.96f, 1.0f),
-			_ => new Vector4(0.95f, 0.95f, 0.95f, 1.0f)
+			GizmoAxis.X => new ColorRGBA(0.93f, 0.25f, 0.25f, 1.0f),
+			GizmoAxis.Y => new ColorRGBA(0.25f, 0.85f, 0.35f, 1.0f),
+			GizmoAxis.Z => new ColorRGBA(0.28f, 0.52f, 0.96f, 1.0f),
+			_ => new ColorRGBA(0.95f, 0.95f, 0.95f, 1.0f)
 		};
 
 		if (axis == activeAxis)
 		{
-			return new Vector4(1.0f, 0.92f, 0.42f, 1.0f);
+			return new ColorRGBA(1.0f, 0.92f, 0.42f, 1.0f);
 		}
 
 		if (axis == hoveredAxis)

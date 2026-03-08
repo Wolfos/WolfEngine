@@ -40,12 +40,12 @@ public struct GBufferPassConfig
 
     public required IGfxTexture DepthTarget { get; init; }
 
-    public Vector4 AlbedoClearColor { get; init; }
+    public ColorRGBA AlbedoClearColor { get; init; }
 
-    public Vector4 NormalClearColor { get; init; }
+    public ColorRGBA NormalClearColor { get; init; }
 
-    public Vector4 MaterialClearColor { get; init; }
-    public Vector4 EmissiveClearColor { get; init; }
+    public ColorRGBA MaterialClearColor { get; init; }
+    public ColorRGBA EmissiveClearColor { get; init; }
 
 
     public float DepthClearValue { get; init; }

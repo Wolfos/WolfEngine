@@ -227,7 +227,7 @@ public sealed class GpuDrawPass
 			uint occlusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint emissiveHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
-			var baseColor = Vector4.One;
+			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
 			var bucketIndex = 0;
@@ -981,7 +981,7 @@ public sealed class GpuDrawPass
 			0,
 			0);
 		var fallbackMaterialData = new GpuMaterialData(
-			new Vector4(1.0f, 0.0f, 1.0f, 1.0f),
+			new ColorRGBA(1.0f, 0.0f, 1.0f, 1.0f),
 			Vector4.One,
 			Vector4.Zero,
 			_bindlessRegistry.ErrorTextureHandle.Value,

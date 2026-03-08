@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.Mathematics;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -143,7 +144,7 @@ public class SceneWindow: EditorWindow
             var drawList = ImGui.GetWindowDrawList();
             drawList.AddText(
                 imageMin + new Vector2(10.0f, 10.0f),
-                ImGui.ColorConvertFloat4ToU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f)),
+                ImGui.ColorConvertFloat4ToU32(new ColorRGBA(0.9f, 0.9f, 0.9f, 1.0f)),
                 "Scene render target unavailable.");
         }
 

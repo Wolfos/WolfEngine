@@ -52,6 +52,12 @@ internal sealed class ShaderPropertyWriter
 		Write(field, value);
 	}
 
+	public void SetColorRGBA(string path, ColorRGBA value)
+	{
+		var field = GetFieldOrThrow(path, ShaderConstantFieldValueKind.Vector4);
+		Write(field, value);
+	}
+
 	public void SetMatrix4x4(string path, Matrix4x4 value)
 	{
 		var field = GetFieldOrThrow(path, ShaderConstantFieldValueKind.Matrix4x4);

@@ -7,7 +7,7 @@ public interface IMaterialFactory
 {
 	Material GetMaterial(
 		string shader,
-		Vector4 color,
+		ColorRGBA color,
 		float metallicFactor = 1.0f,
 		float roughnessFactor = 1.0f,
 		Vector3? emissiveFactor = null,
@@ -34,7 +34,7 @@ public class MaterialFactory : IMaterialFactory
 
 	public Material GetMaterial(
 		string shader,
-		Vector4 color,
+		ColorRGBA color,
 		float metallicFactor = 1.0f,
 		float roughnessFactor = 1.0f,
 		Vector3? emissiveFactor = null,

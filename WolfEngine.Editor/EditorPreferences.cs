@@ -1,7 +1,7 @@
-using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImGuiNET;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor;
 
@@ -18,7 +18,7 @@ public class EditorPreferences
 
 	private const string PreferencesFileName = "EditorPreferences.json";
 
-	public Dictionary<ImGuiCol, Vector4> EditorColors { get; set; } = new();
+	public Dictionary<ImGuiCol, ColorRGBA> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
 	public string? LastProjectPath { get; set; }
 
@@ -27,7 +27,7 @@ public class EditorPreferences
 		_instance = this;
 	}
 
-	public static void SetColor(ImGuiCol id, Vector4 color)
+	public static void SetColor(ImGuiCol id, ColorRGBA color)
 	{
 		if (_instance == null)
 		{

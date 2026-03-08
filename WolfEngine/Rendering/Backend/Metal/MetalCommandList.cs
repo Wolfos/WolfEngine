@@ -171,7 +171,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_renderEncoder.SetScissorRect(scissor);
 	}
 
-	public void ClearColorAttachment(uint index, Vector4 color)
+	public void ClearColorAttachment(uint index, ColorRGBA color)
 	{
 		ThrowIfDisposed();
 		if (index >= _clearColors.Length)
@@ -181,10 +181,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		_clearColors[index] = new MTLClearColor
 		{
-			red = color.X,
-			green = color.Y,
-			blue = color.Z,
-			alpha = color.W
+			red = color.R,
+			green = color.G,
+			blue = color.B,
+			alpha = color.A
 		};
 		_clearColorSet[index] = true;
 	}

@@ -1,4 +1,5 @@
 using System.Numerics;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Importing;
 
@@ -20,7 +21,7 @@ public record ImportedScene(
 );
 
 public record struct ImportedMaterial(
-    Vector4 BaseColor,
+    ColorRGBA BaseColor,
     float MetallicFactor,
     float RoughnessFactor,
     Vector3 EmissiveFactor,

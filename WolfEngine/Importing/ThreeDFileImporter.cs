@@ -1,6 +1,7 @@
+using WolfEngine;
+using WolfEngine.Rendering;
 using System.Numerics;
 using Silk.NET.Assimp;
-using WolfEngine;
 using File = System.IO.File;
 using AssimpTexture = Silk.NET.Assimp.Texture;
 using AssimpMaterial = Silk.NET.Assimp.Material;
@@ -63,8 +64,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
             {
                 AssimpMaterial* material = scene->MMaterials[materialIndex];
 
-                var baseColor = Vector4.One;
-                assimp.GetMaterialColor(material, Assimp.MaterialColorDiffuseBase, 0, 0, ref baseColor);
+                var baseColorVector = Vector4.One;
+                assimp.GetMaterialColor(material, Assimp.MaterialColorDiffuseBase, 0, 0, ref baseColorVector);
+                var baseColor = ColorRGBA.FromVector4(baseColorVector);
 
                 var metallicFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyMetallicFactor, 1.0f);
                 var roughnessFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyRoughnessFactor, 1.0f);

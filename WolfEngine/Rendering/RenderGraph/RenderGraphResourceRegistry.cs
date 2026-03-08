@@ -26,7 +26,7 @@ public sealed class RenderGraphResourceRegistry
 		public int Height { get; }
 		public TextureFormat Format { get; }
 		public TextureUsage Usage { get; }
-		public System.Numerics.Vector4 ClearColor { get; }
+		public ColorRGBA ClearColor { get; }
 		public float DepthClear { get; }
 
 		public bool Equals(TexturePoolKey other)

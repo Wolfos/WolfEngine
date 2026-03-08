@@ -6,6 +6,11 @@ namespace WolfEngine.Rendering;
 [StructLayout(LayoutKind.Sequential)]
 public struct ColorRGBA
 {
+	public ColorRGBA(Vector4 value)
+		: this(value.X, value.Y, value.Z, value.W)
+	{
+	}
+
 	public ColorRGBA(float r, float g, float b, float a)
 	{
 		R = r;
@@ -26,6 +31,9 @@ public struct ColorRGBA
 	{
 		return new ColorRGBA(r: value.X, g: value.Y, b: value.Z, a: value.W);
 	}
+
+	public static implicit operator Vector4(ColorRGBA value) => value.ToVector4();
+	public static implicit operator ColorRGBA(Vector4 value) => FromVector4(value);
 
 	public static ColorRGBA White => new(1.0f, 1.0f, 1.0f, 1.0f);
 	public static ColorRGBA Black => new(0.0f, 0.0f, 0.0f, 1.0f);

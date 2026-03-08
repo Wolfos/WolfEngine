@@ -43,7 +43,7 @@ public sealed class MaterialAssetRuntimeBuilder : IMaterialAssetRuntimeBuilder
 
 		return _materialFactory.GetMaterial(
 			shader: descriptor.ShaderPath,
-			color: properties.BaseColor.ToVector4(),
+			color: properties.BaseColor,
 			metallicFactor: properties.MetallicFactor,
 			roughnessFactor: properties.RoughnessFactor,
 			albedoTexture: ResolveTexture(properties.Textures.Albedo, isSrgb: true),

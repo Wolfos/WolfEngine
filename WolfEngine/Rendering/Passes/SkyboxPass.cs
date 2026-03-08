@@ -14,9 +14,9 @@ public sealed class SkyboxPass
 		public float Intensity { get; set; } = 25;
 		public Vector3 SunColor { get; set; } = Vector3.One;
 		public float SunSharpness { get; set; } = 256;
-		public Vector4 TopColor { get; set; } = new(0.2f, 0.45f, 0.85f, 1.4f);
-		public Vector4 HorizonColor { get; set; } = new(0.65f, 0.75f, 0.9f, 1.0f);
-		public Vector4 GroundColor { get; set; } = new(0.15f, 0.1f, 0.07f, 0.0f);
+		public ColorRGBA TopColor { get; set; } = new(0.2f, 0.45f, 0.85f, 1.4f);
+		public ColorRGBA HorizonColor { get; set; } = new(0.65f, 0.75f, 0.9f, 1.0f);
+		public ColorRGBA GroundColor { get; set; } = new(0.15f, 0.1f, 0.07f, 0.0f);
 	}
 	
 	private const int ProceduralEnvWidth = 512;
@@ -149,9 +149,9 @@ public sealed class SkyboxPass
 		skyParamsWriter.Clear();
 		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(_currentSunDirection, config.Intensity));
 		skyParamsWriter.SetVector4("sunColorSharpness", new Vector4(config.SunColor.X, config.SunColor.Y, config.SunColor.Z, config.SunSharpness));
-		skyParamsWriter.SetVector4("skyTop", config.TopColor);
-		skyParamsWriter.SetVector4("skyHorizon", config.HorizonColor);
-		skyParamsWriter.SetVector4("ground", config.GroundColor);
+		skyParamsWriter.SetColorRGBA("skyTop", config.TopColor);
+		skyParamsWriter.SetColorRGBA("skyHorizon", config.HorizonColor);
+		skyParamsWriter.SetColorRGBA("ground", config.GroundColor);
 		commandList.SetComputeConstants(skyParamsWriter.RegisterIndex, skyParamsWriter.AsBytes());
 
 		commandList.Dispatch((uint)((ProceduralEnvWidth + 7) / 8), (uint)((ProceduralEnvHeight + 7) / 8), 1);

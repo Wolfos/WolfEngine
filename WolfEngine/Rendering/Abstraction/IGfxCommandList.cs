@@ -1,7 +1,5 @@
 #nullable enable
 
-using System.Numerics;
-
 namespace WolfEngine.Rendering.Abstraction;
 
 /// <summary>
@@ -33,7 +31,7 @@ public interface IGfxCommandList
 
 	void SetScissorRect(in RectInt rect);
 
-	void ClearColorAttachment(uint index, Vector4 color);
+	void ClearColorAttachment(uint index, ColorRGBA color);
 
 	void ClearDepthStencil(float depth);
 

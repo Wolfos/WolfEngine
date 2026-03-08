@@ -1,4 +1,3 @@
-using System.Numerics;
 using System.Collections.Generic;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
@@ -51,7 +50,7 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 			size.Y,
 			TextureFormat.Bgra8Unorm,
 			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-			new Vector4(0.05f, 0.05f, 0.05f, 1.0f)));
+			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
 		return _sceneColor;
 	}
 

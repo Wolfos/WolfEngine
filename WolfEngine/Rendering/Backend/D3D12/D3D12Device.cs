@@ -186,10 +186,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		if ((descriptor.Usage & TextureUsage.RenderTarget) != 0)
 		{
 			clearValue.Format = viewFormat;
-			clearValue.Anonymous.Color[0] = descriptor.ClearColor.X;
-			clearValue.Anonymous.Color[1] = descriptor.ClearColor.Y;
-			clearValue.Anonymous.Color[2] = descriptor.ClearColor.Z;
-			clearValue.Anonymous.Color[3] = descriptor.ClearColor.W;
+			clearValue.Anonymous.Color[0] = descriptor.ClearColor.R;
+			clearValue.Anonymous.Color[1] = descriptor.ClearColor.G;
+			clearValue.Anonymous.Color[2] = descriptor.ClearColor.B;
+			clearValue.Anonymous.Color[3] = descriptor.ClearColor.A;
 			clearValuePtr = &clearValue;
 		}
 		else if ((descriptor.Usage & TextureUsage.DepthStencil) != 0)

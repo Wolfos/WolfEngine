@@ -164,52 +164,52 @@ public sealed class RenderGraphFrameBuilder
 				sceneFramebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.392f, 0.584f, 0.929f, 1.0f)));
+				new ColorRGBA(0.392f, 0.584f, 0.929f, 1.0f)));
 			gbufferNormalHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
 				TextureFormat.Rgba16Float,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.5f, 0.5f, 1.0f, 1.0f)));
+				new ColorRGBA(0.5f, 0.5f, 1.0f, 1.0f)));
 			gbufferMaterialHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
 				TextureFormat.Rgba8Unorm,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
 				TextureFormat.Rgba8Unorm,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			gbufferDepthHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				Vector4.Zero,
+				default(ColorRGBA),
 				1.0f));
 			shadowMapHandle0 = _resources.CreateTransientTexture(new TextureDescriptor(
 				ShadowMapPass.CascadeResolution,
 				ShadowMapPass.CascadeResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				Vector4.Zero,
+				default(ColorRGBA),
 				1.0f));
 			shadowMapHandle1 = _resources.CreateTransientTexture(new TextureDescriptor(
 				ShadowMapPass.CascadeResolution,
 				ShadowMapPass.CascadeResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				Vector4.Zero,
+				default(ColorRGBA),
 				1.0f));
 			shadowMapHandle2 = _resources.CreateTransientTexture(new TextureDescriptor(
 				ShadowMapPass.CascadeResolution,
 				ShadowMapPass.CascadeResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				Vector4.Zero,
+				default(ColorRGBA),
 				1.0f));
 			lightingHandle = sceneColorHandle.IsValid
 				? sceneColorHandle
@@ -230,7 +230,7 @@ public sealed class RenderGraphFrameBuilder
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
-				new Vector4(0.05f, 0.05f, 0.05f, 1.0f))),
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
 			GBufferAlbedo = gbufferAlbedoHandle,
 			GBufferNormal = gbufferNormalHandle,
 			GBufferMaterial = gbufferMaterialHandle,

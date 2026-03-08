@@ -27,7 +27,7 @@ public readonly struct GpuInstanceData
 public readonly struct GpuMaterialData
 {
 	public GpuMaterialData(
-		Vector4 baseColor,
+		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
 		uint albedoHandle,
@@ -50,7 +50,7 @@ public readonly struct GpuMaterialData
 		_pad1 = 0;
 	}
 
-	public readonly Vector4 BaseColor;
+	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint AlbedoHandle;
@@ -116,7 +116,7 @@ public readonly struct GpuDrawUpdateData
 	public GpuDrawUpdateData(
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
-		Vector4 baseColor,
+		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
 		uint type,
@@ -166,7 +166,7 @@ public readonly struct GpuDrawUpdateData
 
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
-	public readonly Vector4 BaseColor;
+	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint Type;

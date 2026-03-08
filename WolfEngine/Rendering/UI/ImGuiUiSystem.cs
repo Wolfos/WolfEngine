@@ -409,16 +409,16 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private static void ApplyDefaultStyle()
 	{
 		var style = ImGui.GetStyle();
-		var textColor = new Vector4(0.93333334f, 0.93333334f, 0.93333334f, 1.0f);
-		var bgColor = new Vector4(0.157f,0.165f,0.184f, 1.0f);
-		var bgBright = new Vector4(0.22f,0.224f,0.243f, 1.0f);
-		var bgDark = new Vector4(0.067f,0.075f,0.094f, 1.0f);
+		var textColor = new ColorRGBA(0.93333334f, 0.93333334f, 0.93333334f, 1.0f);
+		var bgColor = new ColorRGBA(0.157f,0.165f,0.184f, 1.0f);
+		var bgBright = new ColorRGBA(0.22f,0.224f,0.243f, 1.0f);
+		var bgDark = new ColorRGBA(0.067f,0.075f,0.094f, 1.0f);
 		var buttonColor = bgColor;
-		var primary = new Vector4(0.675f,0.78f,0.984f, 1.0f);
-		var secondary = new Vector4(0.745f,0.776f,0.855f, 1.0f);
-		var secondaryContainer = new Vector4(0.247f,0.275f,0.337f, 1.0f);
-		var border = new Vector4(0.00f, 0.00f, 0.00f, 0.35f);
-		var separator    = new Vector4(1.00f, 1.00f, 1.00f, 0.06f);
+		var primary = new ColorRGBA(0.675f,0.78f,0.984f, 1.0f);
+		var secondary = new ColorRGBA(0.745f,0.776f,0.855f, 1.0f);
+		var secondaryContainer = new ColorRGBA(0.247f,0.275f,0.337f, 1.0f);
+		var border = new ColorRGBA(0.00f, 0.00f, 0.00f, 0.35f);
+		var separator    = new ColorRGBA(1.00f, 1.00f, 1.00f, 0.06f);
 		
 
 		style.FramePadding = new Vector2(5, 7);
@@ -456,18 +456,18 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.HeaderActive] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.HeaderHovered] = bgBright;
 		style.Colors[(int)ImGuiCol.Border] = border;
-		style.Colors[(int)ImGuiCol.BorderShadow] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.BorderShadow] = default(ColorRGBA);
 		style.Colors[(int)ImGuiCol.Separator] = separator;
-		style.Colors[(int)ImGuiCol.SeparatorHovered] = primary with { W = 0.25f };
-		style.Colors[(int)ImGuiCol.SeparatorActive]  = primary with { W = 0.35f };
+		style.Colors[(int)ImGuiCol.SeparatorHovered] = new ColorRGBA(primary.R, primary.G, primary.B, 0.25f);
+		style.Colors[(int)ImGuiCol.SeparatorActive]  = new ColorRGBA(primary.R, primary.G, primary.B, 0.35f);
 		
 		style.Colors[(int)ImGuiCol.Tab] = bgDark;
 		style.Colors[(int)ImGuiCol.TabDimmed] = bgDark;
 		style.Colors[(int)ImGuiCol.TabSelected] = bgColor;
 		style.Colors[(int)ImGuiCol.TabDimmedSelected] = bgColor;
-		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.TabDimmedSelectedOverline] = default(ColorRGBA);
 		style.Colors[(int)ImGuiCol.TabHovered] = bgColor;
-		style.Colors[(int)ImGuiCol.TabSelectedOverline] = Vector4.Zero;
+		style.Colors[(int)ImGuiCol.TabSelectedOverline] = default(ColorRGBA);
 		
 		style.Colors[(int)ImGuiCol.FrameBg] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.FrameBgHovered] = secondaryContainer;

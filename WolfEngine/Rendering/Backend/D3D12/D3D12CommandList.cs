@@ -363,14 +363,14 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.RSSetScissorRects(1, &scissor);
 	}
 
-	public void ClearColorAttachment(uint index, Vector4 color)
+	public void ClearColorAttachment(uint index, ColorRGBA color)
 	{
 		if (index >= _currentRtvCount)
 		{
 			throw new ArgumentOutOfRangeException(nameof(index));
 		}
 
-		var colorValues = stackalloc float[4] { color.X, color.Y, color.Z, color.W };
+		var colorValues = stackalloc float[4] { color.R, color.G, color.B, color.A };
 		CommandList.ClearRenderTargetView(_currentRtvHandles[index], colorValues, 0, (Box2D<int>*)null);
 	}
 
