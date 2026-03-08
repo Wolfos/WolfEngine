@@ -40,6 +40,30 @@ public class EditorUIUtility
 		return changed;
 	}
 
+	public static bool InputDouble(string label, ref double value)
+	{
+		BeginLabeledField(label);
+		var changed = ImGui.InputDouble("##value", ref value);
+		EndLabeledField();
+		return changed;
+	}
+
+	public static bool Checkbox(string label, ref bool value)
+	{
+		BeginLabeledField(label);
+		var changed = ImGui.Checkbox("##value", ref value);
+		EndLabeledField();
+		return changed;
+	}
+
+	public static bool InputVector2(string label, ref Vector2 value)
+	{
+		BeginLabeledField(label);
+		var changed = ImGui.InputFloat2("##value", ref value);
+		EndLabeledField();
+		return changed;
+	}
+
 	public static bool InputVector3(string label, ref Vector3 value)
 	{
 		BeginLabeledField(label);
@@ -61,6 +85,52 @@ public class EditorUIUtility
 		BeginLabeledField(label);
 		var changed = ImGui.ColorEdit4("##value", ref value);
 		EndLabeledField();
+		return changed;
+	}
+
+	public static bool Combo(string label, string previewValue, Action drawItems)
+	{
+		BeginLabeledField(label);
+		var isOpen = ImGui.BeginCombo("##value", previewValue);
+		EndLabeledField();
+		if (isOpen == false)
+		{
+			return false;
+		}
+
+		drawItems();
+		ImGui.EndCombo();
+		return true;
+	}
+
+	public static bool EnumCombo<TEnum>(string label, ref TEnum value) where TEnum : struct, Enum
+	{
+		var changed = false;
+		var currentValue = value;
+		var nextValue = value;
+		Combo(label, currentValue.ToString(), () =>
+		{
+			foreach (var candidate in Enum.GetValues<TEnum>())
+			{
+				var isSelected = EqualityComparer<TEnum>.Default.Equals(candidate, currentValue);
+				if (ImGui.Selectable(candidate.ToString(), isSelected))
+				{
+					nextValue = candidate;
+					changed = true;
+				}
+
+				if (isSelected)
+				{
+					ImGui.SetItemDefaultFocus();
+				}
+			}
+		});
+
+		if (changed)
+		{
+			value = nextValue;
+		}
+
 		return changed;
 	}
 

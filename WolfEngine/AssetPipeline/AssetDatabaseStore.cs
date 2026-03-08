@@ -27,7 +27,7 @@ public sealed class AssetDatabaseStore : IAssetDatabaseStore
 		var database = JsonSerializer.Deserialize<AssetDatabase>(json, AssetJson.SerializerOptions)
 			?? throw new InvalidOperationException($"Failed to deserialize asset database '{databaseFilePath}'.");
 
-		if (database.Version != AssetDatabase.CurrentVersion)
+		if (database.Version > AssetDatabase.CurrentVersion)
 		{
 			throw new InvalidOperationException(
 				$"Unsupported asset database version {database.Version}. Expected {AssetDatabase.CurrentVersion}.");

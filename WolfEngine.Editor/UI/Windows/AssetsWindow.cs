@@ -14,7 +14,7 @@ public sealed class AssetsWindow : EditorWindow
 	private readonly IEditorProjectService _projectService;
 	private readonly IImageLoader _imageLoader;
 	private readonly IAssetSelectionService _assetSelectionService;
-	private readonly IMaterialAssetCreator _materialAssetCreator;
+	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
 
@@ -22,12 +22,12 @@ public sealed class AssetsWindow : EditorWindow
 		IEditorProjectService projectService,
 		IImageLoader imageLoader,
 		IAssetSelectionService assetSelectionService,
-		IMaterialAssetCreator materialAssetCreator)
+		IEditorAssetHandlerRegistry assetHandlerRegistry)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
-		_materialAssetCreator = materialAssetCreator ?? throw new ArgumentNullException(nameof(materialAssetCreator));
+		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
 	}
 
 	public override string Name => "Assets";
@@ -112,7 +112,9 @@ public sealed class AssetsWindow : EditorWindow
 		}
 
 		drawList.AddRect(min, max, ImGui.GetColorU32(ImGuiCol.Border));
-		var label = asset.Type == AssetType.Material ? "MAT" : "TEX";
+		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
+			? handler.ThumbnailLabel
+			: asset.Type.ToString().ToUpperInvariant();
 		var textSize = ImGui.CalcTextSize(label);
 		var textPos = new Vector2(
 			min.X + (ThumbnailSize.X - textSize.X) * 0.5f,
@@ -120,18 +122,14 @@ public sealed class AssetsWindow : EditorWindow
 		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
 	}
 
-	private static string GetAssetSubtitle(AssetDatabaseEntry asset)
+	private string GetAssetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.Type switch
+		if (_assetHandlerRegistry.TryGetHandler(asset.Type, out var handler))
 		{
-			AssetType.Texture2D when asset.TextureSummary is not null =>
-				$"Texture | {asset.TextureSummary.Width}x{asset.TextureSummary.Height} | {asset.TextureSummary.SourceExtension}",
-			AssetType.Material when asset.MaterialSummary is not null =>
-				$"Material | {asset.MaterialSummary.MaterialType}",
-			AssetType.Texture2D => "Texture",
-			AssetType.Material => "Material",
-			_ => asset.Type.ToString()
-		};
+			return handler.GetSubtitle(asset);
+		}
+
+		return asset.Type.ToString();
 	}
 
 	private void DrawContextMenu()
@@ -149,18 +147,7 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (ImGui.BeginMenu("Create"))
 		{
-			if (ImGui.MenuItem("Material"))
-			{
-				var result = _materialAssetCreator.CreateMaterial();
-				if (result.Success && result.AssetId.HasValue)
-				{
-					_assetSelectionService.Select(result.AssetId.Value);
-				}
-				else if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
-				{
-					ShowError(result.ErrorMessage);
-				}
-			}
+			DrawCreateMenuItems(_assetHandlerRegistry.GetCreateMenuItems());
 			ImGui.EndMenu();
 		}
 
@@ -202,5 +189,40 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		_errorMessage = errorMessage;
 		_openErrorPopup = true;
+	}
+
+	private void DrawCreateMenuItems(IReadOnlyList<EditorAssetCreateMenuItem> items)
+	{
+		for (var i = 0; i < items.Count; i++)
+		{
+			var item = items[i];
+			if (item.Children.Count > 0)
+			{
+				if (ImGui.BeginMenu(item.Label))
+				{
+					DrawCreateMenuItems(item.Children);
+					ImGui.EndMenu();
+				}
+
+				continue;
+			}
+
+			if (ImGui.MenuItem(item.Label) && item.CreateAction is not null)
+			{
+				HandleCreationResult(item.CreateAction());
+			}
+		}
+	}
+
+	private void HandleCreationResult(EditorAssetCreationResult result)
+	{
+		if (result.Success && result.AssetId.HasValue)
+		{
+			_assetSelectionService.Select(result.AssetId.Value);
+		}
+		else if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
+		{
+			ShowError(result.ErrorMessage);
+		}
 	}
 }

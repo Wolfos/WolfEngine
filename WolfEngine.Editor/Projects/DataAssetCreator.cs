@@ -2,58 +2,61 @@ using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
 
-public interface IMaterialAssetCreator
+public interface IDataAssetCreator
 {
-	EditorAssetCreationResult CreateMaterial();
+	EditorAssetCreationResult CreateDataAsset(Type dataAssetType);
 }
 
-public sealed class MaterialAssetCreator : IMaterialAssetCreator
+public sealed class DataAssetCreator : IDataAssetCreator
 {
 	private readonly IEditorProjectService _projectService;
-	private readonly IMaterialAssetStore _materialAssetStore;
+	private readonly IDataAssetStore _dataAssetStore;
 
-	public MaterialAssetCreator(IEditorProjectService projectService, IMaterialAssetStore materialAssetStore)
+	public DataAssetCreator(IEditorProjectService projectService, IDataAssetStore dataAssetStore)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
-		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
+		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 	}
 
-	public EditorAssetCreationResult CreateMaterial()
+	public EditorAssetCreationResult CreateDataAsset(Type dataAssetType)
 	{
 		if (_projectService.HasOpenProject == false)
 		{
-			return EditorAssetCreationResult.Failed("Open or create a project before creating materials.");
+			return EditorAssetCreationResult.Failed("Open or create a project before creating data assets.");
 		}
 
+		ArgumentNullException.ThrowIfNull(dataAssetType);
+
 		var assetId = Guid.NewGuid();
-		var assetName = GetNextMaterialName();
-		var relativeAssetPath = $"Assets/{assetName}{MaterialAssetFile.FileExtension}";
+		var assetName = GetNextDataAssetName(dataAssetType.Name);
+		var relativeAssetPath = $"Assets/{assetName}{DataAssetFile.FileExtension}";
 		var relativeMetaPath = relativeAssetPath + ".meta.json";
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 		var absoluteMetaPath = _projectService.GetAbsolutePath(relativeMetaPath);
 
-		var materialAsset = _materialAssetStore.CreateDefault(MaterialAssetType.Opaque);
-		var materialMeta = _materialAssetStore.CreateMeta(assetId, MaterialAssetType.Opaque);
+		var asset = _dataAssetStore.CreateDefault(dataAssetType);
+		var meta = _dataAssetStore.CreateMeta(assetId, dataAssetType);
 		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		updatedDatabase.Assets.Add(new AssetDatabaseEntry
 		{
 			Id = assetId,
-			Type = AssetType.Material,
+			Type = AssetType.DataAsset,
 			Name = assetName,
 			RelativeAssetPath = relativeAssetPath,
 			RelativeMetaPath = relativeMetaPath,
-			MaterialSummary = new MaterialAssetSummary
+			DataAssetSummary = new DataAssetSummary
 			{
-				MaterialType = MaterialAssetType.Opaque
+				DataAssetType = meta.DataAssetType,
+				DisplayName = dataAssetType.Name
 			}
 		});
 
 		var createdFiles = new List<string>(2);
 		try
 		{
-			_materialAssetStore.SaveAsset(absoluteAssetPath, materialAsset);
+			_dataAssetStore.SaveAsset(absoluteAssetPath, dataAssetType, asset);
 			createdFiles.Add(absoluteAssetPath);
-			_materialAssetStore.SaveMeta(absoluteMetaPath, materialMeta);
+			_dataAssetStore.SaveMeta(absoluteMetaPath, meta);
 			createdFiles.Add(absoluteMetaPath);
 			_projectService.SaveAssetDatabase(updatedDatabase);
 			return EditorAssetCreationResult.Succeeded(assetId);
@@ -61,18 +64,18 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 		catch (Exception ex)
 		{
 			RollbackCreatedFiles(createdFiles);
-			return EditorAssetCreationResult.Failed($"Failed to create material: {ex.Message}");
+			return EditorAssetCreationResult.Failed($"Failed to create data asset: {ex.Message}");
 		}
 	}
 
-	private string GetNextMaterialName()
+	private string GetNextDataAssetName(string typeName)
 	{
-		const string baseName = "New Material";
+		var baseName = $"New {typeName}";
 		var index = 0;
 		while (true)
 		{
 			var candidateName = index == 0 ? baseName : $"{baseName} {index}";
-			var relativeAssetPath = $"Assets/{candidateName}{MaterialAssetFile.FileExtension}";
+			var relativeAssetPath = $"Assets/{candidateName}{DataAssetFile.FileExtension}";
 			var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 			if (File.Exists(absoluteAssetPath) == false)
 			{

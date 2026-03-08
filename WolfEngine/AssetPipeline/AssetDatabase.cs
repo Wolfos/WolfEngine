@@ -5,7 +5,8 @@ namespace WolfEngine.AssetPipeline;
 public enum AssetType
 {
 	Texture2D,
-	Material
+	Material,
+	DataAsset
 }
 
 public enum MaterialAssetType
@@ -17,7 +18,7 @@ public enum MaterialAssetType
 
 public sealed class AssetDatabase
 {
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = 3;
 	public const string FileName = "AssetDatabase.json";
 
 	public int Version { get; set; } = CurrentVersion;
@@ -33,6 +34,7 @@ public sealed class AssetDatabaseEntry
 	public string RelativeMetaPath { get; set; } = string.Empty;
 	public TextureAssetSummary? TextureSummary { get; set; }
 	public MaterialAssetSummary? MaterialSummary { get; set; }
+	public DataAssetSummary? DataAssetSummary { get; set; }
 }
 
 public sealed class TextureAssetSummary
@@ -48,6 +50,12 @@ public sealed class TextureAssetSummary
 public sealed class MaterialAssetSummary
 {
 	public MaterialAssetType MaterialType { get; set; }
+}
+
+public sealed class DataAssetSummary
+{
+	public string DataAssetType { get; set; } = string.Empty;
+	public string DisplayName { get; set; } = string.Empty;
 }
 
 public sealed class TextureAssetMetaFile
@@ -106,6 +114,27 @@ public sealed class MaterialAssetFile
 			_ => Opaque
 		};
 	}
+}
+
+public sealed class DataAssetMetaFile
+{
+	public const int CurrentVersion = 1;
+
+	public int Version { get; set; } = CurrentVersion;
+	public Guid AssetId { get; set; }
+	public AssetType AssetType { get; set; } = AssetType.DataAsset;
+	public string DataAssetType { get; set; } = string.Empty;
+}
+
+public sealed class DataAssetFile
+{
+	public const int CurrentVersion = 1;
+	public const string FileExtension = ".data.json";
+
+	public int Version { get; set; } = CurrentVersion;
+	public AssetType AssetType { get; set; } = AssetType.DataAsset;
+	public string DataAssetType { get; set; } = string.Empty;
+	public System.Text.Json.JsonElement Data { get; set; }
 }
 
 public sealed class MaterialTextureAssignments

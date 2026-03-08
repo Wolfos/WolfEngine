@@ -241,6 +241,13 @@ public sealed class EditorProjectService : IEditorProjectService
 				: new MaterialAssetSummary
 				{
 					MaterialType = asset.MaterialSummary.MaterialType
+				},
+			DataAssetSummary = asset.DataAssetSummary is null
+				? null
+				: new DataAssetSummary
+				{
+					DataAssetType = asset.DataAssetSummary.DataAssetType,
+					DisplayName = asset.DataAssetSummary.DisplayName
 				}
 		};
 	}
