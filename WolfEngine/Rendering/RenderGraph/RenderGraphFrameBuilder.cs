@@ -40,8 +40,9 @@ public sealed class RenderGraphFrameBuilder
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
-	private SkyboxResources? _skybox;
+	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
 	private bool _hasPreviousFrameShape;
@@ -57,6 +58,14 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
 	private readonly Action<RenderGraphContext> _shadowMapExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawCameraCullExecute;
+	private readonly Action<RenderGraphContext> _skyboxEnvironmentExecute;
+	private readonly Action<RenderGraphContext> _skyboxIrradianceExecute;
+	private readonly Action<RenderGraphContext> _skyboxPrefilterExecute;
+	private readonly Action<RenderGraphContext> _skyboxBrdfExecute;
+	private bool _useProceduralSkybox;
+	private bool _recordProceduralSkyLighting;
+	private bool _recordProceduralSkyBrdf;
+	private ResourceState _proceduralSkyboxInitialState = ResourceState.ShaderResource;
 
 	
 	public RenderGraphFrameBuilder(
@@ -67,6 +76,7 @@ public sealed class RenderGraphFrameBuilder
 		ShadowMapPass shadowMapPass,
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
+		SkyboxPass skyboxPass,
 		IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
@@ -76,6 +86,7 @@ public sealed class RenderGraphFrameBuilder
 		_shadowMapPass = shadowMapPass;
 		_gpuDrawPass = gpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
+		_skyboxPass = skyboxPass;
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
@@ -86,43 +97,54 @@ public sealed class RenderGraphFrameBuilder
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
 		_shadowMapExecute = ExecuteShadowMap;
 		_gpuDrawCameraCullExecute = ExecuteGpuDrawCullCamera;
+		_skyboxEnvironmentExecute = ExecuteSkyboxEnvironment;
+		_skyboxIrradianceExecute = ExecuteSkyboxIrradiance;
+		_skyboxPrefilterExecute = ExecuteSkyboxPrefilter;
+		_skyboxBrdfExecute = ExecuteSkyboxBrdf;
 	}
 
 	public void SetSkybox(SkyboxResources skybox)
 	{
-		_skybox = skybox;
+		_externalSkybox = skybox;
 	}
 
 	public void BeginFrame(
 		Int2 framebufferSize,
 		Int2 sceneFramebufferSize,
 		RenderGraphResourceHandle sceneColorHandle,
-		bool sceneEnabled)
+		bool sceneEnabled,
+		Vector3 sunDirection)
 	{
 		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, sceneEnabled);
+
+		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection);
+		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
+		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
+		_recordProceduralSkyLighting = _useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;
+		_recordProceduralSkyBrdf = _useProceduralSkybox && _skyboxPass.ShouldRecordBrdfLutUpdate;
+		_proceduralSkyboxInitialState = _skyboxPass.ProceduralResourcesInitialState;
 
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);
 		var skyboxIrrHandle = default(RenderGraphResourceHandle);
 		var skyboxPrefilterHandle = default(RenderGraphResourceHandle);
 		var skyboxBrdfHandle = default(RenderGraphResourceHandle);
-		if (_skybox?.EnvironmentTexture is IGfxTexture envTexture)
+		if (activeSkybox.EnvironmentTexture is IGfxTexture envTexture)
 		{
-			skyboxEnvHandle = _resources.ImportTexture(envTexture, takeOwnership: false,
-				initialState: ResourceState.ShaderResource);
-			if (_skybox.IrradianceTexture is IGfxTexture irr)
+			var initialState = _useProceduralSkybox
+				? _proceduralSkyboxInitialState
+				: ResourceState.ShaderResource;
+			skyboxEnvHandle = _resources.ImportTexture(envTexture, takeOwnership: false, initialState: initialState);
+			if (activeSkybox.IrradianceTexture is IGfxTexture irr)
 			{
-				skyboxIrrHandle = _resources.ImportTexture(irr, takeOwnership: false,
-					initialState: ResourceState.ShaderResource);
+				skyboxIrrHandle = _resources.ImportTexture(irr, takeOwnership: false, initialState: initialState);
 			}
-			if (_skybox.PrefilteredEnvironment is IGfxTexture prefilter)
+			if (activeSkybox.PrefilteredEnvironment is IGfxTexture prefilter)
 			{
-				skyboxPrefilterHandle = _resources.ImportTexture(prefilter, takeOwnership: false,
-					initialState: ResourceState.ShaderResource);
+				skyboxPrefilterHandle = _resources.ImportTexture(prefilter, takeOwnership: false, initialState: initialState);
 			}
-			if (_skybox.BrdfLut is IGfxTexture brdf)
+			if (activeSkybox.BrdfLut is IGfxTexture brdf)
 			{
-				skyboxBrdfHandle = _resources.ImportTexture(brdf, takeOwnership: false,
-					initialState: ResourceState.ShaderResource);
+				skyboxBrdfHandle = _resources.ImportTexture(brdf, takeOwnership: false, initialState: initialState);
 			}
 		}
 
@@ -259,6 +281,30 @@ public sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
 				.SetExecute(_gbufferExecute);
 
+			if (_useProceduralSkybox && _recordProceduralSkyLighting)
+			{
+				graph.AddPass("Skybox Environment", PassKind.Compute)
+					.WriteTexture(_frameResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
+					.SetExecute(_skyboxEnvironmentExecute);
+
+				graph.AddPass("Skybox Irradiance", PassKind.Compute)
+					.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
+					.SetExecute(_skyboxIrradianceExecute);
+
+				graph.AddPass("Skybox Prefilter", PassKind.Compute)
+					.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
+					.SetExecute(_skyboxPrefilterExecute);
+			}
+
+			if (_useProceduralSkybox && _recordProceduralSkyBrdf)
+			{
+				graph.AddPass("Skybox BRDF LUT", PassKind.Compute)
+					.WriteTexture(_frameResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
+					.SetExecute(_skyboxBrdfExecute);
+			}
+
 			// Register Deferred Lighting pass with proper resource states
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
@@ -363,6 +409,26 @@ public sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
 	{
 		_gpuDrawPass.RecordCull(context, context.SceneData!);
+	}
+
+	private void ExecuteSkyboxEnvironment(RenderGraphContext context)
+	{
+		_skyboxPass.RecordEnvironment(context);
+	}
+
+	private void ExecuteSkyboxIrradiance(RenderGraphContext context)
+	{
+		_skyboxPass.RecordIrradiance(context);
+	}
+
+	private void ExecuteSkyboxPrefilter(RenderGraphContext context)
+	{
+		_skyboxPass.RecordPrefilter(context);
+	}
+
+	private void ExecuteSkyboxBrdf(RenderGraphContext context)
+	{
+		_skyboxPass.RecordBrdfLut(context);
 	}
 
 	private void ExecuteGBuffer(RenderGraphContext context)

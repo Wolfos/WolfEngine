@@ -27,7 +27,6 @@ public sealed class RenderGraph
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
-	private readonly SkyboxRenderer _skyboxRenderer;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
@@ -56,7 +55,7 @@ public sealed class RenderGraph
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		IMainThreadDispatcher mainThreadDispatcher,
-		SkyboxRenderer skyboxRenderer,
+		SkyboxPass skyboxPass,
 		IImGuiRenderer imGuiRenderer)
 	{
 		_resourceRegistry = resourceRegistry;
@@ -70,13 +69,13 @@ public sealed class RenderGraph
 			shadowMapPass,
 			gpuDrawPass,
 			gpuDrawResources,
+			skyboxPass,
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_mainThreadDispatcher = mainThreadDispatcher;
-		_skyboxRenderer = skyboxRenderer ?? throw new ArgumentNullException(nameof(skyboxRenderer));
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
 	}
@@ -270,14 +269,6 @@ public sealed class RenderGraph
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
 
-				// TODO: This should probably not live here
-				using (FrameProfiler.Instance.Measure("Update Skybox"))
-				{
-					var skybox = _skyboxRenderer.UpdateProceduralSkybox(snapshot.SunDirection);
-					_frameBuilder.SetSkybox(skybox);
-				}
-
-
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
@@ -299,7 +290,7 @@ public sealed class RenderGraph
 
 				ResolveSpecialUiTextureIds(uiFrame, nextSceneRenderState.TextureId);
 
-				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport);
+				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection);
 				_frameBuilder.SetUiFrame(uiFrame);
 
 				_frameBuilder.Build(this);

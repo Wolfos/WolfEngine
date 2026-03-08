@@ -42,7 +42,7 @@ public static class WolfEngine
 
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();
-		services.AddSingleton<SkyboxRenderer>();
+		services.AddSingleton<SkyboxPass>();
 		
 		services.AddSingleton<ISceneBuilder, SceneBuilder>();
 		
