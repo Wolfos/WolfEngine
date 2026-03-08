@@ -186,7 +186,7 @@ public sealed class DataAssetEditor
 		       type != typeof(Vector2) &&
 		       type != typeof(Vector3) &&
 		       type != typeof(Vector4) &&
-		       type != typeof(ColorRgba);
+		       type != typeof(Color);
 	}
 
 	private bool DrawEnumProperty(object target, PropertyInfo property, object? value)

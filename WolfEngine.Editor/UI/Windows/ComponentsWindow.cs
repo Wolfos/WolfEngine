@@ -174,14 +174,11 @@ public class ComponentsWindow: IComponentEditor
         {
             var fieldType = field.FieldType;
             var label = field.Name;
-            var presentationHint = fieldType == typeof(Vector4)
-                ? PropertyPresentationHint.PreferColorPicker
-                : PropertyPresentationHint.None;
+
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 label,
                 fieldType,
-                field.GetValueDirect(typedRef),
-                presentationHint));
+                field.GetValueDirect(typedRef)));
             if (drawResult.Handled && drawResult.Changed)
                 field.SetValueDirect(typedRef, drawResult.Value!);
         }

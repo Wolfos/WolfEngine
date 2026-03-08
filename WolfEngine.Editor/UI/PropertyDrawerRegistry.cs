@@ -5,18 +5,11 @@ using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.UI;
 
-[Flags]
-public enum PropertyPresentationHint
-{
-	None = 0,
-	PreferColorPicker = 1
-}
 
 public readonly record struct PropertyDrawerContext(
 	string Label,
 	Type ValueType,
-	object? Value,
-	PropertyPresentationHint PresentationHint = PropertyPresentationHint.None);
+	object? Value);
 
 public readonly record struct PropertyDrawerResult(bool Handled, bool Changed, object? Value);
 
@@ -101,9 +94,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		if (valueType == typeof(Vector4))
 		{
 			var vectorValue = value is Vector4 typedValue ? typedValue : Vector4.Zero;
-			var changed = (context.PresentationHint & PropertyPresentationHint.PreferColorPicker) != 0
-				? EditorUIUtility.ColorEdit4(context.Label, ref vectorValue)
-				: EditorUIUtility.InputVector4(context.Label, ref vectorValue);
+			var changed = EditorUIUtility.InputVector4(context.Label, ref vectorValue);
 			return new PropertyDrawerResult(true, changed, vectorValue);
 		}
 

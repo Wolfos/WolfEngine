@@ -177,8 +177,7 @@ public sealed class MaterialAssetEditor
 		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
 			"Base Color",
 			typeof(Color),
-			properties.BaseColor,
-			PropertyPresentationHint.PreferColorPicker));
+			properties.BaseColor));
 		if (drawResult.Changed && drawResult.Value is Color color)
 		{
 			properties.BaseColor = color;
