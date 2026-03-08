@@ -159,9 +159,7 @@ public class ComponentsWindow: IComponentEditor
         }
 
         ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
-        var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
-        var isOpen = ImGui.CollapsingHeader(typeof(T).Name, ImGuiTreeNodeFlags.DefaultOpen);
-        ImGuiUiSystem.PopFontIfPushed(pushedBoldHeader);
+        var isOpen = EditorUIUtility.CollapsingHeader(typeof(T).Name, true);
         ImGui.PopStyleVar();
         if (isOpen == false)
         {

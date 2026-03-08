@@ -1,5 +1,6 @@
 using ImGuiNET;
 using System.Numerics;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -61,6 +62,14 @@ public class EditorUIUtility
 		var changed = ImGui.ColorEdit4("##value", ref value);
 		EndLabeledField();
 		return changed;
+	}
+
+	public static bool CollapsingHeader(string label, bool isOpenByDefault)
+	{
+		var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
+		var isOpen = ImGui.CollapsingHeader(label, isOpenByDefault ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None);
+		ImGuiUiSystem.PopFontIfPushed(pushedBoldHeader);
+		return isOpen;
 	}
 
 	private static void BeginLabeledField(string label)
