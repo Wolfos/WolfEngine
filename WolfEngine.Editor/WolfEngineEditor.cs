@@ -22,6 +22,7 @@ public class WolfEngineEditor
 	private readonly RenderGraph _renderGraph;
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly EditorCameraContext _cameraContext;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
@@ -41,6 +42,7 @@ public class WolfEngineEditor
 		RenderGraph renderGraph,
 		IInputSystem inputSystem,
 		EditorViewportStateBus viewportStateBus,
+		EditorFrameCoordinator editorFrameCoordinator,
 		EditorCameraContext cameraContext,
 		EditorGui editorGui)
 	{
@@ -51,6 +53,7 @@ public class WolfEngineEditor
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_editorGui = editorGui;
 	}
@@ -134,6 +137,7 @@ public class WolfEngineEditor
 				{
 					_editorGui.Draw(_currentScene);
 				});
+				_editorFrameCoordinator.PublishCompletedFrame();
 			}
 
 			FrameProfiler.Instance.EndFrame();

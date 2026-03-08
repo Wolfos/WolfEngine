@@ -27,16 +27,17 @@ public sealed class RenderGraph
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
+	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
 	private FrameSnapshot _activeSnapshot;
+	private long _lastObservedEditorFrameSequence;
 	private long _lastProcessWorkingSetBytes;
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
-	public event Action? FrameCompleted;
 
 	private readonly ConcurrentQueue<Material> _ensureMaterialQueue = new();
 	private readonly ConcurrentQueue<Texture> _ensureTextureQueue = new();
@@ -54,6 +55,7 @@ public sealed class RenderGraph
 		GpuDrawHardeningStats hardeningStats,
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
+		EditorFrameCoordinator editorFrameCoordinator,
 		IMainThreadDispatcher mainThreadDispatcher,
 		SkyboxPass skyboxPass,
 		IImGuiRenderer imGuiRenderer)
@@ -75,6 +77,7 @@ public sealed class RenderGraph
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
@@ -238,6 +241,13 @@ public sealed class RenderGraph
 		}
 
 		_mainThreadDispatcher.ExecutePending();
+		using (FrameProfiler.Instance.Measure("Wait For Editor Frame"))
+		{
+			_lastObservedEditorFrameSequence = _editorFrameCoordinator.WaitForNextFrame(
+				_lastObservedEditorFrameSequence,
+				_mainThreadDispatcher.ExecutePending);
+		}
+
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
 		_sceneRenderTargetManager.Advance(_renderer.GetGfxDevice());
@@ -313,7 +323,6 @@ public sealed class RenderGraph
 		_frameIndex++;
 		_hardeningStats.SetDeferredReleaseBacklog(_resourceRegistry.PendingDeferredReleaseCount);
 		LogGpuHardeningStatsIfNeeded();
-		FrameCompleted?.Invoke();
 		FrameProfiler.Instance.EndFrame();
 	}
 

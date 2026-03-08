@@ -15,7 +15,6 @@ public class RenderPipeline : IRenderPipeline
 {
     private readonly RenderGraph _renderGraph;
     private readonly GpuDrawDatabase _drawDatabase;
-    private readonly ManualResetEventSlim _frameReady = new(true);
     private int _stressFrame;
     
     public RenderPipeline(
@@ -28,18 +27,11 @@ public class RenderPipeline : IRenderPipeline
 
     public void Run()
     {
-        _renderGraph.FrameCompleted += _frameReady.Set;
         _renderGraph.Startup(static () => { }, static _ => { });
     }
 
     public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, IReadOnlyList<World> worlds)
     {
-        using (FrameProfiler.Instance.Measure("Render Thread Wait"))
-        {
-            _frameReady.Wait();
-        }
-        _frameReady.Reset();
-
         using (FrameProfiler.Instance.Measure("Build Snapshot"))
         {
             var snapshot = _renderGraph.BeginSnapshotWrite();

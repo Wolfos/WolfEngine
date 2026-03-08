@@ -20,6 +20,11 @@ public struct Camera: IEntityComponent
 	
 	public void SetPerspective(float fov)
 	{
+		if (fov < 1)
+		{
+			return;
+		}
+		
 		Fov = fov;
 		fov = float.DegreesToRadians(fov);
 		
