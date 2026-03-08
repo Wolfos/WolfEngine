@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace WolfEngine.Rendering;
 
+[StructLayout(LayoutKind.Sequential)]
 public struct ColorRGBA
 {
 	public ColorRGBA(float r, float g, float b, float a)
@@ -12,10 +14,10 @@ public struct ColorRGBA
 		A = a;
 	}
 
-	public float R { get; set; }
-	public float G { get; set; }
-	public float B { get; set; }
-	public float A { get; set; }
+	public float R;
+	public float G;
+	public float B;
+	public float A;
 
 	public Vector4 ToVector4() => new(R, G, B, A);
 	public Vector3 ToVector3() => new(R, G, B);
