@@ -36,8 +36,6 @@ public unsafe class WolfRendererD3D : IRenderer
 
 private const int FrameCount = 2;
 
-private readonly float[] _backgroundColour = [0.392f, 0.584f, 0.929f, 1.0f];
-	
 private sealed class MeshResources
 {
 		public MeshResources(
