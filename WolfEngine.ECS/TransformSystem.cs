@@ -62,9 +62,13 @@ public class TransformSystem : IPreRender
         {
             (Entity entity, Matrix4x4 parentW) frame;
             if (heapStack != null)
+            {
                 frame = heapStack[--stackSize];
+            }
             else
+            {
                 frame = stack[--stackSize];
+            }
 
             var e = frame.entity;
             var parentMatrix = frame.parentW;

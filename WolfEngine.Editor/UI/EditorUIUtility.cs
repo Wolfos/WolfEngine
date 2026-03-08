@@ -92,14 +92,22 @@ public class EditorUIUtility
 	{
 		BeginLabeledField(label);
 		var isOpen = ImGui.BeginCombo("##value", previewValue);
-		EndLabeledField();
 		if (isOpen == false)
 		{
+			EndLabeledField();
 			return false;
 		}
 
-		drawItems();
-		ImGui.EndCombo();
+		try
+		{
+			drawItems();
+		}
+		finally
+		{
+			ImGui.EndCombo();
+			EndLabeledField();
+		}
+
 		return true;
 	}
 
