@@ -429,7 +429,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.TabBorderSize = 0;
 		style.TabBarBorderSize = 0;
 		style.FrameBorderSize = 1;
-		style.DockingSeparatorSize = 0;
+		style.DockingSeparatorSize = 1;
 		
 		style.FrameRounding = 4.0f;
 		style.ChildRounding = 4.0f;
