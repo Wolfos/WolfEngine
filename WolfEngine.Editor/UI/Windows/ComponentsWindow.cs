@@ -135,20 +135,20 @@ public class ComponentsWindow: IComponentEditor
             ref var local = ref Unsafe.As<T, LocalTransform>(ref component);
 
             var position = local.LocalPosition;
-            if (EditorUIUtility.DrawLabeledField("LocalPosition", () => ImGui.InputFloat3("##value", ref position)))
+            if (EditorUIUtility.InputVector3("LocalPosition", ref position))
             {
                 world.SetLocalPosition(entity, position);
             }
 
             var rotation = local.LocalRotation;
             var eulerDegrees = QuaternionToEulerDegrees(rotation);
-            if (EditorUIUtility.DrawLabeledField("Rotation (deg)", () => ImGui.InputFloat3("##value", ref eulerDegrees)))
+            if (EditorUIUtility.InputVector3("Rotation (deg)", ref eulerDegrees))
             {
                 world.SetLocalRotation(entity, EulerDegreesToQuaternion(eulerDegrees));
             }
 
             var scale = local.LocalScale;
-            if (EditorUIUtility.DrawLabeledField("LocalScale", () => ImGui.InputFloat3("##value", ref scale)))
+            if (EditorUIUtility.InputVector3("LocalScale", ref scale))
             {
                 world.SetLocalScale(entity, scale);
             }
@@ -178,38 +178,38 @@ public class ComponentsWindow: IComponentEditor
             if (fieldType == typeof(Vector3))
             {
                 var v = (Vector3) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.InputFloat3("##value", ref v)))
+                if (EditorUIUtility.InputVector3(label, ref v))
                     field.SetValueDirect(typedRef, v);
             }
             else if (fieldType == typeof(Vector4))
             {
                 var v = (Vector4) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.ColorEdit4("##value", ref v)))
+                if (EditorUIUtility.ColorEdit4(label, ref v))
                     field.SetValueDirect(typedRef, v);
             }
             else if (fieldType == typeof(Quaternion))
             {
                 var q = (Quaternion) field.GetValueDirect(typedRef);
                 var v = new Vector4(q.X, q.Y, q.Z, q.W);
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.InputFloat4("##value", ref v)))
+                if (EditorUIUtility.InputVector4(label, ref v))
                     field.SetValueDirect(typedRef, new Quaternion(v.X, v.Y, v.Z, v.W));
             }
             else if (fieldType == typeof(string))
             {
                 var s = (string) field.GetValueDirect(typedRef) ?? string.Empty;
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.InputText("##value", ref s, 256)))
+                if (EditorUIUtility.InputText(label, ref s))
                     field.SetValueDirect(typedRef, s);
             }
             else if (fieldType == typeof(float))
             {
                 var f = (float) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.InputFloat("##value", ref f)))
+                if (EditorUIUtility.InputFloat(label, ref f))
                     field.SetValueDirect(typedRef, f);
             }
             else if (fieldType == typeof(int))
             {
                 var i = (int) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.DrawLabeledField(label, () => ImGui.InputInt("##value", ref i)))
+                if (EditorUIUtility.InputInt(label, ref i))
                     field.SetValueDirect(typedRef, i);
             }
         }
