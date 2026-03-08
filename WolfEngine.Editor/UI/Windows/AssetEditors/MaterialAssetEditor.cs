@@ -176,10 +176,10 @@ public sealed class MaterialAssetEditor
 	{
 		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
 			"Base Color",
-			typeof(ColorRgba),
+			typeof(Color),
 			properties.BaseColor,
 			PropertyPresentationHint.PreferColorPicker));
-		if (drawResult.Changed && drawResult.Value is ColorRgba color)
+		if (drawResult.Changed && drawResult.Value is Color color)
 		{
 			properties.BaseColor = color;
 			SaveMaterialAsset(asset, materialAsset, materialMeta);

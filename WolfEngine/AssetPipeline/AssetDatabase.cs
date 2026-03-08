@@ -146,7 +146,7 @@ public sealed class MaterialTextureAssignments
 	public Guid? Occlusion { get; set; }
 }
 
-public sealed class ColorRgba
+public sealed class Color
 {
 	public float R { get; set; } = 1.0f;
 	public float G { get; set; } = 1.0f;
@@ -155,9 +155,9 @@ public sealed class ColorRgba
 
 	public Vector4 ToVector4() => new(R, G, B, A);
 
-	public static ColorRgba FromVector4(Vector4 value)
+	public static Color FromVector4(Vector4 value)
 	{
-		return new ColorRgba
+		return new Color
 		{
 			R = value.X,
 			G = value.Y,
@@ -169,7 +169,7 @@ public sealed class ColorRgba
 
 public abstract class MaterialSurfaceProperties
 {
-	public ColorRgba BaseColor { get; set; } = new();
+	public Color BaseColor { get; set; } = new();
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
 	public MaterialTextureAssignments Textures { get; set; } = new();
