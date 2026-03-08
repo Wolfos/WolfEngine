@@ -23,14 +23,6 @@ namespace WolfEngine;
 [SupportedOSPlatform("macos")]
 internal unsafe class WolfRendererMetal : IRenderer
 {
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MaterialParams
-    {
-        public Vector4 BaseColor;
-        public Vector2 MetallicRoughnessFactor;
-        public Vector2 Padding;
-    }
-
     private const string WindowTitle = "WolfEngine";
     private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
     private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
@@ -533,20 +525,6 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public IMaterialResources CreateMaterialResources(Material material)
     {
-        var materialParams = new MaterialParams
-        {
-            BaseColor = material.Color,
-            MetallicRoughnessFactor = new(material.MetallicFactor, material.RoughnessFactor),
-            Padding = Vector2.Zero
-        };
-        var colorBufferLength = (ulong)Marshal.SizeOf<MaterialParams>();
-        var colorBuffer = _device.NewBuffer(colorBufferLength, MTLResourceOptions.ResourceStorageModeShared);
-        if (colorBuffer.NativePtr == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Failed to allocate material buffer.");
-        }
-        BufferHelper.CopyToBuffer(new[] { materialParams }, colorBuffer);
-
         var renderState = new RenderStateDescriptor(
             FillMode.Solid,
             CullMode.Back,
@@ -572,7 +550,6 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         var shaderBytes = _shaderCompiler.GetMetalLibrary(material.ShaderPath);
         var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
-        var constantBuffer = new MetalBuffer($"{material.ShaderPath}_ColorBuffer", new(colorBufferLength, BufferUsage.Constant), colorBuffer);
 
         if (_linearSamplerHandle.IsValid == false)
         {
@@ -583,9 +560,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         return new MtlMaterialResources
         {
             Pipeline = pipeline,
-            ConstantBuffer = constantBuffer,
             PipelineState = default,
-            ColorBuffer = colorBuffer,
             AlbedoTexture = _bindlessRegistry.GetTextureHandle(material.AlbedoTexture?.Resources),
             MetallicRoughnessTexture = _bindlessRegistry.GetTextureHandle(material.MetallicRoughnessTexture?.Resources),
             NormalTexture = _bindlessRegistry.GetTextureHandle(material.NormalTexture?.Resources),

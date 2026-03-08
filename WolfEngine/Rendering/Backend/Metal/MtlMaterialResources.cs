@@ -8,8 +8,6 @@ namespace WolfEngine.Backend.Metal;
 internal class MtlMaterialResources: IMaterialResources
 {
 	public required IGfxPipeline Pipeline { get; init; }
-	
-	public required IGfxBuffer? ConstantBuffer { get; init; }
 
 	public DescriptorHandle AlbedoTexture { get; init; }
 
@@ -25,6 +23,4 @@ internal class MtlMaterialResources: IMaterialResources
 
 	// Internal Metal-specific properties
 	internal MTLRenderPipelineState PipelineState { get; init; }
-
-	internal MTLBuffer ColorBuffer { get; init; }
 }

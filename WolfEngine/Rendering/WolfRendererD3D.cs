@@ -26,14 +26,6 @@ namespace WolfEngine;
 
 public unsafe class WolfRendererD3D : IRenderer
 {
-	[StructLayout(LayoutKind.Sequential)]
-	private struct MaterialParams
-	{
-		public Vector4 BaseColor;
-		public Vector2 MetallicRoughnessFactor;
-		public Vector2 Padding;
-	}
-
 private const int FrameCount = 2;
 
 private sealed class MeshResources
@@ -785,50 +777,6 @@ private sealed class MeshResources
 		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
 		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
 
-		var colorSize = Align((ulong) Unsafe.SizeOf<MaterialParams>(),
-			D3D12.ConstantBufferDataPlacementAlignment);
-		var uploadProps = new HeapProperties(HeapType.Upload);
-		var bufferDesc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Buffer,
-			Alignment = 0,
-			Width = colorSize,
-			Height = 1,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatUnknown,
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutRowMajor,
-			Flags = ResourceFlags.None
-		};
-
-		ComPtr<ID3D12Resource> colorBuffer;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&uploadProps,
-				HeapFlags.None,
-				in bufferDesc,
-				ResourceStates.GenericRead,
-				null,
-				out colorBuffer));
-
-		void* mappedData = null;
-		SilkMarshal.ThrowHResult(colorBuffer.Map(0, (Range*) null, &mappedData));
-		try
-		{
-			var materialParams = new MaterialParams
-			{
-				BaseColor = material.Color,
-				MetallicRoughnessFactor = new(material.MetallicFactor, material.RoughnessFactor),
-				Padding = Vector2.Zero
-			};
-			Unsafe.Write((MaterialParams*) mappedData, materialParams);
-		}
-		finally
-		{
-			colorBuffer.Unmap(0, (Range*) null);
-		}
-
 		// Wrap in abstraction interfaces
 		var renderState = new RenderStateDescriptor(
 			AbstractionFillMode.Solid,
@@ -856,12 +804,6 @@ private sealed class MeshResources
 		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
 		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
 
-		var constantBuffer = new D3D12Buffer(
-			$"{material.ShaderPath}_ColorBuffer",
-			new(colorSize, BufferUsage.Constant),
-			colorBuffer,
-			colorSize);
-
 		var albedoResources = material.AlbedoTexture?.Resources
 		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");
 		var mrResources = material.MetallicRoughnessTexture?.Resources
@@ -873,7 +815,6 @@ private sealed class MeshResources
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
-			ConstantBuffer = constantBuffer,
 			AlbedoTexture = albedoResources.ShaderResourceView,
 			MetallicRoughnessTexture = mrResources.ShaderResourceView,
 			NormalTexture = normalResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
