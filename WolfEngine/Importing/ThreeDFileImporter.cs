@@ -66,10 +66,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 var baseColor = Vector4.One;
                 assimp.GetMaterialColor(material, Assimp.MaterialColorDiffuseBase, 0, 0, ref baseColor);
 
-                var emissiveColor = Vector4.Zero;
-                assimp.GetMaterialColor(material, Assimp.MaterialColorEmissive, 0, 0, ref emissiveColor);
                 var metallicFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyMetallicFactor, 1.0f);
                 var roughnessFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyRoughnessFactor, 1.0f);
+                var emissiveIntensity = GetMaterialScalar(assimp, material, Assimp.MatkeyEmissiveIntensity, 1.0f, clampToUnitRange: false);
 
                 var aMode = GetMaterialString(assimp, material, "$mat.gltf.alphaMode", "OPAQUE");
                 var alphaCutoff = aMode == "MASK"
@@ -144,11 +143,18 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     TextureSemantic.Emissive,
                     TextureType.Emissive);
 
+                var emissiveFactor = TryGetMaterialVector3(assimp, material, Assimp.MaterialColorEmissiveBase, out var importedEmissiveFactor)
+                    ? importedEmissiveFactor
+                    : emissiveTextureIndex is not null
+                        ? Vector3.One
+                        : Vector3.Zero;
+
                 materials.Add(new ImportedMaterial(
                     baseColor,
                     MetallicFactor: metallicFactor,
                     RoughnessFactor: roughnessFactor,
-                    EmissiveFactor: new(emissiveColor.X, emissiveColor.Y, emissiveColor.Z),
+                    EmissiveFactor: emissiveFactor,
+                    EmissiveIntensity: Math.Max(0.0f, emissiveIntensity),
                     BaseColorTextureIndex: baseColorTextureIndex,
                     NormalTextureIndex: normalTextureIndex,
                     MetallicRoughnessTextureIndex: metallicRoughnessTextureIndex,
@@ -246,6 +252,36 @@ public class ThreeDFileImporter : IThreeDFileImporter
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
 
     private static unsafe float GetMaterialFloat(Assimp assimp, AssimpMaterial* material, string key, float defaultValue)
+        => GetMaterialScalar(assimp, material, key, defaultValue, clampToUnitRange: true);
+
+    private static unsafe bool TryGetMaterialVector3(
+        Assimp assimp,
+        AssimpMaterial* material,
+        string key,
+        out Vector3 value)
+    {
+        value = Vector3.Zero;
+        Span<float> components = stackalloc float[4];
+        uint max = 4;
+        var result = assimp.GetMaterialFloatArray(material, key, 0, 0, ref components[0], ref max);
+        if (result != Return.Success || max == 0)
+        {
+            return false;
+        }
+
+        value = new Vector3(
+            max > 0 ? components[0] : 0.0f,
+            max > 1 ? components[1] : 0.0f,
+            max > 2 ? components[2] : 0.0f);
+        return true;
+    }
+
+    private static unsafe float GetMaterialScalar(
+        Assimp assimp,
+        AssimpMaterial* material,
+        string key,
+        float defaultValue,
+        bool clampToUnitRange)
     {
         float value = defaultValue;
         uint max = 1;
@@ -254,7 +290,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         {
             return defaultValue;
         }
-        return Math.Clamp(value, 0.0f, 1.0f);
+        return clampToUnitRange ? Math.Clamp(value, 0.0f, 1.0f) : value;
     }
 
     private static unsafe string GetMaterialString(

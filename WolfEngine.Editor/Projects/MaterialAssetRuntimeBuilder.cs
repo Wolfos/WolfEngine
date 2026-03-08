@@ -42,17 +42,17 @@ public sealed class MaterialAssetRuntimeBuilder : IMaterialAssetRuntimeBuilder
 		var properties = materialAsset.GetActiveProperties();
 
 		return _materialFactory.GetMaterial(
-			descriptor.ShaderPath,
-			properties.BaseColor.ToVector4(),
-			properties.MetallicFactor,
-			properties.RoughnessFactor,
-			ResolveTexture(properties.Textures.Albedo, isSrgb: true),
-			ResolveTexture(properties.Textures.MetallicRoughness, isSrgb: false),
-			ResolveTexture(properties.Textures.Normal, isSrgb: false),
-			ResolveTexture(properties.Textures.Emissive, isSrgb: true),
-			ResolveTexture(properties.Textures.Occlusion, isSrgb: false),
-			descriptor.RuntimeAlphaMode,
-			properties switch
+			shader: descriptor.ShaderPath,
+			color: properties.BaseColor.ToVector4(),
+			metallicFactor: properties.MetallicFactor,
+			roughnessFactor: properties.RoughnessFactor,
+			albedoTexture: ResolveTexture(properties.Textures.Albedo, isSrgb: true),
+			metallicRoughnessTexture: ResolveTexture(properties.Textures.MetallicRoughness, isSrgb: false),
+			normalTexture: ResolveTexture(properties.Textures.Normal, isSrgb: false),
+			emissiveTexture: ResolveTexture(properties.Textures.Emissive, isSrgb: true),
+			occlusionTexture: ResolveTexture(properties.Textures.Occlusion, isSrgb: false),
+			alphaMode: descriptor.RuntimeAlphaMode,
+			alphaCutoff: properties switch
 			{
 				AlphaTestMaterialProperties alphaTest => alphaTest.AlphaCutoff,
 				AlphaBlendMaterialProperties alphaBlend => alphaBlend.AlphaCutoff,

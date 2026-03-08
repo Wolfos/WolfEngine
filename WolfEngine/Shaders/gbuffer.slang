@@ -118,6 +118,7 @@ PSOutput EvaluateFragment(VSOutput input)
     float3 tangentNormal = normalize(normalTex.Sample(sampler, input.uv).rgb * 2.0f - 1.0f);
     float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
+    float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz);
     float3 B = normalize(cross(N, T) * input.tangent.w);
@@ -132,7 +133,7 @@ PSOutput EvaluateFragment(VSOutput input)
     output.albedo = materialData.baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
     output.material = materialParams;
-    output.emissive = emissiveSample;
+    output.emissive = float4(emissive, 1.0f);
 
     return output;
 }

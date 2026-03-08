@@ -24,6 +24,7 @@ public record struct ImportedMaterial(
     float MetallicFactor,
     float RoughnessFactor,
     Vector3 EmissiveFactor,
+    float EmissiveIntensity,
     int? BaseColorTextureIndex,
     int? NormalTextureIndex,
     int? MetallicRoughnessTextureIndex,

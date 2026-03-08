@@ -140,6 +140,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
             GpuMaterialData materialData;
             materialData.baseColor = update.baseColor;
             materialData.metallicRoughness = update.metallicRoughness;
+            materialData.emissiveFactorIntensity = update.emissiveFactorIntensity;
             materialData.albedoHandle = update.albedoHandle;
             materialData.metallicRoughnessHandle = update.metallicRoughnessHandle;
             materialData.normalHandle = update.normalHandle;

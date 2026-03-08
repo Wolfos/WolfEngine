@@ -229,6 +229,7 @@ public sealed class GpuDrawPass
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
 			var baseColor = Vector4.One;
 			var metallicRoughness = Vector4.One;
+			var emissiveFactorIntensity = Vector4.Zero;
 			var bucketIndex = 0;
 			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
 			var alphaCutoff = 0.0f;
@@ -299,6 +300,7 @@ public sealed class GpuDrawPass
 				}
 				baseColor = material!.Color;
 				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, alphaCutoff, 0.0f);
+				emissiveFactorIntensity = new Vector4(material.EmissiveFactor, material.EmissiveIntensity);
 			}
 
 				_updateData.Add(new GpuDrawUpdateData(
@@ -306,6 +308,7 @@ public sealed class GpuDrawPass
 					update.BoundsCenterRadius,
 					baseColor,
 				metallicRoughness,
+				emissiveFactorIntensity,
 				(uint)update.Type,
 				update.DrawHandle.Value,
 					update.InstanceHandle.Value,
@@ -980,6 +983,7 @@ public sealed class GpuDrawPass
 		var fallbackMaterialData = new GpuMaterialData(
 			new Vector4(1.0f, 0.0f, 1.0f, 1.0f),
 			Vector4.One,
+			Vector4.Zero,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,

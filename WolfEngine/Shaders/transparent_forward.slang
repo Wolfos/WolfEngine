@@ -137,6 +137,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     float3 tangentNormal = normalize(normalTex.Sample(sampler, input.uv).rgb * 2.0f - 1.0f);
     float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
+    float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz);
@@ -155,7 +156,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     surface.metallic = metallic;
     surface.roughness = roughness;
     surface.occlusion = occlusion;
-    surface.emissive = emissiveSample.rgb;
+    surface.emissive = emissive;
 
     float3 viewDir = normalize(-input.worldPos);
     float3 color = EvaluateSurfaceLighting(

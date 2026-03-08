@@ -21,6 +21,8 @@ public sealed class Material
     public Vector4 Color { get; set; }
     public float MetallicFactor { get; set; } = 1.0f;
     public float RoughnessFactor { get; set; } = 1.0f;
+    public Vector3 EmissiveFactor { get; set; } = Vector3.Zero;
+    public float EmissiveIntensity { get; set; } = 1.0f;
     public Texture AlbedoTexture { get; set; }
     public Texture MetallicRoughnessTexture { get; set; }
     public Texture NormalTexture { get; set; }

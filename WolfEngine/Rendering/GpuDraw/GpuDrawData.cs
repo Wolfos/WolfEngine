@@ -29,6 +29,7 @@ public readonly struct GpuMaterialData
 	public GpuMaterialData(
 		Vector4 baseColor,
 		Vector4 metallicRoughness,
+		Vector4 emissiveFactorIntensity,
 		uint albedoHandle,
 		uint metallicRoughnessHandle,
 		uint normalHandle,
@@ -38,6 +39,7 @@ public readonly struct GpuMaterialData
 	{
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
+		EmissiveFactorIntensity = emissiveFactorIntensity;
 		AlbedoHandle = albedoHandle;
 		MetallicRoughnessHandle = metallicRoughnessHandle;
 		NormalHandle = normalHandle;
@@ -50,6 +52,7 @@ public readonly struct GpuMaterialData
 
 	public readonly Vector4 BaseColor;
 	public readonly Vector4 MetallicRoughness;
+	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint AlbedoHandle;
 	public readonly uint MetallicRoughnessHandle;
 	public readonly uint NormalHandle;
@@ -115,6 +118,7 @@ public readonly struct GpuDrawUpdateData
 		Vector4 boundsCenterRadius,
 		Vector4 baseColor,
 		Vector4 metallicRoughness,
+		Vector4 emissiveFactorIntensity,
 		uint type,
 		uint drawHandle,
 		uint instanceHandle,
@@ -137,6 +141,7 @@ public readonly struct GpuDrawUpdateData
 		BoundsCenterRadius = boundsCenterRadius;
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
+		EmissiveFactorIntensity = emissiveFactorIntensity;
 		Type = type;
 		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
@@ -163,6 +168,7 @@ public readonly struct GpuDrawUpdateData
 	public readonly Vector4 BoundsCenterRadius;
 	public readonly Vector4 BaseColor;
 	public readonly Vector4 MetallicRoughness;
+	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint Type;
 	public readonly uint DrawHandle;
 	public readonly uint InstanceHandle;

@@ -32,6 +32,7 @@ struct GpuMaterialData
 {
     float4 baseColor;
     float4 metallicRoughness;
+    float4 emissiveFactorIntensity;
     uint albedoHandle;
     uint metallicRoughnessHandle;
     uint normalHandle;
@@ -80,6 +81,7 @@ struct GpuDrawUpdateData
     float4 boundsCenterRadius;
     float4 baseColor;
     float4 metallicRoughness;
+    float4 emissiveFactorIntensity;
     uint32_t type;
     uint32_t drawHandle;
     uint32_t instanceHandle;
