@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
 
@@ -106,12 +107,12 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			return new PropertyDrawerResult(true, changed, new Quaternion(vectorValue.X, vectorValue.Y, vectorValue.Z, vectorValue.W));
 		}
 
-		if (valueType == typeof(Color))
+		if (valueType == typeof(ColorRGBA))
 		{
-			var colorValue = value as Color ?? new Color();
+			var colorValue = (ColorRGBA)(value ?? ColorRGBA.White);
 			var vectorValue = colorValue.ToVector4();
 			var changed = EditorUIUtility.ColorEdit4(context.Label, ref vectorValue);
-			return new PropertyDrawerResult(true, changed, Color.FromVector4(vectorValue));
+			return new PropertyDrawerResult(true, changed, ColorRGBA.FromVector4(vectorValue));
 		}
 
 		if (valueType.IsEnum)

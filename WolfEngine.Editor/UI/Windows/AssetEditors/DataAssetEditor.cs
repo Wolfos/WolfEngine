@@ -3,6 +3,7 @@ using System.Reflection;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
 
@@ -186,7 +187,7 @@ public sealed class DataAssetEditor
 		       type != typeof(Vector2) &&
 		       type != typeof(Vector3) &&
 		       type != typeof(Vector4) &&
-		       type != typeof(Color);
+		       type != typeof(ColorRGBA);
 	}
 
 	private bool DrawEnumProperty(object target, PropertyInfo property, object? value)

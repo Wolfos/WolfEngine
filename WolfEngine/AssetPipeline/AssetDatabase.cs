@@ -1,4 +1,5 @@
 using System.Numerics;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -146,30 +147,9 @@ public sealed class MaterialTextureAssignments
 	public Guid? Occlusion { get; set; }
 }
 
-public sealed class Color
-{
-	public float R { get; set; } = 1.0f;
-	public float G { get; set; } = 1.0f;
-	public float B { get; set; } = 1.0f;
-	public float A { get; set; } = 1.0f;
-
-	public Vector4 ToVector4() => new(R, G, B, A);
-
-	public static Color FromVector4(Vector4 value)
-	{
-		return new Color
-		{
-			R = value.X,
-			G = value.Y,
-			B = value.Z,
-			A = value.W
-		};
-	}
-}
-
 public abstract class MaterialSurfaceProperties
 {
-	public Color BaseColor { get; set; } = new();
+	public ColorRGBA BaseColor { get; set; } = new();
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
 	public MaterialTextureAssignments Textures { get; set; } = new();

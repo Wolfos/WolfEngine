@@ -1,6 +1,7 @@
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
 
@@ -176,9 +177,9 @@ public sealed class MaterialAssetEditor
 	{
 		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
 			"Base Color",
-			typeof(Color),
+			typeof(ColorRGBA),
 			properties.BaseColor));
-		if (drawResult.Changed && drawResult.Value is Color color)
+		if (drawResult.Changed && drawResult.Value is ColorRGBA color)
 		{
 			properties.BaseColor = color;
 			SaveMaterialAsset(asset, materialAsset, materialMeta);
