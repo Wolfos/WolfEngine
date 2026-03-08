@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Numerics;
 using WolfEngine.Rendering;
 
@@ -19,11 +21,37 @@ public enum MaterialAssetType
 
 public sealed class AssetDatabase
 {
+	private static IAssetInstanceRegistry? _instanceRegistry;
+
 	public const int CurrentVersion = 3;
 	public const string FileName = "AssetDatabase.json";
 
 	public int Version { get; set; } = CurrentVersion;
 	public List<AssetDatabaseEntry> Assets { get; set; } = new();
+
+	public static void SetInstanceRegistry(IAssetInstanceRegistry? instanceRegistry)
+	{
+		_instanceRegistry = instanceRegistry;
+	}
+
+	public static void ClearInstanceRegistry()
+	{
+		_instanceRegistry = null;
+	}
+
+	public static T GetInstance<T>(Guid id)
+	{
+		var instanceRegistry = _instanceRegistry
+			?? throw new InvalidOperationException("No asset instance registry has been configured.");
+		var instance = instanceRegistry.GetInstance(id, typeof(T));
+		if (instance is T typedInstance)
+		{
+			return typedInstance;
+		}
+
+		throw new InvalidOperationException(
+			$"Asset '{id}' resolved to '{instance.GetType().FullName}', which cannot be assigned to '{typeof(T).FullName}'.");
+	}
 }
 
 public sealed class AssetDatabaseEntry

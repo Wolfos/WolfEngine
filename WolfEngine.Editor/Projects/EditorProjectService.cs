@@ -23,13 +23,16 @@ public interface IEditorProjectService
 public sealed class EditorProjectService : IEditorProjectService
 {
 	private readonly IAssetDatabaseStore _assetDatabaseStore;
+	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private AssetDatabase _currentAssetDatabase;
 	private string? _projectRootPath;
 
-	public EditorProjectService(IAssetDatabaseStore assetDatabaseStore)
+	public EditorProjectService(IAssetDatabaseStore assetDatabaseStore, IAssetInstanceRegistry assetInstanceRegistry)
 	{
 		_assetDatabaseStore = assetDatabaseStore ?? throw new ArgumentNullException(nameof(assetDatabaseStore));
+		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
+		_assetInstanceRegistry.Clear();
 	}
 
 	public bool HasOpenProject => string.IsNullOrWhiteSpace(_projectRootPath) == false;
@@ -137,6 +140,8 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		_projectRootPath = fullProjectRoot;
 		_currentAssetDatabase = loadedDatabase;
+		_assetInstanceRegistry.Clear();
+		_assetInstanceRegistry.RefreshProject(_projectRootPath, CloneAssetDatabase(_currentAssetDatabase));
 		return true;
 	}
 
@@ -144,6 +149,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	{
 		_projectRootPath = null;
 		_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
+		_assetInstanceRegistry.Clear();
 	}
 
 	public void ReloadAssetDatabase()
@@ -151,10 +157,13 @@ public sealed class EditorProjectService : IEditorProjectService
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
+			_assetInstanceRegistry.Clear();
 			return;
 		}
 
+		_assetInstanceRegistry.Clear();
 		_currentAssetDatabase = _assetDatabaseStore.Load(Path.Combine(DatabasePath!, AssetDatabase.FileName));
+		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneAssetDatabase(_currentAssetDatabase));
 	}
 
 	public void SaveAssetDatabase(AssetDatabase database)
@@ -168,6 +177,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		var databaseFilePath = Path.Combine(DatabasePath!, AssetDatabase.FileName);
 		_assetDatabaseStore.Save(databaseFilePath, database);
 		_currentAssetDatabase = CloneAssetDatabase(database);
+		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneAssetDatabase(_currentAssetDatabase));
 	}
 
 	public AssetDatabase CloneCurrentAssetDatabase()

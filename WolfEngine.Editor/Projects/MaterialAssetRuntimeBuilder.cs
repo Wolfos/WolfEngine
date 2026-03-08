@@ -10,20 +10,17 @@ public interface IMaterialAssetRuntimeBuilder
 public sealed class MaterialAssetRuntimeBuilder : IMaterialAssetRuntimeBuilder
 {
 	private readonly IEditorProjectService _projectService;
-	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
 	private readonly ITextureFactory _textureFactory;
 	private readonly IMaterialFactory _materialFactory;
 
 	public MaterialAssetRuntimeBuilder(
 		IEditorProjectService projectService,
-		IMaterialAssetStore materialAssetStore,
 		IMaterialTypeRegistry materialTypeRegistry,
 		ITextureFactory textureFactory,
 		IMaterialFactory materialFactory)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
-		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_materialTypeRegistry = materialTypeRegistry ?? throw new ArgumentNullException(nameof(materialTypeRegistry));
 		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
 		_materialFactory = materialFactory ?? throw new ArgumentNullException(nameof(materialFactory));
@@ -31,13 +28,7 @@ public sealed class MaterialAssetRuntimeBuilder : IMaterialAssetRuntimeBuilder
 
 	public Material Build(Guid materialAssetId)
 	{
-		if (_projectService.TryGetAsset(materialAssetId, out var asset) == false || asset.Type != AssetType.Material)
-		{
-			throw new InvalidOperationException($"Material asset '{materialAssetId}' was not found in the current project.");
-		}
-
-		var materialAssetPath = _projectService.GetAbsolutePath(asset.RelativeAssetPath);
-		var materialAsset = _materialAssetStore.LoadAsset(materialAssetPath);
+		var materialAsset = AssetDatabase.GetInstance<MaterialAssetFile>(materialAssetId);
 		var descriptor = _materialTypeRegistry.GetDescriptor(materialAsset.MaterialType);
 		var properties = materialAsset.GetActiveProperties();
 

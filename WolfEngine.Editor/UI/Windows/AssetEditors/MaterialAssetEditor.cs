@@ -11,9 +11,8 @@ public sealed class MaterialAssetEditor
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
-	private Guid? _loadedMaterialAssetId;
-	private MaterialAssetFile? _loadedMaterialAsset;
 	private MaterialMetaFile? _loadedMaterialMeta;
+	private Guid? _loadedMaterialMetaAssetId;
 
 	public MaterialAssetEditor(
 		IEditorProjectService projectService,
@@ -106,41 +105,32 @@ public sealed class MaterialAssetEditor
 
 	private MaterialAssetFile? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedMaterialAssetId == asset.Id && _loadedMaterialAsset is not null)
-		{
-			return _loadedMaterialAsset;
-		}
-
 		try
 		{
-			_loadedMaterialAssetId = asset.Id;
-			_loadedMaterialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
-			return _loadedMaterialAsset;
+			return AssetDatabase.GetInstance<MaterialAssetFile>(asset.Id);
 		}
 		catch
 		{
-			_loadedMaterialAssetId = asset.Id;
-			_loadedMaterialAsset = null;
 			return null;
 		}
 	}
 
 	private MaterialMetaFile? EnsureMaterialMetaLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedMaterialAssetId == asset.Id && _loadedMaterialMeta is not null)
+		if (_loadedMaterialMetaAssetId == asset.Id && _loadedMaterialMeta is not null)
 		{
 			return _loadedMaterialMeta;
 		}
 
 		try
 		{
-			_loadedMaterialAssetId = asset.Id;
+			_loadedMaterialMetaAssetId = asset.Id;
 			_loadedMaterialMeta = _materialAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
 			return _loadedMaterialMeta;
 		}
 		catch
 		{
-			_loadedMaterialAssetId = asset.Id;
+			_loadedMaterialMetaAssetId = asset.Id;
 			_loadedMaterialMeta = null;
 			return null;
 		}
@@ -150,8 +140,8 @@ public sealed class MaterialAssetEditor
 	{
 		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
 		_materialAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath), materialMeta);
-		_loadedMaterialAsset = materialAsset;
 		_loadedMaterialMeta = materialMeta;
+		_loadedMaterialMetaAssetId = asset.Id;
 
 		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		for (var i = 0; i < updatedDatabase.Assets.Count; i++)

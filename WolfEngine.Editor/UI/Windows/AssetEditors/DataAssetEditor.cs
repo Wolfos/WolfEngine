@@ -12,10 +12,8 @@ public sealed class DataAssetEditor
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
-	private Guid? _loadedAssetId;
-	private IDataAsset? _loadedAsset;
 	private DataAssetMetaFile? _loadedMeta;
-	private Type? _loadedDataAssetType;
+	private Guid? _loadedMetaAssetId;
 
 	public DataAssetEditor(
 		IEditorProjectService projectService,
@@ -31,58 +29,47 @@ public sealed class DataAssetEditor
 	{
 		var loadedAsset = EnsureAssetLoaded(asset);
 		var meta = EnsureMetaLoaded(asset);
-		if (loadedAsset is null || meta is null || _loadedDataAssetType is null)
+		if (loadedAsset is null || meta is null)
 		{
 			ImGui.TextUnformatted("Failed to load data asset.");
 			return;
 		}
 
-		if (DrawObjectProperties(loadedAsset, _loadedDataAssetType, includeHeader: false))
+		var dataAssetType = loadedAsset.GetType();
+		if (DrawObjectProperties(loadedAsset, dataAssetType, includeHeader: false))
 		{
-			SaveAsset(asset, _loadedDataAssetType, loadedAsset, meta);
+			SaveAsset(asset, dataAssetType, loadedAsset, meta);
 		}
 	}
 
 	private IDataAsset? EnsureAssetLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedAssetId == asset.Id && _loadedAsset is not null && _loadedDataAssetType is not null)
-		{
-			return _loadedAsset;
-		}
-
 		try
 		{
-			var loadResult = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
-			_loadedAssetId = asset.Id;
-			_loadedAsset = loadResult.Asset;
-			_loadedDataAssetType = loadResult.DataAssetType;
-			return _loadedAsset;
+			return AssetDatabase.GetInstance<IDataAsset>(asset.Id);
 		}
 		catch
 		{
-			_loadedAssetId = asset.Id;
-			_loadedAsset = null;
-			_loadedDataAssetType = null;
 			return null;
 		}
 	}
 
 	private DataAssetMetaFile? EnsureMetaLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedAssetId == asset.Id && _loadedMeta is not null)
+		if (_loadedMetaAssetId == asset.Id && _loadedMeta is not null)
 		{
 			return _loadedMeta;
 		}
 
 		try
 		{
-			_loadedAssetId = asset.Id;
+			_loadedMetaAssetId = asset.Id;
 			_loadedMeta = _dataAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
 			return _loadedMeta;
 		}
 		catch
 		{
-			_loadedAssetId = asset.Id;
+			_loadedMetaAssetId = asset.Id;
 			_loadedMeta = null;
 			return null;
 		}
@@ -92,9 +79,8 @@ public sealed class DataAssetEditor
 	{
 		_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), dataAssetType, loadedAsset);
 		_dataAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath), meta);
-		_loadedAsset = loadedAsset;
 		_loadedMeta = meta;
-		_loadedDataAssetType = dataAssetType;
+		_loadedMetaAssetId = asset.Id;
 	}
 
 	private bool DrawObjectProperties(object target, Type targetType, bool includeHeader, string? headerLabel = null)

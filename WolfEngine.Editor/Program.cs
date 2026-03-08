@@ -17,6 +17,7 @@ public static class Program
 		
 		var provider = services.BuildServiceProvider();
 		
+		AssetDatabase.SetInstanceRegistry(provider.GetRequiredService<IAssetInstanceRegistry>());
 		provider.GetRequiredService<IUiFrameProvider>();
 		provider.GetRequiredService<IIconManager>();
 		EditorPreferences.Load();
@@ -36,6 +37,7 @@ public static class Program
 		
 		editor.Stop();
 		editorThread.Join();
+		AssetDatabase.ClearInstanceRegistry();
 	}
 
 	private static void ConfigureServices(IServiceCollection services)
@@ -45,6 +47,7 @@ public static class Program
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
+		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
 		services.AddSingleton<ITextureAssetMetaStore, TextureAssetMetaStore>();
