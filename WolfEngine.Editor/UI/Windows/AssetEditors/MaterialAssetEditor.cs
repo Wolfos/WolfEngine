@@ -9,6 +9,7 @@ public sealed class MaterialAssetEditor
 	private readonly IEditorProjectService _projectService;
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
+	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private Guid? _loadedMaterialAssetId;
 	private MaterialAssetFile? _loadedMaterialAsset;
 	private MaterialMetaFile? _loadedMaterialMeta;
@@ -16,11 +17,13 @@ public sealed class MaterialAssetEditor
 	public MaterialAssetEditor(
 		IEditorProjectService projectService,
 		IMaterialAssetStore materialAssetStore,
-		IMaterialTypeRegistry materialTypeRegistry)
+		IMaterialTypeRegistry materialTypeRegistry,
+		IPropertyDrawerRegistry propertyDrawerRegistry)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_materialTypeRegistry = materialTypeRegistry ?? throw new ArgumentNullException(nameof(materialTypeRegistry));
+		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -171,18 +174,22 @@ public sealed class MaterialAssetEditor
 		MaterialMetaFile materialMeta,
 		MaterialSurfaceProperties properties)
 	{
-		var color = properties.BaseColor.ToVector4();
-		if (EditorUIUtility.ColorEdit4("Base Color", ref color))
+		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
+			"Base Color",
+			typeof(ColorRgba),
+			properties.BaseColor,
+			PropertyPresentationHint.PreferColorPicker));
+		if (drawResult.Changed && drawResult.Value is ColorRgba color)
 		{
-			properties.BaseColor = ColorRgba.FromVector4(color);
+			properties.BaseColor = color;
 			SaveMaterialAsset(asset, materialAsset, materialMeta);
 		}
 	}
 
-	private static void DrawFloatEditor(string label, float currentValue, Action<float> setter)
+	private void DrawFloatEditor(string label, float currentValue, Action<float> setter)
 	{
-		var value = currentValue;
-		if (EditorUIUtility.InputFloat(label, ref value))
+		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(label, typeof(float), currentValue));
+		if (drawResult.Changed && drawResult.Value is float value)
 		{
 			setter(value);
 		}

@@ -26,14 +26,16 @@ public class ComponentsWindow: IComponentEditor
     private static readonly ConcurrentDictionary<Type, MethodInfo> AddComponentMethods = new();
 
     private readonly IIconManager _icons;
+    private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
     private readonly List<Type> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
-    public ComponentsWindow(IIconManager icons)
+    public ComponentsWindow(IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry)
     {
         _icons = icons;
+        _propertyDrawerRegistry = propertyDrawerRegistry;
     }
 
     public void Draw(EditorScene scene, Entity entity, Type componentType)
@@ -44,7 +46,7 @@ public class ComponentsWindow: IComponentEditor
         if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
         
-        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons });
+        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry });
     }
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
@@ -90,7 +92,7 @@ public class ComponentsWindow: IComponentEditor
         ImGui.EndPopup();
     }
 
-    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons)
+    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry)
         where T : struct, IEntityComponent
     {
         var world = scene.World;
@@ -172,44 +174,16 @@ public class ComponentsWindow: IComponentEditor
         {
             var fieldType = field.FieldType;
             var label = field.Name;
-
-            if (fieldType == typeof(Vector3))
-            {
-                var v = (Vector3) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.InputVector3(label, ref v))
-                    field.SetValueDirect(typedRef, v);
-            }
-            else if (fieldType == typeof(Vector4))
-            {
-                var v = (Vector4) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.ColorEdit4(label, ref v))
-                    field.SetValueDirect(typedRef, v);
-            }
-            else if (fieldType == typeof(Quaternion))
-            {
-                var q = (Quaternion) field.GetValueDirect(typedRef);
-                var v = new Vector4(q.X, q.Y, q.Z, q.W);
-                if (EditorUIUtility.InputVector4(label, ref v))
-                    field.SetValueDirect(typedRef, new Quaternion(v.X, v.Y, v.Z, v.W));
-            }
-            else if (fieldType == typeof(string))
-            {
-                var s = (string) field.GetValueDirect(typedRef) ?? string.Empty;
-                if (EditorUIUtility.InputText(label, ref s))
-                    field.SetValueDirect(typedRef, s);
-            }
-            else if (fieldType == typeof(float))
-            {
-                var f = (float) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.InputFloat(label, ref f))
-                    field.SetValueDirect(typedRef, f);
-            }
-            else if (fieldType == typeof(int))
-            {
-                var i = (int) field.GetValueDirect(typedRef);
-                if (EditorUIUtility.InputInt(label, ref i))
-                    field.SetValueDirect(typedRef, i);
-            }
+            var presentationHint = fieldType == typeof(Vector4)
+                ? PropertyPresentationHint.PreferColorPicker
+                : PropertyPresentationHint.None;
+            var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
+                label,
+                fieldType,
+                field.GetValueDirect(typedRef),
+                presentationHint));
+            if (drawResult.Handled && drawResult.Changed)
+                field.SetValueDirect(typedRef, drawResult.Value!);
         }
 
         ImGui.Separator();

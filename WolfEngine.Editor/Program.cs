@@ -54,6 +54,7 @@ public static class Program
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
 		services.AddSingleton<IMaterialAssetRuntimeBuilder, MaterialAssetRuntimeBuilder>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
+		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
