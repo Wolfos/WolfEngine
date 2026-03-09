@@ -28,7 +28,8 @@ public sealed class MaterialAssetRuntimeBuilder : IMaterialAssetRuntimeBuilder
 
 	public Material Build(Guid materialAssetId)
 	{
-		var materialAsset = AssetDatabase.GetInstance<MaterialAssetFile>(materialAssetId);
+		var materialAsset = AssetDatabase.GetInstance<MaterialAssetFile>(materialAssetId)
+			?? throw new InvalidOperationException($"Material asset '{materialAssetId}' was not found in the current project.");
 		var descriptor = _materialTypeRegistry.GetDescriptor(materialAsset.MaterialType);
 		var properties = materialAsset.GetActiveProperties();
 

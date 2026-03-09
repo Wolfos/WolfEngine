@@ -2,13 +2,14 @@ using WolfEngine.ECS;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using System.Numerics;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine;
 
 public interface IRenderPipeline
 {
     void Run();
-    void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, IReadOnlyList<World> worlds);
+    void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config, IReadOnlyList<World> worlds);
 }
 
 public class RenderPipeline : IRenderPipeline
@@ -30,12 +31,13 @@ public class RenderPipeline : IRenderPipeline
         _renderGraph.Startup(static () => { }, static _ => { });
     }
 
-    public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, IReadOnlyList<World> worlds)
+    public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config, IReadOnlyList<World> worlds)
     {
         using (FrameProfiler.Instance.Measure("Build Snapshot"))
         {
             var snapshot = _renderGraph.BeginSnapshotWrite();
             snapshot.SetCamera(camera, cameraWorldTransform);
+            snapshot.SetConfig(config);
             var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
             var hasSunDirection = false;
             _drawDatabase.BeginSync();

@@ -19,17 +19,24 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 	}
 
-	public object GetInstance(Guid assetId, Type expectedType)
+	public object? GetInstance(Guid assetId, Type expectedType)
 	{
 		ArgumentNullException.ThrowIfNull(expectedType);
+		if (assetId == Guid.Empty)
+		{
+			return null;
+		}
 
 		lock (_lock)
 		{
-			EnsureProjectLoaded();
+			if (string.IsNullOrWhiteSpace(_projectRootPath))
+			{
+				return null;
+			}
 
 			if (_assetsById.TryGetValue(assetId, out var asset) == false)
 			{
-				throw new InvalidOperationException($"Asset '{assetId}' was not found in the current project.");
+				return null;
 			}
 
 			if (_instances.TryGetValue(assetId, out var existingInstance))
@@ -78,14 +85,6 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
-	private void EnsureProjectLoaded()
-	{
-		if (string.IsNullOrWhiteSpace(_projectRootPath))
-		{
-			throw new InvalidOperationException("No project is currently loaded in the asset instance registry.");
-		}
-	}
-
 	private object LoadInstance(AssetDatabaseEntry asset)
 	{
 		var absoluteAssetPath = GetAbsolutePath(asset.RelativeAssetPath);
@@ -111,7 +110,11 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 
 	private string GetAbsolutePath(string relativePath)
 	{
-		EnsureProjectLoaded();
+		if (string.IsNullOrWhiteSpace(_projectRootPath))
+		{
+			throw new InvalidOperationException("No project is currently loaded in the asset instance registry.");
+		}
+
 		if (string.IsNullOrWhiteSpace(relativePath))
 		{
 			throw new ArgumentException("Relative path cannot be null or empty.", nameof(relativePath));

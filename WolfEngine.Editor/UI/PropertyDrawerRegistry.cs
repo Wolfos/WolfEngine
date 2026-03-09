@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.UI;
@@ -21,10 +22,22 @@ public interface IPropertyDrawerRegistry
 
 public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 {
+	private readonly IEditorProjectService _projectService;
+
+	public PropertyDrawerRegistry(IEditorProjectService projectService)
+	{
+		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+	}
+
 	public PropertyDrawerResult Draw(PropertyDrawerContext context)
 	{
 		var valueType = context.ValueType;
 		var value = context.Value;
+
+		if (TryDrawAssetLink(context, out var assetLinkResult))
+		{
+			return assetLinkResult;
+		}
 
 		if (valueType == typeof(string))
 		{
@@ -123,6 +136,71 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		return new PropertyDrawerResult(false, false, value);
 	}
 
+	private bool TryDrawAssetLink(PropertyDrawerContext context, out PropertyDrawerResult result)
+	{
+		var valueType = context.ValueType;
+		if (valueType.IsGenericType == false || valueType.GetGenericTypeDefinition() != typeof(AssetLink<>))
+		{
+			result = default;
+			return false;
+		}
+
+		var assetType = valueType.GetGenericArguments()[0];
+		if (typeof(IDataAsset).IsAssignableFrom(assetType) == false)
+		{
+			result = new PropertyDrawerResult(false, false, context.Value);
+			return true;
+		}
+
+		var currentId = GetAssetLinkId(valueType, context.Value);
+		var currentTypeName = assetType.AssemblyQualifiedName ?? string.Empty;
+		var candidates = _projectService.HasOpenProject
+			? _projectService.CurrentAssetDatabase.Assets
+				.Where(asset => asset.Type == AssetType.DataAsset &&
+				                string.Equals(asset.DataAssetSummary?.DataAssetType, currentTypeName, StringComparison.Ordinal))
+				.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+				.ToList()
+			: [];
+
+		var nextId = currentId;
+		var changed = false;
+		EditorUIUtility.Combo(context.Label, GetAssetLinkPreviewLabel(currentId, currentTypeName), () =>
+		{
+			var noneSelected = currentId == Guid.Empty;
+			if (ImGui.Selectable("None", noneSelected))
+			{
+				nextId = Guid.Empty;
+				changed = currentId != Guid.Empty;
+			}
+
+			if (noneSelected)
+			{
+				ImGui.SetItemDefaultFocus();
+			}
+
+			for (var i = 0; i < candidates.Count; i++)
+			{
+				var candidate = candidates[i];
+				var isSelected = candidate.Id == currentId;
+				if (ImGui.Selectable(candidate.Name, isSelected))
+				{
+					nextId = candidate.Id;
+					changed = candidate.Id != currentId;
+				}
+
+				if (isSelected)
+				{
+					ImGui.SetItemDefaultFocus();
+				}
+			}
+		});
+
+		result = changed
+			? new PropertyDrawerResult(true, true, CreateAssetLinkValue(valueType, nextId))
+			: new PropertyDrawerResult(true, false, context.Value);
+		return true;
+	}
+
 	private static PropertyDrawerResult DrawEnum(string label, Type enumType, object? value)
 	{
 		var changed = false;
@@ -215,5 +293,53 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 
 		numericValue = null;
 		return false;
+	}
+
+	private string GetAssetLinkPreviewLabel(Guid assetId, string expectedTypeName)
+	{
+		if (assetId == Guid.Empty)
+		{
+			return "None";
+		}
+
+		if (_projectService.HasOpenProject == false)
+		{
+			return "Missing";
+		}
+
+		if (_projectService.TryGetAsset(assetId, out var asset) == false)
+		{
+			return "Missing";
+		}
+
+		if (asset.Type != AssetType.DataAsset ||
+		    string.Equals(asset.DataAssetSummary?.DataAssetType, expectedTypeName, StringComparison.Ordinal) == false)
+		{
+			return "Invalid";
+		}
+
+		return asset.Name;
+	}
+
+	private static Guid GetAssetLinkId(Type valueType, object? value)
+	{
+		if (value is null)
+		{
+			return Guid.Empty;
+		}
+
+		var idField = valueType.GetField(nameof(AssetLink<IDataAsset>.Id))
+			?? throw new InvalidOperationException($"Asset link type '{valueType.FullName}' is missing its Id field.");
+		return idField.GetValue(value) is Guid id ? id : Guid.Empty;
+	}
+
+	private static object CreateAssetLinkValue(Type valueType, Guid assetId)
+	{
+		var boxedValue = Activator.CreateInstance(valueType)
+			?? throw new InvalidOperationException($"Failed to create asset link value for '{valueType.FullName}'.");
+		var idField = valueType.GetField(nameof(AssetLink<IDataAsset>.Id))
+			?? throw new InvalidOperationException($"Asset link type '{valueType.FullName}' is missing its Id field.");
+		idField.SetValue(boxedValue, assetId);
+		return boxedValue;
 	}
 }

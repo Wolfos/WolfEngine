@@ -39,11 +39,21 @@ public sealed class AssetDatabase
 		_instanceRegistry = null;
 	}
 
-	public static T GetInstance<T>(Guid id)
+	public static T? GetInstance<T>(Guid id)
 	{
+		if (id == Guid.Empty)
+		{
+			return default;
+		}
+
 		var instanceRegistry = _instanceRegistry
 			?? throw new InvalidOperationException("No asset instance registry has been configured.");
 		var instance = instanceRegistry.GetInstance(id, typeof(T));
+		if (instance is null)
+		{
+			return default;
+		}
+
 		if (instance is T typedInstance)
 		{
 			return typedInstance;

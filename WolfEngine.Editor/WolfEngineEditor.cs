@@ -7,6 +7,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor;
 
@@ -158,7 +159,18 @@ public class WolfEngineEditor
 
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		_cameraContext.Publish(camera, cameraWorldTransform);
-		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, _renderWorlds);
+		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, GetConfig(), _renderWorlds);
+	}
+
+	private RenderConfig GetConfig()
+	{
+		RenderConfig config = null;
+		foreach (var entry in _gameWorld.View<WorldSettings>())
+		{
+			config = entry.First.RenderConfigAsset.Asset;
+		}
+
+		return config ?? new RenderConfig();
 	}
 
 	private static Entity CreateEditorCamera(World world)
