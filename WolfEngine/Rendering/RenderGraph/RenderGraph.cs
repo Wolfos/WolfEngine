@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
@@ -30,6 +31,7 @@ public sealed class RenderGraph
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
+	private readonly GpuDrawDatabase _gpuDrawDatabase;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
@@ -39,8 +41,10 @@ public sealed class RenderGraph
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
 
-	private readonly ConcurrentQueue<Material> _ensureMaterialQueue = new();
-	private readonly ConcurrentQueue<Texture> _ensureTextureQueue = new();
+	private readonly object _resourceSync = new();
+	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
+	private readonly HashSet<Texture> _pendingTextures = new(new ReferenceComparer<Texture>());
+	private readonly HashSet<Material> _trackedMaterials = new(new ReferenceComparer<Material>());
 	private readonly ConcurrentQueue<Mesh> _ensureMeshQueue = new();
 
 	public RenderGraph(
@@ -53,6 +57,7 @@ public sealed class RenderGraph
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
+		GpuDrawDatabase gpuDrawDatabase,
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
@@ -75,6 +80,7 @@ public sealed class RenderGraph
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
+		_gpuDrawDatabase = gpuDrawDatabase ?? throw new ArgumentNullException(nameof(gpuDrawDatabase));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
@@ -214,19 +220,18 @@ public sealed class RenderGraph
 
 		using (FrameProfiler.Instance.Measure("Upload resources"))
 		{
-			while (_ensureTextureQueue.TryDequeue(out var texture))
+			var changedTextures = new List<Texture>();
+			ProcessPendingTextures(changedTextures);
+			if (changedTextures.Count > 0)
 			{
-				EnsureTextureResource(texture);
+				MarkDependentMaterialsPending(changedTextures);
 			}
 
-			while (_ensureMaterialQueue.TryDequeue(out var material))
+			var changedMaterials = new List<Material>();
+			ProcessPendingMaterials(changedMaterials);
+			for (var i = 0; i < changedMaterials.Count; i++)
 			{
-				if (material is null || material.Resources is not null)
-				{
-					continue;
-				}
-
-				material.Resources = _renderer.CreateMaterialResources(material);
+				_gpuDrawDatabase.NotifyMaterialChanged(changedMaterials[i]);
 			}
 
 			while (_ensureMeshQueue.TryDequeue(out var mesh))
@@ -335,7 +340,21 @@ public sealed class RenderGraph
 			throw new ArgumentNullException(nameof(material));
 		}
 
-		_ensureMaterialQueue.Enqueue(material);
+		material.MarkResourceRequested();
+		lock (_resourceSync)
+		{
+			_trackedMaterials.Add(material);
+			_pendingMaterials.Add(material);
+		}
+
+		var textures = material.GetTrackedTextures();
+		for (var i = 0; i < textures.Length; i++)
+		{
+			if (textures[i] is not null)
+			{
+				EnsureTextureResources(textures[i]);
+			}
+		}
 	}
 
 	public void RefreshMaterialResources(Material material)
@@ -345,8 +364,8 @@ public sealed class RenderGraph
 			throw new ArgumentNullException(nameof(material));
 		}
 
-		material.Resources = null!;
-		_ensureMaterialQueue.Enqueue(material);
+		material.MarkGpuResourcesDirty();
+		EnsureMaterialResources(material);
 	}
 
 	public void EnsureTextureResources(Texture texture)
@@ -356,7 +375,11 @@ public sealed class RenderGraph
 			throw new ArgumentNullException(nameof(texture));
 		}
 
-		_ensureTextureQueue.Enqueue(texture);
+		texture.MarkResourceRequested();
+		lock (_resourceSync)
+		{
+			_pendingTextures.Add(texture);
+		}
 	}
 
 	public void EnsureMeshResources(Mesh mesh)
@@ -448,13 +471,132 @@ public sealed class RenderGraph
 			$"deferredBacklog={snapshot.DeferredReleaseBacklog} icbStarvationStalls={snapshot.IcbSlotStarvationStalls}");
 	}
 
-	private void EnsureTextureResource(Texture? texture)
+	private void ProcessPendingTextures(List<Texture> changedTextures)
 	{
-		if (texture is null || texture.Resources is not null)
-		{
-			return;
-		}
+		ArgumentNullException.ThrowIfNull(changedTextures);
 
-		texture.Resources = _renderer.CreateTextureResources(texture);
+		var pendingTextures = DrainPendingTextures();
+		for (var i = 0; i < pendingTextures.Count; i++)
+		{
+			var texture = pendingTextures[i];
+			texture.ClearResourceRequestPending();
+			if (texture.HasGpuResources && texture.Resources is not null)
+			{
+				continue;
+			}
+
+			var resources = _renderer.CreateTextureResources(texture);
+			texture.MarkGpuResourcesCreated(resources);
+			changedTextures.Add(texture);
+		}
+	}
+
+	private void MarkDependentMaterialsPending(IReadOnlyList<Texture> changedTextures)
+	{
+		var trackedMaterials = DrainTrackedMaterialsSnapshot();
+		for (var i = 0; i < trackedMaterials.Count; i++)
+		{
+			var material = trackedMaterials[i];
+			for (var textureIndex = 0; textureIndex < changedTextures.Count; textureIndex++)
+			{
+				if (material.DependsOnTexture(changedTextures[textureIndex]) == false)
+				{
+					continue;
+				}
+
+				material.MarkGpuResourcesDirty();
+				material.MarkResourceRequested();
+				lock (_resourceSync)
+				{
+					_pendingMaterials.Add(material);
+				}
+				break;
+			}
+		}
+	}
+
+	private void ProcessPendingMaterials(List<Material> changedMaterials)
+	{
+		ArgumentNullException.ThrowIfNull(changedMaterials);
+
+		var pendingMaterials = DrainPendingMaterials();
+		for (var i = 0; i < pendingMaterials.Count; i++)
+		{
+			var material = pendingMaterials[i];
+			material.ClearResourceRequestPending();
+
+			var textures = material.GetTrackedTextures();
+			for (var textureIndex = 0; textureIndex < textures.Length; textureIndex++)
+			{
+				if (textures[textureIndex] is not null)
+				{
+					EnsureTextureResources(textures[textureIndex]);
+				}
+			}
+
+			if (material.AreRequiredTextureResourcesReady() == false)
+			{
+				material.MarkResourceRequested();
+				lock (_resourceSync)
+				{
+					_pendingMaterials.Add(material);
+				}
+				continue;
+			}
+
+			if (material.NeedsGpuResourceRebuild() == false)
+			{
+				continue;
+			}
+
+			var resources = _renderer.CreateMaterialResources(material);
+			material.MarkGpuResourcesBuilt(resources);
+			changedMaterials.Add(material);
+		}
+	}
+
+	private List<Texture> DrainPendingTextures()
+	{
+		lock (_resourceSync)
+		{
+			if (_pendingTextures.Count == 0)
+			{
+				return new List<Texture>();
+			}
+
+			var result = _pendingTextures.ToList();
+			_pendingTextures.Clear();
+			return result;
+		}
+	}
+
+	private List<Material> DrainPendingMaterials()
+	{
+		lock (_resourceSync)
+		{
+			if (_pendingMaterials.Count == 0)
+			{
+				return new List<Material>();
+			}
+
+			var result = _pendingMaterials.ToList();
+			_pendingMaterials.Clear();
+			return result;
+		}
+	}
+
+	private List<Material> DrainTrackedMaterialsSnapshot()
+	{
+		lock (_resourceSync)
+		{
+			return _trackedMaterials.ToList();
+		}
+	}
+
+	private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class
+	{
+		public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+		public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
 	}
 }

@@ -233,6 +233,7 @@ public sealed class GpuDrawPass
 			var bucketIndex = 0;
 			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
 			var alphaCutoff = 0.0f;
+			var materialReady = material?.HasGpuResources ?? false;
 
 			var materialResources = material?.Resources;
 			if (material is not null)
@@ -245,7 +246,8 @@ public sealed class GpuDrawPass
 						break;
 				}
 
-				drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+				var desiredFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+				drawFlags = materialReady ? desiredFlags : 0u;
 				_materialDrawFlags[update.MaterialHandle.Value] = drawFlags;
 			}
 			else if (update.Type != GpuDrawUpdateType.Remove &&

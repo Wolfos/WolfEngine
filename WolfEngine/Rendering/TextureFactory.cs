@@ -35,24 +35,24 @@ public sealed class TextureFactory : ITextureFactory
 			throw new ArgumentException("Imported texture must contain pixel data.", nameof(importedTexture));
 		}
 
-		return _cache.GetOrAdd(importedTexture.NameOrPath, _ =>
+		var texture = _cache.GetOrAdd(importedTexture.NameOrPath, _ =>
 		{
-			var texture = new Texture(
+			return new Texture(
 				importedTexture.NameOrPath,
 				importedTexture.Width,
 				importedTexture.Height,
 				importedTexture.IsSrgb,
 				importedTexture.PixelData);
-
-			_renderGraph.EnsureTextureResources(texture);
-			return texture;
 		});
+		_renderGraph.EnsureTextureResources(texture);
+		return texture;
 	}
 
 	public Texture GetWhiteTexture()
 	{
 		if (_whiteTexture is not null)
 		{
+			_renderGraph.EnsureTextureResources(_whiteTexture);
 			return _whiteTexture;
 		}
 
@@ -67,6 +67,7 @@ public sealed class TextureFactory : ITextureFactory
 	{
 		if (_blackTexture is not null)
 		{
+			_renderGraph.EnsureTextureResources(_blackTexture);
 			return _blackTexture;
 		}
 
@@ -81,6 +82,7 @@ public sealed class TextureFactory : ITextureFactory
 	{
 		if (_neutralNormalTexture is not null)
 		{
+			_renderGraph.EnsureTextureResources(_neutralNormalTexture);
 			return _neutralNormalTexture;
 		}
 

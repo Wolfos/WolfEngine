@@ -3,7 +3,9 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using ImGuiNET;
+using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -27,15 +29,17 @@ public class ComponentsWindow: IComponentEditor
 
     private readonly IIconManager _icons;
     private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+    private readonly RenderGraph _renderGraph;
     private readonly List<Type> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
-    public ComponentsWindow(IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry)
+    public ComponentsWindow(IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry, RenderGraph renderGraph)
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
+        _renderGraph = renderGraph;
     }
 
     public void Draw(EditorScene scene, Entity entity, Type componentType)
@@ -46,7 +50,7 @@ public class ComponentsWindow: IComponentEditor
         if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
         
-        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry });
+        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry, _renderGraph });
     }
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
@@ -92,7 +96,7 @@ public class ComponentsWindow: IComponentEditor
         ImGui.EndPopup();
     }
 
-    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry)
+    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry, RenderGraph renderGraph)
         where T : struct, IEntityComponent
     {
         var world = scene.World;
@@ -153,6 +157,23 @@ public class ComponentsWindow: IComponentEditor
             if (EditorUIUtility.InputVector3("LocalScale", ref scale))
             {
                 world.SetLocalScale(entity, scale);
+            }
+
+            ImGui.Separator();
+            ImGui.PopID();
+            return;
+        }
+
+        if (typeof(T) == typeof(MeshRenderer))
+        {
+            ref var meshRenderer = ref Unsafe.As<T, MeshRenderer>(ref component);
+            var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
+                nameof(MeshRenderer.MaterialAsset),
+                typeof(AssetLink<Material>),
+                meshRenderer.MaterialAsset));
+            if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetLink<Material> materialAsset)
+            {
+                meshRenderer.AssignMaterialAsset(materialAsset, renderGraph);
             }
 
             ImGui.Separator();

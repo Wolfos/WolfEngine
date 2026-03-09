@@ -177,7 +177,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
     GpuDrawCommand drawCommand;
     drawCommand.instanceHandle = update.instanceHandle;
     drawCommand.drawHandle = update.drawHandle;
-    drawCommand.flags = update.drawFlags | DRAW_FLAG_ACTIVE;
+    drawCommand.flags = update.drawFlags;
     drawCommand.pad0 = 0;
     g_DrawCommands[drawIndex] = drawCommand;
 }

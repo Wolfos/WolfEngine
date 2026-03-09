@@ -13,7 +13,6 @@ public sealed class MaterialAssetEditor
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private readonly ITextureFactory _textureFactory;
 	private readonly RenderGraph _renderGraph;
-	private readonly GpuDrawDatabase _gpuDrawDatabase;
 	private MaterialAsset? _loadedMaterialAsset;
 	private Guid? _loadedMaterialAssetId;
 	private MaterialAssetStateFile? _loadedMaterialState;
@@ -25,8 +24,7 @@ public sealed class MaterialAssetEditor
 		IMaterialTypeRegistry materialTypeRegistry,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
 		ITextureFactory textureFactory,
-		RenderGraph renderGraph,
-		GpuDrawDatabase gpuDrawDatabase)
+		RenderGraph renderGraph)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
@@ -34,7 +32,6 @@ public sealed class MaterialAssetEditor
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
 		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
-		_gpuDrawDatabase = gpuDrawDatabase ?? throw new ArgumentNullException(nameof(gpuDrawDatabase));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -291,7 +288,6 @@ public sealed class MaterialAssetEditor
 			_ => 0.5f
 		};
 		_renderGraph.RefreshMaterialResources(runtimeMaterial);
-		_gpuDrawDatabase.NotifyMaterialChanged(runtimeMaterial);
 	}
 
 	private static Texture? ResolveTexture(AssetLink<Texture> link)

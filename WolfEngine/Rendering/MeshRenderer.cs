@@ -1,5 +1,6 @@
 ﻿using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -9,6 +10,31 @@ public struct MeshRenderer: IEntityComponent
 	public Material Material;
 	public Mesh Mesh;
 
+	public void AssignMaterialAsset(AssetLink<Material> materialAsset, RenderGraph renderGraph)
+	{
+		MaterialAsset = materialAsset;
+		if (materialAsset.IsValid == false)
+		{
+			return;
+		}
+
+		Material = materialAsset.Asset;
+		if (Material is not null)
+		{
+			renderGraph.EnsureMaterialResources(Material);
+		}
+	}
+
+	public void AssignRuntimeMaterial(Material material, RenderGraph renderGraph)
+	{
+		MaterialAsset = default;
+		Material = material;
+		if (material is not null)
+		{
+			renderGraph.EnsureMaterialResources(material);
+		}
+	}
+
 	public bool TryValidate()
 	{
 		if (Mesh == null)
@@ -16,13 +42,9 @@ public struct MeshRenderer: IEntityComponent
 			return false; // TODO: Try link mesh asset
 		}
 
-		if ((Material == null || Material != MaterialAsset.Asset) && MaterialAsset.IsValid)
-		{
-			Material = MaterialAsset.Asset;
-		}
-
 		return IsValid;
 	}
 
 	public bool IsValid => Material != null && Mesh != null;
+	
 }

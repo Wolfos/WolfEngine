@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 using WolfEngine.Importing;
@@ -17,6 +18,7 @@ public sealed class TextureAssetEditor
 	private readonly IImageLoader _imageLoader;
 	private readonly ImportImageLoader _importImageLoader;
 	private readonly ITextureAssetStore _textureAssetStore;
+	private readonly RenderGraph _renderGraph;
 	private Guid? _loadedTextureAssetId;
 	private TextureAsset? _loadedTextureAsset;
 	private TextureAssetStateFile? _loadedTextureState;
@@ -25,12 +27,14 @@ public sealed class TextureAssetEditor
 		IEditorProjectService projectService,
 		IImageLoader imageLoader,
 		ImportImageLoader importImageLoader,
-		ITextureAssetStore textureAssetStore)
+		ITextureAssetStore textureAssetStore,
+		RenderGraph renderGraph)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		_importImageLoader = importImageLoader ?? throw new ArgumentNullException(nameof(importImageLoader));
 		_textureAssetStore = textureAssetStore ?? throw new ArgumentNullException(nameof(textureAssetStore));
+		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -152,6 +156,7 @@ public sealed class TextureAssetEditor
 		TextureRawImageSerializer.Write(
 			_projectService.GetAbsolutePath(_textureAssetStore.GetRuntimeArtifactRelativePath(asset.Id)),
 			importedTexture);
+		SynchronizeRuntimeTexture(asset.Id, importedTexture);
 
 		_loadedTextureAsset = textureAsset;
 		_loadedTextureState = textureState;
@@ -180,6 +185,22 @@ public sealed class TextureAssetEditor
 		}
 
 		_projectService.SaveAssetDatabase(updatedDatabase);
+	}
+
+	private void SynchronizeRuntimeTexture(Guid assetId, ImportedTexture importedTexture)
+	{
+		var runtimeTexture = AssetDatabase.GetInstance<Texture>(assetId);
+		if (runtimeTexture is null)
+		{
+			return;
+		}
+
+		runtimeTexture.ApplyImportedTexture(
+			importedTexture.Width,
+			importedTexture.Height,
+			importedTexture.IsSrgb,
+			importedTexture.PixelData ?? throw new InvalidOperationException("Imported texture pixel data is missing."));
+		_renderGraph.EnsureTextureResources(runtimeTexture);
 	}
 
 	private static string FormatResolutionLabel(int resolution)
