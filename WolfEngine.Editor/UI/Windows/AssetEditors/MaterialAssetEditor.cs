@@ -11,8 +11,8 @@ public sealed class MaterialAssetEditor
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
-	private MaterialMetaFile? _loadedMaterialMeta;
-	private Guid? _loadedMaterialMetaAssetId;
+	private MaterialAssetStateFile? _loadedMaterialState;
+	private Guid? _loadedMaterialStateAssetId;
 
 	public MaterialAssetEditor(
 		IEditorProjectService projectService,
@@ -29,8 +29,8 @@ public sealed class MaterialAssetEditor
 	public void Draw(AssetDatabaseEntry asset)
 	{
 		var materialAsset = EnsureMaterialAssetLoaded(asset);
-		var materialMeta = EnsureMaterialMetaLoaded(asset);
-		if (materialAsset is null || materialMeta is null)
+		var materialState = EnsureMaterialStateLoaded(asset);
+		if (materialAsset is null || materialState is null)
 		{
 			ImGui.TextUnformatted("Failed to load material asset.");
 			return;
@@ -46,8 +46,8 @@ public sealed class MaterialAssetEditor
 				if (ImGui.Selectable(descriptor.DisplayName, isSelected))
 				{
 					materialAsset.MaterialType = descriptor.Type;
-					materialMeta.MaterialType = descriptor.Type;
-					SaveMaterialAsset(asset, materialAsset, materialMeta);
+					materialState.Summary.MaterialType = descriptor.Type;
+					SaveMaterialAsset(asset, materialAsset, materialState);
 				}
 
 				if (isSelected)
@@ -59,16 +59,16 @@ public sealed class MaterialAssetEditor
 
 		var properties = materialAsset.GetActiveProperties();
 		var propertyDefinitions = _materialTypeRegistry.GetPropertiesForMaterialType(materialAsset.MaterialType);
-		DrawBaseColorEditor(asset, materialAsset, materialMeta, properties);
+		DrawBaseColorEditor(asset, materialAsset, materialState, properties);
 		DrawFloatEditor("Metallic", properties.MetallicFactor, value =>
 		{
 			properties.MetallicFactor = value;
-			SaveMaterialAsset(asset, materialAsset, materialMeta);
+			SaveMaterialAsset(asset, materialAsset, materialState);
 		});
 		DrawFloatEditor("Roughness", properties.RoughnessFactor, value =>
 		{
 			properties.RoughnessFactor = value;
-			SaveMaterialAsset(asset, materialAsset, materialMeta);
+			SaveMaterialAsset(asset, materialAsset, materialState);
 		});
 
 		if (HasProperty(propertyDefinitions, MaterialPropertyKind.AlphaCutoff))
@@ -90,24 +90,24 @@ public sealed class MaterialAssetEditor
 					alphaBlend.AlphaCutoff = value;
 				}
 
-				SaveMaterialAsset(asset, materialAsset, materialMeta);
+				SaveMaterialAsset(asset, materialAsset, materialState);
 			});
 		}
 
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
-		DrawTextureAssignmentCombo(asset, materialAsset, materialMeta, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialMeta, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialMeta, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialMeta, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialMeta, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion);
 	}
 
-	private MaterialAssetFile? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
+	private MaterialAsset? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
 	{
 		try
 		{
-			return AssetDatabase.GetInstance<MaterialAssetFile>(asset.Id);
+			return _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
 		}
 		catch
 		{
@@ -115,33 +115,34 @@ public sealed class MaterialAssetEditor
 		}
 	}
 
-	private MaterialMetaFile? EnsureMaterialMetaLoaded(AssetDatabaseEntry asset)
+	private MaterialAssetStateFile? EnsureMaterialStateLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedMaterialMetaAssetId == asset.Id && _loadedMaterialMeta is not null)
+		if (_loadedMaterialStateAssetId == asset.Id && _loadedMaterialState is not null)
 		{
-			return _loadedMaterialMeta;
+			return _loadedMaterialState;
 		}
 
 		try
 		{
-			_loadedMaterialMetaAssetId = asset.Id;
-			_loadedMaterialMeta = _materialAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
-			return _loadedMaterialMeta;
+			_loadedMaterialStateAssetId = asset.Id;
+			_loadedMaterialState = _materialAssetStore.LoadState(_projectService.GetAbsolutePath(asset.GetEffectiveRelativeStatePath()));
+			return _loadedMaterialState;
 		}
 		catch
 		{
-			_loadedMaterialMetaAssetId = asset.Id;
-			_loadedMaterialMeta = null;
+			_loadedMaterialStateAssetId = asset.Id;
+			_loadedMaterialState = null;
 			return null;
 		}
 	}
 
-	private void SaveMaterialAsset(AssetDatabaseEntry asset, MaterialAssetFile materialAsset, MaterialMetaFile materialMeta)
+	private void SaveMaterialAsset(AssetDatabaseEntry asset, MaterialAsset materialAsset, MaterialAssetStateFile materialState)
 	{
 		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
-		_materialAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath), materialMeta);
-		_loadedMaterialMeta = materialMeta;
-		_loadedMaterialMetaAssetId = asset.Id;
+		var relativeStatePath = _materialAssetStore.GetStateRelativePath(asset.Id);
+		_materialAssetStore.SaveState(_projectService.GetAbsolutePath(relativeStatePath), materialState);
+		_loadedMaterialState = materialState;
+		_loadedMaterialStateAssetId = asset.Id;
 
 		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		for (var i = 0; i < updatedDatabase.Assets.Count; i++)
@@ -151,6 +152,8 @@ public sealed class MaterialAssetEditor
 				continue;
 			}
 
+			updatedDatabase.Assets[i].RelativeStatePath = relativeStatePath;
+			updatedDatabase.Assets[i].RelativeMetaPath = relativeStatePath;
 			updatedDatabase.Assets[i].MaterialSummary ??= new MaterialAssetSummary();
 			updatedDatabase.Assets[i].MaterialSummary!.MaterialType = materialAsset.MaterialType;
 			break;
@@ -161,8 +164,8 @@ public sealed class MaterialAssetEditor
 
 	private void DrawBaseColorEditor(
 		AssetDatabaseEntry asset,
-		MaterialAssetFile materialAsset,
-		MaterialMetaFile materialMeta,
+		MaterialAsset materialAsset,
+		MaterialAssetStateFile materialState,
 		MaterialSurfaceProperties properties)
 	{
 		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
@@ -172,7 +175,7 @@ public sealed class MaterialAssetEditor
 		if (drawResult.Changed && drawResult.Value is ColorRGBA color)
 		{
 			properties.BaseColor = color;
-			SaveMaterialAsset(asset, materialAsset, materialMeta);
+			SaveMaterialAsset(asset, materialAsset, materialState);
 		}
 	}
 
@@ -187,29 +190,29 @@ public sealed class MaterialAssetEditor
 
 	private void DrawTextureAssignmentCombo(
 		AssetDatabaseEntry materialEntry,
-		MaterialAssetFile materialAsset,
-		MaterialMetaFile materialMeta,
+		MaterialAsset materialAsset,
+		MaterialAssetStateFile materialState,
 		MaterialTextureAssignments assignments,
 		string propertyName,
 		string label,
-		Guid? currentValue)
+		AssetLink<Texture> currentValue)
 	{
 		var textures = _projectService.CurrentAssetDatabase.Assets
 			.Where(asset => asset.Type == AssetType.Texture2D)
 			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
 			.ToList();
 
-		var previewLabel = currentValue.HasValue && _projectService.TryGetAsset(currentValue.Value, out var selectedTexture)
+		var previewLabel = currentValue.Id != Guid.Empty && _projectService.TryGetAsset(currentValue.Id, out var selectedTexture)
 			? selectedTexture.Name
 			: "None";
 
 		EditorUIUtility.Combo(label, previewLabel, () =>
 		{
-			var noneSelected = currentValue.HasValue == false;
+			var noneSelected = currentValue.Id == Guid.Empty;
 			if (ImGui.Selectable("None", noneSelected))
 			{
-				SetTextureAssignment(assignments, propertyName, null);
-				SaveMaterialAsset(materialEntry, materialAsset, materialMeta);
+				SetTextureAssignment(assignments, propertyName, Guid.Empty);
+				SaveMaterialAsset(materialEntry, materialAsset, materialState);
 			}
 			if (noneSelected)
 			{
@@ -219,11 +222,11 @@ public sealed class MaterialAssetEditor
 			for (var i = 0; i < textures.Count; i++)
 			{
 				var textureAsset = textures[i];
-				var isSelected = currentValue == textureAsset.Id;
+				var isSelected = currentValue.Id == textureAsset.Id;
 				if (ImGui.Selectable(textureAsset.Name, isSelected))
 				{
 					SetTextureAssignment(assignments, propertyName, textureAsset.Id);
-					SaveMaterialAsset(materialEntry, materialAsset, materialMeta);
+					SaveMaterialAsset(materialEntry, materialAsset, materialState);
 				}
 
 				if (isSelected)
@@ -234,24 +237,25 @@ public sealed class MaterialAssetEditor
 		});
 	}
 
-	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid? value)
+	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid value)
 	{
+		var link = new AssetLink<Texture> { Id = value };
 		switch (propertyName)
 		{
 			case nameof(MaterialTextureAssignments.Albedo):
-				assignments.Albedo = value;
+				assignments.Albedo = link;
 				break;
 			case nameof(MaterialTextureAssignments.MetallicRoughness):
-				assignments.MetallicRoughness = value;
+				assignments.MetallicRoughness = link;
 				break;
 			case nameof(MaterialTextureAssignments.Normal):
-				assignments.Normal = value;
+				assignments.Normal = link;
 				break;
 			case nameof(MaterialTextureAssignments.Emissive):
-				assignments.Emissive = value;
+				assignments.Emissive = link;
 				break;
 			case nameof(MaterialTextureAssignments.Occlusion):
-				assignments.Occlusion = value;
+				assignments.Occlusion = link;
 				break;
 			default:
 				throw new InvalidOperationException($"Unknown material texture assignment '{propertyName}'.");

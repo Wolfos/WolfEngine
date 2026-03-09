@@ -27,13 +27,13 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 
 		var assetId = Guid.NewGuid();
 		var assetName = GetNextMaterialName();
-		var relativeAssetPath = $"Assets/{assetName}{MaterialAssetFile.FileExtension}";
-		var relativeMetaPath = relativeAssetPath + ".meta.json";
+		var relativeAssetPath = $"Assets/{assetName}{MaterialAsset.FileExtension}";
+		var relativeStatePath = _materialAssetStore.GetStateRelativePath(assetId);
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
-		var absoluteMetaPath = _projectService.GetAbsolutePath(relativeMetaPath);
+		var absoluteStatePath = _projectService.GetAbsolutePath(relativeStatePath);
 
 		var materialAsset = _materialAssetStore.CreateDefault(MaterialAssetType.Opaque);
-		var materialMeta = _materialAssetStore.CreateMeta(assetId, MaterialAssetType.Opaque);
+		var materialState = _materialAssetStore.CreateState(assetId, MaterialAssetType.Opaque);
 		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		updatedDatabase.Assets.Add(new AssetDatabaseEntry
 		{
@@ -41,7 +41,8 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 			Type = AssetType.Material,
 			Name = assetName,
 			RelativeAssetPath = relativeAssetPath,
-			RelativeMetaPath = relativeMetaPath,
+			RelativeStatePath = relativeStatePath,
+			RelativeMetaPath = relativeStatePath,
 			MaterialSummary = new MaterialAssetSummary
 			{
 				MaterialType = MaterialAssetType.Opaque
@@ -53,8 +54,8 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 		{
 			_materialAssetStore.SaveAsset(absoluteAssetPath, materialAsset);
 			createdFiles.Add(absoluteAssetPath);
-			_materialAssetStore.SaveMeta(absoluteMetaPath, materialMeta);
-			createdFiles.Add(absoluteMetaPath);
+			_materialAssetStore.SaveState(absoluteStatePath, materialState);
+			createdFiles.Add(absoluteStatePath);
 			_projectService.SaveAssetDatabase(updatedDatabase);
 			return EditorAssetCreationResult.Succeeded(assetId);
 		}
@@ -72,7 +73,7 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 		while (true)
 		{
 			var candidateName = index == 0 ? baseName : $"{baseName} {index}";
-			var relativeAssetPath = $"Assets/{candidateName}{MaterialAssetFile.FileExtension}";
+			var relativeAssetPath = $"Assets/{candidateName}{MaterialAsset.FileExtension}";
 			var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 			if (File.Exists(absoluteAssetPath) == false)
 			{

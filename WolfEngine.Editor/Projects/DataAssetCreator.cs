@@ -43,6 +43,7 @@ public sealed class DataAssetCreator : IDataAssetCreator
 			Type = AssetType.DataAsset,
 			Name = assetName,
 			RelativeAssetPath = relativeAssetPath,
+			RelativeStatePath = relativeMetaPath,
 			RelativeMetaPath = relativeMetaPath,
 			DataAssetSummary = new DataAssetSummary
 			{

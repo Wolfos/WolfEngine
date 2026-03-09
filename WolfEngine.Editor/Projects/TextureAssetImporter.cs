@@ -34,18 +34,18 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 	private readonly IFileDialogService _fileDialogService;
 	private readonly IEditorProjectService _projectService;
 	private readonly ImportImageLoader _imageLoader;
-	private readonly ITextureAssetMetaStore _textureAssetMetaStore;
+	private readonly ITextureAssetStore _textureAssetStore;
 
 	public TextureAssetImporter(
 		IFileDialogService fileDialogService,
 		IEditorProjectService projectService,
 		ImportImageLoader imageLoader,
-		ITextureAssetMetaStore textureAssetMetaStore)
+		ITextureAssetStore textureAssetStore)
 	{
 		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
-		_textureAssetMetaStore = textureAssetMetaStore ?? throw new ArgumentNullException(nameof(textureAssetMetaStore));
+		_textureAssetStore = textureAssetStore ?? throw new ArgumentNullException(nameof(textureAssetStore));
 	}
 
 	public TextureImportOperationResult ImportTexture()
@@ -78,59 +78,49 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 	private TextureImportOperationResult ImportTextureFromPath(string sourcePath)
 	{
 		var importedTexture = _imageLoader.Load(sourcePath, TextureSemantic.BaseColor);
-		const bool isSrgb = true;
-
 		var fileName = Path.GetFileName(sourcePath);
-		var destinationAssetPath = Path.Combine(_projectService.AssetsPath!, fileName);
-		if (File.Exists(destinationAssetPath))
-		{
-			return TextureImportOperationResult.Failed(
-				$"An asset named '{fileName}' already exists in the project Assets folder.");
-		}
-
 		var assetId = Guid.NewGuid();
-		var relativeAssetPath = NormalizeRelativePath(Path.Combine("Assets", fileName));
-		var relativeMetaPath = NormalizeRelativePath(relativeAssetPath + ".meta.json");
-		var relativeRawImagePath = NormalizeRelativePath(Path.Combine("Database", $"{assetId:D}.bin"));
-		var destinationMetaPath = _projectService.GetAbsolutePath(relativeMetaPath);
-		var destinationRawImagePath = _projectService.GetAbsolutePath(relativeRawImagePath);
+		var sourceExtension = Path.GetExtension(fileName).ToLowerInvariant();
+		var assetName = GetNextTextureName(Path.GetFileNameWithoutExtension(fileName), sourceExtension);
+		var relativeAssetPath = _textureAssetStore.GetAssetRelativePath(assetName);
+		var relativeSourceAssetPath = _textureAssetStore.GetSourceRelativePath(assetName, sourceExtension);
+		var relativeStatePath = _textureAssetStore.GetStateRelativePath(assetId);
+		var relativeRuntimeArtifactPath = _textureAssetStore.GetRuntimeArtifactRelativePath(assetId);
+		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
+		var absoluteSourceAssetPath = _projectService.GetAbsolutePath(relativeSourceAssetPath);
+		var absoluteStatePath = _projectService.GetAbsolutePath(relativeStatePath);
+		var absoluteRuntimeArtifactPath = _projectService.GetAbsolutePath(relativeRuntimeArtifactPath);
 
 		var summary = new TextureAssetSummary
 		{
-			RelativeRawImagePath = relativeRawImagePath,
+			RelativeSourceAssetPath = relativeSourceAssetPath,
+			RelativeRawImagePath = relativeRuntimeArtifactPath,
 			Width = importedTexture.Width,
 			Height = importedTexture.Height,
 			Channels = importedTexture.Channels,
-			IsSrgb = isSrgb,
-			SourceExtension = Path.GetExtension(fileName).ToLowerInvariant()
+			IsSrgb = importedTexture.IsSrgb,
+			SourceExtension = sourceExtension
 		};
 
-		var metaFile = new TextureAssetMetaFile
+		var textureAsset = _textureAssetStore.Create(relativeSourceAssetPath, new TextureImportSettings
 		{
-			AssetId = assetId,
-			SourceFileName = fileName,
-			ImportSettings = new TextureImportSettings
-			{
-				IsSrgb = isSrgb,
-				MaxResolution = 8192
-			},
-			Artifacts = new TextureImportArtifacts
-			{
-				RelativeRawImagePath = relativeRawImagePath
-			},
-			Summary = summary
-		};
+			IsSrgb = importedTexture.IsSrgb,
+			MaxResolution = 8192
+		});
+		var textureState = _textureAssetStore.CreateState(assetId, summary, _textureAssetStore.CreateDefaultRuntimeArtifacts(assetId));
 
 		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
 		updatedDatabase.Assets.Add(new AssetDatabaseEntry
 		{
 			Id = assetId,
 			Type = AssetType.Texture2D,
-			Name = Path.GetFileNameWithoutExtension(fileName),
+			Name = assetName,
 			RelativeAssetPath = relativeAssetPath,
-			RelativeMetaPath = relativeMetaPath,
+			RelativeStatePath = relativeStatePath,
+			RelativeMetaPath = relativeStatePath,
 			TextureSummary = new TextureAssetSummary
 			{
+				RelativeSourceAssetPath = summary.RelativeSourceAssetPath,
 				RelativeRawImagePath = summary.RelativeRawImagePath,
 				Width = summary.Width,
 				Height = summary.Height,
@@ -140,17 +130,20 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 			}
 		});
 
-		var createdFiles = new List<string>(3);
+		var createdFiles = new List<string>(4);
 		try
 		{
-			File.Copy(sourcePath, destinationAssetPath, overwrite: false);
-			createdFiles.Add(destinationAssetPath);
+			File.Copy(sourcePath, absoluteSourceAssetPath, overwrite: false);
+			createdFiles.Add(absoluteSourceAssetPath);
 
-			_textureAssetMetaStore.Save(destinationMetaPath, metaFile);
-			createdFiles.Add(destinationMetaPath);
+			_textureAssetStore.SaveAsset(absoluteAssetPath, textureAsset);
+			createdFiles.Add(absoluteAssetPath);
 
-			TextureRawImageSerializer.Write(destinationRawImagePath, importedTexture);
-			createdFiles.Add(destinationRawImagePath);
+			_textureAssetStore.SaveState(absoluteStatePath, textureState);
+			createdFiles.Add(absoluteStatePath);
+
+			TextureRawImageSerializer.Write(absoluteRuntimeArtifactPath, importedTexture);
+			createdFiles.Add(absoluteRuntimeArtifactPath);
 
 			_projectService.SaveAssetDatabase(updatedDatabase);
 			return TextureImportOperationResult.Succeeded();
@@ -162,9 +155,24 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 		}
 	}
 
-	private static string NormalizeRelativePath(string path)
+	private string GetNextTextureName(string baseName, string sourceExtension)
 	{
-		return path.Replace('\\', '/');
+		baseName = string.IsNullOrWhiteSpace(baseName) ? "New Texture" : baseName.Trim();
+		var index = 0;
+		while (true)
+		{
+			var candidateName = index == 0 ? baseName : $"{baseName} {index}";
+			var relativeAssetPath = _textureAssetStore.GetAssetRelativePath(candidateName);
+			var relativeSourcePath = _textureAssetStore.GetSourceRelativePath(candidateName, sourceExtension);
+			var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
+			var absoluteSourcePath = _projectService.GetAbsolutePath(relativeSourcePath);
+			if (File.Exists(absoluteAssetPath) == false && File.Exists(absoluteSourcePath) == false)
+			{
+				return candidateName;
+			}
+
+			index++;
+		}
 	}
 
 	private static void RollbackCreatedFiles(IEnumerable<string> files)

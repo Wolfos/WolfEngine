@@ -50,13 +50,15 @@ public static class Program
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
-		services.AddSingleton<ITextureAssetMetaStore, TextureAssetMetaStore>();
+		services.AddSingleton<ITextureAssetStore, TextureAssetStore>();
 		services.AddSingleton<IMaterialAssetStore, MaterialAssetStore>();
 		services.AddSingleton<IDataAssetStore, DataAssetStore>();
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
-		services.AddSingleton<IMaterialAssetRuntimeBuilder, MaterialAssetRuntimeBuilder>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
+		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
+		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
+		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();

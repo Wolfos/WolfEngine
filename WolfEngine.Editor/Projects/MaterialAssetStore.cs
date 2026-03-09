@@ -5,19 +5,20 @@ namespace WolfEngine.Editor.Projects;
 
 public interface IMaterialAssetStore
 {
-	MaterialAssetFile CreateDefault(MaterialAssetType materialType = MaterialAssetType.Opaque);
-	MaterialMetaFile CreateMeta(Guid assetId, MaterialAssetType materialType);
-	MaterialAssetFile LoadAsset(string assetFilePath);
-	MaterialMetaFile LoadMeta(string metaFilePath);
-	void SaveAsset(string assetFilePath, MaterialAssetFile assetFile);
-	void SaveMeta(string metaFilePath, MaterialMetaFile metaFile);
+	MaterialAsset CreateDefault(MaterialAssetType materialType = MaterialAssetType.Opaque);
+	MaterialAssetStateFile CreateState(Guid assetId, MaterialAssetType materialType);
+	MaterialAsset LoadAsset(string assetFilePath);
+	MaterialAssetStateFile LoadState(string stateFilePath);
+	void SaveAsset(string assetFilePath, MaterialAsset assetFile);
+	void SaveState(string stateFilePath, MaterialAssetStateFile stateFile);
+	string GetStateRelativePath(Guid assetId);
 }
 
 public sealed class MaterialAssetStore : IMaterialAssetStore
 {
-	public MaterialAssetFile CreateDefault(MaterialAssetType materialType = MaterialAssetType.Opaque)
+	public MaterialAsset CreateDefault(MaterialAssetType materialType = MaterialAssetType.Opaque)
 	{
-		return new MaterialAssetFile
+		return new MaterialAsset
 		{
 			MaterialType = materialType,
 			Opaque = new OpaqueMaterialProperties(),
@@ -26,16 +27,19 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 		};
 	}
 
-	public MaterialMetaFile CreateMeta(Guid assetId, MaterialAssetType materialType)
+	public MaterialAssetStateFile CreateState(Guid assetId, MaterialAssetType materialType)
 	{
-		return new MaterialMetaFile
+		return new MaterialAssetStateFile
 		{
 			AssetId = assetId,
-			MaterialType = materialType
+			Summary = new MaterialAssetSummary
+			{
+				MaterialType = materialType
+			}
 		};
 	}
 
-	public MaterialAssetFile LoadAsset(string assetFilePath)
+	public MaterialAsset LoadAsset(string assetFilePath)
 	{
 		if (string.IsNullOrWhiteSpace(assetFilePath))
 		{
@@ -43,40 +47,45 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 		}
 
 		var json = File.ReadAllText(assetFilePath);
-		var assetFile = JsonSerializer.Deserialize<MaterialAssetFile>(json, AssetJson.SerializerOptions)
+		var assetFile = JsonSerializer.Deserialize<MaterialAsset>(json, AssetJson.SerializerOptions)
 			?? throw new InvalidOperationException($"Failed to deserialize material asset '{assetFilePath}'.");
-		if (assetFile.Version != MaterialAssetFile.CurrentVersion)
+		if (assetFile.Version != MaterialAsset.CurrentVersion)
 		{
 			throw new InvalidOperationException(
-				$"Unsupported material asset version {assetFile.Version}. Expected {MaterialAssetFile.CurrentVersion}.");
+				$"Unsupported material asset version {assetFile.Version}. Expected {MaterialAsset.CurrentVersion}.");
 		}
 
 		assetFile.Opaque ??= new OpaqueMaterialProperties();
 		assetFile.AlphaTest ??= new AlphaTestMaterialProperties();
 		assetFile.AlphaBlend ??= new AlphaBlendMaterialProperties();
+		assetFile.Opaque.Textures ??= new MaterialTextureAssignments();
+		assetFile.AlphaTest.Textures ??= new MaterialTextureAssignments();
+		assetFile.AlphaBlend.Textures ??= new MaterialTextureAssignments();
 		return assetFile;
 	}
 
-	public MaterialMetaFile LoadMeta(string metaFilePath)
+	public MaterialAssetStateFile LoadState(string stateFilePath)
 	{
-		if (string.IsNullOrWhiteSpace(metaFilePath))
+		if (string.IsNullOrWhiteSpace(stateFilePath))
 		{
-			throw new ArgumentException("Material meta path cannot be null or empty.", nameof(metaFilePath));
+			throw new ArgumentException("Material state path cannot be null or empty.", nameof(stateFilePath));
 		}
 
-		var json = File.ReadAllText(metaFilePath);
-		var metaFile = JsonSerializer.Deserialize<MaterialMetaFile>(json, AssetJson.SerializerOptions)
-			?? throw new InvalidOperationException($"Failed to deserialize material metadata '{metaFilePath}'.");
-		if (metaFile.Version != MaterialMetaFile.CurrentVersion)
+		var json = File.ReadAllText(stateFilePath);
+		var stateFile = JsonSerializer.Deserialize<MaterialAssetStateFile>(json, AssetJson.SerializerOptions)
+			?? throw new InvalidOperationException($"Failed to deserialize material state '{stateFilePath}'.");
+		if (stateFile.Version != MaterialAssetStateFile.CurrentVersion)
 		{
 			throw new InvalidOperationException(
-				$"Unsupported material metadata version {metaFile.Version}. Expected {MaterialMetaFile.CurrentVersion}.");
+				$"Unsupported material state version {stateFile.Version}. Expected {MaterialAssetStateFile.CurrentVersion}.");
 		}
 
-		return metaFile;
+		stateFile.Summary ??= new MaterialAssetSummary();
+		stateFile.Artifacts ??= new List<AssetArtifactInfo>();
+		return stateFile;
 	}
 
-	public void SaveAsset(string assetFilePath, MaterialAssetFile assetFile)
+	public void SaveAsset(string assetFilePath, MaterialAsset assetFile)
 	{
 		if (string.IsNullOrWhiteSpace(assetFilePath))
 		{
@@ -84,25 +93,35 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 		}
 
 		ArgumentNullException.ThrowIfNull(assetFile);
-		assetFile.Version = MaterialAssetFile.CurrentVersion;
+		assetFile.Version = MaterialAsset.CurrentVersion;
 		assetFile.AssetType = AssetType.Material;
 		assetFile.Opaque ??= new OpaqueMaterialProperties();
 		assetFile.AlphaTest ??= new AlphaTestMaterialProperties();
 		assetFile.AlphaBlend ??= new AlphaBlendMaterialProperties();
+		assetFile.Opaque.Textures ??= new MaterialTextureAssignments();
+		assetFile.AlphaTest.Textures ??= new MaterialTextureAssignments();
+		assetFile.AlphaBlend.Textures ??= new MaterialTextureAssignments();
 		WriteJsonAtomically(assetFilePath, assetFile);
 	}
 
-	public void SaveMeta(string metaFilePath, MaterialMetaFile metaFile)
+	public void SaveState(string stateFilePath, MaterialAssetStateFile stateFile)
 	{
-		if (string.IsNullOrWhiteSpace(metaFilePath))
+		if (string.IsNullOrWhiteSpace(stateFilePath))
 		{
-			throw new ArgumentException("Material meta path cannot be null or empty.", nameof(metaFilePath));
+			throw new ArgumentException("Material state path cannot be null or empty.", nameof(stateFilePath));
 		}
 
-		ArgumentNullException.ThrowIfNull(metaFile);
-		metaFile.Version = MaterialMetaFile.CurrentVersion;
-		metaFile.AssetType = AssetType.Material;
-		WriteJsonAtomically(metaFilePath, metaFile);
+		ArgumentNullException.ThrowIfNull(stateFile);
+		stateFile.Version = MaterialAssetStateFile.CurrentVersion;
+		stateFile.AssetType = AssetType.Material;
+		stateFile.Summary ??= new MaterialAssetSummary();
+		stateFile.Artifacts ??= new List<AssetArtifactInfo>();
+		WriteJsonAtomically(stateFilePath, stateFile);
+	}
+
+	public string GetStateRelativePath(Guid assetId)
+	{
+		return $"Database/{assetId:D}.assetstate.json";
 	}
 
 	private static void WriteJsonAtomically<T>(string path, T value)

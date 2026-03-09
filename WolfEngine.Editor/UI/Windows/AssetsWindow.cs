@@ -103,7 +103,10 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null)
 		{
-			var assetAbsolutePath = _projectService.GetAbsolutePath(asset.RelativeAssetPath);
+			var previewRelativePath = string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath)
+				? asset.RelativeAssetPath
+				: asset.TextureSummary.RelativeSourceAssetPath;
+			var assetAbsolutePath = _projectService.GetAbsolutePath(previewRelativePath);
 			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
 			{
 				drawList.AddImage(textureId, min, max);

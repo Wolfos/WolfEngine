@@ -23,7 +23,7 @@ public sealed class AssetDatabase
 {
 	private static IAssetInstanceRegistry? _instanceRegistry;
 
-	public const int CurrentVersion = 3;
+	public const int CurrentVersion = 4;
 	public const string FileName = "AssetDatabase.json";
 
 	public int Version { get; set; } = CurrentVersion;
@@ -70,14 +70,23 @@ public sealed class AssetDatabaseEntry
 	public AssetType Type { get; set; }
 	public string Name { get; set; } = string.Empty;
 	public string RelativeAssetPath { get; set; } = string.Empty;
+	public string RelativeStatePath { get; set; } = string.Empty;
 	public string RelativeMetaPath { get; set; } = string.Empty;
 	public TextureAssetSummary? TextureSummary { get; set; }
 	public MaterialAssetSummary? MaterialSummary { get; set; }
 	public DataAssetSummary? DataAssetSummary { get; set; }
+
+	public string GetEffectiveRelativeStatePath()
+	{
+		return string.IsNullOrWhiteSpace(RelativeStatePath) == false
+			? RelativeStatePath
+			: RelativeMetaPath;
+	}
 }
 
 public sealed class TextureAssetSummary
 {
+	public string RelativeSourceAssetPath { get; set; } = string.Empty;
 	public string RelativeRawImagePath { get; set; } = string.Empty;
 	public int Width { get; set; }
 	public int Height { get; set; }
@@ -97,6 +106,26 @@ public sealed class DataAssetSummary
 	public string DisplayName { get; set; } = string.Empty;
 }
 
+public sealed class AssetArtifactInfo
+{
+	public string Kind { get; set; } = string.Empty;
+	public string Target { get; set; } = string.Empty;
+	public string RelativePath { get; set; } = string.Empty;
+	public string ContentHash { get; set; } = string.Empty;
+	public int Version { get; set; } = 1;
+}
+
+public sealed class TextureAsset
+{
+	public const int CurrentVersion = 1;
+	public const string FileExtension = ".tex.json";
+
+	public int Version { get; set; } = CurrentVersion;
+	public AssetType AssetType { get; set; } = AssetType.Texture2D;
+	public string RelativeSourceAssetPath { get; set; } = string.Empty;
+	public TextureImportSettings ImportSettings { get; set; } = new();
+}
+
 public sealed class TextureAssetMetaFile
 {
 	public const int CurrentVersion = 2;
@@ -108,6 +137,17 @@ public sealed class TextureAssetMetaFile
 	public TextureImportSettings ImportSettings { get; set; } = new();
 	public TextureImportArtifacts Artifacts { get; set; } = new();
 	public TextureAssetSummary Summary { get; set; } = new();
+}
+
+public sealed class TextureAssetStateFile
+{
+	public const int CurrentVersion = 1;
+
+	public int Version { get; set; } = CurrentVersion;
+	public Guid AssetId { get; set; }
+	public AssetType AssetType { get; set; } = AssetType.Texture2D;
+	public TextureAssetSummary Summary { get; set; } = new();
+	public List<AssetArtifactInfo> Artifacts { get; set; } = new();
 }
 
 public sealed class TextureImportSettings
@@ -131,7 +171,7 @@ public sealed class MaterialMetaFile
 	public MaterialAssetType MaterialType { get; set; } = MaterialAssetType.Opaque;
 }
 
-public sealed class MaterialAssetFile
+public sealed class MaterialAsset
 {
 	public const int CurrentVersion = 1;
 	public const string FileExtension = ".mat.json";
@@ -153,6 +193,17 @@ public sealed class MaterialAssetFile
 			_ => Opaque
 		};
 	}
+}
+
+public sealed class MaterialAssetStateFile
+{
+	public const int CurrentVersion = 1;
+
+	public int Version { get; set; } = CurrentVersion;
+	public Guid AssetId { get; set; }
+	public AssetType AssetType { get; set; } = AssetType.Material;
+	public MaterialAssetSummary Summary { get; set; } = new();
+	public List<AssetArtifactInfo> Artifacts { get; set; } = new();
 }
 
 public sealed class DataAssetMetaFile
@@ -178,11 +229,11 @@ public sealed class DataAssetFile
 
 public sealed class MaterialTextureAssignments
 {
-	public Guid? Albedo { get; set; }
-	public Guid? MetallicRoughness { get; set; }
-	public Guid? Normal { get; set; }
-	public Guid? Emissive { get; set; }
-	public Guid? Occlusion { get; set; }
+	public AssetLink<Texture> Albedo { get; set; }
+	public AssetLink<Texture> MetallicRoughness { get; set; }
+	public AssetLink<Texture> Normal { get; set; }
+	public AssetLink<Texture> Emissive { get; set; }
+	public AssetLink<Texture> Occlusion { get; set; }
 }
 
 public abstract class MaterialSurfaceProperties

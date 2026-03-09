@@ -34,6 +34,20 @@ public sealed class AssetDatabaseStore : IAssetDatabaseStore
 		}
 
 		database.Assets ??= new List<AssetDatabaseEntry>();
+		for (var i = 0; i < database.Assets.Count; i++)
+		{
+			var asset = database.Assets[i];
+			asset.RelativeStatePath = string.IsNullOrWhiteSpace(asset.RelativeStatePath)
+				? asset.RelativeMetaPath
+				: asset.RelativeStatePath;
+
+			if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null &&
+			    string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath))
+			{
+				asset.TextureSummary.RelativeSourceAssetPath = asset.RelativeAssetPath;
+			}
+		}
+
 		return database;
 	}
 

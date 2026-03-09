@@ -1,22 +1,19 @@
+using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
 
 public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 {
-	private readonly IDataAssetStore _dataAssetStore;
-	private readonly IMaterialAssetStore _materialAssetStore;
+	private readonly IServiceProvider _serviceProvider;
 	private readonly object _lock = new();
 	private readonly Dictionary<Guid, object> _instances = new();
 	private Dictionary<Guid, AssetDatabaseEntry> _assetsById = new();
 	private string? _projectRootPath;
 
-	public EditorAssetInstanceRegistry(
-		IDataAssetStore dataAssetStore,
-		IMaterialAssetStore materialAssetStore)
+	public EditorAssetInstanceRegistry(IServiceProvider serviceProvider)
 	{
-		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
-		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
+		_serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 	}
 
 	public object? GetInstance(Guid assetId, Type expectedType)
@@ -44,9 +41,15 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 				return EnsureExpectedType(assetId, expectedType, existingInstance);
 			}
 
-			var loadedInstance = LoadInstance(asset);
-			_instances.Add(assetId, loadedInstance);
-			return EnsureExpectedType(assetId, expectedType, loadedInstance);
+			var loadedInstance = LoadInstance(asset, expectedType);
+			if (loadedInstance is not null)
+			{
+				_instances.Add(assetId, loadedInstance);
+			}
+
+			return loadedInstance is null
+				? null
+				: EnsureExpectedType(assetId, expectedType, loadedInstance);
 		}
 	}
 
@@ -85,16 +88,33 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
-	private object LoadInstance(AssetDatabaseEntry asset)
+	private object? LoadInstance(AssetDatabaseEntry asset, Type expectedType)
 	{
-		var absoluteAssetPath = GetAbsolutePath(asset.RelativeAssetPath);
-		return asset.Type switch
+		var descriptor = RuntimeAssetDescriptor.Get(expectedType);
+		if (descriptor.AssetType != asset.Type)
 		{
-			AssetType.DataAsset => _dataAssetStore.LoadAsset(absoluteAssetPath).Asset,
-			AssetType.Material => _materialAssetStore.LoadAsset(absoluteAssetPath),
-			_ => throw new InvalidOperationException(
-				$"Asset '{asset.Id}' of type '{asset.Type}' is not supported by the central asset instance registry.")
-		};
+			throw new InvalidOperationException(
+				$"Asset '{asset.Id}' is registered as '{asset.Type}' and cannot be resolved as '{expectedType.FullName}'.");
+		}
+
+		if (typeof(IRuntimeAssetResolver).IsAssignableFrom(descriptor.ResolverType) == false)
+		{
+			throw new InvalidOperationException(
+				$"Resolver type '{descriptor.ResolverType.FullName}' for '{expectedType.FullName}' does not implement IRuntimeAssetResolver.");
+		}
+
+		var resolver = (IRuntimeAssetResolver)_serviceProvider.GetRequiredService(descriptor.ResolverType);
+		return resolver.Resolve(new RuntimeAssetResolveContext(
+			asset.Id,
+			asset,
+			expectedType,
+			_projectRootPath ?? throw new InvalidOperationException("No project is currently loaded in the asset instance registry."),
+			ResolveReferencedAsset));
+	}
+
+	private object? ResolveReferencedAsset(Guid assetId, Type expectedType)
+	{
+		return GetInstance(assetId, expectedType);
 	}
 
 	private object EnsureExpectedType(Guid assetId, Type expectedType, object instance)
@@ -132,11 +152,13 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			Type = asset.Type,
 			Name = asset.Name,
 			RelativeAssetPath = asset.RelativeAssetPath,
+			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
 			TextureSummary = asset.TextureSummary is null
 				? null
 				: new TextureAssetSummary
 				{
+					RelativeSourceAssetPath = asset.TextureSummary.RelativeSourceAssetPath,
 					RelativeRawImagePath = asset.TextureSummary.RelativeRawImagePath,
 					Width = asset.TextureSummary.Width,
 					Height = asset.TextureSummary.Height,

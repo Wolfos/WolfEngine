@@ -1,8 +1,10 @@
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.AssetPipeline;
 
 namespace WolfEngine;
 
+[RuntimeAsset(AssetType.Material, typeof(MaterialAsset), typeof(IMaterialRuntimeAssetResolver))]
 public sealed class Material
 {
     public Material(string shaderPath)

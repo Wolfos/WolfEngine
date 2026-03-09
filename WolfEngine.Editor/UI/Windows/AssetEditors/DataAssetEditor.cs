@@ -46,7 +46,7 @@ public sealed class DataAssetEditor
 	{
 		try
 		{
-			return AssetDatabase.GetInstance<IDataAsset>(asset.Id);
+			return _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath)).Asset;
 		}
 		catch
 		{
@@ -64,7 +64,7 @@ public sealed class DataAssetEditor
 		try
 		{
 			_loadedMetaAssetId = asset.Id;
-			_loadedMeta = _dataAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
+			_loadedMeta = _dataAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.GetEffectiveRelativeStatePath()));
 			return _loadedMeta;
 		}
 		catch
@@ -78,7 +78,7 @@ public sealed class DataAssetEditor
 	private void SaveAsset(AssetDatabaseEntry asset, Type dataAssetType, IDataAsset loadedAsset, DataAssetMetaFile meta)
 	{
 		_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), dataAssetType, loadedAsset);
-		_dataAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.RelativeMetaPath), meta);
+		_dataAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.GetEffectiveRelativeStatePath()), meta);
 		_loadedMeta = meta;
 		_loadedMetaAssetId = asset.Id;
 	}

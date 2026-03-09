@@ -234,11 +234,13 @@ public sealed class EditorProjectService : IEditorProjectService
 			Type = asset.Type,
 			Name = asset.Name,
 			RelativeAssetPath = asset.RelativeAssetPath,
+			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
 			TextureSummary = asset.TextureSummary is null
 				? null
 				: new TextureAssetSummary
 				{
+					RelativeSourceAssetPath = asset.TextureSummary.RelativeSourceAssetPath,
 					RelativeRawImagePath = asset.TextureSummary.RelativeRawImagePath,
 					Width = asset.TextureSummary.Width,
 					Height = asset.TextureSummary.Height,

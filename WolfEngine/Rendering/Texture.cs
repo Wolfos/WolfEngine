@@ -1,7 +1,9 @@
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.AssetPipeline;
 
 namespace WolfEngine;
 
+[RuntimeAsset(AssetType.Texture2D, typeof(TextureAsset), typeof(ITextureRuntimeAssetResolver))]
 public sealed class Texture
 {
     public Texture(string name, int width, int height, bool isSrgb, byte[] pixelData)
