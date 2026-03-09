@@ -14,6 +14,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * 16;
 	private const int MaxPooledTextures = 256;
 	private const int MaxPooledTexturesPerDescriptor = 2;
+	private static readonly HashSet<string> LoggedComputeArgumentLayouts = new(StringComparer.Ordinal);
 
 	private readonly struct TexturePoolKey : IEquatable<TexturePoolKey>
 	{
@@ -336,6 +337,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				throw new InvalidOperationException($"Failed to create Metal compute pipeline state: {pipelineStateError.LocalizedDescription.ToManagedString()}");
 			}
 
+			LogComputeArgumentsOnce(function, computeReflection);
+
 			var computeTextureEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexTextures);
 			var computeRwTextureEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexRWTextures);
 			var computeSamplerEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
@@ -543,6 +546,52 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 
 		return function.NewArgumentEncoder((ulong)bufferIndex);
+	}
+
+	private static void LogComputeArgumentsOnce(MTLFunction function, MTLComputePipelineReflection? computeReflection)
+	{
+		if (computeReflection is null)
+		{
+			return;
+		}
+
+		var arguments = computeReflection.Value.Arguments;
+		var count = arguments.Count;
+		var signature = new List<string>((int)count);
+		for (ulong i = 0; i < count; i++)
+		{
+			var argumentPtr = arguments.Object(i);
+			if (argumentPtr == IntPtr.Zero)
+			{
+				continue;
+			}
+
+			var argument = new MTLArgument(argumentPtr);
+			signature.Add(
+				$"{argument.Index}:{argument.Type}:argBuffer={argument.Type == MTLArgumentType.Buffer && argument.BufferPointerType.ElementIsArgumentBuffer}");
+		}
+
+		var functionName = function.Name.ToManagedString();
+		var key = $"{functionName}|{string.Join(",", signature)}";
+		if (LoggedComputeArgumentLayouts.Add(key) == false)
+		{
+			return;
+		}
+
+		Console.WriteLine($"Metal compute reflection ({functionName}) argCount={count}");
+		for (ulong i = 0; i < count; i++)
+		{
+			var argumentPtr = arguments.Object(i);
+			if (argumentPtr == IntPtr.Zero)
+			{
+				continue;
+			}
+
+			var argument = new MTLArgument(argumentPtr);
+			var isArgumentBuffer = argument.Type == MTLArgumentType.Buffer && argument.BufferPointerType.ElementIsArgumentBuffer;
+			Console.WriteLine(
+				$"Metal compute arg[{i}]: index={argument.Index} type={argument.Type} argBuffer={isArgumentBuffer}");
+		}
 	}
 
 	private static bool HasArgumentBuffer(NSArray arguments, ulong bufferIndex)

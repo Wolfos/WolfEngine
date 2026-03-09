@@ -4,6 +4,7 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class AmbientOcclusionUpsamplePass
 {
+	private const int DebugLogFrameBudget = 8;
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
@@ -11,7 +12,8 @@ public sealed class AmbientOcclusionUpsamplePass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
-	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
+	private int _remainingDebugLogs = DebugLogFrameBudget;
+	private bool _loggedReflection;
 
 	public AmbientOcclusionUpsamplePass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -30,25 +32,24 @@ public sealed class AmbientOcclusionUpsamplePass
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
 
-		if (_samplerHandle.IsValid == false)
-		{
-			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
-			_samplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
-		}
-
 		var depth = context.GetTexture(resources.GBufferDepth);
 		var normal = context.GetTexture(resources.GBufferNormal);
 		var source = context.GetTexture(resources.AmbientOcclusionRaw);
 		var destination = context.GetTexture(resources.AmbientOcclusionFinal);
+		var depthHandle = _bindlessRegistry.RegisterDepthTexture(depth);
+		var normalHandle = _bindlessRegistry.GetTextureHandle(normal);
+		var sourceHandle = _bindlessRegistry.GetTextureHandle(source);
+		var outputHandle = _bindlessRegistry.RegisterRwTexture(destination);
+
+		LogBindingsOnce(depth, normal, source, destination, depthHandle, normalHandle, sourceHandle, outputHandle);
 
 		return new AmbientOcclusionUpsamplePassConfig
 		{
 			Pipeline = pipeline,
-			DepthHandle = _bindlessRegistry.RegisterDepthTexture(depth),
-			NormalHandle = _bindlessRegistry.GetTextureHandle(normal),
-			SourceHandle = _bindlessRegistry.GetTextureHandle(source),
-			OutputHandle = _bindlessRegistry.RegisterRwTexture(destination),
-			SamplerHandle = _samplerHandle,
+			DepthHandle = depthHandle,
+			NormalHandle = normalHandle,
+			SourceHandle = sourceHandle,
+			OutputHandle = outputHandle,
 			FullResolution = resources.SceneFramebufferSize,
 			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height)
 		};
@@ -68,7 +69,6 @@ public sealed class AmbientOcclusionUpsamplePass
 		bindlessWriter.SetUInt("normalHandle", config.NormalHandle.Value);
 		bindlessWriter.SetUInt("sourceHandle", config.SourceHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
-		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var settingsWriter = _settingsWriter
@@ -106,7 +106,8 @@ public sealed class AmbientOcclusionUpsamplePass
 			computeEntryPoint: "CSMain",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
-			renderState: default);
+			renderState: default,
+			shaderVariant: "ao_upsample.compute.slang");
 		_pipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _computeShader));
 		return _pipeline;
 	}
@@ -131,6 +132,46 @@ public sealed class AmbientOcclusionUpsamplePass
 		var reflection = compiled.ReflectionLayout;
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("UpsampleSettings"));
+		if (_loggedReflection == false)
+		{
+			Console.WriteLine(
+				$"VBAO Upsample reflection: BindlessHandles=b{_bindlessWriter.RegisterIndex}, UpsampleSettings=b{_settingsWriter.RegisterIndex}");
+			_loggedReflection = true;
+		}
 		_compiledBackendKind = backendKind;
+	}
+
+	private void LogBindingsOnce(
+		IGfxTexture depth,
+		IGfxTexture normal,
+		IGfxTexture source,
+		IGfxTexture destination,
+		DescriptorHandle depthHandle,
+		DescriptorHandle normalHandle,
+		DescriptorHandle sourceHandle,
+		DescriptorHandle outputHandle)
+	{
+		if (_remainingDebugLogs <= 0)
+		{
+			return;
+		}
+
+		_remainingDebugLogs--;
+		Console.WriteLine(
+			$"VBAO Upsample BuildConfig: depth={DescribeTexture(depth)} resolvedDepthHandle={DescribeHandle(depthHandle)} " +
+			$"normal={DescribeTexture(normal)} resolvedNormalHandle={DescribeHandle(normalHandle)} " +
+			$"source={DescribeTexture(source)} resolvedSourceHandle={DescribeHandle(sourceHandle)} " +
+			$"destination={DescribeTexture(destination)} resolvedOutputHandle={DescribeHandle(outputHandle)}");
+	}
+
+	private static string DescribeTexture(IGfxTexture texture)
+	{
+		return $"{texture.Name ?? "<unnamed>"}[{texture.Descriptor.Width}x{texture.Descriptor.Height} {texture.Descriptor.Format}] " +
+		       $"srv={DescribeHandle(texture.ShaderResourceView)} depthSrv={DescribeHandle(texture.DepthShaderResourceView)} uav={DescribeHandle(texture.UnorderedAccessView)}";
+	}
+
+	private static string DescribeHandle(DescriptorHandle handle)
+	{
+		return handle.IsValid ? $"{handle.Kind}:{handle.Index} (0x{handle.Value:X8})" : "Invalid";
 	}
 }

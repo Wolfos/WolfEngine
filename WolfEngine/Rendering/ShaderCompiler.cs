@@ -31,6 +31,7 @@ public class ShaderCompiler : IShaderCompiler
 	private readonly Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
 	private readonly Dictionary<(string file, string entry, string target, string profile, string stage, string defines), CompiledComputeShaderWithReflection> _cachedComputeWithReflection = new();
 	private readonly Dictionary<(string file, string vsEntry, string psEntry, string target, string vsProfile, string psProfile, string defines), CompiledGraphicsShaderWithReflection> _cachedGraphicsWithReflection = new();
+	private readonly HashSet<string> _loggedComputeReflectionDetails = new(StringComparer.Ordinal);
 
 	public ReadOnlyMemory<byte> GetMetalLibrary(string filename)
 	{
@@ -319,10 +320,48 @@ public class ShaderCompiler : IShaderCompiler
 		}
 
 		var compiled = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
+		LogComputeReflectionDetailsOnce(filename, entryPoint, backendKind, reflection);
 		var reflectionLayout = ShaderReflectionLayoutBuilder.Build(reflection);
 		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout);
 		_cachedComputeWithReflection[cacheKey] = result;
 		return result;
+	}
+
+	private void LogComputeReflectionDetailsOnce(
+		string filename,
+		string entryPoint,
+		GraphicsBackendKind backendKind,
+		SlangReflection reflection)
+	{
+		if (string.Equals(filename, "ao_vbao.compute.slang", StringComparison.Ordinal) == false)
+		{
+			return;
+		}
+
+		var key = $"{backendKind}:{filename}:{entryPoint}";
+		if (_loggedComputeReflectionDetails.Add(key) == false)
+		{
+			return;
+		}
+
+		var parameters = reflection.Parameters ?? [];
+		Console.WriteLine($"AO raw Slang reflection ({backendKind}, {filename}, {entryPoint}) parameterCount={parameters.Length}");
+		for (var i = 0; i < parameters.Length; i++)
+		{
+			var parameter = parameters[i];
+			var bindings = parameter.Bindings ?? [];
+			var bindingDescriptions = new List<string>(bindings.Length);
+			for (var j = 0; j < bindings.Length; j++)
+			{
+				var binding = bindings[j];
+				bindingDescriptions.Add(
+					$"{binding.Kind}[index={binding.Index},space={binding.Space},used={binding.Used},count={binding.Count}]");
+			}
+
+			Console.WriteLine(
+				$"AO raw Slang reflection param[{i}]: name={parameter.Name ?? "<unnamed>"} " +
+				$"kind={parameter.Type.Kind} bindings={string.Join("; ", bindingDescriptions)}");
+		}
 	}
 
 	public CompiledGraphicsShaderWithReflection GetGraphicsShaderWithReflection(

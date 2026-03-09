@@ -10,7 +10,6 @@ public readonly struct AmbientOcclusionUpsamplePassConfig
 	public required DescriptorHandle NormalHandle { get; init; }
 	public required DescriptorHandle SourceHandle { get; init; }
 	public required DescriptorHandle OutputHandle { get; init; }
-	public required DescriptorHandle SamplerHandle { get; init; }
 	public required Int2 FullResolution { get; init; }
 	public required Int2 AoResolution { get; init; }
 }

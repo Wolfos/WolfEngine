@@ -12,7 +12,6 @@ cbuffer BindlessHandles : register(b0)
     uint depthHandle;
     uint normalHandle;
     uint outputHandle;
-    uint samplerHandle;
 };
 
 cbuffer CameraParams : register(b1)

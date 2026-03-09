@@ -7,7 +7,6 @@ cbuffer BindlessHandles : register(b0)
     uint normalHandle;
     uint sourceHandle;
     uint outputHandle;
-    uint samplerHandle;
 };
 
 cbuffer UpsampleSettings : register(b1)

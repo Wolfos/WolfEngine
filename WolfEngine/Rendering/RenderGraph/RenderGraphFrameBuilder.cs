@@ -607,18 +607,17 @@ public sealed class RenderGraphFrameBuilder
 		return false;
 	}
 
-	private nint ResolveSceneDebugTextureId(SceneDebugViewRegistration debugView)
+	private DescriptorHandle ResolveSceneDebugTextureHandle(SceneDebugViewRegistration debugView)
 	{
 		if (debugView.Handle.IsValid == false)
 		{
-			return 0;
+			return DescriptorHandle.Invalid;
 		}
 
 		var texture = _resources.GetTexture(debugView.Handle);
-		var descriptorHandle = debugView.Kind == SceneDebugViewKind.Depth && texture.DepthShaderResourceView.IsValid
+		return debugView.Kind == SceneDebugViewKind.Depth && texture.DepthShaderResourceView.IsValid
 			? texture.DepthShaderResourceView
 			: texture.ShaderResourceView;
-		return descriptorHandle.IsValid ? (nint)descriptorHandle.Value : 0;
 	}
 
 	private nint ResolveSceneViewportTextureId(out string activeDebugViewId)
@@ -626,19 +625,19 @@ public sealed class RenderGraphFrameBuilder
 		var resolvedView = GetResolvedSceneDebugView();
 		if (resolvedView.HasValue)
 		{
-			var textureId = ResolveSceneDebugTextureId(resolvedView.Value);
-			if (textureId != 0)
+			var descriptorHandle = ResolveSceneDebugTextureHandle(resolvedView.Value);
+			if (descriptorHandle.IsValid)
 			{
 				activeDebugViewId = resolvedView.Value.Id;
-				return textureId;
+				return (nint)descriptorHandle.Value;
 			}
 		}
 
 		if (TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView))
 		{
-			var fallbackTextureId = ResolveSceneDebugTextureId(sceneColorView);
+			var fallbackTextureId = ResolveSceneDebugTextureHandle(sceneColorView);
 			activeDebugViewId = SceneDebugViewIds.SceneColor;
-			return fallbackTextureId;
+			return fallbackTextureId.IsValid ? (nint)fallbackTextureId.Value : 0;
 		}
 
 		activeDebugViewId = SceneDebugViewIds.SceneColor;
