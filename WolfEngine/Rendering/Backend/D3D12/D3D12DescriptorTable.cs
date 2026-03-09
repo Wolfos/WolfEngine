@@ -222,7 +222,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 				AddressW = ToAddressMode(sampler.AddressW),
 				MipLODBias = sampler.MipLodBias,
 				MaxAnisotropy = (uint)Math.Clamp(sampler.MaxAnisotropy, 1.0f, 16.0f),
-				ComparisonFunc = ComparisonFunc.Always,
+				ComparisonFunc = ComparisonFunc.Never,
 				MinLOD = 0.0f,
 				MaxLOD = float.MaxValue
 			};

@@ -492,7 +492,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			AddressV = TextureAddressMode.Clamp,
 			AddressW = TextureAddressMode.Clamp,
 			ShaderVisibility = ShaderVisibility.Pixel,
-			ComparisonFunc = ComparisonFunc.Always,
+			ComparisonFunc = ComparisonFunc.Never,
 			ShaderRegister = 0,
 			RegisterSpace = 0
 		};

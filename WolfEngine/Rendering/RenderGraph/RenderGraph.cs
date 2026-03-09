@@ -302,16 +302,19 @@ public sealed class RenderGraph
 					sceneColorHandle = _resourceRegistry.ImportTexture(
 						sceneTarget,
 						takeOwnership: false,
-						initialState: ResourceState.RenderTarget);
+						initialState: _sceneRenderTargetManager.CurrentState);
 				}
 				
 				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection, snapshot.Config);
 				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.SetUiFrame(uiFrame);
 
-
 				_frameBuilder.Build(this);
 				Execute();
+				if (sceneColorHandle.IsValid)
+				{
+					_sceneRenderTargetManager.SetCurrentState(_resourceRegistry.GetResourceState(sceneColorHandle));
+				}
 
 				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());
 				_viewportStateBus.PublishRenderState(_frameBuilder.GetSceneViewportRenderState());

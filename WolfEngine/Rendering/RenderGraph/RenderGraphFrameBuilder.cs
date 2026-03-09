@@ -168,8 +168,8 @@ public sealed class RenderGraphFrameBuilder
 		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
 		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
-		_recordProceduralSkyLighting = true;//_useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;
-		_recordProceduralSkyBrdf = true;//_useProceduralSkybox && _skyboxPass.ShouldRecordBrdfLutUpdate;
+		_recordProceduralSkyLighting = _useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;
+		_recordProceduralSkyBrdf = _useProceduralSkybox && _skyboxPass.ShouldRecordBrdfLutUpdate;
 		_proceduralSkyboxInitialState = _skyboxPass.ProceduralResourcesInitialState;
 
 		var skyboxEnvHandle = default(RenderGraphResourceHandle);

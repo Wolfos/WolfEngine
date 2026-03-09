@@ -325,7 +325,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		var allowsUav = (descriptor.Flags & BufferFlags.AllowUnorderedAccess) != 0;
 		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant) || descriptor.Usage.HasFlag(BufferUsage.Staging);
 		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
-		var initialState = allowsUav ? ResourceStates.UnorderedAccess : ResourceStates.Common;
+		// Default-heap buffers are created in COMMON even when UAV-capable; the debug layer ignores UAV here.
+		var initialState = ResourceStates.Common;
 
 		var resourceDesc = new ResourceDesc
 		{

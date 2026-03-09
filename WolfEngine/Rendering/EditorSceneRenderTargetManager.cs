@@ -9,6 +9,7 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 	private readonly Queue<PendingTextureRelease> _pendingReleases = new();
 	private IGfxTexture? _sceneColor;
 	private Int2 _size = Int2.Zero;
+	private ResourceState _sceneColorState = ResourceState.Common;
 
 	private readonly record struct PendingTextureRelease(
 		IGfxTexture Texture,
@@ -35,6 +36,8 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 		return true;
 	}
 
+	public ResourceState CurrentState => _sceneColorState;
+
 	public IGfxTexture EnsureTarget(IGfxDevice device, Int2 size)
 	{
 		RetirePending(device);
@@ -51,7 +54,18 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 			TextureFormat.Bgra8Unorm,
 			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
+		_sceneColorState = ResourceState.RenderTarget;
 		return _sceneColor;
+	}
+
+	public void SetCurrentState(ResourceState state)
+	{
+		if (_sceneColor is null)
+		{
+			return;
+		}
+
+		_sceneColorState = state;
 	}
 
 	public void Reset()
@@ -73,8 +87,9 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 			return;
 		}
 
-		EnqueueRelease(device, _sceneColor, ResourceState.RenderTarget);
+		EnqueueRelease(device, _sceneColor, _sceneColorState);
 		_sceneColor = null;
+		_sceneColorState = ResourceState.Common;
 	}
 
 	private void EnqueueRelease(IGfxDevice? device, IGfxTexture texture, ResourceState lastKnownState)

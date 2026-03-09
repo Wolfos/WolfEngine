@@ -66,7 +66,7 @@ public sealed class SkyboxPass
 	public bool ShouldRecordBrdfLutUpdate { get; private set; }
 
 	public ResourceState ProceduralResourcesInitialState =>
-		_hasGeneratedProceduralContent ? ResourceState.ShaderResource : ResourceState.Common;
+		_hasGeneratedProceduralContent ? ResourceState.ShaderResource : ResourceState.UnorderedAccess;
 
 	public SkyboxResources CreateSkyboxResourcesIbl(Texture environmentTexture)
 	{
