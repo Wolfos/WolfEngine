@@ -187,7 +187,7 @@ public sealed class MaterialTextureAssignments
 
 public abstract class MaterialSurfaceProperties
 {
-	public ColorRGBA BaseColor { get; set; } = new();
+	public ColorRGBA BaseColor { get; set; } = ColorRGBA.White;
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
 	public MaterialTextureAssignments Textures { get; set; } = new();

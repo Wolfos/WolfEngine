@@ -7,6 +7,7 @@ public static class AssetJson
 {
 	public static readonly JsonSerializerOptions SerializerOptions = new()
 	{
+		IncludeFields = true,
 		WriteIndented = true,
 		Converters = { new JsonStringEnumConverter() }
 	};

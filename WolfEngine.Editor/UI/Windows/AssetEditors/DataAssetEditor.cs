@@ -93,22 +93,30 @@ public sealed class DataAssetEditor
 		var changed = false;
 		foreach (var property in GetEditableProperties(targetType))
 		{
-			var value = property.GetValue(target);
-			var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(property.Name, property.PropertyType, value));
-			if (drawResult.Handled)
+			ImGui.PushID(property.Name);
+			try
 			{
-				if (drawResult.Changed)
+				var value = property.GetValue(target);
+				var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(property.Name, property.PropertyType, value));
+				if (drawResult.Handled)
 				{
-					property.SetValue(target, drawResult.Value);
-					changed = true;
+					if (drawResult.Changed)
+					{
+						property.SetValue(target, drawResult.Value);
+						changed = true;
+					}
+
+					continue;
 				}
 
-				continue;
+				if (TryDrawNestedProperty(target, property, value))
+				{
+					changed = true;
+				}
 			}
-
-			if (TryDrawNestedProperty(target, property, value))
+			finally
 			{
-				changed = true;
+				ImGui.PopID();
 			}
 		}
 
