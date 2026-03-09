@@ -1,4 +1,3 @@
-using System.Linq;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 
@@ -6,7 +5,6 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class VBAOPass
 {
-	private const int DebugLogFrameBudget = 8;
 	public enum AmbientOcclusionResolution
 	{
 		Full,
@@ -39,9 +37,6 @@ public sealed class VBAOPass
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _cameraWriter;
 	private ShaderPropertyWriter? _settingsWriter;
-	private int _remainingDebugLogs = DebugLogFrameBudget;
-	private bool _loggedReflection;
-
 	public VBAOPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
@@ -66,16 +61,6 @@ public sealed class VBAOPass
 		var depthHandle = _bindlessRegistry.RegisterDepthTexture(depth);
 		var normalHandle = _bindlessRegistry.GetTextureHandle(normal);
 		var outputHandle = _bindlessRegistry.RegisterRwTexture(output);
-
-		LogBindingsOnce(
-			depth,
-			normal,
-			output,
-			depthHandle,
-			normalHandle,
-			outputHandle,
-			settings,
-			DescribeBindlessCounts(device.GlobalTable));
 
 		return new VisibilityBitmaskAmbientOcclusionPassConfig
 		{
@@ -191,73 +176,6 @@ public sealed class VBAOPass
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
 		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("AoSettings"));
-		if (_loggedReflection == false)
-		{
-			Console.WriteLine(
-				$"VBAO reflection: BindlessHandles=b{_bindlessWriter.RegisterIndex}, CameraParams=b{_cameraWriter.RegisterIndex}, AoSettings=b{_settingsWriter.RegisterIndex}");
-			LogLayout("VBAO BindlessHandles", reflection.GetConstantBuffer("BindlessHandles"));
-			LogLayout("VBAO CameraParams", reflection.GetConstantBuffer("CameraParams"));
-			LogLayout("VBAO AoSettings", reflection.GetConstantBuffer("AoSettings"));
-			_loggedReflection = true;
-		}
 		_compiledBackendKind = backendKind;
-	}
-
-	private void LogBindingsOnce(
-		IGfxTexture depth,
-		IGfxTexture normal,
-		IGfxTexture output,
-		DescriptorHandle depthHandle,
-		DescriptorHandle normalHandle,
-		DescriptorHandle outputHandle,
-		Config settings,
-		string bindlessCounts)
-	{
-		if (_remainingDebugLogs <= 0)
-		{
-			return;
-		}
-
-		_remainingDebugLogs--;
-		Console.WriteLine(
-			$"VBAO BuildConfig: depth={DescribeTexture(depth)} resolvedDepthHandle={DescribeHandle(depthHandle)} " +
-			$"normal={DescribeTexture(normal)} resolvedNormalHandle={DescribeHandle(normalHandle)} " +
-			$"output={DescribeTexture(output)} resolvedOutputHandle={DescribeHandle(outputHandle)} " +
-			$"{bindlessCounts} " +
-			$"settings(enabled={settings.Enabled}, resolution={settings.Resolution}, slices={settings.SliceCount}, steps={settings.StepCount}, radius={settings.Radius}, thickness={settings.Thickness}, bias={settings.Bias}, strength={settings.Strength}, power={settings.Power})");
-	}
-
-	private static string DescribeTexture(IGfxTexture texture)
-	{
-		return $"{texture.Name ?? "<unnamed>"}[{texture.Descriptor.Width}x{texture.Descriptor.Height} {texture.Descriptor.Format}] " +
-		       $"srv={DescribeHandle(texture.ShaderResourceView)} depthSrv={DescribeHandle(texture.DepthShaderResourceView)} uav={DescribeHandle(texture.UnorderedAccessView)}";
-	}
-
-	private static string DescribeHandle(DescriptorHandle handle)
-	{
-		return handle.IsValid ? $"{handle.Kind}:{handle.Index} (0x{handle.Value:X8})" : "Invalid";
-	}
-
-	private static void LogLayout(string label, ShaderConstantBufferLayout layout)
-	{
-		var fields = layout.Fields
-			.OrderBy(pair => pair.Value.Offset)
-			.Select(pair => $"{pair.Key}@{pair.Value.Offset}:{pair.Value.ByteSize}/{pair.Value.ValueKind}");
-		Console.WriteLine($"{label} size={layout.SizeInBytes}: {string.Join(", ", fields)}");
-	}
-
-	private static string DescribeBindlessCounts(IGfxDescriptorTable table)
-	{
-		if (table is Backend.Metal.MetalDescriptorTable metal)
-		{
-			return $"bindlessCounts(srv={metal.SrvCount}, uav={metal.UavCount}, sampler={metal.SamplerCount})";
-		}
-
-		if (table is Backend.D3D12.D3D12DescriptorTable d3d12)
-		{
-			return $"bindlessCounts(d3d12Heap)";
-		}
-
-		return "bindlessCounts(unknown)";
 	}
 }

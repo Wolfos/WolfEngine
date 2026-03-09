@@ -9,7 +9,6 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class DeferredLightingPass
 {
-	private const int DebugAoLogFrameBudget = 8;
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
@@ -21,7 +20,6 @@ public sealed class DeferredLightingPass
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private const int MaxLights = 3;
-	private int _remainingAoDebugLogs = DebugAoLogFrameBudget;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -80,7 +78,6 @@ public sealed class DeferredLightingPass
 		var lighting = context.GetTexture(resources.LightingBuffer);
 		var shadowResolution = Math.Max(1, shadowData.MapResolution);
 		var ambientOcclusionHandle = _bindlessRegistry.GetTextureHandle(ambientOcclusion);
-		LogAoBindingsOnce(ambientOcclusion, ambientOcclusionHandle, resources.AmbientOcclusionFinal.IsValid);
 
 		return new DeferredLightingPassConfig
 		{
@@ -265,26 +262,5 @@ public sealed class DeferredLightingPass
 		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
 		_lightingWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("LightingParams"));
 		_compiledBackendKind = backendKind;
-	}
-
-	private void LogAoBindingsOnce(IGfxTexture? ambientOcclusion, DescriptorHandle ambientOcclusionHandle, bool aoEnabled)
-	{
-		if (_remainingAoDebugLogs <= 0 || aoEnabled == false)
-		{
-			return;
-		}
-
-		_remainingAoDebugLogs--;
-		var textureDescription = ambientOcclusion is null
-			? "<null>"
-			: $"{ambientOcclusion.Name ?? "<unnamed>"}[{ambientOcclusion.Descriptor.Width}x{ambientOcclusion.Descriptor.Height} {ambientOcclusion.Descriptor.Format}] " +
-			  $"srv={DescribeHandle(ambientOcclusion.ShaderResourceView)} uav={DescribeHandle(ambientOcclusion.UnorderedAccessView)}";
-		Console.WriteLine(
-			$"Deferred Lighting AO binding: texture={textureDescription} resolvedAoHandle={DescribeHandle(ambientOcclusionHandle)}");
-	}
-
-	private static string DescribeHandle(DescriptorHandle handle)
-	{
-		return handle.IsValid ? $"{handle.Kind}:{handle.Index} (0x{handle.Value:X8})" : "Invalid";
 	}
 }

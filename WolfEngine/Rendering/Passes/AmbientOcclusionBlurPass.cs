@@ -4,7 +4,6 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class AmbientOcclusionBlurPass
 {
-	private const int DebugLogFrameBudget = 8;
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
@@ -12,8 +11,6 @@ public sealed class AmbientOcclusionBlurPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
-	private int _remainingDebugLogs = DebugLogFrameBudget;
-	private bool _loggedReflection;
 
 	public AmbientOcclusionBlurPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -46,8 +43,6 @@ public sealed class AmbientOcclusionBlurPass
 		var normalHandle = _bindlessRegistry.GetTextureHandle(normal);
 		var sourceHandle = _bindlessRegistry.GetTextureHandle(source);
 		var outputHandle = _bindlessRegistry.RegisterRwTexture(destination);
-
-		LogBindingsOnce(depth, normal, source, destination, depthHandle, normalHandle, sourceHandle, outputHandle, blurHorizontally);
 
 		return new AmbientOcclusionBlurPassConfig
 		{
@@ -142,47 +137,6 @@ public sealed class AmbientOcclusionBlurPass
 		var reflection = compiled.ReflectionLayout;
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BlurSettings"));
-		if (_loggedReflection == false)
-		{
-			Console.WriteLine(
-				$"VBAO Blur reflection: BindlessHandles=b{_bindlessWriter.RegisterIndex}, BlurSettings=b{_settingsWriter.RegisterIndex}");
-			_loggedReflection = true;
-		}
 		_compiledBackendKind = backendKind;
-	}
-
-	private void LogBindingsOnce(
-		IGfxTexture depth,
-		IGfxTexture normal,
-		IGfxTexture source,
-		IGfxTexture destination,
-		DescriptorHandle depthHandle,
-		DescriptorHandle normalHandle,
-		DescriptorHandle sourceHandle,
-		DescriptorHandle outputHandle,
-		bool blurHorizontally)
-	{
-		if (_remainingDebugLogs <= 0)
-		{
-			return;
-		}
-
-		_remainingDebugLogs--;
-		Console.WriteLine(
-			$"VBAO Blur BuildConfig ({(blurHorizontally ? "X" : "Y")}): depth={DescribeTexture(depth)} resolvedDepthHandle={DescribeHandle(depthHandle)} " +
-			$"normal={DescribeTexture(normal)} resolvedNormalHandle={DescribeHandle(normalHandle)} " +
-			$"source={DescribeTexture(source)} resolvedSourceHandle={DescribeHandle(sourceHandle)} " +
-			$"destination={DescribeTexture(destination)} resolvedOutputHandle={DescribeHandle(outputHandle)}");
-	}
-
-	private static string DescribeTexture(IGfxTexture texture)
-	{
-		return $"{texture.Name ?? "<unnamed>"}[{texture.Descriptor.Width}x{texture.Descriptor.Height} {texture.Descriptor.Format}] " +
-		       $"srv={DescribeHandle(texture.ShaderResourceView)} depthSrv={DescribeHandle(texture.DepthShaderResourceView)} uav={DescribeHandle(texture.UnorderedAccessView)}";
-	}
-
-	private static string DescribeHandle(DescriptorHandle handle)
-	{
-		return handle.IsValid ? $"{handle.Kind}:{handle.Index} (0x{handle.Value:X8})" : "Invalid";
 	}
 }
