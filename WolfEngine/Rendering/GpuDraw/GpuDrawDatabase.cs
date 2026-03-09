@@ -92,6 +92,31 @@ public sealed class GpuDrawDatabase
 		}
 	}
 
+	public void NotifyMaterialChanged(Material material)
+	{
+		ArgumentNullException.ThrowIfNull(material);
+
+		lock (_lock)
+		{
+			foreach (var record in _records.Values)
+			{
+				if (ReferenceEquals(record.Material, material) == false)
+				{
+					continue;
+				}
+
+				_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
+					record.DrawHandle,
+					record.InstanceHandle,
+					record.MeshHandle,
+					record.MaterialHandle,
+					record.World,
+					record.BoundsCenterRadius,
+					material));
+			}
+		}
+	}
+
 	public void CollectDrawEntries(List<GpuDrawEntry> destination)
 	{
 		lock (_lock)

@@ -11,6 +11,11 @@ public sealed class MaterialAssetEditor
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+	private readonly ITextureFactory _textureFactory;
+	private readonly RenderGraph _renderGraph;
+	private readonly GpuDrawDatabase _gpuDrawDatabase;
+	private MaterialAsset? _loadedMaterialAsset;
+	private Guid? _loadedMaterialAssetId;
 	private MaterialAssetStateFile? _loadedMaterialState;
 	private Guid? _loadedMaterialStateAssetId;
 
@@ -18,12 +23,18 @@ public sealed class MaterialAssetEditor
 		IEditorProjectService projectService,
 		IMaterialAssetStore materialAssetStore,
 		IMaterialTypeRegistry materialTypeRegistry,
-		IPropertyDrawerRegistry propertyDrawerRegistry)
+		IPropertyDrawerRegistry propertyDrawerRegistry,
+		ITextureFactory textureFactory,
+		RenderGraph renderGraph,
+		GpuDrawDatabase gpuDrawDatabase)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_materialTypeRegistry = materialTypeRegistry ?? throw new ArgumentNullException(nameof(materialTypeRegistry));
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
+		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
+		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_gpuDrawDatabase = gpuDrawDatabase ?? throw new ArgumentNullException(nameof(gpuDrawDatabase));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -96,21 +107,31 @@ public sealed class MaterialAssetEditor
 
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
-		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
-		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion);
+		var textureAssets = GetTextureAssets();
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo, textureAssets);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness, textureAssets);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal, textureAssets);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive, textureAssets);
+		DrawTextureAssignmentCombo(asset, materialAsset, materialState, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion, textureAssets);
 	}
 
 	private MaterialAsset? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
 	{
+		if (_loadedMaterialAssetId == asset.Id && _loadedMaterialAsset is not null)
+		{
+			return _loadedMaterialAsset;
+		}
+
 		try
 		{
-			return _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			_loadedMaterialAssetId = asset.Id;
+			_loadedMaterialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			return _loadedMaterialAsset;
 		}
 		catch
 		{
+			_loadedMaterialAssetId = asset.Id;
+			_loadedMaterialAsset = null;
 			return null;
 		}
 	}
@@ -141,6 +162,9 @@ public sealed class MaterialAssetEditor
 		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
 		var relativeStatePath = _materialAssetStore.GetStateRelativePath(asset.Id);
 		_materialAssetStore.SaveState(_projectService.GetAbsolutePath(relativeStatePath), materialState);
+		SynchronizeRuntimeMaterial(asset.Id, materialAsset);
+		_loadedMaterialAsset = materialAsset;
+		_loadedMaterialAssetId = asset.Id;
 		_loadedMaterialState = materialState;
 		_loadedMaterialStateAssetId = asset.Id;
 
@@ -195,13 +219,9 @@ public sealed class MaterialAssetEditor
 		MaterialTextureAssignments assignments,
 		string propertyName,
 		string label,
-		AssetLink<Texture> currentValue)
+		AssetLink<Texture> currentValue,
+		IReadOnlyList<AssetDatabaseEntry> textureAssets)
 	{
-		var textures = _projectService.CurrentAssetDatabase.Assets
-			.Where(asset => asset.Type == AssetType.Texture2D)
-			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-
 		var previewLabel = currentValue.Id != Guid.Empty && _projectService.TryGetAsset(currentValue.Id, out var selectedTexture)
 			? selectedTexture.Name
 			: "None";
@@ -219,9 +239,9 @@ public sealed class MaterialAssetEditor
 				ImGui.SetItemDefaultFocus();
 			}
 
-			for (var i = 0; i < textures.Count; i++)
+			for (var i = 0; i < textureAssets.Count; i++)
 			{
-				var textureAsset = textures[i];
+				var textureAsset = textureAssets[i];
 				var isSelected = currentValue.Id == textureAsset.Id;
 				if (ImGui.Selectable(textureAsset.Name, isSelected))
 				{
@@ -235,6 +255,48 @@ public sealed class MaterialAssetEditor
 				}
 			}
 		});
+	}
+
+	private IReadOnlyList<AssetDatabaseEntry> GetTextureAssets()
+	{
+		return _projectService.CurrentAssetDatabase.Assets
+			.Where(asset => asset.Type == AssetType.Texture2D)
+			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private void SynchronizeRuntimeMaterial(Guid assetId, MaterialAsset materialAsset)
+	{
+		var runtimeMaterial = AssetDatabase.GetInstance<Material>(assetId);
+		if (runtimeMaterial is null)
+		{
+			return;
+		}
+
+		var descriptor = _materialTypeRegistry.GetDescriptor(materialAsset.MaterialType);
+		var properties = materialAsset.GetActiveProperties();
+		runtimeMaterial.Color = properties.BaseColor;
+		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
+		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
+		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();
+		runtimeMaterial.MetallicRoughnessTexture = ResolveTexture(properties.Textures.MetallicRoughness) ?? _textureFactory.GetWhiteTexture();
+		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();
+		runtimeMaterial.EmissiveTexture = ResolveTexture(properties.Textures.Emissive) ?? _textureFactory.GetWhiteTexture();
+		runtimeMaterial.OcclusionTexture = ResolveTexture(properties.Textures.Occlusion) ?? _textureFactory.GetWhiteTexture();
+		runtimeMaterial.AlphaMode = descriptor.RuntimeAlphaMode;
+		runtimeMaterial.AlphaCutoff = properties switch
+		{
+			AlphaTestMaterialProperties alphaTest => alphaTest.AlphaCutoff,
+			AlphaBlendMaterialProperties alphaBlend => alphaBlend.AlphaCutoff,
+			_ => 0.5f
+		};
+		_renderGraph.RefreshMaterialResources(runtimeMaterial);
+		_gpuDrawDatabase.NotifyMaterialChanged(runtimeMaterial);
+	}
+
+	private static Texture? ResolveTexture(AssetLink<Texture> link)
+	{
+		return link.Id == Guid.Empty ? null : AssetDatabase.GetInstance<Texture>(link.Id);
 	}
 
 	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid value)

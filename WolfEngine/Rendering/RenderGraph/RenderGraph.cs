@@ -338,6 +338,17 @@ public sealed class RenderGraph
 		_ensureMaterialQueue.Enqueue(material);
 	}
 
+	public void RefreshMaterialResources(Material material)
+	{
+		if (material is null)
+		{
+			throw new ArgumentNullException(nameof(material));
+		}
+
+		material.Resources = null!;
+		_ensureMaterialQueue.Enqueue(material);
+	}
+
 	public void EnsureTextureResources(Texture texture)
 	{
 		if (texture is null)

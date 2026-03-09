@@ -57,7 +57,7 @@ public class RenderPipeline : IRenderPipeline
                         ref var transform = ref entry.First;
                         ref var meshRenderer = ref entry.Second;
                         
-                        if (meshRenderer.IsValid == false) continue;
+                        if (meshRenderer.TryValidate() == false) continue;
 
                         if (GraphicsConfig.GpuHardeningStressEnabled)
                         {
