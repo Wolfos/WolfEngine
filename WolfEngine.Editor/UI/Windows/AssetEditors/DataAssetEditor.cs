@@ -46,7 +46,23 @@ public sealed class DataAssetEditor
 	{
 		try
 		{
-			return _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath)).Asset;
+			var meta = EnsureMetaLoaded(asset);
+			if (meta is null)
+			{
+				return null;
+			}
+
+			var dataAssetType = Type.GetType(meta.DataAssetType, throwOnError: false);
+			if (dataAssetType is null)
+			{
+				return null;
+			}
+
+			var getInstance = typeof(AssetDatabase)
+				.GetMethod(nameof(AssetDatabase.GetInstance), BindingFlags.Public | BindingFlags.Static)
+				?.MakeGenericMethod(dataAssetType)
+				?? throw new InvalidOperationException("Failed to resolve AssetDatabase.GetInstance<T>.");
+			return getInstance.Invoke(null, [asset.Id]) as IDataAsset;
 		}
 		catch
 		{
