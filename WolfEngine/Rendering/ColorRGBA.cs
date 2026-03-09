@@ -41,5 +41,6 @@ public struct ColorRGBA
 	public static ColorRGBA Green => new(0.0f, 1.0f, 0.0f, 1.0f);
 	public static ColorRGBA Blue => new(0.0f, 0.0f, 1.0f, 1.0f);
 	public static ColorRGBA Cyan => new(0.0f, 1.0f, 1.0f, 1.0f);
-	public static ColorRGBA Magenta => new(1.0f, 1.0f, 0.0f, 1.0f);
+	public static ColorRGBA Magenta => new(1.0f, 0.0f, 1.0f, 1.0f);
+	public static ColorRGBA Yellow => new(1.0f, 1.0f, 0.0f, 1.0f);
 }
