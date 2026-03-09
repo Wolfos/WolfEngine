@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.Mathematics;
@@ -8,10 +9,16 @@ namespace WolfEngine.Editor.UI;
 
 public class SceneWindow: EditorWindow
 {
+    private static readonly SceneDebugViewOption[] FallbackDebugViews =
+    [
+        new SceneDebugViewOption(SceneDebugViewIds.SceneColor, "Scene Color", SceneDebugViewKind.Color)
+    ];
+
     private readonly EditorViewportStateBus _viewportStateBus;
     private readonly IIconManager _icons;
     private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
+    private string _selectedDebugViewId = SceneDebugViewIds.SceneColor;
     
     private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
     private TransformSpace _transformSpace = TransformSpace.Local;
@@ -90,6 +97,30 @@ public class SceneWindow: EditorWindow
         }
 
         ImGui.SameLine();
+        var renderState = _viewportStateBus.GetRenderState();
+        var debugViews = renderState.DebugViews.Length > 0 ? renderState.DebugViews : FallbackDebugViews;
+        ImGui.SetNextItemWidth(150.0f);
+        if (ImGui.BeginCombo("##DebugView", GetDebugViewLabel(debugViews, renderState.ActiveDebugViewId)))
+        {
+            for (var i = 0; i < debugViews.Length; i++)
+            {
+                var debugView = debugViews[i];
+                var selected = string.Equals(_selectedDebugViewId, debugView.Id, StringComparison.Ordinal);
+                if (ImGui.Selectable(debugView.Label, selected))
+                {
+                    _selectedDebugViewId = debugView.Id;
+                }
+
+                if (selected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine();
         const float resolutionSliderWidth = 100.0f;
         var resolutionSliderX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - resolutionSliderWidth - 3;
         if (resolutionSliderX > ImGui.GetCursorPosX())
@@ -131,7 +162,6 @@ public class SceneWindow: EditorWindow
             }
         }
 
-        var renderState = _viewportStateBus.GetRenderState();
         var imageMin = ImGui.GetCursorScreenPos();
         var imageMax = imageMin + contentSize;
         if (renderState.TextureId != 0 && contentSize.X > 0.0f && contentSize.Y > 0.0f)
@@ -152,6 +182,7 @@ public class SceneWindow: EditorWindow
             visible,
             contentPixels,
             _sceneViewportScale,
+            _selectedDebugViewId,
             hovered,
             focused,
             imageMin,
@@ -188,4 +219,24 @@ public class SceneWindow: EditorWindow
         return clicked;
     }
 
+    private string GetDebugViewLabel(SceneDebugViewOption[] debugViews, string activeDebugViewId)
+    {
+        for (var i = 0; i < debugViews.Length; i++)
+        {
+            if (string.Equals(debugViews[i].Id, _selectedDebugViewId, StringComparison.Ordinal))
+            {
+                return debugViews[i].Label;
+            }
+        }
+
+        for (var i = 0; i < debugViews.Length; i++)
+        {
+            if (string.Equals(debugViews[i].Id, activeDebugViewId, StringComparison.Ordinal))
+            {
+                return debugViews[i].Label;
+            }
+        }
+
+        return "Scene Color";
+    }
 }

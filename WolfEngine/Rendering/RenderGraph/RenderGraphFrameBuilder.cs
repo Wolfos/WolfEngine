@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
@@ -32,6 +33,26 @@ public readonly struct RenderGraphFrameResources
 
 public sealed class RenderGraphFrameBuilder
 {
+	private readonly struct SceneDebugViewRegistration
+	{
+		public SceneDebugViewRegistration(
+			string id,
+			string label,
+			RenderGraphResourceHandle handle,
+			SceneDebugViewKind kind)
+		{
+			Id = id;
+			Label = label;
+			Handle = handle;
+			Kind = kind;
+		}
+
+		public string Id { get; }
+		public string Label { get; }
+		public RenderGraphResourceHandle Handle { get; }
+		public SceneDebugViewKind Kind { get; }
+	}
+
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
 	private readonly DeferredLightingPass _deferredLightingPass;
@@ -44,6 +65,10 @@ public sealed class RenderGraphFrameBuilder
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
+	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
+	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
+	private string _requestedSceneDebugViewId = SceneDebugViewIds.SceneColor;
+	private SceneViewportRenderState _resolvedSceneViewportState = SceneViewportRenderState.Empty;
 	private bool _hasPreviousFrameShape;
 	private Int2 _previousFramebufferSize;
 	private Int2 _previousSceneFramebufferSize;
@@ -116,6 +141,9 @@ public sealed class RenderGraphFrameBuilder
 		RenderConfig config)
 	{
 		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, sceneEnabled);
+		_sceneDebugViews.Clear();
+		_sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
+		_resolvedSceneViewportState = SceneViewportRenderState.Empty;
 
 		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
@@ -246,14 +274,29 @@ public sealed class RenderGraphFrameBuilder
 			SkyboxBrdfLut = skyboxBrdfHandle,
 			Config = config
 		};
+
+		if (sceneEnabled)
+		{
+			RegisterSceneDebugView(SceneDebugViewIds.SceneColor, "Scene Color", lightingHandle, SceneDebugViewKind.Color);
+			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
+			_sceneDebugViewOptions = BuildSceneDebugViewOptions();
+		}
 	}
 
 	public void SetUiFrame(UiFrameData uiFrame)
 	{
 		_uiFrame = uiFrame;
 	}
+
+	public void SetSceneViewportSelection(string requestedDebugViewId)
+	{
+		_requestedSceneDebugViewId = NormalizeSceneDebugViewId(requestedDebugViewId);
+	}
+
+	public SceneViewportRenderState GetSceneViewportRenderState() => _resolvedSceneViewportState;
 	
 
+	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public void Build(RenderGraph graph)
 	{
 		if (_frameResources.SceneEnabled)
@@ -314,22 +357,9 @@ public sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource);
-			if (_frameResources.SkyboxEnvironment.IsValid)
-			{
-				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxIrradiance.IsValid)
-			{
-				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxPrefilter.IsValid)
-			{
-				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxBrdfLut.IsValid)
-			{
-				deferredLightingBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
-			}
+			
+			ReadSkyboxTextures(deferredLightingBuilder);
+			
 			deferredLightingBuilder
 				.WriteTexture(_frameResources.LightingBuffer, ResourceState.UnorderedAccess)
 				.SetExecute(_deferredLightingExecute);
@@ -340,31 +370,214 @@ public sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.LightingBuffer, ResourceState.RenderTarget);
-			if (_frameResources.SkyboxEnvironment.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxIrradiance.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxPrefilter.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
-			}
-			if (_frameResources.SkyboxBrdfLut.IsValid)
-			{
-				transparentForwardBuilder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
-			}
+			
+			ReadSkyboxTextures(transparentForwardBuilder);
+			
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 		}
 
-		graph.AddPass("ImGui", PassKind.Graphics)
-			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
-			.SetExecute(_imguiExecute);
+		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
+			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget);
+		var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
+		if (selectedSceneDebugViewHandle.IsValid)
+		{
+			imguiBuilder.ReadTexture(selectedSceneDebugViewHandle, ResourceState.ShaderResource);
+		}
+		var sceneColorDebugViewHandle = GetSceneColorDebugViewHandle();
+		if (sceneColorDebugViewHandle.IsValid && sceneColorDebugViewHandle.Id != selectedSceneDebugViewHandle.Id)
+		{
+			imguiBuilder.ReadTexture(sceneColorDebugViewHandle, ResourceState.ShaderResource);
+		}
+
+		imguiBuilder.SetExecute(_imguiExecute);
+	}
+
+	private void ReadSkyboxTextures(RenderGraphBuilder builder)
+	{
+		if (_frameResources.SkyboxEnvironment.IsValid)
+		{
+			builder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxIrradiance.IsValid)
+		{
+			builder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxPrefilter.IsValid)
+		{
+			builder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+		}
+		if (_frameResources.SkyboxBrdfLut.IsValid)
+		{
+			builder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
+		}
+	}
+
+	public void PrepareSceneViewport()
+	{
+		if (_frameResources.SceneEnabled == false)
+		{
+			_resolvedSceneViewportState = SceneViewportRenderState.Empty;
+			return;
+		}
+
+		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId);
+		ResolveSceneViewportTextureId(_uiFrame, textureId);
+		_resolvedSceneViewportState = new SceneViewportRenderState(
+			textureId,
+			_frameResources.SceneFramebufferSize,
+			_sceneDebugViewOptions,
+			activeDebugViewId);
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
+
+	private void RegisterSceneDebugView(
+		string id,
+		string label,
+		RenderGraphResourceHandle handle,
+		SceneDebugViewKind kind)
+	{
+		if (string.IsNullOrWhiteSpace(id))
+		{
+			throw new ArgumentException("Debug view id cannot be empty.", nameof(id));
+		}
+
+		if (string.IsNullOrWhiteSpace(label))
+		{
+			throw new ArgumentException("Debug view label cannot be empty.", nameof(label));
+		}
+
+		_sceneDebugViews.Add(new SceneDebugViewRegistration(id, label, handle, kind));
+	}
+
+	private SceneDebugViewOption[] BuildSceneDebugViewOptions()
+	{
+		if (_sceneDebugViews.Count == 0)
+		{
+			return Array.Empty<SceneDebugViewOption>();
+		}
+
+		var options = new SceneDebugViewOption[_sceneDebugViews.Count];
+		for (var i = 0; i < _sceneDebugViews.Count; i++)
+		{
+			var debugView = _sceneDebugViews[i];
+			options[i] = new SceneDebugViewOption(debugView.Id, debugView.Label, debugView.Kind);
+		}
+
+		return options;
+	}
+
+	private RenderGraphResourceHandle GetSelectedSceneDebugViewHandle()
+	{
+		var resolvedView = GetResolvedSceneDebugView();
+		return resolvedView?.Handle ?? default;
+	}
+
+	private RenderGraphResourceHandle GetSceneColorDebugViewHandle()
+	{
+		return TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView)
+			? sceneColorView.Handle
+			: default;
+	}
+
+	private SceneDebugViewRegistration? GetResolvedSceneDebugView()
+	{
+		if (TryGetSceneDebugView(_requestedSceneDebugViewId, out var requestedView))
+		{
+			return requestedView;
+		}
+
+		if (TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView))
+		{
+			return sceneColorView;
+		}
+
+		return null;
+	}
+
+	private bool TryGetSceneDebugView(string id, out SceneDebugViewRegistration view)
+	{
+		for (var i = 0; i < _sceneDebugViews.Count; i++)
+		{
+			if (string.Equals(_sceneDebugViews[i].Id, id, StringComparison.Ordinal))
+			{
+				view = _sceneDebugViews[i];
+				return true;
+			}
+		}
+
+		view = default;
+		return false;
+	}
+
+	private nint ResolveSceneDebugTextureId(SceneDebugViewRegistration debugView)
+	{
+		if (debugView.Handle.IsValid == false)
+		{
+			return 0;
+		}
+
+		var texture = _resources.GetTexture(debugView.Handle);
+		var descriptorHandle = debugView.Kind == SceneDebugViewKind.Depth && texture.DepthShaderResourceView.IsValid
+			? texture.DepthShaderResourceView
+			: texture.ShaderResourceView;
+		return descriptorHandle.IsValid ? (nint)descriptorHandle.Value : 0;
+	}
+
+	private nint ResolveSceneViewportTextureId(out string activeDebugViewId)
+	{
+		var resolvedView = GetResolvedSceneDebugView();
+		if (resolvedView.HasValue)
+		{
+			var textureId = ResolveSceneDebugTextureId(resolvedView.Value);
+			if (textureId != 0)
+			{
+				activeDebugViewId = resolvedView.Value.Id;
+				return textureId;
+			}
+		}
+
+		if (TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView))
+		{
+			var fallbackTextureId = ResolveSceneDebugTextureId(sceneColorView);
+			activeDebugViewId = SceneDebugViewIds.SceneColor;
+			return fallbackTextureId;
+		}
+
+		activeDebugViewId = SceneDebugViewIds.SceneColor;
+		return 0;
+	}
+
+	private static string NormalizeSceneDebugViewId(string? requestedDebugViewId)
+	{
+		return string.IsNullOrWhiteSpace(requestedDebugViewId)
+			? SceneDebugViewIds.SceneColor
+			: requestedDebugViewId;
+	}
+
+	private static void ResolveSceneViewportTextureId(UiFrameData uiFrame, nint textureId)
+	{
+		if (ReferenceEquals(uiFrame, UiFrameData.Empty) || uiFrame.CommandCount == 0)
+		{
+			return;
+		}
+
+		for (var i = 0; i < uiFrame.CommandCount; i++)
+		{
+			var command = uiFrame.Commands[i];
+			if (command.TextureId != UiTextureIds.SceneViewport)
+			{
+				continue;
+			}
+
+			uiFrame.Commands[i] = new UiDrawCommand(
+				command.ElemCount,
+				command.IdxOffset,
+				command.VtxOffset,
+				command.ClipRect,
+				textureId);
+		}
+	}
 
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{

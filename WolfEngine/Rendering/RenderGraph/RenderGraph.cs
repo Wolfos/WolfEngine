@@ -102,6 +102,7 @@ public sealed class RenderGraph
 	{
 		// Compile barriers before execution
 		_compiler.Compile(_passes);
+		_frameBuilder.PrepareSceneViewport();
 
 		var device = _renderer.GetGfxDevice();
 
@@ -289,7 +290,6 @@ public sealed class RenderGraph
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
 				var renderSceneToViewport = sceneEnabled;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
-				var nextSceneRenderState = SceneViewportRenderState.Empty;
 				if (renderSceneToViewport)
 				{
 					var sceneTarget = _sceneRenderTargetManager.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
@@ -297,15 +297,10 @@ public sealed class RenderGraph
 						sceneTarget,
 						takeOwnership: false,
 						initialState: ResourceState.RenderTarget);
-					var textureId = sceneTarget.ShaderResourceView.IsValid
-						? (nint)sceneTarget.ShaderResourceView.Value
-						: 0;
-					nextSceneRenderState = new SceneViewportRenderState(textureId, sceneRenderSize);
 				}
-
-				ResolveSpecialUiTextureIds(uiFrame, nextSceneRenderState.TextureId);
 				
 				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection, snapshot.Config);
+				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.SetUiFrame(uiFrame);
 
 
@@ -313,7 +308,7 @@ public sealed class RenderGraph
 				Execute();
 
 				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());
-				_viewportStateBus.PublishRenderState(nextSceneRenderState);
+				_viewportStateBus.PublishRenderState(_frameBuilder.GetSceneViewportRenderState());
 
 				_resourceRegistry.EndFrame();
 			}
@@ -428,30 +423,6 @@ public sealed class RenderGraph
 		}
 
 		return fallback;
-	}
-
-	private static void ResolveSpecialUiTextureIds(UiFrameData uiFrame, nint sceneTextureId)
-	{
-		if (ReferenceEquals(uiFrame, UiFrameData.Empty) || uiFrame.CommandCount == 0)
-		{
-			return;
-		}
-
-		for (var i = 0; i < uiFrame.CommandCount; i++)
-		{
-			var command = uiFrame.Commands[i];
-			if (command.TextureId != UiTextureIds.SceneViewport)
-			{
-				continue;
-			}
-
-			uiFrame.Commands[i] = new UiDrawCommand(
-				command.ElemCount,
-				command.IdxOffset,
-				command.VtxOffset,
-				command.ClipRect,
-				sceneTextureId);
-		}
 	}
 
 	private void LogGpuHardeningStatsIfNeeded()

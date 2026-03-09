@@ -1,7 +1,34 @@
+using System;
 using System.Numerics;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;
+
+public static class SceneDebugViewIds
+{
+	public const string SceneColor = "scene-color";
+	public const string GBufferAlbedo = "gbuffer-albedo";
+}
+
+public enum SceneDebugViewKind
+{
+	Color,
+	Depth
+}
+
+public readonly struct SceneDebugViewOption
+{
+	public SceneDebugViewOption(string id, string label, SceneDebugViewKind kind)
+	{
+		Id = id ?? throw new ArgumentNullException(nameof(id));
+		Label = label ?? throw new ArgumentNullException(nameof(label));
+		Kind = kind;
+	}
+
+	public string Id { get; }
+	public string Label { get; }
+	public SceneDebugViewKind Kind { get; }
+}
 
 public readonly struct SceneViewportUiState
 {
@@ -9,6 +36,7 @@ public readonly struct SceneViewportUiState
 		visible: false,
 		contentSizePixels: Int2.Zero,
 		resolutionScale: 1.0f,
+		requestedDebugViewId: SceneDebugViewIds.SceneColor,
 		hovered: false,
 		focused: false,
 		imageMin: Vector2.Zero,
@@ -18,6 +46,7 @@ public readonly struct SceneViewportUiState
 		bool visible,
 		Int2 contentSizePixels,
 		float resolutionScale,
+		string requestedDebugViewId,
 		bool hovered,
 		bool focused,
 		Vector2 imageMin,
@@ -26,6 +55,9 @@ public readonly struct SceneViewportUiState
 		Visible = visible;
 		ContentSizePixels = contentSizePixels;
 		ResolutionScale = resolutionScale;
+		RequestedDebugViewId = string.IsNullOrWhiteSpace(requestedDebugViewId)
+			? SceneDebugViewIds.SceneColor
+			: requestedDebugViewId;
 		Hovered = hovered;
 		Focused = focused;
 		ImageMin = imageMin;
@@ -35,6 +67,7 @@ public readonly struct SceneViewportUiState
 	public bool Visible { get; }
 	public Int2 ContentSizePixels { get; }
 	public float ResolutionScale { get; }
+	public string RequestedDebugViewId { get; }
 	public bool Hovered { get; }
 	public bool Focused { get; }
 	public Vector2 ImageMin { get; }
@@ -43,16 +76,30 @@ public readonly struct SceneViewportUiState
 
 public readonly struct SceneViewportRenderState
 {
-	public static readonly SceneViewportRenderState Empty = new(textureId: 0, renderSizePixels: Int2.Zero);
+	public static readonly SceneViewportRenderState Empty = new(
+		textureId: 0,
+		renderSizePixels: Int2.Zero,
+		debugViews: Array.Empty<SceneDebugViewOption>(),
+		activeDebugViewId: SceneDebugViewIds.SceneColor);
 
-	public SceneViewportRenderState(nint textureId, Int2 renderSizePixels)
+	public SceneViewportRenderState(
+		nint textureId,
+		Int2 renderSizePixels,
+		SceneDebugViewOption[] debugViews,
+		string activeDebugViewId)
 	{
 		TextureId = textureId;
 		RenderSizePixels = renderSizePixels;
+		DebugViews = debugViews ?? Array.Empty<SceneDebugViewOption>();
+		ActiveDebugViewId = string.IsNullOrWhiteSpace(activeDebugViewId)
+			? SceneDebugViewIds.SceneColor
+			: activeDebugViewId;
 	}
 
 	public nint TextureId { get; }
 	public Int2 RenderSizePixels { get; }
+	public SceneDebugViewOption[] DebugViews { get; }
+	public string ActiveDebugViewId { get; }
 }
 
 public sealed class EditorViewportStateBus
