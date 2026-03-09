@@ -55,6 +55,9 @@ public sealed class DeferredLightingPass
 		var material = context.GetTexture(resources.GBufferMaterial);
 		var emissive = context.GetTexture(resources.GBufferEmissive);
 		var depth = context.GetTexture(resources.GBufferDepth);
+		var ambientOcclusion = resources.AmbientOcclusionFinal.IsValid
+			? context.GetTexture(resources.AmbientOcclusionFinal)
+			: null;
 		var shadowMapDepth0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMapDepth1 = context.GetTexture(resources.ShadowMapDepth1);
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
@@ -83,6 +86,7 @@ public sealed class DeferredLightingPass
 			GBufferMaterial = _bindlessRegistry.GetTextureHandle(material),
 			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
+			AmbientOcclusion = _bindlessRegistry.GetTextureHandle(ambientOcclusion),
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
@@ -106,6 +110,7 @@ public sealed class DeferredLightingPass
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
+			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
 			DispatchSize = resources.SceneFramebufferSize
 		};
 	}
@@ -127,6 +132,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("gbufferMaterialHandle", config.GBufferMaterial.Value);
 		bindlessWriter.SetUInt("gbufferEmissiveHandle", config.GBufferEmissive.Value);
 		bindlessWriter.SetUInt("gbufferDepthHandle", config.GBufferDepth.Value);
+		bindlessWriter.SetUInt("ambientOcclusionHandle", config.AmbientOcclusion.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
 		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		bindlessWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);
@@ -191,6 +197,7 @@ public sealed class DeferredLightingPass
 			"shadowLightIndex",
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
 		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("aoEnabled", config.AoEnabled ? 1u : 0u);
 		lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
 		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
 

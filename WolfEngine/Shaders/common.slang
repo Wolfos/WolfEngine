@@ -4,6 +4,7 @@ struct CameraParams
     float4x4 invViewProjection;
     float3 cameraOrigin; // world-space origin if needed
     float padding; // align to 16 bytes
+    float4x4 viewMatrix;
 };
 
 float3 ReconstructViewPosition(uint2 pixel, uint2 size, float depth, float4x4 invProjection)

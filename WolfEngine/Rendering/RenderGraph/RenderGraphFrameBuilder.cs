@@ -20,6 +20,9 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
 	public RenderGraphResourceHandle GBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
+	public RenderGraphResourceHandle AmbientOcclusionRaw { get; init; }
+	public RenderGraphResourceHandle AmbientOcclusionTemp { get; init; }
+	public RenderGraphResourceHandle AmbientOcclusionFinal { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
@@ -55,6 +58,9 @@ public sealed class RenderGraphFrameBuilder
 
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
+	private readonly VBAOPass _ambientOcclusionPass;
+	private readonly AmbientOcclusionBlurPass _ambientOcclusionBlurPass;
+	private readonly AmbientOcclusionUpsamplePass _ambientOcclusionUpsamplePass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly TransparentForwardPass _transparentForwardPass;
 	private readonly ShadowMapPass _shadowMapPass;
@@ -75,6 +81,10 @@ public sealed class RenderGraphFrameBuilder
 	private bool _previousSceneEnabled;
 	
 	private readonly Action<RenderGraphContext> _gbufferExecute;
+	private readonly Action<RenderGraphContext> _ambientOcclusionExecute;
+	private readonly Action<RenderGraphContext> _ambientOcclusionBlurHorizontalExecute;
+	private readonly Action<RenderGraphContext> _ambientOcclusionBlurVerticalExecute;
+	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
@@ -95,6 +105,9 @@ public sealed class RenderGraphFrameBuilder
 	public RenderGraphFrameBuilder(
 		RenderGraphResourceRegistry resources,
 		IRenderer renderer,
+		VBAOPass ambientOcclusionPass,
+		AmbientOcclusionBlurPass ambientOcclusionBlurPass,
+		AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
 		DeferredLightingPass deferredLightingPass,
 		TransparentForwardPass transparentForwardPass,
 		ShadowMapPass shadowMapPass,
@@ -105,6 +118,9 @@ public sealed class RenderGraphFrameBuilder
 	{
 		_resources = resources;
 		_renderer = renderer;
+		_ambientOcclusionPass = ambientOcclusionPass;
+		_ambientOcclusionBlurPass = ambientOcclusionBlurPass;
+		_ambientOcclusionUpsamplePass = ambientOcclusionUpsamplePass;
 		_deferredLightingPass = deferredLightingPass;
 		_transparentForwardPass = transparentForwardPass;
 		_shadowMapPass = shadowMapPass;
@@ -114,6 +130,10 @@ public sealed class RenderGraphFrameBuilder
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
+		_ambientOcclusionExecute = ExecuteAmbientOcclusion;
+		_ambientOcclusionBlurHorizontalExecute = ExecuteAmbientOcclusionBlurHorizontal;
+		_ambientOcclusionBlurVerticalExecute = ExecuteAmbientOcclusionBlurVertical;
+		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_transparentForwardExecute = ExecuteTransparentForward;
 		_imguiExecute = ExecuteImGui;
@@ -185,6 +205,9 @@ public sealed class RenderGraphFrameBuilder
 		var shadowMapHandle0 = default(RenderGraphResourceHandle);
 		var shadowMapHandle1 = default(RenderGraphResourceHandle);
 		var shadowMapHandle2 = default(RenderGraphResourceHandle);
+		var ambientOcclusionRawHandle = default(RenderGraphResourceHandle);
+		var ambientOcclusionTempHandle = default(RenderGraphResourceHandle);
+		var ambientOcclusionFinalHandle = default(RenderGraphResourceHandle);
 		if (sceneEnabled)
 		{
 			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -246,6 +269,29 @@ public sealed class RenderGraphFrameBuilder
 					sceneFramebufferSize.Y,
 					TextureFormat.Bgra8Unorm,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+
+			if (HasAmbientOcclusion(config))
+			{
+				var aoSize = GetAmbientOcclusionInternalSize(sceneFramebufferSize, config.VBAOConfig.Resolution);
+				ambientOcclusionRawHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					aoSize.X,
+					aoSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+				ambientOcclusionTempHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					aoSize.X,
+					aoSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+				ambientOcclusionFinalHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+			}
 		}
 
 		_frameResources = new()
@@ -264,6 +310,9 @@ public sealed class RenderGraphFrameBuilder
 			GBufferMaterial = gbufferMaterialHandle,
 			GBufferEmissive = gbufferEmissiveHandle,
 			GBufferDepth = gbufferDepthHandle,
+			AmbientOcclusionRaw = ambientOcclusionRawHandle,
+			AmbientOcclusionTemp = ambientOcclusionTempHandle,
+			AmbientOcclusionFinal = ambientOcclusionFinalHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
@@ -278,6 +327,10 @@ public sealed class RenderGraphFrameBuilder
 		if (sceneEnabled)
 		{
 			RegisterSceneDebugView(SceneDebugViewIds.SceneColor, "Scene Color", lightingHandle, SceneDebugViewKind.Color);
+			if (ambientOcclusionFinalHandle.IsValid)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
+			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
 			_sceneDebugViewOptions = BuildSceneDebugViewOptions();
 		}
@@ -324,6 +377,46 @@ public sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
 				.SetExecute(_gbufferExecute);
 
+			if (_frameResources.AmbientOcclusionRaw.IsValid)
+			{
+				graph.AddPass("VBAO Evaluate", PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess)
+					.SetExecute(_ambientOcclusionExecute);
+
+				graph.AddPass("VBAO Blur X", PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.AmbientOcclusionRaw, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.AmbientOcclusionTemp, ResourceState.UnorderedAccess)
+					.SetExecute(_ambientOcclusionBlurHorizontalExecute);
+
+				var blurVerticalBuilder = graph.AddPass("VBAO Blur Y", PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.AmbientOcclusionTemp, ResourceState.ShaderResource);
+				if (_frameResources.Config.VBAOConfig.Resolution == VBAOPass.AmbientOcclusionResolution.Half)
+				{
+					blurVerticalBuilder
+						.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess)
+						.SetExecute(_ambientOcclusionBlurVerticalExecute);
+
+					graph.AddPass("VBAO Upsample", PassKind.Compute)
+						.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.AmbientOcclusionRaw, ResourceState.ShaderResource)
+						.WriteTexture(_frameResources.AmbientOcclusionFinal, ResourceState.UnorderedAccess)
+						.SetExecute(_ambientOcclusionUpsampleExecute);
+				}
+				else
+				{
+					blurVerticalBuilder
+						.WriteTexture(_frameResources.AmbientOcclusionFinal, ResourceState.UnorderedAccess)
+						.SetExecute(_ambientOcclusionBlurVerticalExecute);
+				}
+			}
+
 			if (_useProceduralSkybox && _recordProceduralSkyLighting)
 			{
 				graph.AddPass("Skybox Environment", PassKind.Compute)
@@ -357,6 +450,10 @@ public sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource);
+			if (_frameResources.AmbientOcclusionFinal.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.AmbientOcclusionFinal, ResourceState.ShaderResource);
+			}
 			
 			ReadSkyboxTextures(deferredLightingBuilder);
 			
@@ -717,6 +814,44 @@ public sealed class RenderGraphFrameBuilder
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
 	}
 
+	private void ExecuteAmbientOcclusion(RenderGraphContext context)
+	{
+		var config = _ambientOcclusionPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_ambientOcclusionPass.Record(context, in config, context.SceneData!);
+	}
+
+	private void ExecuteAmbientOcclusionBlurHorizontal(RenderGraphContext context)
+	{
+		var config = _ambientOcclusionBlurPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			blurHorizontally: true);
+		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData!);
+	}
+
+	private void ExecuteAmbientOcclusionBlurVertical(RenderGraphContext context)
+	{
+		var config = _ambientOcclusionBlurPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			blurHorizontally: false);
+		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData!);
+	}
+
+	private void ExecuteAmbientOcclusionUpsample(RenderGraphContext context)
+	{
+		var config = _ambientOcclusionUpsamplePass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_ambientOcclusionUpsamplePass.Record(context, in config, context.SceneData!);
+	}
+
 	private void ExecuteTransparentForward(RenderGraphContext context)
 	{
 		var config = _transparentForwardPass.BuildConfig(
@@ -764,5 +899,23 @@ public sealed class RenderGraphFrameBuilder
 		_previousSceneFramebufferSize = sceneFramebufferSize;
 		_previousSceneEnabled = sceneEnabled;
 		_hasPreviousFrameShape = true;
+	}
+
+	private static bool HasAmbientOcclusion(RenderConfig config)
+	{
+		return config.VBAOConfig.Enabled &&
+		       config.VBAOConfig.SliceCount > 0 &&
+		       config.VBAOConfig.StepCount > 0;
+	}
+
+	private static Int2 GetAmbientOcclusionInternalSize(
+		Int2 sceneFramebufferSize,
+		VBAOPass.AmbientOcclusionResolution resolution)
+	{
+		return resolution == VBAOPass.AmbientOcclusionResolution.Half
+			? new Int2(
+				(sceneFramebufferSize.X + 1) / 2,
+				(sceneFramebufferSize.Y + 1) / 2)
+			: sceneFramebufferSize;
 	}
 }

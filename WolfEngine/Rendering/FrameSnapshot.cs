@@ -52,6 +52,7 @@ public sealed class FrameSnapshot
 
 	public void SetConfig(RenderConfig config)
 	{
+		Config.VBAOConfig = config.VBAOConfig;
 		Config.SkyboxConfig = config.SkyboxConfig;
 	}
 

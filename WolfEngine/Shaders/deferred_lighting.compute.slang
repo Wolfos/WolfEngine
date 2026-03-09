@@ -9,6 +9,7 @@ cbuffer BindlessHandles : register(b0)
     uint gbufferMaterialHandle;
     uint gbufferEmissiveHandle;
     uint gbufferDepthHandle;
+    uint ambientOcclusionHandle;
     uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
@@ -38,8 +39,9 @@ cbuffer LightingParams : register(b2)
     float4 shadowTexelSizeBiasStrength;
     uint shadowLightIndex;
     uint shadowsEnabled;
+    uint aoEnabled;
     float shadowMaxDistance;
-    uint _shadowPadding1;
+    uint _shadowPadding0;
 };
 
 float3 ReconstructWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
@@ -71,6 +73,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     Texture2D<float4> gbufferMaterial = GetTexture(gbufferMaterialHandle);
     Texture2D<float4> gbufferEmissive = GetTexture(gbufferEmissiveHandle);
     Texture2D<float4> gbufferDepth = GetTexture(gbufferDepthHandle);
+    Texture2D<float4> ambientOcclusionTexture = GetTexture(ambientOcclusionHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
     float3 albedo = gbufferAlbedo.SampleLevel(linearSampler, uv, 0.0f).rgb;
@@ -81,6 +84,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float metallic = material.r;
     float roughness = material.g;
     float occlusion = material.b;
+    if (aoEnabled != 0u)
+    {
+        float aoFactor = ambientOcclusionTexture.SampleLevel(linearSampler, uv, 0.0f).r;
+        occlusion = saturate(occlusion * aoFactor);
+    }
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
     if (depth >= 0.9999f)
     {

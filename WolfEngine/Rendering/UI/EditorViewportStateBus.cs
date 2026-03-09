@@ -7,6 +7,7 @@ namespace WolfEngine.Rendering.UI;
 public static class SceneDebugViewIds
 {
 	public const string SceneColor = "scene-color";
+	public const string AmbientOcclusion = "ambient-occlusion";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 }
 

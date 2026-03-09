@@ -26,6 +26,9 @@ public static class WolfEngine
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
 		services.AddSingleton<IInputSystem, InputSystem>();
+		services.AddSingleton<VBAOPass>();
+		services.AddSingleton<AmbientOcclusionBlurPass>();
+		services.AddSingleton<AmbientOcclusionUpsamplePass>();
 		services.AddSingleton<DeferredLightingPass>();
 		services.AddSingleton<TransparentForwardPass>();
 		services.AddSingleton<ShadowMapPass>();

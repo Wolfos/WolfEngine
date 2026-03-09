@@ -51,6 +51,9 @@ public sealed class RenderGraph
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
+		VBAOPass ambientOcclusionPass,
+		AmbientOcclusionBlurPass ambientOcclusionBlurPass,
+		AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
 		DeferredLightingPass deferredLightingPass,
 		TransparentForwardPass transparentForwardPass,
 		ShadowMapPass shadowMapPass,
@@ -71,6 +74,9 @@ public sealed class RenderGraph
 		_frameBuilder = new(
 			resourceRegistry,
 			renderer,
+			ambientOcclusionPass,
+			ambientOcclusionBlurPass,
+			ambientOcclusionUpsamplePass,
 			deferredLightingPass,
 			transparentForwardPass,
 			shadowMapPass,
@@ -138,7 +144,7 @@ public sealed class RenderGraph
 				return;
 			}
 
-			sceneData = new(viewProjection, invProjection, invViewProjection, cameraPosition, _renderLights);
+			sceneData = new(view, viewProjection, invProjection, invViewProjection, cameraPosition, _renderLights);
 		}
 
 		if (sceneData is null)

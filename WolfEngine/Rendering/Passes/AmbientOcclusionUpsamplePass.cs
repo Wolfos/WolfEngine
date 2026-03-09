@@ -1,0 +1,136 @@
+using WolfEngine.Rendering.Abstraction;
+
+namespace WolfEngine.Rendering.Passes;
+
+public sealed class AmbientOcclusionUpsamplePass
+{
+	private readonly IShaderCompiler _shaderCompiler;
+	private readonly BindlessResourceRegistry _bindlessRegistry;
+	private IGfxPipeline _pipeline;
+	private ReadOnlyMemory<byte> _computeShader;
+	private GraphicsBackendKind? _compiledBackendKind;
+	private ShaderPropertyWriter? _bindlessWriter;
+	private ShaderPropertyWriter? _settingsWriter;
+	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
+
+	public AmbientOcclusionUpsamplePass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	{
+		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+	}
+
+	public AmbientOcclusionUpsamplePassConfig BuildConfig(
+		RenderGraphContext context,
+		RenderGraphFrameResources resources,
+		IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(device);
+
+		var pipeline = EnsurePipeline(device);
+		_bindlessRegistry.EnsureInitialized(device);
+
+		if (_samplerHandle.IsValid == false)
+		{
+			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
+			_samplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
+		}
+
+		var depth = context.GetTexture(resources.GBufferDepth);
+		var normal = context.GetTexture(resources.GBufferNormal);
+		var source = context.GetTexture(resources.AmbientOcclusionRaw);
+		var destination = context.GetTexture(resources.AmbientOcclusionFinal);
+
+		return new AmbientOcclusionUpsamplePassConfig
+		{
+			Pipeline = pipeline,
+			DepthHandle = _bindlessRegistry.RegisterDepthTexture(depth),
+			NormalHandle = _bindlessRegistry.GetTextureHandle(normal),
+			SourceHandle = _bindlessRegistry.GetTextureHandle(source),
+			OutputHandle = _bindlessRegistry.RegisterRwTexture(destination),
+			SamplerHandle = _samplerHandle,
+			FullResolution = resources.SceneFramebufferSize,
+			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height)
+		};
+	}
+
+	public void Record(RenderGraphContext context, in AmbientOcclusionUpsamplePassConfig config, SceneDrawData sceneData)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+
+		var commandList = context.CommandList;
+		commandList.BindPipeline(config.Pipeline);
+
+		var bindlessWriter = _bindlessWriter
+			?? throw new InvalidOperationException("Ambient occlusion upsample bindless writer was not initialized.");
+		bindlessWriter.Clear();
+		bindlessWriter.SetUInt("depthHandle", config.DepthHandle.Value);
+		bindlessWriter.SetUInt("normalHandle", config.NormalHandle.Value);
+		bindlessWriter.SetUInt("sourceHandle", config.SourceHandle.Value);
+		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
+		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
+		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
+
+		var settingsWriter = _settingsWriter
+			?? throw new InvalidOperationException("Ambient occlusion upsample settings writer was not initialized.");
+		settingsWriter.Clear();
+		settingsWriter.SetUInt("fullResolutionX", (uint)Math.Max(config.FullResolution.X, 1));
+		settingsWriter.SetUInt("fullResolutionY", (uint)Math.Max(config.FullResolution.Y, 1));
+		settingsWriter.SetUInt("aoResolutionX", (uint)Math.Max(config.AoResolution.X, 1));
+		settingsWriter.SetUInt("aoResolutionY", (uint)Math.Max(config.AoResolution.Y, 1));
+		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
+
+		var dispatchX = (uint)((config.FullResolution.X + 7) / 8);
+		var dispatchY = (uint)((config.FullResolution.Y + 7) / 8);
+		commandList.Dispatch(dispatchX, dispatchY, 1);
+	}
+
+	private IGfxPipeline EnsurePipeline(IGfxDevice device)
+	{
+		if (_pipeline is not null)
+		{
+			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
+			{
+				throw new InvalidOperationException(
+					$"AmbientOcclusionUpsamplePass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
+			}
+
+			return _pipeline;
+		}
+
+		EnsureReflectionWriters(device.BackendKind);
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			vertexEntryPoint: null,
+			pixelEntryPoint: null,
+			computeEntryPoint: "CSMain",
+			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
+			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
+			renderState: default);
+		_pipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _computeShader));
+		return _pipeline;
+	}
+
+	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
+	{
+		if (_compiledBackendKind.HasValue &&
+		    _compiledBackendKind.Value == backendKind &&
+		    _computeShader.IsEmpty == false &&
+		    _bindlessWriter is not null &&
+		    _settingsWriter is not null)
+		{
+			return;
+		}
+
+		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"ao_upsample.compute.slang",
+			"CSMain",
+			backendKind);
+
+		_computeShader = compiled.Bytecode;
+		var reflection = compiled.ReflectionLayout;
+		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
+		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("UpsampleSettings"));
+		_compiledBackendKind = backendKind;
+	}
+}
