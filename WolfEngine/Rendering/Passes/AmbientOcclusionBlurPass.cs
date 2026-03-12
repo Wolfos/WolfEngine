@@ -1,4 +1,5 @@
 using WolfEngine.Rendering.Abstraction;
+using System.Numerics;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -76,6 +77,11 @@ public sealed class AmbientOcclusionBlurPass
 
 		var settingsWriter = _settingsWriter
 			?? throw new InvalidOperationException("Ambient occlusion blur settings writer was not initialized.");
+		if (Matrix4x4.Invert(sceneData.InverseProjection, out var projectionMatrix) == false)
+		{
+			throw new InvalidOperationException("Ambient occlusion blur projection parameters could not be reconstructed.");
+		}
+
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("fullResolutionX", (uint)Math.Max(config.FullResolution.X, 1));
 		settingsWriter.SetUInt("fullResolutionY", (uint)Math.Max(config.FullResolution.Y, 1));
@@ -83,6 +89,8 @@ public sealed class AmbientOcclusionBlurPass
 		settingsWriter.SetUInt("aoResolutionY", (uint)Math.Max(config.AoResolution.Y, 1));
 		settingsWriter.SetUInt("blurHorizontally", config.BlurHorizontally ? 1u : 0u);
 		settingsWriter.SetFloat("blurSharpness", config.BlurSharpness);
+		settingsWriter.SetFloat("projZBias", projectionMatrix.M33);
+		settingsWriter.SetFloat("projZScale", projectionMatrix.M43);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var dispatchX = (uint)((config.AoResolution.X + 7) / 8);

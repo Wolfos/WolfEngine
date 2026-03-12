@@ -17,7 +17,8 @@ cbuffer BlurSettings : register(b1)
     uint aoResolutionY;
     uint blurHorizontally;
     float blurSharpness;
-    float2 _blurPadding;
+    float projZBias;
+    float projZScale;
 };
 
 int2 ClampAoPixel(int2 pixel, uint2 size)
@@ -61,6 +62,17 @@ float GaussianWeight(int tap)
     return 0.01110900f;
 }
 
+float ReconstructViewDepth(float depth)
+{
+    float denom = depth - projZBias;
+    if (abs(denom) < 1e-6f)
+    {
+        denom = denom < 0.0f ? -1e-6f : 1e-6f;
+    }
+
+    return projZScale / denom;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -86,6 +98,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    float centerViewDepth = abs(ReconstructViewDepth(centerDepth));
     float3 centerNormal = DecodeNormal(normalTexture.Load(int3(centerFull, 0)).xyz);
 
     float weightSum = 0.0f;
@@ -98,11 +111,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         int2 sampleFull = ResolveFullPixel(sampleUv, fullSize);
 
         float sampleDepth = depthTexture.Load(int3(sampleFull, 0)).r;
+        float sampleViewDepth = abs(ReconstructViewDepth(sampleDepth));
         float3 sampleNormal = DecodeNormal(normalTexture.Load(int3(sampleFull, 0)).xyz);
         float sampleAoValue = sourceTexture.Load(int3(sampleAo, 0)).r;
 
         float spatialWeight = GaussianWeight(tap);
-        float depthWeight = exp2(-abs(sampleDepth - centerDepth) * blurSharpness * 92.33248f);
+        float depthScale = rcp(max(min(centerViewDepth, sampleViewDepth), 1e-3f));
+        float depthWeight = exp2(-abs(sampleViewDepth - centerViewDepth) * depthScale * blurSharpness);
         float normalWeight = Pow32(dot(centerNormal, sampleNormal));
         float weight = spatialWeight * depthWeight * normalWeight;
         aoSum += sampleAoValue * weight;

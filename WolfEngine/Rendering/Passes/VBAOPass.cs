@@ -20,11 +20,11 @@ public sealed class VBAOPass
 		public bool Enabled { get; set; } = true;
 		public AmbientOcclusionResolution Resolution { get; set; } = AmbientOcclusionResolution.Full;
 		public int SliceCount { get; set; } = 2;
-		public int StepCount { get; set; } = 8;
-		public float Radius { get; set; } = 1.2f;
-		public float Thickness { get; set; } = 0.2f;
+		public int StepCount { get; set; } = 4;
+		public float Radius { get; set; } = 0.4f;
+		public float Thickness { get; set; } = 0.3f;
 		public float Bias { get; set; } = 0.03f;
-		public float Strength { get; set; } = 1.0f;
+		public float Strength { get; set; } = 0.6f;
 		public float Power { get; set; } = 1.5f;
 		public float BlurSharpness { get; set; } = 16.0f;
 	}

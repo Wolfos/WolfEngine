@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -46,7 +47,8 @@ public sealed class AmbientOcclusionUpsamplePass
 			SourceHandle = sourceHandle,
 			OutputHandle = outputHandle,
 			FullResolution = resources.SceneFramebufferSize,
-			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height)
+			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height),
+			BlurSharpness = Math.Max(resources.Config.VBAOConfig.BlurSharpness, 0.001f)
 		};
 	}
 
@@ -68,11 +70,19 @@ public sealed class AmbientOcclusionUpsamplePass
 
 		var settingsWriter = _settingsWriter
 			?? throw new InvalidOperationException("Ambient occlusion upsample settings writer was not initialized.");
+		if (Matrix4x4.Invert(sceneData.InverseProjection, out var projectionMatrix) == false)
+		{
+			throw new InvalidOperationException("Ambient occlusion upsample projection parameters could not be reconstructed.");
+		}
+
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("fullResolutionX", (uint)Math.Max(config.FullResolution.X, 1));
 		settingsWriter.SetUInt("fullResolutionY", (uint)Math.Max(config.FullResolution.Y, 1));
 		settingsWriter.SetUInt("aoResolutionX", (uint)Math.Max(config.AoResolution.X, 1));
 		settingsWriter.SetUInt("aoResolutionY", (uint)Math.Max(config.AoResolution.Y, 1));
+		settingsWriter.SetFloat("blurSharpness", config.BlurSharpness);
+		settingsWriter.SetFloat("projZBias", projectionMatrix.M33);
+		settingsWriter.SetFloat("projZScale", projectionMatrix.M43);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var dispatchX = (uint)((config.FullResolution.X + 7) / 8);

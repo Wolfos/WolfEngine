@@ -12,4 +12,5 @@ public readonly struct AmbientOcclusionUpsamplePassConfig
 	public required DescriptorHandle OutputHandle { get; init; }
 	public required Int2 FullResolution { get; init; }
 	public required Int2 AoResolution { get; init; }
+	public required float BlurSharpness { get; init; }
 }

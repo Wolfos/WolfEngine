@@ -15,6 +15,10 @@ cbuffer UpsampleSettings : register(b1)
     uint fullResolutionY;
     uint aoResolutionX;
     uint aoResolutionY;
+    float blurSharpness;
+    float projZBias;
+    float projZScale;
+    float _upsamplePadding0;
 };
 
 int2 ClampFullPixel(int2 pixel, uint2 size)
@@ -43,6 +47,17 @@ float Pow32(float value)
     return value16 * value16;
 }
 
+float ReconstructViewDepth(float depth)
+{
+    float denom = depth - projZBias;
+    if (abs(denom) < 1e-6f)
+    {
+        denom = denom < 0.0f ? -1e-6f : 1e-6f;
+    }
+
+    return projZScale / denom;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -66,6 +81,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    float centerViewDepth = abs(ReconstructViewDepth(centerDepth));
     float3 centerNormal = DecodeNormal(normalTexture.Load(int3(fullPixel, 0)).xyz);
     float2 lowPosition = (float2(fullPixel) + 0.5f) / float2(fullSize) * float2(aoSize) - 0.5f;
     int2 lowBase = int2(floor(lowPosition));
@@ -81,10 +97,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float aoValue = sourceTexture.Load(int3(aoPixel, 0)).r;
             int2 repFull = ResolveRepresentativeFullPixel(aoPixel, aoSize, fullSize);
             float sampleDepth = depthTexture.Load(int3(repFull, 0)).r;
+            float sampleViewDepth = abs(ReconstructViewDepth(sampleDepth));
             float3 sampleNormal = DecodeNormal(normalTexture.Load(int3(repFull, 0)).xyz);
 
             float bilinearWeight = (x == 0 ? 1.0f - lowFrac.x : lowFrac.x) * (y == 0 ? 1.0f - lowFrac.y : lowFrac.y);
-            float depthWeight = exp2(-abs(sampleDepth - centerDepth) * 92.33248f);
+            float depthScale = rcp(max(min(centerViewDepth, sampleViewDepth), 1e-3f));
+            float depthWeight = exp2(-abs(sampleViewDepth - centerViewDepth) * depthScale * blurSharpness);
             float normalWeight = Pow32(dot(centerNormal, sampleNormal));
             float weight = bilinearWeight * depthWeight * normalWeight;
             aoSum += aoValue * weight;
