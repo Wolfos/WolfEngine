@@ -107,6 +107,11 @@ public sealed class VBAOPass
 
 		var settingsWriter = _settingsWriter
 			?? throw new InvalidOperationException("Ambient occlusion settings writer was not initialized.");
+		if (Matrix4x4.Invert(sceneData.InverseProjection, out var projectionMatrix) == false)
+		{
+			throw new InvalidOperationException("Ambient occlusion projection parameters could not be reconstructed.");
+		}
+
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("fullResolutionX", (uint)Math.Max(config.FullResolution.X, 1));
 		settingsWriter.SetUInt("fullResolutionY", (uint)Math.Max(config.FullResolution.Y, 1));
@@ -119,6 +124,10 @@ public sealed class VBAOPass
 		settingsWriter.SetFloat("bias", config.Bias);
 		settingsWriter.SetFloat("strength", config.Strength);
 		settingsWriter.SetFloat("power", config.Power);
+		settingsWriter.SetFloat("invProjScaleX", sceneData.InverseProjection.M11);
+		settingsWriter.SetFloat("invProjScaleY", sceneData.InverseProjection.M22);
+		settingsWriter.SetFloat("projZBias", projectionMatrix.M33);
+		settingsWriter.SetFloat("projZScale", projectionMatrix.M43);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var dispatchX = (uint)((config.OutputResolution.X + 7) / 8);

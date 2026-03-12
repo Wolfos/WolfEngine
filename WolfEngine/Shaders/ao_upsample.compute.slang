@@ -33,6 +33,16 @@ int2 ResolveRepresentativeFullPixel(int2 aoPixel, uint2 aoSize, uint2 fullSize)
     return ClampFullPixel(int2(uv * float2(fullSize)), fullSize);
 }
 
+float Pow32(float value)
+{
+    value = saturate(value);
+    float value2 = value * value;
+    float value4 = value2 * value2;
+    float value8 = value4 * value4;
+    float value16 = value8 * value8;
+    return value16 * value16;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -74,8 +84,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 sampleNormal = DecodeNormal(normalTexture.Load(int3(repFull, 0)).xyz);
 
             float bilinearWeight = (x == 0 ? 1.0f - lowFrac.x : lowFrac.x) * (y == 0 ? 1.0f - lowFrac.y : lowFrac.y);
-            float depthWeight = exp(-abs(sampleDepth - centerDepth) * 64.0f);
-            float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 32.0f);
+            float depthWeight = exp2(-abs(sampleDepth - centerDepth) * 92.33248f);
+            float normalWeight = Pow32(dot(centerNormal, sampleNormal));
             float weight = bilinearWeight * depthWeight * normalWeight;
             aoSum += aoValue * weight;
             weightSum += weight;

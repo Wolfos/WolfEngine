@@ -9,7 +9,7 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class ShadowMapPass
 {
 	public const int CascadeCount = 3;
-	public const int CascadeResolution = 4096;
+	public const int CascadeResolution = 2048;
 	public const float MaxShadowDistance = 150.0f;
 
 	private const float DefaultDepthBias = 0.0015f;

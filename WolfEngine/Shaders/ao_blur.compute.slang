@@ -30,6 +30,37 @@ int2 ResolveFullPixel(float2 uv, uint2 fullSize)
     return clamp(int2(uv * float2(fullSize)), int2(0, 0), int2(int(fullSize.x) - 1, int(fullSize.y) - 1));
 }
 
+float Pow32(float value)
+{
+    value = saturate(value);
+    float value2 = value * value;
+    float value4 = value2 * value2;
+    float value8 = value4 * value4;
+    float value16 = value8 * value8;
+    return value16 * value16;
+}
+
+float GaussianWeight(int tap)
+{
+    int tapAbs = abs(tap);
+    if (tapAbs == 0)
+    {
+        return 1.0f;
+    }
+
+    if (tapAbs == 1)
+    {
+        return 0.60653066f;
+    }
+
+    if (tapAbs == 2)
+    {
+        return 0.13533528f;
+    }
+
+    return 0.01110900f;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -70,9 +101,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float3 sampleNormal = DecodeNormal(normalTexture.Load(int3(sampleFull, 0)).xyz);
         float sampleAoValue = sourceTexture.Load(int3(sampleAo, 0)).r;
 
-        float spatialWeight = exp(-0.5f * float(tap * tap));
-        float depthWeight = exp(-abs(sampleDepth - centerDepth) * blurSharpness * 64.0f);
-        float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 32.0f);
+        float spatialWeight = GaussianWeight(tap);
+        float depthWeight = exp2(-abs(sampleDepth - centerDepth) * blurSharpness * 92.33248f);
+        float normalWeight = Pow32(dot(centerNormal, sampleNormal));
         float weight = spatialWeight * depthWeight * normalWeight;
         aoSum += sampleAoValue * weight;
         weightSum += weight;
