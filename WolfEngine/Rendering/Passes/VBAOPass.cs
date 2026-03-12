@@ -17,7 +17,7 @@ public sealed class VBAOPass
 		{
 		}
 
-		public bool Enabled { get; set; } = false;
+		public bool Enabled { get; set; } = true;
 		public AmbientOcclusionResolution Resolution { get; set; } = AmbientOcclusionResolution.Full;
 		public int SliceCount { get; set; } = 2;
 		public int StepCount { get; set; } = 8;

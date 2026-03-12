@@ -58,13 +58,6 @@ float3 LoadWorldNormalNearest(Texture2D<float4> texture, float2 uv, uint2 size)
     return DecodeNormal(texture.Load(int3(pixel, 0)).xyz);
 }
 
-float3 LoadViewPositionNearest(Texture2D<float4> depthTexture, float2 uv, uint2 size)
-{
-    int2 pixel = ClampPixel(int2(uv * float2(size)), size);
-    float depth = depthTexture.Load(int3(pixel, 0)).r;
-    return ReconstructViewPosition(uint2(pixel), size, depth, camera.invProjection);
-}
-
 float ComputeProjectedRadius(float viewDepth, uint height)
 {
     float projY = abs(1.0f / max(camera.invProjection[1][1], 1e-5f));
@@ -83,13 +76,13 @@ uint IntervalToSectorMask(float minAngle, float maxAngle)
     uint firstSector = min(uint(floor(minAngle / HALF_PI * float(AO_SECTOR_COUNT))), AO_SECTOR_COUNT - 1u);
     uint lastSector = min(uint(floor(maxAngle / HALF_PI * float(AO_SECTOR_COUNT - 1u))), AO_SECTOR_COUNT - 1u);
 
-    uint mask = 0u;
-    for (uint sector = firstSector; sector <= lastSector; ++sector)
+    uint sectorCount = lastSector - firstSector + 1u;
+    if (sectorCount >= AO_SECTOR_COUNT)
     {
-        mask |= (1u << sector);
+        return 0xFFFFFFFFu;
     }
 
-    return mask;
+    return ((1u << sectorCount) - 1u) << firstSector;
 }
 
 [numthreads(8, 8, 1)]
@@ -121,6 +114,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float baseRotation = InterleavedGradientNoise(dispatchThreadId.xy) * TWO_PI;
     float projectedRadius = ComputeProjectedRadius(centerViewPos.z, fullSize.y);
+    float radiusSq = radius * radius;
     float visibility = 0.0f;
 
     for (uint sliceIndex = 0u; sliceIndex < sliceCount; ++sliceIndex)
@@ -149,15 +143,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                     continue;
                 }
 
-                float3 sampleViewPos = LoadViewPositionNearest(depthTexture, sampleUv, fullSize);
+                int2 samplePixel = ClampPixel(int2(sampleUv * float2(fullSize)), fullSize);
+                float3 sampleViewPos = ReconstructViewPosition(uint2(samplePixel), fullSize, sampleDepth, camera.invProjection);
                 float3 delta = sampleViewPos - centerViewPos;
-                float distance = length(delta);
-                if (distance <= 1e-4f || distance > radius)
+                float distanceSq = dot(delta, delta);
+                if (distanceSq <= 1e-8f || distanceSq > radiusSq)
                 {
                     continue;
                 }
 
-                float3 dirToSample = delta / distance;
+                float invDistance = rsqrt(distanceSq);
+                float distance = distanceSq * invDistance;
+                float3 dirToSample = delta * invDistance;
                 float normalAlignment = dot(centerViewNormal, dirToSample);
                 if (normalAlignment <= bias)
                 {
