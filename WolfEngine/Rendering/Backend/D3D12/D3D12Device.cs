@@ -17,8 +17,11 @@ using Fence = Silk.NET.Direct3D12.ID3D12Fence;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
+public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IDisposable
 {
+	private const ulong DefaultConstantUploadPageSize = 256UL * 1024UL;
+	private const ulong ConstantUploadAlignment = 256UL;
+
 	private readonly ComPtr<ID3D12Device> _device;
 	private readonly ComPtr<ID3D12CommandQueue> _graphicsQueue;
 	private readonly ComPtr<ID3D12CommandQueue> _computeQueue;
@@ -28,6 +31,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
+	private readonly object _constantUploadLock = new();
 	private readonly object _uploadLock = new();
 	private readonly ComPtr<Fence> _submissionFence;
 	private ulong _submissionFenceValue;
@@ -37,6 +41,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private readonly Dictionary<GraphicsLayoutKind, ComPtr<ID3D12RootSignature>> _graphicsRootSignatures = new();
 	private ComPtr<ID3D12RootSignature> _computeRootSignature;
 	private readonly Dictionary<CommandListType, Queue<D3D12CommandList>> _commandListPool = new();
+	private readonly Dictionary<ulong, Stack<D3D12ConstantUploadPage>> _constantUploadPagePool = new();
 	private readonly Dictionary<TextureDescriptor, Queue<PooledTexture>> _texturePool = new(new TextureDescriptorComparer());
 	private readonly Queue<ExternalD3D12Texture> _externalTexturePool = new();
 	private readonly object _texturePoolLock = new();
@@ -47,6 +52,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	private ComPtr<ID3D12CommandSignature> _drawIndexedIndirectSignature;
 	private ComPtr<ID3D12CommandSignature> _graphicsExecuteIndirectSignature;
 	private nint _submissionFenceEvent;
+	private bool _isDisposed;
+	private D3D12ConstantUploadStats _constantUploadStats;
 
 	private readonly struct PooledTexture
 	{
@@ -98,6 +105,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 		public ulong FenceValue { get; }
 	}
 
+	internal readonly record struct D3D12ConstantUploadStats(
+		ulong AllocationCount,
+		ulong RequestedBytes,
+		ulong CommittedPageBytesInUse,
+		uint NewPageCreations,
+		uint PageReuses,
+		uint OversizeDedicatedPageRents);
+
 	public D3D12Device(
 		ComPtr<ID3D12Device> device,
 		ComPtr<ID3D12CommandQueue> graphicsQueue, ComPtr<ID3D12CommandQueue>? computeQueue = null)
@@ -112,6 +127,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.D3D12;
 
+	public ulong LastSubmittedId => _submissionFenceValue;
+
+	public ulong CompletedId =>
+		_submissionFence.Handle is null ? 0UL : _submissionFence.Handle->GetCompletedValue();
+
+	internal D3D12ConstantUploadStats ConstantUploadStats => _constantUploadStats;
+
 	public IGfxCommandList BeginGraphics()
 	{
 		return CreateCommandList(CommandListType.Direct);
@@ -120,6 +142,19 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	public IGfxCommandList BeginCompute()
 	{
 		return CreateCommandList(CommandListType.Direct);
+	}
+
+	public void PumpCompleted()
+	{
+		lock (_commandListLock)
+		{
+			CleanupCompletedCommandListsLocked();
+		}
+	}
+
+	internal void ResetConstantUploadStats()
+	{
+		_constantUploadStats = default;
 	}
 
 	public void Submit(IGfxCommandList commandList)
@@ -433,6 +468,113 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 	{
 		return (size + alignment - 1) & ~(alignment - 1);
 	}
+
+	internal D3D12ConstantUploadPage RentConstantUploadPage(ulong requestedSize)
+	{
+		var alignedSize = Align(requestedSize, ConstantUploadAlignment);
+		var pageSize = alignedSize > DefaultConstantUploadPageSize
+			? alignedSize
+			: DefaultConstantUploadPageSize;
+
+		lock (_constantUploadLock)
+		{
+			_constantUploadStats = _constantUploadStats with
+			{
+				AllocationCount = _constantUploadStats.AllocationCount + 1,
+				RequestedBytes = _constantUploadStats.RequestedBytes + requestedSize,
+				CommittedPageBytesInUse = _constantUploadStats.CommittedPageBytesInUse + pageSize,
+				OversizeDedicatedPageRents = _constantUploadStats.OversizeDedicatedPageRents + (pageSize > DefaultConstantUploadPageSize ? 1u : 0u)
+			};
+
+			if (_constantUploadPagePool.TryGetValue(pageSize, out var pages) && pages.Count > 0)
+			{
+				_constantUploadStats = _constantUploadStats with
+				{
+					PageReuses = _constantUploadStats.PageReuses + 1
+				};
+				return pages.Pop();
+			}
+		}
+
+		var page = CreateConstantUploadPage(pageSize);
+		lock (_constantUploadLock)
+		{
+			_constantUploadStats = _constantUploadStats with
+			{
+				NewPageCreations = _constantUploadStats.NewPageCreations + 1
+			};
+		}
+
+		return page;
+	}
+
+	internal void RecycleConstantUploadPages(List<D3D12ConstantUploadPage> pages)
+	{
+		if (pages.Count == 0)
+		{
+			return;
+		}
+
+		lock (_constantUploadLock)
+		{
+			for (var i = 0; i < pages.Count; i++)
+			{
+				var page = pages[i];
+				if (_constantUploadPagePool.TryGetValue(page.SizeInBytes, out var pool) == false)
+				{
+					pool = new Stack<D3D12ConstantUploadPage>();
+					_constantUploadPagePool[page.SizeInBytes] = pool;
+				}
+
+				pool.Push(page);
+			}
+		}
+	}
+
+	private D3D12ConstantUploadPage CreateConstantUploadPage(ulong sizeInBytes)
+	{
+		var desc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = sizeInBytes,
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.None
+		};
+		var heapProps = new HeapProperties(HeapType.Upload);
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+			&heapProps,
+			HeapFlags.None,
+			in desc,
+			ResourceStates.GenericRead,
+			null,
+			out ComPtr<ID3D12Resource> resource));
+
+		void* mapped = null;
+		SilkMarshal.ThrowHResult(resource.Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped));
+		return new D3D12ConstantUploadPage(resource, (byte*)mapped, sizeInBytes);
+	}
+
+	private void DisposeConstantUploadPages()
+	{
+		lock (_constantUploadLock)
+		{
+			foreach (var (_, pages) in _constantUploadPagePool)
+			{
+				while (pages.Count > 0)
+				{
+					pages.Pop().Dispose();
+				}
+			}
+
+			_constantUploadPagePool.Clear();
+		}
+	}
 	
 	
 
@@ -502,12 +644,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	private void CleanupCompletedCommandListsLocked()
 	{
+		if (_submissionFence.Handle is null)
+		{
+			return;
+		}
+
 		var completedFence = _submissionFence.Handle->GetCompletedValue();
 		for (var i = _inFlightCommandLists.Count - 1; i >= 0; i--)
 		{
 			if (_inFlightCommandLists[i].FenceValue <= completedFence)
 			{
 				var completed = _inFlightCommandLists[i].CommandList;
+				completed.RecycleConstantUploadPages();
 				if (_commandListPool.TryGetValue(completed.Type, out var pool) == false)
 				{
 					pool = new Queue<D3D12CommandList>();
@@ -566,6 +714,117 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 			_texturePool.Clear();
 
 			_externalTexturePool.Clear();
+		}
+	}
+
+	public void Dispose()
+	{
+		if (_isDisposed)
+		{
+			return;
+		}
+
+		_isDisposed = true;
+		WaitForIdle();
+
+		lock (_commandListLock)
+		{
+			for (var i = _inFlightCommandLists.Count - 1; i >= 0; i--)
+			{
+				var inFlight = _inFlightCommandLists[i].CommandList;
+				inFlight.RecycleConstantUploadPages();
+				inFlight.Dispose();
+			}
+
+			_inFlightCommandLists.Clear();
+
+			foreach (var (_, pool) in _commandListPool)
+			{
+				while (pool.Count > 0)
+				{
+					pool.Dequeue().Dispose();
+				}
+			}
+
+			_commandListPool.Clear();
+		}
+
+		ClearTexturePool();
+		DisposeConstantUploadPages();
+
+		foreach (var pipeline in _pipelineCache.Values)
+		{
+			if (pipeline is D3D12Pipeline d3d12Pipeline)
+			{
+				d3d12Pipeline.PipelineState.Dispose();
+			}
+		}
+
+		_pipelineCache.Clear();
+
+		foreach (var rootSignature in _graphicsRootSignatures.Values)
+		{
+			if (rootSignature.Handle is not null)
+			{
+				rootSignature.Dispose();
+			}
+		}
+
+		_graphicsRootSignatures.Clear();
+
+		if (_computeRootSignature.Handle is not null)
+		{
+			_computeRootSignature.Dispose();
+			_computeRootSignature = default;
+		}
+
+		if (_drawIndexedIndirectSignature.Handle is not null)
+		{
+			_drawIndexedIndirectSignature.Dispose();
+			_drawIndexedIndirectSignature = default;
+		}
+
+		if (_graphicsExecuteIndirectSignature.Handle is not null)
+		{
+			_graphicsExecuteIndirectSignature.Dispose();
+			_graphicsExecuteIndirectSignature = default;
+		}
+
+		if (_transitionCommandList.Handle is not null)
+		{
+			_transitionCommandList.Dispose();
+			_transitionCommandList = default;
+		}
+
+		if (_transitionAllocator.Handle is not null)
+		{
+			_transitionAllocator.Dispose();
+			_transitionAllocator = default;
+		}
+
+		if (_uploadCommandList.Handle is not null)
+		{
+			_uploadCommandList.Dispose();
+			_uploadCommandList = default;
+		}
+
+		if (_uploadAllocator.Handle is not null)
+		{
+			_uploadAllocator.Dispose();
+			_uploadAllocator = default;
+		}
+
+		_globalTable.Dispose();
+
+		if (_submissionFence.Handle is not null)
+		{
+			_submissionFence.Dispose();
+		}
+
+		if (_submissionFenceEvent != nint.Zero)
+		{
+			CloseHandle(_submissionFenceEvent);
+			_submissionFenceEvent = nint.Zero;
 		}
 	}
 
@@ -753,6 +1012,25 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 				default,
 				out _uploadCommandList));
 		SilkMarshal.ThrowHResult(_uploadCommandList.Close());
+	}
+
+	private void WaitForIdle()
+	{
+		if (_submissionFence.Handle is null)
+		{
+			return;
+		}
+
+		var lastSubmitted = _submissionFenceValue;
+		if (lastSubmitted != 0)
+		{
+			WaitForFence(lastSubmitted);
+		}
+
+		lock (_commandListLock)
+		{
+			CleanupCompletedCommandListsLocked();
+		}
 	}
 
 	private ComPtr<ID3D12CommandSignature> EnsureDrawIndexedIndirectSignature()
@@ -1542,4 +1820,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool CloseHandle(nint hObject);
 }

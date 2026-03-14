@@ -18,11 +18,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 {
 	private readonly D3D12Device _owner;
 	private readonly CpuDescriptorHandle[] _currentRtvHandles = new CpuDescriptorHandle[8];
-	private readonly List<ComPtr<ID3D12Resource>> _transientUploads = new();
+	private readonly List<D3D12ConstantUploadPage> _constantUploadPages = new();
 	private D3D12DescriptorTable? _bindlessTable;
+	private D3D12ConstantUploadPage? _currentConstantUploadPage;
 	private PassKind? _activePipelineKind;
 	private uint _currentRtvCount;
 	private CpuDescriptorHandle? _currentDsvHandle;
+	private ulong _currentConstantUploadOffset;
 	private bool _isClosed;
 	private bool _bindlessHeapsDirty = true;
 
@@ -61,7 +63,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void Dispose()
 	{
-		DisposeTransientUploads();
+		RecycleConstantUploadPages();
 		CommandList.Dispose();
 		Allocator.Dispose();
 	}
@@ -75,7 +77,8 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		_currentDsvHandle = null;
 		_activePipelineKind = null;
 		_bindlessHeapsDirty = true;
-		DisposeTransientUploads();
+		_currentConstantUploadPage = null;
+		_currentConstantUploadOffset = 0;
 	}
 
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
@@ -661,52 +664,36 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	private ulong UploadConstants(ReadOnlySpan<byte> data)
 	{
 		var alignedSize = Align((ulong)data.Length, 256);
-		var desc = new ResourceDesc
+		if (_currentConstantUploadPage is null ||
+		    _currentConstantUploadOffset + alignedSize > _currentConstantUploadPage.SizeInBytes)
 		{
-			Dimension = ResourceDimension.Buffer,
-			Alignment = 0,
-			Width = alignedSize,
-			Height = 1,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatUnknown,
-			SampleDesc = new SampleDesc(1, 0),
-			Layout = TextureLayout.LayoutRowMajor,
-			Flags = ResourceFlags.None
-		};
-		var heapProps = new HeapProperties(HeapType.Upload);
-		SilkMarshal.ThrowHResult(_owner.NativeDevice.CreateCommittedResource(
-			&heapProps,
-			HeapFlags.None,
-			in desc,
-			ResourceStates.GenericRead,
-			null,
-			out ComPtr<ID3D12Resource> resource));
+			_currentConstantUploadPage = _owner.RentConstantUploadPage(alignedSize);
+			_constantUploadPages.Add(_currentConstantUploadPage);
+			_currentConstantUploadOffset = 0;
+		}
 
-		void* mapped = null;
-		SilkMarshal.ThrowHResult(resource.Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped));
+		var page = _currentConstantUploadPage;
+		var destination = page.MappedData + (nint)_currentConstantUploadOffset;
 		fixed (byte* source = data)
 		{
-			Buffer.MemoryCopy(source, mapped, alignedSize, (ulong)data.Length);
+			Buffer.MemoryCopy(source, destination, alignedSize, (ulong)data.Length);
 		}
-		resource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
 
-		var gpuAddress = resource.Handle->GetGPUVirtualAddress();
-		_transientUploads.Add(resource);
+		var gpuAddress = page.GpuAddress + _currentConstantUploadOffset;
+		_currentConstantUploadOffset += alignedSize;
 		return gpuAddress;
 	}
 
-	private void DisposeTransientUploads()
+	internal void RecycleConstantUploadPages()
 	{
-		for (var i = 0; i < _transientUploads.Count; i++)
+		if (_constantUploadPages.Count > 0)
 		{
-			if (_transientUploads[i].Handle is not null)
-			{
-				_transientUploads[i].Dispose();
-			}
+			_owner.RecycleConstantUploadPages(_constantUploadPages);
+			_constantUploadPages.Clear();
 		}
 
-		_transientUploads.Clear();
+		_currentConstantUploadPage = null;
+		_currentConstantUploadOffset = 0;
 	}
 
 	private static ulong Align(ulong size, ulong alignment)

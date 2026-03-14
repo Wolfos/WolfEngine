@@ -1394,6 +1394,8 @@ private sealed class MeshResources
 
 	public void BeginFrame()
 	{
+		_gfxDevice.ResetConstantUploadStats();
+
 		var frameIdx = _backbufferIndex;
 
 		if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
@@ -1678,9 +1680,9 @@ private sealed class MeshResources
 			_fence = default;
 		}
 
-		if (_gfxDevice is ITexturePoolDevice poolDevice)
+		if (_gfxDevice is IDisposable disposableDevice)
 		{
-			poolDevice.ClearTexturePool();
+			disposableDevice.Dispose();
 		}
 
 		_device.Dispose();
