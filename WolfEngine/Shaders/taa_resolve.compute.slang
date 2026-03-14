@@ -4,12 +4,12 @@ cbuffer BindlessHandles : register(b0)
 {
     uint currentColorHandle;
     uint velocityHandle;
+    uint materialHandle;
     uint currentDepthHandle;
     uint historyColorHandle;
     uint historyDepthHandle;
     uint outputHandle;
     uint samplerHandle;
-    uint _bindlessPadding0;
 };
 
 cbuffer TaaSettings : register(b1)
@@ -35,7 +35,7 @@ float3 YCoCgToRGB(float3 color)
     float Cg = color.z;
     return float3(
         Y + 0.5f * Co - 0.5f * Cg,
-        Y + Cg,
+        Y + 0.5f * Cg,
         Y - 0.5f * Co - 0.5f * Cg);
 }
 
@@ -49,6 +49,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     Texture2D<float4> currentColorTexture = GetTexture(currentColorHandle);
     Texture2D<float4> velocityTexture = GetTexture(velocityHandle);
+    Texture2D<float4> materialTexture = GetTexture(materialHandle);
     Texture2D<float4> currentDepthTexture = GetTexture(currentDepthHandle);
     Texture2D<float4> historyColorTexture = GetTexture(historyColorHandle);
     Texture2D<float4> historyDepthTexture = GetTexture(historyDepthHandle);
@@ -61,6 +62,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 currentColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
     float2 velocity = velocityTexture.Load(int3(pixel, 0)).xy;
+    float alphaTestMask = saturate(materialTexture.Load(int3(pixel, 0)).a);
     float currentDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
 
     bool historyAllowed = historyValid != 0u && resetHistory == 0u;
@@ -86,14 +88,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 resolvedColor = currentColor;
     if (!historyRejected)
     {
-        float historyDepth = historyDepthTexture.SampleLevel(linearSampler, prevUv, 0.0f).r;
-        historyRejected = abs(historyDepth - currentDepth) > 0.01f;
+        int2 historyPixel = clamp(int2(prevUv * renderSize), int2(0, 0), int2(int(renderSizeX) - 1, int(renderSizeY) - 1));
+        float historyDepth = historyDepthTexture.Load(int3(historyPixel, 0)).r;
+        float depthThreshold = lerp(0.01f, 0.06f, alphaTestMask);
+        historyRejected = abs(historyDepth - currentDepth) > depthThreshold;
         if (!historyRejected)
         {
             float3 historyColor = historyColorTexture.SampleLevel(linearSampler, prevUv, 0.0f).rgb;
             float3 clampedHistory = clamp(RGBToYCoCg(historyColor), minBox, maxBox);
             float motionPixels = length(velocity);
-            float historyWeight = lerp(0.9f, 0.2f, saturate(motionPixels * 0.5f));
+            float opaqueHistoryWeight = lerp(0.9f, 0.2f, saturate(motionPixels * 0.5f));
+            float alphaTestHistoryWeight = lerp(0.7f, 0.15f, saturate(motionPixels * 0.75f));
+            float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask);
             resolvedColor = lerp(currentColor, YCoCgToRGB(clampedHistory), historyWeight);
         }
     }

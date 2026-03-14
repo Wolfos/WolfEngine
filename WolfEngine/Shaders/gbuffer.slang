@@ -154,7 +154,11 @@ PSOutput EvaluateFragment(VSOutput input)
     float metallic = saturate(mrSample.b * materialData.metallicRoughness.x);
     float roughness = saturate(mrSample.g * materialData.metallicRoughness.y);
     float occlusion = saturate(occlusionSample.r);
-    float4 materialParams = float4(metallic, roughness, occlusion, 1.0f);
+    float alphaTestMask = 0.0f;
+#ifdef WOLF_ALPHA_CLIP
+    alphaTestMask = 1.0f;
+#endif
+    float4 materialParams = float4(metallic, roughness, occlusion, alphaTestMask);
 
     output.albedo = materialData.baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);

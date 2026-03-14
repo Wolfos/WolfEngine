@@ -7,7 +7,7 @@ public class RenderConfig: IDataAsset
 {
 	public VBAOPass.Config VBAOConfig { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
-	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; }
+	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 }
 
 public struct TemporalAntiAliasingConfig

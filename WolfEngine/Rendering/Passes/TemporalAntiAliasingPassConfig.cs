@@ -8,6 +8,7 @@ public readonly struct TemporalAntiAliasingPassConfig
 	public required IGfxPipeline Pipeline { get; init; }
 	public required DescriptorHandle CurrentColorHandle { get; init; }
 	public required DescriptorHandle VelocityHandle { get; init; }
+	public required DescriptorHandle MaterialHandle { get; init; }
 	public required DescriptorHandle CurrentDepthHandle { get; init; }
 	public required DescriptorHandle HistoryColorHandle { get; init; }
 	public required DescriptorHandle HistoryDepthHandle { get; init; }

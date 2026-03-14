@@ -42,6 +42,7 @@ public sealed class TemporalAntiAliasingPass
 
 		var currentColor = context.GetTexture(resources.LightingBuffer);
 		var velocity = context.GetTexture(resources.GBufferVelocity);
+		var material = context.GetTexture(resources.GBufferMaterial);
 		var currentDepth = context.GetTexture(resources.GBufferDepth);
 		var historyColor = context.GetTexture(resources.HistoryColorRead);
 		var historyDepth = context.GetTexture(resources.HistoryDepthRead);
@@ -52,6 +53,7 @@ public sealed class TemporalAntiAliasingPass
 			Pipeline = pipeline,
 			CurrentColorHandle = _bindlessRegistry.GetTextureHandle(currentColor),
 			VelocityHandle = _bindlessRegistry.GetTextureHandle(velocity),
+			MaterialHandle = _bindlessRegistry.GetTextureHandle(material),
 			CurrentDepthHandle = _bindlessRegistry.RegisterDepthTexture(currentDepth),
 			HistoryColorHandle = _bindlessRegistry.GetTextureHandle(historyColor),
 			HistoryDepthHandle = _bindlessRegistry.GetTextureHandle(historyDepth),
@@ -75,6 +77,7 @@ public sealed class TemporalAntiAliasingPass
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("currentColorHandle", config.CurrentColorHandle.Value);
 		bindlessWriter.SetUInt("velocityHandle", config.VelocityHandle.Value);
+		bindlessWriter.SetUInt("materialHandle", config.MaterialHandle.Value);
 		bindlessWriter.SetUInt("currentDepthHandle", config.CurrentDepthHandle.Value);
 		bindlessWriter.SetUInt("historyColorHandle", config.HistoryColorHandle.Value);
 		bindlessWriter.SetUInt("historyDepthHandle", config.HistoryDepthHandle.Value);
