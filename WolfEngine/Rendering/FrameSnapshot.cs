@@ -54,6 +54,7 @@ public sealed class FrameSnapshot
 	{
 		Config.VBAOConfig = config.VBAOConfig;
 		Config.SkyboxConfig = config.SkyboxConfig;
+		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
 	}
 
 	public readonly struct LightPacket

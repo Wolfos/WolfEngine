@@ -50,7 +50,7 @@ public sealed class TransparentForwardPass
 			_shadowSampler = _bindlessRegistry.GetSamplerHandle(shadowSampler);
 		}
 
-		var lighting = context.GetTexture(resources.LightingBuffer);
+		var lighting = context.GetTexture(resources.ResolvedSceneColor);
 		var depth = context.GetTexture(resources.GBufferDepth);
 		var shadowMap0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMap1 = context.GetTexture(resources.ShadowMapDepth1);
@@ -293,7 +293,7 @@ public sealed class TransparentForwardPass
 			vertexEntryPoint: "vertexShader",
 			pixelEntryPoint: "fragmentShader",
 			computeEntryPoint: null,
-			renderTargets: new(new[] { TextureFormat.Bgra8Unorm }),
+			renderTargets: new(new[] { TextureFormat.Rgba16Float }),
 			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material,

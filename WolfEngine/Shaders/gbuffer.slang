@@ -14,7 +14,14 @@ cbuffer CameraParams : register(b2)
 {
     row_major float4x4 viewProjection;
     float3 cameraPosition;
-    float padding;
+    float currentJitterPixelsX;
+    float3 previousCameraPosition;
+    float currentJitterPixelsY;
+    row_major float4x4 unjitteredViewProjection;
+    row_major float4x4 previousViewProjection;
+    float2 currentJitterNdc;
+    uint frameSizeX;
+    uint frameSizeY;
 };
 
 struct VSInput
@@ -33,6 +40,8 @@ struct VSOutput
     float2 uv : TEXCOORD1;
     float4 tangent : TEXCOORD2;
     uint instanceId : TEXCOORD3;
+    float4 currentClip : TEXCOORD4;
+    float4 previousClip : TEXCOORD5;
 };
 
 VSOutput vertexShader(VSInput input)
@@ -47,6 +56,8 @@ VSOutput vertexShader(VSInput input)
         output.uv = float2(0.0f, 0.0f);
         output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
         output.instanceId = 0;
+        output.currentClip = output.position;
+        output.previousClip = output.position;
         return output;
     }
 
@@ -54,10 +65,14 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(input.position, instanceData.world);
     worldPosition.xyz -= cameraPosition;
+    float4 previousWorldPosition = mul(input.position, instanceData.previousWorld);
+    previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
 
     output.position = mul(worldPosition, viewProjection);
+    output.currentClip = mul(worldPosition, unjitteredViewProjection);
+    output.previousClip = mul(previousWorldPosition, previousViewProjection);
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
     output.tangent = float4(normalize(worldTangent), input.tangent.w);
@@ -71,7 +86,17 @@ struct PSOutput
     float4 normal : SV_Target1;
     float4 material : SV_Target2;
     float4 emissive : SV_Target3;
+    float2 velocity : SV_Target4;
 };
+
+float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
+{
+    float invW = abs(clipPosition.w) > 1e-5f ? rcp(clipPosition.w) : 0.0f;
+    float2 ndc = clipPosition.xy * invW;
+    return float2(
+        (ndc.x * 0.5f + 0.5f) * frameSize.x,
+        (-ndc.y * 0.5f + 0.5f) * frameSize.y);
+}
 
 PSOutput EvaluateFragment(VSOutput input)
 {
@@ -83,6 +108,7 @@ PSOutput EvaluateFragment(VSOutput input)
         output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
         output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
         output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        output.velocity = 0.0f.xx;
         return output;
     }
 
@@ -134,6 +160,10 @@ PSOutput EvaluateFragment(VSOutput input)
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
     output.material = materialParams;
     output.emissive = float4(emissive, 1.0f);
+    uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
+    float2 currentPixel = ClipToPixel(input.currentClip, frameSize);
+    float2 previousPixel = ClipToPixel(input.previousClip, frameSize);
+    output.velocity = previousPixel - currentPixel;
 
     return output;
 }

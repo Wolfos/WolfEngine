@@ -1762,7 +1762,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	{
 		TextureFormat.Bgra8Unorm => Format.FormatB8G8R8A8Unorm,
 		TextureFormat.Rgba8Unorm => Format.FormatR8G8B8A8Unorm,
+		TextureFormat.Rg16Float => Format.FormatR16G16Float,
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
+		TextureFormat.R32Float => Format.FormatR32Float,
 		TextureFormat.D32Float => Format.FormatD32Float,
 		TextureFormat.Unknown => Format.FormatUnknown,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")

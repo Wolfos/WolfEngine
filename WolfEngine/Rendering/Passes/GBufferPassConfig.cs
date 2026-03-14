@@ -38,6 +38,8 @@ public struct GBufferPassConfig
     public required IGfxTexture MaterialTarget { get; init; }
     public required IGfxTexture EmissiveTarget { get; init; }
 
+    public required IGfxTexture VelocityTarget { get; init; }
+
     public required IGfxTexture DepthTarget { get; init; }
 
     public ColorRGBA AlbedoClearColor { get; init; }
@@ -46,6 +48,7 @@ public struct GBufferPassConfig
 
     public ColorRGBA MaterialClearColor { get; init; }
     public ColorRGBA EmissiveClearColor { get; init; }
+    public ColorRGBA VelocityClearColor { get; init; }
 
 
     public float DepthClearValue { get; init; }

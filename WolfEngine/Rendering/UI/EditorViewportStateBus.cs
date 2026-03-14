@@ -9,6 +9,7 @@ public static class SceneDebugViewIds
 	public const string SceneColor = "scene-color";
 	public const string AmbientOcclusion = "ambient-occlusion";
 	public const string GBufferAlbedo = "gbuffer-albedo";
+	public const string MotionVectors = "motion-vectors";
 }
 
 public enum SceneDebugViewKind

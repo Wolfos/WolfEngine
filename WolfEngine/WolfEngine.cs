@@ -30,6 +30,8 @@ public static class WolfEngine
 		services.AddSingleton<AmbientOcclusionBlurPass>();
 		services.AddSingleton<AmbientOcclusionUpsamplePass>();
 		services.AddSingleton<DeferredLightingPass>();
+		services.AddSingleton<TemporalAntiAliasingPass>();
+		services.AddSingleton<TemporalHistoryStorePass>();
 		services.AddSingleton<TransparentForwardPass>();
 		services.AddSingleton<ShadowMapPass>();
 		services.AddSingleton<GpuDrawPass>();

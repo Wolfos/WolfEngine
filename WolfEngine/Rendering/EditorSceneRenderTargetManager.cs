@@ -51,7 +51,7 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 		_sceneColor = device.CreateTexture(new TextureDescriptor(
 			size.X,
 			size.Y,
-			TextureFormat.Bgra8Unorm,
+			TextureFormat.Rgba16Float,
 			TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)));
 		_sceneColorState = ResourceState.RenderTarget;

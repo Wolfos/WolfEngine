@@ -54,6 +54,7 @@ public sealed class GpuDrawDatabase
 				newRecord.InstanceHandle,
 				newRecord.MeshHandle,
 				newRecord.MaterialHandle,
+				newRecord.PreviousWorld,
 				newRecord.World,
 				newRecord.BoundsCenterRadius,
 				mesh,
@@ -111,6 +112,7 @@ public sealed class GpuDrawDatabase
 					record.MeshHandle,
 					record.MaterialHandle,
 					record.World,
+					record.World,
 					record.BoundsCenterRadius,
 					material));
 			}
@@ -131,6 +133,7 @@ public sealed class GpuDrawDatabase
 					record.MaterialHandle,
 					record.Mesh,
 					record.Material,
+					record.PreviousWorld,
 					record.World,
 					record.BoundsCenterRadius));
 			}
@@ -209,11 +212,16 @@ public sealed class GpuDrawDatabase
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
+		var settlePreviousTransform = record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || materialChanged) == false)
+		if ((transformChanged || meshChanged || materialChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
+
+		var uploadPreviousWorld = transformChanged
+			? record.World
+			: record.World;
 
 		if (meshChanged)
 		{
@@ -243,6 +251,7 @@ public sealed class GpuDrawDatabase
 				record.MeshHandle,
 				record.MaterialHandle,
 				record.World,
+				record.World,
 				record.BoundsCenterRadius,
 				mesh));
 		}
@@ -255,19 +264,26 @@ public sealed class GpuDrawDatabase
 				record.MeshHandle,
 				record.MaterialHandle,
 				record.World,
+				record.World,
 				record.BoundsCenterRadius,
 				material));
 		}
 
-		if (transformChanged || meshChanged)
+		if (transformChanged || meshChanged || settlePreviousTransform)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				worldTransform,
+				uploadPreviousWorld,
+				record.World,
 				record.BoundsCenterRadius));
+		}
+
+		if (transformChanged || settlePreviousTransform)
+		{
+			record.PreviousWorld = record.World;
 		}
 	}
 
@@ -283,6 +299,7 @@ public sealed class GpuDrawDatabase
 			MeshHandle = AcquireMeshHandle(mesh),
 			MaterialHandle = AcquireMaterialHandle(material),
 			World = worldTransform,
+			PreviousWorld = worldTransform,
 			LastSeenStamp = _syncStamp
 		};
 
@@ -386,6 +403,7 @@ public sealed class GpuDrawDatabase
 		public GpuDrawHandle MaterialHandle;
 		public Mesh Mesh = null!;
 		public Material Material = null!;
+		public Matrix4x4 PreviousWorld;
 		public Matrix4x4 World;
 		public Vector4 BoundsCenterRadius;
 		public int LastSeenStamp;
@@ -428,6 +446,7 @@ public readonly struct GpuDrawEntry
 		GpuDrawHandle materialHandle,
 		Mesh mesh,
 		Material material,
+		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius)
 	{
@@ -437,6 +456,7 @@ public readonly struct GpuDrawEntry
 		MaterialHandle = materialHandle;
 		Mesh = mesh;
 		Material = material;
+		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 	}
@@ -447,6 +467,7 @@ public readonly struct GpuDrawEntry
 	public GpuDrawHandle MaterialHandle { get; }
 	public Mesh Mesh { get; }
 	public Material Material { get; }
+	public Matrix4x4 PreviousWorld { get; }
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
 
@@ -464,6 +485,7 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
+		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		Mesh? mesh,
@@ -474,6 +496,7 @@ public readonly struct GpuDrawUpdate
 		InstanceHandle = instanceHandle;
 		MeshHandle = meshHandle;
 		MaterialHandle = materialHandle;
+		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 		Mesh = mesh;
@@ -485,6 +508,7 @@ public readonly struct GpuDrawUpdate
 	public GpuDrawHandle InstanceHandle { get; }
 	public GpuDrawHandle MeshHandle { get; }
 	public GpuDrawHandle MaterialHandle { get; }
+	public Matrix4x4 PreviousWorld { get; }
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
 	public Mesh? Mesh { get; }
@@ -500,6 +524,7 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
+		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		Mesh mesh,
@@ -511,6 +536,7 @@ public readonly struct GpuDrawUpdate
 			instanceHandle,
 			meshHandle,
 			materialHandle,
+			previousWorld,
 			world,
 			boundsCenterRadius,
 			mesh,
@@ -526,6 +552,7 @@ public readonly struct GpuDrawUpdate
 			GpuDrawHandle.Invalid,
 			GpuDrawHandle.Invalid,
 			Matrix4x4.Identity,
+			Matrix4x4.Identity,
 			Vector4.Zero,
 			null,
 			null);
@@ -536,6 +563,7 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
+		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius)
 	{
@@ -545,6 +573,7 @@ public readonly struct GpuDrawUpdate
 			instanceHandle,
 			meshHandle,
 			materialHandle,
+			previousWorld,
 			world,
 			boundsCenterRadius,
 			null,
@@ -556,6 +585,7 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
+		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		Material material)
@@ -566,6 +596,7 @@ public readonly struct GpuDrawUpdate
 			instanceHandle,
 			meshHandle,
 			materialHandle,
+			previousWorld,
 			world,
 			boundsCenterRadius,
 			null,
@@ -577,6 +608,7 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
 		GpuDrawHandle materialHandle,
+		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		Mesh mesh)
@@ -587,6 +619,7 @@ public readonly struct GpuDrawUpdate
 			instanceHandle,
 			meshHandle,
 			materialHandle,
+			previousWorld,
 			world,
 			boundsCenterRadius,
 			mesh,

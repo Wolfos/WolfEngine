@@ -13,16 +13,30 @@ public sealed class SceneDrawData
 	public SceneDrawData(
 		Matrix4x4 viewMatrix,
 		Matrix4x4 viewProjection,
+		Matrix4x4 unjitteredProjection,
+		Matrix4x4 unjitteredViewProjection,
+		Matrix4x4 previousViewProjection,
 		Matrix4x4 inverseProjection,
 		Matrix4x4 inverseViewProjection,
 		Vector3 cameraOrigin,
+		Vector3 previousCameraOrigin,
+		Vector2 jitterPixels,
+		Vector2 jitterNdc,
+		bool resetHistory,
 		IReadOnlyList<LightPacket> lights)
 	{
 		ViewMatrix = viewMatrix;
 		ViewProjection = viewProjection;
+		UnjitteredProjection = unjitteredProjection;
+		UnjitteredViewProjection = unjitteredViewProjection;
+		PreviousViewProjection = previousViewProjection;
 		InverseProjection = inverseProjection;
 		InverseViewProjection = inverseViewProjection;
 		CameraOrigin = cameraOrigin;
+		PreviousCameraOrigin = previousCameraOrigin;
+		JitterPixels = jitterPixels;
+		JitterNdc = jitterNdc;
+		ResetHistory = resetHistory;
 		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
 	}
 
@@ -30,11 +44,25 @@ public sealed class SceneDrawData
 
 	public Matrix4x4 ViewProjection { get; }
 
+	public Matrix4x4 UnjitteredProjection { get; }
+
+	public Matrix4x4 UnjitteredViewProjection { get; }
+
+	public Matrix4x4 PreviousViewProjection { get; }
+
 	public Matrix4x4 InverseProjection { get; }
 
 	public Matrix4x4 InverseViewProjection { get; }
 	
 	public Vector3 CameraOrigin { get; }
+
+	public Vector3 PreviousCameraOrigin { get; }
+
+	public Vector2 JitterPixels { get; }
+
+	public Vector2 JitterNdc { get; }
+
+	public bool ResetHistory { get; }
 
 	public IReadOnlyList<LightPacket> Lights { get; }
 }

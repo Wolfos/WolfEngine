@@ -40,6 +40,11 @@ public sealed class RenderGraph
 	private long _lastProcessWorkingSetBytes;
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
+	private bool _hasPreviousCameraState;
+	private bool _previousTaaEnabled;
+	private Int2 _currentSceneRenderSize;
+	private Vector3 _previousCameraOrigin;
+	private Matrix4x4 _previousUnjitteredViewProjection;
 
 	private readonly object _resourceSync = new();
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
@@ -55,6 +60,8 @@ public sealed class RenderGraph
 		AmbientOcclusionBlurPass ambientOcclusionBlurPass,
 		AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
 		DeferredLightingPass deferredLightingPass,
+		TemporalAntiAliasingPass temporalAntiAliasingPass,
+		TemporalHistoryStorePass temporalHistoryStorePass,
 		TransparentForwardPass transparentForwardPass,
 		ShadowMapPass shadowMapPass,
 		GpuDrawPass gpuDrawPass,
@@ -78,6 +85,8 @@ public sealed class RenderGraph
 			ambientOcclusionBlurPass,
 			ambientOcclusionUpsamplePass,
 			deferredLightingPass,
+			temporalAntiAliasingPass,
+			temporalHistoryStorePass,
 			transparentForwardPass,
 			shadowMapPass,
 			gpuDrawPass,
@@ -122,9 +131,17 @@ public sealed class RenderGraph
 		// Build scene data from snapshot
 		SceneDrawData sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
+		var taaEnabled = snapshot.Config.TemporalAntiAliasing.Enabled;
+		var jitterPixels = taaEnabled
+			? TemporalJitter.GetHaltonJitterPixels((ulong)_frameIndex)
+			: Vector2.Zero;
+		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
+		var jitteredProjection = taaEnabled
+			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
+			: snapshot.Camera.Perspective;
 		if (Matrix4x4.Invert(world, out var view) &&
 		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
-		    Matrix4x4.Invert(snapshot.Camera.Perspective, out var invProjection))
+		    Matrix4x4.Invert(jitteredProjection, out var invProjection))
 		{
 			_renderLights.Clear();
 			for (var i = 0; i < snapshot.LightPackets.Count; i++)
@@ -137,14 +154,40 @@ public sealed class RenderGraph
 
 			// Remove camera translation from the view matrix since objects are now camera-relative
 			view.Translation = Vector3.Zero;
-			var viewProjection = view * snapshot.Camera.Perspective;
+			var viewProjection = view * jitteredProjection;
+			var unjitteredViewProjection = view * snapshot.Camera.Perspective;
 			if (Matrix4x4.Invert(viewProjection, out var invViewProjection) == false)
 			{
 				ReleasePasses();
 				return;
 			}
 
-			sceneData = new(view, viewProjection, invProjection, invViewProjection, cameraPosition, _renderLights);
+			var previousViewProjection = _hasPreviousCameraState
+				? _previousUnjitteredViewProjection
+				: unjitteredViewProjection;
+			var previousCameraOrigin = _hasPreviousCameraState
+				? _previousCameraOrigin
+				: cameraPosition;
+
+			sceneData = new(
+				view,
+				viewProjection,
+				snapshot.Camera.Perspective,
+				unjitteredViewProjection,
+				previousViewProjection,
+				invProjection,
+				invViewProjection,
+				cameraPosition,
+				previousCameraOrigin,
+				jitterPixels,
+				jitterNdc,
+				_hasPreviousCameraState == false || (taaEnabled && _previousTaaEnabled == false),
+				_renderLights);
+
+			_previousUnjitteredViewProjection = unjitteredViewProjection;
+			_previousCameraOrigin = cameraPosition;
+			_hasPreviousCameraState = true;
+			_previousTaaEnabled = taaEnabled;
 		}
 
 		if (sceneData is null)
@@ -294,6 +337,7 @@ public sealed class RenderGraph
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
+				_currentSceneRenderSize = sceneRenderSize;
 				var renderSceneToViewport = sceneEnabled;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
 				if (renderSceneToViewport)
@@ -311,6 +355,7 @@ public sealed class RenderGraph
 
 				_frameBuilder.Build(this);
 				Execute();
+				_frameBuilder.CompleteFrame();
 				if (sceneColorHandle.IsValid)
 				{
 					_sceneRenderTargetManager.SetCurrentState(_resourceRegistry.GetResourceState(sceneColorHandle));

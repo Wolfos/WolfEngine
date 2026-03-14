@@ -120,6 +120,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     GpuInstanceData instanceData;
+    instanceData.previousWorld = update.previousWorld;
     instanceData.world = update.world;
     instanceData.boundsCenterRadius = update.boundsCenterRadius;
     instanceData.materialHandle = materialHandle;

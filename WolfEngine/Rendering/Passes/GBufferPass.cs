@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
@@ -15,7 +16,8 @@ public static class GBufferPass
 			new ColorTargetBinding(config.AlbedoTarget),
 			new ColorTargetBinding(config.NormalTarget),
 			new ColorTargetBinding(config.MaterialTarget),
-			new ColorTargetBinding(config.EmissiveTarget)
+			new ColorTargetBinding(config.EmissiveTarget),
+			new ColorTargetBinding(config.VelocityTarget)
 		};
 
 		var depthBinding = new DepthTargetBinding(config.DepthTarget);
@@ -38,6 +40,7 @@ public static class GBufferPass
 		commandList.ClearColorAttachment(1, config.NormalClearColor);
 		commandList.ClearColorAttachment(2, config.MaterialClearColor);
 		commandList.ClearColorAttachment(3, config.EmissiveClearColor);
+		commandList.ClearColorAttachment(4, config.VelocityClearColor);
 		commandList.ClearDepthStencil(config.DepthClearValue);
 		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
 
@@ -45,6 +48,14 @@ public static class GBufferPass
 		cameraWriter.Clear();
 		cameraWriter.SetMatrix4x4("viewProjection", sceneData.ViewProjection);
 		cameraWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
+		cameraWriter.SetVector3("previousCameraPosition", sceneData.PreviousCameraOrigin);
+		cameraWriter.SetFloat("currentJitterPixelsX", sceneData.JitterPixels.X);
+		cameraWriter.SetFloat("currentJitterPixelsY", sceneData.JitterPixels.Y);
+		cameraWriter.SetMatrix4x4("unjitteredViewProjection", sceneData.UnjitteredViewProjection);
+		cameraWriter.SetMatrix4x4("previousViewProjection", sceneData.PreviousViewProjection);
+		cameraWriter.SetVector2("currentJitterNdc", sceneData.JitterNdc);
+		cameraWriter.SetUInt("frameSizeX", (uint)Math.Max(config.FramebufferWidth, 1));
+		cameraWriter.SetUInt("frameSizeY", (uint)Math.Max(config.FramebufferHeight, 1));
 		UploadCameraConstants(config, commandList, cameraWriter);
 
 		if (config.InstanceBuffer is null ||

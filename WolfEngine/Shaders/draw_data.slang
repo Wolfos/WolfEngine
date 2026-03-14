@@ -20,6 +20,7 @@ bool IsPackedHandleValid(uint handle)
 
 struct GpuInstanceData
 {
+    row_major float4x4 previousWorld;
     row_major float4x4 world;
     float4 boundsCenterRadius;
     uint materialHandle;
@@ -77,6 +78,7 @@ struct GpuDrawArgs
 
 struct GpuDrawUpdateData
 {
+    row_major float4x4 previousWorld;
     row_major float4x4 world;
     float4 boundsCenterRadius;
     float4 baseColor;

@@ -15,6 +15,7 @@ public static class GpuDrawFlags
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuInstanceData
 {
+	public readonly Matrix4x4 PreviousWorld;
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
 	public readonly uint MaterialHandle;
@@ -114,6 +115,7 @@ public readonly struct GpuDrawArgs
 public readonly struct GpuDrawUpdateData
 {
 	public GpuDrawUpdateData(
+		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		ColorRGBA baseColor,
@@ -137,6 +139,7 @@ public readonly struct GpuDrawUpdateData
 		uint emissiveHandle,
 		uint samplerHandle)
 	{
+		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
 		BaseColor = baseColor;
@@ -164,6 +167,7 @@ public readonly struct GpuDrawUpdateData
 		_pad2 = 0;
 	}
 
+	public readonly Matrix4x4 PreviousWorld;
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
 	public readonly ColorRGBA BaseColor;

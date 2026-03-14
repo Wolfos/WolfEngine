@@ -572,7 +572,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	{
 		TextureFormat.Bgra8Unorm => MTLPixelFormat.BGRA8Unorm,
 		TextureFormat.Rgba8Unorm => MTLPixelFormat.RGBA8Unorm,
+		TextureFormat.Rg16Float => MTLPixelFormat.RG16Float,
 		TextureFormat.Rgba16Float => MTLPixelFormat.RGBA16Float,
+		TextureFormat.R32Float => MTLPixelFormat.R32Float,
 		TextureFormat.D32Float => MTLPixelFormat.Depth32Float,
 		TextureFormat.Unknown => MTLPixelFormat.Invalid,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")

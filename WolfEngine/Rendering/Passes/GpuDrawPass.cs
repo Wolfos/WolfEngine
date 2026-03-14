@@ -306,6 +306,7 @@ public sealed class GpuDrawPass
 			}
 
 				_updateData.Add(new GpuDrawUpdateData(
+					update.PreviousWorld,
 					update.World,
 					update.BoundsCenterRadius,
 					baseColor,
@@ -574,7 +575,8 @@ public sealed class GpuDrawPass
 					TextureFormat.Bgra8Unorm,
 					TextureFormat.Rgba16Float,
 					TextureFormat.Rgba8Unorm,
-					TextureFormat.Rgba8Unorm
+					TextureFormat.Rgba8Unorm,
+					TextureFormat.Rg16Float
 				}),
 				depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 				renderState: renderState,
@@ -932,6 +934,7 @@ public sealed class GpuDrawPass
 				entry.InstanceHandle,
 				entry.MeshHandle,
 				entry.MaterialHandle,
+				entry.PreviousWorld,
 				entry.World,
 				entry.BoundsCenterRadius,
 				entry.Mesh,
