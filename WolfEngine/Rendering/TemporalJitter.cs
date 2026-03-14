@@ -5,7 +5,7 @@ namespace WolfEngine.Rendering;
 
 public static class TemporalJitter
 {
-	public const int DefaultPhaseCount = 8;
+	public const int DefaultPhaseCount = 16;
 
 	public static Vector2 GetHaltonJitterPixels(ulong frameIndex, int phaseCount = DefaultPhaseCount)
 	{
