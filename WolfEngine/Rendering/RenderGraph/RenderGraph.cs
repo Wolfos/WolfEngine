@@ -132,8 +132,13 @@ public sealed class RenderGraph
 		SceneDrawData sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
 		var taaEnabled = snapshot.Config.TemporalAntiAliasing.Enabled;
+		var taaPhaseCount = snapshot.Config.TemporalAntiAliasing.PhaseCount > 0
+			? snapshot.Config.TemporalAntiAliasing.PhaseCount
+			: TemporalJitter.DefaultPhaseCount;
 		var jitterPixels = taaEnabled
-			? TemporalJitter.GetHaltonJitterPixels((ulong)_frameIndex)
+			? TemporalJitter.GetHaltonJitterPixels(
+				(ulong)_frameIndex,
+				taaPhaseCount)
 			: Vector2.Zero;
 		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
 		var jitteredProjection = taaEnabled

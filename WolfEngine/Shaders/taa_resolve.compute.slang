@@ -18,6 +18,21 @@ cbuffer TaaSettings : register(b1)
     uint renderSizeY;
     uint historyValid;
     uint resetHistory;
+    float depthThresholdOpaque;
+    float depthThresholdAlphaTest;
+    float clampSigmaOpaque;
+    float clampSigmaAlphaTest;
+    float clampExpansionLowMotion;
+    float clampExpansionHighMotion;
+    float clampExpansionMotionScale;
+    float historyWeightOpaqueLowMotion;
+    float historyWeightOpaqueHighMotion;
+    float historyWeightOpaqueMotionScale;
+    float historyWeightAlphaTestLowMotion;
+    float historyWeightAlphaTestHighMotion;
+    float historyWeightAlphaTestMotionScale;
+    float _taaPadding0;
+    float _taaPadding1;
 };
 
 float3 RGBToYCoCg(float3 color)
@@ -149,11 +164,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             }
         }
 
-        float depthThreshold = lerp(0.01f, 0.03f, alphaTestMask);
+        float depthThreshold = lerp(depthThresholdOpaque, depthThresholdAlphaTest, alphaTestMask);
         historyRejected = abs(historyDepth - expectedHistoryDepth) > depthThreshold;
         if (!historyRejected)
         {
-            float sigmaScale = lerp(1.25f, 0.85f, alphaTestMask);
+            float sigmaScale = lerp(clampSigmaOpaque, clampSigmaAlphaTest, alphaTestMask);
             float3 varianceMin = mean - sigmaScale * sigma;
             float3 varianceMax = mean + sigmaScale * sigma;
 
@@ -162,7 +177,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
             float3 center = 0.5f * (clampMin + clampMax);
             float3 extent = 0.5f * (clampMax - clampMin);
-            float clampExpansion = lerp(1.35f, 1.1f, saturate(motionPixels * 0.5f));
+            float clampExpansion = lerp(
+                clampExpansionLowMotion,
+                clampExpansionHighMotion,
+                saturate(motionPixels * clampExpansionMotionScale));
             extent = max(extent * clampExpansion, float3(0.01f, 0.01f, 0.01f));
             clampMin = center - extent;
             clampMax = center + extent;
@@ -171,8 +189,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 clampedHistoryYCoCg = clamp(RGBToYCoCg(historyColor), clampMin, clampMax);
             float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
 
-            float opaqueHistoryWeight = lerp(0.9925f, 0.9f, saturate(motionPixels * 0.1f));
-            float alphaTestHistoryWeight = lerp(0.95f, 0.75f, saturate(motionPixels * 0.15f));
+            float opaqueHistoryWeight = lerp(
+                historyWeightOpaqueLowMotion,
+                historyWeightOpaqueHighMotion,
+                saturate(motionPixels * historyWeightOpaqueMotionScale));
+            float alphaTestHistoryWeight = lerp(
+                historyWeightAlphaTestLowMotion,
+                historyWeightAlphaTestHighMotion,
+                saturate(motionPixels * historyWeightAlphaTestMotionScale));
             float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask);
 
             resolvedColor = lerp(currentColor, clampedHistoryRgb, historyWeight);

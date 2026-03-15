@@ -60,6 +60,7 @@ public sealed class TemporalAntiAliasingPass
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			LinearSampler = _linearSampler,
 			RenderSize = resources.SceneFramebufferSize,
+			Settings = resources.Config.TemporalAntiAliasing,
 			HistoryValid = historyValid,
 			ResetHistory = resetHistory
 		};
@@ -87,11 +88,25 @@ public sealed class TemporalAntiAliasingPass
 
 		var settingsWriter = _settingsWriter
 			?? throw new InvalidOperationException("TAA settings writer was not initialized.");
+		var settings = config.Settings;
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
 		settingsWriter.SetUInt("historyValid", config.HistoryValid ? 1u : 0u);
 		settingsWriter.SetUInt("resetHistory", config.ResetHistory ? 1u : 0u);
+		settingsWriter.SetFloat("depthThresholdOpaque", MathF.Max(settings.DepthThresholdOpaque, 0.0f));
+		settingsWriter.SetFloat("depthThresholdAlphaTest", MathF.Max(settings.DepthThresholdAlphaTest, 0.0f));
+		settingsWriter.SetFloat("clampSigmaOpaque", MathF.Max(settings.ClampSigmaOpaque, 0.0f));
+		settingsWriter.SetFloat("clampSigmaAlphaTest", MathF.Max(settings.ClampSigmaAlphaTest, 0.0f));
+		settingsWriter.SetFloat("clampExpansionLowMotion", MathF.Max(settings.ClampExpansionLowMotion, 0.0f));
+		settingsWriter.SetFloat("clampExpansionHighMotion", MathF.Max(settings.ClampExpansionHighMotion, 0.0f));
+		settingsWriter.SetFloat("clampExpansionMotionScale", MathF.Max(settings.ClampExpansionMotionScale, 0.0f));
+		settingsWriter.SetFloat("historyWeightOpaqueLowMotion", Math.Clamp(settings.HistoryWeightOpaqueLowMotion, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("historyWeightOpaqueHighMotion", Math.Clamp(settings.HistoryWeightOpaqueHighMotion, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("historyWeightOpaqueMotionScale", MathF.Max(settings.HistoryWeightOpaqueMotionScale, 0.0f));
+		settingsWriter.SetFloat("historyWeightAlphaTestLowMotion", Math.Clamp(settings.HistoryWeightAlphaTestLowMotion, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("historyWeightAlphaTestHighMotion", Math.Clamp(settings.HistoryWeightAlphaTestHighMotion, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("historyWeightAlphaTestMotionScale", MathF.Max(settings.HistoryWeightAlphaTestMotionScale, 0.0f));
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var dispatchX = (uint)((config.RenderSize.X + 7) / 8);
