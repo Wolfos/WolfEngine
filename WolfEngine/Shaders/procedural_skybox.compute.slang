@@ -198,12 +198,62 @@ static float3 GetAtmosphere(float3 rayStart, float3 rayDir, float rayLength, flo
     return scattering * kExposureMul;
 }
 
-static float3 GetSunDisc(float3 rayDir, float3 lightDir, float discSize)
+static float3 GetSunDiscCircle(float3 rayDir, float3 lightDir, float3 lightColor, float transmittanceMask, float discSize)
 {
-    float discCos = cos(0.00436f * discSize);
+    if (lightDir.y <= 0.0f || transmittanceMask <= 0.0f)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float minAngularRadius = 0.012f;
+    float angularRadius = max(0.00436f * discSize, minAngularRadius);
+    float edgeSoftness = max(angularRadius * 0.35f, 0.003f);
     float cosTheta = dot(rayDir, lightDir);
-    float disc = sqrt(smoothstep(discCos, 1.0f, cosTheta));
-    return float3(disc, disc, disc);
+    float innerCos = cos(angularRadius);
+    float outerCos = cos(angularRadius + edgeSoftness);
+    float disc = smoothstep(outerCos, innerCos, cosTheta);
+    return disc * lightColor * transmittanceMask;
+}
+
+static float3 SampleSunDiscCircleAA(float2 uv, float2 texelSize, float3 lightDir, float3 lightColor, float transmittanceMask, float discSize)
+{
+    static const float2 offsets[9] =
+    {
+        float2(0.0f, 0.0f),
+        float2(-0.35f, -0.35f),
+        float2(0.35f, -0.35f),
+        float2(-0.35f, 0.35f),
+        float2(0.35f, 0.35f),
+        float2(0.0f, -0.5f),
+        float2(0.0f, 0.5f),
+        float2(-0.5f, 0.0f),
+        float2(0.5f, 0.0f)
+    };
+
+    static const float weights[9] =
+    {
+        0.20f,
+        0.10f,
+        0.10f,
+        0.10f,
+        0.10f,
+        0.10f,
+        0.10f,
+        0.10f,
+        0.10f
+    };
+
+    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < 9; i++)
+    {
+        float2 sampleUv = uv + offsets[i] * texelSize;
+        sampleUv.x = frac(sampleUv.x);
+        sampleUv.y = saturate(sampleUv.y);
+        float3 sampleDir = EquirectToDir(sampleUv);
+        sum += GetSunDiscCircle(sampleDir, lightDir, lightColor, transmittanceMask, discSize) * weights[i];
+    }
+
+    return sum;
 }
 
 static float3 NormalizeTint(float3 tint)
@@ -224,6 +274,7 @@ void ProceduralSkyboxCSMain(uint3 id : SV_DispatchThreadID)
     RWTexture2D<float4> environment = GetRWTexture(environmentHandle);
 
     float2 uv = (float2(id.xy) + 0.5f) / float2(width, height);
+    float2 texelSize = 1.0f / float2(width, height);
     float3 dir = EquirectToDir(uv);
     float3 lightDir = normalize(float3(-sunDirectionIntensity.x, -sunDirectionIntensity.y, sunDirectionIntensity.z));
     float3 lightColor = max(sunColorSharpness.xyz, float3(0.0f, 0.0f, 0.0f)) * max(sunDirectionIntensity.w, 0.0f);
@@ -233,7 +284,7 @@ void ProceduralSkyboxCSMain(uint3 id : SV_DispatchThreadID)
     float3 color = GetAtmosphere(rayStart, dir, kInfinity, lightDir, lightColor, transmittance);
 
     float sunDiscSize = sqrt(256.0f / max(sunColorSharpness.w, 1.0f));
-    float3 sunDisc = GetSunDisc(dir, lightDir, sunDiscSize) * lightColor * transmittance.w;
+    float3 sunDisc = SampleSunDiscCircleAA(uv, texelSize, lightDir, lightColor, transmittance.w, sunDiscSize);
     color += sunDisc;
 
     float zenithWeight = pow(saturate(dir.y), max(skyTop.w, 1e-3f));

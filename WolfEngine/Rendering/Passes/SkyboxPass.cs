@@ -19,8 +19,8 @@ public sealed class SkyboxPass
 		public ColorRGBA GroundColor { get; set; } = new(0.15f, 0.1f, 0.07f, 0.0f);
 	}
 	
-	private const int ProceduralEnvWidth = 512;
-	private const int ProceduralEnvHeight = 256;
+	private const int ProceduralEnvWidth = 2048;
+	private const int ProceduralEnvHeight = 1024;
 	private const int IrradianceSize = 64;
 	private const int PrefilterWidth = 256;
 	private const int PrefilterSliceHeight = 64;
