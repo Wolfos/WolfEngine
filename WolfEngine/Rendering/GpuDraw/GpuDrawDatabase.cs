@@ -212,16 +212,14 @@ public sealed class GpuDrawDatabase
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
-		var settlePreviousTransform = record.PreviousWorld.Equals(record.World) == false;
+		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
 		if ((transformChanged || meshChanged || materialChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
 
-		var uploadPreviousWorld = transformChanged
-			? record.World
-			: record.World;
+		var uploadPreviousWorld = record.World;
 
 		if (meshChanged)
 		{
@@ -269,7 +267,7 @@ public sealed class GpuDrawDatabase
 				material));
 		}
 
-		if (transformChanged || meshChanged || settlePreviousTransform)
+		if (transformChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawHandle,
@@ -279,10 +277,19 @@ public sealed class GpuDrawDatabase
 				uploadPreviousWorld,
 				record.World,
 				record.BoundsCenterRadius));
+			record.PreviousWorld = uploadPreviousWorld;
 		}
 
-		if (transformChanged || settlePreviousTransform)
+		if (settlePreviousTransform)
 		{
+			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.World,
+				record.World,
+				record.BoundsCenterRadius));
 			record.PreviousWorld = record.World;
 		}
 	}
