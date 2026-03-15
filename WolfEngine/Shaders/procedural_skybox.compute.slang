@@ -89,6 +89,18 @@ static float Pow8(float x)
     return xxxx * xxxx;
 }
 
+static float Hash13(float3 p)
+{
+    return frac(sin(dot(p, float3(127.1f, 311.7f, 74.7f))) * 43758.5453123f);
+}
+
+static float2 Hash23(float3 p)
+{
+    return frac(sin(float2(
+        dot(p, float3(127.1f, 311.7f, 74.7f)),
+        dot(p, float3(269.5f, 183.3f, 246.1f)))) * 43758.5453123f);
+}
+
 static float2 SphereIntersection(float3 rayStart, float3 rayDir, float3 sphereCenter, float sphereRadius)
 {
     float3 oc = rayStart - sphereCenter;
@@ -256,6 +268,94 @@ static float3 SampleSunDiscCircleAA(float2 uv, float2 texelSize, float3 lightDir
     return sum;
 }
 
+static float2 DirectionToCubeFaceUv(float3 dir, out float faceIndex)
+{
+    float3 absDir = abs(dir);
+    float2 uv;
+
+    if (absDir.x >= absDir.y && absDir.x >= absDir.z)
+    {
+        if (dir.x >= 0.0f)
+        {
+            faceIndex = 0.0f;
+            uv = float2(-dir.z, dir.y) / absDir.x;
+        }
+        else
+        {
+            faceIndex = 1.0f;
+            uv = float2(dir.z, dir.y) / absDir.x;
+        }
+    }
+    else if (absDir.y >= absDir.z)
+    {
+        if (dir.y >= 0.0f)
+        {
+            faceIndex = 2.0f;
+            uv = float2(dir.x, -dir.z) / absDir.y;
+        }
+        else
+        {
+            faceIndex = 3.0f;
+            uv = float2(dir.x, dir.z) / absDir.y;
+        }
+    }
+    else
+    {
+        if (dir.z >= 0.0f)
+        {
+            faceIndex = 4.0f;
+            uv = float2(dir.x, dir.y) / absDir.z;
+        }
+        else
+        {
+            faceIndex = 5.0f;
+            uv = float2(-dir.x, dir.y) / absDir.z;
+        }
+    }
+
+    return uv * 0.5f + 0.5f;
+}
+
+static float3 SampleStarLayer(float3 dir, float cellCount, float threshold, float minSize, float maxSize, float intensityScale)
+{
+    float faceIndex;
+    float2 faceUv = DirectionToCubeFaceUv(dir, faceIndex);
+    float2 gridUv = faceUv * cellCount;
+    float2 cell = floor(gridUv);
+    float2 local = frac(gridUv) - 0.5f;
+    float3 seed = float3(cell, faceIndex);
+
+    float starChance = Hash13(seed);
+    if (starChance < threshold)
+    {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+
+    float2 centerOffset = (Hash23(seed + 19.19f) - 0.5f) * 0.7f;
+    float2 delta = local - centerOffset;
+
+    float brightnessSeed = Hash13(seed + 3.71f);
+    float size = lerp(maxSize, minSize, pow(brightnessSeed, 0.35f));
+    float core = 1.0f - smoothstep(size, size + max(size * 0.75f, 0.01f), length(delta));
+
+    float sparkleX = 1.0f - smoothstep(size * 0.3f, size * 1.6f, abs(delta.x));
+    float sparkleY = 1.0f - smoothstep(size * 0.3f, size * 1.6f, abs(delta.y));
+    float sparkle = max(sparkleX, sparkleY) * 0.15f;
+
+    float starIntensity = (core + sparkle) * intensityScale * lerp(0.6f, 1.8f, pow(brightnessSeed, 6.0f));
+    float temperature = Hash13(seed + 11.7f);
+    float3 starColor = lerp(float3(1.0f, 0.92f, 0.84f), float3(0.72f, 0.82f, 1.0f), temperature);
+    return starColor * starIntensity;
+}
+
+static float3 SampleProceduralStars(float3 dir)
+{
+    float3 stars = float3(0.0f, 0.0f, 0.0f);
+    stars += SampleStarLayer(dir, 280.0f, 0.9975f, 0.03f, 0.09f, 1.2f);
+    stars += SampleStarLayer(dir, 180.0f, 0.9955f, 0.04f, 0.14f, 2.4f);
+    return stars;
+}
+
 static float3 NormalizeTint(float3 tint)
 {
     tint = max(tint, float3(0.0f, 0.0f, 0.0f));
@@ -294,6 +394,13 @@ void ProceduralSkyboxCSMain(uint3 id : SV_DispatchThreadID)
     float skyTintDenom = max(zenithWeight + horizonWeight, 1e-3f);
     float3 skyTint = NormalizeTint(skyTintBlend / skyTintDenom);
     color *= lerp(float3(1.0f, 1.0f, 1.0f), skyTint, combinedSkyWeight);
+
+    float skyLuminance = dot(color, kLuminanceWeights);
+    float skyDarkness = 1.0f - smoothstep(0.01f, 0.08f, skyLuminance);
+    float sunDarkness = 1.0f - smoothstep(-0.18f, 0.05f, lightDir.y);
+    float horizonStarFade = smoothstep(-0.05f, 0.12f, dir.y);
+    float starVisibility = skyDarkness * sunDarkness * horizonStarFade * transmittance.w;
+    color += SampleProceduralStars(dir) * starVisibility;
 
     float planetHit = 1.0f - transmittance.w;
     float groundWeight = saturate(-dir.y);
