@@ -186,6 +186,11 @@ public class ComponentsWindow: IComponentEditor
             ref var light = ref Unsafe.As<T, Light>(ref component);
             EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type);
             EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity);
+            if (light.Type == LightType.Point)
+            {
+                EditorUIUtility.InputFloat(nameof(Light.Range), ref light.Range);
+            }
+
             var color = light.Color.ToVector4();
             if (EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color))
             {

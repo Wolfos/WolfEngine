@@ -18,7 +18,7 @@ public sealed class TransparentForwardPass
 	private ShaderPropertyWriter? _environmentWriter;
 	private ShaderPropertyWriter? _lightingWriter;
 	private uint _cameraRegisterIndex = 2;
-	private const int MaxLights = 3;
+	private const int MaxLights = 300;
 
 	public TransparentForwardPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -162,7 +162,8 @@ public sealed class TransparentForwardPass
 				$"lights[{i}].colorIntensity",
 				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
 			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
-			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, 25.0f));
+			var range = light.Type == LightType.Point ? MathF.Max(light.Range, 0.001f) : 0.0f;
+			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, range));
 		}
 		lightingWriter.SetMatrix4x4("shadowViewProjection0", config.ShadowViewProjection0);
 		lightingWriter.SetMatrix4x4("shadowViewProjection1", config.ShadowViewProjection1);

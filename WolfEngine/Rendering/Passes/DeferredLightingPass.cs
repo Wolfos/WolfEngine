@@ -19,7 +19,7 @@ public sealed class DeferredLightingPass
 	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
-	private const int MaxLights = 3;
+	private const int MaxLights = 300;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -177,7 +177,8 @@ public sealed class DeferredLightingPass
 				$"lights[{i}].colorIntensity",
 				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
 			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
-			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, 25.0f)); // TODO: light range from component when available
+			var range = light.Type == LightType.Point ? MathF.Max(light.Range, 0.001f) : 0.0f;
+			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, range));
 		}
 
 		lightingWriter.SetMatrix4x4("shadowViewProjection0", config.ShadowViewProjection0);
