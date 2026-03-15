@@ -576,7 +576,7 @@ public sealed class GpuDrawPass
 					TextureFormat.Rgba16Float,
 					TextureFormat.Rgba8Unorm,
 					TextureFormat.Rgba8Unorm,
-					TextureFormat.Rg16Float
+					TextureFormat.Rgba16Float
 				}),
 				depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 				renderState: renderState,
