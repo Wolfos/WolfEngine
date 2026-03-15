@@ -17,6 +17,7 @@ public sealed class FrameSnapshot
 	{
 		LightPackets = new List<LightPacket>(16);
 		SunDirection = DefaultSunDirection;
+		SunIntensityScale = 1.0f;
 		Config = new();
 	}
 
@@ -24,6 +25,7 @@ public sealed class FrameSnapshot
 	public WorldTransform CameraWorldTransform { get; private set; }
 	public List<LightPacket> LightPackets { get; }
 	public Vector3 SunDirection { get; private set; }
+	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
@@ -36,6 +38,7 @@ public sealed class FrameSnapshot
 	{
 		LightPackets.Clear();
 		SunDirection = DefaultSunDirection;
+		SunIntensityScale = 1.0f;
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)
@@ -43,11 +46,12 @@ public sealed class FrameSnapshot
 		LightPackets.Add(new LightPacket(light, transform));
 	}
 
-	public void SetSunDirection(Vector3 sunDirection)
+	public void SetSun(Vector3 sunDirection, float sunIntensityScale)
 	{
 		SunDirection = sunDirection == Vector3.Zero
 			? DefaultSunDirection
 			: Vector3.Normalize(sunDirection);
+		SunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
 	}
 
 	public void SetConfig(RenderConfig config)

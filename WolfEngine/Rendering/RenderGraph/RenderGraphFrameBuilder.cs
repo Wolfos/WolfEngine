@@ -191,6 +191,7 @@ public sealed class RenderGraphFrameBuilder
 		RenderGraphResourceHandle sceneColorHandle,
 		bool sceneEnabled,
 		Vector3 sunDirection,
+		float sunIntensityScale,
 		RenderConfig config)
 	{
 		var taaEnabled = config.TemporalAntiAliasing.Enabled;
@@ -208,7 +209,7 @@ public sealed class RenderGraphFrameBuilder
 		_previousTaaEnabled = taaEnabled;
 		RetirePendingTemporalReleases(_renderer.GetGfxDevice());
 
-		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection);
+		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
 		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
 		_recordProceduralSkyLighting = _useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;

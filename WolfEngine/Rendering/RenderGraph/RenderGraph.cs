@@ -354,7 +354,14 @@ public sealed class RenderGraph
 						initialState: _sceneRenderTargetManager.CurrentState);
 				}
 				
-				_frameBuilder.BeginFrame(frameBufferSize, sceneRenderSize, sceneColorHandle, renderSceneToViewport, snapshot.SunDirection, snapshot.Config);
+				_frameBuilder.BeginFrame(
+					frameBufferSize,
+					sceneRenderSize,
+					sceneColorHandle,
+					renderSceneToViewport,
+					snapshot.SunDirection,
+					snapshot.SunIntensityScale,
+					snapshot.Config);
 				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.SetUiFrame(uiFrame);
 

@@ -47,6 +47,7 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
+			var sunIntensityScale = 1.0f;
 			var hasSunDirection = false;
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
@@ -109,11 +110,12 @@ public class RenderPipeline : IRenderPipeline
 							}
 
 							sunDirection = Vector3.Normalize(forward);
+							sunIntensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
 							hasSunDirection = true;
 						}
 					}
 
-					snapshot.SetSunDirection(sunDirection);
+					snapshot.SetSun(sunDirection, sunIntensityScale);
 				}
 			}
 

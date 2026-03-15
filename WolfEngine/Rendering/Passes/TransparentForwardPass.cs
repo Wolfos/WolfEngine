@@ -156,8 +156,11 @@ public sealed class TransparentForwardPass
 			}
 
 			var position = packet.Transform.Translation;
+			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
 
-			lightingWriter.SetColorRGBA($"lights[{i}].colorIntensity", new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity));
+			lightingWriter.SetColorRGBA(
+				$"lights[{i}].colorIntensity",
+				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
 			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
 			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, 25.0f));
 		}

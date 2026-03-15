@@ -181,6 +181,27 @@ public class ComponentsWindow: IComponentEditor
             return;
         }
 
+        if (typeof(T) == typeof(Light))
+        {
+            ref var light = ref Unsafe.As<T, Light>(ref component);
+            EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type);
+            EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity);
+            var color = light.Color.ToVector4();
+            if (EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color))
+            {
+                light.Color = ColorRGBA.FromVector4(color);
+            }
+
+            if (light.Type == LightType.Directional)
+            {
+                EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref light.HorizonFade);
+            }
+
+            ImGui.Separator();
+            ImGui.PopID();
+            return;
+        }
+
         ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
         var isOpen = EditorUIUtility.CollapsingHeader(typeof(T).Name, true);
         ImGui.PopStyleVar();

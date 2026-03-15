@@ -27,6 +27,7 @@ public sealed class SkyboxPass
 	private const int PrefilterSlices = 6;
 	private const int BrdfSize = 256;
 	private const float SunDirectionEpsilonSquared = 1e-6f;
+	private const float SunIntensityScaleEpsilon = 1e-4f;
 
 	private readonly IRenderer _renderer;
 	private readonly IShaderCompiler _shaderCompiler;
@@ -47,6 +48,8 @@ public sealed class SkyboxPass
 	private IGfxTexture? _proceduralIrradiance;
 	private IGfxTexture? _proceduralPrefilter;
 	private IGfxTexture? _proceduralBrdfLut;
+	private float _currentSunIntensityScale = 1.0f;
+	private float _lastGeneratedSunIntensityScale = 1.0f;
 	private Vector3 _currentSunDirection = Vector3.UnitY;
 	private Vector3 _lastGeneratedSunDirection = Vector3.UnitY;
 	private bool _hasGeneratedSunDirection;
@@ -93,7 +96,7 @@ public sealed class SkyboxPass
 		};
 	}
 
-	public void PrepareFrame(IGfxDevice gfxDevice, Vector3 sunDirection)
+	public void PrepareFrame(IGfxDevice gfxDevice, Vector3 sunDirection, float sunIntensityScale)
 	{
 		ArgumentNullException.ThrowIfNull(gfxDevice);
 
@@ -102,9 +105,11 @@ public sealed class SkyboxPass
 		_currentSunDirection = sunDirection == Vector3.Zero
 			? Vector3.UnitY
 			: Vector3.Normalize(sunDirection);
+		_currentSunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
 
 		var sunChanged = _hasGeneratedSunDirection == false ||
-		                 Vector3.DistanceSquared(_lastGeneratedSunDirection, _currentSunDirection) > SunDirectionEpsilonSquared;
+		                 Vector3.DistanceSquared(_lastGeneratedSunDirection, _currentSunDirection) > SunDirectionEpsilonSquared ||
+		                 MathF.Abs(_lastGeneratedSunIntensityScale - _currentSunIntensityScale) > SunIntensityScaleEpsilon;
 
 		ShouldRecordProceduralLightingUpdate = createdResources || _proceduralLightingValid == false || sunChanged;
 		ShouldRecordBrdfLutUpdate = createdResources || _proceduralBrdfValid == false;
@@ -147,7 +152,7 @@ public sealed class SkyboxPass
 		var skyParamsWriter = _proceduralSkyParamsWriter
 			?? throw new InvalidOperationException("Procedural skybox parameter writer was not initialized.");
 		skyParamsWriter.Clear();
-		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(_currentSunDirection, config.Intensity));
+		skyParamsWriter.SetVector4("sunDirectionIntensity", new Vector4(_currentSunDirection, config.Intensity * _currentSunIntensityScale));
 		skyParamsWriter.SetVector4("sunColorSharpness", new Vector4(config.SunColor.X, config.SunColor.Y, config.SunColor.Z, config.SunSharpness));
 		skyParamsWriter.SetColorRGBA("skyTop", config.TopColor);
 		skyParamsWriter.SetColorRGBA("skyHorizon", config.HorizonColor);
@@ -176,6 +181,7 @@ public sealed class SkyboxPass
 		_proceduralLightingValid = true;
 		_hasGeneratedProceduralContent = true;
 		_lastGeneratedSunDirection = _currentSunDirection;
+		_lastGeneratedSunIntensityScale = _currentSunIntensityScale;
 		_hasGeneratedSunDirection = true;
 	}
 
@@ -344,6 +350,8 @@ public sealed class SkyboxPass
 			_proceduralBrdfValid = false;
 			_hasGeneratedProceduralContent = false;
 			_hasGeneratedSunDirection = false;
+			_currentSunIntensityScale = 1.0f;
+			_lastGeneratedSunIntensityScale = 1.0f;
 		}
 	}
 
