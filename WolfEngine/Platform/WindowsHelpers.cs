@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Threading;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Platform;
@@ -13,11 +14,13 @@ internal static class WindowsHelpers
 	private const int OFN_FILEMUSTEXIST = 0x00001000;
 	private const int OFN_PATHMUSTEXIST = 0x00000800;
 	private const int OFN_NOCHANGEDIR = 0x00000008;
-	private const uint BIF_RETURNONLYFSDIRS = 0x00000001;
-	private const uint BIF_NEWDIALOGSTYLE = 0x00000040;
-	private const uint BIF_EDITBOX = 0x00000010;
-	private const int BFFM_INITIALIZED = 1;
-	private const int BFFM_SETSELECTIONW = 0x0467;
+	private const uint COINIT_APARTMENTTHREADED = 0x2;
+	private const uint COINIT_DISABLE_OLE1DDE = 0x4;
+	private const int S_OK = 0;
+	private const int S_FALSE = 1;
+	private const int ERROR_CANCELLED = unchecked((int)0x800704C7);
+	private static readonly Guid FileOpenDialogClsid = new("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7");
+	private static readonly Guid ShellItemGuid = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
 
 	public static string? OpenFile(FileDialogOptions options)
 	{
@@ -57,73 +60,155 @@ internal static class WindowsHelpers
 
 	public static string? OpenFolder(FileDialogOptions options)
 	{
-		const int maxPathChars = 1024;
-		var displayNameBuffer = Marshal.AllocHGlobal(maxPathChars * sizeof(char));
-		var pathBuffer = Marshal.AllocHGlobal(maxPathChars * sizeof(char));
-		IntPtr initialDirectoryPtr = IntPtr.Zero;
-		BrowseCallbackProc? callback = null;
+		if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+		{
+			return OpenFolderCore(options);
+		}
+
+		return RunInStaThread(() => OpenFolderCore(options));
+	}
+
+	private static string? OpenFolderCore(FileDialogOptions options)
+	{
+		var coInitResult = CoInitializeEx(IntPtr.Zero, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+		var shouldUninitialize = coInitResult is S_OK or S_FALSE;
 
 		try
 		{
-			Marshal.WriteInt16(displayNameBuffer, 0);
-			Marshal.WriteInt16(pathBuffer, 0);
-
-			if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
+			return OpenFolderModern(options);
+		}
+		finally
+		{
+			if (shouldUninitialize)
 			{
-				initialDirectoryPtr = Marshal.StringToHGlobalUni(options.InitialDirectory);
-				callback = static (hwnd, message, _, lpData) =>
-				{
-					if (message == BFFM_INITIALIZED && lpData != IntPtr.Zero)
-					{
-						SendMessageW(hwnd, BFFM_SETSELECTIONW, new IntPtr(1), lpData);
-					}
+				CoUninitialize();
+			}
+		}
+	}
 
-					return 0;
-				};
+	private static string? OpenFolderModern(FileDialogOptions options)
+	{
+		IFileOpenDialog? dialog = null;
+		IShellItem? initialFolder = null;
+		IShellItem? resultItem = null;
+
+		try
+		{
+			var dialogType = Type.GetTypeFromCLSID(FileOpenDialogClsid, throwOnError: true)
+				?? throw new NotSupportedException("FileOpenDialog COM type is unavailable.");
+			dialog = (IFileOpenDialog)Activator.CreateInstance(dialogType)!;
+			dialog.GetOptions(out var dialogOptions);
+			dialog.SetOptions(
+				dialogOptions |
+				FILEOPENDIALOGOPTIONS.FOS_PICKFOLDERS |
+				FILEOPENDIALOGOPTIONS.FOS_FORCEFILESYSTEM |
+				FILEOPENDIALOGOPTIONS.FOS_PATHMUSTEXIST |
+				FILEOPENDIALOGOPTIONS.FOS_NOCHANGEDIR);
+
+			if (string.IsNullOrWhiteSpace(options.Title) == false)
+			{
+				dialog.SetTitle(options.Title);
 			}
 
-			var browseInfo = new BROWSEINFOW
+			initialFolder = CreateShellItemFromPath(options.InitialDirectory);
+			if (initialFolder is not null)
 			{
-				hwndOwner = IntPtr.Zero,
-				pszDisplayName = displayNameBuffer,
-				lpszTitle = options.Title,
-				ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX,
-				lpfn = callback,
-				lParam = initialDirectoryPtr
-			};
+				dialog.SetFolder(initialFolder);
+				dialog.SetDefaultFolder(initialFolder);
+			}
 
-			var itemIdList = SHBrowseForFolderW(ref browseInfo);
-			if (itemIdList == IntPtr.Zero)
+			var showResult = dialog.Show(IntPtr.Zero);
+			if (showResult == ERROR_CANCELLED)
 			{
 				return null;
 			}
 
-			try
+			if (showResult < 0)
 			{
-				if (SHGetPathFromIDListW(itemIdList, pathBuffer) == false)
-				{
-					return null;
-				}
+				Marshal.ThrowExceptionForHR(showResult);
+			}
 
-				var result = Marshal.PtrToStringUni(pathBuffer);
-				return string.IsNullOrWhiteSpace(result) ? null : result;
-			}
-			finally
-			{
-				CoTaskMemFree(itemIdList);
-			}
+			dialog.GetResult(out resultItem);
+			resultItem.GetDisplayName(SIGDN.SIGDN_FILESYSPATH, out var path);
+			return string.IsNullOrWhiteSpace(path) ? null : path;
 		}
 		finally
 		{
-			if (initialDirectoryPtr != IntPtr.Zero)
+			if (resultItem is not null)
 			{
-				Marshal.FreeHGlobal(initialDirectoryPtr);
+				Marshal.ReleaseComObject(resultItem);
 			}
 
-			Marshal.FreeHGlobal(displayNameBuffer);
-			Marshal.FreeHGlobal(pathBuffer);
-			GC.KeepAlive(callback);
+			if (initialFolder is not null)
+			{
+				Marshal.ReleaseComObject(initialFolder);
+			}
+
+			if (dialog is not null)
+			{
+				Marshal.ReleaseComObject(dialog);
+			}
 		}
+	}
+
+	private static IShellItem? CreateShellItemFromPath(string? path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+		{
+			return null;
+		}
+
+		var shellItemGuid = ShellItemGuid;
+		var hr = SHCreateItemFromParsingName(path, IntPtr.Zero, ref shellItemGuid, out IShellItem? shellItem);
+		if (hr < 0)
+		{
+			return null;
+		}
+
+		return shellItem;
+	}
+
+	private static T RunInStaThread<T>(Func<T> action)
+	{
+		if (action is null)
+		{
+			throw new ArgumentNullException(nameof(action));
+		}
+
+		T result = default!;
+		Exception? exception = null;
+		using var completed = new ManualResetEventSlim(false);
+		var thread = new Thread(() =>
+		{
+			try
+			{
+				result = action();
+			}
+			catch (Exception ex)
+			{
+				exception = ex;
+			}
+			finally
+			{
+				completed.Set();
+			}
+		})
+		{
+			IsBackground = true,
+			Name = "WindowsFolderDialogThread"
+		};
+
+		thread.SetApartmentState(ApartmentState.STA);
+		thread.Start();
+		completed.Wait();
+		thread.Join();
+
+		if (exception is not null)
+		{
+			throw exception;
+		}
+
+		return result;
 	}
 
 	private static string BuildFilterString(string[]? extensions)
@@ -187,17 +272,17 @@ internal static class WindowsHelpers
 	private static extern bool GetOpenFileNameW(ref OPENFILENAME ofn);
 
 	[DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-	private static extern IntPtr SHBrowseForFolderW(ref BROWSEINFOW browseInfo);
-
-	[DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-	[return: MarshalAs(UnmanagedType.Bool)]
-	private static extern bool SHGetPathFromIDListW(IntPtr pidl, IntPtr pszPath);
+	private static extern int SHCreateItemFromParsingName(
+		[MarshalAs(UnmanagedType.LPWStr)] string path,
+		IntPtr pbc,
+		ref Guid riid,
+		[MarshalAs(UnmanagedType.Interface)] out IShellItem? shellItem);
 
 	[DllImport("ole32.dll")]
-	private static extern void CoTaskMemFree(IntPtr ptr);
+	private static extern int CoInitializeEx(IntPtr pvReserved, uint dwCoInit);
 
-	[DllImport("user32.dll", CharSet = CharSet.Unicode)]
-	private static extern IntPtr SendMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+	[DllImport("ole32.dll")]
+	private static extern void CoUninitialize();
 
 	[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 	private struct OPENFILENAME
@@ -227,18 +312,64 @@ internal static class WindowsHelpers
 		public int FlagsEx;
 	}
 
-	private delegate int BrowseCallbackProc(IntPtr hwnd, int message, IntPtr lParam, IntPtr lpData);
-
-	[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-	private struct BROWSEINFOW
+	[Flags]
+	private enum FILEOPENDIALOGOPTIONS : uint
 	{
-		public IntPtr hwndOwner;
-		public IntPtr pidlRoot;
-		public IntPtr pszDisplayName;
-		public string? lpszTitle;
-		public uint ulFlags;
-		public BrowseCallbackProc? lpfn;
-		public IntPtr lParam;
-		public int iImage;
+		FOS_NOCHANGEDIR = 0x00000008,
+		FOS_PICKFOLDERS = 0x00000020,
+		FOS_FORCEFILESYSTEM = 0x00000040,
+		FOS_PATHMUSTEXIST = 0x00000800
 	}
+
+	private enum SIGDN : uint
+	{
+		SIGDN_FILESYSPATH = 0x80058000
+	}
+
+	[ComImport]
+	[Guid("d57c7288-d4ad-4768-be02-9d969532d960")]
+	[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+	private interface IFileOpenDialog
+	{
+		[PreserveSig]
+		int Show(IntPtr parent);
+		void SetFileTypes(uint cFileTypes, IntPtr filterSpec);
+		void SetFileTypeIndex(uint iFileType);
+		void GetFileTypeIndex(out uint piFileType);
+		void Advise(IntPtr pfde, out uint pdwCookie);
+		void Unadvise(uint dwCookie);
+		void SetOptions(FILEOPENDIALOGOPTIONS fos);
+		void GetOptions(out FILEOPENDIALOGOPTIONS pfos);
+		void SetDefaultFolder(IShellItem psi);
+		void SetFolder(IShellItem psi);
+		void GetFolder(out IShellItem ppsi);
+		void GetCurrentSelection(out IShellItem ppsi);
+		void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+		void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+		void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+		void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+		void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+		void GetResult(out IShellItem ppsi);
+		void AddPlace(IShellItem psi, int fdap);
+		void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+		void Close(int hr);
+		void SetClientGuid(ref Guid guid);
+		void ClearClientData();
+		void SetFilter(IntPtr pFilter);
+		void GetResults(out IntPtr ppenum);
+		void GetSelectedItems(out IntPtr ppsai);
+	}
+
+	[ComImport]
+	[Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+	[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+	private interface IShellItem
+	{
+		void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+		void GetParent(out IShellItem ppsi);
+		void GetDisplayName(SIGDN sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+		void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+		void Compare(IShellItem psi, uint hint, out int piOrder);
+	}
+
 }
