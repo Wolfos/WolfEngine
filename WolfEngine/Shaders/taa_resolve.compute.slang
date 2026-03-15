@@ -39,6 +39,35 @@ float3 YCoCgToRGB(float3 color)
         Y - 0.5f * Co - 0.5f * Cg);
 }
 
+float4 SampleCatmullRom(Texture2D<float4> texture, SamplerState samplerState, float2 uv, float2 textureSize)
+{
+    float2 samplePos = uv * textureSize;
+    float2 texPos1 = floor(samplePos - 0.5f) + 0.5f;
+    float2 f = samplePos - texPos1;
+
+    float2 w0 = f * (-0.5f + f * (1.0f - 0.5f * f));
+    float2 w1 = 1.0f + f * f * (-2.5f + 1.5f * f);
+    float2 w2 = f * (0.5f + f * (2.0f - 1.5f * f));
+    float2 w3 = f * f * (-0.5f + 0.5f * f);
+
+    float2 w12 = w1 + w2;
+    float2 offset12 = w2 / max(w12, 1e-5f.xx);
+
+    float2 texPos0 = (texPos1 - 1.0f) / textureSize;
+    float2 texPos3 = (texPos1 + 2.0f) / textureSize;
+    float2 texPos12 = (texPos1 + offset12) / textureSize;
+
+    return texture.SampleLevel(samplerState, float2(texPos0.x, texPos0.y), 0.0f) * w0.x * w0.y +
+        texture.SampleLevel(samplerState, float2(texPos12.x, texPos0.y), 0.0f) * w12.x * w0.y +
+        texture.SampleLevel(samplerState, float2(texPos3.x, texPos0.y), 0.0f) * w3.x * w0.y +
+        texture.SampleLevel(samplerState, float2(texPos0.x, texPos12.y), 0.0f) * w0.x * w12.y +
+        texture.SampleLevel(samplerState, float2(texPos12.x, texPos12.y), 0.0f) * w12.x * w12.y +
+        texture.SampleLevel(samplerState, float2(texPos3.x, texPos12.y), 0.0f) * w3.x * w12.y +
+        texture.SampleLevel(samplerState, float2(texPos0.x, texPos3.y), 0.0f) * w0.x * w3.y +
+        texture.SampleLevel(samplerState, float2(texPos12.x, texPos3.y), 0.0f) * w12.x * w3.y +
+        texture.SampleLevel(samplerState, float2(texPos3.x, texPos3.y), 0.0f) * w3.x * w3.y;
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -60,11 +89,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 renderSize = float2(renderSizeX, renderSizeY);
     float2 uv = (float2(dispatchThreadId.xy) + 0.5f) / renderSize;
 
-    float3 currentColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
+    float3 centerColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
     float closestDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
     int2 closestPixel = pixel;
-    float3 minBox = RGBToYCoCg(currentColor);
+    float3 minBox = RGBToYCoCg(centerColor);
     float3 maxBox = minBox;
+    float3 currentColor = centerColor;
+    float3 firstMoment = 0.0f.xxx;
+    float3 secondMoment = 0.0f.xxx;
 
     for (int offsetY = -1; offsetY <= 1; offsetY++)
     {
@@ -82,12 +114,19 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 sampleYCoCg = RGBToYCoCg(sampleColor);
             minBox = min(minBox, sampleYCoCg);
             maxBox = max(maxBox, sampleYCoCg);
+            firstMoment += sampleYCoCg;
+            secondMoment += sampleYCoCg * sampleYCoCg;
         }
     }
 
-    float2 velocity = velocityTexture.Load(int3(closestPixel, 0)).xy;
+    float3 mean = firstMoment / 9.0f;
+    float3 variance = max(secondMoment / 9.0f - mean * mean, 0.0f.xxx);
+    float3 sigma = sqrt(variance);
+
+    float4 velocitySample = velocityTexture.Load(int3(closestPixel, 0));
+    float2 velocity = velocitySample.xy;
+    float expectedHistoryDepth = velocitySample.z;
     float alphaTestMask = saturate(materialTexture.Load(int3(closestPixel, 0)).a);
-    float currentDepth = closestDepth;
     float motionPixels = length(velocity);
 
     bool historyAllowed = historyValid != 0u && resetHistory == 0u;
@@ -110,23 +149,33 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             }
         }
 
-        float depthThreshold = lerp(0.02f, 0.075f, alphaTestMask);
-        historyRejected = abs(historyDepth - currentDepth) > depthThreshold;
+        float depthThreshold = lerp(0.01f, 0.03f, alphaTestMask);
+        historyRejected = abs(historyDepth - expectedHistoryDepth) > depthThreshold;
         if (!historyRejected)
         {
-            float3 center = 0.5f * (minBox + maxBox);
-            float3 extent = 0.5f * (maxBox - minBox);
-            float clampExpansion = lerp(2.5f, 1.25f, saturate(motionPixels * 0.5f));
-            extent = max(extent * clampExpansion, float3(0.02f, 0.02f, 0.02f));
-            float3 clampMin = center - extent;
-            float3 clampMax = center + extent;
+            float sigmaScale = lerp(1.25f, 0.85f, alphaTestMask);
+            float3 varianceMin = mean - sigmaScale * sigma;
+            float3 varianceMax = mean + sigmaScale * sigma;
 
-            float3 historyColor = historyColorTexture.SampleLevel(linearSampler, prevUv, 0.0f).rgb;
-            float3 clampedHistory = clamp(RGBToYCoCg(historyColor), clampMin, clampMax);
-            float opaqueHistoryWeight = lerp(0.97f, 0.2f, saturate(motionPixels * 0.5f));
-            float alphaTestHistoryWeight = lerp(0.9f, 0.15f, saturate(motionPixels * 0.75f));
+            float3 clampMin = min(max(minBox, varianceMin), min(maxBox, varianceMax));
+            float3 clampMax = max(max(minBox, varianceMin), min(maxBox, varianceMax));
+
+            float3 center = 0.5f * (clampMin + clampMax);
+            float3 extent = 0.5f * (clampMax - clampMin);
+            float clampExpansion = lerp(1.35f, 1.1f, saturate(motionPixels * 0.5f));
+            extent = max(extent * clampExpansion, float3(0.01f, 0.01f, 0.01f));
+            clampMin = center - extent;
+            clampMax = center + extent;
+
+            float3 historyColor = SampleCatmullRom(historyColorTexture, linearSampler, prevUv, renderSize).rgb;
+            float3 clampedHistoryYCoCg = clamp(RGBToYCoCg(historyColor), clampMin, clampMax);
+            float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
+
+            float opaqueHistoryWeight = lerp(0.9925f, 0.9f, saturate(motionPixels * 0.1f));
+            float alphaTestHistoryWeight = lerp(0.95f, 0.75f, saturate(motionPixels * 0.15f));
             float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask);
-            resolvedColor = lerp(currentColor, YCoCgToRGB(clampedHistory), historyWeight);
+
+            resolvedColor = lerp(currentColor, clampedHistoryRgb, historyWeight);
         }
     }
 

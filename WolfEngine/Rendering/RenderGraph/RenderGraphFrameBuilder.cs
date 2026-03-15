@@ -286,7 +286,7 @@ public sealed class RenderGraphFrameBuilder
 			gbufferVelocityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
-				TextureFormat.Rg16Float,
+				TextureFormat.Rgba16Float,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 			gbufferDepthHandle = _resources.CreateTransientTexture(new TextureDescriptor(

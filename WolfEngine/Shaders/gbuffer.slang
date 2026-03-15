@@ -86,7 +86,7 @@ struct PSOutput
     float4 normal : SV_Target1;
     float4 material : SV_Target2;
     float4 emissive : SV_Target3;
-    float2 velocity : SV_Target4;
+    float4 velocity : SV_Target4;
 };
 
 float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
@@ -96,6 +96,12 @@ float2 ClipToPixel(float4 clipPosition, uint2 frameSize)
     return float2(
         (ndc.x * 0.5f + 0.5f) * frameSize.x,
         (-ndc.y * 0.5f + 0.5f) * frameSize.y);
+}
+
+float ClipToDepth(float4 clipPosition)
+{
+    float invW = abs(clipPosition.w) > 1e-5f ? rcp(clipPosition.w) : 0.0f;
+    return clipPosition.z * invW;
 }
 
 PSOutput EvaluateFragment(VSOutput input)
@@ -108,7 +114,7 @@ PSOutput EvaluateFragment(VSOutput input)
         output.normal = float4(0.5f, 0.5f, 1.0f, 1.0f);
         output.material = float4(0.0f, 1.0f, 1.0f, 1.0f);
         output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
-        output.velocity = 0.0f.xx;
+        output.velocity = float4(0.0f, 0.0f, 1.0f, 1.0f);
         return output;
     }
 
@@ -167,7 +173,8 @@ PSOutput EvaluateFragment(VSOutput input)
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
     float2 currentPixel = ClipToPixel(input.currentClip, frameSize);
     float2 previousPixel = ClipToPixel(input.previousClip, frameSize);
-    output.velocity = previousPixel - currentPixel;
+    float previousDepth = ClipToDepth(input.previousClip);
+    output.velocity = float4(previousPixel - currentPixel, previousDepth, 1.0f);
 
     return output;
 }
