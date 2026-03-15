@@ -18,19 +18,19 @@ cbuffer TaaSettings : register(b1)
     uint renderSizeY;
     uint historyValid;
     uint resetHistory;
-    float depthThresholdOpaque;
-    float depthThresholdAlphaTest;
-    float clampSigmaOpaque;
-    float clampSigmaAlphaTest;
-    float clampExpansionLowMotion;
-    float clampExpansionHighMotion;
+    float opaqueDepthThreshold;
+    float alphaTestDepthThreshold;
+    float opaqueClampSigma;
+    float alphaTestClampSigma;
+    float lowMotionClampExpansion;
+    float highMotionClampExpansion;
     float clampExpansionMotionScale;
-    float historyWeightOpaqueLowMotion;
-    float historyWeightOpaqueHighMotion;
-    float historyWeightOpaqueMotionScale;
-    float historyWeightAlphaTestLowMotion;
-    float historyWeightAlphaTestHighMotion;
-    float historyWeightAlphaTestMotionScale;
+    float lowMotionOpaqueHistoryWeight;
+    float highMotionOpaqueHistoryWeight;
+    float opaqueHistoryMotionScale;
+    float lowMotionAlphaTestHistoryWeight;
+    float highMotionAlphaTestHistoryWeight;
+    float alphaTestHistoryMotionScale;
     float _taaPadding0;
     float _taaPadding1;
 };
@@ -164,11 +164,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             }
         }
 
-        float depthThreshold = lerp(depthThresholdOpaque, depthThresholdAlphaTest, alphaTestMask);
+        float depthThreshold = lerp(opaqueDepthThreshold, alphaTestDepthThreshold, alphaTestMask);
         historyRejected = abs(historyDepth - expectedHistoryDepth) > depthThreshold;
         if (!historyRejected)
         {
-            float sigmaScale = lerp(clampSigmaOpaque, clampSigmaAlphaTest, alphaTestMask);
+            float sigmaScale = lerp(opaqueClampSigma, alphaTestClampSigma, alphaTestMask);
             float3 varianceMin = mean - sigmaScale * sigma;
             float3 varianceMax = mean + sigmaScale * sigma;
 
@@ -178,8 +178,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 center = 0.5f * (clampMin + clampMax);
             float3 extent = 0.5f * (clampMax - clampMin);
             float clampExpansion = lerp(
-                clampExpansionLowMotion,
-                clampExpansionHighMotion,
+                lowMotionClampExpansion,
+                highMotionClampExpansion,
                 saturate(motionPixels * clampExpansionMotionScale));
             extent = max(extent * clampExpansion, float3(0.01f, 0.01f, 0.01f));
             clampMin = center - extent;
@@ -190,13 +190,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
 
             float opaqueHistoryWeight = lerp(
-                historyWeightOpaqueLowMotion,
-                historyWeightOpaqueHighMotion,
-                saturate(motionPixels * historyWeightOpaqueMotionScale));
+                lowMotionOpaqueHistoryWeight,
+                highMotionOpaqueHistoryWeight,
+                saturate(motionPixels * opaqueHistoryMotionScale));
             float alphaTestHistoryWeight = lerp(
-                historyWeightAlphaTestLowMotion,
-                historyWeightAlphaTestHighMotion,
-                saturate(motionPixels * historyWeightAlphaTestMotionScale));
+                lowMotionAlphaTestHistoryWeight,
+                highMotionAlphaTestHistoryWeight,
+                saturate(motionPixels * alphaTestHistoryMotionScale));
             float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask);
 
             resolvedColor = lerp(currentColor, clampedHistoryRgb, historyWeight);

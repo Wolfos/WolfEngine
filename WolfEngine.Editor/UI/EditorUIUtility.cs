@@ -6,7 +6,10 @@ namespace WolfEngine.Editor.UI;
 
 public class EditorUIUtility
 {
-	private const float DefaultLabelWidth = 140.0f;
+	private const float MinLabelWidth = 96.0f;
+	private const float MaxLabelWidth = 320.0f;
+	private const float LabelWidthFraction = 0.35f;
+	private const float MinimumControlWidth = 140.0f;
 
 	public static bool DrawLabeledField(string label, Func<bool> drawControl)
 	{
@@ -154,15 +157,32 @@ public class EditorUIUtility
 	{
 		ImGui.PushID(label);
 		var startX = ImGui.GetCursorPosX();
+		var labelWidth = CalculateLabelWidth(label);
 		ImGui.AlignTextToFramePadding();
 		ImGui.TextUnformatted(label);
 		ImGui.SameLine();
-		ImGui.SetCursorPosX(startX + DefaultLabelWidth);
-		ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+		ImGui.SetCursorPosX(startX + labelWidth);
+		ImGui.SetNextItemWidth(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X));
 	}
 
 	private static void EndLabeledField()
 	{
 		ImGui.PopID();
+	}
+
+	private static float CalculateLabelWidth(string label)
+	{
+		var availableWidth = ImGui.GetContentRegionAvail().X;
+		var itemSpacing = ImGui.GetStyle().ItemSpacing.X;
+		var desiredWidth = ImGui.CalcTextSize(label).X + itemSpacing;
+		if (availableWidth <= 0.0f)
+		{
+			return Math.Clamp(desiredWidth, MinLabelWidth, MaxLabelWidth);
+		}
+
+		// Scale the label column with panel width, but keep enough room for the editor control.
+		var responsiveWidth = Math.Clamp(availableWidth * LabelWidthFraction, MinLabelWidth, MaxLabelWidth);
+		var maxAllowedWidth = MathF.Max(MinLabelWidth, availableWidth - MinimumControlWidth);
+		return MathF.Min(MathF.Max(desiredWidth, responsiveWidth), maxAllowedWidth);
 	}
 }
