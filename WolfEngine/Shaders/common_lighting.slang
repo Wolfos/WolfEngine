@@ -1,14 +1,34 @@
 import "constants.slang";
 import "common_bindless.slang";
 
-static const uint MAX_LIGHTS = 300;
+static const uint MAX_DIRECTIONAL_LIGHTS = 4;
 static const float IBL_EXPOSURE = 0.75f;
+static const uint CLUSTER_TILE_SIZE = 64;
+static const uint CLUSTER_Z_SLICE_COUNT = 24;
 
-struct LightData
+struct DirectionalLightData
 {
-    float4 colorIntensity;   // rgb = color, a = intensity
-    float4 directionType;    // xyz = direction (normalized), w = type (0 = directional, 1 = point)
-    float4 positionRange;    // xyz = position, w = range (point only)
+    float4 colorIntensity;
+    float4 directionAndType;
+};
+
+struct PointLightData
+{
+    float4 colorIntensity;
+    float4 worldPositionRange;
+    float4 viewPositionRange;
+};
+
+struct ClusterHeader
+{
+    uint offset;
+    uint count;
+};
+
+struct ClusterAabb
+{
+    float4 minPoint;
+    float4 maxPoint;
 };
 
 struct SurfaceLightingInput
@@ -99,7 +119,6 @@ float ShadowCompare(Texture2D<float4> shadowMap, int2 texel, int2 shadowMapSize,
     return receiverDepth <= depth ? 1.0f : 0.0f;
 }
 
-// Emulates SampleCmp + bilinear filtering using 4 depth compares around the sample UV.
 float SampleShadowBilinearPCF(Texture2D<float4> shadowMap, float2 sampleUV, int2 shadowMapSize, float receiverDepth)
 {
     float2 texelPos = sampleUV * float2(shadowMapSize) - 0.5f;
@@ -143,9 +162,7 @@ float ComputeDirectionalShadow(
     }
 
     Texture2D<float4> shadowMap = GetTexture(shadowMapHandle);
-    // Sampler handle is currently kept for interface compatibility.
     float shadowSamplerCompat = (shadowSamplerHandle == 0u) ? 0.0f : 0.0f;
-    // Optimized 5x5 tent PCF with 9 taps (phase-aware; bilinear filtered).
     uint shadowWidth, shadowHeight;
     shadowMap.GetDimensions(shadowWidth, shadowHeight);
     int2 shadowMapSizeInt = int2(max(int(shadowWidth), 1), max(int(shadowHeight), 1));
@@ -171,7 +188,6 @@ float ComputeDirectionalShadow(
 
     float receiverDepth = shadowPos.z - depthBias + shadowSamplerCompat;
     float visibility = 0.0f;
-    float weightSum = 0.0f;
 
     float2 sampleUV00 = (baseTexel + float2(u0, v0) - 0.5f) * shadowTexelSize;
     float2 sampleUV10 = (baseTexel + float2(u1, v0) - 0.5f) * shadowTexelSize;
@@ -203,7 +219,7 @@ float ComputeDirectionalShadow(
     visibility += SampleShadowBilinearPCF(shadowMap, sampleUV12, shadowMapSizeInt, receiverDepth) * w12;
     visibility += SampleShadowBilinearPCF(shadowMap, sampleUV22, shadowMapSizeInt, receiverDepth) * w22;
 
-    weightSum = w00 + w10 + w20 + w01 + w11 + w21 + w02 + w12 + w22;
+    float weightSum = w00 + w10 + w20 + w01 + w11 + w21 + w02 + w12 + w22;
     return weightSum > 0.0f ? visibility / weightSum : 1.0f;
 }
 
@@ -222,33 +238,15 @@ float SampleDirectionalShadowCascade(
 {
     if (cascadeIndex == 0u)
     {
-        return ComputeDirectionalShadow(
-            worldPos,
-            shadowViewProjection0,
-            shadowMapHandle0,
-            shadowSamplerHandle,
-            shadowTexelSize,
-            shadowDepthBias);
+        return ComputeDirectionalShadow(worldPos, shadowViewProjection0, shadowMapHandle0, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
     }
 
     if (cascadeIndex == 1u)
     {
-        return ComputeDirectionalShadow(
-            worldPos,
-            shadowViewProjection1,
-            shadowMapHandle1,
-            shadowSamplerHandle,
-            shadowTexelSize,
-            shadowDepthBias);
+        return ComputeDirectionalShadow(worldPos, shadowViewProjection1, shadowMapHandle1, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
     }
 
-    return ComputeDirectionalShadow(
-        worldPos,
-        shadowViewProjection2,
-        shadowMapHandle2,
-        shadowSamplerHandle,
-        shadowTexelSize,
-        shadowDepthBias);
+    return ComputeDirectionalShadow(worldPos, shadowViewProjection2, shadowMapHandle2, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
 }
 
 float ComputeCascadedDirectionalShadow(
@@ -316,37 +314,43 @@ float ComputeCascadedDirectionalShadow(
             return lerp(primary, nextShadow, t);
         }
     }
-    else
-    {
-        float boundary = shadowSplits.y;
-        if (abs(receiverDistance - boundary) <= shadowCascadeBlendDistance)
-        {
-            float prevShadow = SampleDirectionalShadowCascade(
-                worldPos,
-                1u,
-                shadowViewProjection0,
-                shadowViewProjection1,
-                shadowViewProjection2,
-                shadowMapHandle0,
-                shadowMapHandle1,
-                shadowMapHandle2,
-                shadowSamplerHandle,
-                shadowTexelSize,
-                shadowDepthBias);
-            float blendRange = max(shadowCascadeBlendDistance * 2.0f, 1e-6f);
-            float t = saturate((receiverDistance - (boundary - shadowCascadeBlendDistance)) / blendRange);
-            return lerp(prevShadow, primary, t);
-        }
-    }
 
     return primary;
 }
 
-float3 EvaluateDirectLighting(
+float3 AccumulateLight(
     SurfaceLightingInput surface,
     float3 viewDir,
-    uint lightCount,
-    LightData lights[MAX_LIGHTS],
+    float3 lightColor,
+    float3 lightDirection,
+    float attenuation,
+    float shadowFactor)
+{
+    float3 normal = normalize(surface.normal);
+    float3 H = normalize(lightDirection + viewDir);
+    float NdotL = max(dot(normal, lightDirection), 0.0f);
+    float NdotV = max(dot(normal, viewDir), 0.0f);
+    float NdotH = max(dot(normal, H), 0.0f);
+    float VdotH = max(dot(viewDir, H), 0.0f);
+
+    float alpha = max(surface.roughness * surface.roughness, 0.04f);
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), surface.albedo, surface.metallic);
+    float3 F = FresnelSchlick(VdotH, F0);
+    float D = DistributionGGX(NdotH, alpha);
+    float G = GeometrySmith(NdotV, NdotL, alpha);
+
+    float3 specular = (D * G * F) / max(4.0f * NdotV * NdotL, 1e-5f);
+    float3 kS = F;
+    float3 kD = (1.0f - kS) * (1.0f - surface.metallic);
+    float3 diffuse = kD * surface.albedo / PI;
+    return (diffuse + specular) * lightColor * attenuation * NdotL * shadowFactor;
+}
+
+float3 EvaluateDirectionalLights(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    uint directionalLightCount,
+    DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS],
     float4x4 shadowViewProjection0,
     float4x4 shadowViewProjection1,
     float4x4 shadowViewProjection2,
@@ -363,55 +367,15 @@ float3 EvaluateDirectLighting(
     uint shadowsEnabled,
     float shadowMaxDistance)
 {
-    float3 color = float3(0.0f, 0.0f, 0.0f);
-    float3 normal = normalize(surface.normal);
-    float3 albedo = surface.albedo;
-    float metallic = surface.metallic;
-    float roughness = surface.roughness;
-
+    float3 color = 0.0f.xxx;
     [unroll]
-    for (uint i = 0; i < lightCount && i < MAX_LIGHTS; ++i)
+    for (uint i = 0; i < directionalLightCount && i < MAX_DIRECTIONAL_LIGHTS; ++i)
     {
-        LightData light = lights[i];
-        float intensity = light.colorIntensity.a;
-        float3 lightColor = light.colorIntensity.rgb * intensity;
-
-        float type = light.directionType.w;
-        float3 L = -light.directionType.xyz;
-        float attenuation = 1.0f;
-
-        if (type >= 0.5f)
-        {
-            float3 lightPos = light.positionRange.xyz;
-            float range = max(light.positionRange.w, 0.001f);
-            float3 toLight = lightPos - surface.worldPos;
-            float distSq = dot(toLight, toLight);
-            float dist = sqrt(distSq);
-            L = dist > 0.0f ? toLight / dist : float3(0, 1, 0);
-            float falloff = saturate(1.0f - dist / range);
-            attenuation = falloff * falloff;
-        }
-
-        float3 H = normalize(L + viewDir);
-        float NdotL = max(dot(normal, L), 0.0f);
-        float NdotV = max(dot(normal, viewDir), 0.0f);
-        float NdotH = max(dot(normal, H), 0.0f);
-        float VdotH = max(dot(viewDir, H), 0.0f);
-
-        float alpha = max(roughness * roughness, 0.04f);
-        float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-        float3 F = FresnelSchlick(VdotH, F0);
-        float D = DistributionGGX(NdotH, alpha);
-        float G = GeometrySmith(NdotV, NdotL, alpha);
-
-        float3 specular = (D * G * F) / max(4.0f * NdotV * NdotL, 1e-5f);
-        float3 kS = F;
-        float3 kD = (1.0f - kS) * (1.0f - metallic);
-        float3 diffuse = kD * albedo / PI;
-
-        float3 radiance = lightColor * attenuation;
+        DirectionalLightData light = directionalLights[i];
+        float3 L = -normalize(light.directionAndType.xyz);
+        float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
         float shadow = 1.0f;
-        if (shadowsEnabled != 0 && type < 0.5f && i == shadowLightIndex)
+        if (shadowsEnabled != 0u && i == shadowLightIndex)
         {
             float maxShadowDistanceSq = shadowMaxDistance * shadowMaxDistance;
             float receiverDistanceSq = dot(surface.worldPos, surface.worldPos);
@@ -436,10 +400,45 @@ float3 EvaluateDirectLighting(
             }
         }
 
-        color += (diffuse + specular) * radiance * NdotL * shadow;
+        color += AccumulateLight(surface, viewDir, lightColor, L, 1.0f, shadow);
     }
 
     return color;
+}
+
+float3 EvaluatePointLight(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    PointLightData light)
+{
+    float3 toLight = light.worldPositionRange.xyz - surface.worldPos;
+    float distSq = dot(toLight, toLight);
+    float dist = sqrt(distSq);
+    float range = max(light.worldPositionRange.w, 0.001f);
+    float3 L = dist > 0.0f ? toLight / dist : float3(0.0f, 1.0f, 0.0f);
+    float falloff = saturate(1.0f - dist / range);
+    float attenuation = falloff * falloff;
+    float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
+    return AccumulateLight(surface, viewDir, lightColor, L, attenuation, 1.0f);
+}
+
+uint ComputeClusterZSlice(float viewDepth, float nearPlane, float farPlane)
+{
+    float safeDepth = max(viewDepth, nearPlane);
+    float logDepth = log2(max(safeDepth / max(nearPlane, 1e-5f), 1.0f));
+    float logRange = max(log2(max(farPlane / max(nearPlane, 1e-5f), 1.0f)), 1e-5f);
+    float slice = floor((logDepth / logRange) * float(CLUSTER_Z_SLICE_COUNT));
+    return min((uint)max(slice, 0.0f), CLUSTER_Z_SLICE_COUNT - 1u);
+}
+
+uint ComputeClusterIndex(uint2 pixel, uint2 framebufferSize, float viewDepth, float nearPlane, float farPlane)
+{
+    uint clusterCountX = max((framebufferSize.x + CLUSTER_TILE_SIZE - 1u) / CLUSTER_TILE_SIZE, 1u);
+    uint clusterCountY = max((framebufferSize.y + CLUSTER_TILE_SIZE - 1u) / CLUSTER_TILE_SIZE, 1u);
+    uint clusterX = min(pixel.x / CLUSTER_TILE_SIZE, clusterCountX - 1u);
+    uint clusterY = min(pixel.y / CLUSTER_TILE_SIZE, clusterCountY - 1u);
+    uint clusterZ = ComputeClusterZSlice(viewDepth, nearPlane, farPlane);
+    return clusterX + (clusterY * clusterCountX) + (clusterZ * clusterCountX * clusterCountY);
 }
 
 float3 EvaluateImageBasedLighting(
@@ -474,63 +473,5 @@ float3 EvaluateImageBasedLighting(
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);
     color += specular * 0.5f * occlusion;
 
-    return color;
-}
-
-float3 EvaluateSurfaceLighting(
-    SurfaceLightingInput surface,
-    float3 viewDir,
-    uint lightCount,
-    LightData lights[MAX_LIGHTS],
-    float4x4 shadowViewProjection0,
-    float4x4 shadowViewProjection1,
-    float4x4 shadowViewProjection2,
-    uint shadowMapHandle0,
-    uint shadowMapHandle1,
-    uint shadowMapHandle2,
-    uint shadowSamplerHandle,
-    float3 shadowSplits,
-    float shadowCascadeBlendDistance,
-    uint shadowLightIndex,
-    float2 shadowTexelSize,
-    float shadowDepthBias,
-    float shadowStrength,
-    uint shadowsEnabled,
-    float shadowMaxDistance,
-    uint irradianceHandle,
-    uint prefilteredHandle,
-    uint brdfLutHandle,
-    uint samplerHandle,
-    float iblExposure)
-{
-    float3 color = EvaluateDirectLighting(
-        surface,
-        viewDir,
-        lightCount,
-        lights,
-        shadowViewProjection0,
-        shadowViewProjection1,
-        shadowViewProjection2,
-        shadowMapHandle0,
-        shadowMapHandle1,
-        shadowMapHandle2,
-        shadowSamplerHandle,
-        shadowSplits,
-        shadowCascadeBlendDistance,
-        shadowLightIndex,
-        shadowTexelSize,
-        shadowDepthBias,
-        shadowStrength,
-        shadowsEnabled,
-        shadowMaxDistance);
-    color += EvaluateImageBasedLighting(
-        surface,
-        viewDir,
-        irradianceHandle,
-        prefilteredHandle,
-        brdfLutHandle,
-        samplerHandle,
-        iblExposure);
-    color += surface.emissive;
     return color;
 }

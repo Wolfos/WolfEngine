@@ -56,6 +56,8 @@ public struct TransparentForwardPassConfig
 	public required bool ShadowsEnabled { get; init; }
 	public required float ShadowTexelSizeX { get; init; }
 	public required float ShadowTexelSizeY { get; init; }
+	public required float NearPlane { get; init; }
+	public required float FarPlane { get; init; }
 
 	public required IGfxBuffer? InstanceBuffer { get; init; }
 	public required IGfxBuffer? MaterialBuffer { get; init; }
@@ -63,6 +65,9 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? TransparentEnvironmentBuffer { get; init; }
 	public required IGfxBuffer? TransparentLightingBuffer { get; init; }
+	public required IGfxBuffer? PointLightBuffer { get; init; }
+	public required IGfxBuffer? ClusterHeaderBuffer { get; init; }
+	public required IGfxBuffer? ClusterLightIndexBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
 	public required IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }

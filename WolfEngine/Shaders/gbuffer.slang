@@ -22,6 +22,10 @@ cbuffer CameraParams : register(b2)
     float2 currentJitterNdc;
     uint frameSizeX;
     uint frameSizeY;
+    row_major float4x4 viewMatrix;
+    float nearPlane;
+    float farPlane;
+    float2 _cameraPadding;
 };
 
 struct VSInput

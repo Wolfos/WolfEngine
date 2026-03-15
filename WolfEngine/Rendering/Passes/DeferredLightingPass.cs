@@ -19,7 +19,6 @@ public sealed class DeferredLightingPass
 	private ShaderPropertyWriter? _lightingWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
-	private const int MaxLights = 300;
 
 	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -31,10 +30,14 @@ public sealed class DeferredLightingPass
 		RenderGraphContext context,
 		RenderGraphFrameResources resources,
 		IGfxDevice device,
-		ShadowFrameData shadowData)
+		GpuDrawResources gpuDrawResources,
+		ShadowFrameData shadowData,
+		SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
+		ArgumentNullException.ThrowIfNull(gpuDrawResources);
+		ArgumentNullException.ThrowIfNull(sceneData);
 
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
@@ -98,6 +101,9 @@ public sealed class DeferredLightingPass
 			LightingOutput = _bindlessRegistry.RegisterRwTexture(lighting),
 			LinearSampler = _linearSampler,
 			ShadowSampler = _shadowSampler,
+			PointLightBuffer = gpuDrawResources.ClusterPointLightBuffer ?? throw new InvalidOperationException("Cluster point-light buffer missing."),
+			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer ?? throw new InvalidOperationException("Cluster header buffer missing."),
+			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer ?? throw new InvalidOperationException("Cluster light-index buffer missing."),
 			ShadowViewProjection0 = shadowData.CascadeViewProjection0,
 			ShadowViewProjection1 = shadowData.CascadeViewProjection1,
 			ShadowViewProjection2 = shadowData.CascadeViewProjection2,
@@ -112,6 +118,11 @@ public sealed class DeferredLightingPass
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
+			ClusterCountX = gpuDrawResources.ClusteredLightingLayout.Grid.X,
+			ClusterCountY = gpuDrawResources.ClusteredLightingLayout.Grid.Y,
+			ClusterCountZ = gpuDrawResources.ClusteredLightingLayout.Grid.Z,
+			NearPlane = sceneData.NearPlane,
+			FarPlane = sceneData.FarPlane,
 			DispatchSize = resources.SceneFramebufferSize
 		};
 	}
@@ -152,17 +163,25 @@ public sealed class DeferredLightingPass
 		cameraWriter.SetMatrix4x4("camera.invProjection", sceneData.InverseProjection);
 		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
 		cameraWriter.SetVector3("camera.cameraOrigin", sceneData.CameraOrigin);
+		cameraWriter.SetMatrix4x4("camera.viewMatrix", sceneData.ViewMatrix);
+		cameraWriter.SetFloat("camera.nearPlane", sceneData.NearPlane);
+		cameraWriter.SetFloat("camera.farPlane", sceneData.FarPlane);
+		cameraWriter.SetUInt("camera.frameSizeX", (uint)Math.Max(sceneData.SceneFramebufferSize.X, 1));
+		cameraWriter.SetUInt("camera.frameSizeY", (uint)Math.Max(sceneData.SceneFramebufferSize.Y, 1));
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
 		var lightingWriter = _lightingWriter
 			?? throw new InvalidOperationException("Deferred lighting lighting reflection writer was not initialized.");
 		lightingWriter.Clear();
-		var lightCountInt = Math.Min(sceneData.Lights.Count, MaxLights);
-		lightingWriter.SetUInt("lightCount", (uint)lightCountInt);
-		for (var i = 0; i < lightCountInt; i++)
+		var directionalLightCount = 0;
+		for (var i = 0; i < sceneData.Lights.Count && directionalLightCount < ClusteredLightingShared.MaxDirectionalLights; i++)
 		{
 			var packet = sceneData.Lights[i];
 			var light = packet.Light;
+			if (light.Type != LightType.Directional)
+			{
+				continue;
+			}
 
 			var forward = Vector3.TransformNormal(Vector3.UnitZ, packet.Transform);
 			if (forward == Vector3.Zero)
@@ -174,12 +193,12 @@ public sealed class DeferredLightingPass
 			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
 
 			lightingWriter.SetColorRGBA(
-				$"lights[{i}].colorIntensity",
+				$"directionalLights[{directionalLightCount}].colorIntensity",
 				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
-			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
-			var range = light.Type == LightType.Point ? MathF.Max(light.Range, 0.001f) : 0.0f;
-			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, range));
+			lightingWriter.SetVector4($"directionalLights[{directionalLightCount}].directionAndType", new Vector4(forward, 0.0f));
+			directionalLightCount++;
 		}
+		lightingWriter.SetUInt("directionalLightCount", (uint)directionalLightCount);
 
 		lightingWriter.SetMatrix4x4("shadowViewProjection0", config.ShadowViewProjection0);
 		lightingWriter.SetMatrix4x4("shadowViewProjection1", config.ShadowViewProjection1);
@@ -204,7 +223,14 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("aoEnabled", config.AoEnabled ? 1u : 0u);
 		lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
+		lightingWriter.SetFloat("nearPlane", config.NearPlane);
+		lightingWriter.SetFloat("farPlane", config.FarPlane);
+		lightingWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.DispatchSize.X, 1));
+		lightingWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.DispatchSize.Y, 1));
 		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
+		commandList.SetComputeBuffer(3, config.PointLightBuffer);
+		commandList.SetComputeBuffer(4, config.ClusterHeaderBuffer);
+		commandList.SetComputeBuffer(5, config.ClusterLightIndexBuffer);
 
 		// Dispatch the compute shader
 		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);

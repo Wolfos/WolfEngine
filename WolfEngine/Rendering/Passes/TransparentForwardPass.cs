@@ -18,7 +18,6 @@ public sealed class TransparentForwardPass
 	private ShaderPropertyWriter? _environmentWriter;
 	private ShaderPropertyWriter? _lightingWriter;
 	private uint _cameraRegisterIndex = 2;
-	private const int MaxLights = 300;
 
 	public TransparentForwardPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -31,11 +30,13 @@ public sealed class TransparentForwardPass
 		RenderGraphFrameResources resources,
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
-		ShadowFrameData shadowData)
+		ShadowFrameData shadowData,
+		SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
+		ArgumentNullException.ThrowIfNull(sceneData);
 		EnsureReflectionWriters(device.BackendKind);
 
 		_bindlessRegistry.EnsureInitialized(device);
@@ -90,12 +91,17 @@ public sealed class TransparentForwardPass
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
+			NearPlane = sceneData.NearPlane,
+			FarPlane = sceneData.FarPlane,
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
 			CameraBuffer = gpuDrawResources.CameraBuffer,
 			TransparentEnvironmentBuffer = gpuDrawResources.TransparentEnvironmentBuffer,
 			TransparentLightingBuffer = gpuDrawResources.TransparentLightingBuffer,
+			PointLightBuffer = gpuDrawResources.ClusterPointLightBuffer,
+			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer,
+			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
 			VisibleDrawIdsPerBucketBuffer = gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
@@ -142,12 +148,15 @@ public sealed class TransparentForwardPass
 		var lightingWriter = _lightingWriter
 			?? throw new InvalidOperationException("Transparent lighting writer was not initialized.");
 		lightingWriter.Clear();
-		var lightCountInt = Math.Min(sceneData.Lights.Count, MaxLights);
-		lightingWriter.SetUInt("lightCount", (uint)lightCountInt);
-		for (var i = 0; i < lightCountInt; i++)
+		var directionalLightCount = 0;
+		for (var i = 0; i < sceneData.Lights.Count && directionalLightCount < ClusteredLightingShared.MaxDirectionalLights; i++)
 		{
 			var packet = sceneData.Lights[i];
 			var light = packet.Light;
+			if (light.Type != LightType.Directional)
+			{
+				continue;
+			}
 
 			var forward = Vector3.TransformNormal(Vector3.UnitZ, packet.Transform);
 			if (forward == Vector3.Zero)
@@ -155,16 +164,15 @@ public sealed class TransparentForwardPass
 				forward = new Vector3(0, -1, 0);
 			}
 
-			var position = packet.Transform.Translation;
 			var intensityScale = DirectionalLightUtility.GetIntensityScale(light, forward);
 
 			lightingWriter.SetColorRGBA(
-				$"lights[{i}].colorIntensity",
+				$"directionalLights[{directionalLightCount}].colorIntensity",
 				new ColorRGBA(light.Color.R, light.Color.G, light.Color.B, light.Intensity * intensityScale));
-			lightingWriter.SetVector4($"lights[{i}].directionType", new Vector4(forward, (float)light.Type));
-			var range = light.Type == LightType.Point ? MathF.Max(light.Range, 0.001f) : 0.0f;
-			lightingWriter.SetVector4($"lights[{i}].positionRange", new Vector4(position, range));
+			lightingWriter.SetVector4($"directionalLights[{directionalLightCount}].directionAndType", new Vector4(forward, 0.0f));
+			directionalLightCount++;
 		}
+		lightingWriter.SetUInt("directionalLightCount", (uint)directionalLightCount);
 		lightingWriter.SetMatrix4x4("shadowViewProjection0", config.ShadowViewProjection0);
 		lightingWriter.SetMatrix4x4("shadowViewProjection1", config.ShadowViewProjection1);
 		lightingWriter.SetMatrix4x4("shadowViewProjection2", config.ShadowViewProjection2);
@@ -223,6 +231,18 @@ public sealed class TransparentForwardPass
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+				}
+				if (config.PointLightBuffer is not null)
+				{
+					commandList.BindConstantBuffer(14, config.PointLightBuffer);
+				}
+				if (config.ClusterHeaderBuffer is not null)
+				{
+					commandList.BindConstantBuffer(15, config.ClusterHeaderBuffer);
+				}
+				if (config.ClusterLightIndexBuffer is not null)
+				{
+					commandList.BindConstantBuffer(16, config.ClusterLightIndexBuffer);
 				}
 
 				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);

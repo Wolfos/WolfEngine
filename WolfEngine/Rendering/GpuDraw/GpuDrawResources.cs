@@ -2,6 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 
@@ -34,6 +35,12 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _shadowCameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentEnvironmentBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentLightingBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterPointLightBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterAabbBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterHeaderBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterLightIndexBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterWriteCursorBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _clusterOverflowBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowDrawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -53,6 +60,7 @@ public sealed class GpuDrawResources : IDisposable
 	private int _shadowCameraBufferSizeInBytes;
 	private int _transparentEnvironmentBufferSizeInBytes;
 	private int _transparentLightingBufferSizeInBytes;
+	private ClusteredLightingFrameLayout _clusteredLightingLayout;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
 	public GpuDrawResources(IShaderCompiler shaderCompiler)
@@ -98,6 +106,18 @@ public sealed class GpuDrawResources : IDisposable
 
 	public IGfxBuffer? TransparentLightingBuffer => _transparentLightingBuffers[_activeFrameSlot];
 
+	public IGfxBuffer? ClusterPointLightBuffer => _clusterPointLightBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ClusterAabbBuffer => _clusterAabbBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ClusterHeaderBuffer => _clusterHeaderBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ClusterLightIndexBuffer => _clusterLightIndexBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ClusterWriteCursorBuffer => _clusterWriteCursorBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ClusterOverflowBuffer => _clusterOverflowBuffers[_activeFrameSlot];
+
 	public IGfxBuffer? DrawCountPerBucketBuffer => _drawCountPerBucketBuffers[_activeFrameSlot];
 	
 	public IGfxBuffer? ShadowDrawCountPerBucketBuffer => _shadowDrawCountPerBucketBuffers[_activeFrameSlot];
@@ -108,6 +128,8 @@ public sealed class GpuDrawResources : IDisposable
 
 	public ShaderConstantBufferLayout GBufferCameraLayout => _gBufferCameraLayout
 		?? throw new InvalidOperationException("GpuDraw camera layout was not initialized.");
+
+	public ClusteredLightingFrameLayout ClusteredLightingLayout => _clusteredLightingLayout;
 
 	public void EnsureCreated(IGfxDevice device)
 	{
@@ -241,7 +263,51 @@ public sealed class GpuDrawResources : IDisposable
 					(uint)MaxDrawCount,
 					supportsIndexedExecution: true));
 			}
+		}
 	}
+
+	public void EnsureClusteredLightingCapacity(IGfxDevice device, Int2 sceneFramebufferSize)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var requiredGrid = ClusteredLightingShared.ComputeGrid(sceneFramebufferSize);
+		var requiredClusterCount = ClusteredLightingShared.ComputeClusterCount(sceneFramebufferSize);
+		var requiredLightIndexCapacity = ClusteredLightingShared.ComputeIndexCapacity(sceneFramebufferSize);
+		_clusteredLightingLayout = new ClusteredLightingFrameLayout(requiredGrid, requiredClusterCount, requiredLightIndexCapacity);
+
+		for (var i = 0; i < MaxFramesInFlight; i++)
+		{
+			_clusterPointLightBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterPointLightBuffers[i],
+				ClusteredLightingShared.MaxPointLights,
+				Marshal.SizeOf<PointLightGpuData>());
+			_clusterAabbBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterAabbBuffers[i],
+				requiredClusterCount,
+				Marshal.SizeOf<ClusterAabbGpuData>());
+			_clusterHeaderBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterHeaderBuffers[i],
+				requiredClusterCount,
+				Marshal.SizeOf<ClusterHeaderGpuData>());
+			_clusterLightIndexBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterLightIndexBuffers[i],
+				requiredLightIndexCapacity,
+				sizeof(uint));
+			_clusterWriteCursorBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterWriteCursorBuffers[i],
+				requiredClusterCount,
+				sizeof(uint));
+			_clusterOverflowBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_clusterOverflowBuffers[i],
+				2,
+				sizeof(uint));
+		}
 	}
 
 	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int bucketIndex)
@@ -319,6 +385,12 @@ public sealed class GpuDrawResources : IDisposable
 			(_shadowCameraBuffers[i] as IDisposable)?.Dispose();
 			(_transparentEnvironmentBuffers[i] as IDisposable)?.Dispose();
 			(_transparentLightingBuffers[i] as IDisposable)?.Dispose();
+			(_clusterPointLightBuffers[i] as IDisposable)?.Dispose();
+			(_clusterAabbBuffers[i] as IDisposable)?.Dispose();
+			(_clusterHeaderBuffers[i] as IDisposable)?.Dispose();
+			(_clusterLightIndexBuffers[i] as IDisposable)?.Dispose();
+			(_clusterWriteCursorBuffers[i] as IDisposable)?.Dispose();
+			(_clusterOverflowBuffers[i] as IDisposable)?.Dispose();
 			(_drawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_shadowDrawCountPerBucketBuffers[i] as IDisposable)?.Dispose();
 			(_drawExecutionRangePerBucketBuffers[i] as IDisposable)?.Dispose();
@@ -332,6 +404,12 @@ public sealed class GpuDrawResources : IDisposable
 			_shadowCameraBuffers[i] = null;
 			_transparentEnvironmentBuffers[i] = null;
 			_transparentLightingBuffers[i] = null;
+			_clusterPointLightBuffers[i] = null;
+			_clusterAabbBuffers[i] = null;
+			_clusterHeaderBuffers[i] = null;
+			_clusterLightIndexBuffers[i] = null;
+			_clusterWriteCursorBuffers[i] = null;
+			_clusterOverflowBuffers[i] = null;
 			_drawCountPerBucketBuffers[i] = null;
 			_shadowDrawCountPerBucketBuffers[i] = null;
 			_drawExecutionRangePerBucketBuffers[i] = null;
@@ -422,6 +500,25 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		return existingBuffer;
+	}
+
+	private static IGfxBuffer EnsureStructuredBufferCapacity(
+		IGfxDevice device,
+		IGfxBuffer? existingBuffer,
+		int elementCount,
+		int elementSizeInBytes)
+	{
+		var sizeInBytes = checked((ulong)Math.Max(elementCount, 1) * (ulong)Math.Max(elementSizeInBytes, 1));
+		if (existingBuffer is not null && existingBuffer.Descriptor.SizeInBytes >= sizeInBytes)
+		{
+			return existingBuffer;
+		}
+
+		(existingBuffer as IDisposable)?.Dispose();
+		return device.CreateBuffer(new BufferDescriptor(
+			sizeInBytes,
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 	}
 
 }

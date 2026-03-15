@@ -72,6 +72,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly VBAOPass _ambientOcclusionPass;
 	private readonly AmbientOcclusionBlurPass _ambientOcclusionBlurPass;
 	private readonly AmbientOcclusionUpsamplePass _ambientOcclusionUpsamplePass;
+	private readonly ClusteredLightingPass _clusteredLightingPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
@@ -110,6 +111,10 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurHorizontalExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurVerticalExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
+	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
+	private readonly Action<RenderGraphContext> _clusteredLightingCountExecute;
+	private readonly Action<RenderGraphContext> _clusteredLightingPrefixExecute;
+	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
@@ -135,6 +140,7 @@ public sealed class RenderGraphFrameBuilder
 			VBAOPass ambientOcclusionPass,
 			AmbientOcclusionBlurPass ambientOcclusionBlurPass,
 			AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
+			ClusteredLightingPass clusteredLightingPass,
 			DeferredLightingPass deferredLightingPass,
 			TemporalAntiAliasingPass temporalAntiAliasingPass,
 			TemporalHistoryStorePass temporalHistoryStorePass,
@@ -150,6 +156,7 @@ public sealed class RenderGraphFrameBuilder
 		_ambientOcclusionPass = ambientOcclusionPass;
 		_ambientOcclusionBlurPass = ambientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = ambientOcclusionUpsamplePass;
+		_clusteredLightingPass = clusteredLightingPass;
 		_deferredLightingPass = deferredLightingPass;
 		_temporalAntiAliasingPass = temporalAntiAliasingPass;
 		_temporalHistoryStorePass = temporalHistoryStorePass;
@@ -165,6 +172,10 @@ public sealed class RenderGraphFrameBuilder
 		_ambientOcclusionBlurHorizontalExecute = ExecuteAmbientOcclusionBlurHorizontal;
 		_ambientOcclusionBlurVerticalExecute = ExecuteAmbientOcclusionBlurVertical;
 		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
+		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
+		_clusteredLightingCountExecute = ExecuteClusteredLightingCount;
+		_clusteredLightingPrefixExecute = ExecuteClusteredLightingPrefix;
+		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
@@ -544,6 +555,15 @@ public sealed class RenderGraphFrameBuilder
 					.WriteTexture(_frameResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
 					.SetExecute(_skyboxBrdfExecute);
 			}
+
+			graph.AddPass("Clustered Lighting Build", PassKind.Compute)
+				.SetExecute(_clusteredLightingBuildExecute);
+			graph.AddPass("Clustered Lighting Count", PassKind.Compute)
+				.SetExecute(_clusteredLightingCountExecute);
+			graph.AddPass("Clustered Lighting Prefix", PassKind.Compute)
+				.SetExecute(_clusteredLightingPrefixExecute);
+			graph.AddPass("Clustered Lighting Write", PassKind.Compute)
+				.SetExecute(_clusteredLightingWriteExecute);
 
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
@@ -938,8 +958,46 @@ public sealed class RenderGraphFrameBuilder
 			context,
 			_frameResources,
 			_renderer.GetGfxDevice(),
-			_shadowMapPass.GetCurrentFrameData());
+			_gpuDrawResources,
+			_shadowMapPass.GetCurrentFrameData(),
+			context.SceneData!);
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
+	}
+
+	private void ExecuteClusteredLightingBuild(RenderGraphContext context)
+	{
+		var config = _clusteredLightingPass.BuildConfig(
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
+			_frameResources.SceneFramebufferSize);
+		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.BuildClusters);
+	}
+
+	private void ExecuteClusteredLightingCount(RenderGraphContext context)
+	{
+		var config = _clusteredLightingPass.BuildConfig(
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
+			_frameResources.SceneFramebufferSize);
+		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.CountLights);
+	}
+
+	private void ExecuteClusteredLightingPrefix(RenderGraphContext context)
+	{
+		var config = _clusteredLightingPass.BuildConfig(
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
+			_frameResources.SceneFramebufferSize);
+		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.PrefixOffsets);
+	}
+
+	private void ExecuteClusteredLightingWrite(RenderGraphContext context)
+	{
+		var config = _clusteredLightingPass.BuildConfig(
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
+			_frameResources.SceneFramebufferSize);
+		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.WriteLightIndices);
 	}
 
 	private void ExecuteTemporalResolve(RenderGraphContext context)
@@ -1007,7 +1065,8 @@ public sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
-			_shadowMapPass.GetCurrentFrameData());
+			_shadowMapPass.GetCurrentFrameData(),
+			context.SceneData!);
 		_transparentForwardPass.Record(context, in config, context.SceneData!);
 	}
 

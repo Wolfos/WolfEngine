@@ -29,20 +29,26 @@ cbuffer CameraParams : register(b1)
 
 cbuffer LightingParams : register(b2)
 {
-    uint lightCount;
-    uint3 _lightingPadding;
-    LightData lights[MAX_LIGHTS];
+    uint directionalLightCount;
+    uint shadowLightIndex;
+    uint shadowsEnabled;
+    uint aoEnabled;
+    DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
     row_major float4x4 shadowViewProjection0;
     row_major float4x4 shadowViewProjection1;
     row_major float4x4 shadowViewProjection2;
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
-    uint shadowLightIndex;
-    uint shadowsEnabled;
-    uint aoEnabled;
     float shadowMaxDistance;
-    uint _shadowPadding0;
+    float nearPlane;
+    float farPlane;
+    uint framebufferSizeX;
+    uint framebufferSizeY;
 };
+
+RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
+RWStructuredBuffer<ClusterHeader> g_ClusterHeaders : register(u4);
+RWStructuredBuffer<uint> g_ClusterLightIndices : register(u5);
 
 float3 ReconstructWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
 {
@@ -89,6 +95,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float aoFactor = ambientOcclusionTexture.SampleLevel(linearSampler, uv, 0.0f).r;
         occlusion = saturate(occlusion * aoFactor);
     }
+
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
     if (depth >= 0.9999f)
     {
@@ -99,6 +106,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float3 worldPos = ReconstructWorldPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invViewProjection);
+    float3 viewPos = ReconstructViewPosition(dispatchThreadId.xy, uint2(width, height), depth, camera.invProjection);
     float3 viewDir = normalize(-worldPos);
 
     SurfaceLightingInput surface;
@@ -110,11 +118,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     surface.occlusion = occlusion;
     surface.emissive = emissive;
 
-    float3 color = EvaluateSurfaceLighting(
+    float3 color = EvaluateDirectionalLights(
         surface,
         viewDir,
-        lightCount,
-        lights,
+        directionalLightCount,
+        directionalLights,
         shadowViewProjection0,
         shadowViewProjection1,
         shadowViewProjection2,
@@ -129,12 +137,25 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowTexelSizeBiasStrength.z,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
-        shadowMaxDistance,
+        shadowMaxDistance);
+
+    uint clusterIndex = ComputeClusterIndex(dispatchThreadId.xy, uint2(framebufferSizeX, framebufferSizeY), max(viewPos.z, nearPlane), nearPlane, farPlane);
+    ClusterHeader header = g_ClusterHeaders[clusterIndex];
+    for (uint i = 0; i < header.count; ++i)
+    {
+        uint pointLightIndex = g_ClusterLightIndices[header.offset + i];
+        color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
+    }
+
+    color += EvaluateImageBasedLighting(
+        surface,
+        viewDir,
         irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,
         samplerHandle,
         IBL_EXPOSURE);
+    color += surface.emissive;
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

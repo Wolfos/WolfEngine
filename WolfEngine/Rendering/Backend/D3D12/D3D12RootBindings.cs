@@ -18,6 +18,9 @@ internal static class D3D12RootBindings
 		internal const uint SrvT11 = 9;
 		internal const uint SrvT12 = 10;
 		internal const uint SrvT13 = 11;
+		internal const uint SrvT14 = 12;
+		internal const uint SrvT15 = 13;
+		internal const uint SrvT16 = 14;
 	}
 
 	internal static class Compute
@@ -74,6 +77,15 @@ internal static class D3D12RootBindings
 				return true;
 			case 13:
 				rootIndex = Graphics.SrvT13;
+				return true;
+			case 14:
+				rootIndex = Graphics.SrvT14;
+				return true;
+			case 15:
+				rootIndex = Graphics.SrvT15;
+				return true;
+			case 16:
+				rootIndex = Graphics.SrvT16;
 				return true;
 			default:
 				rootIndex = 0;

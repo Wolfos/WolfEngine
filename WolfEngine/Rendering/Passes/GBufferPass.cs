@@ -56,6 +56,9 @@ public static class GBufferPass
 		cameraWriter.SetVector2("currentJitterNdc", sceneData.JitterNdc);
 		cameraWriter.SetUInt("frameSizeX", (uint)Math.Max(config.FramebufferWidth, 1));
 		cameraWriter.SetUInt("frameSizeY", (uint)Math.Max(config.FramebufferHeight, 1));
+		cameraWriter.SetMatrix4x4("viewMatrix", sceneData.ViewMatrix);
+		cameraWriter.SetFloat("nearPlane", sceneData.NearPlane);
+		cameraWriter.SetFloat("farPlane", sceneData.FarPlane);
 		UploadCameraConstants(config, commandList, cameraWriter);
 
 		if (config.InstanceBuffer is null ||

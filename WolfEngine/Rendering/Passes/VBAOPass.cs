@@ -103,6 +103,10 @@ public sealed class VBAOPass
 		cameraWriter.SetMatrix4x4("camera.invViewProjection", sceneData.InverseViewProjection);
 		cameraWriter.SetVector3("camera.cameraOrigin", sceneData.CameraOrigin);
 		cameraWriter.SetMatrix4x4("camera.viewMatrix", sceneData.ViewMatrix);
+		cameraWriter.SetFloat("camera.nearPlane", sceneData.NearPlane);
+		cameraWriter.SetFloat("camera.farPlane", sceneData.FarPlane);
+		cameraWriter.SetUInt("camera.frameSizeX", (uint)Math.Max(sceneData.SceneFramebufferSize.X, 1));
+		cameraWriter.SetUInt("camera.frameSizeY", (uint)Math.Max(sceneData.SceneFramebufferSize.Y, 1));
 		commandList.SetComputeConstants(cameraWriter.RegisterIndex, cameraWriter.AsBytes());
 
 		var settingsWriter = _settingsWriter

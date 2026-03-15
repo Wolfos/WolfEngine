@@ -40,6 +40,9 @@
         <None Update="Shaders\deferred_lighting.compute.slang">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\clustered_lighting.compute.slang">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Assets\Monkey.obj">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>

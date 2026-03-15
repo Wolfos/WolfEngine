@@ -10,6 +10,9 @@ StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+StructuredBuffer<PointLightData> g_PointLights : register(t14);
+StructuredBuffer<ClusterHeader> g_ClusterHeaders : register(t15);
+StructuredBuffer<uint> g_ClusterLightIndices : register(t16);
 
 cbuffer TransparentEnvironmentParams : register(b0)
 {
@@ -31,23 +34,36 @@ cbuffer CameraParams : register(b2)
 {
     row_major float4x4 viewProjection;
     float3 cameraPosition;
-    float padding;
+    float currentJitterPixelsX;
+    float3 previousCameraPosition;
+    float currentJitterPixelsY;
+    row_major float4x4 unjitteredViewProjection;
+    row_major float4x4 previousViewProjection;
+    float2 currentJitterNdc;
+    uint frameSizeX;
+    uint frameSizeY;
+    row_major float4x4 viewMatrix;
+    float nearPlane;
+    float farPlane;
+    float2 _cameraPadding;
 };
 
 cbuffer LightingParams : register(b3)
 {
-    uint lightCount;
-    uint3 _lightingPadding;
-    LightData lights[MAX_LIGHTS];
+    uint directionalLightCount;
+    uint shadowLightIndex;
+    uint shadowsEnabled;
+    uint _lightingPadding0;
+    DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
     row_major float4x4 shadowViewProjection0;
     row_major float4x4 shadowViewProjection1;
     row_major float4x4 shadowViewProjection2;
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
-    uint shadowLightIndex;
-    uint shadowsEnabled;
     float shadowMaxDistance;
-    uint _shadowPadding1;
+    float _lightingPadding1;
+    float _lightingPadding2;
+    float _lightingPadding3;
 };
 
 struct VSInput
@@ -63,10 +79,11 @@ struct VSOutput
 {
     float4 position : SV_Position;
     float3 worldPos : TEXCOORD0;
-    float3 normal : TEXCOORD1;
-    float2 uv : TEXCOORD2;
-    float4 tangent : TEXCOORD3;
-    uint instanceId : TEXCOORD4;
+    float3 viewPos : TEXCOORD1;
+    float3 normal : TEXCOORD2;
+    float2 uv : TEXCOORD3;
+    float4 tangent : TEXCOORD4;
+    uint instanceId : TEXCOORD5;
 };
 
 VSOutput vertexShader(VSInput input)
@@ -76,11 +93,12 @@ VSOutput vertexShader(VSInput input)
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
-        output.worldPos = float3(0.0f, 0.0f, 0.0f);
+        output.worldPos = 0.0f.xxx;
+        output.viewPos = 0.0f.xxx;
         output.normal = float3(0.0f, 1.0f, 0.0f);
-        output.uv = float2(0.0f, 0.0f);
+        output.uv = 0.0f.xx;
         output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
-        output.instanceId = 0;
+        output.instanceId = 0u;
         return output;
     }
 
@@ -88,12 +106,14 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
 
     float4 worldPosition = mul(input.position, instanceData.world);
-    float3 cameraRelativeWorldPosition = worldPosition.xyz - cameraPosition;
+    worldPosition.xyz -= cameraPosition;
+    float4 viewPosition = mul(float4(worldPosition.xyz, 1.0f), viewMatrix);
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
 
-    output.position = mul(float4(cameraRelativeWorldPosition, 1.0f), viewProjection);
-    output.worldPos = cameraRelativeWorldPosition;
+    output.position = mul(float4(worldPosition.xyz, 1.0f), viewProjection);
+    output.worldPos = worldPosition.xyz;
+    output.viewPos = viewPosition.xyz;
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
     output.tangent = float4(normalize(worldTangent), input.tangent.w);
@@ -109,7 +129,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     }
 
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
-    uint materialIndex = 0;
+    uint materialIndex = 0u;
     uint materialHandle = instanceData.materialHandle;
     if (IsPackedHandleValid(materialHandle))
     {
@@ -145,25 +165,21 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     float3x3 TBN = float3x3(T, B, N);
     normal = normalize(mul(tangentNormal, TBN));
 
-    float metallic = saturate(mrSample.b * materialData.metallicRoughness.x);
-    float roughness = saturate(mrSample.g * materialData.metallicRoughness.y);
-    float occlusion = saturate(occlusionSample.r);
-
     SurfaceLightingInput surface;
     surface.worldPos = input.worldPos;
     surface.normal = normal;
     surface.albedo = (materialData.baseColor * albedoSample).rgb;
-    surface.metallic = metallic;
-    surface.roughness = roughness;
-    surface.occlusion = occlusion;
+    surface.metallic = saturate(mrSample.b * materialData.metallicRoughness.x);
+    surface.roughness = saturate(mrSample.g * materialData.metallicRoughness.y);
+    surface.occlusion = saturate(occlusionSample.r);
     surface.emissive = emissive;
 
     float3 viewDir = normalize(-input.worldPos);
-    float3 color = EvaluateSurfaceLighting(
+    float3 color = EvaluateDirectionalLights(
         surface,
         viewDir,
-        lightCount,
-        lights,
+        directionalLightCount,
+        directionalLights,
         shadowViewProjection0,
         shadowViewProjection1,
         shadowViewProjection2,
@@ -178,12 +194,26 @@ float4 fragmentShader(VSOutput input) : SV_Target0
         shadowTexelSizeBiasStrength.z,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
-        shadowMaxDistance,
+        shadowMaxDistance);
+
+    uint2 pixel = uint2(input.position.xy);
+    uint clusterIndex = ComputeClusterIndex(pixel, uint2(frameSizeX, frameSizeY), max(input.viewPos.z, nearPlane), nearPlane, farPlane);
+    ClusterHeader header = g_ClusterHeaders[clusterIndex];
+    for (uint i = 0u; i < header.count; ++i)
+    {
+        uint pointLightIndex = g_ClusterLightIndices[header.offset + i];
+        color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
+    }
+
+    color += EvaluateImageBasedLighting(
+        surface,
+        viewDir,
         irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,
         samplerHandle,
         IBL_EXPOSURE);
+    color += surface.emissive;
 
     float alpha = saturate(materialData.baseColor.a * albedoSample.a);
     return float4(color, alpha);

@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering;
 
@@ -20,6 +21,9 @@ public sealed class SceneDrawData
 		Matrix4x4 inverseViewProjection,
 		Vector3 cameraOrigin,
 		Vector3 previousCameraOrigin,
+		Int2 sceneFramebufferSize,
+		float nearPlane,
+		float farPlane,
 		Vector2 jitterPixels,
 		Vector2 jitterNdc,
 		bool resetHistory,
@@ -34,6 +38,9 @@ public sealed class SceneDrawData
 		InverseViewProjection = inverseViewProjection;
 		CameraOrigin = cameraOrigin;
 		PreviousCameraOrigin = previousCameraOrigin;
+		SceneFramebufferSize = sceneFramebufferSize;
+		NearPlane = nearPlane;
+		FarPlane = farPlane;
 		JitterPixels = jitterPixels;
 		JitterNdc = jitterNdc;
 		ResetHistory = resetHistory;
@@ -57,6 +64,12 @@ public sealed class SceneDrawData
 	public Vector3 CameraOrigin { get; }
 
 	public Vector3 PreviousCameraOrigin { get; }
+
+	public Int2 SceneFramebufferSize { get; }
+
+	public float NearPlane { get; }
+
+	public float FarPlane { get; }
 
 	public Vector2 JitterPixels { get; }
 

@@ -320,6 +320,7 @@ public sealed class ShadowMapPass
 	{
 		lightDirection = Vector3.Zero;
 		shadowedLightIndex = -1;
+		var directionalLightCount = 0;
 		if (sceneData.Lights.Count == 0)
 		{
 			return false;
@@ -340,7 +341,7 @@ public sealed class ShadowMapPass
 			}
 
 			lightDirection = Vector3.Normalize(forward);
-			shadowedLightIndex = i;
+			shadowedLightIndex = directionalLightCount;
 			return true;
 		}
 

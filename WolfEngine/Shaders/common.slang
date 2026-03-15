@@ -5,6 +5,10 @@ struct CameraParams
     float3 cameraOrigin; // world-space origin if needed
     float padding; // align to 16 bytes
     float4x4 viewMatrix;
+    float nearPlane;
+    float farPlane;
+    uint frameSizeX;
+    uint frameSizeY;
 };
 
 float3 ReconstructViewPosition(uint2 pixel, uint2 size, float depth, float4x4 invProjection)

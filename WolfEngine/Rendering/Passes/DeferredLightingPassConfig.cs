@@ -28,6 +28,10 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle LinearSampler { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
 
+	public required IGfxBuffer PointLightBuffer { get; init; }
+	public required IGfxBuffer ClusterHeaderBuffer { get; init; }
+	public required IGfxBuffer ClusterLightIndexBuffer { get; init; }
+
 	public required Matrix4x4 ShadowViewProjection0 { get; init; }
 	public required Matrix4x4 ShadowViewProjection1 { get; init; }
 	public required Matrix4x4 ShadowViewProjection2 { get; init; }
@@ -42,6 +46,11 @@ public struct DeferredLightingPassConfig
 	public required float ShadowTexelSizeX { get; init; }
 	public required float ShadowTexelSizeY { get; init; }
 	public required bool AoEnabled { get; init; }
+	public required int ClusterCountX { get; init; }
+	public required int ClusterCountY { get; init; }
+	public required int ClusterCountZ { get; init; }
+	public required float NearPlane { get; init; }
+	public required float FarPlane { get; init; }
 
 	public required Int2 DispatchSize { get; init; }
 }

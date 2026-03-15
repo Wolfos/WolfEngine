@@ -29,6 +29,7 @@ public static class WolfEngine
 		services.AddSingleton<VBAOPass>();
 		services.AddSingleton<AmbientOcclusionBlurPass>();
 		services.AddSingleton<AmbientOcclusionUpsamplePass>();
+		services.AddSingleton<ClusteredLightingPass>();
 		services.AddSingleton<DeferredLightingPass>();
 		services.AddSingleton<TemporalAntiAliasingPass>();
 		services.AddSingleton<TemporalHistoryStorePass>();
