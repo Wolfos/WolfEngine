@@ -202,45 +202,11 @@ public class SceneBuilder : ISceneBuilder
 				Mesh = importedMesh.Mesh,
 				Material = material
 			});
-
-			// Stress test thing, would be a waste to throw it away
-			// TryAddEmissivePointLight(entity, importedMesh, ownerName, world, material);
 		}
 		catch (Exception e)
 		{
 			Console.Out.WriteLine($"Error importing object {ownerName}");
 			Console.Out.WriteLine(e.Message);
 		}
-	}
-
-	private static void TryAddEmissivePointLight(
-		Entity entity,
-		ImportedNodeMesh importedMesh,
-		string ownerName,
-		World world,
-		Material material)
-	{
-		if (GetMaxComponent(material.EmissiveFactor) <= 0.01f)
-		{
-			return;
-		}
-
-		var meshBounds = importedMesh.Mesh.BoundingSphere;
-		var lightEntity = world.CreateEntity($"{ownerName} Emissive Light");
-		world.SetParent(lightEntity, entity);
-		world.AddTransform(lightEntity, Matrix4x4.CreateTranslation(meshBounds.Center));
-		world.AddComponent(lightEntity, new Light
-		{
-			Type = LightType.Point,
-			Color = new ColorRGBA(material.EmissiveFactor.X, material.EmissiveFactor.Y, material.EmissiveFactor.Z, 1.0f),
-			Intensity = material.EmissiveIntensity * 0.5f,
-			Range = MathF.Min(MathF.Max(meshBounds.Radius * 2.0f, 1.0f), 10.0f),
-			HorizonFade = false
-		});
-	}
-
-	private static float GetMaxComponent(Vector3 value)
-	{
-		return MathF.Max(value.X, MathF.Max(value.Y, value.Z));
 	}
 }
