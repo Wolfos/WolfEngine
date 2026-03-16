@@ -6,7 +6,7 @@
 - Deferred base pass (small G-buffer) + clustered/forward+ for transparents.
 - Atmosphere/sky model, sun/moon, cascaded shadows.
 - Volumetrics: half-res froxel grid with history; async compute if possible.
-- Post: TAA (stable!), exposure, bloom, color grading, depth of field.
+- Post: TAA (stable!), exposure, bloom, color grading.
 - Optional tier: DDGI.
 
 **Engine**

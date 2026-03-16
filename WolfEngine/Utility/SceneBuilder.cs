@@ -203,7 +203,8 @@ public class SceneBuilder : ISceneBuilder
 				Material = material
 			});
 
-			TryAddEmissivePointLight(entity, importedMesh, ownerName, world, material);
+			// Stress test thing, would be a waste to throw it away
+			// TryAddEmissivePointLight(entity, importedMesh, ownerName, world, material);
 		}
 		catch (Exception e)
 		{

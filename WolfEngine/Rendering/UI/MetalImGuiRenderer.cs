@@ -57,7 +57,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
 	{
 		var commandList = context.CommandList as MetalCommandList;
 		if (commandList is null)
@@ -80,7 +80,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		var targets = new PassTargets(new[] { new ColorTargetBinding(finalColor) });
 		var viewport = new Viewport(0, 0, finalColor.Descriptor.Width, finalColor.Descriptor.Height);
 		commandList.BeginPass(targets, viewport);
-		commandList.ClearColorAttachment(0, new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f));
+		if (clearTarget)
+		{
+			commandList.ClearColorAttachment(0, new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f));
+		}
 
 		if (frame.CommandCount == 0 || _pipeline is null || _fontTexture is null)
 		{

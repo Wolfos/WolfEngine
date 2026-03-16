@@ -71,7 +71,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
 	{
 		var finalColor = finalColorTarget as ID3D12BackendTexture;
 		if (finalColor is null)
@@ -86,8 +86,11 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		var rtvHandle = finalColor.RenderTargetView
 		                ?? throw new InvalidOperationException("Final color target missing RTV.");
 		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
-		var clearColor = stackalloc float[4] { 0.05f, 0.05f, 0.05f, 1.0f };
-		native->ClearRenderTargetView(rtvHandle, clearColor, 0, null);
+		if (clearTarget)
+		{
+			var clearColor = stackalloc float[4] { 0.05f, 0.05f, 0.05f, 1.0f };
+			native->ClearRenderTargetView(rtvHandle, clearColor, 0, null);
+		}
 
 		if (frame.CommandCount == 0)
 		{

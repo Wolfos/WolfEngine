@@ -14,6 +14,7 @@ public readonly struct RenderGraphFrameResources
 	public Int2 FramebufferSize { get; init; }
 	public Int2 SceneFramebufferSize { get; init; }
 	public bool SceneEnabled { get; init; }
+	public RenderGraphResourceHandle TonemappedSceneColor { get; init; }
 	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
@@ -77,6 +78,8 @@ public sealed class RenderGraphFrameBuilder
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
+	private readonly TonemappingPass _tonemappingPass;
+	private readonly CopyToFinalPass _copyToFinalPass;
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -87,7 +90,7 @@ public sealed class RenderGraphFrameBuilder
 	private UiFrameData _uiFrame = UiFrameData.Empty;
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
-	private string _requestedSceneDebugViewId = SceneDebugViewIds.SceneColor;
+	private string _requestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
 	private SceneViewportRenderState _resolvedSceneViewportState = SceneViewportRenderState.Empty;
 	private bool _hasPreviousFrameShape;
 	private Int2 _previousFramebufferSize;
@@ -119,6 +122,8 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
+	private readonly Action<RenderGraphContext> _tonemappingExecute;
+	private readonly Action<RenderGraphContext> _copyToFinalExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -145,6 +150,8 @@ public sealed class RenderGraphFrameBuilder
 			TemporalAntiAliasingPass temporalAntiAliasingPass,
 			TemporalHistoryStorePass temporalHistoryStorePass,
 			TransparentForwardPass transparentForwardPass,
+			TonemappingPass tonemappingPass,
+			CopyToFinalPass copyToFinalPass,
 		ShadowMapPass shadowMapPass,
 		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
@@ -161,6 +168,8 @@ public sealed class RenderGraphFrameBuilder
 		_temporalAntiAliasingPass = temporalAntiAliasingPass;
 		_temporalHistoryStorePass = temporalHistoryStorePass;
 		_transparentForwardPass = transparentForwardPass;
+		_tonemappingPass = tonemappingPass;
+		_copyToFinalPass = copyToFinalPass;
 		_shadowMapPass = shadowMapPass;
 		_gpuDrawPass = gpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
@@ -180,6 +189,8 @@ public sealed class RenderGraphFrameBuilder
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
+		_tonemappingExecute = ExecuteTonemapping;
+		_copyToFinalExecute = ExecuteCopyToFinal;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -401,16 +412,26 @@ public sealed class RenderGraphFrameBuilder
 			}
 		}
 
+		var tonemappedSceneColorHandle = sceneEnabled
+			? _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Bgra8Unorm,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
+			: default;
+
 		_frameResources = new()
 		{
 			FramebufferSize = framebufferSize,
 			SceneFramebufferSize = sceneFramebufferSize,
 			SceneEnabled = sceneEnabled,
+			TonemappedSceneColor = tonemappedSceneColorHandle,
 			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
 			GBufferAlbedo = gbufferAlbedoHandle,
 			GBufferNormal = gbufferNormalHandle,
@@ -439,7 +460,7 @@ public sealed class RenderGraphFrameBuilder
 
 		if (sceneEnabled)
 		{
-			RegisterSceneDebugView(SceneDebugViewIds.SceneColor, "Scene Color", resolvedSceneColorHandle, SceneDebugViewKind.Color);
+			RegisterSceneDebugView(SceneDebugViewIds.FinalColor, "Final Color", _frameResources.TonemappedSceneColor, SceneDebugViewKind.Color);
 			if (ambientOcclusionFinalHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
@@ -618,6 +639,16 @@ public sealed class RenderGraphFrameBuilder
 			ReadSkyboxTextures(transparentForwardBuilder);
 			
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			graph.AddPass("Tonemapping", PassKind.Compute)
+				.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
+				.WriteTexture(_frameResources.TonemappedSceneColor, ResourceState.UnorderedAccess)
+				.SetExecute(_tonemappingExecute);
+
+			graph.AddPass("Copy To Final", PassKind.Compute)
+				.ReadTexture(_frameResources.TonemappedSceneColor, ResourceState.ShaderResource)
+				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
+				.SetExecute(_copyToFinalExecute);
 		}
 
 		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
@@ -719,7 +750,7 @@ public sealed class RenderGraphFrameBuilder
 
 	private RenderGraphResourceHandle GetSceneColorDebugViewHandle()
 	{
-		return TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView)
+		return TryGetSceneDebugView(SceneDebugViewIds.FinalColor, out var sceneColorView)
 			? sceneColorView.Handle
 			: default;
 	}
@@ -731,7 +762,7 @@ public sealed class RenderGraphFrameBuilder
 			return requestedView;
 		}
 
-		if (TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView))
+		if (TryGetSceneDebugView(SceneDebugViewIds.FinalColor, out var sceneColorView))
 		{
 			return sceneColorView;
 		}
@@ -780,21 +811,21 @@ public sealed class RenderGraphFrameBuilder
 			}
 		}
 
-		if (TryGetSceneDebugView(SceneDebugViewIds.SceneColor, out var sceneColorView))
+		if (TryGetSceneDebugView(SceneDebugViewIds.FinalColor, out var sceneColorView))
 		{
 			var fallbackTextureId = ResolveSceneDebugTextureHandle(sceneColorView);
-			activeDebugViewId = SceneDebugViewIds.SceneColor;
+			activeDebugViewId = SceneDebugViewIds.FinalColor;
 			return fallbackTextureId.IsValid ? (nint)fallbackTextureId.Value : 0;
 		}
 
-		activeDebugViewId = SceneDebugViewIds.SceneColor;
+		activeDebugViewId = SceneDebugViewIds.FinalColor;
 		return 0;
 	}
 
 	private static string NormalizeSceneDebugViewId(string? requestedDebugViewId)
 	{
 		return string.IsNullOrWhiteSpace(requestedDebugViewId)
-			? SceneDebugViewIds.SceneColor
+			? SceneDebugViewIds.FinalColor
 			: requestedDebugViewId;
 	}
 
@@ -1070,11 +1101,29 @@ public sealed class RenderGraphFrameBuilder
 		_transparentForwardPass.Record(context, in config, context.SceneData!);
 	}
 
+	private void ExecuteTonemapping(RenderGraphContext context)
+	{
+		var config = _tonemappingPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_tonemappingPass.Record(context, in config);
+	}
+
+	private void ExecuteCopyToFinal(RenderGraphContext context)
+	{
+		var config = _copyToFinalPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_copyToFinalPass.Record(context, in config);
+	}
+
 	private void ExecuteImGui(RenderGraphContext context)
 	{
 		var finalColor = context.GetTexture(_frameResources.FinalColor);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, finalColor);
+		_imGuiRenderer.Record(context, _uiFrame, finalColor, clearTarget: _frameResources.SceneEnabled == false);
 	}
 
 	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderGraphFrameResources resources, int cascadeIndex)

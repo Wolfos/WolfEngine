@@ -11,14 +11,14 @@ public class SceneWindow: EditorWindow
 {
     private static readonly SceneDebugViewOption[] FallbackDebugViews =
     [
-        new SceneDebugViewOption(SceneDebugViewIds.SceneColor, "Scene Color", SceneDebugViewKind.Color)
+        new SceneDebugViewOption(SceneDebugViewIds.FinalColor, "Final Color", SceneDebugViewKind.Color)
     ];
 
     private readonly EditorViewportStateBus _viewportStateBus;
     private readonly IIconManager _icons;
     private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
-    private string _selectedDebugViewId = SceneDebugViewIds.SceneColor;
+    private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
     
     private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
     private TransformSpace _transformSpace = TransformSpace.Local;
@@ -237,6 +237,6 @@ public class SceneWindow: EditorWindow
             }
         }
 
-        return "Scene Color";
+        return "Final Color";
     }
 }

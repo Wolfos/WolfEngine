@@ -34,6 +34,8 @@ public static class WolfEngine
 		services.AddSingleton<TemporalAntiAliasingPass>();
 		services.AddSingleton<TemporalHistoryStorePass>();
 		services.AddSingleton<TransparentForwardPass>();
+		services.AddSingleton<TonemappingPass>();
+		services.AddSingleton<CopyToFinalPass>();
 		services.AddSingleton<ShadowMapPass>();
 		services.AddSingleton<GpuDrawPass>();
 		services.AddSingleton<ImGuiUiSystem>();

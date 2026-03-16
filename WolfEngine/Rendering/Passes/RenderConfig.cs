@@ -8,6 +8,16 @@ public class RenderConfig: IDataAsset
 	public VBAOPass.Config VBAOConfig { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
+	public TonemappingConfig Tonemapping { get; set; } = new();
+}
+
+public struct TonemappingConfig
+{
+	public TonemappingConfig()
+	{
+	}
+
+	public float Exposure { get; set; } = 1.0f;
 }
 
 public struct TemporalAntiAliasingConfig

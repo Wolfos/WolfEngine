@@ -6,7 +6,7 @@ namespace WolfEngine.Rendering.UI;
 
 public static class SceneDebugViewIds
 {
-	public const string SceneColor = "scene-color";
+	public const string FinalColor = "final-color";
 	public const string AmbientOcclusion = "ambient-occlusion";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string MotionVectors = "motion-vectors";
@@ -38,7 +38,7 @@ public readonly struct SceneViewportUiState
 		visible: false,
 		contentSizePixels: Int2.Zero,
 		resolutionScale: 1.0f,
-		requestedDebugViewId: SceneDebugViewIds.SceneColor,
+		requestedDebugViewId: SceneDebugViewIds.FinalColor,
 		hovered: false,
 		focused: false,
 		imageMin: Vector2.Zero,
@@ -58,7 +58,7 @@ public readonly struct SceneViewportUiState
 		ContentSizePixels = contentSizePixels;
 		ResolutionScale = resolutionScale;
 		RequestedDebugViewId = string.IsNullOrWhiteSpace(requestedDebugViewId)
-			? SceneDebugViewIds.SceneColor
+			? SceneDebugViewIds.FinalColor
 			: requestedDebugViewId;
 		Hovered = hovered;
 		Focused = focused;
@@ -82,7 +82,7 @@ public readonly struct SceneViewportRenderState
 		textureId: 0,
 		renderSizePixels: Int2.Zero,
 		debugViews: Array.Empty<SceneDebugViewOption>(),
-		activeDebugViewId: SceneDebugViewIds.SceneColor);
+		activeDebugViewId: SceneDebugViewIds.FinalColor);
 
 	public SceneViewportRenderState(
 		nint textureId,
@@ -94,7 +94,7 @@ public readonly struct SceneViewportRenderState
 		RenderSizePixels = renderSizePixels;
 		DebugViews = debugViews ?? Array.Empty<SceneDebugViewOption>();
 		ActiveDebugViewId = string.IsNullOrWhiteSpace(activeDebugViewId)
-			? SceneDebugViewIds.SceneColor
+			? SceneDebugViewIds.FinalColor
 			: activeDebugViewId;
 	}
 
