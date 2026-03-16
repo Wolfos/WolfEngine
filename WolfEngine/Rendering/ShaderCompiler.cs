@@ -320,7 +320,8 @@ public class ShaderCompiler : IShaderCompiler
 
 		var compiled = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
 		var reflectionLayout = ShaderReflectionLayoutBuilder.Build(reflection);
-		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout);
+		var threadGroupSize = ResolveComputeThreadGroupSize(reflection, entryPoint);
+		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout, threadGroupSize);
 		_cachedComputeWithReflection[cacheKey] = result;
 		return result;
 	}
@@ -464,6 +465,34 @@ public class ShaderCompiler : IShaderCompiler
 
 		var bytecode = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
 		return (bytecode, ShaderReflectionLayoutBuilder.Build(reflection));
+	}
+
+	private static ComputeThreadGroupSize ResolveComputeThreadGroupSize(SlangReflection reflection, string entryPoint)
+	{
+		var entryPoints = reflection.EntryPoints ?? [];
+		for (var i = 0; i < entryPoints.Length; i++)
+		{
+			var candidate = entryPoints[i];
+			if (string.Equals(candidate.Name, entryPoint, StringComparison.Ordinal) == false)
+			{
+				continue;
+			}
+
+			var size = candidate.ThreadGroupSize;
+			if (size is not { Length: 3 } ||
+			    size[0] == 0 ||
+			    size[1] == 0 ||
+			    size[2] == 0)
+			{
+				throw new InvalidOperationException(
+					$"Reflected compute entry point '{entryPoint}' does not expose a valid 3D threadgroup size.");
+			}
+
+			return new ComputeThreadGroupSize(size[0], size[1], size[2]);
+		}
+
+		throw new InvalidOperationException(
+			$"Reflected compute entry point '{entryPoint}' was not found when resolving threadgroup size.");
 	}
 
 	private static string BuildDefineSuffix(params string[] defines)

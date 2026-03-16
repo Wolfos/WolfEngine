@@ -13,6 +13,7 @@ public sealed class DeferredLightingPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
+	private ComputeThreadGroupSize? _threadGroupSize;
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -233,9 +234,12 @@ public sealed class DeferredLightingPass
 		commandList.SetComputeBuffer(5, config.ClusterLightIndexBuffer);
 
 		// Dispatch the compute shader
-		var dispatchX = (uint)((config.DispatchSize.X + 7) / 8);
-		var dispatchY = (uint)((config.DispatchSize.Y + 7) / 8);
-		commandList.Dispatch(dispatchX, dispatchY, 1);
+		var threadGroupSize = _threadGroupSize
+			?? throw new InvalidOperationException("Deferred lighting threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)Math.Max(config.DispatchSize.X, 1),
+			(uint)Math.Max(config.DispatchSize.Y, 1));
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private IGfxPipeline EnsurePipeline(IGfxDevice device)
@@ -264,7 +268,7 @@ public sealed class DeferredLightingPass
 			renderState: default,
 			shaderVariant: "deferred_lighting.compute.slang");
 
-		var shaderSet = new ShaderBytecodeSet(compute: _computeShader);
+		var shaderSet = new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize);
 		_pipeline = device.GetOrCreatePipeline(pipelineKey, shaderSet);
 		return _pipeline;
 	}
@@ -274,6 +278,7 @@ public sealed class DeferredLightingPass
 		if (_compiledBackendKind.HasValue &&
 		    _compiledBackendKind.Value == backendKind &&
 		    _computeShader.IsEmpty == false &&
+		    _threadGroupSize.HasValue &&
 		    _bindlessWriter is not null &&
 		    _cameraWriter is not null &&
 		    _lightingWriter is not null)
@@ -287,6 +292,7 @@ public sealed class DeferredLightingPass
 			backendKind);
 
 		_computeShader = compiled.Bytecode;
+		_threadGroupSize = compiled.ThreadGroupSize;
 		var reflection = compiled.ReflectionLayout;
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));

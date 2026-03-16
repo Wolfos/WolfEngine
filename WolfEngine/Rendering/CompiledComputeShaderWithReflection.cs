@@ -4,7 +4,10 @@ namespace WolfEngine.Rendering;
 
 public readonly struct CompiledComputeShaderWithReflection
 {
-	public CompiledComputeShaderWithReflection(ReadOnlyMemory<byte> bytecode, ShaderReflectionLayout reflectionLayout)
+	public CompiledComputeShaderWithReflection(
+		ReadOnlyMemory<byte> bytecode,
+		ShaderReflectionLayout reflectionLayout,
+		ComputeThreadGroupSize threadGroupSize)
 	{
 		if (bytecode.IsEmpty)
 		{
@@ -15,9 +18,12 @@ public readonly struct CompiledComputeShaderWithReflection
 
 		Bytecode = bytecode;
 		ReflectionLayout = reflectionLayout;
+		ThreadGroupSize = threadGroupSize;
 	}
 
 	public ReadOnlyMemory<byte> Bytecode { get; }
 
 	public ShaderReflectionLayout ReflectionLayout { get; }
+
+	public ComputeThreadGroupSize ThreadGroupSize { get; }
 }

@@ -188,11 +188,16 @@ public enum BufferFlags
 /// </summary>
 public readonly struct ShaderBytecodeSet
 {
-	public ShaderBytecodeSet(ReadOnlyMemory<byte>? vertex = null, ReadOnlyMemory<byte>? pixel = null, ReadOnlyMemory<byte>? compute = null)
+	public ShaderBytecodeSet(
+		ReadOnlyMemory<byte>? vertex = null,
+		ReadOnlyMemory<byte>? pixel = null,
+		ReadOnlyMemory<byte>? compute = null,
+		ComputeThreadGroupSize? computeThreadGroupSize = null)
 	{
 		Vertex = vertex;
 		Pixel = pixel;
 		Compute = compute;
+		ComputeThreadGroupSize = computeThreadGroupSize;
 	}
 
 	public ReadOnlyMemory<byte>? Vertex { get; }
@@ -200,4 +205,6 @@ public readonly struct ShaderBytecodeSet
 	public ReadOnlyMemory<byte>? Pixel { get; }
 
 	public ReadOnlyMemory<byte>? Compute { get; }
+
+	public ComputeThreadGroupSize? ComputeThreadGroupSize { get; }
 }

@@ -435,13 +435,20 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	{
 		ThrowIfDisposed();
 		EnsureComputeEncoder();
+		var reflectedThreadGroupSize = _currentComputePipeline?.ComputeThreadGroupSize
+			?? throw new InvalidOperationException("No compute pipeline with reflected threadgroup size is currently bound.");
 		var threadgroups = new MTLSize
 		{
 			width = groupCountX,
 			height = groupCountY,
 			depth = groupCountZ
 		};
-		var threadsPerGroup = new MTLSize { width = 8, height = 8, depth = 1 };
+		var threadsPerGroup = new MTLSize
+		{
+			width = reflectedThreadGroupSize.X,
+			height = reflectedThreadGroupSize.Y,
+			depth = reflectedThreadGroupSize.Z
+		};
 		_computeEncoder.DispatchThreadgroups(threadgroups, threadsPerGroup);
 	}
 

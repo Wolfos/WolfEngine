@@ -45,11 +45,10 @@ uint NextGeneration(uint generation)
     return generation;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint dispatchWidth = ((updateCount + 63) / 64) * 8;
-    uint index = dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
+    uint index = dispatchThreadId.x;
     if (index >= updateCount)
     {
         return;

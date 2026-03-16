@@ -21,6 +21,8 @@ public sealed class GpuDrawPass
 	private GraphicsBackendKind? _computeReflectionBackendKind;
 	private ReadOnlyMemory<byte> _updateShaderBytecode;
 	private ReadOnlyMemory<byte> _cullShaderBytecode;
+	private ComputeThreadGroupSize? _updateThreadGroupSize;
+	private ComputeThreadGroupSize? _cullThreadGroupSize;
 	private ShaderPropertyWriter? _updateParamsWriter;
 	private ShaderPropertyWriter? _cullParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
@@ -375,8 +377,10 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(8, _gpuDrawResources.MaterialGenerationBuffer!);
 			commandList.SetComputeBuffer(9, _gpuDrawResources.DiagnosticsCounterBuffer!);
 
-			var groupCount = (uint)((_updateData.Count + 63) / 64);
-			commandList.Dispatch(groupCount, 1, 1);
+			var threadGroupSize = _updateThreadGroupSize
+				?? throw new InvalidOperationException("GpuDraw update threadgroup size was not initialized.");
+			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount((uint)_updateData.Count);
+			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
 	}
 
@@ -454,8 +458,10 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(10, _gpuDrawResources.MaterialGenerationBuffer!);
 			commandList.SetComputeBuffer(11, _gpuDrawResources.DiagnosticsCounterBuffer!);
 
-			var groupCount = (uint)((GpuDrawResources.MaxDrawCount + 63) / 64);
-			commandList.Dispatch(groupCount, 1, 1);
+			var threadGroupSize = _cullThreadGroupSize
+				?? throw new InvalidOperationException("GpuDraw cull threadgroup size was not initialized.");
+			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(GpuDrawResources.MaxDrawCount);
+			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
 
 	}
@@ -469,7 +475,9 @@ public sealed class GpuDrawPass
 
 		EnsureComputeReflectionResources(device.BackendKind);
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdate", default, default, default);
-		_updatePipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _updateShaderBytecode));
+		_updatePipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _updateShaderBytecode, computeThreadGroupSize: _updateThreadGroupSize));
 		return _updatePipeline;
 	}
 
@@ -482,7 +490,9 @@ public sealed class GpuDrawPass
 
 		EnsureComputeReflectionResources(device.BackendKind);
 		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
-		_cullPipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _cullShaderBytecode));
+		_cullPipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _cullShaderBytecode, computeThreadGroupSize: _cullThreadGroupSize));
 		return _cullPipeline;
 	}
 
@@ -492,6 +502,8 @@ public sealed class GpuDrawPass
 		    _computeReflectionBackendKind.Value == backendKind &&
 		    _updateParamsWriter is not null &&
 		    _cullParamsWriter is not null &&
+		    _updateThreadGroupSize.HasValue &&
+		    _cullThreadGroupSize.HasValue &&
 		    _updateShaderBytecode.IsEmpty == false &&
 		    _cullShaderBytecode.IsEmpty == false)
 		{
@@ -503,6 +515,7 @@ public sealed class GpuDrawPass
 			"CSUpdate",
 			backendKind);
 		_updateShaderBytecode = updateCompiled.Bytecode;
+		_updateThreadGroupSize = updateCompiled.ThreadGroupSize;
 		_updateParamsWriter = new ShaderPropertyWriter(updateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 
 		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
@@ -510,6 +523,7 @@ public sealed class GpuDrawPass
 			"CSCull",
 			backendKind);
 		_cullShaderBytecode = cullCompiled.Bytecode;
+		_cullThreadGroupSize = cullCompiled.ThreadGroupSize;
 		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));
 
 		_computeReflectionBackendKind = backendKind;

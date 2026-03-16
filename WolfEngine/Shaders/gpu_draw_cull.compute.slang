@@ -50,7 +50,7 @@ bool IsSphereVisible(float3 center, float radius)
     return true;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     float3 cameraPosition = cameraPositionAndMaxDrawCount.xyz;
@@ -60,8 +60,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    uint dispatchWidth = ((maxDrawCount + 63) / 64) * 8;
-    uint drawId = dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
+    uint drawId = dispatchThreadId.x;
     if (drawId >= maxDrawCount)
     {
         return;

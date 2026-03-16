@@ -9,6 +9,7 @@ public sealed class AmbientOcclusionBlurPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
+	private ComputeThreadGroupSize? _threadGroupSize;
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
@@ -93,9 +94,12 @@ public sealed class AmbientOcclusionBlurPass
 		settingsWriter.SetFloat("projZScale", projectionMatrix.M43);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
-		var dispatchX = (uint)((config.AoResolution.X + 7) / 8);
-		var dispatchY = (uint)((config.AoResolution.Y + 7) / 8);
-		commandList.Dispatch(dispatchX, dispatchY, 1);
+		var threadGroupSize = _threadGroupSize
+			?? throw new InvalidOperationException("Ambient occlusion blur threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)Math.Max(config.AoResolution.X, 1),
+			(uint)Math.Max(config.AoResolution.Y, 1));
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private IGfxPipeline EnsurePipeline(IGfxDevice device)
@@ -121,7 +125,9 @@ public sealed class AmbientOcclusionBlurPass
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
 			shaderVariant: "ao_blur.compute.slang");
-		_pipeline = device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(compute: _computeShader));
+		_pipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
 		return _pipeline;
 	}
 
@@ -130,6 +136,7 @@ public sealed class AmbientOcclusionBlurPass
 		if (_compiledBackendKind.HasValue &&
 		    _compiledBackendKind.Value == backendKind &&
 		    _computeShader.IsEmpty == false &&
+		    _threadGroupSize.HasValue &&
 		    _bindlessWriter is not null &&
 		    _settingsWriter is not null)
 		{
@@ -142,6 +149,7 @@ public sealed class AmbientOcclusionBlurPass
 			backendKind);
 
 		_computeShader = compiled.Bytecode;
+		_threadGroupSize = compiled.ThreadGroupSize;
 		var reflection = compiled.ReflectionLayout;
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BlurSettings"));

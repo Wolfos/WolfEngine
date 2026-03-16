@@ -89,16 +89,15 @@ bool IntersectsCluster(PointLightData light, ClusterAabb cluster)
     return dot(delta, delta) <= radius * radius;
 }
 
-uint GetLinearClusterIndex(uint3 dispatchThreadId)
+uint GetLinearClusterIndex(uint dispatchThreadIdX)
 {
-    uint dispatchWidth = ((clusterCount + 63u) / 64u) * 8u;
-    return dispatchThreadId.x + (dispatchThreadId.y * dispatchWidth);
+    return dispatchThreadIdX;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSBuildClusters(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId);
+    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId.x);
     if (clusterIndex >= clusterCount)
     {
         return;
@@ -114,10 +113,10 @@ void CSBuildClusters(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSCountLights(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId);
+    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId.x);
     if (clusterIndex >= clusterCount)
     {
         return;
@@ -166,10 +165,10 @@ void CSPrefixOffsets(uint3 dispatchThreadId : SV_DispatchThreadID)
     g_ClusterOverflow[1] = runningOffset;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSWriteLightIndices(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId);
+    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId.x);
     if (clusterIndex >= clusterCount)
     {
         return;

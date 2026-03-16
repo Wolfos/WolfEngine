@@ -38,6 +38,10 @@ public sealed class SkyboxPass
 	private IGfxPipeline _iblBrdfLutPipeline;
 	private IGfxPipeline _proceduralSkyboxPipeline;
 	private GraphicsBackendKind? _reflectionBackendKind;
+	private ComputeThreadGroupSize? _iblIrradianceThreadGroupSize;
+	private ComputeThreadGroupSize? _iblPrefilterThreadGroupSize;
+	private ComputeThreadGroupSize? _iblBrdfThreadGroupSize;
+	private ComputeThreadGroupSize? _proceduralSkyboxThreadGroupSize;
 	private ShaderPropertyWriter? _iblIrradianceWriter;
 	private ShaderPropertyWriter? _iblPrefilterWriter;
 	private ShaderPropertyWriter? _iblBrdfWriter;
@@ -159,7 +163,10 @@ public sealed class SkyboxPass
 		skyParamsWriter.SetColorRGBA("ground", config.GroundColor);
 		commandList.SetComputeConstants(skyParamsWriter.RegisterIndex, skyParamsWriter.AsBytes());
 
-		commandList.Dispatch((uint)((ProceduralEnvWidth + 7) / 8), (uint)((ProceduralEnvHeight + 7) / 8), 1);
+		var threadGroupSize = _proceduralSkyboxThreadGroupSize
+			?? throw new InvalidOperationException("Procedural skybox threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(ProceduralEnvWidth, ProceduralEnvHeight);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	public void RecordIrradiance(RenderGraphContext context)
@@ -259,7 +266,10 @@ public sealed class SkyboxPass
 		writer.SetUInt("sliceCount", 1);
 		writer.SetUInt("sliceHeight", IrradianceSize);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		commandList.Dispatch((uint)((IrradianceSize + 7) / 8), (uint)((IrradianceSize + 7) / 8), 1);
+		var threadGroupSize = _iblIrradianceThreadGroupSize
+			?? throw new InvalidOperationException("IBL irradiance threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(IrradianceSize, IrradianceSize);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private void RecordPrefilter(
@@ -282,10 +292,12 @@ public sealed class SkyboxPass
 		writer.SetUInt("sliceCount", PrefilterSlices);
 		writer.SetUInt("sliceHeight", PrefilterSliceHeight);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		commandList.Dispatch(
-			(uint)((PrefilterWidth + 7) / 8),
-			(uint)(((PrefilterSliceHeight * PrefilterSlices) + 7) / 8),
-			1);
+		var threadGroupSize = _iblPrefilterThreadGroupSize
+			?? throw new InvalidOperationException("IBL prefilter threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			PrefilterWidth,
+			PrefilterSliceHeight * PrefilterSlices);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private void RecordBrdfLut(IGfxCommandList commandList, IGfxDevice gfxDevice, IGfxTexture brdfTex)
@@ -297,7 +309,10 @@ public sealed class SkyboxPass
 		writer.Clear();
 		writer.SetUInt("brdfHandle", brdfTex.UnorderedAccessView.Value);
 		commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
-		commandList.Dispatch((uint)((BrdfSize + 7) / 8), (uint)((BrdfSize + 7) / 8), 1);
+		var threadGroupSize = _iblBrdfThreadGroupSize
+			?? throw new InvalidOperationException("IBL BRDF threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(BrdfSize, BrdfSize);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
 	private void EnsureProceduralResources(IGfxDevice gfxDevice, out bool createdResources)
@@ -375,9 +390,10 @@ public sealed class SkyboxPass
 		}
 
 		var compiled = CompileComputeWithReflection("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain", gfxDevice.BackendKind);
+		_proceduralSkyboxThreadGroupSize = compiled.ThreadGroupSize;
 		_proceduralBindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_proceduralSkyParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SkyParams"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _proceduralSkyboxThreadGroupSize);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -400,8 +416,9 @@ public sealed class SkyboxPass
 		}
 
 		var compiled = CompileComputeWithReflection("ibl_irradiance.compute.slang", "IblIrradianceCSMain", gfxDevice.BackendKind);
+		_iblIrradianceThreadGroupSize = compiled.ThreadGroupSize;
 		_iblIrradianceWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblIrradianceThreadGroupSize);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -424,8 +441,9 @@ public sealed class SkyboxPass
 		}
 
 		var compiled = CompileComputeWithReflection("ibl_prefilter.compute.slang", "IblPrefilterCSMain", gfxDevice.BackendKind);
+		_iblPrefilterThreadGroupSize = compiled.ThreadGroupSize;
 		_iblPrefilterWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblPrefilterThreadGroupSize);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
@@ -448,8 +466,9 @@ public sealed class SkyboxPass
 		}
 
 		var compiled = CompileComputeWithReflection("ibl_brdf_lut.compute.slang", "IblBrdfCSMain", gfxDevice.BackendKind);
+		_iblBrdfThreadGroupSize = compiled.ThreadGroupSize;
 		_iblBrdfWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode);
+		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblBrdfThreadGroupSize);
 
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,

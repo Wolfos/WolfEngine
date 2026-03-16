@@ -326,6 +326,11 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				throw new InvalidOperationException("Compute shader source was not provided.");
 			}
 
+			if (shaders.ComputeThreadGroupSize is null)
+			{
+				throw new InvalidOperationException("Metal compute pipelines require reflected threadgroup size metadata.");
+			}
+
 			using var computeLibrary = CreateLibraryFromMetallib(shaders.Compute.Value);
 			using var computeEntry = NSStringHelper.From(key.ComputeEntryPoint ?? "CSMain");
 			using var function = computeLibrary.NewFunction(computeEntry);
@@ -341,7 +346,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			var computeSamplerEncoder = CreateArgumentEncoder(function, computeReflection?.Arguments, MetalDescriptorTable.BindlessArgumentBufferIndexSamplers);
 
 			var pipeline = new MetalPipeline(key, PassKind.Compute, default, pipelineState, default,
-				computeTextureEncoder, computeRwTextureEncoder, computeSamplerEncoder, key.RenderState);
+				computeTextureEncoder, computeRwTextureEncoder, computeSamplerEncoder, key.RenderState,
+				shaders.ComputeThreadGroupSize);
 			_pipelines[key] = pipeline;
 			return pipeline;
 		}

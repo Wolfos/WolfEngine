@@ -8,7 +8,8 @@ internal sealed class MetalPipeline : IGfxPipeline
 	public MetalPipeline(PipelineKey key, PassKind kind, MTLRenderPipelineState renderState,
 		MTLComputePipelineState computeState, MTLDepthStencilState depthState,
 		MTLArgumentEncoder textureEncoder, MTLArgumentEncoder rwTextureEncoder, MTLArgumentEncoder samplerEncoder,
-		RenderStateDescriptor renderStateDescriptor)
+		RenderStateDescriptor renderStateDescriptor,
+		ComputeThreadGroupSize? computeThreadGroupSize = null)
 	{
 		Key = key;
 		Kind = kind;
@@ -19,6 +20,7 @@ internal sealed class MetalPipeline : IGfxPipeline
 		RWTextureEncoder = rwTextureEncoder;
 		SamplerEncoder = samplerEncoder;
 		RenderState = renderStateDescriptor;
+		ComputeThreadGroupSize = computeThreadGroupSize;
 	}
 
 	public string Name => null;
@@ -40,4 +42,6 @@ internal sealed class MetalPipeline : IGfxPipeline
 	public MTLArgumentEncoder SamplerEncoder { get; }
 
 	public RenderStateDescriptor RenderState { get; }
+
+	public ComputeThreadGroupSize? ComputeThreadGroupSize { get; }
 }
