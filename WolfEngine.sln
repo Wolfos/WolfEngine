@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.ECS", "WolfEngin
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Editor", "WolfEngine.Editor\WolfEngine.Editor.csproj", "{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.ECS.Tests", "WolfEngine.ECS.Tests\WolfEngine.ECS.Tests.csproj", "{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8F53AFD3-7AC3-49A6-98C8-3EED0628D8A4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

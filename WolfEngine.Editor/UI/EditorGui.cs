@@ -68,6 +68,7 @@ public class EditorGui
 			var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 			if (HasSelectedEntity)
 			{
+				_componentEditor.DrawEntityControls(scene, SelectedEntity);
 				foreach (var componentType in SelectedComponentTypes)
 				{
 					_componentEditor.Draw(scene, SelectedEntity, componentType);

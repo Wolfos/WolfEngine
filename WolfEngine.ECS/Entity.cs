@@ -18,7 +18,7 @@ public readonly struct Entity : IEquatable<Entity>
 		return Index == other.Index && Generation == other.Generation;
 	}
 
-	public override bool Equals(object obj)
+	public override bool Equals(object? obj)
 	{
 		return obj is Entity other && Equals(other);
 	}

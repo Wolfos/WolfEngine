@@ -24,7 +24,7 @@ public readonly ref struct View<T1>
 		}
 
 		private readonly ComponentPool<T1> _pool1;
-		private readonly ReadOnlySpan<int> _iterEntities;
+		private readonly ReadOnlySpan<Entity> _iterEntities;
 		private int _index;
 
 		public Enumerator(ComponentPool<T1> a)
@@ -41,7 +41,7 @@ public readonly ref struct View<T1>
 		{
 			if (++_index >= _iterEntities.Length) return false;
 
-			var entity = new Entity(_iterEntities[_index], 0);
+			var entity = _iterEntities[_index];
 			Current = new Entry(entity, _pool1);
 			return true;
 		}
@@ -77,7 +77,7 @@ public readonly ref struct View<T1,T2>
 
 		private readonly ComponentPool<T1> _pool1;
 		private readonly ComponentPool<T2> _pool2;
-		private readonly ReadOnlySpan<int> _iterEntities;
+		private readonly ReadOnlySpan<Entity> _iterEntities;
 		private readonly bool _iteratingPool1;
 		private int _index;
 
@@ -107,7 +107,7 @@ public readonly ref struct View<T1,T2>
 		{
 			while (++_index < _iterEntities.Length)
 			{
-				var entity = new Entity(_iterEntities[_index], 0);
+				var entity = _iterEntities[_index];
 				if (_iteratingPool1)
 				{
 					if (_pool2.Has(entity))
@@ -165,7 +165,7 @@ public readonly ref struct View<T1,T2,T3>
 		private readonly ComponentPool<T1> _pool1;
 		private readonly ComponentPool<T2> _pool2;
 		private readonly ComponentPool<T3> _pool3;
-		private readonly ReadOnlySpan<int> _iterEntities;
+		private readonly ReadOnlySpan<Entity> _iterEntities;
 		private readonly byte _iteratingPool;
 		private int _index;
 
@@ -201,7 +201,7 @@ public readonly ref struct View<T1,T2,T3>
 		{
 			while (++_index < _iterEntities.Length)
 			{
-				var entity = new Entity(_iterEntities[_index], 0);
+				var entity = _iterEntities[_index];
 				switch (_iteratingPool)
 				{
 					case 1:

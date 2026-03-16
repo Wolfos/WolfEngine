@@ -12,6 +12,7 @@ namespace WolfEngine.Editor.UI;
 
 public interface IComponentEditor
 {
+    void DrawEntityControls(EditorScene scene, Entity entity);
     void Draw(EditorScene scene, Entity entity, Type componentType);
     void DrawAddComponentControls(EditorScene scene, Entity entity);
 }
@@ -40,6 +41,17 @@ public class ComponentsWindow: IComponentEditor
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
         _renderGraph = renderGraph;
+    }
+
+    public void DrawEntityControls(EditorScene scene, Entity entity)
+    {
+        var isEnabled = scene.World.IsEnabled(entity);
+        if (EditorUIUtility.Checkbox("Enabled", ref isEnabled))
+        {
+            scene.World.SetEnabled(entity, isEnabled);
+        }
+
+        ImGui.Separator();
     }
 
     public void Draw(EditorScene scene, Entity entity, Type componentType)
@@ -166,6 +178,12 @@ public class ComponentsWindow: IComponentEditor
 
         if (typeof(T) == typeof(MeshRenderer))
         {
+            if (BeginComponentSection(typeof(T).Name) == false)
+            {
+                ImGui.PopID();
+                return;
+            }
+
             ref var meshRenderer = ref Unsafe.As<T, MeshRenderer>(ref component);
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 nameof(MeshRenderer.MaterialAsset),
@@ -183,6 +201,12 @@ public class ComponentsWindow: IComponentEditor
 
         if (typeof(T) == typeof(Light))
         {
+            if (BeginComponentSection(typeof(T).Name) == false)
+            {
+                ImGui.PopID();
+                return;
+            }
+
             ref var light = ref Unsafe.As<T, Light>(ref component);
             EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type);
             EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity);
@@ -207,10 +231,7 @@ public class ComponentsWindow: IComponentEditor
             return;
         }
 
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
-        var isOpen = EditorUIUtility.CollapsingHeader(typeof(T).Name, true);
-        ImGui.PopStyleVar();
-        if (isOpen == false)
+        if (BeginComponentSection(typeof(T).Name) == false)
         {
             ImGui.PopID();
             return;
@@ -232,6 +253,14 @@ public class ComponentsWindow: IComponentEditor
 
         ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private static bool BeginComponentSection(string label)
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
+        var isOpen = EditorUIUtility.CollapsingHeader(label, true);
+        ImGui.PopStyleVar();
+        return isOpen;
     }
 
     private static nint ResolveIconTexture(string iconName, IIconManager icons)

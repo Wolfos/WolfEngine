@@ -7,6 +7,7 @@ public class FreeList
 		public int NextFree;
 		public int Generation;
 		public bool Alive;
+		public bool Enabled;
 	}
 
 	private Slot[] _slots = new Slot[1024];
@@ -34,6 +35,7 @@ public class FreeList
 
 		ref var slot = ref _slots[index];
 		slot.Alive = true;
+		slot.Enabled = true;
 		slot.Generation++;
 
 		return new(index, slot.Generation);
@@ -57,6 +59,25 @@ public class FreeList
 		return entity.Index < _count &&
 			_slots[entity.Index].Alive &&
 			_slots[entity.Index].Generation == entity.Generation;
+	}
+	
+	public bool IsEnabled(Entity entity)
+	{
+		return entity.Index < _count &&
+		       _slots[entity.Index].Alive &&
+		       _slots[entity.Index].Enabled &&
+		       _slots[entity.Index].Generation == entity.Generation;
+	}
+
+	public void SetEnabled(Entity entity, bool enabled)
+	{
+		if (entity.Index >= _count) return;
+		
+		ref var slot = ref _slots[entity.Index];
+		if (slot.Generation == entity.Generation)
+		{
+			slot.Enabled = enabled;
+		}
 	}
 
 	public void GetAllEntities(List<Entity> entities)

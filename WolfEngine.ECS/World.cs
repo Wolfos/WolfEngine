@@ -70,6 +70,16 @@ public class World
         _entities.GetAllEntities(entities);
     }
 
+    public bool IsEnabled(Entity e)
+    {
+        return _entities.IsEnabled(e);
+    }
+
+    public void SetEnabled(Entity e, bool enabled)
+    {
+        _entities.SetEnabled(e, enabled);
+    }
+
     public void GetAllComponents(Entity entity, List<IEntityComponent> components)
     {
         components.Clear();

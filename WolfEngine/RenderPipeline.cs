@@ -66,6 +66,8 @@ public class RenderPipeline : IRenderPipeline
 				{
 					foreach (var entry in world.View<WorldTransform, MeshRenderer>())
 					{
+						if (world.IsEnabled(entry.Entity) == false) continue;
+						
 						ref var transform = ref entry.First;
 						ref var meshRenderer = ref entry.Second;
 
