@@ -10,6 +10,7 @@ using Silk.NET.Maths;
 using Silk.NET.Windowing;
 using WolfEngine.Mathematics;
 using WolfEngine.Input;
+using WolfEngine.Platform;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
@@ -85,6 +86,7 @@ private sealed class MeshResources
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly IInputSystem _inputSystem;
+	private readonly WindowChromeController _windowChromeController;
 	private IWindow _window = null!;
 	private IInputContext _inputContext = null!;
 	private Action _startupCallback = static () => { };
@@ -128,7 +130,12 @@ private sealed class MeshResources
 	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
-	public WolfRendererD3D(IShaderCompiler shaderCompiler, IArenaAllocator arenaAllocator, IInputSystem inputSystem, ImGuiUiSystem imguiSystem)
+	public WolfRendererD3D(
+		IShaderCompiler shaderCompiler,
+		IArenaAllocator arenaAllocator,
+		IInputSystem inputSystem,
+		ImGuiUiSystem imguiSystem,
+		WindowChromeController windowChromeController)
 	{
 		_width = 1280;
 		_height = 720;
@@ -136,6 +143,7 @@ private sealed class MeshResources
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 		_imguiInputSink = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
+		_windowChromeController = windowChromeController ?? throw new ArgumentNullException(nameof(windowChromeController));
 	}
 
 	public void Run(Action startup, Action<float> update, Action<float> render)
@@ -470,6 +478,7 @@ private sealed class MeshResources
 		options.Title = "WolfEngine";
 		options.Size = new(_width, _height);
 		options.API = GraphicsAPI.None;
+		options.WindowBorder = WindowBorder.Hidden;
 
 		_window = Window.Create(options);
 	}
@@ -492,6 +501,8 @@ private sealed class MeshResources
 		{
 			throw new InvalidOperationException("Windowing subsystem reported a null window handle.");
 		}
+
+		_windowChromeController.AttachToWindow(_windowHandle);
 	}
 
 	private void UpdateFramebufferSize()
@@ -1722,6 +1733,7 @@ private sealed class MeshResources
 
 		if (_window is not null)
 		{
+			_windowChromeController.DetachWindow();
 			_window.Load -= OnWindowLoad;
 			_window.Update -= OnWindowUpdate;
 			_window.Render -= OnWindowRender;

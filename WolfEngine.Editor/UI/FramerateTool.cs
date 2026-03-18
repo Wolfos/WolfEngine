@@ -11,7 +11,7 @@ public class FramerateTool
 	private float _averageMs;
 	private float _maxMs;
 
-	public void DrawRightAlignedInMenuBar()
+	public void DrawRightAlignedInMenuBar(float rightInset = 0.0f)
 	{
 		UpdateSamples();
 		var label = $"Frame {_averageMs:0.00} ms avg | {_maxMs:0.00} ms max";
@@ -19,7 +19,7 @@ public class FramerateTool
 		var style = ImGuiNET.ImGui.GetStyle();
 		float textWidth = ImGuiNET.ImGui.CalcTextSize(label).X;
 		float totalWidth = textWidth + style.FramePadding.X * 2.0f;
-		float rightX = Math.Max(0.0f, ImGuiNET.ImGui.GetWindowWidth() - totalWidth - style.WindowPadding.X);
+		float rightX = Math.Max(0.0f, ImGuiNET.ImGui.GetWindowWidth() - totalWidth - style.WindowPadding.X - rightInset);
 
 		ImGuiNET.ImGui.SameLine();
 		ImGuiNET.ImGui.SetCursorPosX(rightX);

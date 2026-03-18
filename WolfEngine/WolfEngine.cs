@@ -45,6 +45,8 @@ public static class WolfEngine
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
+		services.AddSingleton<WindowChromeController>();
+		services.AddSingleton<IWindowChromeController>(sp => sp.GetRequiredService<WindowChromeController>());
 		services.AddSingleton<GpuDrawResources>();
 		services.AddSingleton<GpuDrawDatabase>();
 		services.AddSingleton<GpuDrawHardeningStats>();
@@ -58,7 +60,7 @@ public static class WolfEngine
 		
 		if (OperatingSystem.IsMacOS())
 		{
-			services.AddSingleton<IMacOSInputHandler, MacOsInputHandlerHandler>();
+			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
 			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
 			services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();

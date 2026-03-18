@@ -2,6 +2,8 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Platform;
+using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.UI;
@@ -15,12 +17,19 @@ public sealed class MenuBar : IMenuBar
 {
 	private const string NewProjectPopupId = "New Project";
 	private const string ErrorPopupId = "Asset Pipeline Error";
+	private const float MacTitlebarButtonInset = 70.0f;
+	private const float WindowsCaptionButtonWidth = 45.0f;
+	private const float WindowsCaptionButtonSpacing = 0.0f;
+	private const float WindowsMaximizedTopInset = 8.0f;
+	private const float WindowsMaximizedContentInset = 4.0f;
 
 	private readonly IFileDialogService _fileDialogService;
 	private readonly ISceneBuilder _sceneBuilder;
 	private readonly FramerateTool _framerateTool;
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
+	private readonly IIconManager _icons;
+	private readonly IWindowChromeController _windowChromeController;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -33,54 +42,194 @@ public sealed class MenuBar : IMenuBar
 		ISceneBuilder sceneBuilder,
 		FramerateTool framerateTool,
 		IEditorProjectService projectService,
-		ITextureAssetImporter textureAssetImporter)
+		ITextureAssetImporter textureAssetImporter,
+		IIconManager icons,
+		IWindowChromeController windowChromeController)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneBuilder = sceneBuilder;
 		_framerateTool = framerateTool;
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
+		_icons = icons;
+		_windowChromeController = windowChromeController;
 	}
 
 	public void Draw(EditorScene scene)
 	{
+		var style = ImGui.GetStyle();
+		var pushedMaximizedMenuPadding = false;
+		if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+		    && _windowChromeController.IsCustomChromeSupported
+		    && _windowChromeController.IsMaximized)
+		{
+			ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, style.FramePadding.Y + (WindowsMaximizedTopInset * 0.5f)));
+			pushedMaximizedMenuPadding = true;
+		}
+
 		if (ImGui.BeginMainMenuBar() == false)
 		{
+			_windowChromeController.SetTitleBarMetrics(WindowTitleBarMetrics.Empty);
+			if (pushedMaximizedMenuPadding)
+			{
+				ImGui.PopStyleVar();
+			}
 			DrawPopups();
 			return;
 		}
 
+		var exclusionRects = new List<WindowChromeRect>(8);
+		var titleBarMin = ImGui.GetWindowPos();
+		WindowChromeRect minimizeButtonRect = WindowChromeRect.Empty;
+		WindowChromeRect maximizeButtonRect = WindowChromeRect.Empty;
+		WindowChromeRect closeButtonRect = WindowChromeRect.Empty;
+		var isWindowsChrome = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && _windowChromeController.IsCustomChromeSupported;
+		var contentInset = isWindowsChrome && _windowChromeController.IsMaximized
+			? WindowsMaximizedContentInset
+			: 0.0f;
+
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
 		{
-			const float macTitlebarButtonInset = 70.0f;
-			if (ImGui.GetCursorPosX() < macTitlebarButtonInset)
+			if (ImGui.GetCursorPosX() < MacTitlebarButtonInset)
 			{
-				ImGui.SetCursorPosX(macTitlebarButtonInset);
+				ImGui.SetCursorPosX(MacTitlebarButtonInset);
 			}
 		}
+		else if (contentInset > 0.0f)
+		{
+			ImGui.SetCursorPosY(ImGui.GetCursorPosY() + contentInset);
+		}
 
-		DrawFileMenu();
-		DrawEditMenu();
-		DrawImportMenu(scene);
+		AddRect(exclusionRects, DrawFileMenu());
+		AddRect(exclusionRects, DrawEditMenu());
+		AddRect(exclusionRects, DrawImportMenu(scene));
 
 		if (_projectService.HasOpenProject)
 		{
 			var projectLabel = Path.GetFileName(_projectService.ProjectRootPath);
 			ImGui.SameLine();
 			ImGui.TextDisabled($"Project: {projectLabel}");
+			AddLastItemRect(exclusionRects);
 		}
 
-		_framerateTool.DrawRightAlignedInMenuBar();
+		var rightInset = isWindowsChrome
+			? (WindowsCaptionButtonWidth * 3.0f) + WindowsCaptionButtonSpacing + ImGui.GetStyle().ItemSpacing.X
+			: 0.0f;
+		_framerateTool.DrawRightAlignedInMenuBar(rightInset);
+		AddLastItemRect(exclusionRects);
+
+		if (isWindowsChrome)
+		{
+			DrawWindowsCaptionButtons(ref minimizeButtonRect, ref maximizeButtonRect, ref closeButtonRect, exclusionRects);
+		}
+
+		var titleBarMax = titleBarMin + ImGui.GetWindowSize();
 		ImGui.EndMainMenuBar();
+		if (pushedMaximizedMenuPadding)
+		{
+			ImGui.PopStyleVar();
+		}
+		_windowChromeController.SetTitleBarMetrics(new WindowTitleBarMetrics(
+			new WindowChromeRect(titleBarMin.X, titleBarMin.Y, titleBarMax.X, titleBarMax.Y),
+			minimizeButtonRect,
+			maximizeButtonRect,
+			closeButtonRect,
+			exclusionRects.ToArray()));
 
 		DrawPopups();
 	}
 
-	private void DrawFileMenu()
+	private void DrawWindowsCaptionButtons(
+		ref WindowChromeRect minimizeButtonRect,
+		ref WindowChromeRect maximizeButtonRect,
+		ref WindowChromeRect closeButtonRect,
+		List<WindowChromeRect> exclusionRects)
 	{
-		if (ImGui.BeginMenu("File") == false)
+		var buttonHeight = MathF.Max(ImGui.GetWindowHeight() - 2.0f, 20.0f);
+		var buttonSize = new Vector2(WindowsCaptionButtonWidth, buttonHeight);
+		var style = ImGui.GetStyle();
+		var contentInset = _windowChromeController.IsMaximized ? WindowsMaximizedContentInset : 0.0f;
+		var topOffset = MathF.Max((ImGui.GetWindowHeight() - buttonHeight) * 0.5f, 0.0f) + contentInset;
+		var rightEdge = ImGui.GetWindowWidth();
+		var closeX = rightEdge - buttonSize.X;
+		var maximizeX = closeX - WindowsCaptionButtonSpacing - buttonSize.X;
+		var minimizeX = maximizeX - WindowsCaptionButtonSpacing - buttonSize.X;
+
+		minimizeButtonRect = DrawWindowsCaptionButton("TitleMinimize", "minimize", minimizeX, topOffset, buttonSize, false, () => _windowChromeController.Minimize());
+		exclusionRects.Add(minimizeButtonRect);
+
+		var maximizeIcon = _windowChromeController.IsMaximized ? "window" : "square";
+		maximizeButtonRect = DrawWindowsCaptionButton("TitleMaximize", maximizeIcon, maximizeX, topOffset, buttonSize, false, () => _windowChromeController.ToggleMaximize());
+		exclusionRects.Add(maximizeButtonRect);
+
+		closeButtonRect = DrawWindowsCaptionButton("TitleClose", "close", closeX, topOffset, buttonSize, true, () => _windowChromeController.Close());
+		exclusionRects.Add(closeButtonRect);
+	}
+
+	private WindowChromeRect DrawWindowsCaptionButton(
+		string id,
+		string iconName,
+		float x,
+		float y,
+		Vector2 size,
+		bool isCloseButton,
+		Action onClick)
+	{
+		ImGui.SetCursorPos(new Vector2(x, y));
+
+		var baseColor = new Vector4(0.0f, 0.0f, 0.0f, 0.0f);
+		var hoveredColor = isCloseButton ? new Vector4(0.741f, 0.184f, 0.224f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 0.12f);
+		var activeColor = isCloseButton ? new Vector4(0.616f, 0.157f, 0.188f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 0.18f);
+		var imageSize = Vector2.One * 14.0f;
+		var framePadding = new Vector2(
+			MathF.Max((size.X - imageSize.X) * 0.5f, 0.0f),
+			MathF.Max((size.Y - imageSize.Y) * 0.5f, 0.0f));
+
+		ImGui.PushStyleColor(ImGuiCol.Button, baseColor);
+		ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hoveredColor);
+		ImGui.PushStyleColor(ImGuiCol.ButtonActive, activeColor);
+		ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 0.0f);
+		ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.0f);
+		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, framePadding);
+
+		if (ImGui.ImageButton(id, _icons.Get(iconName), imageSize))
 		{
-			return;
+			onClick();
+		}
+
+		var rect = GetLastItemRect();
+		ImGui.PopStyleVar(3);
+		ImGui.PopStyleColor(3);
+		return rect;
+	}
+
+	private static void AddLastItemRect(List<WindowChromeRect> rects)
+	{
+		AddRect(rects, GetLastItemRect());
+	}
+
+	private static void AddRect(List<WindowChromeRect> rects, WindowChromeRect rect)
+	{
+		if (rect.IsEmpty == false)
+		{
+			rects.Add(rect);
+		}
+	}
+
+	private static WindowChromeRect GetLastItemRect()
+	{
+		var min = ImGui.GetItemRectMin();
+		var max = ImGui.GetItemRectMax();
+		return new WindowChromeRect(min.X, min.Y, max.X, max.Y);
+	}
+
+	private WindowChromeRect DrawFileMenu()
+	{
+		var isOpen = ImGui.BeginMenu("File");
+		var menuRect = GetLastItemRect();
+		if (isOpen == false)
+		{
+			return menuRect;
 		}
 
 		if (ImGui.MenuItem("New Project..."))
@@ -115,21 +264,28 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		ImGui.EndMenu();
+		return menuRect;
 	}
 
-	private static void DrawEditMenu()
+	private static WindowChromeRect DrawEditMenu()
 	{
-		if (ImGui.BeginMenu("Edit"))
+		var isOpen = ImGui.BeginMenu("Edit");
+		var menuRect = GetLastItemRect();
+		if (isOpen)
 		{
 			ImGui.EndMenu();
 		}
+
+		return menuRect;
 	}
 
-	private void DrawImportMenu(EditorScene scene)
+	private WindowChromeRect DrawImportMenu(EditorScene scene)
 	{
-		if (ImGui.BeginMenu("Import") == false)
+		var isOpen = ImGui.BeginMenu("Import");
+		var menuRect = GetLastItemRect();
+		if (isOpen == false)
 		{
-			return;
+			return menuRect;
 		}
 
 		if (ImGui.MenuItem("Import 3D file"))
@@ -166,6 +322,7 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		ImGui.EndMenu();
+		return menuRect;
 	}
 
 	private void DrawPopups()

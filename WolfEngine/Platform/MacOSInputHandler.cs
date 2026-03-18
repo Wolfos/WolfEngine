@@ -13,14 +13,14 @@ internal interface IMacOSInputHandler
 	internal void HandleInputEvents(ref Event @event);
 }
 
-public class MacOsInputHandlerHandler: IMacOSInputHandler
+public class MacOsInputHandler: IMacOSInputHandler
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInputSink;
 	
 	private bool _hasMousePosition;
 
-	public MacOsInputHandlerHandler(IInputSystem inputSystem, IImGuiInputSink imguiInputSink)
+	public MacOsInputHandler(IInputSystem inputSystem, IImGuiInputSink imguiInputSink)
 	{
 		_inputSystem = inputSystem;
 		_imguiInputSink = imguiInputSink;
