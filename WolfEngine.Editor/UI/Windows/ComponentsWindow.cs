@@ -49,6 +49,11 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     {
         ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
+        if (EditorGui.HasSelectedEntity && EditorGui.ConsumeComponentsWindowFocusRequest())
+        {
+            ImGui.SetNextWindowFocus();
+        }
+
         var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
         ImGui.Begin(Name);
         var pushedRegularContent = ImGuiUiSystem.PushRegularFont();

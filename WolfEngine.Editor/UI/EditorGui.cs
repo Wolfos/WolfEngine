@@ -13,6 +13,7 @@ public class EditorGui
 	public static readonly List<Type> SelectedComponentTypes = new();
 	public static Entity SelectedEntity;
 	public static bool HasSelectedEntity = false;
+	private static bool _componentsWindowFocusRequested;
 
 	private readonly IMenuBar _menuBar;
 	private readonly IEditorModeState _editorModeState;
@@ -79,6 +80,18 @@ public class EditorGui
 		HasSelectedEntity = true;
 		SelectedEntity = entity;
 		world.GetComponentTypes(entity, SelectedComponentTypes);
+		_componentsWindowFocusRequested = true;
+	}
+
+	public static bool ConsumeComponentsWindowFocusRequest()
+	{
+		if (_componentsWindowFocusRequested == false)
+		{
+			return false;
+		}
+
+		_componentsWindowFocusRequested = false;
+		return true;
 	}
 
 	private static void DrawWindow(EditorWindow window, EditorScene scene)

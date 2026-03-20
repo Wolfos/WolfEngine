@@ -26,6 +26,11 @@ public sealed class AssetEditorWindow : EditorWindow
 	{
 		ImGui.SetNextWindowPos(new Vector2(860.0f, 420.0f), ImGuiCond.FirstUseEver);
 		ImGui.SetNextWindowSize(new Vector2(420.0f, 300.0f), ImGuiCond.FirstUseEver);
+		if (_assetSelectionService.SelectedAssetId.HasValue && _assetSelectionService.ConsumeFocusRequest())
+		{
+			ImGui.SetNextWindowFocus();
+		}
+
 		Begin();
 
 		if (_projectService.HasOpenProject == false)
