@@ -30,6 +30,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly ITextureAssetImporter _textureAssetImporter;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
+	private readonly IEditorModeState _editorModeState;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -44,7 +45,8 @@ public sealed class MenuBar : IMenuBar
 		IEditorProjectService projectService,
 		ITextureAssetImporter textureAssetImporter,
 		IIconManager icons,
-		IWindowChromeController windowChromeController)
+		IWindowChromeController windowChromeController,
+		IEditorModeState editorModeState)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneBuilder = sceneBuilder;
@@ -53,6 +55,7 @@ public sealed class MenuBar : IMenuBar
 		_textureAssetImporter = textureAssetImporter;
 		_icons = icons;
 		_windowChromeController = windowChromeController;
+		_editorModeState = editorModeState;
 	}
 
 	public void Draw(EditorScene scene)
@@ -141,7 +144,7 @@ public sealed class MenuBar : IMenuBar
 		DrawPopups();
 	}
 
-	private static void DrawCenteredEditorModeButtons(List<WindowChromeRect> exclusionRects, float rightInset)
+	private void DrawCenteredEditorModeButtons(List<WindowChromeRect> exclusionRects, float rightInset)
 	{
 		const string SceneLabel = "Scene";
 		const string AssetsLabel = "Assets";
@@ -165,12 +168,17 @@ public sealed class MenuBar : IMenuBar
 		}
 		
 		var notSelectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.TitleBg];
+		var currentMode = _editorModeState.CurrentMode;
 
-		void DrawEditorModeButton(string label, float width, bool selected)
+		void DrawEditorModeButton(string label, float width, EditorMode mode)
 		{
+			var selected = currentMode == mode;
 			if(selected == false) ImGui.PushStyleColor(ImGuiCol.Button, notSelectedColor);
 			
-			ImGui.Button(label, new Vector2(width, buttonHeight));
+			if (ImGui.Button(label, new Vector2(width, buttonHeight)))
+			{
+				_editorModeState.SetMode(mode);
+			}
 			AddLastItemRect(exclusionRects);
 			
 			if(selected == false) ImGui.PopStyleColor();
@@ -178,14 +186,14 @@ public sealed class MenuBar : IMenuBar
 
 		ImGui.SameLine();
 		ImGui.SetCursorPosX(startX);
-		DrawEditorModeButton(SceneLabel, sceneWidth, true);
+		DrawEditorModeButton(SceneLabel, sceneWidth, EditorMode.Scene);
 
 		
 		ImGui.SameLine();
-		DrawEditorModeButton(AssetsLabel, assetsWidth, false);
+		DrawEditorModeButton(AssetsLabel, assetsWidth, EditorMode.Assets);
 
 		ImGui.SameLine();
-		DrawEditorModeButton(AnimationLabel, animationWidth, false);
+		DrawEditorModeButton(AnimationLabel, animationWidth, EditorMode.Animation);
 
 	}
 

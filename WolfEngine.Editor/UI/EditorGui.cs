@@ -14,31 +14,30 @@ public class EditorGui
 	public static Entity SelectedEntity;
 	public static bool HasSelectedEntity = false;
 
-	private readonly IServiceProvider _serviceProvider;
-	private readonly IComponentEditor _componentEditor;
 	private readonly IMenuBar _menuBar;
+	private readonly IEditorModeState _editorModeState;
 
-	private readonly List<EditorWindow> _editorWindows = new();
+	private readonly EntitiesWindow _entitiesWindow;
+	private readonly AssetsWindow _assetsWindow;
+	private readonly AssetEditorWindow _assetEditorWindow;
+	private readonly ComponentsWindow _componentsWindow;
+	private readonly ProfilerWindow _profilerWindow;
+	private readonly SceneWindow _sceneWindow;
 
 	public EditorGui(
-		IComponentEditor componentEditor,
 		IMenuBar menuBar,
+		IEditorModeState editorModeState,
 		IServiceProvider serviceProvider)
 	{
-		_componentEditor = componentEditor;
 		_menuBar = menuBar;
-		_serviceProvider = serviceProvider;
-		
-		NewWindow<EntitiesWindow>();
-		NewWindow<AssetsWindow>();
-		NewWindow<AssetEditorWindow>();
-		NewWindow<ProfilerWindow>();
-		NewWindow<SceneWindow>(); }
+		_editorModeState = editorModeState;
 
-	public void NewWindow<T>() where T : EditorWindow
-	{
-		var window = ActivatorUtilities.CreateInstance<T>(_serviceProvider);
-		_editorWindows.Add(window);
+		_entitiesWindow = serviceProvider.GetRequiredService<EntitiesWindow>();
+		_assetsWindow = serviceProvider.GetRequiredService<AssetsWindow>();
+		_assetEditorWindow = serviceProvider.GetRequiredService<AssetEditorWindow>();
+		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
+		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
+		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
 	}
 
 	public void Draw(EditorScene scene)
@@ -50,41 +49,24 @@ public class EditorGui
 			_menuBar.Draw(scene);
 		}
 
-		foreach (var window in _editorWindows)
+		switch (_editorModeState.CurrentMode)
 		{
-			using (FrameProfiler.Instance.Measure(window.Name))
-			{
-				window.Draw(scene);
-			}
+			case EditorMode.Scene:
+				DrawWindow(_entitiesWindow, scene);
+				DrawWindow(_sceneWindow, scene);
+				DrawWindow(_componentsWindow, scene);
+				DrawWindow(_assetEditorWindow, scene);
+				break;
+			case EditorMode.Assets:
+				DrawWindow(_assetsWindow, scene);
+				DrawWindow(_componentsWindow, scene);
+				DrawWindow(_assetEditorWindow, scene);
+				break;
+			case EditorMode.Animation:
+				break;
 		}
 
-		// TODO: Refactor
-		using (FrameProfiler.Instance.Measure("Components Window"))
-		{
-			ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
-			ImGui.SetNextWindowSize(new Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
-			var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-			ImGui.Begin("Components");
-			var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
-			if (HasSelectedEntity)
-			{
-				_componentEditor.DrawEntityControls(scene, SelectedEntity);
-				foreach (var componentType in SelectedComponentTypes)
-				{
-					_componentEditor.Draw(scene, SelectedEntity, componentType);
-				}
-				ImGui.Separator();
-				_componentEditor.DrawAddComponentControls(scene, SelectedEntity);
-			}
-			else
-			{
-				ImGui.TextUnformatted("No entity selected.");
-			}
-
-			ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
-			ImGui.End();
-			ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
-		}
+		DrawWindow(_profilerWindow, scene);
 
 		using (FrameProfiler.Instance.Measure("Preferences"))
 		{
@@ -97,6 +79,14 @@ public class EditorGui
 		HasSelectedEntity = true;
 		SelectedEntity = entity;
 		world.GetComponentTypes(entity, SelectedComponentTypes);
+	}
+
+	private static void DrawWindow(EditorWindow window, EditorScene scene)
+	{
+		using (FrameProfiler.Instance.Measure(window.Name))
+		{
+			window.Draw(scene);
+		}
 	}
 
 	private static void DockSpace()

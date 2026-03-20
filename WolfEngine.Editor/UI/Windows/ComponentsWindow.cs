@@ -17,7 +17,7 @@ public interface IComponentEditor
     void DrawAddComponentControls(EditorScene scene, Entity entity);
 }
 
-public class ComponentsWindow: IComponentEditor
+public class ComponentsWindow : EditorWindow, IComponentEditor
 {
     private const string AddComponentPopupId = "AddComponentPopup";
     private static readonly MethodInfo DrawComponentEditorGenericMethod = typeof(ComponentsWindow).GetMethod(
@@ -41,6 +41,36 @@ public class ComponentsWindow: IComponentEditor
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
         _renderGraph = renderGraph;
+    }
+
+    public override string Name => "Components";
+
+    public override void Draw(EditorScene scene)
+    {
+        ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(239.0f, 720.0f), ImGuiCond.FirstUseEver);
+        var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
+        ImGui.Begin(Name);
+        var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
+        if (EditorGui.HasSelectedEntity)
+        {
+            DrawEntityControls(scene, EditorGui.SelectedEntity);
+            foreach (var componentType in EditorGui.SelectedComponentTypes)
+            {
+                Draw(scene, EditorGui.SelectedEntity, componentType);
+            }
+
+            ImGui.Separator();
+            DrawAddComponentControls(scene, EditorGui.SelectedEntity);
+        }
+        else
+        {
+            ImGui.TextUnformatted("No entity selected.");
+        }
+
+        ImGuiUiSystem.PopFontIfPushed(pushedRegularContent);
+        ImGui.End();
+        ImGuiUiSystem.PopFontIfPushed(pushedBoldTitle);
     }
 
     public void DrawEntityControls(EditorScene scene, Entity entity)

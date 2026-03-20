@@ -67,6 +67,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
+		services.AddSingleton<IEditorModeState, EditorModeState>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
@@ -78,7 +79,8 @@ public static class Program
 
 	private static void ConfigureEditorWindows(IServiceCollection services)
 	{
-		services.AddSingleton<IComponentEditor, ComponentsWindow>();
+		services.AddSingleton<ComponentsWindow>();
+		services.AddSingleton<IComponentEditor>(provider => provider.GetRequiredService<ComponentsWindow>());
 		services.AddTransient<EntitiesWindow>();
 		services.AddTransient<AssetsWindow>();
 		services.AddTransient<AssetEditorWindow>();
