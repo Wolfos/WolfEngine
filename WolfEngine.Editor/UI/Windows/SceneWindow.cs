@@ -41,9 +41,10 @@ public class SceneWindow: EditorWindow
         var world = scene.World;
         
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 3.0f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0);
         ImGui.SetNextWindowSize(new Vector2(800.0f, 520.0f), ImGuiCond.FirstUseEver);
         Begin();
-        ImGui.PopStyleVar();
+        ImGui.PopStyleVar(2);
 
         ImGui.SetCursorPosX(3);
         if (DrawTransformModeButton("Translate", "translate", TransformGizmoMode.Translate))

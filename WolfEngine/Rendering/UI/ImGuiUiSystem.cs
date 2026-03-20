@@ -427,9 +427,9 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.ChildBorderSize = 1;
 		style.PopupBorderSize = 1;
 		style.TabBorderSize = 0;
-		style.TabBarBorderSize = 0;
+		style.TabBarBorderSize = 1;
 		style.FrameBorderSize = 1;
-		style.DockingSeparatorSize = 1;
+		style.DockingSeparatorSize = 3;
 		
 		style.FrameRounding = 4.0f;
 		style.ChildRounding = 4.0f;
@@ -437,7 +437,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.PopupRounding = 4.0f;
 		style.ScrollbarRounding = 4.0f;
 		style.TabRounding = 6.0f;
-		style.WindowRounding = 4.0f;
+		style.WindowRounding = 6.0f;
 		style.WindowMenuButtonPosition = ImGuiDir.None;
 		
 		style.Colors[(int)ImGuiCol.Text] = textColor;
@@ -455,7 +455,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		style.Colors[(int)ImGuiCol.Header] = bgColor;
 		style.Colors[(int)ImGuiCol.HeaderActive] = secondaryContainer;
 		style.Colors[(int)ImGuiCol.HeaderHovered] = bgBright;
-		style.Colors[(int)ImGuiCol.Border] = border;
+		style.Colors[(int)ImGuiCol.Border] = bgDark;
 		style.Colors[(int)ImGuiCol.BorderShadow] = default(ColorRGBA);
 		style.Colors[(int)ImGuiCol.Separator] = separator;
 		style.Colors[(int)ImGuiCol.SeparatorHovered] = new ColorRGBA(primary.R, primary.G, primary.B, 0.25f);

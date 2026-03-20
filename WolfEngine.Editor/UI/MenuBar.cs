@@ -104,17 +104,19 @@ public sealed class MenuBar : IMenuBar
 		AddRect(exclusionRects, DrawEditMenu());
 		AddRect(exclusionRects, DrawImportMenu(scene));
 
-		if (_projectService.HasOpenProject)
-		{
-			var projectLabel = Path.GetFileName(_projectService.ProjectRootPath);
-			ImGui.SameLine();
-			ImGui.TextDisabled($"Project: {projectLabel}");
-			AddLastItemRect(exclusionRects);
-		}
-
 		var rightInset = isWindowsChrome
 			? (WindowsCaptionButtonWidth * 3.0f) + WindowsCaptionButtonSpacing + ImGui.GetStyle().ItemSpacing.X
 			: 0.0f;
+		DrawCenteredEditorModeButtons(exclusionRects, rightInset);
+
+		// if (_projectService.HasOpenProject)
+		// {
+		// 	var projectLabel = Path.GetFileName(_projectService.ProjectRootPath);
+		// 	ImGui.SameLine();
+		// 	ImGui.TextDisabled($"Project: {projectLabel}");
+		// 	AddLastItemRect(exclusionRects);
+		// }
+
 		_framerateTool.DrawRightAlignedInMenuBar(rightInset);
 		AddLastItemRect(exclusionRects);
 
@@ -137,6 +139,54 @@ public sealed class MenuBar : IMenuBar
 			exclusionRects.ToArray()));
 
 		DrawPopups();
+	}
+
+	private static void DrawCenteredEditorModeButtons(List<WindowChromeRect> exclusionRects, float rightInset)
+	{
+		const string SceneLabel = "Scene";
+		const string AssetsLabel = "Assets";
+		const string AnimationLabel = "Animation";
+		const string FramerateTemplateLabel = "Frame 0000.00 ms avg | 0000.00 ms max";
+
+		var style = ImGui.GetStyle();
+		var leftBoundary = ImGui.GetCursorPosX() + style.ItemSpacing.X;
+		var buttonHeight = ImGui.GetFrameHeight();
+		var sceneWidth = ImGui.CalcTextSize(SceneLabel).X + (style.FramePadding.X * 2.0f);
+		var assetsWidth = ImGui.CalcTextSize(AssetsLabel).X + (style.FramePadding.X * 2.0f);
+		var animationWidth = ImGui.CalcTextSize(AnimationLabel).X + (style.FramePadding.X * 2.0f);
+		var groupWidth = sceneWidth + assetsWidth + animationWidth + (style.ItemSpacing.X * 2.0f);
+		var framerateWidth = ImGui.CalcTextSize(FramerateTemplateLabel).X + (style.FramePadding.X * 2.0f);
+		var rightBoundary = ImGui.GetWindowWidth() - style.WindowPadding.X - rightInset - framerateWidth - style.ItemSpacing.X;
+		var centeredX = (ImGui.GetWindowWidth() - groupWidth) * 0.5f;
+		var startX = MathF.Max(leftBoundary, centeredX);
+		if (startX + groupWidth > rightBoundary)
+		{
+			startX = MathF.Max(leftBoundary, rightBoundary - groupWidth);
+		}
+		
+		var notSelectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.TitleBg];
+
+		void DrawEditorModeButton(string label, float width, bool selected)
+		{
+			if(selected == false) ImGui.PushStyleColor(ImGuiCol.Button, notSelectedColor);
+			
+			ImGui.Button(label, new Vector2(width, buttonHeight));
+			AddLastItemRect(exclusionRects);
+			
+			if(selected == false) ImGui.PopStyleColor();
+		}
+
+		ImGui.SameLine();
+		ImGui.SetCursorPosX(startX);
+		DrawEditorModeButton(SceneLabel, sceneWidth, true);
+
+		
+		ImGui.SameLine();
+		DrawEditorModeButton(AssetsLabel, assetsWidth, false);
+
+		ImGui.SameLine();
+		DrawEditorModeButton(AnimationLabel, animationWidth, false);
+
 	}
 
 	private void DrawWindowsCaptionButtons(
