@@ -12,6 +12,7 @@ public sealed class AssetsWindow : EditorWindow
 	private const string ErrorPopupId = "AssetsWindowError";
 
 	private readonly IEditorProjectService _projectService;
+	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IImageLoader _imageLoader;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
@@ -20,11 +21,13 @@ public sealed class AssetsWindow : EditorWindow
 
 	public AssetsWindow(
 		IEditorProjectService projectService,
+		IProjectAssetPipelineService assetPipelineService,
 		IImageLoader imageLoader,
 		IAssetSelectionService assetSelectionService,
 		IEditorAssetHandlerRegistry assetHandlerRegistry)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
@@ -43,7 +46,7 @@ public sealed class AssetsWindow : EditorWindow
 			ImGui.BeginDisabled();
 			ImGui.TextUnformatted("No project open.");
 			ImGui.EndDisabled();
-			DrawContextMenu();
+			DrawContextMenu(scene);
 			DrawErrorPopup();
 			ImGui.End();
 			return;
@@ -56,7 +59,7 @@ public sealed class AssetsWindow : EditorWindow
 		if (assetGroups.Count == 0)
 		{
 			ImGui.TextUnformatted("No assets imported yet.");
-			DrawContextMenu();
+			DrawContextMenu(scene);
 			DrawErrorPopup();
 			ImGui.End();
 			return;
@@ -64,20 +67,20 @@ public sealed class AssetsWindow : EditorWindow
 
 		for (var i = 0; i < assetGroups.Count; i++)
 		{
-			DrawAssetGroup(assetGroups[i]);
+			DrawAssetGroup(assetGroups[i], scene);
 		}
 
-		DrawContextMenu();
+		DrawContextMenu(scene);
 		DrawErrorPopup();
 		ImGui.End();
 	}
 
-	private void DrawAssetGroup(AssetGroup assetGroup)
+	private void DrawAssetGroup(AssetGroup assetGroup, EditorScene scene)
 	{
-		DrawAssetNode(assetGroup.Root, assetGroup.Children);
+		DrawAssetNode(assetGroup.Root, assetGroup.Children, scene);
 	}
 
-	private unsafe void DrawAssetNode(AssetDatabaseEntry asset, IReadOnlyList<AssetDatabaseEntry> children)
+	private unsafe void DrawAssetNode(AssetDatabaseEntry asset, IReadOnlyList<AssetDatabaseEntry> children, EditorScene scene)
 	{
 		ImGui.PushID(asset.Id.ToString());
 
@@ -110,9 +113,10 @@ public sealed class AssetsWindow : EditorWindow
 		var nodeCursorPosition = ImGui.GetCursorScreenPos();
 		var open = ImGui.TreeNodeEx("##AssetNode", flags);
 		var nodeClicked = ImGui.IsItemClicked();
+		var nodeRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		DrawAssetRowContent(asset, nodeCursorPosition.X, children.Count);
 
-		if (nodeClicked)
+		if (nodeClicked || nodeRightClicked)
 		{
 			_assetSelectionService.Select(asset.Id);
 		}
@@ -121,7 +125,7 @@ public sealed class AssetsWindow : EditorWindow
 		{
 			for (var i = 0; i < children.Count; i++)
 			{
-				DrawAssetNode(children[i], []);
+				DrawAssetNode(children[i], [], scene);
 			}
 
 			ImGui.TreePop();
@@ -254,7 +258,7 @@ public sealed class AssetsWindow : EditorWindow
 		};
 	}
 
-	private void DrawContextMenu()
+	private void DrawContextMenu(EditorScene scene)
 	{
 		if (ImGui.BeginPopupContextWindow("AssetsContextMenu", ImGuiPopupFlags.MouseButtonRight) == false)
 		{
@@ -271,6 +275,23 @@ public sealed class AssetsWindow : EditorWindow
 		{
 			DrawCreateMenuItems(_assetHandlerRegistry.GetCreateMenuItems());
 			ImGui.EndMenu();
+		}
+
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId
+		    && _projectService.TryGetAsset(selectedAssetId, out var selectedAsset)
+		    && selectedAsset.Type == AssetType.Model3D)
+		{
+			if (ImGui.MenuItem("Add to Scene"))
+			{
+				try
+				{
+					_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, selectedAsset.Id, scene.World);
+				}
+				catch (Exception ex)
+				{
+					ShowError($"Failed to add model to scene: {ex.Message}");
+				}
+			}
 		}
 
 		if (hasProject == false)
