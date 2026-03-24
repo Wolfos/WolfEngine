@@ -641,8 +641,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				AssetPipelinePaths.ImportedFolderName,
 				metadata.SourceId.ToString("D"),
 				"meshes",
-				$"{nodeKey.Replace(':', '_')}.mesh.json"));
-			WriteJsonFile(GetAbsolutePath(projectRootPath, relativeMeshPath), new ImportedMeshAssetFile
+				$"{nodeKey.Replace(':', '_')}.mesh.bin"));
+			ImportedMeshSerializer.Write(GetAbsolutePath(projectRootPath, relativeMeshPath), new ImportedMeshAssetFile
 			{
 				Vertices = meshInfo.Mesh.Vertices,
 				Indices = meshInfo.Mesh.Indices,

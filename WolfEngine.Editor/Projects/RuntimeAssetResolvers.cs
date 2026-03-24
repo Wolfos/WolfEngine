@@ -123,7 +123,7 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 		var summary = context.Asset.MeshSummary
 		              ?? throw new InvalidOperationException($"Mesh node '{context.AssetId}' is missing its mesh summary.");
 		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
-		var meshFile = AssetPipelineSerialization.Deserialize<ImportedMeshAssetFile>(File.ReadAllText(absoluteMeshPath));
+		var meshFile = ImportedMeshSerializer.Read(absoluteMeshPath);
 		return new Mesh(
 			meshFile.Vertices,
 			meshFile.Indices,

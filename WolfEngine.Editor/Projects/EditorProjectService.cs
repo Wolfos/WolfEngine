@@ -130,6 +130,8 @@ public sealed class EditorProjectService : IEditorProjectService
 			_currentAssetDatabase = new AssetDatabase();
 			_assetInstanceRegistry.Clear();
 			errorMessage = $"Failed to open project: {ex.Message}";
+			Console.WriteLine(ex.Message);
+			Console.WriteLine(ex.StackTrace);
 			return false;
 		}
 	}
