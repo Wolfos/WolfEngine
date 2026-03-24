@@ -553,6 +553,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
+		var sourceAssetName = Path.GetFileName(relativeSourcePath);
 		var modelGraph = new ImportedModelAssetFile
 		{
 			Name = importedScene.Name,
@@ -573,9 +574,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			modelGraph.RootNodes.Add(rootNode);
 		}
 
-		var modelNodeId = GetOrCreateNodeId(metadata, "scene", AssetType.Model3D, string.IsNullOrWhiteSpace(importedScene.Name)
-			? Path.GetFileNameWithoutExtension(relativeSourcePath)
-			: importedScene.Name);
+		var modelNodeId = GetOrCreateNodeId(metadata, "scene", AssetType.Model3D, sourceAssetName);
 		var relativeModelPath = NormalizeRelativePath(Path.Combine(
 			AssetPipelinePaths.LibraryFolderName,
 			AssetPipelinePaths.ImportedFolderName,
@@ -588,7 +587,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			SourceId = metadata.SourceId,
 			Type = AssetType.Model3D,
 			NodeKey = "scene",
-			Name = modelGraph.Name,
+			Name = sourceAssetName,
 			IsGenerated = true,
 			RelativeSourcePath = relativeSourcePath,
 			RelativeAssetPath = relativeModelPath,
