@@ -52,10 +52,8 @@ public sealed class AssetsWindow : EditorWindow
 		ImGui.TextUnformatted(_projectService.ProjectRootPath ?? string.Empty);
 		ImGui.Separator();
 
-		var assets = _projectService.CurrentAssetDatabase.Assets
-			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-		if (assets.Count == 0)
+		var assetGroups = BuildAssetGroups(_projectService.CurrentAssetDatabase.Assets);
+		if (assetGroups.Count == 0)
 		{
 			ImGui.TextUnformatted("No assets imported yet.");
 			DrawContextMenu();
@@ -64,9 +62,9 @@ public sealed class AssetsWindow : EditorWindow
 			return;
 		}
 
-		for (var i = 0; i < assets.Count; i++)
+		for (var i = 0; i < assetGroups.Count; i++)
 		{
-			DrawAssetRow(assets[i]);
+			DrawAssetGroup(assetGroups[i]);
 		}
 
 		DrawContextMenu();
@@ -74,19 +72,80 @@ public sealed class AssetsWindow : EditorWindow
 		ImGui.End();
 	}
 
-	private void DrawAssetRow(AssetDatabaseEntry asset)
+	private void DrawAssetGroup(AssetGroup assetGroup)
+	{
+		DrawAssetNode(assetGroup.Root, assetGroup.Children);
+	}
+
+	private unsafe void DrawAssetNode(AssetDatabaseEntry asset, IReadOnlyList<AssetDatabaseEntry> children)
 	{
 		ImGui.PushID(asset.Id.ToString());
+
+		var hasChildren = children.Count > 0;
 		var isSelected = _assetSelectionService.SelectedAssetId == asset.Id;
-		var rowHeight = MathF.Max(ThumbnailSize.Y + 8.0f, ImGui.GetTextLineHeightWithSpacing() * 2.0f + 8.0f);
-		if (ImGui.Selectable("##AssetRow", isSelected, ImGuiSelectableFlags.None, new Vector2(ImGui.GetContentRegionAvail().X, rowHeight)))
+		var containsSelectedChild = children.Any(child => child.Id == _assetSelectionService.SelectedAssetId);
+		var style = ImGui.GetStyle();
+		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, 10.0f));
+
+		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
+		if (hasChildren == false)
+		{
+			flags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
+		}
+
+		if (isSelected)
+		{
+			flags |= ImGuiTreeNodeFlags.Selected;
+			var selectedColor = ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
+			ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
+			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
+		}
+
+		if (containsSelectedChild)
+		{
+			ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+		}
+
+		var nodeCursorPosition = ImGui.GetCursorScreenPos();
+		var open = ImGui.TreeNodeEx("##AssetNode", flags);
+		var nodeClicked = ImGui.IsItemClicked();
+		DrawAssetRowContent(asset, nodeCursorPosition.X, children.Count);
+
+		if (nodeClicked)
 		{
 			_assetSelectionService.Select(asset.Id);
 		}
 
+		if (hasChildren && open)
+		{
+			for (var i = 0; i < children.Count; i++)
+			{
+				DrawAssetNode(children[i], []);
+			}
+
+			ImGui.TreePop();
+		}
+
+		if (isSelected)
+		{
+			ImGui.PopStyleColor(3);
+		}
+
+		ImGui.PopStyleVar();
+
+		ImGui.PopID();
+	}
+
+	private void DrawAssetRowContent(AssetDatabaseEntry asset, float nodeCursorX, int childCount)
+	{
 		var itemMin = ImGui.GetItemRectMin();
+		var itemMax = ImGui.GetItemRectMax();
+		var rowHeight = itemMax.Y - itemMin.Y;
 		var drawList = ImGui.GetWindowDrawList();
-		var thumbMin = itemMin + new Vector2(6.0f, (rowHeight - ThumbnailSize.Y) * 0.5f);
+		var thumbMin = new Vector2(
+			nodeCursorX + ImGui.GetTreeNodeToLabelSpacing(),
+			itemMin.Y + (rowHeight - ThumbnailSize.Y) * 0.5f);
 		var thumbMax = thumbMin + ThumbnailSize;
 		var textX = thumbMax.X + 8.0f;
 		var titleY = itemMin.Y + 6.0f;
@@ -94,9 +153,7 @@ public sealed class AssetsWindow : EditorWindow
 
 		DrawAssetThumbnail(drawList, thumbMin, thumbMax, asset);
 		drawList.AddText(new Vector2(textX, titleY), ImGui.GetColorU32(ImGuiCol.Text), asset.Name);
-		drawList.AddText(new Vector2(textX, subtitleY), ImGui.GetColorU32(ImGuiCol.TextDisabled), GetAssetSubtitle(asset));
-
-		ImGui.PopID();
+		drawList.AddText(new Vector2(textX, subtitleY), ImGui.GetColorU32(ImGuiCol.TextDisabled), GetAssetSubtitle(asset, childCount));
 	}
 
 	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
@@ -125,19 +182,68 @@ public sealed class AssetsWindow : EditorWindow
 		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
 	}
 
-	private string GetAssetSubtitle(AssetDatabaseEntry asset)
+	private string GetAssetSubtitle(AssetDatabaseEntry asset, int childCount = 0)
 	{
-		if (_assetHandlerRegistry.TryGetHandler(asset.Type, out var handler))
+		var baseSubtitle = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
+			? handler.GetSubtitle(asset)
+			: asset.Type switch
+			{
+				AssetType.Model3D => "3D Model",
+				_ => asset.Type.ToString()
+			};
+		if (childCount <= 0)
 		{
-			return handler.GetSubtitle(asset);
+			return baseSubtitle;
 		}
 
+		var suffix = childCount == 1 ? "1 sub-asset" : $"{childCount} sub-assets";
+		return $"{baseSubtitle} | {suffix}";
+	}
+
+	private static List<AssetGroup> BuildAssetGroups(IReadOnlyList<AssetDatabaseEntry> assets)
+	{
+		return assets
+			.GroupBy(asset => asset.SourceId)
+			.Select(CreateAssetGroup)
+			.OrderBy(group => group.Root.Name, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private static AssetGroup CreateAssetGroup(IGrouping<Guid, AssetDatabaseEntry> group)
+	{
+		var assets = group
+			.OrderBy(GetAssetTypeSortOrder)
+			.ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(asset => asset.NodeKey, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+		var root = assets.FirstOrDefault(asset => asset.Type == AssetType.Model3D)
+			?? assets.FirstOrDefault(asset => asset.IsGenerated == false && string.Equals(asset.NodeKey, "main", StringComparison.Ordinal))
+			?? assets.FirstOrDefault(asset => string.Equals(asset.NodeKey, "main", StringComparison.Ordinal))
+			?? assets.FirstOrDefault(asset => asset.IsGenerated == false)
+			?? assets[0];
+		var children = assets
+			.Where(asset => asset.Id != root.Id)
+			.OrderBy(GetAssetTypeSortOrder)
+			.ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(asset => asset.NodeKey, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+		return new AssetGroup(root, children);
+	}
+
+	private static int GetAssetTypeSortOrder(AssetDatabaseEntry asset)
+	{
 		return asset.Type switch
 		{
-			AssetType.Model3D => "3D Model",
-			_ => asset.Type.ToString()
+			AssetType.Model3D => 0,
+			AssetType.Mesh => 1,
+			AssetType.Material => 2,
+			AssetType.Texture2D => 3,
+			AssetType.DataAsset => 4,
+			_ => 10
 		};
 	}
+
+	private sealed record AssetGroup(AssetDatabaseEntry Root, List<AssetDatabaseEntry> Children);
 
 	private static string GetFallbackThumbnailLabel(AssetType assetType)
 	{
