@@ -42,4 +42,6 @@ public struct TemporalAntiAliasingConfig
 	public float LowMotionAlphaTestHistoryWeight { get; set; } = 0.95f;
 	public float HighMotionAlphaTestHistoryWeight { get; set; } = 0.75f;
 	public float AlphaTestHistoryMotionScale { get; set; } = 0.15f;
+	public bool EnableCasSharpen { get; set; } = true;
+	public float CasSharpness { get; set; } = 0.0f;
 }

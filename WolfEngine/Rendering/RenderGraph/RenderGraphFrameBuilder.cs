@@ -14,6 +14,7 @@ public readonly struct RenderGraphFrameResources
 	public Int2 FramebufferSize { get; init; }
 	public Int2 SceneFramebufferSize { get; init; }
 	public bool SceneEnabled { get; init; }
+	public RenderGraphResourceHandle TonemappedLinearSceneColor { get; init; }
 	public RenderGraphResourceHandle TonemappedSceneColor { get; init; }
 	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
@@ -79,6 +80,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
 	private readonly TonemappingPass _tonemappingPass;
+	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
@@ -123,6 +125,7 @@ public sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
+	private readonly Action<RenderGraphContext> _casSharpenExecute;
 	private readonly Action<RenderGraphContext> _copyToFinalExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
@@ -151,6 +154,7 @@ public sealed class RenderGraphFrameBuilder
 			TemporalHistoryStorePass temporalHistoryStorePass,
 			TransparentForwardPass transparentForwardPass,
 			TonemappingPass tonemappingPass,
+			CasSharpenPass casSharpenPass,
 			CopyToFinalPass copyToFinalPass,
 		ShadowMapPass shadowMapPass,
 		GpuDrawPass gpuDrawPass,
@@ -169,6 +173,7 @@ public sealed class RenderGraphFrameBuilder
 		_temporalHistoryStorePass = temporalHistoryStorePass;
 		_transparentForwardPass = transparentForwardPass;
 		_tonemappingPass = tonemappingPass;
+		_casSharpenPass = casSharpenPass;
 		_copyToFinalPass = copyToFinalPass;
 		_shadowMapPass = shadowMapPass;
 		_gpuDrawPass = gpuDrawPass;
@@ -190,6 +195,7 @@ public sealed class RenderGraphFrameBuilder
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
 		_tonemappingExecute = ExecuteTonemapping;
+		_casSharpenExecute = ExecuteCasSharpen;
 		_copyToFinalExecute = ExecuteCopyToFinal;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
@@ -412,6 +418,15 @@ public sealed class RenderGraphFrameBuilder
 			}
 		}
 
+		var tonemappedLinearSceneColorHandle = sceneEnabled
+			? _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
+			: default;
+
 		var tonemappedSceneColorHandle = sceneEnabled
 			? _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
@@ -426,6 +441,7 @@ public sealed class RenderGraphFrameBuilder
 			FramebufferSize = framebufferSize,
 			SceneFramebufferSize = sceneFramebufferSize,
 			SceneEnabled = sceneEnabled,
+			TonemappedLinearSceneColor = tonemappedLinearSceneColorHandle,
 			TonemappedSceneColor = tonemappedSceneColorHandle,
 			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
@@ -642,8 +658,13 @@ public sealed class RenderGraphFrameBuilder
 
 			graph.AddPass("Tonemapping", PassKind.Compute)
 				.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
-				.WriteTexture(_frameResources.TonemappedSceneColor, ResourceState.UnorderedAccess)
+				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
+
+			graph.AddPass("CAS Sharpen", PassKind.Compute)
+				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+				.WriteTexture(_frameResources.TonemappedSceneColor, ResourceState.UnorderedAccess)
+				.SetExecute(_casSharpenExecute);
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
 				.ReadTexture(_frameResources.TonemappedSceneColor, ResourceState.ShaderResource)
@@ -1108,6 +1129,15 @@ public sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice());
 		_tonemappingPass.Record(context, in config);
+	}
+
+	private void ExecuteCasSharpen(RenderGraphContext context)
+	{
+		var config = _casSharpenPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_casSharpenPass.Record(context, in config);
 	}
 
 	private void ExecuteCopyToFinal(RenderGraphContext context)

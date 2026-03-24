@@ -121,8 +121,20 @@
         <None Update="Shaders\tonemapping.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\cas_sharpen.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\copy_to_final.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ffx-cas\ffx_a.h">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ffx-cas\ffx_cas.h">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ffx-cas\LICENSE.txt">
+          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 

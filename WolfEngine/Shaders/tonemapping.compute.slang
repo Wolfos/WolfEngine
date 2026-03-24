@@ -25,14 +25,6 @@ float3 AcesFitted(float3 color)
     return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
-float3 LinearToSrgb(float3 color)
-{
-    float3 cutoff = step(color, 0.0031308f.xxx);
-    float3 lower = color * 12.92f;
-    float3 upper = 1.055f * pow(abs(color), 1.0f / 2.4f) - 0.055f;
-    return lerp(upper, lower, cutoff);
-}
-
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -50,6 +42,5 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 hdrColor = inputTexture.SampleLevel(linearSampler, uv, 0.0f).rgb;
     float3 exposedColor = hdrColor * exposure;
     float3 tonemapped = AcesFitted(max(exposedColor, 0.0f.xxx));
-    float3 srgb = saturate(LinearToSrgb(tonemapped));
-    outputTexture[dispatchThreadId.xy] = float4(srgb, 1.0f);
+    outputTexture[dispatchThreadId.xy] = float4(saturate(tonemapped), 1.0f);
 }

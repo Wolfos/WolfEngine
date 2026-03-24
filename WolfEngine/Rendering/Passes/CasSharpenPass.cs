@@ -2,7 +2,7 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
 
-public sealed class TonemappingPass
+public sealed class CasSharpenPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
@@ -12,15 +12,14 @@ public sealed class TonemappingPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
-	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public TonemappingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public CasSharpenPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
-	public TonemappingPassConfig BuildConfig(
+	public CasSharpenPassConfig BuildConfig(
 		RenderGraphContext context,
 		RenderGraphFrameResources resources,
 		IGfxDevice device)
@@ -30,30 +29,23 @@ public sealed class TonemappingPass
 
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
-		if (_linearSampler.IsValid == false)
-		{
-			_linearSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
-				FilterMode.Bilinear,
-				AddressMode.Clamp,
-				AddressMode.Clamp,
-				AddressMode.Clamp));
-		}
 
-		var input = context.GetTexture(resources.ResolvedSceneColor);
-		var output = context.GetTexture(resources.TonemappedLinearSceneColor);
+		var input = context.GetTexture(resources.TonemappedLinearSceneColor);
+		var output = context.GetTexture(resources.TonemappedSceneColor);
+		var taa = resources.Config.TemporalAntiAliasing;
 
-		return new TonemappingPassConfig
+		return new CasSharpenPassConfig
 		{
 			Pipeline = pipeline,
 			InputHandle = _bindlessRegistry.GetTextureHandle(input),
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
-			LinearSampler = _linearSampler,
 			RenderSize = resources.FramebufferSize,
-			Settings = resources.Config.Tonemapping
+			SharpenEnabled = taa.Enabled && taa.EnableCasSharpen,
+			Sharpness = Math.Clamp(taa.CasSharpness, 0.0f, 1.0f)
 		};
 	}
 
-	public void Record(RenderGraphContext context, in TonemappingPassConfig config)
+	public void Record(RenderGraphContext context, in CasSharpenPassConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 
@@ -61,23 +53,32 @@ public sealed class TonemappingPass
 		commandList.BindPipeline(config.Pipeline);
 
 		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Tonemapping bindless writer was not initialized.");
+			?? throw new InvalidOperationException("CAS sharpen bindless writer was not initialized.");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("inputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
-		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var settingsWriter = _settingsWriter
-			?? throw new InvalidOperationException("Tonemapping settings writer was not initialized.");
+			?? throw new InvalidOperationException("CAS sharpen settings writer was not initialized.");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
-		settingsWriter.SetFloat("exposure", MathF.Max(config.Settings.Exposure, 0.0f));
+		settingsWriter.SetUInt("sharpenEnabled", config.SharpenEnabled ? 1u : 0u);
+		settingsWriter.SetUInt("casConst0X", BitConverter.SingleToUInt32Bits(1.0f));
+		settingsWriter.SetUInt("casConst0Y", BitConverter.SingleToUInt32Bits(1.0f));
+		settingsWriter.SetUInt("casConst0Z", BitConverter.SingleToUInt32Bits(0.0f));
+		settingsWriter.SetUInt("casConst0W", BitConverter.SingleToUInt32Bits(0.0f));
+
+		var peak = -1.0f / Lerp(8.0f, 5.0f, config.Sharpness);
+		settingsWriter.SetUInt("casConst1X", BitConverter.SingleToUInt32Bits(peak));
+		settingsWriter.SetUInt("casConst1Y", BitConverter.SingleToUInt32Bits(peak));
+		settingsWriter.SetUInt("casConst1Z", BitConverter.SingleToUInt32Bits(8.0f));
+		settingsWriter.SetUInt("casConst1W", 0u);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("Tonemapping threadgroup size was not initialized.");
+			?? throw new InvalidOperationException("CAS sharpen threadgroup size was not initialized.");
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.RenderSize.X, 1),
 			(uint)Math.Max(config.RenderSize.Y, 1));
@@ -91,7 +92,7 @@ public sealed class TonemappingPass
 			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
 			{
 				throw new InvalidOperationException(
-					$"TonemappingPass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
+					$"CasSharpenPass is already compiled for backend '{_compiledBackendKind.Value}', but was requested for '{device.BackendKind}'.");
 			}
 
 			return _pipeline;
@@ -106,7 +107,7 @@ public sealed class TonemappingPass
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
-			shaderVariant: "tonemapping.compute.slang");
+			shaderVariant: "cas_sharpen.compute.slang");
 		_pipeline = device.GetOrCreatePipeline(
 			pipelineKey,
 			new ShaderBytecodeSet(compute: _computeShader, computeThreadGroupSize: _threadGroupSize));
@@ -126,14 +127,19 @@ public sealed class TonemappingPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"tonemapping.compute.slang",
+			"cas_sharpen.compute.slang",
 			"CSMain",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;
 		var reflection = compiled.ReflectionLayout;
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
-		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("TonemappingSettings"));
+		_settingsWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CasSettings"));
 		_compiledBackendKind = backendKind;
+	}
+
+	private static float Lerp(float start, float end, float amount)
+	{
+		return start + ((end - start) * amount);
 	}
 }
