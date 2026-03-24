@@ -59,7 +59,7 @@ public sealed class DataAssetCreator : IDataAssetCreator
 					}
 				]
 			});
-			_projectService.ReloadAssetDatabase();
+			_projectService.RefreshAssetSource(relativeAssetPath);
 			if (_assetPipelineService.TryGetPrimaryNodeIdForRelativeSourcePath(_projectService.ProjectRootPath!, relativeAssetPath, out var nodeId))
 			{
 				return EditorAssetCreationResult.Succeeded(nodeId);

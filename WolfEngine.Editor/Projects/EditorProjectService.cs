@@ -15,6 +15,8 @@ public interface IEditorProjectService
 	bool OpenProject(string projectRoot, out string errorMessage);
 	void CloseProject();
 	void ReloadAssetDatabase();
+	void ReloadAssetDatabaseFromIndex();
+	void RefreshAssetSource(string relativeSourcePath);
 	void SaveAssetDatabase(AssetDatabase database);
 	AssetDatabase CloneCurrentAssetDatabase();
 	bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset);
@@ -119,9 +121,8 @@ public sealed class EditorProjectService : IEditorProjectService
 		try
 		{
 			_projectRootPath = fullProjectRoot;
-			_currentAssetDatabase = _assetPipelineService.RefreshProject(_projectRootPath);
 			_assetInstanceRegistry.Clear();
-			_assetInstanceRegistry.RefreshProject(_projectRootPath, CloneCurrentAssetDatabase());
+			ApplyDatabase(_assetPipelineService.RefreshProject(_projectRootPath));
 			return true;
 		}
 		catch (Exception ex)
@@ -152,14 +153,51 @@ public sealed class EditorProjectService : IEditorProjectService
 			return;
 		}
 
-		_currentAssetDatabase = _assetPipelineService.RefreshProject(_projectRootPath!);
-		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
+		ApplyDatabase(_assetPipelineService.RefreshProject(_projectRootPath!));
+	}
+
+	public void ReloadAssetDatabaseFromIndex()
+	{
+		if (HasOpenProject == false)
+		{
+			_currentAssetDatabase = new AssetDatabase();
+			_assetInstanceRegistry.Clear();
+			return;
+		}
+
+		ApplyDatabase(_assetPipelineService.LoadDatabase(_projectRootPath!));
+	}
+
+	public void RefreshAssetSource(string relativeSourcePath)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeSourcePath);
+		var normalizedRelativePath = relativeSourcePath.Replace(Path.DirectorySeparatorChar, '/');
+		var previousNodeIds = _currentAssetDatabase.Assets
+			.Where(asset => string.Equals(asset.RelativeSourcePath, normalizedRelativePath, StringComparison.OrdinalIgnoreCase))
+			.Select(asset => asset.Id)
+			.ToHashSet();
+
+		_assetPipelineService.ReimportSource(_projectRootPath!, normalizedRelativePath);
+		var database = _assetPipelineService.LoadDatabase(_projectRootPath!);
+		var currentNodeIds = database.Assets
+			.Where(asset => string.Equals(asset.RelativeSourcePath, normalizedRelativePath, StringComparison.OrdinalIgnoreCase))
+			.Select(asset => asset.Id)
+			.ToHashSet();
+		previousNodeIds.UnionWith(currentNodeIds);
+
+		ApplyDatabase(database);
+		_assetInstanceRegistry.InvalidateAssets(previousNodeIds);
 	}
 
 	public void SaveAssetDatabase(AssetDatabase database)
 	{
 		ArgumentNullException.ThrowIfNull(database);
-		ReloadAssetDatabase();
+		ReloadAssetDatabaseFromIndex();
 	}
 
 	public AssetDatabase CloneCurrentAssetDatabase()
@@ -200,6 +238,13 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
 		return Path.GetFullPath(Path.Combine(_projectRootPath!, normalized));
+	}
+
+	private void ApplyDatabase(AssetDatabase database)
+	{
+		ArgumentNullException.ThrowIfNull(database);
+		_currentAssetDatabase = database;
+		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
 	}
 
 	private static AssetDatabaseEntry CloneEntry(AssetDatabaseEntry asset)

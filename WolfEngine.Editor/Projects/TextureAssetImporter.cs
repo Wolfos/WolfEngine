@@ -62,7 +62,7 @@ public sealed class TextureAssetImporter : ITextureAssetImporter
 		try
 		{
 			_assetPipelineService.ImportExternalSource(_projectService.ProjectRootPath!, sourcePath);
-			_projectService.ReloadAssetDatabase();
+			_projectService.ReloadAssetDatabaseFromIndex();
 			return TextureImportOperationResult.Succeeded();
 		}
 		catch (Exception ex)

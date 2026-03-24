@@ -93,6 +93,34 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
+	public void InvalidateAssets(IEnumerable<Guid> assetIds)
+	{
+		ArgumentNullException.ThrowIfNull(assetIds);
+
+		lock (_lock)
+		{
+			var nodeIds = assetIds
+				.Where(assetId => assetId != Guid.Empty)
+				.ToHashSet();
+			if (nodeIds.Count == 0)
+			{
+				return;
+			}
+
+			var staleKeys = _instances.Keys.Where(key => nodeIds.Contains(key.NodeId)).ToList();
+			for (var i = 0; i < staleKeys.Count; i++)
+			{
+				_instances.Remove(staleKeys[i]);
+			}
+
+			var staleInProgressKeys = _inProgress.Where(key => nodeIds.Contains(key.NodeId)).ToList();
+			for (var i = 0; i < staleInProgressKeys.Count; i++)
+			{
+				_inProgress.Remove(staleInProgressKeys[i]);
+			}
+		}
+	}
+
 	public void Clear()
 	{
 		lock (_lock)

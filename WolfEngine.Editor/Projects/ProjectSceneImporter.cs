@@ -26,7 +26,7 @@ public sealed class ProjectSceneImporter : IProjectSceneImporter
 		}
 
 		var importResult = _assetPipelineService.ImportExternalSource(_projectService.ProjectRootPath!, absoluteSourcePath);
-		_projectService.ReloadAssetDatabase();
+		_projectService.ReloadAssetDatabaseFromIndex();
 		if (importResult.PrimaryNodeId is not { } modelNodeId)
 		{
 			throw new InvalidOperationException("The imported 3D source did not produce a 3D model node.");

@@ -12,6 +12,7 @@ public interface IProjectAssetPipelineService
 {
 	void InitializeProject(string projectRootPath);
 	AssetDatabase RefreshProject(string projectRootPath);
+	void ReimportSource(string projectRootPath, string relativeSourcePath);
 	AssetDatabase LoadDatabase(string projectRootPath);
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
 	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
@@ -96,6 +97,33 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		return LoadDatabase(projectRootPath);
+	}
+
+	public void ReimportSource(string projectRootPath, string relativeSourcePath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeSourcePath);
+		InitializeProject(projectRootPath);
+
+		var normalizedRelativePath = NormalizeRelativePath(relativeSourcePath);
+		var absoluteSourcePath = GetAbsolutePath(projectRootPath, normalizedRelativePath);
+		if (File.Exists(absoluteSourcePath) == false)
+		{
+			if (_index.TryGetSourceByRelativePath(projectRootPath, normalizedRelativePath, out var existingSource))
+			{
+				DeleteSourceArtifacts(projectRootPath, existingSource.SourceId);
+				_index.DeleteSource(projectRootPath, existingSource.SourceId);
+			}
+
+			return;
+		}
+
+		if (IsSupportedSourcePath(absoluteSourcePath) == false)
+		{
+			throw new InvalidOperationException($"Unsupported asset source '{normalizedRelativePath}'.");
+		}
+
+		ImportSource(projectRootPath, absoluteSourcePath, normalizedRelativePath);
 	}
 
 	public AssetDatabase LoadDatabase(string projectRootPath)

@@ -50,7 +50,7 @@ public sealed class DataAssetEditor
 		if (DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false))
 		{
 			_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), loadedAsset.DataAssetType, loadedAsset.Asset);
-			_projectService.ReloadAssetDatabase();
+			_projectService.RefreshAssetSource(asset.RelativeSourcePath);
 		}
 	}
 

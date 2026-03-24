@@ -119,7 +119,7 @@ public sealed class TextureAssetEditor
 		_metadataStore.Save(_projectService.GetAbsolutePath(asset.RelativeMetaPath), metadata);
 		_loadedMetadata = metadata;
 		_loadedTextureAssetId = asset.Id;
-		_projectService.ReloadAssetDatabase();
+		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
 	}
 
 	private static string FormatResolutionLabel(int resolution)

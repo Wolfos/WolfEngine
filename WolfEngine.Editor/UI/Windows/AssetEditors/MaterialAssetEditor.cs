@@ -142,7 +142,7 @@ public sealed class MaterialAssetEditor
 		SynchronizeRuntimeMaterial(asset.Id, materialAsset);
 		_loadedMaterialAsset = materialAsset;
 		_loadedMaterialAssetId = asset.Id;
-		_projectService.ReloadAssetDatabase();
+		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
 	}
 
 	private void DrawBaseColorEditor(AssetDatabaseEntry asset, MaterialAsset materialAsset, MaterialSurfaceProperties properties)
