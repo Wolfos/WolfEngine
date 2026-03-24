@@ -11,11 +11,19 @@ public sealed class DataAssetCreator : IDataAssetCreator
 {
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
+	private readonly IAssetMetadataStore _metadataStore;
+	private readonly IProjectAssetPipelineService _assetPipelineService;
 
-	public DataAssetCreator(IEditorProjectService projectService, IDataAssetStore dataAssetStore)
+	public DataAssetCreator(
+		IEditorProjectService projectService,
+		IDataAssetStore dataAssetStore,
+		IAssetMetadataStore metadataStore,
+		IProjectAssetPipelineService assetPipelineService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
+		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
+		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 	}
 
 	public EditorAssetCreationResult CreateDataAsset(Type dataAssetType)
@@ -26,45 +34,41 @@ public sealed class DataAssetCreator : IDataAssetCreator
 		}
 
 		ArgumentNullException.ThrowIfNull(dataAssetType);
-
-		var assetId = Guid.NewGuid();
 		var assetName = GetNextDataAssetName(dataAssetType.Name);
 		var relativeAssetPath = $"Assets/{assetName}{DataAssetFile.FileExtension}";
-		var relativeMetaPath = relativeAssetPath + ".meta.json";
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
-		var absoluteMetaPath = _projectService.GetAbsolutePath(relativeMetaPath);
+		var absoluteMetaPath = absoluteAssetPath + ".meta";
 
-		var asset = _dataAssetStore.CreateDefault(dataAssetType);
-		var meta = _dataAssetStore.CreateMeta(assetId, dataAssetType);
-		var updatedDatabase = _projectService.CloneCurrentAssetDatabase();
-		updatedDatabase.Assets.Add(new AssetDatabaseEntry
-		{
-			Id = assetId,
-			Type = AssetType.DataAsset,
-			Name = assetName,
-			RelativeAssetPath = relativeAssetPath,
-			RelativeStatePath = relativeMetaPath,
-			RelativeMetaPath = relativeMetaPath,
-			DataAssetSummary = new DataAssetSummary
-			{
-				DataAssetType = meta.DataAssetType,
-				DisplayName = dataAssetType.Name
-			}
-		});
-
-		var createdFiles = new List<string>(2);
 		try
 		{
+			var asset = _dataAssetStore.CreateDefault(dataAssetType);
 			_dataAssetStore.SaveAsset(absoluteAssetPath, dataAssetType, asset);
-			createdFiles.Add(absoluteAssetPath);
-			_dataAssetStore.SaveMeta(absoluteMetaPath, meta);
-			createdFiles.Add(absoluteMetaPath);
-			_projectService.SaveAssetDatabase(updatedDatabase);
-			return EditorAssetCreationResult.Succeeded(assetId);
+			_metadataStore.Save(absoluteMetaPath, new AssetSourceMetaFile
+			{
+				SourceId = Guid.NewGuid(),
+				ImporterId = AssetImporterIds.DataAsset,
+				ImporterVersion = 1,
+				SubAssets =
+				[
+					new AssetSubAssetManifestEntry
+					{
+						Key = "main",
+						NodeId = Guid.NewGuid(),
+						Type = AssetType.DataAsset,
+						Name = assetName
+					}
+				]
+			});
+			_projectService.ReloadAssetDatabase();
+			if (_assetPipelineService.TryGetPrimaryNodeIdForRelativeSourcePath(_projectService.ProjectRootPath!, relativeAssetPath, out var nodeId))
+			{
+				return EditorAssetCreationResult.Succeeded(nodeId);
+			}
+
+			return EditorAssetCreationResult.Failed("Data asset was created, but the pipeline did not produce a node.");
 		}
 		catch (Exception ex)
 		{
-			RollbackCreatedFiles(createdFiles);
 			return EditorAssetCreationResult.Failed($"Failed to create data asset: {ex.Message}");
 		}
 	}
@@ -84,23 +88,6 @@ public sealed class DataAssetCreator : IDataAssetCreator
 			}
 
 			index++;
-		}
-	}
-
-	private static void RollbackCreatedFiles(IEnumerable<string> files)
-	{
-		foreach (var file in files.Reverse())
-		{
-			try
-			{
-				if (File.Exists(file))
-				{
-					File.Delete(file);
-				}
-			}
-			catch
-			{
-			}
 		}
 	}
 }

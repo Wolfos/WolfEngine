@@ -6,11 +6,11 @@ namespace WolfEngine;
 
 public struct MeshRenderer: IEntityComponent
 {
-	public AssetLink<Material> MaterialAsset;
+	public AssetRef<Material> MaterialAsset;
 	public Material Material;
 	public Mesh Mesh;
 
-	public void AssignMaterialAsset(AssetLink<Material> materialAsset, RenderGraph renderGraph)
+	public void AssignMaterialAsset(AssetRef<Material> materialAsset, RenderGraph renderGraph)
 	{
 		MaterialAsset = materialAsset;
 		if (materialAsset.IsValid == false)

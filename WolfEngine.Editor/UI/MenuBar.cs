@@ -24,7 +24,7 @@ public sealed class MenuBar : IMenuBar
 	private const float WindowsMaximizedContentInset = 4.0f;
 
 	private readonly IFileDialogService _fileDialogService;
-	private readonly ISceneBuilder _sceneBuilder;
+	private readonly IProjectSceneImporter _sceneImporter;
 	private readonly FramerateTool _framerateTool;
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
@@ -40,7 +40,7 @@ public sealed class MenuBar : IMenuBar
 
 	public MenuBar(
 		IFileDialogService fileDialogService,
-		ISceneBuilder sceneBuilder,
+		IProjectSceneImporter sceneImporter,
 		FramerateTool framerateTool,
 		IEditorProjectService projectService,
 		ITextureAssetImporter textureAssetImporter,
@@ -49,7 +49,7 @@ public sealed class MenuBar : IMenuBar
 		IEditorModeState editorModeState)
 	{
 		_fileDialogService = fileDialogService;
-		_sceneBuilder = sceneBuilder;
+		_sceneImporter = sceneImporter;
 		_framerateTool = framerateTool;
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
@@ -346,6 +346,12 @@ public sealed class MenuBar : IMenuBar
 			return menuRect;
 		}
 
+		var hasOpenProject = _projectService.HasOpenProject;
+		if (hasOpenProject == false)
+		{
+			ImGui.BeginDisabled();
+		}
+
 		if (ImGui.MenuItem("Import 3D file"))
 		{
 			var path = _fileDialogService.OpenFile(new FileDialogOptions
@@ -355,14 +361,15 @@ public sealed class MenuBar : IMenuBar
 			});
 			if (string.IsNullOrEmpty(path) == false)
 			{
-				_sceneBuilder.Import3DScene(path, scene.World);
+				try
+				{
+					_sceneImporter.ImportScene(path, scene.World);
+				}
+				catch (Exception ex)
+				{
+					ShowError(ex.Message);
+				}
 			}
-		}
-
-		var hasOpenProject = _projectService.HasOpenProject;
-		if (hasOpenProject == false)
-		{
-			ImGui.BeginDisabled();
 		}
 
 		if (ImGui.MenuItem("Import Texture..."))

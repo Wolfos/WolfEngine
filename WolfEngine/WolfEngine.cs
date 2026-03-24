@@ -22,7 +22,8 @@ public static class WolfEngine
 		services.AddSingleton<ITextureFactory, TextureFactory>();
 		services.AddSingleton<IMaterialFactory, MaterialFactory>();
 		services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
-		services.AddSingleton<IAssetDatabaseStore, AssetDatabaseStore>();
+		services.AddSingleton<IAssetPipelineIndex, AssetPipelineIndex>();
+		services.AddSingleton<IAssetMetadataStore, AssetMetadataStore>();
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
 		services.AddSingleton<IInputSystem, InputSystem>();

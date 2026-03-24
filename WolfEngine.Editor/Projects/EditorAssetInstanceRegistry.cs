@@ -7,7 +7,8 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 {
 	private readonly IServiceProvider _serviceProvider;
 	private readonly object _lock = new();
-	private readonly Dictionary<Guid, object> _instances = new();
+	private readonly Dictionary<(Guid NodeId, Type RuntimeType), object> _instances = new();
+	private readonly HashSet<(Guid NodeId, Type RuntimeType)> _inProgress = new();
 	private Dictionary<Guid, AssetDatabaseEntry> _assetsById = new();
 	private string? _projectRootPath;
 
@@ -36,20 +37,35 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 				return null;
 			}
 
-			if (_instances.TryGetValue(assetId, out var existingInstance))
+			var cacheKey = (assetId, expectedType);
+			if (_instances.TryGetValue(cacheKey, out var existingInstance))
 			{
 				return EnsureExpectedType(assetId, expectedType, existingInstance);
 			}
 
-			var loadedInstance = LoadInstance(asset, expectedType);
-			if (loadedInstance is not null)
+			if (_inProgress.Contains(cacheKey))
 			{
-				_instances.Add(assetId, loadedInstance);
+				throw new InvalidOperationException(
+					$"Detected a cyclic or re-entrant asset resolution for node '{assetId}' and runtime type '{expectedType.FullName}'.");
 			}
 
-			return loadedInstance is null
-				? null
-				: EnsureExpectedType(assetId, expectedType, loadedInstance);
+			_inProgress.Add(cacheKey);
+			try
+			{
+				var loadedInstance = LoadInstance(asset, expectedType);
+				if (loadedInstance is not null)
+				{
+					_instances[cacheKey] = loadedInstance;
+				}
+
+				return loadedInstance is null
+					? null
+					: EnsureExpectedType(assetId, expectedType, loadedInstance);
+			}
+			finally
+			{
+				_inProgress.Remove(cacheKey);
+			}
 		}
 	}
 
@@ -65,16 +81,15 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		lock (_lock)
 		{
 			_projectRootPath = Path.GetFullPath(projectRootPath);
-			_assetsById = database.Assets
-				.Select(CloneEntry)
-				.ToDictionary(asset => asset.Id);
-			var removedAssetIds = _instances.Keys
-				.Where(assetId => _assetsById.ContainsKey(assetId) == false)
-				.ToList();
-			for (var i = 0; i < removedAssetIds.Count; i++)
+			_assetsById = database.Assets.ToDictionary(asset => asset.Id, CloneEntry);
+			var validNodeIds = _assetsById.Keys.ToHashSet();
+			var staleKeys = _instances.Keys.Where(key => validNodeIds.Contains(key.NodeId) == false).ToList();
+			for (var i = 0; i < staleKeys.Count; i++)
 			{
-				_instances.Remove(removedAssetIds[i]);
+				_instances.Remove(staleKeys[i]);
 			}
+
+			_inProgress.Clear();
 		}
 	}
 
@@ -85,6 +100,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			_projectRootPath = null;
 			_assetsById = new Dictionary<Guid, AssetDatabaseEntry>();
 			_instances.Clear();
+			_inProgress.Clear();
 		}
 	}
 
@@ -94,7 +110,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		if (descriptor.AssetType != asset.Type)
 		{
 			throw new InvalidOperationException(
-				$"Asset '{asset.Id}' is registered as '{asset.Type}' and cannot be resolved as '{expectedType.FullName}'.");
+				$"Asset node '{asset.Id}' is registered as '{asset.Type}' and cannot be resolved as '{expectedType.FullName}'.");
 		}
 
 		if (typeof(IRuntimeAssetResolver).IsAssignableFrom(descriptor.ResolverType) == false)
@@ -117,7 +133,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		return GetInstance(assetId, expectedType);
 	}
 
-	private object EnsureExpectedType(Guid assetId, Type expectedType, object instance)
+	private static object EnsureExpectedType(Guid assetId, Type expectedType, object instance)
 	{
 		if (expectedType.IsInstanceOfType(instance))
 		{
@@ -125,23 +141,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 
 		throw new InvalidOperationException(
-			$"Asset '{assetId}' resolved to '{instance.GetType().FullName}', which cannot be assigned to '{expectedType.FullName}'.");
-	}
-
-	private string GetAbsolutePath(string relativePath)
-	{
-		if (string.IsNullOrWhiteSpace(_projectRootPath))
-		{
-			throw new InvalidOperationException("No project is currently loaded in the asset instance registry.");
-		}
-
-		if (string.IsNullOrWhiteSpace(relativePath))
-		{
-			throw new ArgumentException("Relative path cannot be null or empty.", nameof(relativePath));
-		}
-
-		var normalizedPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-		return Path.GetFullPath(Path.Combine(_projectRootPath!, normalizedPath));
+			$"Asset node '{assetId}' resolved to '{instance.GetType().FullName}', which cannot be assigned to '{expectedType.FullName}'.");
 	}
 
 	private static AssetDatabaseEntry CloneEntry(AssetDatabaseEntry asset)
@@ -149,36 +149,20 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		return new AssetDatabaseEntry
 		{
 			Id = asset.Id,
+			SourceId = asset.SourceId,
 			Type = asset.Type,
 			Name = asset.Name,
+			NodeKey = asset.NodeKey,
+			IsGenerated = asset.IsGenerated,
+			RelativeSourcePath = asset.RelativeSourcePath,
 			RelativeAssetPath = asset.RelativeAssetPath,
 			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
-			TextureSummary = asset.TextureSummary is null
-				? null
-				: new TextureAssetSummary
-				{
-					RelativeSourceAssetPath = asset.TextureSummary.RelativeSourceAssetPath,
-					RelativeRawImagePath = asset.TextureSummary.RelativeRawImagePath,
-					Width = asset.TextureSummary.Width,
-					Height = asset.TextureSummary.Height,
-					Channels = asset.TextureSummary.Channels,
-					IsSrgb = asset.TextureSummary.IsSrgb,
-					SourceExtension = asset.TextureSummary.SourceExtension
-				},
-			MaterialSummary = asset.MaterialSummary is null
-				? null
-				: new MaterialAssetSummary
-				{
-					MaterialType = asset.MaterialSummary.MaterialType
-				},
-			DataAssetSummary = asset.DataAssetSummary is null
-				? null
-				: new DataAssetSummary
-				{
-					DataAssetType = asset.DataAssetSummary.DataAssetType,
-					DisplayName = asset.DataAssetSummary.DisplayName
-				}
+			TextureSummary = asset.TextureSummary,
+			MaterialSummary = asset.MaterialSummary,
+			DataAssetSummary = asset.DataAssetSummary,
+			MeshSummary = asset.MeshSummary,
+			ModelSummary = asset.ModelSummary
 		};
 	}
 }

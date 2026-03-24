@@ -125,8 +125,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         BindlessResourceRegistry bindlessRegistry,
         GpuDrawHardeningStats hardeningStats)
     {
-        _width = 1280;
-        _height = 720;
+        _width = 1600;
+        _height = 900;
         _shaderCompiler = shaderCompiler;
         _inputHandler = inputHandler;
         _bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

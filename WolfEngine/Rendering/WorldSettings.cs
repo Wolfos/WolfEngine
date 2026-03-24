@@ -6,5 +6,5 @@ namespace WolfEngine.Rendering;
 
 public struct WorldSettings: IEntityComponent
 {
-	public AssetLink<RenderConfig> RenderConfigAsset;
+	public AssetRef<RenderConfig> RenderConfigAsset;
 }

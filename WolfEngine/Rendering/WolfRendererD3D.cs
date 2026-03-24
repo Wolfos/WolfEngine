@@ -137,8 +137,8 @@ private sealed class MeshResources
 		ImGuiUiSystem imguiSystem,
 		WindowChromeController windowChromeController)
 	{
-		_width = 1280;
-		_height = 720;
+		_width = 1600;
+		_height = 900;
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_arenaAllocator = arenaAllocator ?? throw new ArgumentNullException(nameof(arenaAllocator));
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));

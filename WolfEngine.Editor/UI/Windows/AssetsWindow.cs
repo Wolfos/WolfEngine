@@ -103,21 +103,21 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null)
 		{
-			var previewRelativePath = string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath)
-				? asset.RelativeAssetPath
-				: asset.TextureSummary.RelativeSourceAssetPath;
-			var assetAbsolutePath = _projectService.GetAbsolutePath(previewRelativePath);
-			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
+			if (string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
 			{
-				drawList.AddImage(textureId, min, max);
-				return;
+				var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
+				if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
+				{
+					drawList.AddImage(textureId, min, max);
+					return;
+				}
 			}
 		}
 
 		drawList.AddRect(min, max, ImGui.GetColorU32(ImGuiCol.Border));
 		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
 			? handler.ThumbnailLabel
-			: asset.Type.ToString().ToUpperInvariant();
+			: GetFallbackThumbnailLabel(asset.Type);
 		var textSize = ImGui.CalcTextSize(label);
 		var textPos = new Vector2(
 			min.X + (ThumbnailSize.X - textSize.X) * 0.5f,
@@ -132,7 +132,20 @@ public sealed class AssetsWindow : EditorWindow
 			return handler.GetSubtitle(asset);
 		}
 
-		return asset.Type.ToString();
+		return asset.Type switch
+		{
+			AssetType.Model3D => "3D Model",
+			_ => asset.Type.ToString()
+		};
+	}
+
+	private static string GetFallbackThumbnailLabel(AssetType assetType)
+	{
+		return assetType switch
+		{
+			AssetType.Model3D => "3D",
+			_ => assetType.ToString().ToUpperInvariant()
+		};
 	}
 
 	private void DrawContextMenu()

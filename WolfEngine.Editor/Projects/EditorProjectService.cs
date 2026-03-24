@@ -7,6 +7,7 @@ public interface IEditorProjectService
 	bool HasOpenProject { get; }
 	string? ProjectRootPath { get; }
 	string? AssetsPath { get; }
+	string? LibraryPath { get; }
 	string? DatabasePath { get; }
 	AssetDatabase CurrentAssetDatabase { get; }
 
@@ -22,23 +23,23 @@ public interface IEditorProjectService
 
 public sealed class EditorProjectService : IEditorProjectService
 {
-	private readonly IAssetDatabaseStore _assetDatabaseStore;
+	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
-	private AssetDatabase _currentAssetDatabase;
+	private AssetDatabase _currentAssetDatabase = new();
 	private string? _projectRootPath;
 
-	public EditorProjectService(IAssetDatabaseStore assetDatabaseStore, IAssetInstanceRegistry assetInstanceRegistry)
+	public EditorProjectService(IProjectAssetPipelineService assetPipelineService, IAssetInstanceRegistry assetInstanceRegistry)
 	{
-		_assetDatabaseStore = assetDatabaseStore ?? throw new ArgumentNullException(nameof(assetDatabaseStore));
+		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
-		_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
 		_assetInstanceRegistry.Clear();
 	}
 
 	public bool HasOpenProject => string.IsNullOrWhiteSpace(_projectRootPath) == false;
 	public string? ProjectRootPath => _projectRootPath;
-	public string? AssetsPath => HasOpenProject ? Path.Combine(_projectRootPath!, "Assets") : null;
-	public string? DatabasePath => HasOpenProject ? Path.Combine(_projectRootPath!, "Database") : null;
+	public string? AssetsPath => HasOpenProject ? AssetPipelinePaths.GetAssetsPath(_projectRootPath!) : null;
+	public string? LibraryPath => HasOpenProject ? AssetPipelinePaths.GetLibraryPath(_projectRootPath!) : null;
+	public string? DatabasePath => LibraryPath;
 	public AssetDatabase CurrentAssetDatabase => _currentAssetDatabase;
 
 	public bool CreateProject(string parentFolder, string projectName, out string errorMessage)
@@ -76,15 +77,10 @@ public sealed class EditorProjectService : IEditorProjectService
 			return false;
 		}
 
-		var assetsPath = Path.Combine(projectRoot, "Assets");
-		var databasePath = Path.Combine(projectRoot, "Database");
-		var databaseFilePath = Path.Combine(databasePath, AssetDatabase.FileName);
-
 		try
 		{
-			Directory.CreateDirectory(assetsPath);
-			Directory.CreateDirectory(databasePath);
-			_assetDatabaseStore.Save(databaseFilePath, _assetDatabaseStore.CreateEmpty());
+			Directory.CreateDirectory(projectRoot);
+			_assetPipelineService.InitializeProject(projectRoot);
 		}
 		catch (Exception ex)
 		{
@@ -105,9 +101,8 @@ public sealed class EditorProjectService : IEditorProjectService
 		}
 
 		var fullProjectRoot = Path.GetFullPath(projectRoot);
-		var assetsPath = Path.Combine(fullProjectRoot, "Assets");
-		var databasePath = Path.Combine(fullProjectRoot, "Database");
-		var databaseFilePath = Path.Combine(databasePath, AssetDatabase.FileName);
+		var assetsPath = AssetPipelinePaths.GetAssetsPath(fullProjectRoot);
+		var libraryPath = AssetPipelinePaths.GetLibraryPath(fullProjectRoot);
 
 		if (Directory.Exists(fullProjectRoot) == false)
 		{
@@ -115,40 +110,34 @@ public sealed class EditorProjectService : IEditorProjectService
 			return false;
 		}
 
-		if (Directory.Exists(assetsPath) == false || Directory.Exists(databasePath) == false)
+		if (Directory.Exists(assetsPath) == false || Directory.Exists(libraryPath) == false)
 		{
-			errorMessage = "Project folder must contain both Assets and Database subfolders.";
+			errorMessage = "Project folder must contain both Assets and Library subfolders.";
 			return false;
 		}
 
-		if (File.Exists(databaseFilePath) == false)
-		{
-			errorMessage = $"Project database '{databaseFilePath}' was not found.";
-			return false;
-		}
-
-		AssetDatabase loadedDatabase;
 		try
 		{
-			loadedDatabase = _assetDatabaseStore.Load(databaseFilePath);
+			_projectRootPath = fullProjectRoot;
+			_currentAssetDatabase = _assetPipelineService.RefreshProject(_projectRootPath);
+			_assetInstanceRegistry.Clear();
+			_assetInstanceRegistry.RefreshProject(_projectRootPath, CloneCurrentAssetDatabase());
+			return true;
 		}
 		catch (Exception ex)
 		{
+			_projectRootPath = null;
+			_currentAssetDatabase = new AssetDatabase();
+			_assetInstanceRegistry.Clear();
 			errorMessage = $"Failed to open project: {ex.Message}";
 			return false;
 		}
-
-		_projectRootPath = fullProjectRoot;
-		_currentAssetDatabase = loadedDatabase;
-		_assetInstanceRegistry.Clear();
-		_assetInstanceRegistry.RefreshProject(_projectRootPath, CloneAssetDatabase(_currentAssetDatabase));
-		return true;
 	}
 
 	public void CloseProject()
 	{
 		_projectRootPath = null;
-		_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
+		_currentAssetDatabase = new AssetDatabase();
 		_assetInstanceRegistry.Clear();
 	}
 
@@ -156,33 +145,27 @@ public sealed class EditorProjectService : IEditorProjectService
 	{
 		if (HasOpenProject == false)
 		{
-			_currentAssetDatabase = _assetDatabaseStore.CreateEmpty();
+			_currentAssetDatabase = new AssetDatabase();
 			_assetInstanceRegistry.Clear();
 			return;
 		}
 
-		_assetInstanceRegistry.Clear();
-		_currentAssetDatabase = _assetDatabaseStore.Load(Path.Combine(DatabasePath!, AssetDatabase.FileName));
-		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneAssetDatabase(_currentAssetDatabase));
+		_currentAssetDatabase = _assetPipelineService.RefreshProject(_projectRootPath!);
+		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
 	}
 
 	public void SaveAssetDatabase(AssetDatabase database)
 	{
-		if (HasOpenProject == false)
-		{
-			throw new InvalidOperationException("No project is currently open.");
-		}
-
 		ArgumentNullException.ThrowIfNull(database);
-		var databaseFilePath = Path.Combine(DatabasePath!, AssetDatabase.FileName);
-		_assetDatabaseStore.Save(databaseFilePath, database);
-		_currentAssetDatabase = CloneAssetDatabase(database);
-		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneAssetDatabase(_currentAssetDatabase));
+		ReloadAssetDatabase();
 	}
 
 	public AssetDatabase CloneCurrentAssetDatabase()
 	{
-		return CloneAssetDatabase(_currentAssetDatabase);
+		return new AssetDatabase
+		{
+			Assets = _currentAssetDatabase.Assets.Select(CloneEntry).ToList()
+		};
 	}
 
 	public bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset)
@@ -192,7 +175,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			var candidate = _currentAssetDatabase.Assets[i];
 			if (candidate.Id == assetId)
 			{
-				asset = candidate;
+				asset = CloneEntry(candidate);
 				return true;
 			}
 		}
@@ -217,22 +200,17 @@ public sealed class EditorProjectService : IEditorProjectService
 		return Path.GetFullPath(Path.Combine(_projectRootPath!, normalized));
 	}
 
-	private static AssetDatabase CloneAssetDatabase(AssetDatabase source)
-	{
-		return new AssetDatabase
-		{
-			Version = source.Version,
-			Assets = source.Assets.Select(CloneEntry).ToList()
-		};
-	}
-
 	private static AssetDatabaseEntry CloneEntry(AssetDatabaseEntry asset)
 	{
 		return new AssetDatabaseEntry
 		{
 			Id = asset.Id,
+			SourceId = asset.SourceId,
 			Type = asset.Type,
 			Name = asset.Name,
+			NodeKey = asset.NodeKey,
+			IsGenerated = asset.IsGenerated,
+			RelativeSourcePath = asset.RelativeSourcePath,
 			RelativeAssetPath = asset.RelativeAssetPath,
 			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
@@ -241,7 +219,8 @@ public sealed class EditorProjectService : IEditorProjectService
 				: new TextureAssetSummary
 				{
 					RelativeSourceAssetPath = asset.TextureSummary.RelativeSourceAssetPath,
-					RelativeRawImagePath = asset.TextureSummary.RelativeRawImagePath,
+					RelativeImportedPath = asset.TextureSummary.RelativeImportedPath,
+					RelativeRuntimeArtifactPath = asset.TextureSummary.RelativeRuntimeArtifactPath,
 					Width = asset.TextureSummary.Width,
 					Height = asset.TextureSummary.Height,
 					Channels = asset.TextureSummary.Channels,
@@ -260,6 +239,21 @@ public sealed class EditorProjectService : IEditorProjectService
 				{
 					DataAssetType = asset.DataAssetSummary.DataAssetType,
 					DisplayName = asset.DataAssetSummary.DisplayName
+				},
+			MeshSummary = asset.MeshSummary is null
+				? null
+				: new MeshAssetSummary
+				{
+					RelativeImportedMeshPath = asset.MeshSummary.RelativeImportedMeshPath,
+					VertexCount = asset.MeshSummary.VertexCount,
+					IndexCount = asset.MeshSummary.IndexCount
+				},
+			ModelSummary = asset.ModelSummary is null
+				? null
+				: new Model3DAssetSummary
+				{
+					RelativeImportedModelPath = asset.ModelSummary.RelativeImportedModelPath,
+					RootNodeCount = asset.ModelSummary.RootNodeCount
 				}
 		};
 	}

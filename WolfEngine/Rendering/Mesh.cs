@@ -2,9 +2,11 @@
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.AssetPipeline;
 
 namespace WolfEngine;
 
+[RuntimeAsset(AssetType.Mesh, typeof(ImportedMeshAssetFile), typeof(IMeshRuntimeAssetResolver))]
 public class Mesh
 {
     public Vector4[] Vertices { get; }

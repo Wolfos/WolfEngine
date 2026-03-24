@@ -3,7 +3,6 @@ using ImGuiNET;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.ECS;
 using WolfEngine.Profiling;
-using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 

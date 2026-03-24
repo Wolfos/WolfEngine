@@ -51,6 +51,10 @@ public interface ITextureRuntimeAssetResolver : IRuntimeAssetResolver
 {
 }
 
+public interface IMeshRuntimeAssetResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IRuntimeArtifactTargetProvider
 {
 	string CurrentTarget { get; }

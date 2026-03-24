@@ -222,9 +222,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ref var meshRenderer = ref Unsafe.As<T, MeshRenderer>(ref component);
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 nameof(MeshRenderer.MaterialAsset),
-                typeof(AssetLink<Material>),
+                typeof(AssetRef<Material>),
                 meshRenderer.MaterialAsset));
-            if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetLink<Material> materialAsset)
+            if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
                 meshRenderer.AssignMaterialAsset(materialAsset, renderGraph);
             }

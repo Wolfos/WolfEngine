@@ -12,8 +12,6 @@ public sealed class DataAssetEditor
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
-	private DataAssetMetaFile? _loadedMeta;
-	private Guid? _loadedMetaAssetId;
 
 	public DataAssetEditor(
 		IEditorProjectService projectService,
@@ -27,76 +25,33 @@ public sealed class DataAssetEditor
 
 	public void Draw(AssetDatabaseEntry asset)
 	{
-		var loadedAsset = EnsureAssetLoaded(asset);
-		var meta = EnsureMetaLoaded(asset);
-		if (loadedAsset is null || meta is null)
+		if (asset.IsGenerated)
+		{
+			ImGui.TextUnformatted("Generated data nodes are read-only.");
+			return;
+		}
+
+		DataAssetLoadResult? loadedAsset;
+		try
+		{
+			loadedAsset = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+		}
+		catch
+		{
+			loadedAsset = null;
+		}
+
+		if (loadedAsset is null)
 		{
 			ImGui.TextUnformatted("Failed to load data asset.");
 			return;
 		}
 
-		var dataAssetType = loadedAsset.GetType();
-		if (DrawObjectProperties(loadedAsset, dataAssetType, includeHeader: false))
+		if (DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false))
 		{
-			SaveAsset(asset, dataAssetType, loadedAsset, meta);
+			_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), loadedAsset.DataAssetType, loadedAsset.Asset);
+			_projectService.ReloadAssetDatabase();
 		}
-	}
-
-	private IDataAsset? EnsureAssetLoaded(AssetDatabaseEntry asset)
-	{
-		try
-		{
-			var meta = EnsureMetaLoaded(asset);
-			if (meta is null)
-			{
-				return null;
-			}
-
-			var dataAssetType = Type.GetType(meta.DataAssetType, throwOnError: false);
-			if (dataAssetType is null)
-			{
-				return null;
-			}
-
-			var getInstance = typeof(AssetDatabase)
-				.GetMethod(nameof(AssetDatabase.GetInstance), BindingFlags.Public | BindingFlags.Static)
-				?.MakeGenericMethod(dataAssetType)
-				?? throw new InvalidOperationException("Failed to resolve AssetDatabase.GetInstance<T>.");
-			return getInstance.Invoke(null, [asset.Id]) as IDataAsset;
-		}
-		catch
-		{
-			return null;
-		}
-	}
-
-	private DataAssetMetaFile? EnsureMetaLoaded(AssetDatabaseEntry asset)
-	{
-		if (_loadedMetaAssetId == asset.Id && _loadedMeta is not null)
-		{
-			return _loadedMeta;
-		}
-
-		try
-		{
-			_loadedMetaAssetId = asset.Id;
-			_loadedMeta = _dataAssetStore.LoadMeta(_projectService.GetAbsolutePath(asset.GetEffectiveRelativeStatePath()));
-			return _loadedMeta;
-		}
-		catch
-		{
-			_loadedMetaAssetId = asset.Id;
-			_loadedMeta = null;
-			return null;
-		}
-	}
-
-	private void SaveAsset(AssetDatabaseEntry asset, Type dataAssetType, IDataAsset loadedAsset, DataAssetMetaFile meta)
-	{
-		_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), dataAssetType, loadedAsset);
-		_dataAssetStore.SaveMeta(_projectService.GetAbsolutePath(asset.GetEffectiveRelativeStatePath()), meta);
-		_loadedMeta = meta;
-		_loadedMetaAssetId = asset.Id;
 	}
 
 	private bool DrawObjectProperties(object target, Type targetType, bool includeHeader, string? headerLabel = null)
@@ -200,38 +155,8 @@ public sealed class DataAssetEditor
 		       type != typeof(ColorRGBA);
 	}
 
-	private bool DrawEnumProperty(object target, PropertyInfo property, object? value)
+	private static void DrawUnsupportedProperty(string propertyName, Type propertyType)
 	{
-		var currentValue = value?.ToString() ?? string.Empty;
-		var changed = false;
-		EditorUIUtility.Combo(property.Name, currentValue, () =>
-		{
-			foreach (var candidate in Enum.GetValues(property.PropertyType))
-			{
-				var candidateName = candidate?.ToString() ?? string.Empty;
-				var isSelected = Equals(candidate, value);
-				if (ImGui.Selectable(candidateName, isSelected))
-				{
-					property.SetValue(target, candidate);
-					changed = true;
-				}
-
-				if (isSelected)
-				{
-					ImGui.SetItemDefaultFocus();
-				}
-			}
-		});
-
-		return changed;
-	}
-
-	private static void DrawUnsupportedProperty(string label, Type propertyType)
-	{
-		EditorUIUtility.DrawLabeledField(label, () =>
-		{
-			ImGui.TextDisabled($"Unsupported ({propertyType.Name})");
-			return false;
-		});
+		ImGui.TextDisabled($"{propertyName}: Unsupported ({propertyType.Name})");
 	}
 }

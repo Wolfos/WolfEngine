@@ -47,6 +47,8 @@ public static class Program
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
+		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
+		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
@@ -59,6 +61,7 @@ public static class Program
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
+		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();

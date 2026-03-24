@@ -139,7 +139,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 	private bool TryDrawAssetLink(PropertyDrawerContext context, out PropertyDrawerResult result)
 	{
 		var valueType = context.ValueType;
-		if (valueType.IsGenericType == false || valueType.GetGenericTypeDefinition() != typeof(AssetLink<>))
+		if (valueType.IsGenericType == false || valueType.GetGenericTypeDefinition() != typeof(AssetRef<>))
 		{
 			result = default;
 			return false;
@@ -351,18 +351,18 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			return Guid.Empty;
 		}
 
-		var idField = valueType.GetField(nameof(AssetLink<IDataAsset>.Id))
-			?? throw new InvalidOperationException($"Asset link type '{valueType.FullName}' is missing its Id field.");
-		return idField.GetValue(value) is Guid id ? id : Guid.Empty;
+		var nodeIdProperty = valueType.GetProperty(nameof(AssetRef<IDataAsset>.NodeId))
+			?? throw new InvalidOperationException($"Asset reference type '{valueType.FullName}' is missing its NodeId property.");
+		return nodeIdProperty.GetValue(value) is Guid nodeId ? nodeId : Guid.Empty;
 	}
 
 	private static object CreateAssetLinkValue(Type valueType, Guid assetId)
 	{
 		var boxedValue = Activator.CreateInstance(valueType)
-			?? throw new InvalidOperationException($"Failed to create asset link value for '{valueType.FullName}'.");
-		var idField = valueType.GetField(nameof(AssetLink<IDataAsset>.Id))
-			?? throw new InvalidOperationException($"Asset link type '{valueType.FullName}' is missing its Id field.");
-		idField.SetValue(boxedValue, assetId);
+			?? throw new InvalidOperationException($"Failed to create asset reference value for '{valueType.FullName}'.");
+		var nodeIdProperty = valueType.GetProperty(nameof(AssetRef<IDataAsset>.NodeId))
+			?? throw new InvalidOperationException($"Asset reference type '{valueType.FullName}' is missing its NodeId property.");
+		nodeIdProperty.SetValue(boxedValue, assetId);
 		return boxedValue;
 	}
 }

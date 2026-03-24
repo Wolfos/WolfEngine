@@ -1,0 +1,1042 @@
+using System.Text.Json;
+using WolfEngine.AssetPipeline;
+using WolfEngine.Importing;
+using WolfEngine.Utility;
+using WolfEngine.ECS;
+using WolfEngine.Rendering;
+using ImportImageLoader = WolfEngine.Importing.IImageLoader;
+
+namespace WolfEngine.Editor.Projects;
+
+public interface IProjectAssetPipelineService
+{
+	void InitializeProject(string projectRootPath);
+	AssetDatabase RefreshProject(string projectRootPath);
+	AssetDatabase LoadDatabase(string projectRootPath);
+	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
+	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
+	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
+	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
+}
+
+public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
+{
+	private static readonly string[] TextureExtensions =
+	[
+		".jpg", ".jpeg", ".png", ".bmp", ".tga", ".psd", ".gif", ".hdr"
+	];
+
+	private static readonly string[] ThreeDExtensions =
+	[
+		".gltf", ".glb", ".fbx"
+	];
+
+	private readonly IAssetPipelineIndex _index;
+	private readonly IAssetMetadataStore _metadataStore;
+	private readonly ImportImageLoader _imageLoader;
+	private readonly IDataAssetStore _dataAssetStore;
+	private readonly IMaterialAssetStore _materialAssetStore;
+	private readonly IThreeDFileImporter _threeDFileImporter;
+
+	public ProjectAssetPipelineService(
+		IAssetPipelineIndex index,
+		IAssetMetadataStore metadataStore,
+		ImportImageLoader imageLoader,
+		IDataAssetStore dataAssetStore,
+		IMaterialAssetStore materialAssetStore,
+		IThreeDFileImporter threeDFileImporter)
+	{
+		_index = index ?? throw new ArgumentNullException(nameof(index));
+		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
+		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
+		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
+		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
+		_threeDFileImporter = threeDFileImporter ?? throw new ArgumentNullException(nameof(threeDFileImporter));
+	}
+
+	public void InitializeProject(string projectRootPath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		Directory.CreateDirectory(AssetPipelinePaths.GetAssetsPath(projectRootPath));
+		Directory.CreateDirectory(AssetPipelinePaths.GetLibraryPath(projectRootPath));
+		Directory.CreateDirectory(AssetPipelinePaths.GetImportedRoot(projectRootPath));
+		Directory.CreateDirectory(AssetPipelinePaths.GetArtifactsRoot(projectRootPath));
+		_index.Initialize(projectRootPath);
+	}
+
+	public AssetDatabase RefreshProject(string projectRootPath)
+	{
+		InitializeProject(projectRootPath);
+		var assetsPath = AssetPipelinePaths.GetAssetsPath(projectRootPath);
+		var sourceFiles = Directory.EnumerateFiles(assetsPath, "*", SearchOption.AllDirectories)
+			.Where(path => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) == false)
+			.Where(IsSupportedSourcePath)
+			.ToList();
+
+		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		for (var i = 0; i < sourceFiles.Count; i++)
+		{
+			var absoluteSourcePath = sourceFiles[i];
+			var relativeSourcePath = ToProjectRelativePath(projectRootPath, absoluteSourcePath);
+			knownRelativePaths.Add(relativeSourcePath);
+			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath);
+		}
+
+		var existingSources = _index.GetSources(projectRootPath);
+		for (var i = 0; i < existingSources.Count; i++)
+		{
+			var existing = existingSources[i];
+			if (knownRelativePaths.Contains(existing.RelativeSourcePath))
+			{
+				continue;
+			}
+
+			DeleteSourceArtifacts(projectRootPath, existing.SourceId);
+			_index.DeleteSource(projectRootPath, existing.SourceId);
+		}
+
+		return LoadDatabase(projectRootPath);
+	}
+
+	public AssetDatabase LoadDatabase(string projectRootPath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		_index.Initialize(projectRootPath);
+		var nodes = _index.GetNodes(projectRootPath);
+		return new AssetDatabase
+		{
+			Assets = nodes.Select(node => CreateDatabaseEntry(node)).ToList()
+		};
+	}
+
+	public bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset)
+	{
+		if (_index.TryGetNode(projectRootPath, nodeId, out var node) == false)
+		{
+			asset = null!;
+			return false;
+		}
+
+		asset = CreateDatabaseEntry(node);
+		return true;
+	}
+
+	public bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId)
+	{
+		nodeId = Guid.Empty;
+		if (_index.TryGetSourceByRelativePath(projectRootPath, relativeSourcePath, out var source) == false)
+		{
+			return false;
+		}
+
+		var nodes = _index.GetNodes(projectRootPath)
+			.Where(candidate => candidate.SourceId == source.SourceId)
+			.OrderBy(candidate => candidate.NodeKey, StringComparer.Ordinal)
+			.ToList();
+		var primary = nodes.FirstOrDefault(candidate => string.Equals(candidate.NodeKey, "main", StringComparison.Ordinal))
+			?? nodes.FirstOrDefault(candidate => string.Equals(candidate.NodeKey, "scene", StringComparison.Ordinal))
+			?? nodes.FirstOrDefault();
+		if (primary is null)
+		{
+			return false;
+		}
+
+		nodeId = primary.NodeId;
+		return true;
+	}
+
+	public AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentException.ThrowIfNullOrWhiteSpace(absoluteSourcePath);
+
+		var extension = Path.GetExtension(absoluteSourcePath).ToLowerInvariant();
+		var destinationFolder = AssetPipelinePaths.GetAssetsPath(projectRootPath);
+		Directory.CreateDirectory(destinationFolder);
+
+		var baseName = Path.GetFileNameWithoutExtension(absoluteSourcePath);
+		var destinationPath = GetUniqueDestinationPath(destinationFolder, baseName, extension);
+		File.Copy(absoluteSourcePath, destinationPath, overwrite: false);
+
+		var relativePath = ToProjectRelativePath(projectRootPath, destinationPath);
+		ImportSource(projectRootPath, destinationPath, relativePath);
+		if (TryGetPrimaryNodeIdForRelativeSourcePath(projectRootPath, relativePath, out var nodeId))
+		{
+			var source = _index.GetSources(projectRootPath)
+				.First(record => string.Equals(record.RelativeSourcePath, relativePath, StringComparison.OrdinalIgnoreCase));
+			return new AssetImportResult
+			{
+				PrimaryNodeId = nodeId,
+				PrimarySourceId = source.SourceId
+			};
+		}
+
+		return new AssetImportResult();
+	}
+
+	public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentNullException.ThrowIfNull(world);
+		if (_index.TryGetNode(projectRootPath, modelNodeId, out var modelNode) == false)
+		{
+			throw new InvalidOperationException($"3D model node '{modelNodeId}' was not found.");
+		}
+
+		if (modelNode.Type != AssetType.Model3D)
+		{
+			throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
+		}
+
+		var summary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(modelNode.SummaryJson);
+		var absoluteModelPath = GetAbsolutePath(projectRootPath, summary.RelativeImportedModelPath);
+		var modelFile = AssetPipelineSerialization.Deserialize<ImportedModelAssetFile>(File.ReadAllText(absoluteModelPath));
+		if (modelFile.RootNodes.Count == 0)
+		{
+			return;
+		}
+
+		if (modelFile.RootNodes.Count == 1)
+		{
+			CreateModelNodeEntity(modelFile.RootNodes[0], world, parent: null);
+			return;
+		}
+
+		var wrapper = world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
+		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
+		foreach (var rootNode in modelFile.RootNodes)
+		{
+			CreateModelNodeEntity(rootNode, world, wrapper);
+		}
+	}
+
+	private void CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
+	{
+		var entity = world.CreateEntity(node.Name);
+		if (parent is { } parentEntity)
+		{
+			world.SetParent(entity, parentEntity);
+		}
+
+		world.AddTransform(entity, node.LocalTransform);
+		for (var i = 0; i < node.Meshes.Count; i++)
+		{
+			var meshInstance = node.Meshes[i];
+			var meshEntity = node.Meshes.Count == 1 ? entity : world.CreateEntity(meshInstance.Name);
+			if (node.Meshes.Count > 1)
+			{
+				world.SetParent(meshEntity, entity);
+				world.AddTransform(meshEntity, System.Numerics.Matrix4x4.Identity);
+			}
+
+			var material = AssetDatabase.GetInstance<Material>(meshInstance.MaterialNodeId);
+			var mesh = AssetDatabase.GetInstance<Mesh>(meshInstance.MeshNodeId);
+			if (material is null || mesh is null)
+			{
+				continue;
+			}
+
+			world.AddComponent(meshEntity, new MeshRenderer
+			{
+				MaterialAsset = new AssetRef<Material> { NodeId = meshInstance.MaterialNodeId },
+				Material = material,
+				Mesh = mesh
+			});
+		}
+
+		for (var i = 0; i < node.Children.Count; i++)
+		{
+			CreateModelNodeEntity(node.Children[i], world, entity);
+		}
+	}
+
+	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath)
+	{
+		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteSourcePath);
+		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
+		var metadata = File.Exists(absoluteMetaPath)
+			? _metadataStore.Load(absoluteMetaPath)
+			: CreateDefaultMetadata(relativeSourcePath);
+		if (metadata.SourceId == Guid.Empty)
+		{
+			metadata.SourceId = Guid.NewGuid();
+		}
+
+		metadata.SourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
+		var sourceInfo = new FileInfo(absoluteSourcePath);
+		metadata.SourceFileSize = sourceInfo.Length;
+		metadata.SourceLastWriteTimeUtcTicks = sourceInfo.LastWriteTimeUtc.Ticks;
+
+		var sourceRecord = new AssetSourceRecord
+		{
+			SourceId = metadata.SourceId,
+			RelativeSourcePath = relativeSourcePath,
+			RelativeMetaPath = relativeMetaPath,
+			ImporterId = metadata.ImporterId,
+			ImporterVersion = metadata.ImporterVersion,
+			SourceContentHash = metadata.SourceContentHash,
+			SourceFileSize = metadata.SourceFileSize,
+			SourceLastWriteTimeUtcTicks = metadata.SourceLastWriteTimeUtcTicks,
+			ImportSettingsJson = SerializeImportSettings(metadata)
+		};
+
+		var importGraph = metadata.ImporterId switch
+		{
+			AssetImporterIds.Texture => ImportTextureSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.Material => ImportMaterialSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
+		};
+		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
+		metadata.SubAssets = metadata.SubAssets
+			.Where(entry => activeKeys.Contains(entry.Key))
+			.ToList();
+
+		_metadataStore.Save(absoluteMetaPath, metadata);
+		_index.UpsertSourceGraph(projectRootPath, sourceRecord, importGraph.Nodes, importGraph.Artifacts, importGraph.Dependencies);
+	}
+
+	private ImportGraph ImportTextureSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		metadata.TextureImportSettings ??= new TextureImportSettings();
+		var semantic = metadata.TextureImportSettings.IsSrgb ? TextureSemantic.BaseColor : TextureSemantic.Unknown;
+		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ImportedFolderName,
+			metadata.SourceId.ToString("D"),
+			"texture.bin"));
+		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			"runtime.bin"));
+		TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTexture);
+		TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeArtifactPath), importedTexture);
+
+		var summary = new TextureAssetSummary
+		{
+			RelativeSourceAssetPath = relativeSourcePath,
+			RelativeImportedPath = relativeImportedPath,
+			RelativeRuntimeArtifactPath = relativeArtifactPath,
+			Width = importedTexture.Width,
+			Height = importedTexture.Height,
+			Channels = importedTexture.Channels,
+			IsSrgb = importedTexture.IsSrgb,
+			SourceExtension = Path.GetExtension(relativeSourcePath).ToLowerInvariant()
+		};
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.Texture2D,
+					NodeKey = "main",
+					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts = CreateTextureArtifactRecords(nodeId, relativeArtifactPath, GetAbsolutePath(projectRootPath, relativeArtifactPath)),
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportMaterialSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var materialAsset = _materialAssetStore.LoadAsset(absoluteSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Material, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var summary = new MaterialAssetSummary
+		{
+			MaterialType = materialAsset.MaterialType
+		};
+
+		var dependencies = CreateMaterialDependencies(materialAsset);
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.Material,
+					NodeKey = "main",
+					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts = [],
+			Dependencies = dependencies.Select(dependency => new AssetDependencyRecord
+			{
+				FromNodeId = nodeId,
+				ToNodeId = dependency.TargetNodeId,
+				Kind = dependency.Kind,
+				IsHard = true
+			}).ToList()
+		};
+	}
+
+	private ImportGraph ImportDataAssetSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var loadResult = _dataAssetStore.LoadAsset(absoluteSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.DataAsset, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var summary = new DataAssetSummary
+		{
+			DataAssetType = loadResult.DataAssetType.AssemblyQualifiedName ?? loadResult.DataAssetType.FullName ?? loadResult.DataAssetType.Name,
+			DisplayName = loadResult.DataAssetType.Name
+		};
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.DataAsset,
+					NodeKey = "main",
+					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts = [],
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportThreeDSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var importedScene = _threeDFileImporter.Import(absoluteSourcePath);
+		var nodes = new List<AssetNodeRecord>();
+		var artifacts = new List<AssetArtifactRecord>();
+		var dependencies = new List<AssetDependencyRecord>();
+
+		var textureNodeIds = new List<Guid>(importedScene.Textures.Count);
+		for (var i = 0; i < importedScene.Textures.Count; i++)
+		{
+			var importedTexture = importedScene.Textures[i];
+			var nodeKey = $"texture:{i}";
+			var name = string.IsNullOrWhiteSpace(importedTexture.NameOrPath) ? $"Texture {i}" : Path.GetFileNameWithoutExtension(importedTexture.NameOrPath);
+			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Texture2D, name);
+			textureNodeIds.Add(nodeId);
+
+			var importedTextureFile = new ImportedTexture(
+				importedTexture.NameOrPath,
+				importedTexture.Width,
+				importedTexture.Height,
+				importedTexture.Channels,
+				importedTexture.IsSrgb,
+				importedTexture.PixelData);
+			var relativeImportedPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ImportedFolderName,
+				metadata.SourceId.ToString("D"),
+				"textures",
+				$"{nodeKey.Replace(':', '_')}.bin"));
+			var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ArtifactsFolderName,
+				nodeId.ToString("D"),
+				"runtime.bin"));
+			TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTextureFile);
+			TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeArtifactPath), importedTextureFile);
+
+			nodes.Add(new AssetNodeRecord
+			{
+				NodeId = nodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.Texture2D,
+				NodeKey = nodeKey,
+				Name = name,
+				IsGenerated = true,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = string.Empty,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new TextureAssetSummary
+				{
+					RelativeSourceAssetPath = string.Empty,
+					RelativeImportedPath = relativeImportedPath,
+					RelativeRuntimeArtifactPath = relativeArtifactPath,
+					Width = importedTexture.Width,
+					Height = importedTexture.Height,
+					Channels = importedTexture.Channels,
+					IsSrgb = importedTexture.IsSrgb,
+					SourceExtension = Path.GetExtension(importedTexture.NameOrPath ?? string.Empty).ToLowerInvariant()
+				})
+			});
+			artifacts.AddRange(CreateTextureArtifactRecords(nodeId, relativeArtifactPath, GetAbsolutePath(projectRootPath, relativeArtifactPath)));
+		}
+
+		var materialNodeIds = new List<Guid>(importedScene.Materials.Count);
+		for (var i = 0; i < importedScene.Materials.Count; i++)
+		{
+			var importedMaterial = importedScene.Materials[i];
+			var nodeKey = $"material:{i}";
+			var name = $"Material {i}";
+			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Material, name);
+			materialNodeIds.Add(nodeId);
+
+			var materialAsset = CreateGeneratedMaterialAsset(importedMaterial, textureNodeIds);
+			var relativeMaterialPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ImportedFolderName,
+				metadata.SourceId.ToString("D"),
+				"materials",
+				$"{nodeKey.Replace(':', '_')}.mat.json"));
+			_materialAssetStore.SaveAsset(GetAbsolutePath(projectRootPath, relativeMaterialPath), materialAsset);
+
+			nodes.Add(new AssetNodeRecord
+			{
+				NodeId = nodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.Material,
+				NodeKey = nodeKey,
+				Name = name,
+				IsGenerated = true,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = relativeMaterialPath,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new MaterialAssetSummary
+				{
+					MaterialType = materialAsset.MaterialType
+				})
+			});
+
+			foreach (var dependency in CreateMaterialDependencies(materialAsset))
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = nodeId,
+					ToNodeId = dependency.TargetNodeId,
+					Kind = dependency.Kind,
+					IsHard = true
+				});
+			}
+		}
+
+		var modelGraph = new ImportedModelAssetFile
+		{
+			Name = importedScene.Name,
+			RootNodes = new List<ImportedModelAssetNode>()
+		};
+		for (var i = 0; i < importedScene.RootNodes.Count; i++)
+		{
+			var rootNode = CreateModelNode(
+				projectRootPath,
+				metadata,
+				relativeSourcePath,
+				relativeMetaPath,
+				$"root-{i}-{SanitizeKey(importedScene.RootNodes[i].Name)}",
+				importedScene.RootNodes[i],
+				materialNodeIds,
+				nodes,
+				dependencies);
+			modelGraph.RootNodes.Add(rootNode);
+		}
+
+		var modelNodeId = GetOrCreateNodeId(metadata, "scene", AssetType.Model3D, string.IsNullOrWhiteSpace(importedScene.Name)
+			? Path.GetFileNameWithoutExtension(relativeSourcePath)
+			: importedScene.Name);
+		var relativeModelPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ImportedFolderName,
+			metadata.SourceId.ToString("D"),
+			"model3d.asset.json"));
+		WriteJsonFile(GetAbsolutePath(projectRootPath, relativeModelPath), modelGraph);
+		nodes.Add(new AssetNodeRecord
+		{
+			NodeId = modelNodeId,
+			SourceId = metadata.SourceId,
+			Type = AssetType.Model3D,
+			NodeKey = "scene",
+			Name = modelGraph.Name,
+			IsGenerated = true,
+			RelativeSourcePath = relativeSourcePath,
+			RelativeAssetPath = relativeModelPath,
+			RelativeMetaPath = relativeMetaPath,
+			SummaryJson = AssetPipelineSerialization.Serialize(new Model3DAssetSummary
+			{
+				RelativeImportedModelPath = relativeModelPath,
+				RootNodeCount = modelGraph.RootNodes.Count
+			})
+		});
+
+		var emittedModelMaterialDependencies = new HashSet<Guid>();
+		for (var i = 0; i < modelGraph.RootNodes.Count; i++)
+		{
+			AddModelDependencies(modelNodeId, modelGraph.RootNodes[i], dependencies, emittedModelMaterialDependencies);
+		}
+
+		return new ImportGraph
+		{
+			Nodes = nodes,
+			Artifacts = artifacts,
+			Dependencies = dependencies
+		};
+	}
+
+	private ImportedModelAssetNode CreateModelNode(
+		string projectRootPath,
+		AssetSourceMetaFile metadata,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		string hierarchyKey,
+		ImportedNode node,
+		IReadOnlyList<Guid> materialNodeIds,
+		List<AssetNodeRecord> nodes,
+		List<AssetDependencyRecord> dependencies)
+	{
+		var modelNode = new ImportedModelAssetNode
+		{
+			Name = node.Name,
+			LocalTransform = node.LocalTransform
+		};
+
+		for (var i = 0; i < node.Meshes.Count; i++)
+		{
+			var meshInfo = node.Meshes[i];
+			var nodeKey = $"mesh:{hierarchyKey}:{i}:{SanitizeKey(meshInfo.Name)}";
+			var meshNodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Mesh, meshInfo.Name);
+			var relativeMeshPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ImportedFolderName,
+				metadata.SourceId.ToString("D"),
+				"meshes",
+				$"{nodeKey.Replace(':', '_')}.mesh.json"));
+			WriteJsonFile(GetAbsolutePath(projectRootPath, relativeMeshPath), new ImportedMeshAssetFile
+			{
+				Vertices = meshInfo.Mesh.Vertices,
+				Indices = meshInfo.Mesh.Indices,
+				Normals = meshInfo.Mesh.Normals,
+				Tangents = meshInfo.Mesh.Tangents,
+				UVs = meshInfo.Mesh.UVs
+			});
+			nodes.Add(new AssetNodeRecord
+			{
+				NodeId = meshNodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.Mesh,
+				NodeKey = nodeKey,
+				Name = string.IsNullOrWhiteSpace(meshInfo.Name) ? "Mesh" : meshInfo.Name,
+				IsGenerated = true,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = relativeMeshPath,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new MeshAssetSummary
+				{
+					RelativeImportedMeshPath = relativeMeshPath,
+					VertexCount = meshInfo.Mesh.Vertices.Length,
+					IndexCount = meshInfo.Mesh.Indices.Length
+				})
+			});
+
+			var materialNodeId = meshInfo.MaterialIndex >= 0 && meshInfo.MaterialIndex < materialNodeIds.Count
+				? materialNodeIds[meshInfo.MaterialIndex]
+				: Guid.Empty;
+			modelNode.Meshes.Add(new ImportedModelAssetMeshInstance
+			{
+				Name = meshInfo.Name,
+				MeshNodeId = meshNodeId,
+				MaterialNodeId = materialNodeId
+			});
+			if (materialNodeId != Guid.Empty)
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = meshNodeId,
+					ToNodeId = materialNodeId,
+					Kind = "mesh-material",
+					IsHard = true
+				});
+			}
+		}
+
+		for (var i = 0; i < node.Children.Count; i++)
+		{
+			var childKey = $"{hierarchyKey}/child-{i}-{SanitizeKey(node.Children[i].Name)}";
+			modelNode.Children.Add(CreateModelNode(
+				projectRootPath,
+				metadata,
+				relativeSourcePath,
+				relativeMetaPath,
+				childKey,
+				node.Children[i],
+				materialNodeIds,
+				nodes,
+				dependencies));
+		}
+
+		return modelNode;
+	}
+
+	private static void AddModelDependencies(
+		Guid modelNodeId,
+		ImportedModelAssetNode node,
+		List<AssetDependencyRecord> dependencies,
+		HashSet<Guid> emittedModelMaterialDependencies)
+	{
+		for (var i = 0; i < node.Meshes.Count; i++)
+		{
+			var mesh = node.Meshes[i];
+			dependencies.Add(new AssetDependencyRecord
+			{
+				FromNodeId = modelNodeId,
+				ToNodeId = mesh.MeshNodeId,
+				Kind = "model-mesh",
+				IsHard = true
+			});
+			if (mesh.MaterialNodeId != Guid.Empty && emittedModelMaterialDependencies.Add(mesh.MaterialNodeId))
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = modelNodeId,
+					ToNodeId = mesh.MaterialNodeId,
+					Kind = "model-material",
+					IsHard = true
+				});
+			}
+		}
+
+		for (var i = 0; i < node.Children.Count; i++)
+		{
+			AddModelDependencies(modelNodeId, node.Children[i], dependencies, emittedModelMaterialDependencies);
+		}
+	}
+
+	private static string SerializeImportSettings(AssetSourceMetaFile metadata)
+	{
+		if (metadata.TextureImportSettings is not null)
+		{
+			return AssetPipelineSerialization.Serialize(metadata.TextureImportSettings);
+		}
+
+		return "{}";
+	}
+
+	private static bool IsSupportedSourcePath(string absolutePath)
+	{
+		var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
+		return TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+		       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+		       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
+		       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static AssetSourceMetaFile CreateDefaultMetadata(string relativeSourcePath)
+	{
+		var importerId = GetImporterId(relativeSourcePath);
+		return new AssetSourceMetaFile
+		{
+			SourceId = Guid.NewGuid(),
+			ImporterId = importerId,
+			ImporterVersion = 1,
+			TextureImportSettings = importerId == AssetImporterIds.Texture ? new TextureImportSettings() : null
+		};
+	}
+
+	private static string GetImporterId(string relativeSourcePath)
+	{
+		if (relativeSourcePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.Material;
+		}
+
+		if (relativeSourcePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.DataAsset;
+		}
+
+		var extension = Path.GetExtension(relativeSourcePath).ToLowerInvariant();
+		if (TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.Texture;
+		}
+
+		if (ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.ThreeDScene;
+		}
+
+		throw new InvalidOperationException($"Unsupported asset source '{relativeSourcePath}'.");
+	}
+
+	private Guid GetOrCreateNodeId(AssetSourceMetaFile metadata, string key, AssetType type, string name)
+	{
+		var existing = metadata.SubAssets.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.Ordinal));
+		if (existing is not null)
+		{
+			existing.Type = type;
+			existing.Name = name;
+			return existing.NodeId;
+		}
+
+		var created = new AssetSubAssetManifestEntry
+		{
+			Key = key,
+			NodeId = Guid.NewGuid(),
+			Type = type,
+			Name = name
+		};
+		metadata.SubAssets.Add(created);
+		return created.NodeId;
+	}
+
+	private static IReadOnlyList<MaterialDependency> CreateMaterialDependencies(MaterialAsset materialAsset)
+	{
+		var properties = materialAsset.GetActiveProperties();
+		var dependencies = new List<MaterialDependency>(5);
+		AddDependency(properties.Textures.Albedo, "material-texture:albedo");
+		AddDependency(properties.Textures.MetallicRoughness, "material-texture:metallic-roughness");
+		AddDependency(properties.Textures.Normal, "material-texture:normal");
+		AddDependency(properties.Textures.Emissive, "material-texture:emissive");
+		AddDependency(properties.Textures.Occlusion, "material-texture:occlusion");
+		return dependencies;
+
+		void AddDependency(AssetRef<Texture> reference, string kind)
+		{
+			if (reference.NodeId == Guid.Empty)
+			{
+				return;
+			}
+
+			dependencies.Add(new MaterialDependency(reference.NodeId, kind));
+		}
+	}
+
+	private static MaterialAsset CreateGeneratedMaterialAsset(ImportedMaterial importedMaterial, IReadOnlyList<Guid> textureNodeIds)
+	{
+		var materialType = importedMaterial.AlphaMode switch
+		{
+			AlphaMode.AlphaTest => MaterialAssetType.AlphaTest,
+			AlphaMode.AlphaBlend => MaterialAssetType.AlphaBlend,
+			_ => MaterialAssetType.Opaque
+		};
+
+		var materialAsset = new MaterialAsset
+		{
+			MaterialType = materialType
+		};
+		var properties = materialAsset.GetActiveProperties();
+		properties.BaseColor = importedMaterial.BaseColor;
+		properties.MetallicFactor = importedMaterial.MetallicFactor;
+		properties.RoughnessFactor = importedMaterial.RoughnessFactor;
+		properties.Textures.Albedo = CreateTextureRef(importedMaterial.BaseColorTextureIndex, textureNodeIds);
+		properties.Textures.Normal = CreateTextureRef(importedMaterial.NormalTextureIndex, textureNodeIds);
+		properties.Textures.MetallicRoughness = CreateTextureRef(importedMaterial.MetallicRoughnessTextureIndex, textureNodeIds);
+		properties.Textures.Occlusion = CreateTextureRef(importedMaterial.OcclusionTextureIndex, textureNodeIds);
+		properties.Textures.Emissive = CreateTextureRef(importedMaterial.EmissiveTextureIndex, textureNodeIds);
+
+		if (properties is AlphaTestMaterialProperties alphaTest)
+		{
+			alphaTest.AlphaCutoff = importedMaterial.AlphaCutoff;
+		}
+		else if (properties is AlphaBlendMaterialProperties alphaBlend)
+		{
+			alphaBlend.AlphaCutoff = importedMaterial.AlphaCutoff;
+		}
+
+		return materialAsset;
+	}
+
+	private static AssetRef<Texture> CreateTextureRef(int? index, IReadOnlyList<Guid> textureNodeIds)
+	{
+		if (index is not { } resolvedIndex || resolvedIndex < 0 || resolvedIndex >= textureNodeIds.Count)
+		{
+			return default;
+		}
+
+		return new AssetRef<Texture> { NodeId = textureNodeIds[resolvedIndex] };
+	}
+
+	private static List<AssetArtifactRecord> CreateTextureArtifactRecords(Guid nodeId, string relativeArtifactPath, string absoluteArtifactPath)
+	{
+		var fileInfo = new FileInfo(absoluteArtifactPath);
+		var contentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath);
+		return
+		[
+			CreateTextureArtifact(nodeId, "runtime", string.Empty),
+			CreateTextureArtifact(nodeId, "runtime-metal", "metal"),
+			CreateTextureArtifact(nodeId, "runtime-d3d12", "d3d12")
+		];
+
+		AssetArtifactRecord CreateTextureArtifact(Guid recordNodeId, string artifactKey, string target)
+		{
+			return new AssetArtifactRecord
+			{
+				NodeId = recordNodeId,
+				ArtifactKey = artifactKey,
+				Kind = "RuntimeTexture",
+				Target = target,
+				RelativePath = relativeArtifactPath,
+				ContentHash = contentHash,
+				ByteSize = fileInfo.Length,
+				ChunkIndex = 0,
+				ChunkCount = 1,
+				StreamGroup = "default",
+				MetadataJson = "{}"
+			};
+		}
+	}
+
+	private static AssetDatabaseEntry CreateDatabaseEntry(AssetNodeRecord node)
+	{
+		var entry = new AssetDatabaseEntry
+		{
+			Id = node.NodeId,
+			SourceId = node.SourceId,
+			Type = node.Type,
+			Name = node.Name,
+			NodeKey = node.NodeKey,
+			IsGenerated = node.IsGenerated,
+			RelativeSourcePath = node.RelativeSourcePath,
+			RelativeAssetPath = node.RelativeAssetPath,
+			RelativeStatePath = node.RelativeMetaPath,
+			RelativeMetaPath = node.RelativeMetaPath
+		};
+
+		switch (node.Type)
+		{
+			case AssetType.Texture2D:
+				entry.TextureSummary = AssetPipelineSerialization.Deserialize<TextureAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.Material:
+				entry.MaterialSummary = AssetPipelineSerialization.Deserialize<MaterialAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.DataAsset:
+				entry.DataAssetSummary = AssetPipelineSerialization.Deserialize<DataAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.Mesh:
+				entry.MeshSummary = AssetPipelineSerialization.Deserialize<MeshAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.Model3D:
+				entry.ModelSummary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(node.SummaryJson);
+				break;
+		}
+
+		return entry;
+	}
+
+	private void DeleteSourceArtifacts(string projectRootPath, Guid sourceId)
+	{
+		var nodes = _index.GetNodes(projectRootPath).Where(node => node.SourceId == sourceId).ToList();
+		var importedDirectory = Path.Combine(AssetPipelinePaths.GetImportedRoot(projectRootPath), sourceId.ToString("D"));
+		if (Directory.Exists(importedDirectory))
+		{
+			Directory.Delete(importedDirectory, recursive: true);
+		}
+
+		for (var i = 0; i < nodes.Count; i++)
+		{
+			var artifactDirectory = Path.Combine(AssetPipelinePaths.GetArtifactsRoot(projectRootPath), nodes[i].NodeId.ToString("D"));
+			if (Directory.Exists(artifactDirectory))
+			{
+				Directory.Delete(artifactDirectory, recursive: true);
+			}
+		}
+	}
+
+	private static string ToProjectRelativePath(string projectRootPath, string absolutePath)
+	{
+		var relative = Path.GetRelativePath(projectRootPath, absolutePath);
+		return NormalizeRelativePath(relative);
+	}
+
+	private static string NormalizeRelativePath(string relativePath)
+	{
+		return relativePath.Replace(Path.DirectorySeparatorChar, '/');
+	}
+
+	private static string GetAbsolutePath(string projectRootPath, string relativePath)
+	{
+		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+		return Path.GetFullPath(Path.Combine(projectRootPath, normalized));
+	}
+
+	private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)
+	{
+		var index = 0;
+		while (true)
+		{
+			var fileName = index == 0 ? $"{baseName}{extension}" : $"{baseName} {index}{extension}";
+			var candidate = Path.Combine(destinationFolder, fileName);
+			if (File.Exists(candidate) == false)
+			{
+				return candidate;
+			}
+
+			index++;
+		}
+	}
+
+	private static string SanitizeKey(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return "unnamed";
+		}
+
+		var chars = value
+			.Select(character => char.IsLetterOrDigit(character) ? character : '-')
+			.ToArray();
+		return new string(chars);
+	}
+
+	private static void WriteJsonFile<T>(string absolutePath, T value)
+	{
+		var directory = Path.GetDirectoryName(absolutePath);
+		if (string.IsNullOrWhiteSpace(directory) == false)
+		{
+			Directory.CreateDirectory(directory);
+		}
+
+		File.WriteAllText(absolutePath, JsonSerializer.Serialize(value, AssetJson.SerializerOptions));
+	}
+
+	private sealed class ImportGraph
+	{
+		public required List<AssetNodeRecord> Nodes { get; init; }
+		public required List<AssetArtifactRecord> Artifacts { get; init; }
+		public required List<AssetDependencyRecord> Dependencies { get; init; }
+	}
+
+	private readonly record struct MaterialDependency(Guid TargetNodeId, string Kind);
+}

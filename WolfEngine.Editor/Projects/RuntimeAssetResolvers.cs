@@ -65,52 +65,70 @@ public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 			});
 	}
 
-	private static Texture? ResolveTexture(AssetLink<Texture> link)
+	private static Texture? ResolveTexture(AssetRef<Texture> reference)
 	{
-		return link.Id == Guid.Empty ? null : link.Asset;
+		return reference.NodeId == Guid.Empty ? null : reference.Asset;
 	}
 }
 
 public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 {
-	private readonly ITextureAssetStore _textureAssetStore;
 	private readonly ITextureFactory _textureFactory;
 	private readonly IRuntimeArtifactTargetProvider _targetProvider;
 
 	public TextureRuntimeAssetResolver(
-		ITextureAssetStore textureAssetStore,
 		ITextureFactory textureFactory,
 		IRuntimeArtifactTargetProvider targetProvider)
 	{
-		_textureAssetStore = textureAssetStore ?? throw new ArgumentNullException(nameof(textureAssetStore));
 		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
 		_targetProvider = targetProvider ?? throw new ArgumentNullException(nameof(targetProvider));
 	}
 
 	public object Resolve(RuntimeAssetResolveContext context)
 	{
-		var textureAsset = _textureAssetStore.LoadAsset(context.GetAbsolutePath(context.Asset.RelativeAssetPath));
-		var textureState = _textureAssetStore.LoadState(context.GetAbsolutePath(context.Asset.GetEffectiveRelativeStatePath()));
-		var currentTarget = _targetProvider.CurrentTarget;
-
-		var artifact = textureState.Artifacts
-			.FirstOrDefault(candidate =>
-				string.Equals(candidate.Kind, "RuntimeTexture", StringComparison.OrdinalIgnoreCase) &&
-				string.Equals(candidate.Target, currentTarget, StringComparison.OrdinalIgnoreCase))
-			?? textureState.Artifacts.FirstOrDefault(candidate =>
-				string.Equals(candidate.Kind, "RuntimeTexture", StringComparison.OrdinalIgnoreCase) &&
-				string.IsNullOrWhiteSpace(candidate.Target));
-
-		if (artifact is not null && string.IsNullOrWhiteSpace(artifact.RelativePath) == false)
+		var summary = context.Asset.TextureSummary
+		              ?? throw new InvalidOperationException($"Texture node '{context.AssetId}' is missing its texture summary.");
+		if (string.IsNullOrWhiteSpace(summary.RelativeRuntimeArtifactPath) == false)
 		{
 			var importedTexture = TextureRawImageSerializer.Read(
-				context.GetAbsolutePath(artifact.RelativePath),
+				context.GetAbsolutePath(summary.RelativeRuntimeArtifactPath),
 				context.Asset.Name);
 			return _textureFactory.GetTexture(importedTexture);
 		}
 
-		return _textureFactory.LoadFromFile(
-			context.GetAbsolutePath(textureAsset.RelativeSourceAssetPath),
-			textureAsset.ImportSettings.IsSrgb);
+		if (string.IsNullOrWhiteSpace(summary.RelativeImportedPath) == false)
+		{
+			var importedTexture = TextureRawImageSerializer.Read(
+				context.GetAbsolutePath(summary.RelativeImportedPath),
+				context.Asset.Name);
+			return _textureFactory.GetTexture(importedTexture);
+		}
+
+		if (string.IsNullOrWhiteSpace(summary.RelativeSourceAssetPath) == false)
+		{
+			return _textureFactory.LoadFromFile(
+				context.GetAbsolutePath(summary.RelativeSourceAssetPath),
+				summary.IsSrgb);
+		}
+
+		throw new InvalidOperationException(
+			$"Texture node '{context.AssetId}' does not expose a runtime artifact, imported texture, or source file.");
+	}
+}
+
+public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
+{
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var summary = context.Asset.MeshSummary
+		              ?? throw new InvalidOperationException($"Mesh node '{context.AssetId}' is missing its mesh summary.");
+		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
+		var meshFile = AssetPipelineSerialization.Deserialize<ImportedMeshAssetFile>(File.ReadAllText(absoluteMeshPath));
+		return new Mesh(
+			meshFile.Vertices,
+			meshFile.Indices,
+			meshFile.Normals,
+			meshFile.UVs,
+			meshFile.Tangents);
 	}
 }
