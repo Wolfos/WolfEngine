@@ -107,8 +107,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     int2 pixel = int2(dispatchThreadId.xy);
     float2 renderSize = float2(renderSizeX, renderSizeY);
+    float2 centerUv = (float2(pixel) + float2(0.5f, 0.5f)) / renderSize;
     float3 centerColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
-    float closestDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
+    float centerDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
+    float closestDepth = centerDepth;
     int2 closestPixel = pixel;
     float3 minBox = RGBToYCoCg(centerColor);
     float3 maxBox = minBox;
@@ -147,9 +149,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float alphaTestMask = saturate(materialTexture.Load(int3(closestPixel, 0)).a);
     float motionPixels = length(velocity);
     float2 closestUv = (float2(closestPixel) + float2(0.5f, 0.5f)) / renderSize;
+    float depthDiscontinuity = abs(closestDepth - centerDepth);
+    float closestSampleWeight = smoothstep(0.0f, 0.02f, depthDiscontinuity) * smoothstep(0.35f, 1.5f, motionPixels);
+    float2 reprojectionBaseUv = lerp(centerUv, closestUv, closestSampleWeight);
 
     bool historyAllowed = historyValid != 0u && resetHistory == 0u;
-    float2 prevUv = closestUv + (velocity / renderSize);
+    float2 prevUv = reprojectionBaseUv + (velocity / renderSize);
     bool historyRejected = !historyAllowed;
     historyRejected = historyRejected || any(prevUv < 0.0f.xx) || any(prevUv > 1.0f.xx);
     historyRejected = historyRejected || motionPixels > max(renderSizeX, renderSizeY);
@@ -194,15 +199,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 clampedHistoryYCoCg = clamp(historyYCoCg, clampMin, clampMax);
             float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
 
-            // If the reprojected sample lands far outside the current neighborhood, flush it quickly.
+            // If the reprojected sample lands far outside the current neighborhood, respond faster.
+            // Keep this mostly motion-driven so static high-frequency detail can still accumulate.
             float3 clampRange = max(clampMax - clampMin, float3(0.02f, 0.02f, 0.02f));
             float3 normalizedClampDelta = abs(clampedHistoryYCoCg - historyYCoCg) / clampRange;
-            float clampConfidence = 1.0f - saturate(MaxComponent(normalizedClampDelta));
-
-            float3 currentYCoCg = RGBToYCoCg(currentColor);
-            float3 normalizedHistoryMismatch = abs(clampedHistoryYCoCg - currentYCoCg) / (clampRange * 2.0f);
-            float colorConfidence = 1.0f - saturate(MaxComponent(normalizedHistoryMismatch));
-            float historyConfidence = clampConfidence * colorConfidence;
+            float clampAmount = MaxComponent(normalizedClampDelta);
+            float clampResponse = smoothstep(0.2f, 0.9f, clampAmount);
+            float historyConfidence = 1.0f - clampResponse * saturate(motionPixels * 0.35f + alphaTestMask * 0.5f);
 
             float opaqueHistoryWeight = lerp(
                 lowMotionOpaqueHistoryWeight,
