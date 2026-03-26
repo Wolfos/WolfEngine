@@ -28,7 +28,7 @@ public struct TemporalAntiAliasingConfig
 
 	// Temporary fallback until the DirectSR path replaces this resolve.
 	public bool Enabled { get; set; } = true;
-	public int PhaseCount { get; set; } = 16;
+	public int PhaseCount { get; set; } = 32;
 	public float OpaqueDepthThreshold { get; set; } = 0.01f;
 	public float AlphaTestDepthThreshold { get; set; } = 0.03f;
 	public float OpaqueClampSigma { get; set; } = 1.25f;
@@ -43,5 +43,5 @@ public struct TemporalAntiAliasingConfig
 	public float HighMotionAlphaTestHistoryWeight { get; set; } = 0.75f;
 	public float AlphaTestHistoryMotionScale { get; set; } = 0.15f;
 	public bool EnableCasSharpen { get; set; } = true;
-	public float CasSharpness { get; set; } = 0.0f;
+	public float CasSharpness { get; set; } = 1.0f;
 }

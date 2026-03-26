@@ -54,6 +54,11 @@ float3 YCoCgToRGB(float3 color)
         Y - 0.5f * Co - 0.5f * Cg);
 }
 
+float MaxComponent(float3 value)
+{
+    return max(value.x, max(value.y, value.z));
+}
+
 float4 SampleCatmullRom(Texture2D<float4> texture, SamplerState samplerState, float2 uv, float2 textureSize)
 {
     float2 samplePos = uv * textureSize;
@@ -102,8 +107,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     int2 pixel = int2(dispatchThreadId.xy);
     float2 renderSize = float2(renderSizeX, renderSizeY);
-    float2 uv = (float2(dispatchThreadId.xy) + 0.5f) / renderSize;
-
     float3 centerColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
     float closestDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
     int2 closestPixel = pixel;
@@ -143,9 +146,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float expectedHistoryDepth = velocitySample.z;
     float alphaTestMask = saturate(materialTexture.Load(int3(closestPixel, 0)).a);
     float motionPixels = length(velocity);
+    float2 closestUv = (float2(closestPixel) + float2(0.5f, 0.5f)) / renderSize;
 
     bool historyAllowed = historyValid != 0u && resetHistory == 0u;
-    float2 prevUv = uv + (velocity / renderSize);
+    float2 prevUv = closestUv + (velocity / renderSize);
     bool historyRejected = !historyAllowed;
     historyRejected = historyRejected || any(prevUv < 0.0f.xx) || any(prevUv > 1.0f.xx);
     historyRejected = historyRejected || motionPixels > max(renderSizeX, renderSizeY);
@@ -186,8 +190,19 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             clampMax = center + extent;
 
             float3 historyColor = SampleCatmullRom(historyColorTexture, linearSampler, prevUv, renderSize).rgb;
-            float3 clampedHistoryYCoCg = clamp(RGBToYCoCg(historyColor), clampMin, clampMax);
+            float3 historyYCoCg = RGBToYCoCg(historyColor);
+            float3 clampedHistoryYCoCg = clamp(historyYCoCg, clampMin, clampMax);
             float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
+
+            // If the reprojected sample lands far outside the current neighborhood, flush it quickly.
+            float3 clampRange = max(clampMax - clampMin, float3(0.02f, 0.02f, 0.02f));
+            float3 normalizedClampDelta = abs(clampedHistoryYCoCg - historyYCoCg) / clampRange;
+            float clampConfidence = 1.0f - saturate(MaxComponent(normalizedClampDelta));
+
+            float3 currentYCoCg = RGBToYCoCg(currentColor);
+            float3 normalizedHistoryMismatch = abs(clampedHistoryYCoCg - currentYCoCg) / (clampRange * 2.0f);
+            float colorConfidence = 1.0f - saturate(MaxComponent(normalizedHistoryMismatch));
+            float historyConfidence = clampConfidence * colorConfidence;
 
             float opaqueHistoryWeight = lerp(
                 lowMotionOpaqueHistoryWeight,
@@ -197,7 +212,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 lowMotionAlphaTestHistoryWeight,
                 highMotionAlphaTestHistoryWeight,
                 saturate(motionPixels * alphaTestHistoryMotionScale));
-            float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask);
+            float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask) * historyConfidence;
 
             resolvedColor = lerp(currentColor, clampedHistoryRgb, historyWeight);
         }
