@@ -1,12 +1,10 @@
 using System.Collections.Concurrent;
-using System.Numerics;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
-using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor;
 
@@ -21,13 +19,6 @@ public class EditorSceneFactory : IEditorSceneFactory
 {
 	private static readonly ConcurrentDictionary<Type, Func<World, Entity, object>> GetComponentReaders = new();
 	private static readonly ConcurrentDictionary<Type, Action<World, Entity, object>> AddComponentWriters = new();
-	private static readonly Dictionary<Type, ISceneComponentAdapter> ComponentAdapters = new()
-	{
-		[typeof(LocalTransform)] = new LocalTransformSceneComponentAdapter(),
-		[typeof(Camera)] = new CameraSceneComponentAdapter(),
-		[typeof(MeshRenderer)] = new MeshRendererSceneComponentAdapter(),
-		[typeof(WorldSettings)] = new WorldSettingsSceneComponentAdapter()
-	};
 
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -227,7 +218,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 					throw new InvalidOperationException($"Scene contains duplicate entity id '{savedEntity.EntityId}'.");
 				}
 
-				var entity = scene.World.CreateEntity();
+				var entity = CreateEntity(scene.World, savedEntity);
 				entitiesById[savedEntity.EntityId] = entity;
 				scene.EntityIds[entity] = savedEntity.EntityId;
 				scene.EntityCellKeys[entity] = cellKey;
@@ -250,14 +241,6 @@ public class EditorSceneFactory : IEditorSceneFactory
 			{
 				var savedEntity = cell.Entities[entityIndex];
 				var entity = entitiesById[savedEntity.EntityId];
-				if (savedEntity.HasName)
-				{
-					scene.World.AddComponent(entity, new NameComponent
-					{
-						Name = savedEntity.Name
-					});
-				}
-
 				scene.World.SetEnabled(entity, savedEntity.Enabled);
 				for (var componentIndex = 0; componentIndex < savedEntity.Components.Count; componentIndex++)
 				{
@@ -293,16 +276,20 @@ public class EditorSceneFactory : IEditorSceneFactory
 	private static SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
 	{
 		var world = scene.World;
+		var hasName = world.HasComponent<NameComponent>(entity);
 		var savedEntity = new SavedEntity
 		{
 			EntityId = entityId,
 			ParentEntityId = TryGetParentEntityId(scene, entity),
-			HasName = world.HasComponent<NameComponent>(entity),
-			Name = world.HasComponent<NameComponent>(entity)
+			HasName = hasName,
+			Name = hasName
 				? world.GetComponent<NameComponent>(entity).Name ?? string.Empty
 				: string.Empty,
 			Enabled = world.IsEnabled(entity),
 			Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
+			LocalTransform = world.HasComponent<LocalTransform>(entity)
+				? world.GetComponent<LocalTransform>(entity).GetTransform()
+				: null,
 			Components = []
 		};
 
@@ -337,14 +324,11 @@ public class EditorSceneFactory : IEditorSceneFactory
 
 	private static SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
 	{
-		var serializedData = ComponentAdapters.TryGetValue(componentType, out var adapter)
-			? adapter.Serialize(world, entity)
-			: JsonSerializer.SerializeToElement(GetComponentBoxed(world, entity, componentType), componentType, AssetJson.SerializerOptions);
 		return new SavedComponent
 		{
 			Type = componentType.AssemblyQualifiedName
 			       ?? throw new InvalidOperationException($"Component type '{componentType.FullName}' does not have an assembly-qualified name."),
-			Data = serializedData
+			Data = JsonSerializer.SerializeToElement(GetComponentBoxed(world, entity, componentType), componentType, AssetJson.SerializerOptions)
 		};
 	}
 
@@ -353,12 +337,6 @@ public class EditorSceneFactory : IEditorSceneFactory
 		var componentType = Type.GetType(component.Type, throwOnError: false);
 		if (componentType is null || IsPersistableComponentType(componentType) == false)
 		{
-			return;
-		}
-
-		if (ComponentAdapters.TryGetValue(componentType, out var adapter))
-		{
-			adapter.DeserializeAndApply(world, entity, component.Data);
 			return;
 		}
 
@@ -372,8 +350,30 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return componentType == typeof(NameComponent) == false
 		       && componentType.IsValueType
 		       && typeof(IEntityComponent).IsAssignableFrom(componentType)
+		       && Attribute.IsDefined(componentType, typeof(NotSerializedAttribute)) == false
 		       && Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)) == false
 		       && Attribute.IsDefined(componentType, typeof(EditorOnlyAttribute)) == false;
+	}
+
+	private static Entity CreateEntity(World world, SavedEntity savedEntity)
+	{
+		if (savedEntity.HasName && savedEntity.LocalTransform is { } transformWithName)
+		{
+			return world.CreateEntity(savedEntity.Name, transformWithName);
+		}
+
+		if (savedEntity.HasName)
+		{
+			return world.CreateEntity(savedEntity.Name);
+		}
+
+		var entity = world.CreateEntity();
+		if (savedEntity.LocalTransform is { } transform)
+		{
+			world.AddTransform(entity, transform);
+		}
+
+		return entity;
 	}
 
 	private Cell LoadCell(string relativePath)
@@ -535,149 +535,5 @@ public class EditorSceneFactory : IEditorSceneFactory
 	private static void AddComponentGeneric<T>(World world, Entity entity, object componentValue) where T : struct, IEntityComponent
 	{
 		world.AddComponent(entity, (T)componentValue);
-	}
-
-	private sealed class LocalTransformComponentData
-	{
-		public Vector3 LocalPosition { get; set; }
-		public Quaternion LocalRotation { get; set; }
-		public Vector3 LocalScale { get; set; }
-	}
-
-	private sealed class CameraComponentData
-	{
-		public int ScreenWidth { get; set; } = 1;
-		public int ScreenHeight { get; set; } = 1;
-		public float Fov { get; set; }
-		public float NearPlane { get; set; }
-		public float FarPlane { get; set; }
-		public bool AutoResolution { get; set; }
-	}
-
-	private sealed class MeshRendererComponentData
-	{
-		public Guid MeshAssetId { get; set; }
-		public Guid MaterialAssetId { get; set; }
-	}
-
-	private sealed class WorldSettingsComponentData
-	{
-		public Guid RenderConfigAssetId { get; set; }
-	}
-
-	private interface ISceneComponentAdapter
-	{
-		JsonElement Serialize(World world, Entity entity);
-		void DeserializeAndApply(World world, Entity entity, JsonElement data);
-	}
-
-	private sealed class LocalTransformSceneComponentAdapter : ISceneComponentAdapter
-	{
-		public JsonElement Serialize(World world, Entity entity)
-		{
-			var localTransform = world.GetComponent<LocalTransform>(entity);
-			return JsonSerializer.SerializeToElement(new LocalTransformComponentData
-			{
-				LocalPosition = localTransform.LocalPosition,
-				LocalRotation = localTransform.LocalRotation,
-				LocalScale = localTransform.LocalScale
-			}, AssetJson.SerializerOptions);
-		}
-
-		public void DeserializeAndApply(World world, Entity entity, JsonElement data)
-		{
-			var payload = data.Deserialize<LocalTransformComponentData>(AssetJson.SerializerOptions)
-			             ?? throw new InvalidOperationException("Failed to deserialize LocalTransform scene data.");
-			var transform = Matrix4x4.CreateScale(payload.LocalScale)
-			               * Matrix4x4.CreateFromQuaternion(payload.LocalRotation)
-			               * Matrix4x4.CreateTranslation(payload.LocalPosition);
-			world.AddTransform(entity, transform);
-		}
-	}
-
-	private sealed class CameraSceneComponentAdapter : ISceneComponentAdapter
-	{
-		public JsonElement Serialize(World world, Entity entity)
-		{
-			var camera = world.GetComponent<Camera>(entity);
-			return JsonSerializer.SerializeToElement(new CameraComponentData
-			{
-				ScreenWidth = camera.ScreenResolution.X,
-				ScreenHeight = camera.ScreenResolution.Y,
-				Fov = camera.Fov,
-				NearPlane = camera.NearPlane,
-				FarPlane = camera.FarPlane,
-				AutoResolution = camera.AutoResolution
-			}, AssetJson.SerializerOptions);
-		}
-
-		public void DeserializeAndApply(World world, Entity entity, JsonElement data)
-		{
-			var payload = data.Deserialize<CameraComponentData>(AssetJson.SerializerOptions)
-			             ?? throw new InvalidOperationException("Failed to deserialize Camera scene data.");
-			var camera = new Camera
-			{
-				ScreenResolution = new Int2(
-					Math.Max(payload.ScreenWidth, 1),
-					Math.Max(payload.ScreenHeight, 1)),
-				NearPlane = payload.NearPlane,
-				FarPlane = payload.FarPlane,
-				AutoResolution = payload.AutoResolution
-			};
-			camera.SetPerspective(payload.Fov > 0.0f ? payload.Fov : 70.0f);
-			world.AddComponent(entity, camera);
-		}
-	}
-
-	private sealed class MeshRendererSceneComponentAdapter : ISceneComponentAdapter
-	{
-		public JsonElement Serialize(World world, Entity entity)
-		{
-			var meshRenderer = world.GetComponent<MeshRenderer>(entity);
-			return JsonSerializer.SerializeToElement(new MeshRendererComponentData
-			{
-				MeshAssetId = meshRenderer.MeshAsset.NodeId,
-				MaterialAssetId = meshRenderer.MaterialAsset.NodeId
-			}, AssetJson.SerializerOptions);
-		}
-
-		public void DeserializeAndApply(World world, Entity entity, JsonElement data)
-		{
-			var payload = data.Deserialize<MeshRendererComponentData>(AssetJson.SerializerOptions)
-			             ?? throw new InvalidOperationException("Failed to deserialize MeshRenderer scene data.");
-			var meshAsset = new AssetRef<Mesh> { NodeId = payload.MeshAssetId };
-			var materialAsset = new AssetRef<Material> { NodeId = payload.MaterialAssetId };
-			world.AddComponent(entity, new MeshRenderer
-			{
-				MeshAsset = meshAsset,
-				MaterialAsset = materialAsset,
-				Mesh = meshAsset.IsValid ? meshAsset.Asset : null,
-				Material = materialAsset.IsValid ? materialAsset.Asset : null
-			});
-		}
-	}
-
-	private sealed class WorldSettingsSceneComponentAdapter : ISceneComponentAdapter
-	{
-		public JsonElement Serialize(World world, Entity entity)
-		{
-			var worldSettings = world.GetComponent<WorldSettings>(entity);
-			return JsonSerializer.SerializeToElement(new WorldSettingsComponentData
-			{
-				RenderConfigAssetId = worldSettings.RenderConfigAsset.NodeId
-			}, AssetJson.SerializerOptions);
-		}
-
-		public void DeserializeAndApply(World world, Entity entity, JsonElement data)
-		{
-			var payload = data.Deserialize<WorldSettingsComponentData>(AssetJson.SerializerOptions)
-			             ?? throw new InvalidOperationException("Failed to deserialize WorldSettings scene data.");
-			var worldSettings = new WorldSettings
-			{
-				RenderConfigAsset = new AssetRef<RenderConfig> { NodeId = payload.RenderConfigAssetId }
-			};
-			_ = worldSettings.RenderConfigAsset.Asset;
-			world.AddComponent(entity, worldSettings);
-		}
 	}
 }

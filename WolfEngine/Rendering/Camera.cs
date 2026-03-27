@@ -1,14 +1,16 @@
 using System.Numerics;
+using System.Text.Json.Serialization;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine;
 
-public struct Camera: IEntityComponent
+public struct Camera: IEntityComponent, IJsonOnDeserialized
 {
 	public const float DefaultNearPlane = 0.03f;
 	public const float DefaultFarPlane = 10000.0f;
 
+	[JsonIgnore]
 	public Matrix4x4 Perspective { get; private set; }
 	public Int2 ScreenResolution;
 	public float Fov;
@@ -48,5 +50,13 @@ public struct Camera: IEntityComponent
 				(float)ScreenResolution.X / (float)ScreenResolution.Y,
 				NearPlane,
 				FarPlane);
+	}
+
+	public void OnDeserialized()
+	{
+		ScreenResolution = new Int2(
+			Math.Max(ScreenResolution.X, 1),
+			Math.Max(ScreenResolution.Y, 1));
+		SetPerspective(Fov > 0.0f ? Fov : 70.0f);
 	}
 }

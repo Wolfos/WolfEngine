@@ -99,6 +99,28 @@ public sealed class ScenePersistenceTests
 	}
 
 	[Test]
+	public void SaveAndLoad_CustomComponentFromTestAssembly_RoundTripsWithoutFactoryRegistration()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		scene.Name = "Custom Component Scene";
+		var entity = scene.World.CreateEntity("Custom Entity");
+		scene.World.AddComponent(entity, new TestSceneComponent
+		{
+			Count = 42,
+			Label = "generic"
+		});
+
+		environment.Factory.Save(scene);
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedEntity = FindEntityByName(loadedScene.World, "Custom Entity");
+		var loadedComponent = loadedScene.World.GetComponent<TestSceneComponent>(loadedEntity);
+
+		Assert.That(loadedComponent.Count, Is.EqualTo(42));
+		Assert.That(loadedComponent.Label, Is.EqualTo("generic"));
+	}
+
+	[Test]
 	public void SaveAndLoad_CameraLightAndWorldSettings_RoundTripCorrectly()
 	{
 		using var environment = new TestEnvironment();
@@ -186,6 +208,49 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedScene.World.HasComponent<Parent>(loadedSpatialChild), Is.True);
 	}
 
+	[Test]
+	public void Save_PersistsTransformOnEntityAndSkipsTransientTransformComponents()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		scene.Name = "Transform Persistence Scene";
+
+		var entity = scene.World.CreateEntity("Transform Entity");
+		var transform = Matrix4x4.CreateScale(new Vector3(2.0f, 3.0f, 4.0f))
+		                * Matrix4x4.CreateFromYawPitchRoll(0.2f, 0.3f, 0.4f)
+		                * Matrix4x4.CreateTranslation(new Vector3(5.0f, 6.0f, 7.0f));
+		scene.World.AddTransform(entity, transform);
+
+		environment.Factory.Save(scene);
+
+		var savedEntity = scene.GlobalCell.Entities.Single();
+		Assert.That(savedEntity.LocalTransform.HasValue, Is.True);
+		AssertMatrix(savedEntity.LocalTransform!.Value, transform);
+		Assert.That(savedEntity.Components.Select(component => Type.GetType(component.Type, throwOnError: false)), Does.Not.Contain(typeof(LocalTransform)));
+		Assert.That(savedEntity.Components.Select(component => Type.GetType(component.Type, throwOnError: false)), Does.Not.Contain(typeof(WorldTransform)));
+		Assert.That(savedEntity.Components.Select(component => Type.GetType(component.Type, throwOnError: false)), Does.Not.Contain(typeof(DirtyTransformRoot)));
+	}
+
+	[Test]
+	public void SaveAndLoad_UnnamedEntityWithTransform_PreservesMissingNameComponent()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		scene.Name = "Unnamed Transform Scene";
+
+		var entity = scene.World.CreateEntity();
+		scene.World.AddTransform(entity, Matrix4x4.CreateTranslation(new Vector3(8.0f, 9.0f, 10.0f)));
+
+		environment.Factory.Save(scene);
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedEntity = GetAllEntities(loadedScene.World).Single();
+		var localTransform = loadedScene.World.GetComponent<LocalTransform>(loadedEntity);
+
+		Assert.That(loadedScene.World.HasComponent<NameComponent>(loadedEntity), Is.False);
+		Assert.That(loadedScene.World.HasComponent<WorldTransform>(loadedEntity), Is.True);
+		Assert.That(localTransform.LocalPosition, Is.EqualTo(new Vector3(8.0f, 9.0f, 10.0f)));
+	}
+
 	private static List<Entity> GetAllEntities(World world)
 	{
 		var entities = new List<Entity>();
@@ -222,6 +287,32 @@ public sealed class ScenePersistenceTests
 				new Vector4(0.0f, 1.0f, 0.0f, 1.0f)
 			],
 			[0u, 1u, 2u]);
+	}
+
+	private static void AssertMatrix(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)
+	{
+		Assert.That(actual.M11, Is.EqualTo(expected.M11).Within(tolerance));
+		Assert.That(actual.M12, Is.EqualTo(expected.M12).Within(tolerance));
+		Assert.That(actual.M13, Is.EqualTo(expected.M13).Within(tolerance));
+		Assert.That(actual.M14, Is.EqualTo(expected.M14).Within(tolerance));
+		Assert.That(actual.M21, Is.EqualTo(expected.M21).Within(tolerance));
+		Assert.That(actual.M22, Is.EqualTo(expected.M22).Within(tolerance));
+		Assert.That(actual.M23, Is.EqualTo(expected.M23).Within(tolerance));
+		Assert.That(actual.M24, Is.EqualTo(expected.M24).Within(tolerance));
+		Assert.That(actual.M31, Is.EqualTo(expected.M31).Within(tolerance));
+		Assert.That(actual.M32, Is.EqualTo(expected.M32).Within(tolerance));
+		Assert.That(actual.M33, Is.EqualTo(expected.M33).Within(tolerance));
+		Assert.That(actual.M34, Is.EqualTo(expected.M34).Within(tolerance));
+		Assert.That(actual.M41, Is.EqualTo(expected.M41).Within(tolerance));
+		Assert.That(actual.M42, Is.EqualTo(expected.M42).Within(tolerance));
+		Assert.That(actual.M43, Is.EqualTo(expected.M43).Within(tolerance));
+		Assert.That(actual.M44, Is.EqualTo(expected.M44).Within(tolerance));
+	}
+
+	private struct TestSceneComponent : IEntityComponent
+	{
+		public int Count;
+		public string Label;
 	}
 
 	private sealed class TestEnvironment : IDisposable

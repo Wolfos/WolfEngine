@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 #nullable enable
 
 namespace WolfEngine.Mathematics;
@@ -7,6 +9,7 @@ namespace WolfEngine.Mathematics;
 /// </summary>
 public readonly struct Int2 : IEquatable<Int2>
 {
+	[JsonConstructor]
 	public Int2(int x, int y)
 	{
 		X = x;

@@ -16,3 +16,8 @@ public class ExcludeFromAddComponentAttribute: Attribute
 {
 	
 }
+
+[AttributeUsage(AttributeTargets.Struct, Inherited = false)]
+public sealed class NotSerializedAttribute : Attribute
+{
+}

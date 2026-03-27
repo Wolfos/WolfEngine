@@ -1,14 +1,17 @@
 ﻿using System.Numerics;
+using System.Text.Json.Serialization;
 
 namespace WolfEngine.ECS;
 
 [ExcludeFromAddComponent]
+[NotSerialized]
 public struct LocalTransform: IEntityComponent
 {
 	public Vector3 LocalPosition { get; internal set; }
 	public Quaternion LocalRotation { get; internal set; }
 	public Vector3 LocalScale { get; internal set; }
 
+	[JsonIgnore]
 	public bool IsDirty { get; internal set; }
 
 	internal LocalTransform(Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
@@ -37,6 +40,7 @@ public struct LocalTransform: IEntityComponent
 }
 
 [ExcludeFromEditor]
+[NotSerialized]
 public struct WorldTransform : IEntityComponent
 {
 	public Matrix4x4 LocalToWorld;
@@ -62,6 +66,7 @@ public struct Sibling : IEntityComponent
 }
 
 [ExcludeFromEditor]
+[NotSerialized]
 public struct DirtyTransformRoot : IEntityComponent
 {
 }

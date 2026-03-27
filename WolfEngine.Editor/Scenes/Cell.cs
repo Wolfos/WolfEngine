@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text.Json;
 using WolfEngine.Mathematics;
 
@@ -21,6 +22,7 @@ public sealed class SavedEntity
 	public string Name { get; set; } = string.Empty;
 	public bool Enabled { get; set; } = true;
 	public string Icon { get; set; } = string.Empty;
+	public Matrix4x4? LocalTransform { get; set; }
 	public List<SavedComponent> Components { get; set; } = [];
 }
 
