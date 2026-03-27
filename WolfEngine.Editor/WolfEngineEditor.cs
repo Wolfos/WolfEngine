@@ -27,6 +27,7 @@ public class WolfEngineEditor
 	private readonly EditorCameraContext _cameraContext;
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
+	private readonly IEditorSceneWorkspace _sceneWorkspace;
 
 	private EditorScene _currentScene;
 
@@ -45,7 +46,8 @@ public class WolfEngineEditor
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
 		EditorCameraContext cameraContext,
-		EditorGui editorGui)
+		EditorGui editorGui,
+		IEditorSceneWorkspace sceneWorkspace)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -56,7 +58,8 @@ public class WolfEngineEditor
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
-		_editorGui = editorGui;
+		_editorGui = editorGui ?? throw new ArgumentNullException(nameof(editorGui));
+		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 	}
 
 	public void Run()
@@ -81,6 +84,7 @@ public class WolfEngineEditor
 			World = _gameWorld,
 			EntityIcons = new()
 		};
+		_sceneWorkspace.Initialize(_currentScene);
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
@@ -110,6 +114,7 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
+			SyncCurrentScene();
 			FrameProfiler.Instance.BeginFrame("Editor Frame");
 
 			var now = stopwatch.Elapsed;
@@ -160,6 +165,21 @@ public class WolfEngineEditor
 		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		_cameraContext.Publish(camera, cameraWorldTransform);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, GetConfig(), _renderWorlds);
+	}
+
+	private void SyncCurrentScene()
+	{
+		var nextScene = _sceneWorkspace.CurrentScene;
+		if (ReferenceEquals(_currentScene, nextScene))
+		{
+			return;
+		}
+
+		_currentScene = nextScene;
+		_gameWorld = nextScene.World;
+		_renderWorlds.Clear();
+		_renderWorlds.Add(_editorWorld);
+		_renderWorlds.Add(_gameWorld);
 	}
 
 	private RenderConfig GetConfig()

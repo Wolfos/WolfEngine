@@ -16,6 +16,7 @@ public sealed class AssetsWindow : EditorWindow
 	private readonly IImageLoader _imageLoader;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
+	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
 
@@ -24,13 +25,15 @@ public sealed class AssetsWindow : EditorWindow
 		IProjectAssetPipelineService assetPipelineService,
 		IImageLoader imageLoader,
 		IAssetSelectionService assetSelectionService,
-		IEditorAssetHandlerRegistry assetHandlerRegistry)
+		IEditorAssetHandlerRegistry assetHandlerRegistry,
+		IEditorSceneWorkspace sceneWorkspace)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
+		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 	}
 
 	public override string Name => "Assets";
@@ -114,11 +117,25 @@ public sealed class AssetsWindow : EditorWindow
 		var open = ImGui.TreeNodeEx("##AssetNode", flags);
 		var nodeClicked = ImGui.IsItemClicked();
 		var nodeRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		var nodeDoubleClicked = nodeClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 		DrawAssetRowContent(asset, nodeCursorPosition.X, children.Count);
 
 		if (nodeClicked || nodeRightClicked)
 		{
 			_assetSelectionService.Select(asset.Id);
+		}
+
+		if (nodeDoubleClicked && asset.Type == AssetType.Scene)
+		{
+			try
+			{
+				_sceneWorkspace.LoadScene(asset.Id);
+				EditorGui.ClearEntitySelection();
+			}
+			catch (Exception ex)
+			{
+				ShowError($"Failed to load scene: {ex.Message}");
+			}
 		}
 
 		if (hasChildren && open)

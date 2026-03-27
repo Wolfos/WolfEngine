@@ -3,6 +3,8 @@ namespace WolfEngine.ECS;
 public interface IWorldManager
 {
 	public World CreateWorld(WorldTag tag);
+	public void RegisterWorld(World world);
+	public bool RemoveWorld(World world);
 	public void AddSystem<T>() where T : ISystem, new();
 	public void AddSystem(ISystem system);
 	public void Update(float deltaTime, WorldTag tag);
@@ -18,10 +20,26 @@ public class WorldManager: IWorldManager
 	public World CreateWorld(WorldTag tag)
 	{
 		var world = new World(tag);
-		_worlds.Add(world);
+		RegisterWorld(world);
 		return world;
 	}
-	
+
+	public void RegisterWorld(World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		if (_worlds.Contains(world))
+		{
+			return;
+		}
+
+		_worlds.Add(world);
+	}
+
+	public bool RemoveWorld(World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		return _worlds.Remove(world);
+	}
 
 	public void AddSystem<T>() where T : ISystem, new()
 	{

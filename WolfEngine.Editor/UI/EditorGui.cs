@@ -93,6 +93,14 @@ public class EditorGui
 		return true;
 	}
 
+	public static void ClearEntitySelection()
+	{
+		HasSelectedEntity = false;
+		SelectedEntity = default;
+		SelectedComponentTypes.Clear();
+		_componentsWindowFocusRequested = false;
+	}
+
 	private static void DrawWindow(EditorWindow window, EditorScene scene)
 	{
 		using (FrameProfiler.Instance.Measure(window.Name))

@@ -50,6 +50,7 @@ public static class Program
 		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
 		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();
 		services.AddSingleton<IEditorSceneFactory, EditorSceneFactory>();
+		services.AddSingleton<IEditorSceneWorkspace, EditorSceneWorkspace>();
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();

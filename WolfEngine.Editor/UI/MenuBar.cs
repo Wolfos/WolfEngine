@@ -31,6 +31,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorModeState _editorModeState;
+	private readonly IEditorSceneWorkspace _sceneWorkspace;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -46,7 +47,8 @@ public sealed class MenuBar : IMenuBar
 		ITextureAssetImporter textureAssetImporter,
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
-		IEditorModeState editorModeState)
+		IEditorModeState editorModeState,
+		IEditorSceneWorkspace sceneWorkspace)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -56,6 +58,7 @@ public sealed class MenuBar : IMenuBar
 		_icons = icons;
 		_windowChromeController = windowChromeController;
 		_editorModeState = editorModeState;
+		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 	}
 
 	public void Draw(EditorScene scene)
@@ -314,6 +317,29 @@ public sealed class MenuBar : IMenuBar
 					ShowError(errorMessage);
 				}
 			}
+		}
+
+		var hasOpenProject = _projectService.HasOpenProject;
+		if (hasOpenProject == false)
+		{
+			ImGui.BeginDisabled();
+		}
+
+		if (ImGui.MenuItem("Save Scene"))
+		{
+			try
+			{
+				_sceneWorkspace.SaveCurrentScene();
+			}
+			catch (Exception ex)
+			{
+				ShowError($"Failed to save scene: {ex.Message}");
+			}
+		}
+
+		if (hasOpenProject == false)
+		{
+			ImGui.EndDisabled();
 		}
 
 		if (ImGui.MenuItem("Preferences"))
