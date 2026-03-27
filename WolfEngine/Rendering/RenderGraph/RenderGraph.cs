@@ -113,7 +113,7 @@ public sealed class RenderGraph
 	}
 
 
-	public RenderGraphBuilder AddPass(string name, PassKind kind = PassKind.Graphics)
+	public RenderGraphBuilder AddPass(string name, PassKind kind)
 	{
 		var pass = _passPool.Count > 0 ? _passPool.Dequeue() : new RenderGraphPass();
 		pass.Configure(name, kind);

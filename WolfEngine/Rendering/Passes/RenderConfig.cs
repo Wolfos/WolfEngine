@@ -26,7 +26,6 @@ public struct TemporalAntiAliasingConfig
 	{
 	}
 
-	// Temporary fallback until the DirectSR path replaces this resolve.
 	public bool Enabled { get; set; } = true;
 	public int PhaseCount { get; set; } = 32;
 	public float OpaqueDepthThreshold { get; set; } = 0.004f;
