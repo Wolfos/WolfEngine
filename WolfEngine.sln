@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.ECS.Tests", "Wol
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{3D935CEA-AEC9-4293-B608-60598098804E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Editor.Tests", "WolfEngine.Editor.Tests\WolfEngine.Editor.Tests.csproj", "{3D58EEF8-40C7-4408-ACA0-863DA087637F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,8 +34,13 @@ Global
 		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D58EEF8-40C7-4408-ACA0-863DA087637F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D58EEF8-40C7-4408-ACA0-863DA087637F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D58EEF8-40C7-4408-ACA0-863DA087637F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D58EEF8-40C7-4408-ACA0-863DA087637F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5} = {3D935CEA-AEC9-4293-B608-60598098804E}
+		{3D58EEF8-40C7-4408-ACA0-863DA087637F} = {3D935CEA-AEC9-4293-B608-60598098804E}
 	EndGlobalSection
 EndGlobal

@@ -11,7 +11,8 @@ public enum AssetType
 	Material,
 	DataAsset,
 	Mesh,
-	Model3D
+	Model3D,
+	Scene
 }
 
 public enum MaterialAssetType
@@ -79,6 +80,7 @@ public sealed class AssetDatabaseEntry
 	public DataAssetSummary? DataAssetSummary { get; set; }
 	public MeshAssetSummary? MeshSummary { get; set; }
 	public Model3DAssetSummary? ModelSummary { get; set; }
+	public SceneAssetSummary? SceneSummary { get; set; }
 
 	public string GetEffectiveRelativeStatePath()
 	{
@@ -120,6 +122,12 @@ public sealed class Model3DAssetSummary
 {
 	public string RelativeImportedModelPath { get; set; } = string.Empty;
 	public int RootNodeCount { get; set; }
+}
+
+public sealed class SceneAssetSummary
+{
+	public string GlobalCellPath { get; set; } = string.Empty;
+	public int SpatialCellCount { get; set; }
 }
 
 public sealed class TextureAsset

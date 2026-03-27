@@ -266,6 +266,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 			world.AddComponent(meshEntity, new MeshRenderer
 			{
+				MeshAsset = new AssetRef<Mesh> { NodeId = meshInstance.MeshNodeId },
 				MaterialAsset = new AssetRef<Material> { NodeId = meshInstance.MaterialNodeId },
 				Material = material,
 				Mesh = mesh
@@ -314,6 +315,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			AssetImporterIds.Material => ImportMaterialSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 			AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 			AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.EditorScene => ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 			_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
 		};
 		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
@@ -641,6 +643,44 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 	}
 
+	private ImportGraph ImportEditorSceneSource(
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var sceneAsset = EditorSceneAssetFile.Load(absoluteSourcePath);
+		var assetName = string.IsNullOrWhiteSpace(sceneAsset.Name)
+			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
+			: sceneAsset.Name;
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = GetOrCreateNodeId(metadata, "main", AssetType.Scene, assetName),
+					SourceId = metadata.SourceId,
+					Type = AssetType.Scene,
+					NodeKey = "main",
+					Name = assetName,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(new SceneAssetSummary
+					{
+						GlobalCellPath = sceneAsset.GlobalCellPath,
+						SpatialCellCount = sceneAsset.SpatialCells.Count
+					})
+				}
+			],
+			Artifacts = [],
+			Dependencies = []
+		};
+	}
+
 	private ImportedModelAssetNode CreateModelNode(
 		string projectRootPath,
 		AssetSourceMetaFile metadata,
@@ -785,7 +825,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
 		       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
 		       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
-		       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
+		       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
+		       || absolutePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static AssetSourceMetaFile CreateDefaultMetadata(string relativeSourcePath)
@@ -810,6 +851,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		if (relativeSourcePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
 		{
 			return AssetImporterIds.DataAsset;
+		}
+
+		if (relativeSourcePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.EditorScene;
 		}
 
 		var extension = Path.GetExtension(relativeSourcePath).ToLowerInvariant();
@@ -976,6 +1022,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				break;
 			case AssetType.Model3D:
 				entry.ModelSummary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.Scene:
+				entry.SceneSummary = AssetPipelineSerialization.Deserialize<SceneAssetSummary>(node.SummaryJson);
 				break;
 		}
 

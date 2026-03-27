@@ -301,6 +301,13 @@ public sealed class EditorProjectService : IEditorProjectService
 				{
 					RelativeImportedModelPath = asset.ModelSummary.RelativeImportedModelPath,
 					RootNodeCount = asset.ModelSummary.RootNodeCount
+				},
+			SceneSummary = asset.SceneSummary is null
+				? null
+				: new SceneAssetSummary
+				{
+					GlobalCellPath = asset.SceneSummary.GlobalCellPath,
+					SpatialCellCount = asset.SceneSummary.SpatialCellCount
 				}
 		};
 	}

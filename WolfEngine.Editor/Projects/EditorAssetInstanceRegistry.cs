@@ -190,7 +190,8 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			MaterialSummary = asset.MaterialSummary,
 			DataAssetSummary = asset.DataAssetSummary,
 			MeshSummary = asset.MeshSummary,
-			ModelSummary = asset.ModelSummary
+			ModelSummary = asset.ModelSummary,
+			SceneSummary = asset.SceneSummary
 		};
 	}
 }

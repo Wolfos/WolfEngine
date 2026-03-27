@@ -174,3 +174,31 @@ public sealed class DataEditorAssetHandler : IEditorAssetHandler
 		_editor.Draw(asset);
 	}
 }
+
+public sealed class SceneEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly SceneAssetEditor _editor;
+
+	public SceneEditorAssetHandler(SceneAssetEditor editor)
+	{
+		_editor = editor ?? throw new ArgumentNullException(nameof(editor));
+	}
+
+	public AssetType AssetType => AssetType.Scene;
+	public string DisplayName => "Scene";
+	public string ThumbnailLabel => "SCN";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.SceneSummary is null
+			? "Scene"
+			: $"Scene | {asset.SceneSummary.SpatialCellCount} spatial cells";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		_editor.Draw(asset);
+	}
+}

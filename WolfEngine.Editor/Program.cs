@@ -49,6 +49,7 @@ public static class Program
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
 		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
 		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();
+		services.AddSingleton<IEditorSceneFactory, EditorSceneFactory>();
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
@@ -66,9 +67,11 @@ public static class Program
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
+		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, SceneEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
 		services.AddSingleton<IEditorModeState, EditorModeState>();
 		services.AddSingleton<IMenuBar, MenuBar>();

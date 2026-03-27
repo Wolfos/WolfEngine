@@ -238,11 +238,12 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		return asset.Type switch
 		{
-			AssetType.Model3D => 0,
-			AssetType.Mesh => 1,
-			AssetType.Material => 2,
-			AssetType.Texture2D => 3,
-			AssetType.DataAsset => 4,
+			AssetType.Scene => 0,
+			AssetType.Model3D => 1,
+			AssetType.Mesh => 2,
+			AssetType.Material => 3,
+			AssetType.Texture2D => 4,
+			AssetType.DataAsset => 5,
 			_ => 10
 		};
 	}
@@ -253,6 +254,7 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		return assetType switch
 		{
+			AssetType.Scene => "SCN",
 			AssetType.Model3D => "3D",
 			_ => assetType.ToString().ToUpperInvariant()
 		};

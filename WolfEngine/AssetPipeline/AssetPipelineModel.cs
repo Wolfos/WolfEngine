@@ -23,6 +23,7 @@ public static class AssetImporterIds
 	public const string Material = "material";
 	public const string DataAsset = "data";
 	public const string ThreeDScene = "three-d-scene";
+	public const string EditorScene = "editor-scene";
 }
 
 public sealed class AssetSourceMetaFile

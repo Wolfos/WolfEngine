@@ -6,9 +6,16 @@ namespace WolfEngine;
 
 public struct MeshRenderer: IEntityComponent
 {
+	public AssetRef<Mesh> MeshAsset;
 	public AssetRef<Material> MaterialAsset;
 	public Material Material;
 	public Mesh Mesh;
+
+	public void AssignMeshAsset(AssetRef<Mesh> meshAsset)
+	{
+		MeshAsset = meshAsset;
+		Mesh = meshAsset.IsValid ? meshAsset.Asset : null;
+	}
 
 	public void AssignMaterialAsset(AssetRef<Material> materialAsset, RenderGraph renderGraph)
 	{
@@ -37,6 +44,16 @@ public struct MeshRenderer: IEntityComponent
 
 	public bool TryValidate()
 	{
+		if (Mesh == null && MeshAsset.IsValid)
+		{
+			Mesh = MeshAsset.Asset;
+		}
+
+		if (Material == null && MaterialAsset.IsValid)
+		{
+			Material = MaterialAsset.Asset;
+		}
+
 		if (Mesh == null)
 		{
 			return false; // TODO: Try link mesh asset
