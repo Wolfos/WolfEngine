@@ -43,6 +43,7 @@ public static class Program
 	private static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
+		services.AddSingleton<IEditorPlaySession, EditorPlaySession>();
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();

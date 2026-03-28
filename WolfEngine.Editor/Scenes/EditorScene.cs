@@ -8,7 +8,7 @@ public class EditorScene
 	public Guid AssetId { get; set; }
 	public string Name { get; set; } = "Untitled Scene";
 	public string RelativeAssetPath { get; set; } = string.Empty;
-	public World World { get; set; } = new(WorldTag.Game);
+	public World World { get; set; } = new(WorldTag.Authoring);
 	public Dictionary<Entity, string> EntityIcons { get; set; } = new();
 	public Cell GlobalCell { get; set; } = new();
 	public Dictionary<Int2, Cell> SpatialCells { get; set; } = new();

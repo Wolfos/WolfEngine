@@ -5,17 +5,19 @@ public interface IWorldManager
 	public World CreateWorld(WorldTag tag);
 	public void RegisterWorld(World world);
 	public bool RemoveWorld(World world);
-	public void AddSystem<T>() where T : ISystem, new();
-	public void AddSystem(ISystem system);
-	public void Update(float deltaTime, WorldTag tag);
-	public void OnPreRender(float deltaTime, WorldTag tag);
+	public void AddSystem<T>(SystemExecutionGroup group = SystemExecutionGroup.Shared) where T : ISystem, new();
+	public void AddSystem(ISystem system, SystemExecutionGroup group = SystemExecutionGroup.Shared);
+	public bool RemoveSystem(ISystem system);
+	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
+	public void OnPreRender(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 }
 
 public class WorldManager: IWorldManager
 {
 	private readonly List<World> _worlds = new();
-	private Dictionary<WorldTag, IUpdateable> _updateables = new();
-	private Dictionary<WorldTag, IPreRender> _preRenders = new();
+	private readonly List<SystemRegistration> _systems = new();
+
+	private readonly record struct SystemRegistration(ISystem System, SystemExecutionGroup Group);
 	
 	public World CreateWorld(WorldTag tag)
 	{
@@ -41,47 +43,83 @@ public class WorldManager: IWorldManager
 		return _worlds.Remove(world);
 	}
 
-	public void AddSystem<T>() where T : ISystem, new()
+	public void AddSystem<T>(SystemExecutionGroup group = SystemExecutionGroup.Shared) where T : ISystem, new()
 	{
 		var system = new T();
-		AddSystem(system);
+		AddSystem(system, group);
 	}
 
-	public void AddSystem(ISystem system)
+	public void AddSystem(ISystem system, SystemExecutionGroup group = SystemExecutionGroup.Shared)
 	{
-		// ReSharper disable once ConvertIfStatementToSwitchStatement, systems implementing multiple is *valid*
-		if (system is IUpdateable u) _updateables.Add(u.GetTag(), u);
-		if (system is IPreRender p) _preRenders.Add(p.GetTag(), p);
+		ArgumentNullException.ThrowIfNull(system);
+		if (_systems.Exists(registration => ReferenceEquals(registration.System, system)))
+		{
+			return;
+		}
+
+		_systems.Add(new SystemRegistration(system, group));
 	}
 
-	public void Update(float deltaTime, WorldTag tag)
+	public bool RemoveSystem(ISystem system)
+	{
+		ArgumentNullException.ThrowIfNull(system);
+		var removed = false;
+		for (var index = _systems.Count - 1; index >= 0; index--)
+		{
+			if (ReferenceEquals(_systems[index].System, system))
+			{
+				_systems.RemoveAt(index);
+				removed = true;
+			}
+		}
+
+		return removed;
+	}
+
+	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
 	{
 		foreach (var world in _worlds)
 		{
-			if ((world.Tag & tag) == 0) continue;
-
-			foreach (var system in _updateables)
+			if ((world.Tag & worldTagMask) == 0)
 			{
-				if ((system.Key & world.Tag) != 0)
+				continue;
+			}
+
+			for (var index = 0; index < _systems.Count; index++)
+			{
+				var registration = _systems[index];
+				if ((registration.Group & groupMask) == 0 ||
+				    registration.System is not IUpdateable updateable ||
+				    (updateable.GetTag() & world.Tag) == 0)
 				{
-					system.Value.Update(deltaTime, world);
+					continue;
 				}
+
+				updateable.Update(deltaTime, world);
 			}
 		}
 	}
 
-	public void OnPreRender(float deltaTime, WorldTag tag)
+	public void OnPreRender(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
 	{
 		foreach (var world in _worlds)
 		{
-			if ((world.Tag & tag) == 0) continue;
-			
-			foreach (var system in _preRenders)
+			if ((world.Tag & worldTagMask) == 0)
 			{
-				if ((system.Key & world.Tag) != 0)
+				continue;
+			}
+
+			for (var index = 0; index < _systems.Count; index++)
+			{
+				var registration = _systems[index];
+				if ((registration.Group & groupMask) == 0 ||
+				    registration.System is not IPreRender preRender ||
+				    (preRender.GetTag() & world.Tag) == 0)
 				{
-					system.Value.PreRender(deltaTime, world);
+					continue;
 				}
+
+				preRender.PreRender(deltaTime, world);
 			}
 		}
 	}

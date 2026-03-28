@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.UI;
 
@@ -27,6 +28,7 @@ public sealed class AssetsWindow : EditorWindow
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IEditorPlaySession _playSession;
 	private readonly IIconManager _icons;
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
@@ -42,6 +44,7 @@ public sealed class AssetsWindow : EditorWindow
 		IAssetSelectionService assetSelectionService,
 		IEditorAssetHandlerRegistry assetHandlerRegistry,
 		IEditorSceneWorkspace sceneWorkspace,
+		IEditorPlaySession playSession,
 		IIconManager icons)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -50,6 +53,7 @@ public sealed class AssetsWindow : EditorWindow
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
+		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 	}
 
@@ -652,6 +656,12 @@ public sealed class AssetsWindow : EditorWindow
 	{
 		if (asset.Type != AssetType.Scene)
 		{
+			return;
+		}
+
+		if (_playSession.IsActive)
+		{
+			ShowError("Stop play mode before loading another scene.");
 			return;
 		}
 

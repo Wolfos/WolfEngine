@@ -70,16 +70,36 @@ internal static class ProjectGameplayScaffolder
 			$$"""
 			  using WolfEngine.ECS;
 			  using WolfEngine.Gameplay;
-
+			  using WolfEngineGame.Gameplay.Systems;
+			  
 			  namespace {{rootNamespace}};
-
+			  
+			  // ReSharper disable once UnusedType.Global
 			  public static class GameplayEntrypoint
 			  {
-			  	public static IGameplayModule? CreateModule() => null;
+			  	// ReSharper disable once UnusedMember.Global
+			  	public static IGameplayModule? CreateModule() => new GameplayModule();
 			  }
-
-			  public struct GameplayMarker : IEntityComponent
+			  
+			  
+			  public sealed class GameplayModule : IGameplayModule
 			  {
+			  	public IEnumerable<ISystem> CreateSystems()
+			  	{
+			  		yield return new RotateSystem();
+			  	}
+			  
+			  	public void OnLoaded(World world)
+			  	{
+			  	}
+			  
+			  	public void OnUnloading(World world)
+			  	{
+			  	}
+			  
+			  	public void Update(float deltaTime, World world)
+			  	{
+			  	}
 			  }
 			  """;
 	}

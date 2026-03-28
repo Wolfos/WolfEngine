@@ -70,6 +70,11 @@ public class World
         _entities.GetAllEntities(entities);
     }
 
+    public bool IsAlive(Entity entity)
+    {
+        return _entities.IsAlive(entity);
+    }
+
     public bool IsEnabled(Entity e)
     {
         return _entities.IsEnabled(e);

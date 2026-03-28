@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
@@ -52,6 +53,11 @@ internal static class ProjectTypeStateTransferUtility
 			catch
 			{
 			}
+		}
+
+		if (value is IJsonOnDeserialized callback)
+		{
+			callback.OnDeserialized();
 		}
 
 		return value;

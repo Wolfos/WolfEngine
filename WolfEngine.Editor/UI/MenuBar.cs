@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
+using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Platform;
 using WolfEngine.Rendering.UI;
@@ -32,6 +33,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorModeState _editorModeState;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IEditorPlaySession _playSession;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorNotificationService _notificationService;
 
@@ -51,6 +53,7 @@ public sealed class MenuBar : IMenuBar
 		IWindowChromeController windowChromeController,
 		IEditorModeState editorModeState,
 		IEditorSceneWorkspace sceneWorkspace,
+		IEditorPlaySession playSession,
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorNotificationService notificationService)
 	{
@@ -63,6 +66,7 @@ public sealed class MenuBar : IMenuBar
 		_windowChromeController = windowChromeController;
 		_editorModeState = editorModeState;
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
+		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 	}
@@ -115,7 +119,9 @@ public sealed class MenuBar : IMenuBar
 		AddRect(exclusionRects, DrawFileMenu());
 		AddRect(exclusionRects, DrawEditMenu());
 		AddRect(exclusionRects, DrawImportMenu(scene));
+		
 		AddRect(exclusionRects, DrawGameplayReloadButton());
+		AddRect(exclusionRects, DrawPlayControls());
 
 		var rightInset = isWindowsChrome
 			? (WindowsCaptionButtonWidth * 3.0f) + WindowsCaptionButtonSpacing + ImGui.GetStyle().ItemSpacing.X
@@ -300,6 +306,12 @@ public sealed class MenuBar : IMenuBar
 			return menuRect;
 		}
 
+		var authoringLocked = _playSession.IsActive;
+		if (authoringLocked)
+		{
+			ImGui.BeginDisabled();
+		}
+
 		if (ImGui.MenuItem("New Project..."))
 		{
 			_newProjectName = string.Empty;
@@ -349,6 +361,11 @@ public sealed class MenuBar : IMenuBar
 			ImGui.EndDisabled();
 		}
 
+		if (authoringLocked)
+		{
+			ImGui.EndDisabled();
+		}
+
 		if (ImGui.MenuItem("Preferences"))
 		{
 			EditorPreferencesMenu.Open();
@@ -380,7 +397,7 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		var hasOpenProject = _projectService.HasOpenProject;
-		if (hasOpenProject == false)
+		if (hasOpenProject == false || _playSession.IsActive)
 		{
 			ImGui.BeginDisabled();
 		}
@@ -414,13 +431,60 @@ public sealed class MenuBar : IMenuBar
 			}
 		}
 
-		if (hasOpenProject == false)
+		if (hasOpenProject == false || _playSession.IsActive)
 		{
 			ImGui.EndDisabled();
 		}
 
 		ImGui.EndMenu();
 		return menuRect;
+	}
+
+	private WindowChromeRect DrawPlayControls()
+	{
+		ImGui.SameLine();
+		WindowChromeRect rect;
+		switch (_playSession.State)
+		{
+			case EditorPlayState.Edit:
+				if (ImGui.ImageButton("Play", _icons.Get("play"), Vector2.One * 15.5f))
+				{
+					_playSession.EnterPlay();
+				}
+				rect = GetLastItemRect();
+				break;
+			case EditorPlayState.Playing:
+				if (ImGui.ImageButton("Pause", _icons.Get("pause"), Vector2.One * 15.5f))
+				{
+					_playSession.Pause();
+				}
+				rect = GetLastItemRect();
+				ImGui.SameLine();
+				if (ImGui.ImageButton("Stop", _icons.Get("stop"), Vector2.One * 15.5f))
+				{
+					_playSession.Stop();
+				}
+				rect = Union(rect, GetLastItemRect());
+				break;
+			case EditorPlayState.Paused:
+				if (ImGui.ImageButton("Resume", _icons.Get("play"), Vector2.One * 15.5f))
+				{
+					_playSession.Resume();
+				}
+				rect = GetLastItemRect();
+				ImGui.SameLine();
+				if (ImGui.ImageButton("Stop", _icons.Get("stop"), Vector2.One * 15.5f))
+				{
+					_playSession.Stop();
+				}
+				rect = Union(rect, GetLastItemRect());
+				break;
+			default:
+				rect = WindowChromeRect.Empty;
+				break;
+		}
+
+		return rect;
 	}
 
 	private WindowChromeRect DrawGameplayReloadButton()
@@ -451,6 +515,25 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		return buttonRect;
+	}
+
+	private static WindowChromeRect Union(WindowChromeRect left, WindowChromeRect right)
+	{
+		if (left.IsEmpty)
+		{
+			return right;
+		}
+
+		if (right.IsEmpty)
+		{
+			return left;
+		}
+
+		return new WindowChromeRect(
+			MathF.Min(left.Left, right.Left),
+			MathF.Min(left.Top, right.Top),
+			MathF.Max(left.Right, right.Right),
+			MathF.Max(left.Bottom, right.Bottom));
 	}
 
 	private void DrawPopups()

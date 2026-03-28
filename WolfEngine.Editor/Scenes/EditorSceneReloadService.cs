@@ -19,7 +19,7 @@ public sealed class EditorSceneReloadSnapshot
 public interface IEditorSceneReloadService
 {
 	EditorSceneReloadSnapshot Capture(EditorScene scene);
-	EditorScene Restore(EditorSceneReloadSnapshot snapshot);
+	EditorScene Restore(EditorSceneReloadSnapshot snapshot, WorldTag worldTag = WorldTag.Authoring);
 }
 
 public sealed class EditorSceneReloadService : IEditorSceneReloadService
@@ -94,7 +94,7 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 		};
 	}
 
-	public EditorScene Restore(EditorSceneReloadSnapshot snapshot)
+	public EditorScene Restore(EditorSceneReloadSnapshot snapshot, WorldTag worldTag = WorldTag.Authoring)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -103,7 +103,7 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			AssetId = snapshot.AssetId,
 			Name = snapshot.Name,
 			RelativeAssetPath = snapshot.RelativeAssetPath,
-			World = new World(WorldTag.Game),
+			World = new World(worldTag),
 			EntityIcons = new Dictionary<Entity, string>(),
 			GlobalCell = CloneCell(snapshot.GlobalCell),
 			SpatialCells = snapshot.SpatialCells.ToDictionary(entry => entry.Key, entry => CloneCell(entry.Value)),

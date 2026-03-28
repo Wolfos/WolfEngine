@@ -5,6 +5,8 @@ public enum WorldTag
 {
 	Invalid = 0,
 	Editor = 1,
-	Game = 2,
-	All = Editor | Game
+	Authoring = 2,
+	Game = 4,
+	Scene = Authoring | Game,
+	All = Editor | Scene
 }

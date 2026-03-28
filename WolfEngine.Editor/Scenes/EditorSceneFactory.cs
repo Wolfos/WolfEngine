@@ -36,7 +36,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return new EditorScene
 		{
 			Name = "Untitled Scene",
-			World = new World(WorldTag.Game),
+			World = new World(WorldTag.Authoring),
 			EntityIcons = new Dictionary<Entity, string>(),
 			GlobalCell = new Cell(),
 			SpatialCells = new Dictionary<Int2, Cell>(),
@@ -64,7 +64,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 			AssetId = node,
 			Name = string.IsNullOrWhiteSpace(sceneAsset.Name) ? asset.Name : sceneAsset.Name,
 			RelativeAssetPath = asset.RelativeAssetPath,
-			World = new World(WorldTag.Game),
+			World = new World(WorldTag.Authoring),
 			EntityIcons = new Dictionary<Entity, string>(),
 			GlobalCell = LoadCell(sceneAsset.GlobalCellPath),
 			SpatialCells = new Dictionary<Int2, Cell>(),
