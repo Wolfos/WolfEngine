@@ -9,6 +9,8 @@ public interface IEditorProjectService
 	string? AssetsPath { get; }
 	string? LibraryPath { get; }
 	string? DatabasePath { get; }
+	string? GameplayProjectRelativePath { get; }
+	string? GameplayProjectPath { get; }
 	AssetDatabase CurrentAssetDatabase { get; }
 
 	bool CreateProject(string parentFolder, string projectName, out string errorMessage);
@@ -31,6 +33,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private AssetDatabase _currentAssetDatabase = new();
 	private string? _projectRootPath;
+	private EditorProjectManifest? _projectManifest;
 
 	public EditorProjectService(IProjectAssetPipelineService assetPipelineService, IAssetInstanceRegistry assetInstanceRegistry)
 	{
@@ -44,6 +47,10 @@ public sealed class EditorProjectService : IEditorProjectService
 	public string? AssetsPath => HasOpenProject ? AssetPipelinePaths.GetAssetsPath(_projectRootPath!) : null;
 	public string? LibraryPath => HasOpenProject ? AssetPipelinePaths.GetLibraryPath(_projectRootPath!) : null;
 	public string? DatabasePath => LibraryPath;
+	public string? GameplayProjectRelativePath => HasOpenProject ? _projectManifest?.GameplayProjectRelativePath : null;
+	public string? GameplayProjectPath => HasOpenProject && string.IsNullOrWhiteSpace(_projectManifest?.GameplayProjectRelativePath) == false
+		? GetAbsolutePath(_projectManifest.GameplayProjectRelativePath)
+		: null;
 	public AssetDatabase CurrentAssetDatabase => _currentAssetDatabase;
 
 	public bool CreateProject(string parentFolder, string projectName, out string errorMessage)
@@ -85,6 +92,11 @@ public sealed class EditorProjectService : IEditorProjectService
 		{
 			Directory.CreateDirectory(projectRoot);
 			_assetPipelineService.InitializeProject(projectRoot);
+			ProjectGameplayScaffolder.Scaffold(projectRoot, projectName);
+			EditorProjectManifestFile.Save(projectRoot, new EditorProjectManifest
+			{
+				GameplayProjectRelativePath = ProjectGameplayScaffolder.GetGameplayProjectRelativePath(projectName)
+			});
 		}
 		catch (Exception ex)
 		{
@@ -120,9 +132,18 @@ public sealed class EditorProjectService : IEditorProjectService
 			return false;
 		}
 
+		if (File.Exists(EditorProjectManifestFile.GetPath(fullProjectRoot)) == false)
+		{
+			errorMessage = $"Project folder must contain a {EditorProjectManifestFile.FileName} manifest.";
+			return false;
+		}
+
 		try
 		{
+			var manifest = EditorProjectManifestFile.Load(fullProjectRoot);
+			ValidateManifest(fullProjectRoot, manifest);
 			_projectRootPath = fullProjectRoot;
+			_projectManifest = manifest;
 			_assetInstanceRegistry.Clear();
 			ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath));
 			return true;
@@ -130,6 +151,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		catch (Exception ex)
 		{
 			_projectRootPath = null;
+			_projectManifest = null;
 			_currentAssetDatabase = new AssetDatabase();
 			_assetInstanceRegistry.Clear();
 			errorMessage = $"Failed to open project: {ex.Message}";
@@ -142,6 +164,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	public void CloseProject()
 	{
 		_projectRootPath = null;
+		_projectManifest = null;
 		_currentAssetDatabase = new AssetDatabase();
 		_assetInstanceRegistry.Clear();
 	}
@@ -305,6 +328,40 @@ public sealed class EditorProjectService : IEditorProjectService
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
 		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
+	}
+
+	private static void ValidateManifest(string projectRootPath, EditorProjectManifest manifest)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentNullException.ThrowIfNull(manifest);
+
+		if (string.IsNullOrWhiteSpace(manifest.GameplayProjectRelativePath))
+		{
+			throw new InvalidOperationException("Project manifest is missing the gameplay project path.");
+		}
+
+		var normalizedRelativePath = ProjectPathUtility.NormalizeRelativePath(manifest.GameplayProjectRelativePath).Trim('/');
+		if (Path.IsPathRooted(normalizedRelativePath))
+		{
+			throw new InvalidOperationException("Project manifest gameplay project path must be relative to the project root.");
+		}
+
+		var absoluteGameplayProjectPath = Path.GetFullPath(Path.Combine(projectRootPath, normalizedRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+		var fullProjectRoot = Path.GetFullPath(projectRootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var fullProjectRootWithSeparator = fullProjectRoot + Path.DirectorySeparatorChar;
+		if (absoluteGameplayProjectPath.StartsWith(fullProjectRootWithSeparator, StringComparison.OrdinalIgnoreCase) == false)
+		{
+			throw new InvalidOperationException("Project manifest gameplay project path must remain inside the project root.");
+		}
+
+		if (File.Exists(absoluteGameplayProjectPath) == false)
+		{
+			throw new FileNotFoundException(
+				$"Gameplay project '{normalizedRelativePath}' referenced by the project manifest was not found.",
+				absoluteGameplayProjectPath);
+		}
+
+		manifest.GameplayProjectRelativePath = normalizedRelativePath;
 	}
 
 	private static AssetDatabaseEntry CloneEntry(AssetDatabaseEntry asset)

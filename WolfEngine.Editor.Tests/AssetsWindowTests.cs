@@ -108,6 +108,50 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void CreateProject_CreatesGameplayScaffoldingAndManifest()
+	{
+		var parentDirectory = Path.Combine(Path.GetTempPath(), "WolfEngineCreateProjectTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(parentDirectory);
+
+		var projectService = new EditorProjectService(new TrackingProjectAssetPipelineService(), new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.CreateProject(parentDirectory, "My Game", out var errorMessage), Is.True, errorMessage);
+
+			var projectRoot = Path.Combine(parentDirectory, "My Game");
+			var manifest = EditorProjectManifestFile.Load(projectRoot);
+			var gameplayFolderPath = Path.Combine(projectRoot, ProjectGameplayScaffolder.GameplayFolderName);
+			var gameplayProjectPath = Path.Combine(projectRoot, "Gameplay", "My Game.Gameplay.csproj");
+			var gameplaySourcePath = Path.Combine(gameplayFolderPath, ProjectGameplayScaffolder.GameplaySourceFileName);
+			var solutionPath = Path.Combine(projectRoot, ProjectGameplayScaffolder.GetSolutionFileName("My Game"));
+			var projectFileContents = File.ReadAllText(gameplayProjectPath);
+			var solutionFileContents = File.ReadAllText(solutionPath);
+
+			Assert.That(Directory.Exists(gameplayFolderPath), Is.True);
+			Assert.That(File.Exists(gameplayProjectPath), Is.True);
+			Assert.That(File.Exists(gameplaySourcePath), Is.True);
+			Assert.That(File.Exists(solutionPath), Is.True);
+			Assert.That(manifest.GameplayProjectRelativePath, Is.EqualTo("Gameplay/My Game.Gameplay.csproj"));
+			Assert.That(projectService.GameplayProjectRelativePath, Is.EqualTo("Gameplay/My Game.Gameplay.csproj"));
+			Assert.That(projectService.GameplayProjectPath, Is.EqualTo(gameplayProjectPath));
+			Assert.That(projectFileContents, Does.Contain("../../WolfEngine/WolfEngine/WolfEngine.csproj"));
+			Assert.That(projectFileContents, Does.Contain("../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj"));
+			Assert.That(solutionFileContents, Does.Contain(@"Gameplay\My Game.Gameplay.csproj"));
+			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine\WolfEngine.csproj"));
+			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(parentDirectory))
+			{
+				Directory.Delete(parentDirectory, recursive: true);
+			}
+		}
+	}
+
+	[Test]
 	public void DeleteAssetSource_RemovesFileMetaAndDatabaseEntries()
 	{
 		using var environment = new EditorProjectTestEnvironment();
@@ -156,8 +200,7 @@ public sealed class AssetsWindowTests
 	public void DeleteAssetSource_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteAssetSourceTests", Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+		CreateManifestBackedProjectStructure(projectRoot, "DeleteAssetSourceTests");
 
 		var sourcePath = Path.Combine(projectRoot, "Assets", "file.mat.json");
 		File.WriteAllText(sourcePath, "{}");
@@ -193,8 +236,8 @@ public sealed class AssetsWindowTests
 	public void DeleteFolder_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteFolderTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "DeleteFolderTests");
 		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Data"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
 
 		var sourcePath = Path.Combine(projectRoot, "Assets", "Data", "file.data.json");
 		File.WriteAllText(sourcePath, "{}");
@@ -230,8 +273,7 @@ public sealed class AssetsWindowTests
 	public void OpenProject_UsesIncrementalRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineOpenProjectRefreshTests", Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+		CreateManifestBackedProjectStructure(projectRoot, "OpenProjectRefreshTests");
 
 		var pipeline = new TrackingProjectAssetPipelineService();
 		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
@@ -254,11 +296,60 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void OpenProject_LoadsGameplayProjectPathFromManifest()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineOpenProjectGameplayTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "GameplayDiscoveryTests");
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			Assert.That(projectService.GameplayProjectRelativePath, Is.EqualTo("Gameplay/GameplayDiscoveryTests.Gameplay.csproj"));
+			Assert.That(projectService.GameplayProjectPath, Is.EqualTo(Path.Combine(projectRoot, "Gameplay", "GameplayDiscoveryTests.Gameplay.csproj")));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void OpenProject_RejectsProjectWithoutManifest()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineLegacyProjectTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+
+		var projectService = new EditorProjectService(new TrackingProjectAssetPipelineService(), new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.False);
+			Assert.That(errorMessage, Does.Contain(EditorProjectManifestFile.FileName));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
 	public void ReloadAssetDatabase_UsesIncrementalRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineReloadRefreshTests", Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+		CreateManifestBackedProjectStructure(projectRoot, "ReloadRefreshTests");
 
 		var pipeline = new TrackingProjectAssetPipelineService();
 		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
@@ -496,6 +587,8 @@ public sealed class AssetsWindowTests
 
 		public void InitializeProject(string projectRootPath)
 		{
+			Directory.CreateDirectory(Path.Combine(projectRootPath, "Assets"));
+			Directory.CreateDirectory(Path.Combine(projectRootPath, "Library"));
 		}
 
 		public AssetDatabase RefreshProject(string projectRootPath)
@@ -568,5 +661,17 @@ public sealed class AssetsWindowTests
 	private static void WaitForTimestampTick()
 	{
 		Thread.Sleep(1100);
+	}
+
+	private static void CreateManifestBackedProjectStructure(string projectRoot, string projectName)
+	{
+		Directory.CreateDirectory(projectRoot);
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+		ProjectGameplayScaffolder.Scaffold(projectRoot, projectName);
+		EditorProjectManifestFile.Save(projectRoot, new EditorProjectManifest
+		{
+			GameplayProjectRelativePath = ProjectGameplayScaffolder.GetGameplayProjectRelativePath(projectName)
+		});
 	}
 }
