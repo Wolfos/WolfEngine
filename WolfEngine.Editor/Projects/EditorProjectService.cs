@@ -272,7 +272,8 @@ public sealed class EditorProjectService : IEditorProjectService
 			File.Delete(absoluteMetaPath);
 		}
 
-		ReloadAssetDatabase();
+		_assetPipelineService.RemoveDeletedSource(_projectRootPath!, normalizedRelativePath);
+		ReloadAssetDatabaseFromIndex();
 	}
 
 	public void DeleteFolder(string relativeFolderPath)
@@ -295,7 +296,8 @@ public sealed class EditorProjectService : IEditorProjectService
 		}
 
 		Directory.Delete(absoluteFolderPath, recursive: true);
-		ReloadAssetDatabase();
+		_assetPipelineService.RemoveDeletedSourcesUnderFolder(_projectRootPath!, normalizedRelativePath);
+		ReloadAssetDatabaseFromIndex();
 	}
 
 	private void ApplyDatabase(AssetDatabase database)

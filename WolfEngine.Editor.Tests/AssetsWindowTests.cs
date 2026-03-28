@@ -151,6 +151,78 @@ public sealed class AssetsWindowTests
 			Throws.TypeOf<InvalidOperationException>());
 	}
 
+	[Test]
+	public void DeleteAssetSource_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteAssetSourceTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+
+		var sourcePath = Path.Combine(projectRoot, "Assets", "file.mat.json");
+		File.WriteAllText(sourcePath, "{}");
+		File.WriteAllText(sourcePath + ".meta", "{}");
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.ResetCounters();
+			projectService.DeleteAssetSource("Assets/file.mat.json");
+
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RemoveDeletedSourceCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LastRemovedSourcePath, Is.EqualTo("Assets/file.mat.json"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void DeleteFolder_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteFolderTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Data"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+
+		var sourcePath = Path.Combine(projectRoot, "Assets", "Data", "file.data.json");
+		File.WriteAllText(sourcePath, "{}");
+		File.WriteAllText(sourcePath + ".meta", "{}");
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.ResetCounters();
+			projectService.DeleteFolder("Assets/Data");
+
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RemoveDeletedSourcesUnderFolderCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LastRemovedFolderPath, Is.EqualTo("Assets/Data"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
 	private sealed class TemporaryAssetsRoot : IDisposable
 	{
 		public TemporaryAssetsRoot()
@@ -247,6 +319,79 @@ public sealed class AssetsWindowTests
 		public void Clear()
 		{
 			_instances.Clear();
+		}
+	}
+
+	private sealed class TrackingProjectAssetPipelineService : IProjectAssetPipelineService
+	{
+		public int RefreshProjectCalls { get; private set; }
+		public int RemoveDeletedSourceCalls { get; private set; }
+		public int RemoveDeletedSourcesUnderFolderCalls { get; private set; }
+		public int LoadDatabaseCalls { get; private set; }
+		public string? LastRemovedSourcePath { get; private set; }
+		public string? LastRemovedFolderPath { get; private set; }
+
+		public void InitializeProject(string projectRootPath)
+		{
+		}
+
+		public AssetDatabase RefreshProject(string projectRootPath)
+		{
+			RefreshProjectCalls++;
+			return new AssetDatabase();
+		}
+
+		public void RemoveDeletedSource(string projectRootPath, string relativeSourcePath)
+		{
+			RemoveDeletedSourceCalls++;
+			LastRemovedSourcePath = relativeSourcePath;
+		}
+
+		public void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath)
+		{
+			RemoveDeletedSourcesUnderFolderCalls++;
+			LastRemovedFolderPath = relativeFolderPath;
+		}
+
+		public void ReimportSource(string projectRootPath, string relativeSourcePath)
+		{
+		}
+
+		public AssetDatabase LoadDatabase(string projectRootPath)
+		{
+			LoadDatabaseCalls++;
+			return new AssetDatabase();
+		}
+
+		public bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset)
+		{
+			asset = null!;
+			return false;
+		}
+
+		public bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId)
+		{
+			nodeId = Guid.Empty;
+			return false;
+		}
+
+		public AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath)
+		{
+			return new AssetImportResult();
+		}
+
+		public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+		{
+		}
+
+		public void ResetCounters()
+		{
+			RefreshProjectCalls = 0;
+			RemoveDeletedSourceCalls = 0;
+			RemoveDeletedSourcesUnderFolderCalls = 0;
+			LoadDatabaseCalls = 0;
+			LastRemovedSourcePath = null;
+			LastRemovedFolderPath = null;
 		}
 	}
 }

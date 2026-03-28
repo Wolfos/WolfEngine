@@ -12,6 +12,8 @@ public interface IProjectAssetPipelineService
 {
 	void InitializeProject(string projectRootPath);
 	AssetDatabase RefreshProject(string projectRootPath);
+	void RemoveDeletedSource(string projectRootPath, string relativeSourcePath);
+	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
 	void ReimportSource(string projectRootPath, string relativeSourcePath);
 	AssetDatabase LoadDatabase(string projectRootPath);
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
@@ -97,6 +99,40 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		return LoadDatabase(projectRootPath);
+	}
+
+	public void RemoveDeletedSource(string projectRootPath, string relativeSourcePath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeSourcePath);
+		InitializeProject(projectRootPath);
+
+		var normalizedRelativePath = NormalizeRelativePath(relativeSourcePath);
+		if (_index.TryGetSourceByRelativePath(projectRootPath, normalizedRelativePath, out var existingSource) == false)
+		{
+			return;
+		}
+
+		DeleteSourceArtifacts(projectRootPath, existingSource.SourceId);
+		_index.DeleteSource(projectRootPath, existingSource.SourceId);
+	}
+
+	public void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeFolderPath);
+		InitializeProject(projectRootPath);
+
+		var normalizedFolderPath = NormalizeRelativePath(relativeFolderPath).TrimEnd('/');
+		var sourcesToDelete = _index.GetSources(projectRootPath)
+			.Where(source => source.RelativeSourcePath.StartsWith(normalizedFolderPath + "/", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+
+		for (var i = 0; i < sourcesToDelete.Count; i++)
+		{
+			DeleteSourceArtifacts(projectRootPath, sourcesToDelete[i].SourceId);
+			_index.DeleteSource(projectRootPath, sourcesToDelete[i].SourceId);
+		}
 	}
 
 	public void ReimportSource(string projectRootPath, string relativeSourcePath)
