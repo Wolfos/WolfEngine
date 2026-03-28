@@ -15,8 +15,8 @@ public sealed class AssetsWindowTests
 	public void BrowserModelBuild_IncludesEmptyFolders_AndGroupsSubAssetsUnderSource()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();
-		Directory.CreateDirectory(System.IO.Path.Combine(assetsRoot.AssetsPath, "Audio"));
-		Directory.CreateDirectory(System.IO.Path.Combine(assetsRoot.AssetsPath, "Empty"));
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Audio"));
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Empty"));
 
 		var sourceId = Guid.NewGuid();
 		var primaryAssetId = Guid.NewGuid();
@@ -387,7 +387,7 @@ public sealed class AssetsWindowTests
 	{
 		public TemporaryAssetsRoot()
 		{
-			var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "WolfEngineAssetsWindowTests", Guid.NewGuid().ToString("N"), "Assets");
+			var root = Path.Combine(Path.GetTempPath(), "WolfEngineAssetsWindowTests", Guid.NewGuid().ToString("N"), "Assets");
 			Directory.CreateDirectory(root);
 			AssetsPath = root;
 		}
@@ -417,7 +417,7 @@ public sealed class AssetsWindowTests
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),
 				new AssetMetadataStore(),
-				Substitute.For<global::WolfEngine.Importing.IImageLoader>(),
+				Substitute.For<Importing.IImageLoader>(),
 				new DataAssetStore(),
 				new MaterialAssetStore(),
 				Substitute.For<IThreeDFileImporter>());
