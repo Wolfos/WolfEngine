@@ -29,6 +29,7 @@ public sealed class SavedEntity
 public sealed class SavedComponent
 {
 	public string Type { get; set; } = string.Empty;
+	public string TypeId { get; set; } = string.Empty;
 	public JsonElement Data { get; set; }
 }
 

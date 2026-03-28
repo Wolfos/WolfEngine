@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -30,7 +32,7 @@ public sealed class GameplayComponentSupportTests
 	public void GameplayComponent_CanBeDiscoveredAddedEditedSavedAndLoaded()
 	{
 		using var environment = new GameplayTestEnvironment();
-		environment.BuildGameplayAssembly(
+		environment.BuildAndLoadGameplayAssembly(
 			"""
 			using WolfEngine.ECS;
 
@@ -65,6 +67,7 @@ public sealed class GameplayComponentSupportTests
 		environment.Factory.Save(scene);
 		var savedComponent = scene.GlobalCell.Entities.Single().Components.Single();
 		Assert.That(savedComponent.Type, Is.EqualTo(descriptor.TypeName));
+		Assert.That(savedComponent.TypeId, Is.EqualTo(descriptor.StableTypeId));
 
 		var loadedScene = environment.Factory.Load(scene.AssetId);
 		var loadedEntity = FindEntityByName(loadedScene.World, "Gameplay Entity");
@@ -86,6 +89,143 @@ public sealed class GameplayComponentSupportTests
 
 		Assert.That(loadResult.DataAssetType, Is.EqualTo(typeof(RenderConfig)));
 		Assert.That(loadResult.Asset, Is.TypeOf<RenderConfig>());
+	}
+
+	[Test]
+	public void GameplayReload_PreservesMatchingFieldsAndDefaultsNewFields()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayReloadComponent : IEntityComponent
+			{
+				public int Count;
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayReloadComponent", StringComparison.Ordinal))
+			.Type;
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Reload Entity");
+		RuntimeComponentAccessor.AddDefault(scene.World, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType);
+		componentType.GetField("Count")!.SetValue(componentValue, 17);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
+
+		var snapshot = environment.SceneReloadService.Capture(scene);
+
+		var buildResult = environment.BuildGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayReloadComponent : IEntityComponent
+			{
+				public int Count;
+				public string Label;
+			}
+			""");
+		environment.TypeCatalogImpl.ClearCaches();
+		RuntimeComponentAccessor.ClearCachedDelegates();
+		RuntimeComponentFieldEditor.ClearCachedFields();
+		RuntimeAssetDescriptor.ClearCache();
+		ProjectTypeResolverUtility.ClearCaches();
+		environment.AssetInstanceRegistry.ClearCachedInstances();
+		environment.Host.ApplyPreparedBuild(buildResult);
+
+		var restoredScene = environment.SceneReloadService.Restore(snapshot);
+		var restoredEntity = FindEntityByName(restoredScene.World, "Reload Entity");
+		var reloadedType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayReloadComponent", StringComparison.Ordinal))
+			.Type;
+		var restoredComponent = RuntimeComponentAccessor.ReadBoxed(restoredScene.World, restoredEntity, reloadedType);
+
+		AssertFieldValue<int>(restoredComponent, "Count", 17);
+		Assert.That(reloadedType.GetField("Label")!.GetValue(restoredComponent), Is.Null);
+	}
+
+	[Test]
+	public void GameplayReload_UnloadsPreviousLoadContextAfterDepinning()
+	{
+		var unloadedContextReference = CreateUnloadedGameplayContextReference();
+		ForceCollect(unloadedContextReference);
+		Assert.That(unloadedContextReference.IsAlive, Is.False);
+	}
+
+	[Test]
+	public void SceneLoad_LegacyComponentTypeWithoutTypeId_StillLoads()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct LegacyGameplayComponent : IEntityComponent
+			{
+				public int Count;
+			}
+			""");
+
+		var descriptor = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "LegacyGameplayComponent", StringComparison.Ordinal));
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Legacy Entity");
+		RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
+		var component = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, descriptor.Type);
+		descriptor.Type.GetField("Count")!.SetValue(component, 7);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, descriptor.Type, component);
+		environment.Factory.Save(scene);
+
+		var globalCellPath = Path.Combine(environment.ProjectRootPath, scene.GlobalCell.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+		var cell = JsonSerializer.Deserialize<Cell>(File.ReadAllText(globalCellPath), AssetJson.SerializerOptions)!;
+		cell.Entities.Single().Components.Single().TypeId = string.Empty;
+		File.WriteAllText(globalCellPath, JsonSerializer.Serialize(cell, AssetJson.SerializerOptions));
+
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedEntity = FindEntityByName(loadedScene.World, "Legacy Entity");
+		var loadedComponent = RuntimeComponentAccessor.ReadBoxed(loadedScene.World, loadedEntity, descriptor.Type);
+		AssertFieldValue<int>(loadedComponent, "Count", 7);
+	}
+
+	[Test]
+	public void DataAssetStore_LegacyTypeWithoutTypeId_StillLoads()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.AssetPipeline;
+
+			namespace GameplayComponentSupport;
+
+			public class GameplayDataAsset : IDataAsset
+			{
+				public int Count { get; set; }
+			}
+			""");
+
+		var descriptor = environment.TypeCatalog.GetDataAssetTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayDataAsset", StringComparison.Ordinal));
+		var assetPath = Path.Combine(environment.ProjectRootPath, "Assets", "Data", $"GameplayAsset{DataAssetFile.FileExtension}");
+		Directory.CreateDirectory(Path.GetDirectoryName(assetPath)!);
+		var asset = (IDataAsset)Activator.CreateInstance(descriptor.Type)!;
+		descriptor.Type.GetProperty("Count")!.SetValue(asset, 5);
+		environment.DataAssetStore.SaveAsset(assetPath, descriptor.Type, asset);
+
+		var file = JsonSerializer.Deserialize<DataAssetFile>(File.ReadAllText(assetPath), AssetJson.SerializerOptions)!;
+		file.DataAssetTypeId = string.Empty;
+		File.WriteAllText(assetPath, JsonSerializer.Serialize(file, AssetJson.SerializerOptions));
+
+		var loadResult = environment.DataAssetStore.LoadAsset(assetPath);
+		Assert.That(loadResult.DataAssetType, Is.EqualTo(descriptor.Type));
+		Assert.That(descriptor.Type.GetProperty("Count")!.GetValue(loadResult.Asset), Is.EqualTo(5));
 	}
 
 	private static Entity FindEntityByName(World world, string name)
@@ -116,11 +256,74 @@ public sealed class GameplayComponentSupportTests
 		Assert.That(field.GetValue(componentValue), Is.EqualTo(expectedValue));
 	}
 
+	private static void ForceCollect(WeakReference weakReference)
+	{
+		for (var attempt = 0; attempt < 10 && weakReference.IsAlive; attempt++)
+		{
+			GC.Collect();
+			GC.WaitForPendingFinalizers();
+			GC.Collect();
+			Thread.Sleep(50);
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static WeakReference CreateUnloadedGameplayContextReference()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayUnloadComponent : IEntityComponent
+			{
+				public int Count;
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayUnloadComponent", StringComparison.Ordinal))
+			.Type;
+		_ = environment.TypeCatalogImpl.GetStableTypeId(componentType);
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Unload Entity");
+		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+		var fieldEditor = new TestPropertyDrawerRegistry(new Dictionary<string, object?>());
+		_ = RuntimeComponentFieldEditor.ApplyPublicFields(componentType, fieldEditor, ref componentValue);
+
+		var buildResult = environment.BuildGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayUnloadComponent : IEntityComponent
+			{
+				public int Count;
+				public int Extra;
+			}
+			""");
+		environment.TypeCatalogImpl.ClearCaches();
+		RuntimeComponentAccessor.ClearCachedDelegates();
+		RuntimeComponentFieldEditor.ClearCachedFields();
+		RuntimeAssetDescriptor.ClearCache();
+		ProjectTypeResolverUtility.ClearCaches();
+		environment.AssetInstanceRegistry.ClearCachedInstances();
+		var loadResult = environment.Host.ApplyPreparedBuild(buildResult);
+
+		Assert.That(loadResult.UnloadedContextReference, Is.Not.Null);
+		return loadResult.UnloadedContextReference!;
+	}
+
 	private sealed class GameplayTestEnvironment : IDisposable
 	{
 		private readonly string _parentDirectory;
 		private readonly TestAssetInstanceRegistry _registry;
 		private readonly EditorProjectService _projectService;
+		private readonly GameplayAssemblyHost _gameplayAssemblyHost;
 
 		public GameplayTestEnvironment()
 		{
@@ -133,7 +336,8 @@ public sealed class GameplayComponentSupportTests
 			_registry = new TestAssetInstanceRegistry();
 			AssetDatabase.SetInstanceRegistry(_registry);
 
-			TypeCatalogImpl = new ProjectTypeCatalog(() => _projectService);
+			_gameplayAssemblyHost = new GameplayAssemblyHost(() => _projectService);
+			TypeCatalogImpl = new ProjectTypeCatalog(() => _projectService, _gameplayAssemblyHost);
 			DataAssetStore = new DataAssetStore(TypeCatalogImpl);
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),
@@ -151,6 +355,7 @@ public sealed class GameplayComponentSupportTests
 			ProjectRootPath = Path.Combine(_parentDirectory, ProjectName);
 			TypeCatalog = TypeCatalogImpl;
 			Factory = new EditorSceneFactory(_projectService, pipelineService, TypeCatalogImpl);
+			SceneReloadService = new EditorSceneReloadService(TypeCatalogImpl);
 		}
 
 		public string ProjectName { get; }
@@ -160,30 +365,42 @@ public sealed class GameplayComponentSupportTests
 		public IProjectTypeCatalog TypeCatalog { get; }
 		public DataAssetStore DataAssetStore { get; }
 		public IEditorSceneFactory Factory { get; }
+		public IEditorSceneReloadService SceneReloadService { get; }
+		public GameplayAssemblyHost Host => _gameplayAssemblyHost;
+		public TestAssetInstanceRegistry AssetInstanceRegistry => _registry;
 
-		public void BuildGameplayAssembly(string source)
+		public GameplayBuildResult BuildGameplayAssembly(string source)
 		{
-			var gameplaySourcePath = Path.Combine(ProjectRootPath, ProjectGameplayScaffolder.GameplayFolderName, ProjectGameplayScaffolder.GameplaySourceFileName);
-			File.WriteAllText(gameplaySourcePath, source);
-			RewriteGameplayProjectReferences();
+			WriteGameplaySource(source);
+			var buildResult = WaitForReloadBuild();
+			Assert.That(buildResult.Succeeded, Is.True, buildResult.Output);
+			return buildResult;
+		}
 
-			var gameplayProjectPath = _projectService.GameplayProjectPath
-			                         ?? throw new AssertionException("Gameplay project path was not set.");
-			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" /m:1")
-			{
-				WorkingDirectory = ProjectRootPath,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				UseShellExecute = false
-			};
-
-			using var process = Process.Start(startInfo) ?? throw new AssertionException("Failed to start gameplay build process.");
-			var standardOutput = process.StandardOutput.ReadToEnd();
-			var standardError = process.StandardError.ReadToEnd();
-			process.WaitForExit();
-			Assert.That(process.ExitCode, Is.EqualTo(0), $"{standardOutput}{Environment.NewLine}{standardError}");
+		public void BuildAndLoadGameplayAssembly(string source)
+		{
+			WriteGameplaySource(source);
+			var buildResult = WaitForReloadBuild();
+			Assert.That(buildResult.Succeeded, Is.True, buildResult.Output);
+			_gameplayAssemblyHost.ApplyPreparedBuild(buildResult);
 			Assert.That(TypeCatalogImpl.TryGetDescriptor("missing", out _), Is.False);
-			Assert.That(global::WolfEngine.Editor.Projects.ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath), Is.Not.Null);
+		}
+
+		public GameplayBuildResult WaitForReloadBuild()
+		{
+			Assert.That(_gameplayAssemblyHost.RequestBuildAndReload(), Is.True);
+			var timeoutAt = DateTime.UtcNow.AddSeconds(30);
+			while (DateTime.UtcNow < timeoutAt)
+			{
+				if (_gameplayAssemblyHost.TryConsumeBuildResult(out var buildResult))
+				{
+					return buildResult;
+				}
+
+				Thread.Sleep(50);
+			}
+
+			throw new AssertionException("Timed out waiting for gameplay build result.");
 		}
 
 		public void Dispose()
@@ -207,6 +424,13 @@ public sealed class GameplayComponentSupportTests
 			projectContents = projectContents.Replace("../../WolfEngine/WolfEngine/WolfEngine.csproj", engineProjectPath, StringComparison.Ordinal);
 			projectContents = projectContents.Replace("../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj", ecsProjectPath, StringComparison.Ordinal);
 			File.WriteAllText(gameplayProjectPath, projectContents);
+		}
+
+		private void WriteGameplaySource(string source)
+		{
+			var gameplaySourcePath = Path.Combine(ProjectRootPath, ProjectGameplayScaffolder.GameplayFolderName, ProjectGameplayScaffolder.GameplaySourceFileName);
+			File.WriteAllText(gameplaySourcePath, source);
+			RewriteGameplayProjectReferences();
 		}
 	}
 
@@ -257,6 +481,11 @@ public sealed class GameplayComponentSupportTests
 		}
 
 		public void Clear()
+		{
+			_instances.Clear();
+		}
+
+		public void ClearCachedInstances()
 		{
 			_instances.Clear();
 		}

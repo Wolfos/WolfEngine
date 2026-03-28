@@ -38,6 +38,13 @@ public static class RuntimeComponentAccessor
 		WriteBoxedDelegates.GetOrAdd(componentType, CreateWriteBoxedDelegate)(world, entity, componentValue);
 	}
 
+	public static void ClearCachedDelegates()
+	{
+		AddDefaultDelegates.Clear();
+		ReadBoxedDelegates.Clear();
+		WriteBoxedDelegates.Clear();
+	}
+
 	private static void ValidateComponentType(Type? componentType)
 	{
 		if (componentType is null ||

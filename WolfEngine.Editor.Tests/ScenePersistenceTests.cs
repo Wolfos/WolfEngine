@@ -394,5 +394,10 @@ public sealed class ScenePersistenceTests
 		{
 			_instances.Clear();
 		}
+
+		public void ClearCachedInstances()
+		{
+			_instances.Clear();
+		}
 	}
 }

@@ -7,6 +7,7 @@ public sealed class DataAssetLoadResult
 {
 	public required DataAssetFile File { get; init; }
 	public required Type DataAssetType { get; init; }
+	public required string DataAssetTypeId { get; init; }
 	public required IDataAsset Asset { get; init; }
 }
 
@@ -51,14 +52,14 @@ public sealed class DataAssetStore : IDataAssetStore
 				$"Unsupported data asset version {assetFile.Version}. Expected {DataAssetFile.CurrentVersion}.");
 		}
 
-		var dataAssetType = ResolveDataAssetType(assetFile.DataAssetType);
-		var asset = (IDataAsset?)assetFile.Data.Deserialize(dataAssetType, AssetJson.SerializerOptions)
-			?? throw new InvalidOperationException($"Failed to deserialize data payload from '{assetFilePath}'.");
+		var dataAssetType = ResolveDataAssetType(assetFile.DataAssetType, assetFile.DataAssetTypeId);
+		var asset = (IDataAsset)ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(assetFile.Data, dataAssetType);
 
 		return new DataAssetLoadResult
 		{
 			File = assetFile,
 			DataAssetType = dataAssetType,
+			DataAssetTypeId = GetStableTypeId(dataAssetType),
 			Asset = asset
 		};
 	}
@@ -79,7 +80,8 @@ public sealed class DataAssetStore : IDataAssetStore
 			Version = DataAssetFile.CurrentVersion,
 			AssetType = AssetType.DataAsset,
 			DataAssetType = GetTypeName(dataAssetType),
-			Data = JsonSerializer.SerializeToElement(asset, dataAssetType, AssetJson.SerializerOptions)
+			DataAssetTypeId = GetStableTypeId(dataAssetType),
+			Data = JsonSerializer.SerializeToElement(asset, dataAssetType, AssetJson.GetSerializerOptions(dataAssetType))
 		};
 
 		WriteJsonAtomically(assetFilePath, assetFile);
@@ -100,7 +102,19 @@ public sealed class DataAssetStore : IDataAssetStore
 
 	private Type ResolveDataAssetType(string typeName)
 	{
-		if (_typeResolver?.TryResolveType(typeName, out var type) != true &&
+		return ResolveDataAssetType(typeName, stableTypeId: null);
+	}
+
+	private Type ResolveDataAssetType(string typeName, string? stableTypeId)
+	{
+		Type type;
+		if (_typeResolver?.TryResolveStableTypeId(stableTypeId ?? string.Empty, out type) == true)
+		{
+			ValidateDataAssetType(type);
+			return type;
+		}
+
+		if (_typeResolver?.TryResolveType(typeName, out type) != true &&
 		    ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(typeName, out type) == false)
 		{
 			throw new InvalidOperationException($"Failed to resolve data asset type '{typeName}'.");
@@ -113,6 +127,11 @@ public sealed class DataAssetStore : IDataAssetStore
 	private string GetTypeName(Type dataAssetType)
 	{
 		return _typeResolver?.GetTypeName(dataAssetType) ?? ProjectTypeResolverUtility.GetTypeName(dataAssetType);
+	}
+
+	private string GetStableTypeId(Type dataAssetType)
+	{
+		return _typeResolver?.GetStableTypeId(dataAssetType) ?? ProjectTypeResolverUtility.GetStableTypeId(dataAssetType);
 	}
 
 	private static void WriteJsonAtomically<T>(string path, T value)

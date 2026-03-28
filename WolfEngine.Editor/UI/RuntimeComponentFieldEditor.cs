@@ -32,6 +32,11 @@ public static class RuntimeComponentFieldEditor
 		return changed;
 	}
 
+	public static void ClearCachedFields()
+	{
+		EditableFields.Clear();
+	}
+
 	private static FieldInfo[] GetEditableFields(Type componentType)
 	{
 		return componentType

@@ -74,6 +74,12 @@ public class EditorGui
 		}
 	}
 
+	public void PrepareForGameplayReload()
+	{
+		ClearEntitySelection();
+		_componentsWindow.ResetCachedTypes();
+	}
+
 	public static void SelectEntity(Entity entity, World world)
 	{
 		HasSelectedEntity = true;

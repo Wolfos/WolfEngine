@@ -32,6 +32,8 @@ public sealed class MenuBar : IMenuBar
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorModeState _editorModeState;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
+	private readonly IEditorNotificationService _notificationService;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -48,7 +50,9 @@ public sealed class MenuBar : IMenuBar
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
 		IEditorModeState editorModeState,
-		IEditorSceneWorkspace sceneWorkspace)
+		IEditorSceneWorkspace sceneWorkspace,
+		IGameplayAssemblyHost gameplayAssemblyHost,
+		IEditorNotificationService notificationService)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -59,6 +63,8 @@ public sealed class MenuBar : IMenuBar
 		_windowChromeController = windowChromeController;
 		_editorModeState = editorModeState;
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
+		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
+		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 	}
 
 	public void Draw(EditorScene scene)
@@ -109,6 +115,7 @@ public sealed class MenuBar : IMenuBar
 		AddRect(exclusionRects, DrawFileMenu());
 		AddRect(exclusionRects, DrawEditMenu());
 		AddRect(exclusionRects, DrawImportMenu(scene));
+		AddRect(exclusionRects, DrawGameplayReloadButton());
 
 		var rightInset = isWindowsChrome
 			? (WindowsCaptionButtonWidth * 3.0f) + WindowsCaptionButtonSpacing + ImGui.GetStyle().ItemSpacing.X
@@ -416,8 +423,44 @@ public sealed class MenuBar : IMenuBar
 		return menuRect;
 	}
 
+	private WindowChromeRect DrawGameplayReloadButton()
+	{
+		var hasOpenProject = _projectService.HasOpenProject;
+		var isBuildInProgress = _gameplayAssemblyHost.IsBuildInProgress;
+		if (hasOpenProject == false || isBuildInProgress)
+		{
+			ImGui.BeginDisabled();
+		}
+
+		ImGui.SameLine();
+		var clicked = ImGui.ImageButton("GameplayReload", _icons.Get("refresh"), Vector2.One * 15.5f);
+		var buttonRect = GetLastItemRect();
+		if (ImGui.IsItemHovered())
+		{
+			ImGui.SetTooltip(isBuildInProgress ? "Gameplay build is already running." : "Build and reload gameplay");
+		}
+
+		if (hasOpenProject == false || isBuildInProgress)
+		{
+			ImGui.EndDisabled();
+		}
+
+		if (clicked)
+		{
+			_gameplayAssemblyHost.RequestBuildAndReload();
+		}
+
+		return buttonRect;
+	}
+
 	private void DrawPopups()
 	{
+		while (_notificationService.TryDequeueError(out var errorMessage))
+		{
+			_errorMessage = errorMessage;
+			_openErrorPopup = true;
+		}
+
 		if (_openNewProjectPopup)
 		{
 			ImGui.OpenPopup(NewProjectPopupId);
@@ -509,8 +552,7 @@ public sealed class MenuBar : IMenuBar
 
 	private void ShowError(string errorMessage)
 	{
-		_errorMessage = errorMessage;
-		_openErrorPopup = true;
+		_notificationService.ReportError(errorMessage);
 	}
 
 	private void PersistLastOpenedProject()

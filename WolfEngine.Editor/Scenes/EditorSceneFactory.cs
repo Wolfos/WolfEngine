@@ -329,19 +329,19 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return new SavedComponent
 		{
 			Type = _typeResolver?.GetTypeName(componentType) ?? ProjectTypeResolverUtility.GetTypeName(componentType),
-			Data = JsonSerializer.SerializeToElement(RuntimeComponentAccessor.ReadBoxed(world, entity, componentType), componentType, AssetJson.SerializerOptions)
+			TypeId = _typeResolver?.GetStableTypeId(componentType) ?? ProjectTypeResolverUtility.GetStableTypeId(componentType),
+			Data = JsonSerializer.SerializeToElement(RuntimeComponentAccessor.ReadBoxed(world, entity, componentType), componentType, AssetJson.GetSerializerOptions(componentType))
 		};
 	}
 
 	private void ApplyComponent(World world, Entity entity, SavedComponent component)
 	{
-		if (TryResolveComponentType(component.Type, out var componentType) == false || IsPersistableComponentType(componentType) == false)
+		if (TryResolveComponentType(component, out var componentType) == false || IsPersistableComponentType(componentType) == false)
 		{
 			return;
 		}
 
-		var deserialized = component.Data.Deserialize(componentType, AssetJson.SerializerOptions)
-			?? throw new InvalidOperationException($"Failed to deserialize scene component '{componentType.FullName}'.");
+		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
 		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
 	}
 
@@ -501,13 +501,18 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return relativePath.Replace('\\', '/');
 	}
 
-	private bool TryResolveComponentType(string typeName, out Type componentType)
+	private bool TryResolveComponentType(SavedComponent component, out Type componentType)
 	{
-		if (_typeResolver?.TryResolveType(typeName, out componentType) == true)
+		if (_typeResolver?.TryResolveStableTypeId(component.TypeId, out componentType) == true)
 		{
 			return true;
 		}
 
-		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(typeName, out componentType);
+		if (_typeResolver?.TryResolveType(component.Type, out componentType) == true)
+		{
+			return true;
+		}
+
+		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
 	}
 }

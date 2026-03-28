@@ -520,6 +520,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var summary = new DataAssetSummary
 		{
 			DataAssetType = loadResult.DataAssetType.AssemblyQualifiedName ?? loadResult.DataAssetType.FullName ?? loadResult.DataAssetType.Name,
+			DataAssetTypeId = loadResult.DataAssetTypeId,
 			DisplayName = loadResult.DataAssetType.Name
 		};
 

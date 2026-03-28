@@ -94,4 +94,12 @@ public static class RuntimeAssetDescriptor
 				?? throw new InvalidOperationException($"Runtime asset type '{runtimeType.FullName}' is missing a RuntimeAssetAttribute.");
 		}
 	}
+
+	public static void ClearCache()
+	{
+		lock (Sync)
+		{
+			Cache.Clear();
+		}
+	}
 }

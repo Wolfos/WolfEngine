@@ -45,14 +45,19 @@ public static class Program
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
+		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
-		services.AddSingleton<IProjectTypeCatalog>(provider => new ProjectTypeCatalog(() => provider.GetRequiredService<IEditorProjectService>()));
+		services.AddSingleton<IGameplayAssemblyHost>(provider => new GameplayAssemblyHost(() => provider.GetRequiredService<IEditorProjectService>()));
+		services.AddSingleton<IProjectTypeCatalog>(provider => new ProjectTypeCatalog(
+			() => provider.GetRequiredService<IEditorProjectService>(),
+			provider.GetRequiredService<IGameplayAssemblyHost>()));
 		services.AddSingleton<IProjectTypeResolver>(provider => (IProjectTypeResolver)provider.GetRequiredService<IProjectTypeCatalog>());
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
 		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
 		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();
 		services.AddSingleton<IEditorSceneFactory, EditorSceneFactory>();
 		services.AddSingleton<IEditorSceneWorkspace, EditorSceneWorkspace>();
+		services.AddSingleton<IEditorSceneReloadService, EditorSceneReloadService>();
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();

@@ -48,6 +48,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     public override string Name => "Components";
 
+    public void ResetCachedTypes()
+    {
+        _addableComponentTypes.Clear();
+        _existingComponentTypes.Clear();
+        _componentNameCounts.Clear();
+    }
+
     public override void Draw(EditorScene scene)
     {
         ImGui.SetNextWindowPos(new Vector2(1041.0f, 0.0f), ImGuiCond.FirstUseEver);

@@ -1,3 +1,4 @@
+using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -11,4 +12,14 @@ public static class AssetJson
 		WriteIndented = true,
 		Converters = { new JsonStringEnumConverter() }
 	};
+
+	public static JsonSerializerOptions GetSerializerOptions(Type? runtimeType)
+	{
+		if (runtimeType is not null && AssemblyLoadContext.GetLoadContext(runtimeType.Assembly) != AssemblyLoadContext.Default)
+		{
+			return new JsonSerializerOptions(SerializerOptions);
+		}
+
+		return SerializerOptions;
+	}
 }

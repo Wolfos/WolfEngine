@@ -108,6 +108,7 @@ public sealed class MaterialAssetSummary
 public sealed class DataAssetSummary
 {
 	public string DataAssetType { get; set; } = string.Empty;
+	public string DataAssetTypeId { get; set; } = string.Empty;
 	public string DisplayName { get; set; } = string.Empty;
 }
 
@@ -173,6 +174,7 @@ public sealed class DataAssetFile
 	public int Version { get; set; } = CurrentVersion;
 	public AssetType AssetType { get; set; } = AssetType.DataAsset;
 	public string DataAssetType { get; set; } = string.Empty;
+	public string DataAssetTypeId { get; set; } = string.Empty;
 	public System.Text.Json.JsonElement Data { get; set; }
 }
 

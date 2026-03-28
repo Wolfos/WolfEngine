@@ -13,6 +13,8 @@ public sealed class ProjectTypeDescriptor
 	public required string DisplayName { get; init; }
 	public required string QualifiedDisplayName { get; init; }
 	public required string TypeName { get; init; }
+	public required string StableTypeId { get; init; }
+	public required bool IsGameplayType { get; init; }
 }
 
 public interface IProjectTypeCatalog
@@ -21,30 +23,34 @@ public interface IProjectTypeCatalog
 	IReadOnlyList<ProjectTypeDescriptor> GetComponentTypes();
 	IReadOnlyList<ProjectTypeDescriptor> GetDataAssetTypes();
 	bool TryGetDescriptor(string typeName, out ProjectTypeDescriptor descriptor);
+	void ClearCaches();
 }
 
 public interface IProjectTypeResolver
 {
 	string GetTypeName(Type type);
+	string GetStableTypeId(Type type);
 	bool TryResolveType(string typeName, out Type type);
+	bool TryResolveStableTypeId(string stableTypeId, out Type type);
 }
 
 public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolver
 {
-	private static readonly ConcurrentDictionary<string, byte> KnownGameplayAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Func<IEditorProjectService> _projectServiceAccessor;
+	private readonly IGameplayAssemblyHost? _gameplayAssemblyHost;
 	private readonly object _sync = new();
 	private string? _loadedProjectRootPath;
-	private bool _gameplayAssemblyLoadAttempted;
-	private Assembly? _currentGameplayAssembly;
+	private long _loadedGameplayGeneration = -1;
 	private IReadOnlyList<ProjectTypeDescriptor>? _allDescriptors;
 	private IReadOnlyList<ProjectTypeDescriptor>? _componentDescriptors;
 	private IReadOnlyList<ProjectTypeDescriptor>? _dataAssetDescriptors;
 	private Dictionary<string, ProjectTypeDescriptor>? _descriptorsByTypeName;
+	private Dictionary<string, ProjectTypeDescriptor>? _descriptorsByStableTypeId;
 
-	public ProjectTypeCatalog(Func<IEditorProjectService> projectServiceAccessor)
+	public ProjectTypeCatalog(Func<IEditorProjectService> projectServiceAccessor, IGameplayAssemblyHost? gameplayAssemblyHost = null)
 	{
 		_projectServiceAccessor = projectServiceAccessor ?? throw new ArgumentNullException(nameof(projectServiceAccessor));
+		_gameplayAssemblyHost = gameplayAssemblyHost;
 	}
 
 	public IReadOnlyList<ProjectTypeDescriptor> GetAll()
@@ -77,11 +83,22 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 		return _descriptorsByTypeName!.TryGetValue(typeName, out descriptor!);
 	}
 
+	public void ClearCaches()
+	{
+		lock (_sync)
+		{
+			ResetCache(currentProjectRoot: null, currentGameplayGeneration: -1);
+		}
+	}
+
 	public string GetTypeName(Type type)
 	{
-		ArgumentNullException.ThrowIfNull(type);
-		return type.AssemblyQualifiedName
-		       ?? throw new InvalidOperationException($"Type '{type.FullName}' does not have an assembly-qualified name.");
+		return ProjectTypeResolverUtility.GetTypeName(type);
+	}
+
+	public string GetStableTypeId(Type type)
+	{
+		return ProjectTypeResolverUtility.GetStableTypeId(type);
 	}
 
 	public bool TryResolveType(string typeName, out Type type)
@@ -96,14 +113,35 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 		return false;
 	}
 
+	public bool TryResolveStableTypeId(string stableTypeId, out Type type)
+	{
+		EnsureCatalogLoaded();
+		if (string.IsNullOrWhiteSpace(stableTypeId))
+		{
+			type = null!;
+			return false;
+		}
+
+		if (_descriptorsByStableTypeId!.TryGetValue(stableTypeId, out var descriptor))
+		{
+			type = descriptor.Type;
+			return true;
+		}
+
+		type = null!;
+		return false;
+	}
+
 	private void EnsureCatalogLoaded()
 	{
 		var currentProjectRoot = GetCurrentProjectRootPath();
+		var currentGameplayGeneration = _gameplayAssemblyHost?.CurrentGeneration ?? 0;
 		lock (_sync)
 		{
-			if (string.Equals(currentProjectRoot, _loadedProjectRootPath, StringComparison.OrdinalIgnoreCase) == false)
+			if (string.Equals(currentProjectRoot, _loadedProjectRootPath, StringComparison.OrdinalIgnoreCase) == false ||
+			    currentGameplayGeneration != _loadedGameplayGeneration)
 			{
-				ResetCache(currentProjectRoot);
+				ResetCache(currentProjectRoot, currentGameplayGeneration);
 			}
 
 			if (_allDescriptors is not null)
@@ -111,10 +149,9 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 				return;
 			}
 
-			EnsureGameplayAssemblyLoaded();
-
 			var descriptors = new List<ProjectTypeDescriptor>();
 			var descriptorsByTypeName = new Dictionary<string, ProjectTypeDescriptor>(StringComparer.Ordinal);
+			var descriptorsByStableTypeId = new Dictionary<string, ProjectTypeDescriptor>(StringComparer.Ordinal);
 			foreach (var assembly in GetAssembliesForCatalog())
 			{
 				foreach (var type in ProjectTypeResolverUtility.GetLoadableTypes(assembly))
@@ -130,10 +167,13 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 						Type = type,
 						DisplayName = type.Name,
 						QualifiedDisplayName = string.IsNullOrWhiteSpace(type.FullName) ? type.Name : type.FullName,
-						TypeName = typeName
+						TypeName = typeName,
+						StableTypeId = ProjectTypeResolverUtility.GetStableTypeId(type),
+						IsGameplayType = ProjectTypeResolverUtility.IsGameplayType(type)
 					};
 					descriptors.Add(descriptor);
 					descriptorsByTypeName.Add(typeName, descriptor);
+					descriptorsByStableTypeId.TryAdd(descriptor.StableTypeId, descriptor);
 				}
 			}
 
@@ -152,6 +192,7 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 			_componentDescriptors = descriptors.Where(descriptor => IsComponentType(descriptor.Type)).ToList();
 			_dataAssetDescriptors = descriptors.Where(descriptor => IsDataAssetType(descriptor.Type)).ToList();
 			_descriptorsByTypeName = descriptorsByTypeName;
+			_descriptorsByStableTypeId = descriptorsByStableTypeId;
 		}
 	}
 
@@ -163,95 +204,34 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 			: null;
 	}
 
-	private void ResetCache(string? currentProjectRoot)
+	private void ResetCache(string? currentProjectRoot, long currentGameplayGeneration)
 	{
 		_loadedProjectRootPath = currentProjectRoot;
-		_gameplayAssemblyLoadAttempted = false;
-		_currentGameplayAssembly = null;
+		_loadedGameplayGeneration = currentGameplayGeneration;
 		_allDescriptors = null;
 		_componentDescriptors = null;
 		_dataAssetDescriptors = null;
 		_descriptorsByTypeName = null;
-	}
-
-	private void EnsureGameplayAssemblyLoaded()
-	{
-		if (_gameplayAssemblyLoadAttempted)
-		{
-			return;
-		}
-
-		_gameplayAssemblyLoadAttempted = true;
-		var projectService = _projectServiceAccessor();
-		var gameplayProjectPath = projectService.GameplayProjectPath;
-		if (string.IsNullOrWhiteSpace(gameplayProjectPath) || File.Exists(gameplayProjectPath) == false)
-		{
-			return;
-		}
-
-		var gameplayAssemblyPath = TryFindGameplayAssemblyPath(gameplayProjectPath);
-		if (string.IsNullOrWhiteSpace(gameplayAssemblyPath))
-		{
-			return;
-		}
-
-		try
-		{
-			_currentGameplayAssembly = ReuseOrLoadGameplayAssembly(gameplayAssemblyPath);
-			KnownGameplayAssemblyPaths.TryAdd(Path.GetFullPath(gameplayAssemblyPath), 0);
-		}
-		catch (Exception exception)
-		{
-			Console.WriteLine($"Failed to load gameplay assembly '{gameplayAssemblyPath}': {exception}");
-		}
+		_descriptorsByStableTypeId = null;
 	}
 
 	private IEnumerable<Assembly> GetAssembliesForCatalog()
 	{
 		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
 		{
-			if (_currentGameplayAssembly is not null && ReferenceEquals(assembly, _currentGameplayAssembly))
-			{
-				yield return assembly;
-				continue;
-			}
-
-			if (string.IsNullOrWhiteSpace(assembly.Location) == false &&
-			    KnownGameplayAssemblyPaths.ContainsKey(Path.GetFullPath(assembly.Location)))
+			if (AssemblyLoadContext.GetLoadContext(assembly) != AssemblyLoadContext.Default)
 			{
 				continue;
 			}
 
 			yield return assembly;
 		}
-	}
 
-	private static Assembly ReuseOrLoadGameplayAssembly(string assemblyPath)
-	{
-		var fullAssemblyPath = Path.GetFullPath(assemblyPath);
-		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+		var gameplayAssembly = _gameplayAssemblyHost?.EnsureLoaded().Assembly;
+		if (gameplayAssembly is not null)
 		{
-			if (string.IsNullOrWhiteSpace(assembly.Location))
-			{
-				continue;
-			}
-
-			if (string.Equals(Path.GetFullPath(assembly.Location), fullAssemblyPath, StringComparison.OrdinalIgnoreCase))
-			{
-				return assembly;
-			}
+			yield return gameplayAssembly;
 		}
-
-		var assemblyName = AssemblyName.GetAssemblyName(fullAssemblyPath);
-		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-		{
-			if (AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), assemblyName))
-			{
-				return assembly;
-			}
-		}
-
-		return AssemblyLoadContext.Default.LoadFromAssemblyPath(fullAssemblyPath);
 	}
 
 	internal static string? TryFindGameplayAssemblyPath(string gameplayProjectPath)
@@ -331,6 +311,8 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 internal static class ProjectTypeResolverUtility
 {
 	private static readonly ConcurrentDictionary<Type, string> TypeNames = new();
+	private static readonly ConcurrentDictionary<Type, string> StableTypeIds = new();
+	private const string GameplayTypeIdPrefix = "gameplay:";
 
 	public static string GetTypeName(Type type)
 	{
@@ -338,6 +320,34 @@ internal static class ProjectTypeResolverUtility
 		return TypeNames.GetOrAdd(type, static candidate =>
 			candidate.AssemblyQualifiedName
 			?? throw new InvalidOperationException($"Type '{candidate.FullName}' does not have an assembly-qualified name."));
+	}
+
+	public static string GetStableTypeId(Type type)
+	{
+		ArgumentNullException.ThrowIfNull(type);
+		return StableTypeIds.GetOrAdd(type, static candidate =>
+		{
+			if (IsGameplayType(candidate))
+			{
+				var fullName = candidate.FullName ?? candidate.Name;
+				return $"{GameplayTypeIdPrefix}{fullName}";
+			}
+
+			return GetTypeName(candidate);
+		});
+	}
+
+	public static bool IsGameplayType(Type type)
+	{
+		ArgumentNullException.ThrowIfNull(type);
+		var loadContext = AssemblyLoadContext.GetLoadContext(type.Assembly);
+		return loadContext is not null && ReferenceEquals(loadContext, AssemblyLoadContext.Default) == false;
+	}
+
+	public static void ClearCaches()
+	{
+		TypeNames.Clear();
+		StableTypeIds.Clear();
 	}
 
 	public static bool TryResolveFromLoadedAssemblies(string typeName, out Type type)
@@ -348,7 +358,7 @@ internal static class ProjectTypeResolverUtility
 			return false;
 		}
 
-		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(candidate => AssemblyLoadContext.GetLoadContext(candidate) == AssemblyLoadContext.Default))
 		{
 			foreach (var candidate in GetLoadableTypes(assembly))
 			{
@@ -362,6 +372,12 @@ internal static class ProjectTypeResolverUtility
 
 		type = null!;
 		return false;
+	}
+
+	public static bool IsGameplayStableTypeId(string stableTypeId)
+	{
+		return string.IsNullOrWhiteSpace(stableTypeId) == false &&
+		       stableTypeId.StartsWith(GameplayTypeIdPrefix, StringComparison.Ordinal);
 	}
 
 	public static IEnumerable<Type> GetLoadableTypes(Assembly assembly)

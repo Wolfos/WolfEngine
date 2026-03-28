@@ -23,10 +23,12 @@ public interface IPropertyDrawerRegistry
 public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 {
 	private readonly IEditorProjectService _projectService;
+	private readonly IProjectTypeResolver _typeResolver;
 
-	public PropertyDrawerRegistry(IEditorProjectService projectService)
+	public PropertyDrawerRegistry(IEditorProjectService projectService, IProjectTypeResolver typeResolver)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
 	}
 
 	public PropertyDrawerResult Draw(PropertyDrawerContext context)
@@ -154,16 +156,17 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 
 		var currentId = GetAssetLinkId(valueType, context.Value);
 		var authoringTypeName = descriptor.AuthoringType.AssemblyQualifiedName ?? string.Empty;
+		var authoringTypeId = _typeResolver.GetStableTypeId(descriptor.AuthoringType);
 		var candidates = _projectService.HasOpenProject
 			? _projectService.CurrentAssetDatabase.Assets
-				.Where(asset => IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName))
+				.Where(asset => IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName, authoringTypeId))
 				.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
 				.ToList()
 			: [];
 
 		var nextId = currentId;
 		var changed = false;
-		EditorUIUtility.Combo(context.Label, GetAssetLinkPreviewLabel(currentId, descriptor, authoringTypeName), () =>
+		EditorUIUtility.Combo(context.Label, GetAssetLinkPreviewLabel(currentId, descriptor, authoringTypeName, authoringTypeId), () =>
 		{
 			var noneSelected = currentId == Guid.Empty;
 			if (ImGui.Selectable("None", noneSelected))
@@ -294,7 +297,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		return false;
 	}
 
-	private string GetAssetLinkPreviewLabel(Guid assetId, RuntimeAssetAttribute descriptor, string authoringTypeName)
+	private string GetAssetLinkPreviewLabel(Guid assetId, RuntimeAssetAttribute descriptor, string authoringTypeName, string authoringTypeId)
 	{
 		if (assetId == Guid.Empty)
 		{
@@ -311,7 +314,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			return "Missing";
 		}
 
-		if (IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName) == false)
+		if (IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName, authoringTypeId) == false)
 		{
 			return "Invalid";
 		}
@@ -333,7 +336,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		}
 	}
 
-	private static bool IsMatchingAssetLinkCandidate(AssetDatabaseEntry asset, RuntimeAssetAttribute descriptor, string authoringTypeName)
+	private static bool IsMatchingAssetLinkCandidate(AssetDatabaseEntry asset, RuntimeAssetAttribute descriptor, string authoringTypeName, string authoringTypeId)
 	{
 		if (asset.Type != descriptor.AssetType)
 		{
@@ -341,6 +344,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		}
 
 		return descriptor.AssetType != AssetType.DataAsset ||
+		       string.Equals(asset.DataAssetSummary?.DataAssetTypeId, authoringTypeId, StringComparison.Ordinal) ||
 		       string.Equals(asset.DataAssetSummary?.DataAssetType, authoringTypeName, StringComparison.Ordinal);
 	}
 

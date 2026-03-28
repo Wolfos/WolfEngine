@@ -69,11 +69,13 @@ internal static class ProjectGameplayScaffolder
 		return
 			$$"""
 			  using WolfEngine.ECS;
+			  using WolfEngine.Gameplay;
 
 			  namespace {{rootNamespace}};
 
 			  public static class GameplayEntrypoint
 			  {
+			  	public static IGameplayModule? CreateModule() => null;
 			  }
 
 			  public struct GameplayMarker : IEntityComponent

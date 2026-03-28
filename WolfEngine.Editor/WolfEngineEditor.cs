@@ -8,6 +8,8 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor;
 
@@ -28,6 +30,11 @@ public class WolfEngineEditor
 	private readonly List<World> _renderWorlds = new(2);
 	private readonly EditorGui _editorGui;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
+	private readonly IEditorSceneReloadService _sceneReloadService;
+	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
+	private readonly IEditorNotificationService _notificationService;
+	private readonly IProjectTypeCatalog _typeCatalog;
 
 	private EditorScene _currentScene;
 
@@ -35,6 +42,8 @@ public class WolfEngineEditor
 	private World _gameWorld = null!;
 	private Entity _editorCamera;
 	private volatile bool _running;
+	private long _boundGameplayGeneration;
+	private World? _boundGameplayWorld;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -47,7 +56,12 @@ public class WolfEngineEditor
 		EditorFrameCoordinator editorFrameCoordinator,
 		EditorCameraContext cameraContext,
 		EditorGui editorGui,
-		IEditorSceneWorkspace sceneWorkspace)
+		IEditorSceneWorkspace sceneWorkspace,
+		IProjectTypeCatalog typeCatalog,
+		IGameplayAssemblyHost gameplayAssemblyHost,
+		IEditorSceneReloadService sceneReloadService,
+		IAssetInstanceRegistry assetInstanceRegistry,
+		IEditorNotificationService notificationService)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -60,6 +74,11 @@ public class WolfEngineEditor
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_editorGui = editorGui ?? throw new ArgumentNullException(nameof(editorGui));
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
+		_typeCatalog = typeCatalog ?? throw new ArgumentNullException(nameof(typeCatalog));
+		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
+		_sceneReloadService = sceneReloadService ?? throw new ArgumentNullException(nameof(sceneReloadService));
+		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
+		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 	}
 
 	public void Run()
@@ -121,8 +140,12 @@ public class WolfEngineEditor
 			var deltaTime = (float)(now - last).TotalSeconds;
 			last = now;
 
+			HandleGameplayBuildAndReload();
+			EnsureGameplayModuleBound();
+
 			using (FrameProfiler.Instance.Measure("World Update"))
 			{
+				UpdateGameplay(deltaTime);
 				_worldManager.Update(deltaTime, WorldTag.All);
 			}
 
@@ -180,6 +203,116 @@ public class WolfEngineEditor
 		_renderWorlds.Clear();
 		_renderWorlds.Add(_editorWorld);
 		_renderWorlds.Add(_gameWorld);
+	}
+
+	private void UpdateGameplay(float deltaTime)
+	{
+		_gameplayAssemblyHost.CurrentModule?.Update(deltaTime, _gameWorld);
+	}
+
+	private void EnsureGameplayModuleBound()
+	{
+		var loadResult = _gameplayAssemblyHost.EnsureLoaded();
+		if (loadResult.Generation == 0)
+		{
+			return;
+		}
+
+		if (loadResult.Generation == _boundGameplayGeneration &&
+		    ReferenceEquals(_boundGameplayWorld, _gameWorld))
+		{
+			return;
+		}
+
+		if (_boundGameplayGeneration != 0 &&
+		    ReferenceEquals(_boundGameplayWorld, _gameWorld) == false)
+		{
+			_gameplayAssemblyHost.CurrentModule?.OnUnloading(_boundGameplayWorld!);
+		}
+
+		loadResult.Module?.OnLoaded(_gameWorld);
+		_boundGameplayGeneration = loadResult.Generation;
+		_boundGameplayWorld = _gameWorld;
+	}
+
+	private void HandleGameplayBuildAndReload()
+	{
+		if (_gameplayAssemblyHost.TryConsumeBuildResult(out var buildResult) == false)
+		{
+			return;
+		}
+
+		if (buildResult.Succeeded == false)
+		{
+			_notificationService.ReportError(string.IsNullOrWhiteSpace(buildResult.Output)
+				? "Gameplay build failed."
+				: buildResult.Output);
+			return;
+		}
+
+		try
+		{
+			ApplyGameplayReload(buildResult);
+		}
+		catch (Exception exception)
+		{
+			_notificationService.ReportError($"Gameplay reload failed:{Environment.NewLine}{exception}");
+		}
+	}
+
+	private void ApplyGameplayReload(GameplayBuildResult buildResult)
+	{
+		var selectedEntityId = TryGetSelectedEntityId();
+		var snapshot = _sceneReloadService.Capture(_currentScene);
+
+		_gameplayAssemblyHost.CurrentModule?.OnUnloading(_gameWorld);
+		_editorGui.PrepareForGameplayReload();
+		_assetInstanceRegistry.ClearCachedInstances();
+		_typeCatalog.ClearCaches();
+		RuntimeComponentAccessor.ClearCachedDelegates();
+		RuntimeComponentFieldEditor.ClearCachedFields();
+		RuntimeAssetDescriptor.ClearCache();
+		ProjectTypeResolverUtility.ClearCaches();
+
+		var loadResult = _gameplayAssemblyHost.ApplyPreparedBuild(buildResult);
+		var restoredScene = _sceneReloadService.Restore(snapshot);
+		_sceneWorkspace.ReplaceCurrentScene(restoredScene);
+		_currentScene = restoredScene;
+		_gameWorld = restoredScene.World;
+		_renderWorlds.Clear();
+		_renderWorlds.Add(_editorWorld);
+		_renderWorlds.Add(_gameWorld);
+
+		loadResult.Module?.OnLoaded(_gameWorld);
+		_boundGameplayGeneration = loadResult.Generation;
+		_boundGameplayWorld = _gameWorld;
+		RestoreSelectedEntity(selectedEntityId);
+	}
+
+	private Guid? TryGetSelectedEntityId()
+	{
+		return EditorGui.HasSelectedEntity &&
+		       _currentScene.EntityIds.TryGetValue(EditorGui.SelectedEntity, out var selectedEntityId) &&
+		       selectedEntityId != Guid.Empty
+			? selectedEntityId
+			: null;
+	}
+
+	private void RestoreSelectedEntity(Guid? selectedEntityId)
+	{
+		if (selectedEntityId is not { } entityId)
+		{
+			return;
+		}
+
+		foreach (var entry in _currentScene.EntityIds)
+		{
+			if (entry.Value == entityId)
+			{
+				EditorGui.SelectEntity(entry.Key, _currentScene.World);
+				return;
+			}
+		}
 	}
 
 	private RenderConfig GetConfig()

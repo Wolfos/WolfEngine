@@ -573,6 +573,11 @@ public sealed class AssetsWindowTests
 		{
 			_instances.Clear();
 		}
+
+		public void ClearCachedInstances()
+		{
+			_instances.Clear();
+		}
 	}
 
 	private sealed class TrackingProjectAssetPipelineService : IProjectAssetPipelineService

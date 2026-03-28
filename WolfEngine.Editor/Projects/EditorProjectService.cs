@@ -402,6 +402,7 @@ public sealed class EditorProjectService : IEditorProjectService
 				: new DataAssetSummary
 				{
 					DataAssetType = asset.DataAssetSummary.DataAssetType,
+					DataAssetTypeId = asset.DataAssetSummary.DataAssetTypeId,
 					DisplayName = asset.DataAssetSummary.DisplayName
 				},
 			MeshSummary = asset.MeshSummary is null

@@ -132,6 +132,15 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
+	public void ClearCachedInstances()
+	{
+		lock (_lock)
+		{
+			_instances.Clear();
+			_inProgress.Clear();
+		}
+	}
+
 	private object? LoadInstance(AssetDatabaseEntry asset, Type expectedType)
 	{
 		var descriptor = RuntimeAssetDescriptor.Get(expectedType);
