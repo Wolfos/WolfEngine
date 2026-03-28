@@ -17,8 +17,8 @@ public sealed class AssetsWindow : EditorWindow
 	private const float GridMinItemWidth = 150.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
-	private const string ItemContextMenuId = "AssetsWindowItemContextMenu";
 	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
+	private const string LocalItemContextMenuId = "ItemContextMenu";
 
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -31,7 +31,6 @@ public sealed class AssetsWindow : EditorWindow
 	private bool _openErrorPopup;
 	private string _selectedFolderPath = AssetPipelinePaths.AssetsFolderName;
 	private Guid? _expandedSourceId;
-	private BrowserContextTarget? _contextMenuTarget;
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
 
@@ -79,8 +78,6 @@ public sealed class AssetsWindow : EditorWindow
 		DrawFolderTree(browserModel);
 		ImGui.SameLine();
 		DrawContentArea(selectedFolder, scene);
-
-		DrawItemContextMenu(scene, browserModel);
 		DrawDeletePopup();
 		DrawErrorPopup();
 		ImGui.End();
@@ -155,8 +152,14 @@ public sealed class AssetsWindow : EditorWindow
 		if (rightClicked)
 		{
 			SelectFolder(folder.RelativePath);
-			_contextMenuTarget = BrowserContextTarget.ForFolder(folder.RelativePath);
-			ImGui.OpenPopup(ItemContextMenuId);
+			ImGui.OpenPopup(LocalItemContextMenuId);
+		}
+
+		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
+		if (popupOpen)
+		{
+			DrawFolderScopedContextMenu(folder.RelativePath);
+			ImGui.EndPopup();
 		}
 
 		if (hasChildren && open)
@@ -272,8 +275,14 @@ public sealed class AssetsWindow : EditorWindow
 		if (rightClicked)
 		{
 			SelectFolder(folder.RelativePath);
-			_contextMenuTarget = BrowserContextTarget.ForFolder(folder.RelativePath);
-			ImGui.OpenPopup(ItemContextMenuId);
+			ImGui.OpenPopup(LocalItemContextMenuId);
+		}
+
+		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
+		if (popupOpen)
+		{
+			DrawFolderScopedContextMenu(folder.RelativePath);
+			ImGui.EndPopup();
 		}
 
 		ImGui.EndChild();
@@ -334,9 +343,19 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (headerRightClicked)
 		{
-			SelectAsset(source.PrimaryAsset);
-			_contextMenuTarget = BrowserContextTarget.ForSource(source.RelativeSourcePath, source.SourceId, source.PrimaryAsset.Id);
-			ImGui.OpenPopup(ItemContextMenuId);
+			SelectAsset(source.PrimaryAsset, requestFocus: false);
+			ImGui.OpenPopup(LocalItemContextMenuId);
+		}
+
+		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
+		if (popupOpen)
+		{
+			DrawSourceContextMenu(
+				scene,
+				source,
+				BrowserContextTarget.ForSource(source.RelativeSourcePath, source.SourceId, source.PrimaryAsset.Id),
+				deleteLabel: "Delete");
+			ImGui.EndPopup();
 		}
 
 		if (source.SubAssets.Count > 0)
@@ -381,6 +400,7 @@ public sealed class AssetsWindow : EditorWindow
 
 	private void DrawSubAssetRow(AssetsWindowSourceItem source, AssetDatabaseEntry subAsset, EditorScene scene)
 	{
+		ImGui.PushID(subAsset.Id.ToString());
 		var isSelected = _assetSelectionService.SelectedAssetId == subAsset.Id;
 		if (ImGui.Selectable($"{subAsset.Name}  [{subAsset.Type}]", isSelected, ImGuiSelectableFlags.SpanAllColumns))
 		{
@@ -392,38 +412,25 @@ public sealed class AssetsWindow : EditorWindow
 			OpenAsset(subAsset, scene);
 		}
 
-		if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		if (rightClicked)
 		{
-			SelectAsset(subAsset);
-			_contextMenuTarget = BrowserContextTarget.ForSubAsset(source.RelativeSourcePath, source.SourceId, subAsset.Id);
-			ImGui.OpenPopup(ItemContextMenuId);
-		}
-	}
-
-	private void DrawItemContextMenu(EditorScene scene, AssetsWindowBrowserModel browserModel)
-	{
-		if (ImGui.BeginPopup(ItemContextMenuId) == false)
-		{
-			return;
+			SelectAsset(subAsset, requestFocus: false);
+			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
 
-		switch (_contextMenuTarget)
+		var popupOpen = ImGui.BeginPopup(LocalItemContextMenuId);
+		if (popupOpen)
 		{
-			case { Kind: BrowserContextKind.Folder } folderTarget:
-				DrawFolderScopedContextMenu(folderTarget.FolderPath);
-				break;
-			case { Kind: BrowserContextKind.CurrentFolder } currentFolderTarget:
-				DrawFolderScopedContextMenu(currentFolderTarget.FolderPath);
-				break;
-			case { Kind: BrowserContextKind.Source } sourceTarget:
-				DrawSourceContextMenu(scene, browserModel, sourceTarget, deleteLabel: "Delete");
-				break;
-			case { Kind: BrowserContextKind.SubAsset } subAssetTarget:
-				DrawSourceContextMenu(scene, browserModel, subAssetTarget, deleteLabel: "Delete Source Asset");
-				break;
+			DrawSourceContextMenu(
+				scene,
+				source,
+				BrowserContextTarget.ForSubAsset(source.RelativeSourcePath, source.SourceId, subAsset.Id),
+				deleteLabel: "Delete Source Asset");
+			ImGui.EndPopup();
 		}
 
-		ImGui.EndPopup();
+		ImGui.PopID();
 	}
 
 	private void DrawFolderScopedContextMenu(string folderPath)
@@ -441,12 +448,9 @@ public sealed class AssetsWindow : EditorWindow
 		}
 	}
 
-	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowBrowserModel browserModel, BrowserContextTarget contextTarget, string deleteLabel)
+	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem, BrowserContextTarget contextTarget, string deleteLabel)
 	{
 		var asset = ResolveTargetAsset(contextTarget);
-		var sourceItem = browserModel.SourcesBySourceId.TryGetValue(contextTarget.SourceId!.Value, out var resolvedSource)
-			? resolvedSource
-			: null;
 		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
 		{
 			try
@@ -459,7 +463,7 @@ public sealed class AssetsWindow : EditorWindow
 			}
 		}
 
-		if (sourceItem is not null && sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
+		if (sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
 		{
 			var isExpanded = _expandedSourceId == sourceItem.SourceId;
 			if (ImGui.MenuItem(isExpanded ? "Hide Sub-assets" : "Show Sub-assets"))
@@ -621,10 +625,10 @@ public sealed class AssetsWindow : EditorWindow
 		_assetSelectionService.Clear();
 	}
 
-	private void SelectAsset(AssetDatabaseEntry asset)
+	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true)
 	{
 		_selectedFolderPath = ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath);
-		_assetSelectionService.Select(asset.Id);
+		_assetSelectionService.Select(asset.Id, requestFocus);
 	}
 
 	private void OpenAsset(AssetDatabaseEntry asset, EditorScene scene)
