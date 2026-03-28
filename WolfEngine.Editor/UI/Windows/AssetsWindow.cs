@@ -8,13 +8,14 @@ namespace WolfEngine.Editor.UI;
 
 public sealed class AssetsWindow : EditorWindow
 {
-	private static readonly Vector2 ThumbnailSize = new(42.0f, 42.0f);
+	private static readonly Vector2 ThumbnailSize = new(46.0f, 46.0f);
 	private const float FolderTreeWidth = 220.0f;
 	private const float FolderTreeIconSize = 15.5f;
-	private const float FolderCardHeight = 90.0f;
-	private const float SourceCardHeaderHeight = 92.0f;
+	private const float FolderCardHeight = 116.0f;
+	private const float SourceCardHeaderHeight = 116.0f;
+	private const float SourceCardToggleHeight = 26.0f;
 	private const float SubAssetRowHeight = 24.0f;
-	private const float GridMinItemWidth = 150.0f;
+	private const float GridMinItemWidth = 210.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
 	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
@@ -85,6 +86,7 @@ public sealed class AssetsWindow : EditorWindow
 
 	private void DrawFolderTree(AssetsWindowBrowserModel browserModel)
 	{
+		PushPaneStyle();
 		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.Borders);
 		DrawFolderTreeNode(browserModel.RootFolder);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree", ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
@@ -94,6 +96,7 @@ public sealed class AssetsWindow : EditorWindow
 		}
 
 		ImGui.EndChild();
+		ImGui.PopStyleColor(2);
 	}
 
 	private void DrawContentArea(AssetsWindowFolderNode selectedFolder, EditorScene scene)
@@ -102,7 +105,8 @@ public sealed class AssetsWindow : EditorWindow
 		DrawBreadcrumbs(selectedFolder.RelativePath);
 		ImGui.Separator();
 
-		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f));
+		PushPaneStyle();
+		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.Borders);
 		DrawCurrentFolderContents(selectedFolder, scene);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId, ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
@@ -111,6 +115,7 @@ public sealed class AssetsWindow : EditorWindow
 		}
 
 		ImGui.EndChild();
+		ImGui.PopStyleColor(2);
 		ImGui.EndGroup();
 	}
 
@@ -259,7 +264,7 @@ public sealed class AssetsWindow : EditorWindow
 	private void DrawFolderCard(AssetsWindowFolderNode folder)
 	{
 		ImGui.PushID(folder.RelativePath);
-		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders);
+		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 		var buttonSize = new Vector2(ImGui.GetContentRegionAvail().X, FolderCardHeight - 6.0f);
 		ImGui.InvisibleButton("FolderCardButton", buttonSize);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
@@ -296,11 +301,11 @@ public sealed class AssetsWindow : EditorWindow
 		var drawList = ImGui.GetWindowDrawList();
 		var backgroundColor = ImGui.IsItemHovered()
 			? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
-			: ImGui.GetColorU32(ImGuiCol.FrameBg);
+			: ImGui.GetColorU32(ImGuiCol.Button);
 		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
 		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
 
-		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 10.0f);
+		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
 		var thumbnailMax = thumbnailMin + ThumbnailSize;
 		if (TryGetFolderIconTexture(out var textureId))
 		{
@@ -311,15 +316,22 @@ public sealed class AssetsWindow : EditorWindow
 			drawList.AddRect(thumbnailMin, thumbnailMax, ImGui.GetColorU32(ImGuiCol.Border));
 		}
 
-		DrawCenteredText(drawList, folder.Name, itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 8.0f, ImGui.GetColorU32(ImGuiCol.Text));
+		DrawCardTextBlock(
+			drawList,
+			itemMin,
+			itemMax,
+			thumbnailMax.Y + 10.0f,
+			folder.Name,
+			null);
 	}
 
 	private void DrawSourceCard(AssetsWindowSourceItem source, EditorScene scene)
 	{
 		var isExpanded = _expandedSourceId == source.SourceId;
-		var totalHeight = SourceCardHeaderHeight + (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
+		var toggleHeight = source.SubAssets.Count > 0 ? SourceCardToggleHeight : 0.0f;
+		var totalHeight = SourceCardHeaderHeight + toggleHeight + (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
 		ImGui.PushID(source.SourceId.ToString());
-		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders);
+		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
 		ImGui.InvisibleButton("SourceHeaderButton", new Vector2(ImGui.GetContentRegionAvail().X, SourceCardHeaderHeight - 6.0f));
 		var headerLeftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
@@ -360,7 +372,7 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (source.SubAssets.Count > 0)
 		{
-			ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 2.0f);
+			ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2.0f);
 			if (ImGui.SmallButton(isExpanded ? "Hide Sub-assets" : $"Show Sub-assets ({source.SubAssets.Count})"))
 			{
 				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
@@ -387,15 +399,20 @@ public sealed class AssetsWindow : EditorWindow
 			? ImGui.GetColorU32(ImGuiCol.HeaderActive)
 			: ImGui.IsItemHovered()
 				? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
-				: ImGui.GetColorU32(ImGuiCol.FrameBg);
+				: ImGui.GetColorU32(ImGuiCol.Button);
 		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
 		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
 
-		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 10.0f);
+		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
 		var thumbnailMax = thumbnailMin + ThumbnailSize;
 		DrawAssetThumbnail(drawList, thumbnailMin, thumbnailMax, source.PrimaryAsset);
-		DrawCenteredText(drawList, source.DisplayName, itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 8.0f, ImGui.GetColorU32(ImGuiCol.Text));
-		DrawCenteredText(drawList, GetAssetSubtitle(source.PrimaryAsset, source.SubAssets.Count), itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 26.0f, ImGui.GetColorU32(ImGuiCol.TextDisabled));
+		DrawCardTextBlock(
+			drawList,
+			itemMin,
+			itemMax,
+			thumbnailMax.Y + 10.0f,
+			Path.GetFileName(source.RelativeSourcePath),
+			GetAssetSubtitle(source.PrimaryAsset, source.SubAssets.Count));
 	}
 
 	private void DrawSubAssetRow(AssetsWindowSourceItem source, AssetDatabaseEntry subAsset, EditorScene scene)
@@ -777,6 +794,55 @@ public sealed class AssetsWindow : EditorWindow
 		var availableWidth = maxX - minX;
 		var textX = minX + MathF.Max((availableWidth - textSize.X) * 0.5f, 0.0f);
 		drawList.AddText(new Vector2(textX, y), color, text);
+	}
+
+	private static void DrawCardTextBlock(ImDrawListPtr drawList, Vector2 itemMin, Vector2 itemMax, float startY, string title, string? subtitle)
+	{
+		var textInset = 8.0f;
+		var titleMin = new Vector2(itemMin.X + textInset, startY);
+		var titleMax = new Vector2(itemMax.X - textInset, startY + ImGui.GetTextLineHeight());
+		drawList.AddText(titleMin, ImGui.GetColorU32(ImGuiCol.Text), ClipTextToWidth(title, titleMax.X - titleMin.X));
+
+		if (string.IsNullOrWhiteSpace(subtitle))
+		{
+			return;
+		}
+
+		var subtitleY = startY + ImGui.GetTextLineHeightWithSpacing();
+		var subtitleMin = new Vector2(itemMin.X + textInset, subtitleY);
+		var subtitleMax = new Vector2(itemMax.X - textInset, subtitleY + ImGui.GetTextLineHeight());
+		drawList.AddText(subtitleMin, ImGui.GetColorU32(ImGuiCol.TextDisabled), ClipTextToWidth(subtitle, subtitleMax.X - subtitleMin.X));
+	}
+
+	private static string ClipTextToWidth(string text, float maxWidth)
+	{
+		if (string.IsNullOrWhiteSpace(text))
+		{
+			return string.Empty;
+		}
+
+		if (ImGui.CalcTextSize(text).X <= maxWidth)
+		{
+			return text;
+		}
+
+		const string ellipsis = "...";
+		for (var length = text.Length - 1; length > 0; length--)
+		{
+			var candidate = text[..length] + ellipsis;
+			if (ImGui.CalcTextSize(candidate).X <= maxWidth)
+			{
+				return candidate;
+			}
+		}
+
+		return ellipsis;
+	}
+
+	private static void PushPaneStyle()
+	{
+		ImGui.PushStyleColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.WindowBg));
+		ImGui.PushStyleColor(ImGuiCol.Border, ImGui.GetColorU32(ImGuiCol.Separator));
 	}
 
 	private static void AdvanceTable(ref int columnIndex, int columnCount)
