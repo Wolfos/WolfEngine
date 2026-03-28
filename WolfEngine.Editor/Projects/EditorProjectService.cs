@@ -124,7 +124,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		{
 			_projectRootPath = fullProjectRoot;
 			_assetInstanceRegistry.Clear();
-			ApplyDatabase(_assetPipelineService.RefreshProject(_projectRootPath));
+			ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath));
 			return true;
 		}
 		catch (Exception ex)
@@ -155,7 +155,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			return;
 		}
 
-		ApplyDatabase(_assetPipelineService.RefreshProject(_projectRootPath!));
+		ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath!));
 	}
 
 	public void ReloadAssetDatabaseFromIndex()

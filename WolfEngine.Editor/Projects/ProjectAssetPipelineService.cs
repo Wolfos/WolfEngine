@@ -12,6 +12,7 @@ public interface IProjectAssetPipelineService
 {
 	void InitializeProject(string projectRootPath);
 	AssetDatabase RefreshProject(string projectRootPath);
+	AssetDatabase RefreshProjectIncremental(string projectRootPath);
 	void RemoveDeletedSource(string projectRootPath, string relativeSourcePath);
 	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
 	void ReimportSource(string projectRootPath, string relativeSourcePath);
@@ -69,8 +70,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	public AssetDatabase RefreshProject(string projectRootPath)
 	{
+		return RefreshProjectIncremental(projectRootPath);
+	}
+
+	public AssetDatabase RefreshProjectIncremental(string projectRootPath)
+	{
 		InitializeProject(projectRootPath);
 		var assetsPath = AssetPipelinePaths.GetAssetsPath(projectRootPath);
+		var existingSources = _index.GetSources(projectRootPath);
+		var indexedSourcesByPath = existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
 		var sourceFiles = Directory.EnumerateFiles(assetsPath, "*", SearchOption.AllDirectories)
 			.Where(path => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) == false)
 			.Where(IsSupportedSourcePath)
@@ -82,20 +90,24 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			var absoluteSourcePath = sourceFiles[i];
 			var relativeSourcePath = ToProjectRelativePath(projectRootPath, absoluteSourcePath);
 			knownRelativePaths.Add(relativeSourcePath);
-			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath);
-		}
 
-		var existingSources = _index.GetSources(projectRootPath);
-		for (var i = 0; i < existingSources.Count; i++)
-		{
-			var existing = existingSources[i];
-			if (knownRelativePaths.Contains(existing.RelativeSourcePath))
+			if (indexedSourcesByPath.TryGetValue(relativeSourcePath, out var existingSource)
+			    && TryRefreshSourceScanState(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource))
 			{
 				continue;
 			}
 
-			DeleteSourceArtifacts(projectRootPath, existing.SourceId);
-			_index.DeleteSource(projectRootPath, existing.SourceId);
+			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath);
+		}
+
+		for (var i = 0; i < existingSources.Count; i++)
+		{
+			if (knownRelativePaths.Contains(existingSources[i].RelativeSourcePath))
+			{
+				continue;
+			}
+
+			DeleteIndexedSource(projectRootPath, existingSources[i].SourceId);
 		}
 
 		return LoadDatabase(projectRootPath);
@@ -319,13 +331,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
-		var metadata = File.Exists(absoluteMetaPath)
-			? _metadataStore.Load(absoluteMetaPath)
-			: CreateDefaultMetadata(relativeSourcePath);
-		if (metadata.SourceId == Guid.Empty)
-		{
-			metadata.SourceId = Guid.NewGuid();
-		}
+		var metadata = LoadOrCreateMetadata(absoluteMetaPath, relativeSourcePath);
 
 		metadata.SourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
@@ -855,6 +861,101 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return "{}";
 	}
 
+	private bool TryRefreshSourceScanState(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		AssetSourceRecord existingSource)
+	{
+		if (TryLoadUsableMetadata(AssetFileExtensions.GetMetaPath(absoluteSourcePath), relativeSourcePath, out var metadata) == false)
+		{
+			return false;
+		}
+
+		var importSettingsJson = SerializeImportSettings(metadata);
+		var sourceInfo = new FileInfo(absoluteSourcePath);
+		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
+		var importerVersionChanged = metadata.ImporterVersion != existingSource.ImporterVersion;
+		var importerChanged = string.Equals(metadata.ImporterId, existingSource.ImporterId, StringComparison.Ordinal) == false;
+		var importSettingsChanged = string.Equals(importSettingsJson, existingSource.ImportSettingsJson, StringComparison.Ordinal) == false;
+		var fileSizeChanged = sourceInfo.Length != existingSource.SourceFileSize;
+		var lastWriteChanged = sourceInfo.LastWriteTimeUtc.Ticks != existingSource.SourceLastWriteTimeUtcTicks;
+
+		if (importerChanged || importerVersionChanged || importSettingsChanged)
+		{
+			return false;
+		}
+
+		if (fileSizeChanged == false && lastWriteChanged == false)
+		{
+			return true;
+		}
+
+		var sourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
+		if (string.Equals(sourceContentHash, existingSource.SourceContentHash, StringComparison.Ordinal) == false)
+		{
+			return false;
+		}
+
+		_index.UpdateSource(
+			projectRootPath,
+			existingSource.SourceId,
+			relativeMetaPath,
+			metadata.ImporterId,
+			metadata.ImporterVersion,
+			sourceContentHash,
+			sourceInfo.Length,
+			sourceInfo.LastWriteTimeUtc.Ticks,
+			importSettingsJson);
+		return true;
+	}
+
+	private AssetSourceMetaFile LoadOrCreateMetadata(string absoluteMetaPath, string relativeSourcePath)
+	{
+		if (TryLoadUsableMetadata(absoluteMetaPath, relativeSourcePath, out var metadata))
+		{
+			return metadata;
+		}
+
+		return CreateDefaultMetadata(relativeSourcePath);
+	}
+
+	private bool TryLoadUsableMetadata(string absoluteMetaPath, string relativeSourcePath, out AssetSourceMetaFile metadata)
+	{
+		metadata = null!;
+		if (File.Exists(absoluteMetaPath) == false)
+		{
+			return false;
+		}
+
+		try
+		{
+			var loadedMetadata = _metadataStore.Load(absoluteMetaPath);
+			var expectedImporterId = GetImporterId(relativeSourcePath);
+			if (loadedMetadata.SourceId == Guid.Empty
+			    || string.IsNullOrWhiteSpace(loadedMetadata.ImporterId)
+			    || string.Equals(loadedMetadata.ImporterId, expectedImporterId, StringComparison.Ordinal) == false
+			    || loadedMetadata.ImporterVersion <= 0)
+			{
+				return false;
+			}
+
+			if (string.Equals(loadedMetadata.ImporterId, AssetImporterIds.Texture, StringComparison.Ordinal)
+			    && loadedMetadata.TextureImportSettings is null)
+			{
+				return false;
+			}
+
+			loadedMetadata.SubAssets ??= new List<AssetSubAssetManifestEntry>();
+			metadata = loadedMetadata;
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
 	private static bool IsSupportedSourcePath(string absolutePath)
 	{
 		var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
@@ -1084,6 +1185,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				Directory.Delete(artifactDirectory, recursive: true);
 			}
 		}
+	}
+
+	private void DeleteIndexedSource(string projectRootPath, Guid sourceId)
+	{
+		DeleteSourceArtifacts(projectRootPath, sourceId);
+		_index.DeleteSource(projectRootPath, sourceId);
 	}
 
 	private static string ToProjectRelativePath(string projectRootPath, string absolutePath)

@@ -6,6 +6,16 @@ public interface IAssetPipelineIndex
 {
 	void Initialize(string projectRootPath);
 	void DeleteSource(string projectRootPath, Guid sourceId);
+	void UpdateSource(
+		string projectRootPath,
+		Guid sourceId,
+		string relativeMetaPath,
+		string importerId,
+		int importerVersion,
+		string sourceContentHash,
+		long sourceFileSize,
+		long sourceLastWriteTimeUtcTicks,
+		string importSettingsJson);
 	void UpsertSourceGraph(
 		string projectRootPath,
 		AssetSourceRecord source,
@@ -108,6 +118,42 @@ public sealed class AssetPipelineIndex : IAssetPipelineIndex
 		using var command = connection.CreateCommand();
 		command.CommandText = "DELETE FROM sources WHERE source_id = $sourceId;";
 		command.Parameters.AddWithValue("$sourceId", sourceId.ToString("D"));
+		command.ExecuteNonQuery();
+	}
+
+	public void UpdateSource(
+		string projectRootPath,
+		Guid sourceId,
+		string relativeMetaPath,
+		string importerId,
+		int importerVersion,
+		string sourceContentHash,
+		long sourceFileSize,
+		long sourceLastWriteTimeUtcTicks,
+		string importSettingsJson)
+	{
+		using var connection = OpenConnection(projectRootPath);
+		using var command = connection.CreateCommand();
+		command.CommandText = """
+			UPDATE sources
+			SET
+				relative_meta_path = $relativeMetaPath,
+				importer_id = $importerId,
+				importer_version = $importerVersion,
+				source_content_hash = $sourceContentHash,
+				source_file_size = $sourceFileSize,
+				source_last_write_time_utc_ticks = $sourceLastWriteTimeUtcTicks,
+				import_settings_json = $importSettingsJson
+			WHERE source_id = $sourceId;
+			""";
+		command.Parameters.AddWithValue("$sourceId", sourceId.ToString("D"));
+		command.Parameters.AddWithValue("$relativeMetaPath", relativeMetaPath);
+		command.Parameters.AddWithValue("$importerId", importerId);
+		command.Parameters.AddWithValue("$importerVersion", importerVersion);
+		command.Parameters.AddWithValue("$sourceContentHash", sourceContentHash);
+		command.Parameters.AddWithValue("$sourceFileSize", sourceFileSize);
+		command.Parameters.AddWithValue("$sourceLastWriteTimeUtcTicks", sourceLastWriteTimeUtcTicks);
+		command.Parameters.AddWithValue("$importSettingsJson", importSettingsJson);
 		command.ExecuteNonQuery();
 	}
 

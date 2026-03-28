@@ -173,6 +173,7 @@ public sealed class AssetsWindowTests
 			projectService.DeleteAssetSource("Assets/file.mat.json");
 
 			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(0));
 			Assert.That(pipeline.RemoveDeletedSourceCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LastRemovedSourcePath, Is.EqualTo("Assets/file.mat.json"));
@@ -209,6 +210,7 @@ public sealed class AssetsWindowTests
 			projectService.DeleteFolder("Assets/Data");
 
 			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(0));
 			Assert.That(pipeline.RemoveDeletedSourcesUnderFolderCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LastRemovedFolderPath, Is.EqualTo("Assets/Data"));
@@ -221,6 +223,163 @@ public sealed class AssetsWindowTests
 				Directory.Delete(projectRoot, recursive: true);
 			}
 		}
+	}
+
+	[Test]
+	public void OpenProject_UsesIncrementalRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineOpenProjectRefreshTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(1));
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void ReloadAssetDatabase_UsesIncrementalRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineReloadRefreshTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.ResetCounters();
+			projectService.ReloadAssetDatabase();
+
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(1));
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void ReopenProject_WithUnchangedAssets_DoesNotReimportSources()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var asset), Is.True);
+
+		var absoluteMetaPath = environment.ProjectService.GetAbsolutePath(asset.RelativeSourcePath) + ".meta";
+		var originalMetaWriteTime = File.GetLastWriteTimeUtc(absoluteMetaPath);
+
+		WaitForTimestampTick();
+		environment.ProjectService.CloseProject();
+
+		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
+		Assert.That(File.GetLastWriteTimeUtc(absoluteMetaPath), Is.EqualTo(originalMetaWriteTime));
+	}
+
+	[Test]
+	public void ReopenProject_WithExternallyModifiedSource_ReimportsOnlyChangedSource()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var firstResult = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		var secondResult = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(firstResult.Success && secondResult.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(firstResult.AssetId!.Value, out var firstAsset), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(secondResult.AssetId!.Value, out var secondAsset), Is.True);
+
+		var changedSourcePath = environment.ProjectService.GetAbsolutePath(firstAsset.RelativeSourcePath);
+		var unchangedMetaPath = environment.ProjectService.GetAbsolutePath(secondAsset.RelativeSourcePath) + ".meta";
+		var unchangedMetaWriteTime = File.GetLastWriteTimeUtc(unchangedMetaPath);
+		var changedMaterial = environment.MaterialStore.LoadAsset(changedSourcePath);
+		changedMaterial.MaterialType = MaterialAssetType.AlphaBlend;
+
+		WaitForTimestampTick();
+		environment.MaterialStore.SaveAsset(changedSourcePath, changedMaterial);
+		var changedMetaPath = changedSourcePath + ".meta";
+		var previousChangedMetaWriteTime = File.GetLastWriteTimeUtc(changedMetaPath);
+
+		WaitForTimestampTick();
+		environment.ProjectService.CloseProject();
+		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
+
+		Assert.That(environment.ProjectService.TryGetAsset(firstResult.AssetId.Value, out var refreshedChangedAsset), Is.True);
+		Assert.That(refreshedChangedAsset.MaterialSummary?.MaterialType, Is.EqualTo(MaterialAssetType.AlphaBlend));
+		Assert.That(File.GetLastWriteTimeUtc(changedMetaPath), Is.GreaterThan(previousChangedMetaWriteTime));
+		Assert.That(File.GetLastWriteTimeUtc(unchangedMetaPath), Is.EqualTo(unchangedMetaWriteTime));
+	}
+
+	[Test]
+	public void ReloadAssetDatabase_ProcessesAddedChangedAndDeletedSourcesIncrementally()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var changedResult = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		var deletedResult = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data");
+		Assert.That(changedResult.Success && deletedResult.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(changedResult.AssetId!.Value, out var changedAsset), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(deletedResult.AssetId!.Value, out var deletedAsset), Is.True);
+
+		var changedSourcePath = environment.ProjectService.GetAbsolutePath(changedAsset.RelativeSourcePath);
+		var deletedSourcePath = environment.ProjectService.GetAbsolutePath(deletedAsset.RelativeSourcePath);
+		var deletedMetaPath = deletedSourcePath + ".meta";
+		var newSourcePath = environment.ProjectService.GetAbsolutePath("Assets/Materials/Externally Added.mat.json");
+		var changedMaterial = environment.MaterialStore.LoadAsset(changedSourcePath);
+		changedMaterial.MaterialType = MaterialAssetType.AlphaTest;
+		var newMaterial = environment.MaterialStore.CreateDefault(MaterialAssetType.AlphaBlend);
+
+		WaitForTimestampTick();
+		environment.MaterialStore.SaveAsset(changedSourcePath, changedMaterial);
+		environment.MaterialStore.SaveAsset(newSourcePath, newMaterial);
+		File.Delete(deletedSourcePath);
+		File.Delete(deletedMetaPath);
+
+		environment.ProjectService.ReloadAssetDatabase();
+
+		Assert.That(environment.ProjectService.TryGetAsset(changedResult.AssetId.Value, out var refreshedChangedAsset), Is.True);
+		Assert.That(refreshedChangedAsset.MaterialSummary?.MaterialType, Is.EqualTo(MaterialAssetType.AlphaTest));
+		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(asset => asset.RelativeSourcePath == deletedAsset.RelativeSourcePath), Is.False);
+		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(asset => asset.RelativeSourcePath == "Assets/Materials/Externally Added.mat.json"), Is.True);
+		Assert.That(File.Exists(newSourcePath + ".meta"), Is.True);
+	}
+
+	[Test]
+	public void ReloadAssetDatabase_RecreatesMissingMetaFile()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var asset), Is.True);
+
+		var absoluteSourcePath = environment.ProjectService.GetAbsolutePath(asset.RelativeSourcePath);
+		var absoluteMetaPath = absoluteSourcePath + ".meta";
+		File.Delete(absoluteMetaPath);
+
+		environment.ProjectService.ReloadAssetDatabase();
+
+		Assert.That(File.Exists(absoluteMetaPath), Is.True);
+		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(candidate => candidate.RelativeSourcePath == asset.RelativeSourcePath), Is.True);
 	}
 
 	private sealed class TemporaryAssetsRoot : IDisposable
@@ -273,11 +432,13 @@ public sealed class AssetsWindowTests
 		}
 
 		public string ParentDirectory { get; }
+		public string ProjectRootPath => Path.Combine(ParentDirectory, "Project");
 		public TestAssetInstanceRegistry Registry { get; }
 		public IProjectAssetPipelineService PipelineService { get; }
 		public IEditorProjectService ProjectService { get; }
 		public IMaterialAssetCreator MaterialCreator { get; }
 		public IDataAssetCreator DataAssetCreator { get; }
+		public MaterialAssetStore MaterialStore { get; } = new();
 
 		public void Dispose()
 		{
@@ -325,6 +486,7 @@ public sealed class AssetsWindowTests
 	private sealed class TrackingProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		public int RefreshProjectCalls { get; private set; }
+		public int RefreshProjectIncrementalCalls { get; private set; }
 		public int RemoveDeletedSourceCalls { get; private set; }
 		public int RemoveDeletedSourcesUnderFolderCalls { get; private set; }
 		public int LoadDatabaseCalls { get; private set; }
@@ -338,6 +500,12 @@ public sealed class AssetsWindowTests
 		public AssetDatabase RefreshProject(string projectRootPath)
 		{
 			RefreshProjectCalls++;
+			return new AssetDatabase();
+		}
+
+		public AssetDatabase RefreshProjectIncremental(string projectRootPath)
+		{
+			RefreshProjectIncrementalCalls++;
 			return new AssetDatabase();
 		}
 
@@ -387,11 +555,17 @@ public sealed class AssetsWindowTests
 		public void ResetCounters()
 		{
 			RefreshProjectCalls = 0;
+			RefreshProjectIncrementalCalls = 0;
 			RemoveDeletedSourceCalls = 0;
 			RemoveDeletedSourcesUnderFolderCalls = 0;
 			LoadDatabaseCalls = 0;
 			LastRemovedSourcePath = null;
 			LastRemovedFolderPath = null;
 		}
+	}
+
+	private static void WaitForTimestampTick()
+	{
+		Thread.Sleep(1100);
 	}
 }
