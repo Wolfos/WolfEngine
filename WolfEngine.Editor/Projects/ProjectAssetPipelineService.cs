@@ -97,7 +97,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				continue;
 			}
 
-			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath);
+			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource);
 		}
 
 		for (var i = 0; i < existingSources.Count; i++)
@@ -154,10 +154,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		InitializeProject(projectRootPath);
 
 		var normalizedRelativePath = NormalizeRelativePath(relativeSourcePath);
+		_index.TryGetSourceByRelativePath(projectRootPath, normalizedRelativePath, out var existingSource);
 		var absoluteSourcePath = GetAbsolutePath(projectRootPath, normalizedRelativePath);
 		if (File.Exists(absoluteSourcePath) == false)
 		{
-			if (_index.TryGetSourceByRelativePath(projectRootPath, normalizedRelativePath, out var existingSource))
+			if (existingSource is not null)
 			{
 				DeleteSourceArtifacts(projectRootPath, existingSource.SourceId);
 				_index.DeleteSource(projectRootPath, existingSource.SourceId);
@@ -171,7 +172,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			throw new InvalidOperationException($"Unsupported asset source '{normalizedRelativePath}'.");
 		}
 
-		ImportSource(projectRootPath, absoluteSourcePath, normalizedRelativePath);
+		ImportSource(projectRootPath, absoluteSourcePath, normalizedRelativePath, existingSource);
 	}
 
 	public AssetDatabase LoadDatabase(string projectRootPath)
@@ -235,7 +236,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		File.Copy(absoluteSourcePath, destinationPath, overwrite: false);
 
 		var relativePath = ToProjectRelativePath(projectRootPath, destinationPath);
-		ImportSource(projectRootPath, destinationPath, relativePath);
+		ImportSource(projectRootPath, destinationPath, relativePath, existingSource: null);
 		if (TryGetPrimaryNodeIdForRelativeSourcePath(projectRootPath, relativePath, out var nodeId))
 		{
 			var source = _index.GetSources(projectRootPath)
@@ -327,11 +328,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath)
+	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath, AssetSourceRecord? existingSource)
 	{
 		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
 		var metadata = LoadOrCreateMetadata(absoluteMetaPath, relativeSourcePath);
+		ApplyIndexedIdentity(projectRootPath, existingSource, metadata);
 
 		metadata.SourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
@@ -367,6 +369,40 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		_metadataStore.Save(absoluteMetaPath, metadata);
 		_index.UpsertSourceGraph(projectRootPath, sourceRecord, importGraph.Nodes, importGraph.Artifacts, importGraph.Dependencies);
+	}
+
+	private void ApplyIndexedIdentity(string projectRootPath, AssetSourceRecord? existingSource, AssetSourceMetaFile metadata)
+	{
+		if (existingSource is null)
+		{
+			if (metadata.SourceId == Guid.Empty)
+			{
+				metadata.SourceId = Guid.NewGuid();
+			}
+
+			return;
+		}
+
+		metadata.SourceId = existingSource.SourceId;
+		if (metadata.SubAssets.Count > 0)
+		{
+			return;
+		}
+
+		var indexedNodes = _index.GetNodes(projectRootPath)
+			.Where(node => node.SourceId == existingSource.SourceId)
+			.OrderBy(node => node.NodeKey, StringComparer.Ordinal)
+			.ToList();
+		for (var i = 0; i < indexedNodes.Count; i++)
+		{
+			metadata.SubAssets.Add(new AssetSubAssetManifestEntry
+			{
+				Key = indexedNodes[i].NodeKey,
+				NodeId = indexedNodes[i].NodeId,
+				Type = indexedNodes[i].Type,
+				Name = indexedNodes[i].Name
+			});
+		}
 	}
 
 	private ImportGraph ImportTextureSource(
