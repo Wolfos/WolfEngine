@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Editor.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 
@@ -17,16 +17,18 @@ public interface IEditorSceneFactory
 
 public class EditorSceneFactory : IEditorSceneFactory
 {
-	private static readonly ConcurrentDictionary<Type, Func<World, Entity, object>> GetComponentReaders = new();
-	private static readonly ConcurrentDictionary<Type, Action<World, Entity, object>> AddComponentWriters = new();
-
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
+	private readonly IProjectTypeResolver? _typeResolver;
 
-	public EditorSceneFactory(IEditorProjectService projectService, IProjectAssetPipelineService assetPipelineService)
+	public EditorSceneFactory(
+		IEditorProjectService projectService,
+		IProjectAssetPipelineService assetPipelineService,
+		IProjectTypeResolver? typeResolver = null)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
+		_typeResolver = typeResolver;
 	}
 
 	public EditorScene New()
@@ -232,7 +234,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return entitiesById;
 	}
 
-	private static void ApplyEntityState(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
+	private void ApplyEntityState(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
 	{
 		for (var i = 0; i < loadedCells.Count; i++)
 		{
@@ -273,7 +275,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 		}
 	}
 
-	private static SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
+	private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
 	{
 		var world = scene.World;
 		var hasName = world.HasComponent<NameComponent>(entity);
@@ -322,27 +324,25 @@ public class EditorSceneFactory : IEditorSceneFactory
 			: null;
 	}
 
-	private static SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
+	private SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
 	{
 		return new SavedComponent
 		{
-			Type = componentType.AssemblyQualifiedName
-			       ?? throw new InvalidOperationException($"Component type '{componentType.FullName}' does not have an assembly-qualified name."),
-			Data = JsonSerializer.SerializeToElement(GetComponentBoxed(world, entity, componentType), componentType, AssetJson.SerializerOptions)
+			Type = _typeResolver?.GetTypeName(componentType) ?? ProjectTypeResolverUtility.GetTypeName(componentType),
+			Data = JsonSerializer.SerializeToElement(RuntimeComponentAccessor.ReadBoxed(world, entity, componentType), componentType, AssetJson.SerializerOptions)
 		};
 	}
 
-	private static void ApplyComponent(World world, Entity entity, SavedComponent component)
+	private void ApplyComponent(World world, Entity entity, SavedComponent component)
 	{
-		var componentType = Type.GetType(component.Type, throwOnError: false);
-		if (componentType is null || IsPersistableComponentType(componentType) == false)
+		if (TryResolveComponentType(component.Type, out var componentType) == false || IsPersistableComponentType(componentType) == false)
 		{
 			return;
 		}
 
 		var deserialized = component.Data.Deserialize(componentType, AssetJson.SerializerOptions)
 			?? throw new InvalidOperationException($"Failed to deserialize scene component '{componentType.FullName}'.");
-		AddComponentBoxed(world, entity, componentType, deserialized);
+		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
 	}
 
 	private static bool IsPersistableComponentType(Type componentType)
@@ -501,39 +501,13 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return relativePath.Replace('\\', '/');
 	}
 
-	private static object GetComponentBoxed(World world, Entity entity, Type componentType)
+	private bool TryResolveComponentType(string typeName, out Type componentType)
 	{
-		return GetComponentReaders.GetOrAdd(componentType, CreateComponentReader)(world, entity);
-	}
+		if (_typeResolver?.TryResolveType(typeName, out componentType) == true)
+		{
+			return true;
+		}
 
-	private static void AddComponentBoxed(World world, Entity entity, Type componentType, object componentValue)
-	{
-		AddComponentWriters.GetOrAdd(componentType, CreateComponentWriter)(world, entity, componentValue);
-	}
-
-	private static Func<World, Entity, object> CreateComponentReader(Type componentType)
-	{
-		var method = typeof(EditorSceneFactory)
-			.GetMethod(nameof(ReadComponentGeneric), System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
-			.MakeGenericMethod(componentType);
-		return (Func<World, Entity, object>)Delegate.CreateDelegate(typeof(Func<World, Entity, object>), method);
-	}
-
-	private static Action<World, Entity, object> CreateComponentWriter(Type componentType)
-	{
-		var method = typeof(EditorSceneFactory)
-			.GetMethod(nameof(AddComponentGeneric), System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
-			.MakeGenericMethod(componentType);
-		return (Action<World, Entity, object>)Delegate.CreateDelegate(typeof(Action<World, Entity, object>), method);
-	}
-
-	private static object ReadComponentGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
-	{
-		return world.GetComponent<T>(entity);
-	}
-
-	private static void AddComponentGeneric<T>(World world, Entity entity, object componentValue) where T : struct, IEntityComponent
-	{
-		world.AddComponent(entity, (T)componentValue);
+		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(typeName, out componentType);
 	}
 }

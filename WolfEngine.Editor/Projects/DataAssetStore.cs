@@ -19,6 +19,13 @@ public interface IDataAssetStore
 
 public sealed class DataAssetStore : IDataAssetStore
 {
+	private readonly IProjectTypeResolver? _typeResolver;
+
+	public DataAssetStore(IProjectTypeResolver? typeResolver = null)
+	{
+		_typeResolver = typeResolver;
+	}
+
 	public IDataAsset CreateDefault(Type dataAssetType)
 	{
 		ArgumentNullException.ThrowIfNull(dataAssetType);
@@ -91,10 +98,10 @@ public sealed class DataAssetStore : IDataAssetStore
 		}
 	}
 
-	private static Type ResolveDataAssetType(string typeName)
+	private Type ResolveDataAssetType(string typeName)
 	{
-		var type = Type.GetType(typeName, throwOnError: false);
-		if (type is null)
+		if (_typeResolver?.TryResolveType(typeName, out var type) != true &&
+		    ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(typeName, out type) == false)
 		{
 			throw new InvalidOperationException($"Failed to resolve data asset type '{typeName}'.");
 		}
@@ -103,10 +110,9 @@ public sealed class DataAssetStore : IDataAssetStore
 		return type;
 	}
 
-	private static string GetTypeName(Type dataAssetType)
+	private string GetTypeName(Type dataAssetType)
 	{
-		return dataAssetType.AssemblyQualifiedName
-		       ?? throw new InvalidOperationException($"Type '{dataAssetType.FullName}' does not have an assembly-qualified name.");
+		return _typeResolver?.GetTypeName(dataAssetType) ?? ProjectTypeResolverUtility.GetTypeName(dataAssetType);
 	}
 
 	private static void WriteJsonAtomically<T>(string path, T value)

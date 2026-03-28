@@ -46,6 +46,8 @@ public static class Program
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
+		services.AddSingleton<IProjectTypeCatalog>(provider => new ProjectTypeCatalog(() => provider.GetRequiredService<IEditorProjectService>()));
+		services.AddSingleton<IProjectTypeResolver>(provider => (IProjectTypeResolver)provider.GetRequiredService<IProjectTypeCatalog>());
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
 		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
 		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();

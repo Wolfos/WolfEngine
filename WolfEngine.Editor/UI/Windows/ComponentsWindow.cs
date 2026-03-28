@@ -1,10 +1,10 @@
 using System.Numerics;
-using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
@@ -23,23 +23,26 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private static readonly MethodInfo DrawComponentEditorGenericMethod = typeof(ComponentsWindow).GetMethod(
         nameof(DrawComponentEditorGeneric),
         BindingFlags.NonPublic | BindingFlags.Static)!;
-    private static readonly MethodInfo AddComponentGenericMethod = typeof(ComponentsWindow).GetMethod(
-        nameof(AddComponentGeneric),
-        BindingFlags.NonPublic | BindingFlags.Static)!;
-    private static readonly ConcurrentDictionary<Type, MethodInfo> AddComponentMethods = new();
 
     private readonly IIconManager _icons;
     private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+    private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
-    private readonly List<Type> _addableComponentTypes = new();
+    private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
+    private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
 
-    public ComponentsWindow(IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry, RenderGraph renderGraph)
+    public ComponentsWindow(
+        IIconManager icons,
+        IPropertyDrawerRegistry propertyDrawerRegistry,
+        IProjectTypeCatalog projectTypeCatalog,
+        RenderGraph renderGraph)
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
+        _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
     }
 
@@ -96,8 +99,17 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
-        
-        DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry, _renderGraph });
+
+        if (componentType == typeof(NameComponent) ||
+            componentType == typeof(LocalTransform) ||
+            componentType == typeof(MeshRenderer) ||
+            componentType == typeof(Light))
+        {
+            DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry, _renderGraph });
+            return;
+        }
+
+        DrawGenericComponentEditor(scene.World, entity, componentType, _propertyDrawerRegistry);
     }
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
@@ -127,14 +139,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        foreach (var componentType in _addableComponentTypes)
+        foreach (var descriptor in _addableComponentTypes)
         {
-            if (ImGui.MenuItem(componentType.Name) == false)
+            if (ImGui.MenuItem(GetAddComponentLabel(descriptor)) == false)
             {
                 continue;
             }
 
-            AddComponent(scene.World, entity, componentType);
+            RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
             EditorGui.SelectEntity(entity, scene.World);
             ImGui.CloseCurrentPopup();
             break;
@@ -290,6 +302,34 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGui.PopID();
     }
 
+    private static void DrawGenericComponentEditor(World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry)
+    {
+        object componentValue;
+        try
+        {
+            componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        ImGui.PushID(componentType.FullName);
+        if (BeginComponentSection(componentType.Name) == false)
+        {
+            ImGui.PopID();
+            return;
+        }
+
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue))
+        {
+            RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
+        }
+
+        ImGui.Separator();
+        ImGui.PopID();
+    }
+
     private static bool BeginComponentSection(string label)
     {
         ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
@@ -420,27 +460,35 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private void PopulateAddableComponentTypes(World world, Entity entity)
     {
         _addableComponentTypes.Clear();
+        _componentNameCounts.Clear();
         world.GetComponentTypes(entity, _existingComponentTypes);
 
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        foreach (var descriptor in _projectTypeCatalog.GetComponentTypes())
         {
-            foreach (var componentType in GetLoadableTypes(assembly))
+            if (IsAddableComponentType(descriptor.Type, _existingComponentTypes) == false)
             {
-                if (IsAddableComponentType(componentType, _existingComponentTypes) == false)
-                {
-                    continue;
-                }
-
-                if (_addableComponentTypes.Contains(componentType))
-                {
-                    continue;
-                }
-
-                _addableComponentTypes.Add(componentType);
+                continue;
             }
+
+            if (_addableComponentTypes.Any(candidate => candidate.Type == descriptor.Type))
+            {
+                continue;
+            }
+
+            _addableComponentTypes.Add(descriptor);
+            _componentNameCounts[descriptor.DisplayName] = _componentNameCounts.GetValueOrDefault(descriptor.DisplayName) + 1;
         }
 
-        _addableComponentTypes.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name));
+        _addableComponentTypes.Sort((left, right) =>
+        {
+            var displayNameComparison = StringComparer.OrdinalIgnoreCase.Compare(left.DisplayName, right.DisplayName);
+            if (displayNameComparison != 0)
+            {
+                return displayNameComparison;
+            }
+
+            return StringComparer.OrdinalIgnoreCase.Compare(left.QualifiedDisplayName, right.QualifiedDisplayName);
+        });
     }
 
     private static bool IsAddableComponentType(Type componentType, List<Type> existingComponentTypes)
@@ -465,35 +513,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return existingComponentTypes.Contains(componentType) == false;
     }
 
-    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    private string GetAddComponentLabel(ProjectTypeDescriptor descriptor)
     {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException exception)
-        {
-            var loadableTypes = new List<Type>(exception.Types.Length);
-            foreach (var type in exception.Types)
-            {
-                if (type is not null)
-                {
-                    loadableTypes.Add(type);
-                }
-            }
-
-            return loadableTypes;
-        }
-    }
-
-    private static void AddComponent(World world, Entity entity, Type componentType)
-    {
-        var addMethod = AddComponentMethods.GetOrAdd(componentType, static type => AddComponentGenericMethod.MakeGenericMethod(type));
-        addMethod.Invoke(null, new object[] { world, entity });
-    }
-
-    private static void AddComponentGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
-    {
-        world.AddComponent<T>(entity);
+        return _componentNameCounts.TryGetValue(descriptor.DisplayName, out var count) && count > 1
+            ? descriptor.QualifiedDisplayName
+            : descriptor.DisplayName;
     }
 }
