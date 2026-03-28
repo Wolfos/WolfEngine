@@ -38,4 +38,23 @@ public class TransformSystemTests
         Assert.That(world.GetComponent<LocalTransform>(parent).IsDirty, Is.False);
         Assert.That(world.GetComponent<LocalTransform>(child).IsDirty, Is.False);
     }
+
+    [Test]
+    public void PreRender_AfterParentingDirtyTransforms_UsesParentTransformInsteadOfStaleChildRoot()
+    {
+        var world = new World(WorldTag.All);
+        var system = new TransformSystem();
+
+        var parentRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI * 0.5f);
+        var parent = world.CreateEntity("Parent", Vector3.Zero, parentRotation, Vector3.One);
+        var child = world.CreateEntity("Child", new Vector3(1.0f, 0.0f, 0.0f), Quaternion.Identity, Vector3.One);
+
+        world.SetParent(child, parent);
+        system.PreRender(0.0f, world);
+
+        var childWorld = world.GetComponent<WorldTransform>(child);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(child), Is.False);
+        Assert.That(childWorld.LocalToWorld.Translation.X, Is.EqualTo(0.0f).Within(0.0001f));
+        Assert.That(childWorld.LocalToWorld.Translation.Z, Is.EqualTo(-1.0f).Within(0.0001f));
+    }
 }
