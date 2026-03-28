@@ -21,6 +21,8 @@ public interface IEditorProjectService
 	AssetDatabase CloneCurrentAssetDatabase();
 	bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset);
 	string GetAbsolutePath(string relativePath);
+	void DeleteAssetSource(string relativeSourcePath);
+	void DeleteFolder(string relativeFolderPath);
 }
 
 public sealed class EditorProjectService : IEditorProjectService
@@ -238,6 +240,62 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
 		return Path.GetFullPath(Path.Combine(_projectRootPath!, normalized));
+	}
+
+	public void DeleteAssetSource(string relativeSourcePath)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		var normalizedRelativePath = ProjectPathUtility.NormalizeRelativePath(relativeSourcePath);
+		if (ProjectPathUtility.IsAssetsPathOrDescendant(normalizedRelativePath) == false)
+		{
+			throw new InvalidOperationException($"Path '{relativeSourcePath}' must be inside the Assets folder.");
+		}
+
+		var absoluteSourcePath = GetAbsolutePath(normalizedRelativePath);
+		var absoluteMetaPath = absoluteSourcePath + ".meta";
+		if (File.Exists(absoluteSourcePath) == false && File.Exists(absoluteMetaPath) == false)
+		{
+			throw new FileNotFoundException($"Asset source '{normalizedRelativePath}' was not found.");
+		}
+
+		if (File.Exists(absoluteSourcePath))
+		{
+			File.Delete(absoluteSourcePath);
+		}
+
+		if (File.Exists(absoluteMetaPath))
+		{
+			File.Delete(absoluteMetaPath);
+		}
+
+		ReloadAssetDatabase();
+	}
+
+	public void DeleteFolder(string relativeFolderPath)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		var normalizedRelativePath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		if (string.Equals(normalizedRelativePath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		{
+			throw new InvalidOperationException("Cannot delete the root Assets folder.");
+		}
+
+		var absoluteFolderPath = GetAbsolutePath(normalizedRelativePath);
+		if (Directory.Exists(absoluteFolderPath) == false)
+		{
+			throw new DirectoryNotFoundException($"Folder '{normalizedRelativePath}' was not found.");
+		}
+
+		Directory.Delete(absoluteFolderPath, recursive: true);
+		ReloadAssetDatabase();
 	}
 
 	private void ApplyDatabase(AssetDatabase database)

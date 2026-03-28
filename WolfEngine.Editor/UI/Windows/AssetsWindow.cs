@@ -8,8 +8,17 @@ namespace WolfEngine.Editor.UI;
 
 public sealed class AssetsWindow : EditorWindow
 {
-	private static readonly Vector2 ThumbnailSize = new(36.0f, 36.0f);
+	private static readonly Vector2 ThumbnailSize = new(42.0f, 42.0f);
+	private const float FolderTreeWidth = 220.0f;
+	private const float FolderTreeIconSize = 15.5f;
+	private const float FolderCardHeight = 90.0f;
+	private const float SourceCardHeaderHeight = 92.0f;
+	private const float SubAssetRowHeight = 24.0f;
+	private const float GridMinItemWidth = 150.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
+	private const string DeletePopupId = "AssetsWindowDelete";
+	private const string ItemContextMenuId = "AssetsWindowItemContextMenu";
+	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
 
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -17,8 +26,14 @@ public sealed class AssetsWindow : EditorWindow
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IIconManager _icons;
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
+	private string _selectedFolderPath = AssetPipelinePaths.AssetsFolderName;
+	private Guid? _expandedSourceId;
+	private BrowserContextTarget? _contextMenuTarget;
+	private PendingDeleteTarget? _pendingDeleteTarget;
+	private bool _openDeletePopup;
 
 	public AssetsWindow(
 		IEditorProjectService projectService,
@@ -26,7 +41,8 @@ public sealed class AssetsWindow : EditorWindow
 		IImageLoader imageLoader,
 		IAssetSelectionService assetSelectionService,
 		IEditorAssetHandlerRegistry assetHandlerRegistry,
-		IEditorSceneWorkspace sceneWorkspace)
+		IEditorSceneWorkspace sceneWorkspace,
+		IIconManager icons)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
@@ -34,6 +50,7 @@ public sealed class AssetsWindow : EditorWindow
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
+		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 	}
 
 	public override string Name => "Assets";
@@ -41,58 +58,72 @@ public sealed class AssetsWindow : EditorWindow
 	public override void Draw(EditorScene scene)
 	{
 		ImGui.SetNextWindowPos(new Vector2(0.0f, 520.0f), ImGuiCond.FirstUseEver);
-		ImGui.SetNextWindowSize(new Vector2(320.0f, 240.0f), ImGuiCond.FirstUseEver);
+		ImGui.SetNextWindowSize(new Vector2(640.0f, 300.0f), ImGuiCond.FirstUseEver);
 		Begin();
 
-		if (_projectService.HasOpenProject == false)
+		if (_projectService.HasOpenProject == false || string.IsNullOrWhiteSpace(_projectService.AssetsPath))
 		{
 			ImGui.BeginDisabled();
 			ImGui.TextUnformatted("No project open.");
 			ImGui.EndDisabled();
-			DrawContextMenu(scene);
+			DrawDeletePopup();
 			DrawErrorPopup();
 			ImGui.End();
 			return;
 		}
 
-		ImGui.TextUnformatted(_projectService.ProjectRootPath ?? string.Empty);
-		ImGui.Separator();
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(_projectService.CurrentAssetDatabase.Assets, _projectService.AssetsPath);
+		PruneState(browserModel);
+		var selectedFolder = browserModel.FoldersByPath[_selectedFolderPath];
 
-		var assetGroups = BuildAssetGroups(_projectService.CurrentAssetDatabase.Assets);
-		if (assetGroups.Count == 0)
-		{
-			ImGui.TextUnformatted("No assets imported yet.");
-			DrawContextMenu(scene);
-			DrawErrorPopup();
-			ImGui.End();
-			return;
-		}
+		DrawFolderTree(browserModel);
+		ImGui.SameLine();
+		DrawContentArea(selectedFolder, scene);
 
-		for (var i = 0; i < assetGroups.Count; i++)
-		{
-			DrawAssetGroup(assetGroups[i], scene);
-		}
-
-		DrawContextMenu(scene);
+		DrawItemContextMenu(scene, browserModel);
+		DrawDeletePopup();
 		DrawErrorPopup();
 		ImGui.End();
 	}
 
-	private void DrawAssetGroup(AssetGroup assetGroup, EditorScene scene)
+	private void DrawFolderTree(AssetsWindowBrowserModel browserModel)
 	{
-		DrawAssetNode(assetGroup.Root, assetGroup.Children, scene);
+		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.Borders);
+		DrawFolderTreeNode(browserModel.RootFolder);
+		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree", ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
+		{
+			DrawFolderScopedContextMenu(_selectedFolderPath);
+			ImGui.EndPopup();
+		}
+
+		ImGui.EndChild();
 	}
 
-	private unsafe void DrawAssetNode(AssetDatabaseEntry asset, IReadOnlyList<AssetDatabaseEntry> children, EditorScene scene)
+	private void DrawContentArea(AssetsWindowFolderNode selectedFolder, EditorScene scene)
 	{
-		ImGui.PushID(asset.Id.ToString());
+		ImGui.BeginGroup();
+		DrawBreadcrumbs(selectedFolder.RelativePath);
+		ImGui.Separator();
 
-		var hasChildren = children.Count > 0;
-		var isSelected = _assetSelectionService.SelectedAssetId == asset.Id;
-		var containsSelectedChild = children.Any(child => child.Id == _assetSelectionService.SelectedAssetId);
-		var style = ImGui.GetStyle();
-		ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(style.FramePadding.X, 10.0f));
+		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f));
+		DrawCurrentFolderContents(selectedFolder, scene);
+		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId, ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
+		{
+			DrawFolderScopedContextMenu(_selectedFolderPath);
+			ImGui.EndPopup();
+		}
 
+		ImGui.EndChild();
+		ImGui.EndGroup();
+	}
+
+	private void DrawFolderTreeNode(AssetsWindowFolderNode folder)
+	{
+		ImGui.PushID(folder.RelativePath);
+
+		var isSelected = string.Equals(_selectedFolderPath, folder.RelativePath, StringComparison.OrdinalIgnoreCase);
+		var containsSelectedDescendant = ProjectPathUtility.IsSameOrDescendant(_selectedFolderPath, folder.RelativePath);
+		var hasChildren = folder.Children.Count > 0;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (hasChildren == false)
 		{
@@ -102,47 +133,37 @@ public sealed class AssetsWindow : EditorWindow
 		if (isSelected)
 		{
 			flags |= ImGuiTreeNodeFlags.Selected;
-			var selectedColor = ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
-			ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
-			ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
-			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
+			PushSelectedHeaderColors();
 		}
 
-		if (containsSelectedChild)
+		if (containsSelectedDescendant && hasChildren)
 		{
 			ImGui.SetNextItemOpen(true, ImGuiCond.Always);
 		}
 
-		var nodeCursorPosition = ImGui.GetCursorScreenPos();
-		var open = ImGui.TreeNodeEx("##AssetNode", flags);
-		var nodeClicked = ImGui.IsItemClicked();
-		var nodeRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		var nodeDoubleClicked = nodeClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
-		DrawAssetRowContent(asset, nodeCursorPosition.X, children.Count);
+		var nodeCursorX = ImGui.GetCursorScreenPos().X;
+		var open = ImGui.TreeNodeEx("##FolderNode", flags);
+		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		DrawFolderTreeLabel(folder, nodeCursorX);
 
-		if (nodeClicked || nodeRightClicked)
+		if (leftClicked)
 		{
-			_assetSelectionService.Select(asset.Id);
+			SelectFolder(folder.RelativePath);
 		}
 
-		if (nodeDoubleClicked && asset.Type == AssetType.Scene)
+		if (rightClicked)
 		{
-			try
-			{
-				_sceneWorkspace.LoadScene(asset.Id);
-				EditorGui.ClearEntitySelection();
-			}
-			catch (Exception ex)
-			{
-				ShowError($"Failed to load scene: {ex.Message}");
-			}
+			SelectFolder(folder.RelativePath);
+			_contextMenuTarget = BrowserContextTarget.ForFolder(folder.RelativePath);
+			ImGui.OpenPopup(ItemContextMenuId);
 		}
 
 		if (hasChildren && open)
 		{
-			for (var i = 0; i < children.Count; i++)
+			for (var i = 0; i < folder.Children.Count; i++)
 			{
-				DrawAssetNode(children[i], [], scene);
+				DrawFolderTreeNode(folder.Children[i]);
 			}
 
 			ImGui.TreePop();
@@ -153,169 +174,378 @@ public sealed class AssetsWindow : EditorWindow
 			ImGui.PopStyleColor(3);
 		}
 
-		ImGui.PopStyleVar();
-
 		ImGui.PopID();
 	}
 
-	private void DrawAssetRowContent(AssetDatabaseEntry asset, float nodeCursorX, int childCount)
+	private void DrawFolderTreeLabel(AssetsWindowFolderNode folder, float nodeCursorX)
 	{
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
 		var rowHeight = itemMax.Y - itemMin.Y;
+		var labelStartX = nodeCursorX + ImGui.GetTreeNodeToLabelSpacing();
+		var iconSize = MathF.Min(FolderTreeIconSize, MathF.Max(1.0f, rowHeight - 2.0f));
+		var iconPosition = new Vector2(labelStartX, itemMin.Y + (rowHeight - iconSize) * 0.5f);
+		var textSize = ImGui.CalcTextSize(folder.Name);
+		var textPosition = new Vector2(iconPosition.X + iconSize + 4.0f, itemMin.Y + (rowHeight - textSize.Y) * 0.5f);
 		var drawList = ImGui.GetWindowDrawList();
-		var thumbMin = new Vector2(
-			nodeCursorX + ImGui.GetTreeNodeToLabelSpacing(),
-			itemMin.Y + (rowHeight - ThumbnailSize.Y) * 0.5f);
-		var thumbMax = thumbMin + ThumbnailSize;
-		var textX = thumbMax.X + 8.0f;
-		var titleY = itemMin.Y + 6.0f;
-		var subtitleY = titleY + ImGui.GetTextLineHeightWithSpacing();
 
-		DrawAssetThumbnail(drawList, thumbMin, thumbMax, asset);
-		drawList.AddText(new Vector2(textX, titleY), ImGui.GetColorU32(ImGuiCol.Text), asset.Name);
-		drawList.AddText(new Vector2(textX, subtitleY), ImGui.GetColorU32(ImGuiCol.TextDisabled), GetAssetSubtitle(asset, childCount));
+		if (TryGetFolderIconTexture(out var textureId))
+		{
+			drawList.AddImage(textureId, iconPosition, iconPosition + Vector2.One * iconSize);
+		}
+		else
+		{
+			drawList.AddRect(iconPosition, iconPosition + Vector2.One * iconSize, ImGui.GetColorU32(ImGuiCol.Border));
+		}
+
+		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), folder.Name);
 	}
 
-	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
+	private void DrawBreadcrumbs(string relativeFolderPath)
 	{
-		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null)
+		var parts = relativeFolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		var currentPath = string.Empty;
+		for (var i = 0; i < parts.Length; i++)
 		{
-			if (string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
+			currentPath = i == 0 ? parts[i] : $"{currentPath}/{parts[i]}";
+			if (i > 0)
 			{
-				var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
-				if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
-				{
-					drawList.AddImage(textureId, min, max);
-					return;
-				}
+				ImGui.SameLine(0.0f, 6.0f);
+				ImGui.TextDisabled(">");
+				ImGui.SameLine(0.0f, 6.0f);
+			}
+
+			if (ImGui.SmallButton(parts[i]))
+			{
+				SelectFolder(currentPath);
 			}
 		}
-
-		drawList.AddRect(min, max, ImGui.GetColorU32(ImGuiCol.Border));
-		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
-			? handler.ThumbnailLabel
-			: GetFallbackThumbnailLabel(asset.Type);
-		var textSize = ImGui.CalcTextSize(label);
-		var textPos = new Vector2(
-			min.X + (ThumbnailSize.X - textSize.X) * 0.5f,
-			min.Y + (ThumbnailSize.Y - textSize.Y) * 0.5f);
-		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
 	}
 
-	private string GetAssetSubtitle(AssetDatabaseEntry asset, int childCount = 0)
+	private void DrawCurrentFolderContents(AssetsWindowFolderNode folder, EditorScene scene)
 	{
-		var baseSubtitle = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
-			? handler.GetSubtitle(asset)
-			: asset.Type switch
-			{
-				AssetType.Model3D => "3D Model",
-				_ => asset.Type.ToString()
-			};
-		if (childCount <= 0)
+		if (folder.Children.Count == 0 && folder.Sources.Count == 0)
 		{
-			return baseSubtitle;
+			ImGui.TextDisabled("This folder is empty.");
+			return;
 		}
 
-		var suffix = childCount == 1 ? "1 sub-asset" : $"{childCount} sub-assets";
-		return $"{baseSubtitle} | {suffix}";
-	}
-
-	private static List<AssetGroup> BuildAssetGroups(IReadOnlyList<AssetDatabaseEntry> assets)
-	{
-		return assets
-			.GroupBy(asset => asset.SourceId)
-			.Select(CreateAssetGroup)
-			.OrderBy(group => group.Root.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-	}
-
-	private static AssetGroup CreateAssetGroup(IGrouping<Guid, AssetDatabaseEntry> group)
-	{
-		var assets = group
-			.OrderBy(GetAssetTypeSortOrder)
-			.ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-			.ThenBy(asset => asset.NodeKey, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-		var root = assets.FirstOrDefault(asset => asset.Type == AssetType.Model3D)
-			?? assets.FirstOrDefault(asset => asset.IsGenerated == false && string.Equals(asset.NodeKey, "main", StringComparison.Ordinal))
-			?? assets.FirstOrDefault(asset => string.Equals(asset.NodeKey, "main", StringComparison.Ordinal))
-			?? assets.FirstOrDefault(asset => asset.IsGenerated == false)
-			?? assets[0];
-		var children = assets
-			.Where(asset => asset.Id != root.Id)
-			.OrderBy(GetAssetTypeSortOrder)
-			.ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-			.ThenBy(asset => asset.NodeKey, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-		return new AssetGroup(root, children);
-	}
-
-	private static int GetAssetTypeSortOrder(AssetDatabaseEntry asset)
-	{
-		return asset.Type switch
-		{
-			AssetType.Scene => 0,
-			AssetType.Model3D => 1,
-			AssetType.Mesh => 2,
-			AssetType.Material => 3,
-			AssetType.Texture2D => 4,
-			AssetType.DataAsset => 5,
-			_ => 10
-		};
-	}
-
-	private sealed record AssetGroup(AssetDatabaseEntry Root, List<AssetDatabaseEntry> Children);
-
-	private static string GetFallbackThumbnailLabel(AssetType assetType)
-	{
-		return assetType switch
-		{
-			AssetType.Scene => "SCN",
-			AssetType.Model3D => "3D",
-			_ => assetType.ToString().ToUpperInvariant()
-		};
-	}
-
-	private void DrawContextMenu(EditorScene scene)
-	{
-		if (ImGui.BeginPopupContextWindow("AssetsContextMenu", ImGuiPopupFlags.MouseButtonRight) == false)
+		var availableWidth = MathF.Max(ImGui.GetContentRegionAvail().X, GridMinItemWidth);
+		var columnCount = Math.Max(1, (int)MathF.Floor(availableWidth / GridMinItemWidth));
+		if (ImGui.BeginTable("AssetsGrid", columnCount, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.PadOuterX) == false)
 		{
 			return;
 		}
 
-		var hasProject = _projectService.HasOpenProject;
-		if (hasProject == false)
+		var columnIndex = 0;
+		for (var i = 0; i < folder.Children.Count; i++)
 		{
-			ImGui.BeginDisabled();
+			AdvanceTable(ref columnIndex, columnCount);
+			DrawFolderCard(folder.Children[i]);
 		}
 
-		if (ImGui.BeginMenu("Create"))
+		for (var i = 0; i < folder.Sources.Count; i++)
 		{
-			DrawCreateMenuItems(_assetHandlerRegistry.GetCreateMenuItems());
-			ImGui.EndMenu();
+			AdvanceTable(ref columnIndex, columnCount);
+			DrawSourceCard(folder.Sources[i], scene);
 		}
 
-		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId
-		    && _projectService.TryGetAsset(selectedAssetId, out var selectedAsset)
-		    && selectedAsset.Type == AssetType.Model3D)
+		ImGui.EndTable();
+	}
+
+	private void DrawFolderCard(AssetsWindowFolderNode folder)
+	{
+		ImGui.PushID(folder.RelativePath);
+		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders);
+		var buttonSize = new Vector2(ImGui.GetContentRegionAvail().X, FolderCardHeight - 6.0f);
+		ImGui.InvisibleButton("FolderCardButton", buttonSize);
+		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
+		DrawFolderCardContents(folder);
+
+		if (doubleClicked)
 		{
-			if (ImGui.MenuItem("Add to Scene"))
+			SelectFolder(folder.RelativePath);
+		}
+
+		if (rightClicked)
+		{
+			SelectFolder(folder.RelativePath);
+			_contextMenuTarget = BrowserContextTarget.ForFolder(folder.RelativePath);
+			ImGui.OpenPopup(ItemContextMenuId);
+		}
+
+		ImGui.EndChild();
+		ImGui.PopID();
+	}
+
+	private void DrawFolderCardContents(AssetsWindowFolderNode folder)
+	{
+		var itemMin = ImGui.GetItemRectMin();
+		var itemMax = ImGui.GetItemRectMax();
+		var drawList = ImGui.GetWindowDrawList();
+		var backgroundColor = ImGui.IsItemHovered()
+			? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
+			: ImGui.GetColorU32(ImGuiCol.FrameBg);
+		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
+		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
+
+		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 10.0f);
+		var thumbnailMax = thumbnailMin + ThumbnailSize;
+		if (TryGetFolderIconTexture(out var textureId))
+		{
+			drawList.AddImage(textureId, thumbnailMin, thumbnailMax);
+		}
+		else
+		{
+			drawList.AddRect(thumbnailMin, thumbnailMax, ImGui.GetColorU32(ImGuiCol.Border));
+		}
+
+		DrawCenteredText(drawList, folder.Name, itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 8.0f, ImGui.GetColorU32(ImGuiCol.Text));
+	}
+
+	private void DrawSourceCard(AssetsWindowSourceItem source, EditorScene scene)
+	{
+		var isExpanded = _expandedSourceId == source.SourceId;
+		var totalHeight = SourceCardHeaderHeight + (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
+		ImGui.PushID(source.SourceId.ToString());
+		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders);
+
+		ImGui.InvisibleButton("SourceHeaderButton", new Vector2(ImGui.GetContentRegionAvail().X, SourceCardHeaderHeight - 6.0f));
+		var headerLeftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+		var headerRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		var headerDoubleClicked = headerLeftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
+		DrawSourceHeaderContents(source, ImGui.GetItemRectMin(), ImGui.GetItemRectMax());
+
+		if (headerLeftClicked)
+		{
+			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
+			SelectAsset(source.PrimaryAsset);
+			if (headerDoubleClicked)
 			{
-				try
-				{
-					_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, selectedAsset.Id, scene.World);
-				}
-				catch (Exception ex)
-				{
-					ShowError($"Failed to add model to scene: {ex.Message}");
-				}
+				OpenAsset(source.PrimaryAsset, scene);
+			}
+			else if (wasPrimarySelected && source.SubAssets.Count > 0)
+			{
+				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
 			}
 		}
 
-		if (hasProject == false)
+		if (headerRightClicked)
 		{
-			ImGui.EndDisabled();
+			SelectAsset(source.PrimaryAsset);
+			_contextMenuTarget = BrowserContextTarget.ForSource(source.RelativeSourcePath, source.SourceId, source.PrimaryAsset.Id);
+			ImGui.OpenPopup(ItemContextMenuId);
+		}
+
+		if (source.SubAssets.Count > 0)
+		{
+			ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 2.0f);
+			if (ImGui.SmallButton(isExpanded ? "Hide Sub-assets" : $"Show Sub-assets ({source.SubAssets.Count})"))
+			{
+				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
+			}
+		}
+
+		if (isExpanded)
+		{
+			for (var i = 0; i < source.SubAssets.Count; i++)
+			{
+				DrawSubAssetRow(source, source.SubAssets[i], scene);
+			}
+		}
+
+		ImGui.EndChild();
+		ImGui.PopID();
+	}
+
+	private void DrawSourceHeaderContents(AssetsWindowSourceItem source, Vector2 itemMin, Vector2 itemMax)
+	{
+		var drawList = ImGui.GetWindowDrawList();
+		var isSelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
+		var backgroundColor = isSelected
+			? ImGui.GetColorU32(ImGuiCol.HeaderActive)
+			: ImGui.IsItemHovered()
+				? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
+				: ImGui.GetColorU32(ImGuiCol.FrameBg);
+		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
+		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
+
+		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 10.0f);
+		var thumbnailMax = thumbnailMin + ThumbnailSize;
+		DrawAssetThumbnail(drawList, thumbnailMin, thumbnailMax, source.PrimaryAsset);
+		DrawCenteredText(drawList, source.DisplayName, itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 8.0f, ImGui.GetColorU32(ImGuiCol.Text));
+		DrawCenteredText(drawList, GetAssetSubtitle(source.PrimaryAsset, source.SubAssets.Count), itemMin.X + 6.0f, itemMax.X - 6.0f, thumbnailMax.Y + 26.0f, ImGui.GetColorU32(ImGuiCol.TextDisabled));
+	}
+
+	private void DrawSubAssetRow(AssetsWindowSourceItem source, AssetDatabaseEntry subAsset, EditorScene scene)
+	{
+		var isSelected = _assetSelectionService.SelectedAssetId == subAsset.Id;
+		if (ImGui.Selectable($"{subAsset.Name}  [{subAsset.Type}]", isSelected, ImGuiSelectableFlags.SpanAllColumns))
+		{
+			SelectAsset(subAsset);
+		}
+
+		if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+		{
+			OpenAsset(subAsset, scene);
+		}
+
+		if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+		{
+			SelectAsset(subAsset);
+			_contextMenuTarget = BrowserContextTarget.ForSubAsset(source.RelativeSourcePath, source.SourceId, subAsset.Id);
+			ImGui.OpenPopup(ItemContextMenuId);
+		}
+	}
+
+	private void DrawItemContextMenu(EditorScene scene, AssetsWindowBrowserModel browserModel)
+	{
+		if (ImGui.BeginPopup(ItemContextMenuId) == false)
+		{
+			return;
+		}
+
+		switch (_contextMenuTarget)
+		{
+			case { Kind: BrowserContextKind.Folder } folderTarget:
+				DrawFolderScopedContextMenu(folderTarget.FolderPath);
+				break;
+			case { Kind: BrowserContextKind.CurrentFolder } currentFolderTarget:
+				DrawFolderScopedContextMenu(currentFolderTarget.FolderPath);
+				break;
+			case { Kind: BrowserContextKind.Source } sourceTarget:
+				DrawSourceContextMenu(scene, browserModel, sourceTarget, deleteLabel: "Delete");
+				break;
+			case { Kind: BrowserContextKind.SubAsset } subAssetTarget:
+				DrawSourceContextMenu(scene, browserModel, subAssetTarget, deleteLabel: "Delete Source Asset");
+				break;
+		}
+
+		ImGui.EndPopup();
+	}
+
+	private void DrawFolderScopedContextMenu(string folderPath)
+	{
+		if (ImGui.BeginMenu("Create"))
+		{
+			DrawCreateMenuItems(_assetHandlerRegistry.GetCreateMenuItems(), folderPath);
+			ImGui.EndMenu();
+		}
+
+		var canDelete = string.Equals(folderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false;
+		if (canDelete && ImGui.MenuItem("Delete Folder"))
+		{
+			RequestDelete(PendingDeleteTarget.ForFolder(folderPath));
+		}
+	}
+
+	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowBrowserModel browserModel, BrowserContextTarget contextTarget, string deleteLabel)
+	{
+		var asset = ResolveTargetAsset(contextTarget);
+		var sourceItem = browserModel.SourcesBySourceId.TryGetValue(contextTarget.SourceId!.Value, out var resolvedSource)
+			? resolvedSource
+			: null;
+		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
+		{
+			try
+			{
+				_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, asset.Id, scene.World);
+			}
+			catch (Exception ex)
+			{
+				ShowError($"Failed to add model to scene: {ex.Message}");
+			}
+		}
+
+		if (sourceItem is not null && sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
+		{
+			var isExpanded = _expandedSourceId == sourceItem.SourceId;
+			if (ImGui.MenuItem(isExpanded ? "Hide Sub-assets" : "Show Sub-assets"))
+			{
+				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, sourceItem.SourceId);
+			}
+		}
+
+		if (ImGui.MenuItem(deleteLabel))
+		{
+			RequestDelete(PendingDeleteTarget.ForSource(contextTarget.RelativeSourcePath!));
+		}
+	}
+
+	private void DrawCreateMenuItems(IReadOnlyList<EditorAssetCreateMenuItem> items, string targetFolderPath)
+	{
+		for (var i = 0; i < items.Count; i++)
+		{
+			var item = items[i];
+			if (item.Children.Count > 0)
+			{
+				if (ImGui.BeginMenu(item.Label))
+				{
+					DrawCreateMenuItems(item.Children, targetFolderPath);
+					ImGui.EndMenu();
+				}
+
+				continue;
+			}
+
+			if (ImGui.MenuItem(item.Label) && item.CreateAction is not null)
+			{
+				HandleCreationResult(item.CreateAction(targetFolderPath));
+			}
+		}
+	}
+
+	private void HandleCreationResult(EditorAssetCreationResult result)
+	{
+		if (result.Success && result.AssetId.HasValue)
+		{
+			if (_projectService.TryGetAsset(result.AssetId.Value, out var createdAsset))
+			{
+				_selectedFolderPath = ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath);
+			}
+
+			_expandedSourceId = null;
+			_assetSelectionService.Select(result.AssetId.Value);
+		}
+		else if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
+		{
+			ShowError(result.ErrorMessage);
+		}
+	}
+
+	private void DrawDeletePopup()
+	{
+		if (_openDeletePopup)
+		{
+			ImGui.OpenPopup(DeletePopupId);
+			_openDeletePopup = false;
+		}
+
+		var isOpen = true;
+		ImGui.SetNextWindowSize(new Vector2(420.0f, 0.0f), ImGuiCond.Appearing);
+		if (ImGui.BeginPopupModal(DeletePopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
+		{
+			return;
+		}
+
+		if (_pendingDeleteTarget is not null)
+		{
+			ImGui.TextWrapped(_pendingDeleteTarget.ConfirmationText);
+			ImGui.Spacing();
+			if (ImGui.Button("Delete", new Vector2(100.0f, 0.0f)))
+			{
+				ExecutePendingDelete();
+				ImGui.CloseCurrentPopup();
+			}
+
+			ImGui.SameLine();
+			if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)))
+			{
+				_pendingDeleteTarget = null;
+				ImGui.CloseCurrentPopup();
+			}
 		}
 
 		ImGui.EndPopup();
@@ -347,44 +577,265 @@ public sealed class AssetsWindow : EditorWindow
 		ImGui.EndPopup();
 	}
 
+	private void ExecutePendingDelete()
+	{
+		if (_pendingDeleteTarget is null)
+		{
+			return;
+		}
+
+		try
+		{
+			switch (_pendingDeleteTarget.Kind)
+			{
+				case DeleteTargetKind.Source:
+					_projectService.DeleteAssetSource(_pendingDeleteTarget.RelativePath);
+					break;
+				case DeleteTargetKind.Folder:
+					_projectService.DeleteFolder(_pendingDeleteTarget.RelativePath);
+					break;
+			}
+
+			ValidateSelectionAfterProjectMutation();
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to delete '{_pendingDeleteTarget.DisplayName}': {ex.Message}");
+		}
+		finally
+		{
+			_pendingDeleteTarget = null;
+		}
+	}
+
+	private void RequestDelete(PendingDeleteTarget deleteTarget)
+	{
+		_pendingDeleteTarget = deleteTarget;
+		_openDeletePopup = true;
+	}
+
+	private void SelectFolder(string relativeFolderPath)
+	{
+		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		_expandedSourceId = null;
+		_assetSelectionService.Clear();
+	}
+
+	private void SelectAsset(AssetDatabaseEntry asset)
+	{
+		_selectedFolderPath = ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath);
+		_assetSelectionService.Select(asset.Id);
+	}
+
+	private void OpenAsset(AssetDatabaseEntry asset, EditorScene scene)
+	{
+		if (asset.Type != AssetType.Scene)
+		{
+			return;
+		}
+
+		try
+		{
+			_sceneWorkspace.LoadScene(asset.Id);
+			EditorGui.ClearEntitySelection();
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to load scene: {ex.Message}");
+		}
+	}
+
+	private void PruneState(AssetsWindowBrowserModel browserModel)
+	{
+		_selectedFolderPath = AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath);
+		if (_expandedSourceId.HasValue && browserModel.SourcesBySourceId.ContainsKey(_expandedSourceId.Value) == false)
+		{
+			_expandedSourceId = null;
+		}
+
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId && _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+		{
+			_selectedFolderPath = ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath);
+		}
+		else if (_assetSelectionService.SelectedAssetId.HasValue)
+		{
+			_assetSelectionService.Clear();
+		}
+	}
+
+	private void ValidateSelectionAfterProjectMutation()
+	{
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId && _projectService.TryGetAsset(selectedAssetId, out _) == false)
+		{
+			_assetSelectionService.Clear();
+		}
+
+		if (_projectService.HasOpenProject)
+		{
+			_selectedFolderPath = GetNearestExistingFolderPath(_selectedFolderPath);
+		}
+
+		if (_expandedSourceId.HasValue && _projectService.CurrentAssetDatabase.Assets.Any(asset => asset.SourceId == _expandedSourceId.Value) == false)
+		{
+			_expandedSourceId = null;
+		}
+	}
+
+	private string GetNearestExistingFolderPath(string relativeFolderPath)
+	{
+		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		while (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false)
+		{
+			var absoluteFolderPath = _projectService.GetAbsolutePath(normalizedFolderPath);
+			if (Directory.Exists(absoluteFolderPath))
+			{
+				return normalizedFolderPath;
+			}
+
+			normalizedFolderPath = ProjectPathUtility.GetParentFolderPath(normalizedFolderPath);
+		}
+
+		return AssetPipelinePaths.AssetsFolderName;
+	}
+
+	private AssetDatabaseEntry? ResolveTargetAsset(BrowserContextTarget contextTarget)
+	{
+		return contextTarget.AssetId.HasValue && _projectService.TryGetAsset(contextTarget.AssetId.Value, out var asset)
+			? asset
+			: null;
+	}
+
+	private unsafe void PushSelectedHeaderColors()
+	{
+		var selectedColor = ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
+		ImGui.PushStyleColor(ImGuiCol.Header, *selectedColor);
+		ImGui.PushStyleColor(ImGuiCol.HeaderHovered, *selectedColor);
+		ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
+	}
+
+	private bool TryGetFolderIconTexture(out nint textureId)
+	{
+		return _icons.TryGet("folder", out textureId);
+	}
+
+	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
+	{
+		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null && string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
+		{
+			var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
+			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
+			{
+				drawList.AddImage(textureId, min, max);
+				return;
+			}
+		}
+
+		drawList.AddRect(min, max, ImGui.GetColorU32(ImGuiCol.Border));
+		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
+			? handler.ThumbnailLabel
+			: GetFallbackThumbnailLabel(asset.Type);
+		var textSize = ImGui.CalcTextSize(label);
+		var textPos = new Vector2(min.X + ((max.X - min.X) - textSize.X) * 0.5f, min.Y + ((max.Y - min.Y) - textSize.Y) * 0.5f);
+		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
+	}
+
+	private string GetAssetSubtitle(AssetDatabaseEntry asset, int childCount = 0)
+	{
+		var baseSubtitle = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
+			? handler.GetSubtitle(asset)
+			: asset.Type switch
+			{
+				AssetType.Model3D => "3D Model",
+				_ => asset.Type.ToString()
+			};
+		if (childCount <= 0)
+		{
+			return baseSubtitle;
+		}
+
+		var suffix = childCount == 1 ? "1 sub-asset" : $"{childCount} sub-assets";
+		return $"{baseSubtitle} | {suffix}";
+	}
+
+	private static string GetFallbackThumbnailLabel(AssetType assetType)
+	{
+		return assetType switch
+		{
+			AssetType.Scene => "SCN",
+			AssetType.Model3D => "3D",
+			_ => assetType.ToString().ToUpperInvariant()
+		};
+	}
+
+	private static void DrawCenteredText(ImDrawListPtr drawList, string text, float minX, float maxX, float y, uint color)
+	{
+		var textSize = ImGui.CalcTextSize(text);
+		var availableWidth = maxX - minX;
+		var textX = minX + MathF.Max((availableWidth - textSize.X) * 0.5f, 0.0f);
+		drawList.AddText(new Vector2(textX, y), color, text);
+	}
+
+	private static void AdvanceTable(ref int columnIndex, int columnCount)
+	{
+		if (columnIndex == 0)
+		{
+			ImGui.TableNextRow();
+		}
+
+		ImGui.TableSetColumnIndex(columnIndex);
+		columnIndex = (columnIndex + 1) % columnCount;
+	}
+
 	private void ShowError(string errorMessage)
 	{
 		_errorMessage = errorMessage;
 		_openErrorPopup = true;
 	}
 
-	private void DrawCreateMenuItems(IReadOnlyList<EditorAssetCreateMenuItem> items)
+	private sealed record BrowserContextTarget(BrowserContextKind Kind, string FolderPath, string? RelativeSourcePath, Guid? SourceId, Guid? AssetId)
 	{
-		for (var i = 0; i < items.Count; i++)
+		public static BrowserContextTarget ForCurrentFolder(string folderPath) => new(BrowserContextKind.CurrentFolder, folderPath, null, null, null);
+		public static BrowserContextTarget ForFolder(string folderPath) => new(BrowserContextKind.Folder, folderPath, null, null, null);
+		public static BrowserContextTarget ForSource(string relativeSourcePath, Guid sourceId, Guid assetId) =>
+			new(BrowserContextKind.Source, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath, sourceId, assetId);
+		public static BrowserContextTarget ForSubAsset(string relativeSourcePath, Guid sourceId, Guid assetId) =>
+			new(BrowserContextKind.SubAsset, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath, sourceId, assetId);
+	}
+
+	private enum BrowserContextKind
+	{
+		CurrentFolder,
+		Folder,
+		Source,
+		SubAsset
+	}
+
+	private sealed record PendingDeleteTarget(DeleteTargetKind Kind, string RelativePath, string DisplayName, string ConfirmationText)
+	{
+		public static PendingDeleteTarget ForSource(string relativeSourcePath)
 		{
-			var item = items[i];
-			if (item.Children.Count > 0)
-			{
-				if (ImGui.BeginMenu(item.Label))
-				{
-					DrawCreateMenuItems(item.Children);
-					ImGui.EndMenu();
-				}
+			var displayName = Path.GetFileName(relativeSourcePath);
+			return new PendingDeleteTarget(
+				DeleteTargetKind.Source,
+				relativeSourcePath,
+				displayName,
+				$"Delete '{displayName}' and all derived assets? This permanently removes the source file and its .meta file.");
+		}
 
-				continue;
-			}
-
-			if (ImGui.MenuItem(item.Label) && item.CreateAction is not null)
-			{
-				HandleCreationResult(item.CreateAction());
-			}
+		public static PendingDeleteTarget ForFolder(string relativeFolderPath)
+		{
+			var displayName = Path.GetFileName(relativeFolderPath);
+			return new PendingDeleteTarget(
+				DeleteTargetKind.Folder,
+				relativeFolderPath,
+				displayName,
+				$"Delete folder '{displayName}' and everything inside it? This permanently removes all files and derived assets under that folder.");
 		}
 	}
 
-	private void HandleCreationResult(EditorAssetCreationResult result)
+	private enum DeleteTargetKind
 	{
-		if (result.Success && result.AssetId.HasValue)
-		{
-			_assetSelectionService.Select(result.AssetId.Value);
-		}
-		else if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
-		{
-			ShowError(result.ErrorMessage);
-		}
+		Source,
+		Folder
 	}
 }

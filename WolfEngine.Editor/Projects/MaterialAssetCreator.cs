@@ -4,7 +4,7 @@ namespace WolfEngine.Editor.Projects;
 
 public interface IMaterialAssetCreator
 {
-	EditorAssetCreationResult CreateMaterial();
+	EditorAssetCreationResult CreateMaterial(string targetRelativeFolderPath);
 }
 
 public sealed class MaterialAssetCreator : IMaterialAssetCreator
@@ -26,19 +26,21 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 	}
 
-	public EditorAssetCreationResult CreateMaterial()
+	public EditorAssetCreationResult CreateMaterial(string targetRelativeFolderPath)
 	{
 		if (_projectService.HasOpenProject == false)
 		{
 			return EditorAssetCreationResult.Failed("Open or create a project before creating materials.");
 		}
 
-		var assetName = GetNextMaterialName();
-		var relativeAssetPath = $"Assets/{assetName}{MaterialAsset.FileExtension}";
+		var targetFolderPath = NormalizeTargetFolderPath(targetRelativeFolderPath);
+		var assetName = GetNextMaterialName(targetFolderPath);
+		var relativeAssetPath = $"{targetFolderPath}/{assetName}{MaterialAsset.FileExtension}";
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 		var absoluteMetaPath = absoluteAssetPath + ".meta";
 		try
 		{
+			Directory.CreateDirectory(_projectService.GetAbsolutePath(targetFolderPath));
 			_materialAssetStore.SaveAsset(absoluteAssetPath, _materialAssetStore.CreateDefault(MaterialAssetType.Opaque));
 			_metadataStore.Save(absoluteMetaPath, new AssetSourceMetaFile
 			{
@@ -70,14 +72,14 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 		}
 	}
 
-	private string GetNextMaterialName()
+	private string GetNextMaterialName(string targetFolderPath)
 	{
 		const string baseName = "New Material";
 		var index = 0;
 		while (true)
 		{
 			var candidateName = index == 0 ? baseName : $"{baseName} {index}";
-			var relativeAssetPath = $"Assets/{candidateName}{MaterialAsset.FileExtension}";
+			var relativeAssetPath = $"{targetFolderPath}/{candidateName}{MaterialAsset.FileExtension}";
 			var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 			if (File.Exists(absoluteAssetPath) == false)
 			{
@@ -86,5 +88,10 @@ public sealed class MaterialAssetCreator : IMaterialAssetCreator
 
 			index++;
 		}
+	}
+
+	private static string NormalizeTargetFolderPath(string targetRelativeFolderPath)
+	{
+		return ProjectPathUtility.NormalizeAssetsFolderPath(targetRelativeFolderPath);
 	}
 }

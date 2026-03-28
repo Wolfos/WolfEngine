@@ -6,7 +6,7 @@ namespace WolfEngine.Editor.UI;
 public sealed class EditorAssetCreateMenuItem
 {
 	public required string Label { get; init; }
-	public Func<EditorAssetCreationResult>? CreateAction { get; init; }
+	public Func<string, EditorAssetCreationResult>? CreateAction { get; init; }
 	public IReadOnlyList<EditorAssetCreateMenuItem> Children { get; init; } = [];
 }
 
@@ -111,7 +111,7 @@ public sealed class MaterialEditorAssetHandler : IEditorAssetHandler
 			new EditorAssetCreateMenuItem
 			{
 				Label = "Material",
-				CreateAction = () => _materialAssetCreator.CreateMaterial()
+				CreateAction = targetRelativeFolderPath => _materialAssetCreator.CreateMaterial(targetRelativeFolderPath)
 			}
 		];
 	}
@@ -155,7 +155,7 @@ public sealed class DataEditorAssetHandler : IEditorAssetHandler
 			.Select(descriptor => new EditorAssetCreateMenuItem
 			{
 				Label = descriptor.DisplayName,
-				CreateAction = () => _dataAssetCreator.CreateDataAsset(descriptor.Type)
+				CreateAction = targetRelativeFolderPath => _dataAssetCreator.CreateDataAsset(descriptor.Type, targetRelativeFolderPath)
 			})
 			.ToList();
 

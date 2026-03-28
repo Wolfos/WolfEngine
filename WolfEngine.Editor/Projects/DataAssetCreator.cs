@@ -4,7 +4,7 @@ namespace WolfEngine.Editor.Projects;
 
 public interface IDataAssetCreator
 {
-	EditorAssetCreationResult CreateDataAsset(Type dataAssetType);
+	EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath);
 }
 
 public sealed class DataAssetCreator : IDataAssetCreator
@@ -26,7 +26,7 @@ public sealed class DataAssetCreator : IDataAssetCreator
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 	}
 
-	public EditorAssetCreationResult CreateDataAsset(Type dataAssetType)
+	public EditorAssetCreationResult CreateDataAsset(Type dataAssetType, string targetRelativeFolderPath)
 	{
 		if (_projectService.HasOpenProject == false)
 		{
@@ -34,13 +34,15 @@ public sealed class DataAssetCreator : IDataAssetCreator
 		}
 
 		ArgumentNullException.ThrowIfNull(dataAssetType);
-		var assetName = GetNextDataAssetName(dataAssetType.Name);
-		var relativeAssetPath = $"Assets/{assetName}{DataAssetFile.FileExtension}";
+		var targetFolderPath = NormalizeTargetFolderPath(targetRelativeFolderPath);
+		var assetName = GetNextDataAssetName(dataAssetType.Name, targetFolderPath);
+		var relativeAssetPath = $"{targetFolderPath}/{assetName}{DataAssetFile.FileExtension}";
 		var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 		var absoluteMetaPath = absoluteAssetPath + ".meta";
 
 		try
 		{
+			Directory.CreateDirectory(_projectService.GetAbsolutePath(targetFolderPath));
 			var asset = _dataAssetStore.CreateDefault(dataAssetType);
 			_dataAssetStore.SaveAsset(absoluteAssetPath, dataAssetType, asset);
 			_metadataStore.Save(absoluteMetaPath, new AssetSourceMetaFile
@@ -73,14 +75,14 @@ public sealed class DataAssetCreator : IDataAssetCreator
 		}
 	}
 
-	private string GetNextDataAssetName(string typeName)
+	private string GetNextDataAssetName(string typeName, string targetFolderPath)
 	{
 		var baseName = $"New {typeName}";
 		var index = 0;
 		while (true)
 		{
 			var candidateName = index == 0 ? baseName : $"{baseName} {index}";
-			var relativeAssetPath = $"Assets/{candidateName}{DataAssetFile.FileExtension}";
+			var relativeAssetPath = $"{targetFolderPath}/{candidateName}{DataAssetFile.FileExtension}";
 			var absoluteAssetPath = _projectService.GetAbsolutePath(relativeAssetPath);
 			if (File.Exists(absoluteAssetPath) == false)
 			{
@@ -89,5 +91,10 @@ public sealed class DataAssetCreator : IDataAssetCreator
 
 			index++;
 		}
+	}
+
+	private static string NormalizeTargetFolderPath(string targetRelativeFolderPath)
+	{
+		return ProjectPathUtility.NormalizeAssetsFolderPath(targetRelativeFolderPath);
 	}
 }
