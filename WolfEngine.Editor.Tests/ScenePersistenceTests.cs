@@ -1,14 +1,14 @@
 ﻿using System.Numerics;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
-using WolfEngine.Editor;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 
-namespace WolfEngine.ECS.Tests;
+namespace WolfEngine.Editor.Tests;
 
 [TestFixture]
 public sealed class ScenePersistenceTests

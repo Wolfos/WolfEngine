@@ -1,11 +1,12 @@
 using NSubstitute;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 using WolfEngine.Rendering.Passes;
 
-namespace WolfEngine.ECS.Tests;
+namespace WolfEngine.Editor.Tests;
 
 [TestFixture]
 public sealed class AssetsWindowTests
