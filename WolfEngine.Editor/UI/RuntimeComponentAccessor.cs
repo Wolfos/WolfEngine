@@ -75,7 +75,9 @@ public static class RuntimeComponentAccessor
 
 	private static void AddDefaultGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
 	{
-		world.AddComponent<T>(entity);
+		var component = default(T);
+		component.ApplyDefaultValues();
+		world.AddComponent(entity, component);
 	}
 
 	private static object ReadBoxedGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent

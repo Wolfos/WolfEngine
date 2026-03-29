@@ -78,6 +78,42 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
+	public void GameplayComponent_AddDefault_AppliesComponentDefaultValues()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayDefaultedComponent : IEntityComponent
+			{
+				public int Count;
+				public string Label;
+
+				public void ApplyDefaultValues()
+				{
+					Count = 42;
+					Label = "default-label";
+				}
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayDefaultedComponent", StringComparison.Ordinal))
+			.Type;
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Defaulted Entity");
+
+		RuntimeComponentAccessor.AddDefault(scene.World, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType);
+
+		AssertFieldValue<int>(componentValue, "Count", 42);
+		AssertFieldValue<string>(componentValue, "Label", "default-label");
+	}
+
+	[Test]
 	public void DataAssetStore_LoadsBuiltInDataAssetTypesThroughResolver()
 	{
 		using var environment = new GameplayTestEnvironment();

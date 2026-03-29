@@ -21,20 +21,24 @@ public struct Rigidbody : IEntityComponent
 	public bool AllowSleeping;
 	public bool UseManifoldReduction;
 	public bool IsSensor;
+	
+	public void ApplyDefaultValues()
+	{
+		BodyType = RigidbodyBodyType.Dynamic;
+		Mass = 1.0f;
+		LinearVelocity = Vector3.Zero;
+		AngularVelocity = Vector3.Zero;
+		GravityFactor = 1.0f;
+		StartActivated = true;
+		AllowSleeping = true;
+		UseManifoldReduction = false;
+		IsSensor = false;
+	}
 
 	public static Rigidbody CreateDefault()
 	{
-		return new Rigidbody
-		{
-			BodyType = RigidbodyBodyType.Dynamic,
-			Mass = 1.0f,
-			LinearVelocity = Vector3.Zero,
-			AngularVelocity = Vector3.Zero,
-			GravityFactor = 1.0f,
-			StartActivated = true,
-			AllowSleeping = true,
-			UseManifoldReduction = false,
-			IsSensor = false
-		};
+		var rb = new Rigidbody();
+		rb.ApplyDefaultValues();
+		return rb;
 	}
 }
