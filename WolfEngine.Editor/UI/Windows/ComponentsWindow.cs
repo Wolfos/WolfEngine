@@ -294,6 +294,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         var typedRef = __makeref(component);
         foreach (var field in typeof(T).GetFields(BindingFlags.Instance | BindingFlags.Public))
         {
+            if (field.IsInitOnly ||
+                Attribute.IsDefined(field, typeof(NotSerializedAttribute)) ||
+                Attribute.IsDefined(field, typeof(HideFromEditorAttribute)))
+            {
+                continue;
+            }
+
             var fieldType = field.FieldType;
             var label = field.Name;
 

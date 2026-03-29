@@ -14,7 +14,9 @@ public struct Rigidbody : IEntityComponent
 {
 	public RigidbodyBodyType BodyType;
 	public float Mass;
+	[NotSerialized]
 	public Vector3 LinearVelocity;
+	[NotSerialized]
 	public Vector3 AngularVelocity;
 	public float GravityFactor;
 	public bool StartActivated;

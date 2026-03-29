@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Editor.UI;
 
@@ -41,7 +42,9 @@ public static class RuntimeComponentFieldEditor
 	{
 		return componentType
 			.GetFields(BindingFlags.Instance | BindingFlags.Public)
-			.Where(field => field.IsInitOnly == false)
+			.Where(field => field.IsInitOnly == false &&
+			                Attribute.IsDefined(field, typeof(NotSerializedAttribute)) == false &&
+			                Attribute.IsDefined(field, typeof(HideFromEditorAttribute)) == false)
 			.ToArray();
 	}
 }

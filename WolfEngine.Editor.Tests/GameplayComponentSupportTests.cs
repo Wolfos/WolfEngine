@@ -114,6 +114,98 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
+	public void GameplayComponent_FieldEditor_HidesMembersMarkedNotSerializedOrHideFromEditor()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayHiddenFieldsComponent : IEntityComponent
+			{
+				public int Visible;
+				[HideFromEditor] public int Hidden;
+				[NotSerialized] public int Transient;
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayHiddenFieldsComponent", StringComparison.Ordinal))
+			.Type;
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Hidden Fields Entity");
+		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(
+			componentType,
+			new TestPropertyDrawerRegistry(new Dictionary<string, object?>
+			{
+				["Visible"] = 5,
+				["Hidden"] = 7,
+				["Transient"] = 9
+			}),
+			ref componentValue);
+
+		Assert.That(changed, Is.True);
+		AssertFieldValue<int>(componentValue, "Visible", 5);
+		AssertFieldValue<int>(componentValue, "Hidden", 0);
+		AssertFieldValue<int>(componentValue, "Transient", 0);
+	}
+
+	[Test]
+	public void GameplayComponent_SaveLoad_SkipsNotSerializedMembersButPersistsHiddenMembers()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayPersistenceComponent : IEntityComponent
+			{
+				public int VisibleField;
+				[HideFromEditor] public int HiddenField;
+				[NotSerialized] public int TransientField;
+				public int VisibleProperty { get; set; }
+				[HideFromEditor] public int HiddenProperty { get; set; }
+				[NotSerialized] public int TransientProperty { get; set; }
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayPersistenceComponent", StringComparison.Ordinal))
+			.Type;
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Persistence Entity");
+		RuntimeComponentAccessor.AddDefault(scene.World, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType);
+
+		componentType.GetField("VisibleField")!.SetValue(componentValue, 11);
+		componentType.GetField("HiddenField")!.SetValue(componentValue, 12);
+		componentType.GetField("TransientField")!.SetValue(componentValue, 13);
+		componentType.GetProperty("VisibleProperty")!.SetValue(componentValue, 21);
+		componentType.GetProperty("HiddenProperty")!.SetValue(componentValue, 22);
+		componentType.GetProperty("TransientProperty")!.SetValue(componentValue, 23);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
+
+		environment.Factory.Save(scene);
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedEntity = FindEntityByName(loadedScene.World, "Persistence Entity");
+		var loadedComponent = RuntimeComponentAccessor.ReadBoxed(loadedScene.World, loadedEntity, componentType);
+
+		AssertFieldValue<int>(loadedComponent, "VisibleField", 11);
+		AssertFieldValue<int>(loadedComponent, "HiddenField", 12);
+		AssertFieldValue<int>(loadedComponent, "TransientField", 0);
+		Assert.That(componentType.GetProperty("VisibleProperty")!.GetValue(loadedComponent), Is.EqualTo(21));
+		Assert.That(componentType.GetProperty("HiddenProperty")!.GetValue(loadedComponent), Is.EqualTo(22));
+		Assert.That(componentType.GetProperty("TransientProperty")!.GetValue(loadedComponent), Is.EqualTo(0));
+	}
+
+	[Test]
 	public void DataAssetStore_LoadsBuiltInDataAssetTypesThroughResolver()
 	{
 		using var environment = new GameplayTestEnvironment();

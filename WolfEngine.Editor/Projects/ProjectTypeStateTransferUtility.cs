@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 
 namespace WolfEngine.Editor.Projects;
 
@@ -20,7 +21,9 @@ internal static class ProjectTypeStateTransferUtility
 		var value = CreateDefaultValue(targetType);
 		foreach (var field in targetType.GetFields(BindingFlags.Instance | BindingFlags.Public))
 		{
-			if (field.IsInitOnly || data.TryGetProperty(field.Name, out var fieldData) == false)
+			if (field.IsInitOnly ||
+			    Attribute.IsDefined(field, typeof(NotSerializedAttribute)) ||
+			    data.TryGetProperty(field.Name, out var fieldData) == false)
 			{
 				continue;
 			}
@@ -40,6 +43,7 @@ internal static class ProjectTypeStateTransferUtility
 			if (property.CanWrite == false ||
 			    property.GetIndexParameters().Length != 0 ||
 			    property.SetMethod?.IsPublic != true ||
+			    Attribute.IsDefined(property, typeof(NotSerializedAttribute)) ||
 			    data.TryGetProperty(property.Name, out var propertyData) == false)
 			{
 				continue;
