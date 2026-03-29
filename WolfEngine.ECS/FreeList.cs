@@ -1,4 +1,6 @@
-﻿namespace WolfEngine.ECS;
+﻿using System.Collections.Generic;
+
+namespace WolfEngine.ECS;
 
 public class FreeList
 {

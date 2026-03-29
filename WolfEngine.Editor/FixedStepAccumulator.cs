@@ -1,3 +1,5 @@
+using System;
+
 namespace WolfEngine.Editor;
 
 internal sealed class FixedStepAccumulator

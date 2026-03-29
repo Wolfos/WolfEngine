@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;

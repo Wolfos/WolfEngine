@@ -1,3 +1,5 @@
+using System;
+
 namespace WolfEngine.ECS;
 
 [AttributeUsage(AttributeTargets.Struct, Inherited = false)]

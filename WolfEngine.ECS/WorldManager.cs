@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace WolfEngine.ECS;
 
 public interface IWorldManager

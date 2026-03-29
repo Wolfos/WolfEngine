@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;

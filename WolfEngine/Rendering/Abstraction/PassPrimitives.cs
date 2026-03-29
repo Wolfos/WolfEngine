@@ -1,5 +1,8 @@
 #nullable enable
 
+using System;
+using System.Collections.Generic;
+
 namespace WolfEngine.Rendering.Abstraction;
 
 /// <summary>

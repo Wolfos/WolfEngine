@@ -1,4 +1,6 @@
-﻿namespace WolfEngine.ECS;
+﻿using System;
+
+namespace WolfEngine.ECS;
 
 internal interface IComponentPool
 {

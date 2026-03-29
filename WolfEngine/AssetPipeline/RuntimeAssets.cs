@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
 namespace WolfEngine.AssetPipeline;
 
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
@@ -70,7 +75,7 @@ public sealed class RuntimeArtifactTargetProvider : IRuntimeArtifactTargetProvid
 
 public static class RuntimeAssetDescriptor
 {
-	private static readonly Dictionary<Type, RuntimeAssetAttribute?> Cache = new();
+	private static readonly Dictionary<Type, RuntimeAssetAttribute> Cache = new();
 	private static readonly object Sync = new();
 
 	public static RuntimeAssetAttribute Get(Type runtimeType)

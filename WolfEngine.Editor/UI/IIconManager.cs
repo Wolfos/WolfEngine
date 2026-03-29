@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace WolfEngine.Editor.UI;
 
 public interface IIconManager

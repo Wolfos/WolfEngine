@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Concurrent;
 using System.Buffers;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using ImGuiNET;

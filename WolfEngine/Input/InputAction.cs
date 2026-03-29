@@ -1,4 +1,6 @@
-﻿namespace WolfEngine.Input;
+﻿using System.Collections.Generic;
+
+namespace WolfEngine.Input;
 
 public struct InputAction
 {

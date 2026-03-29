@@ -1,3 +1,5 @@
+using System;
+
 namespace WolfEngine.Rendering;
 
 public readonly struct ComputeThreadGroupSize : IEquatable<ComputeThreadGroupSize>
