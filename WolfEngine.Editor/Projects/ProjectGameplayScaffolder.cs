@@ -11,8 +11,11 @@ internal static class ProjectGameplayScaffolder
 	private const string TargetFramework = "net10.0";
 	private const string EngineProjectReference = "../../WolfEngine/WolfEngine/WolfEngine.csproj";
 	private const string EcsProjectReference = "../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj";
+	private const string PhysicsProjectReference = "../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj";
 	private const string EngineSolutionReference = @"..\WolfEngine\WolfEngine\WolfEngine.csproj";
 	private const string EcsSolutionReference = @"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj";
+	private const string PhysicsSolutionReference = @"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj";
+	private const string EditorSolutionReference = @"..\WolfEngine\WolfEngine.Editor\WolfEngine.Editor.csproj";
 
 	public static string GetGameplayProjectRelativePath(string projectName)
 	{
@@ -59,6 +62,7 @@ internal static class ProjectGameplayScaffolder
 			   <ItemGroup>
 			     <ProjectReference Include="{EngineProjectReference}" />
 			     <ProjectReference Include="{EcsProjectReference}" />
+			     <ProjectReference Include="{PhysicsProjectReference}" />
 			   </ItemGroup>
 			 </Project>
 			 """;
@@ -111,6 +115,8 @@ internal static class ProjectGameplayScaffolder
 		var gameplayProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var engineProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var ecsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var physicsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var editorProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 
 		return
 			$$"""
@@ -120,6 +126,10 @@ internal static class ProjectGameplayScaffolder
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine", "{{EngineSolutionReference}}", "{{engineProjectGuid}}"
 			  EndProject
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.ECS", "{{EcsSolutionReference}}", "{{ecsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Physics", "{{PhysicsSolutionReference}}", "{{physicsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Editor", "{{EditorSolutionReference}}", "{{editorProjectGuid}}"
 			  EndProject
 			  Global
 			  	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -139,6 +149,14 @@ internal static class ProjectGameplayScaffolder
 			  		{{ecsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
 			  		{{ecsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
 			  		{{ecsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{physicsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{physicsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{physicsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{physicsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{editorProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{editorProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{editorProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{editorProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
 			  	EndGlobalSection
 			  EndGlobal
 			  """;

@@ -19,6 +19,7 @@ using BackendD3D12Texture = WolfEngine.Backend.D3D12.D3D12Texture;
 using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
 using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
 using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
+using Box = Silk.NET.Direct3D12.Box;
 using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
 using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
 using Range = Silk.NET.Direct3D12.Range;

@@ -420,9 +420,11 @@ public sealed class GameplayComponentSupportTests
 			var repoRoot = Path.GetFullPath(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "..", ".."));
 			var engineProjectPath = Path.Combine(repoRoot, "WolfEngine", "WolfEngine.csproj");
 			var ecsProjectPath = Path.Combine(repoRoot, "WolfEngine.ECS", "WolfEngine.ECS.csproj");
+			var physicsProjectPath = Path.Combine(repoRoot, "WolfEngine.Physics", "WolfEngine.Physics.csproj");
 			var projectContents = File.ReadAllText(gameplayProjectPath);
 			projectContents = projectContents.Replace("../../WolfEngine/WolfEngine/WolfEngine.csproj", engineProjectPath, StringComparison.Ordinal);
 			projectContents = projectContents.Replace("../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj", ecsProjectPath, StringComparison.Ordinal);
+			projectContents = projectContents.Replace("../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj", physicsProjectPath, StringComparison.Ordinal);
 			File.WriteAllText(gameplayProjectPath, projectContents);
 		}
 

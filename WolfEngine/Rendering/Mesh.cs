@@ -15,6 +15,7 @@ public class Mesh
     public Vector4[] Tangents { get; }
     public Vector2[] UVs { get; }
     public BoundingSphere BoundingSphere { get; }
+    public Box BoundingBox { get; }
     
     // GPU resources are set by the renderer after creation
     internal IGfxBuffer VertexBuffer { get; set; }
@@ -24,6 +25,7 @@ public class Mesh
     internal ulong PackedVertexOffsetBytes { get; set; }
     internal ulong PackedIndexOffsetBytes { get; set; }
     internal int PackedBaseVertex { get; set; }
+    
     public Mesh(
         IReadOnlyList<Vector4> vertices,
         IReadOnlyList<uint> indices,
@@ -86,6 +88,7 @@ public class Mesh
         }
 
         BoundingSphere = ComputeBoundingSphere(Vertices);
+        BoundingBox = ComputeBoundingBox(Vertices);
     }
 
 
@@ -168,5 +171,24 @@ public class Mesh
         }
 
         return new BoundingSphere(center, MathF.Sqrt(radiusSquared));
+    }
+
+    private static Box ComputeBoundingBox(Vector4[] vertices)
+    {
+        var min = ToVector3(vertices[0]);
+        var max = min;
+
+        for (var i = 1; i < vertices.Length; i++)
+        {
+            var point = ToVector3(vertices[i]);
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+
+        return new Box
+        {
+            Center = (min + max) * 0.5f,
+            Size = max - min
+        };
     }
 }

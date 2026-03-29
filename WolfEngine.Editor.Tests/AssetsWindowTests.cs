@@ -137,9 +137,12 @@ public sealed class AssetsWindowTests
 			Assert.That(projectService.GameplayProjectPath, Is.EqualTo(gameplayProjectPath));
 			Assert.That(projectFileContents, Does.Contain("../../WolfEngine/WolfEngine/WolfEngine.csproj"));
 			Assert.That(projectFileContents, Does.Contain("../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj"));
+			Assert.That(projectFileContents, Does.Contain("../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj"));
 			Assert.That(solutionFileContents, Does.Contain(@"Gameplay\My Game.Gameplay.csproj"));
 			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine\WolfEngine.csproj"));
 			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj"));
+			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj"));
+			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.Editor\WolfEngine.Editor.csproj"));
 		}
 		finally
 		{
