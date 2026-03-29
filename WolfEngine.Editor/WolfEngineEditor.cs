@@ -143,11 +143,11 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
+			var frameStart = stopwatch.Elapsed;
 			FrameProfiler.Instance.BeginFrame("Editor Frame");
 
-			var now = stopwatch.Elapsed;
-			var deltaTime = (float)(now - last).TotalSeconds;
-			last = now;
+			var deltaTime = (float)(frameStart - last).TotalSeconds;
+			last = frameStart;
 
 			HandleGameplayBuildAndReload();
 			SyncCurrentScene();
@@ -184,6 +184,41 @@ public class WolfEngineEditor
 			}
 
 			FrameProfiler.Instance.EndFrame();
+			ApplyEditorFrameCap(stopwatch, frameStart);
+		}
+	}
+
+	private static void ApplyEditorFrameCap(Stopwatch stopwatch, TimeSpan frameStart)
+	{
+		if (EditorPreferences.GetLimitFPS() == false)
+		{
+			Thread.Sleep(0);
+			return;
+		}
+
+		var maxFPS = EditorPreferences.GetMaxFPS();
+		if (maxFPS <= 0)
+		{
+			Thread.Sleep(0);
+			return;
+		}
+
+		var targetFrameDuration = TimeSpan.FromSeconds(1.0 / maxFPS);
+		while (true)
+		{
+			var elapsed = stopwatch.Elapsed - frameStart;
+			var remaining = targetFrameDuration - elapsed;
+			if (remaining <= TimeSpan.Zero)
+			{
+				break;
+			}
+
+			if (remaining > TimeSpan.FromMilliseconds(2))
+			{
+				Thread.Sleep(1);
+				continue;
+			}
+
 			Thread.Sleep(0);
 		}
 	}

@@ -23,6 +23,8 @@ public class EditorPreferences
 
 	public Dictionary<ImGuiCol, ColorRGBA> EditorColors { get; set; } = new();
 	public float SceneViewportResolutionScale { get; set; } = 1.0f;
+	public bool LimitFPS { get; set; } = false;
+	public int MaxFPS { get; set; } = 0;
 	public string? LastProjectPath { get; set; }
 
 	public EditorPreferences()
@@ -58,6 +60,46 @@ public class EditorPreferences
 		}
 
 		_instance.SceneViewportResolutionScale = Math.Clamp(scale, 0.5f, 1.0f);
+	}
+
+	public static bool GetLimitFPS()
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		return _instance.LimitFPS;
+	}
+
+	public static void SetLimitFPS(bool val)
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		_instance.LimitFPS = val;
+	}
+
+	public static int GetMaxFPS()
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		return Math.Max(_instance.MaxFPS, 20);
+	}
+
+	public static void SetMaxFPS(int maxFPS)
+	{
+		if (_instance == null)
+		{
+			_instance = new EditorPreferences();
+		}
+
+		_instance.MaxFPS = maxFPS;
 	}
 
 	public static string? GetLastProjectPath()
