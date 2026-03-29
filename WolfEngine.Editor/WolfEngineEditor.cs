@@ -11,12 +11,15 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Physics;
 
 namespace WolfEngine.Editor;
 
 public class WolfEngineEditor
 {
 	private const float EditorCameraFov = 70.0f;
+	private const float PhysicsFixedDeltaTime = 1.0f / 60.0f;
+	private const int PhysicsMaxStepsPerFrame = 4;
 	private static readonly Vector3 EditorCameraPosition = new(0.0f, 1.0f, -5.0f);
 
 	private readonly IWorldManager _worldManager;
@@ -38,6 +41,7 @@ public class WolfEngineEditor
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
+	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
 
 	private EditorScene _currentScene = null!;
 
@@ -112,6 +116,7 @@ public class WolfEngineEditor
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
+		_worldManager.AddSystem(new RigidbodySystem(), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
 		
 		var sun = authoringWorld.CreateEntity("Sun");
@@ -149,6 +154,7 @@ public class WolfEngineEditor
 
 			using (FrameProfiler.Instance.Measure("World Update"))
 			{
+				UpdatePhysics(deltaTime);
 				UpdateGameplay(deltaTime);
 				var (worldMask, groupMask) = GetExecutionMask();
 				_worldManager.Update(deltaTime, worldMask, groupMask);
@@ -220,6 +226,29 @@ public class WolfEngineEditor
 		}
 
 		_boundGameplayModule?.Update(deltaTime, runtimeScene.World);
+	}
+
+	private void UpdatePhysics(float deltaTime)
+	{
+		if (CanAdvancePhysics(_playSession.State, _playSession.RuntimeScene?.World, _boundGameplayWorld) == false ||
+		    _playSession.RuntimeScene is not { } runtimeScene)
+		{
+			_physicsAccumulator.Reset();
+			return;
+		}
+
+		_physicsAccumulator.Execute(deltaTime, fixedDeltaTime =>
+		{
+			_boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World);
+			_worldManager.PhysicsUpdate(fixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
+		});
+	}
+
+	internal static bool CanAdvancePhysics(EditorPlayState state, World? runtimeWorld, World? boundGameplayWorld)
+	{
+		return state == EditorPlayState.Playing &&
+		       runtimeWorld is not null &&
+		       ReferenceEquals(runtimeWorld, boundGameplayWorld);
 	}
 
 	private void EnsureGameplayModuleBound()

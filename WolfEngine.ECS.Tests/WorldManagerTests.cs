@@ -58,6 +58,40 @@ public sealed class WorldManagerTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_AllowsMultipleSystemsWithSameTagAndPreservesRegistrationOrder()
+	{
+		var manager = new WorldManager();
+		manager.CreateWorld(WorldTag.Game);
+		var calls = new List<string>();
+		var first = new RecordingPhysicsSystem(WorldTag.Game, calls, "first");
+		var second = new RecordingPhysicsSystem(WorldTag.Game, calls, "second");
+
+		manager.AddSystem(first);
+		manager.AddSystem(second);
+
+		manager.PhysicsUpdate(1.0f / 60.0f, WorldTag.Game, SystemExecutionGroup.Shared);
+
+		Assert.That(calls, Is.EqualTo(new[] { "first", "second" }));
+	}
+
+	[Test]
+	public void PhysicsUpdate_GroupMaskRunsSharedSystemsWithoutGameplaySystems()
+	{
+		var manager = new WorldManager();
+		manager.CreateWorld(WorldTag.Game);
+		var shared = new CountingPhysicsSystem(WorldTag.Game);
+		var gameplay = new CountingPhysicsSystem(WorldTag.Game);
+
+		manager.AddSystem(shared, SystemExecutionGroup.Shared);
+		manager.AddSystem(gameplay, SystemExecutionGroup.Gameplay);
+
+		manager.PhysicsUpdate(1.0f / 60.0f, WorldTag.Game, SystemExecutionGroup.Shared);
+
+		Assert.That(shared.UpdateCount, Is.EqualTo(1));
+		Assert.That(gameplay.UpdateCount, Is.EqualTo(0));
+	}
+
+	[Test]
 	public void RemoveSystem_StopsFutureExecution()
 	{
 		var manager = new WorldManager();
@@ -71,6 +105,19 @@ public sealed class WorldManagerTests
 		manager.Update(0.016f, WorldTag.Game, SystemExecutionGroup.Shared);
 
 		Assert.That(system.UpdateCount, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void RemoveWorld_NotifiesWorldRemovedListeners()
+	{
+		var manager = new WorldManager();
+		var world = manager.CreateWorld(WorldTag.Game);
+		var listener = new WorldRemovedListenerSystem();
+		manager.AddSystem(listener);
+
+		Assert.That(manager.RemoveWorld(world), Is.True);
+		Assert.That(listener.RemovedWorlds, Has.Count.EqualTo(1));
+		Assert.That(listener.RemovedWorlds[0], Is.SameAs(world));
 	}
 
 	private sealed class RecordingUpdateSystem : IUpdateable
@@ -130,5 +177,55 @@ public sealed class WorldManagerTests
 		}
 
 		public WorldTag GetTag() => _tag;
+	}
+
+	private sealed class RecordingPhysicsSystem : IPhysicsUpdate
+	{
+		private readonly WorldTag _tag;
+		private readonly List<string> _calls;
+		private readonly string _label;
+
+		public RecordingPhysicsSystem(WorldTag tag, List<string> calls, string label)
+		{
+			_tag = tag;
+			_calls = calls;
+			_label = label;
+		}
+
+		public void PhysicsUpdate(float fixedDeltaTime, World world)
+		{
+			_calls.Add(_label);
+		}
+
+		public WorldTag GetTag() => _tag;
+	}
+
+	private sealed class CountingPhysicsSystem : IPhysicsUpdate
+	{
+		private readonly WorldTag _tag;
+
+		public CountingPhysicsSystem(WorldTag tag)
+		{
+			_tag = tag;
+		}
+
+		public int UpdateCount { get; private set; }
+
+		public void PhysicsUpdate(float fixedDeltaTime, World world)
+		{
+			UpdateCount++;
+		}
+
+		public WorldTag GetTag() => _tag;
+	}
+
+	private sealed class WorldRemovedListenerSystem : IWorldRemovedListener
+	{
+		public List<World> RemovedWorlds { get; } = new();
+
+		public void OnWorldRemoved(World world)
+		{
+			RemovedWorlds.Add(world);
+		}
 	}
 }

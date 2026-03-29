@@ -14,6 +14,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Editor.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Physics", "WolfEngine.Physics\WolfEngine.Physics.csproj", "{64944B1B-1605-4B4B-8DF9-C2AA56FA4993}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Physics.Tests", "WolfEngine.Physics.Tests\WolfEngine.Physics.Tests.csproj", "{E51EA2E1-FEE4-4E35-9260-35B2185C56D3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -44,9 +46,14 @@ Global
 		{64944B1B-1605-4B4B-8DF9-C2AA56FA4993}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{64944B1B-1605-4B4B-8DF9-C2AA56FA4993}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{64944B1B-1605-4B4B-8DF9-C2AA56FA4993}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E51EA2E1-FEE4-4E35-9260-35B2185C56D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E51EA2E1-FEE4-4E35-9260-35B2185C56D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E51EA2E1-FEE4-4E35-9260-35B2185C56D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E51EA2E1-FEE4-4E35-9260-35B2185C56D3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{BD4C9273-6DC7-4418-96D1-D983A6A73CF5} = {3D935CEA-AEC9-4293-B608-60598098804E}
 		{3D58EEF8-40C7-4408-ACA0-863DA087637F} = {3D935CEA-AEC9-4293-B608-60598098804E}
+		{E51EA2E1-FEE4-4E35-9260-35B2185C56D3} = {3D935CEA-AEC9-4293-B608-60598098804E}
 	EndGlobalSection
 EndGlobal

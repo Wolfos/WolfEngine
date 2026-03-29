@@ -10,6 +10,7 @@ using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
+using WolfEngine.Physics;
 
 namespace WolfEngine;
 
@@ -84,5 +85,6 @@ public static class WolfEngine
 	{
 		worldManager.AddSystem<CameraResolutionUpdater>();
 		worldManager.AddSystem<TransformSystem>();
+		worldManager.AddSystem(new RigidbodySystem(), SystemExecutionGroup.Gameplay);
 	}
 }

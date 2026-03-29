@@ -10,4 +10,8 @@
       <PackageReference Include="JoltPhysicsSharp" Version="2.20.1" />
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
+    </ItemGroup>
+
 </Project>

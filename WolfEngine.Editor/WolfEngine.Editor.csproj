@@ -18,6 +18,7 @@
     <ItemGroup>
       <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
       <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+      <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
     </ItemGroup>
 
     <ItemGroup>

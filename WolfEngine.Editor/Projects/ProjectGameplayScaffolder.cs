@@ -100,6 +100,10 @@ internal static class ProjectGameplayScaffolder
 			  	public void OnUnloading(World world)
 			  	{
 			  	}
+
+			  	public void PhysicsUpdate(float fixedDeltaTime, World world)
+			  	{
+			  	}
 			  
 			  	public void Update(float deltaTime, World world)
 			  	{

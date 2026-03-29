@@ -9,6 +9,7 @@ public interface IWorldManager
 	public void AddSystem(ISystem system, SystemExecutionGroup group = SystemExecutionGroup.Shared);
 	public bool RemoveSystem(ISystem system);
 	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
+	public void PhysicsUpdate(float fixedDeltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 	public void OnPreRender(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 }
 
@@ -40,7 +41,21 @@ public class WorldManager: IWorldManager
 	public bool RemoveWorld(World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
-		return _worlds.Remove(world);
+		var removed = _worlds.Remove(world);
+		if (removed == false)
+		{
+			return false;
+		}
+
+		for (var index = 0; index < _systems.Count; index++)
+		{
+			if (_systems[index].System is IWorldRemovedListener listener)
+			{
+				listener.OnWorldRemoved(world);
+			}
+		}
+
+		return true;
 	}
 
 	public void AddSystem<T>(SystemExecutionGroup group = SystemExecutionGroup.Shared) where T : ISystem, new()
@@ -96,6 +111,30 @@ public class WorldManager: IWorldManager
 				}
 
 				updateable.Update(deltaTime, world);
+			}
+		}
+	}
+
+	public void PhysicsUpdate(float fixedDeltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
+	{
+		foreach (var world in _worlds)
+		{
+			if ((world.Tag & worldTagMask) == 0)
+			{
+				continue;
+			}
+
+			for (var index = 0; index < _systems.Count; index++)
+			{
+				var registration = _systems[index];
+				if ((registration.Group & groupMask) == 0 ||
+				    registration.System is not IPhysicsUpdate physicsUpdate ||
+				    (physicsUpdate.GetTag() & world.Tag) == 0)
+				{
+					continue;
+				}
+
+				physicsUpdate.PhysicsUpdate(fixedDeltaTime, world);
 			}
 		}
 	}
