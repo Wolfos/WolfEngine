@@ -40,7 +40,15 @@ public class World
     }
 
     
-    public void DestroyEntity(Entity e) => _entities.Destroy(e);
+    public void DestroyEntity(Entity e)
+    {
+        if (!IsAlive(e))
+        {
+            return;
+        }
+
+        DestroyEntityRecursive(e);
+    }
 
     public void AddComponent<T>(Entity e, in T value = default) where T : struct, IEntityComponent
         => Pool<T>().Add(e, value);
@@ -109,6 +117,39 @@ public class World
             if (kvp.Value.Has(entity))
                 componentTypes.Add(kvp.Key);
         }
+    }
+
+    private void DestroyEntityRecursive(Entity entity)
+    {
+        if (!IsAlive(entity))
+        {
+            return;
+        }
+
+        if (HasComponent<Children>(entity))
+        {
+            var child = GetComponent<Children>(entity).First;
+            while (child.IsValid)
+            {
+                var next = HasComponent<Sibling>(child)
+                    ? GetComponent<Sibling>(child).Next
+                    : default;
+                DestroyEntityRecursive(child);
+                child = next;
+            }
+        }
+
+        if (HasComponent<Parent>(entity))
+        {
+            RemoveParent(entity);
+        }
+
+        foreach (var pool in _pools.Values)
+        {
+            pool.Remove(entity);
+        }
+
+        _entities.Destroy(entity);
     }
 
     private ComponentPool<T> Pool<T>() where T:struct, IEntityComponent
