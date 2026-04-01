@@ -14,11 +14,13 @@ public class EntitiesWindow: EditorWindow
 	private static readonly List<Entity> PendingDeleteEntities = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 	private const string DeletePopupId = "EntitiesWindowDelete";
-	private const string LocalItemContextMenuId = "EntitiesItemContextMenu";
+	private const string ContextMenuId = "EntitiesContextMenu";
 
 	private readonly IIconManager _iconManager;
 	private Entity? _pendingDeleteEntity;
+	private Entity? _contextMenuEntity;
 	private bool _openDeletePopup;
+	private Entity? _hoveredEntity;
 
 	public EntitiesWindow(IIconManager iconManager)
 	{
@@ -40,6 +42,7 @@ public class EntitiesWindow: EditorWindow
 
 		world.GetAllEntities(AllEntities);
 		BuildRootList(world);
+		_hoveredEntity = null;
 
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
@@ -107,24 +110,15 @@ public class EntitiesWindow: EditorWindow
 		var nodeCursorPosition = ImGui.GetCursorScreenPos();
 		var open = ImGui.TreeNodeEx("##EntityNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup))
+		{
+			_hoveredEntity = entity;
+		}
 		DrawEntityLabelWithIcon(name, iconTexture, nodeCursorPosition.X);
 
 		if (leftClicked)
 		{
 			EditorGui.SelectEntity(entity, world);
-		}
-
-		if (rightClicked)
-		{
-			EditorGui.SelectEntity(entity, world);
-			ImGui.OpenPopup(LocalItemContextMenuId);
-		}
-
-		if (ImGui.BeginPopup(LocalItemContextMenuId))
-		{
-			DrawEntityContextMenu(entity, world);
-			ImGui.EndPopup();
 		}
 
 		if (hasChildren && open)
@@ -153,14 +147,6 @@ public class EntitiesWindow: EditorWindow
 		}
 
 		ImGui.PopID();
-	}
-
-	private void DrawEntityContextMenu(Entity entity, World world)
-	{
-		if (ImGui.MenuItem("Delete"))
-		{
-			RequestDelete(entity, world);
-		}
 	}
 
 	private static nint ResolveIconTexture(IIconManager icons, string iconName)
@@ -200,23 +186,44 @@ public class EntitiesWindow: EditorWindow
 
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), label);
 	}
-	private static void DrawContextMenu(EditorScene scene)
+	private void DrawContextMenu(EditorScene scene)
 	{
-		if (ImGui.BeginPopupContextWindow("EntitiesContextMenu", ImGuiPopupFlags.MouseButtonRight) == false)
+		if (ImGui.BeginPopupContextWindow(ContextMenuId, ImGuiPopupFlags.MouseButtonRight) == false)
 		{
 			return;
 		}
 
+		if (ImGui.IsWindowAppearing())
+		{
+			_contextMenuEntity = _hoveredEntity;
+			if (_contextMenuEntity is { } hoveredEntity)
+			{
+				EditorGui.SelectEntity(hoveredEntity, scene.World, requestFocus: false);
+			}
+		}
+		
 		if (ImGui.BeginMenu("Create"))
 		{
 			if (ImGui.MenuItem("Entity"))
 			{
-				var entity = scene.World.CreateEntity("Entity", Matrix4x4.Identity);
-				EditorGui.SelectEntity(entity, scene.World);
+				var createdEntity = scene.World.CreateEntity("Entity", Matrix4x4.Identity);
+				EditorGui.SelectEntity(createdEntity, scene.World);
 			}
 
 			ImGui.EndMenu();
 		}
+
+		if (_contextMenuEntity is { } entity && scene.World.IsAlive(entity))
+		{
+			if (ImGui.MenuItem("Delete"))
+			{
+				RequestDelete(entity, scene.World);
+			}
+
+			ImGui.Separator();
+		}
+
+		
 
 		ImGui.EndPopup();
 	}

@@ -82,12 +82,12 @@ public class EditorGui
 		_componentsWindow.ResetCachedTypes();
 	}
 
-	public static void SelectEntity(Entity entity, World world)
+	public static void SelectEntity(Entity entity, World world, bool requestFocus = true)
 	{
 		HasSelectedEntity = true;
 		SelectedEntity = entity;
 		world.GetComponentTypes(entity, SelectedComponentTypes);
-		_componentsWindowFocusRequested = true;
+		_componentsWindowFocusRequested = requestFocus;
 	}
 
 	public static bool ConsumeComponentsWindowFocusRequest()
