@@ -67,11 +67,12 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ImGui.SetNextWindowFocus();
         }
 
-        var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-        ImGui.Begin(Name);
-        var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
-        if (EditorGui.HasSelectedEntity)
-        {
+		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
+		ImGui.Begin(Name);
+		FocusOnRightClickStart();
+		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
+		if (EditorGui.HasSelectedEntity)
+		{
             DrawEntityControls(scene, EditorGui.SelectedEntity);
             foreach (var componentType in EditorGui.SelectedComponentTypes)
             {

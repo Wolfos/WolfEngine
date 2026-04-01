@@ -19,6 +19,7 @@ public class SceneWindow: EditorWindow
     private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
     private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
+    private bool _rightMousePressStartedHere;
     
     private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
     private TransformSpace _transformSpace = TransformSpace.Local;
@@ -147,6 +148,15 @@ public class SceneWindow: EditorWindow
         var visible = ImGui.IsWindowCollapsed() == false && contentPixels.X > 0 && contentPixels.Y > 0;
         var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows);
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            _rightMousePressStartedHere = hovered;
+        }
+        else if (ImGui.IsMouseDown(ImGuiMouseButton.Right) == false)
+        {
+            _rightMousePressStartedHere = false;
+        }
+
         if ((hovered || focused) && io.WantTextInput == false)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.W))
@@ -186,6 +196,7 @@ public class SceneWindow: EditorWindow
             _selectedDebugViewId,
             hovered,
             focused,
+            _rightMousePressStartedHere,
             imageMin,
             imageMax));
 

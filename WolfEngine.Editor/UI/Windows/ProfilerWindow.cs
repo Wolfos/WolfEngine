@@ -28,7 +28,7 @@ public class ProfilerWindow: EditorWindow
 			return;
 		}
 
-		ImGui.Begin("Profiler", ref _isOpen);
+		Begin(ref _isOpen);
 		var vsyncEnabled = Screen.VSyncEnabled;
 		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
 		{
