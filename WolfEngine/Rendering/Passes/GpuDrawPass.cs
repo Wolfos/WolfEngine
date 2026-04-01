@@ -441,7 +441,7 @@ public sealed class GpuDrawPass
 				"cameraPositionAndMaxDrawCount",
 				new Vector4(
 					cameraOrigin,
-					GpuDrawResources.MaxDrawCount));
+					_gpuDrawResources.ActiveDrawCommandUpperBound));
 			cullParamsWriter.SetUInt("bucketCount", (uint)bucketCount);
 			cullParamsWriter.SetUInt("maxVisiblePerBucket", GpuDrawResources.MaxDrawCount);
 			cullParamsWriter.SetUInt("fallbackMeshHandle", _drawDatabase.FallbackMeshHandle.Value);
