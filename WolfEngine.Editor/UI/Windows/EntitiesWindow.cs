@@ -7,24 +7,23 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public class EntitiesWindow: EditorWindow
+public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 {
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly List<Entity> PendingDeleteEntities = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
-	private const string DeletePopupId = "EntitiesWindowDelete";
 	private const string ContextMenuId = "EntitiesContextMenu";
 
 	private readonly IIconManager _iconManager;
-	private Entity? _pendingDeleteEntity;
+	private readonly IEditorInteractionState _interactionState;
 	private Entity? _contextMenuEntity;
-	private bool _openDeletePopup;
 	private Entity? _hoveredEntity;
 
-	public EntitiesWindow(IIconManager iconManager)
+	public EntitiesWindow(IIconManager iconManager, IEditorInteractionState interactionState)
 	{
 		_iconManager = iconManager;
+		_interactionState = interactionState;
 	}
 
 	public override string Name => "Entities";
@@ -39,6 +38,10 @@ public class EntitiesWindow: EditorWindow
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(2, 3.0f));
 		Begin();
 		ImGui.PopStyleVar();
+		if (ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
+		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		}
 
 		world.GetAllEntities(AllEntities);
 		BuildRootList(world);
@@ -54,7 +57,6 @@ public class EntitiesWindow: EditorWindow
 		}
 
 		DrawContextMenu(scene);
-		DrawDeletePopup(scene);
 		ImGui.PopStyleVar(2);
 		ImGui.End();
 	}
@@ -118,6 +120,7 @@ public class EntitiesWindow: EditorWindow
 
 		if (leftClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
 			EditorGui.SelectEntity(entity, world);
 		}
 
@@ -198,6 +201,7 @@ public class EntitiesWindow: EditorWindow
 			_contextMenuEntity = _hoveredEntity;
 			if (_contextMenuEntity is { } hoveredEntity)
 			{
+				_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
 				EditorGui.SelectEntity(hoveredEntity, scene.World, requestFocus: false);
 			}
 		}
@@ -208,6 +212,7 @@ public class EntitiesWindow: EditorWindow
 			{
 				var createdEntity = scene.World.CreateEntity("Entity", Matrix4x4.Identity);
 				EditorGui.SelectEntity(createdEntity, scene.World);
+				_interactionState.MarkSceneDirty();
 			}
 
 			ImGui.EndMenu();
@@ -217,7 +222,8 @@ public class EntitiesWindow: EditorWindow
 		{
 			if (ImGui.MenuItem("Delete"))
 			{
-				RequestDelete(entity, scene.World);
+				DeleteEntity(entity, scene);
+				ImGui.CloseCurrentPopup();
 			}
 
 			ImGui.Separator();
@@ -228,81 +234,23 @@ public class EntitiesWindow: EditorWindow
 		ImGui.EndPopup();
 	}
 
-	private void DrawDeletePopup(EditorScene scene)
+	private void DeleteEntity(Entity entity, EditorScene scene)
 	{
-		if (_openDeletePopup)
+		if (scene.World.IsAlive(entity) == false)
 		{
-			ImGui.OpenPopup(DeletePopupId);
-			_openDeletePopup = false;
-		}
-
-		var isOpen = true;
-		ImGui.SetNextWindowSize(new Vector2(420.0f, 0.0f), ImGuiCond.Appearing);
-		if (ImGui.BeginPopupModal(DeletePopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
-		{
-			return;
-		}
-
-		if (_pendingDeleteEntity.HasValue && scene.World.IsAlive(_pendingDeleteEntity.Value))
-		{
-			ImGui.TextWrapped(BuildDeleteConfirmationText(_pendingDeleteEntity.Value, scene.World));
-			ImGui.Spacing();
-			if (ImGui.Button("Delete", new Vector2(100.0f, 0.0f)))
-			{
-				ExecutePendingDelete(scene);
-				ImGui.CloseCurrentPopup();
-			}
-
-			ImGui.SameLine();
-			if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)))
-			{
-				_pendingDeleteEntity = null;
-				ImGui.CloseCurrentPopup();
-			}
-		}
-
-		ImGui.EndPopup();
-	}
-
-	private void RequestDelete(Entity entity, World world)
-	{
-		if (world.IsAlive(entity) == false)
-		{
-			return;
-		}
-
-		_pendingDeleteEntity = entity;
-		_openDeletePopup = true;
-	}
-
-	private static string BuildDeleteConfirmationText(Entity entity, World world)
-	{
-		var name = world.HasComponent<NameComponent>(entity)
-			? world.GetComponent<NameComponent>(entity).Name ?? "Unnamed"
-			: "Unnamed";
-		return world.HasComponent<Children>(entity) && world.GetComponent<Children>(entity).First.IsValid
-			? $"Delete '{name}' and all of its child entities?"
-			: $"Delete '{name}'?";
-	}
-
-	private void ExecutePendingDelete(EditorScene scene)
-	{
-		if (_pendingDeleteEntity.HasValue == false || scene.World.IsAlive(_pendingDeleteEntity.Value) == false)
-		{
-			_pendingDeleteEntity = null;
 			return;
 		}
 
 		PendingDeleteEntities.Clear();
-		CollectEntitySubtree(_pendingDeleteEntity.Value, scene.World, PendingDeleteEntities);
-		scene.World.DestroyEntity(_pendingDeleteEntity.Value);
+		CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
+		scene.World.DestroyEntity(entity);
 
 		for (var i = 0; i < PendingDeleteEntities.Count; i++)
 		{
-			var entity = PendingDeleteEntities[i];
-			scene.EntityIcons.Remove(entity);
-			scene.EntityCellKeys.Remove(entity);
-			scene.EntityIds.Remove(entity);
+			var deletedEntity = PendingDeleteEntities[i];
+			scene.EntityIcons.Remove(deletedEntity);
+			scene.EntityCellKeys.Remove(deletedEntity);
+			scene.EntityIds.Remove(deletedEntity);
 		}
 
 		if (EditorGui.HasSelectedEntity && PendingDeleteEntities.Contains(EditorGui.SelectedEntity))
@@ -310,8 +258,19 @@ public class EntitiesWindow: EditorWindow
 			EditorGui.ClearEntitySelection();
 		}
 
+		_interactionState.MarkSceneDirty();
 		PendingDeleteEntities.Clear();
-		_pendingDeleteEntity = null;
+	}
+
+	public bool DeleteSelectedEntity(EditorScene scene)
+	{
+		if (EditorGui.HasSelectedEntity == false || scene.World.IsAlive(EditorGui.SelectedEntity) == false)
+		{
+			return false;
+		}
+
+		DeleteEntity(EditorGui.SelectedEntity, scene);
+		return true;
 	}
 
 	private static void CollectEntitySubtree(Entity entity, World world, List<Entity> entities)

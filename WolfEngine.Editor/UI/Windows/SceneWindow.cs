@@ -157,7 +157,11 @@ public class SceneWindow: EditorWindow
             _rightMousePressStartedHere = false;
         }
 
-        if ((hovered || focused) && io.WantTextInput == false)
+        var primaryModifierDown = ImGui.IsKeyDown(ImGuiKey.LeftCtrl)
+                                  || ImGui.IsKeyDown(ImGuiKey.RightCtrl)
+                                  || ImGui.IsKeyDown(ImGuiKey.LeftSuper)
+                                  || ImGui.IsKeyDown(ImGuiKey.RightSuper);
+        if ((hovered || focused) && io.WantTextInput == false && primaryModifierDown == false)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.W))
             {

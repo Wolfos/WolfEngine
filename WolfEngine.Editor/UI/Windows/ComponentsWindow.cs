@@ -25,12 +25,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private const string AddComponentPopupId = "AddComponentPopup";
     private static readonly MethodInfo DrawComponentEditorGenericMethod = typeof(ComponentsWindow).GetMethod(
         nameof(DrawComponentEditorGeneric),
-        BindingFlags.NonPublic | BindingFlags.Static)!;
+        BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     private readonly IIconManager _icons;
     private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
     private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
+    private readonly IEditorInteractionState _interactionState;
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
@@ -41,12 +42,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         IIconManager icons,
         IPropertyDrawerRegistry propertyDrawerRegistry,
         IProjectTypeCatalog projectTypeCatalog,
-        RenderGraph renderGraph)
+        RenderGraph renderGraph,
+        IEditorInteractionState interactionState)
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
         _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
+        _interactionState = interactionState;
     }
 
     public override string Name => "Components";
@@ -98,6 +101,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         if (EditorUIUtility.Checkbox("Enabled", ref isEnabled))
         {
             scene.World.SetEnabled(entity, isEnabled);
+            _interactionState.MarkSceneDirty();
         }
 
         ImGui.Separator();
@@ -116,11 +120,12 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             componentType == typeof(MeshRenderer) ||
             componentType == typeof(Light))
         {
-            DrawComponentEditorGenericMethod.MakeGenericMethod(componentType).Invoke(null, new object[] { scene, entity, _icons, _propertyDrawerRegistry, _renderGraph });
+            DrawComponentEditorGenericMethod.MakeGenericMethod(componentType)
+                .Invoke(this, new object[] { scene, entity, _icons, _propertyDrawerRegistry, _renderGraph, _interactionState });
             return;
         }
 
-        DrawGenericComponentEditor(scene.World, entity, componentType, _propertyDrawerRegistry);
+        DrawGenericComponentEditor(scene.World, entity, componentType, _propertyDrawerRegistry, _interactionState);
     }
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
@@ -159,6 +164,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
             RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
             EditorGui.SelectEntity(entity, scene.World);
+            _interactionState.MarkSceneDirty();
             ImGui.CloseCurrentPopup();
             break;
         }
@@ -166,7 +172,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGui.EndPopup();
     }
 
-    private static void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry, RenderGraph renderGraph)
+    private void DrawComponentEditorGeneric<T>(EditorScene scene, Entity entity, IIconManager icons, IPropertyDrawerRegistry propertyDrawerRegistry, RenderGraph renderGraph, IEditorInteractionState interactionState)
         where T : struct, IEntityComponent
     {
         var world = scene.World;
@@ -193,12 +199,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 ImGui.OpenPopup(iconPickerPopupId);
             }
 
-            DrawIconPickerModal(scene, entity, iconPickerPopupId, icons);
+            DrawIconPickerModal(scene, entity, iconPickerPopupId, icons, interactionState);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (ImGui.InputText("##value", ref value, 256))
             {
                 name.Name = value;
+                interactionState.MarkSceneDirty();
             }
 
             ImGui.Separator();
@@ -214,6 +221,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             if (EditorUIUtility.InputVector3("LocalPosition", ref position))
             {
                 world.SetLocalPosition(entity, position);
+                interactionState.MarkSceneDirty();
             }
 
             var rotation = local.LocalRotation;
@@ -221,12 +229,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             if (EditorUIUtility.InputVector3("Rotation (deg)", ref eulerDegrees))
             {
                 world.SetLocalRotation(entity, EulerDegreesToQuaternion(eulerDegrees));
+                interactionState.MarkSceneDirty();
             }
 
             var scale = local.LocalScale;
             if (EditorUIUtility.InputVector3("LocalScale", ref scale))
             {
                 world.SetLocalScale(entity, scale);
+                interactionState.MarkSceneDirty();
             }
 
             ImGui.Separator();
@@ -244,12 +254,23 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
             ref var meshRenderer = ref Unsafe.As<T, MeshRenderer>(ref component);
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
+                nameof(MeshRenderer.MeshAsset),
+                typeof(AssetRef<Mesh>),
+                meshRenderer.MeshAsset));
+            if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Mesh> meshAsset)
+            {
+                meshRenderer.AssignMeshAsset(meshAsset);
+                interactionState.MarkSceneDirty();
+            }
+
+            drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 nameof(MeshRenderer.MaterialAsset),
                 typeof(AssetRef<Material>),
                 meshRenderer.MaterialAsset));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
                 meshRenderer.AssignMaterialAsset(materialAsset, renderGraph);
+                interactionState.MarkSceneDirty();
             }
 
             ImGui.Separator();
@@ -266,22 +287,37 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             }
 
             ref var light = ref Unsafe.As<T, Light>(ref component);
-            EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type);
-            EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity);
+            if (EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type))
+            {
+                interactionState.MarkSceneDirty();
+            }
+
+            if (EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity))
+            {
+                interactionState.MarkSceneDirty();
+            }
+
             if (light.Type == LightType.Point)
             {
-                EditorUIUtility.InputFloat(nameof(Light.Range), ref light.Range);
+                if (EditorUIUtility.InputFloat(nameof(Light.Range), ref light.Range))
+                {
+                    interactionState.MarkSceneDirty();
+                }
             }
 
             var color = light.Color.ToVector4();
             if (EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color))
             {
                 light.Color = ColorRGBA.FromVector4(color);
+                interactionState.MarkSceneDirty();
             }
 
             if (light.Type == LightType.Directional)
             {
-                EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref light.HorizonFade);
+                if (EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref light.HorizonFade))
+                {
+                    interactionState.MarkSceneDirty();
+                }
             }
 
             ImGui.Separator();
@@ -313,14 +349,17 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 fieldType,
                 field.GetValueDirect(typedRef)));
             if (drawResult.Handled && drawResult.Changed)
+            {
                 field.SetValueDirect(typedRef, drawResult.Value!);
+                interactionState.MarkSceneDirty();
+            }
         }
 
         ImGui.Separator();
         ImGui.PopID();
     }
 
-    private static void DrawGenericComponentEditor(World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry)
+    private static void DrawGenericComponentEditor(World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, IEditorInteractionState interactionState)
     {
         object componentValue;
         try
@@ -342,6 +381,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue))
         {
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
+            interactionState.MarkSceneDirty();
         }
 
         ImGui.Separator();
@@ -371,7 +411,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return 0;
     }
 
-    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId, IIconManager icons)
+    private static void DrawIconPickerModal(EditorScene scene, Entity entity, string popupId, IIconManager icons, IEditorInteractionState interactionState)
     {
         var isOpen = true;
         ImGui.SetNextWindowSize(new Vector2(360.0f, 260.0f), ImGuiCond.Appearing);
@@ -399,6 +439,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                     if (ImGui.ImageButton("##icon", textureId, PickerIconSize))
                     {
                         scene.EntityIcons[entity] = name;
+                        interactionState.MarkSceneDirty();
                         ImGui.CloseCurrentPopup();
                     }
 

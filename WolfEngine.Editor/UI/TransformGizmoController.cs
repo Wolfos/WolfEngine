@@ -19,13 +19,15 @@ public sealed class TransformGizmoController
 
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly EditorCameraContext _cameraContext;
+	private readonly IEditorInteractionState _interactionState;
 	private readonly GizmoDragState _dragState = new();
 	private GizmoAxis _hoveredAxis;
 
-	public TransformGizmoController(EditorViewportStateBus viewportStateBus, EditorCameraContext cameraContext)
+	public TransformGizmoController(EditorViewportStateBus viewportStateBus, EditorCameraContext cameraContext, IEditorInteractionState interactionState)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
+		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 	}
 
 	public void DrawAndHandle(
@@ -257,6 +259,7 @@ public sealed class TransformGizmoController
 				var delta = currentParameter - _dragState.StartAxisParameter;
 				var worldPosition = _dragState.StartEntityWorldPosition + (_dragState.AxisWorld * delta);
 				world.SetWorldPosition(_dragState.Entity, worldPosition);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 			case TransformGizmoMode.Rotate:
@@ -277,6 +280,7 @@ public sealed class TransformGizmoController
 				var deltaRotation = Quaternion.CreateFromAxisAngle(_dragState.AxisWorld, angle);
 				var targetWorldRotation = NormalizeOrIdentity(deltaRotation * _dragState.StartWorldRotation);
 				world.SetWorldRotation(_dragState.Entity, targetWorldRotation);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 			case TransformGizmoMode.Scale:
@@ -304,6 +308,7 @@ public sealed class TransformGizmoController
 				}
 
 				world.SetLocalScale(_dragState.Entity, localScale);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 		}

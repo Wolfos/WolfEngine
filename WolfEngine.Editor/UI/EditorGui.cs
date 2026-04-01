@@ -18,6 +18,8 @@ public class EditorGui
 
 	private readonly IMenuBar _menuBar;
 	private readonly IEditorModeState _editorModeState;
+	private readonly IEditorInteractionState _interactionState;
+	private readonly IEditorCommandService _commandService;
 
 	private readonly EntitiesWindow _entitiesWindow;
 	private readonly AssetsWindow _assetsWindow;
@@ -29,10 +31,14 @@ public class EditorGui
 	public EditorGui(
 		IMenuBar menuBar,
 		IEditorModeState editorModeState,
+		IEditorInteractionState interactionState,
+		IEditorCommandService commandService,
 		IServiceProvider serviceProvider)
 	{
 		_menuBar = menuBar;
 		_editorModeState = editorModeState;
+		_interactionState = interactionState;
+		_commandService = commandService;
 
 		_entitiesWindow = serviceProvider.GetRequiredService<EntitiesWindow>();
 		_assetsWindow = serviceProvider.GetRequiredService<AssetsWindow>();
@@ -40,10 +46,12 @@ public class EditorGui
 		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
 		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
 		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
+		_commandService.BindDeletionHandlers(_entitiesWindow, _assetsWindow);
 	}
 
 	public void Draw(EditorScene scene)
 	{
+		_interactionState.BeginFrame();
 		DockSpace();
 
 		using (FrameProfiler.Instance.Measure("Menu Bar"))
@@ -69,6 +77,9 @@ public class EditorGui
 		}
 
 		DrawWindow(_profilerWindow, scene);
+
+		_commandService.ProcessShortcuts();
+		_commandService.DrawPendingDialogs();
 
 		using (FrameProfiler.Instance.Measure("Preferences"))
 		{

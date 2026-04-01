@@ -47,6 +47,8 @@ public static class Program
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
+		services.AddSingleton<IEditorInteractionState, EditorInteractionState>();
+		services.AddSingleton<IEditorCommandService, EditorCommandService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<IGameplayAssemblyHost>(provider => new GameplayAssemblyHost(() => provider.GetRequiredService<IEditorProjectService>()));
 		services.AddSingleton<IProjectTypeCatalog>(provider => new ProjectTypeCatalog(

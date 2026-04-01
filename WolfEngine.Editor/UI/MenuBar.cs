@@ -38,6 +38,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly IEditorPlaySession _playSession;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorNotificationService _notificationService;
+	private readonly IEditorCommandService _commandService;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -57,7 +58,8 @@ public sealed class MenuBar : IMenuBar
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorPlaySession playSession,
 		IGameplayAssemblyHost gameplayAssemblyHost,
-		IEditorNotificationService notificationService)
+		IEditorNotificationService notificationService,
+		IEditorCommandService commandService)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -71,6 +73,7 @@ public sealed class MenuBar : IMenuBar
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 	}
 
 	public void Draw(EditorScene scene)
@@ -340,22 +343,25 @@ public sealed class MenuBar : IMenuBar
 			}
 		}
 
+		if (ImGui.MenuItem("New Scene", "Ctrl/Cmd+N"))
+		{
+			_commandService.RequestNewScene();
+		}
+
 		var hasOpenProject = _projectService.HasOpenProject;
 		if (hasOpenProject == false)
 		{
 			ImGui.BeginDisabled();
 		}
 
-		if (ImGui.MenuItem("Save Scene"))
+		if (ImGui.MenuItem("Save Scene", "Ctrl/Cmd+S"))
 		{
-			try
-			{
-				_sceneWorkspace.SaveCurrentScene();
-			}
-			catch (Exception ex)
-			{
-				ShowError($"Failed to save scene: {ex.Message}");
-			}
+			_commandService.SaveScene();
+		}
+
+		if (ImGui.MenuItem("Refresh Asset Database", "Ctrl/Cmd+R"))
+		{
+			_commandService.RefreshAssetDatabase();
 		}
 
 		if (hasOpenProject == false)
