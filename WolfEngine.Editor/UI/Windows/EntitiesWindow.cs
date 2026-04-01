@@ -17,13 +17,21 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 	private readonly IIconManager _iconManager;
 	private readonly IEditorInteractionState _interactionState;
+	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
+	private readonly IEditorUndoRedoService _undoRedoService;
 	private Entity? _contextMenuEntity;
 	private Entity? _hoveredEntity;
 
-	public EntitiesWindow(IIconManager iconManager, IEditorInteractionState interactionState)
+	public EntitiesWindow(
+		IIconManager iconManager,
+		IEditorInteractionState interactionState,
+		IEditorSceneSnapshotService sceneSnapshotService,
+		IEditorUndoRedoService undoRedoService)
 	{
 		_iconManager = iconManager;
 		_interactionState = interactionState;
+		_sceneSnapshotService = sceneSnapshotService;
+		_undoRedoService = undoRedoService;
 	}
 
 	public override string Name => "Entities";
@@ -243,6 +251,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 		PendingDeleteEntities.Clear();
 		CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
+		var deletedEntities = _sceneSnapshotService.CaptureDeletedEntities(scene, PendingDeleteEntities);
 		scene.World.DestroyEntity(entity);
 
 		for (var i = 0; i < PendingDeleteEntities.Count; i++)
@@ -256,6 +265,12 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		if (EditorGui.HasSelectedEntity && PendingDeleteEntities.Contains(EditorGui.SelectedEntity))
 		{
 			EditorGui.ClearEntitySelection();
+		}
+
+		if (deletedEntities.Count > 0)
+		{
+			_undoRedoService.BeginCapture("Delete Entity");
+			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
 		}
 
 		_interactionState.MarkSceneDirty();

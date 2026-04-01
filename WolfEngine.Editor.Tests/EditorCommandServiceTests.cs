@@ -16,31 +16,31 @@ public sealed class EditorCommandServiceTests
 	{
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, true, false, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, true, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.NewScene));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, true, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, false, true, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.SaveScene));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, true, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, false, false, true, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.RefreshAssetDatabase));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(false, false, false, false, true, false, false, false),
+				new EditorShortcutSnapshot(false, false, false, false, false, false, false, true, false, false, false),
 				EditorFocusedWindow.Entities),
 			Is.EqualTo(EditorShortcutCommand.DeleteFocusedSelection));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, false, false, true, false, true),
+				new EditorShortcutSnapshot(true, false, false, false, false, false, false, false, true, false, true),
 				EditorFocusedWindow.Assets),
 			Is.EqualTo(EditorShortcutCommand.DeleteFocusedSelection));
 	}
@@ -49,10 +49,32 @@ public sealed class EditorCommandServiceTests
 	public void ShortcutResolver_SuppressesShortcutsWhileTyping()
 	{
 		var command = EditorShortcutCommandResolver.Resolve(
-			new EditorShortcutSnapshot(true, true, true, true, true, true, true, true),
+			new EditorShortcutSnapshot(true, true, true, true, true, true, true, true, true, true, true),
 			EditorFocusedWindow.Entities);
 
 		Assert.That(command, Is.EqualTo(EditorShortcutCommand.None));
+	}
+
+	[Test]
+	public void ShortcutResolver_MapsUndoAndRedo()
+	{
+		Assert.That(
+			EditorShortcutCommandResolver.Resolve(
+				new EditorShortcutSnapshot(true, false, true, false, false, false, false, false, false, false, false),
+				EditorFocusedWindow.None),
+			Is.EqualTo(EditorShortcutCommand.Undo));
+
+		Assert.That(
+			EditorShortcutCommandResolver.Resolve(
+				new EditorShortcutSnapshot(true, true, true, false, false, false, false, false, false, false, true),
+				EditorFocusedWindow.None),
+			Is.EqualTo(EditorShortcutCommand.Redo));
+
+		Assert.That(
+			EditorShortcutCommandResolver.Resolve(
+				new EditorShortcutSnapshot(true, false, false, true, false, false, false, false, false, false, false),
+				EditorFocusedWindow.None),
+			Is.EqualTo(EditorShortcutCommand.Redo));
 	}
 
 	[Test]
@@ -179,7 +201,11 @@ public sealed class EditorCommandServiceTests
 	public void EntitiesWindow_DeleteSelectedEntity_RemovesEntityAndMarksSceneDirty()
 	{
 		var interactionState = new EditorInteractionState();
-		var window = new EntitiesWindow(Substitute.For<IIconManager>(), interactionState);
+		var window = new EntitiesWindow(
+			Substitute.For<IIconManager>(),
+			interactionState,
+			Substitute.For<IEditorSceneSnapshotService>(),
+			Substitute.For<IEditorUndoRedoService>());
 		var scene = new EditorScene();
 		var entity = scene.World.CreateEntity("Entity");
 		EditorGui.SelectEntity(entity, scene.World, requestFocus: false);
@@ -258,7 +284,8 @@ public sealed class EditorCommandServiceTests
 			projectService,
 			playSession,
 			new EditorInteractionState(),
-			Substitute.For<IEditorNotificationService>());
+			Substitute.For<IEditorNotificationService>(),
+			Substitute.For<IEditorUndoRedoService>());
 	}
 
 	private sealed record CommandFixture(
@@ -266,7 +293,8 @@ public sealed class EditorCommandServiceTests
 		IEditorProjectService ProjectService,
 		IEditorPlaySession PlaySession,
 		EditorInteractionState InteractionState,
-		IEditorNotificationService NotificationService)
+		IEditorNotificationService NotificationService,
+		IEditorUndoRedoService UndoRedoService)
 	{
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
@@ -274,6 +302,7 @@ public sealed class EditorCommandServiceTests
 			PlaySession,
 			InteractionState,
 			NotificationService,
+			UndoRedoService,
 			new InputSystem());
 	}
 

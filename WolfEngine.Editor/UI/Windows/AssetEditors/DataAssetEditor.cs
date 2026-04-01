@@ -15,15 +15,26 @@ public sealed class DataAssetEditor
 	private readonly IEditorProjectService _projectService;
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+	private readonly IEditorAssetSnapshotService _assetSnapshotService;
+	private readonly IEditorUndoRedoService _undoRedoService;
+	private DataAssetLoadResult? _loadedAsset;
+	private Guid? _loadedAssetId;
+	private AssetDatabaseEntry? _loadedAssetEntry;
+	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
+	private bool _hasPendingChanges;
 
 	public DataAssetEditor(
 		IEditorProjectService projectService,
 		IDataAssetStore dataAssetStore,
-		IPropertyDrawerRegistry propertyDrawerRegistry)
+		IPropertyDrawerRegistry propertyDrawerRegistry,
+		IEditorAssetSnapshotService assetSnapshotService,
+		IEditorUndoRedoService undoRedoService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
+		_assetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService));
+		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -34,15 +45,12 @@ public sealed class DataAssetEditor
 			return;
 		}
 
-		DataAssetLoadResult? loadedAsset;
-		try
+		if (_loadedAssetId.HasValue && _loadedAssetId.Value != asset.Id)
 		{
-			loadedAsset = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			CommitPendingChanges();
 		}
-		catch
-		{
-			loadedAsset = null;
-		}
+
+		var loadedAsset = EnsureLoaded(asset);
 
 		if (loadedAsset is null)
 		{
@@ -52,8 +60,36 @@ public sealed class DataAssetEditor
 
 		if (DrawObjectProperties(loadedAsset.Asset, loadedAsset.DataAssetType, includeHeader: false))
 		{
-			_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), loadedAsset.DataAssetType, loadedAsset.Asset);
-			_projectService.RefreshAssetSource(asset.RelativeSourcePath);
+			BeginPendingChange(asset);
+			_hasPendingChanges = true;
+		}
+
+		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
+		{
+			CommitPendingChanges();
+		}
+	}
+
+	private DataAssetLoadResult? EnsureLoaded(AssetDatabaseEntry asset)
+	{
+		if (_loadedAssetId == asset.Id && _loadedAsset is not null)
+		{
+			return _loadedAsset;
+		}
+
+		try
+		{
+			_loadedAssetId = asset.Id;
+			_loadedAssetEntry = asset;
+			_loadedAsset = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			return _loadedAsset;
+		}
+		catch
+		{
+			_loadedAssetId = asset.Id;
+			_loadedAssetEntry = asset;
+			_loadedAsset = null;
+			return null;
 		}
 	}
 
@@ -161,5 +197,39 @@ public sealed class DataAssetEditor
 	private static void DrawUnsupportedProperty(string propertyName, Type propertyType)
 	{
 		ImGui.TextDisabled($"{propertyName}: Unsupported ({propertyType.Name})");
+	}
+
+	private void BeginPendingChange(AssetDatabaseEntry asset)
+	{
+		if (_pendingBeforeSnapshot.HasValue)
+		{
+			return;
+		}
+
+		_pendingBeforeSnapshot = _assetSnapshotService.CaptureDataAssetSnapshot(asset);
+	}
+
+	private void CommitPendingChanges()
+	{
+		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null || _loadedAsset is null)
+		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
+			return;
+		}
+
+		var after = _assetSnapshotService.CaptureDataAssetSnapshot(_loadedAssetEntry, _loadedAsset.DataAssetType, _loadedAsset.Asset);
+		if (string.Equals(before.Json, after.Json, StringComparison.Ordinal))
+		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
+			return;
+		}
+
+		_assetSnapshotService.SaveDataAsset(_loadedAssetEntry, _loadedAsset.DataAssetType, _loadedAsset.Asset);
+		_undoRedoService.BeginCapture("Edit Data Asset");
+		_undoRedoService.CommitCapture(new DataAssetEditUndoRedoEntry("Edit Data Asset", before, after));
+		_hasPendingChanges = false;
+		_pendingBeforeSnapshot = null;
 	}
 }

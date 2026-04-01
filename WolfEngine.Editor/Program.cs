@@ -48,6 +48,9 @@ public static class Program
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
 		services.AddSingleton<IEditorInteractionState, EditorInteractionState>();
+		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();
+		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
+		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();
 		services.AddSingleton<IEditorCommandService, EditorCommandService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<IGameplayAssemblyHost>(provider => new GameplayAssemblyHost(() => provider.GetRequiredService<IEditorProjectService>()));

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -32,6 +33,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
     private readonly IEditorInteractionState _interactionState;
+    private readonly IEditorSceneSnapshotService _sceneSnapshotService;
+    private readonly IEditorUndoRedoService _undoRedoService;
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
@@ -43,13 +46,17 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         IPropertyDrawerRegistry propertyDrawerRegistry,
         IProjectTypeCatalog projectTypeCatalog,
         RenderGraph renderGraph,
-        IEditorInteractionState interactionState)
+        IEditorInteractionState interactionState,
+        IEditorSceneSnapshotService sceneSnapshotService,
+        IEditorUndoRedoService undoRedoService)
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
         _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
         _interactionState = interactionState;
+        _sceneSnapshotService = sceneSnapshotService;
+        _undoRedoService = undoRedoService;
     }
 
     public override string Name => "Components";
@@ -125,7 +132,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        DrawGenericComponentEditor(scene.World, entity, componentType, _propertyDrawerRegistry, _interactionState);
+        DrawGenericComponentEditor(scene, scene.World, entity, componentType, _propertyDrawerRegistry, _interactionState);
     }
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
@@ -204,7 +211,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (ImGui.InputText("##value", ref value, 256))
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(NameComponent));
                 name.Name = value;
+                PushComponentEdit("Edit Name", before, CaptureSingleComponentSnapshot(scene, entity, typeof(NameComponent)));
                 interactionState.MarkSceneDirty();
             }
 
@@ -220,7 +229,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             var position = local.LocalPosition;
             if (EditorUIUtility.InputVector3("LocalPosition", ref position))
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
                 world.SetLocalPosition(entity, position);
+                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
                 interactionState.MarkSceneDirty();
             }
 
@@ -228,14 +239,18 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             var eulerDegrees = QuaternionToEulerDegrees(rotation);
             if (EditorUIUtility.InputVector3("Rotation (deg)", ref eulerDegrees))
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
                 world.SetLocalRotation(entity, EulerDegreesToQuaternion(eulerDegrees));
+                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
                 interactionState.MarkSceneDirty();
             }
 
             var scale = local.LocalScale;
             if (EditorUIUtility.InputVector3("LocalScale", ref scale))
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
                 world.SetLocalScale(entity, scale);
+                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
                 interactionState.MarkSceneDirty();
             }
 
@@ -259,7 +274,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 meshRenderer.MeshAsset));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Mesh> meshAsset)
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
                 meshRenderer.AssignMeshAsset(meshAsset);
+                PushComponentEdit("Edit Mesh Renderer", before, CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer)));
                 interactionState.MarkSceneDirty();
             }
 
@@ -269,7 +286,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 meshRenderer.MaterialAsset));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
                 meshRenderer.AssignMaterialAsset(materialAsset, renderGraph);
+                PushComponentEdit("Edit Mesh Renderer", before, CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer)));
                 interactionState.MarkSceneDirty();
             }
 
@@ -287,35 +306,45 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             }
 
             ref var light = ref Unsafe.As<T, Light>(ref component);
+            var before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
             if (EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type))
             {
+                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
                 interactionState.MarkSceneDirty();
             }
 
+            before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
             if (EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity))
             {
+                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
                 interactionState.MarkSceneDirty();
             }
 
             if (light.Type == LightType.Point)
             {
+                before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
                 if (EditorUIUtility.InputFloat(nameof(Light.Range), ref light.Range))
                 {
+                    PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
                     interactionState.MarkSceneDirty();
                 }
             }
 
             var color = light.Color.ToVector4();
+            before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
             if (EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color))
             {
                 light.Color = ColorRGBA.FromVector4(color);
+                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
                 interactionState.MarkSceneDirty();
             }
 
             if (light.Type == LightType.Directional)
             {
+                before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
                 if (EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref light.HorizonFade))
                 {
+                    PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
                     interactionState.MarkSceneDirty();
                 }
             }
@@ -350,7 +379,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 field.GetValueDirect(typedRef)));
             if (drawResult.Handled && drawResult.Changed)
             {
+                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(T));
                 field.SetValueDirect(typedRef, drawResult.Value!);
+                PushComponentEdit($"Edit {typeof(T).Name}", before, CaptureSingleComponentSnapshot(scene, entity, typeof(T)));
                 interactionState.MarkSceneDirty();
             }
         }
@@ -359,7 +390,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGui.PopID();
     }
 
-    private static void DrawGenericComponentEditor(World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, IEditorInteractionState interactionState)
+    private void DrawGenericComponentEditor(EditorScene scene, World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, IEditorInteractionState interactionState)
     {
         object componentValue;
         try
@@ -380,12 +411,42 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue))
         {
+            var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
+            PushComponentEdit($"Edit {componentType.Name}", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
             interactionState.MarkSceneDirty();
         }
 
         ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private SceneComponentSnapshot CaptureSingleComponentSnapshot(EditorScene scene, Entity entity, Type componentType)
+    {
+        return _sceneSnapshotService.CaptureComponent(scene, entity, componentType);
+    }
+
+    private void PushComponentEdit(string description, SceneComponentSnapshot before, SceneComponentSnapshot after)
+    {
+        if (SnapshotsEqual(before, after))
+        {
+            return;
+        }
+
+        _undoRedoService.BeginCapture(description);
+        _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, [before], [after]));
+    }
+
+    private static bool SnapshotsEqual(SceneComponentSnapshot left, SceneComponentSnapshot right)
+    {
+        return left.EntityId == right.EntityId &&
+               string.Equals(left.ComponentTypeId, right.ComponentTypeId, StringComparison.Ordinal) &&
+               string.Equals(NormalizeSnapshotJson(left.Data), NormalizeSnapshotJson(right.Data), StringComparison.Ordinal);
+    }
+
+    private static string NormalizeSnapshotJson(JsonElement data)
+    {
+        return JsonSerializer.Serialize(data, AssetJson.SerializerOptions);
     }
 
     private static bool BeginComponentSection(string label)

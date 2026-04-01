@@ -22,6 +22,8 @@ public interface IEditorCommandService
 	bool RequestLoadScene(Guid assetId);
 	bool SaveScene();
 	bool RefreshAssetDatabase();
+	bool Undo();
+	bool Redo();
 	bool DeleteFocusedSelection();
 	void ProcessShortcuts();
 	void DrawPendingDialogs();
@@ -51,10 +53,15 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IEditorPlaySession _playSession;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorNotificationService _notificationService;
+	private readonly IEditorUndoRedoService _undoRedoService;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
+	private bool _leftShiftDown;
+	private bool _rightShiftDown;
 	private bool _leftSuperDown;
 	private bool _rightSuperDown;
+	private bool _undoPressedThisFrame;
+	private bool _redoPressedThisFrame;
 	private bool _newPressedThisFrame;
 	private bool _savePressedThisFrame;
 	private bool _refreshPressedThisFrame;
@@ -74,6 +81,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		IEditorPlaySession playSession,
 		IEditorInteractionState interactionState,
 		IEditorNotificationService notificationService,
+		IEditorUndoRedoService undoRedoService,
 		IInputSystem inputSystem)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
@@ -81,8 +89,11 @@ public sealed class EditorCommandService : IEditorCommandService
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
 
+		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutRedo", InputActionBinding.KeyY, callback => _redoPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutNew", InputActionBinding.KeyN, callback => _newPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutSave", InputActionBinding.KeyS, callback => _savePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRefresh", InputActionBinding.KeyR, callback => _refreshPressedThisFrame |= callback.Value);
@@ -90,6 +101,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		RegisterTrackedButton(inputSystem, "ShortcutBackspace", InputActionBinding.KeyBackspace, callback => _backspacePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftCtrl", InputActionBinding.KeyLeftControl, callback => _leftCtrlDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRightCtrl", InputActionBinding.KeyRightControl, callback => _rightCtrlDown = callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutLeftShift", InputActionBinding.KeyLeftShift, callback => _leftShiftDown = callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutRightShift", InputActionBinding.KeyRightShift, callback => _rightShiftDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftSuper", InputActionBinding.KeyLeftSuper, callback => _leftSuperDown = callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRightSuper", InputActionBinding.KeyRightSuper, callback => _rightSuperDown = callback.Value);
 	}
@@ -168,6 +181,16 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 	}
 
+	public bool Undo()
+	{
+		return _undoRedoService.Undo();
+	}
+
+	public bool Redo()
+	{
+		return _undoRedoService.Redo();
+	}
+
 	public bool DeleteFocusedSelection()
 	{
 		return _interactionState.FocusedWindow switch
@@ -183,6 +206,9 @@ public sealed class EditorCommandService : IEditorCommandService
 		var io = ImGui.GetIO();
 		var snapshot = new EditorShortcutSnapshot(
 			IsPrimaryModifierDown(),
+			IsShiftDown(),
+			_undoPressedThisFrame,
+			_redoPressedThisFrame,
 			_newPressedThisFrame,
 			_savePressedThisFrame,
 			_refreshPressedThisFrame,
@@ -196,6 +222,12 @@ public sealed class EditorCommandService : IEditorCommandService
 
 		switch (shortcut)
 		{
+			case EditorShortcutCommand.Undo:
+				Undo();
+				break;
+			case EditorShortcutCommand.Redo:
+				Redo();
+				break;
 			case EditorShortcutCommand.NewScene:
 				RequestNewScene();
 				break;
@@ -210,6 +242,8 @@ public sealed class EditorCommandService : IEditorCommandService
 				break;
 		}
 
+		_undoPressedThisFrame = false;
+		_redoPressedThisFrame = false;
 		_newPressedThisFrame = false;
 		_savePressedThisFrame = false;
 		_refreshPressedThisFrame = false;
@@ -321,6 +355,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	{
 		try
 		{
+			_undoRedoService.Clear();
 			switch (replacement.Kind)
 			{
 				case PendingSceneReplacementKind.NewScene:
@@ -355,6 +390,11 @@ public sealed class EditorCommandService : IEditorCommandService
 		return _leftCtrlDown || _rightCtrlDown || _leftSuperDown || _rightSuperDown;
 	}
 
+	private bool IsShiftDown()
+	{
+		return _leftShiftDown || _rightShiftDown;
+	}
+
 	private void DrawShortcutDiagnostics()
 	{
 		ImGui.SetNextWindowPos(new System.Numerics.Vector2(20.0f, 60.0f), ImGuiCond.FirstUseEver);
@@ -365,6 +405,9 @@ public sealed class EditorCommandService : IEditorCommandService
 			ImGui.TextUnformatted($"Resolved Command: {_lastShortcutCommand}");
 			ImGui.Separator();
 			ImGui.TextUnformatted($"Primary Modifier Down: {_lastShortcutSnapshot.PrimaryModifierDown}");
+			ImGui.TextUnformatted($"Shift Down: {_lastShortcutSnapshot.ShiftDown}");
+			ImGui.TextUnformatted($"Z Pressed: {_lastShortcutSnapshot.UndoPressed}");
+			ImGui.TextUnformatted($"Y Pressed: {_lastShortcutSnapshot.RedoPressed}");
 			ImGui.TextUnformatted($"N Pressed: {_lastShortcutSnapshot.NewPressed}");
 			ImGui.TextUnformatted($"S Pressed: {_lastShortcutSnapshot.SavePressed}");
 			ImGui.TextUnformatted($"R Pressed: {_lastShortcutSnapshot.RefreshPressed}");

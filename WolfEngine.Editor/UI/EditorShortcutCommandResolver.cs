@@ -3,6 +3,8 @@ namespace WolfEngine.Editor.UI;
 internal enum EditorShortcutCommand
 {
 	None,
+	Undo,
+	Redo,
 	NewScene,
 	SaveScene,
 	RefreshAssetDatabase,
@@ -11,6 +13,9 @@ internal enum EditorShortcutCommand
 
 internal readonly record struct EditorShortcutSnapshot(
 	bool PrimaryModifierDown,
+	bool ShiftDown,
+	bool UndoPressed,
+	bool RedoPressed,
 	bool NewPressed,
 	bool SavePressed,
 	bool RefreshPressed,
@@ -30,6 +35,18 @@ internal static class EditorShortcutCommandResolver
 
 		if (snapshot.PrimaryModifierDown)
 		{
+			if (snapshot.UndoPressed)
+			{
+				return snapshot.IsMacOS && snapshot.ShiftDown
+					? EditorShortcutCommand.Redo
+					: EditorShortcutCommand.Undo;
+			}
+
+			if (snapshot.IsMacOS == false && snapshot.RedoPressed)
+			{
+				return EditorShortcutCommand.Redo;
+			}
+
 			if (snapshot.NewPressed)
 			{
 				return EditorShortcutCommand.NewScene;

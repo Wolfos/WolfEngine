@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Linq;
+using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.UI;
 
 namespace WolfEngine.Editor.Projects;
 
@@ -34,14 +36,19 @@ public sealed class EditorProjectService : IEditorProjectService
 {
 	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
+	private readonly IServiceProvider? _serviceProvider;
 	private AssetDatabase _currentAssetDatabase = new();
 	private string? _projectRootPath;
 	private EditorProjectManifest? _projectManifest;
 
-	public EditorProjectService(IProjectAssetPipelineService assetPipelineService, IAssetInstanceRegistry assetInstanceRegistry)
+	public EditorProjectService(
+		IProjectAssetPipelineService assetPipelineService,
+		IAssetInstanceRegistry assetInstanceRegistry,
+		IServiceProvider? serviceProvider = null)
 	{
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
+		_serviceProvider = serviceProvider;
 		_assetInstanceRegistry.Clear();
 	}
 
@@ -149,6 +156,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			_projectManifest = manifest;
 			_assetInstanceRegistry.Clear();
 			ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath));
+			ClearUndoHistory();
 			return true;
 		}
 		catch (Exception ex)
@@ -170,10 +178,12 @@ public sealed class EditorProjectService : IEditorProjectService
 		_projectManifest = null;
 		_currentAssetDatabase = new AssetDatabase();
 		_assetInstanceRegistry.Clear();
+		ClearUndoHistory();
 	}
 
 	public void ReloadAssetDatabase()
 	{
+		ClearUndoHistory();
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = new AssetDatabase();
@@ -186,6 +196,7 @@ public sealed class EditorProjectService : IEditorProjectService
 
 	public void ReloadAssetDatabaseFromIndex()
 	{
+		ClearUndoHistory();
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = new AssetDatabase();
@@ -431,5 +442,10 @@ public sealed class EditorProjectService : IEditorProjectService
 					SpatialCellCount = asset.SceneSummary.SpatialCellCount
 				}
 		};
+	}
+
+	private void ClearUndoHistory()
+	{
+		_serviceProvider?.GetService<IEditorUndoRedoService>()?.Clear();
 	}
 }

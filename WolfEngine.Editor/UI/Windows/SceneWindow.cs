@@ -205,6 +205,7 @@ public class SceneWindow: EditorWindow
             imageMax));
 
         _transformGizmoController.DrawAndHandle(
+            scene,
             world,
             EditorGui.SelectedEntity,
             EditorGui.HasSelectedEntity,
