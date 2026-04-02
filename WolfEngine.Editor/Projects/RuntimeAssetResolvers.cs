@@ -90,6 +90,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 	{
 		var summary = context.Asset.TextureSummary
 		              ?? throw new InvalidOperationException($"Texture node '{context.AssetId}' is missing its texture summary.");
+		var runtimeTextureName = GetRuntimeTextureName(context.AssetId, context.Asset.Name);
 
 		var targetArtifact = context.Asset.Artifacts
 			.Where(artifact => string.Equals(artifact.Kind, "RuntimeTexture", StringComparison.Ordinal))
@@ -98,7 +99,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 		{
 			var runtimeTexture = TextureArtifactSerializer.Read(
 				context.GetAbsolutePath(targetArtifact.RelativePath),
-				context.Asset.Name);
+				runtimeTextureName);
 			return _textureFactory.GetTexture(runtimeTexture);
 		}
 
@@ -106,7 +107,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 		{
 			var runtimeTexture = TextureArtifactSerializer.Read(
 				context.GetAbsolutePath(summary.RelativeRuntimeArtifactPath),
-				context.Asset.Name);
+				runtimeTextureName);
 			return _textureFactory.GetTexture(runtimeTexture);
 		}
 
@@ -114,7 +115,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 		{
 			var importedTexture = ImportedTextureSerializer.Read(
 				context.GetAbsolutePath(summary.RelativeImportedPath),
-				context.Asset.Name);
+				runtimeTextureName);
 			return _textureFactory.GetTexture(importedTexture);
 		}
 
@@ -127,6 +128,13 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 
 		throw new InvalidOperationException(
 			$"Texture node '{context.AssetId}' does not expose a runtime artifact, imported texture, or source file.");
+	}
+
+	private static string GetRuntimeTextureName(Guid assetId, string assetName)
+	{
+		return string.IsNullOrWhiteSpace(assetName)
+			? assetId.ToString("D")
+			: $"{assetId:D}:{assetName}";
 	}
 }
 

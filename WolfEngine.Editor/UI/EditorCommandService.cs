@@ -72,8 +72,6 @@ public sealed class EditorCommandService : IEditorCommandService
 	private IEditorAssetDeletionHandler? _assetDeletionHandler;
 	private PendingSceneReplacement? _pendingSceneReplacement;
 	private bool _openUnsavedScenePopup;
-	private EditorShortcutSnapshot _lastShortcutSnapshot;
-	private EditorShortcutCommand _lastShortcutCommand;
 
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
@@ -217,7 +215,6 @@ public sealed class EditorCommandService : IEditorCommandService
 			io.WantTextInput,
 			OperatingSystem.IsMacOS());
 		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, _interactionState.FocusedWindow);
-		_lastShortcutSnapshot = snapshot;
 		_lastShortcutCommand = shortcut;
 
 		switch (shortcut)
@@ -309,7 +306,6 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		ImGui.EndPopup();
-		DrawShortcutDiagnostics();
 	}
 
 	internal bool ResolvePendingSceneReplacement(PendingSceneReplacementDecision decision)
@@ -393,31 +389,6 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool IsShiftDown()
 	{
 		return _leftShiftDown || _rightShiftDown;
-	}
-
-	private void DrawShortcutDiagnostics()
-	{
-		ImGui.SetNextWindowPos(new System.Numerics.Vector2(20.0f, 60.0f), ImGuiCond.FirstUseEver);
-		ImGui.SetNextWindowSize(new System.Numerics.Vector2(360.0f, 0.0f), ImGuiCond.FirstUseEver);
-		if (ImGui.Begin("Shortcut Diagnostics"))
-		{
-			ImGui.TextUnformatted($"Focused Window: {_interactionState.FocusedWindow}");
-			ImGui.TextUnformatted($"Resolved Command: {_lastShortcutCommand}");
-			ImGui.Separator();
-			ImGui.TextUnformatted($"Primary Modifier Down: {_lastShortcutSnapshot.PrimaryModifierDown}");
-			ImGui.TextUnformatted($"Shift Down: {_lastShortcutSnapshot.ShiftDown}");
-			ImGui.TextUnformatted($"Z Pressed: {_lastShortcutSnapshot.UndoPressed}");
-			ImGui.TextUnformatted($"Y Pressed: {_lastShortcutSnapshot.RedoPressed}");
-			ImGui.TextUnformatted($"N Pressed: {_lastShortcutSnapshot.NewPressed}");
-			ImGui.TextUnformatted($"S Pressed: {_lastShortcutSnapshot.SavePressed}");
-			ImGui.TextUnformatted($"R Pressed: {_lastShortcutSnapshot.RefreshPressed}");
-			ImGui.TextUnformatted($"Delete Pressed: {_lastShortcutSnapshot.DeletePressed}");
-			ImGui.TextUnformatted($"Backspace Pressed: {_lastShortcutSnapshot.BackspacePressed}");
-			ImGui.TextUnformatted($"Text Input Active: {_lastShortcutSnapshot.IsTextInputActive}");
-			ImGui.TextUnformatted($"Platform IsMacOS: {_lastShortcutSnapshot.IsMacOS}");
-		}
-
-		ImGui.End();
 	}
 
 	private static void RegisterTrackedButton(IInputSystem inputSystem, string name, InputActionBinding binding, Action<InputActionCallback<bool>> handler)

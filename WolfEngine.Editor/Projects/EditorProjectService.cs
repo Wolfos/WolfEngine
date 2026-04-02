@@ -36,6 +36,7 @@ public sealed class EditorProjectService : IEditorProjectService
 {
 	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
+	private readonly IEditorNotificationService? _notificationService;
 	private readonly IServiceProvider? _serviceProvider;
 	private AssetDatabase _currentAssetDatabase = new();
 	private string? _projectRootPath;
@@ -44,10 +45,12 @@ public sealed class EditorProjectService : IEditorProjectService
 	public EditorProjectService(
 		IProjectAssetPipelineService assetPipelineService,
 		IAssetInstanceRegistry assetInstanceRegistry,
+		IEditorNotificationService? notificationService = null,
 		IServiceProvider? serviceProvider = null)
 	{
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
+		_notificationService = notificationService;
 		_serviceProvider = serviceProvider;
 		_assetInstanceRegistry.Clear();
 	}
@@ -136,9 +139,9 @@ public sealed class EditorProjectService : IEditorProjectService
 			return false;
 		}
 
-		if (Directory.Exists(assetsPath) == false || Directory.Exists(libraryPath) == false)
+		if (Directory.Exists(assetsPath) == false)
 		{
-			errorMessage = "Project folder must contain both Assets and Library subfolders.";
+			errorMessage = "Project folder must contain an Assets subfolder.";
 			return false;
 		}
 
@@ -152,10 +155,17 @@ public sealed class EditorProjectService : IEditorProjectService
 		{
 			var manifest = EditorProjectManifestFile.Load(fullProjectRoot);
 			ValidateManifest(fullProjectRoot, manifest);
+			var shouldRebuildAssetDatabase = Directory.Exists(libraryPath) == false;
 			_projectRootPath = fullProjectRoot;
 			_projectManifest = manifest;
 			_assetInstanceRegistry.Clear();
-			ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath));
+			ApplyDatabase(shouldRebuildAssetDatabase
+				? _assetPipelineService.RebuildProject(_projectRootPath)
+				: _assetPipelineService.RefreshProjectIncremental(_projectRootPath));
+			if (shouldRebuildAssetDatabase)
+			{
+				_notificationService?.ReportInfo("Library folder was missing. Rebuilt the asset database from project sources.");
+			}
 			ClearUndoHistory();
 			return true;
 		}

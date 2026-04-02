@@ -1,4 +1,3 @@
-using System;
 using AstcEncoder;
 using BCnEncoder.Encoder;
 using BCnEncoder.Shared;
@@ -9,6 +8,8 @@ namespace WolfEngine.Editor.Projects;
 
 internal static class TextureCompressionCompiler
 {
+	private const float EditorAstcQuality = 80.0f;
+
 	public static Texture CompileD3D12(ImportedTexture importedTexture)
 	{
 		ArgumentNullException.ThrowIfNull(importedTexture.MipLevels);
@@ -18,8 +19,10 @@ internal static class TextureCompressionCompiler
 			: TextureFormat.Bc7Unorm;
 
 		var encoder = new BcEncoder();
+		encoder.Options.IsParallel = true;
+		encoder.Options.TaskCount = Math.Max(1, Environment.ProcessorCount);
 		encoder.OutputOptions.GenerateMipMaps = false;
-		encoder.OutputOptions.Quality = CompressionQuality.Balanced;
+		encoder.OutputOptions.Quality = CompressionQuality.Fast;
 		encoder.OutputOptions.Format = format switch
 		{
 			TextureFormat.Bc5Unorm => CompressionFormat.Bc5,
@@ -54,10 +57,11 @@ internal static class TextureCompressionCompiler
 	{
 		var flags = isSrgb ? AstcencFlags.UsePerceptual : 0;
 		var profile = isSrgb ? AstcencProfile.AstcencPrfLdrSrgb : AstcencProfile.AstcencPrfLdr;
-		var configResult = Astcenc.AstcencConfigInit(profile, 4, 4, 1, 60.0f, flags, out var config);
+		var configResult = Astcenc.AstcencConfigInit(profile, 4, 4, 1, EditorAstcQuality, flags, out var config);
 		EnsureSuccess(configResult, "initialize ASTC config");
 
-		var allocResult = Astcenc.AstcencContextAlloc(ref config, 1, out var context);
+		var threadCount = (uint)Math.Max(1, Environment.ProcessorCount);
+		var allocResult = Astcenc.AstcencContextAlloc(ref config, threadCount, out var context);
 		EnsureSuccess(allocResult, "allocate ASTC context");
 
 		try

@@ -77,7 +77,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="AstcEncoderCSharp" Version="5.3.0" />
+      <PackageReference Include="AstcEncoderCSharp-WolfEngine" Version="0.0.0-alpha.0.38" />
       <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     </ItemGroup>
 

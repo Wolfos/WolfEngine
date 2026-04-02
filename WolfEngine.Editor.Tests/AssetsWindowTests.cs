@@ -299,6 +299,38 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void OpenProject_RebuildsAssetDatabaseWhenLibraryIsMissing()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineOpenProjectRebuildTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "OpenProjectRebuildTests");
+		Directory.Delete(Path.Combine(projectRoot, "Library"), recursive: true);
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var notifications = new EditorNotificationService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry(), notifications);
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			Assert.That(pipeline.RebuildProjectCalls, Is.EqualTo(1));
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(0));
+			Assert.That(Directory.Exists(Path.Combine(projectRoot, "Library")), Is.True);
+			Assert.That(notifications.TryDequeue(out var notification), Is.True);
+			Assert.That(notification.Kind, Is.EqualTo(EditorNotificationKind.Info));
+			Assert.That(notification.Message, Does.Contain("Library folder was missing"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
 	public void OpenProject_LoadsGameplayProjectPathFromManifest()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineOpenProjectGameplayTests", Guid.NewGuid().ToString("N"));
@@ -329,7 +361,6 @@ public sealed class AssetsWindowTests
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineLegacyProjectTests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets"));
-		Directory.CreateDirectory(Path.Combine(projectRoot, "Library"));
 
 		var projectService = new EditorProjectService(new TrackingProjectAssetPipelineService(), new TestAssetInstanceRegistry());
 
@@ -346,6 +377,30 @@ public sealed class AssetsWindowTests
 				Directory.Delete(projectRoot, recursive: true);
 			}
 		}
+	}
+
+	[Test]
+	public void OpenProject_RebuildsLibraryAndPreservesAssetsWhenLibraryIsMissing()
+	{
+		var notifications = new EditorNotificationService();
+		using var environment = new EditorProjectTestEnvironment(notifications);
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		environment.ProjectService.CloseProject();
+		Directory.Delete(Path.Combine(environment.ProjectRootPath, "Library"), recursive: true);
+
+		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
+
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId.Value, out var rebuiltAsset), Is.True);
+		Assert.That(rebuiltAsset.RelativeSourcePath, Is.EqualTo(originalAsset.RelativeSourcePath));
+		Assert.That(Directory.Exists(Path.Combine(environment.ProjectRootPath, "Library")), Is.True);
+		Assert.That(File.Exists(Path.Combine(environment.ProjectRootPath, "Library", AssetPipelinePaths.SqliteFileName)), Is.True);
+		Assert.That(Directory.Exists(Path.Combine(environment.ProjectRootPath, "Library", AssetPipelinePaths.ImportedFolderName)), Is.True);
+		Assert.That(Directory.Exists(Path.Combine(environment.ProjectRootPath, "Library", AssetPipelinePaths.ArtifactsFolderName)), Is.True);
+		Assert.That(notifications.TryDequeue(out var notification), Is.True);
+		Assert.That(notification.Kind, Is.EqualTo(EditorNotificationKind.Info));
 	}
 
 	[Test]
@@ -500,7 +555,7 @@ public sealed class AssetsWindowTests
 
 	private sealed class EditorProjectTestEnvironment : IDisposable
 	{
-		public EditorProjectTestEnvironment()
+		public EditorProjectTestEnvironment(IEditorNotificationService? notificationService = null)
 		{
 			ParentDirectory = Path.Combine(Path.GetTempPath(), "WolfEngineAssetsWindowProjectTests", Guid.NewGuid().ToString("N"));
 			Directory.CreateDirectory(ParentDirectory);
@@ -516,7 +571,7 @@ public sealed class AssetsWindowTests
 				new MaterialAssetStore(),
 				Substitute.For<IThreeDFileImporter>());
 			PipelineService = pipelineService;
-			ProjectService = new EditorProjectService(pipelineService, Registry);
+			ProjectService = new EditorProjectService(pipelineService, Registry, notificationService);
 			if (ProjectService.CreateProject(ParentDirectory, "Project", out var errorMessage) == false)
 			{
 				throw new AssertionException(errorMessage);
@@ -586,6 +641,7 @@ public sealed class AssetsWindowTests
 	private sealed class TrackingProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		public int RefreshProjectCalls { get; private set; }
+		public int RebuildProjectCalls { get; private set; }
 		public int RefreshProjectIncrementalCalls { get; private set; }
 		public int RemoveDeletedSourceCalls { get; private set; }
 		public int RemoveDeletedSourcesUnderFolderCalls { get; private set; }
@@ -602,6 +658,13 @@ public sealed class AssetsWindowTests
 		public AssetDatabase RefreshProject(string projectRootPath)
 		{
 			RefreshProjectCalls++;
+			return new AssetDatabase();
+		}
+
+		public AssetDatabase RebuildProject(string projectRootPath)
+		{
+			RebuildProjectCalls++;
+			InitializeProject(projectRootPath);
 			return new AssetDatabase();
 		}
 
@@ -657,6 +720,7 @@ public sealed class AssetsWindowTests
 		public void ResetCounters()
 		{
 			RefreshProjectCalls = 0;
+			RebuildProjectCalls = 0;
 			RefreshProjectIncrementalCalls = 0;
 			RemoveDeletedSourceCalls = 0;
 			RemoveDeletedSourcesUnderFolderCalls = 0;
