@@ -392,6 +392,20 @@ public sealed class EditorProjectService : IEditorProjectService
 			RelativeAssetPath = asset.RelativeAssetPath,
 			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
+			Artifacts = asset.Artifacts.Select(artifact => new AssetArtifactRecord
+			{
+				NodeId = artifact.NodeId,
+				ArtifactKey = artifact.ArtifactKey,
+				Kind = artifact.Kind,
+				Target = artifact.Target,
+				RelativePath = artifact.RelativePath,
+				ContentHash = artifact.ContentHash,
+				ByteSize = artifact.ByteSize,
+				ChunkIndex = artifact.ChunkIndex,
+				ChunkCount = artifact.ChunkCount,
+				StreamGroup = artifact.StreamGroup,
+				MetadataJson = artifact.MetadataJson
+			}).ToList(),
 			TextureSummary = asset.TextureSummary is null
 				? null
 				: new TextureAssetSummary

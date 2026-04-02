@@ -8,6 +8,7 @@ namespace WolfEngine;
 public interface ITextureFactory
 {
 	Texture GetTexture(ImportedTexture importedTexture);
+	Texture GetTexture(Texture texture);
 	Texture GetWhiteTexture();
 	Texture GetBlackTexture();
 	Texture GetNeutralNormalTexture();
@@ -31,22 +32,32 @@ public sealed class TextureFactory : ITextureFactory
 
 	public Texture GetTexture(ImportedTexture importedTexture)
 	{
-		if (importedTexture.PixelData is null)
+		if (importedTexture.MipLevels is null || importedTexture.MipLevels.Length == 0)
 		{
-			throw new ArgumentException("Imported texture must contain pixel data.", nameof(importedTexture));
+			throw new ArgumentException("Imported texture must contain mip data.", nameof(importedTexture));
 		}
 
-		var texture = _cache.GetOrAdd(importedTexture.NameOrPath, _ =>
+		return GetTexture(new Texture(
+			importedTexture.NameOrPath,
+			importedTexture.Width,
+			importedTexture.Height,
+			importedTexture.IsSrgb,
+			TextureFormat.Rgba8Unorm,
+			importedTexture.MipLevels));
+	}
+
+	public Texture GetTexture(Texture texture)
+	{
+		ArgumentNullException.ThrowIfNull(texture);
+
+		var cached = _cache.GetOrAdd(texture.Name, _ => texture);
+		if (ReferenceEquals(cached, texture) == false)
 		{
-			return new Texture(
-				importedTexture.NameOrPath,
-				importedTexture.Width,
-				importedTexture.Height,
-				importedTexture.IsSrgb,
-				importedTexture.PixelData);
-		});
-		_renderGraph.EnsureTextureResources(texture);
-		return texture;
+			cached.ApplyTextureData(texture.Width, texture.Height, texture.IsSrgb, texture.Format, texture.MipLevels);
+		}
+
+		_renderGraph.EnsureTextureResources(cached);
+		return cached;
 	}
 
 	public Texture GetWhiteTexture()
@@ -57,8 +68,7 @@ public sealed class TextureFactory : ITextureFactory
 			return _whiteTexture;
 		}
 
-		var pixels = new byte[] { 255, 255, 255, 255 };
-		var texture = new Texture("white_fallback", 1, 1, true, pixels);
+		var texture = new Texture("white_fallback", 1, 1, true, TextureFormat.Rgba8Unorm, [new TextureMipData(1, 1, [255, 255, 255, 255])]);
 		_renderGraph.EnsureTextureResources(texture);
 		_whiteTexture = texture;
 		return texture;
@@ -72,8 +82,7 @@ public sealed class TextureFactory : ITextureFactory
 			return _blackTexture;
 		}
 
-		var pixels = new byte[] { 0, 0, 0, 255 };
-		var texture = new Texture("black_fallback", 1, 1, true, pixels);
+		var texture = new Texture("black_fallback", 1, 1, true, TextureFormat.Rgba8Unorm, [new TextureMipData(1, 1, [0, 0, 0, 255])]);
 		_renderGraph.EnsureTextureResources(texture);
 		_blackTexture = texture;
 		return texture;
@@ -87,8 +96,7 @@ public sealed class TextureFactory : ITextureFactory
 			return _neutralNormalTexture;
 		}
 
-		var pixels = new byte[] { 128, 128, 255, 255 };
-		var texture = new Texture("neutral_normal_fallback", 1, 1, false, pixels);
+		var texture = new Texture("neutral_normal_fallback", 1, 1, false, TextureFormat.Rgba8Unorm, [new TextureMipData(1, 1, [128, 128, 255, 255])]);
 		_renderGraph.EnsureTextureResources(texture);
 		_neutralNormalTexture = texture;
 		return texture;

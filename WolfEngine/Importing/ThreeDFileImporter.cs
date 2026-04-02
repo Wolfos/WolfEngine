@@ -475,9 +475,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
             $"embedded_{embeddedIndex}",
             width,
             height,
-            4,
             StbImageLoader.IsSrgb(semantic),
-            dest);
+            semantic,
+            [new Rendering.TextureMipData(width, height, dest)]);
     }
 
     private static unsafe void BuildRootNodes(

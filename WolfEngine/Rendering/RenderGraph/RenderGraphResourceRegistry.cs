@@ -22,6 +22,8 @@ public sealed class RenderGraphResourceRegistry
 			Usage = descriptor.Usage;
 			ClearColor = descriptor.ClearColor;
 			DepthClear = descriptor.DepthClear;
+			MipLevels = descriptor.MipLevels;
+			IsSrgb = descriptor.IsSrgb;
 		}
 
 		public int Width { get; }
@@ -30,6 +32,8 @@ public sealed class RenderGraphResourceRegistry
 		public TextureUsage Usage { get; }
 		public ColorRGBA ClearColor { get; }
 		public float DepthClear { get; }
+		public int MipLevels { get; }
+		public bool IsSrgb { get; }
 
 		public bool Equals(TexturePoolKey other)
 		{
@@ -37,13 +41,15 @@ public sealed class RenderGraphResourceRegistry
 			       Height == other.Height &&
 			       Format == other.Format &&
 			       Usage == other.Usage &&
+			       MipLevels == other.MipLevels &&
+			       IsSrgb == other.IsSrgb &&
 			       ClearColor.Equals(other.ClearColor) &&
 			       DepthClear.Equals(other.DepthClear);
 		}
 
 		public override bool Equals(object? obj) => obj is TexturePoolKey other && Equals(other);
 
-		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage, ClearColor, DepthClear);
+		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage, MipLevels, IsSrgb, ClearColor, DepthClear);
 	}
 
 	private readonly struct TransientPoolEntry

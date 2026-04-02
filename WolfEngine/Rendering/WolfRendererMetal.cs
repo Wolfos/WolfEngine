@@ -579,16 +579,18 @@ internal unsafe class WolfRendererMetal : IRenderer
             throw new ArgumentNullException(nameof(texture));
         }
 
-        if (texture.PixelData is null || texture.PixelData.Length == 0)
+        if (texture.MipLevels is null || texture.MipLevels.Length == 0)
         {
-            throw new ArgumentException("Texture must contain pixel data.", nameof(texture));
+            throw new ArgumentException("Texture must contain mip data.", nameof(texture));
         }
 
         var descriptor = new TextureDescriptor(
             texture.Width,
             texture.Height,
-            TextureFormat.Rgba8Unorm,
-            TextureUsage.ShaderResource);
+            texture.Format,
+            TextureUsage.ShaderResource,
+            mipLevels: texture.MipCount,
+            isSrgb: texture.IsSrgb);
 
         var gfxTexture = _gfxDevice.CreateTexture(descriptor);
         if (gfxTexture is not MetalTexture metalTexture)
@@ -762,36 +764,28 @@ internal unsafe class WolfRendererMetal : IRenderer
     
     private static void UploadTextureData(MTLTexture texture, Texture source)
     {
-        var bytesPerPixel = GetBytesPerPixel(texture.PixelFormat);
-        var expectedBytes = source.Width * source.Height * bytesPerPixel;
-        if (source.PixelData.Length < expectedBytes)
+        for (var mipLevel = 0; mipLevel < source.MipLevels.Length; mipLevel++)
         {
-            throw new ArgumentException(
-                $"Texture pixel data is smaller than the expected size for {texture.PixelFormat}.",
-                nameof(source));
-        }
+            var mip = source.MipLevels[mipLevel];
+            var expectedBytes = TextureFormatUtilities.GetMipDataSize(source.Format, mip.Width, mip.Height);
+            if (mip.Data.Length < expectedBytes)
+            {
+                throw new ArgumentException(
+                    $"Texture mip data is smaller than the expected size for {source.Format}.",
+                    nameof(source));
+            }
 
-        var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
-        var size = new MTLSize { width = (ulong)source.Width, height = (ulong)source.Height, depth = 1 };
-        var region = new MTLRegion { origin = origin, size = size };
-        var bytesPerRow = (ulong)(source.Width * bytesPerPixel);
+            var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
+            var size = new MTLSize { width = (ulong)mip.Width, height = (ulong)mip.Height, depth = 1 };
+            var region = new MTLRegion { origin = origin, size = size };
+            var bytesPerRow = (ulong)TextureFormatUtilities.GetBytesPerRow(source.Format, mip.Width);
 
-        fixed (byte* ptr = source.PixelData)
-        {
-            texture.ReplaceRegion(region, 0, (IntPtr)ptr, bytesPerRow);
+            fixed (byte* ptr = mip.Data)
+            {
+                texture.ReplaceRegion(region, (ulong)mipLevel, (IntPtr)ptr, bytesPerRow);
+            }
         }
     }
-
-    private static int GetBytesPerPixel(MTLPixelFormat format) => format switch
-    {
-        MTLPixelFormat.RGBA8Unorm => 4,
-        MTLPixelFormat.BGRA8Unorm => 4,
-        MTLPixelFormat.RGBA8UnormsRGB => 4,
-        MTLPixelFormat.BGRA8UnormsRGB => 4,
-        MTLPixelFormat.RGBA16Float => 8,
-        MTLPixelFormat.RGBA32Float => 16,
-        _ => throw new InvalidOperationException($"Unsupported pixel format for upload: {format}.")
-    };
 
     private void EnsurePackedGeometryBuffers()
     {

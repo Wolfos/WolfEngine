@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
@@ -89,17 +90,29 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 	{
 		var summary = context.Asset.TextureSummary
 		              ?? throw new InvalidOperationException($"Texture node '{context.AssetId}' is missing its texture summary.");
+
+		var targetArtifact = context.Asset.Artifacts
+			.Where(artifact => string.Equals(artifact.Kind, "RuntimeTexture", StringComparison.Ordinal))
+			.FirstOrDefault(artifact => string.Equals(artifact.Target, _targetProvider.CurrentTarget, StringComparison.OrdinalIgnoreCase));
+		if (targetArtifact is not null)
+		{
+			var runtimeTexture = TextureArtifactSerializer.Read(
+				context.GetAbsolutePath(targetArtifact.RelativePath),
+				context.Asset.Name);
+			return _textureFactory.GetTexture(runtimeTexture);
+		}
+
 		if (string.IsNullOrWhiteSpace(summary.RelativeRuntimeArtifactPath) == false)
 		{
-			var importedTexture = TextureRawImageSerializer.Read(
+			var runtimeTexture = TextureArtifactSerializer.Read(
 				context.GetAbsolutePath(summary.RelativeRuntimeArtifactPath),
 				context.Asset.Name);
-			return _textureFactory.GetTexture(importedTexture);
+			return _textureFactory.GetTexture(runtimeTexture);
 		}
 
 		if (string.IsNullOrWhiteSpace(summary.RelativeImportedPath) == false)
 		{
-			var importedTexture = TextureRawImageSerializer.Read(
+			var importedTexture = ImportedTextureSerializer.Read(
 				context.GetAbsolutePath(summary.RelativeImportedPath),
 				context.Asset.Name);
 			return _textureFactory.GetTexture(importedTexture);

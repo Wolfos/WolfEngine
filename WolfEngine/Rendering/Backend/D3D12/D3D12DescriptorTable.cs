@@ -508,12 +508,14 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			? Format.FormatR32Float
 			: texture.Descriptor.Format switch
 			{
-				TextureFormat.Bgra8Unorm => Format.FormatB8G8R8A8Unorm,
-				TextureFormat.Rgba8Unorm => Format.FormatR8G8B8A8Unorm,
+				TextureFormat.Bgra8Unorm => texture.Descriptor.IsSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
+				TextureFormat.Rgba8Unorm => texture.Descriptor.IsSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
 				TextureFormat.Rg16Float => Format.FormatR16G16Float,
 				TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 				TextureFormat.R32Float => Format.FormatR32Float,
 				TextureFormat.D32Float => Format.FormatR32Float,
+				TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
+				TextureFormat.Bc7Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 				_ => Format.FormatUnknown
 			};
 		var desc = new ShaderResourceViewDesc
@@ -525,7 +527,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		desc.Anonymous.Texture2D = new Tex2DSrv
 		{
 			MostDetailedMip = 0,
-			MipLevels = 1,
+			MipLevels = (uint)texture.Descriptor.MipLevels,
 			ResourceMinLODClamp = 0.0f
 		};
 		return desc;
@@ -554,11 +556,13 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 	{
 		var format = texture.Descriptor.Format switch
 		{
-			TextureFormat.Bgra8Unorm => Format.FormatB8G8R8A8Unorm,
-			TextureFormat.Rgba8Unorm => Format.FormatR8G8B8A8Unorm,
+			TextureFormat.Bgra8Unorm => texture.Descriptor.IsSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
+			TextureFormat.Rgba8Unorm => texture.Descriptor.IsSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
 			TextureFormat.Rg16Float => Format.FormatR16G16Float,
 			TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 			TextureFormat.R32Float => Format.FormatR32Float,
+			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
+			TextureFormat.Bc7Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 			_ => Format.FormatUnknown
 		};
 		var desc = new UnorderedAccessViewDesc

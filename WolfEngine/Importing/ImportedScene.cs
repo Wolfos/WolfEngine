@@ -40,10 +40,14 @@ public record struct ImportedTexture(
     string NameOrPath,
     int Width,
     int Height,
-    int Channels,
     bool IsSrgb,
-    byte[] PixelData
-);
+    TextureSemantic Semantic,
+    TextureMipData[] MipLevels)
+{
+    public int Channels => 4;
+    public int MipCount => MipLevels?.Length ?? 0;
+    public byte[] PixelData => MipLevels is { Length: > 0 } ? MipLevels[0].Data : [];
+}
 
 public record ImportedNode(
     string Name,
