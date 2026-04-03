@@ -228,16 +228,21 @@ public class WolfEngineEditor
 
 	private void PublishSnapshot()
 	{
-		ref var camera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
+		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
 		var viewportRenderState = _viewportStateBus.GetRenderState();
 		var renderSize = viewportRenderState.RenderSizePixels;
-		if (renderSize.X > 0 && renderSize.Y > 0 && camera.ScreenResolution != renderSize)
+		if (renderSize.X > 0 && renderSize.Y > 0 && editorCamera.ScreenResolution != renderSize)
 		{
-			camera.ScreenResolution = renderSize;
-			camera.SetPerspective(camera.Fov);
+			editorCamera.ScreenResolution = renderSize;
+			editorCamera.SetPerspective(editorCamera.Fov);
 		}
 
-		ref var cameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
+		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
+		var (camera, cameraWorldTransform) = GetViewportCamera(
+			_playSession.State,
+			_currentScene,
+			editorCamera,
+			editorCameraWorldTransform);
 		_cameraContext.Publish(camera, cameraWorldTransform);
 		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, GetConfig(), _renderWorlds);
 	}
@@ -436,13 +441,55 @@ public class WolfEngineEditor
 
 	private (WorldTag WorldMask, SystemExecutionGroup GroupMask) GetExecutionMask()
 	{
-		return _playSession.State switch
+		return GetExecutionMask(_playSession.State);
+	}
+
+	internal static (WorldTag WorldMask, SystemExecutionGroup GroupMask) GetExecutionMask(EditorPlayState playState)
+	{
+		return playState switch
 		{
 			EditorPlayState.Edit => (WorldTag.Editor | WorldTag.Authoring, SystemExecutionGroup.Shared),
-			EditorPlayState.Playing => (WorldTag.Editor | WorldTag.Game, SystemExecutionGroup.All),
+			EditorPlayState.Playing => (WorldTag.Game, SystemExecutionGroup.All),
 			EditorPlayState.Paused => (WorldTag.Editor | WorldTag.Game, SystemExecutionGroup.Shared),
 			_ => (WorldTag.Editor | WorldTag.Authoring, SystemExecutionGroup.Shared)
 		};
+	}
+
+	internal static (Camera Camera, WorldTransform CameraWorldTransform) GetViewportCamera(
+		EditorPlayState playState,
+		EditorScene scene,
+		in Camera editorCamera,
+		in WorldTransform editorCameraWorldTransform)
+	{
+		if (playState == EditorPlayState.Playing &&
+		    TryGetFirstActiveCamera(scene.World, out var runtimeCamera, out var runtimeCameraWorldTransform))
+		{
+			return (runtimeCamera, runtimeCameraWorldTransform);
+		}
+
+		return (editorCamera, editorCameraWorldTransform);
+	}
+
+	private static bool TryGetFirstActiveCamera(
+		World world,
+		out Camera camera,
+		out WorldTransform cameraWorldTransform)
+	{
+		foreach (var entry in world.View<Camera, WorldTransform>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			camera = entry.First;
+			cameraWorldTransform = entry.Second;
+			return true;
+		}
+
+		camera = default;
+		cameraWorldTransform = default;
+		return false;
 	}
 
 	private void RegisterGameplaySystems(IEnumerable<ISystem>? systems)
