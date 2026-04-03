@@ -215,7 +215,6 @@ public sealed class EditorCommandService : IEditorCommandService
 			io.WantTextInput,
 			OperatingSystem.IsMacOS());
 		var shortcut = EditorShortcutCommandResolver.Resolve(snapshot, _interactionState.FocusedWindow);
-		_lastShortcutCommand = shortcut;
 
 		switch (shortcut)
 		{
