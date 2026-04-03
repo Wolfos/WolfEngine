@@ -356,6 +356,12 @@ public sealed class RenderGraph
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
 				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
+				var currentResolution = sceneEnabled ? sceneRenderSize : frameBufferSize;
+				if (currentResolution.X > 0 && currentResolution.Y > 0)
+				{
+					Screen.CurrentResolution = currentResolution;
+				}
+
 				_currentSceneRenderSize = sceneRenderSize;
 				var renderSceneToViewport = sceneEnabled;
 				var sceneColorHandle = default(RenderGraphResourceHandle);

@@ -229,14 +229,6 @@ public class WolfEngineEditor
 	private void PublishSnapshot()
 	{
 		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
-		var viewportRenderState = _viewportStateBus.GetRenderState();
-		var renderSize = viewportRenderState.RenderSizePixels;
-		if (renderSize.X > 0 && renderSize.Y > 0 && editorCamera.ScreenResolution != renderSize)
-		{
-			editorCamera.ScreenResolution = renderSize;
-			editorCamera.SetPerspective(editorCamera.Fov);
-		}
-
 		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
 		var (camera, cameraWorldTransform) = GetViewportCamera(
 			_playSession.State,
@@ -537,8 +529,7 @@ public class WolfEngineEditor
 	{
 		var camera = new Camera
 		{
-			ScreenResolution = Screen.CurrentResolution,
-			AutoResolution = false
+			ScreenResolution = Screen.CurrentResolution
 		};
 		camera.SetPerspective(EditorCameraFov);
 

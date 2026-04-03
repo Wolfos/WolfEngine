@@ -17,15 +17,7 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 	public float Fov;
 	public float NearPlane;
 	public float FarPlane;
-	private byte _autoResolutionState;
 
-	public bool AutoResolution
-	{
-		get => _autoResolutionState != 1;
-		set => _autoResolutionState = value ? (byte)2 : (byte)1;
-	}
-	
-	
 	public void SetPerspective(float fov)
 	{
 		if (fov < 1)
@@ -44,7 +36,11 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 		{
 			FarPlane = DefaultFarPlane;
 		}
-		
+
+		ScreenResolution = new Int2(
+			Math.Max(ScreenResolution.X, 1),
+			Math.Max(ScreenResolution.Y, 1));
+
 		Perspective =
 			Matrix4x4.CreatePerspectiveFieldOfViewLeftHanded(
 				fov,
