@@ -137,8 +137,7 @@ public sealed class ScenePersistenceTests
 		{
 			ScreenResolution = new Int2(1280, 720),
 			NearPlane = 0.5f,
-			FarPlane = 500.0f,
-			AutoResolution = false
+			FarPlane = 500.0f
 		};
 		camera.SetPerspective(75.0f);
 		scene.World.AddComponent(cameraEntity, camera);
@@ -170,7 +169,6 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedCamera.Fov, Is.EqualTo(75.0f).Within(0.001f));
 		Assert.That(loadedCamera.NearPlane, Is.EqualTo(0.5f));
 		Assert.That(loadedCamera.FarPlane, Is.EqualTo(500.0f));
-		Assert.That(loadedCamera.AutoResolution, Is.False);
 
 		Assert.That(loadedLight.Type, Is.EqualTo(LightType.Point));
 		Assert.That(loadedLight.Intensity, Is.EqualTo(3.5f));

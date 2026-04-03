@@ -114,6 +114,7 @@ public sealed class GpuDrawDatabase
 					record.World,
 					record.World,
 					record.BoundsCenterRadius,
+					record.Mesh,
 					material));
 			}
 		}
@@ -264,6 +265,7 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.World,
 				record.BoundsCenterRadius,
+				record.Mesh,
 				material));
 		}
 
@@ -595,6 +597,7 @@ public readonly struct GpuDrawUpdate
 		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
+		Mesh mesh,
 		Material material)
 	{
 		return new GpuDrawUpdate(
@@ -606,7 +609,7 @@ public readonly struct GpuDrawUpdate
 			previousWorld,
 			world,
 			boundsCenterRadius,
-			null,
+			mesh,
 			material);
 	}
 

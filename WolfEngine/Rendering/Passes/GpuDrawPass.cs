@@ -168,7 +168,6 @@ public sealed class GpuDrawPass
 		_updateData.Clear();
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
-		var reencodeAfterUpdates = false;
 
 		for (var i = 0; i < updateCount; i++)
 		{
@@ -268,12 +267,6 @@ public sealed class GpuDrawPass
 			{
 				AppendStructuralRecord(update, mesh, bucketIndex);
 			}
-			else if (update.Type == GpuDrawUpdateType.UpdateMaterial &&
-			         backendSignals.SupportsIndirectStructuralUpdates &&
-			         activeIndirectCommands is not null)
-			{
-				reencodeAfterUpdates = true;
-			}
 
 			if (materialResources is not null)
 			{
@@ -334,14 +327,6 @@ public sealed class GpuDrawPass
 				emissiveHandle,
 					samplerHandle));
 			}
-
-		if (backendSignals.SupportsIndirectStructuralUpdates &&
-		    reencodeAfterUpdates &&
-		    activeIndirectCommands is not null &&
-		    activeIndirectCommands.Length > 0)
-		{
-			ReencodeAllIndirectCommands(activeIndirectCommands);
-		}
 
 		if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
 		{
@@ -642,7 +627,10 @@ public sealed class GpuDrawPass
 	}
 
 	private static bool IsStructuralUpdateType(GpuDrawUpdateType type) =>
-		type is GpuDrawUpdateType.Add or GpuDrawUpdateType.Remove or GpuDrawUpdateType.UpdateMesh;
+		type is GpuDrawUpdateType.Add
+			or GpuDrawUpdateType.Remove
+			or GpuDrawUpdateType.UpdateMaterial
+			or GpuDrawUpdateType.UpdateMesh;
 
 	private bool ApplyStructuralUpdate(
 		in GpuDrawUpdate update,

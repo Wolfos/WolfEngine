@@ -114,8 +114,7 @@ public sealed class WolfEngineEditorPhysicsTests
 	{
 		var camera = new Camera
 		{
-			ScreenResolution = new(1920, 1080),
-			AutoResolution = false
+			ScreenResolution = new(1920, 1080)
 		};
 		camera.SetPerspective(fov);
 		return camera;
