@@ -41,6 +41,7 @@ public class WolfEngineEditor
 	private readonly IEditorSceneReloadService _sceneReloadService;
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private readonly IEditorNotificationService _notificationService;
+	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
@@ -71,7 +72,8 @@ public class WolfEngineEditor
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorSceneReloadService sceneReloadService,
 		IAssetInstanceRegistry assetInstanceRegistry,
-		IEditorNotificationService notificationService)
+		IEditorNotificationService notificationService,
+		IEditorUndoRedoService undoRedoService)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -90,6 +92,7 @@ public class WolfEngineEditor
 		_sceneReloadService = sceneReloadService ?? throw new ArgumentNullException(nameof(sceneReloadService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 	}
 
 	public void Run()
@@ -360,6 +363,7 @@ public class WolfEngineEditor
 
 		_gameplayAssemblyHost.ApplyPreparedBuild(buildResult);
 		var restoredScene = _sceneReloadService.Restore(snapshot, WorldTag.Authoring);
+		_undoRedoService.Clear();
 		_sceneWorkspace.ReplaceCurrentScene(restoredScene);
 		_playSession.Restart(previousState);
 		_currentScene = _playSession.ActiveScene;

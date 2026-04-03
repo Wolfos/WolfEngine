@@ -14,25 +14,28 @@ public sealed class MaterialAssetEditor
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IMaterialTypeRegistry _materialTypeRegistry;
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
-	private readonly ITextureFactory _textureFactory;
-	private readonly RenderGraph _renderGraph;
+	private readonly IEditorAssetSnapshotService _assetSnapshotService;
+	private readonly IEditorUndoRedoService _undoRedoService;
 	private MaterialAsset? _loadedMaterialAsset;
 	private Guid? _loadedMaterialAssetId;
+	private AssetDatabaseEntry? _loadedAssetEntry;
+	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
+	private bool _hasPendingChanges;
 
 	public MaterialAssetEditor(
 		IEditorProjectService projectService,
 		IMaterialAssetStore materialAssetStore,
 		IMaterialTypeRegistry materialTypeRegistry,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
-		ITextureFactory textureFactory,
-		RenderGraph renderGraph)
+		IEditorAssetSnapshotService assetSnapshotService,
+		IEditorUndoRedoService undoRedoService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_materialTypeRegistry = materialTypeRegistry ?? throw new ArgumentNullException(nameof(materialTypeRegistry));
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
-		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
-		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
+		_assetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService));
+		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -42,6 +45,11 @@ public sealed class MaterialAssetEditor
 			ImGui.TextUnformatted("Generated material");
 			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only in this slice.");
 			return;
+		}
+
+		if (_loadedMaterialAssetId.HasValue && _loadedMaterialAssetId.Value != asset.Id)
+		{
+			CommitPendingChanges();
 		}
 
 		var materialAsset = EnsureMaterialAssetLoaded(asset);
@@ -60,8 +68,9 @@ public sealed class MaterialAssetEditor
 				var isSelected = descriptor.Type == materialAsset.MaterialType;
 				if (ImGui.Selectable(descriptor.DisplayName, isSelected))
 				{
+					BeginPendingChange(asset);
 					materialAsset.MaterialType = descriptor.Type;
-					SaveMaterialAsset(asset, materialAsset);
+					_hasPendingChanges = true;
 				}
 
 				if (isSelected)
@@ -76,13 +85,15 @@ public sealed class MaterialAssetEditor
 		DrawBaseColorEditor(asset, materialAsset, properties);
 		DrawFloatEditor("Metallic", properties.MetallicFactor, value =>
 		{
+			BeginPendingChange(asset);
 			properties.MetallicFactor = value;
-			SaveMaterialAsset(asset, materialAsset);
+			_hasPendingChanges = true;
 		});
 		DrawFloatEditor("Roughness", properties.RoughnessFactor, value =>
 		{
+			BeginPendingChange(asset);
 			properties.RoughnessFactor = value;
-			SaveMaterialAsset(asset, materialAsset);
+			_hasPendingChanges = true;
 		});
 
 		if (HasProperty(propertyDefinitions, MaterialPropertyKind.AlphaCutoff))
@@ -95,6 +106,7 @@ public sealed class MaterialAssetEditor
 			};
 			DrawFloatEditor("Alpha Cutoff", alphaCutoff, value =>
 			{
+				BeginPendingChange(asset);
 				if (properties is AlphaTestMaterialProperties alphaTest)
 				{
 					alphaTest.AlphaCutoff = value;
@@ -104,7 +116,7 @@ public sealed class MaterialAssetEditor
 					alphaBlend.AlphaCutoff = value;
 				}
 
-				SaveMaterialAsset(asset, materialAsset);
+				_hasPendingChanges = true;
 			});
 		}
 
@@ -116,6 +128,11 @@ public sealed class MaterialAssetEditor
 		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal, textureAssets);
 		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive, textureAssets);
 		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion, textureAssets);
+
+		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
+		{
+			CommitPendingChanges();
+		}
 	}
 
 	private MaterialAsset? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
@@ -128,24 +145,17 @@ public sealed class MaterialAssetEditor
 		try
 		{
 			_loadedMaterialAssetId = asset.Id;
+			_loadedAssetEntry = asset;
 			_loadedMaterialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
 			return _loadedMaterialAsset;
 		}
 		catch
 		{
 			_loadedMaterialAssetId = asset.Id;
+			_loadedAssetEntry = asset;
 			_loadedMaterialAsset = null;
 			return null;
 		}
-	}
-
-	private void SaveMaterialAsset(AssetDatabaseEntry asset, MaterialAsset materialAsset)
-	{
-		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
-		SynchronizeRuntimeMaterial(asset.Id, materialAsset);
-		_loadedMaterialAsset = materialAsset;
-		_loadedMaterialAssetId = asset.Id;
-		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
 	}
 
 	private void DrawBaseColorEditor(AssetDatabaseEntry asset, MaterialAsset materialAsset, MaterialSurfaceProperties properties)
@@ -156,8 +166,9 @@ public sealed class MaterialAssetEditor
 			properties.BaseColor));
 		if (drawResult.Changed && drawResult.Value is ColorRGBA color)
 		{
+			BeginPendingChange(asset);
 			properties.BaseColor = color;
-			SaveMaterialAsset(asset, materialAsset);
+			_hasPendingChanges = true;
 		}
 	}
 
@@ -188,8 +199,9 @@ public sealed class MaterialAssetEditor
 			var noneSelected = currentValue.NodeId == Guid.Empty;
 			if (ImGui.Selectable("None", noneSelected))
 			{
+				BeginPendingChange(materialEntry);
 				SetTextureAssignment(assignments, propertyName, Guid.Empty);
-				SaveMaterialAsset(materialEntry, materialAsset);
+				_hasPendingChanges = true;
 			}
 
 			if (noneSelected)
@@ -203,8 +215,9 @@ public sealed class MaterialAssetEditor
 				var isSelected = currentValue.NodeId == textureAsset.Id;
 				if (ImGui.Selectable(textureAsset.Name, isSelected))
 				{
+					BeginPendingChange(materialEntry);
 					SetTextureAssignment(assignments, propertyName, textureAsset.Id);
-					SaveMaterialAsset(materialEntry, materialAsset);
+					_hasPendingChanges = true;
 				}
 
 				if (isSelected)
@@ -221,39 +234,6 @@ public sealed class MaterialAssetEditor
 			.Where(asset => asset.Type == AssetType.Texture2D)
 			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
 			.ToList();
-	}
-
-	private void SynchronizeRuntimeMaterial(Guid assetId, MaterialAsset materialAsset)
-	{
-		var runtimeMaterial = AssetDatabase.GetInstance<Material>(assetId);
-		if (runtimeMaterial is null)
-		{
-			return;
-		}
-
-		var descriptor = _materialTypeRegistry.GetDescriptor(materialAsset.MaterialType);
-		var properties = materialAsset.GetActiveProperties();
-		runtimeMaterial.Color = properties.BaseColor;
-		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
-		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
-		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.MetallicRoughnessTexture = ResolveTexture(properties.Textures.MetallicRoughness) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();
-		runtimeMaterial.EmissiveTexture = ResolveTexture(properties.Textures.Emissive) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.OcclusionTexture = ResolveTexture(properties.Textures.Occlusion) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.AlphaMode = descriptor.RuntimeAlphaMode;
-		runtimeMaterial.AlphaCutoff = properties switch
-		{
-			AlphaTestMaterialProperties alphaTest => alphaTest.AlphaCutoff,
-			AlphaBlendMaterialProperties alphaBlend => alphaBlend.AlphaCutoff,
-			_ => 0.5f
-		};
-		_renderGraph.RefreshMaterialResources(runtimeMaterial);
-	}
-
-	private static Texture? ResolveTexture(AssetRef<Texture> reference)
-	{
-		return reference.NodeId == Guid.Empty ? null : AssetDatabase.GetInstance<Texture>(reference.NodeId);
 	}
 
 	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid value)
@@ -292,5 +272,39 @@ public sealed class MaterialAssetEditor
 		}
 
 		return false;
+	}
+
+	private void BeginPendingChange(AssetDatabaseEntry asset)
+	{
+		if (_pendingBeforeSnapshot.HasValue)
+		{
+			return;
+		}
+
+		_pendingBeforeSnapshot = _assetSnapshotService.CaptureMaterialAssetSnapshot(asset);
+	}
+
+	private void CommitPendingChanges()
+	{
+		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null || _loadedMaterialAsset is null)
+		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
+			return;
+		}
+
+		var after = _assetSnapshotService.CaptureMaterialAssetSnapshot(_loadedAssetEntry, _loadedMaterialAsset);
+		if (string.Equals(before.Json, after.Json, StringComparison.Ordinal))
+		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
+			return;
+		}
+
+		_assetSnapshotService.SaveMaterialAsset(_loadedAssetEntry, _loadedMaterialAsset);
+		_undoRedoService.BeginCapture("Edit Material Asset");
+		_undoRedoService.CommitCapture(new MaterialAssetEditUndoRedoEntry("Edit Material Asset", before, after));
+		_hasPendingChanges = false;
+		_pendingBeforeSnapshot = null;
 	}
 }

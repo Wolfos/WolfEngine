@@ -1,6 +1,7 @@
 using System;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -11,18 +12,25 @@ public sealed class Texture
     private int _width;
     private int _height;
     private bool _isSrgb;
-    private byte[] _pixelData;
+    private TextureFormat _format;
+    private TextureMipData[] _mipLevels;
 
-    public Texture(string name, int width, int height, bool isSrgb, byte[] pixelData)
+    public Texture(string name, int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         _width = width;
         _height = height;
         _isSrgb = isSrgb;
-        _pixelData = pixelData ?? throw new ArgumentNullException(nameof(pixelData));
+        _format = format;
+        _mipLevels = mipLevels ?? throw new ArgumentNullException(nameof(mipLevels));
         if (width <= 0 || height <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
+        }
+
+        if (mipLevels.Length == 0)
+        {
+            throw new ArgumentException("Texture must contain at least one mip level.", nameof(mipLevels));
         }
     }
 
@@ -30,7 +38,9 @@ public sealed class Texture
     public int Width => _width;
     public int Height => _height;
     public bool IsSrgb => _isSrgb;
-    public byte[] PixelData => _pixelData;
+    public TextureFormat Format => _format;
+    public TextureMipData[] MipLevels => _mipLevels;
+    public int MipCount => _mipLevels.Length;
 
     internal ITextureResources? Resources
     {
@@ -120,18 +130,24 @@ public sealed class Texture
         }
     }
 
-    public void ApplyImportedTexture(int width, int height, bool isSrgb, byte[] pixelData)
+    public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
     {
-        ArgumentNullException.ThrowIfNull(pixelData);
+        ArgumentNullException.ThrowIfNull(mipLevels);
         if (width <= 0 || height <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
         }
 
+        if (mipLevels.Length == 0)
+        {
+            throw new ArgumentException("Texture must contain at least one mip level.", nameof(mipLevels));
+        }
+
         _width = width;
         _height = height;
         _isSrgb = isSrgb;
-        _pixelData = pixelData;
+        _format = format;
+        _mipLevels = mipLevels;
         MarkGpuResourcesDirty();
     }
 }

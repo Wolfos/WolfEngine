@@ -91,7 +91,7 @@ public class CameraMoverSystem: IUpdateable
 		var viewportState = _viewportStateBus.GetUiState();
 		var viewportControlActive =
 			viewportState.Visible &&
-			(viewportState.Hovered || viewportState.Focused) &&
+			viewportState.RightMousePressStartedHere &&
 			_isLooking &&
 			_viewportStateBus.IsGizmoDragging() == false;
 		if (viewportControlActive == false)

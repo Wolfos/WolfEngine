@@ -206,6 +206,8 @@ public sealed class RenderGraphCompiler
 		       a.Height == b.Height &&
 		       a.Format == b.Format &&
 		       a.Usage == b.Usage &&
+		       a.MipLevels == b.MipLevels &&
+		       a.IsSrgb == b.IsSrgb &&
 		       a.ClearColor.Equals(b.ClearColor) &&
 		       a.DepthClear.Equals(b.DepthClear);
 	}

@@ -845,9 +845,9 @@ private sealed class MeshResources
 			throw new ArgumentNullException(nameof(texture));
 		}
 
-		if (texture.PixelData is null || texture.PixelData.Length == 0)
+		if (texture.MipLevels is null || texture.MipLevels.Length == 0)
 		{
-			throw new ArgumentException("Texture must contain pixel data.", nameof(texture));
+			throw new ArgumentException("Texture must contain mip data.", nameof(texture));
 		}
 
 		var texDesc = new ResourceDesc
@@ -857,8 +857,8 @@ private sealed class MeshResources
 			Width = (ulong)texture.Width,
 			Height = (uint)texture.Height,
 			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatR8G8B8A8Unorm,
+			MipLevels = (ushort)texture.MipCount,
+			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
 			SampleDesc = new(1, 0),
 			Layout = TextureLayout.LayoutUnknown,
 			Flags = ResourceFlags.None
@@ -875,19 +875,25 @@ private sealed class MeshResources
 				null,
 				out gpuTexture));
 
-		PlacedSubresourceFootprint layout = default;
-		uint numRows = 0;
-		ulong rowSizeInBytes = 0;
+		var subresourceCount = texture.MipCount;
+		var layouts = new PlacedSubresourceFootprint[subresourceCount];
+		var numRows = new uint[subresourceCount];
+		var rowSizeInBytes = new ulong[subresourceCount];
 		ulong totalSizeInBytes = 0;
-		_device.GetCopyableFootprints(
-			texDesc,
-			0,
-			1,
-			0,
-			&layout,
-			&numRows,
-			&rowSizeInBytes,
-			&totalSizeInBytes);
+		fixed (PlacedSubresourceFootprint* layoutPtr = layouts)
+		fixed (uint* numRowsPtr = numRows)
+		fixed (ulong* rowSizePtr = rowSizeInBytes)
+		{
+			_device.GetCopyableFootprints(
+				texDesc,
+				0,
+				(uint)subresourceCount,
+				0,
+				layoutPtr,
+				numRowsPtr,
+				rowSizePtr,
+				&totalSizeInBytes);
+		}
 
 		var uploadDesc = new ResourceDesc
 		{
@@ -918,15 +924,19 @@ private sealed class MeshResources
 		SilkMarshal.ThrowHResult(uploadBuffer.Map(0, (Range*)null, (void**)&mapped));
 		try
 		{
-			fixed (byte* src = texture.PixelData)
+			for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
 			{
-				var rowPitch = layout.Footprint.RowPitch;
-				var rowSize = (ulong)(texture.Width * 4);
-				for (uint row = 0; row < numRows; row++)
+				var mip = texture.MipLevels[mipIndex];
+				fixed (byte* src = mip.Data)
 				{
-					var destRow = mapped + layout.Offset + row * rowPitch;
-					var srcRow = src + row * rowSize;
-					Buffer.MemoryCopy(srcRow, destRow, rowSize, rowSize);
+					var rowPitch = layouts[mipIndex].Footprint.RowPitch;
+					var sourceRowSize = (ulong)TextureFormatUtilities.GetBytesPerRow(texture.Format, mip.Width);
+					for (uint row = 0; row < numRows[mipIndex]; row++)
+					{
+						var destRow = mapped + layouts[mipIndex].Offset + row * rowPitch;
+						var srcRow = src + row * sourceRowSize;
+						Buffer.MemoryCopy(srcRow, destRow, sourceRowSize, sourceRowSize);
+					}
 				}
 			}
 		}
@@ -945,21 +955,24 @@ private sealed class MeshResources
 				default,
 				out uploadCommandList));
 
-		var destLocation = new TextureCopyLocation
+		for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
 		{
-			PResource = gpuTexture.Handle,
-			Type = TextureCopyType.SubresourceIndex
-		};
-		destLocation.Anonymous.SubresourceIndex = 0;
+			var destLocation = new TextureCopyLocation
+			{
+				PResource = gpuTexture.Handle,
+				Type = TextureCopyType.SubresourceIndex
+			};
+			destLocation.Anonymous.SubresourceIndex = (uint)mipIndex;
 
-		var srcLocation = new TextureCopyLocation
-		{
-			PResource = uploadBuffer.Handle,
-			Type = TextureCopyType.PlacedFootprint
-		};
-		srcLocation.Anonymous.PlacedFootprint = layout;
+			var srcLocation = new TextureCopyLocation
+			{
+				PResource = uploadBuffer.Handle,
+				Type = TextureCopyType.PlacedFootprint
+			};
+			srcLocation.Anonymous.PlacedFootprint = layouts[mipIndex];
 
-		uploadCommandList.CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, (Box*)null);
+			uploadCommandList.CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, (Box*)null);
+		}
 
 		var textureBarrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
 		textureBarrier.Anonymous.Transition = new()
@@ -982,8 +995,10 @@ private sealed class MeshResources
 		var descriptor = new TextureDescriptor(
 			texture.Width,
 			texture.Height,
-			TextureFormat.Rgba8Unorm,
-			TextureUsage.ShaderResource);
+			texture.Format,
+			TextureUsage.ShaderResource,
+			mipLevels: texture.MipCount,
+			isSrgb: texture.IsSrgb);
 
 		var backendTexture = new BackendD3D12Texture();
 		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
@@ -994,6 +1009,18 @@ private sealed class MeshResources
 		{
 			Texture = backendTexture,
 			ShaderResourceView = srvHandle
+		};
+	}
+
+	private static Format ToDxgiTextureFormat(TextureFormat format, bool isSrgb)
+	{
+		return format switch
+		{
+			TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
+			TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
+			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
+			TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported runtime texture format.")
 		};
 	}
 

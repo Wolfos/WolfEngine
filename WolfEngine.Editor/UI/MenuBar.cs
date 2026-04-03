@@ -19,7 +19,7 @@ public interface IMenuBar
 public sealed class MenuBar : IMenuBar
 {
 	private const string NewProjectPopupId = "New Project";
-	private const string ErrorPopupId = "Asset Pipeline Error";
+	private const string NotificationPopupId = "Editor Notification";
 	private const float MacTitlebarButtonInset = 70.0f;
 	private const float WindowsCaptionButtonWidth = 45.0f;
 	private const float WindowsCaptionButtonSpacing = 0.0f;
@@ -38,12 +38,14 @@ public sealed class MenuBar : IMenuBar
 	private readonly IEditorPlaySession _playSession;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorNotificationService _notificationService;
+	private readonly IEditorCommandService _commandService;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
 	private bool _openNewProjectPopup;
-	private bool _openErrorPopup;
-	private string _errorMessage = string.Empty;
+	private bool _openNotificationPopup;
+	private string _notificationTitle = string.Empty;
+	private string _notificationMessage = string.Empty;
 
 	public MenuBar(
 		IFileDialogService fileDialogService,
@@ -57,7 +59,8 @@ public sealed class MenuBar : IMenuBar
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorPlaySession playSession,
 		IGameplayAssemblyHost gameplayAssemblyHost,
-		IEditorNotificationService notificationService)
+		IEditorNotificationService notificationService,
+		IEditorCommandService commandService)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -71,6 +74,7 @@ public sealed class MenuBar : IMenuBar
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 	}
 
 	public void Draw(EditorScene scene)
@@ -340,22 +344,25 @@ public sealed class MenuBar : IMenuBar
 			}
 		}
 
+		if (ImGui.MenuItem("New Scene", "Ctrl/Cmd+N"))
+		{
+			_commandService.RequestNewScene();
+		}
+
 		var hasOpenProject = _projectService.HasOpenProject;
 		if (hasOpenProject == false)
 		{
 			ImGui.BeginDisabled();
 		}
 
-		if (ImGui.MenuItem("Save Scene"))
+		if (ImGui.MenuItem("Save Scene", "Ctrl/Cmd+S"))
 		{
-			try
-			{
-				_sceneWorkspace.SaveCurrentScene();
-			}
-			catch (Exception ex)
-			{
-				ShowError($"Failed to save scene: {ex.Message}");
-			}
+			_commandService.SaveScene();
+		}
+
+		if (ImGui.MenuItem("Refresh Asset Database", "Ctrl/Cmd+R"))
+		{
+			_commandService.RefreshAssetDatabase();
 		}
 
 		if (hasOpenProject == false)
@@ -540,10 +547,11 @@ public sealed class MenuBar : IMenuBar
 
 	private void DrawPopups()
 	{
-		while (_notificationService.TryDequeueError(out var errorMessage))
+		while (_notificationService.TryDequeue(out var notification))
 		{
-			_errorMessage = errorMessage;
-			_openErrorPopup = true;
+			_notificationTitle = notification.Kind == EditorNotificationKind.Error ? "Error" : "Notice";
+			_notificationMessage = notification.Message;
+			_openNotificationPopup = true;
 		}
 
 		if (_openNewProjectPopup)
@@ -552,14 +560,14 @@ public sealed class MenuBar : IMenuBar
 			_openNewProjectPopup = false;
 		}
 
-		if (_openErrorPopup)
+		if (_openNotificationPopup)
 		{
-			ImGui.OpenPopup(ErrorPopupId);
-			_openErrorPopup = false;
+			ImGui.OpenPopup(NotificationPopupId);
+			_openNotificationPopup = false;
 		}
 
 		DrawNewProjectPopup();
-		DrawErrorPopup();
+		DrawNotificationPopup();
 	}
 
 	private void DrawNewProjectPopup()
@@ -615,20 +623,27 @@ public sealed class MenuBar : IMenuBar
 		ImGui.EndPopup();
 	}
 
-	private void DrawErrorPopup()
+	private void DrawNotificationPopup()
 	{
 		var isOpen = true;
 		ImGui.SetNextWindowSize(new Vector2(480.0f, 0.0f), ImGuiCond.Appearing);
-		if (ImGui.BeginPopupModal(ErrorPopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
+		if (ImGui.BeginPopupModal(NotificationPopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
 		{
 			return;
 		}
 
-		ImGui.TextWrapped(_errorMessage);
+		if (string.IsNullOrWhiteSpace(_notificationTitle) == false)
+		{
+			ImGui.TextUnformatted(_notificationTitle);
+			ImGui.Separator();
+		}
+
+		ImGui.TextWrapped(_notificationMessage);
 		ImGui.Spacing();
 		if (ImGui.Button("OK", new Vector2(100.0f, 0.0f)))
 		{
-			_errorMessage = string.Empty;
+			_notificationTitle = string.Empty;
+			_notificationMessage = string.Empty;
 			ImGui.CloseCurrentPopup();
 		}
 

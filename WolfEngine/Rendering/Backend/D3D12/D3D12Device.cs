@@ -78,6 +78,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			       x.Height == y.Height &&
 			       x.Format == y.Format &&
 			       x.Usage == y.Usage &&
+			       x.MipLevels == y.MipLevels &&
+			       x.IsSrgb == y.IsSrgb &&
 			       x.ClearColor.Equals(y.ClearColor) &&
 			       Math.Abs(x.DepthClear - y.DepthClear) < float.Epsilon;
 		}
@@ -89,6 +91,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				obj.Height,
 				(int)obj.Format,
 				(int)obj.Usage,
+				obj.MipLevels,
+				obj.IsSrgb,
 				obj.ClearColor,
 				obj.DepthClear);
 		}
@@ -195,7 +199,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return pooledTexture;
 		}
 
-		var viewFormat = ToDxgiFormat(descriptor.Format);
+		var viewFormat = ToDxgiFormat(descriptor.Format, descriptor.IsSrgb);
 		var isDepthTexture = (descriptor.Usage & TextureUsage.DepthStencil) != 0;
 		var resourceFormat = isDepthTexture && (descriptor.Usage & TextureUsage.ShaderResource) != 0
 			? Format.FormatR32Typeless
@@ -208,7 +212,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			Width = (ulong)descriptor.Width,
 			Height = (uint)descriptor.Height,
 			DepthOrArraySize = 1,
-			MipLevels = 1,
+			MipLevels = (ushort)descriptor.MipLevels,
 			Format = resourceFormat,
 			SampleDesc = new SampleDesc(1, 0),
 			Layout = TextureLayout.LayoutUnknown,
@@ -1772,14 +1776,16 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	}
 	
 
-	private static Format ToDxgiFormat(TextureFormat format) => format switch
+	private static Format ToDxgiFormat(TextureFormat format, bool isSrgb = false) => format switch
 	{
-		TextureFormat.Bgra8Unorm => Format.FormatB8G8R8A8Unorm,
-		TextureFormat.Rgba8Unorm => Format.FormatR8G8B8A8Unorm,
+		TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
+		TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
 		TextureFormat.Rg16Float => Format.FormatR16G16Float,
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 		TextureFormat.R32Float => Format.FormatR32Float,
 		TextureFormat.D32Float => Format.FormatD32Float,
+		TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
+		TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 		TextureFormat.Unknown => Format.FormatUnknown,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
 	};

@@ -23,6 +23,11 @@ public class EditorPreferencesMenu
 
 		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
 		ImGui.Begin("Preferences", ref _isOpen);
+		if (ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem) &&
+		    ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+		{
+			ImGui.SetWindowFocus();
+		}
 		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		if (ImGui.Button("Save"))
 		{

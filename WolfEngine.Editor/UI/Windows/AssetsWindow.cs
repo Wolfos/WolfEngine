@@ -11,7 +11,7 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public sealed class AssetsWindow : EditorWindow
+public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 {
 	private static readonly Vector2 ThumbnailSize = new(46.0f, 46.0f);
 	private const float FolderTreeWidth = 220.0f;
@@ -31,9 +31,9 @@ public sealed class AssetsWindow : EditorWindow
 	private readonly IImageLoader _imageLoader;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
-	private readonly IEditorSceneWorkspace _sceneWorkspace;
-	private readonly IEditorPlaySession _playSession;
 	private readonly IIconManager _icons;
+	private readonly IEditorInteractionState _interactionState;
+	private readonly IEditorCommandService _commandService;
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
 	private string _selectedFolderPath = AssetPipelinePaths.AssetsFolderName;
@@ -47,18 +47,26 @@ public sealed class AssetsWindow : EditorWindow
 		IImageLoader imageLoader,
 		IAssetSelectionService assetSelectionService,
 		IEditorAssetHandlerRegistry assetHandlerRegistry,
-		IEditorSceneWorkspace sceneWorkspace,
-		IEditorPlaySession playSession,
-		IIconManager icons)
+		IIconManager icons,
+		IEditorInteractionState interactionState,
+		IEditorCommandService commandService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
 		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
-		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
-		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
+		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
+		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
+	}
+
+	internal string? PendingDeleteKindForTesting => _pendingDeleteTarget?.Kind.ToString();
+	internal string? PendingDeleteRelativePathForTesting => _pendingDeleteTarget?.RelativePath;
+
+	internal void SetSelectedFolderForTesting(string relativeFolderPath)
+	{
+		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
 	}
 
 	public override string Name => "Assets";
@@ -68,6 +76,10 @@ public sealed class AssetsWindow : EditorWindow
 		ImGui.SetNextWindowPos(new Vector2(0.0f, 520.0f), ImGuiCond.FirstUseEver);
 		ImGui.SetNextWindowSize(new Vector2(640.0f, 300.0f), ImGuiCond.FirstUseEver);
 		Begin();
+		if (ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
+		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
+		}
 
 		if (_projectService.HasOpenProject == false || string.IsNullOrWhiteSpace(_projectService.AssetsPath))
 		{
@@ -159,11 +171,13 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (leftClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectFolder(folder.RelativePath);
 		}
 
 		if (rightClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectFolder(folder.RelativePath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
@@ -282,11 +296,13 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (doubleClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectFolder(folder.RelativePath);
 		}
 
 		if (rightClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectFolder(folder.RelativePath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
@@ -349,6 +365,7 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (headerLeftClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
 			SelectAsset(source.PrimaryAsset);
 			if (headerDoubleClicked)
@@ -363,6 +380,7 @@ public sealed class AssetsWindow : EditorWindow
 
 		if (headerRightClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectAsset(source.PrimaryAsset, requestFocus: false);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
@@ -429,6 +447,7 @@ public sealed class AssetsWindow : EditorWindow
 		var isSelected = _assetSelectionService.SelectedAssetId == subAsset.Id;
 		if (ImGui.Selectable($"{subAsset.Name}  [{subAsset.Type}]", isSelected, ImGuiSelectableFlags.SpanAllColumns))
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectAsset(subAsset);
 		}
 
@@ -440,6 +459,7 @@ public sealed class AssetsWindow : EditorWindow
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		if (rightClicked)
 		{
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			SelectAsset(subAsset, requestFocus: false);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
@@ -481,6 +501,7 @@ public sealed class AssetsWindow : EditorWindow
 			try
 			{
 				_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, asset.Id, scene.World);
+				_interactionState.MarkSceneDirty();
 			}
 			catch (Exception ex)
 			{
@@ -643,6 +664,24 @@ public sealed class AssetsWindow : EditorWindow
 		_openDeletePopup = true;
 	}
 
+	public bool RequestDeleteSelectedItem()
+	{
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+		{
+			RequestDelete(PendingDeleteTarget.ForSource(selectedAsset.RelativeSourcePath));
+			return true;
+		}
+
+		if (string.Equals(_selectedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		RequestDelete(PendingDeleteTarget.ForFolder(_selectedFolderPath));
+		return true;
+	}
+
 	private void SelectFolder(string relativeFolderPath)
 	{
 		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
@@ -663,21 +702,7 @@ public sealed class AssetsWindow : EditorWindow
 			return;
 		}
 
-		if (_playSession.IsActive)
-		{
-			ShowError("Stop play mode before loading another scene.");
-			return;
-		}
-
-		try
-		{
-			_sceneWorkspace.LoadScene(asset.Id);
-			EditorGui.ClearEntitySelection();
-		}
-		catch (Exception ex)
-		{
-			ShowError($"Failed to load scene: {ex.Message}");
-		}
+		_commandService.RequestLoadScene(asset.Id);
 	}
 
 	private void PruneState(AssetsWindowBrowserModel browserModel)

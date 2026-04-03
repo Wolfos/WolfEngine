@@ -77,6 +77,7 @@ public sealed class AssetDatabaseEntry
 	public string RelativeAssetPath { get; set; } = string.Empty;
 	public string RelativeStatePath { get; set; } = string.Empty;
 	public string RelativeMetaPath { get; set; } = string.Empty;
+	public List<AssetArtifactRecord> Artifacts { get; set; } = new();
 	public TextureAssetSummary? TextureSummary { get; set; }
 	public MaterialAssetSummary? MaterialSummary { get; set; }
 	public DataAssetSummary? DataAssetSummary { get; set; }

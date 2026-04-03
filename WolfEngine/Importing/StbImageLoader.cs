@@ -35,9 +35,9 @@ public sealed class StbImageLoader : IImageLoader
 			nameHint,
 			image.Width,
 			image.Height,
-			(int)image.Comp,
 			IsSrgb(semantic),
-			image.Data);
+			semantic,
+			[new Rendering.TextureMipData(image.Width, image.Height, image.Data)]);
 	}
 
 	public static bool IsSrgb(TextureSemantic semantic) =>

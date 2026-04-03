@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Utility;
@@ -16,6 +17,7 @@ public interface IProjectAssetPipelineService
 {
 	void InitializeProject(string projectRootPath);
 	AssetDatabase RefreshProject(string projectRootPath);
+	AssetDatabase RebuildProject(string projectRootPath);
 	AssetDatabase RefreshProjectIncremental(string projectRootPath);
 	void RemoveDeletedSource(string projectRootPath, string relativeSourcePath);
 	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
@@ -74,47 +76,19 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	public AssetDatabase RefreshProject(string projectRootPath)
 	{
-		return RefreshProjectIncremental(projectRootPath);
+		return RebuildProject(projectRootPath);
+	}
+
+	public AssetDatabase RebuildProject(string projectRootPath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		RecreateLibrary(projectRootPath);
+		return ImportAllSupportedSources(projectRootPath, loadExistingSources: false);
 	}
 
 	public AssetDatabase RefreshProjectIncremental(string projectRootPath)
 	{
-		InitializeProject(projectRootPath);
-		var assetsPath = AssetPipelinePaths.GetAssetsPath(projectRootPath);
-		var existingSources = _index.GetSources(projectRootPath);
-		var indexedSourcesByPath = existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
-		var sourceFiles = Directory.EnumerateFiles(assetsPath, "*", SearchOption.AllDirectories)
-			.Where(path => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) == false)
-			.Where(IsSupportedSourcePath)
-			.ToList();
-
-		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		for (var i = 0; i < sourceFiles.Count; i++)
-		{
-			var absoluteSourcePath = sourceFiles[i];
-			var relativeSourcePath = ToProjectRelativePath(projectRootPath, absoluteSourcePath);
-			knownRelativePaths.Add(relativeSourcePath);
-
-			if (indexedSourcesByPath.TryGetValue(relativeSourcePath, out var existingSource)
-			    && TryRefreshSourceScanState(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource))
-			{
-				continue;
-			}
-
-			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource);
-		}
-
-		for (var i = 0; i < existingSources.Count; i++)
-		{
-			if (knownRelativePaths.Contains(existingSources[i].RelativeSourcePath))
-			{
-				continue;
-			}
-
-			DeleteIndexedSource(projectRootPath, existingSources[i].SourceId);
-		}
-
-		return LoadDatabase(projectRootPath);
+		return ImportAllSupportedSources(projectRootPath, loadExistingSources: true);
 	}
 
 	public void RemoveDeletedSource(string projectRootPath, string relativeSourcePath)
@@ -186,7 +160,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var nodes = _index.GetNodes(projectRootPath);
 		return new AssetDatabase
 		{
-			Assets = nodes.Select(node => CreateDatabaseEntry(node)).ToList()
+			Assets = nodes.Select(node => CreateDatabaseEntry(projectRootPath, node)).ToList()
 		};
 	}
 
@@ -198,7 +172,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return false;
 		}
 
-		asset = CreateDatabaseEntry(node);
+		asset = CreateDatabaseEntry(projectRootPath, node);
 		return true;
 	}
 
@@ -425,19 +399,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			AssetPipelinePaths.ImportedFolderName,
 			metadata.SourceId.ToString("D"),
 			"texture.bin"));
-		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
-			AssetPipelinePaths.LibraryFolderName,
-			AssetPipelinePaths.ArtifactsFolderName,
-			nodeId.ToString("D"),
-			"runtime.bin"));
-		TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTexture);
-		TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeArtifactPath), importedTexture);
+		var runtimeArtifacts = WriteTextureArtifacts(projectRootPath, nodeId, relativeImportedPath, importedTexture);
 
 		var summary = new TextureAssetSummary
 		{
 			RelativeSourceAssetPath = relativeSourcePath,
 			RelativeImportedPath = relativeImportedPath,
-			RelativeRuntimeArtifactPath = relativeArtifactPath,
+			RelativeRuntimeArtifactPath = string.Empty,
 			Width = importedTexture.Width,
 			Height = importedTexture.Height,
 			Channels = importedTexture.Channels,
@@ -463,7 +431,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					SummaryJson = AssetPipelineSerialization.Serialize(summary)
 				}
 			],
-			Artifacts = CreateTextureArtifactRecords(nodeId, relativeArtifactPath, GetAbsolutePath(projectRootPath, relativeArtifactPath)),
+			Artifacts = runtimeArtifacts,
 			Dependencies = []
 		};
 	}
@@ -572,26 +540,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Texture2D, name);
 			textureNodeIds.Add(nodeId);
 
-			var importedTextureFile = new ImportedTexture(
-				importedTexture.NameOrPath,
-				importedTexture.Width,
-				importedTexture.Height,
-				importedTexture.Channels,
-				importedTexture.IsSrgb,
-				importedTexture.PixelData);
 			var relativeImportedPath = NormalizeRelativePath(Path.Combine(
 				AssetPipelinePaths.LibraryFolderName,
 				AssetPipelinePaths.ImportedFolderName,
 				metadata.SourceId.ToString("D"),
 				"textures",
 				$"{nodeKey.Replace(':', '_')}.bin"));
-			var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
-				AssetPipelinePaths.LibraryFolderName,
-				AssetPipelinePaths.ArtifactsFolderName,
-				nodeId.ToString("D"),
-				"runtime.bin"));
-			TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTextureFile);
-			TextureRawImageSerializer.Write(GetAbsolutePath(projectRootPath, relativeArtifactPath), importedTextureFile);
+			var runtimeArtifacts = WriteTextureArtifacts(projectRootPath, nodeId, relativeImportedPath, importedTexture);
 
 			nodes.Add(new AssetNodeRecord
 			{
@@ -608,7 +563,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				{
 					RelativeSourceAssetPath = string.Empty,
 					RelativeImportedPath = relativeImportedPath,
-					RelativeRuntimeArtifactPath = relativeArtifactPath,
+					RelativeRuntimeArtifactPath = string.Empty,
 					Width = importedTexture.Width,
 					Height = importedTexture.Height,
 					Channels = importedTexture.Channels,
@@ -616,7 +571,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					SourceExtension = Path.GetExtension(importedTexture.NameOrPath ?? string.Empty).ToLowerInvariant()
 				})
 			});
-			artifacts.AddRange(CreateTextureArtifactRecords(nodeId, relativeArtifactPath, GetAbsolutePath(projectRootPath, relativeArtifactPath)));
+			artifacts.AddRange(runtimeArtifacts);
 		}
 
 		var materialNodeIds = new List<Guid>(importedScene.Materials.Count);
@@ -997,6 +952,89 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
+	private AssetDatabase ImportAllSupportedSources(string projectRootPath, bool loadExistingSources)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		InitializeProject(projectRootPath);
+		var assetsPath = AssetPipelinePaths.GetAssetsPath(projectRootPath);
+		var existingSources = loadExistingSources ? _index.GetSources(projectRootPath) : [];
+		var indexedSourcesByPath = existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
+		var sourceFiles = EnumerateSupportedSourceFiles(assetsPath);
+
+		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		for (var i = 0; i < sourceFiles.Count; i++)
+		{
+			var absoluteSourcePath = sourceFiles[i];
+			var relativeSourcePath = ToProjectRelativePath(projectRootPath, absoluteSourcePath);
+			knownRelativePaths.Add(relativeSourcePath);
+
+			if (loadExistingSources
+			    && indexedSourcesByPath.TryGetValue(relativeSourcePath, out var existingSource)
+			    && TryRefreshSourceScanState(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource))
+			{
+				continue;
+			}
+
+			ImportSource(
+				projectRootPath,
+				absoluteSourcePath,
+				relativeSourcePath,
+				loadExistingSources && indexedSourcesByPath.TryGetValue(relativeSourcePath, out existingSource)
+					? existingSource
+					: null);
+		}
+
+		if (loadExistingSources)
+		{
+			for (var i = 0; i < existingSources.Count; i++)
+			{
+				if (knownRelativePaths.Contains(existingSources[i].RelativeSourcePath))
+				{
+					continue;
+				}
+
+				DeleteIndexedSource(projectRootPath, existingSources[i].SourceId);
+			}
+		}
+
+		return LoadDatabase(projectRootPath);
+	}
+
+	private static List<string> EnumerateSupportedSourceFiles(string assetsPath)
+	{
+		if (Directory.Exists(assetsPath) == false)
+		{
+			return [];
+		}
+
+		return Directory.EnumerateFiles(assetsPath, "*", SearchOption.AllDirectories)
+			.Where(path => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) == false)
+			.Where(IsSupportedSourcePath)
+			.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private static void RecreateLibrary(string projectRootPath)
+	{
+		SqliteConnection.ClearAllPools();
+		var libraryPath = AssetPipelinePaths.GetLibraryPath(projectRootPath);
+		if (Directory.Exists(libraryPath) == false)
+		{
+			return;
+		}
+
+		var libraryDirectory = new DirectoryInfo(libraryPath);
+		foreach (var directory in libraryDirectory.EnumerateDirectories())
+		{
+			directory.Delete(recursive: true);
+		}
+
+		foreach (var file in libraryDirectory.EnumerateFiles())
+		{
+			file.Delete();
+		}
+	}
+
 	private static bool IsSupportedSourcePath(string absolutePath)
 	{
 		var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
@@ -1138,37 +1176,81 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return new AssetRef<Texture> { NodeId = textureNodeIds[resolvedIndex] };
 	}
 
-	private static List<AssetArtifactRecord> CreateTextureArtifactRecords(Guid nodeId, string relativeArtifactPath, string absoluteArtifactPath)
+	private List<AssetArtifactRecord> WriteTextureArtifacts(
+		string projectRootPath,
+		Guid nodeId,
+		string relativeImportedPath,
+		ImportedTexture importedTexture)
 	{
-		var fileInfo = new FileInfo(absoluteArtifactPath);
-		var contentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath);
-		return
-		[
-			CreateTextureArtifact(nodeId, "runtime", string.Empty),
-			CreateTextureArtifact(nodeId, "runtime-metal", "metal"),
-			CreateTextureArtifact(nodeId, "runtime-d3d12", "d3d12")
-		];
+		ImportedTextureSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTexture);
 
-		AssetArtifactRecord CreateTextureArtifact(Guid recordNodeId, string artifactKey, string target)
+		var d3d12RelativePath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			"runtime-d3d12.bin"));
+		var metalRelativePath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			"runtime-metal.bin"));
+		var artifacts = new List<(string ArtifactKey, string Target, string RelativePath, string AbsolutePath)>(1);
+		if (OperatingSystem.IsMacOS())
 		{
-			return new AssetArtifactRecord
+			var metalAbsolutePath = GetAbsolutePath(projectRootPath, metalRelativePath);
+			var metalTexture = TextureCompressionCompiler.CompileMetal(importedTexture);
+			TextureArtifactSerializer.Write(
+				metalAbsolutePath,
+				metalTexture,
+				importedTexture.Semantic,
+				TextureCompressionFamily.Astc);
+			artifacts.Add(("runtime-metal", "metal", metalRelativePath, metalAbsolutePath));
+		}
+		else
+		{
+			var d3d12AbsolutePath = GetAbsolutePath(projectRootPath, d3d12RelativePath);
+			var d3d12Texture = TextureCompressionCompiler.CompileD3D12(importedTexture);
+			TextureArtifactSerializer.Write(
+				d3d12AbsolutePath,
+				d3d12Texture,
+				importedTexture.Semantic,
+				TextureCompressionFamily.Bc);
+			artifacts.Add(("runtime-d3d12", "d3d12", d3d12RelativePath, d3d12AbsolutePath));
+		}
+
+		return CreateTextureArtifactRecords(nodeId, artifacts);
+	}
+
+	private static List<AssetArtifactRecord> CreateTextureArtifactRecords(
+		Guid nodeId,
+		IReadOnlyList<(string ArtifactKey, string Target, string RelativePath, string AbsolutePath)> artifacts)
+	{
+		var results = new List<AssetArtifactRecord>(artifacts.Count);
+		for (var i = 0; i < artifacts.Count; i++)
+		{
+			var artifact = artifacts[i];
+			var fileInfo = new FileInfo(artifact.AbsolutePath);
+			var contentHash = AssetHashing.ComputeFileHash(artifact.AbsolutePath);
+			results.Add(new AssetArtifactRecord
 			{
-				NodeId = recordNodeId,
-				ArtifactKey = artifactKey,
+				NodeId = nodeId,
+				ArtifactKey = artifact.ArtifactKey,
 				Kind = "RuntimeTexture",
-				Target = target,
-				RelativePath = relativeArtifactPath,
+				Target = artifact.Target,
+				RelativePath = artifact.RelativePath,
 				ContentHash = contentHash,
 				ByteSize = fileInfo.Length,
 				ChunkIndex = 0,
 				ChunkCount = 1,
 				StreamGroup = "default",
 				MetadataJson = "{}"
-			};
+			});
 		}
+
+		return results;
 	}
 
-	private static AssetDatabaseEntry CreateDatabaseEntry(AssetNodeRecord node)
+	private AssetDatabaseEntry CreateDatabaseEntry(string projectRootPath, AssetNodeRecord node)
 	{
 		var entry = new AssetDatabaseEntry
 		{
@@ -1181,7 +1263,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			RelativeSourcePath = node.RelativeSourcePath,
 			RelativeAssetPath = node.RelativeAssetPath,
 			RelativeStatePath = node.RelativeMetaPath,
-			RelativeMetaPath = node.RelativeMetaPath
+			RelativeMetaPath = node.RelativeMetaPath,
+			Artifacts = _index.GetArtifactsForNode(projectRootPath, node.NodeId).ToList()
 		};
 
 		switch (node.Type)

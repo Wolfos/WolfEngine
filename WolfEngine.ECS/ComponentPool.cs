@@ -6,6 +6,7 @@ internal interface IComponentPool
 {
 	bool Has(Entity entity);
 	bool TryGetComponent(Entity entity, out IEntityComponent component);
+	void Remove(Entity entity);
 }
 
 public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent

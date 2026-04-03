@@ -9,7 +9,7 @@ namespace WolfEngine.Rendering;
 public readonly struct TextureDescriptor
 {
 	public TextureDescriptor(int width, int height, TextureFormat format, TextureUsage usage, ColorRGBA? clearColor = null,
-		float depthClear = 1.0f)
+		float depthClear = 1.0f, int mipLevels = 1, bool isSrgb = false)
 	{
 		Width = width;
 		Height = height;
@@ -17,6 +17,8 @@ public readonly struct TextureDescriptor
 		Usage = usage;
 		ClearColor = clearColor ?? default;
 		DepthClear = depthClear;
+		MipLevels = mipLevels;
+		IsSrgb = isSrgb;
 	}
 
 	public int Width { get; }
@@ -30,6 +32,10 @@ public readonly struct TextureDescriptor
 	public ColorRGBA ClearColor { get; }
 
 	public float DepthClear { get; }
+
+	public int MipLevels { get; }
+
+	public bool IsSrgb { get; }
 }
 
 public enum TextureFormat
@@ -40,7 +46,10 @@ public enum TextureFormat
 	Rg16Float,
 	Rgba16Float,
 	R32Float,
-	D32Float
+	D32Float,
+	Bc5Unorm,
+	Bc7Unorm,
+	Astc4x4Unorm
 }
 
 [Flags]

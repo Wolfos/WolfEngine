@@ -79,6 +79,89 @@ public class WorldTests
     }
 
     [Test]
+    public void DestroyEntity_RemovesComponentsFromDestroyedEntity()
+    {
+        var world = new World(WorldTag.All);
+        var entity = world.CreateEntity("Entity");
+        world.AddComponent(entity, new TestComponentA { Value = 7 });
+
+        world.DestroyEntity(entity);
+
+        Assert.That(world.HasComponent<NameComponent>(entity), Is.False);
+        Assert.That(world.HasComponent<TestComponentA>(entity), Is.False);
+    }
+
+    [Test]
+    public void DestroyEntity_DestroyingParentAlsoDestroysDescendants()
+    {
+        var world = new World(WorldTag.All);
+        var parent = CreateTransformEntity(world, "Parent", Vector3.Zero);
+        var child = CreateTransformEntity(world, "Child", Vector3.One);
+        var grandchild = CreateTransformEntity(world, "Grandchild", Vector3.One * 2.0f);
+        world.SetParent(child, parent);
+        world.SetParent(grandchild, child);
+
+        world.DestroyEntity(parent);
+
+        Assert.That(world.IsAlive(parent), Is.False);
+        Assert.That(world.IsAlive(child), Is.False);
+        Assert.That(world.IsAlive(grandchild), Is.False);
+        Assert.That(world.HasComponent<Parent>(child), Is.False);
+        Assert.That(world.HasComponent<Parent>(grandchild), Is.False);
+    }
+
+    [Test]
+    public void DestroyEntity_DestroyingMiddleSiblingRepairsSiblingChain()
+    {
+        var world = new World(WorldTag.All);
+        var parent = CreateTransformEntity(world, "Parent", Vector3.Zero);
+        var first = CreateTransformEntity(world, "First", Vector3.One);
+        var middle = CreateTransformEntity(world, "Middle", Vector3.One * 2.0f);
+        var last = CreateTransformEntity(world, "Last", Vector3.One * 3.0f);
+        world.SetParent(first, parent);
+        world.SetParent(middle, parent);
+        world.SetParent(last, parent);
+
+        world.DestroyEntity(middle);
+
+        Assert.That(world.IsAlive(middle), Is.False);
+        Assert.That(world.GetComponent<Children>(parent).First, Is.EqualTo(first));
+        Assert.That(world.GetComponent<Sibling>(first).Next, Is.EqualTo(last));
+        Assert.That(world.HasComponent<Parent>(last), Is.True);
+    }
+
+    [Test]
+    public void DestroyEntity_DestroyingOnlyChildRemovesParentChildrenComponent()
+    {
+        var world = new World(WorldTag.All);
+        var parent = CreateTransformEntity(world, "Parent", Vector3.Zero);
+        var child = CreateTransformEntity(world, "Child", Vector3.One);
+        world.SetParent(child, parent);
+
+        world.DestroyEntity(child);
+
+        Assert.That(world.IsAlive(child), Is.False);
+        Assert.That(world.HasComponent<Children>(parent), Is.False);
+    }
+
+    [Test]
+    public void DestroyEntity_DestroyingFirstChildPromotesNextSiblingToParentChildrenComponent()
+    {
+        var world = new World(WorldTag.All);
+        var parent = CreateTransformEntity(world, "Parent", Vector3.Zero);
+        var first = CreateTransformEntity(world, "First", Vector3.One);
+        var second = CreateTransformEntity(world, "Second", Vector3.One * 2.0f);
+        world.SetParent(first, parent);
+        world.SetParent(second, parent);
+
+        world.DestroyEntity(first);
+
+        Assert.That(world.IsAlive(first), Is.False);
+        Assert.That(world.GetComponent<Children>(parent).First, Is.EqualTo(second));
+        Assert.That(world.HasComponent<Parent>(second), Is.True);
+    }
+
+    [Test]
     public void AddComponent_AddsComponentToEntity()
     {
         var world = new World(WorldTag.All);

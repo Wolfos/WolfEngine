@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using WolfEngine.Importing;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Utility;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
@@ -78,7 +79,8 @@ public sealed class ImageLoader : IImageLoader
 			imported.Width,
 			imported.Height,
 			imported.IsSrgb,
-			imported.PixelData);
+			TextureFormat.Rgba8Unorm,
+			imported.MipLevels);
 
 		var resources = _mainThreadDispatcher.Invoke(() => _renderer.CreateTextureResources(texture));
 		var textureId = resources.ShaderResourceView.IsValid
@@ -108,4 +110,3 @@ public sealed class ImageLoader : IImageLoader
 		return $"{(isSrgb ? "srgb" : "linear")}:{absolutePath}";
 	}
 }
-

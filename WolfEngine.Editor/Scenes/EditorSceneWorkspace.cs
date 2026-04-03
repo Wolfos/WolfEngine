@@ -8,6 +8,7 @@ public interface IEditorSceneWorkspace
 	EditorScene CurrentScene { get; }
 	void Initialize(EditorScene scene);
 	void ReplaceCurrentScene(EditorScene scene);
+	void ResetToNewScene();
 	void SaveCurrentScene();
 	void LoadScene(Guid assetId);
 }
@@ -39,6 +40,11 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 		ArgumentNullException.ThrowIfNull(scene.World);
 		SwapWorld(scene.World);
 		_currentScene = scene;
+	}
+
+	public void ResetToNewScene()
+	{
+		ReplaceCurrentScene(_sceneFactory.New());
 	}
 
 	public void SaveCurrentScene()

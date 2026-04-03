@@ -19,16 +19,28 @@ public sealed class TransformGizmoController
 
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly EditorCameraContext _cameraContext;
+	private readonly IEditorInteractionState _interactionState;
+	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
+	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly GizmoDragState _dragState = new();
 	private GizmoAxis _hoveredAxis;
 
-	public TransformGizmoController(EditorViewportStateBus viewportStateBus, EditorCameraContext cameraContext)
+	public TransformGizmoController(
+		EditorViewportStateBus viewportStateBus,
+		EditorCameraContext cameraContext,
+		IEditorInteractionState interactionState,
+		IEditorSceneSnapshotService sceneSnapshotService,
+		IEditorUndoRedoService undoRedoService)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
+		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
+		_sceneSnapshotService = sceneSnapshotService ?? throw new ArgumentNullException(nameof(sceneSnapshotService));
+		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 	}
 
 	public void DrawAndHandle(
+		EditorScene scene,
 		World world,
 		Entity entity,
 		bool hasSelectedEntity,
@@ -102,6 +114,11 @@ public sealed class TransformGizmoController
 
 		if (_dragState.Active && (_dragState.Entity != entity || leftDown == false || leftReleased))
 		{
+			if (leftReleased && _dragState.Entity == entity)
+			{
+				CommitDrag(scene);
+			}
+
 			EndDrag();
 		}
 
@@ -123,6 +140,7 @@ public sealed class TransformGizmoController
 			if (mouseInViewport && leftClicked && _hoveredAxis != GizmoAxis.None)
 			{
 				TryBeginDrag(
+					scene,
 					world,
 					entity,
 					mode,
@@ -167,6 +185,7 @@ public sealed class TransformGizmoController
 	}
 
 	private void TryBeginDrag(
+		EditorScene scene,
 		World world,
 		Entity entity,
 		TransformGizmoMode mode,
@@ -197,6 +216,7 @@ public sealed class TransformGizmoController
 
 		_dragState.Active = true;
 		_dragState.Entity = entity;
+		_dragState.BeforeSnapshot = _sceneSnapshotService.CaptureComponent(scene, entity, typeof(LocalTransform));
 		_dragState.Mode = mode;
 		_dragState.Space = space;
 		_dragState.Axis = axis;
@@ -257,6 +277,7 @@ public sealed class TransformGizmoController
 				var delta = currentParameter - _dragState.StartAxisParameter;
 				var worldPosition = _dragState.StartEntityWorldPosition + (_dragState.AxisWorld * delta);
 				world.SetWorldPosition(_dragState.Entity, worldPosition);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 			case TransformGizmoMode.Rotate:
@@ -277,6 +298,7 @@ public sealed class TransformGizmoController
 				var deltaRotation = Quaternion.CreateFromAxisAngle(_dragState.AxisWorld, angle);
 				var targetWorldRotation = NormalizeOrIdentity(deltaRotation * _dragState.StartWorldRotation);
 				world.SetWorldRotation(_dragState.Entity, targetWorldRotation);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 			case TransformGizmoMode.Scale:
@@ -304,6 +326,7 @@ public sealed class TransformGizmoController
 				}
 
 				world.SetLocalScale(_dragState.Entity, localScale);
+				_interactionState.MarkSceneDirty();
 				break;
 			}
 		}
@@ -944,6 +967,7 @@ public sealed class TransformGizmoController
 		_dragState.StartEntityWorldPosition = Vector3.Zero;
 		_dragState.StartWorldRotation = Quaternion.Identity;
 		_dragState.StartLocalScale = Vector3.One;
+		_dragState.BeforeSnapshot = default;
 		_dragState.StartAxisParameter = 0.0f;
 		_dragState.HandleLength = 1.0f;
 		_hoveredAxis = GizmoAxis.None;
@@ -974,6 +998,7 @@ public sealed class TransformGizmoController
 	{
 		public bool Active;
 		public Entity Entity;
+		public SceneComponentSnapshot BeforeSnapshot;
 		public TransformGizmoMode Mode;
 		public TransformSpace Space;
 		public GizmoAxis Axis;
@@ -986,5 +1011,28 @@ public sealed class TransformGizmoController
 		public Vector3 StartLocalScale = Vector3.One;
 		public float StartAxisParameter;
 		public float HandleLength = 1.0f;
+	}
+
+	private void CommitDrag(EditorScene scene)
+	{
+		if (_dragState.Active == false || scene.World.IsAlive(_dragState.Entity) == false)
+		{
+			return;
+		}
+
+		var afterSnapshot = _sceneSnapshotService.CaptureComponent(scene, _dragState.Entity, typeof(LocalTransform));
+		if (_dragState.BeforeSnapshot.EntityId == Guid.Empty)
+		{
+			return;
+		}
+
+		if (_dragState.BeforeSnapshot.EntityId == afterSnapshot.EntityId &&
+		    string.Equals(_dragState.BeforeSnapshot.Data.GetRawText(), afterSnapshot.Data.GetRawText(), StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		_undoRedoService.BeginCapture("Transform");
+		_undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry("Transform", [_dragState.BeforeSnapshot], [afterSnapshot]));
 	}
 }

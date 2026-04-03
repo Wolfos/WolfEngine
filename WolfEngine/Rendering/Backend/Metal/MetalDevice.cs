@@ -26,22 +26,28 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			Height = descriptor.Height;
 			Format = descriptor.Format;
 			Usage = descriptor.Usage;
+			MipLevels = descriptor.MipLevels;
+			IsSrgb = descriptor.IsSrgb;
 		}
 
 		public int Width { get; }
 		public int Height { get; }
 		public TextureFormat Format { get; }
 		public TextureUsage Usage { get; }
+		public int MipLevels { get; }
+		public bool IsSrgb { get; }
 
 		public bool Equals(TexturePoolKey other) =>
 			Width == other.Width &&
 			Height == other.Height &&
 			Format == other.Format &&
-			Usage == other.Usage;
+			Usage == other.Usage &&
+			MipLevels == other.MipLevels &&
+			IsSrgb == other.IsSrgb;
 
 		public override bool Equals(object obj) => obj is TexturePoolKey other && Equals(other);
 
-		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage);
+		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage, MipLevels, IsSrgb);
 	}
 
 	private MTLDevice _device;
@@ -239,8 +245,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		textureDescriptor.Width = (ulong)descriptor.Width;
 		textureDescriptor.Height = (ulong)descriptor.Height;
 		textureDescriptor.Depth = 1;
-		textureDescriptor.MipmapLevelCount = 1;
-		textureDescriptor.PixelFormat = ToPixelFormat(descriptor.Format);
+		textureDescriptor.MipmapLevelCount = (ulong)descriptor.MipLevels;
+		textureDescriptor.PixelFormat = ToPixelFormat(descriptor.Format, descriptor.IsSrgb);
 		textureDescriptor.TextureType = MTLTextureType.Type2D;
 		textureDescriptor.StorageMode = MTLStorageMode.Managed;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
@@ -577,14 +583,15 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		return false;
 	}
 
-	private static MTLPixelFormat ToPixelFormat(TextureFormat format) => format switch
+	private static MTLPixelFormat ToPixelFormat(TextureFormat format, bool isSrgb = false) => format switch
 	{
-		TextureFormat.Bgra8Unorm => MTLPixelFormat.BGRA8Unorm,
-		TextureFormat.Rgba8Unorm => MTLPixelFormat.RGBA8Unorm,
+		TextureFormat.Bgra8Unorm => isSrgb ? MTLPixelFormat.BGRA8UnormsRGB : MTLPixelFormat.BGRA8Unorm,
+		TextureFormat.Rgba8Unorm => isSrgb ? MTLPixelFormat.RGBA8UnormsRGB : MTLPixelFormat.RGBA8Unorm,
 		TextureFormat.Rg16Float => MTLPixelFormat.RG16Float,
 		TextureFormat.Rgba16Float => MTLPixelFormat.RGBA16Float,
 		TextureFormat.R32Float => MTLPixelFormat.R32Float,
 		TextureFormat.D32Float => MTLPixelFormat.Depth32Float,
+		TextureFormat.Astc4x4Unorm => isSrgb ? MTLPixelFormat.ASTC4x4sRGB : MTLPixelFormat.ASTC4x4LDR,
 		TextureFormat.Unknown => MTLPixelFormat.Invalid,
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported texture format.")
 	};

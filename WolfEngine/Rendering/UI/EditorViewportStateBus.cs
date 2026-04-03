@@ -41,6 +41,7 @@ public readonly struct SceneViewportUiState
 		requestedDebugViewId: SceneDebugViewIds.FinalColor,
 		hovered: false,
 		focused: false,
+		rightMousePressStartedHere: false,
 		imageMin: Vector2.Zero,
 		imageMax: Vector2.Zero);
 
@@ -51,6 +52,7 @@ public readonly struct SceneViewportUiState
 		string requestedDebugViewId,
 		bool hovered,
 		bool focused,
+		bool rightMousePressStartedHere,
 		Vector2 imageMin,
 		Vector2 imageMax)
 	{
@@ -62,6 +64,7 @@ public readonly struct SceneViewportUiState
 			: requestedDebugViewId;
 		Hovered = hovered;
 		Focused = focused;
+		RightMousePressStartedHere = rightMousePressStartedHere;
 		ImageMin = imageMin;
 		ImageMax = imageMax;
 	}
@@ -72,6 +75,7 @@ public readonly struct SceneViewportUiState
 	public string RequestedDebugViewId { get; }
 	public bool Hovered { get; }
 	public bool Focused { get; }
+	public bool RightMousePressStartedHere { get; }
 	public Vector2 ImageMin { get; }
 	public Vector2 ImageMax { get; }
 }
