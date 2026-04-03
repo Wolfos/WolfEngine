@@ -91,6 +91,9 @@ public static class Program
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
+		services.AddSingleton<IGizmoLineRenderer, GizmoLineRenderer>();
+		services.AddSingleton<BoxColliderGizmoDrawer>();
+		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<EditorGui>();
 		

@@ -30,6 +30,12 @@ public interface IPreRender: ISystem
 	public WorldTag GetTag();
 }
 
+public interface IOnDrawGizmos : ISystem
+{
+	public void OnDrawGizmos(World world);
+	public WorldTag GetTag();
+}
+
 public interface IWorldRemovedListener: ISystem
 {
 	public void OnWorldRemoved(World world);

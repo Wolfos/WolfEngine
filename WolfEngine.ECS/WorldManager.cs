@@ -14,6 +14,7 @@ public interface IWorldManager
 	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 	public void PhysicsUpdate(float fixedDeltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 	public void OnPreRender(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
+	public void OnDrawGizmos(WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 }
 
 public class WorldManager: IWorldManager
@@ -162,6 +163,30 @@ public class WorldManager: IWorldManager
 				}
 
 				preRender.PreRender(deltaTime, world);
+			}
+		}
+	}
+
+	public void OnDrawGizmos(WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
+	{
+		foreach (var world in _worlds)
+		{
+			if ((world.Tag & worldTagMask) == 0)
+			{
+				continue;
+			}
+
+			for (var index = 0; index < _systems.Count; index++)
+			{
+				var registration = _systems[index];
+				if ((registration.Group & groupMask) == 0 ||
+				    registration.System is not IOnDrawGizmos gizmoDrawer ||
+				    (gizmoDrawer.GetTag() & world.Tag) == 0)
+				{
+					continue;
+				}
+
+				gizmoDrawer.OnDrawGizmos(world);
 			}
 		}
 	}

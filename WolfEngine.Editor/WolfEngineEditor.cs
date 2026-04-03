@@ -42,6 +42,8 @@ public class WolfEngineEditor
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly BoxColliderGizmoDrawer _boxColliderGizmoDrawer;
+	private readonly CapsuleColliderGizmoDrawer _capsuleColliderGizmoDrawer;
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
@@ -73,7 +75,9 @@ public class WolfEngineEditor
 		IEditorSceneReloadService sceneReloadService,
 		IAssetInstanceRegistry assetInstanceRegistry,
 		IEditorNotificationService notificationService,
-		IEditorUndoRedoService undoRedoService)
+		IEditorUndoRedoService undoRedoService,
+		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
+		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -93,6 +97,8 @@ public class WolfEngineEditor
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
+		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
 	}
 
 	public void Run()
@@ -123,6 +129,8 @@ public class WolfEngineEditor
 		_worldManager.AddSystem<TransformSystem>();
 		_worldManager.AddSystem(new RigidbodySystem(), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
+		_worldManager.AddSystem(_boxColliderGizmoDrawer);
+		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
 		
 		var sun = authoringWorld.CreateEntity("Sun");
 		var light = new Light

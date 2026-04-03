@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using ImGuiNET;
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -15,6 +16,9 @@ public class SceneWindow: EditorWindow
     ];
 
     private readonly EditorViewportStateBus _viewportStateBus;
+    private readonly IWorldManager _worldManager;
+    private readonly IEditorPlaySession _playSession;
+    private readonly IGizmoLineRenderer _gizmoLineRenderer;
     private readonly IIconManager _icons;
     private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
@@ -26,9 +30,18 @@ public class SceneWindow: EditorWindow
     private TransformPivotMode _pivotMode = TransformPivotMode.Center;
 
 
-    public SceneWindow(EditorViewportStateBus viewportStateBus, IIconManager icons, TransformGizmoController transformGizmoController)
+    public SceneWindow(
+        EditorViewportStateBus viewportStateBus,
+        IWorldManager worldManager,
+        IEditorPlaySession playSession,
+        IGizmoLineRenderer gizmoLineRenderer,
+        IIconManager icons,
+        TransformGizmoController transformGizmoController)
     {
         _viewportStateBus = viewportStateBus;
+        _worldManager = worldManager;
+        _playSession = playSession;
+        _gizmoLineRenderer = gizmoLineRenderer;
         _icons = icons;
         _transformGizmoController = transformGizmoController;
         
@@ -204,6 +217,12 @@ public class SceneWindow: EditorWindow
             imageMin,
             imageMax));
 
+        _gizmoLineRenderer.BeginFrame();
+        if (ShouldDrawGizmos(_playSession.State))
+        {
+            _worldManager.OnDrawGizmos(WorldTag.Authoring);
+        }
+
         _transformGizmoController.DrawAndHandle(
             scene,
             world,
@@ -214,6 +233,11 @@ public class SceneWindow: EditorWindow
             _pivotMode);
 
         ImGui.End();
+    }
+
+    internal static bool ShouldDrawGizmos(EditorPlayState playState)
+    {
+        return playState == EditorPlayState.Edit;
     }
 
     private bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
