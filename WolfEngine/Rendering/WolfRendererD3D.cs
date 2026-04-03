@@ -742,10 +742,13 @@ private sealed class MeshResources
 				_adapter,
 				D3DFeatureLevel.Level122,
 				out _device));
-		var commandQueueDescription = new CommandQueueDesc(
-			type: CommandListType.Direct,
-			priority: (int) CommandQueuePriority.Normal,
-			flags: CommandQueueFlags.None);
+		var commandQueueDescription = new CommandQueueDesc
+		{
+			Type = CommandListType.Direct,
+			Priority = (int)CommandQueuePriority.Normal,
+			Flags = CommandQueueFlags.None,
+			NodeMask = 0
+		};
 
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
 

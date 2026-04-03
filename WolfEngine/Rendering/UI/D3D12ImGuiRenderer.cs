@@ -431,7 +431,13 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		uploadList.ResourceBarrier(1, &barrier);
 		SilkMarshal.ThrowHResult(uploadList.Close());
 
-		var queueDesc = new CommandQueueDesc(CommandListType.Direct, 0, CommandQueueFlags.None);
+		var queueDesc = new CommandQueueDesc
+		{
+			Type = CommandListType.Direct,
+			Priority = 0,
+			Flags = CommandQueueFlags.None,
+			NodeMask = 0
+		};
 		ComPtr<ID3D12CommandQueue> queue;
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(queueDesc, out queue));
 
