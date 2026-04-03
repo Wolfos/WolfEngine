@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using NSubstitute;
@@ -7,6 +8,8 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
+using WolfEngine.Mathematics;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 
@@ -220,7 +223,7 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
-	public void GameplayReload_PreservesMatchingFieldsAndDefaultsNewFields()
+	public void GameplayReload_PatchesGameplayComponentsInPlaceAndKeepsAuthoringState()
 	{
 		using var environment = new GameplayTestEnvironment();
 		environment.BuildAndLoadGameplayAssembly(
@@ -239,13 +242,49 @@ public sealed class GameplayComponentSupportTests
 			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayReloadComponent", StringComparison.Ordinal))
 			.Type;
 		var scene = environment.Factory.New();
+		var parent = scene.World.CreateEntity("Parent");
+		scene.World.AddTransform(parent, Matrix4x4.CreateTranslation(1.0f, 2.0f, 3.0f));
+		scene.EntityIds[parent] = Guid.NewGuid();
+
 		var entity = scene.World.CreateEntity("Reload Entity");
+		scene.World.AddTransform(entity, Matrix4x4.CreateScale(2.0f));
+		scene.World.SetParent(entity, parent);
+		scene.World.SetEnabled(entity, false);
+		scene.EntityIds[entity] = Guid.NewGuid();
+		scene.EntityIcons[entity] = "script";
+		scene.World.AddComponent(entity, new Light
+		{
+			Color = ColorRGBA.White,
+			Intensity = 3.0f,
+			Range = 12.0f,
+			Type = LightType.Point
+		});
 		RuntimeComponentAccessor.AddDefault(scene.World, entity, componentType);
 		var componentValue = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType);
 		componentType.GetField("Count")!.SetValue(componentValue, 17);
 		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
+		var originalWorld = scene.World;
+		var originalEntityId = scene.EntityIds[entity];
+		var originalParentId = scene.EntityIds[parent];
 
-		var snapshot = environment.SceneReloadService.Capture(scene);
+		var snapshot = environment.SceneReloadService.CaptureGameplayComponents(scene);
+
+		Assert.That(scene.World, Is.SameAs(originalWorld));
+		Assert.That(scene.World.IsAlive(entity), Is.True);
+		Assert.That(scene.World.IsAlive(parent), Is.True);
+		Assert.That(scene.EntityIds[entity], Is.EqualTo(originalEntityId));
+		Assert.That(scene.EntityIds[parent], Is.EqualTo(originalParentId));
+		Assert.That(scene.World.HasComponent<NameComponent>(entity), Is.True);
+		Assert.That(scene.World.HasComponent<LocalTransform>(entity), Is.True);
+		Assert.That(scene.World.HasComponent<WorldTransform>(entity), Is.True);
+		Assert.That(scene.World.HasComponent<Parent>(entity), Is.True);
+		Assert.That(scene.World.HasComponent<Children>(parent), Is.True);
+		Assert.That(scene.World.HasComponent<Light>(entity), Is.True);
+		Assert.That(scene.World.IsEnabled(entity), Is.False);
+		Assert.That(scene.EntityIcons[entity], Is.EqualTo("script"));
+		Assert.That(scene.World.GetComponent<Parent>(entity).Value, Is.EqualTo(parent));
+		Assert.That(scene.World.GetComponent<Light>(entity).Intensity, Is.EqualTo(3.0f));
+		Assert.That(scene.World.HasComponent(entity, componentType), Is.False);
 
 		var buildResult = environment.BuildGameplayAssembly(
 			"""
@@ -267,22 +306,88 @@ public sealed class GameplayComponentSupportTests
 		environment.AssetInstanceRegistry.ClearCachedInstances();
 		environment.Host.ApplyPreparedBuild(buildResult);
 
-		var restoredScene = environment.SceneReloadService.Restore(snapshot);
-		var restoredEntity = FindEntityByName(restoredScene.World, "Reload Entity");
+		environment.SceneReloadService.RestoreGameplayComponents(scene, snapshot);
 		var reloadedType = environment.TypeCatalog.GetComponentTypes()
 			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayReloadComponent", StringComparison.Ordinal))
 			.Type;
-		var restoredComponent = RuntimeComponentAccessor.ReadBoxed(restoredScene.World, restoredEntity, reloadedType);
+		var restoredComponent = RuntimeComponentAccessor.ReadBoxed(scene.World, entity, reloadedType);
 
 		AssertFieldValue<int>(restoredComponent, "Count", 17);
 		Assert.That(reloadedType.GetField("Label")!.GetValue(restoredComponent), Is.Null);
+		Assert.That(scene.World, Is.SameAs(originalWorld));
+		Assert.That(scene.EntityIds[entity], Is.EqualTo(originalEntityId));
+		Assert.That(scene.EntityIds[parent], Is.EqualTo(originalParentId));
+		Assert.That(scene.World.GetComponent<Parent>(entity).Value, Is.EqualTo(parent));
+		Assert.That(scene.World.GetComponent<Light>(entity).Intensity, Is.EqualTo(3.0f));
+		Assert.That(scene.World.IsEnabled(entity), Is.False);
+		Assert.That(scene.EntityIcons[entity], Is.EqualTo("script"));
+	}
+
+	[Test]
+	public void GameplayReload_SkipsRemovedGameplayComponentTypes()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct RemovedGameplayComponent : IEntityComponent
+			{
+				public int Count;
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "RemovedGameplayComponent", StringComparison.Ordinal))
+			.Type;
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Reload Entity");
+		scene.World.AddComponent(entity, new Light
+		{
+			Color = ColorRGBA.White,
+			Intensity = 2.0f,
+			Range = 8.0f,
+			Type = LightType.Point
+		});
+		RuntimeComponentAccessor.AddDefault(scene.World, entity, componentType);
+
+		var snapshot = environment.SceneReloadService.CaptureGameplayComponents(scene);
+
+		Assert.That(scene.World.HasComponent<Light>(entity), Is.True);
+
+		var buildResult = environment.BuildGameplayAssembly(
+			"""
+			namespace GameplayComponentSupport;
+
+			public static class GameplayEntrypoint
+			{
+			}
+			""");
+		environment.TypeCatalogImpl.ClearCaches();
+		RuntimeComponentAccessor.ClearCachedDelegates();
+		RuntimeComponentFieldEditor.ClearCachedFields();
+		RuntimeAssetDescriptor.ClearCache();
+		ProjectTypeResolverUtility.ClearCaches();
+		environment.AssetInstanceRegistry.ClearCachedInstances();
+		environment.Host.ApplyPreparedBuild(buildResult);
+
+		environment.SceneReloadService.RestoreGameplayComponents(scene, snapshot);
+
+		Assert.That(scene.World.HasComponent<Light>(entity), Is.True);
+		Assert.That(
+			environment.TypeCatalog.GetComponentTypes()
+				.Any(candidate => string.Equals(candidate.Type.Name, "RemovedGameplayComponent", StringComparison.Ordinal)),
+			Is.False);
 	}
 
 	[Test]
 	public void GameplayReload_UnloadsPreviousLoadContextAfterDepinning()
 	{
-		var unloadedContextReference = CreateUnloadedGameplayContextReference();
+		var unloadedContextReference = CreateUnloadedGameplayContextReferenceWithRetainedScene(out var retainedScene);
 		ForceCollect(unloadedContextReference);
+		GC.KeepAlive(retainedScene);
 		Assert.That(unloadedContextReference.IsAlive, Is.False);
 	}
 
@@ -396,7 +501,7 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[MethodImpl(MethodImplOptions.NoInlining)]
-	private static WeakReference CreateUnloadedGameplayContextReference()
+	private static WeakReference CreateUnloadedGameplayContextReferenceWithRetainedScene(out EditorScene retainedScene)
 	{
 		using var environment = new GameplayTestEnvironment();
 		environment.BuildAndLoadGameplayAssembly(
@@ -411,16 +516,11 @@ public sealed class GameplayComponentSupportTests
 			}
 			""");
 
-		var componentType = environment.TypeCatalog.GetComponentTypes()
-			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayUnloadComponent", StringComparison.Ordinal))
-			.Type;
-		_ = environment.TypeCatalogImpl.GetStableTypeId(componentType);
-		var world = new World(WorldTag.Game);
-		var entity = world.CreateEntity("Unload Entity");
-		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
-		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
-		var fieldEditor = new TestPropertyDrawerRegistry(new Dictionary<string, object?>());
-		_ = RuntimeComponentFieldEditor.ApplyPublicFields(componentType, fieldEditor, ref componentValue);
+		retainedScene = environment.Factory.New();
+		var entity = retainedScene.World.CreateEntity("Unload Entity");
+		retainedScene.EntityIds[entity] = Guid.NewGuid();
+		AddGameplayUnloadComponent(environment, retainedScene.World, entity);
+		var snapshot = environment.SceneReloadService.CaptureGameplayComponents(retainedScene);
 
 		var buildResult = environment.BuildGameplayAssembly(
 			"""
@@ -441,9 +541,27 @@ public sealed class GameplayComponentSupportTests
 		ProjectTypeResolverUtility.ClearCaches();
 		environment.AssetInstanceRegistry.ClearCachedInstances();
 		var loadResult = environment.Host.ApplyPreparedBuild(buildResult);
+		environment.SceneReloadService.RestoreGameplayComponents(retainedScene, snapshot);
+		// Keep the scene object alive for the regression test, but drop current gameplay components so
+		// fixture teardown can unload the active gameplay ALC and delete its shadow-copied DLLs.
+		_ = environment.SceneReloadService.CaptureGameplayComponents(retainedScene);
 
 		Assert.That(loadResult.UnloadedContextReference, Is.Not.Null);
 		return loadResult.UnloadedContextReference!;
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void AddGameplayUnloadComponent(GameplayTestEnvironment environment, World world, Entity entity)
+	{
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayUnloadComponent", StringComparison.Ordinal))
+			.Type;
+		_ = environment.TypeCatalogImpl.GetStableTypeId(componentType);
+		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+		var fieldEditor = new TestPropertyDrawerRegistry(new Dictionary<string, object?>());
+		_ = RuntimeComponentFieldEditor.ApplyPublicFields(componentType, fieldEditor, ref componentValue);
+		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
 	}
 
 	private sealed class GameplayTestEnvironment : IDisposable
@@ -533,6 +651,13 @@ public sealed class GameplayComponentSupportTests
 
 		public void Dispose()
 		{
+			TypeCatalogImpl.ClearCaches();
+			RuntimeComponentAccessor.ClearCachedDelegates();
+			RuntimeComponentFieldEditor.ClearCachedFields();
+			RuntimeAssetDescriptor.ClearCache();
+			ProjectTypeResolverUtility.ClearCaches();
+			_registry.ClearCachedInstances();
+			_gameplayAssemblyHost.UnloadCurrent();
 			_projectService.CloseProject();
 			AssetDatabase.ClearInstanceRegistry();
 			if (Directory.Exists(_parentDirectory))

@@ -13,9 +13,12 @@ public static class RuntimeComponentAccessor
 		.GetMethod(nameof(ReadBoxedGeneric), BindingFlags.Static | BindingFlags.NonPublic)!;
 	private static readonly MethodInfo WriteBoxedGenericMethod = typeof(RuntimeComponentAccessor)
 		.GetMethod(nameof(WriteBoxedGeneric), BindingFlags.Static | BindingFlags.NonPublic)!;
+	private static readonly MethodInfo RemoveGenericMethod = typeof(RuntimeComponentAccessor)
+		.GetMethod(nameof(RemoveGeneric), BindingFlags.Static | BindingFlags.NonPublic)!;
 	private static readonly ConcurrentDictionary<Type, Action<World, Entity>> AddDefaultDelegates = new();
 	private static readonly ConcurrentDictionary<Type, Func<World, Entity, object>> ReadBoxedDelegates = new();
 	private static readonly ConcurrentDictionary<Type, Action<World, Entity, object>> WriteBoxedDelegates = new();
+	private static readonly ConcurrentDictionary<Type, Action<World, Entity>> RemoveDelegates = new();
 
 	public static void AddDefault(World world, Entity entity, Type componentType)
 	{
@@ -39,11 +42,19 @@ public static class RuntimeComponentAccessor
 		WriteBoxedDelegates.GetOrAdd(componentType, CreateWriteBoxedDelegate)(world, entity, componentValue);
 	}
 
+	public static void Remove(World world, Entity entity, Type componentType)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		ValidateComponentType(componentType);
+		RemoveDelegates.GetOrAdd(componentType, CreateRemoveDelegate)(world, entity);
+	}
+
 	public static void ClearCachedDelegates()
 	{
 		AddDefaultDelegates.Clear();
 		ReadBoxedDelegates.Clear();
 		WriteBoxedDelegates.Clear();
+		RemoveDelegates.Clear();
 	}
 
 	private static void ValidateComponentType(Type? componentType)
@@ -74,6 +85,12 @@ public static class RuntimeComponentAccessor
 		return (Action<World, Entity, object>)Delegate.CreateDelegate(typeof(Action<World, Entity, object>), method);
 	}
 
+	private static Action<World, Entity> CreateRemoveDelegate(Type componentType)
+	{
+		var method = RemoveGenericMethod.MakeGenericMethod(componentType);
+		return (Action<World, Entity>)Delegate.CreateDelegate(typeof(Action<World, Entity>), method);
+	}
+
 	private static void AddDefaultGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
 	{
 		var component = default(T);
@@ -90,5 +107,10 @@ public static class RuntimeComponentAccessor
 	{
 		var typedValue = (T)componentValue;
 		world.AddComponent(entity, typedValue);
+	}
+
+	private static void RemoveGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
+	{
+		world.RemoveComponent<T>(entity);
 	}
 }

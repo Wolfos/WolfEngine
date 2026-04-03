@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.UI;
@@ -171,6 +172,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		}
 		catch (Exception ex)
 		{
+			ReleaseAssetDatabaseConnections();
 			_projectRootPath = null;
 			_projectManifest = null;
 			_currentAssetDatabase = new AssetDatabase();
@@ -184,6 +186,7 @@ public sealed class EditorProjectService : IEditorProjectService
 
 	public void CloseProject()
 	{
+		ReleaseAssetDatabaseConnections();
 		_projectRootPath = null;
 		_projectManifest = null;
 		_currentAssetDatabase = new AssetDatabase();
@@ -352,6 +355,11 @@ public sealed class EditorProjectService : IEditorProjectService
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
 		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
+	}
+
+	private static void ReleaseAssetDatabaseConnections()
+	{
+		SqliteConnection.ClearAllPools();
 	}
 
 	private static void ValidateManifest(string projectRootPath, EditorProjectManifest manifest)

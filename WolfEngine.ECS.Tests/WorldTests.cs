@@ -209,6 +209,30 @@ public class WorldTests
     }
 
     [Test]
+    public void RemoveComponent_WithRuntimeType_RemovesStoredComponent()
+    {
+        var world = new World(WorldTag.All);
+        var entity = world.CreateEntity();
+        world.AddComponent(entity, new TestComponentA { Value = 1 });
+
+        world.RemoveComponent(entity, typeof(TestComponentA));
+
+        Assert.That(world.HasComponent<TestComponentA>(entity), Is.False);
+    }
+
+    [Test]
+    public void RemoveComponentPool_WithRuntimeType_RemovesPool()
+    {
+        var world = new World(WorldTag.All);
+        var entity = world.CreateEntity();
+        world.AddComponent(entity, new TestComponentA { Value = 1 });
+
+        world.RemoveComponentPool(typeof(TestComponentA));
+
+        Assert.That(world.HasComponent<TestComponentA>(entity), Is.False);
+    }
+
+    [Test]
     public void View_WithSingleComponent_ReturnsMatchingEntities()
     {
         var world = new World(WorldTag.All);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
@@ -19,10 +20,23 @@ public sealed class EditorSceneReloadSnapshot
 	public required Dictionary<Int2, Cell> SpatialCells { get; init; }
 }
 
+public sealed class EditorSceneGameplayReloadSnapshot
+{
+	public required List<EditorSceneGameplayEntitySnapshot> Entities { get; init; }
+}
+
+public sealed class EditorSceneGameplayEntitySnapshot
+{
+	public required Guid EntityId { get; init; }
+	public required List<SavedComponent> Components { get; init; }
+}
+
 public interface IEditorSceneReloadService
 {
 	EditorSceneReloadSnapshot Capture(EditorScene scene);
 	EditorScene Restore(EditorSceneReloadSnapshot snapshot, WorldTag worldTag = WorldTag.Authoring);
+	EditorSceneGameplayReloadSnapshot CaptureGameplayComponents(EditorScene scene);
+	void RestoreGameplayComponents(EditorScene scene, EditorSceneGameplayReloadSnapshot snapshot);
 }
 
 public sealed class EditorSceneReloadService : IEditorSceneReloadService
@@ -56,13 +70,7 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 		scene.World.GetAllEntities(entities);
 		for (var i = 0; i < entities.Count; i++)
 		{
-			var entity = entities[i];
-			if (scene.EntityIds.TryGetValue(entity, out var entityId) && entityId != Guid.Empty)
-			{
-				continue;
-			}
-
-			scene.EntityIds[entity] = Guid.NewGuid();
+			EnsureEntityId(scene, entities[i]);
 		}
 
 		for (var i = 0; i < entities.Count; i++)
@@ -123,10 +131,94 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			loadedCells.Add((SceneCellKey.Spatial(spatialCell.Key), spatialCell.Value));
 		}
 
+
 		var entitiesById = CreateEntities(scene, loadedCells);
+
+
 		ApplyEntityState(scene.World, loadedCells, entitiesById);
 		RestoreHierarchy(scene.World, loadedCells, entitiesById);
+
 		return scene;
+	}
+
+	public EditorSceneGameplayReloadSnapshot CaptureGameplayComponents(EditorScene scene)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(scene.World);
+
+		var entities = new List<Entity>();
+		scene.World.GetAllEntities(entities);
+		for (var i = 0; i < entities.Count; i++)
+		{
+			EnsureEntityId(scene, entities[i]);
+		}
+
+		var entitySnapshots = new List<EditorSceneGameplayEntitySnapshot>();
+		var gameplayComponentTypes = new HashSet<Type>();
+		var componentTypes = new List<Type>();
+		for (var i = 0; i < entities.Count; i++)
+		{
+			var entity = entities[i];
+			scene.World.GetComponentTypes(entity, componentTypes);
+
+			List<SavedComponent>? components = null;
+			for (var componentIndex = 0; componentIndex < componentTypes.Count; componentIndex++)
+			{
+				var componentType = componentTypes[componentIndex];
+				if (IsGameplayReloadComponentType(componentType) == false)
+				{
+					continue;
+				}
+
+				components ??= [];
+				components.Add(SerializeComponent(scene.World, entity, componentType));
+				RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
+				gameplayComponentTypes.Add(componentType);
+			}
+
+			if (components is null)
+			{
+				continue;
+			}
+
+			entitySnapshots.Add(new EditorSceneGameplayEntitySnapshot
+			{
+				EntityId = scene.EntityIds[entity],
+				Components = components
+			});
+		}
+
+		foreach (var componentType in gameplayComponentTypes)
+		{
+			scene.World.RemoveComponentPool(componentType);
+		}
+
+		return new EditorSceneGameplayReloadSnapshot
+		{
+			Entities = entitySnapshots
+		};
+	}
+
+	public void RestoreGameplayComponents(EditorScene scene, EditorSceneGameplayReloadSnapshot snapshot)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(scene.World);
+		ArgumentNullException.ThrowIfNull(snapshot);
+
+		var entitiesById = CreateEntitiesById(scene);
+		for (var i = 0; i < snapshot.Entities.Count; i++)
+		{
+			var entitySnapshot = snapshot.Entities[i];
+			if (entitiesById.TryGetValue(entitySnapshot.EntityId, out var entity) == false)
+			{
+				continue;
+			}
+
+			for (var componentIndex = 0; componentIndex < entitySnapshot.Components.Count; componentIndex++)
+			{
+				ApplyGameplayComponent(scene.World, entity, entitySnapshot.Components[componentIndex]);
+			}
+		}
 	}
 
 	private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
@@ -159,15 +251,23 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 				continue;
 			}
 
-			savedEntity.Components.Add(new SavedComponent
-			{
-				Type = _typeResolver.GetTypeName(componentType),
-				TypeId = _typeResolver.GetStableTypeId(componentType),
-					Data = JsonSerializer.SerializeToElement(global::WolfEngine.Editor.UI.RuntimeComponentAccessor.ReadBoxed(world, entity, componentType), componentType, AssetJson.GetSerializerOptions(componentType))
-			});
+			savedEntity.Components.Add(SerializeComponent(world, entity, componentType));
 		}
 
 		return savedEntity;
+	}
+
+	private SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
+	{
+		return new SavedComponent
+		{
+			Type = _typeResolver.GetTypeName(componentType),
+			TypeId = _typeResolver.GetStableTypeId(componentType),
+			Data = JsonSerializer.SerializeToElement(
+				RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
+				componentType,
+				AssetJson.GetSerializerOptions(componentType))
+		};
 	}
 
 	private void ApplyEntityState(World world, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
@@ -196,7 +296,19 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 		}
 
 		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-		global::WolfEngine.Editor.UI.RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+	}
+
+	private void ApplyGameplayComponent(World world, Entity entity, SavedComponent component)
+	{
+		if (TryResolveComponentType(component, out var componentType) == false ||
+		    IsGameplayReloadComponentType(componentType) == false)
+		{
+			return;
+		}
+
+		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
+		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
 	}
 
 	private bool TryResolveComponentType(SavedComponent component, out Type componentType)
@@ -232,6 +344,22 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 					scene.EntityIcons[entity] = savedEntity.Icon;
 				}
 			}
+		}
+
+		return entitiesById;
+	}
+
+	private static Dictionary<Guid, Entity> CreateEntitiesById(EditorScene scene)
+	{
+		var entitiesById = new Dictionary<Guid, Entity>(scene.EntityIds.Count);
+		foreach (var entry in scene.EntityIds)
+		{
+			if (entry.Value == Guid.Empty || scene.World.IsAlive(entry.Key) == false)
+			{
+				continue;
+			}
+
+			entitiesById[entry.Value] = entry.Key;
 		}
 
 		return entitiesById;
@@ -276,6 +404,22 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 		       && Attribute.IsDefined(componentType, typeof(NotSerializedAttribute)) == false
 		       && Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)) == false
 		       && Attribute.IsDefined(componentType, typeof(EditorOnlyAttribute)) == false;
+	}
+
+	private static bool IsGameplayReloadComponentType(Type componentType)
+	{
+		return IsPersistableComponentType(componentType) &&
+		       ProjectTypeResolverUtility.IsGameplayType(componentType);
+	}
+
+	private static void EnsureEntityId(EditorScene scene, Entity entity)
+	{
+		if (scene.EntityIds.TryGetValue(entity, out var entityId) && entityId != Guid.Empty)
+		{
+			return;
+		}
+
+		scene.EntityIds[entity] = Guid.NewGuid();
 	}
 
 	private static Entity CreateEntity(World world, SavedEntity savedEntity)

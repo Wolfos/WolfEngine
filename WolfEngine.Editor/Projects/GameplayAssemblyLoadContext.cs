@@ -26,12 +26,25 @@ internal sealed class GameplayAssemblyLoadContext : AssemblyLoadContext
 		}
 
 		var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
-		return string.IsNullOrWhiteSpace(assemblyPath) ? null : LoadFromAssemblyPath(assemblyPath);
+		return string.IsNullOrWhiteSpace(assemblyPath) ? null : LoadManagedAssembly(assemblyPath);
 	}
 
 	protected override nint LoadUnmanagedDll(string unmanagedDllName)
 	{
 		var libraryPath = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
 		return string.IsNullOrWhiteSpace(libraryPath) ? 0 : LoadUnmanagedDllFromPath(libraryPath);
+	}
+
+	public Assembly LoadManagedAssembly(string assemblyPath)
+	{
+		using var assemblyStream = File.OpenRead(assemblyPath);
+		var symbolsPath = Path.ChangeExtension(assemblyPath, ".pdb");
+		if (File.Exists(symbolsPath) == false)
+		{
+			return LoadFromStream(assemblyStream);
+		}
+
+		using var symbolsStream = File.OpenRead(symbolsPath);
+		return LoadFromStream(assemblyStream, symbolsStream);
 	}
 }

@@ -59,8 +59,31 @@ public class World
     public bool HasComponent<T>(Entity e) where T : struct, IEntityComponent
         => Pool<T>().Has(e);
 
+    public bool HasComponent(Entity e, Type componentType)
+    {
+        ValidateComponentType(componentType);
+        return _pools.TryGetValue(componentType, out var pool) && pool.Has(e);
+    }
+
     public void RemoveComponent<T>(Entity e) where T : struct, IEntityComponent
         => Pool<T>().Remove(e);
+
+    public void RemoveComponent(Entity e, Type componentType)
+    {
+        ValidateComponentType(componentType);
+        if (_pools.TryGetValue(componentType, out var pool) == false)
+        {
+            return;
+        }
+
+        pool.Remove(e);
+    }
+
+    public void RemoveComponentPool(Type componentType)
+    {
+        ValidateComponentType(componentType);
+        _pools.Remove(componentType);
+    }
 
     public View<T1> View<T1>()
         where T1:struct, IEntityComponent
@@ -155,6 +178,16 @@ public class World
     private ComponentPool<T> Pool<T>() where T:struct, IEntityComponent
         => (ComponentPool<T>) (_pools.TryGetValue(typeof(T), out var p)
             ? p : _pools[typeof(T)] = new ComponentPool<T>());
+
+    private static void ValidateComponentType(Type? componentType)
+    {
+        if (componentType is null ||
+            componentType.IsValueType == false ||
+            typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+        {
+            throw new InvalidOperationException($"'{componentType?.FullName ?? "<null>"}' is not a valid entity component type.");
+        }
+    }
 
     public void AddTransform(Entity entity, in LocalTransform transform)
     {

@@ -10,22 +10,27 @@ namespace WolfEngine.AssetPipeline;
 
 public static class AssetJson
 {
-	public static readonly JsonSerializerOptions SerializerOptions = new()
-	{
-		IncludeFields = true,
-		TypeInfoResolver = CreateTypeInfoResolver(),
-		WriteIndented = true,
-		Converters = { new JsonStringEnumConverter() }
-	};
+	public static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
 
 	public static JsonSerializerOptions GetSerializerOptions(Type? runtimeType)
 	{
 		if (runtimeType is not null && AssemblyLoadContext.GetLoadContext(runtimeType.Assembly) != AssemblyLoadContext.Default)
 		{
-			return new JsonSerializerOptions(SerializerOptions);
+			return CreateSerializerOptions();
 		}
 
 		return SerializerOptions;
+	}
+
+	private static JsonSerializerOptions CreateSerializerOptions()
+	{
+		return new JsonSerializerOptions
+		{
+			IncludeFields = true,
+			TypeInfoResolver = CreateTypeInfoResolver(),
+			WriteIndented = true,
+			Converters = { new JsonStringEnumConverter() }
+		};
 	}
 
 	private static IJsonTypeInfoResolver CreateTypeInfoResolver()

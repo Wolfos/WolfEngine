@@ -131,6 +131,22 @@ internal sealed class GpuDrawHandlePool
 		_free.Push((ushort)index);
 	}
 
+	public void Reset()
+	{
+		_free.Clear();
+		_nextIndex = 1;
+		for (var i = 0; i < _generations.Length; i++)
+		{
+			var nextGeneration = unchecked((ushort)(_generations[i] + 1));
+			if (nextGeneration == 0)
+			{
+				nextGeneration = 1;
+			}
+
+			_generations[i] = nextGeneration;
+		}
+	}
+
 	public void WriteGenerations(Span<uint> destination)
 	{
 		if (destination.Length < _generations.Length)

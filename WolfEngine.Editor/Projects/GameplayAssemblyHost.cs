@@ -37,6 +37,7 @@ public interface IGameplayAssemblyHost
 	bool TryConsumeBuildResult(out GameplayBuildResult result);
 	GameplayLoadResult EnsureLoaded();
 	GameplayLoadResult ApplyPreparedBuild(GameplayBuildResult result);
+	void UnloadCurrent();
 }
 
 public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
@@ -57,6 +58,12 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		public required GameplayAssemblyLoadContext LoadContext { get; init; }
 		public required Assembly Assembly { get; init; }
 		public IGameplayModule? Module { get; init; }
+	}
+
+	private sealed class GameplayPendingUnload
+	{
+		public required WeakReference LoadContextReference { get; init; }
+		public required string ShadowDirectoryPath { get; init; }
 	}
 
 	public GameplayAssemblyHost(Func<IEditorProjectService> projectServiceAccessor)
@@ -198,17 +205,31 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			};
 		}
 
+		GameplayPendingUnload? pendingUnload;
 		lock (_sync)
 		{
-			var unloadedContextReference = UnloadCurrent_NoLock();
+			pendingUnload = UnloadCurrent_NoLock();
 			var next = LoadShadowAssembly_NoLock(result.ShadowDirectoryPath, result.ShadowAssemblyPath);
 			_current = next;
 			_loadedProjectRootPath = GetProjectService().ProjectRootPath is { } projectRootPath
 				? Path.GetFullPath(projectRootPath)
 				: null;
 			_generation++;
-			return CreateLoadResult(_generation, next, unloadedContextReference);
+			StartUnloadCleanup(pendingUnload);
+			return CreateLoadResult(_generation, next, pendingUnload?.LoadContextReference);
 		}
+	}
+
+	public void UnloadCurrent()
+	{
+		GameplayPendingUnload? pendingUnload;
+		lock (_sync)
+		{
+			pendingUnload = UnloadCurrent_NoLock();
+			_loadedProjectRootPath = null;
+		}
+
+		WaitForUnloadAndDeleteShadowDirectory(pendingUnload);
 	}
 
 	private void BuildAndPrepareShadowCopy(string projectRootPath, string gameplayProjectPath)
@@ -216,7 +237,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		GameplayBuildResult buildResult;
 		try
 		{
-			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" /m:1")
+			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" /m:1 -nr:false -p:UseSharedCompilation=false")
 			{
 				WorkingDirectory = projectRootPath,
 				RedirectStandardOutput = true,
@@ -235,9 +256,13 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			}
 			else
 			{
+				var buildStopwatch = Stopwatch.StartNew();
 				var standardOutput = process.StandardOutput.ReadToEnd();
 				var standardError = process.StandardError.ReadToEnd();
 				process.WaitForExit();
+				buildStopwatch.Stop();
+				Console.WriteLine($"[GameplayReload] dotnet build: {buildStopwatch.Elapsed.TotalMilliseconds:F1} ms (exit {process.ExitCode}).");
+
 				var output = string.Concat(standardOutput, string.IsNullOrWhiteSpace(standardError) ? string.Empty : Environment.NewLine + standardError).Trim();
 				if (process.ExitCode != 0)
 				{
@@ -297,7 +322,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			throw new FileNotFoundException("Shadow-copied gameplay assembly was not found.", shadowAssemblyPath);
 		}
 
-		return new GameplayBuildResult
+		return new()
 		{
 			Succeeded = true,
 			Output = buildOutput ?? string.Empty,
@@ -309,7 +334,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 	private GameplayLoadedAssembly LoadShadowAssembly_NoLock(string shadowDirectoryPath, string shadowAssemblyPath)
 	{
 		var loadContext = new GameplayAssemblyLoadContext(shadowAssemblyPath);
-		var assembly = loadContext.LoadFromAssemblyPath(shadowAssemblyPath);
+		var assembly = loadContext.LoadManagedAssembly(shadowAssemblyPath);
 		var module = TryCreateModule(assembly);
 
 		return new GameplayLoadedAssembly
@@ -325,19 +350,21 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		};
 	}
 
-	private WeakReference? UnloadCurrent_NoLock()
+	private GameplayPendingUnload? UnloadCurrent_NoLock()
 	{
 		if (_current is null)
 		{
 			return null;
 		}
 
-		var unloadReference = new WeakReference(_current.LoadContext);
-		var shadowDirectoryPath = _current.ShadowDirectoryPath;
+		var pendingUnload = new GameplayPendingUnload
+		{
+			LoadContextReference = new WeakReference(_current.LoadContext),
+			ShadowDirectoryPath = _current.ShadowDirectoryPath
+		};
 		_current.LoadContext.Unload();
 		_current = null;
-		TryDeleteShadowDirectory(shadowDirectoryPath);
-		return unloadReference;
+		return pendingUnload;
 	}
 
 	private static GameplayLoadResult CreateLoadResult(long generation, GameplayLoadedAssembly? current, WeakReference? unloadedContextReference)
@@ -405,6 +432,37 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		}
 		catch
 		{
+		}
+	}
+
+	private static void StartUnloadCleanup(GameplayPendingUnload? pendingUnload)
+	{
+		if (pendingUnload is null)
+		{
+			return;
+		}
+
+		Task.Run(() => WaitForUnloadAndDeleteShadowDirectory(pendingUnload));
+	}
+
+	private static void WaitForUnloadAndDeleteShadowDirectory(GameplayPendingUnload? pendingUnload)
+	{
+		if (pendingUnload is null)
+		{
+			return;
+		}
+
+		WaitForUnload(pendingUnload.LoadContextReference);
+		TryDeleteShadowDirectory(pendingUnload.ShadowDirectoryPath);
+	}
+
+	private static void WaitForUnload(WeakReference unloadedContextReference)
+	{
+		for (var attempt = 0; attempt < 10 && unloadedContextReference.IsAlive; attempt++)
+		{
+			GC.Collect();
+			GC.WaitForPendingFinalizers();
+			GC.Collect();
 		}
 	}
 

@@ -354,11 +354,13 @@ public class WolfEngineEditor
 	{
 		var previousState = _playSession.State;
 		var selectedEntityId = TryGetSelectedEntityId(_playSession.ActiveScene);
-		var snapshot = _sceneReloadService.Capture(_playSession.AuthoringScene);
+
+		var snapshot = _sceneReloadService.CaptureGameplayComponents(_playSession.AuthoringScene);
 
 		UnbindGameplayModule();
 		_playSession.Stop();
 		_editorGui.PrepareForGameplayReload();
+
 		_assetInstanceRegistry.ClearCachedInstances();
 		_typeCatalog.ClearCaches();
 		RuntimeComponentAccessor.ClearCachedDelegates();
@@ -367,9 +369,10 @@ public class WolfEngineEditor
 		ProjectTypeResolverUtility.ClearCaches();
 
 		_gameplayAssemblyHost.ApplyPreparedBuild(buildResult);
-		var restoredScene = _sceneReloadService.Restore(snapshot, WorldTag.Authoring);
+
+		_sceneReloadService.RestoreGameplayComponents(_playSession.AuthoringScene, snapshot);
+
 		_undoRedoService.Clear();
-		_sceneWorkspace.ReplaceCurrentScene(restoredScene);
 		_playSession.Restart(previousState);
 		_currentScene = _playSession.ActiveScene;
 		RefreshRenderWorlds();
