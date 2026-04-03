@@ -13,7 +13,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 {
 	private const int MaxSrvDescriptors = 16384;
 	private const int MaxUavDescriptors = 16384;
-	private const int MaxCbvDescriptors = 16384;
+	private const int MaxCbvDescriptors = 65536;
 	private const int MaxSamplerDescriptors = 2048;
 
 	private readonly ComPtr<ID3D12Device> _device;
