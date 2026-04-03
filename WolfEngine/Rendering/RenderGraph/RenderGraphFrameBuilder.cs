@@ -1205,6 +1205,16 @@ public sealed class RenderGraphFrameBuilder
 			return;
 		}
 
+		if (_frameResources.HistoryColorRead.IsValid)
+		{
+			_historyColorStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.HistoryColorRead);
+		}
+
+		if (_frameResources.HistoryDepthRead.IsValid)
+		{
+			_historyDepthStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.HistoryDepthRead);
+		}
+
 		var writeIndex = 1 - _historyReadIndex;
 		_historyColorStates[writeIndex] = _resources.GetResourceState(_frameResources.HistoryColorWrite);
 		_historyDepthStates[writeIndex] = _resources.GetResourceState(_frameResources.HistoryDepthWrite);
@@ -1244,8 +1254,8 @@ public sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
-			_historyColorStates[i] = ResourceState.ShaderResource;
-			_historyDepthStates[i] = ResourceState.ShaderResource;
+			_historyColorStates[i] = ResourceState.UnorderedAccess;
+			_historyDepthStates[i] = ResourceState.UnorderedAccess;
 		}
 
 		_historyDevice = device;
