@@ -484,6 +484,7 @@ public sealed class RenderGraphFrameBuilder
 				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
 			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
+			RegisterSceneDebugView(SceneDebugViewIds.GBufferMaterial, "GBuffer Material", gbufferNormalHandle, SceneDebugViewKind.Color);
 			RegisterSceneDebugView(SceneDebugViewIds.MotionVectors, "Motion Vectors", gbufferVelocityHandle, SceneDebugViewKind.Color);
 			_sceneDebugViewOptions = BuildSceneDebugViewOptions();
 		}

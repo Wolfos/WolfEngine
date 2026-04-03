@@ -1,6 +1,5 @@
 using AstcEncoder;
-using BCnEncoder.Encoder;
-using BCnEncoder.Shared;
+using JeremyAnsel.BcnSharp;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
@@ -18,23 +17,18 @@ internal static class TextureCompressionCompiler
 			? TextureFormat.Bc5Unorm
 			: TextureFormat.Bc7Unorm;
 
-		var encoder = new BcEncoder();
-		encoder.Options.IsParallel = true;
-		encoder.Options.TaskCount = Math.Max(1, Environment.ProcessorCount);
-		encoder.OutputOptions.GenerateMipMaps = false;
-		encoder.OutputOptions.Quality = CompressionQuality.Fast;
-		encoder.OutputOptions.Format = format switch
-		{
-			TextureFormat.Bc5Unorm => CompressionFormat.Bc5,
-			TextureFormat.Bc7Unorm => CompressionFormat.Bc7,
-			_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported BC runtime texture format.")
-		};
-
 		var compressedMips = new TextureMipData[rawMips.Length];
 		for (var i = 0; i < rawMips.Length; i++)
 		{
-			var encoded = encoder.EncodeToRawBytes(rawMips[i].Data, rawMips[i].Width, rawMips[i].Height, PixelFormat.Rgba32);
-			compressedMips[i] = new TextureMipData(rawMips[i].Width, rawMips[i].Height, encoded[0]);
+			var mip = rawMips[i];
+			var encoded = format switch
+			{
+				TextureFormat.Bc5Unorm => Bc5Sharp.Encode(SwizzleRgbaToBgra(mip.Data), mip.Width, mip.Height),
+				TextureFormat.Bc7Unorm => Bc7Sharp.Encode(SwizzleRgbaToBgra(mip.Data), mip.Width, mip.Height),
+				_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported BC runtime texture format.")
+			};
+
+			compressedMips[i] = new TextureMipData(mip.Width, mip.Height, encoded);
 		}
 
 		return new Texture(importedTexture.NameOrPath, importedTexture.Width, importedTexture.Height, importedTexture.IsSrgb, format, compressedMips);
@@ -91,6 +85,20 @@ internal static class TextureCompressionCompiler
 		{
 			Astcenc.AstcencContextFree(context);
 		}
+	}
+
+	private static byte[] SwizzleRgbaToBgra(byte[] rgba)
+	{
+		var bgra = new byte[rgba.Length];
+		for (var i = 0; i < rgba.Length; i += 4)
+		{
+			bgra[i + 0] = rgba[i + 2];
+			bgra[i + 1] = rgba[i + 1];
+			bgra[i + 2] = rgba[i + 0];
+			bgra[i + 3] = rgba[i + 3];
+		}
+
+		return bgra;
 	}
 
 	private static void EnsureSuccess(AstcencError error, string operation)

@@ -2,6 +2,7 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 import "common_lighting.slang";
+import "normal_decode.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 20000
 #define WOLF_MAX_MATERIAL_COUNT 8192
@@ -154,7 +155,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
 
     float4 albedoSample = albedoTex.Sample(sampler, input.uv);
     float4 mrSample = metallicRoughnessTex.Sample(sampler, input.uv);
-    float3 tangentNormal = normalize(normalTex.Sample(sampler, input.uv).rgb * 2.0f - 1.0f);
+    float3 tangentNormal = DecodeNormalMapSample(normalTex.Sample(sampler, input.uv));
     float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
