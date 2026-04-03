@@ -101,6 +101,33 @@ public sealed class EntityDeletionUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
+public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly EntityHierarchySnapshot _before;
+	private readonly EntityHierarchySnapshot _after;
+
+	public EntityHierarchyUndoRedoEntry(string description, EntityHierarchySnapshot before, EntityHierarchySnapshot after)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Edit Hierarchy" : description;
+		_before = before;
+		_after = after;
+	}
+
+	public string Description { get; }
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, _before);
+		context.InteractionState.MarkSceneDirty();
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, _after);
+		context.InteractionState.MarkSceneDirty();
+	}
+}
+
 public sealed class MaterialAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 {
 	private readonly EditorAssetFileSnapshot _before;

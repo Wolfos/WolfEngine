@@ -20,6 +20,8 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private Entity? _contextMenuEntity;
+	private Entity? _pressedEntity;
+	private Entity? _draggedEntity;
 	private Entity? _hoveredEntity;
 
 	public EntitiesWindow(
@@ -64,6 +66,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			DrawEntityNode(entity, world, scene);
 		}
 
+		CompleteDragDrop(scene);
 		DrawContextMenu(scene);
 		ImGui.PopStyleVar(2);
 		ImGui.End();
@@ -120,7 +123,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		var nodeCursorPosition = ImGui.GetCursorScreenPos();
 		var open = ImGui.TreeNodeEx("##EntityNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup))
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
 		{
 			_hoveredEntity = entity;
 		}
@@ -128,6 +131,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 		if (leftClicked)
 		{
+			_pressedEntity = entity;
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
 			EditorGui.SelectEntity(entity, world);
 		}
@@ -158,6 +162,44 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		}
 
 		ImGui.PopID();
+	}
+
+	private void CompleteDragDrop(EditorScene scene)
+	{
+		if (_pressedEntity is { } pressedEntity && _draggedEntity is null && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+		{
+			_draggedEntity = pressedEntity;
+		}
+
+		if (_draggedEntity is not { } draggedEntity)
+		{
+			if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false)
+			{
+				_pressedEntity = null;
+			}
+
+			return;
+		}
+
+		if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+		{
+			ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+			return;
+		}
+
+		if (ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows))
+		{
+			EntityHierarchyEditorOperations.TryReparentEntity(
+				scene,
+				draggedEntity,
+				_hoveredEntity,
+				_sceneSnapshotService,
+				_undoRedoService,
+				_interactionState);
+		}
+
+		_pressedEntity = null;
+		_draggedEntity = null;
 	}
 
 	private static nint ResolveIconTexture(IIconManager icons, string iconName)
