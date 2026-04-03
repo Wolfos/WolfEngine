@@ -18,6 +18,15 @@ namespace WolfEngine.Editor.Tests;
 [TestFixture]
 public sealed class GameplayComponentSupportTests
 {
+	[SetUp]
+	public void SkipGameplayBuildTestsOnGitHubActions()
+	{
+		if (string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase))
+		{
+			Assert.Ignore("Gameplay build/reload tests are disabled on GitHub Actions.");
+		}
+	}
+
 	[Test]
 	public void Catalog_MissingGameplayBuild_DoesNotThrowAndIgnoresUnbuiltProjectAssembly()
 	{
