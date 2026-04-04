@@ -466,15 +466,22 @@ public sealed class EditorProjectService : IEditorProjectService
 					RelativeImportedModelPath = asset.ModelSummary.RelativeImportedModelPath,
 					RootNodeCount = asset.ModelSummary.RootNodeCount
 				},
-			SceneSummary = asset.SceneSummary is null
-				? null
-				: new SceneAssetSummary
-				{
-					GlobalCellPath = asset.SceneSummary.GlobalCellPath,
-					SpatialCellCount = asset.SceneSummary.SpatialCellCount
-				}
-		};
-	}
+				SceneSummary = asset.SceneSummary is null
+					? null
+					: new SceneAssetSummary
+					{
+						GlobalCellPath = asset.SceneSummary.GlobalCellPath,
+						SpatialCellCount = asset.SceneSummary.SpatialCellCount
+					},
+				PrefabSummary = asset.PrefabSummary is null
+					? null
+					: new PrefabAssetSummary
+					{
+						RootEntityId = asset.PrefabSummary.RootEntityId,
+						EntityCount = asset.PrefabSummary.EntityCount
+					}
+			};
+		}
 
 	private void ClearUndoHistory()
 	{

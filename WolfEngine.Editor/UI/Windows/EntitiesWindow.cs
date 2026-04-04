@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -19,6 +20,9 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IPrefabAssetCreator _prefabAssetCreator;
+	private readonly IAssetSelectionService _assetSelectionService;
+	private readonly IEditorNotificationService _notificationService;
 	private Entity? _contextMenuEntity;
 	private Entity? _pressedEntity;
 	private Entity? _draggedEntity;
@@ -28,12 +32,18 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		IIconManager iconManager,
 		IEditorInteractionState interactionState,
 		IEditorSceneSnapshotService sceneSnapshotService,
-		IEditorUndoRedoService undoRedoService)
+		IEditorUndoRedoService undoRedoService,
+		IPrefabAssetCreator prefabAssetCreator,
+		IAssetSelectionService assetSelectionService,
+		IEditorNotificationService notificationService)
 	{
 		_iconManager = iconManager;
 		_interactionState = interactionState;
 		_sceneSnapshotService = sceneSnapshotService;
 		_undoRedoService = undoRedoService;
+		_prefabAssetCreator = prefabAssetCreator;
+		_assetSelectionService = assetSelectionService;
+		_notificationService = notificationService;
 	}
 
 	public override string Name => "Entities";
@@ -113,9 +123,11 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
 		}
 
-		var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
-			? assignedIconName
-			: "object";
+			var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
+				? assignedIconName
+				: EditorPrefabUtility.IsPrefabEntity(scene, entity)
+					? "prefab"
+					: "object";
 		var iconTexture = ResolveIconTexture(_iconManager, iconName);
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
@@ -268,11 +280,17 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			ImGui.EndMenu();
 		}
 
-		if (_contextMenuEntity is { } entity && scene.World.IsAlive(entity))
-		{
-			if (ImGui.MenuItem("Delete"))
+			if (_contextMenuEntity is { } entity && scene.World.IsAlive(entity))
 			{
-				DeleteEntity(entity, scene);
+				if (ImGui.MenuItem("Save as Prefab"))
+				{
+					SaveEntityAsPrefab(scene, entity);
+					ImGui.CloseCurrentPopup();
+				}
+
+				if (ImGui.MenuItem("Delete"))
+				{
+					DeleteEntity(entity, scene);
 				ImGui.CloseCurrentPopup();
 			}
 
@@ -291,6 +309,12 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			return;
 		}
 
+		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+		{
+			_notificationService.ReportError("Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
+			return;
+		}
+
 		PendingDeleteEntities.Clear();
 		CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
 		var deletedEntities = _sceneSnapshotService.CaptureDeletedEntities(scene, PendingDeleteEntities);
@@ -299,10 +323,11 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		for (var i = 0; i < PendingDeleteEntities.Count; i++)
 		{
 			var deletedEntity = PendingDeleteEntities[i];
-			scene.EntityIcons.Remove(deletedEntity);
-			scene.EntityCellKeys.Remove(deletedEntity);
-			scene.EntityIds.Remove(deletedEntity);
-		}
+				scene.EntityIcons.Remove(deletedEntity);
+				scene.EntityCellKeys.Remove(deletedEntity);
+				scene.EntityIds.Remove(deletedEntity);
+				scene.EntityPrefabSourcePaths.Remove(deletedEntity);
+			}
 
 		if (EditorGui.HasSelectedEntity && PendingDeleteEntities.Contains(EditorGui.SelectedEntity))
 		{
@@ -346,6 +371,26 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 				: default;
 			CollectEntitySubtree(child, world, entities);
 			child = next;
+		}
+	}
+
+	private void SaveEntityAsPrefab(EditorScene scene, Entity entity)
+	{
+		var result = _prefabAssetCreator.SaveEntityAsPrefab(scene, entity, "Assets/Prefabs");
+		if (result.Success)
+		{
+			if (result.AssetId is { } assetId)
+			{
+				_assetSelectionService.Select(assetId);
+			}
+
+			_interactionState.MarkSceneDirty();
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
+		{
+			_notificationService.ReportError(result.ErrorMessage);
 		}
 	}
 }

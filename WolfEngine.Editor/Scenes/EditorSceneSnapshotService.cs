@@ -128,12 +128,17 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 				continue;
 			}
 
-			var entity = CreateEntity(scene.World, snapshot.Entity);
-			scene.EntityIds[entity] = snapshot.Entity.EntityId;
-			scene.EntityCellKeys[entity] = snapshot.CellKey;
-			if (string.IsNullOrWhiteSpace(snapshot.Entity.Icon) == false)
-			{
-				scene.EntityIcons[entity] = snapshot.Entity.Icon;
+				var entity = CreateEntity(scene.World, snapshot.Entity);
+				scene.EntityIds[entity] = snapshot.Entity.EntityId;
+				scene.EntityCellKeys[entity] = snapshot.CellKey;
+				if (snapshot.Entity.PrefabSourcePath.Count > 0)
+				{
+					scene.EntityPrefabSourcePaths[entity] = EditorPrefabUtility.ClonePrefabSourcePath(snapshot.Entity.PrefabSourcePath);
+				}
+
+				if (string.IsNullOrWhiteSpace(snapshot.Entity.Icon) == false)
+				{
+					scene.EntityIcons[entity] = snapshot.Entity.Icon;
 			}
 
 			scene.World.SetEnabled(entity, snapshot.Entity.Enabled);
@@ -199,12 +204,15 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 			HasName = hasName,
 			Name = hasName ? world.GetComponent<NameComponent>(entity).Name ?? string.Empty : string.Empty,
 			Enabled = world.IsEnabled(entity),
-			Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
-			LocalTransform = world.HasComponent<LocalTransform>(entity)
-				? world.GetComponent<LocalTransform>(entity).GetTransform()
-				: null,
-			Components = []
-		};
+				Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
+				LocalTransform = world.HasComponent<LocalTransform>(entity)
+					? world.GetComponent<LocalTransform>(entity).GetTransform()
+					: null,
+				PrefabSourcePath = scene.EntityPrefabSourcePaths.TryGetValue(entity, out var prefabSourcePath)
+					? EditorPrefabUtility.ClonePrefabSourcePath(prefabSourcePath)
+					: [],
+				Components = []
+			};
 
 		var componentTypes = new List<Type>();
 		world.GetComponentTypes(entity, componentTypes);
@@ -347,11 +355,12 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		scene.World.DestroyEntity(entity);
 		for (var i = 0; i < entities.Count; i++)
 		{
-			var deletedEntity = entities[i];
-			scene.EntityIcons.Remove(deletedEntity);
-			scene.EntityCellKeys.Remove(deletedEntity);
-			scene.EntityIds.Remove(deletedEntity);
-		}
+				var deletedEntity = entities[i];
+				scene.EntityIcons.Remove(deletedEntity);
+				scene.EntityCellKeys.Remove(deletedEntity);
+				scene.EntityIds.Remove(deletedEntity);
+				scene.EntityPrefabSourcePaths.Remove(deletedEntity);
+			}
 
 		if (EditorGui.HasSelectedEntity && entities.Contains(EditorGui.SelectedEntity))
 		{
@@ -380,21 +389,6 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 
 	private static SavedEntity CloneEntity(SavedEntity source)
 	{
-		return new SavedEntity
-		{
-			EntityId = source.EntityId,
-			ParentEntityId = source.ParentEntityId,
-			HasName = source.HasName,
-			Name = source.Name,
-			Enabled = source.Enabled,
-			Icon = source.Icon,
-			LocalTransform = source.LocalTransform,
-			Components = source.Components.Select(component => new SavedComponent
-			{
-				Type = component.Type,
-				TypeId = component.TypeId,
-				Data = component.Data.Clone()
-			}).ToList()
-		};
+		return EditorPrefabUtility.CloneEntity(source);
 	}
 }

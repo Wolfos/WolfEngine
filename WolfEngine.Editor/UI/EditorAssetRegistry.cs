@@ -205,3 +205,31 @@ public sealed class SceneEditorAssetHandler : IEditorAssetHandler
 		_editor.Draw(asset);
 	}
 }
+
+public sealed class PrefabEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly PrefabAssetEditor _editor;
+
+	public PrefabEditorAssetHandler(PrefabAssetEditor editor)
+	{
+		_editor = editor ?? throw new ArgumentNullException(nameof(editor));
+	}
+
+	public AssetType AssetType => AssetType.Prefab;
+	public string DisplayName => "Prefab";
+	public string ThumbnailLabel => "PFB";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.PrefabSummary is null
+			? "Prefab"
+			: $"Prefab | {asset.PrefabSummary.EntityCount} entities";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		_editor.Draw(asset);
+	}
+}

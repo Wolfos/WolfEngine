@@ -14,7 +14,8 @@ public enum AssetType
 	DataAsset,
 	Mesh,
 	Model3D,
-	Scene
+	Scene,
+	Prefab
 }
 
 public enum MaterialAssetType
@@ -84,6 +85,7 @@ public sealed class AssetDatabaseEntry
 	public MeshAssetSummary? MeshSummary { get; set; }
 	public Model3DAssetSummary? ModelSummary { get; set; }
 	public SceneAssetSummary? SceneSummary { get; set; }
+	public PrefabAssetSummary? PrefabSummary { get; set; }
 
 	public string GetEffectiveRelativeStatePath()
 	{
@@ -132,6 +134,12 @@ public sealed class SceneAssetSummary
 {
 	public string GlobalCellPath { get; set; } = string.Empty;
 	public int SpatialCellCount { get; set; }
+}
+
+public sealed class PrefabAssetSummary
+{
+	public Guid RootEntityId { get; set; }
+	public int EntityCount { get; set; }
 }
 
 public sealed class TextureAsset

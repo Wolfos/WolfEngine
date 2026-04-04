@@ -169,15 +169,16 @@ internal static class AssetsWindowBrowserModelBuilder
 
 	private static int GetAssetTypeSortOrder(AssetDatabaseEntry asset)
 	{
-		return asset.Type switch
-		{
-			AssetType.Scene => 0,
-			AssetType.Model3D => 1,
-			AssetType.Mesh => 2,
-			AssetType.Material => 3,
-			AssetType.Texture2D => 4,
-			AssetType.DataAsset => 5,
-			_ => 10
-		};
+			return asset.Type switch
+			{
+				AssetType.Scene => 0,
+				AssetType.Prefab => 1,
+				AssetType.Model3D => 2,
+				AssetType.Mesh => 3,
+				AssetType.Material => 4,
+				AssetType.Texture2D => 5,
+				AssetType.DataAsset => 6,
+				_ => 10
+			};
+		}
 	}
-}

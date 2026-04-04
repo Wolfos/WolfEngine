@@ -16,4 +16,5 @@ public class EditorScene
 	public Dictionary<Int2, Cell> SpatialCells { get; set; } = new();
 	public Dictionary<Entity, SceneCellKey> EntityCellKeys { get; set; } = new();
 	public Dictionary<Entity, Guid> EntityIds { get; set; } = new();
+	public Dictionary<Entity, List<SavedPrefabLink>> EntityPrefabSourcePaths { get; set; } = new();
 }

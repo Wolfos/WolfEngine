@@ -201,11 +201,14 @@ public sealed class EditorCommandServiceTests
 	public void EntitiesWindow_DeleteSelectedEntity_RemovesEntityAndMarksSceneDirty()
 	{
 		var interactionState = new EditorInteractionState();
-		var window = new EntitiesWindow(
-			Substitute.For<IIconManager>(),
-			interactionState,
-			Substitute.For<IEditorSceneSnapshotService>(),
-			Substitute.For<IEditorUndoRedoService>());
+			var window = new EntitiesWindow(
+				Substitute.For<IIconManager>(),
+				interactionState,
+				Substitute.For<IEditorSceneSnapshotService>(),
+				Substitute.For<IEditorUndoRedoService>(),
+				Substitute.For<IPrefabAssetCreator>(),
+				Substitute.For<IAssetSelectionService>(),
+				Substitute.For<IEditorNotificationService>());
 		var scene = new EditorScene();
 		var entity = scene.World.CreateEntity("Entity");
 		EditorGui.SelectEntity(entity, scene.World, requestFocus: false);

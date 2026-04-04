@@ -717,6 +717,10 @@ public sealed class AssetsWindowTests
 		{
 		}
 
+		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+		{
+		}
+
 		public void ResetCounters()
 		{
 			RefreshProjectCalls = 0;

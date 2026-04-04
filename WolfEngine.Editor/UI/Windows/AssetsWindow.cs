@@ -496,9 +496,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem, BrowserContextTarget contextTarget, string deleteLabel)
 	{
 		var asset = ResolveTargetAsset(contextTarget);
-		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
-		{
-			try
+			if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
+			{
+				try
 			{
 				_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, asset.Id, scene.World);
 				_interactionState.MarkSceneDirty();
@@ -506,8 +506,21 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			catch (Exception ex)
 			{
 				ShowError($"Failed to add model to scene: {ex.Message}");
+				}
 			}
-		}
+
+			if (asset is not null && asset.Type == AssetType.Prefab && ImGui.MenuItem("Add to Scene"))
+			{
+				try
+				{
+					_assetPipelineService.InstantiatePrefab(_projectService.ProjectRootPath!, asset.Id, scene);
+					_interactionState.MarkSceneDirty();
+				}
+				catch (Exception ex)
+				{
+					ShowError($"Failed to add prefab to scene: {ex.Message}");
+				}
+			}
 
 		if (sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
 		{
@@ -819,13 +832,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private static string GetFallbackThumbnailLabel(AssetType assetType)
 	{
-		return assetType switch
-		{
-			AssetType.Scene => "SCN",
-			AssetType.Model3D => "3D",
-			_ => assetType.ToString().ToUpperInvariant()
-		};
-	}
+			return assetType switch
+			{
+				AssetType.Scene => "SCN",
+				AssetType.Prefab => "PFB",
+				AssetType.Model3D => "3D",
+				_ => assetType.ToString().ToUpperInvariant()
+			};
+		}
 
 	private static void DrawCenteredText(ImDrawListPtr drawList, string text, float minX, float maxX, float y, uint color)
 	{

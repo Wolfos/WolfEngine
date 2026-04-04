@@ -249,6 +249,67 @@ public sealed class ScenePersistenceTests
 		Assert.That(localTransform.LocalPosition, Is.EqualTo(new Vector3(8.0f, 9.0f, 10.0f)));
 	}
 
+	[Test]
+	public void SaveEntityAsPrefab_InstantiateAndSaveScene_PersistsOverridesAndRefreshesSourceDefaults()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAuthoringScene = environment.Factory.New();
+		prefabAuthoringScene.Name = "Prefab Authoring";
+
+		var sourceRoot = prefabAuthoringScene.World.CreateEntity("Source Root");
+		prefabAuthoringScene.World.AddTransform(sourceRoot, Matrix4x4.CreateTranslation(new Vector3(1.0f, 2.0f, 3.0f)));
+		var sourceChild = prefabAuthoringScene.World.CreateEntity("Source Child");
+		prefabAuthoringScene.World.AddTransform(sourceChild, Matrix4x4.CreateTranslation(new Vector3(4.0f, 5.0f, 6.0f)));
+		prefabAuthoringScene.World.SetParent(sourceChild, sourceRoot);
+		prefabAuthoringScene.World.AddComponent(sourceChild, new Light
+		{
+			Type = LightType.Point,
+			Intensity = 2.0f,
+			Range = 8.0f,
+			Color = ColorRGBA.White,
+			HorizonFade = true
+		});
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(prefabAuthoringScene, sourceRoot, "Assets/Prefabs");
+
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+		Assert.That(prefabCreationResult.AssetId.HasValue, Is.True);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId!.Value, scene);
+
+		var instanceRoot = FindEntityByName(scene.World, "Source Root");
+		var instanceChild = FindEntityByName(scene.World, "Source Child");
+		Assert.That(scene.EntityPrefabSourcePaths.ContainsKey(instanceRoot), Is.True);
+		Assert.That(scene.EntityPrefabSourcePaths.ContainsKey(instanceChild), Is.True);
+
+		scene.World.GetComponent<NameComponent>(instanceRoot).Name = "Scene Override Root";
+		scene.World.SetLocalPosition(instanceChild, new Vector3(9.0f, 8.0f, 7.0f));
+
+		environment.Factory.Save(scene);
+
+		Assert.That(environment.ProjectService.TryGetAsset(prefabCreationResult.AssetId.Value, out var prefabAsset), Is.True);
+		var prefabAbsolutePath = environment.ProjectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+		var prefabFile = PrefabAssetFile.Load(prefabAbsolutePath);
+		var prefabRoot = prefabFile.Entities.Single(entity => entity.EntityId == prefabFile.RootEntityId);
+		prefabRoot.Name = "Source Root Updated";
+		prefabRoot.LocalTransform = Matrix4x4.CreateTranslation(new Vector3(21.0f, 22.0f, 23.0f));
+		var prefabChild = prefabFile.Entities.Single(entity => entity.ParentEntityId == prefabFile.RootEntityId);
+		prefabChild.LocalTransform = Matrix4x4.CreateTranslation(new Vector3(11.0f, 12.0f, 13.0f));
+		File.WriteAllText(prefabAbsolutePath, System.Text.Json.JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions));
+		environment.ProjectService.RefreshAssetSource(prefabAsset.RelativeAssetPath);
+
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedRoot = FindEntityByName(loadedScene.World, "Scene Override Root");
+		var loadedChild = FindEntityByName(loadedScene.World, "Source Child");
+
+		Assert.That(loadedScene.EntityPrefabSourcePaths.ContainsKey(loadedRoot), Is.True);
+		Assert.That(loadedScene.World.GetComponent<NameComponent>(loadedRoot).Name, Is.EqualTo("Scene Override Root"));
+		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedRoot).LocalPosition, Is.EqualTo(new Vector3(21.0f, 22.0f, 23.0f)));
+		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedChild).LocalPosition, Is.EqualTo(new Vector3(9.0f, 8.0f, 7.0f)));
+	}
+
 	private static List<Entity> GetAllEntities(World world)
 	{
 		var entities = new List<Entity>();
@@ -323,27 +384,37 @@ public sealed class ScenePersistenceTests
 			Registry = new TestAssetInstanceRegistry();
 			AssetDatabase.SetInstanceRegistry(Registry);
 
+			var metadataStore = new AssetMetadataStore();
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),
-				new AssetMetadataStore(),
+				metadataStore,
 				Substitute.For<IImageLoader>(),
 				new DataAssetStore(),
 				new MaterialAssetStore(),
 				Substitute.For<IThreeDFileImporter>());
 			PipelineService = pipelineService;
 			ProjectService = new EditorProjectService(pipelineService, Registry);
+			TypeResolver = new ProjectTypeCatalog(() => ProjectService);
+			PrefabCreator = new PrefabAssetCreator(
+				ProjectService,
+				metadataStore,
+				PipelineService,
+				new EditorSceneSnapshotService(TypeResolver),
+				TypeResolver);
 			if (ProjectService.CreateProject(ParentDirectory, "Project", out var errorMessage) == false)
 			{
 				throw new AssertionException(errorMessage);
 			}
 
-			Factory = new EditorSceneFactory(ProjectService, PipelineService);
+			Factory = new EditorSceneFactory(ProjectService, PipelineService, TypeResolver);
 		}
 
 		public string ParentDirectory { get; }
 		public TestAssetInstanceRegistry Registry { get; }
 		public IProjectAssetPipelineService PipelineService { get; }
 		public IEditorProjectService ProjectService { get; }
+		public IProjectTypeResolver TypeResolver { get; }
+		public IPrefabAssetCreator PrefabCreator { get; }
 		public IEditorSceneFactory Factory { get; }
 
 		public void Dispose()

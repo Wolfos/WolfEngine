@@ -39,14 +39,16 @@ public interface IEditorSceneReloadService
 	void RestoreGameplayComponents(EditorScene scene, EditorSceneGameplayReloadSnapshot snapshot);
 }
 
-public sealed class EditorSceneReloadService : IEditorSceneReloadService
-{
-	private readonly IProjectTypeResolver _typeResolver;
-
-	public EditorSceneReloadService(IProjectTypeResolver typeResolver)
+	public sealed class EditorSceneReloadService : IEditorSceneReloadService
 	{
-		_typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
-	}
+		private readonly IProjectTypeResolver _typeResolver;
+		private readonly IEditorProjectService? _projectService;
+
+		public EditorSceneReloadService(IProjectTypeResolver typeResolver, IEditorProjectService? projectService = null)
+		{
+			_typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
+			_projectService = projectService;
+		}
 
 	public EditorSceneReloadSnapshot Capture(EditorScene scene)
 	{
@@ -115,12 +117,13 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			Name = snapshot.Name,
 			RelativeAssetPath = snapshot.RelativeAssetPath,
 			World = new World(worldTag),
-			EntityIcons = new Dictionary<Entity, string>(),
-			GlobalCell = CloneCell(snapshot.GlobalCell),
-			SpatialCells = snapshot.SpatialCells.ToDictionary(entry => entry.Key, entry => CloneCell(entry.Value)),
-			EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
-			EntityIds = new Dictionary<Entity, Guid>()
-		};
+				EntityIcons = new Dictionary<Entity, string>(),
+				GlobalCell = CloneCell(snapshot.GlobalCell),
+				SpatialCells = snapshot.SpatialCells.ToDictionary(entry => entry.Key, entry => CloneCell(entry.Value)),
+				EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
+				EntityIds = new Dictionary<Entity, Guid>(),
+				EntityPrefabSourcePaths = new Dictionary<Entity, List<SavedPrefabLink>>()
+			};
 
 		var loadedCells = new List<(SceneCellKey CellKey, Cell Cell)>
 		{
@@ -234,12 +237,15 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 				? world.GetComponent<NameComponent>(entity).Name ?? string.Empty
 				: string.Empty,
 			Enabled = world.IsEnabled(entity),
-			Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
-			LocalTransform = world.HasComponent<LocalTransform>(entity)
-				? world.GetComponent<LocalTransform>(entity).GetTransform()
-				: null,
-			Components = []
-		};
+				Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
+				LocalTransform = world.HasComponent<LocalTransform>(entity)
+					? world.GetComponent<LocalTransform>(entity).GetTransform()
+					: null,
+				PrefabSourcePath = scene.EntityPrefabSourcePaths.TryGetValue(entity, out var prefabSourcePath)
+					? EditorPrefabUtility.ClonePrefabSourcePath(prefabSourcePath)
+					: [],
+				Components = []
+			};
 
 		var componentTypes = new List<Type>();
 		world.GetComponentTypes(entity, componentTypes);
@@ -254,7 +260,13 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			savedEntity.Components.Add(SerializeComponent(world, entity, componentType));
 		}
 
-		return savedEntity;
+			if (_projectService is not null &&
+			    EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
+			{
+				savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
+			}
+
+			return savedEntity;
 	}
 
 	private SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
@@ -277,15 +289,16 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			var cell = loadedCells[i].Cell;
 			for (var entityIndex = 0; entityIndex < cell.Entities.Count; entityIndex++)
 			{
-				var savedEntity = cell.Entities[entityIndex];
-				var entity = entitiesById[savedEntity.EntityId];
-				world.SetEnabled(entity, savedEntity.Enabled);
-				for (var componentIndex = 0; componentIndex < savedEntity.Components.Count; componentIndex++)
-				{
-					ApplyComponent(world, entity, savedEntity.Components[componentIndex]);
+					var savedEntity = cell.Entities[entityIndex];
+					var entity = entitiesById[savedEntity.EntityId];
+					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					world.SetEnabled(entity, mergedEntity.Enabled);
+					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
+					{
+						ApplyComponent(world, entity, mergedEntity.Components[componentIndex]);
+					}
 				}
 			}
-		}
 	}
 
 	private void ApplyComponent(World world, Entity entity, SavedComponent component)
@@ -326,7 +339,7 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
 	}
 
-	private static Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
+	private Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
 	{
 		var entitiesById = new Dictionary<Guid, Entity>();
 		for (var i = 0; i < loadedCells.Count; i++)
@@ -335,13 +348,19 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 			for (var entityIndex = 0; entityIndex < cell.Entities.Count; entityIndex++)
 			{
 				var savedEntity = cell.Entities[entityIndex];
-				var entity = CreateEntity(scene.World, savedEntity);
-				entitiesById[savedEntity.EntityId] = entity;
-				scene.EntityIds[entity] = savedEntity.EntityId;
-				scene.EntityCellKeys[entity] = cellKey;
-				if (string.IsNullOrWhiteSpace(savedEntity.Icon) == false)
-				{
-					scene.EntityIcons[entity] = savedEntity.Icon;
+					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var entity = CreateEntity(scene.World, mergedEntity);
+					entitiesById[savedEntity.EntityId] = entity;
+					scene.EntityIds[entity] = savedEntity.EntityId;
+					scene.EntityCellKeys[entity] = cellKey;
+					if (savedEntity.PrefabSourcePath.Count > 0)
+					{
+						scene.EntityPrefabSourcePaths[entity] = EditorPrefabUtility.ClonePrefabSourcePath(savedEntity.PrefabSourcePath);
+					}
+
+					if (string.IsNullOrWhiteSpace(savedEntity.Icon) == false)
+					{
+						scene.EntityIcons[entity] = savedEntity.Icon;
 				}
 			}
 		}
@@ -454,21 +473,17 @@ public sealed class EditorSceneReloadService : IEditorSceneReloadService
 
 	private static SavedEntity CloneEntity(SavedEntity source)
 	{
-		return new SavedEntity
+		return EditorPrefabUtility.CloneEntity(source);
+	}
+
+	private SavedEntity MergePrefabSourceEntity(SavedEntity savedEntity)
+	{
+		if (_projectService is null ||
+		    EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity) == false)
 		{
-			EntityId = source.EntityId,
-			ParentEntityId = source.ParentEntityId,
-			HasName = source.HasName,
-			Name = source.Name,
-			Enabled = source.Enabled,
-			Icon = source.Icon,
-			LocalTransform = source.LocalTransform,
-			Components = source.Components.Select(component => new SavedComponent
-			{
-				Type = component.Type,
-				TypeId = component.TypeId,
-				Data = component.Data.Clone()
-			}).ToList()
-		};
+			return savedEntity;
+		}
+
+		return EditorPrefabUtility.MergePrefabSourceEntity(savedEntity, sourceEntity);
 	}
 }

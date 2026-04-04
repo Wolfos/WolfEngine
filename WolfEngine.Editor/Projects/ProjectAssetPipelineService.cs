@@ -8,6 +8,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Utility;
 using WolfEngine.ECS;
+using WolfEngine.Editor.UI;
 using WolfEngine.Rendering;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 
@@ -25,9 +26,10 @@ public interface IProjectAssetPipelineService
 	AssetDatabase LoadDatabase(string projectRootPath);
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
 	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
-	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
-	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
-}
+		AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
+		void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
+		void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
+	}
 
 public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 {
@@ -229,18 +231,18 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return new AssetImportResult();
 	}
 
-	public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
-	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
-		ArgumentNullException.ThrowIfNull(world);
-		if (_index.TryGetNode(projectRootPath, modelNodeId, out var modelNode) == false)
+		public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
 		{
-			throw new InvalidOperationException($"3D model node '{modelNodeId}' was not found.");
-		}
+			ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+			ArgumentNullException.ThrowIfNull(world);
+			if (_index.TryGetNode(projectRootPath, modelNodeId, out var modelNode) == false)
+			{
+				throw new InvalidOperationException($"3D model node '{modelNodeId}' was not found.");
+			}
 
-		if (modelNode.Type != AssetType.Model3D)
-		{
-			throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
+			if (modelNode.Type != AssetType.Model3D)
+			{
+				throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
 		}
 
 		var summary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(modelNode.SummaryJson);
@@ -259,11 +261,42 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		var wrapper = world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
 		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
-		foreach (var rootNode in modelFile.RootNodes)
-		{
-			CreateModelNodeEntity(rootNode, world, wrapper);
+			foreach (var rootNode in modelFile.RootNodes)
+			{
+				CreateModelNodeEntity(rootNode, world, wrapper);
+			}
 		}
-	}
+
+		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+		{
+			ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+			ArgumentNullException.ThrowIfNull(scene);
+			ArgumentNullException.ThrowIfNull(scene.World);
+			if (_index.TryGetNode(projectRootPath, prefabNodeId, out var prefabNode) == false)
+			{
+				throw new InvalidOperationException($"Prefab node '{prefabNodeId}' was not found.");
+			}
+
+			if (prefabNode.Type != AssetType.Prefab)
+			{
+				throw new InvalidOperationException($"Asset node '{prefabNodeId}' is not a prefab.");
+			}
+
+			var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
+			if (prefabFile.RootEntityId == Guid.Empty)
+			{
+				return;
+			}
+
+			var entitiesById = prefabFile.Entities.ToDictionary(entity => entity.EntityId);
+			var childrenByParent = BuildPrefabChildrenMap(prefabFile.Entities);
+			if (entitiesById.TryGetValue(prefabFile.RootEntityId, out var rootEntity) == false)
+			{
+				throw new InvalidOperationException($"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
+			}
+
+			InstantiatePrefabEntity(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent, parent: null);
+		}
 
 	private void CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
 	{
@@ -335,11 +368,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			AssetImporterIds.Texture => ImportTextureSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 			AssetImporterIds.Material => ImportMaterialSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.EditorScene => ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
-		};
+				AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+				AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+				AssetImporterIds.EditorScene => ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+				AssetImporterIds.EditorPrefab => ImportPrefabSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+				_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
+			};
 		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
 		metadata.SubAssets = metadata.SubAssets
 			.Where(entry => activeKeys.Contains(entry.Key))
@@ -681,7 +715,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 	}
 
-	private ImportGraph ImportEditorSceneSource(
+		private ImportGraph ImportEditorSceneSource(
 		string absoluteSourcePath,
 		string relativeSourcePath,
 		string relativeMetaPath,
@@ -795,8 +829,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
-		for (var i = 0; i < node.Children.Count; i++)
-		{
+			for (var i = 0; i < node.Children.Count; i++)
+			{
 			var childKey = $"{hierarchyKey}/child-{i}-{SanitizeKey(node.Children[i].Name)}";
 			modelNode.Children.Add(CreateModelNode(
 				projectRootPath,
@@ -810,8 +844,46 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				dependencies));
 		}
 
-		return modelNode;
-	}
+			return modelNode;
+		}
+
+		private ImportGraph ImportPrefabSource(
+			string absoluteSourcePath,
+			string relativeSourcePath,
+			string relativeMetaPath,
+			AssetSourceMetaFile metadata)
+		{
+			var prefabAsset = PrefabAssetFile.Load(absoluteSourcePath);
+			var assetName = string.IsNullOrWhiteSpace(prefabAsset.Name)
+				? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
+				: prefabAsset.Name;
+
+			return new ImportGraph
+			{
+				Nodes =
+				[
+					new AssetNodeRecord
+					{
+						NodeId = GetOrCreateNodeId(metadata, "main", AssetType.Prefab, assetName),
+						SourceId = metadata.SourceId,
+						Type = AssetType.Prefab,
+						NodeKey = "main",
+						Name = assetName,
+						IsGenerated = false,
+						RelativeSourcePath = relativeSourcePath,
+						RelativeAssetPath = relativeSourcePath,
+						RelativeMetaPath = relativeMetaPath,
+						SummaryJson = AssetPipelineSerialization.Serialize(new PrefabAssetSummary
+						{
+							RootEntityId = prefabAsset.RootEntityId,
+							EntityCount = prefabAsset.Entities.Count
+						})
+					}
+				],
+				Artifacts = [],
+				Dependencies = []
+			};
+		}
 
 	private static void AddModelDependencies(
 		Guid modelNodeId,
@@ -1038,11 +1110,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private static bool IsSupportedSourcePath(string absolutePath)
 	{
 		var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
-		return TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
-		       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
-		       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
-		       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
-		       || absolutePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
+			return TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+			       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
+			       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
+			       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
+			       || absolutePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
+			       || absolutePath.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static AssetSourceMetaFile CreateDefaultMetadata(string relativeSourcePath)
@@ -1069,10 +1142,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return AssetImporterIds.DataAsset;
 		}
 
-		if (relativeSourcePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
-		{
-			return AssetImporterIds.EditorScene;
-		}
+			if (relativeSourcePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+			{
+				return AssetImporterIds.EditorScene;
+			}
+
+			if (relativeSourcePath.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+			{
+				return AssetImporterIds.EditorPrefab;
+			}
 
 		var extension = Path.GetExtension(relativeSourcePath).ToLowerInvariant();
 		if (TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
@@ -1286,10 +1364,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			case AssetType.Model3D:
 				entry.ModelSummary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(node.SummaryJson);
 				break;
-			case AssetType.Scene:
-				entry.SceneSummary = AssetPipelineSerialization.Deserialize<SceneAssetSummary>(node.SummaryJson);
-				break;
-		}
+				case AssetType.Scene:
+					entry.SceneSummary = AssetPipelineSerialization.Deserialize<SceneAssetSummary>(node.SummaryJson);
+					break;
+				case AssetType.Prefab:
+					entry.PrefabSummary = AssetPipelineSerialization.Deserialize<PrefabAssetSummary>(node.SummaryJson);
+					break;
+			}
 
 		return entry;
 	}
@@ -1330,13 +1411,194 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return relativePath.Replace(Path.DirectorySeparatorChar, '/');
 	}
 
-	private static string GetAbsolutePath(string projectRootPath, string relativePath)
-	{
-		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
-		return Path.GetFullPath(Path.Combine(projectRootPath, normalized));
-	}
+		private static string GetAbsolutePath(string projectRootPath, string relativePath)
+		{
+			var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+			return Path.GetFullPath(Path.Combine(projectRootPath, normalized));
+		}
 
-	private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)
+		private static Dictionary<Guid, List<SavedEntity>> BuildPrefabChildrenMap(List<SavedEntity> entities)
+		{
+			var childrenByParent = new Dictionary<Guid, List<SavedEntity>>();
+			for (var i = 0; i < entities.Count; i++)
+			{
+				if (entities[i].ParentEntityId is not { } parentEntityId)
+				{
+					continue;
+				}
+
+				if (childrenByParent.TryGetValue(parentEntityId, out var children) == false)
+				{
+					children = [];
+					childrenByParent[parentEntityId] = children;
+				}
+
+				children.Add(entities[i]);
+			}
+
+			return childrenByParent;
+		}
+
+		private Entity InstantiatePrefabEntity(
+			EditorScene scene,
+			string projectRootPath,
+			Guid prefabNodeId,
+			SavedEntity sourceEntity,
+			Dictionary<Guid, SavedEntity> entitiesById,
+			Dictionary<Guid, List<SavedEntity>> childrenByParent,
+			Entity? parent)
+		{
+			sourceEntity = ResolvePrefabEntityForInstantiation(projectRootPath, sourceEntity);
+
+			var world = scene.World;
+			var entity = CreateEntity(world, sourceEntity);
+			scene.EntityIds[entity] = Guid.NewGuid();
+			scene.EntityCellKeys[entity] = SceneCellKey.Global;
+			scene.EntityPrefabSourcePaths[entity] = CreateInstantiatedPrefabSourcePath(prefabNodeId, sourceEntity);
+			if (string.IsNullOrWhiteSpace(sourceEntity.Icon) == false)
+			{
+				scene.EntityIcons[entity] = sourceEntity.Icon;
+			}
+
+			if (parent is { } parentEntity)
+			{
+				world.SetParent(entity, parentEntity);
+			}
+
+			world.SetEnabled(entity, sourceEntity.Enabled);
+			for (var i = 0; i < sourceEntity.Components.Count; i++)
+			{
+				ApplySavedComponent(world, entity, sourceEntity.Components[i]);
+			}
+
+			if (childrenByParent.TryGetValue(sourceEntity.EntityId, out var children) == false)
+			{
+				return entity;
+			}
+
+			for (var i = 0; i < children.Count; i++)
+			{
+				if (entitiesById.ContainsKey(children[i].EntityId) == false)
+				{
+					continue;
+				}
+
+				InstantiatePrefabEntity(scene, projectRootPath, prefabNodeId, children[i], entitiesById, childrenByParent, entity);
+			}
+
+			return entity;
+		}
+
+		private SavedEntity ResolvePrefabEntityForInstantiation(string projectRootPath, SavedEntity sourceEntity)
+		{
+			var resolvedEntity = EditorPrefabUtility.CloneEntity(sourceEntity);
+			if (resolvedEntity.PrefabSourcePath.Count == 0)
+			{
+				return resolvedEntity;
+			}
+
+			if (TryResolveNestedPrefabSourceEntity(projectRootPath, resolvedEntity.PrefabSourcePath[0], new HashSet<Guid>(), out var nestedSourceEntity))
+			{
+				resolvedEntity = EditorPrefabUtility.MergePrefabSourceEntity(resolvedEntity, nestedSourceEntity);
+			}
+
+			return resolvedEntity;
+		}
+
+		private bool TryResolveNestedPrefabSourceEntity(
+			string projectRootPath,
+			SavedPrefabLink sourceLink,
+			HashSet<Guid> prefabAssetStack,
+			out SavedEntity sourceEntity)
+		{
+			sourceEntity = null!;
+			if (sourceLink.PrefabAssetId == Guid.Empty || sourceLink.PrefabEntityId == Guid.Empty)
+			{
+				return false;
+			}
+
+			if (prefabAssetStack.Add(sourceLink.PrefabAssetId) == false)
+			{
+				throw new InvalidOperationException($"Cyclic prefab nesting detected while resolving prefab '{sourceLink.PrefabAssetId}'.");
+			}
+
+			if (_index.TryGetNode(projectRootPath, sourceLink.PrefabAssetId, out var prefabNode) == false ||
+			    prefabNode.Type != AssetType.Prefab)
+			{
+				prefabAssetStack.Remove(sourceLink.PrefabAssetId);
+				return false;
+			}
+
+			var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
+			var nestedSource = prefabFile.Entities.FirstOrDefault(entity => entity.EntityId == sourceLink.PrefabEntityId);
+			if (nestedSource is null)
+			{
+				prefabAssetStack.Remove(sourceLink.PrefabAssetId);
+				return false;
+			}
+
+			sourceEntity = EditorPrefabUtility.CloneEntity(nestedSource);
+			if (sourceEntity.PrefabSourcePath.Count > 0 &&
+			    TryResolveNestedPrefabSourceEntity(projectRootPath, sourceEntity.PrefabSourcePath[0], prefabAssetStack, out var deepSourceEntity))
+			{
+				sourceEntity = EditorPrefabUtility.MergePrefabSourceEntity(sourceEntity, deepSourceEntity);
+			}
+
+			prefabAssetStack.Remove(sourceLink.PrefabAssetId);
+			return true;
+		}
+
+		private static List<SavedPrefabLink> CreateInstantiatedPrefabSourcePath(Guid prefabNodeId, SavedEntity sourceEntity)
+		{
+			var sourcePath = new List<SavedPrefabLink>(1 + sourceEntity.PrefabSourcePath.Count)
+			{
+				new()
+				{
+					PrefabAssetId = prefabNodeId,
+					PrefabEntityId = sourceEntity.EntityId
+				}
+			};
+			sourcePath.AddRange(EditorPrefabUtility.ClonePrefabSourcePath(sourceEntity.PrefabSourcePath));
+			return sourcePath;
+		}
+
+		private static Entity CreateEntity(World world, SavedEntity savedEntity)
+		{
+			if (savedEntity.HasName && savedEntity.LocalTransform is { } transformWithName)
+			{
+				return world.CreateEntity(savedEntity.Name, transformWithName);
+			}
+
+			if (savedEntity.HasName)
+			{
+				return world.CreateEntity(savedEntity.Name);
+			}
+
+			var entity = world.CreateEntity();
+			if (savedEntity.LocalTransform is { } transform)
+			{
+				world.AddTransform(entity, transform);
+			}
+
+			return entity;
+		}
+
+		private static void ApplySavedComponent(World world, Entity entity, SavedComponent component)
+		{
+			if ((ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out var componentType) == false &&
+			     ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType) == false) ||
+			    componentType == typeof(NameComponent) ||
+			    componentType.IsValueType == false ||
+			    typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+			{
+				return;
+			}
+
+			var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
+			RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+		}
+
+		private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)
 	{
 		var index = 0;
 		while (true)

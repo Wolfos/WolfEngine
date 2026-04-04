@@ -72,6 +72,7 @@ public static class Program
 		services.AddSingleton<IDataAssetStore, DataAssetStore>();
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
+		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IMaterialImporter, MaterialImporter>();
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
@@ -83,10 +84,12 @@ public static class Program
 		services.AddSingleton<MaterialAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();
+		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, SceneEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, PrefabEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
 		services.AddSingleton<IEditorModeState, EditorModeState>();
 		services.AddSingleton<IMenuBar, MenuBar>();

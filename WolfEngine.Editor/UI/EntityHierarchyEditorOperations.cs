@@ -25,15 +25,21 @@ internal static class EntityHierarchyEditorOperations
 		ArgumentNullException.ThrowIfNull(undoRedoService);
 		ArgumentNullException.ThrowIfNull(interactionState);
 
-		var world = scene.World;
-		if (world.IsAlive(entity) == false)
-		{
-			return false;
-		}
+			var world = scene.World;
+			if (world.IsAlive(entity) == false)
+			{
+				return false;
+			}
+
+			if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+			{
+				return false;
+			}
 
 		if (parent is { } parentEntity)
 		{
 			if (world.IsAlive(parentEntity) == false ||
+			    EditorPrefabUtility.IsPrefabEntity(scene, parentEntity) ||
 			    entity == parentEntity ||
 			    IsSameParent(world, entity, parentEntity) ||
 			    IsDescendantOf(world, parentEntity, entity))

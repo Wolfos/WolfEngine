@@ -45,7 +45,8 @@ public class EditorSceneFactory : IEditorSceneFactory
 			GlobalCell = new Cell(),
 			SpatialCells = new Dictionary<Int2, Cell>(),
 			EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
-			EntityIds = new Dictionary<Entity, Guid>()
+			EntityIds = new Dictionary<Entity, Guid>(),
+			EntityPrefabSourcePaths = new Dictionary<Entity, List<SavedPrefabLink>>()
 		};
 	}
 
@@ -73,7 +74,8 @@ public class EditorSceneFactory : IEditorSceneFactory
 			GlobalCell = LoadCell(sceneAsset.GlobalCellPath),
 			SpatialCells = new Dictionary<Int2, Cell>(),
 			EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
-			EntityIds = new Dictionary<Entity, Guid>()
+			EntityIds = new Dictionary<Entity, Guid>(),
+			EntityPrefabSourcePaths = new Dictionary<Entity, List<SavedPrefabLink>>()
 		};
 
 		var loadedCells = new List<(SceneCellKey CellKey, Cell Cell)>
@@ -205,7 +207,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 		}
 	}
 
-	private static Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
+	private Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
 	{
 		var entitiesById = new Dictionary<Guid, Entity>();
 		for (var i = 0; i < loadedCells.Count; i++)
@@ -224,13 +226,19 @@ public class EditorSceneFactory : IEditorSceneFactory
 					throw new InvalidOperationException($"Scene contains duplicate entity id '{savedEntity.EntityId}'.");
 				}
 
-				var entity = CreateEntity(scene.World, savedEntity);
-				entitiesById[savedEntity.EntityId] = entity;
-				scene.EntityIds[entity] = savedEntity.EntityId;
-				scene.EntityCellKeys[entity] = cellKey;
-				if (string.IsNullOrWhiteSpace(savedEntity.Icon) == false)
-				{
-					scene.EntityIcons[entity] = savedEntity.Icon;
+					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var entity = CreateEntity(scene.World, mergedEntity);
+					entitiesById[savedEntity.EntityId] = entity;
+					scene.EntityIds[entity] = savedEntity.EntityId;
+					scene.EntityCellKeys[entity] = cellKey;
+					if (savedEntity.PrefabSourcePath.Count > 0)
+					{
+						scene.EntityPrefabSourcePaths[entity] = EditorPrefabUtility.ClonePrefabSourcePath(savedEntity.PrefabSourcePath);
+					}
+
+					if (string.IsNullOrWhiteSpace(savedEntity.Icon) == false)
+					{
+						scene.EntityIcons[entity] = savedEntity.Icon;
 				}
 			}
 		}
@@ -246,14 +254,15 @@ public class EditorSceneFactory : IEditorSceneFactory
 			for (var entityIndex = 0; entityIndex < cell.Entities.Count; entityIndex++)
 			{
 				var savedEntity = cell.Entities[entityIndex];
-				var entity = entitiesById[savedEntity.EntityId];
-				scene.World.SetEnabled(entity, savedEntity.Enabled);
-				for (var componentIndex = 0; componentIndex < savedEntity.Components.Count; componentIndex++)
-				{
-					ApplyComponent(scene.World, entity, savedEntity.Components[componentIndex]);
+					var entity = entitiesById[savedEntity.EntityId];
+					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					scene.World.SetEnabled(entity, mergedEntity.Enabled);
+					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
+					{
+						ApplyComponent(scene.World, entity, mergedEntity.Components[componentIndex]);
+					}
 				}
 			}
-		}
 	}
 
 	private static void RestoreHierarchy(World world, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
@@ -292,12 +301,15 @@ public class EditorSceneFactory : IEditorSceneFactory
 				? world.GetComponent<NameComponent>(entity).Name ?? string.Empty
 				: string.Empty,
 			Enabled = world.IsEnabled(entity),
-			Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
-			LocalTransform = world.HasComponent<LocalTransform>(entity)
-				? world.GetComponent<LocalTransform>(entity).GetTransform()
-				: null,
-			Components = []
-		};
+				Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
+				LocalTransform = world.HasComponent<LocalTransform>(entity)
+					? world.GetComponent<LocalTransform>(entity).GetTransform()
+					: null,
+				PrefabSourcePath = scene.EntityPrefabSourcePaths.TryGetValue(entity, out var prefabSourcePath)
+					? EditorPrefabUtility.ClonePrefabSourcePath(prefabSourcePath)
+					: [],
+				Components = []
+			};
 
 		var componentTypes = new List<Type>();
 		world.GetComponentTypes(entity, componentTypes);
@@ -312,7 +324,12 @@ public class EditorSceneFactory : IEditorSceneFactory
 			savedEntity.Components.Add(SerializeComponent(world, entity, componentType));
 		}
 
-		return savedEntity;
+			if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
+			{
+				savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
+			}
+
+			return savedEntity;
 	}
 
 	private static Guid? TryGetParentEntityId(EditorScene scene, Entity entity)
@@ -518,5 +535,15 @@ public class EditorSceneFactory : IEditorSceneFactory
 		}
 
 		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
+	}
+
+	private SavedEntity MergePrefabSourceEntity(SavedEntity savedEntity)
+	{
+		if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity) == false)
+		{
+			return savedEntity;
+		}
+
+		return EditorPrefabUtility.MergePrefabSourceEntity(savedEntity, sourceEntity);
 	}
 }

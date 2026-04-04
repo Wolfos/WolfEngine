@@ -25,6 +25,8 @@ public sealed class SavedEntity
 	public bool Enabled { get; set; } = true;
 	public string Icon { get; set; } = string.Empty;
 	public Matrix4x4? LocalTransform { get; set; }
+	public List<SavedPrefabLink> PrefabSourcePath { get; set; } = [];
+	public SavedPrefabOverrides PrefabOverrides { get; set; } = new();
 	public List<SavedComponent> Components { get; set; } = [];
 }
 
@@ -33,6 +35,33 @@ public sealed class SavedComponent
 	public string Type { get; set; } = string.Empty;
 	public string TypeId { get; set; } = string.Empty;
 	public JsonElement Data { get; set; }
+}
+
+public sealed class SavedPrefabLink
+{
+	public Guid PrefabAssetId { get; set; }
+	public Guid PrefabEntityId { get; set; }
+}
+
+public sealed class SavedPrefabOverrides
+{
+	public bool Name { get; set; }
+	public bool Enabled { get; set; }
+	public bool LocalTransform { get; set; }
+	public List<string> ComponentTypeIds { get; set; } = [];
+
+	public bool HasComponentOverride(string componentTypeId)
+	{
+		for (var i = 0; i < ComponentTypeIds.Count; i++)
+		{
+			if (string.Equals(ComponentTypeIds[i], componentTypeId, StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
 }
 
 public readonly struct SceneCellKey : IEquatable<SceneCellKey>

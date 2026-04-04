@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
@@ -30,6 +31,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     private readonly IIconManager _icons;
     private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+    private readonly IEditorProjectService _projectService;
     private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
     private readonly IEditorInteractionState _interactionState;
@@ -44,6 +46,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     public ComponentsWindow(
         IIconManager icons,
         IPropertyDrawerRegistry propertyDrawerRegistry,
+        IEditorProjectService projectService,
         IProjectTypeCatalog projectTypeCatalog,
         RenderGraph renderGraph,
         IEditorInteractionState interactionState,
@@ -52,6 +55,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
+        _projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
         _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
         _interactionState = interactionState;
@@ -111,6 +115,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             _interactionState.MarkSceneDirty();
         }
 
+        DrawPrefabControls(scene, entity);
         ImGui.Separator();
     }
 
@@ -137,6 +142,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
     {
+        if (EditorPrefabUtility.IsPrefabEntity(scene, entity))
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Prefab Components Locked", new Vector2(ImGui.GetContentRegionAvail().X, 0.0f));
+            ImGui.EndDisabled();
+            return;
+        }
+
         PopulateAddableComponentTypes(scene.World, entity);
 
         var hasAddableComponents = _addableComponentTypes.Count > 0;
@@ -638,5 +651,213 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return _componentNameCounts.TryGetValue(descriptor.DisplayName, out var count) && count > 1
             ? descriptor.QualifiedDisplayName
             : descriptor.DisplayName;
+    }
+
+    private void DrawPrefabControls(EditorScene scene, Entity entity)
+    {
+        if (scene.EntityPrefabSourcePaths.TryGetValue(entity, out var sourcePath) == false || sourcePath.Count == 0)
+        {
+            return;
+        }
+
+        var prefabLabel = "Prefab";
+        if (_projectService.HasOpenProject && _projectService.TryGetAsset(sourcePath[0].PrefabAssetId, out var prefabAsset))
+        {
+            prefabLabel = $"Prefab: {prefabAsset.Name}";
+        }
+
+        ImGui.TextDisabled(prefabLabel);
+        if (ImGui.Button("Apply Overrides"))
+        {
+            ApplyPrefabOverrides(scene, entity);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Revert Overrides"))
+        {
+            RevertPrefabOverrides(scene, entity);
+        }
+    }
+
+    private void RevertPrefabOverrides(EditorScene scene, Entity entity)
+    {
+        if (_projectService.HasOpenProject == false ||
+            scene.EntityPrefabSourcePaths.TryGetValue(entity, out var prefabSourcePath) == false ||
+            prefabSourcePath.Count == 0)
+        {
+            return;
+        }
+
+        var prefabEntity = new SavedEntity
+        {
+            PrefabSourcePath = EditorPrefabUtility.ClonePrefabSourcePath(prefabSourcePath)
+        };
+        if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, prefabEntity, out var sourceEntity) == false)
+        {
+            return;
+        }
+
+        ApplySavedEntityToScene(scene, entity, sourceEntity);
+        _interactionState.MarkSceneDirty();
+    }
+
+    private void ApplyPrefabOverrides(EditorScene scene, Entity entity)
+    {
+        if (_projectService.HasOpenProject == false ||
+            scene.EntityPrefabSourcePaths.TryGetValue(entity, out var prefabSourcePath) == false ||
+            prefabSourcePath.Count == 0 ||
+            _projectService.TryGetAsset(prefabSourcePath[0].PrefabAssetId, out var prefabAsset) == false ||
+            prefabAsset.Type != AssetType.Prefab)
+        {
+            return;
+        }
+
+        var prefabPath = _projectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+        var prefabFile = PrefabAssetFile.Load(prefabPath);
+        var sourceEntity = prefabFile.Entities.FirstOrDefault(candidate => candidate.EntityId == prefabSourcePath[0].PrefabEntityId);
+        if (sourceEntity is null)
+        {
+            return;
+        }
+
+        var currentEntity = SerializeEntity(scene, entity, sourceEntity.EntityId);
+        sourceEntity.HasName = currentEntity.HasName;
+        sourceEntity.Name = currentEntity.Name;
+        sourceEntity.Enabled = currentEntity.Enabled;
+        sourceEntity.Icon = currentEntity.Icon;
+        sourceEntity.LocalTransform = currentEntity.LocalTransform;
+        sourceEntity.Components = currentEntity.Components.Select(EditorPrefabUtility.CloneComponent).ToList();
+        if (sourceEntity.PrefabSourcePath.Count > 0 &&
+            EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, sourceEntity, out var nestedSourceEntity))
+        {
+            sourceEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(sourceEntity, nestedSourceEntity);
+        }
+        else
+        {
+            sourceEntity.PrefabOverrides = new SavedPrefabOverrides();
+        }
+
+        var json = JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions);
+        File.WriteAllText(prefabPath, json);
+        _projectService.RefreshAssetSource(prefabAsset.RelativeSourcePath);
+    }
+
+    private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
+    {
+        var world = scene.World;
+        var hasName = world.HasComponent<NameComponent>(entity);
+        var savedEntity = new SavedEntity
+        {
+            EntityId = entityId,
+            HasName = hasName,
+            Name = hasName ? world.GetComponent<NameComponent>(entity).Name ?? string.Empty : string.Empty,
+            Enabled = world.IsEnabled(entity),
+            Icon = scene.EntityIcons.TryGetValue(entity, out var iconName) ? iconName : string.Empty,
+            LocalTransform = world.HasComponent<LocalTransform>(entity)
+                ? world.GetComponent<LocalTransform>(entity).GetTransform()
+                : null,
+            Components = []
+        };
+
+        var componentTypes = new List<Type>();
+        world.GetComponentTypes(entity, componentTypes);
+        for (var i = 0; i < componentTypes.Count; i++)
+        {
+            var componentType = componentTypes[i];
+            if (componentType == typeof(NameComponent) ||
+                componentType == typeof(LocalTransform) ||
+                componentType == typeof(WorldTransform) ||
+                componentType == typeof(Parent) ||
+                componentType == typeof(Children) ||
+                componentType == typeof(Sibling) ||
+                componentType == typeof(DirtyTransformRoot) ||
+                Attribute.IsDefined(componentType, typeof(NotSerializedAttribute)) ||
+                Attribute.IsDefined(componentType, typeof(ExcludeFromEditorAttribute)) ||
+                Attribute.IsDefined(componentType, typeof(EditorOnlyAttribute)))
+            {
+                continue;
+            }
+
+            savedEntity.Components.Add(new SavedComponent
+            {
+                Type = ProjectTypeResolverUtility.GetTypeName(componentType),
+                TypeId = ProjectTypeResolverUtility.GetStableTypeId(componentType),
+                Data = JsonSerializer.SerializeToElement(
+                    RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
+                    componentType,
+                    AssetJson.GetSerializerOptions(componentType))
+            });
+        }
+
+        return savedEntity;
+    }
+
+    private void ApplySavedEntityToScene(EditorScene scene, Entity entity, SavedEntity savedEntity)
+    {
+        var world = scene.World;
+        if (savedEntity.HasName)
+        {
+            world.AddComponent(entity, new NameComponent { Name = savedEntity.Name });
+        }
+        else if (world.HasComponent<NameComponent>(entity))
+        {
+            world.RemoveComponent<NameComponent>(entity);
+        }
+
+        scene.World.SetEnabled(entity, savedEntity.Enabled);
+        if (savedEntity.LocalTransform is { } localTransform)
+        {
+            if (world.HasComponent<LocalTransform>(entity) == false)
+            {
+                world.AddTransform(entity, localTransform);
+            }
+            else if (Matrix4x4.Decompose(localTransform, out var scale, out var rotation, out var position))
+            {
+                world.SetLocalPosition(entity, position);
+                world.SetLocalRotation(entity, rotation);
+                world.SetLocalScale(entity, scale);
+            }
+        }
+
+        world.GetComponentTypes(entity, _existingComponentTypes);
+        for (var i = 0; i < _existingComponentTypes.Count; i++)
+        {
+            var componentType = _existingComponentTypes[i];
+            if (componentType == typeof(NameComponent) ||
+                componentType == typeof(LocalTransform) ||
+                componentType == typeof(WorldTransform) ||
+                componentType == typeof(Parent) ||
+                componentType == typeof(Children) ||
+                componentType == typeof(Sibling) ||
+                componentType == typeof(DirtyTransformRoot))
+            {
+                continue;
+            }
+
+            RuntimeComponentAccessor.Remove(world, entity, componentType);
+        }
+
+        for (var i = 0; i < savedEntity.Components.Count; i++)
+        {
+            var component = savedEntity.Components[i];
+            if (ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out var componentType) == false)
+            {
+                continue;
+            }
+
+            var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
+            RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
+        }
+
+        if (string.IsNullOrWhiteSpace(savedEntity.Icon))
+        {
+            scene.EntityIcons.Remove(entity);
+        }
+        else
+        {
+            scene.EntityIcons[entity] = savedEntity.Icon;
+        }
+
+        EditorGui.SelectEntity(entity, world, requestFocus: false);
     }
 }
