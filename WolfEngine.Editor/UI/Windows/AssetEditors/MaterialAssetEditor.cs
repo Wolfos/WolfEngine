@@ -44,7 +44,7 @@ public sealed class MaterialAssetEditor
 		if (asset.IsGenerated)
 		{
 			ImGui.TextUnformatted("Generated material");
-			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only in this slice.");
+			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only.");
 			return;
 		}
 

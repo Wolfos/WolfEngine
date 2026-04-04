@@ -44,50 +44,50 @@ public sealed class MaterialTypeRegistry : IMaterialTypeRegistry
 {
 	private static readonly IReadOnlyList<MaterialPropertyDefinition> SharedProperties =
 	[
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
+		new() { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
+		new() { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
+		new() { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
+		new() { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
+		new() { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
+		new() { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
+		new() { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
+		new() { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
+		new() { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
+		new() { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
 	];
 	
 	private static readonly IReadOnlyList<MaterialPropertyDefinition> AlphaTestProperties =
 	[
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.AlphaCutoff, DisplayName = "Alpha Cutoff" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
+		new() { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
+		new() { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
+		new() { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
+		new() { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
+		new() { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
+		new() { Kind = MaterialPropertyKind.AlphaCutoff, DisplayName = "Alpha Cutoff" },
+		new() { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
+		new() { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
+		new() { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
+		new() { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
+		new() { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
 	];
 
 	private static readonly IReadOnlyList<MaterialPropertyDefinition> AlphaBlendProperties =
 	[
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
-		new MaterialPropertyDefinition { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
+		new() { Kind = MaterialPropertyKind.BaseColor, DisplayName = "Base Color" },
+		new() { Kind = MaterialPropertyKind.MetallicFactor, DisplayName = "Metallic" },
+		new() { Kind = MaterialPropertyKind.RoughnessFactor, DisplayName = "Roughness" },
+		new() { Kind = MaterialPropertyKind.EmissiveFactor, DisplayName = "Emissive Factor" },
+		new() { Kind = MaterialPropertyKind.EmissiveIntensity, DisplayName = "Emissive Intensity" },
+		new() { Kind = MaterialPropertyKind.AlbedoTexture, DisplayName = "Albedo" },
+		new() { Kind = MaterialPropertyKind.MetallicRoughnessTexture, DisplayName = "Metallic / Roughness" },
+		new() { Kind = MaterialPropertyKind.NormalTexture, DisplayName = "Normal" },
+		new() { Kind = MaterialPropertyKind.EmissiveTexture, DisplayName = "Emissive" },
+		new() { Kind = MaterialPropertyKind.OcclusionTexture, DisplayName = "Occlusion" }
 	];
 
 	private readonly IReadOnlyList<MaterialTypeDescriptor> _descriptors =
 	[
-		new MaterialTypeDescriptor
+		new()
 		{
 			Type = MaterialAssetType.Opaque,
 			DisplayName = "Opaque",
@@ -95,7 +95,7 @@ public sealed class MaterialTypeRegistry : IMaterialTypeRegistry
 			RuntimeAlphaMode = AlphaMode.Opaque,
 			Properties = SharedProperties
 		},
-		new MaterialTypeDescriptor
+		new()
 		{
 			Type = MaterialAssetType.AlphaTest,
 			DisplayName = "AlphaTest",
@@ -103,7 +103,7 @@ public sealed class MaterialTypeRegistry : IMaterialTypeRegistry
 			RuntimeAlphaMode = AlphaMode.AlphaTest,
 			Properties = AlphaTestProperties
 		},
-		new MaterialTypeDescriptor
+		new()
 		{
 			Type = MaterialAssetType.AlphaBlend,
 			DisplayName = "AlphaBlend",
