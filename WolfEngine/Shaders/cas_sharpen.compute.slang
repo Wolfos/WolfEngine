@@ -1,7 +1,7 @@
 import "common_bindless.slang";
 
 // Adapted from AMD FidelityFX CAS (Contrast Adaptive Sharpening), sharpen-only path.
-// The original vendor sources are bundled under Shaders/ffx-cas with the upstream license text.
+// License text is bundled under Shaders/ffx-cas
 
 cbuffer BindlessHandles : register(b0)
 {
