@@ -73,6 +73,7 @@ public static class Program
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
+		services.AddSingleton<IMaterialImporter, MaterialImporter>();
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
@@ -107,6 +108,7 @@ public static class Program
 		services.AddTransient<EntitiesWindow>();
 		services.AddTransient<AssetsWindow>();
 		services.AddTransient<AssetEditorWindow>();
+		services.AddSingleton<MaterialImporterWindow>();
 		services.AddTransient<ProfilerWindow>();
 		services.AddTransient<SceneWindow>();
 	}

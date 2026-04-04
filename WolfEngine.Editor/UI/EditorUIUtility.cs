@@ -93,6 +93,14 @@ public class EditorUIUtility
 		return changed;
 	}
 
+	public static bool ColorEdit3(string label, ref Vector3 value)
+	{
+		BeginLabeledField(label);
+		var changed = ImGui.ColorEdit3("##value", ref value);
+		EndLabeledField();
+		return changed;
+	}
+
 	public static bool Combo(string label, string previewValue, Action drawItems)
 	{
 		BeginLabeledField(label);

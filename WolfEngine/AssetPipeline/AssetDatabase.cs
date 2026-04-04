@@ -195,6 +195,8 @@ public abstract class MaterialSurfaceProperties
 	public ColorRGBA BaseColor { get; set; } = ColorRGBA.White;
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
+	public Vector3 EmissiveFactor { get; set; } = Vector3.Zero;
+	public float EmissiveIntensity { get; set; } = 1.0f;
 	public MaterialTextureAssignments Textures { get; set; } = new();
 }
 

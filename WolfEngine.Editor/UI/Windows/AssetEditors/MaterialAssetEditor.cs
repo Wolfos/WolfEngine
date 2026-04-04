@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
@@ -95,6 +96,13 @@ public sealed class MaterialAssetEditor
 			properties.RoughnessFactor = value;
 			_hasPendingChanges = true;
 		});
+		DrawEmissiveFactorEditor(asset, properties);
+		DrawFloatEditor("Emissive Intensity", properties.EmissiveIntensity, value =>
+		{
+			BeginPendingChange(asset);
+			properties.EmissiveIntensity = MathF.Max(0.0f, value);
+			_hasPendingChanges = true;
+		});
 
 		if (HasProperty(propertyDefinitions, MaterialPropertyKind.AlphaCutoff))
 		{
@@ -168,6 +176,17 @@ public sealed class MaterialAssetEditor
 		{
 			BeginPendingChange(asset);
 			properties.BaseColor = color;
+			_hasPendingChanges = true;
+		}
+	}
+
+	private void DrawEmissiveFactorEditor(AssetDatabaseEntry asset, MaterialSurfaceProperties properties)
+	{
+		var emissiveColor = properties.EmissiveFactor;
+		if (EditorUIUtility.ColorEdit3("Emissive Factor", ref emissiveColor))
+		{
+			BeginPendingChange(asset);
+			properties.EmissiveFactor = emissiveColor;
 			_hasPendingChanges = true;
 		}
 	}

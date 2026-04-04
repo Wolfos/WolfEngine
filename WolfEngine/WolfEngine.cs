@@ -49,13 +49,10 @@ public static class WolfEngine
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
-		services.AddSingleton<WindowChromeController>();
-		services.AddSingleton<IWindowChromeController>(sp => sp.GetRequiredService<WindowChromeController>());
 		services.AddSingleton<GpuDrawResources>();
 		services.AddSingleton<GpuDrawDatabase>();
 		services.AddSingleton<GpuDrawHardeningStats>();
 		services.AddSingleton<BindlessResourceRegistry>();
-
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();
 		services.AddSingleton<SkyboxPass>();
@@ -76,6 +73,9 @@ public static class WolfEngine
 			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
+			services.AddSingleton<WindowChromeController>();
+			services.AddSingleton<IWindowChromeController>(sp => sp.GetRequiredService<WindowChromeController>());
+
 		}
 		
 		Ecs.ConfigureServices(services);

@@ -24,6 +24,7 @@ public class EditorGui
 	private readonly EntitiesWindow _entitiesWindow;
 	private readonly AssetsWindow _assetsWindow;
 	private readonly AssetEditorWindow _assetEditorWindow;
+	private readonly MaterialImporterWindow _materialImporterWindow;
 	private readonly ComponentsWindow _componentsWindow;
 	private readonly ProfilerWindow _profilerWindow;
 	private readonly SceneWindow _sceneWindow;
@@ -43,6 +44,7 @@ public class EditorGui
 		_entitiesWindow = serviceProvider.GetRequiredService<EntitiesWindow>();
 		_assetsWindow = serviceProvider.GetRequiredService<AssetsWindow>();
 		_assetEditorWindow = serviceProvider.GetRequiredService<AssetEditorWindow>();
+		_materialImporterWindow = serviceProvider.GetRequiredService<MaterialImporterWindow>();
 		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
 		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
 		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
@@ -77,6 +79,7 @@ public class EditorGui
 		}
 
 		DrawWindow(_profilerWindow, scene);
+		DrawWindow(_materialImporterWindow, scene);
 
 		_commandService.ProcessShortcuts();
 		_commandService.DrawPendingDialogs();

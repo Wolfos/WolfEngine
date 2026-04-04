@@ -1148,6 +1148,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		properties.BaseColor = importedMaterial.BaseColor;
 		properties.MetallicFactor = importedMaterial.MetallicFactor;
 		properties.RoughnessFactor = importedMaterial.RoughnessFactor;
+		properties.EmissiveFactor = importedMaterial.EmissiveFactor;
+		properties.EmissiveIntensity = importedMaterial.EmissiveIntensity;
 		properties.Textures.Albedo = CreateTextureRef(importedMaterial.BaseColorTextureIndex, textureNodeIds);
 		properties.Textures.Normal = CreateTextureRef(importedMaterial.NormalTextureIndex, textureNodeIds);
 		properties.Textures.MetallicRoughness = CreateTextureRef(importedMaterial.MetallicRoughnessTextureIndex, textureNodeIds);

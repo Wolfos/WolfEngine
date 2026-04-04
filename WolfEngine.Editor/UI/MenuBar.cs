@@ -31,6 +31,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly FramerateTool _framerateTool;
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
+	private readonly MaterialImporterWindow _materialImporterWindow;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorModeState _editorModeState;
@@ -53,6 +54,7 @@ public sealed class MenuBar : IMenuBar
 		FramerateTool framerateTool,
 		IEditorProjectService projectService,
 		ITextureAssetImporter textureAssetImporter,
+		MaterialImporterWindow materialImporterWindow,
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
 		IEditorModeState editorModeState,
@@ -67,6 +69,7 @@ public sealed class MenuBar : IMenuBar
 		_framerateTool = framerateTool;
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
+		_materialImporterWindow = materialImporterWindow ?? throw new ArgumentNullException(nameof(materialImporterWindow));
 		_icons = icons;
 		_windowChromeController = windowChromeController;
 		_editorModeState = editorModeState;
@@ -438,6 +441,11 @@ public sealed class MenuBar : IMenuBar
 			{
 				ShowError(result.ErrorMessage ?? "Texture import failed.");
 			}
+		}
+
+		if (ImGui.MenuItem("Material..."))
+		{
+			_materialImporterWindow.Open();
 		}
 
 		if (hasOpenProject == false || _playSession.IsActive)
