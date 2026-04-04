@@ -142,14 +142,6 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     public void DrawAddComponentControls(EditorScene scene, Entity entity)
     {
-        if (EditorPrefabUtility.IsPrefabEntity(scene, entity))
-        {
-            ImGui.BeginDisabled();
-            ImGui.Button("Prefab Components Locked", new Vector2(ImGui.GetContentRegionAvail().X, 0.0f));
-            ImGui.EndDisabled();
-            return;
-        }
-
         PopulateAddableComponentTypes(scene.World, entity);
 
         var hasAddableComponents = _addableComponentTypes.Count > 0;
