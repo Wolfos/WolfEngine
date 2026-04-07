@@ -149,11 +149,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return false;
 		}
 
-		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One);
+		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
 		var shapeHandle = CreateShape(queryShapeDefinition);
 		try
 		{
-			var shapeTransform = Matrix4x4.CreateFromQuaternion(Normalize(rotation)) * Matrix4x4.CreateTranslation(position);
+			var normalizedRotation = Normalize(rotation);
+			var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
+			var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
+			                     Matrix4x4.CreateTranslation(position + centerOffset);
 			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
 			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
 			var hits = new List<ShapeCastResult>(capacity: 8);
@@ -213,11 +216,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return 0;
 		}
 
-		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One);
+		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
 		var shapeHandle = CreateShape(queryShapeDefinition);
 		try
 		{
-			var shapeTransform = Matrix4x4.CreateFromQuaternion(Normalize(rotation)) * Matrix4x4.CreateTranslation(position);
+			var normalizedRotation = Normalize(rotation);
+			var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
+			var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
+			                     Matrix4x4.CreateTranslation(position + centerOffset);
 			var baseOffset = Vector3.Zero;
 			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
 			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
@@ -536,7 +542,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		var bodyId = state.BodyInterface.CreateAndAddBody(
 			bodySettings,
 			definition.StartActivated ? Activation.Activate : Activation.DontActivate);
-		var bodyState = new PhysicsBodyState(entity, bodyId, definition, shapeHandle.BaseShape, shapeHandle.OffsetShape);
+		var bodyState = new PhysicsBodyState(entity, bodyId, definition, shapeHandle.BaseShape, shapeHandle.TranslatedShape);
 		state.BodiesByEntity.Add(entity, bodyState);
 		state.BodiesByBodyId.Add(bodyId, bodyState);
 	}
@@ -798,8 +804,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return new PhysicsShapeHandle(baseShape, null, baseShape);
 		}
 
-		var offsetShape = new OffsetCenterOfMassShape(definition.Center, baseShape);
-		return new PhysicsShapeHandle(baseShape, offsetShape, offsetShape);
+		var translatedShape = new RotatedTranslatedShape(definition.Center, Quaternion.Identity, baseShape);
+		return new PhysicsShapeHandle(baseShape, translatedShape, translatedShape);
 	}
 
 	private static Vector3 Multiply(Vector3 left, Vector3 right)
@@ -1033,44 +1039,44 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			BodyID bodyId,
 			PhysicsBodyDefinition definition,
 			Shape baseShape,
-			OffsetCenterOfMassShape? offsetShape)
+			RotatedTranslatedShape? translatedShape)
 		{
 			Entity = entity;
 			BodyId = bodyId;
 			Definition = definition;
 			BaseShape = baseShape;
-			OffsetShape = offsetShape;
+			TranslatedShape = translatedShape;
 		}
 
 		public Entity Entity { get; }
 		public BodyID BodyId { get; }
 		public PhysicsBodyDefinition Definition { get; set; }
 		public Shape BaseShape { get; }
-		public OffsetCenterOfMassShape? OffsetShape { get; }
+		public RotatedTranslatedShape? TranslatedShape { get; }
 
 		public void Dispose()
 		{
-			OffsetShape?.Dispose();
+			TranslatedShape?.Dispose();
 			BaseShape.Dispose();
 		}
 	}
 
 	private sealed class PhysicsShapeHandle : IDisposable
 	{
-		public PhysicsShapeHandle(Shape baseShape, OffsetCenterOfMassShape? offsetShape, Shape shape)
+		public PhysicsShapeHandle(Shape baseShape, RotatedTranslatedShape? translatedShape, Shape shape)
 		{
 			BaseShape = baseShape;
-			OffsetShape = offsetShape;
+			TranslatedShape = translatedShape;
 			Shape = shape;
 		}
 
 		public Shape BaseShape { get; }
-		public OffsetCenterOfMassShape? OffsetShape { get; }
+		public RotatedTranslatedShape? TranslatedShape { get; }
 		public Shape Shape { get; }
 
 		public void Dispose()
 		{
-			OffsetShape?.Dispose();
+			TranslatedShape?.Dispose();
 			BaseShape.Dispose();
 		}
 	}

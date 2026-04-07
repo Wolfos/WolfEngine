@@ -133,6 +133,25 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_DynamicBodyWithBoxCenterOffsetPreservesEntityTransform()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Offset Box", Matrix4x4.Identity);
+		var collider = BoxCollider.CreateDefault();
+		collider.Center = new Vector3(0.0f, 2.0f, 0.0f);
+		world.AddComponent(entity, collider);
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.GravityFactor = 0.0f;
+		world.AddComponent(entity, rigidbody);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var transform = world.GetComponent<LocalTransform>(entity);
+		Assert.That(transform.LocalPosition, Is.EqualTo(Vector3.Zero).Using(Vector3Comparer.Within(0.01f)));
+	}
+
+	[Test]
 	public void TryMoveKinematicBody_MovesBodyWithoutRecreation()
 	{
 		var world = new World(WorldTag.Game);
@@ -184,6 +203,28 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void TryRaycast_HitsBoxColliderCenterOffset()
+	{
+		var world = new World(WorldTag.Game);
+		var box = world.CreateEntity("Offset Box", Matrix4x4.Identity);
+		var collider = BoxCollider.CreateDefault();
+		collider.Center = new Vector3(0.0f, 2.0f, 0.0f);
+		world.AddComponent(box, collider);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var hitSomething = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 5.0f, 0.0f),
+			new Vector3(0.0f, -10.0f, 0.0f),
+			out var hit);
+
+		Assert.That(hitSomething, Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(box));
+		Assert.That(hit.Point.Y, Is.EqualTo(2.5f).Within(0.05f));
+	}
+
+	[Test]
 	public void TryCastCapsule_ReturnsHitAgainstWall()
 	{
 		var world = new World(WorldTag.Game);
@@ -207,6 +248,25 @@ public sealed class RigidbodySystemTests
 		Assert.That(hit.Fraction, Is.GreaterThan(0.0f));
 		Assert.That(hit.Fraction, Is.LessThan(1.0f));
 		Assert.That(hit.Normal.X, Is.LessThan(-0.5f));
+	}
+
+	[Test]
+	public void PhysicsUpdate_DynamicBodyWithCapsuleCenterOffsetPreservesEntityTransform()
+	{
+		var world = new World(WorldTag.Game);
+		var capsule = CapsuleCollider.CreateDefault();
+		capsule.Center = new Vector3(1.0f, 0.0f, 0.0f);
+		var entity = world.CreateEntity("Offset Capsule", Matrix4x4.Identity);
+		world.AddComponent(entity, capsule);
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.GravityFactor = 0.0f;
+		world.AddComponent(entity, rigidbody);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var transform = world.GetComponent<LocalTransform>(entity);
+		Assert.That(transform.LocalPosition, Is.EqualTo(Vector3.Zero).Using(Vector3Comparer.Within(0.01f)));
 	}
 
 	[Test]
@@ -305,5 +365,23 @@ public sealed class RigidbodySystemTests
 
 		Assert.That(sawAdded, Is.True);
 		Assert.That(sawPersisted, Is.True);
+	}
+
+	private sealed class Vector3Comparer(float tolerance) : IEqualityComparer<Vector3>
+	{
+		public static Vector3Comparer Within(float tolerance)
+		{
+			return new Vector3Comparer(tolerance);
+		}
+
+		public bool Equals(Vector3 x, Vector3 y)
+		{
+			return Vector3.Distance(x, y) <= tolerance;
+		}
+
+		public int GetHashCode(Vector3 obj)
+		{
+			return obj.GetHashCode();
+		}
 	}
 }
