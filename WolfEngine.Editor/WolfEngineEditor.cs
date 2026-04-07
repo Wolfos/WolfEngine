@@ -127,7 +127,6 @@ public class WolfEngineEditor
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
-		_worldManager.AddSystem(new RigidbodySystem(), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);

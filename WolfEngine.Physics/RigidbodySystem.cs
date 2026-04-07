@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Threading;
 using JoltPhysicsSharp;
 using WolfEngine.ECS;
+using WolfEngine.Profiling;
 
 namespace WolfEngine.Physics;
 
@@ -35,17 +36,23 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	{
 		ArgumentNullException.ThrowIfNull(world);
 
-		var state = GetOrCreateWorldState(world);
-		state.ContactEvents.Clear();
-		SynchronizeBodies(world, state, fixedDeltaTime);
-
-		var updateError = state.PhysicsSystem.Update(fixedDeltaTime, CollisionSteps, state.JobSystem);
-		if (updateError != PhysicsUpdateError.None)
+		using (FrameProfiler.Instance.Measure("Physics.Update"))
 		{
-			throw new InvalidOperationException($"Jolt physics update failed: {updateError}.");
-		}
+			var state = GetOrCreateWorldState(world);
+			state.ContactEvents.Clear();
+			SynchronizeBodies(world, state, fixedDeltaTime);
 
-		SyncDynamicBodiesBackToWorld(world, state);
+			using (FrameProfiler.Instance.Measure("Physics.Step"))
+			{
+				var updateError = state.PhysicsSystem.Update(fixedDeltaTime, CollisionSteps, state.JobSystem);
+				if (updateError != PhysicsUpdateError.None)
+				{
+					throw new InvalidOperationException($"Jolt physics update failed: {updateError}.");
+				}
+			}
+
+			SyncDynamicBodiesBackToWorld(world, state);
+		}
 	}
 
 	public void OnWorldRemoved(World world)
@@ -105,30 +112,33 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return false;
 		}
 
-		using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
-		using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
-		var ray = new Ray(origin, direction);
-		if (state.PhysicsSystem.NarrowPhaseQuery.CastRay(
-			    ray,
-			    out var rayHit,
-			    _broadPhaseLayerFilter,
-			    objectLayerFilter,
-			    bodyFilter) == false)
+		using (FrameProfiler.Instance.Measure("Physics.Query.Raycast"))
 		{
-			return false;
-		}
+			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
+			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
+			var ray = new Ray(origin, direction);
+			if (state.PhysicsSystem.NarrowPhaseQuery.CastRay(
+				    ray,
+				    out var rayHit,
+				    _broadPhaseLayerFilter,
+				    objectLayerFilter,
+				    bodyFilter) == false)
+			{
+				return false;
+			}
 
-		if (TryCreateBodyQueryHit(state, rayHit.BodyID, out var entity, out var isSensor, out var layer) == false)
-		{
-			return false;
-		}
+			if (TryCreateBodyQueryHit(state, rayHit.BodyID, out var entity, out var isSensor, out var layer) == false)
+			{
+				return false;
+			}
 
-		var point = origin + direction * rayHit.Fraction;
-		var bodyShape = state.BodyInterface.GetTransformedShape(state.PhysicsSystem.BodyLockInterfaceNoLock, rayHit.BodyID);
-		var subShapeId = new SubShapeID(rayHit.subShapeID2);
-		var normal = NormalizeDirection(bodyShape.GetWorldSpaceSurfaceNormal(subShapeId, point));
-		hit = new PhysicsRaycastHit(entity, point, normal, rayHit.Fraction, isSensor, layer);
-		return true;
+			var point = origin + direction * rayHit.Fraction;
+			var bodyShape = state.BodyInterface.GetTransformedShape(state.PhysicsSystem.BodyLockInterfaceNoLock, rayHit.BodyID);
+			var subShapeId = new SubShapeID(rayHit.subShapeID2);
+			var normal = NormalizeDirection(bodyShape.GetWorldSpaceSurfaceNormal(subShapeId, point));
+			hit = new PhysicsRaycastHit(entity, point, normal, rayHit.Fraction, isSensor, layer);
+			return true;
+		}
 	}
 
 	public bool TryCastCapsule(
@@ -149,52 +159,55 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return false;
 		}
 
-		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
-		var shapeHandle = CreateShape(queryShapeDefinition);
-		try
+		using (FrameProfiler.Instance.Measure("Physics.Query.CastCapsule"))
 		{
-			var normalizedRotation = Normalize(rotation);
-			var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
-			var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
-			                     Matrix4x4.CreateTranslation(position + centerOffset);
-			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
-			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
-			var hits = new List<ShapeCastResult>(capacity: 8);
-			if (state.PhysicsSystem.NarrowPhaseQuery.CastShape(
-				    shapeHandle.Shape,
-				    shapeTransform,
-				    QueryShapeScale,
-				    direction,
-				    CollisionCollectorType.ClosestHit,
-				    hits,
-				    _broadPhaseLayerFilter,
-				    objectLayerFilter,
-				    bodyFilter,
-				    _shapeFilter) == false ||
-			    hits.Count == 0)
+			var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
+			var shapeHandle = CreateShape(queryShapeDefinition);
+			try
 			{
-				return false;
-			}
+				var normalizedRotation = Normalize(rotation);
+				var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
+				var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
+				                     Matrix4x4.CreateTranslation(position + centerOffset);
+				using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
+				using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
+				var hits = new List<ShapeCastResult>(capacity: 8);
+				if (state.PhysicsSystem.NarrowPhaseQuery.CastShape(
+					    shapeHandle.Shape,
+					    shapeTransform,
+					    QueryShapeScale,
+					    direction,
+					    CollisionCollectorType.ClosestHit,
+					    hits,
+					    _broadPhaseLayerFilter,
+					    objectLayerFilter,
+					    bodyFilter,
+					    _shapeFilter) == false ||
+				    hits.Count == 0)
+				{
+					return false;
+				}
 
-			var shapeHit = hits[0];
-			if (TryCreateBodyQueryHit(state, shapeHit.BodyID2, out var entity, out var isSensor, out var layer) == false)
+				var shapeHit = hits[0];
+				if (TryCreateBodyQueryHit(state, shapeHit.BodyID2, out var entity, out var isSensor, out var layer) == false)
+				{
+					return false;
+				}
+
+				hit = new PhysicsShapeCastHit(
+					entity,
+					shapeHit.ContactPointOn2,
+					-NormalizeDirection(shapeHit.PenetrationAxis),
+					Math.Clamp(shapeHit.Fraction / direction.Length(), 0.0f, 1.0f),
+					shapeHit.PenetrationDepth,
+					isSensor,
+					layer);
+				return true;
+			}
+			finally
 			{
-				return false;
+				shapeHandle.Dispose();
 			}
-
-			hit = new PhysicsShapeCastHit(
-				entity,
-				shapeHit.ContactPointOn2,
-				-NormalizeDirection(shapeHit.PenetrationAxis),
-				Math.Clamp(shapeHit.Fraction / direction.Length(), 0.0f, 1.0f),
-				shapeHit.PenetrationDepth,
-				isSensor,
-				layer);
-			return true;
-		}
-		finally
-		{
-			shapeHandle.Dispose();
 		}
 	}
 
@@ -216,55 +229,58 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return 0;
 		}
 
-		var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
-		var shapeHandle = CreateShape(queryShapeDefinition);
-		try
+		using (FrameProfiler.Instance.Measure("Physics.Query.OverlapCapsule"))
 		{
-			var normalizedRotation = Normalize(rotation);
-			var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
-			var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
-			                     Matrix4x4.CreateTranslation(position + centerOffset);
-			var baseOffset = Vector3.Zero;
-			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
-			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
-			var overlapHits = new List<CollideShapeResult>(capacity: 8);
-			if (state.PhysicsSystem.NarrowPhaseQuery.CollideShape(
-				    shapeHandle.Shape,
-				    baseOffset,
-				    shapeTransform,
-				    baseOffset,
-				    CollisionCollectorType.AllHit,
-				    overlapHits,
-				    _broadPhaseLayerFilter,
-				    objectLayerFilter,
-				    bodyFilter,
-				    _shapeFilter) == false)
+			var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
+			var shapeHandle = CreateShape(queryShapeDefinition);
+			try
 			{
-				return 0;
-			}
-
-			for (var i = 0; i < overlapHits.Count; i++)
-			{
-				var overlapHit = overlapHits[i];
-				if (TryCreateBodyQueryHit(state, overlapHit.BodyID2, out var entity, out var isSensor, out var layer) == false)
+				var normalizedRotation = Normalize(rotation);
+				var centerOffset = Vector3.Transform(capsule.Center, normalizedRotation);
+				var shapeTransform = Matrix4x4.CreateFromQuaternion(normalizedRotation) *
+				                     Matrix4x4.CreateTranslation(position + centerOffset);
+				var baseOffset = Vector3.Zero;
+				using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
+				using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
+				var overlapHits = new List<CollideShapeResult>(capacity: 8);
+				if (state.PhysicsSystem.NarrowPhaseQuery.CollideShape(
+					    shapeHandle.Shape,
+					    baseOffset,
+					    shapeTransform,
+					    baseOffset,
+					    CollisionCollectorType.AllHit,
+					    overlapHits,
+					    _broadPhaseLayerFilter,
+					    objectLayerFilter,
+					    bodyFilter,
+					    _shapeFilter) == false)
 				{
-					continue;
+					return 0;
 				}
 
-				hits.Add(new PhysicsOverlapHit(
-					entity,
-					overlapHit.ContactPointOn2,
-					-NormalizeDirection(overlapHit.PenetrationAxis),
-					overlapHit.PenetrationDepth,
-					isSensor,
-					layer));
-			}
+				for (var i = 0; i < overlapHits.Count; i++)
+				{
+					var overlapHit = overlapHits[i];
+					if (TryCreateBodyQueryHit(state, overlapHit.BodyID2, out var entity, out var isSensor, out var layer) == false)
+					{
+						continue;
+					}
 
-			return hits.Count;
-		}
-		finally
-		{
-			shapeHandle.Dispose();
+					hits.Add(new PhysicsOverlapHit(
+						entity,
+						overlapHit.ContactPointOn2,
+						-NormalizeDirection(overlapHit.PenetrationAxis),
+						overlapHit.PenetrationDepth,
+						isSensor,
+						layer));
+				}
+
+				return hits.Count;
+			}
+			finally
+			{
+				shapeHandle.Dispose();
+			}
 		}
 	}
 
@@ -379,41 +395,60 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 	private static void SynchronizeBodies(World world, PhysicsWorldState state, float fixedDeltaTime)
 	{
-		var changed = false;
-		var bodiesToRemove = new List<Entity>();
-
-		foreach (var entry in state.BodiesByEntity)
+		using (FrameProfiler.Instance.Measure("Physics.SyncBodies"))
 		{
-			var entity = entry.Key;
-			var bodyState = entry.Value;
-			var currentDefinition = CreateDefinition(world, entity);
-			if (currentDefinition is null)
+			var changed = false;
+			var bodiesToRemove = new List<Entity>();
+
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.ApplyChanges"))
 			{
-				bodiesToRemove.Add(entity);
-				continue;
+				foreach (var entry in state.BodiesByEntity)
+				{
+					var entity = entry.Key;
+					var bodyState = entry.Value;
+					var currentDefinition = CreateDefinition(world, entity);
+					if (currentDefinition is null)
+					{
+						bodiesToRemove.Add(entity);
+						continue;
+					}
+
+					if (RequiresBodyRecreation(bodyState.Definition, currentDefinition.Value))
+					{
+						bodiesToRemove.Add(entity);
+						continue;
+					}
+
+					ApplyBodyChanges(state, bodyState, currentDefinition.Value, fixedDeltaTime);
+				}
 			}
 
-			if (RequiresBodyRecreation(bodyState.Definition, currentDefinition.Value))
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.Remove"))
 			{
-				bodiesToRemove.Add(entity);
-				continue;
+				for (var i = 0; i < bodiesToRemove.Count; i++)
+				{
+					RemoveBody(state, bodiesToRemove[i]);
+					changed = true;
+				}
 			}
 
-			ApplyBodyChanges(state, bodyState, currentDefinition.Value, fixedDeltaTime);
-		}
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateBox"))
+			{
+				CreateBodiesForView(world, state, world.View<BoxCollider>(), ref changed);
+			}
 
-		for (var i = 0; i < bodiesToRemove.Count; i++)
-		{
-			RemoveBody(state, bodiesToRemove[i]);
-			changed = true;
-		}
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateCapsule"))
+			{
+				CreateBodiesForView(world, state, world.View<CapsuleCollider>(), ref changed);
+			}
 
-		CreateBodiesForView(world, state, world.View<BoxCollider>(), ref changed);
-		CreateBodiesForView(world, state, world.View<CapsuleCollider>(), ref changed);
-
-		if (changed)
-		{
-			state.PhysicsSystem.OptimizeBroadPhase();
+			if (changed)
+			{
+				using (FrameProfiler.Instance.Measure("Physics.SyncBodies.OptimizeBroadPhase"))
+				{
+					state.PhysicsSystem.OptimizeBroadPhase();
+				}
+			}
 		}
 	}
 
@@ -643,36 +678,39 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 	private static void SyncDynamicBodiesBackToWorld(World world, PhysicsWorldState state)
 	{
-		foreach (var pair in state.BodiesByEntity)
+		using (FrameProfiler.Instance.Measure("Physics.SyncBack"))
 		{
-			var bodyState = pair.Value;
-			if (bodyState.Definition.MotionType != MotionType.Dynamic || world.HasComponent<LocalTransform>(pair.Key) == false)
+			foreach (var pair in state.BodiesByEntity)
 			{
-				continue;
+				var bodyState = pair.Value;
+				if (bodyState.Definition.MotionType != MotionType.Dynamic || world.HasComponent<LocalTransform>(pair.Key) == false)
+				{
+					continue;
+				}
+
+				var position = state.BodyInterface.GetPosition(bodyState.BodyId);
+				var rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
+				WriteWorldPose(world, pair.Key, position, rotation);
+
+				var linearVelocity = bodyState.Definition.LinearVelocity;
+				var angularVelocity = bodyState.Definition.AngularVelocity;
+				if (world.HasComponent<Rigidbody>(pair.Key))
+				{
+					ref var rigidbody = ref world.GetComponent<Rigidbody>(pair.Key);
+					rigidbody.LinearVelocity = state.BodyInterface.GetLinearVelocity(bodyState.BodyId);
+					rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
+					linearVelocity = rigidbody.LinearVelocity;
+					angularVelocity = rigidbody.AngularVelocity;
+				}
+
+				bodyState.Definition = bodyState.Definition with
+				{
+					Position = position,
+					Rotation = rotation,
+					LinearVelocity = linearVelocity,
+					AngularVelocity = angularVelocity
+				};
 			}
-
-			var position = state.BodyInterface.GetPosition(bodyState.BodyId);
-			var rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
-			WriteWorldPose(world, pair.Key, position, rotation);
-
-			var linearVelocity = bodyState.Definition.LinearVelocity;
-			var angularVelocity = bodyState.Definition.AngularVelocity;
-			if (world.HasComponent<Rigidbody>(pair.Key))
-			{
-				ref var rigidbody = ref world.GetComponent<Rigidbody>(pair.Key);
-				rigidbody.LinearVelocity = state.BodyInterface.GetLinearVelocity(bodyState.BodyId);
-				rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
-				linearVelocity = rigidbody.LinearVelocity;
-				angularVelocity = rigidbody.AngularVelocity;
-			}
-
-			bodyState.Definition = bodyState.Definition with
-			{
-				Position = position,
-				Rotation = rotation,
-				LinearVelocity = linearVelocity,
-				AngularVelocity = angularVelocity
-			};
 		}
 	}
 
