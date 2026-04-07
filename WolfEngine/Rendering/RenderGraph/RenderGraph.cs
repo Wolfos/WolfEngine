@@ -405,8 +405,6 @@ public sealed class RenderGraph
 			throw new ArgumentNullException(nameof(material));
 		}
 		
-		// Todo: Possible bug here, probably need to check if resources already exist
-
 		material.MarkResourceRequested();
 		lock (_resourceSync)
 		{
