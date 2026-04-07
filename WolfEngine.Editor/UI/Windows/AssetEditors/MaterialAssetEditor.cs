@@ -130,12 +130,11 @@ public sealed class MaterialAssetEditor
 
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
-		var textureAssets = GetTextureAssets();
-		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo, textureAssets);
-		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness, textureAssets);
-		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal, textureAssets);
-		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive, textureAssets);
-		DrawTextureAssignmentCombo(asset, materialAsset, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion, textureAssets);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion);
 
 		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
 		{
@@ -200,59 +199,20 @@ public sealed class MaterialAssetEditor
 		}
 	}
 
-	private void DrawTextureAssignmentCombo(
+	private void DrawTextureAssignmentEditor(
 		AssetDatabaseEntry materialEntry,
-		MaterialAsset materialAsset,
 		MaterialTextureAssignments assignments,
 		string propertyName,
 		string label,
-		AssetRef<Texture> currentValue,
-		IReadOnlyList<AssetDatabaseEntry> textureAssets)
+		AssetRef<Texture> currentValue)
 	{
-		var previewLabel = currentValue.NodeId != Guid.Empty && _projectService.TryGetAsset(currentValue.NodeId, out var selectedTexture)
-			? selectedTexture.Name
-			: "None";
-
-		EditorUIUtility.Combo(label, previewLabel, () =>
+		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(label, typeof(AssetRef<Texture>), currentValue));
+		if (drawResult.Changed && drawResult.Value is AssetRef<Texture> textureReference)
 		{
-			var noneSelected = currentValue.NodeId == Guid.Empty;
-			if (ImGui.Selectable("None", noneSelected))
-			{
-				BeginPendingChange(materialEntry);
-				SetTextureAssignment(assignments, propertyName, Guid.Empty);
-				_hasPendingChanges = true;
-			}
-
-			if (noneSelected)
-			{
-				ImGui.SetItemDefaultFocus();
-			}
-
-			for (var i = 0; i < textureAssets.Count; i++)
-			{
-				var textureAsset = textureAssets[i];
-				var isSelected = currentValue.NodeId == textureAsset.Id;
-				if (ImGui.Selectable(textureAsset.Name, isSelected))
-				{
-					BeginPendingChange(materialEntry);
-					SetTextureAssignment(assignments, propertyName, textureAsset.Id);
-					_hasPendingChanges = true;
-				}
-
-				if (isSelected)
-				{
-					ImGui.SetItemDefaultFocus();
-				}
-			}
-		});
-	}
-
-	private IReadOnlyList<AssetDatabaseEntry> GetTextureAssets()
-	{
-		return _projectService.CurrentAssetDatabase.Assets
-			.Where(asset => asset.Type == AssetType.Texture2D)
-			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-			.ToList();
+			BeginPendingChange(materialEntry);
+			SetTextureAssignment(assignments, propertyName, textureReference.NodeId);
+			_hasPendingChanges = true;
+		}
 	}
 
 	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid value)
