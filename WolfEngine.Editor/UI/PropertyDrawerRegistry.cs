@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
@@ -24,8 +25,12 @@ public interface IPropertyDrawerRegistry
 
 public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 {
+	private const string AssetLinkPickerPopupId = "AssetLinkPickerPopup";
+	private static readonly Vector2 AssetLinkPickerSize = new(420.0f, 320.0f);
+
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectTypeResolver _typeResolver;
+	private readonly Dictionary<uint, string> _assetLinkSearchTexts = new();
 
 	public PropertyDrawerRegistry(IEditorProjectService projectService, IProjectTypeResolver typeResolver)
 	{
@@ -160,42 +165,107 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		var authoringTypeName = descriptor.AuthoringType.AssemblyQualifiedName ?? string.Empty;
 		var authoringTypeId = _typeResolver.GetStableTypeId(descriptor.AuthoringType);
 		var candidates = _projectService.HasOpenProject
-			? _projectService.CurrentAssetDatabase.Assets
-				.Where(asset => IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName, authoringTypeId))
-				.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-				.ToList()
+			? AssetLinkPickerLogic.GetCandidates(_projectService.CurrentAssetDatabase.Assets, descriptor, authoringTypeName, authoringTypeId)
 			: [];
+		var currentAsset = _projectService.HasOpenProject && _projectService.TryGetAsset(currentId, out var asset)
+			? asset
+			: null;
 
 		var nextId = currentId;
 		var changed = false;
-		EditorUIUtility.Combo(context.Label, GetAssetLinkPreviewLabel(currentId, descriptor, authoringTypeName, authoringTypeId), () =>
+		EditorUIUtility.PopupButton(
+			context.Label,
+			AssetLinkPickerLogic.GetPreviewLabel(_projectService.HasOpenProject, currentId, currentAsset, descriptor, authoringTypeName, authoringTypeId),
+			AssetLinkPickerPopupId,
+			AssetLinkPickerSize,
+			() =>
 		{
-			var noneSelected = currentId == Guid.Empty;
-			if (ImGui.Selectable("None", noneSelected))
+			var popupStateId = ImGui.GetID(AssetLinkPickerPopupId);
+			if (_assetLinkSearchTexts.TryGetValue(popupStateId, out var searchText) == false || ImGui.IsWindowAppearing())
 			{
-				nextId = Guid.Empty;
-				changed = currentId != Guid.Empty;
+				searchText = string.Empty;
 			}
 
-			if (noneSelected)
+			if (ImGui.IsWindowAppearing())
 			{
-				ImGui.SetItemDefaultFocus();
+				ImGui.SetKeyboardFocusHere();
 			}
 
-			for (var i = 0; i < candidates.Count; i++)
+			ImGui.InputText("##AssetSearch", ref searchText, 256);
+			_assetLinkSearchTexts[popupStateId] = searchText;
+			ImGui.Separator();
+			ImGui.BeginChild("AssetLinkResults", new Vector2(0.0f, 240.0f), ImGuiChildFlags.Borders);
+			try
 			{
-				var candidate = candidates[i];
-				var isSelected = candidate.Id == currentId;
-				if (ImGui.Selectable(candidate.Name, isSelected))
+				var noneSelected = currentId == Guid.Empty;
+				ImGui.PushID("None");
+				try
 				{
-					nextId = candidate.Id;
-					changed = candidate.Id != currentId;
+					if (ImGui.Selectable("None", noneSelected))
+					{
+						nextId = Guid.Empty;
+						changed = currentId != Guid.Empty;
+						ImGui.CloseCurrentPopup();
+					}
+
+					if (noneSelected)
+					{
+						ImGui.SetItemDefaultFocus();
+						if (ImGui.IsWindowAppearing())
+						{
+							ImGui.SetScrollHereY();
+						}
+					}
+				}
+				finally
+				{
+					ImGui.PopID();
 				}
 
-				if (isSelected)
+				var filteredCandidateCount = 0;
+				for (var i = 0; i < candidates.Count; i++)
 				{
-					ImGui.SetItemDefaultFocus();
+					var candidate = candidates[i];
+					if (AssetLinkPickerLogic.MatchesSearch(candidate.Name, searchText) == false)
+					{
+						continue;
+					}
+
+					filteredCandidateCount++;
+					var isSelected = candidate.Id == currentId;
+					ImGui.PushID(candidate.Id.ToString());
+					try
+					{
+						if (ImGui.Selectable(candidate.Name, isSelected))
+						{
+							nextId = candidate.Id;
+							changed = candidate.Id != currentId;
+							ImGui.CloseCurrentPopup();
+						}
+
+						if (isSelected)
+						{
+							ImGui.SetItemDefaultFocus();
+							if (ImGui.IsWindowAppearing())
+							{
+								ImGui.SetScrollHereY();
+							}
+						}
+					}
+					finally
+					{
+						ImGui.PopID();
+					}
 				}
+
+				if (filteredCandidateCount == 0)
+				{
+					ImGui.TextDisabled("No matching assets.");
+				}
+			}
+			finally
+			{
+				ImGui.EndChild();
 			}
 		});
 
@@ -299,31 +369,6 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		return false;
 	}
 
-	private string GetAssetLinkPreviewLabel(Guid assetId, RuntimeAssetAttribute descriptor, string authoringTypeName, string authoringTypeId)
-	{
-		if (assetId == Guid.Empty)
-		{
-			return "None";
-		}
-
-		if (_projectService.HasOpenProject == false)
-		{
-			return "Missing";
-		}
-
-		if (_projectService.TryGetAsset(assetId, out var asset) == false)
-		{
-			return "Missing";
-		}
-
-		if (IsMatchingAssetLinkCandidate(asset, descriptor, authoringTypeName, authoringTypeId) == false)
-		{
-			return "Invalid";
-		}
-
-		return asset.Name;
-	}
-
 	private static bool TryGetRuntimeAssetDescriptor(Type runtimeType, out RuntimeAssetAttribute descriptor)
 	{
 		try
@@ -338,19 +383,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		}
 	}
 
-	private static bool IsMatchingAssetLinkCandidate(AssetDatabaseEntry asset, RuntimeAssetAttribute descriptor, string authoringTypeName, string authoringTypeId)
-	{
-		if (asset.Type != descriptor.AssetType)
-		{
-			return false;
-		}
-
-		return descriptor.AssetType != AssetType.DataAsset ||
-		       string.Equals(asset.DataAssetSummary?.DataAssetTypeId, authoringTypeId, StringComparison.Ordinal) ||
-		       string.Equals(asset.DataAssetSummary?.DataAssetType, authoringTypeName, StringComparison.Ordinal);
-	}
-
-	private static Guid GetAssetLinkId(Type valueType, object? value)
+	internal static Guid GetAssetLinkId(Type valueType, object? value)
 	{
 		if (value is null)
 		{
@@ -362,7 +395,7 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		return nodeIdProperty.GetValue(value) is Guid nodeId ? nodeId : Guid.Empty;
 	}
 
-	private static object CreateAssetLinkValue(Type valueType, Guid assetId)
+	internal static object CreateAssetLinkValue(Type valueType, Guid assetId)
 	{
 		var boxedValue = Activator.CreateInstance(valueType)
 			?? throw new InvalidOperationException($"Failed to create asset reference value for '{valueType.FullName}'.");
@@ -370,5 +403,73 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			?? throw new InvalidOperationException($"Asset reference type '{valueType.FullName}' is missing its NodeId property.");
 		nodeIdProperty.SetValue(boxedValue, assetId);
 		return boxedValue;
+	}
+}
+
+internal static class AssetLinkPickerLogic
+{
+	public static List<AssetDatabaseEntry> GetCandidates(
+		IReadOnlyList<AssetDatabaseEntry> assets,
+		RuntimeAssetAttribute descriptor,
+		string authoringTypeName,
+		string authoringTypeId)
+	{
+		ArgumentNullException.ThrowIfNull(assets);
+		ArgumentNullException.ThrowIfNull(descriptor);
+
+		return assets
+			.Where(asset => IsMatchingCandidate(asset, descriptor, authoringTypeName, authoringTypeId))
+			.OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	public static string GetPreviewLabel(
+		bool hasOpenProject,
+		Guid assetId,
+		AssetDatabaseEntry? asset,
+		RuntimeAssetAttribute descriptor,
+		string authoringTypeName,
+		string authoringTypeId)
+	{
+		if (assetId == Guid.Empty)
+		{
+			return "None";
+		}
+
+		if (hasOpenProject == false || asset is null)
+		{
+			return "Missing";
+		}
+
+		return IsMatchingCandidate(asset, descriptor, authoringTypeName, authoringTypeId)
+			? asset.Name
+			: "Invalid";
+	}
+
+	public static bool MatchesSearch(string assetName, string searchText)
+	{
+		ArgumentNullException.ThrowIfNull(assetName);
+
+		return string.IsNullOrWhiteSpace(searchText) ||
+		       assetName.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+	}
+
+	public static bool IsMatchingCandidate(
+		AssetDatabaseEntry asset,
+		RuntimeAssetAttribute descriptor,
+		string authoringTypeName,
+		string authoringTypeId)
+	{
+		ArgumentNullException.ThrowIfNull(asset);
+		ArgumentNullException.ThrowIfNull(descriptor);
+
+		if (asset.Type != descriptor.AssetType)
+		{
+			return false;
+		}
+
+		return descriptor.AssetType != AssetType.DataAsset ||
+		       string.Equals(asset.DataAssetSummary?.DataAssetTypeId, authoringTypeId, StringComparison.Ordinal) ||
+		       string.Equals(asset.DataAssetSummary?.DataAssetType, authoringTypeName, StringComparison.Ordinal);
 	}
 }

@@ -57,6 +57,12 @@ public static class WolfEngine
 		services.AddSingleton<RenderGraph>();
 		services.AddSingleton<SkyboxPass>();
 		
+#pragma warning disable CA1416
+		services.AddSingleton<WindowChromeController>();
+		services.AddSingleton<IWindowChromeController>(sp => sp.GetRequiredService<WindowChromeController>());
+#pragma warning restore CA1416
+
+		
 		services.AddSingleton<ISceneBuilder, SceneBuilder>();
 		
 		if (OperatingSystem.IsMacOS())
@@ -73,8 +79,6 @@ public static class WolfEngine
 			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
-			services.AddSingleton<WindowChromeController>();
-			services.AddSingleton<IWindowChromeController>(sp => sp.GetRequiredService<WindowChromeController>());
 
 		}
 		

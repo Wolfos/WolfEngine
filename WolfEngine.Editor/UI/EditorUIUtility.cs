@@ -124,6 +124,48 @@ public class EditorUIUtility
 		return true;
 	}
 
+	public static bool PopupButton(string label, string previewValue, string popupId, Vector2 popupSize, Action drawPopupContents)
+	{
+		BeginLabeledField(label);
+		try
+		{
+			var buttonSize = new Vector2(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X), 0.0f);
+			ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.0f, 0.5f));
+			try
+			{
+				if (ImGui.Button($"{previewValue}##value", buttonSize))
+				{
+					ImGui.OpenPopup(popupId);
+				}
+			}
+			finally
+			{
+				ImGui.PopStyleVar();
+			}
+
+			ImGui.SetNextWindowSize(popupSize, ImGuiCond.Appearing);
+			if (ImGui.BeginPopup(popupId) == false)
+			{
+				return false;
+			}
+
+			try
+			{
+				drawPopupContents();
+			}
+			finally
+			{
+				ImGui.EndPopup();
+			}
+
+			return true;
+		}
+		finally
+		{
+			EndLabeledField();
+		}
+	}
+
 	public static bool EnumCombo<TEnum>(string label, ref TEnum value) where TEnum : struct, Enum
 	{
 		var changed = false;
