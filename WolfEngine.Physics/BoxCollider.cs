@@ -7,13 +7,38 @@ public struct BoxCollider : IEntityComponent
 {
 	public Vector3 HalfExtents;
 	public Vector3 Center;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool PhysicsCacheValid;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedHalfExtents;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedCenter;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedWorldScale;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedScaledHalfExtents;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedScaledCenter;
+	[NotSerialized]
+	[HideFromEditor]
+	internal uint CachedLayer;
+	[NotSerialized]
+	[HideFromEditor]
+	internal uint CachedCollidesWith;
 
 	public static BoxCollider CreateDefault()
 	{
 		return new BoxCollider
 		{
 			HalfExtents = new Vector3(0.5f),
-			Center = Vector3.Zero
+			Center = Vector3.Zero,
+			PhysicsCacheValid = false
 		};
 	}
 
@@ -24,5 +49,6 @@ public struct BoxCollider : IEntityComponent
 		var meshRenderer = world.GetComponent<MeshRenderer>(entity);
 		HalfExtents = meshRenderer.Mesh.BoundingBox.HalfExtents;
 		Center = meshRenderer.Mesh.BoundingBox.Center;
+		PhysicsCacheValid = false;
 	}
 }

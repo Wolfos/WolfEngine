@@ -23,6 +23,36 @@ public struct Rigidbody : IEntityComponent
 	public bool AllowSleeping;
 	public bool UseManifoldReduction;
 	public bool IsSensor;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool PhysicsCacheValid;
+	[NotSerialized]
+	[HideFromEditor]
+	internal RigidbodyBodyType CachedBodyType;
+	[NotSerialized]
+	[HideFromEditor]
+	internal float CachedMass;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedLinearVelocity;
+	[NotSerialized]
+	[HideFromEditor]
+	internal Vector3 CachedAngularVelocity;
+	[NotSerialized]
+	[HideFromEditor]
+	internal float CachedGravityFactor;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool CachedStartActivated;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool CachedAllowSleeping;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool CachedUseManifoldReduction;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool CachedIsSensor;
 	
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
@@ -35,6 +65,7 @@ public struct Rigidbody : IEntityComponent
 		AllowSleeping = true;
 		UseManifoldReduction = false;
 		IsSensor = false;
+		PhysicsCacheValid = false;
 	}
 
 	public static Rigidbody CreateDefault()

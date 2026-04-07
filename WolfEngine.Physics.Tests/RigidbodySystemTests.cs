@@ -39,6 +39,29 @@ public sealed class RigidbodySystemTests
 		Assert.That(system.TryGetBodyMotionType(world, entity, out var motionType), Is.True);
 		Assert.That(motionType, Is.EqualTo(MotionType.Dynamic));
 		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition.X, Is.GreaterThan(0.0f));
+		Assert.That(world.GetComponent<LocalTransform>(entity).IsDirty, Is.False);
+	}
+
+	[Test]
+	public void PhysicsUpdate_DynamicChildBodyWritesBackLocalTransformUnderParent()
+	{
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Holder", Matrix4x4.CreateTranslation(new Vector3(10.0f, 0.0f, 0.0f)));
+		var child = world.CreateEntity("Dynamic Box", Matrix4x4.Identity);
+		world.SetParent(child, parent);
+		world.AddComponent(child, BoxCollider.CreateDefault());
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.GravityFactor = 0.0f;
+		rigidbody.LinearVelocity = new Vector3(1.0f, 0.0f, 0.0f);
+		world.AddComponent(child, rigidbody);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var transform = world.GetComponent<LocalTransform>(child);
+		Assert.That(transform.LocalPosition.X, Is.GreaterThan(0.0f));
+		Assert.That(transform.LocalPosition.X, Is.LessThan(1.0f));
+		Assert.That(transform.IsDirty, Is.False);
 	}
 
 	[Test]

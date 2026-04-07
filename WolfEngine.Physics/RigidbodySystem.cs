@@ -85,7 +85,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 		worldRotation = Normalize(worldRotation);
 		state.BodyInterface.MoveKinematic(bodyState.BodyId, worldPosition, worldRotation, fixedDeltaTime);
-		WriteWorldPose(world, entity, worldPosition, worldRotation);
+		world.ApplyPhysicsWorldPose(entity, worldPosition, worldRotation);
 
 		var updatedDefinition = bodyState.Definition with
 		{
@@ -399,6 +399,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		{
 			var changed = false;
 			var bodiesToRemove = new List<Entity>();
+			var totalColliderCount = world.GetComponentCount<BoxCollider>() + world.GetComponentCount<CapsuleCollider>();
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.ApplyChanges"))
 			{
@@ -406,7 +407,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				{
 					var entity = entry.Key;
 					var bodyState = entry.Value;
-					var currentDefinition = CreateDefinition(world, entity);
+					var currentDefinition = CreateDefinition(world, entity, bodyState.Definition);
 					if (currentDefinition is null)
 					{
 						bodiesToRemove.Add(entity);
@@ -434,12 +435,24 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateBox"))
 			{
-				CreateBodiesForView(world, state, world.View<BoxCollider>(), ref changed);
+				if (state.LastBoxColliderCount != world.GetComponentCount<BoxCollider>() ||
+				    state.BodiesByEntity.Count < totalColliderCount)
+				{
+					CreateBodiesForView(world, state, world.View<BoxCollider>(), ref changed);
+				}
+
+				state.LastBoxColliderCount = world.GetComponentCount<BoxCollider>();
 			}
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateCapsule"))
 			{
-				CreateBodiesForView(world, state, world.View<CapsuleCollider>(), ref changed);
+				if (state.LastCapsuleColliderCount != world.GetComponentCount<CapsuleCollider>() ||
+				    state.BodiesByEntity.Count < totalColliderCount)
+				{
+					CreateBodiesForView(world, state, world.View<CapsuleCollider>(), ref changed);
+				}
+
+				state.LastCapsuleColliderCount = world.GetComponentCount<CapsuleCollider>();
 			}
 
 			if (changed)
@@ -478,9 +491,12 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		}
 	}
 
-	private static PhysicsBodyDefinition? CreateDefinition(World world, Entity entity)
+	private static PhysicsBodyDefinition? CreateDefinition(
+		World world,
+		Entity entity,
+		PhysicsBodyDefinition? previousDefinition = null)
 	{
-		if (world.IsAlive(entity) == false || TryCreateShapeDefinition(world, entity, out var shapeDefinition) == false)
+		if (world.IsAlive(entity) == false || TryGetColliderKind(world, entity, out var colliderKind) == false)
 		{
 			return null;
 		}
@@ -490,13 +506,30 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		var collisionFilter = world.HasComponent<CollisionFilter>(entity)
 			? world.GetComponent<CollisionFilter>(entity)
 			: CollisionFilter.CreateDefault();
-
-		var worldMatrix = ComputeWorldMatrix(world, entity);
-		if (Matrix4x4.Decompose(worldMatrix, out _, out var worldRotation, out var worldPosition) == false)
+		var transformDirty = world.HasComponent<LocalTransform>(entity) && world.GetComponent<LocalTransform>(entity).IsDirty;
+		var rigidbodyChanged = HasRigidbodyChanged(previousDefinition, hasRigidbody, rigidbody);
+		var shapeChanged = HasShapeChanged(world, entity, colliderKind);
+		var collisionFilterChanged = HasCollisionFilterChanged(world, entity, colliderKind, collisionFilter);
+		if (previousDefinition is { } cachedDefinition &&
+		    transformDirty == false &&
+		    rigidbodyChanged == false &&
+		    shapeChanged == false &&
+		    collisionFilterChanged == false)
 		{
-			worldRotation = Quaternion.Identity;
-			worldPosition = Vector3.Zero;
+			return cachedDefinition;
 		}
+
+		var worldPosition = Vector3.Zero;
+		var worldRotation = Quaternion.Identity;
+		var worldScale = Vector3.One;
+		world.TryGetWorldPoseAndScale(entity, out worldPosition, out worldRotation, out worldScale);
+
+		if (TryCreateShapeDefinition(world, entity, colliderKind, worldScale, collisionFilter, out var shapeDefinition) == false)
+		{
+			return null;
+		}
+
+		CacheRigidbodyState(world, entity, hasRigidbody, rigidbody);
 
 		return new PhysicsBodyDefinition(
 			shapeDefinition,
@@ -515,18 +548,27 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			GetMotionType(hasRigidbody, rigidbody));
 	}
 
-	private static bool TryCreateShapeDefinition(World world, Entity entity, out PhysicsShapeDefinition shapeDefinition)
+	private static bool TryCreateShapeDefinition(
+		World world,
+		Entity entity,
+		PhysicsColliderKind colliderKind,
+		Vector3 worldScale,
+		CollisionFilter collisionFilter,
+		out PhysicsShapeDefinition shapeDefinition)
 	{
-		var worldScale = GetAbsoluteWorldScale(world, entity);
-		if (world.HasComponent<BoxCollider>(entity))
+		if (colliderKind == PhysicsColliderKind.Box)
 		{
-			shapeDefinition = CreateBoxShapeDefinition(world.GetComponent<BoxCollider>(entity), worldScale);
+			ref var collider = ref world.GetComponent<BoxCollider>(entity);
+			UpdateBoxColliderCache(ref collider, worldScale, collisionFilter);
+			shapeDefinition = PhysicsShapeDefinition.CreateBox(collider.CachedScaledHalfExtents, collider.CachedScaledCenter);
 			return true;
 		}
 
-		if (world.HasComponent<CapsuleCollider>(entity))
+		if (colliderKind == PhysicsColliderKind.Capsule)
 		{
-			shapeDefinition = CreateCapsuleShapeDefinition(world.GetComponent<CapsuleCollider>(entity), worldScale);
+			ref var collider = ref world.GetComponent<CapsuleCollider>(entity);
+			UpdateCapsuleColliderCache(ref collider, worldScale, collisionFilter);
+			shapeDefinition = PhysicsShapeDefinition.CreateCapsule(collider.CachedScaledHalfHeight, collider.CachedScaledRadius, collider.CachedScaledCenter);
 			return true;
 		}
 
@@ -690,7 +732,10 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 				var position = state.BodyInterface.GetPosition(bodyState.BodyId);
 				var rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
-				WriteWorldPose(world, pair.Key, position, rotation);
+				if (HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
+				{
+					world.ApplyPhysicsWorldPose(pair.Key, position, rotation);
+				}
 
 				var linearVelocity = bodyState.Definition.LinearVelocity;
 				var angularVelocity = bodyState.Definition.AngularVelocity;
@@ -701,6 +746,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 					rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
 					linearVelocity = rigidbody.LinearVelocity;
 					angularVelocity = rigidbody.AngularVelocity;
+					CacheRigidbodyState(ref rigidbody);
 				}
 
 				bodyState.Definition = bodyState.Definition with
@@ -777,55 +823,58 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		return rigidbody;
 	}
 
-	private static Matrix4x4 ComputeWorldMatrix(World world, Entity entity)
+	private static bool TryGetColliderKind(World world, Entity entity, out PhysicsColliderKind colliderKind)
 	{
-		var localMatrix = world.HasComponent<LocalTransform>(entity)
-			? world.GetComponent<LocalTransform>(entity).GetTransform()
-			: Matrix4x4.Identity;
-		if (world.HasComponent<Parent>(entity) == false)
+		if (world.HasComponent<BoxCollider>(entity))
 		{
-			return localMatrix;
+			colliderKind = PhysicsColliderKind.Box;
+			return true;
 		}
 
-		var parent = world.GetComponent<Parent>(entity).Value;
-		return localMatrix * ComputeWorldMatrix(world, parent);
-	}
-
-	private static Matrix4x4 ComputeParentWorldMatrix(World world, Entity entity)
-	{
-		if (world.HasComponent<Parent>(entity) == false)
+		if (world.HasComponent<CapsuleCollider>(entity))
 		{
-			return Matrix4x4.Identity;
+			colliderKind = PhysicsColliderKind.Capsule;
+			return true;
 		}
 
-		return ComputeWorldMatrix(world, world.GetComponent<Parent>(entity).Value);
+		colliderKind = default;
+		return false;
 	}
 
-	private static Vector3 GetAbsoluteWorldScale(World world, Entity entity)
+	private static bool HasRigidbodyChanged(PhysicsBodyDefinition? previousDefinition, bool hasRigidbody, Rigidbody rigidbody)
 	{
-		var worldMatrix = ComputeWorldMatrix(world, entity);
-		return Matrix4x4.Decompose(worldMatrix, out var scale, out _, out _)
-			? new Vector3(MathF.Abs(scale.X), MathF.Abs(scale.Y), MathF.Abs(scale.Z))
-			: Vector3.One;
-	}
-
-	private static void WriteWorldPose(World world, Entity entity, Vector3 position, Quaternion rotation)
-	{
-		var parentWorld = ComputeParentWorldMatrix(world, entity);
-		Matrix4x4.Invert(parentWorld, out var parentWorldInverse);
-		var localTransform = world.GetComponent<LocalTransform>(entity);
-		var worldMatrix = Matrix4x4.CreateScale(localTransform.LocalScale) *
-		                  Matrix4x4.CreateFromQuaternion(rotation) *
-		                  Matrix4x4.CreateTranslation(position);
-		var localMatrix = worldMatrix * parentWorldInverse;
-		if (Matrix4x4.Decompose(localMatrix, out var localScale, out var localRotation, out var localPosition) == false)
+		if (hasRigidbody == false)
 		{
-			return;
+			return previousDefinition is { MotionType: not MotionType.Static };
 		}
 
-		world.SetLocalPosition(entity, localPosition);
-		world.SetLocalRotation(entity, Normalize(localRotation));
-		world.SetLocalScale(entity, localScale);
+		return rigidbody.PhysicsCacheValid == false ||
+		       rigidbody.CachedBodyType != rigidbody.BodyType ||
+		       MathF.Abs(rigidbody.CachedMass - rigidbody.Mass) > 0.0001f ||
+		       rigidbody.CachedLinearVelocity != rigidbody.LinearVelocity ||
+		       rigidbody.CachedAngularVelocity != rigidbody.AngularVelocity ||
+		       MathF.Abs(rigidbody.CachedGravityFactor - rigidbody.GravityFactor) > 0.0001f ||
+		       rigidbody.CachedStartActivated != rigidbody.StartActivated ||
+		       rigidbody.CachedAllowSleeping != rigidbody.AllowSleeping ||
+		       rigidbody.CachedUseManifoldReduction != rigidbody.UseManifoldReduction ||
+		       rigidbody.CachedIsSensor != rigidbody.IsSensor;
+	}
+
+	private static bool HasShapeChanged(World world, Entity entity, PhysicsColliderKind colliderKind)
+	{
+		if (colliderKind == PhysicsColliderKind.Box)
+		{
+			ref var collider = ref world.GetComponent<BoxCollider>(entity);
+			return collider.PhysicsCacheValid == false ||
+			       collider.CachedHalfExtents != collider.HalfExtents ||
+			       collider.CachedCenter != collider.Center;
+		}
+
+		ref var capsule = ref world.GetComponent<CapsuleCollider>(entity);
+		return capsule.PhysicsCacheValid == false ||
+		       MathF.Abs(capsule.CachedRadius - capsule.Radius) > 0.0001f ||
+		       MathF.Abs(capsule.CachedHalfHeight - capsule.HalfHeight) > 0.0001f ||
+		       capsule.CachedCenter != capsule.Center;
 	}
 
 	private static PhysicsShapeHandle CreateShape(PhysicsShapeDefinition definition)
@@ -864,6 +913,88 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	private static uint ClampLayer(uint layer)
 	{
 		return layer <= CollisionFilter.MaxLayer ? layer : CollisionFilter.MaxLayer;
+	}
+
+	private static bool HasCollisionFilterChanged(
+		World world,
+		Entity entity,
+		PhysicsColliderKind colliderKind,
+		CollisionFilter collisionFilter)
+	{
+		var layer = ClampLayer(collisionFilter.Layer);
+		return colliderKind switch
+		{
+			PhysicsColliderKind.Box => world.GetComponent<BoxCollider>(entity).PhysicsCacheValid == false ||
+			                           world.GetComponent<BoxCollider>(entity).CachedLayer != layer ||
+			                           world.GetComponent<BoxCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
+			PhysicsColliderKind.Capsule => world.GetComponent<CapsuleCollider>(entity).PhysicsCacheValid == false ||
+			                               world.GetComponent<CapsuleCollider>(entity).CachedLayer != layer ||
+			                               world.GetComponent<CapsuleCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
+			_ => true
+		};
+	}
+
+	private static void UpdateBoxColliderCache(ref BoxCollider collider, Vector3 worldScale, CollisionFilter collisionFilter)
+	{
+		collider.CachedHalfExtents = collider.HalfExtents;
+		collider.CachedCenter = collider.Center;
+		collider.CachedWorldScale = worldScale;
+		collider.CachedScaledHalfExtents = Vector3.Max(new Vector3(0.001f), Multiply(collider.HalfExtents, worldScale));
+		collider.CachedScaledCenter = Multiply(collider.Center, worldScale);
+		collider.CachedLayer = ClampLayer(collisionFilter.Layer);
+		collider.CachedCollidesWith = collisionFilter.CollidesWith;
+		collider.PhysicsCacheValid = true;
+	}
+
+	private static void UpdateCapsuleColliderCache(ref CapsuleCollider collider, Vector3 worldScale, CollisionFilter collisionFilter)
+	{
+		collider.CachedRadius = collider.Radius;
+		collider.CachedHalfHeight = collider.HalfHeight;
+		collider.CachedCenter = collider.Center;
+		collider.CachedWorldScale = worldScale;
+		collider.CachedScaledHalfHeight = MathF.Max(0.001f, MathF.Abs(collider.HalfHeight * worldScale.Y));
+		var radiusScale = MathF.Max(MathF.Abs(worldScale.X), MathF.Abs(worldScale.Z));
+		collider.CachedScaledRadius = MathF.Max(0.001f, MathF.Abs(collider.Radius * radiusScale));
+		collider.CachedScaledCenter = Multiply(collider.Center, worldScale);
+		collider.CachedLayer = ClampLayer(collisionFilter.Layer);
+		collider.CachedCollidesWith = collisionFilter.CollidesWith;
+		collider.PhysicsCacheValid = true;
+	}
+
+	private static void CacheRigidbodyState(World world, Entity entity, bool hasRigidbody, Rigidbody rigidbody)
+	{
+		if (hasRigidbody == false)
+		{
+			return;
+		}
+
+		ref var current = ref world.GetComponent<Rigidbody>(entity);
+		current = rigidbody;
+		CacheRigidbodyState(ref current);
+	}
+
+	private static void CacheRigidbodyState(ref Rigidbody rigidbody)
+	{
+		rigidbody.CachedBodyType = rigidbody.BodyType;
+		rigidbody.CachedMass = rigidbody.Mass;
+		rigidbody.CachedLinearVelocity = rigidbody.LinearVelocity;
+		rigidbody.CachedAngularVelocity = rigidbody.AngularVelocity;
+		rigidbody.CachedGravityFactor = rigidbody.GravityFactor;
+		rigidbody.CachedStartActivated = rigidbody.StartActivated;
+		rigidbody.CachedAllowSleeping = rigidbody.AllowSleeping;
+		rigidbody.CachedUseManifoldReduction = rigidbody.UseManifoldReduction;
+		rigidbody.CachedIsSensor = rigidbody.IsSensor;
+		rigidbody.PhysicsCacheValid = true;
+	}
+
+	private static bool HasWorldPoseChanged(
+		Vector3 previousPosition,
+		Quaternion previousRotation,
+		Vector3 currentPosition,
+		Quaternion currentRotation)
+	{
+		return Vector3.DistanceSquared(previousPosition, currentPosition) > 0.000001f ||
+		       MathF.Abs(Quaternion.Dot(previousRotation, currentRotation)) < 0.999999f;
 	}
 
 	private static void AcquireFoundation()
@@ -942,6 +1073,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		public Dictionary<Entity, PhysicsBodyState> BodiesByEntity { get; } = new();
 		public Dictionary<BodyID, PhysicsBodyState> BodiesByBodyId { get; } = new();
 		public List<PhysicsContactEvent> ContactEvents { get; } = new();
+		public int LastBoxColliderCount { get; set; } = -1;
+		public int LastCapsuleColliderCount { get; set; } = -1;
 
 		public void Dispose()
 		{
