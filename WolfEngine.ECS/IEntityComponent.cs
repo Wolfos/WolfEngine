@@ -2,7 +2,7 @@
 
 public interface IEntityComponent
 {
-	public void ApplyDefaultValues()
+	public void ApplyDefaultValues(World world, Entity entity)
 	{
 	}
 }

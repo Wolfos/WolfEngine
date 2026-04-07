@@ -94,7 +94,7 @@ public static class RuntimeComponentAccessor
 	private static void AddDefaultGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
 	{
 		var component = default(T);
-		component.ApplyDefaultValues();
+		component.ApplyDefaultValues(world, entity);
 		world.AddComponent(entity, component);
 	}
 

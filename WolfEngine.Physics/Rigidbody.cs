@@ -24,7 +24,7 @@ public struct Rigidbody : IEntityComponent
 	public bool UseManifoldReduction;
 	public bool IsSensor;
 	
-	public void ApplyDefaultValues()
+	public void ApplyDefaultValues(World world, Entity entity)
 	{
 		BodyType = RigidbodyBodyType.Dynamic;
 		Mass = 1.0f;
@@ -40,7 +40,7 @@ public struct Rigidbody : IEntityComponent
 	public static Rigidbody CreateDefault()
 	{
 		var rb = new Rigidbody();
-		rb.ApplyDefaultValues();
+		rb.ApplyDefaultValues(null!, new Entity());
 		return rb;
 	}
 }

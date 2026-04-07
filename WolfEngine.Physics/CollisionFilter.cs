@@ -11,7 +11,7 @@ public struct CollisionFilter : IEntityComponent
 	public uint Layer;
 	public uint CollidesWith;
 
-	public void ApplyDefaultValues()
+	public void ApplyDefaultValues(World world, Entity entity)
 	{
 		Layer = DefaultLayer;
 		CollidesWith = DefaultLayerMask;
@@ -20,7 +20,7 @@ public struct CollisionFilter : IEntityComponent
 	public static CollisionFilter CreateDefault()
 	{
 		var filter = new CollisionFilter();
-		filter.ApplyDefaultValues();
+		filter.ApplyDefaultValues(null!, new Entity());
 		return filter;
 	}
 }

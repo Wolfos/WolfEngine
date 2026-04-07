@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Editor.UI;
+using WolfEngine.Physics;
 
 namespace WolfEngine.Editor;
 
@@ -12,10 +14,11 @@ public static class Program
 	{
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
-		
 		ConfigureServices(services);
 		
 		var provider = services.BuildServiceProvider();
+
+		WolfEnginePhysics.AddDefaultSystems(provider.GetRequiredService<IWorldManager>());
 		
 		AssetDatabase.SetInstanceRegistry(provider.GetRequiredService<IAssetInstanceRegistry>());
 		provider.GetRequiredService<IUiFrameProvider>();
