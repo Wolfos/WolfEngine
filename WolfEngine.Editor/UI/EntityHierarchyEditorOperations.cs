@@ -12,6 +12,46 @@ public readonly record struct EntityHierarchySnapshot(
 
 internal static class EntityHierarchyEditorOperations
 {
+	public static Entity? DuplicateEntity(
+		EditorScene scene,
+		Entity entity,
+		IEditorSceneSnapshotService sceneSnapshotService,
+		IEditorUndoRedoService undoRedoService,
+		IEditorInteractionState interactionState)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(sceneSnapshotService);
+		ArgumentNullException.ThrowIfNull(undoRedoService);
+		ArgumentNullException.ThrowIfNull(interactionState);
+
+		var world = scene.World;
+		if (world.IsAlive(entity) == false || EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+		{
+			return null;
+		}
+
+		var entitiesToDuplicate = new List<Entity>();
+		CollectEntitySubtree(entity, world, entitiesToDuplicate);
+		var snapshots = sceneSnapshotService.CaptureDeletedEntities(scene, entitiesToDuplicate);
+		if (snapshots.Count == 0)
+		{
+			return null;
+		}
+
+		var duplicatedSnapshots = CloneForDuplication(snapshots);
+		sceneSnapshotService.RestoreDeletedEntities(scene, duplicatedSnapshots);
+		if (TryFindEntity(scene, duplicatedSnapshots[0].Entity.EntityId, out var duplicatedRoot) == false)
+		{
+			return null;
+		}
+
+		EditorGui.SelectEntity(duplicatedRoot, world, requestFocus: false);
+		undoRedoService.BeginCapture("Duplicate Entity");
+		undoRedoService.CommitCapture(new EntityCreationUndoRedoEntry("Duplicate Entity", duplicatedSnapshots));
+		interactionState.MarkSceneDirty();
+		return duplicatedRoot;
+	}
+
 	public static bool TryReparentEntity(
 		EditorScene scene,
 		Entity entity,
@@ -228,5 +268,53 @@ internal static class EntityHierarchyEditorOperations
 
 		entity = default;
 		return false;
+	}
+
+	private static IReadOnlyList<DeletedEntitySnapshot> CloneForDuplication(IReadOnlyList<DeletedEntitySnapshot> snapshots)
+	{
+		var idMap = new Dictionary<Guid, Guid>(snapshots.Count);
+		for (var i = 0; i < snapshots.Count; i++)
+		{
+			var originalId = snapshots[i].Entity.EntityId;
+			if (originalId != Guid.Empty)
+			{
+				idMap[originalId] = Guid.NewGuid();
+			}
+		}
+
+		var clones = new List<DeletedEntitySnapshot>(snapshots.Count);
+		for (var i = 0; i < snapshots.Count; i++)
+		{
+			var snapshot = snapshots[i];
+			var clonedEntity = EditorPrefabUtility.CloneEntity(snapshot.Entity);
+			clonedEntity.EntityId = idMap[clonedEntity.EntityId];
+			if (clonedEntity.ParentEntityId is { } parentEntityId && idMap.TryGetValue(parentEntityId, out var duplicatedParentId))
+			{
+				clonedEntity.ParentEntityId = duplicatedParentId;
+			}
+
+			clones.Add(new DeletedEntitySnapshot(snapshot.CellKey, clonedEntity));
+		}
+
+		return clones;
+	}
+
+	private static void CollectEntitySubtree(Entity entity, World world, List<Entity> entities)
+	{
+		entities.Add(entity);
+		if (world.HasComponent<Children>(entity) == false)
+		{
+			return;
+		}
+
+		var child = world.GetComponent<Children>(entity).First;
+		while (child.IsValid)
+		{
+			var next = world.HasComponent<Sibling>(child)
+				? world.GetComponent<Sibling>(child).Next
+				: default;
+			CollectEntitySubtree(child, world, entities);
+			child = next;
+		}
 	}
 }

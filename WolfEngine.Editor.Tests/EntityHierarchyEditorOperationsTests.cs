@@ -122,6 +122,46 @@ public sealed class EntityHierarchyEditorOperationsTests
 		undoRedoService.DidNotReceive().CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
 
+	[Test]
+	public void DuplicateEntity_ClonesSubtreeWithFreshIdsAndMarksSceneDirty()
+	{
+		var scene = new EditorScene();
+		var parent = scene.World.CreateEntity("Parent", new Vector3(1.0f, 2.0f, 3.0f), Quaternion.Identity, Vector3.One);
+		var child = scene.World.CreateEntity("Child", new Vector3(4.0f, 5.0f, 6.0f), Quaternion.Identity, Vector3.One);
+		scene.World.SetParent(child, parent);
+		scene.EntityIcons[parent] = "light";
+		scene.EntityIcons[child] = "object";
+		scene.EntityIds[parent] = Guid.NewGuid();
+		scene.EntityIds[child] = Guid.NewGuid();
+		var interactionState = Substitute.For<IEditorInteractionState>();
+		var undoRedoService = Substitute.For<IEditorUndoRedoService>();
+
+		var duplicate = EntityHierarchyEditorOperations.DuplicateEntity(
+			scene,
+			parent,
+			new EditorSceneSnapshotService(Substitute.For<IProjectTypeResolver>()),
+			undoRedoService,
+			interactionState);
+
+		Assert.That(duplicate.HasValue, Is.True);
+		Assert.That(duplicate.Value, Is.Not.EqualTo(parent));
+		Assert.That(scene.World.IsAlive(duplicate.Value), Is.True);
+		Assert.That(scene.World.GetComponent<NameComponent>(duplicate.Value).Name, Is.EqualTo("Parent"));
+		Assert.That(scene.EntityIds[duplicate.Value], Is.Not.EqualTo(scene.EntityIds[parent]));
+		Assert.That(scene.EntityIcons[duplicate.Value], Is.EqualTo("light"));
+
+		var duplicateChildren = scene.World.GetComponent<Children>(duplicate.Value).First;
+		Assert.That(duplicateChildren.IsValid, Is.True);
+		Assert.That(scene.World.GetComponent<NameComponent>(duplicateChildren).Name, Is.EqualTo("Child"));
+		Assert.That(scene.World.GetComponent<Parent>(duplicateChildren).Value, Is.EqualTo(duplicate.Value));
+		Assert.That(scene.EntityIds[duplicateChildren], Is.Not.EqualTo(scene.EntityIds[child]));
+		Assert.That(scene.EntityIcons[duplicateChildren], Is.EqualTo("object"));
+
+		interactionState.Received(1).MarkSceneDirty();
+		undoRedoService.Received(1).BeginCapture("Duplicate Entity");
+		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityCreationUndoRedoEntry>());
+	}
+
 	private static void AssertMatrix(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)
 	{
 		Assert.That(actual.M11, Is.EqualTo(expected.M11).Within(tolerance));

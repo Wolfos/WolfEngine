@@ -7,6 +7,7 @@ namespace WolfEngine.Editor.UI;
 
 public interface IEditorEntityDeletionHandler
 {
+	bool DuplicateSelectedEntity(EditorScene scene);
 	bool DeleteSelectedEntity(EditorScene scene);
 }
 
@@ -24,6 +25,7 @@ public interface IEditorCommandService
 	bool RefreshAssetDatabase();
 	bool Undo();
 	bool Redo();
+	bool DuplicateFocusedSelection();
 	bool DeleteFocusedSelection();
 	void ProcessShortcuts();
 	void DrawPendingDialogs();
@@ -65,6 +67,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private bool _newPressedThisFrame;
 	private bool _savePressedThisFrame;
 	private bool _refreshPressedThisFrame;
+	private bool _duplicatePressedThisFrame;
 	private bool _deletePressedThisFrame;
 	private bool _backspacePressedThisFrame;
 
@@ -95,6 +98,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		RegisterTrackedButton(inputSystem, "ShortcutNew", InputActionBinding.KeyN, callback => _newPressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutSave", InputActionBinding.KeyS, callback => _savePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutRefresh", InputActionBinding.KeyR, callback => _refreshPressedThisFrame |= callback.Value);
+		RegisterTrackedButton(inputSystem, "ShortcutDuplicate", InputActionBinding.KeyD, callback => _duplicatePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutDelete", InputActionBinding.KeyDelete, callback => _deletePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutBackspace", InputActionBinding.KeyBackspace, callback => _backspacePressedThisFrame |= callback.Value);
 		RegisterTrackedButton(inputSystem, "ShortcutLeftCtrl", InputActionBinding.KeyLeftControl, callback => _leftCtrlDown = callback.Value);
@@ -199,6 +203,15 @@ public sealed class EditorCommandService : IEditorCommandService
 		};
 	}
 
+	public bool DuplicateFocusedSelection()
+	{
+		return _interactionState.FocusedWindow switch
+		{
+			EditorFocusedWindow.Entities => _entityDeletionHandler?.DuplicateSelectedEntity(_sceneWorkspace.CurrentScene) ?? false,
+			_ => false
+		};
+	}
+
 	public void ProcessShortcuts()
 	{
 		var io = ImGui.GetIO();
@@ -210,6 +223,7 @@ public sealed class EditorCommandService : IEditorCommandService
 			_newPressedThisFrame,
 			_savePressedThisFrame,
 			_refreshPressedThisFrame,
+			_duplicatePressedThisFrame,
 			_deletePressedThisFrame,
 			_backspacePressedThisFrame,
 			io.WantTextInput,
@@ -233,6 +247,9 @@ public sealed class EditorCommandService : IEditorCommandService
 			case EditorShortcutCommand.RefreshAssetDatabase:
 				RefreshAssetDatabase();
 				break;
+			case EditorShortcutCommand.DuplicateFocusedSelection:
+				DuplicateFocusedSelection();
+				break;
 			case EditorShortcutCommand.DeleteFocusedSelection:
 				DeleteFocusedSelection();
 				break;
@@ -243,6 +260,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_newPressedThisFrame = false;
 		_savePressedThisFrame = false;
 		_refreshPressedThisFrame = false;
+		_duplicatePressedThisFrame = false;
 		_deletePressedThisFrame = false;
 		_backspacePressedThisFrame = false;
 	}

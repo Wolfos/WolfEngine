@@ -280,11 +280,17 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			ImGui.EndMenu();
 		}
 
-			if (_contextMenuEntity is { } entity && scene.World.IsAlive(entity))
+		if (_contextMenuEntity is { } entity && scene.World.IsAlive(entity))
+		{
+			if (ImGui.MenuItem("Duplicate", "Ctrl/Cmd+D"))
 			{
-				if (ImGui.MenuItem("Save as Prefab"))
-				{
-					SaveEntityAsPrefab(scene, entity);
+				DuplicateEntity(entity, scene);
+				ImGui.CloseCurrentPopup();
+			}
+
+			if (ImGui.MenuItem("Save as Prefab"))
+			{
+				SaveEntityAsPrefab(scene, entity);
 					ImGui.CloseCurrentPopup();
 				}
 
@@ -300,6 +306,27 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		
 
 		ImGui.EndPopup();
+	}
+
+	private void DuplicateEntity(Entity entity, EditorScene scene)
+	{
+		if (scene.World.IsAlive(entity) == false)
+		{
+			return;
+		}
+
+		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+		{
+			_notificationService.ReportError("Cannot duplicate entities inside prefab instances. Duplicate the prefab root instance instead.");
+			return;
+		}
+
+		EntityHierarchyEditorOperations.DuplicateEntity(
+			scene,
+			entity,
+			_sceneSnapshotService,
+			_undoRedoService,
+			_interactionState);
 	}
 
 	private void DeleteEntity(Entity entity, EditorScene scene)
@@ -352,6 +379,17 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		}
 
 		DeleteEntity(EditorGui.SelectedEntity, scene);
+		return true;
+	}
+
+	public bool DuplicateSelectedEntity(EditorScene scene)
+	{
+		if (EditorGui.HasSelectedEntity == false || scene.World.IsAlive(EditorGui.SelectedEntity) == false)
+		{
+			return false;
+		}
+
+		DuplicateEntity(EditorGui.SelectedEntity, scene);
 		return true;
 	}
 

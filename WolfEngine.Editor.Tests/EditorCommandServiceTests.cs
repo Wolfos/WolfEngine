@@ -16,31 +16,37 @@ public sealed class EditorCommandServiceTests
 	{
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, false, true, false, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, true, false, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.NewScene));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, false, false, true, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, false, true, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.SaveScene));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, false, false, false, true, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, false, false, true, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.RefreshAssetDatabase));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(false, false, false, false, false, false, false, true, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, false, false, false, false, true, false, false, false, false),
+				EditorFocusedWindow.Entities),
+			Is.EqualTo(EditorShortcutCommand.DuplicateFocusedSelection));
+
+		Assert.That(
+			EditorShortcutCommandResolver.Resolve(
+				new EditorShortcutSnapshot(false, false, false, false, false, false, false, false, true, false, false, false),
 				EditorFocusedWindow.Entities),
 			Is.EqualTo(EditorShortcutCommand.DeleteFocusedSelection));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, false, false, false, false, false, true, false, true),
+				new EditorShortcutSnapshot(true, false, false, false, false, false, false, false, false, true, false, true),
 				EditorFocusedWindow.Assets),
 			Is.EqualTo(EditorShortcutCommand.DeleteFocusedSelection));
 	}
@@ -49,7 +55,7 @@ public sealed class EditorCommandServiceTests
 	public void ShortcutResolver_SuppressesShortcutsWhileTyping()
 	{
 		var command = EditorShortcutCommandResolver.Resolve(
-			new EditorShortcutSnapshot(true, true, true, true, true, true, true, true, true, true, true),
+			new EditorShortcutSnapshot(true, true, true, true, true, true, true, true, true, true, true, true),
 			EditorFocusedWindow.Entities);
 
 		Assert.That(command, Is.EqualTo(EditorShortcutCommand.None));
@@ -60,19 +66,19 @@ public sealed class EditorCommandServiceTests
 	{
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, true, false, false, false, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, true, false, false, false, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.Undo));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, true, true, false, false, false, false, false, false, false, true),
+				new EditorShortcutSnapshot(true, true, true, false, false, false, false, false, false, false, false, true),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.Redo));
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
-				new EditorShortcutSnapshot(true, false, false, true, false, false, false, false, false, false, false),
+				new EditorShortcutSnapshot(true, false, false, true, false, false, false, false, false, false, false, false),
 				EditorFocusedWindow.None),
 			Is.EqualTo(EditorShortcutCommand.Redo));
 	}
@@ -165,6 +171,27 @@ public sealed class EditorCommandServiceTests
 		Assert.That(fixture.Service.DeleteFocusedSelection(), Is.False);
 		Assert.That(entityHandler.CallCount, Is.EqualTo(1));
 		Assert.That(assetHandler.CallCount, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void DuplicateFocusedSelection_RoutesToEntitiesHandlerOnly()
+	{
+		var fixture = CreateCommandFixture();
+		var entityHandler = new TrackingEntityDeletionHandler();
+		var assetHandler = new TrackingAssetDeletionHandler();
+		fixture.Service.BindDeletionHandlers(entityHandler, assetHandler);
+
+		fixture.InteractionState.BeginFrame();
+		fixture.InteractionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		Assert.That(fixture.Service.DuplicateFocusedSelection(), Is.True);
+		Assert.That(entityHandler.DuplicateCallCount, Is.EqualTo(1));
+		Assert.That(assetHandler.CallCount, Is.EqualTo(0));
+
+		fixture.InteractionState.BeginFrame();
+		fixture.InteractionState.SetFocusedWindow(EditorFocusedWindow.Assets);
+		Assert.That(fixture.Service.DuplicateFocusedSelection(), Is.False);
+		Assert.That(entityHandler.DuplicateCallCount, Is.EqualTo(1));
+		Assert.That(assetHandler.CallCount, Is.EqualTo(0));
 	}
 
 	[Test]
@@ -312,6 +339,13 @@ public sealed class EditorCommandServiceTests
 	private sealed class TrackingEntityDeletionHandler : IEditorEntityDeletionHandler
 	{
 		public int CallCount { get; private set; }
+		public int DuplicateCallCount { get; private set; }
+
+		public bool DuplicateSelectedEntity(EditorScene scene)
+		{
+			DuplicateCallCount++;
+			return true;
+		}
 
 		public bool DeleteSelectedEntity(EditorScene scene)
 		{

@@ -8,6 +8,7 @@ internal enum EditorShortcutCommand
 	NewScene,
 	SaveScene,
 	RefreshAssetDatabase,
+	DuplicateFocusedSelection,
 	DeleteFocusedSelection
 }
 
@@ -19,6 +20,7 @@ internal readonly record struct EditorShortcutSnapshot(
 	bool NewPressed,
 	bool SavePressed,
 	bool RefreshPressed,
+	bool DuplicatePressed,
 	bool DeletePressed,
 	bool BackspacePressed,
 	bool IsTextInputActive,
@@ -60,6 +62,11 @@ internal static class EditorShortcutCommandResolver
 			if (snapshot.RefreshPressed)
 			{
 				return EditorShortcutCommand.RefreshAssetDatabase;
+			}
+
+			if (snapshot.DuplicatePressed && focusedWindow == EditorFocusedWindow.Entities)
+			{
+				return EditorShortcutCommand.DuplicateFocusedSelection;
 			}
 		}
 

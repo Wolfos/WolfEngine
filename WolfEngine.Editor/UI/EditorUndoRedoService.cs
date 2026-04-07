@@ -101,6 +101,42 @@ public sealed class EntityDeletionUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
+public sealed class EntityCreationUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly IReadOnlyList<DeletedEntitySnapshot> _createdEntities;
+
+	public EntityCreationUndoRedoEntry(string description, IReadOnlyList<DeletedEntitySnapshot> createdEntities)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Duplicate Entity" : description;
+		_createdEntities = createdEntities ?? throw new ArgumentNullException(nameof(createdEntities));
+	}
+
+	public string Description { get; }
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.DeleteEntitiesByPersistentIds(context.SceneWorkspace.CurrentScene, GetCreatedEntityIds());
+		context.InteractionState.MarkSceneDirty();
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.RestoreDeletedEntities(context.SceneWorkspace.CurrentScene, _createdEntities);
+		context.InteractionState.MarkSceneDirty();
+	}
+
+	private IReadOnlyList<Guid> GetCreatedEntityIds()
+	{
+		var ids = new List<Guid>(_createdEntities.Count);
+		for (var i = 0; i < _createdEntities.Count; i++)
+		{
+			ids.Add(_createdEntities[i].Entity.EntityId);
+		}
+
+		return ids;
+	}
+}
+
 public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
 {
 	private readonly EntityHierarchySnapshot _before;
