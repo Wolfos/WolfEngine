@@ -44,7 +44,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderConfig Config { get; init; }
 }
 
-public sealed class RenderGraphFrameBuilder
+internal sealed class RenderGraphFrameBuilder
 {
 	private readonly record struct PendingTemporalTextureRelease(
 		IGfxTexture Texture,
@@ -147,40 +147,27 @@ public sealed class RenderGraphFrameBuilder
 	public RenderGraphFrameBuilder(
 		RenderGraphResourceRegistry resources,
 		IRenderer renderer,
-			VBAOPass ambientOcclusionPass,
-			AmbientOcclusionBlurPass ambientOcclusionBlurPass,
-			AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
-			ClusteredLightingPass clusteredLightingPass,
-			DeferredLightingPass deferredLightingPass,
-			TemporalAntiAliasingPass temporalAntiAliasingPass,
-			TemporalHistoryStorePass temporalHistoryStorePass,
-			TransparentForwardPass transparentForwardPass,
-			TonemappingPass tonemappingPass,
-			CasSharpenPass casSharpenPass,
-			CopyToFinalPass copyToFinalPass,
-		ShadowMapPass shadowMapPass,
-		GpuDrawPass gpuDrawPass,
+		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
-		SkyboxPass skyboxPass,
 		IImGuiRenderer imGuiRenderer)
 	{
 		_resources = resources;
 		_renderer = renderer;
-		_ambientOcclusionPass = ambientOcclusionPass;
-		_ambientOcclusionBlurPass = ambientOcclusionBlurPass;
-		_ambientOcclusionUpsamplePass = ambientOcclusionUpsamplePass;
-		_clusteredLightingPass = clusteredLightingPass;
-		_deferredLightingPass = deferredLightingPass;
-		_temporalAntiAliasingPass = temporalAntiAliasingPass;
-		_temporalHistoryStorePass = temporalHistoryStorePass;
-		_transparentForwardPass = transparentForwardPass;
-		_tonemappingPass = tonemappingPass;
-		_casSharpenPass = casSharpenPass;
-		_copyToFinalPass = copyToFinalPass;
-		_shadowMapPass = shadowMapPass;
-		_gpuDrawPass = gpuDrawPass;
+		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
+		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
+		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
+		_clusteredLightingPass = passSet.ClusteredLightingPass;
+		_deferredLightingPass = passSet.DeferredLightingPass;
+		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
+		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
+		_transparentForwardPass = passSet.TransparentForwardPass;
+		_tonemappingPass = passSet.TonemappingPass;
+		_casSharpenPass = passSet.CasSharpenPass;
+		_copyToFinalPass = passSet.CopyToFinalPass;
+		_shadowMapPass = passSet.ShadowMapPass;
+		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
-		_skyboxPass = skyboxPass;
+		_skyboxPass = passSet.SkyboxPass;
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;

@@ -29,19 +29,6 @@ public static class WolfEngine
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
 		services.AddSingleton<IInputSystem, InputSystem>();
-		services.AddSingleton<VBAOPass>();
-		services.AddSingleton<AmbientOcclusionBlurPass>();
-		services.AddSingleton<AmbientOcclusionUpsamplePass>();
-		services.AddSingleton<ClusteredLightingPass>();
-		services.AddSingleton<DeferredLightingPass>();
-		services.AddSingleton<TemporalAntiAliasingPass>();
-		services.AddSingleton<TemporalHistoryStorePass>();
-		services.AddSingleton<TransparentForwardPass>();
-		services.AddSingleton<TonemappingPass>();
-		services.AddSingleton<CasSharpenPass>();
-		services.AddSingleton<CopyToFinalPass>();
-		services.AddSingleton<ShadowMapPass>();
-		services.AddSingleton<GpuDrawPass>();
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
@@ -55,7 +42,6 @@ public static class WolfEngine
 		services.AddSingleton<BindlessResourceRegistry>();
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();
-		services.AddSingleton<SkyboxPass>();
 		
 #pragma warning disable CA1416
 		services.AddSingleton<WindowChromeController>();

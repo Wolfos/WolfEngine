@@ -59,19 +59,6 @@ public sealed class RenderGraph
 		RenderGraphResourceRegistry resourceRegistry,
 		IRenderer renderer,
 		IArenaAllocator arenaAllocator,
-		VBAOPass ambientOcclusionPass,
-		AmbientOcclusionBlurPass ambientOcclusionBlurPass,
-		AmbientOcclusionUpsamplePass ambientOcclusionUpsamplePass,
-		ClusteredLightingPass clusteredLightingPass,
-		DeferredLightingPass deferredLightingPass,
-		TemporalAntiAliasingPass temporalAntiAliasingPass,
-		TemporalHistoryStorePass temporalHistoryStorePass,
-		TransparentForwardPass transparentForwardPass,
-		TonemappingPass tonemappingPass,
-		CasSharpenPass casSharpenPass,
-		CopyToFinalPass copyToFinalPass,
-		ShadowMapPass shadowMapPass,
-		GpuDrawPass gpuDrawPass,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
 		GpuDrawDatabase gpuDrawDatabase,
@@ -79,30 +66,27 @@ public sealed class RenderGraph
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
 		IMainThreadDispatcher mainThreadDispatcher,
-		SkyboxPass skyboxPass,
-		IImGuiRenderer imGuiRenderer)
+		IImGuiRenderer imGuiRenderer,
+		IShaderCompiler shaderCompiler,
+		BindlessResourceRegistry bindlessResourceRegistry,
+		IGpuDrawBackendBridge gpuDrawBackendBridge)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
 		_arenaAllocator = arenaAllocator;
+		var passSet = new RenderGraphPassSet(
+			renderer,
+			shaderCompiler,
+			bindlessResourceRegistry,
+			gpuDrawDatabase,
+			gpuDrawResources,
+			hardeningStats,
+			gpuDrawBackendBridge);
 		_frameBuilder = new(
 			resourceRegistry,
 			renderer,
-			ambientOcclusionPass,
-			ambientOcclusionBlurPass,
-			ambientOcclusionUpsamplePass,
-			clusteredLightingPass,
-			deferredLightingPass,
-			temporalAntiAliasingPass,
-			temporalHistoryStorePass,
-			transparentForwardPass,
-			tonemappingPass,
-			casSharpenPass,
-			copyToFinalPass,
-			shadowMapPass,
-			gpuDrawPass,
+			passSet,
 			gpuDrawResources,
-			skyboxPass,
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
@@ -420,6 +404,8 @@ public sealed class RenderGraph
 		{
 			throw new ArgumentNullException(nameof(material));
 		}
+		
+		// Todo: Possible bug here, probably need to check if resources already exist
 
 		material.MarkResourceRequested();
 		lock (_resourceSync)
