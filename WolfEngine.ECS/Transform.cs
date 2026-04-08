@@ -70,3 +70,5 @@ public struct Sibling : IEntityComponent
 public struct DirtyTransformRoot : IEntityComponent
 {
 }
+
+internal readonly record struct PhysicsWorldPoseSyncItem(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation);

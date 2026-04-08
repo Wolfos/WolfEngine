@@ -722,6 +722,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	{
 		using (FrameProfiler.Instance.Measure("Physics.SyncBack"))
 		{
+			var changedPoses = new List<PhysicsWorldPoseSyncItem>();
 			foreach (var pair in state.BodiesByEntity)
 			{
 				var bodyState = pair.Value;
@@ -730,23 +731,32 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 					continue;
 				}
 
-				var position = state.BodyInterface.GetPosition(bodyState.BodyId);
-				var rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
+				Vector3 position;
+				Quaternion rotation;
+				using (FrameProfiler.Instance.Measure("Physics.SyncBack.ReadPose"))
+				{
+					position = state.BodyInterface.GetPosition(bodyState.BodyId);
+					rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
+				}
+
 				if (HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
 				{
-					world.ApplyPhysicsWorldPose(pair.Key, position, rotation);
+					changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, position, rotation));
 				}
 
 				var linearVelocity = bodyState.Definition.LinearVelocity;
 				var angularVelocity = bodyState.Definition.AngularVelocity;
 				if (world.HasComponent<Rigidbody>(pair.Key))
 				{
-					ref var rigidbody = ref world.GetComponent<Rigidbody>(pair.Key);
-					rigidbody.LinearVelocity = state.BodyInterface.GetLinearVelocity(bodyState.BodyId);
-					rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
-					linearVelocity = rigidbody.LinearVelocity;
-					angularVelocity = rigidbody.AngularVelocity;
-					CacheRigidbodyState(ref rigidbody);
+					using (FrameProfiler.Instance.Measure("Physics.SyncBack.ReadVelocity"))
+					{
+						ref var rigidbody = ref world.GetComponent<Rigidbody>(pair.Key);
+						rigidbody.LinearVelocity = state.BodyInterface.GetLinearVelocity(bodyState.BodyId);
+						rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
+						linearVelocity = rigidbody.LinearVelocity;
+						angularVelocity = rigidbody.AngularVelocity;
+						CacheRigidbodyState(ref rigidbody);
+					}
 				}
 
 				bodyState.Definition = bodyState.Definition with
@@ -756,6 +766,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 					LinearVelocity = linearVelocity,
 					AngularVelocity = angularVelocity
 				};
+			}
+
+			if (changedPoses.Count > 0)
+			{
+				using (FrameProfiler.Instance.Measure("Physics.SyncBack.WritePose"))
+				{
+					world.ApplyPhysicsWorldPoses(changedPoses);
+				}
 			}
 		}
 	}

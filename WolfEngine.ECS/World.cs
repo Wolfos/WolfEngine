@@ -536,6 +536,27 @@ public class World
         return GetComponent<WorldTransform>(parent).WorldToLocal;
     }
 
+    internal void ApplyPhysicsWorldPoses(IReadOnlyList<PhysicsWorldPoseSyncItem> poses)
+    {
+        if (poses.Count == 0)
+        {
+            return;
+        }
+
+        var posesByEntity = new Dictionary<Entity, PhysicsWorldPoseSyncItem>(poses.Count);
+        for (var index = 0; index < poses.Count; index++)
+        {
+            var pose = poses[index];
+            posesByEntity[pose.Entity] = pose;
+        }
+
+        var applied = new HashSet<Entity>();
+        for (var index = 0; index < poses.Count; index++)
+        {
+            ApplyPhysicsWorldPoseRecursive(poses[index].Entity, posesByEntity, applied);
+        }
+    }
+
     internal void ApplyPhysicsWorldPose(Entity entity, Vector3 worldPosition, Quaternion worldRotation)
     {
         if (HasComponent<LocalTransform>(entity) == false || HasComponent<WorldTransform>(entity) == false)
@@ -565,6 +586,34 @@ public class World
         MarkChildTransformsDirty(entity);
     }
 
+    private void ApplyPhysicsWorldPoseRecursive(
+        Entity entity,
+        IReadOnlyDictionary<Entity, PhysicsWorldPoseSyncItem> posesByEntity,
+        ISet<Entity> applied)
+    {
+        if (applied.Contains(entity))
+        {
+            return;
+        }
+
+        if (posesByEntity.TryGetValue(entity, out var pose) == false)
+        {
+            return;
+        }
+
+        if (HasComponent<Parent>(entity))
+        {
+            var parent = GetComponent<Parent>(entity).Value;
+            if (parent.IsValid && posesByEntity.ContainsKey(parent))
+            {
+                ApplyPhysicsWorldPoseRecursive(parent, posesByEntity, applied);
+            }
+        }
+
+        ApplyPhysicsWorldPose(entity, pose.WorldPosition, pose.WorldRotation);
+        applied.Add(entity);
+    }
+
     private void EnsureWorldTransformUpToDate(Entity entity)
     {
         if (HasComponent<LocalTransform>(entity) == false || HasComponent<WorldTransform>(entity) == false)
@@ -572,6 +621,13 @@ public class World
             return;
         }
 
+        ref var localTransform = ref GetComponent<LocalTransform>(entity);
+        if (localTransform.IsDirty == false)
+        {
+            return;
+        }
+
+        ref var worldTransform = ref GetComponent<WorldTransform>(entity);
         var parentWorld = Matrix4x4.Identity;
         if (HasComponent<Parent>(entity))
         {
@@ -583,17 +639,15 @@ public class World
             }
         }
 
-        ref var localTransform = ref GetComponent<LocalTransform>(entity);
-        ref var worldTransform = ref GetComponent<WorldTransform>(entity);
-        if (localTransform.IsDirty == false)
-        {
-            return;
-        }
-
         var worldMatrix = localTransform.GetTransform() * parentWorld;
         worldTransform.LocalToWorld = worldMatrix;
         Matrix4x4.Invert(worldMatrix, out worldTransform.WorldToLocal);
         localTransform.IsDirty = false;
+    }
+
+    internal void MarkPhysicsChildTransformsDirty(Entity entity)
+    {
+        MarkChildTransformsDirty(entity);
     }
 
     private void MarkChildTransformsDirty(Entity entity)

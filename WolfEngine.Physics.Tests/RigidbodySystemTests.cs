@@ -65,6 +65,72 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_DynamicSiblingsUnderSharedParentWriteBackLocalTransforms()
+	{
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Holder", Matrix4x4.CreateTranslation(new Vector3(10.0f, 0.0f, 0.0f)));
+		var firstChild = world.CreateEntity("First", Matrix4x4.Identity);
+		var secondChild = world.CreateEntity("Second", Matrix4x4.CreateTranslation(new Vector3(2.0f, 0.0f, 0.0f)));
+		world.SetParent(firstChild, parent);
+		world.SetParent(secondChild, parent);
+
+		world.AddComponent(firstChild, BoxCollider.CreateDefault());
+		var firstRigidbody = Rigidbody.CreateDefault();
+		firstRigidbody.GravityFactor = 0.0f;
+		firstRigidbody.LinearVelocity = new Vector3(1.0f, 0.0f, 0.0f);
+		world.AddComponent(firstChild, firstRigidbody);
+
+		world.AddComponent(secondChild, BoxCollider.CreateDefault());
+		var secondRigidbody = Rigidbody.CreateDefault();
+		secondRigidbody.GravityFactor = 0.0f;
+		secondRigidbody.LinearVelocity = new Vector3(2.0f, 0.0f, 0.0f);
+		world.AddComponent(secondChild, secondRigidbody);
+
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var firstTransform = world.GetComponent<LocalTransform>(firstChild);
+		var secondTransform = world.GetComponent<LocalTransform>(secondChild);
+		Assert.That(firstTransform.LocalPosition.X, Is.GreaterThan(0.0f));
+		Assert.That(firstTransform.LocalPosition.X, Is.LessThan(1.0f));
+		Assert.That(secondTransform.LocalPosition.X, Is.GreaterThan(2.0f));
+		Assert.That(secondTransform.LocalPosition.X, Is.LessThan(3.0f));
+		Assert.That(firstTransform.IsDirty, Is.False);
+		Assert.That(secondTransform.IsDirty, Is.False);
+	}
+
+	[Test]
+	public void PhysicsUpdate_DynamicParentAndChildUseUpdatedParentPose()
+	{
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Parent", Matrix4x4.CreateTranslation(new Vector3(10.0f, 0.0f, 0.0f)));
+		var child = world.CreateEntity("Child", Matrix4x4.CreateTranslation(new Vector3(1.0f, 0.0f, 0.0f)));
+		world.SetParent(child, parent);
+
+		world.AddComponent(parent, BoxCollider.CreateDefault());
+		var parentRigidbody = Rigidbody.CreateDefault();
+		parentRigidbody.GravityFactor = 0.0f;
+		parentRigidbody.LinearVelocity = new Vector3(1.0f, 0.0f, 0.0f);
+		world.AddComponent(parent, parentRigidbody);
+
+		world.AddComponent(child, BoxCollider.CreateDefault());
+		var childRigidbody = Rigidbody.CreateDefault();
+		childRigidbody.GravityFactor = 0.0f;
+		childRigidbody.LinearVelocity = new Vector3(2.0f, 0.0f, 0.0f);
+		world.AddComponent(child, childRigidbody);
+
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var parentTransform = world.GetComponent<LocalTransform>(parent);
+		var childTransform = world.GetComponent<LocalTransform>(child);
+		Assert.That(parentTransform.LocalPosition.X, Is.GreaterThan(10.0f));
+		Assert.That(parentTransform.LocalPosition.X, Is.LessThan(11.0f));
+		Assert.That(childTransform.LocalPosition.X, Is.EqualTo(1.0f + (1.0f / 60.0f)).Within(0.05f));
+		Assert.That(childTransform.IsDirty, Is.False);
+	}
+
+	[Test]
 	public void OnWorldRemoved_DiscardsTrackedPhysicsState()
 	{
 		var world = new World(WorldTag.Game);
