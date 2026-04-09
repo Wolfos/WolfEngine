@@ -40,8 +40,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
+    private Type? _pendingRemovedComponentType;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
+    private static readonly Vector2 ComponentActionIconSize = Vector2.One * 15.5f;
 
     public ComponentsWindow(
         IIconManager icons,
@@ -87,10 +89,21 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		if (EditorGui.HasSelectedEntity)
 		{
+            _pendingRemovedComponentType = null;
             DrawEntityControls(scene, EditorGui.SelectedEntity);
             foreach (var componentType in EditorGui.SelectedComponentTypes)
             {
                 Draw(scene, EditorGui.SelectedEntity, componentType);
+                if (_pendingRemovedComponentType is not null)
+                {
+                    break;
+                }
+            }
+
+            if (_pendingRemovedComponentType is not null)
+            {
+                RemoveComponent(scene, EditorGui.SelectedEntity, _pendingRemovedComponentType);
+                _pendingRemovedComponentType = null;
             }
 
             ImGui.Separator();
@@ -266,7 +279,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (typeof(T) == typeof(MeshRenderer))
         {
-            if (BeginComponentSection(typeof(T).Name) == false)
+            var isOpen = BeginComponentSection(typeof(T).Name, out var removeRequested);
+            if (removeRequested)
+            {
+                QueueComponentRemoval(typeof(T));
+                ImGui.PopID();
+                return;
+            }
+
+            if (isOpen == false)
             {
                 ImGui.PopID();
                 return;
@@ -304,7 +325,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (typeof(T) == typeof(Light))
         {
-            if (BeginComponentSection(typeof(T).Name) == false)
+            var isOpen = BeginComponentSection(typeof(T).Name, out var removeRequested);
+            if (removeRequested)
+            {
+                QueueComponentRemoval(typeof(T));
+                ImGui.PopID();
+                return;
+            }
+
+            if (isOpen == false)
             {
                 ImGui.PopID();
                 return;
@@ -359,7 +388,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        if (BeginComponentSection(typeof(T).Name) == false)
+        var isComponentOpen = BeginComponentSection(typeof(T).Name, out var isRemoveRequested);
+        if (isRemoveRequested)
+        {
+            QueueComponentRemoval(typeof(T));
+            ImGui.PopID();
+            return;
+        }
+
+        if (isComponentOpen == false)
         {
             ImGui.PopID();
             return;
@@ -408,7 +445,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         }
 
         ImGui.PushID(componentType.FullName);
-        if (BeginComponentSection(componentType.Name) == false)
+        var isOpen = BeginComponentSection(componentType.Name, out var removeRequested);
+        if (removeRequested)
+        {
+            QueueComponentRemoval(componentType);
+            ImGui.PopID();
+            return;
+        }
+
+        if (isOpen == false)
         {
             ImGui.PopID();
             return;
@@ -454,12 +499,65 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return JsonSerializer.Serialize(data, AssetJson.SerializerOptions);
     }
 
-    private static bool BeginComponentSection(string label)
+    private bool BeginComponentSection(string label, out bool removeRequested)
     {
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0);
-        var isOpen = EditorUIUtility.CollapsingHeader(label, true);
+        removeRequested = false;
+
+        var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.0f);
+        var isOpen = ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.AllowOverlap);
         ImGui.PopStyleVar();
+        ImGuiUiSystem.PopFontIfPushed(pushedBoldHeader);
+
+        if (_icons.TryGet("delete", out var deleteIcon) == false)
+        {
+            return isOpen;
+        }
+
+        var cursorAfterHeader = ImGui.GetCursorPos();
+        var headerMin = ImGui.GetItemRectMin();
+        var headerMax = ImGui.GetItemRectMax();
+        var frameHeight = headerMax.Y - headerMin.Y;
+        var framePadding = new Vector2(
+            MathF.Max((frameHeight - ComponentActionIconSize.X) * 0.5f, 0.0f),
+            MathF.Max((frameHeight - ComponentActionIconSize.Y) * 0.5f, 0.0f));
+        var buttonWidth = ComponentActionIconSize.X + (framePadding.X * 2.0f);
+        var buttonHeight = ComponentActionIconSize.Y + (framePadding.Y * 2.0f);
+        var buttonPos = new Vector2(
+            headerMax.X - buttonWidth - ImGui.GetStyle().FramePadding.X,
+            headerMin.Y + MathF.Max((frameHeight - buttonHeight) * 0.5f, 0.0f));
+
+        ImGui.SetCursorScreenPos(buttonPos);
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1.0f, 1.0f, 1.0f, 0.12f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1.0f, 1.0f, 1.0f, 0.18f));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, framePadding);
+        removeRequested = ImGui.ImageButton($"Remove{label}", deleteIcon, ComponentActionIconSize);
+        ImGui.PopStyleVar(2);
+        ImGui.PopStyleColor(3);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Remove component");
+        }
+
+        ImGui.SetCursorPos(cursorAfterHeader);
         return isOpen;
+    }
+
+    private void RemoveComponent(EditorScene scene, Entity entity, Type componentType)
+    {
+        var snapshot = CaptureSingleComponentSnapshot(scene, entity, componentType);
+        RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
+        EditorGui.RefreshSelectedEntity(scene.World, requestFocus: false);
+        _undoRedoService.BeginCapture($"Remove {componentType.Name}");
+        _undoRedoService.CommitCapture(new SceneComponentRemovalUndoRedoEntry($"Remove {componentType.Name}", [snapshot]));
+        _interactionState.MarkSceneDirty();
+    }
+
+    private void QueueComponentRemoval(Type componentType)
+    {
+        _pendingRemovedComponentType ??= componentType;
     }
 
     private static nint ResolveIconTexture(string iconName, IIconManager icons)

@@ -115,6 +115,22 @@ public class EditorGui
 		return true;
 	}
 
+	public static void RefreshSelectedEntity(World world, bool requestFocus = false)
+	{
+		if (HasSelectedEntity == false)
+		{
+			return;
+		}
+
+		if (world.IsAlive(SelectedEntity) == false)
+		{
+			ClearEntitySelection();
+			return;
+		}
+
+		SelectEntity(SelectedEntity, world, requestFocus);
+	}
+
 	public static void ClearEntitySelection()
 	{
 		HasSelectedEntity = false;

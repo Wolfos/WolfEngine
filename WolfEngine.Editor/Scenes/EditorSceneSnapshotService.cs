@@ -25,6 +25,7 @@ public interface IEditorSceneSnapshotService
 	SceneComponentSnapshot CaptureComponent(EditorScene scene, Entity entity, Type componentType);
 	IReadOnlyList<DeletedEntitySnapshot> CaptureDeletedEntities(EditorScene scene, IReadOnlyList<Entity> entities);
 	void ApplyComponentSnapshots(EditorScene scene, IReadOnlyList<SceneComponentSnapshot> snapshots);
+	void RemoveComponents(EditorScene scene, IReadOnlyList<SceneComponentSnapshot> snapshots);
 	void RestoreDeletedEntities(EditorScene scene, IReadOnlyList<DeletedEntitySnapshot> deletedEntities);
 	void DeleteEntitiesByPersistentIds(EditorScene scene, IReadOnlyList<Guid> entityIds);
 	Guid EnsurePersistentEntityId(EditorScene scene, Entity entity);
@@ -105,6 +106,24 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 
 			var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(snapshot.Data, componentType);
 			RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
+		}
+	}
+
+	public void RemoveComponents(EditorScene scene, IReadOnlyList<SceneComponentSnapshot> snapshots)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(snapshots);
+
+		for (var i = 0; i < snapshots.Count; i++)
+		{
+			var snapshot = snapshots[i];
+			if (TryFindEntity(scene, snapshot.EntityId, out var entity) == false ||
+			    TryResolveComponentType(snapshot, out var componentType) == false)
+			{
+				continue;
+			}
+
+			RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
 		}
 	}
 

@@ -65,6 +65,33 @@ public sealed class SceneComponentEditUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
+public sealed class SceneComponentRemovalUndoRedoEntry : IEditorUndoRedoEntry
+{
+	private readonly IReadOnlyList<SceneComponentSnapshot> _removedSnapshots;
+
+	public SceneComponentRemovalUndoRedoEntry(string description, IReadOnlyList<SceneComponentSnapshot> removedSnapshots)
+	{
+		Description = string.IsNullOrWhiteSpace(description) ? "Remove Component" : description;
+		_removedSnapshots = removedSnapshots ?? throw new ArgumentNullException(nameof(removedSnapshots));
+	}
+
+	public string Description { get; }
+
+	public void Undo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.ApplyComponentSnapshots(context.SceneWorkspace.CurrentScene, _removedSnapshots);
+		EditorGui.RefreshSelectedEntity(context.SceneWorkspace.CurrentScene.World, requestFocus: false);
+		context.InteractionState.MarkSceneDirty();
+	}
+
+	public void Redo(EditorUndoRedoContext context)
+	{
+		context.SceneSnapshotService.RemoveComponents(context.SceneWorkspace.CurrentScene, _removedSnapshots);
+		EditorGui.RefreshSelectedEntity(context.SceneWorkspace.CurrentScene.World, requestFocus: false);
+		context.InteractionState.MarkSceneDirty();
+	}
+}
+
 public sealed class EntityDeletionUndoRedoEntry : IEditorUndoRedoEntry
 {
 	private readonly IReadOnlyList<DeletedEntitySnapshot> _deletedEntities;
