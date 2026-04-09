@@ -138,7 +138,7 @@ public interface IEditorSceneReloadService
 		var entitiesById = CreateEntities(scene, loadedCells);
 
 
-		ApplyEntityState(scene.World, loadedCells, entitiesById);
+		ApplyEntityState(scene, loadedCells, entitiesById);
 		RestoreHierarchy(scene.World, loadedCells, entitiesById);
 
 		return scene;
@@ -174,7 +174,7 @@ public interface IEditorSceneReloadService
 				}
 
 				components ??= [];
-				components.Add(SerializeComponent(scene.World, entity, componentType));
+				components.Add(SerializeComponent(scene, entity, componentType));
 				RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
 				gameplayComponentTypes.Add(componentType);
 			}
@@ -219,7 +219,7 @@ public interface IEditorSceneReloadService
 
 			for (var componentIndex = 0; componentIndex < entitySnapshot.Components.Count; componentIndex++)
 			{
-				ApplyGameplayComponent(scene.World, entity, entitySnapshot.Components[componentIndex]);
+				ApplyGameplayComponent(scene, entity, entitySnapshot.Components[componentIndex]);
 			}
 		}
 	}
@@ -257,7 +257,7 @@ public interface IEditorSceneReloadService
 				continue;
 			}
 
-			savedEntity.Components.Add(SerializeComponent(world, entity, componentType));
+			savedEntity.Components.Add(SerializeComponent(scene, entity, componentType));
 		}
 
 			if (_projectService is not null &&
@@ -269,20 +269,20 @@ public interface IEditorSceneReloadService
 			return savedEntity;
 	}
 
-	private SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
+	private SavedComponent SerializeComponent(EditorScene scene, Entity entity, Type componentType)
 	{
 		return new SavedComponent
 		{
 			Type = _typeResolver.GetTypeName(componentType),
 			TypeId = _typeResolver.GetStableTypeId(componentType),
-			Data = JsonSerializer.SerializeToElement(
-				RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
+			Data = EditorEntityReferenceUtility.SerializeComponentData(
+				scene,
 				componentType,
-				AssetJson.GetSerializerOptions(componentType))
+				RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType))
 		};
 	}
 
-	private void ApplyEntityState(World world, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
+	private void ApplyEntityState(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
 	{
 		for (var i = 0; i < loadedCells.Count; i++)
 		{
@@ -292,27 +292,28 @@ public interface IEditorSceneReloadService
 					var savedEntity = cell.Entities[entityIndex];
 					var entity = entitiesById[savedEntity.EntityId];
 					var mergedEntity = MergePrefabSourceEntity(savedEntity);
-					world.SetEnabled(entity, mergedEntity.Enabled);
+					scene.World.SetEnabled(entity, mergedEntity.Enabled);
 					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
 					{
-						ApplyComponent(world, entity, mergedEntity.Components[componentIndex]);
+						ApplyComponent(scene, entity, mergedEntity.Components[componentIndex]);
 					}
 				}
 			}
 	}
 
-	private void ApplyComponent(World world, Entity entity, SavedComponent component)
+	private void ApplyComponent(EditorScene scene, Entity entity, SavedComponent component)
 	{
 		if (TryResolveComponentType(component, out var componentType) == false || IsPersistableComponentType(componentType) == false)
 		{
 			return;
 		}
 
-		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+		var deserialized = EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+		                   ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, deserialized);
 	}
 
-	private void ApplyGameplayComponent(World world, Entity entity, SavedComponent component)
+	private void ApplyGameplayComponent(EditorScene scene, Entity entity, SavedComponent component)
 	{
 		if (TryResolveComponentType(component, out var componentType) == false ||
 		    IsGameplayReloadComponentType(componentType) == false)
@@ -320,8 +321,9 @@ public interface IEditorSceneReloadService
 			return;
 		}
 
-		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+		var deserialized = EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+		                   ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, deserialized);
 	}
 
 	private bool TryResolveComponentType(SavedComponent component, out Type componentType)

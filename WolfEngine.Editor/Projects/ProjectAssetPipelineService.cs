@@ -295,7 +295,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				throw new InvalidOperationException($"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
 			}
 
-			InstantiatePrefabEntity(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent, parent: null);
+			InstantiatePrefabEntities(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
 		}
 
 	private void CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
@@ -1439,19 +1439,69 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return childrenByParent;
 		}
 
-		private Entity InstantiatePrefabEntity(
+		private void InstantiatePrefabEntities(
 			EditorScene scene,
 			string projectRootPath,
 			Guid prefabNodeId,
-			SavedEntity sourceEntity,
+			SavedEntity rootEntity,
 			Dictionary<Guid, SavedEntity> entitiesById,
-			Dictionary<Guid, List<SavedEntity>> childrenByParent,
+			Dictionary<Guid, List<SavedEntity>> childrenByParent)
+		{
+			var resolvedEntitiesById = ResolvePrefabEntitiesForInstantiation(projectRootPath, rootEntity.EntityId, entitiesById, childrenByParent);
+			var instantiatedEntitiesBySourceId = new Dictionary<Guid, Entity>(resolvedEntitiesById.Count);
+			CreateInstantiatedPrefabEntities(scene, prefabNodeId, rootEntity.EntityId, resolvedEntitiesById, childrenByParent, instantiatedEntitiesBySourceId, parent: null);
+			ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId);
+		}
+
+		private Dictionary<Guid, SavedEntity> ResolvePrefabEntitiesForInstantiation(
+			string projectRootPath,
+			Guid rootEntityId,
+			IReadOnlyDictionary<Guid, SavedEntity> entitiesById,
+			IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent)
+		{
+			var resolvedEntitiesById = new Dictionary<Guid, SavedEntity>();
+			var pendingEntityIds = new Stack<Guid>();
+			pendingEntityIds.Push(rootEntityId);
+			while (pendingEntityIds.Count > 0)
+			{
+				var entityId = pendingEntityIds.Pop();
+				if (entitiesById.TryGetValue(entityId, out var sourceEntity) == false || resolvedEntitiesById.ContainsKey(entityId))
+				{
+					continue;
+				}
+
+				resolvedEntitiesById[entityId] = ResolvePrefabEntityForInstantiation(projectRootPath, sourceEntity);
+				if (childrenByParent.TryGetValue(entityId, out var children) == false)
+				{
+					continue;
+				}
+
+				for (var i = 0; i < children.Count; i++)
+				{
+					pendingEntityIds.Push(children[i].EntityId);
+				}
+			}
+
+			return resolvedEntitiesById;
+		}
+
+		private void CreateInstantiatedPrefabEntities(
+			EditorScene scene,
+			Guid prefabNodeId,
+			Guid sourceEntityId,
+			IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
+			IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent,
+			Dictionary<Guid, Entity> instantiatedEntitiesBySourceId,
 			Entity? parent)
 		{
-			sourceEntity = ResolvePrefabEntityForInstantiation(projectRootPath, sourceEntity);
+			if (resolvedEntitiesById.TryGetValue(sourceEntityId, out var sourceEntity) == false)
+			{
+				return;
+			}
 
 			var world = scene.World;
 			var entity = CreateEntity(world, sourceEntity);
+			instantiatedEntitiesBySourceId[sourceEntityId] = entity;
 			scene.EntityIds[entity] = Guid.NewGuid();
 			scene.EntityCellKeys[entity] = SceneCellKey.Global;
 			scene.EntityPrefabSourcePaths[entity] = CreateInstantiatedPrefabSourcePath(prefabNodeId, sourceEntity);
@@ -1465,28 +1515,32 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				world.SetParent(entity, parentEntity);
 			}
 
-			world.SetEnabled(entity, sourceEntity.Enabled);
-			for (var i = 0; i < sourceEntity.Components.Count; i++)
+			if (childrenByParent.TryGetValue(sourceEntityId, out var children) == false)
 			{
-				ApplySavedComponent(world, entity, sourceEntity.Components[i]);
-			}
-
-			if (childrenByParent.TryGetValue(sourceEntity.EntityId, out var children) == false)
-			{
-				return entity;
+				return;
 			}
 
 			for (var i = 0; i < children.Count; i++)
 			{
-				if (entitiesById.ContainsKey(children[i].EntityId) == false)
-				{
-					continue;
-				}
-
-				InstantiatePrefabEntity(scene, projectRootPath, prefabNodeId, children[i], entitiesById, childrenByParent, entity);
+				CreateInstantiatedPrefabEntities(scene, prefabNodeId, children[i].EntityId, resolvedEntitiesById, childrenByParent, instantiatedEntitiesBySourceId, entity);
 			}
+		}
 
-			return entity;
+		private static void ApplyInstantiatedPrefabEntityState(
+			EditorScene scene,
+			IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
+			IReadOnlyDictionary<Guid, Entity> instantiatedEntitiesBySourceId)
+		{
+			foreach (var entry in instantiatedEntitiesBySourceId)
+			{
+				var sourceEntity = resolvedEntitiesById[entry.Key];
+				var entity = entry.Value;
+				scene.World.SetEnabled(entity, sourceEntity.Enabled);
+				for (var i = 0; i < sourceEntity.Components.Count; i++)
+				{
+					ApplySavedComponent(scene, instantiatedEntitiesBySourceId, entity, sourceEntity.Components[i]);
+				}
+			}
 		}
 
 		private SavedEntity ResolvePrefabEntityForInstantiation(string projectRootPath, SavedEntity sourceEntity)
@@ -1583,7 +1637,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return entity;
 		}
 
-		private static void ApplySavedComponent(World world, Entity entity, SavedComponent component)
+		private static void ApplySavedComponent(EditorScene scene, IReadOnlyDictionary<Guid, Entity>? sourceEntitiesById, Entity entity, SavedComponent component)
 		{
 			if ((ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out var componentType) == false &&
 			     ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType) == false) ||
@@ -1594,8 +1648,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				return;
 			}
 
-			var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-			RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+			var deserialized = sourceEntitiesById is null
+				? EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+				: EditorEntityReferenceUtility.DeserializeValue(component.Data, componentType, entityId =>
+				{
+					return sourceEntitiesById.TryGetValue(entityId, out var resolvedEntity)
+						? resolvedEntity
+						: null;
+				});
+			RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, deserialized ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType));
 		}
 
 		private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)

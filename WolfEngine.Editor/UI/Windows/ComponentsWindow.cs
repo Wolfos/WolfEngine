@@ -297,7 +297,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 nameof(MeshRenderer.MeshAsset),
                 typeof(AssetRef<Mesh>),
-                meshRenderer.MeshAsset));
+                meshRenderer.MeshAsset,
+                scene,
+                entity));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Mesh> meshAsset)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
@@ -309,7 +311,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 nameof(MeshRenderer.MaterialAsset),
                 typeof(AssetRef<Material>),
-                meshRenderer.MaterialAsset));
+                meshRenderer.MaterialAsset,
+                scene,
+                entity));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
@@ -418,7 +422,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
                 label,
                 fieldType,
-                field.GetValueDirect(typedRef)));
+                field.GetValueDirect(typedRef),
+                scene,
+                entity));
             if (drawResult.Handled && drawResult.Changed)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(T));
@@ -459,7 +465,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue))
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue, scene, entity))
         {
             var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
@@ -872,10 +878,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             {
                 Type = ProjectTypeResolverUtility.GetTypeName(componentType),
                 TypeId = ProjectTypeResolverUtility.GetStableTypeId(componentType),
-                Data = JsonSerializer.SerializeToElement(
-                    RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
-                    componentType,
-                    AssetJson.GetSerializerOptions(componentType))
+                Data = EditorEntityReferenceUtility.SerializeComponentData(scene, componentType, RuntimeComponentAccessor.ReadBoxed(world, entity, componentType))
             });
         }
 
@@ -935,7 +938,18 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 continue;
             }
 
-            var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
+            var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType, entityId =>
+            {
+                foreach (var entry in scene.EntityIds)
+                {
+                    if (entry.Value == entityId && scene.World.IsAlive(entry.Key))
+                    {
+                        return entry.Key;
+                    }
+                }
+
+                return null;
+            });
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
         }
 

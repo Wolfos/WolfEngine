@@ -174,10 +174,10 @@ public sealed class PrefabAssetCreator : IPrefabAssetCreator
 			{
 				Type = _typeResolver.GetTypeName(componentType),
 				TypeId = _typeResolver.GetStableTypeId(componentType),
-				Data = JsonSerializer.SerializeToElement(
-					RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
+				Data = EditorEntityReferenceUtility.SerializeComponentData(
+					scene,
 					componentType,
-					AssetJson.GetSerializerOptions(componentType))
+					RuntimeComponentAccessor.ReadBoxed(world, entity, componentType))
 			});
 		}
 

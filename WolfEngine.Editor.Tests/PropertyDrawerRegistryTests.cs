@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
@@ -142,6 +144,46 @@ public sealed class PropertyDrawerRegistryTests
 
 		Assert.That(value, Is.TypeOf<AssetRef<Mesh>>());
 		Assert.That(PropertyDrawerRegistry.GetAssetLinkId(typeof(AssetRef<Mesh>), value), Is.EqualTo(Guid.Empty));
+	}
+
+	[Test]
+	public void EntityPreviewLabelReturnsNoneForDefaultEntity()
+	{
+		var scene = new EditorScene();
+
+		var label = EntityLinkPickerLogic.GetPreviewLabel(scene, default, entityId: null);
+
+		Assert.That(label, Is.EqualTo("None"));
+	}
+
+	[Test]
+	public void EntityPreviewLabelReturnsMissingForUntrackedEntity()
+	{
+		var scene = new EditorScene { World = new World(WorldTag.Authoring) };
+		var entity = scene.World.CreateEntity("Target");
+
+		var label = EntityLinkPickerLogic.GetPreviewLabel(scene, entity, entityId: null);
+
+		Assert.That(label, Is.EqualTo("Missing"));
+	}
+
+	[Test]
+	public void EntityCandidatesIncludeOwnerAndSortByDisplayName()
+	{
+		var scene = new EditorScene { World = new World(WorldTag.Authoring) };
+		var owner = scene.World.CreateEntity("Owner");
+		var beta = scene.World.CreateEntity("beta");
+		var unnamed = scene.World.CreateEntity();
+		var alpha = scene.World.CreateEntity("Alpha");
+		scene.EntityIds[owner] = Guid.NewGuid();
+		scene.EntityIds[beta] = Guid.Parse("11111111-1111-1111-1111-111111111111");
+		scene.EntityIds[unnamed] = Guid.Parse("22222222-2222-2222-2222-222222222222");
+		scene.EntityIds[alpha] = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+		var candidates = EntityLinkPickerLogic.GetCandidates(scene, owner);
+
+		Assert.That(candidates.Select(candidate => candidate.Entity), Does.Contain(owner));
+		Assert.That(candidates.Select(candidate => candidate.DisplayName), Is.EqualTo(new[] { "Alpha", "beta", "Entity 22222222", "Owner" }));
 	}
 
 	private static AssetDatabaseEntry CreateAsset(string name, AssetType assetType)

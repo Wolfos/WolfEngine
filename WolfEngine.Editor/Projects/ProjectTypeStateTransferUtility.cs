@@ -68,6 +68,15 @@ internal static class ProjectTypeStateTransferUtility
 		return value;
 	}
 
+	public static object DeserializeWithFieldMerge(JsonElement data, Type targetType, Func<Guid, Entity?> entityResolver)
+	{
+		ArgumentNullException.ThrowIfNull(targetType);
+		ArgumentNullException.ThrowIfNull(entityResolver);
+
+		return EditorEntityReferenceUtility.DeserializeValue(data, targetType, entityResolver)
+		       ?? CreateDefaultValue(targetType);
+	}
+
 	public static object CreateDefaultValue(Type type)
 	{
 		ArgumentNullException.ThrowIfNull(type);

@@ -259,7 +259,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 					scene.World.SetEnabled(entity, mergedEntity.Enabled);
 					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
 					{
-						ApplyComponent(scene.World, entity, mergedEntity.Components[componentIndex]);
+						ApplyComponent(scene, entity, mergedEntity.Components[componentIndex]);
 					}
 				}
 			}
@@ -321,7 +321,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 				continue;
 			}
 
-			savedEntity.Components.Add(SerializeComponent(world, entity, componentType));
+			savedEntity.Components.Add(SerializeComponent(scene, entity, componentType));
 		}
 
 			if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
@@ -345,25 +345,26 @@ public class EditorSceneFactory : IEditorSceneFactory
 			: null;
 	}
 
-	private SavedComponent SerializeComponent(World world, Entity entity, Type componentType)
+	private SavedComponent SerializeComponent(EditorScene scene, Entity entity, Type componentType)
 	{
 		return new SavedComponent
 		{
 			Type = _typeResolver?.GetTypeName(componentType) ?? ProjectTypeResolverUtility.GetTypeName(componentType),
 			TypeId = _typeResolver?.GetStableTypeId(componentType) ?? ProjectTypeResolverUtility.GetStableTypeId(componentType),
-			Data = JsonSerializer.SerializeToElement(RuntimeComponentAccessor.ReadBoxed(world, entity, componentType), componentType, AssetJson.GetSerializerOptions(componentType))
+			Data = EditorEntityReferenceUtility.SerializeComponentData(scene, componentType, RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType))
 		};
 	}
 
-	private void ApplyComponent(World world, Entity entity, SavedComponent component)
+	private void ApplyComponent(EditorScene scene, Entity entity, SavedComponent component)
 	{
 		if (TryResolveComponentType(component, out var componentType) == false || IsPersistableComponentType(componentType) == false)
 		{
 			return;
 		}
 
-		var deserialized = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, deserialized);
+		var deserialized = EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+		                   ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, deserialized);
 	}
 
 	private static bool IsPersistableComponentType(Type componentType)

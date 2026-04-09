@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using System.Text.Json;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -118,6 +119,61 @@ public sealed class ScenePersistenceTests
 
 		Assert.That(loadedComponent.Count, Is.EqualTo(42));
 		Assert.That(loadedComponent.Label, Is.EqualTo("generic"));
+	}
+
+	[Test]
+	public void SaveAndLoad_ComponentEntityReference_RoundTripsAcrossCells()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		scene.Name = "Entity Reference Scene";
+		var cellCoordinates = new Int2(2, -1);
+		scene.SpatialCells[cellCoordinates] = new Cell();
+
+		var target = scene.World.CreateEntity("Target");
+		scene.World.AddTransform(target, Matrix4x4.Identity);
+		scene.EntityCellKeys[target] = SceneCellKey.Spatial(cellCoordinates);
+
+		var source = scene.World.CreateEntity("Source");
+		scene.World.AddComponent(source, new EntityReferenceComponent
+		{
+			Target = target
+		});
+
+		environment.Factory.Save(scene);
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedSource = FindEntityByName(loadedScene.World, "Source");
+		var loadedTarget = FindEntityByName(loadedScene.World, "Target");
+		var loadedComponent = loadedScene.World.GetComponent<EntityReferenceComponent>(loadedSource);
+
+		Assert.That(loadedComponent.Target, Is.EqualTo(loadedTarget));
+	}
+
+	[Test]
+	public void SaveAndLoad_ComponentEntityReference_AutoClearsWhenTargetMissing()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		scene.Name = "Broken Entity Reference Scene";
+		var target = scene.World.CreateEntity("Target");
+		var source = scene.World.CreateEntity("Source");
+		scene.World.AddComponent(source, new EntityReferenceComponent
+		{
+			Target = target
+		});
+
+		environment.Factory.Save(scene);
+
+		var globalCellPath = Path.Combine(environment.ProjectService.ProjectRootPath!, scene.GlobalCell.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+		var cell = JsonSerializer.Deserialize<Cell>(File.ReadAllText(globalCellPath), AssetJson.SerializerOptions)!;
+		cell.Entities.RemoveAll(candidate => string.Equals(candidate.Name, "Target", StringComparison.Ordinal));
+		File.WriteAllText(globalCellPath, JsonSerializer.Serialize(cell, AssetJson.SerializerOptions));
+
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedSource = FindEntityByName(loadedScene.World, "Source");
+		var loadedComponent = loadedScene.World.GetComponent<EntityReferenceComponent>(loadedSource);
+
+		Assert.That(loadedComponent.Target, Is.EqualTo(default(Entity)));
 	}
 
 	[Test]
@@ -310,6 +366,34 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedChild).LocalPosition, Is.EqualTo(new Vector3(9.0f, 8.0f, 7.0f)));
 	}
 
+	[Test]
+	public void SaveEntityAsPrefab_InstantiateScene_PreservesEntityReferenceWithinPrefab()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAuthoringScene = environment.Factory.New();
+		prefabAuthoringScene.Name = "Prefab Entity Ref";
+
+		var root = prefabAuthoringScene.World.CreateEntity("Root");
+		var child = prefabAuthoringScene.World.CreateEntity("Child");
+		prefabAuthoringScene.World.SetParent(child, root);
+		prefabAuthoringScene.World.AddComponent(root, new EntityReferenceComponent
+		{
+			Target = child
+		});
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(prefabAuthoringScene, root, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+
+		var scene = environment.Factory.New();
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId!.Value, scene);
+
+		var instanceRoot = FindEntityByName(scene.World, "Root");
+		var instanceChild = FindEntityByName(scene.World, "Child");
+		var component = scene.World.GetComponent<EntityReferenceComponent>(instanceRoot);
+
+		Assert.That(component.Target, Is.EqualTo(instanceChild));
+	}
+
 	private static List<Entity> GetAllEntities(World world)
 	{
 		var entities = new List<Entity>();
@@ -372,6 +456,11 @@ public sealed class ScenePersistenceTests
 	{
 		public int Count;
 		public string Label;
+	}
+
+	private struct EntityReferenceComponent : IEntityComponent
+	{
+		public Entity Target;
 	}
 
 	private sealed class TestEnvironment : IDisposable

@@ -10,7 +10,7 @@ public static class RuntimeComponentFieldEditor
 {
 	private static readonly ConcurrentDictionary<Type, FieldInfo[]> EditableFields = new();
 
-	public static bool ApplyPublicFields(Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, ref object componentValue)
+	public static bool ApplyPublicFields(Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, ref object componentValue, EditorScene? scene = null, Entity? ownerEntity = null)
 	{
 		ArgumentNullException.ThrowIfNull(componentType);
 		ArgumentNullException.ThrowIfNull(propertyDrawerRegistry);
@@ -22,7 +22,9 @@ public static class RuntimeComponentFieldEditor
 			var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
 				field.Name,
 				field.FieldType,
-				field.GetValue(componentValue)));
+				field.GetValue(componentValue),
+				scene,
+				ownerEntity));
 			if (drawResult.Handled == false || drawResult.Changed == false)
 			{
 				continue;

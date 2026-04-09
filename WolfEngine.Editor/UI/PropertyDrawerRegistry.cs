@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
 
@@ -14,7 +15,9 @@ namespace WolfEngine.Editor.UI;
 public readonly record struct PropertyDrawerContext(
 	string Label,
 	Type ValueType,
-	object? Value);
+	object? Value,
+	EditorScene? Scene = null,
+	Entity? OwnerEntity = null);
 
 public readonly record struct PropertyDrawerResult(bool Handled, bool Changed, object? Value);
 
@@ -42,6 +45,11 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 	{
 		var valueType = context.ValueType;
 		var value = context.Value;
+
+		if (TryDrawEntityLink(context, out var entityLinkResult))
+		{
+			return entityLinkResult;
+		}
 
 		if (TryDrawAssetLink(context, out var assetLinkResult))
 		{
@@ -275,6 +283,120 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		return true;
 	}
 
+	private bool TryDrawEntityLink(PropertyDrawerContext context, out PropertyDrawerResult result)
+	{
+		if (context.ValueType != typeof(Entity) || context.Scene is null)
+		{
+			result = default;
+			return false;
+		}
+
+		var scene = context.Scene;
+		var ownerEntity = context.OwnerEntity;
+		var currentEntity = context.Value is Entity typedEntity ? typedEntity : default;
+		var candidates = EntityLinkPickerLogic.GetCandidates(scene, ownerEntity);
+		var currentEntityId = EntityLinkPickerLogic.TryGetPersistentEntityId(scene, currentEntity);
+		var previewLabel = EntityLinkPickerLogic.GetPreviewLabel(scene, currentEntity, currentEntityId);
+		var popupId = $"EntityLinkPickerPopup##{context.Label}";
+		var nextEntity = currentEntity;
+		var changed = false;
+		EditorUIUtility.PopupButton(context.Label, previewLabel, popupId, AssetLinkPickerSize, () =>
+		{
+			var popupStateId = ImGui.GetID(popupId);
+			if (_assetLinkSearchTexts.TryGetValue(popupStateId, out var searchText) == false || ImGui.IsWindowAppearing())
+			{
+				searchText = string.Empty;
+			}
+
+			if (ImGui.IsWindowAppearing())
+			{
+				ImGui.SetKeyboardFocusHere();
+			}
+
+			ImGui.InputText("##EntitySearch", ref searchText, 256);
+			_assetLinkSearchTexts[popupStateId] = searchText;
+			ImGui.Separator();
+			ImGui.BeginChild("EntityLinkResults", new Vector2(0.0f, 240.0f), ImGuiChildFlags.Borders);
+			try
+			{
+				var noneSelected = currentEntity.IsValid == false;
+				ImGui.PushID("None");
+				try
+				{
+					if (ImGui.Selectable("None", noneSelected))
+					{
+						nextEntity = default;
+						changed = currentEntity.IsValid;
+						ImGui.CloseCurrentPopup();
+					}
+
+					if (noneSelected)
+					{
+						ImGui.SetItemDefaultFocus();
+						if (ImGui.IsWindowAppearing())
+						{
+							ImGui.SetScrollHereY();
+						}
+					}
+				}
+				finally
+				{
+					ImGui.PopID();
+				}
+
+				var filteredCandidateCount = 0;
+				for (var i = 0; i < candidates.Count; i++)
+				{
+					var candidate = candidates[i];
+					if (AssetLinkPickerLogic.MatchesSearch(candidate.DisplayName, searchText) == false)
+					{
+						continue;
+					}
+
+					filteredCandidateCount++;
+					var isSelected = currentEntityId is { } selectedId && selectedId == candidate.Id;
+					ImGui.PushID(candidate.Id.ToString());
+					try
+					{
+						if (ImGui.Selectable(candidate.DisplayName, isSelected))
+						{
+							nextEntity = candidate.Entity;
+							changed = nextEntity != currentEntity;
+							ImGui.CloseCurrentPopup();
+						}
+
+						if (isSelected)
+						{
+							ImGui.SetItemDefaultFocus();
+							if (ImGui.IsWindowAppearing())
+							{
+								ImGui.SetScrollHereY();
+							}
+						}
+					}
+					finally
+					{
+						ImGui.PopID();
+					}
+				}
+
+				if (filteredCandidateCount == 0)
+				{
+					ImGui.TextDisabled("No matching entities.");
+				}
+			}
+			finally
+			{
+				ImGui.EndChild();
+			}
+		});
+
+		result = changed
+			? new PropertyDrawerResult(true, true, nextEntity)
+			: new PropertyDrawerResult(true, false, context.Value);
+		return true;
+	}
+
 	private static PropertyDrawerResult DrawEnum(string label, Type enumType, object? value)
 	{
 		var changed = false;
@@ -403,6 +525,77 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			?? throw new InvalidOperationException($"Asset reference type '{valueType.FullName}' is missing its NodeId property.");
 		nodeIdProperty.SetValue(boxedValue, assetId);
 		return boxedValue;
+	}
+}
+
+internal readonly record struct EntityLinkCandidate(Guid Id, Entity Entity, string DisplayName);
+
+internal static class EntityLinkPickerLogic
+{
+	public static List<EntityLinkCandidate> GetCandidates(EditorScene scene, Entity? ownerEntity)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+
+		var candidates = new List<EntityLinkCandidate>();
+		foreach (var entry in scene.EntityIds)
+		{
+			if (entry.Value == Guid.Empty ||
+			    scene.World.IsAlive(entry.Key) == false)
+			{
+				continue;
+			}
+
+			candidates.Add(new EntityLinkCandidate(entry.Value, entry.Key, GetDisplayName(scene, entry.Key, entry.Value)));
+		}
+
+		candidates.Sort(static (left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.DisplayName, right.DisplayName));
+		return candidates;
+	}
+
+	public static Guid? TryGetPersistentEntityId(EditorScene scene, Entity entity)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		if (entity.IsValid == false || scene.World.IsAlive(entity) == false)
+		{
+			return null;
+		}
+
+		return scene.EntityIds.TryGetValue(entity, out var entityId) && entityId != Guid.Empty
+			? entityId
+			: null;
+	}
+
+	public static string GetPreviewLabel(EditorScene scene, Entity entity, Guid? entityId)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		if (entity.IsValid == false)
+		{
+			return "None";
+		}
+
+		if (entityId is not { } resolvedEntityId || resolvedEntityId == Guid.Empty || scene.World.IsAlive(entity) == false)
+		{
+			return "Missing";
+		}
+
+		return GetDisplayName(scene, entity, resolvedEntityId);
+	}
+
+	private static string GetDisplayName(EditorScene scene, Entity entity, Guid entityId)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+
+		if (scene.World.HasComponent<NameComponent>(entity))
+		{
+			var name = scene.World.GetComponent<NameComponent>(entity).Name;
+			if (string.IsNullOrWhiteSpace(name) == false)
+			{
+				return name;
+			}
+		}
+
+		var shortId = entityId.ToString("N")[..8];
+		return $"Entity {shortId}";
 	}
 }
 

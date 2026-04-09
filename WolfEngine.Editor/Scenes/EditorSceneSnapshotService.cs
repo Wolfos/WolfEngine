@@ -47,10 +47,10 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		var entityId = EnsurePersistentEntityId(scene, entity);
 		var data = componentType == typeof(LocalTransform)
 			? JsonSerializer.SerializeToElement(scene.World.GetComponent<LocalTransform>(entity).GetTransform(), AssetJson.SerializerOptions)
-			: JsonSerializer.SerializeToElement(
-				RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType),
+			: EditorEntityReferenceUtility.SerializeComponentData(
+				scene,
 				componentType,
-				AssetJson.GetSerializerOptions(componentType));
+				RuntimeComponentAccessor.ReadBoxed(scene.World, entity, componentType));
 
 		return new SceneComponentSnapshot(
 			entityId,
@@ -104,7 +104,8 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 				continue;
 			}
 
-			var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(snapshot.Data, componentType);
+			var componentValue = EditorEntityReferenceUtility.DeserializeComponentData(scene, snapshot.Data, componentType)
+			                   ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType);
 			RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
 		}
 	}
@@ -163,7 +164,7 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 			scene.World.SetEnabled(entity, snapshot.Entity.Enabled);
 			for (var componentIndex = 0; componentIndex < snapshot.Entity.Components.Count; componentIndex++)
 			{
-				ApplySavedComponent(scene.World, entity, snapshot.Entity.Components[componentIndex]);
+				ApplySavedComponent(scene, entity, snapshot.Entity.Components[componentIndex]);
 			}
 
 			entitiesById[snapshot.Entity.EntityId] = entity;
@@ -247,17 +248,17 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 			{
 				Type = _typeResolver.GetTypeName(componentType),
 				TypeId = _typeResolver.GetStableTypeId(componentType),
-				Data = JsonSerializer.SerializeToElement(
-					RuntimeComponentAccessor.ReadBoxed(world, entity, componentType),
+				Data = EditorEntityReferenceUtility.SerializeComponentData(
+					scene,
 					componentType,
-					AssetJson.GetSerializerOptions(componentType))
+					RuntimeComponentAccessor.ReadBoxed(world, entity, componentType))
 			});
 		}
 
 		return CloneEntity(savedEntity);
 	}
 
-	private void ApplySavedComponent(World world, Entity entity, SavedComponent component)
+	private void ApplySavedComponent(EditorScene scene, Entity entity, SavedComponent component)
 	{
 		if (TryResolveComponentType(component.Type, component.TypeId, out var componentType) == false ||
 		    IsPersistableComponentType(componentType) == false)
@@ -265,8 +266,9 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 			return;
 		}
 
-		var componentValue = ProjectTypeStateTransferUtility.DeserializeWithFieldMerge(component.Data, componentType);
-		RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
+		var componentValue = EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+		                   ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType);
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, componentValue);
 	}
 
 	private bool TryResolveComponentType(SceneComponentSnapshot snapshot, out Type componentType)
