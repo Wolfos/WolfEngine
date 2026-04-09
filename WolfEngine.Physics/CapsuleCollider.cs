@@ -38,15 +38,17 @@ public struct CapsuleCollider : IEntityComponent
 	[NotSerialized]
 	[HideFromEditor]
 	internal uint CachedCollidesWith;
+	
+	public void ApplyDefaultValues(World world, Entity entity)
+	{
+		Radius = 0.5f;
+		HalfHeight = 0.5f; 
+	}
 
 	public static CapsuleCollider CreateDefault()
 	{
-		return new CapsuleCollider
-		{
-			Radius = 0.5f,
-			HalfHeight = 0.5f,
-			Center = Vector3.Zero,
-			PhysicsCacheValid = false
-		};
+		var cc = new CapsuleCollider();
+		cc.ApplyDefaultValues(null!, new Entity());
+		return cc;
 	}
 }
