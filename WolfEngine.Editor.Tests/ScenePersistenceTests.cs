@@ -1,11 +1,13 @@
 ﻿using System.Numerics;
 using System.Text.Json;
 using NSubstitute;
+using EditorUI = WolfEngine.Editor.UI;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
 using WolfEngine.Mathematics;
+using WolfEngine.Physics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 
@@ -97,6 +99,69 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedRenderer.MaterialAsset.NodeId, Is.EqualTo(materialId));
 		Assert.That(loadedRenderer.Mesh, Is.SameAs(mesh));
 		Assert.That(loadedRenderer.Material, Is.SameAs(material));
+	}
+
+	[Test]
+	public void RuntimeComponentAccessor_AddDefault_MeshColliderCopiesMeshRendererMesh()
+	{
+		using var environment = new TestEnvironment();
+		var meshId = Guid.NewGuid();
+		var mesh = CreateTriangleMesh();
+		environment.Registry.Register(meshId, mesh);
+
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Mesh Entity");
+		scene.World.AddComponent(entity, new MeshRenderer
+		{
+			MeshAsset = new AssetRef<Mesh> { NodeId = meshId },
+			Mesh = mesh
+		});
+
+		EditorUI.RuntimeComponentAccessor.AddDefault(scene.World, entity, typeof(MeshCollider));
+
+		var collider = scene.World.GetComponent<MeshCollider>(entity);
+		Assert.That(collider.MeshAsset.NodeId, Is.EqualTo(meshId));
+		Assert.That(collider.Mesh, Is.SameAs(mesh));
+	}
+
+	[Test]
+	public void RuntimeComponentAccessor_AddDefault_MeshColliderWithoutMeshRendererLeavesMeshUnset()
+	{
+		using var environment = new TestEnvironment();
+		var scene = environment.Factory.New();
+		var entity = scene.World.CreateEntity("Plain Entity");
+
+		EditorUI.RuntimeComponentAccessor.AddDefault(scene.World, entity, typeof(MeshCollider));
+
+		var collider = scene.World.GetComponent<MeshCollider>(entity);
+		Assert.That(collider.MeshAsset.NodeId, Is.EqualTo(Guid.Empty));
+		Assert.That(collider.Mesh, Is.Null);
+	}
+
+	[Test]
+	public void SaveAndLoad_MeshCollider_HydratesMeshAsset()
+	{
+		using var environment = new TestEnvironment();
+		var meshId = Guid.NewGuid();
+		var mesh = CreateTriangleMesh();
+		environment.Registry.Register(meshId, mesh);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Mesh Collider Scene";
+		var entity = scene.World.CreateEntity("Mesh Collider Entity");
+		scene.World.AddComponent(entity, new MeshCollider
+		{
+			MeshAsset = new AssetRef<Mesh> { NodeId = meshId },
+			Mesh = mesh
+		});
+
+		environment.Factory.Save(scene);
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedEntity = FindEntityByName(loadedScene.World, "Mesh Collider Entity");
+		var loadedCollider = loadedScene.World.GetComponent<MeshCollider>(loadedEntity);
+
+		Assert.That(loadedCollider.MeshAsset.NodeId, Is.EqualTo(meshId));
+		Assert.That(loadedCollider.Mesh, Is.SameAs(mesh));
 	}
 
 	[Test]

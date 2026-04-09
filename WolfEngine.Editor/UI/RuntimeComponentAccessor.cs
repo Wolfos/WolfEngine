@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Text.Json.Serialization;
 using WolfEngine.ECS;
 
 namespace WolfEngine.Editor.UI;
@@ -106,6 +107,12 @@ public static class RuntimeComponentAccessor
 	private static void WriteBoxedGeneric<T>(World world, Entity entity, object componentValue) where T : struct, IEntityComponent
 	{
 		var typedValue = (T)componentValue;
+		if (typedValue is IJsonOnDeserialized callback)
+		{
+			callback.OnDeserialized();
+			typedValue = (T)callback;
+		}
+
 		world.AddComponent(entity, typedValue);
 	}
 

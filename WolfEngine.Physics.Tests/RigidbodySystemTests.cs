@@ -1,5 +1,6 @@
 using System.Numerics;
 using JoltPhysicsSharp;
+using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 
 namespace WolfEngine.Physics.Tests;
@@ -219,6 +220,118 @@ public sealed class RigidbodySystemTests
 		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(1));
 		Assert.That(system.TryGetBodyMotionType(world, entity, out var motionType), Is.True);
 		Assert.That(motionType, Is.EqualTo(MotionType.Dynamic));
+	}
+
+	[Test]
+	public void PhysicsUpdate_MeshColliderWithoutRigidbodyCreatesStaticBody()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Static Mesh", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateMeshCollider(CreateQuadMesh(), Guid.NewGuid()));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(1));
+		Assert.That(system.TryGetBodyMotionType(world, entity, out var motionType), Is.True);
+		Assert.That(motionType, Is.EqualTo(MotionType.Static));
+	}
+
+	[Test]
+	public void TryRaycast_HitsMeshCollider()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Floor Mesh", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateMeshCollider(CreateQuadMesh(), Guid.NewGuid()));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var hitSomething = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 1.0f, 0.0f),
+			new Vector3(0.0f, -2.0f, 0.0f),
+			out var hit);
+
+		Assert.That(hitSomething, Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(entity));
+		Assert.That(hit.Point.Y, Is.EqualTo(0.0f).Within(0.05f));
+		Assert.That(MathF.Abs(hit.Normal.Y), Is.GreaterThan(0.9f));
+	}
+
+	[Test]
+	public void PhysicsUpdate_MeshAssetChangeRecreatesBody()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Static Mesh", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateMeshCollider(CreateQuadMesh(), Guid.NewGuid()));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdBefore), Is.True);
+
+		ref var collider = ref world.GetComponent<MeshCollider>(entity);
+		collider.MeshAsset = new AssetRef<Mesh> { NodeId = Guid.NewGuid() };
+		collider.Mesh = CreateRaisedQuadMesh();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdAfter), Is.True);
+		Assert.That(bodyIdAfter, Is.Not.EqualTo(bodyIdBefore));
+	}
+
+	[Test]
+	public void PhysicsUpdate_MeshCollisionFilterChangeKeepsBodyAndUpdatesQueries()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Filtered Mesh", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateMeshCollider(CreateQuadMesh(), Guid.NewGuid()));
+		world.AddComponent(entity, new CollisionFilter { Layer = 1, CollidesWith = 1u << 1 });
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdBefore), Is.True);
+
+		ref var filter = ref world.GetComponent<CollisionFilter>(entity);
+		filter.Layer = 2;
+		filter.CollidesWith = 1u << 2;
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdAfter), Is.True);
+		Assert.That(bodyIdAfter, Is.EqualTo(bodyIdBefore));
+
+		var hitsOldLayer = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 1.0f, 0.0f),
+			new Vector3(0.0f, -2.0f, 0.0f),
+			out _,
+			layerMask: 1u << 1);
+		var hitsNewLayer = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 1.0f, 0.0f),
+			new Vector3(0.0f, -2.0f, 0.0f),
+			out _,
+			layerMask: 1u << 2);
+
+		Assert.That(hitsOldLayer, Is.False);
+		Assert.That(hitsNewLayer, Is.True);
+	}
+
+	[TestCase(RigidbodyBodyType.Dynamic)]
+	[TestCase(RigidbodyBodyType.Kinematic)]
+	public void PhysicsUpdate_NonStaticMeshColliderDoesNotCreateBody(RigidbodyBodyType bodyType)
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("NonStatic Mesh", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateMeshCollider(CreateQuadMesh(), Guid.NewGuid()));
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.BodyType = bodyType;
+		world.AddComponent(entity, rigidbody);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(0));
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out _), Is.False);
 	}
 
 	[Test]
@@ -472,5 +585,31 @@ public sealed class RigidbodySystemTests
 		{
 			return obj.GetHashCode();
 		}
+	}
+
+	private static MeshCollider CreateMeshCollider(Mesh mesh, Guid assetId)
+	{
+		return new MeshCollider
+		{
+			MeshAsset = new AssetRef<Mesh> { NodeId = assetId },
+			Mesh = mesh
+		};
+	}
+
+	private static Mesh CreateQuadMesh(float y = 0.0f)
+	{
+		return new Mesh(
+			[
+				new Vector4(-1.0f, y, -1.0f, 1.0f),
+				new Vector4(1.0f, y, -1.0f, 1.0f),
+				new Vector4(1.0f, y, 1.0f, 1.0f),
+				new Vector4(-1.0f, y, 1.0f, 1.0f)
+			],
+			[0u, 1u, 2u, 0u, 2u, 3u]);
+	}
+
+	private static Mesh CreateRaisedQuadMesh()
+	{
+		return CreateQuadMesh(1.0f);
 	}
 }
