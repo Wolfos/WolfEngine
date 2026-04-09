@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
@@ -17,7 +18,8 @@ public readonly record struct PropertyDrawerContext(
 	Type ValueType,
 	object? Value,
 	EditorScene? Scene = null,
-	Entity? OwnerEntity = null);
+	Entity? OwnerEntity = null,
+	MemberInfo? Member = null);
 
 public readonly record struct PropertyDrawerResult(bool Handled, bool Changed, object? Value);
 
@@ -293,8 +295,9 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 
 		var scene = context.Scene;
 		var ownerEntity = context.OwnerEntity;
+		var requiredComponentType = GetRequiredComponentType(context.Member);
 		var currentEntity = context.Value is Entity typedEntity ? typedEntity : default;
-		var candidates = EntityLinkPickerLogic.GetCandidates(scene, ownerEntity);
+		var candidates = EntityLinkPickerLogic.GetCandidates(scene, ownerEntity, requiredComponentType);
 		var currentEntityId = EntityLinkPickerLogic.TryGetPersistentEntityId(scene, currentEntity);
 		var previewLabel = EntityLinkPickerLogic.GetPreviewLabel(scene, currentEntity, currentEntityId);
 		var popupId = $"EntityLinkPickerPopup##{context.Label}";
@@ -395,6 +398,16 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			? new PropertyDrawerResult(true, true, nextEntity)
 			: new PropertyDrawerResult(true, false, context.Value);
 		return true;
+	}
+
+	private static Type? GetRequiredComponentType(MemberInfo? member)
+	{
+		if (member is null)
+		{
+			return null;
+		}
+
+		return member.GetCustomAttribute<RequireComponentAttribute>()?.Type;
 	}
 
 	private static PropertyDrawerResult DrawEnum(string label, Type enumType, object? value)
@@ -532,7 +545,7 @@ internal readonly record struct EntityLinkCandidate(Guid Id, Entity Entity, stri
 
 internal static class EntityLinkPickerLogic
 {
-	public static List<EntityLinkCandidate> GetCandidates(EditorScene scene, Entity? ownerEntity)
+	public static List<EntityLinkCandidate> GetCandidates(EditorScene scene, Entity? ownerEntity, Type? requiredComponentType = null)
 	{
 		ArgumentNullException.ThrowIfNull(scene);
 
@@ -540,7 +553,8 @@ internal static class EntityLinkPickerLogic
 		foreach (var entry in scene.EntityIds)
 		{
 			if (entry.Value == Guid.Empty ||
-			    scene.World.IsAlive(entry.Key) == false)
+			    scene.World.IsAlive(entry.Key) == false ||
+			    (requiredComponentType is not null && scene.World.HasComponent(entry.Key, requiredComponentType) == false))
 			{
 				continue;
 			}

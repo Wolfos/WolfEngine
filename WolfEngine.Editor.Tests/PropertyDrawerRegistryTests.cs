@@ -186,6 +186,21 @@ public sealed class PropertyDrawerRegistryTests
 		Assert.That(candidates.Select(candidate => candidate.DisplayName), Is.EqualTo(new[] { "Alpha", "beta", "Entity 22222222", "Owner" }));
 	}
 
+	[Test]
+	public void EntityCandidatesFilterByRequiredComponentTypeWhenProvided()
+	{
+		var scene = new EditorScene { World = new World(WorldTag.Authoring) };
+		var lightEntity = scene.World.CreateEntity("Light");
+		scene.World.AddComponent(lightEntity, new Light());
+		var plainEntity = scene.World.CreateEntity("Plain");
+		scene.EntityIds[lightEntity] = Guid.NewGuid();
+		scene.EntityIds[plainEntity] = Guid.NewGuid();
+
+		var candidates = EntityLinkPickerLogic.GetCandidates(scene, ownerEntity: null, typeof(Light));
+
+		Assert.That(candidates.Select(candidate => candidate.Entity), Is.EqualTo(new[] { lightEntity }));
+	}
+
 	private static AssetDatabaseEntry CreateAsset(string name, AssetType assetType)
 	{
 		return new AssetDatabaseEntry

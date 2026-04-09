@@ -424,7 +424,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 fieldType,
                 field.GetValueDirect(typedRef),
                 scene,
-                entity));
+                entity,
+                field));
             if (drawResult.Handled && drawResult.Changed)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(T));

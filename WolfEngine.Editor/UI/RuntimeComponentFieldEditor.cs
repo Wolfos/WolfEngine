@@ -24,7 +24,8 @@ public static class RuntimeComponentFieldEditor
 				field.FieldType,
 				field.GetValue(componentValue),
 				scene,
-				ownerEntity));
+				ownerEntity,
+				field));
 			if (drawResult.Handled == false || drawResult.Changed == false)
 			{
 				continue;
