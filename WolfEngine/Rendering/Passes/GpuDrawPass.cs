@@ -447,7 +447,8 @@ public sealed class GpuDrawPass
 
 			var threadGroupSize = _cullThreadGroupSize
 				?? throw new InvalidOperationException("GpuDraw cull threadgroup size was not initialized.");
-			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(GpuDrawResources.MaxDrawCount);
+				var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(
+					_gpuDrawResources.ActiveDrawCommandUpperBound);
 			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
 

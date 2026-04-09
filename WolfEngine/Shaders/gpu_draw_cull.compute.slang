@@ -1,8 +1,8 @@
 import "draw_data.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 20000
-#define WOLF_MAX_MESH_COUNT 20000
-#define WOLF_MAX_MATERIAL_COUNT 8192
+#define WOLF_MAX_INSTANCE_COUNT 65535
+#define WOLF_MAX_MESH_COUNT 65535
+#define WOLF_MAX_MATERIAL_COUNT 65535
 
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;

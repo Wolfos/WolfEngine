@@ -4,8 +4,8 @@ import "draw_data.slang";
 import "common_lighting.slang";
 import "normal_decode.slang";
 
-#define WOLF_MAX_INSTANCE_COUNT 20000
-#define WOLF_MAX_MATERIAL_COUNT 8192
+#define WOLF_MAX_INSTANCE_COUNT 65535
+#define WOLF_MAX_MATERIAL_COUNT 65535
 
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);

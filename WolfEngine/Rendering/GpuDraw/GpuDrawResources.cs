@@ -12,10 +12,10 @@ public sealed class GpuDrawResources : IDisposable
 {
 	public const int IndirectCommandBufferSlotCount = 4;
 	public const int MaxFramesInFlight = 4;
-	public const int MaxDrawCount = 20000;
-	public const int MaxInstanceCount = 20000;
-	public const int MaxMaterialCount = 8192;
-	public const int MaxMeshCount = 20000;
+	public const int MaxDrawCount = 65535;
+	public const int MaxInstanceCount = 65535;
+	public const int MaxMaterialCount = 65535;
+	public const int MaxMeshCount = 65535;
 	public const int HardeningCounterCount = 16;
 	private readonly IShaderCompiler _shaderCompiler;
 
