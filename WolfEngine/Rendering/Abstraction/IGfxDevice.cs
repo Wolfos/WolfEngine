@@ -25,6 +25,11 @@ public interface IGfxDevice
 	void Submit(IGfxCommandList commandList);
 
 	/// <summary>
+	/// Blocks until all previously submitted GPU work has completed.
+	/// </summary>
+	void WaitForIdle();
+
+	/// <summary>
 	/// Allocates a new GPU texture from the supplied abstract descriptor.
 	/// </summary>
 	IGfxTexture CreateTexture(in TextureDescriptor descriptor);

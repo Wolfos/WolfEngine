@@ -1021,6 +1021,9 @@ private sealed class MeshResources
 		{
 			TextureFormat.Bgra8Unorm => isSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
 			TextureFormat.Rgba8Unorm => isSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
+			TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
+			TextureFormat.Bc3Unorm => isSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,
+			TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
 			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
 			TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported runtime texture format.")

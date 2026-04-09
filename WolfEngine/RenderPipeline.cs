@@ -10,7 +10,7 @@ namespace WolfEngine;
 
 public interface IRenderPipeline
 {
-	void Run();
+	void Run(Action? startup = null);
 
 	void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,
 		IReadOnlyList<World> worlds);
@@ -30,9 +30,9 @@ public class RenderPipeline : IRenderPipeline
 		_drawDatabase = drawDatabase ?? throw new ArgumentNullException(nameof(drawDatabase));
 	}
 
-	public void Run()
+	public void Run(Action? startup = null)
 	{
-		_renderGraph.Startup(static () => { }, static _ => { });
+		_renderGraph.Startup(startup ?? (() => { }), static _ => { });
 	}
 
 	public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,

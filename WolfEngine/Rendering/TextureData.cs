@@ -17,12 +17,18 @@ public enum TextureCompressionFamily
 public static class TextureFormatUtilities
 {
 	public static bool IsCompressed(TextureFormat format) => format is
+		TextureFormat.Bc1Unorm or
+		TextureFormat.Bc3Unorm or
+		TextureFormat.Bc4Unorm or
 		TextureFormat.Bc5Unorm or
 		TextureFormat.Bc7Unorm or
 		TextureFormat.Astc4x4Unorm;
 
 	public static int GetBlockWidth(TextureFormat format) => format switch
 	{
+		TextureFormat.Bc1Unorm => 4,
+		TextureFormat.Bc3Unorm => 4,
+		TextureFormat.Bc4Unorm => 4,
 		TextureFormat.Bc5Unorm => 4,
 		TextureFormat.Bc7Unorm => 4,
 		TextureFormat.Astc4x4Unorm => 4,
@@ -31,6 +37,9 @@ public static class TextureFormatUtilities
 
 	public static int GetBlockHeight(TextureFormat format) => format switch
 	{
+		TextureFormat.Bc1Unorm => 4,
+		TextureFormat.Bc3Unorm => 4,
+		TextureFormat.Bc4Unorm => 4,
 		TextureFormat.Bc5Unorm => 4,
 		TextureFormat.Bc7Unorm => 4,
 		TextureFormat.Astc4x4Unorm => 4,
@@ -39,6 +48,9 @@ public static class TextureFormatUtilities
 
 	public static int GetBytesPerBlock(TextureFormat format) => format switch
 	{
+		TextureFormat.Bc1Unorm => 8,
+		TextureFormat.Bc3Unorm => 16,
+		TextureFormat.Bc4Unorm => 8,
 		TextureFormat.Bc5Unorm => 16,
 		TextureFormat.Bc7Unorm => 16,
 		TextureFormat.Astc4x4Unorm => 16,

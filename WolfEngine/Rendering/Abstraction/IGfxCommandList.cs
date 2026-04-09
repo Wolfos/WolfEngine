@@ -72,5 +72,7 @@ public interface IGfxCommandList
 
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
+	void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes);
+
 	void Barrier(in ResourceBarrierDescription barrier);
 }

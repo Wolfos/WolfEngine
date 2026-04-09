@@ -514,6 +514,9 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 				TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 				TextureFormat.R32Float => Format.FormatR32Float,
 				TextureFormat.D32Float => Format.FormatR32Float,
+				TextureFormat.Bc1Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
+				TextureFormat.Bc3Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,
+				TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
 				TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
 				TextureFormat.Bc7Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 				_ => Format.FormatUnknown
@@ -561,6 +564,9 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			TextureFormat.Rg16Float => Format.FormatR16G16Float,
 			TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 			TextureFormat.R32Float => Format.FormatR32Float,
+			TextureFormat.Bc1Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
+			TextureFormat.Bc3Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,
+			TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
 			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
 			TextureFormat.Bc7Unorm => texture.Descriptor.IsSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 			_ => Format.FormatUnknown

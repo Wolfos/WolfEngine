@@ -588,6 +588,40 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 	}
 
+	public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes)
+	{
+		if (sizeInBytes == 0)
+		{
+			return;
+		}
+
+		if (source is not D3D12Buffer sourceBuffer || sourceBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Source buffer was not created by the Direct3D12 backend.");
+		}
+
+		if (destination is not D3D12Buffer destinationBuffer || destinationBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Destination buffer was not created by the Direct3D12 backend.");
+		}
+
+		var previousSourceState = sourceBuffer.CurrentState;
+		TransitionBufferIfNeeded(sourceBuffer, ResourceStates.CopySource);
+		if (destinationBuffer.IsCpuReadableDirect == false)
+		{
+			TransitionBufferIfNeeded(destinationBuffer, ResourceStates.CopyDest);
+		}
+
+		CommandList.CopyBufferRegion(
+			destinationBuffer.Resource,
+			destinationOffset,
+			sourceBuffer.Resource,
+			sourceOffset,
+			sizeInBytes);
+
+		TransitionBufferIfNeeded(sourceBuffer, previousSourceState);
+	}
+
 	public void SetDescriptorHeaps(ComPtr<ID3D12DescriptorHeap>[] heaps)
 	{
 		var heapPtrs = stackalloc ID3D12DescriptorHeap*[heaps.Length];

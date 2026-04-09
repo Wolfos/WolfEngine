@@ -50,6 +50,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IThreeDFileImporter _threeDFileImporter;
+	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
 
 	public ProjectAssetPipelineService(
 		IAssetPipelineIndex index,
@@ -58,6 +59,25 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		IDataAssetStore dataAssetStore,
 		IMaterialAssetStore materialAssetStore,
 		IThreeDFileImporter threeDFileImporter)
+		: this(
+			index,
+			metadataStore,
+			imageLoader,
+			dataAssetStore,
+			materialAssetStore,
+			threeDFileImporter,
+			new UnsupportedTextureGpuCompressionService())
+	{
+	}
+
+	public ProjectAssetPipelineService(
+		IAssetPipelineIndex index,
+		IAssetMetadataStore metadataStore,
+		ImportImageLoader imageLoader,
+		IDataAssetStore dataAssetStore,
+		IMaterialAssetStore materialAssetStore,
+		IThreeDFileImporter threeDFileImporter,
+		ITextureGpuCompressionService textureGpuCompressionService)
 	{
 		_index = index ?? throw new ArgumentNullException(nameof(index));
 		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
@@ -65,6 +85,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_threeDFileImporter = threeDFileImporter ?? throw new ArgumentNullException(nameof(threeDFileImporter));
+		_textureGpuCompressionService = textureGpuCompressionService ?? throw new ArgumentNullException(nameof(textureGpuCompressionService));
 	}
 
 	public void InitializeProject(string projectRootPath)
@@ -1324,30 +1345,39 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			nodeId.ToString("D"),
 			"runtime-metal.bin"));
 		var artifacts = new List<(string ArtifactKey, string Target, string RelativePath, string AbsolutePath)>(1);
+
+		var compressedTexture = _textureGpuCompressionService.CompileBcTexture(importedTexture);
 		if (OperatingSystem.IsMacOS())
 		{
 			var metalAbsolutePath = GetAbsolutePath(projectRootPath, metalRelativePath);
-			var metalTexture = TextureCompressionCompiler.CompileMetal(importedTexture);
 			TextureArtifactSerializer.Write(
 				metalAbsolutePath,
-				metalTexture,
+				compressedTexture,
 				importedTexture.Semantic,
-				TextureCompressionFamily.Astc);
+				TextureCompressionFamily.Bc);
 			artifacts.Add(("runtime-metal", "metal", metalRelativePath, metalAbsolutePath));
 		}
 		else
 		{
 			var d3d12AbsolutePath = GetAbsolutePath(projectRootPath, d3d12RelativePath);
-			var d3d12Texture = TextureCompressionCompiler.CompileD3D12(importedTexture);
 			TextureArtifactSerializer.Write(
 				d3d12AbsolutePath,
-				d3d12Texture,
+				compressedTexture,
 				importedTexture.Semantic,
 				TextureCompressionFamily.Bc);
 			artifacts.Add(("runtime-d3d12", "d3d12", d3d12RelativePath, d3d12AbsolutePath));
 		}
 
 		return CreateTextureArtifactRecords(nodeId, artifacts);
+	}
+
+	private sealed class UnsupportedTextureGpuCompressionService : ITextureGpuCompressionService
+	{
+		public Texture CompileBcTexture(ImportedTexture importedTexture)
+		{
+			throw new InvalidOperationException(
+				$"GPU BC compression service is not available while importing '{importedTexture.NameOrPath}'.");
+		}
 	}
 
 	private static List<AssetArtifactRecord> CreateTextureArtifactRecords(

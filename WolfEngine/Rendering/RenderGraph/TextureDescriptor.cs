@@ -47,9 +47,12 @@ public enum TextureFormat
 	Rgba16Float,
 	R32Float,
 	D32Float,
+	Bc3Unorm,
 	Bc5Unorm,
 	Bc7Unorm,
-	Astc4x4Unorm
+	Astc4x4Unorm,
+	Bc1Unorm,
+	Bc4Unorm
 }
 
 [Flags]

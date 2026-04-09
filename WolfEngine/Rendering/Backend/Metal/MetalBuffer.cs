@@ -5,7 +5,7 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
-internal sealed class MetalBuffer : IWritableGpuBuffer, IDisposable
+internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	public MetalBuffer(string name, BufferDescriptor descriptor, MTLBuffer buffer)
 	{
@@ -39,6 +39,26 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IDisposable
 			(byte*)Buffer.Contents.ToPointer() + (nint)byteOffset,
 			(int)byteCount);
 		MemoryMarshal.AsBytes(source).CopyTo(destination);
+	}
+
+	public unsafe void Read(Span<byte> destination, ulong sourceOffset = 0)
+	{
+		if (destination.IsEmpty)
+		{
+			return;
+		}
+
+		var byteCount = (ulong)destination.Length;
+		var end = checked(sourceOffset + byteCount);
+		if (end > Buffer.Length)
+		{
+			throw new ArgumentOutOfRangeException(nameof(destination), "Read exceeds source buffer size.");
+		}
+
+		var source = new ReadOnlySpan<byte>(
+			(byte*)Buffer.Contents.ToPointer() + (nint)sourceOffset,
+			destination.Length);
+		source.CopyTo(destination);
 	}
 
 	public void Dispose()

@@ -24,19 +24,23 @@ public static class Program
 		provider.GetRequiredService<IUiFrameProvider>();
 		provider.GetRequiredService<IIconManager>();
 		EditorPreferences.Load();
-		var projectService = provider.GetRequiredService<IEditorProjectService>();
 		var lastProjectPath = EditorPreferences.GetLastProjectPath();
-		if (string.IsNullOrWhiteSpace(lastProjectPath) == false)
-		{
-			projectService.OpenProject(lastProjectPath, out _);
-		}
 		
 		var editor = provider.GetRequiredService<WolfEngineEditor>();
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };
 		editorThread.Start();
 		
 		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
-		renderPipeline.Run();
+		renderPipeline.Run(() =>
+		{
+			if (string.IsNullOrWhiteSpace(lastProjectPath))
+			{
+				return;
+			}
+
+			var projectService = provider.GetRequiredService<IEditorProjectService>();
+			projectService.OpenProject(lastProjectPath, out _);
+		});
 		
 		editor.Stop();
 		editorThread.Join();
@@ -63,6 +67,7 @@ public static class Program
 			provider.GetRequiredService<IGameplayAssemblyHost>()));
 		services.AddSingleton<IProjectTypeResolver>(provider => (IProjectTypeResolver)provider.GetRequiredService<IProjectTypeCatalog>());
 		services.AddSingleton<IDataAssetTypeRegistry, DataAssetTypeRegistry>();
+		services.AddSingleton<ITextureGpuCompressionService, TextureGpuCompressionService>();
 		services.AddSingleton<IProjectAssetPipelineService, ProjectAssetPipelineService>();
 		services.AddSingleton<IProjectSceneImporter, ProjectSceneImporter>();
 		services.AddSingleton<IEditorSceneFactory, EditorSceneFactory>();

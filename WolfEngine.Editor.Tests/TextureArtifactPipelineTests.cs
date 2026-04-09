@@ -18,7 +18,7 @@ public sealed class TextureArtifactPipelineTests
 			8,
 			8,
 			true,
-			TextureFormat.Bc7Unorm,
+			TextureFormat.Bc3Unorm,
 			[
 				new TextureMipData(8, 8, new byte[64]),
 				new TextureMipData(4, 4, new byte[16]),
@@ -45,14 +45,14 @@ public sealed class TextureArtifactPipelineTests
 		var metalPath = Path.Combine(tempDirectory.Path, "runtime-metal.bin");
 		TextureArtifactSerializer.Write(
 			d3dPath,
-			new Texture("test", 4, 4, false, TextureFormat.Bc7Unorm, [new TextureMipData(4, 4, new byte[16])]),
+			new Texture("test", 4, 4, false, TextureFormat.Bc1Unorm, [new TextureMipData(4, 4, new byte[8])]),
 			TextureSemantic.BaseColor,
 			TextureCompressionFamily.Bc);
 		TextureArtifactSerializer.Write(
 			metalPath,
-			new Texture("test", 4, 4, false, TextureFormat.Astc4x4Unorm, [new TextureMipData(4, 4, new byte[16])]),
+			new Texture("test", 4, 4, false, TextureFormat.Bc3Unorm, [new TextureMipData(4, 4, new byte[16])]),
 			TextureSemantic.BaseColor,
-			TextureCompressionFamily.Astc);
+			TextureCompressionFamily.Bc);
 
 		var factory = Substitute.For<ITextureFactory>();
 		factory.GetTexture(Arg.Any<Texture>()).Returns(call => call.Arg<Texture>());
@@ -80,8 +80,8 @@ public sealed class TextureArtifactPipelineTests
 			tempDirectory.Path,
 			(_, _) => null))!;
 
-		Assert.That(resolved.Format, Is.EqualTo(TextureFormat.Astc4x4Unorm));
-		factory.Received(1).GetTexture(Arg.Is<Texture>(texture => texture.Format == TextureFormat.Astc4x4Unorm));
+		Assert.That(resolved.Format, Is.EqualTo(TextureFormat.Bc3Unorm));
+		factory.Received(1).GetTexture(Arg.Is<Texture>(texture => texture.Format == TextureFormat.Bc3Unorm));
 	}
 
 	private sealed class TempDirectory : IDisposable

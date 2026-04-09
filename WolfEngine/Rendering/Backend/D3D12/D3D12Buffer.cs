@@ -6,13 +6,15 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
+internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffer
 {
 	private readonly BufferDescriptor _descriptor;
 	private readonly bool _cpuWritableDirect;
+	private readonly bool _cpuReadableDirect;
 	private readonly Action<D3D12Buffer, ulong, ulong>? _flushUploadRange;
 	private readonly Func<int>? _getDeviceRemovedReason;
-	private void* _mappedPtr;
+	private void* _writeMappedPtr;
+	private void* _readMappedPtr;
 
 	public D3D12Buffer(
 		string? name,
@@ -21,6 +23,7 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
 		ulong sizeInBytes,
 		ComPtr<ID3D12Resource> uploadResource = default,
 		bool cpuWritableDirect = false,
+		bool cpuReadableDirect = false,
 		Action<D3D12Buffer, ulong, ulong>? flushUploadRange = null,
 		Func<int>? getDeviceRemovedReason = null,
 		ResourceStates initialState = ResourceStates.Common)
@@ -31,6 +34,7 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
 		UploadResource = uploadResource;
 		SizeInBytes = sizeInBytes;
 		_cpuWritableDirect = cpuWritableDirect;
+		_cpuReadableDirect = cpuReadableDirect;
 		_flushUploadRange = flushUploadRange;
 		_getDeviceRemovedReason = getDeviceRemovedReason;
 		CurrentState = initialState;
@@ -49,6 +53,8 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
 	internal ResourceStates CurrentState { get; set; }
 
 	internal bool IsCpuWritableDirect => _cpuWritableDirect;
+
+	internal bool IsCpuReadableDirect => _cpuReadableDirect;
 
 	internal uint GetConstantBufferViewSizeInBytes()
 	{
@@ -92,7 +98,7 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
 			throw new InvalidOperationException("Buffer does not support CPU writes on this backend.");
 		}
 
-		if (_mappedPtr is null)
+		if (_writeMappedPtr is null)
 		{
 			void* mapped = null;
 			var mapResult = target.Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped);
@@ -116,18 +122,55 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer
 				throw new COMException(message, mapResult);
 			}
 
-			_mappedPtr = mapped;
+			_writeMappedPtr = mapped;
 		}
 
 		fixed (T* src = source)
 		{
-			var dest = (byte*)_mappedPtr + (nint)byteOffset;
+			var dest = (byte*)_writeMappedPtr + (nint)byteOffset;
 			Buffer.MemoryCopy(src, dest, byteCount, byteCount);
 		}
 
 		if (_cpuWritableDirect == false)
 		{
 			_flushUploadRange?.Invoke(this, byteOffset, byteCount);
+		}
+	}
+
+	public void Read(Span<byte> destination, ulong sourceOffset = 0)
+	{
+		if (destination.IsEmpty)
+		{
+			return;
+		}
+
+		if (_cpuReadableDirect == false)
+		{
+			throw new InvalidOperationException("Buffer does not support CPU reads on this backend.");
+		}
+
+		var byteCount = (ulong)destination.Length;
+		if (sourceOffset + byteCount > SizeInBytes)
+		{
+			throw new ArgumentOutOfRangeException(nameof(destination), "Read range exceeds buffer size.");
+		}
+
+		if (_readMappedPtr is null)
+		{
+			void* mapped = null;
+			var mapResult = Resource.Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped);
+			if (mapResult < 0)
+			{
+				throw new COMException("ID3D12Resource::Map failed while reading a GPU buffer.", mapResult);
+			}
+
+			_readMappedPtr = mapped;
+		}
+
+		fixed (byte* dst = destination)
+		{
+			var src = (byte*)_readMappedPtr + (nint)sourceOffset;
+			Buffer.MemoryCopy(src, dst, byteCount, byteCount);
 		}
 	}
 

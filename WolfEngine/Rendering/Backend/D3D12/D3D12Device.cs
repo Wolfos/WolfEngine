@@ -364,7 +364,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			: 16UL;
 		var sizeInBytes = Align(descriptor.SizeInBytes, bufferAlignment);
 		var allowsUav = (descriptor.Flags & BufferFlags.AllowUnorderedAccess) != 0;
-		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant) || descriptor.Usage.HasFlag(BufferUsage.Staging);
+		var isReadbackBuffer = descriptor.Usage.HasFlag(BufferUsage.Staging);
+		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant);
+		var cpuReadableDirect = isReadbackBuffer;
 		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
 		// Default-heap buffers are created in COMMON even when UAV-capable; the debug layer ignores UAV here.
 		var initialState = ResourceStates.Common;
@@ -383,8 +385,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			Flags = resourceFlags
 		};
 
-		var defaultHeap = new HeapProperties(cpuWritableDirect ? HeapType.Upload : HeapType.Default);
-		var defaultState = cpuWritableDirect ? ResourceStates.GenericRead : initialState;
+		var heapType = cpuReadableDirect
+			? HeapType.Readback
+			: cpuWritableDirect
+				? HeapType.Upload
+				: HeapType.Default;
+		var defaultHeap = new HeapProperties(heapType);
+		var defaultState = cpuReadableDirect
+			? ResourceStates.CopyDest
+			: cpuWritableDirect
+				? ResourceStates.GenericRead
+				: initialState;
 		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
 			&defaultHeap,
 			HeapFlags.None,
@@ -394,7 +405,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			out ComPtr<ID3D12Resource> resource));
 
 		ComPtr<ID3D12Resource> upload = default;
-		if (cpuWritableDirect == false)
+		if (cpuWritableDirect == false && cpuReadableDirect == false)
 		{
 			var uploadDesc = resourceDesc;
 			// Upload heap buffers cannot use UAV resource flags.
@@ -417,9 +428,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			sizeInBytes,
 			upload,
 			cpuWritableDirect: cpuWritableDirect,
+			cpuReadableDirect: cpuReadableDirect,
 			flushUploadRange: cpuWritableDirect ? null : FlushUploadRange,
 			getDeviceRemovedReason: () => _device.GetDeviceRemovedReason(),
-			initialState: cpuWritableDirect ? ResourceStates.GenericRead : initialState);
+			initialState: defaultState);
 		return buffer;
 	}
 
@@ -1020,7 +1032,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		SilkMarshal.ThrowHResult(_uploadCommandList.Close());
 	}
 
-	private void WaitForIdle()
+	public void WaitForIdle()
 	{
 		if (_submissionFence.Handle is null)
 		{
@@ -1784,6 +1796,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 		TextureFormat.R32Float => Format.FormatR32Float,
 		TextureFormat.D32Float => Format.FormatD32Float,
+		TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
+		TextureFormat.Bc3Unorm => isSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,
+		TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
 		TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
 		TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
 		TextureFormat.Unknown => Format.FormatUnknown,

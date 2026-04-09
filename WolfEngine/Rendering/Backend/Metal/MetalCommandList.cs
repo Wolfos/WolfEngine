@@ -454,6 +454,40 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_computeEncoder.DispatchThreadgroups(threadgroups, threadsPerGroup);
 	}
 
+	public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes)
+	{
+		ThrowIfDisposed();
+		if (sizeInBytes == 0)
+		{
+			return;
+		}
+
+		if (source is not MetalBuffer sourceBuffer)
+		{
+			throw new InvalidOperationException("Source buffer was not created by the Metal backend.");
+		}
+
+		if (destination is not MetalBuffer destinationBuffer)
+		{
+			throw new InvalidOperationException("Destination buffer was not created by the Metal backend.");
+		}
+
+		EndActiveEncoders();
+
+		var blit = _commandBuffer.BlitCommandEncoder();
+		blit.CopyFromBuffer(
+			sourceBuffer.Buffer,
+			(nuint)sourceOffset,
+			destinationBuffer.Buffer,
+			(nuint)destinationOffset,
+			(nuint)sizeInBytes);
+		blit.EndEncoding();
+		if (blit.NativePtr != IntPtr.Zero)
+		{
+			blit.Dispose();
+		}
+	}
+
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
 		ThrowIfDisposed();
@@ -468,22 +502,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		if (_renderEncoder.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.EndEncoding();
-			_renderEncoder.Dispose();
-			_renderEncoder = default;
-		}
-
-		if (_computeEncoder.NativePtr != IntPtr.Zero)
-		{
-			_computeEncoder.EndEncoding();
-			_computeEncoder.Dispose();
-			_computeEncoder = default;
-			_currentComputePipeline = null;
-			_bindlessBuffersSetCompute = false;
-			_lastBindlessVersionCompute = uint.MaxValue;
-		}
+		EndActiveEncoders();
 
 		var blit = _commandBuffer.BlitCommandEncoder();
 		var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
@@ -503,25 +522,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
-		if (_renderEncoder.NativePtr != IntPtr.Zero)
-		{
-			_renderEncoder.EndEncoding();
-			_renderEncoder.Dispose();
-			_renderEncoder = default;
-			_currentGraphicsPipeline = null;
-			_bindlessBuffersSetRender = false;
-			_lastBindlessVersionRender = uint.MaxValue;
-		}
-
-		if (_computeEncoder.NativePtr != IntPtr.Zero)
-		{
-			_computeEncoder.EndEncoding();
-			_computeEncoder.Dispose();
-			_computeEncoder = default;
-			_currentComputePipeline = null;
-			_bindlessBuffersSetCompute = false;
-			_lastBindlessVersionCompute = uint.MaxValue;
-		}
+		EndActiveEncoders();
 
 		if (_presentDrawable.NativePtr != IntPtr.Zero)
 		{
@@ -820,6 +821,29 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		if (_disposed)
 		{
 			throw new ObjectDisposedException(nameof(MetalCommandList));
+		}
+	}
+
+	private void EndActiveEncoders()
+	{
+		if (_renderEncoder.NativePtr != IntPtr.Zero)
+		{
+			_renderEncoder.EndEncoding();
+			_renderEncoder.Dispose();
+			_renderEncoder = default;
+			_currentGraphicsPipeline = null;
+			_bindlessBuffersSetRender = false;
+			_lastBindlessVersionRender = uint.MaxValue;
+		}
+
+		if (_computeEncoder.NativePtr != IntPtr.Zero)
+		{
+			_computeEncoder.EndEncoding();
+			_computeEncoder.Dispose();
+			_computeEncoder = default;
+			_currentComputePipeline = null;
+			_bindlessBuffersSetCompute = false;
+			_lastBindlessVersionCompute = uint.MaxValue;
 		}
 	}
 }
