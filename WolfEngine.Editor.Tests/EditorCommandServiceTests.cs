@@ -217,7 +217,7 @@ public sealed class EditorCommandServiceTests
 		Assert.That(fixture.Service.SaveScene(), Is.True);
 		Assert.That(fixture.Service.RefreshAssetDatabase(), Is.True);
 		fixture.SceneWorkspace.Received(1).SaveCurrentScene();
-		fixture.ProjectService.Received(1).ReloadAssetDatabase();
+		fixture.AssetRefreshService.Received(1).RefreshOpenSceneAssets();
 
 		fixture.PlaySession.IsActive.Returns(true);
 		Assert.That(fixture.Service.SaveScene(), Is.False);
@@ -306,12 +306,14 @@ public sealed class EditorCommandServiceTests
 		sceneWorkspace.CurrentScene.Returns(new EditorScene());
 
 		var projectService = Substitute.For<IEditorProjectService>();
+		var assetRefreshService = Substitute.For<IEditorAssetRefreshService>();
 		var playSession = Substitute.For<IEditorPlaySession>();
 		playSession.IsActive.Returns(false);
 
 		return new CommandFixture(
 			sceneWorkspace,
 			projectService,
+			assetRefreshService,
 			playSession,
 			new EditorInteractionState(),
 			Substitute.For<IEditorNotificationService>(),
@@ -321,6 +323,7 @@ public sealed class EditorCommandServiceTests
 	private sealed record CommandFixture(
 		IEditorSceneWorkspace SceneWorkspace,
 		IEditorProjectService ProjectService,
+		IEditorAssetRefreshService AssetRefreshService,
 		IEditorPlaySession PlaySession,
 		EditorInteractionState InteractionState,
 		IEditorNotificationService NotificationService,
@@ -329,6 +332,7 @@ public sealed class EditorCommandServiceTests
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
 			ProjectService,
+			AssetRefreshService,
 			PlaySession,
 			InteractionState,
 			NotificationService,
@@ -386,7 +390,7 @@ public sealed class EditorCommandServiceTests
 		public bool CreateProject(string parentFolder, string projectName, out string errorMessage) => throw new NotSupportedException();
 		public bool OpenProject(string projectRoot, out string errorMessage) => throw new NotSupportedException();
 		public void CloseProject() => throw new NotSupportedException();
-		public void ReloadAssetDatabase() => throw new NotSupportedException();
+		public AssetDatabaseRefreshResult ReloadAssetDatabase() => throw new NotSupportedException();
 		public void ReloadAssetDatabaseFromIndex() => throw new NotSupportedException();
 		public void RefreshAssetSource(string relativeSourcePath) => throw new NotSupportedException();
 		public void SaveAssetDatabase(AssetDatabase database) => throw new NotSupportedException();

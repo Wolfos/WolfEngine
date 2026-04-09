@@ -20,6 +20,7 @@ public interface IProjectAssetPipelineService
 	AssetDatabase RefreshProject(string projectRootPath);
 	AssetDatabase RebuildProject(string projectRootPath);
 	AssetDatabase RefreshProjectIncremental(string projectRootPath);
+	IReadOnlyCollection<Guid> ExpandInvalidationClosure(string projectRootPath, IEnumerable<Guid> changedNodeIds);
 	void RemoveDeletedSource(string projectRootPath, string relativeSourcePath);
 	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
 	void ReimportSource(string projectRootPath, string relativeSourcePath);
@@ -91,6 +92,54 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	public AssetDatabase RefreshProjectIncremental(string projectRootPath)
 	{
 		return ImportAllSupportedSources(projectRootPath, loadExistingSources: true);
+	}
+
+	public IReadOnlyCollection<Guid> ExpandInvalidationClosure(string projectRootPath, IEnumerable<Guid> changedNodeIds)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentNullException.ThrowIfNull(changedNodeIds);
+
+		InitializeProject(projectRootPath);
+
+		var invalidatedNodeIds = changedNodeIds
+			.Where(nodeId => nodeId != Guid.Empty)
+			.ToHashSet();
+		if (invalidatedNodeIds.Count == 0)
+		{
+			return [];
+		}
+
+		var reverseDependencies = new Dictionary<Guid, List<Guid>>();
+		foreach (var dependency in _index.GetDependencies(projectRootPath))
+		{
+			if (reverseDependencies.TryGetValue(dependency.ToNodeId, out var dependents) == false)
+			{
+				dependents = [];
+				reverseDependencies[dependency.ToNodeId] = dependents;
+			}
+
+			dependents.Add(dependency.FromNodeId);
+		}
+
+		var queue = new Queue<Guid>(invalidatedNodeIds);
+		while (queue.Count > 0)
+		{
+			var nodeId = queue.Dequeue();
+			if (reverseDependencies.TryGetValue(nodeId, out var dependents) == false)
+			{
+				continue;
+			}
+
+			for (var i = 0; i < dependents.Count; i++)
+			{
+				if (invalidatedNodeIds.Add(dependents[i]))
+				{
+					queue.Enqueue(dependents[i]);
+				}
+			}
+		}
+
+		return invalidatedNodeIds.ToArray();
 	}
 
 	public void RemoveDeletedSource(string projectRootPath, string relativeSourcePath)

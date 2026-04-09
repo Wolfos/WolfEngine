@@ -22,7 +22,7 @@ public interface IEditorProjectService
 	bool CreateProject(string parentFolder, string projectName, out string errorMessage);
 	bool OpenProject(string projectRoot, out string errorMessage);
 	void CloseProject();
-	void ReloadAssetDatabase();
+	AssetDatabaseRefreshResult ReloadAssetDatabase();
 	void ReloadAssetDatabaseFromIndex();
 	void RefreshAssetSource(string relativeSourcePath);
 	void SaveAssetDatabase(AssetDatabase database);
@@ -31,6 +31,11 @@ public interface IEditorProjectService
 	string GetAbsolutePath(string relativePath);
 	void DeleteAssetSource(string relativeSourcePath);
 	void DeleteFolder(string relativeFolderPath);
+}
+
+public readonly record struct AssetDatabaseRefreshResult(IReadOnlyCollection<Guid> InvalidatedAssetIds)
+{
+	public static AssetDatabaseRefreshResult Empty { get; } = new(Array.Empty<Guid>());
 }
 
 public sealed class EditorProjectService : IEditorProjectService
@@ -194,17 +199,24 @@ public sealed class EditorProjectService : IEditorProjectService
 		ClearUndoHistory();
 	}
 
-	public void ReloadAssetDatabase()
+	public AssetDatabaseRefreshResult ReloadAssetDatabase()
 	{
 		ClearUndoHistory();
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = new AssetDatabase();
 			_assetInstanceRegistry.Clear();
-			return;
+			return AssetDatabaseRefreshResult.Empty;
 		}
 
-		ApplyDatabase(_assetPipelineService.RefreshProjectIncremental(_projectRootPath!));
+		var previousDatabase = CloneCurrentAssetDatabase();
+		var refreshedDatabase = _assetPipelineService.RefreshProjectIncremental(_projectRootPath!);
+		ApplyDatabase(refreshedDatabase);
+
+		var changedNodeIds = CollectChangedNodeIds(previousDatabase, refreshedDatabase);
+		var invalidatedNodeIds = _assetPipelineService.ExpandInvalidationClosure(_projectRootPath!, changedNodeIds);
+		_assetInstanceRegistry.InvalidateAssets(invalidatedNodeIds);
+		return new AssetDatabaseRefreshResult(invalidatedNodeIds);
 	}
 
 	public void ReloadAssetDatabaseFromIndex()
@@ -243,7 +255,8 @@ public sealed class EditorProjectService : IEditorProjectService
 		previousNodeIds.UnionWith(currentNodeIds);
 
 		ApplyDatabase(database);
-		_assetInstanceRegistry.InvalidateAssets(previousNodeIds);
+		var invalidatedNodeIds = _assetPipelineService.ExpandInvalidationClosure(_projectRootPath!, previousNodeIds);
+		_assetInstanceRegistry.InvalidateAssets(invalidatedNodeIds);
 	}
 
 	public void SaveAssetDatabase(AssetDatabase database)
@@ -355,6 +368,165 @@ public sealed class EditorProjectService : IEditorProjectService
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
 		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
+	}
+
+	private static IReadOnlyCollection<Guid> CollectChangedNodeIds(AssetDatabase previousDatabase, AssetDatabase refreshedDatabase)
+	{
+		ArgumentNullException.ThrowIfNull(previousDatabase);
+		ArgumentNullException.ThrowIfNull(refreshedDatabase);
+
+		var previousAssets = previousDatabase.Assets.ToDictionary(asset => asset.Id);
+		var refreshedAssets = refreshedDatabase.Assets.ToDictionary(asset => asset.Id);
+		var changedNodeIds = new HashSet<Guid>();
+
+		foreach (var entry in previousAssets)
+		{
+			if (refreshedAssets.TryGetValue(entry.Key, out var refreshedAsset) == false ||
+			    AssetEntriesEqual(entry.Value, refreshedAsset) == false)
+			{
+				changedNodeIds.Add(entry.Key);
+			}
+		}
+
+		foreach (var entry in refreshedAssets)
+		{
+			if (previousAssets.ContainsKey(entry.Key) == false)
+			{
+				changedNodeIds.Add(entry.Key);
+			}
+		}
+
+		return changedNodeIds.ToArray();
+	}
+
+	private static bool AssetEntriesEqual(AssetDatabaseEntry left, AssetDatabaseEntry right)
+	{
+		return left.Id == right.Id &&
+		       left.SourceId == right.SourceId &&
+		       left.Type == right.Type &&
+		       string.Equals(left.Name, right.Name, StringComparison.Ordinal) &&
+		       string.Equals(left.NodeKey, right.NodeKey, StringComparison.Ordinal) &&
+		       left.IsGenerated == right.IsGenerated &&
+		       string.Equals(left.RelativeSourcePath, right.RelativeSourcePath, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativeAssetPath, right.RelativeAssetPath, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativeStatePath, right.RelativeStatePath, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativeMetaPath, right.RelativeMetaPath, StringComparison.Ordinal) &&
+		       TextureSummariesEqual(left.TextureSummary, right.TextureSummary) &&
+		       MaterialSummariesEqual(left.MaterialSummary, right.MaterialSummary) &&
+		       DataAssetSummariesEqual(left.DataAssetSummary, right.DataAssetSummary) &&
+		       MeshSummariesEqual(left.MeshSummary, right.MeshSummary) &&
+		       ModelSummariesEqual(left.ModelSummary, right.ModelSummary) &&
+		       SceneSummariesEqual(left.SceneSummary, right.SceneSummary) &&
+		       PrefabSummariesEqual(left.PrefabSummary, right.PrefabSummary) &&
+		       ArtifactListsEqual(left.Artifacts, right.Artifacts);
+	}
+
+	private static bool TextureSummariesEqual(TextureAssetSummary? left, TextureAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       string.Equals(left.RelativeSourceAssetPath, right.RelativeSourceAssetPath, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativeImportedPath, right.RelativeImportedPath, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativeRuntimeArtifactPath, right.RelativeRuntimeArtifactPath, StringComparison.Ordinal) &&
+		       left.Width == right.Width &&
+		       left.Height == right.Height &&
+		       left.Channels == right.Channels &&
+		       left.IsSrgb == right.IsSrgb &&
+		       string.Equals(left.SourceExtension, right.SourceExtension, StringComparison.Ordinal);
+	}
+
+	private static bool MaterialSummariesEqual(MaterialAssetSummary? left, MaterialAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       left.MaterialType == right.MaterialType;
+	}
+
+	private static bool DataAssetSummariesEqual(DataAssetSummary? left, DataAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       string.Equals(left.DataAssetType, right.DataAssetType, StringComparison.Ordinal) &&
+		       string.Equals(left.DataAssetTypeId, right.DataAssetTypeId, StringComparison.Ordinal) &&
+		       string.Equals(left.DisplayName, right.DisplayName, StringComparison.Ordinal);
+	}
+
+	private static bool MeshSummariesEqual(MeshAssetSummary? left, MeshAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       string.Equals(left.RelativeImportedMeshPath, right.RelativeImportedMeshPath, StringComparison.Ordinal) &&
+		       left.VertexCount == right.VertexCount &&
+		       left.IndexCount == right.IndexCount;
+	}
+
+	private static bool ModelSummariesEqual(Model3DAssetSummary? left, Model3DAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       string.Equals(left.RelativeImportedModelPath, right.RelativeImportedModelPath, StringComparison.Ordinal) &&
+		       left.RootNodeCount == right.RootNodeCount;
+	}
+
+	private static bool SceneSummariesEqual(SceneAssetSummary? left, SceneAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       string.Equals(left.GlobalCellPath, right.GlobalCellPath, StringComparison.Ordinal) &&
+		       left.SpatialCellCount == right.SpatialCellCount;
+	}
+
+	private static bool PrefabSummariesEqual(PrefabAssetSummary? left, PrefabAssetSummary? right)
+	{
+		return left is null && right is null ||
+		       left is not null &&
+		       right is not null &&
+		       left.RootEntityId == right.RootEntityId &&
+		       left.EntityCount == right.EntityCount;
+	}
+
+	private static bool ArtifactListsEqual(IReadOnlyList<AssetArtifactRecord> left, IReadOnlyList<AssetArtifactRecord> right)
+	{
+		if (ReferenceEquals(left, right))
+		{
+			return true;
+		}
+
+		if (left.Count != right.Count)
+		{
+			return false;
+		}
+
+		for (var i = 0; i < left.Count; i++)
+		{
+			if (ArtifactEqual(left[i], right[i]) == false)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static bool ArtifactEqual(AssetArtifactRecord left, AssetArtifactRecord right)
+	{
+		return left.NodeId == right.NodeId &&
+		       string.Equals(left.ArtifactKey, right.ArtifactKey, StringComparison.Ordinal) &&
+		       string.Equals(left.Kind, right.Kind, StringComparison.Ordinal) &&
+		       string.Equals(left.Target, right.Target, StringComparison.Ordinal) &&
+		       string.Equals(left.RelativePath, right.RelativePath, StringComparison.Ordinal) &&
+		       string.Equals(left.ContentHash, right.ContentHash, StringComparison.Ordinal) &&
+		       left.ByteSize == right.ByteSize &&
+		       left.ChunkIndex == right.ChunkIndex &&
+		       left.ChunkCount == right.ChunkCount &&
+		       string.Equals(left.StreamGroup, right.StreamGroup, StringComparison.Ordinal) &&
+		       string.Equals(left.MetadataJson, right.MetadataJson, StringComparison.Ordinal);
 	}
 
 	private static void ReleaseAssetDatabaseConnections()

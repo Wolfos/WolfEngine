@@ -52,6 +52,7 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorProjectService _projectService;
+	private readonly IEditorAssetRefreshService _assetRefreshService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorNotificationService _notificationService;
@@ -79,6 +80,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorProjectService projectService,
+		IEditorAssetRefreshService assetRefreshService,
 		IEditorPlaySession playSession,
 		IEditorInteractionState interactionState,
 		IEditorNotificationService notificationService,
@@ -87,6 +89,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_assetRefreshService = assetRefreshService ?? throw new ArgumentNullException(nameof(assetRefreshService));
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
@@ -173,7 +176,7 @@ public sealed class EditorCommandService : IEditorCommandService
 
 		try
 		{
-			_projectService.ReloadAssetDatabase();
+			_assetRefreshService.RefreshOpenSceneAssets();
 			return true;
 		}
 		catch (Exception ex)

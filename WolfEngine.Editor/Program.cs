@@ -51,6 +51,7 @@ public static class Program
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
 		services.AddSingleton<IEditorInteractionState, EditorInteractionState>();
+		services.AddSingleton<IEditorAssetRefreshService, EditorAssetRefreshService>();
 		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();
 		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
 		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();

@@ -433,6 +433,61 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void ReloadAssetDatabase_InvalidatesChangedAssetsAndDependentsOnly()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineReloadInvalidationTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "ReloadInvalidationTests");
+
+		var changedAssetId = Guid.NewGuid();
+		var unchangedAssetId = Guid.NewGuid();
+		var dependentAssetId = Guid.NewGuid();
+		var pipeline = new TrackingProjectAssetPipelineService
+		{
+			NextRefreshProjectIncrementalResult = CreateAssetDatabase(
+				CreateAssetEntry(changedAssetId, "hash-a"),
+				CreateAssetEntry(unchangedAssetId, "hash-static"),
+				CreateAssetEntry(dependentAssetId, "hash-dependent")),
+		};
+		pipeline.DependentInvalidations[changedAssetId] = [dependentAssetId];
+
+		var registry = new TestAssetInstanceRegistry();
+		registry.Register(changedAssetId, new object());
+		registry.Register(unchangedAssetId, new object());
+		registry.Register(dependentAssetId, new object());
+
+		var projectService = new EditorProjectService(pipeline, registry);
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.NextRefreshProjectIncrementalResult = CreateAssetDatabase(
+				CreateAssetEntry(changedAssetId, "hash-b"),
+				CreateAssetEntry(unchangedAssetId, "hash-static"),
+				CreateAssetEntry(dependentAssetId, "hash-dependent"));
+
+			registry.Register(changedAssetId, new object());
+			registry.Register(unchangedAssetId, new object());
+			registry.Register(dependentAssetId, new object());
+
+			var refreshResult = projectService.ReloadAssetDatabase();
+
+			Assert.That(refreshResult.InvalidatedAssetIds, Is.EquivalentTo(new[] { changedAssetId, dependentAssetId }));
+			Assert.That(registry.GetInstance(changedAssetId, typeof(object)), Is.Null);
+			Assert.That(registry.GetInstance(dependentAssetId, typeof(object)), Is.Null);
+			Assert.That(registry.GetInstance(unchangedAssetId, typeof(object)), Is.Not.Null);
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
 	public void ReopenProject_WithUnchangedAssets_DoesNotReimportSources()
 	{
 		using var environment = new EditorProjectTestEnvironment();
@@ -605,6 +660,11 @@ public sealed class AssetsWindowTests
 	{
 		private readonly Dictionary<Guid, object> _instances = new();
 
+		public void Register(Guid assetId, object instance)
+		{
+			_instances[assetId] = instance;
+		}
+
 		public object? GetInstance(Guid assetId, Type expectedType)
 		{
 			if (_instances.TryGetValue(assetId, out var instance) == false)
@@ -671,7 +731,28 @@ public sealed class AssetsWindowTests
 		public AssetDatabase RefreshProjectIncremental(string projectRootPath)
 		{
 			RefreshProjectIncrementalCalls++;
-			return new AssetDatabase();
+			return NextRefreshProjectIncrementalResult ?? new AssetDatabase();
+		}
+
+		public IReadOnlyCollection<Guid> ExpandInvalidationClosure(string projectRootPath, IEnumerable<Guid> changedNodeIds)
+		{
+			var results = changedNodeIds
+				.Where(nodeId => nodeId != Guid.Empty)
+				.ToHashSet();
+			foreach (var nodeId in results.ToArray())
+			{
+				if (DependentInvalidations.TryGetValue(nodeId, out var dependentNodeIds) == false)
+				{
+					continue;
+				}
+
+				foreach (var dependentNodeId in dependentNodeIds)
+				{
+					results.Add(dependentNodeId);
+				}
+			}
+
+			return results.ToArray();
 		}
 
 		public void RemoveDeletedSource(string projectRootPath, string relativeSourcePath)
@@ -732,11 +813,48 @@ public sealed class AssetsWindowTests
 			LastRemovedSourcePath = null;
 			LastRemovedFolderPath = null;
 		}
+
+		public AssetDatabase? NextRefreshProjectIncrementalResult { get; set; }
+		public Dictionary<Guid, List<Guid>> DependentInvalidations { get; } = new();
 	}
 
 	private static void WaitForTimestampTick()
 	{
 		Thread.Sleep(1100);
+	}
+
+	private static AssetDatabase CreateAssetDatabase(params AssetDatabaseEntry[] assets)
+	{
+		return new AssetDatabase
+		{
+			Assets = assets.ToList()
+		};
+	}
+
+	private static AssetDatabaseEntry CreateAssetEntry(Guid assetId, string contentHash)
+	{
+		return new AssetDatabaseEntry
+		{
+			Id = assetId,
+			SourceId = assetId,
+			Type = AssetType.Mesh,
+			Name = assetId.ToString("N"),
+			NodeKey = "main",
+			RelativeSourcePath = $"Assets/{assetId:N}.glb",
+			RelativeAssetPath = $"Assets/{assetId:N}.glb",
+			RelativeMetaPath = $"Assets/{assetId:N}.glb.meta",
+			Artifacts =
+			[
+				new AssetArtifactRecord
+				{
+					NodeId = assetId,
+					ArtifactKey = "mesh",
+					Kind = "RuntimeMesh",
+					RelativePath = $"Library/Artifacts/{assetId:N}.mesh.bin",
+					ContentHash = contentHash
+				}
+			]
+		};
 	}
 
 	private static void CreateManifestBackedProjectStructure(string projectRoot, string projectName)
