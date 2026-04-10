@@ -569,6 +569,172 @@ public sealed class RigidbodySystemTests
 		Assert.That(sawPersisted, Is.True);
 	}
 
+	[Test]
+	public void VehiclePhysicsUpdate_CreatesVehicleRuntimeAndSingleChassisBody()
+	{
+		var world = new World(WorldTag.Game);
+		var chassis = CreateVehicleChassis(world, Matrix4x4.CreateTranslation(0.0f, 2.0f, 0.0f));
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(vehicleSystem.GetTrackedVehicleCount(world), Is.EqualTo(1));
+		Assert.That(rigidbodySystem.GetTrackedBodyCount(world), Is.EqualTo(1));
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out _), Is.True);
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_MissingRigidbodySkipsVehicleCreation()
+	{
+		var world = new World(WorldTag.Game);
+		var chassis = world.CreateEntity("Vehicle", Matrix4x4.Identity);
+		world.AddComponent(chassis, BoxCollider.CreateDefault());
+		world.AddComponent(chassis, Vehicle.CreateDefault());
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(vehicleSystem.GetTrackedVehicleCount(world), Is.EqualTo(0));
+		Assert.That(rigidbodySystem.GetTrackedBodyCount(world), Is.EqualTo(0));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_ThrottleMovesChassisForward()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		ref var input = ref world.GetComponent<VehicleInput>(chassis);
+		input.Throttle = 1.0f;
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 60);
+
+		Assert.That(world.GetComponent<LocalTransform>(chassis).LocalPosition.Z, Is.GreaterThan(0.2f));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_SteerChangesChassisHeading()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		ref var input = ref world.GetComponent<VehicleInput>(chassis);
+		input.Throttle = 1.0f;
+		input.Steer = 1.0f;
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 90);
+
+		var rotation = world.GetComponent<LocalTransform>(chassis).LocalRotation;
+		Assert.That(MathF.Abs(rotation.Y), Is.GreaterThan(0.02f));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_SuspensionKeepsChassisAboveGroundAndSyncsWheelVisuals()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 120);
+
+		var chassisTransform = world.GetComponent<LocalTransform>(chassis);
+		Assert.That(chassisTransform.LocalPosition.Y, Is.GreaterThan(0.3f));
+
+		var vehicle = world.GetComponent<Vehicle>(chassis);
+		Assert.That(world.GetComponent<LocalTransform>(vehicle.FrontLeft.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
+		Assert.That(world.GetComponent<LocalTransform>(vehicle.FrontRight.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
+		Assert.That(world.GetComponent<LocalTransform>(vehicle.RearLeft.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
+		Assert.That(world.GetComponent<LocalTransform>(vehicle.RearRight.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_DestroyedWheelEntityDoesNotTearDownVehicle()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		var vehicle = world.GetComponent<Vehicle>(chassis);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+		world.DestroyEntity(vehicle.FrontLeft.VisualEntity);
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(vehicleSystem.GetTrackedVehicleCount(world), Is.EqualTo(1));
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out _), Is.True);
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_DestroyedChassisRemovesVehicleRuntime()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+		world.DestroyEntity(chassis);
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(vehicleSystem.GetTrackedVehicleCount(world), Is.EqualTo(0));
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out _), Is.False);
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_ChangingWheelRadiusRecreatesChassisBody()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out var before), Is.True);
+
+		ref var vehicle = ref world.GetComponent<Vehicle>(chassis);
+		vehicle.FrontLeft.Radius += 0.1f;
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out var after), Is.True);
+		Assert.That(after, Is.Not.EqualTo(before));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_ChangingInputDoesNotRecreateChassisBody()
+	{
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out var before), Is.True);
+
+		ref var input = ref world.GetComponent<VehicleInput>(chassis);
+		input.Throttle = 1.0f;
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 1);
+
+		Assert.That(rigidbodySystem.TryGetTrackedBodyId(world, chassis, out var after), Is.True);
+		Assert.That(after, Is.EqualTo(before));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_ParentedChassisWritesBackLocalTransform()
+	{
+		var world = new World(WorldTag.Game);
+		var parent = world.CreateEntity("Parent", Matrix4x4.CreateTranslation(new Vector3(10.0f, 0.0f, 0.0f)));
+		var chassis = CreateVehicleChassis(world, Matrix4x4.CreateTranslation(new Vector3(1.0f, 2.0f, 0.0f)));
+		world.SetParent(chassis, parent);
+		CreateGround(world);
+		ref var input = ref world.GetComponent<VehicleInput>(chassis);
+		input.Throttle = 1.0f;
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 60);
+
+		Assert.That(world.GetComponent<LocalTransform>(chassis).LocalPosition.Z, Is.GreaterThan(0.2f));
+		Assert.That(world.GetComponent<LocalTransform>(chassis).LocalPosition.X, Is.EqualTo(1.0f).Within(0.5f));
+	}
+
 	private sealed class Vector3Comparer(float tolerance) : IEqualityComparer<Vector3>
 	{
 		public static Vector3Comparer Within(float tolerance)
@@ -611,5 +777,59 @@ public sealed class RigidbodySystemTests
 	private static Mesh CreateRaisedQuadMesh()
 	{
 		return CreateQuadMesh(1.0f);
+	}
+
+	private static World CreateVehicleWorldWithGround(out Entity chassis)
+	{
+		var world = new World(WorldTag.Game);
+		CreateGround(world);
+		chassis = CreateVehicleChassis(world, Matrix4x4.CreateTranslation(0.0f, 2.0f, 0.0f));
+		return world;
+	}
+
+	private static void CreateGround(World world)
+	{
+		var ground = world.CreateEntity("Ground", Matrix4x4.CreateTranslation(0.0f, -0.5f, 0.0f));
+		var collider = BoxCollider.CreateDefault();
+		collider.HalfExtents = new Vector3(50.0f, 0.5f, 50.0f);
+		world.AddComponent(ground, collider);
+	}
+
+	private static Entity CreateVehicleChassis(World world, Matrix4x4 transform)
+	{
+		var chassis = world.CreateEntity("Vehicle", transform);
+		var collider = BoxCollider.CreateDefault();
+		collider.HalfExtents = new Vector3(0.9f, 0.35f, 1.4f);
+		world.AddComponent(chassis, collider);
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.BodyType = RigidbodyBodyType.Dynamic;
+		rigidbody.Mass = 1200.0f;
+		world.AddComponent(chassis, rigidbody);
+		var vehicle = Vehicle.CreateDefault();
+		vehicle.FrontLeft.VisualEntity = CreateWheelEntity(world, "FrontLeft");
+		vehicle.FrontRight.VisualEntity = CreateWheelEntity(world, "FrontRight");
+		vehicle.RearLeft.VisualEntity = CreateWheelEntity(world, "RearLeft");
+		vehicle.RearRight.VisualEntity = CreateWheelEntity(world, "RearRight");
+		world.AddComponent(chassis, vehicle);
+		world.AddComponent(chassis, VehicleInput.CreateDefault());
+		world.SetParent(vehicle.FrontLeft.VisualEntity, chassis);
+		world.SetParent(vehicle.FrontRight.VisualEntity, chassis);
+		world.SetParent(vehicle.RearLeft.VisualEntity, chassis);
+		world.SetParent(vehicle.RearRight.VisualEntity, chassis);
+		return chassis;
+	}
+
+	private static Entity CreateWheelEntity(World world, string name)
+	{
+		return world.CreateEntity(name, Matrix4x4.Identity);
+	}
+
+	private static void StepVehicle(World world, VehicleSystem vehicleSystem, RigidbodySystem rigidbodySystem, int steps)
+	{
+		for (var index = 0; index < steps; index++)
+		{
+			vehicleSystem.PhysicsUpdate(1.0f / 60.0f, world);
+			rigidbodySystem.PhysicsUpdate(1.0f / 60.0f, world);
+		}
 	}
 }

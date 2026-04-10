@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Threading;
 using JoltPhysicsSharp;
 using WolfEngine;
 using WolfEngine.ECS;
@@ -11,24 +10,15 @@ namespace WolfEngine.Physics;
 
 public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDisposable
 {
-	private const uint PhysicsObjectLayerCount = CollisionFilter.MaxLayer + 1;
-	private const uint BroadPhaseLayerCount = 1;
 	private const int CollisionSteps = 1;
-
-	private static readonly Vector3 DefaultGravity = new(0.0f, -9.81f, 0.0f);
 	private static readonly Vector3 QueryShapeScale = Vector3.One;
-	private static readonly Lock FoundationLock = new();
-	private static int _foundationReferenceCount;
-	private static bool _foundationHandlersConfigured;
-
-	private readonly Dictionary<World, PhysicsWorldState> _worldStates = new();
 	private readonly PhysicsQueryBroadPhaseLayerFilter _broadPhaseLayerFilter = new();
 	private readonly PhysicsQueryShapeFilter _shapeFilter = new();
 	private bool _disposed;
 
 	public RigidbodySystem()
 	{
-		AcquireFoundation();
+		PhysicsWorldRegistry.AcquireOwner();
 	}
 
 	public WorldTag GetTag() => WorldTag.Game;
@@ -39,7 +29,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 		using (FrameProfiler.Instance.Measure("Physics.Update"))
 		{
-			var state = GetOrCreateWorldState(world);
+			var state = PhysicsWorldRegistry.GetOrCreateWorldState(world);
 			state.ContactEvents.Clear();
 			SynchronizeBodies(world, state, fixedDeltaTime);
 
@@ -53,6 +43,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			}
 
 			SyncDynamicBodiesBackToWorld(world, state);
+			VehicleSystem.SyncVehicleVisuals(world, state);
 		}
 	}
 
@@ -63,10 +54,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return;
 		}
 
-		if (_worldStates.Remove(world, out var state))
-		{
-			state.Dispose();
-		}
+		PhysicsWorldRegistry.RemoveWorld(world);
 	}
 
 	public bool TryMoveKinematicBody(
@@ -77,7 +65,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		float fixedDeltaTime)
 	{
 		ArgumentNullException.ThrowIfNull(world);
-		if (_worldStates.TryGetValue(world, out var state) == false ||
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false ||
 		    state.BodiesByEntity.TryGetValue(entity, out var bodyState) == false ||
 		    bodyState.Definition.MotionType != MotionType.Kinematic)
 		{
@@ -108,7 +96,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(world);
 		hit = default;
 
-		if (_worldStates.TryGetValue(world, out var state) == false || direction.LengthSquared() <= 0.0f)
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false || direction.LengthSquared() <= 0.0f)
 		{
 			return false;
 		}
@@ -155,7 +143,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(world);
 		hit = default;
 
-		if (_worldStates.TryGetValue(world, out var state) == false || direction.LengthSquared() <= 0.0f)
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false || direction.LengthSquared() <= 0.0f)
 		{
 			return false;
 		}
@@ -225,7 +213,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(hits);
 		hits.Clear();
 
-		if (_worldStates.TryGetValue(world, out var state) == false)
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false)
 		{
 			return 0;
 		}
@@ -288,7 +276,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	public IReadOnlyList<PhysicsContactEvent> GetContactEvents(World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
-		return _worldStates.TryGetValue(world, out var state) ? state.ContactEvents : Array.Empty<PhysicsContactEvent>();
+		return PhysicsWorldRegistry.TryGetWorldState(world, out var state) ? state.ContactEvents : Array.Empty<PhysicsContactEvent>();
 	}
 
 	public void Dispose()
@@ -298,28 +286,22 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return;
 		}
 
-		foreach (var state in _worldStates.Values)
-		{
-			state.Dispose();
-		}
-
-		_worldStates.Clear();
 		_broadPhaseLayerFilter.Dispose();
 		_shapeFilter.Dispose();
-		ReleaseFoundation();
+		PhysicsWorldRegistry.ReleaseOwner();
 		_disposed = true;
 	}
 
-	internal int GetTrackedWorldCount() => _worldStates.Count;
+	internal int GetTrackedWorldCount() => PhysicsWorldRegistry.TryGetWorldStateCount(out var count) ? count : 0;
 
 	internal int GetTrackedBodyCount(World world)
 	{
-		return _worldStates.TryGetValue(world, out var state) ? state.BodiesByEntity.Count : 0;
+		return PhysicsWorldRegistry.TryGetWorldState(world, out var state) ? state.BodiesByEntity.Count : 0;
 	}
 
 	internal bool TryGetBodyMotionType(World world, Entity entity, out MotionType motionType)
 	{
-		if (_worldStates.TryGetValue(world, out var state) &&
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) &&
 		    state.BodiesByEntity.TryGetValue(entity, out var bodyState))
 		{
 			motionType = state.BodyInterface.GetMotionType(bodyState.BodyId);
@@ -332,7 +314,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 	internal bool TryGetTrackedBodyId(World world, Entity entity, out BodyID bodyId)
 	{
-		if (_worldStates.TryGetValue(world, out var state) &&
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) &&
 		    state.BodiesByEntity.TryGetValue(entity, out var bodyState))
 		{
 			bodyId = bodyState.BodyId;
@@ -341,57 +323,6 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 		bodyId = BodyID.Invalid;
 		return false;
-	}
-
-	private PhysicsWorldState GetOrCreateWorldState(World world)
-	{
-		if (_worldStates.TryGetValue(world, out var existingState))
-		{
-			return existingState;
-		}
-
-		var broadPhaseLayerInterface = new BroadPhaseLayerInterfaceTable(PhysicsObjectLayerCount, BroadPhaseLayerCount);
-		var objectLayerPairFilter = new ObjectLayerPairFilterTable(PhysicsObjectLayerCount);
-		var broadPhaseLayer = new BroadPhaseLayer(0);
-		for (var i = 0u; i < PhysicsObjectLayerCount; i++)
-		{
-			var objectLayer = new ObjectLayer(i);
-			broadPhaseLayerInterface.MapObjectToBroadPhaseLayer(objectLayer, broadPhaseLayer);
-			for (var j = 0u; j < PhysicsObjectLayerCount; j++)
-			{
-				objectLayerPairFilter.EnableCollision(objectLayer, new ObjectLayer(j));
-			}
-		}
-
-		var objectVsBroadPhaseLayerFilter = new ObjectVsBroadPhaseLayerFilterTable(
-			broadPhaseLayerInterface,
-			BroadPhaseLayerCount,
-			objectLayerPairFilter,
-			PhysicsObjectLayerCount);
-
-		var settings = new PhysicsSystemSettings
-		{
-			MaxBodies = 65536,
-			MaxBodyPairs = 65536,
-			MaxContactConstraints = 65536,
-			NumBodyMutexes = 0,
-			ObjectLayerPairFilter = objectLayerPairFilter,
-			BroadPhaseLayerInterface = broadPhaseLayerInterface,
-			ObjectVsBroadPhaseLayerFilter = objectVsBroadPhaseLayerFilter
-		};
-
-		var physicsSystem = new PhysicsSystem(settings)
-		{
-			Gravity = DefaultGravity
-		};
-		var state = new PhysicsWorldState(
-			physicsSystem,
-			new JobSystemThreadPool(),
-			broadPhaseLayerInterface,
-			objectLayerPairFilter,
-			objectVsBroadPhaseLayerFilter);
-		_worldStates.Add(world, state);
-		return state;
 	}
 
 	private static void SynchronizeBodies(World world, PhysicsWorldState state, float fixedDeltaTime)
@@ -410,6 +341,11 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				{
 					var entity = entry.Key;
 					var bodyState = entry.Value;
+					if (bodyState.Owner != PhysicsBodyOwner.Rigidbody)
+					{
+						continue;
+					}
+
 					var currentDefinition = CreateDefinition(world, entity, bodyState.Definition);
 					if (currentDefinition is null)
 					{
@@ -500,7 +436,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				continue;
 			}
 
-			CreateBody(state, entity, definition.Value);
+			CreateBody(state, entity, definition.Value, PhysicsBodyOwner.Rigidbody);
 			changed = true;
 		}
 	}
@@ -511,6 +447,11 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		PhysicsBodyDefinition? previousDefinition = null)
 	{
 		if (world.IsAlive(entity) == false || TryGetColliderKind(world, entity, out var colliderKind) == false)
+		{
+			return null;
+		}
+
+		if (world.HasComponent<Vehicle>(entity))
 		{
 			return null;
 		}
@@ -626,7 +567,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		return PhysicsShapeDefinition.CreateCapsule(halfHeight, radius, center);
 	}
 
-	private static void CreateBody(PhysicsWorldState state, Entity entity, PhysicsBodyDefinition definition)
+	internal static void CreateBody(PhysicsWorldState state, Entity entity, PhysicsBodyDefinition definition, PhysicsBodyOwner owner)
 	{
 		var shapeHandle = CreateShape(definition.Shape);
 		using var bodySettings = new BodyCreationSettings(
@@ -653,12 +594,12 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		var bodyId = state.BodyInterface.CreateAndAddBody(
 			bodySettings,
 			definition.StartActivated ? Activation.Activate : Activation.DontActivate);
-		var bodyState = new PhysicsBodyState(entity, bodyId, definition, shapeHandle.BaseShape, shapeHandle.TranslatedShape);
+		var bodyState = new PhysicsBodyState(entity, bodyId, definition, shapeHandle.BaseShape, shapeHandle.TranslatedShape, owner);
 		state.BodiesByEntity.Add(entity, bodyState);
 		state.BodiesByBodyId.Add(bodyId, bodyState);
 	}
 
-	private static void RemoveBody(PhysicsWorldState state, Entity entity)
+	internal static void RemoveBody(PhysicsWorldState state, Entity entity)
 	{
 		if (state.BodiesByEntity.Remove(entity, out var bodyState))
 		{
@@ -1135,310 +1076,6 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	{
 		return Vector3.DistanceSquared(previousPosition, currentPosition) > 0.000001f ||
 		       MathF.Abs(Quaternion.Dot(previousRotation, currentRotation)) < 0.999999f;
-	}
-
-	private static void AcquireFoundation()
-	{
-		lock (FoundationLock)
-		{
-			if (_foundationHandlersConfigured == false)
-			{
-				Foundation.SetTraceHandler(Console.WriteLine);
-#if DEBUG
-				Foundation.SetAssertFailureHandler((expression, message, file, line) =>
-				{
-					var failureMessage = message ?? expression ?? "Unknown Jolt assertion failure.";
-					throw new InvalidOperationException($"[JoltPhysics] Assertion failure at {file}:{line}: {failureMessage}");
-				});
-#endif
-				_foundationHandlersConfigured = true;
-			}
-
-			if (_foundationReferenceCount == 0 && Foundation.Init() == false)
-			{
-				throw new InvalidOperationException("Failed to initialize the Jolt physics foundation.");
-			}
-
-			_foundationReferenceCount++;
-		}
-	}
-
-	private static void ReleaseFoundation()
-	{
-		lock (FoundationLock)
-		{
-			if (_foundationReferenceCount == 0)
-			{
-				return;
-			}
-
-			_foundationReferenceCount--;
-			if (_foundationReferenceCount == 0)
-			{
-				Foundation.Shutdown();
-			}
-		}
-	}
-
-	private sealed class PhysicsWorldState : IDisposable
-	{
-		private readonly Lock _contactEventsLock = new();
-
-		public PhysicsWorldState(
-			PhysicsSystem physicsSystem,
-			JobSystemThreadPool jobSystem,
-			BroadPhaseLayerInterfaceTable broadPhaseLayerInterface,
-			ObjectLayerPairFilterTable objectLayerPairFilter,
-			ObjectVsBroadPhaseLayerFilterTable objectVsBroadPhaseLayerFilter)
-		{
-			PhysicsSystem = physicsSystem;
-			JobSystem = jobSystem;
-			BroadPhaseLayerInterface = broadPhaseLayerInterface;
-			ObjectLayerPairFilter = objectLayerPairFilter;
-			ObjectVsBroadPhaseLayerFilter = objectVsBroadPhaseLayerFilter;
-			BodyInterface = physicsSystem.BodyInterface;
-
-			PhysicsSystem.OnContactValidate += OnContactValidate;
-			PhysicsSystem.OnContactAdded += OnContactAdded;
-			PhysicsSystem.OnContactPersisted += OnContactPersisted;
-			PhysicsSystem.OnContactRemoved += OnContactRemoved;
-		}
-
-		public PhysicsSystem PhysicsSystem { get; }
-		public JobSystemThreadPool JobSystem { get; }
-		public BroadPhaseLayerInterfaceTable BroadPhaseLayerInterface { get; }
-		public ObjectLayerPairFilterTable ObjectLayerPairFilter { get; }
-		public ObjectVsBroadPhaseLayerFilterTable ObjectVsBroadPhaseLayerFilter { get; }
-		public BodyInterface BodyInterface { get; }
-		public Dictionary<Entity, PhysicsBodyState> BodiesByEntity { get; } = new();
-		public Dictionary<BodyID, PhysicsBodyState> BodiesByBodyId { get; } = new();
-		public List<PhysicsContactEvent> ContactEvents { get; } = new();
-		public int LastBoxColliderCount { get; set; } = -1;
-		public int LastCapsuleColliderCount { get; set; } = -1;
-		public int LastMeshColliderCount { get; set; } = -1;
-
-		public void Dispose()
-		{
-			foreach (var bodyState in BodiesByEntity.Values)
-			{
-				BodyInterface.RemoveAndDestroyBody(bodyState.BodyId);
-				bodyState.Dispose();
-			}
-
-			BodiesByEntity.Clear();
-			BodiesByBodyId.Clear();
-			ContactEvents.Clear();
-			PhysicsSystem.Dispose();
-			JobSystem.Dispose();
-			ObjectVsBroadPhaseLayerFilter.Dispose();
-			ObjectLayerPairFilter.Dispose();
-			BroadPhaseLayerInterface.Dispose();
-		}
-
-		private ValidateResult OnContactValidate(
-			PhysicsSystem _,
-			in Body bodyA,
-			in Body bodyB,
-			RVector3 __,
-			in CollideShapeResult ___)
-		{
-			if (BodiesByBodyId.TryGetValue(bodyA.ID, out var bodyStateA) == false ||
-			    BodiesByBodyId.TryGetValue(bodyB.ID, out var bodyStateB) == false)
-			{
-				return ValidateResult.AcceptContact;
-			}
-
-			return CanBodiesCollide(bodyStateA.Definition, bodyStateB.Definition)
-				? ValidateResult.AcceptContact
-				: ValidateResult.RejectContact;
-		}
-
-		private void OnContactAdded(
-			PhysicsSystem _,
-			in Body bodyA,
-			in Body bodyB,
-			in ContactManifold manifold,
-			ref ContactSettings settings)
-		{
-			AddContactEvent(PhysicsContactEventType.Added, bodyA, bodyB, manifold, settings);
-		}
-
-		private void OnContactPersisted(
-			PhysicsSystem _,
-			in Body bodyA,
-			in Body bodyB,
-			in ContactManifold manifold,
-			ref ContactSettings settings)
-		{
-			AddContactEvent(PhysicsContactEventType.Persisted, bodyA, bodyB, manifold, settings);
-		}
-
-		private void OnContactRemoved(PhysicsSystem _, ref SubShapeIDPair subShapePair)
-		{
-			AddRemovedContactEvent(subShapePair);
-		}
-
-		private void AddContactEvent(
-			PhysicsContactEventType eventType,
-			in Body bodyA,
-			in Body bodyB,
-			in ContactManifold manifold,
-			ContactSettings settings)
-		{
-			if (BodiesByBodyId.TryGetValue(bodyA.ID, out var bodyStateA) == false ||
-			    BodiesByBodyId.TryGetValue(bodyB.ID, out var bodyStateB) == false)
-			{
-				return;
-			}
-
-			var pointOnA = manifold.PointCount > 0
-				? manifold.GetWorldSpaceContactPointOn1(0)
-				: Vector3.Zero;
-			var pointOnB = manifold.PointCount > 0
-				? manifold.GetWorldSpaceContactPointOn2(0)
-				: Vector3.Zero;
-			var contactEvent = new PhysicsContactEvent(
-				eventType,
-				bodyStateA.Entity,
-				bodyStateB.Entity,
-				NormalizeDirection(manifold.WorldSpaceNormal),
-				pointOnA,
-				pointOnB,
-				manifold.PenetrationDepth,
-				settings.IsSensor);
-
-			lock (_contactEventsLock)
-			{
-				ContactEvents.Add(contactEvent);
-			}
-		}
-
-		private void AddRemovedContactEvent(SubShapeIDPair subShapePair)
-		{
-			if (BodiesByBodyId.TryGetValue(subShapePair.Body1ID, out var bodyStateA) == false ||
-			    BodiesByBodyId.TryGetValue(subShapePair.Body2ID, out var bodyStateB) == false)
-			{
-				return;
-			}
-
-			lock (_contactEventsLock)
-			{
-				ContactEvents.Add(new PhysicsContactEvent(
-					PhysicsContactEventType.Removed,
-					bodyStateA.Entity,
-					bodyStateB.Entity,
-					Vector3.Zero,
-					Vector3.Zero,
-					Vector3.Zero,
-					0.0f,
-					false));
-			}
-		}
-
-		private static bool CanBodiesCollide(PhysicsBodyDefinition bodyA, PhysicsBodyDefinition bodyB)
-		{
-			var layerABit = 1u << (int)bodyA.Layer;
-			var layerBBit = 1u << (int)bodyB.Layer;
-			return (bodyA.CollidesWith & layerBBit) != 0 &&
-			       (bodyB.CollidesWith & layerABit) != 0;
-		}
-	}
-
-	private sealed class PhysicsBodyState : IDisposable
-	{
-		public PhysicsBodyState(
-			Entity entity,
-			BodyID bodyId,
-			PhysicsBodyDefinition definition,
-			Shape baseShape,
-			RotatedTranslatedShape? translatedShape)
-		{
-			Entity = entity;
-			BodyId = bodyId;
-			Definition = definition;
-			BaseShape = baseShape;
-			TranslatedShape = translatedShape;
-		}
-
-		public Entity Entity { get; }
-		public BodyID BodyId { get; }
-		public PhysicsBodyDefinition Definition { get; set; }
-		public Shape BaseShape { get; }
-		public RotatedTranslatedShape? TranslatedShape { get; }
-
-		public void Dispose()
-		{
-			TranslatedShape?.Dispose();
-			BaseShape.Dispose();
-		}
-	}
-
-	private sealed class PhysicsShapeHandle : IDisposable
-	{
-		public PhysicsShapeHandle(Shape baseShape, RotatedTranslatedShape? translatedShape, Shape shape)
-		{
-			BaseShape = baseShape;
-			TranslatedShape = translatedShape;
-			Shape = shape;
-		}
-
-		public Shape BaseShape { get; }
-		public RotatedTranslatedShape? TranslatedShape { get; }
-		public Shape Shape { get; }
-
-		public void Dispose()
-		{
-			TranslatedShape?.Dispose();
-			BaseShape.Dispose();
-		}
-	}
-
-	private readonly record struct PhysicsShapeDefinition(
-		PhysicsColliderKind Kind,
-		Vector3 BoxHalfExtents,
-		float CapsuleHalfHeight,
-		float CapsuleRadius,
-		Vector3 Center,
-		Mesh? Mesh,
-		Vector3 MeshScale)
-	{
-		public static PhysicsShapeDefinition CreateBox(Vector3 halfExtents, Vector3 center)
-		{
-			return new PhysicsShapeDefinition(PhysicsColliderKind.Box, halfExtents, 0.0f, 0.0f, center, null, Vector3.One);
-		}
-
-		public static PhysicsShapeDefinition CreateCapsule(float halfHeight, float radius, Vector3 center)
-		{
-			return new PhysicsShapeDefinition(PhysicsColliderKind.Capsule, Vector3.Zero, halfHeight, radius, center, null, Vector3.One);
-		}
-
-		public static PhysicsShapeDefinition CreateMesh(Mesh mesh, Vector3 meshScale)
-		{
-			return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale);
-		}
-	}
-
-	private readonly record struct PhysicsBodyDefinition(
-		PhysicsShapeDefinition Shape,
-		Vector3 Position,
-		Quaternion Rotation,
-		Vector3 LinearVelocity,
-		Vector3 AngularVelocity,
-		float Mass,
-		float GravityFactor,
-		bool StartActivated,
-		bool AllowSleeping,
-		bool UseManifoldReduction,
-		bool IsSensor,
-		uint Layer,
-		uint CollidesWith,
-		MotionType MotionType);
-
-	private enum PhysicsColliderKind
-	{
-		Box,
-		Capsule,
-		Mesh
 	}
 
 	private sealed class PhysicsQueryBroadPhaseLayerFilter : BroadPhaseLayerFilter
