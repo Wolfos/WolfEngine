@@ -419,6 +419,8 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			vehicle.TransmissionClutchStrength,
 			vehicle.TransmissionForwardGearRatio,
 			vehicle.TransmissionReverseGearRatio,
+			vehicle.LongitudinalFriction,
+			vehicle.LateralFriction,
 			wheels);
 	}
 
@@ -479,7 +481,7 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			MaxRPM = definition.EngineMaxRpm,
 			Inertia = definition.EngineInertia,
 			AngularDamping = definition.EngineAngularDamping,
-			NormalizedTorque = CreateFlatCurve()
+			NormalizedTorque = CreateFlatCurve(1.0f)
 		};
 	}
 
@@ -530,8 +532,8 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 				MaxSteerAngle = wheel.Steer ? wheel.MaxSteerAngle : 0.0f,
 				MaxBrakeTorque = wheel.MaxBrakeTorque,
 				MaxHandBrakeTorque = wheel.HandBrake ? wheel.MaxHandBrakeTorque : 0.0f,
-				LongitudinalFriction = CreateFlatCurve(),
-				LateralFriction = CreateFlatCurve()
+				LongitudinalFriction = CreateFlatCurve(definition.LongitudinalFriction),
+				LateralFriction = CreateFlatCurve(definition.LateralFriction)
 			};
 			wheels[index] = wheelSettings;
 		}
@@ -539,11 +541,11 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		return wheels;
 	}
 
-	private static LinearCurve CreateFlatCurve()
+	private static LinearCurve CreateFlatCurve(float value)
 	{
 		var curve = new LinearCurve();
-		curve.AddPoint(0.0f, 1.0f);
-		curve.AddPoint(1.0f, 1.0f);
+		curve.AddPoint(0.0f, value);
+		curve.AddPoint(1.0f, value);
 		return curve;
 	}
 
@@ -741,6 +743,8 @@ internal readonly record struct PhysicsVehicleDefinition(
 	float TransmissionClutchStrength,
 	float TransmissionForwardGearRatio,
 	float TransmissionReverseGearRatio,
+	float LongitudinalFriction,
+	float LateralFriction,
 	PhysicsVehicleWheelDefinition[] Wheels)
 {
 	public MotionType MotionType => MotionType.Dynamic;

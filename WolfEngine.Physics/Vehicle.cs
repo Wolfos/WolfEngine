@@ -84,6 +84,8 @@ public struct Vehicle : IEntityComponent
 	public float TransmissionClutchStrength;
 	public float TransmissionForwardGearRatio;
 	public float TransmissionReverseGearRatio;
+	public float LongitudinalFriction;
+	public float LateralFriction;
 	public VehicleWheel FrontLeft;
 	public VehicleWheel FrontRight;
 	public VehicleWheel RearLeft;
