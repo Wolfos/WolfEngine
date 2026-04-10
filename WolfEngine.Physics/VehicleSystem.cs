@@ -189,12 +189,17 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		};
 
 		var constraint = new VehicleConstraint(body, constraintSettings);
-		constraint.SetVehicleCollisionTester(new VehicleCollisionTesterRay(new ObjectLayer(definition.Layer)));
+		var collisionTester = new VehicleCollisionTesterRay(
+			new ObjectLayer(definition.Layer),
+			Normalize(definition.Up, Vector3.UnitY),
+			0.95f);
+		constraint.SetVehicleCollisionTester(collisionTester);
+		constraint.SetMaxPitchRollAngle(definition.MaxPitchRollAngle);
 		state.PhysicsSystem.AddConstraint(constraint);
 		state.PhysicsSystem.AddStepListener(constraint);
 
 		var controller = constraint.GetController<WheeledVehicleController>();
-		var vehicleState = new PhysicsVehicleState(entity, bodyId, bodyState, constraint, controller, definition);
+		var vehicleState = new PhysicsVehicleState(entity, bodyId, bodyState, constraint, collisionTester, controller, definition);
 		state.VehiclesByEntity.Add(entity, vehicleState);
 		ApplyRuntimeInput(world, vehicleState, fixedDeltaTime);
 	}
@@ -235,41 +240,109 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			                 handBrakeInput * (wheelDefinition.HandBrake ? wheelDefinition.MaxHandBrakeTorque : 0.0f);
 			wheel.ApplyTorque(wheelDefinition.Drive ? driveTorque : 0.0f, wheelBrake);
 		}
+
+		LogVehicleState(world, vehicleState, fixedDeltaTime, forwardInput, rightInput, brakeInput, handBrakeInput, driveTorque);
+	}
+
+	private static void LogVehicleState(
+		World world,
+		PhysicsVehicleState vehicleState,
+		float fixedDeltaTime,
+		float forwardInput,
+		float rightInput,
+		float brakeInput,
+		float handBrakeInput,
+		float driveTorque)
+	{
+		var shouldLog = MathF.Abs(forwardInput) > 0.01f ||
+		                MathF.Abs(rightInput) > 0.01f ||
+		                brakeInput > 0.01f ||
+		                handBrakeInput > 0.01f;
+		if (shouldLog == false)
+		{
+			vehicleState.LogTimer = 0.0f;
+			return;
+		}
+
+		vehicleState.LogTimer += fixedDeltaTime;
+		if (vehicleState.LogTimer < 0.5f)
+		{
+			return;
+		}
+
+		vehicleState.LogTimer = 0.0f;
+		var vehicleName = GetEntityDebugName(world, vehicleState.Entity);
+		Console.WriteLine(
+			$"[VehicleDebug] {vehicleName} throttle={forwardInput:F2} steer={rightInput:F2} brake={brakeInput:F2} handBrake={handBrakeInput:F2} torque={driveTorque:F1} linearSpeed={vehicleState.BodyState.Definition.LinearVelocity.Length():F2}");
+
+		for (var wheelIndex = 0; wheelIndex < vehicleState.Definition.Wheels.Length; wheelIndex++)
+		{
+			var wheel = vehicleState.Constraint.GetWheel<WheelWV>(wheelIndex);
+			Console.WriteLine(
+				$"[VehicleDebug] {vehicleName} wheel={GetWheelName(wheelIndex)} contact={wheel.HasContact} body={wheel.ContactBodyID} suspLen={wheel.SuspensionLength:F3} steer={wheel.SteerAngle:F3} angVel={wheel.AngularVelocity:F3} long={wheel.LongitudinalLambda:F3} lat={wheel.LateralLambda:F3} susp={wheel.SuspensionLambda:F3}");
+		}
+	}
+
+	private static string GetEntityDebugName(World world, Entity entity)
+	{
+		if (world.HasComponent<NameComponent>(entity))
+		{
+			var name = world.GetComponent<NameComponent>(entity).Name;
+			if (string.IsNullOrWhiteSpace(name) == false)
+			{
+				return name;
+			}
+		}
+
+		return entity.ToString();
+	}
+
+	private static string GetWheelName(int wheelIndex)
+	{
+		return wheelIndex switch
+		{
+			0 => "FrontLeft",
+			1 => "FrontRight",
+			2 => "RearLeft",
+			3 => "RearRight",
+			_ => wheelIndex.ToString()
+		};
 	}
 
 	private static bool HasStructuralChanges(PhysicsVehicleDefinition previous, PhysicsVehicleDefinition current)
 	{
-		return previous.BoxHalfExtents != current.BoxHalfExtents ||
-		       previous.BoxCenter != current.BoxCenter ||
-		       previous.Mass != current.Mass ||
-		       MathF.Abs(previous.GravityFactor - current.GravityFactor) > 0.0001f ||
+		return NearEqual(previous.BoxHalfExtents, current.BoxHalfExtents) == false ||
+		       NearEqual(previous.BoxCenter, current.BoxCenter) == false ||
+		       NearEqual(previous.CenterOfMassOffset, current.CenterOfMassOffset) == false ||
+		       NearEqual(previous.Mass, current.Mass) == false ||
+		       NearEqual(previous.GravityFactor, current.GravityFactor) == false ||
 		       previous.StartActivated != current.StartActivated ||
 		       previous.AllowSleeping != current.AllowSleeping ||
 		       previous.UseManifoldReduction != current.UseManifoldReduction ||
 		       previous.IsSensor != current.IsSensor ||
 		       previous.Layer != current.Layer ||
 		       previous.CollidesWith != current.CollidesWith ||
-		       previous.Up != current.Up ||
-		       previous.Forward != current.Forward ||
-		       MathF.Abs(previous.MaxPitchRollAngle - current.MaxPitchRollAngle) > 0.0001f ||
-		       MathF.Abs(previous.DifferentialLimitedSlipRatio - current.DifferentialLimitedSlipRatio) > 0.0001f ||
-		       MathF.Abs(previous.DifferentialRatio - current.DifferentialRatio) > 0.0001f ||
-		       MathF.Abs(previous.DifferentialLeftRightSplit - current.DifferentialLeftRightSplit) > 0.0001f ||
-		       MathF.Abs(previous.DifferentialEngineTorqueRatio - current.DifferentialEngineTorqueRatio) > 0.0001f ||
-		       MathF.Abs(previous.EngineMaxTorque - current.EngineMaxTorque) > 0.0001f ||
-		       MathF.Abs(previous.EngineMinRpm - current.EngineMinRpm) > 0.0001f ||
-		       MathF.Abs(previous.EngineMaxRpm - current.EngineMaxRpm) > 0.0001f ||
-		       MathF.Abs(previous.EngineInertia - current.EngineInertia) > 0.0001f ||
-		       MathF.Abs(previous.EngineAngularDamping - current.EngineAngularDamping) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionShiftUpRpm - current.TransmissionShiftUpRpm) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionShiftDownRpm - current.TransmissionShiftDownRpm) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionSwitchTime - current.TransmissionSwitchTime) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionClutchReleaseTime - current.TransmissionClutchReleaseTime) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionSwitchLatency - current.TransmissionSwitchLatency) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionClutchStrength - current.TransmissionClutchStrength) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionForwardGearRatio - current.TransmissionForwardGearRatio) > 0.0001f ||
-		       MathF.Abs(previous.TransmissionReverseGearRatio - current.TransmissionReverseGearRatio) > 0.0001f ||
-		       previous.Wheels.AsSpan().SequenceEqual(current.Wheels.AsSpan()) == false;
+		       NearEqual(previous.Up, current.Up) == false ||
+		       NearEqual(previous.Forward, current.Forward) == false ||
+		       NearEqual(previous.MaxPitchRollAngle, current.MaxPitchRollAngle) == false ||
+		       NearEqual(previous.DifferentialLimitedSlipRatio, current.DifferentialLimitedSlipRatio) == false ||
+		       NearEqual(previous.DifferentialRatio, current.DifferentialRatio) == false ||
+		       NearEqual(previous.DifferentialLeftRightSplit, current.DifferentialLeftRightSplit) == false ||
+		       NearEqual(previous.DifferentialEngineTorqueRatio, current.DifferentialEngineTorqueRatio) == false ||
+		       NearEqual(previous.EngineMaxTorque, current.EngineMaxTorque) == false ||
+		       NearEqual(previous.EngineMinRpm, current.EngineMinRpm) == false ||
+		       NearEqual(previous.EngineMaxRpm, current.EngineMaxRpm) == false ||
+		       NearEqual(previous.EngineInertia, current.EngineInertia) == false ||
+		       NearEqual(previous.EngineAngularDamping, current.EngineAngularDamping) == false ||
+		       NearEqual(previous.TransmissionShiftUpRpm, current.TransmissionShiftUpRpm) == false ||
+		       NearEqual(previous.TransmissionShiftDownRpm, current.TransmissionShiftDownRpm) == false ||
+		       NearEqual(previous.TransmissionSwitchTime, current.TransmissionSwitchTime) == false ||
+		       NearEqual(previous.TransmissionClutchReleaseTime, current.TransmissionClutchReleaseTime) == false ||
+		       NearEqual(previous.TransmissionSwitchLatency, current.TransmissionSwitchLatency) == false ||
+		       NearEqual(previous.TransmissionClutchStrength, current.TransmissionClutchStrength) == false ||
+		       NearEqual(previous.TransmissionForwardGearRatio, current.TransmissionForwardGearRatio) == false ||
+		       NearEqual(previous.TransmissionReverseGearRatio, current.TransmissionReverseGearRatio) == false ||
+		       WheelsEqual(previous.Wheels, current.Wheels) == false;
 	}
 
 	private static PhysicsVehicleDefinition? CreateDefinition(World world, Entity entity)
@@ -301,19 +374,21 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			return null;
 		}
 
+		var scaledCenterOfMassOffset = Multiply(vehicle.CenterOfMassOffset, worldScale);
 		var wheels = new[]
 		{
-			CreateWheelDefinition(vehicle.FrontLeft, worldScale),
-			CreateWheelDefinition(vehicle.FrontRight, worldScale),
-			CreateWheelDefinition(vehicle.RearLeft, worldScale),
-			CreateWheelDefinition(vehicle.RearRight, worldScale)
+			CreateWheelDefinition(vehicle.FrontLeft, worldScale, scaledCenterOfMassOffset),
+			CreateWheelDefinition(vehicle.FrontRight, worldScale, scaledCenterOfMassOffset),
+			CreateWheelDefinition(vehicle.RearLeft, worldScale, scaledCenterOfMassOffset),
+			CreateWheelDefinition(vehicle.RearRight, worldScale, scaledCenterOfMassOffset)
 		};
 
 		return new PhysicsVehicleDefinition(
-			position,
+			position + Vector3.Transform(scaledCenterOfMassOffset, rotation),
 			rotation,
 			Vector3.Max(new Vector3(0.001f), Multiply(boxCollider.HalfExtents, worldScale)),
-			Multiply(boxCollider.Center, worldScale),
+			Multiply(boxCollider.Center, worldScale) - scaledCenterOfMassOffset,
+			scaledCenterOfMassOffset,
 			rigidbody.LinearVelocity,
 			rigidbody.AngularVelocity,
 			MathF.Max(0.001f, rigidbody.Mass),
@@ -363,11 +438,16 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 
 	private static PhysicsVehicleWheelDefinition CreateWheelDefinition(VehicleWheel wheel, Vector3 worldScale)
 	{
+		return CreateWheelDefinition(wheel, worldScale, Vector3.Zero);
+	}
+
+	private static PhysicsVehicleWheelDefinition CreateWheelDefinition(VehicleWheel wheel, Vector3 worldScale, Vector3 centerOfMassOffset)
+	{
 		var radiusScale = MathF.Max(MathF.Abs(worldScale.X), MathF.Abs(worldScale.Z));
 		return new PhysicsVehicleWheelDefinition(
 			wheel.VisualEntity,
-			Multiply(wheel.Position, worldScale),
-			Multiply(wheel.SuspensionForcePoint, worldScale),
+			Multiply(wheel.Position, worldScale) - centerOfMassOffset,
+			Multiply(wheel.SuspensionForcePoint, worldScale) - centerOfMassOffset,
 			Normalize(wheel.SuspensionDirection, -Vector3.UnitY),
 			Normalize(wheel.SteeringAxis, Vector3.UnitY),
 			Normalize(wheel.WheelUp, Vector3.UnitY),
@@ -519,6 +599,68 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		       MathF.Abs(matrix.M42) > 0.0001f ||
 		       MathF.Abs(matrix.M43) > 0.0001f;
 	}
+
+	private static bool WheelsEqual(PhysicsVehicleWheelDefinition[] left, PhysicsVehicleWheelDefinition[] right)
+	{
+		if (ReferenceEquals(left, right))
+		{
+			return true;
+		}
+
+		if (left.Length != right.Length)
+		{
+			return false;
+		}
+
+		for (var index = 0; index < left.Length; index++)
+		{
+			if (WheelEqual(left[index], right[index]) == false)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static bool WheelEqual(PhysicsVehicleWheelDefinition left, PhysicsVehicleWheelDefinition right)
+	{
+		return left.VisualEntity == right.VisualEntity &&
+		       NearEqual(left.Position, right.Position) &&
+		       NearEqual(left.SuspensionForcePoint, right.SuspensionForcePoint) &&
+		       NearEqual(left.SuspensionDirection, right.SuspensionDirection) &&
+		       NearEqual(left.SteeringAxis, right.SteeringAxis) &&
+		       NearEqual(left.WheelUp, right.WheelUp) &&
+		       NearEqual(left.WheelForward, right.WheelForward) &&
+		       NearEqual(left.SuspensionMinLength, right.SuspensionMinLength) &&
+		       NearEqual(left.SuspensionMaxLength, right.SuspensionMaxLength) &&
+		       NearEqual(left.SuspensionPreloadLength, right.SuspensionPreloadLength) &&
+		       left.SuspensionMode == right.SuspensionMode &&
+		       NearEqual(left.SuspensionFrequencyOrStiffness, right.SuspensionFrequencyOrStiffness) &&
+		       NearEqual(left.SuspensionDamping, right.SuspensionDamping) &&
+		       NearEqual(left.Radius, right.Radius) &&
+		       NearEqual(left.Width, right.Width) &&
+		       NearEqual(left.Inertia, right.Inertia) &&
+		       NearEqual(left.MaxSteerAngle, right.MaxSteerAngle) &&
+		       NearEqual(left.MaxBrakeTorque, right.MaxBrakeTorque) &&
+		       NearEqual(left.MaxHandBrakeTorque, right.MaxHandBrakeTorque) &&
+		       left.EnableSuspensionForcePoint == right.EnableSuspensionForcePoint &&
+		       left.Steer == right.Steer &&
+		       left.Drive == right.Drive &&
+		       left.HandBrake == right.HandBrake;
+	}
+
+	private static bool NearEqual(Vector3 left, Vector3 right, float tolerance = 0.0001f)
+	{
+		return MathF.Abs(left.X - right.X) <= tolerance &&
+		       MathF.Abs(left.Y - right.Y) <= tolerance &&
+		       MathF.Abs(left.Z - right.Z) <= tolerance;
+	}
+
+	private static bool NearEqual(float left, float right, float tolerance = 0.0001f)
+	{
+		return MathF.Abs(left - right) <= tolerance;
+	}
 }
 
 internal sealed class PhysicsVehicleState
@@ -528,6 +670,7 @@ internal sealed class PhysicsVehicleState
 		BodyID bodyId,
 		PhysicsBodyState bodyState,
 		VehicleConstraint constraint,
+		VehicleCollisionTester collisionTester,
 		WheeledVehicleController controller,
 		PhysicsVehicleDefinition definition)
 	{
@@ -535,6 +678,7 @@ internal sealed class PhysicsVehicleState
 		BodyId = bodyId;
 		BodyState = bodyState;
 		Constraint = constraint;
+		CollisionTester = collisionTester;
 		Controller = controller;
 		Definition = definition;
 	}
@@ -543,8 +687,10 @@ internal sealed class PhysicsVehicleState
 	public BodyID BodyId { get; }
 	public PhysicsBodyState BodyState { get; }
 	public VehicleConstraint Constraint { get; }
+	public VehicleCollisionTester CollisionTester { get; }
 	public WheeledVehicleController Controller { get; }
 	public PhysicsVehicleDefinition Definition { get; }
+	public float LogTimer { get; set; }
 
 	public void Dispose(PhysicsWorldState state)
 	{
@@ -554,6 +700,7 @@ internal sealed class PhysicsVehicleState
 		state.BodiesByBodyId.Remove(BodyId);
 		state.BodyInterface.RemoveAndDestroyBody(BodyId);
 		Constraint.Dispose();
+		CollisionTester.Dispose();
 		BodyState.Dispose();
 	}
 }
@@ -563,6 +710,7 @@ internal readonly record struct PhysicsVehicleDefinition(
 	Quaternion Rotation,
 	Vector3 BoxHalfExtents,
 	Vector3 BoxCenter,
+	Vector3 CenterOfMassOffset,
 	Vector3 LinearVelocity,
 	Vector3 AngularVelocity,
 	float Mass,
@@ -596,6 +744,16 @@ internal readonly record struct PhysicsVehicleDefinition(
 	PhysicsVehicleWheelDefinition[] Wheels)
 {
 	public MotionType MotionType => MotionType.Dynamic;
+
+	public Vector3 GetEntityPosition()
+	{
+		return GetEntityPosition(Position, Rotation);
+	}
+
+	public Vector3 GetEntityPosition(Vector3 bodyPosition, Quaternion bodyRotation)
+	{
+		return bodyPosition - Vector3.Transform(CenterOfMassOffset, bodyRotation);
+	}
 
 	public PhysicsBodyDefinition ToPhysicsBodyDefinition()
 	{

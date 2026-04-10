@@ -714,9 +714,16 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 					rotation = Normalize(state.BodyInterface.GetRotation(bodyState.BodyId));
 				}
 
+				var worldPosition = position;
+				if (bodyState.Owner == PhysicsBodyOwner.Vehicle &&
+				    state.VehiclesByEntity.TryGetValue(pair.Key, out var vehicleState))
+				{
+					worldPosition = vehicleState.Definition.GetEntityPosition(position, rotation);
+				}
+
 				if (HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
 				{
-					changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, position, rotation));
+					changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, worldPosition, rotation));
 				}
 
 				var linearVelocity = bodyState.Definition.LinearVelocity;
