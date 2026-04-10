@@ -223,7 +223,7 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		var rightInput = Math.Clamp(input.Steer, -1.0f, 1.0f);
 		var brakeInput = Math.Clamp(input.Brake, 0.0f, 1.0f);
 		var handBrakeInput = Math.Clamp(input.HandBrake, 0.0f, 1.0f);
-		vehicleState.Controller.SetDriverInput(forwardInput, rightInput, brakeInput, handBrakeInput);
+		vehicleState.Controller.SetDriverInput(forwardInput, -rightInput, brakeInput, handBrakeInput);
 
 		if (fixedDeltaTime > 0.0f)
 		{
