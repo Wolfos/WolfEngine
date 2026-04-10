@@ -65,6 +65,18 @@ public struct MeshRenderer: IEntityComponent, IJsonOnDeserialized
 		return IsValid;
 	}
 
+	public void RefreshResolvedAssets(RenderGraph renderGraph)
+	{
+		ArgumentNullException.ThrowIfNull(renderGraph);
+
+		Mesh = MeshAsset.IsValid ? MeshAsset.Asset : null;
+		Material = MaterialAsset.IsValid ? MaterialAsset.Asset : null;
+		if (Material is not null)
+		{
+			renderGraph.EnsureMaterialResources(Material);
+		}
+	}
+
 	public bool IsValid => Material != null && Mesh != null;
 
 	public void OnDeserialized()

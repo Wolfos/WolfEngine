@@ -373,12 +373,25 @@ public class WolfEngineEditor
 		_gameplayAssemblyHost.ApplyPreparedBuild(buildResult);
 
 		_sceneReloadService.RestoreGameplayComponents(_playSession.AuthoringScene, snapshot);
+		RefreshAssetBackedComponents(_playSession.AuthoringScene);
 
 		_undoRedoService.Clear();
 		_playSession.Restart(previousState);
 		_currentScene = _playSession.ActiveScene;
+		RefreshAssetBackedComponents(_currentScene);
 		RefreshRenderWorlds();
 		RestoreSelectedEntity(_currentScene, selectedEntityId);
+	}
+
+	private void RefreshAssetBackedComponents(EditorScene scene)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+
+		foreach (var entry in scene.World.View<MeshRenderer>())
+		{
+			ref var meshRenderer = ref entry.First;
+			meshRenderer.RefreshResolvedAssets(_renderGraph);
+		}
 	}
 
 	private Guid? TryGetSelectedEntityId(EditorScene scene)
