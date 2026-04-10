@@ -536,6 +536,23 @@ public class World
         return GetComponent<WorldTransform>(parent).WorldToLocal;
     }
 
+    internal Matrix4x4 GetParentLocalToWorldMatrix(Entity entity)
+    {
+        if (HasComponent<Parent>(entity) == false)
+        {
+            return Matrix4x4.Identity;
+        }
+
+        var parent = GetComponent<Parent>(entity).Value;
+        if (parent.IsValid == false || HasComponent<WorldTransform>(parent) == false)
+        {
+            return Matrix4x4.Identity;
+        }
+
+        EnsureWorldTransformUpToDate(parent);
+        return GetComponent<WorldTransform>(parent).LocalToWorld;
+    }
+
     internal void ApplyPhysicsWorldPoses(IReadOnlyList<PhysicsWorldPoseSyncItem> poses)
     {
         if (poses.Count == 0)
@@ -567,21 +584,25 @@ public class World
         ref var localTransform = ref GetComponent<LocalTransform>(entity);
         worldRotation = worldRotation.LengthSquared() > 0.0f ? Quaternion.Normalize(worldRotation) : Quaternion.Identity;
 
-        var worldMatrix = ComposeTrs(localTransform.LocalScale, worldRotation, worldPosition);
+        var preservedLocalScale = localTransform.LocalScale;
+        var worldMatrix = ComposeTrs(preservedLocalScale, worldRotation, worldPosition);
         var localMatrix = worldMatrix * GetParentWorldToLocalMatrix(entity);
-        if (Matrix4x4.Decompose(localMatrix, out var localScale, out var localRotation, out var localPosition) == false)
+        if (Matrix4x4.Decompose(localMatrix, out _, out var localRotation, out var localPosition) == false)
         {
             return;
         }
 
         localTransform.LocalPosition = localPosition;
         localTransform.LocalRotation = localRotation.LengthSquared() > 0.0f ? Quaternion.Normalize(localRotation) : Quaternion.Identity;
-        localTransform.LocalScale = localScale;
+        localTransform.LocalScale = preservedLocalScale;
         localTransform.IsDirty = false;
 
+        var finalLocalMatrix = ComposeTrs(localTransform.LocalScale, localTransform.LocalRotation, localTransform.LocalPosition);
+        var parentLocalToWorld = GetParentLocalToWorldMatrix(entity);
+
         ref var worldTransform = ref GetComponent<WorldTransform>(entity);
-        worldTransform.LocalToWorld = worldMatrix;
-        Matrix4x4.Invert(worldMatrix, out worldTransform.WorldToLocal);
+        worldTransform.LocalToWorld = finalLocalMatrix * parentLocalToWorld;
+        Matrix4x4.Invert(worldTransform.LocalToWorld, out worldTransform.WorldToLocal);
 
         MarkChildTransformsDirty(entity);
     }
