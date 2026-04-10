@@ -18,11 +18,11 @@ internal sealed class GameplayAssemblyLoadContext : AssemblyLoadContext
 
 	protected override Assembly? Load(AssemblyName assemblyName)
 	{
-		if (string.Equals(assemblyName.Name, "WolfEngine", StringComparison.Ordinal) ||
-		    string.Equals(assemblyName.Name, "WolfEngine.ECS", StringComparison.Ordinal))
+		var sharedAssembly = AssemblyLoadContext.Default.Assemblies.FirstOrDefault(candidate =>
+			AssemblyName.ReferenceMatchesDefinition(candidate.GetName(), assemblyName));
+		if (sharedAssembly is not null)
 		{
-			return AssemblyLoadContext.Default.Assemblies.FirstOrDefault(candidate =>
-				AssemblyName.ReferenceMatchesDefinition(candidate.GetName(), assemblyName));
+			return sharedAssembly;
 		}
 
 		var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
