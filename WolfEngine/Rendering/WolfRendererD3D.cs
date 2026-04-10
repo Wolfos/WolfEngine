@@ -125,7 +125,6 @@ private sealed class MeshResources
 	private readonly List<IKeyboard> _keyboards = new();
 	private readonly List<IMouse> _mice = new();
 	private Vector2 _lastMousePosition;
-	private bool _hasMousePosition;
 	private readonly IImGuiInputSink _imguiInputSink;
 	private readonly bool[] _imguiMouseButtons = new bool[5];
 	private Vector2 _imguiMousePosition;
@@ -323,15 +322,11 @@ private sealed class MeshResources
 		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, current);
 		_imguiMousePosition = current;
 		_imguiInputSink.SetMousePosition(current);
-
-		if (_hasMousePosition)
-		{
-			var delta = current - _lastMousePosition;
-			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
-		}
+		
+		var delta = current - _lastMousePosition;
+		_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
 
 		_lastMousePosition = current;
-		_hasMousePosition = true;
 	}
 
 	private void HandleMouseScroll(IMouse mouse, ScrollWheel scrollWheel)
@@ -1761,7 +1756,6 @@ private sealed class MeshResources
 
 			_keyboards.Clear();
 			_mice.Clear();
-			_hasMousePosition = false;
 
 			//_inputContext.Dispose();
 			_inputContext = null;

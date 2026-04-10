@@ -2,11 +2,11 @@
 
 namespace WolfEngine.Input;
 
-public struct InputAction
+public struct InputAction(string name, InputActionType type, InputActionBinding[] bindings)
 {
-	public string Name;
-	public InputActionType Type;
-	public InputActionBinding[] Bindings;
+	public string Name = name;
+	public InputActionType Type = type;
+	public InputActionBinding[] Bindings = bindings;
 }
 
 public enum InputActionType

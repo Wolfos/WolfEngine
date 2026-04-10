@@ -183,6 +183,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void PumpEvents(ref Event @event)
     {
+        _inputHandler.StartInputFrame();
+        
         while (_sdl.PollEvent(ref @event) != 0)
         {
             switch ((EventType)@event.Type)
@@ -205,6 +207,8 @@ internal unsafe class WolfRendererMetal : IRenderer
                     break;
             }
         }
+        
+        _inputHandler.EndInputFrame();
     }
     
 

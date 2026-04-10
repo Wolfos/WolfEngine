@@ -11,6 +11,8 @@ namespace WolfEngine.Platform;
 
 internal interface IMacOSInputHandler
 {
+	internal void StartInputFrame();
+	internal void EndInputFrame();
 	internal void HandleInputEvents(ref Event @event);
 }
 
@@ -18,15 +20,27 @@ public class MacOsInputHandler: IMacOSInputHandler
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInputSink;
+	private bool _hasMouseInput;
 	
-	private bool _hasMousePosition;
-
 	public MacOsInputHandler(IInputSystem inputSystem, IImGuiInputSink imguiInputSink)
 	{
 		_inputSystem = inputSystem;
 		_imguiInputSink = imguiInputSink;
 	}
 
+	public void StartInputFrame()
+	{
+		_hasMouseInput = false;
+	}
+	
+	public void EndInputFrame()
+	{
+		if (_hasMouseInput == false)
+		{
+			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, Vector2.Zero);
+		}
+	}
+	
 	public void HandleInputEvents(ref Event @event)
 	{
 		switch ((EventType)@event.Type)
@@ -116,12 +130,9 @@ public class MacOsInputHandler: IMacOSInputHandler
 		_imguiInputSink.SetMousePosition(position);
 
 		var delta = new Vector2(motionEvent.Xrel, motionEvent.Yrel);
-		if (_hasMousePosition || delta != Vector2.Zero)
-		{
-			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
-		}
 
-		_hasMousePosition = true;
+		_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
+		_hasMouseInput = true;
 	}
 
 	private void HandleMouseButton(MouseButtonEvent buttonEvent, bool isDown)

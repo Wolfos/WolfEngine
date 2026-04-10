@@ -47,6 +47,7 @@ public class WolfEngineEditor
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
+	private readonly IServiceProvider _serviceProvider;
 
 	private EditorScene _currentScene = null!;
 
@@ -77,7 +78,8 @@ public class WolfEngineEditor
 		IEditorNotificationService notificationService,
 		IEditorUndoRedoService undoRedoService,
 		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
-		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer)
+		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
+		IServiceProvider serviceProvider)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderPipeline = renderPipeline ?? throw new ArgumentNullException(nameof(renderPipeline));
@@ -99,6 +101,7 @@ public class WolfEngineEditor
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
+		_serviceProvider = serviceProvider;
 	}
 
 	public void Run()
@@ -317,7 +320,7 @@ public class WolfEngineEditor
 		}
 
 		UnbindGameplayModule();
-		RegisterGameplaySystems(loadResult.Module?.CreateSystems());
+		RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider));
 		loadResult.Module?.OnLoaded(runtimeScene.World);
 		_boundGameplayGeneration = loadResult.Generation;
 		_boundGameplayWorld = runtimeScene.World;
