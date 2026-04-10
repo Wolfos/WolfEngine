@@ -16,7 +16,7 @@ public struct CameraMover : IEntityComponent
 	public bool Initialized;
 }
 
-public class CameraMoverSystem: IUpdateable
+public class CameraMoverSystem: IUpdate
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;

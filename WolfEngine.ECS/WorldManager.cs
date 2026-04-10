@@ -108,7 +108,7 @@ public class WorldManager: IWorldManager
 			{
 				var registration = _systems[index];
 				if ((registration.Group & groupMask) == 0 ||
-				    registration.System is not IUpdateable updateable ||
+				    registration.System is not IUpdate updateable ||
 				    (updateable.GetTag() & world.Tag) == 0)
 				{
 					continue;
