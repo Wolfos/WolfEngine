@@ -392,51 +392,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        var isComponentOpen = BeginComponentSection(typeof(T).Name, out var isRemoveRequested);
-        if (isRemoveRequested)
-        {
-            QueueComponentRemoval(typeof(T));
-            ImGui.PopID();
-            return;
-        }
-
-        if (isComponentOpen == false)
-        {
-            ImGui.PopID();
-            return;
-        }
-
-        var typedRef = __makeref(component);
-        foreach (var field in typeof(T).GetFields(BindingFlags.Instance | BindingFlags.Public))
-        {
-            if (field.IsInitOnly ||
-                Attribute.IsDefined(field, typeof(NotSerializedAttribute)) ||
-                Attribute.IsDefined(field, typeof(HideFromEditorAttribute)))
-            {
-                continue;
-            }
-
-            var fieldType = field.FieldType;
-            var label = field.Name;
-
-            var drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
-                label,
-                fieldType,
-                field.GetValueDirect(typedRef),
-                scene,
-                entity,
-                field));
-            if (drawResult.Handled && drawResult.Changed)
-            {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(T));
-                field.SetValueDirect(typedRef, drawResult.Value!);
-                PushComponentEdit($"Edit {typeof(T).Name}", before, CaptureSingleComponentSnapshot(scene, entity, typeof(T)));
-                interactionState.MarkSceneDirty();
-            }
-        }
-
-        ImGui.Separator();
-        ImGui.PopID();
+        DrawGenericComponentEditor(scene, scene.World, entity, typeof(T), propertyDrawerRegistry, interactionState);
     }
 
     private void DrawGenericComponentEditor(EditorScene scene, World world, Entity entity, Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, IEditorInteractionState interactionState)
@@ -466,9 +422,9 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
+        var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
         if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue, scene, entity))
         {
-            var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
             PushComponentEdit($"Edit {componentType.Name}", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
             interactionState.MarkSceneDirty();

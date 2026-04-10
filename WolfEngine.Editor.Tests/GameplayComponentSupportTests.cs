@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using NSubstitute;
@@ -9,6 +10,7 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 using WolfEngine.Mathematics;
+using WolfEngine.Physics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
@@ -47,6 +49,7 @@ public sealed class GameplayComponentSupportTests
 		environment.BuildAndLoadGameplayAssembly(
 			"""
 			using WolfEngine.ECS;
+			using WolfEngine.Rendering;
 
 			namespace GameplayComponentSupport;
 
@@ -165,6 +168,116 @@ public sealed class GameplayComponentSupportTests
 		AssertFieldValue<int>(componentValue, "Visible", 5);
 		AssertFieldValue<int>(componentValue, "Hidden", 0);
 		AssertFieldValue<int>(componentValue, "Transient", 0);
+	}
+
+	[Test]
+	public void GameplayComponent_FieldEditor_EditsNestedStructFieldsRecursively()
+	{
+		var componentType = typeof(TestRecursiveComponent);
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Nested Fields Entity");
+		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(
+			componentType,
+			new TestPropertyDrawerRegistry(new Dictionary<string, object?>
+			{
+				["Count"] = 5,
+				["Label"] = "nested-value"
+			}),
+			ref componentValue);
+
+		Assert.That(changed, Is.True);
+		var config = componentType.GetField("Config")!.GetValue(componentValue)!;
+		Assert.That(config.GetType().GetField("Count")!.GetValue(config), Is.EqualTo(5));
+		var deeper = config.GetType().GetField("Deeper")!.GetValue(config)!;
+		Assert.That(deeper.GetType().GetField("Label")!.GetValue(deeper), Is.EqualTo("nested-value"));
+	}
+
+	[Test]
+	public void GameplayComponent_FieldEditor_HidesNestedMembersMarkedNotSerializedOrHideFromEditor()
+	{
+		var componentType = typeof(TestNestedHiddenFieldsComponent);
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Nested Hidden Fields Entity");
+		RuntimeComponentAccessor.AddDefault(world, entity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(
+			componentType,
+			new TestPropertyDrawerRegistry(new Dictionary<string, object?>
+			{
+				["Visible"] = 9,
+				["Hidden"] = 7,
+				["Transient"] = 11
+			}),
+			ref componentValue);
+
+		Assert.That(changed, Is.True);
+		var settings = componentType.GetField("Settings")!.GetValue(componentValue)!;
+		Assert.That(settings.GetType().GetField("Visible")!.GetValue(settings), Is.EqualTo(9));
+		Assert.That(settings.GetType().GetField("Hidden")!.GetValue(settings), Is.EqualTo(0));
+		Assert.That(settings.GetType().GetField("Transient")!.GetValue(settings), Is.EqualTo(0));
+	}
+
+	[Test]
+	public void GameplayComponent_FieldEditor_PassesNestedLeafMemberMetadataAndOwnerEntityToDrawer()
+	{
+		var componentType = typeof(TestEntityLinkComponent);
+		var scene = new EditorScene { World = new World(WorldTag.Authoring) };
+		var ownerEntity = scene.World.CreateEntity("Owner");
+		var targetEntity = scene.World.CreateEntity("Wheel Visual");
+		scene.EntityIds[ownerEntity] = Guid.NewGuid();
+		scene.EntityIds[targetEntity] = Guid.NewGuid();
+		scene.World.AddComponent(targetEntity, new Light());
+		RuntimeComponentAccessor.AddDefault(scene.World, ownerEntity, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(scene.World, ownerEntity, componentType);
+
+		var fieldEditor = new TestPropertyDrawerRegistry(context =>
+		{
+			if (context.Label != "VisualEntity")
+			{
+				return new PropertyDrawerResult(false, false, context.Value);
+			}
+
+			return new PropertyDrawerResult(true, true, targetEntity);
+		});
+
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(componentType, fieldEditor, ref componentValue, scene, ownerEntity);
+
+		Assert.That(changed, Is.True);
+		var wheel = componentType.GetField("FrontLeft")!.GetValue(componentValue)!;
+		Assert.That(wheel.GetType().GetField("VisualEntity")!.GetValue(wheel), Is.EqualTo(targetEntity));
+		var context = fieldEditor.SeenContexts.Single(candidate => candidate.Label == "VisualEntity");
+		Assert.That(context.OwnerEntity, Is.EqualTo(ownerEntity));
+		Assert.That(context.Member, Is.TypeOf<FieldInfo>());
+		Assert.That(context.Member!.GetCustomAttribute<RequireComponentAttribute>()!.Type, Is.EqualTo(typeof(Light)));
+	}
+
+	[Test]
+	public void GameplayComponent_FieldEditor_EditsVehicleStructFieldsRecursively()
+	{
+		var scene = new EditorScene { World = new World(WorldTag.Authoring) };
+		var ownerEntity = scene.World.CreateEntity("Vehicle");
+		var wheelVisual = scene.World.CreateEntity("Wheel Visual");
+		scene.EntityIds[ownerEntity] = Guid.NewGuid();
+		scene.EntityIds[wheelVisual] = Guid.NewGuid();
+		var componentValue = (object)Vehicle.CreateDefault();
+		var fieldEditor = new TestPropertyDrawerRegistry(new Dictionary<string, object?>
+		{
+			["TransmissionReverseGearRatio"] = 4.1f,
+			["Radius"] = 0.55f,
+			["VisualEntity"] = wheelVisual
+		});
+
+		var changed = RuntimeComponentFieldEditor.ApplyPublicFields(typeof(Vehicle), fieldEditor, ref componentValue, scene, ownerEntity);
+
+		Assert.That(changed, Is.True);
+		var vehicle = (Vehicle)componentValue;
+		Assert.That(vehicle.TransmissionReverseGearRatio, Is.EqualTo(4.1f));
+		Assert.That(vehicle.FrontLeft.Radius, Is.EqualTo(0.55f));
+		Assert.That(vehicle.FrontLeft.VisualEntity, Is.EqualTo(wheelVisual));
 	}
 
 	[Test]
@@ -509,6 +622,45 @@ public sealed class GameplayComponentSupportTests
 		}
 	}
 
+	private struct TestRecursiveComponent : IEntityComponent
+	{
+		public TestRecursiveLevelOne Config;
+	}
+
+	private struct TestRecursiveLevelOne
+	{
+		public int Count;
+		public TestRecursiveLevelTwo Deeper;
+	}
+
+	private struct TestRecursiveLevelTwo
+	{
+		public string Label;
+	}
+
+	private struct TestNestedHiddenFieldsComponent : IEntityComponent
+	{
+		public TestNestedHiddenFields Settings;
+	}
+
+	private struct TestNestedHiddenFields
+	{
+		public int Visible;
+		[HideFromEditor] public int Hidden;
+		[NotSerialized] public int Transient;
+	}
+
+	private struct TestEntityLinkComponent : IEntityComponent
+	{
+		public TestNestedWheel FrontLeft;
+	}
+
+	private struct TestNestedWheel
+	{
+		[RequireComponent(typeof(Light))]
+		public Entity VisualEntity;
+	}
+
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	private static WeakReference CreateUnloadedGameplayContextReferenceWithRetainedScene(out EditorScene retainedScene)
 	{
@@ -700,21 +852,32 @@ public sealed class GameplayComponentSupportTests
 
 	private sealed class TestPropertyDrawerRegistry : IPropertyDrawerRegistry
 	{
-		private readonly IReadOnlyDictionary<string, object?> _valuesByLabel;
+		private readonly Func<PropertyDrawerContext, PropertyDrawerResult> _draw;
 
 		public TestPropertyDrawerRegistry(IReadOnlyDictionary<string, object?> valuesByLabel)
+			: this(context =>
+			{
+				if (valuesByLabel.TryGetValue(context.Label, out var value) == false)
+				{
+					return new PropertyDrawerResult(false, false, context.Value);
+				}
+
+				return new PropertyDrawerResult(true, true, value);
+			})
 		{
-			_valuesByLabel = valuesByLabel;
 		}
+
+		public TestPropertyDrawerRegistry(Func<PropertyDrawerContext, PropertyDrawerResult> draw)
+		{
+			_draw = draw;
+		}
+
+		public List<PropertyDrawerContext> SeenContexts { get; } = [];
 
 		public PropertyDrawerResult Draw(PropertyDrawerContext context)
 		{
-			if (_valuesByLabel.TryGetValue(context.Label, out var value) == false)
-			{
-				return new PropertyDrawerResult(false, false, context.Value);
-			}
-
-			return new PropertyDrawerResult(true, true, value);
+			SeenContexts.Add(context);
+			return _draw(context);
 		}
 	}
 

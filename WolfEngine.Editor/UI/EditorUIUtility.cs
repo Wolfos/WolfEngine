@@ -205,6 +205,16 @@ public class EditorUIUtility
 		return isOpen;
 	}
 
+	public static void BeginIndentedGroup()
+	{
+		ImGui.Indent();
+	}
+
+	public static void EndIndentedGroup()
+	{
+		ImGui.Unindent();
+	}
+
 	private static void BeginLabeledField(string label)
 	{
 		ImGui.PushID(label);
