@@ -107,10 +107,13 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 					continue;
 				}
 
-				var wheelRight = Vector3.Zero;
-				var wheelUp = Vector3.Zero;
+				var wheelUp = Normalize(wheelDefinition.WheelUp, Vector3.UnitY);
+				var wheelRight = Vector3.Cross(
+					Normalize(wheelDefinition.WheelForward, Vector3.UnitZ),
+					wheelUp);
+				wheelRight = Normalize(wheelRight, Vector3.UnitX);
 				var wheelMatrix = vehicleState.Constraint.GetWheelWorldTransform(wheelIndex, in wheelRight, in wheelUp);
-				if (Matrix4x4.Decompose(wheelMatrix, out _, out var rotation, out var position) == false)
+				if (TryDecomposeWheelTransform(wheelMatrix, out var rotation, out var position) == false)
 				{
 					continue;
 				}
@@ -489,6 +492,32 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 	private static uint ClampLayer(uint layer)
 	{
 		return layer <= CollisionFilter.MaxLayer ? layer : CollisionFilter.MaxLayer;
+	}
+
+	private static bool TryDecomposeWheelTransform(Matrix4x4 wheelMatrix, out Quaternion rotation, out Vector3 position)
+	{
+		if (Matrix4x4.Decompose(wheelMatrix, out _, out rotation, out position) &&
+		    (position != Vector3.Zero || HasRowTranslation(wheelMatrix)))
+		{
+			return true;
+		}
+
+		var transposed = Matrix4x4.Transpose(wheelMatrix);
+		if (Matrix4x4.Decompose(transposed, out _, out rotation, out position))
+		{
+			return true;
+		}
+
+		rotation = Quaternion.Identity;
+		position = Vector3.Zero;
+		return false;
+	}
+
+	private static bool HasRowTranslation(Matrix4x4 matrix)
+	{
+		return MathF.Abs(matrix.M41) > 0.0001f ||
+		       MathF.Abs(matrix.M42) > 0.0001f ||
+		       MathF.Abs(matrix.M43) > 0.0001f;
 	}
 }
 
