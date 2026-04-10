@@ -2,7 +2,7 @@ using WolfEngine.ECS;
 
 namespace WolfEngine.Rendering;
 
-public class CameraResolutionUpdater: IUpdateable
+public class CameraResolutionUpdater: IUpdate
 {
 	public void Update(float deltaTime, World world)
 	{

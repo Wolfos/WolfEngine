@@ -12,7 +12,7 @@ public interface ISystem
 {
 }
 
-public interface IUpdateable: ISystem
+public interface IUpdate: ISystem
 {
 	public void Update(float deltaTime, World world);
 	public WorldTag GetTag();
