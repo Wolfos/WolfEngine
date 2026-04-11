@@ -35,7 +35,6 @@ public static class WolfEngine
 		services.AddSingleton<EditorFrameCoordinator>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<GpuDrawResources>();
-		services.AddSingleton<GpuDrawDatabase>();
 		services.AddSingleton<GpuDrawHardeningStats>();
 		services.AddSingleton<BindlessResourceRegistry>();
 		services.AddSingleton<RenderGraphResourceRegistry>();

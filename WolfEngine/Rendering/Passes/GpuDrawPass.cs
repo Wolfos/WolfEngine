@@ -12,7 +12,6 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class GpuDrawPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
-	private readonly GpuDrawDatabase _drawDatabase;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
@@ -70,12 +69,11 @@ public sealed class GpuDrawPass
 		public Mesh? Mesh { get; }
 	}
 	
-	public GpuDrawPass(IShaderCompiler shaderCompiler, GpuDrawDatabase drawDatabase,
+	public GpuDrawPass(IShaderCompiler shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, GpuDrawHardeningStats hardeningStats, IRenderer renderer,
 		IGpuDrawBackendBridge backendBridge)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
-		_drawDatabase = drawDatabase ?? throw new ArgumentNullException(nameof(drawDatabase));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 		_gpuDrawResources = gpuDrawResources ?? throw new ArgumentNullException(nameof(gpuDrawResources));
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
@@ -86,6 +84,7 @@ public sealed class GpuDrawPass
 
 	public void RecordUpdate(RenderGraphContext context)
 	{
+		var drawDatabase = context.GpuDrawDatabase;
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
@@ -113,7 +112,7 @@ public sealed class GpuDrawPass
 				{
 					using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
 					{
-						ReencodeAllIndirectCommands(activeIndirectCommands);
+						ReencodeAllIndirectCommands(drawDatabase, activeIndirectCommands);
 					}
 					requireFullGpuStateRefresh = true;
 
@@ -126,18 +125,18 @@ public sealed class GpuDrawPass
 				{
 					using (FrameProfiler.Instance.Measure("GpuDraw.StructuralReplay"))
 					{
-						ReplayPendingStructuralRecords(activeSlot, activeIndirectCommands);
+						ReplayPendingStructuralRecords(drawDatabase, activeSlot, activeIndirectCommands);
 					}
 				}
 			}
 		}
 
-		_drawDatabase.ConsumeUpdates(_updates);
-		UploadGenerationTables();
+		drawDatabase.ConsumeUpdates(_updates);
+		UploadGenerationTables(drawDatabase);
 		SampleGpuDiagnosticCounters();
 		if (_gpuStateBootstrapPending)
 		{
-			var appended = AppendFullGpuStateRefreshUpdates(_updates);
+			var appended = AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
 			if (appended > 0)
 			{
 				_gpuStateBootstrapPending = false;
@@ -145,7 +144,7 @@ public sealed class GpuDrawPass
 		}
 		if (requireFullGpuStateRefresh)
 		{
-			AppendFullGpuStateRefreshUpdates(_updates);
+			AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
 		}
 
 		if (_updates.Count > GpuDrawResources.MaxDrawCount)
@@ -164,7 +163,7 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		_gpuDrawResources.ActiveDrawCommandUpperBound = _drawDatabase.GetActiveDrawCommandUpperBound();
+		_gpuDrawResources.ActiveDrawCommandUpperBound = drawDatabase.GetActiveDrawCommandUpperBound();
 		_updateData.Clear();
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
@@ -263,7 +262,7 @@ public sealed class GpuDrawPass
 			if (backendSignals.SupportsIndirectStructuralUpdates &&
 			    activeIndirectCommands is not null &&
 			    IsStructuralUpdateType(update.Type) &&
-			    ApplyStructuralUpdate(update, mesh, activeIndirectCommands, bucketIndex))
+			    ApplyStructuralUpdate(drawDatabase, update, mesh, activeIndirectCommands, bucketIndex))
 			{
 				AppendStructuralRecord(update, mesh, bucketIndex);
 			}
@@ -429,7 +428,7 @@ public sealed class GpuDrawPass
 					_gpuDrawResources.ActiveDrawCommandUpperBound));
 			cullParamsWriter.SetUInt("bucketCount", (uint)bucketCount);
 			cullParamsWriter.SetUInt("maxVisiblePerBucket", GpuDrawResources.MaxDrawCount);
-			cullParamsWriter.SetUInt("fallbackMeshHandle", _drawDatabase.FallbackMeshHandle.Value);
+			cullParamsWriter.SetUInt("fallbackMeshHandle", context.GpuDrawDatabase.FallbackMeshHandle.Value);
 			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
 
 			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
@@ -634,6 +633,7 @@ public sealed class GpuDrawPass
 			or GpuDrawUpdateType.UpdateMesh;
 
 	private bool ApplyStructuralUpdate(
+		GpuDrawDatabase drawDatabase,
 		in GpuDrawUpdate update,
 		Mesh? mesh,
 		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands,
@@ -644,7 +644,7 @@ public sealed class GpuDrawPass
 			return false;
 		}
 
-		if (_drawDatabase.IsCurrentDrawHandle(update.DrawHandle) == false)
+		if (drawDatabase.IsCurrentDrawHandle(update.DrawHandle) == false)
 		{
 			return false;
 		}
@@ -692,6 +692,7 @@ public sealed class GpuDrawPass
 	}
 
 	private void ReplayPendingStructuralRecords(
+		GpuDrawDatabase drawDatabase,
 		int slotIndex,
 		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
@@ -709,17 +710,18 @@ public sealed class GpuDrawPass
 				continue;
 			}
 
-			ApplyStructuralRecord(record, indirectCommands);
+			ApplyStructuralRecord(drawDatabase, record, indirectCommands);
 		}
 
 		_slotAppliedVersions[slotIndex] = _latestStructuralVersion;
 	}
 
 	private void ApplyStructuralRecord(
+		GpuDrawDatabase drawDatabase,
 		in StructuralCommandRecord record,
 		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
-		if (_drawDatabase.IsCurrentDrawHandle(record.DrawHandle) == false)
+		if (drawDatabase.IsCurrentDrawHandle(record.DrawHandle) == false)
 		{
 			return;
 		}
@@ -799,7 +801,7 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	private void ReencodeAllIndirectCommands(IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
+	private void ReencodeAllIndirectCommands(GpuDrawDatabase drawDatabase, IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands)
 	{
 		for (var bucketIndex = 0; bucketIndex < indirectCommands.Count; bucketIndex++)
 		{
@@ -809,7 +811,7 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		_drawDatabase.CollectDrawEntries(_drawEntries);
+		drawDatabase.CollectDrawEntries(_drawEntries);
 		for (var i = 0; i < _drawEntries.Count; i++)
 		{
 			var entry = _drawEntries[i];
@@ -927,10 +929,10 @@ public sealed class GpuDrawPass
 		return 0;
 	}
 
-	private int AppendFullGpuStateRefreshUpdates(List<GpuDrawUpdate> destination)
+	private int AppendFullGpuStateRefreshUpdates(GpuDrawDatabase drawDatabase, List<GpuDrawUpdate> destination)
 	{
 		var initialCount = destination.Count;
-		_drawDatabase.CollectDrawEntries(_drawEntries);
+		drawDatabase.CollectDrawEntries(_drawEntries);
 		for (var i = 0; i < _drawEntries.Count; i++)
 		{
 			var entry = _drawEntries[i];
@@ -958,9 +960,9 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	private void UploadGenerationTables()
+	private void UploadGenerationTables(GpuDrawDatabase drawDatabase)
 	{
-		_drawDatabase.CopyGenerationTables(
+		drawDatabase.CopyGenerationTables(
 			_drawGenerations,
 			_instanceGenerations,
 			_meshGenerations,

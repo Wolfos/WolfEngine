@@ -604,6 +604,11 @@ public class World
         worldTransform.LocalToWorld = finalLocalMatrix * parentLocalToWorld;
         Matrix4x4.Invert(worldTransform.LocalToWorld, out worldTransform.WorldToLocal);
 
+        if (HasComponent<DirtyTransformRoot>(entity))
+        {
+            RemoveComponent<DirtyTransformRoot>(entity);
+        }
+
         MarkChildTransformsDirty(entity);
     }
 

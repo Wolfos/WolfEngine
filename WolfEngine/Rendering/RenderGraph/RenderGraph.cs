@@ -34,7 +34,6 @@ public sealed class RenderGraph
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
-	private readonly GpuDrawDatabase _gpuDrawDatabase;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
@@ -61,7 +60,6 @@ public sealed class RenderGraph
 		IArenaAllocator arenaAllocator,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
-		GpuDrawDatabase gpuDrawDatabase,
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
@@ -78,7 +76,6 @@ public sealed class RenderGraph
 			renderer,
 			shaderCompiler,
 			bindlessResourceRegistry,
-			gpuDrawDatabase,
 			gpuDrawResources,
 			hardeningStats,
 			gpuDrawBackendBridge);
@@ -90,7 +87,6 @@ public sealed class RenderGraph
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
-		_gpuDrawDatabase = gpuDrawDatabase ?? throw new ArgumentNullException(nameof(gpuDrawDatabase));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
@@ -231,7 +227,8 @@ public sealed class RenderGraph
 				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
 				{
 					CommandList = commandList,
-					SceneData = sceneData
+					SceneData = sceneData,
+					GpuDrawDatabase = snapshot.GpuDrawDatabase
 				};
 				pass.Execute(context);
 
@@ -266,6 +263,7 @@ public sealed class RenderGraph
 	public void OnRender(float deltaTime)
 	{
 		FrameProfiler.Instance.BeginFrame("Render Frame");
+		var changedMaterials = new List<Material>();
 		if (_renderer.GetGfxDevice() is IGpuSubmissionTimeline submissionTimeline)
 		{
 			submissionTimeline.PumpCompleted();
@@ -280,12 +278,8 @@ public sealed class RenderGraph
 				MarkDependentMaterialsPending(changedTextures);
 			}
 
-			var changedMaterials = new List<Material>();
+			changedMaterials.Clear();
 			ProcessPendingMaterials(changedMaterials);
-			for (var i = 0; i < changedMaterials.Count; i++)
-			{
-				_gpuDrawDatabase.NotifyMaterialChanged(changedMaterials[i]);
-			}
 
 			while (_ensureMeshQueue.TryDequeue(out var mesh))
 			{
@@ -336,6 +330,10 @@ public sealed class RenderGraph
 
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
+				for (var i = 0; i < changedMaterials.Count; i++)
+				{
+					snapshot.GpuDrawDatabase.NotifyMaterialChanged(changedMaterials[i]);
+				}
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();

@@ -9,7 +9,6 @@ internal sealed class RenderGraphPassSet
 		IRenderer renderer,
 		IShaderCompiler shaderCompiler,
 		BindlessResourceRegistry bindlessResourceRegistry,
-		GpuDrawDatabase gpuDrawDatabase,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats gpuDrawHardeningStats,
 		IGpuDrawBackendBridge gpuDrawBackendBridge)
@@ -17,7 +16,6 @@ internal sealed class RenderGraphPassSet
 		ArgumentNullException.ThrowIfNull(renderer);
 		ArgumentNullException.ThrowIfNull(shaderCompiler);
 		ArgumentNullException.ThrowIfNull(bindlessResourceRegistry);
-		ArgumentNullException.ThrowIfNull(gpuDrawDatabase);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(gpuDrawHardeningStats);
 		ArgumentNullException.ThrowIfNull(gpuDrawBackendBridge);
@@ -36,7 +34,6 @@ internal sealed class RenderGraphPassSet
 		ShadowMapPass = new(shaderCompiler);
 		GpuDrawPass = new(
 			shaderCompiler,
-			gpuDrawDatabase,
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			gpuDrawHardeningStats,

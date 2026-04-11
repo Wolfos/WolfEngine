@@ -22,6 +22,7 @@ public sealed class FrameSnapshot
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
+		GpuDrawDatabase = new GpuDrawDatabase();
 	}
 
 	public Camera Camera { get; private set; }
@@ -30,6 +31,7 @@ public sealed class FrameSnapshot
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
+	public GpuDrawDatabase GpuDrawDatabase { get; }
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
@@ -42,6 +44,7 @@ public sealed class FrameSnapshot
 		LightPackets.Clear();
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
+		GpuDrawDatabase.ResetForSnapshotWrite();
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)

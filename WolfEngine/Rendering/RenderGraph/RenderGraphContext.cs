@@ -11,6 +11,7 @@ public sealed class RenderGraphContext
 {
 	private IGfxCommandList _commandList;
 	private SceneDrawData _sceneData;
+	private GpuDrawDatabase _gpuDrawDatabase;
 
 	internal RenderGraphContext(RenderGraphResourceRegistry resourceRegistry, string passName)
 	{
@@ -32,6 +33,12 @@ public sealed class RenderGraphContext
 	{
 		get => _sceneData;
 		internal set => _sceneData = value;
+	}
+
+	public GpuDrawDatabase GpuDrawDatabase
+	{
+		get => _gpuDrawDatabase ?? throw new InvalidOperationException("GpuDrawDatabase has not been set for this pass.");
+		internal set => _gpuDrawDatabase = value;
 	}
 
 	public IGfxTexture GetTexture(RenderGraphResourceHandle handle)

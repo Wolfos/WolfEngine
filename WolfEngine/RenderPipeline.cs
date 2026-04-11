@@ -19,15 +19,11 @@ public interface IRenderPipeline
 public class RenderPipeline : IRenderPipeline
 {
 	private readonly RenderGraph _renderGraph;
-	private readonly GpuDrawDatabase _drawDatabase;
 	private int _stressFrame;
 
-	public RenderPipeline(
-		RenderGraph renderGraph,
-		GpuDrawDatabase drawDatabase)
+	public RenderPipeline(RenderGraph renderGraph)
 	{
 		_renderGraph = renderGraph ?? throw new ArgumentNullException(nameof(renderGraph));
-		_drawDatabase = drawDatabase ?? throw new ArgumentNullException(nameof(drawDatabase));
 	}
 
 	public void Run(Action? startup = null)
@@ -51,9 +47,10 @@ public class RenderPipeline : IRenderPipeline
 			var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
 			var sunIntensityScale = 1.0f;
 			var hasSunDirection = false;
+			var gpuDrawDatabase = snapshot.GpuDrawDatabase;
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
-				_drawDatabase.BeginSync();
+				gpuDrawDatabase.BeginSync();
 			}
 
 			for (var i = 0; i < (worlds?.Count ?? 0); i++)
@@ -94,7 +91,7 @@ public class RenderPipeline : IRenderPipeline
 
 
 						var transformMatrix = transform.LocalToWorld;
-						_drawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+						gpuDrawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
 					}
 				}
 
@@ -124,7 +121,7 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 
-			_drawDatabase.EndSync();
+			gpuDrawDatabase.EndSync();
 			_renderGraph.PublishSnapshot();
 
 

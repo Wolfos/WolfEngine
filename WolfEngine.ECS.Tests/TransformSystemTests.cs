@@ -57,4 +57,30 @@ public class TransformSystemTests
         Assert.That(childWorld.LocalToWorld.Translation.X, Is.EqualTo(0.0f).Within(0.0001f));
         Assert.That(childWorld.LocalToWorld.Translation.Z, Is.EqualTo(-1.0f).Within(0.0001f));
     }
+
+    [Test]
+    public void PreRender_AfterPhysicsPoseOnParentedEntity_IgnoresStalePhysicsDirtyRootForChildGraphics()
+    {
+        var world = new World(WorldTag.All);
+        var system = new TransformSystem();
+
+        var root = world.CreateEntity("Root", new Vector3(10.0f, 0.0f, 0.0f), Quaternion.Identity, Vector3.One);
+        var vehicle = world.CreateEntity("Vehicle", Vector3.Zero, Quaternion.Identity, Vector3.One);
+        var graphics = world.CreateEntity("Graphics", new Vector3(2.0f, 0.0f, 0.0f), Quaternion.Identity, Vector3.One);
+
+        world.SetParent(vehicle, root);
+        world.SetParent(graphics, vehicle);
+        system.PreRender(0.0f, world);
+
+        world.AddComponent<DirtyTransformRoot>(vehicle);
+        world.ApplyPhysicsWorldPose(vehicle, new Vector3(20.0f, 0.0f, 0.0f), Quaternion.Identity);
+
+        system.PreRender(0.0f, world);
+
+        var vehicleWorld = world.GetComponent<WorldTransform>(vehicle);
+        var graphicsWorld = world.GetComponent<WorldTransform>(graphics);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(vehicle), Is.False);
+        Assert.That(vehicleWorld.LocalToWorld.Translation.X, Is.EqualTo(20.0f).Within(0.0001f));
+        Assert.That(graphicsWorld.LocalToWorld.Translation.X, Is.EqualTo(22.0f).Within(0.0001f));
+    }
 }

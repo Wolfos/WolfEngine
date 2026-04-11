@@ -10,7 +10,6 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawDatabase
 {
-	private readonly object _lock = new();
 	private readonly Dictionary<Entity, DrawRecord> _records = new(new EntityComparer());
 	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
@@ -25,70 +24,67 @@ public sealed class GpuDrawDatabase
 
 	public void BeginSync()
 	{
-		lock (_lock)
-		{
-			_syncStamp++;
-		}
+		_syncStamp++;
+	}
+
+	public void ResetForSnapshotWrite()
+	{
+		_updates.Clear();
+		_syncStamp++;
 	}
 
 	public void Touch(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
-		lock (_lock)
+		if (_records.TryGetValue(entity, out var record))
 		{
-			if (_records.TryGetValue(entity, out var record))
-			{
-				ApplyChanges(record, mesh, material, worldTransform);
-				record.LastSeenStamp = _syncStamp;
-				return;
-			}
-
-			var newRecord = CreateRecord(entity, mesh, material, worldTransform);
-			_records.Add(entity, newRecord);
-			if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
-			{
-				_maxActiveDrawIndex = newRecord.DrawHandle.Index;
-			}
-
-			_updates.Add(GpuDrawUpdate.CreateAdd(
-				newRecord.DrawHandle,
-				newRecord.InstanceHandle,
-				newRecord.MeshHandle,
-				newRecord.MaterialHandle,
-				newRecord.PreviousWorld,
-				newRecord.World,
-				newRecord.BoundsCenterRadius,
-				mesh,
-				material));
+			ApplyChanges(record, mesh, material, worldTransform);
+			record.LastSeenStamp = _syncStamp;
+			return;
 		}
+
+		var newRecord = CreateRecord(entity, mesh, material, worldTransform);
+		_records.Add(entity, newRecord);
+		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
+		{
+			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
+		}
+
+		_updates.Add(GpuDrawUpdate.CreateAdd(
+			newRecord.DrawHandle,
+			newRecord.InstanceHandle,
+			newRecord.MeshHandle,
+			newRecord.MaterialHandle,
+			newRecord.PreviousWorld,
+			newRecord.World,
+			newRecord.BoundsCenterRadius,
+			mesh,
+			material));
 	}
 
 	public void EndSync()
 	{
-		lock (_lock)
+		var toRemove = new List<Entity>();
+		foreach (var (entity, record) in _records)
 		{
-			var toRemove = new List<Entity>();
-			foreach (var (entity, record) in _records)
+			if (record.LastSeenStamp != _syncStamp)
 			{
-				if (record.LastSeenStamp != _syncStamp)
-				{
-					toRemove.Add(entity);
-				}
+				toRemove.Add(entity);
+			}
+		}
+
+		foreach (var entity in toRemove)
+		{
+			if (_records.TryGetValue(entity, out var record) == false)
+			{
+				continue;
 			}
 
-			foreach (var entity in toRemove)
+			_records.Remove(entity);
+			_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawHandle, record.InstanceHandle));
+			ReleaseRecord(record);
+			if (record.DrawHandle.Index == _maxActiveDrawIndex)
 			{
-				if (_records.TryGetValue(entity, out var record) == false)
-				{
-					continue;
-				}
-
-				_records.Remove(entity);
-				_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawHandle, record.InstanceHandle));
-				ReleaseRecord(record);
-				if (record.DrawHandle.Index == _maxActiveDrawIndex)
-				{
-					_maxActiveDrawIndexDirty = true;
-				}
+				_maxActiveDrawIndexDirty = true;
 			}
 		}
 	}
@@ -97,88 +93,76 @@ public sealed class GpuDrawDatabase
 	{
 		ArgumentNullException.ThrowIfNull(material);
 
-		lock (_lock)
+		foreach (var record in _records.Values)
 		{
-			foreach (var record in _records.Values)
+			if (ReferenceEquals(record.Material, material) == false)
 			{
-				if (ReferenceEquals(record.Material, material) == false)
-				{
-					continue;
-				}
-
-				_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
-					record.DrawHandle,
-					record.InstanceHandle,
-					record.MeshHandle,
-					record.MaterialHandle,
-					record.World,
-					record.World,
-					record.BoundsCenterRadius,
-					record.Mesh,
-					material));
+				continue;
 			}
+
+			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.World,
+				record.World,
+				record.BoundsCenterRadius,
+				record.Mesh,
+				material));
 		}
 	}
 
 	public void CollectDrawEntries(List<GpuDrawEntry> destination)
 	{
-		lock (_lock)
+		destination.Clear();
+		foreach (var record in _records.Values)
 		{
-			destination.Clear();
-			foreach (var record in _records.Values)
-			{
-				destination.Add(new GpuDrawEntry(
-					record.DrawHandle,
-					record.InstanceHandle,
-					record.MeshHandle,
-					record.MaterialHandle,
-					record.Mesh,
-					record.Material,
-					record.PreviousWorld,
-					record.World,
-					record.BoundsCenterRadius));
-			}
+			destination.Add(new GpuDrawEntry(
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.Mesh,
+				record.Material,
+				record.PreviousWorld,
+				record.World,
+				record.BoundsCenterRadius));
 		}
 	}
 
 	public void ConsumeUpdates(List<GpuDrawUpdate> destination)
 	{
-		lock (_lock)
-		{
-			destination.Clear();
-			destination.AddRange(_updates);
-			_updates.Clear();
-		}
+		destination.Clear();
+		destination.AddRange(_updates);
+		_updates.Clear();
 	}
 
 	public uint GetActiveDrawCommandUpperBound()
 	{
-		lock (_lock)
+		if (_records.Count == 0)
 		{
-			if (_records.Count == 0)
-			{
-				_maxActiveDrawIndex = 0;
-				_maxActiveDrawIndexDirty = false;
-				return 1;
-			}
-
-			if (_maxActiveDrawIndexDirty)
-			{
-				var maxDrawIndex = 0;
-				foreach (var record in _records.Values)
-				{
-					if (record.DrawHandle.Index > maxDrawIndex)
-					{
-						maxDrawIndex = record.DrawHandle.Index;
-					}
-				}
-
-				_maxActiveDrawIndex = maxDrawIndex;
-				_maxActiveDrawIndexDirty = false;
-			}
-
-			return (uint)(_maxActiveDrawIndex + 1);
+			_maxActiveDrawIndex = 0;
+			_maxActiveDrawIndexDirty = false;
+			return 1;
 		}
+
+		if (_maxActiveDrawIndexDirty)
+		{
+			var maxDrawIndex = 0;
+			foreach (var record in _records.Values)
+			{
+				if (record.DrawHandle.Index > maxDrawIndex)
+				{
+					maxDrawIndex = record.DrawHandle.Index;
+				}
+			}
+
+			_maxActiveDrawIndex = maxDrawIndex;
+			_maxActiveDrawIndexDirty = false;
+		}
+
+		return (uint)(_maxActiveDrawIndex + 1);
 	}
 
 	public void CopyGenerationTables(
@@ -187,35 +171,27 @@ public sealed class GpuDrawDatabase
 		List<uint> meshGenerations,
 		List<uint> materialGenerations)
 	{
-		lock (_lock)
-		{
-			_drawHandlePool.WriteGenerations(drawGenerations);
-			_instanceHandlePool.WriteGenerations(instanceGenerations);
-			_meshHandlePool.WriteGenerations(meshGenerations);
-			_materialHandlePool.WriteGenerations(materialGenerations);
-		}
+		_drawHandlePool.WriteGenerations(drawGenerations);
+		_instanceHandlePool.WriteGenerations(instanceGenerations);
+		_meshHandlePool.WriteGenerations(meshGenerations);
+		_materialHandlePool.WriteGenerations(materialGenerations);
 	}
 
 	public GpuDrawHandle FallbackMeshHandle => _meshHandlePool.FallbackHandle;
 
 	public GpuDrawHandle FallbackMaterialHandle => _materialHandlePool.FallbackHandle;
 
-	public bool IsCurrentDrawHandle(in GpuDrawHandle handle)
-	{
-		lock (_lock)
-		{
-			return _drawHandlePool.IsCurrent(handle);
-		}
-	}
+	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) => _drawHandlePool.IsCurrent(handle);
 
 	private void ApplyChanges(DrawRecord record, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
+		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
 		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || materialChanged || settlePreviousTransform) == false)
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
@@ -234,6 +210,11 @@ public sealed class GpuDrawDatabase
 			ReleaseMaterial(record.MaterialHandle, record.Material);
 			record.Material = material;
 			record.MaterialHandle = AcquireMaterialHandle(material);
+			record.MaterialResourceRevision = material.ResourceRevision;
+		}
+		else if (materialResourceChanged)
+		{
+			record.MaterialResourceRevision = material.ResourceRevision;
 		}
 
 		if (transformChanged || meshChanged)
@@ -255,7 +236,7 @@ public sealed class GpuDrawDatabase
 				mesh));
 		}
 
-		if (materialChanged)
+		if (materialChanged || materialResourceChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawHandle,
@@ -307,6 +288,7 @@ public sealed class GpuDrawDatabase
 			Material = material,
 			MeshHandle = AcquireMeshHandle(mesh),
 			MaterialHandle = AcquireMaterialHandle(material),
+			MaterialResourceRevision = material.ResourceRevision,
 			World = worldTransform,
 			PreviousWorld = worldTransform,
 			LastSeenStamp = _syncStamp
@@ -412,6 +394,7 @@ public sealed class GpuDrawDatabase
 		public GpuDrawHandle MaterialHandle;
 		public Mesh Mesh = null!;
 		public Material Material = null!;
+		public int MaterialResourceRevision;
 		public Matrix4x4 PreviousWorld;
 		public Matrix4x4 World;
 		public Vector4 BoundsCenterRadius;
