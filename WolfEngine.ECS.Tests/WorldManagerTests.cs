@@ -120,7 +120,7 @@ public sealed class WorldManagerTests
 		Assert.That(listener.RemovedWorlds[0], Is.SameAs(world));
 	}
 
-	private sealed class RecordingUpdateSystem : IUpdateable
+	private sealed class RecordingUpdateSystem : IUpdate
 	{
 		private readonly WorldTag _tag;
 		private readonly List<string> _calls;
@@ -141,7 +141,7 @@ public sealed class WorldManagerTests
 		public WorldTag GetTag() => _tag;
 	}
 
-	private sealed class CountingUpdateSystem : IUpdateable
+	private sealed class CountingUpdateSystem : IUpdate
 	{
 		private readonly WorldTag _tag;
 
