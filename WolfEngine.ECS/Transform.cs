@@ -94,14 +94,3 @@ public struct DirtyTransformRoot : IEntityComponent
 }
 
 internal readonly record struct PhysicsWorldPoseSyncItem(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation);
-
-[ExcludeFromEditor]
-[NotSerialized]
-public struct PhysicsInterpolationPose : IEntityComponent
-{
-	public Vector3 PreviousWorldPosition;
-	public Quaternion PreviousWorldRotation;
-	public Vector3 CurrentWorldPosition;
-	public Quaternion CurrentWorldRotation;
-	public bool IsValid;
-}

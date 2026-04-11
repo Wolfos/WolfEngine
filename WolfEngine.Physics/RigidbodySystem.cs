@@ -367,7 +367,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			{
 				for (var i = 0; i < bodiesToRemove.Count; i++)
 				{
-					RemoveBody(world, state, bodiesToRemove[i]);
+					RemoveBody(state, bodiesToRemove[i]);
 					changed = true;
 				}
 			}
@@ -599,11 +599,10 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		state.BodiesByBodyId.Add(bodyId, bodyState);
 	}
 
-	internal static void RemoveBody(World world, PhysicsWorldState state, Entity entity)
+	internal static void RemoveBody(PhysicsWorldState state, Entity entity)
 	{
 		if (state.BodiesByEntity.Remove(entity, out var bodyState))
 		{
-			RemoveInterpolationPose(world, entity);
 			state.BodiesByBodyId.Remove(bodyState.BodyId);
 			state.BodyInterface.RemoveAndDestroyBody(bodyState.BodyId);
 			bodyState.Dispose();
@@ -720,15 +719,6 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				    state.VehiclesByEntity.TryGetValue(pair.Key, out var vehicleState))
 				{
 					worldPosition = vehicleState.Definition.GetEntityPosition(position, rotation);
-				}
-
-				if (IsInterpolationEnabled(world, pair.Key, bodyState.Definition.MotionType))
-				{
-					UpdateInterpolationPose(world, pair.Key, worldPosition, rotation);
-				}
-				else
-				{
-					RemoveInterpolationPose(world, pair.Key);
 				}
 
 				if (HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
@@ -873,8 +863,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		       rigidbody.CachedStartActivated != rigidbody.StartActivated ||
 		       rigidbody.CachedAllowSleeping != rigidbody.AllowSleeping ||
 		       rigidbody.CachedUseManifoldReduction != rigidbody.UseManifoldReduction ||
-		       rigidbody.CachedIsSensor != rigidbody.IsSensor ||
-		       rigidbody.CachedInterpolation != rigidbody.Interpolation;
+		       rigidbody.CachedIsSensor != rigidbody.IsSensor;
 	}
 
 	private static bool HasShapeChanged(World world, Entity entity, PhysicsColliderKind colliderKind)
@@ -1022,59 +1011,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		rigidbody.CachedAllowSleeping = rigidbody.AllowSleeping;
 		rigidbody.CachedUseManifoldReduction = rigidbody.UseManifoldReduction;
 		rigidbody.CachedIsSensor = rigidbody.IsSensor;
-		rigidbody.CachedInterpolation = rigidbody.Interpolation;
 		rigidbody.PhysicsCacheValid = true;
-	}
-
-	private static bool IsInterpolationEnabled(World world, Entity entity, MotionType motionType)
-	{
-		if (motionType != MotionType.Dynamic || world.HasComponent<Rigidbody>(entity) == false)
-		{
-			return false;
-		}
-
-		return world.GetComponent<Rigidbody>(entity).Interpolation == RigidbodyInterpolationMode.Interpolate;
-	}
-
-	private static void UpdateInterpolationPose(World world, Entity entity, Vector3 worldPosition, Quaternion worldRotation)
-	{
-		worldRotation = Normalize(worldRotation);
-		if (world.HasComponent<PhysicsInterpolationPose>(entity))
-		{
-			ref var pose = ref world.GetComponent<PhysicsInterpolationPose>(entity);
-			if (pose.IsValid)
-			{
-				pose.PreviousWorldPosition = pose.CurrentWorldPosition;
-				pose.PreviousWorldRotation = pose.CurrentWorldRotation;
-			}
-			else
-			{
-				pose.PreviousWorldPosition = worldPosition;
-				pose.PreviousWorldRotation = worldRotation;
-			}
-
-			pose.CurrentWorldPosition = worldPosition;
-			pose.CurrentWorldRotation = worldRotation;
-			pose.IsValid = true;
-			return;
-		}
-
-		world.AddComponent(entity, new PhysicsInterpolationPose
-		{
-			PreviousWorldPosition = worldPosition,
-			PreviousWorldRotation = worldRotation,
-			CurrentWorldPosition = worldPosition,
-			CurrentWorldRotation = worldRotation,
-			IsValid = true
-		});
-	}
-
-	private static void RemoveInterpolationPose(World world, Entity entity)
-	{
-		if (world.HasComponent<PhysicsInterpolationPose>(entity))
-		{
-			world.RemoveComponent<PhysicsInterpolationPose>(entity);
-		}
 	}
 
 	private static bool IsMeshColliderBodySupported(bool hasRigidbody, Rigidbody rigidbody)
