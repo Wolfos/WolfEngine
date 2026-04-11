@@ -1385,10 +1385,11 @@ private sealed class MeshResources
 		}
 
 		var sampler = new SamplerDescriptor(
-			FilterMode.Trilinear,
+			FilterMode.Anisotropic,
 			AddressMode.Wrap,
 			AddressMode.Wrap,
-			AddressMode.Wrap);
+			AddressMode.Wrap,
+			maxAnisotropy: 16.0f);
 		_defaultMaterialSamplerHandle = _gfxDevice.GlobalTable.AllocateSampler(sampler);
 		return _defaultMaterialSamplerHandle;
 	}

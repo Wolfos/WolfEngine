@@ -559,7 +559,12 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         if (_linearSamplerHandle.IsValid == false)
         {
-            var sampler = new SamplerDescriptor(FilterMode.Trilinear, AddressMode.Wrap, AddressMode.Wrap, AddressMode.Wrap);
+            var sampler = new SamplerDescriptor(
+                FilterMode.Anisotropic,
+                AddressMode.Wrap,
+                AddressMode.Wrap,
+                AddressMode.Wrap,
+                maxAnisotropy: 16.0f);
             _linearSamplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
         }
 

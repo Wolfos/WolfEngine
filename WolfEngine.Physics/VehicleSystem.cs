@@ -236,74 +236,8 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			var wheel = vehicleState.Constraint.GetWheel<WheelWV>(wheelIndex);
 			wheel.SteerAngle = wheelDefinition.Steer ? rightInput * wheelDefinition.MaxSteerAngle : 0.0f;
 		}
-
-		LogVehicleState(world, vehicleState, fixedDeltaTime, forwardInput, rightInput, brakeInput, handBrakeInput, 0.0f);
 	}
 
-	private static void LogVehicleState(
-		World world,
-		PhysicsVehicleState vehicleState,
-		float fixedDeltaTime,
-		float forwardInput,
-		float rightInput,
-		float brakeInput,
-		float handBrakeInput,
-		float driveTorque)
-	{
-		var shouldLog = MathF.Abs(forwardInput) > 0.01f ||
-		                MathF.Abs(rightInput) > 0.01f ||
-		                brakeInput > 0.01f ||
-		                handBrakeInput > 0.01f;
-		if (shouldLog == false)
-		{
-			vehicleState.LogTimer = 0.0f;
-			return;
-		}
-
-		vehicleState.LogTimer += fixedDeltaTime;
-		if (vehicleState.LogTimer < 0.5f)
-		{
-			return;
-		}
-
-		vehicleState.LogTimer = 0.0f;
-		var vehicleName = GetEntityDebugName(world, vehicleState.Entity);
-		Console.WriteLine(
-			$"[VehicleDebug] {vehicleName} throttle={forwardInput:F2} steer={rightInput:F2} brake={brakeInput:F2} handBrake={handBrakeInput:F2} torque={driveTorque:F1} linearSpeed={vehicleState.BodyState.Definition.LinearVelocity.Length():F2}");
-
-		for (var wheelIndex = 0; wheelIndex < vehicleState.Definition.Wheels.Length; wheelIndex++)
-		{
-			var wheel = vehicleState.Constraint.GetWheel<WheelWV>(wheelIndex);
-			Console.WriteLine(
-				$"[VehicleDebug] {vehicleName} wheel={GetWheelName(wheelIndex)} contact={wheel.HasContact} body={wheel.ContactBodyID} suspLen={wheel.SuspensionLength:F3} steer={wheel.SteerAngle:F3} angVel={wheel.AngularVelocity:F3} long={wheel.LongitudinalLambda:F3} lat={wheel.LateralLambda:F3} susp={wheel.SuspensionLambda:F3}");
-		}
-	}
-
-	private static string GetEntityDebugName(World world, Entity entity)
-	{
-		if (world.HasComponent<NameComponent>(entity))
-		{
-			var name = world.GetComponent<NameComponent>(entity).Name;
-			if (string.IsNullOrWhiteSpace(name) == false)
-			{
-				return name;
-			}
-		}
-
-		return entity.ToString();
-	}
-
-	private static string GetWheelName(int wheelIndex)
-	{
-		return wheelIndex switch
-		{
-			0 => "FrontLeft",
-			1 => "FrontRight",
-			2 => "RearLeft",
-			3 => "RearRight",
-			_ => wheelIndex.ToString()
-		};
-	}
 
 	private static bool HasStructuralChanges(PhysicsVehicleDefinition previous, PhysicsVehicleDefinition current)
 	{
