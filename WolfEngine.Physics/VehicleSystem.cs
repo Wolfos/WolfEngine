@@ -230,18 +230,14 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			vehicleState.Controller.Engine.ApplyDamping(fixedDeltaTime);
 		}
 
-		var driveTorque = MathF.Max(0.0f, forwardInput) * vehicleState.Definition.EngineMaxTorque;
 		for (var wheelIndex = 0; wheelIndex < vehicleState.Definition.Wheels.Length; wheelIndex++)
 		{
 			var wheelDefinition = vehicleState.Definition.Wheels[wheelIndex];
 			var wheel = vehicleState.Constraint.GetWheel<WheelWV>(wheelIndex);
 			wheel.SteerAngle = wheelDefinition.Steer ? rightInput * wheelDefinition.MaxSteerAngle : 0.0f;
-			var wheelBrake = brakeInput * wheelDefinition.MaxBrakeTorque +
-			                 handBrakeInput * (wheelDefinition.HandBrake ? wheelDefinition.MaxHandBrakeTorque : 0.0f);
-			wheel.ApplyTorque(wheelDefinition.Drive ? driveTorque : 0.0f, wheelBrake);
 		}
 
-		LogVehicleState(world, vehicleState, fixedDeltaTime, forwardInput, rightInput, brakeInput, handBrakeInput, driveTorque);
+		LogVehicleState(world, vehicleState, fixedDeltaTime, forwardInput, rightInput, brakeInput, handBrakeInput, 0.0f);
 	}
 
 	private static void LogVehicleState(

@@ -806,6 +806,8 @@ public sealed class RigidbodySystemTests
 		rigidbody.Mass = 1200.0f;
 		world.AddComponent(chassis, rigidbody);
 		var vehicle = Vehicle.CreateDefault();
+		vehicle.LongitudinalFriction = 2.0f;
+		vehicle.LateralFriction = 2.0f;
 		vehicle.FrontLeft.VisualEntity = CreateWheelEntity(world, "FrontLeft");
 		vehicle.FrontRight.VisualEntity = CreateWheelEntity(world, "FrontRight");
 		vehicle.RearLeft.VisualEntity = CreateWheelEntity(world, "RearLeft");
