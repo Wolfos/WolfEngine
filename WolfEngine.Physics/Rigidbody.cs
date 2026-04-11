@@ -10,9 +10,16 @@ public enum RigidbodyBodyType
 	Dynamic
 }
 
+public enum RigidbodyInterpolationMode
+{
+	None,
+	Interpolate
+}
+
 public struct Rigidbody : IEntityComponent
 {
 	public RigidbodyBodyType BodyType;
+	public RigidbodyInterpolationMode Interpolation;
 	public float Mass;
 	[NotSerialized]
 	public Vector3 LinearVelocity;
@@ -53,10 +60,14 @@ public struct Rigidbody : IEntityComponent
 	[NotSerialized]
 	[HideFromEditor]
 	internal bool CachedIsSensor;
+	[NotSerialized]
+	[HideFromEditor]
+	internal RigidbodyInterpolationMode CachedInterpolation;
 	
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
 		BodyType = RigidbodyBodyType.Dynamic;
+		Interpolation = RigidbodyInterpolationMode.Interpolate;
 		Mass = 1.0f;
 		LinearVelocity = Vector3.Zero;
 		AngularVelocity = Vector3.Zero;

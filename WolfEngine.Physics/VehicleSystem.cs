@@ -70,7 +70,7 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 
 		for (var index = 0; index < toRemove.Count; index++)
 		{
-			RemoveVehicle(state, toRemove[index]);
+			RemoveVehicle(world, state, toRemove[index]);
 		}
 
 		foreach (var entry in world.View<Vehicle>())
@@ -204,11 +204,16 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		ApplyRuntimeInput(world, vehicleState, fixedDeltaTime);
 	}
 
-	private static void RemoveVehicle(PhysicsWorldState state, Entity entity)
+	private static void RemoveVehicle(World world, PhysicsWorldState state, Entity entity)
 	{
 		if (state.VehiclesByEntity.Remove(entity, out var vehicleState) == false)
 		{
 			return;
+		}
+
+		if (world.HasComponent<PhysicsInterpolationPose>(entity))
+		{
+			world.RemoveComponent<PhysicsInterpolationPose>(entity);
 		}
 
 		vehicleState.Dispose(state);

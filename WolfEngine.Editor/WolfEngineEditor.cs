@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using WolfEngine.ECS;
@@ -9,11 +7,9 @@ using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
-using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Physics;
 
 namespace WolfEngine.Editor;
 
