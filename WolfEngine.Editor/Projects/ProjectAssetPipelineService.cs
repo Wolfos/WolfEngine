@@ -1345,16 +1345,18 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			nodeId.ToString("D"),
 			"runtime-metal.bin"));
 		var artifacts = new List<(string ArtifactKey, string Target, string RelativePath, string AbsolutePath)>(1);
-
-		var compressedTexture = _textureGpuCompressionService.CompileBcTexture(importedTexture);
+		var texture = CreateRuntimeTexture(importedTexture);
+		var compressionFamily = TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out _)
+			? TextureCompressionFamily.Bc
+			: TextureCompressionFamily.None;
 		if (OperatingSystem.IsMacOS())
 		{
 			var metalAbsolutePath = GetAbsolutePath(projectRootPath, metalRelativePath);
 			TextureArtifactSerializer.Write(
 				metalAbsolutePath,
-				compressedTexture,
+				texture,
 				importedTexture.Semantic,
-				TextureCompressionFamily.Bc);
+				compressionFamily);
 			artifacts.Add(("runtime-metal", "metal", metalRelativePath, metalAbsolutePath));
 		}
 		else
@@ -1362,13 +1364,29 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			var d3d12AbsolutePath = GetAbsolutePath(projectRootPath, d3d12RelativePath);
 			TextureArtifactSerializer.Write(
 				d3d12AbsolutePath,
-				compressedTexture,
+				texture,
 				importedTexture.Semantic,
-				TextureCompressionFamily.Bc);
+				compressionFamily);
 			artifacts.Add(("runtime-d3d12", "d3d12", d3d12RelativePath, d3d12AbsolutePath));
 		}
 
 		return CreateTextureArtifactRecords(nodeId, artifacts);
+	}
+
+	private Texture CreateRuntimeTexture(ImportedTexture importedTexture)
+	{
+		if (TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out _) == false)
+		{
+			return new Texture(
+				importedTexture.NameOrPath,
+				importedTexture.Width,
+				importedTexture.Height,
+				importedTexture.IsSrgb,
+				TextureFormat.Rgba8Unorm,
+				TextureMipGenerator.GenerateRgba32MipChain(importedTexture.MipLevels[0]));
+		}
+
+		return _textureGpuCompressionService.CompileBcTexture(importedTexture);
 	}
 
 	private sealed class UnsupportedTextureGpuCompressionService : ITextureGpuCompressionService

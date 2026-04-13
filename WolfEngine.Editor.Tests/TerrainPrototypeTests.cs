@@ -1,0 +1,292 @@
+#nullable enable
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Numerics;
+using System.Reflection;
+using System.Runtime.Serialization;
+using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
+using WolfEngine.Rendering;
+
+namespace WolfEngine.Editor.Tests;
+
+[TestFixture]
+public sealed class TerrainPrototypeTests
+{
+	[TearDown]
+	public void TearDown()
+	{
+		AssetDatabase.ClearInstanceRegistry();
+	}
+
+	[Test]
+	public void DataAssetStore_RoundTripsTerrainLayerSetTextureRefs()
+	{
+		var store = new DataAssetStore();
+		var assetPath = Path.Combine(Path.GetTempPath(), "WolfEngineTerrainTests", Guid.NewGuid().ToString("N"), $"TerrainLayerSet{DataAssetFile.FileExtension}");
+		var albedoId = Guid.NewGuid();
+		var normalId = Guid.NewGuid();
+		var heightId = Guid.NewGuid();
+		var layerSet = new TerrainLayerSet
+		{
+			ActiveLayerCount = 2,
+			HeightBlendSharpness = 6.5f,
+			Layer0 = new TerrainLayerDefinition
+			{
+				Albedo = new AssetRef<Texture> { NodeId = albedoId },
+				Normal = new AssetRef<Texture> { NodeId = normalId }
+			},
+			Layer1 = new TerrainLayerDefinition
+			{
+				Height = new AssetRef<Texture> { NodeId = heightId }
+			}
+		};
+
+		store.SaveAsset(assetPath, typeof(TerrainLayerSet), layerSet);
+		var loadResult = store.LoadAsset(assetPath);
+		var loaded = (TerrainLayerSet)loadResult.Asset;
+
+		Assert.That(loadResult.DataAssetType, Is.EqualTo(typeof(TerrainLayerSet)));
+		Assert.That(loaded.ActiveLayerCount, Is.EqualTo(2));
+		Assert.That(loaded.HeightBlendSharpness, Is.EqualTo(6.5f).Within(0.0001f));
+		Assert.That(loaded.Layer0.Albedo.NodeId, Is.EqualTo(albedoId));
+		Assert.That(loaded.Layer0.Normal.NodeId, Is.EqualTo(normalId));
+		Assert.That(loaded.Layer1.Height.NodeId, Is.EqualTo(heightId));
+	}
+
+	[Test]
+	public void DecodeHeightSamples_UsesTopMipRedChannel()
+	{
+		var texture = new Texture(
+			"height",
+			2,
+			2,
+			isSrgb: false,
+			TextureFormat.Rgba8Unorm,
+			[
+				new TextureMipData(2, 2, [10, 100, 200, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255]),
+				new TextureMipData(1, 1, [255, 0, 0, 255])
+			]);
+
+		var decodeMethod = typeof(TerrainRuntimeData).GetMethod("DecodeHeightSamples", BindingFlags.NonPublic | BindingFlags.Static)
+			?? throw new AssertionException("DecodeHeightSamples method was not found.");
+		var parameters = new object?[] { texture, 0, 0 };
+		var result = (float[]?)decodeMethod.Invoke(null, parameters);
+
+		Assert.That(result, Is.Not.Null);
+		Assert.That((int)parameters[1]!, Is.EqualTo(2));
+		Assert.That((int)parameters[2]!, Is.EqualTo(2));
+		Assert.That(result!, Has.Length.EqualTo(4));
+		Assert.That(result[0], Is.EqualTo(10.0f / 255.0f).Within(0.0001f));
+		Assert.That(result[1], Is.EqualTo(20.0f / 255.0f).Within(0.0001f));
+		Assert.That(result[2], Is.EqualTo(30.0f / 255.0f).Within(0.0001f));
+		Assert.That(result[3], Is.EqualTo(40.0f / 255.0f).Within(0.0001f));
+	}
+
+	[Test]
+	public void EnsureBuilt_GeneratesExpectedChunkMeshesAndLods()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		Assert.That(runtime.HeightSampleWidth, Is.EqualTo(5));
+		Assert.That(runtime.HeightSampleHeight, Is.EqualTo(5));
+		Assert.That(runtime.Chunks, Has.Count.EqualTo(1));
+
+		var chunk = runtime.Chunks[0];
+		Assert.That(chunk.LodMeshes[0].Vertices, Has.Length.EqualTo(45));
+		Assert.That(chunk.LodMeshes[0].Indices, Has.Length.EqualTo(192));
+		Assert.That(chunk.LodMeshes[1].Vertices, Has.Length.EqualTo(21));
+		Assert.That(chunk.LodMeshes[1].Indices, Has.Length.EqualTo(72));
+		Assert.That(chunk.LodMeshes[2].Vertices, Has.Length.EqualTo(12));
+		Assert.That(chunk.LodMeshes[2].Indices, Has.Length.EqualTo(30));
+	}
+
+	[Test]
+	public void CollectVisibleRecords_RejectsCulledChunksAndSelectsLodsByDistance()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 8.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var renderGraph = CreateTestRenderGraph();
+		var nearCamera = new Vector3(0.0f, 40.0f, -60.0f);
+		var nearViewProjection = CreateViewProjection(nearCamera, Vector3.Zero, 500.0f);
+		var records = new List<TerrainSnapshotRecord>();
+
+		runtime.CollectVisibleRecords(renderGraph, nearCamera, nearViewProjection, Matrix4x4.Identity, records);
+
+		Assert.That(records, Has.Count.EqualTo(1));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[0]));
+
+		records.Clear();
+		var farCamera = new Vector3(0.0f, 50.0f, -400.0f);
+		var farViewProjection = CreateViewProjection(farCamera, Vector3.Zero, 1000.0f);
+		runtime.CollectVisibleRecords(renderGraph, farCamera, farViewProjection, Matrix4x4.Identity, records);
+
+		Assert.That(records, Has.Count.EqualTo(1));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
+
+		records.Clear();
+		runtime.CollectVisibleRecords(
+			renderGraph,
+			nearCamera,
+			nearViewProjection,
+			Matrix4x4.CreateTranslation(5000.0f, 0.0f, 0.0f),
+			records);
+
+		Assert.That(records, Is.Empty);
+	}
+
+	[Test]
+	public void EnsureBuilt_RebuildsWhenHeightTextureContentChanges()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		var texture = CreateHeightTexture("height-5x5", 5, 5);
+		registry.Register(heightmapId, texture);
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		var initialChunkCount = runtime.Chunks.Count;
+
+		texture.ApplyTextureData(9, 9, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(9, 9));
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		Assert.That(runtime.HeightSampleWidth, Is.EqualTo(9));
+		Assert.That(runtime.HeightSampleHeight, Is.EqualTo(9));
+		Assert.That(runtime.Chunks.Count, Is.Not.EqualTo(initialChunkCount));
+		Assert.That(runtime.Chunks.Count, Is.EqualTo(4));
+	}
+
+	private static Matrix4x4 CreateViewProjection(Vector3 cameraPosition, Vector3 target, float farPlane)
+	{
+		var view = Matrix4x4.CreateLookAt(cameraPosition, target, Vector3.UnitY);
+		var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3.0f, 1.0f, 0.1f, farPlane);
+		return view * projection;
+	}
+
+	private static Texture CreateHeightTexture(string name, int width, int height)
+	{
+		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(width, height));
+	}
+
+	private static TextureMipData[] CreateHeightMipLevels(int width, int height)
+	{
+		var data = new byte[width * height * 4];
+		for (var y = 0; y < height; y++)
+		{
+			for (var x = 0; x < width; x++)
+			{
+				var sampleIndex = y * width + x;
+				var offset = sampleIndex * 4;
+				data[offset] = (byte)Math.Clamp((x + y) * 16, 0, 255);
+				data[offset + 1] = 0;
+				data[offset + 2] = 0;
+				data[offset + 3] = 255;
+			}
+		}
+
+		return [new TextureMipData(width, height, data)];
+	}
+
+	private static RenderGraph CreateTestRenderGraph()
+	{
+		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		SetField(renderGraph, "_resourceSync", new object());
+		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
+		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());
+		return renderGraph;
+	}
+
+	private static void SetField(object instance, string fieldName, object value)
+	{
+		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
+			?? throw new AssertionException($"Field '{fieldName}' was not found.");
+		field.SetValue(instance, value);
+	}
+
+	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable
+	{
+		private readonly Dictionary<Guid, object> _assets = new();
+
+		public TestAssetRegistry()
+		{
+			AssetDatabase.SetInstanceRegistry(this);
+		}
+
+		public void Register(Guid assetId, object asset)
+		{
+			_assets[assetId] = asset;
+		}
+
+		public object? GetInstance(Guid assetId, Type expectedType)
+		{
+			if (_assets.TryGetValue(assetId, out var asset) == false)
+			{
+				return null;
+			}
+
+			return expectedType.IsInstanceOfType(asset) ? asset : null;
+		}
+
+		public void RefreshProject(string projectRootPath, AssetDatabase database)
+		{
+		}
+
+		public void InvalidateAssets(IEnumerable<Guid> assetIds)
+		{
+			foreach (var assetId in assetIds)
+			{
+				_assets.Remove(assetId);
+			}
+		}
+
+		public void ClearCachedInstances()
+		{
+			_assets.Clear();
+		}
+
+		public void Clear()
+		{
+			_assets.Clear();
+		}
+
+		public void Dispose()
+		{
+			AssetDatabase.ClearInstanceRegistry();
+		}
+	}
+}

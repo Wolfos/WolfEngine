@@ -19,6 +19,7 @@ public interface IRenderPipeline
 public class RenderPipeline : IRenderPipeline
 {
 	private readonly RenderGraph _renderGraph;
+	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private int _stressFrame;
 
 	public RenderPipeline(RenderGraph renderGraph)
@@ -48,6 +49,13 @@ public class RenderPipeline : IRenderPipeline
 			var sunIntensityScale = 1.0f;
 			var hasSunDirection = false;
 			var gpuDrawDatabase = snapshot.GpuDrawDatabase;
+			var viewProjection = Matrix4x4.Identity;
+			var cameraOrigin = Vector3.Zero;
+			if (Matrix4x4.Invert(cameraWorldTransform.LocalToWorld, out var view) &&
+			    Matrix4x4.Decompose(cameraWorldTransform.LocalToWorld, out _, out _, out cameraOrigin))
+			{
+				viewProjection = view * camera.Perspective;
+			}
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
 				gpuDrawDatabase.BeginSync();
@@ -92,6 +100,27 @@ public class RenderPipeline : IRenderPipeline
 
 						var transformMatrix = transform.LocalToWorld;
 						gpuDrawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+					}
+				}
+
+				using (FrameProfiler.Instance.Measure("Gather terrain"))
+				{
+					foreach (var entry in world.View<WorldTransform, TerrainComponent>())
+					{
+						if (world.IsEnabled(entry.Entity) == false)
+						{
+							continue;
+						}
+
+						_terrainRuntimeCache.CollectVisibleTerrain(
+							_renderGraph,
+							world,
+							entry.Entity,
+							entry.Second,
+							entry.First,
+							cameraOrigin,
+							viewProjection,
+							snapshot.TerrainRecords);
 					}
 				}
 

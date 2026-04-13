@@ -228,7 +228,8 @@ public sealed class RenderGraph
 				{
 					CommandList = commandList,
 					SceneData = sceneData,
-					GpuDrawDatabase = snapshot.GpuDrawDatabase
+					GpuDrawDatabase = snapshot.GpuDrawDatabase,
+					FrameSnapshot = snapshot
 				};
 				pass.Execute(context);
 
