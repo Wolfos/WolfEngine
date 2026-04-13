@@ -17,8 +17,7 @@ cbuffer ClusterParams : register(b12)
     float nearPlane;
     float farPlane;
     uint pointLightCount;
-    uint lightIndexCapacity;
-    uint2 _clusterPadding;
+    uint3 _clusterPadding;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u0);
@@ -104,65 +103,13 @@ void CSBuildClusters(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     g_ClusterAabbs[clusterIndex] = BuildClusterAabb(clusterIndex);
-    g_ClusterHeaders[clusterIndex].offset = 0u;
+    g_ClusterHeaders[clusterIndex].offset = clusterIndex * CLUSTER_MAX_LIGHTS_PER_CLUSTER;
     g_ClusterHeaders[clusterIndex].count = 0u;
     g_ClusterWriteCursor[clusterIndex] = 0u;
     if (clusterIndex < 2u)
     {
         g_ClusterOverflow[clusterIndex] = 0u;
     }
-}
-
-[numthreads(64, 1, 1)]
-void CSCountLights(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint clusterIndex = GetLinearClusterIndex(dispatchThreadId.x);
-    if (clusterIndex >= clusterCount)
-    {
-        return;
-    }
-
-    ClusterAabb cluster = g_ClusterAabbs[clusterIndex];
-    uint count = 0u;
-    for (uint i = 0u; i < pointLightCount; ++i)
-    {
-        if (IntersectsCluster(g_PointLights[i], cluster))
-        {
-            count++;
-        }
-    }
-
-    g_ClusterHeaders[clusterIndex].count = count;
-}
-
-[numthreads(1, 1, 1)]
-void CSPrefixOffsets(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    if (dispatchThreadId.x != 0u || dispatchThreadId.y != 0u || dispatchThreadId.z != 0u)
-    {
-        return;
-    }
-
-    uint runningOffset = 0u;
-    uint overflow = 0u;
-    for (uint i = 0u; i < clusterCount; ++i)
-    {
-        uint count = g_ClusterHeaders[i].count;
-        uint available = runningOffset < lightIndexCapacity ? (lightIndexCapacity - runningOffset) : 0u;
-        uint clampedCount = min(count, available);
-        if (clampedCount < count)
-        {
-            overflow = 1u;
-        }
-
-        g_ClusterHeaders[i].offset = runningOffset;
-        g_ClusterHeaders[i].count = clampedCount;
-        g_ClusterWriteCursor[i] = 0u;
-        runningOffset += clampedCount;
-    }
-
-    g_ClusterOverflow[0] = overflow;
-    g_ClusterOverflow[1] = runningOffset;
 }
 
 [numthreads(64, 1, 1)]
@@ -175,7 +122,8 @@ void CSWriteLightIndices(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     ClusterAabb cluster = g_ClusterAabbs[clusterIndex];
-    ClusterHeader header = g_ClusterHeaders[clusterIndex];
+    uint writeCount = 0u;
+    uint baseOffset = clusterIndex * CLUSTER_MAX_LIGHTS_PER_CLUSTER;
     for (uint i = 0u; i < pointLightCount; ++i)
     {
         if (IntersectsCluster(g_PointLights[i], cluster) == false)
@@ -183,15 +131,17 @@ void CSWriteLightIndices(uint3 dispatchThreadId : SV_DispatchThreadID)
             continue;
         }
 
-        uint writeIndex = 0u;
-        InterlockedAdd(g_ClusterWriteCursor[clusterIndex], 1u, writeIndex);
-        if (writeIndex < header.count)
+        if (writeCount < CLUSTER_MAX_LIGHTS_PER_CLUSTER)
         {
-            g_ClusterLightIndices[header.offset + writeIndex] = i;
+            g_ClusterLightIndices[baseOffset + writeCount] = i;
+            writeCount++;
         }
         else
         {
             g_ClusterOverflow[0] = 1u;
         }
     }
+
+    g_ClusterHeaders[clusterIndex].offset = baseOffset;
+    g_ClusterHeaders[clusterIndex].count = writeCount;
 }

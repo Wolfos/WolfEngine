@@ -119,8 +119,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurVerticalExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
-	private readonly Action<RenderGraphContext> _clusteredLightingCountExecute;
-	private readonly Action<RenderGraphContext> _clusteredLightingPrefixExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
@@ -176,8 +174,6 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionBlurVerticalExecute = ExecuteAmbientOcclusionBlurVertical;
 		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
 		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
-		_clusteredLightingCountExecute = ExecuteClusteredLightingCount;
-		_clusteredLightingPrefixExecute = ExecuteClusteredLightingPrefix;
 		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_taaResolveExecute = ExecuteTemporalResolve;
@@ -585,10 +581,6 @@ internal sealed class RenderGraphFrameBuilder
 
 			graph.AddPass("Clustered Lighting Build", PassKind.Compute)
 				.SetExecute(_clusteredLightingBuildExecute);
-			graph.AddPass("Clustered Lighting Count", PassKind.Compute)
-				.SetExecute(_clusteredLightingCountExecute);
-			graph.AddPass("Clustered Lighting Prefix", PassKind.Compute)
-				.SetExecute(_clusteredLightingPrefixExecute);
 			graph.AddPass("Clustered Lighting Write", PassKind.Compute)
 				.SetExecute(_clusteredLightingWriteExecute);
 
@@ -1013,24 +1005,6 @@ internal sealed class RenderGraphFrameBuilder
 			_gpuDrawResources,
 			_frameResources.SceneFramebufferSize);
 		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.BuildClusters);
-	}
-
-	private void ExecuteClusteredLightingCount(RenderGraphContext context)
-	{
-		var config = _clusteredLightingPass.BuildConfig(
-			_renderer.GetGfxDevice(),
-			_gpuDrawResources,
-			_frameResources.SceneFramebufferSize);
-		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.CountLights);
-	}
-
-	private void ExecuteClusteredLightingPrefix(RenderGraphContext context)
-	{
-		var config = _clusteredLightingPass.BuildConfig(
-			_renderer.GetGfxDevice(),
-			_gpuDrawResources,
-			_frameResources.SceneFramebufferSize);
-		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.PrefixOffsets);
 	}
 
 	private void ExecuteClusteredLightingWrite(RenderGraphContext context)

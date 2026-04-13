@@ -5,6 +5,7 @@ static const uint MAX_DIRECTIONAL_LIGHTS = 4;
 static const float IBL_EXPOSURE = 0.75f;
 static const uint CLUSTER_TILE_SIZE = 64;
 static const uint CLUSTER_Z_SLICE_COUNT = 24;
+static const uint CLUSTER_MAX_LIGHTS_PER_CLUSTER = 64;
 
 struct DirectionalLightData
 {
