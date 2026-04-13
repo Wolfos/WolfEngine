@@ -101,7 +101,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 				throw new InvalidOperationException("GPU input buffer does not support CPU writes.");
 			}
 
-			writableInput.Write(MemoryMarshal.Cast<byte, uint>(mip.Data.AsSpan()));
+			writableInput.Write<uint>(MemoryMarshal.Cast<byte, uint>(mip.Data.AsSpan()));
 
 			return format switch
 			{
@@ -368,7 +368,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 			throw new InvalidOperationException("GPU lookup buffer does not support CPU writes.");
 		}
 
-		writableBuffer.Write(values);
+		writableBuffer.Write<Vector2>(values);
 		return buffer;
 	}
 

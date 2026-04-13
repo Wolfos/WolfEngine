@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 
 namespace WolfEngine.ECS;
@@ -669,11 +667,6 @@ public class World
         worldTransform.LocalToWorld = worldMatrix;
         Matrix4x4.Invert(worldMatrix, out worldTransform.WorldToLocal);
         localTransform.IsDirty = false;
-    }
-
-    internal void MarkPhysicsChildTransformsDirty(Entity entity)
-    {
-        MarkChildTransformsDirty(entity);
     }
 
     private void MarkChildTransformsDirty(Entity entity)
