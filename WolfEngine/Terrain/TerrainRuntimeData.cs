@@ -290,7 +290,8 @@ public sealed class TerrainRuntimeData
 			layer.Normal.Asset,
 			layer.MetallicRoughness.Asset,
 			layer.Occlusion.Asset,
-			layer.Height.Asset);
+			layer.Height.Asset,
+			layer.Scale);
 	}
 
 	private void BuildChunks(float[] heights, Vector3[] normals, int sampleWidth, int sampleHeight)

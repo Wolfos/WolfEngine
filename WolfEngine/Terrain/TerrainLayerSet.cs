@@ -41,6 +41,7 @@ public sealed class TerrainLayerSet : IDataAsset
 
 public sealed class TerrainLayerDefinition
 {
+	public float Scale { get; set; } = 8.0f;
 	public AssetRef<Texture> Albedo { get; set; }
 	public AssetRef<Texture> Normal { get; set; }
 	public AssetRef<Texture> MetallicRoughness { get; set; }

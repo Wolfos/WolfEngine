@@ -223,6 +223,7 @@ public sealed class TerrainGBufferPass
 		var hasHeight = layer.Height is not null;
 		writer.SetUInt($"layer{index}HeightHandle", ResolveTextureHandle(layer.Height).Value);
 		writer.SetUInt($"layer{index}HasHeight", hasHeight ? 1u : 0u);
+		writer.SetFloat($"layer{index}Scale", Math.Max(layer.Scale, 0.001f));
 	}
 }
 

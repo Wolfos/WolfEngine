@@ -17,13 +17,14 @@ public sealed class TerrainSnapshotRecord
 
 public readonly struct TerrainResolvedLayer
 {
-	public TerrainResolvedLayer(Texture? albedo, Texture? normal, Texture? metallicRoughness, Texture? occlusion, Texture? height)
+	public TerrainResolvedLayer(Texture? albedo, Texture? normal, Texture? metallicRoughness, Texture? occlusion, Texture? height, float scale)
 	{
 		Albedo = albedo;
 		Normal = normal;
 		MetallicRoughness = metallicRoughness;
 		Occlusion = occlusion;
 		Height = height;
+		Scale = scale;
 	}
 
 	public Texture? Albedo { get; }
@@ -31,4 +32,5 @@ public readonly struct TerrainResolvedLayer
 	public Texture? MetallicRoughness { get; }
 	public Texture? Occlusion { get; }
 	public Texture? Height { get; }
+	public float Scale { get; }
 }

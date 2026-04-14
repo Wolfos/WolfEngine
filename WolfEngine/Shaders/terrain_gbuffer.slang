@@ -36,24 +36,36 @@ cbuffer TerrainDrawParams : register(b3)
     uint layer0OcclusionHandle;
     uint layer0HeightHandle;
     uint layer0HasHeight;
+    float layer0Scale;
+    float _layer0Padding0;
+    float _layer0Padding1;
     uint layer1AlbedoHandle;
     uint layer1NormalHandle;
     uint layer1MetallicRoughnessHandle;
     uint layer1OcclusionHandle;
     uint layer1HeightHandle;
     uint layer1HasHeight;
+    float layer1Scale;
+    float _layer1Padding0;
+    float _layer1Padding1;
     uint layer2AlbedoHandle;
     uint layer2NormalHandle;
     uint layer2MetallicRoughnessHandle;
     uint layer2OcclusionHandle;
     uint layer2HeightHandle;
     uint layer2HasHeight;
+    float layer2Scale;
+    float _layer2Padding0;
+    float _layer2Padding1;
     uint layer3AlbedoHandle;
     uint layer3NormalHandle;
     uint layer3MetallicRoughnessHandle;
     uint layer3OcclusionHandle;
     uint layer3HeightHandle;
     uint layer3HasHeight;
+    float layer3Scale;
+    float _layer3Padding0;
+    float _layer3Padding1;
 };
 
 struct VSInput
@@ -70,8 +82,9 @@ struct VSOutput
     float3 normal : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float4 tangent : TEXCOORD2;
-    float4 currentClip : TEXCOORD3;
-    float4 previousClip : TEXCOORD4;
+    float3 worldPosition : TEXCOORD3;
+    float4 currentClip : TEXCOORD4;
+    float4 previousClip : TEXCOORD5;
 };
 
 struct PSOutput
@@ -96,8 +109,9 @@ struct LayerSample
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    float4 worldPosition = mul(input.position, world);
-    float4 previousWorldPosition = worldPosition;
+    float4 absoluteWorldPosition = mul(input.position, world);
+    float4 worldPosition = absoluteWorldPosition;
+    float4 previousWorldPosition = absoluteWorldPosition;
     worldPosition.xyz -= cameraPosition;
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), world);
@@ -108,6 +122,7 @@ VSOutput vertexShader(VSInput input)
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
     output.tangent = float4(normalize(worldTangent), input.tangent.w);
+    output.worldPosition = absoluteWorldPosition.xyz;
     return output;
 }
 
@@ -138,32 +153,6 @@ float4 SampleControlWeights(float2 uv)
     return saturate(controlTex.Sample(samplerState, uv));
 }
 
-LayerSample SampleLayer(float2 uv, float3 geometryNormal, float4 tangent, uint albedoHandle, uint normalHandle, uint mrHandle, uint occlusionHandle, uint heightHandle, uint hasHeightMap)
-{
-    SamplerState samplerState = GetSampler(layerSamplerHandle);
-    LayerSample sample;
-    sample.albedo = GetTexture(albedoHandle).Sample(samplerState, uv);
-    float4 mr = GetTexture(mrHandle).Sample(samplerState, uv);
-    float4 occ = GetTexture(occlusionHandle).Sample(samplerState, uv);
-    float heightValue = 0.5f;
-    if (hasHeightMap != 0)
-    {
-        heightValue = GetTexture(heightHandle).Sample(samplerState, uv).r;
-    }
-
-    float3 tangentNormal = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, uv));
-    float3 N = normalize(geometryNormal);
-    float3 T = normalize(tangent.xyz);
-    float3 B = normalize(cross(N, T) * tangent.w);
-    float3x3 TBN = float3x3(T, B, N);
-    sample.normal = normalize(mul(tangentNormal, TBN));
-    sample.metallic = saturate(mr.b);
-    sample.roughness = saturate(mr.g);
-    sample.occlusion = saturate(occ.r);
-    sample.height = saturate(heightValue);
-    return sample;
-}
-
 float4 NormalizeWeights(float4 weights)
 {
     float sum = weights.x + weights.y + weights.z + weights.w;
@@ -184,14 +173,79 @@ float4 MaskInactiveLayers(float4 weights, uint activeLayerCount)
     return masked;
 }
 
+float3 GetTriplanarWeights(float3 worldNormal)
+{
+    float3 weights = pow(abs(normalize(worldNormal)), 4.0f);
+    float sum = weights.x + weights.y + weights.z;
+    return sum > 1e-5f ? weights / sum : float3(0.0f, 1.0f, 0.0f);
+}
+
+float2 GetTriplanarUvX(float3 worldPosition, float layerScale)
+{
+    return worldPosition.zy / max(layerScale, 0.001f);
+}
+
+float2 GetTriplanarUvY(float3 worldPosition, float layerScale)
+{
+    return worldPosition.xz / max(layerScale, 0.001f);
+}
+
+float2 GetTriplanarUvZ(float3 worldPosition, float layerScale)
+{
+    return worldPosition.xy / max(layerScale, 0.001f);
+}
+
+float4 SampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
+{
+    float3 weights = GetTriplanarWeights(worldNormal);
+    float4 sampleX = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale));
+    float4 sampleY = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale));
+    float4 sampleZ = GetTexture(textureHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale));
+    return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
+}
+
+float3 DecodeTriplanarNormal(uint normalHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
+{
+    float3 weights = GetTriplanarWeights(worldNormal);
+    float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale)));
+    float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale)));
+    float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale)));
+
+    float3 worldNormalX = normalize(float3(normalX.z, normalX.y, normalX.x));
+    float3 worldNormalY = normalize(float3(normalY.x, normalY.z, normalY.y));
+    float3 worldNormalZ = normalize(float3(normalZ.x, normalZ.y, normalZ.z));
+    return normalize(worldNormalX * weights.x + worldNormalY * weights.y + worldNormalZ * weights.z);
+}
+
+LayerSample SampleTriplanarLayer(float3 worldPosition, float3 geometryNormal, uint albedoHandle, uint normalHandle, uint mrHandle, uint occlusionHandle, uint heightHandle, uint hasHeightMap, float layerScale)
+{
+    SamplerState samplerState = GetSampler(layerSamplerHandle);
+    LayerSample sample;
+    sample.albedo = SampleTriplanarFloat4(albedoHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    float4 mr = SampleTriplanarFloat4(mrHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    float4 occ = SampleTriplanarFloat4(occlusionHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    float heightValue = 0.5f;
+    if (hasHeightMap != 0)
+    {
+        heightValue = SampleTriplanarFloat4(heightHandle, samplerState, worldPosition, geometryNormal, layerScale).r;
+    }
+
+    sample.normal = DecodeTriplanarNormal(normalHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    sample.metallic = saturate(mr.b);
+    sample.roughness = saturate(mr.g);
+    sample.occlusion = saturate(occ.r);
+    sample.height = saturate(heightValue);
+    return sample;
+}
+
 PSOutput fragmentShader(VSOutput input)
 {
     PSOutput output;
     float4 control = MaskInactiveLayers(SampleControlWeights(input.uv), layerCount);
-    LayerSample layer0 = SampleLayer(input.uv, input.normal, input.tangent, layer0AlbedoHandle, layer0NormalHandle, layer0MetallicRoughnessHandle, layer0OcclusionHandle, layer0HeightHandle, layer0HasHeight);
-    LayerSample layer1 = SampleLayer(input.uv, input.normal, input.tangent, layer1AlbedoHandle, layer1NormalHandle, layer1MetallicRoughnessHandle, layer1OcclusionHandle, layer1HeightHandle, layer1HasHeight);
-    LayerSample layer2 = SampleLayer(input.uv, input.normal, input.tangent, layer2AlbedoHandle, layer2NormalHandle, layer2MetallicRoughnessHandle, layer2OcclusionHandle, layer2HeightHandle, layer2HasHeight);
-    LayerSample layer3 = SampleLayer(input.uv, input.normal, input.tangent, layer3AlbedoHandle, layer3NormalHandle, layer3MetallicRoughnessHandle, layer3OcclusionHandle, layer3HeightHandle, layer3HasHeight);
+    LayerSample layer0 = SampleTriplanarLayer(input.worldPosition, input.normal, layer0AlbedoHandle, layer0NormalHandle, layer0MetallicRoughnessHandle, layer0OcclusionHandle, layer0HeightHandle, layer0HasHeight, layer0Scale);
+    LayerSample layer1 = SampleTriplanarLayer(input.worldPosition, input.normal, layer1AlbedoHandle, layer1NormalHandle, layer1MetallicRoughnessHandle, layer1OcclusionHandle, layer1HeightHandle, layer1HasHeight, layer1Scale);
+    LayerSample layer2 = SampleTriplanarLayer(input.worldPosition, input.normal, layer2AlbedoHandle, layer2NormalHandle, layer2MetallicRoughnessHandle, layer2OcclusionHandle, layer2HeightHandle, layer2HasHeight, layer2Scale);
+    LayerSample layer3 = SampleTriplanarLayer(input.worldPosition, input.normal, layer3AlbedoHandle, layer3NormalHandle, layer3MetallicRoughnessHandle, layer3OcclusionHandle, layer3HeightHandle, layer3HasHeight, layer3Scale);
 
     float4 biased = control;
     if (layerCount > 0) biased.x *= pow(max(layer0.height, 0.0001f), max(heightBlendSharpness, 0.0001f));
