@@ -53,6 +53,8 @@ public interface IGfxCommandList
 
 	void PushConstants<T>(in T data) where T : unmanaged;
 
+	void SetVertexBuffer(in VertexBufferView vertexBuffer);
+
 	void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers);
 
 	void SetIndexBuffer(in IndexBufferView indexBuffer);

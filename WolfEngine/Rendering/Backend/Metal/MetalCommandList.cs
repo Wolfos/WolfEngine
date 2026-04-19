@@ -280,6 +280,18 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		SetGraphicsConstants(0, MemoryMarshal.AsBytes(payload));
 	}
 
+	public void SetVertexBuffer(in VertexBufferView vertexBuffer)
+	{
+		ThrowIfDisposed();
+		EnsureRenderEncoder();
+		if (vertexBuffer.Buffer is not MetalBuffer metalBuffer)
+		{
+			throw new InvalidOperationException("Vertex buffer was not created by the Metal backend.");
+		}
+
+		_renderEncoder!.SetVertexBuffer(metalBuffer.Buffer, (nuint)vertexBuffer.Offset, 0);
+	}
+
 	public void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers)
 	{
 		ThrowIfDisposed();

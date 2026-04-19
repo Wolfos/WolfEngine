@@ -11,6 +11,7 @@ public sealed class TerrainGBufferPass
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
 	private ShaderPropertyWriter? _drawWriter;
+	private LayerFieldSet[]? _layerFields;
 	private DescriptorHandle _layerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _controlSampler = DescriptorHandle.Invalid;
 
@@ -134,7 +135,10 @@ public sealed class TerrainGBufferPass
 				WriteLayer(drawWriter, 2, record.Layer2);
 				WriteLayer(drawWriter, 3, record.Layer3);
 				commandList.SetGraphicsConstants(drawWriter.RegisterIndex, drawWriter.AsBytes());
-				commandList.SetVertexBuffers(new[] { new VertexBufferView(record.Mesh.VertexBuffer, record.Mesh.StrideInBytes, checked((uint)record.Mesh.PackedVertexOffsetBytes)) });
+				commandList.SetVertexBuffer(new VertexBufferView(
+					record.Mesh.VertexBuffer,
+					record.Mesh.StrideInBytes,
+					checked((uint)record.Mesh.PackedVertexOffsetBytes)));
 				commandList.SetIndexBuffer(new IndexBufferView(record.Mesh.IndexBuffer, IndexFormat.UInt32, checked((uint)record.Mesh.PackedIndexOffsetBytes)));
 				commandList.Draw(new DrawArguments(record.Mesh.IndexCount, 1, 0, 0, 0));
 			}
@@ -198,7 +202,9 @@ public sealed class TerrainGBufferPass
 			"vertexShader",
 			"fragmentShader");
 		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
-		_drawWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("TerrainDrawParams"));
+		var drawLayout = compiled.ReflectionLayout.GetConstantBuffer("TerrainDrawParams");
+		_drawWriter = new ShaderPropertyWriter(drawLayout);
+		_layerFields = CreateLayerFieldSets(drawLayout);
 		_reflectionBackendKind = backendKind;
 	}
 
@@ -211,15 +217,44 @@ public sealed class TerrainGBufferPass
 
 	private void WriteLayer(ShaderPropertyWriter writer, int index, in TerrainResolvedLayer layer)
 	{
-		writer.SetUInt($"layer{index}AlbedoHandle", ResolveTextureHandle(layer.Albedo).Value);
-		writer.SetUInt($"layer{index}NormalHandle", ResolveTextureHandle(layer.Normal).Value);
-		writer.SetUInt($"layer{index}MetallicRoughnessHandle", ResolveTextureHandle(layer.MetallicRoughness).Value);
-		writer.SetUInt($"layer{index}OcclusionHandle", ResolveTextureHandle(layer.Occlusion).Value);
+		var layerFields = _layerFields ?? throw new InvalidOperationException("Terrain layer fields were not initialized.");
+		var fields = layerFields[index];
+		writer.SetUInt(fields.AlbedoHandle, ResolveTextureHandle(layer.Albedo).Value);
+		writer.SetUInt(fields.NormalHandle, ResolveTextureHandle(layer.Normal).Value);
+		writer.SetUInt(fields.MetallicRoughnessHandle, ResolveTextureHandle(layer.MetallicRoughness).Value);
+		writer.SetUInt(fields.OcclusionHandle, ResolveTextureHandle(layer.Occlusion).Value);
 		var hasHeight = layer.Height is not null;
-		writer.SetUInt($"layer{index}HeightHandle", ResolveTextureHandle(layer.Height).Value);
-		writer.SetUInt($"layer{index}HasHeight", hasHeight ? 1u : 0u);
-		writer.SetFloat($"layer{index}Scale", Math.Max(layer.Scale, 0.001f));
+		writer.SetUInt(fields.HeightHandle, ResolveTextureHandle(layer.Height).Value);
+		writer.SetUInt(fields.HasHeight, hasHeight ? 1u : 0u);
+		writer.SetFloat(fields.Scale, Math.Max(layer.Scale, 0.001f));
 	}
+
+	private static LayerFieldSet[] CreateLayerFieldSets(ShaderConstantBufferLayout drawLayout)
+	{
+		var fields = new LayerFieldSet[4];
+		for (var i = 0; i < fields.Length; i++)
+		{
+			fields[i] = new LayerFieldSet(
+				drawLayout.GetFieldOrThrow($"layer{i}AlbedoHandle"),
+				drawLayout.GetFieldOrThrow($"layer{i}NormalHandle"),
+				drawLayout.GetFieldOrThrow($"layer{i}MetallicRoughnessHandle"),
+				drawLayout.GetFieldOrThrow($"layer{i}OcclusionHandle"),
+				drawLayout.GetFieldOrThrow($"layer{i}HeightHandle"),
+				drawLayout.GetFieldOrThrow($"layer{i}HasHeight"),
+				drawLayout.GetFieldOrThrow($"layer{i}Scale"));
+		}
+
+		return fields;
+	}
+
+	private readonly record struct LayerFieldSet(
+		ShaderConstantFieldLayout AlbedoHandle,
+		ShaderConstantFieldLayout NormalHandle,
+		ShaderConstantFieldLayout MetallicRoughnessHandle,
+		ShaderConstantFieldLayout OcclusionHandle,
+		ShaderConstantFieldLayout HeightHandle,
+		ShaderConstantFieldLayout HasHeight,
+		ShaderConstantFieldLayout Scale);
 }
 
 public sealed class TerrainGBufferPassConfig

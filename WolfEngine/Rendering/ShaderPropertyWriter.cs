@@ -29,9 +29,21 @@ internal sealed class ShaderPropertyWriter
 		Write(field, value);
 	}
 
+	public void SetUInt(in ShaderConstantFieldLayout field, uint value)
+	{
+		ValidateFieldKind(field, ShaderConstantFieldValueKind.UInt);
+		Write(field, value);
+	}
+
 	public void SetFloat(string path, float value)
 	{
 		var field = GetFieldOrThrow(path, ShaderConstantFieldValueKind.Float);
+		Write(field, value);
+	}
+
+	public void SetFloat(in ShaderConstantFieldLayout field, float value)
+	{
+		ValidateFieldKind(field, ShaderConstantFieldValueKind.Float);
 		Write(field, value);
 	}
 
@@ -68,14 +80,18 @@ internal sealed class ShaderPropertyWriter
 	private ShaderConstantFieldLayout GetFieldOrThrow(string path, ShaderConstantFieldValueKind expectedKind)
 	{
 		var field = _layout.GetFieldOrThrow(path);
+		ValidateFieldKind(field, expectedKind);
+		return field;
+	}
+
+	private void ValidateFieldKind(in ShaderConstantFieldLayout field, ShaderConstantFieldValueKind expectedKind)
+	{
 		if (field.ValueKind != expectedKind)
 		{
 			throw new InvalidOperationException(
-				$"Shader field '{path}' in constant buffer '{_layout.Name}' has type '{field.ValueKind}', " +
+				$"Shader field '{field.Path}' in constant buffer '{_layout.Name}' has type '{field.ValueKind}', " +
 				$"but '{expectedKind}' was requested.");
 		}
-
-		return field;
 	}
 
 	private void Write<T>(in ShaderConstantFieldLayout field, in T value) where T : unmanaged

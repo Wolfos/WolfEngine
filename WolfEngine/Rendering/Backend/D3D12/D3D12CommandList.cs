@@ -398,6 +398,39 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		SetGraphicsConstants(0, bytes);
 	}
 
+	public void SetVertexBuffer(in AbstractionVertexBufferView vertexBuffer)
+	{
+		if (vertexBuffer.Buffer is not D3D12Buffer buffer)
+		{
+			throw new InvalidOperationException("Vertex buffer was not created by the Direct3D12 backend.");
+		}
+
+		var resource = buffer.Resource.Handle;
+		if (resource is null)
+		{
+			throw new InvalidOperationException("Vertex buffer resource was null.");
+		}
+
+		var gpuAddress = resource->GetGPUVirtualAddress();
+		var size = buffer.SizeInBytes;
+		var start = vertexBuffer.Offset;
+		if (start >= size)
+		{
+			throw new ArgumentOutOfRangeException(nameof(vertexBuffer), "Vertex buffer offset exceeds buffer size.");
+		}
+
+		var remaining = size - start;
+		var spanSize = Math.Min(remaining, uint.MaxValue);
+		var view = new Silk.NET.Direct3D12.VertexBufferView
+		{
+			BufferLocation = gpuAddress + start,
+			StrideInBytes = vertexBuffer.Stride,
+			SizeInBytes = (uint)spanSize
+		};
+
+		CommandList.IASetVertexBuffers(0, 1, &view);
+	}
+
 	public void SetVertexBuffers(ReadOnlySpan<AbstractionVertexBufferView> vertexBuffers)
 	{
 		if (vertexBuffers.IsEmpty)
