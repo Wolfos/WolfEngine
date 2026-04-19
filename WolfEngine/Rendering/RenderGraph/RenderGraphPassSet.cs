@@ -32,7 +32,7 @@ internal sealed class RenderGraphPassSet
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
 		ShadowMapPass = new(shaderCompiler);
-		TerrainGBufferPass = new(shaderCompiler, bindlessResourceRegistry, renderer);
+		TerrainGBufferPass = new(shaderCompiler, bindlessResourceRegistry);
 		GpuDrawPass = new(
 			shaderCompiler,
 			bindlessResourceRegistry,

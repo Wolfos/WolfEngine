@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 
@@ -10,7 +7,6 @@ public sealed class TerrainGBufferPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly IRenderer _renderer;
 	private IGfxPipeline? _pipeline;
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -18,11 +14,10 @@ public sealed class TerrainGBufferPass
 	private DescriptorHandle _layerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _controlSampler = DescriptorHandle.Invalid;
 
-	public TerrainGBufferPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry, IRenderer renderer)
+	public TerrainGBufferPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
-		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 	}
 
 	public TerrainGBufferPassConfig BuildConfig(
