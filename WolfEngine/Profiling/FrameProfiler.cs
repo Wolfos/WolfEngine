@@ -21,7 +21,8 @@ public sealed class FrameProfiler
 		state.FrameActive = true;
 		state.Root = new ProfileNode(name)
 		{
-			StartTicks = Stopwatch.GetTimestamp()
+			StartTicks = Stopwatch.GetTimestamp(),
+			StartAllocatedBytes = GC.GetAllocatedBytesForCurrentThread()
 		};
 		state.Stack.Clear();
 		state.Stack.Push(state.Root);
@@ -36,6 +37,7 @@ public sealed class FrameProfiler
 		}
 
 		state.Root.EndTicks = Stopwatch.GetTimestamp();
+		state.Root.EndAllocatedBytes = GC.GetAllocatedBytesForCurrentThread();
 		state.Stack.Clear();
 		state.FrameActive = false;
 
@@ -55,7 +57,8 @@ public sealed class FrameProfiler
 
 		var node = new ProfileNode(name)
 		{
-			StartTicks = Stopwatch.GetTimestamp()
+			StartTicks = Stopwatch.GetTimestamp(),
+			StartAllocatedBytes = GC.GetAllocatedBytesForCurrentThread()
 		};
 		state.Stack.Peek().Children.Add(node);
 		state.Stack.Push(node);
@@ -86,6 +89,7 @@ public sealed class FrameProfiler
 
 		var node = state.Stack.Pop();
 		node.EndTicks = Stopwatch.GetTimestamp();
+		node.EndAllocatedBytes = GC.GetAllocatedBytesForCurrentThread();
 	}
 
 	private sealed class ProfilerState
@@ -120,8 +124,11 @@ public sealed class FrameProfiler
 		public string Name { get; }
 		public long StartTicks { get; set; }
 		public long EndTicks { get; set; }
+		public long StartAllocatedBytes { get; set; }
+		public long EndAllocatedBytes { get; set; }
 		public List<ProfileNode> Children { get; }
 		public double DurationMs => (EndTicks - StartTicks) * TickToMs;
+		public long AllocatedBytes => Math.Max(0, EndAllocatedBytes - StartAllocatedBytes);
 	}
 
 	public readonly struct Scope : IDisposable
