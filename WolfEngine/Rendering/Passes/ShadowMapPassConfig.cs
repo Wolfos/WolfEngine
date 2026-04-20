@@ -8,15 +8,22 @@ namespace WolfEngine.Rendering.Passes;
 
 public readonly struct ShadowMapExecutionBucket
 {
-	public ShadowMapExecutionBucket(int bucketIndex, string debugName, IGfxPipeline pipeline, IGfxIndirectCommandBuffer indirectCommandBuffer)
+	public ShadowMapExecutionBucket(
+		GpuDrawBucketId bucketId,
+		int executionIndex,
+		string debugName,
+		IGfxPipeline pipeline,
+		IGfxIndirectCommandBuffer indirectCommandBuffer)
 	{
-		BucketIndex = bucketIndex;
+		BucketId = bucketId;
+		ExecutionIndex = executionIndex;
 		DebugName = debugName;
 		Pipeline = pipeline;
 		IndirectCommandBuffer = indirectCommandBuffer;
 	}
 
-	public int BucketIndex { get; }
+	public GpuDrawBucketId BucketId { get; }
+	public int ExecutionIndex { get; }
 	public string DebugName { get; }
 	public IGfxPipeline Pipeline { get; }
 	public IGfxIndirectCommandBuffer IndirectCommandBuffer { get; }

@@ -503,12 +503,22 @@ public sealed class RenderGraph
 		}
 
 		var snapshot = _hardeningStats.Snapshot();
-		Console.WriteLine(
+		var logLine =
 			$"[GpuHardening] frame={_frameIndex} staleRejects={snapshot.StaleHandleRejects} " +
 			$"fallbackSubs={snapshot.FallbackProxySubstitutions} overflowRecoveries={snapshot.UpdateOverflowRecoveries} " +
 			$"packedCapacityFailures={snapshot.PackedCapacityFailures} visibleClampHits={snapshot.VisibleListClampHits} " +
 			$"materialFallbackDrawHits={snapshot.MaterialFallbackDrawHits} " +
-			$"deferredBacklog={snapshot.DeferredReleaseBacklog} icbStarvationStalls={snapshot.IcbSlotStarvationStalls}");
+			$"deferredBacklog={snapshot.DeferredReleaseBacklog} icbStarvationStalls={snapshot.IcbSlotStarvationStalls}";
+		for (var i = 0; i < snapshot.BucketDiagnostics.Count; i++)
+		{
+			var bucket = snapshot.BucketDiagnostics[i];
+			logLine +=
+				$" bucket[{bucket.BucketId}:{bucket.ExecutionIndex}]={{submitted:{bucket.SubmittedDrawCount}," +
+				$"visible:{bucket.VisibleDrawCount},range:{bucket.ExecutionRangeStart}-{bucket.ExecutionRangeEndExclusive}," +
+				$"fallbacks:{bucket.MaterialFallbackIncidents}}}";
+		}
+
+		Console.WriteLine(logLine);
 	}
 
 	private void ProcessPendingTextures(List<Texture> changedTextures)

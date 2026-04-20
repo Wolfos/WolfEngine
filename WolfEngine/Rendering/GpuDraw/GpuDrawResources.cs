@@ -255,9 +255,9 @@ public sealed class GpuDrawResources : IDisposable
 
 		for (var slotIndex = 0; slotIndex < IndirectCommandBufferSlotCount; slotIndex++)
 		{
-			for (var bucketIndex = 0; bucketIndex < GBufferDrawBuckets.BucketCount; bucketIndex++)
+			for (var executionIndex = 0; executionIndex < GBufferDrawBuckets.BucketCount; executionIndex++)
 			{
-				var index = FlattenSlotBucketIndex(slotIndex, bucketIndex);
+				var index = FlattenSlotBucketIndex(slotIndex, executionIndex);
 				_gbufferIndirectCommandSlots[index] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
 					PassKind.Graphics,
 					(uint)MaxDrawCount,
@@ -310,20 +310,23 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int bucketIndex)
+	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int bucketExecutionIndex)
 	{
 		if (slotIndex < 0 || slotIndex >= IndirectCommandBufferSlotCount)
 		{
 			throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Indirect command buffer slot is out of range.");
 		}
 
-		if (bucketIndex < 0 || bucketIndex >= GBufferDrawBuckets.BucketCount)
+		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= GBufferDrawBuckets.BucketCount)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketIndex), bucketIndex, "GBuffer bucket index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
 		}
 
-		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, bucketIndex)];
+		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, bucketExecutionIndex)];
 	}
+
+	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, GpuDrawBucketId bucketId) =>
+		GetIndirectCommandBufferSlot(slotIndex, GBufferDrawBuckets.GetExecutionIndex(bucketId));
 
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
 	{
@@ -349,25 +352,31 @@ public sealed class GpuDrawResources : IDisposable
 		return _materialGenerationBuffers[frameSlot];
 	}
 
-	public IGfxPipeline? GetGBufferPipeline(int bucketIndex)
+	public IGfxPipeline? GetGBufferPipeline(int bucketExecutionIndex)
 	{
-		if (bucketIndex < 0 || bucketIndex >= _gbufferPipelines.Length)
+		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= _gbufferPipelines.Length)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketIndex), bucketIndex, "GBuffer bucket index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
 		}
 
-		return _gbufferPipelines[bucketIndex];
+		return _gbufferPipelines[bucketExecutionIndex];
 	}
 
-	public void SetGBufferPipeline(int bucketIndex, IGfxPipeline pipeline)
+	public IGfxPipeline? GetGBufferPipeline(GpuDrawBucketId bucketId) =>
+		GetGBufferPipeline(GBufferDrawBuckets.GetExecutionIndex(bucketId));
+
+	public void SetGBufferPipeline(int bucketExecutionIndex, IGfxPipeline pipeline)
 	{
-		if (bucketIndex < 0 || bucketIndex >= _gbufferPipelines.Length)
+		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= _gbufferPipelines.Length)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketIndex), bucketIndex, "GBuffer bucket index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
 		}
 
-		_gbufferPipelines[bucketIndex] = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
+		_gbufferPipelines[bucketExecutionIndex] = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
 	}
+
+	public void SetGBufferPipeline(GpuDrawBucketId bucketId, IGfxPipeline pipeline) =>
+		SetGBufferPipeline(GBufferDrawBuckets.GetExecutionIndex(bucketId), pipeline);
 
 	public void Dispose()
 	{
@@ -428,8 +437,8 @@ public sealed class GpuDrawResources : IDisposable
 		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
 	}
 
-	private static int FlattenSlotBucketIndex(int slotIndex, int bucketIndex) =>
-		(slotIndex * GBufferDrawBuckets.BucketCount) + bucketIndex;
+	private static int FlattenSlotBucketIndex(int slotIndex, int bucketExecutionIndex) =>
+		(slotIndex * GBufferDrawBuckets.BucketCount) + bucketExecutionIndex;
 
 	private static void ValidateFrameSlot(int frameSlot)
 	{

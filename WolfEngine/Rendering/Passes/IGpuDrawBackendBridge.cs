@@ -38,6 +38,11 @@ public interface IGpuDrawBackendBridge
 		Mesh mesh,
 		GpuDrawResources resources);
 
+	void SampleVisibilityDiagnostics(
+		IGfxBuffer? drawCountPerBucketBuffer,
+		IGfxBuffer? drawExecutionRangePerBucketBuffer,
+		GpuDrawHardeningStats stats);
+
 	void SampleGpuDiagnosticCounters(
 		IGfxBuffer? diagnosticsCounterBuffer,
 		uint[] lastCounters,

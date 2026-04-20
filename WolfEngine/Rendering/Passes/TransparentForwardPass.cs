@@ -13,7 +13,7 @@ public sealed class TransparentForwardPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly Dictionary<int, IGfxPipeline> _pipelinesByBucketIndex = new();
+	private readonly Dictionary<GpuDrawBucketId, IGfxPipeline> _pipelinesByBucketId = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -251,8 +251,8 @@ public sealed class TransparentForwardPass
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{
-					var indicesOffsetBytes = (ulong)(bucket.BucketIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
-					var rangeOffsetBytes = (ulong)(bucket.BucketIndex * 2 * sizeof(uint));
+					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
+					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
 					commandList.ExecuteIndirectCommandBufferIndexed(
 						bucket.IndirectCommandBuffer,
 						config.VisibleDrawIdsPerBucketBuffer,
@@ -272,26 +272,22 @@ public sealed class TransparentForwardPass
 
 	private List<TransparentExecutionBucket> BuildBuckets(IGfxDevice device, GpuDrawResources gpuDrawResources)
 	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
 		var buckets = new List<TransparentExecutionBucket>(bucketDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucketDefinition = bucketDefinitions[i];
-			if (bucketDefinition.SupportsPass(DrawPassParticipation.ForwardTransparent) == false)
-			{
-				continue;
-			}
-
-			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, i);
+			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, bucketDefinition.BucketId);
 			if (indirectCommandBuffer is null)
 			{
 				continue;
 			}
 
-			var pipeline = EnsurePipeline(device, bucketDefinition, i);
+			var pipeline = EnsurePipeline(device, bucketDefinition);
 			buckets.Add(new TransparentExecutionBucket(
-				i,
+				bucketDefinition.BucketId,
+				bucketDefinition.ExecutionIndex,
 				bucketDefinition.DebugName,
 				pipeline,
 				indirectCommandBuffer));
@@ -300,9 +296,9 @@ public sealed class TransparentForwardPass
 		return buckets;
 	}
 
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GBufferDrawBucketDefinition bucket, int bucketIndex)
+	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GBufferDrawBucketDefinition bucket)
 	{
-		if (_pipelinesByBucketIndex.TryGetValue(bucketIndex, out var pipeline))
+		if (_pipelinesByBucketId.TryGetValue(bucket.BucketId, out var pipeline))
 		{
 			return pipeline;
 		}
@@ -333,7 +329,7 @@ public sealed class TransparentForwardPass
 			"fragmentShader",
 			bucket.PreprocessorDefine);
 		pipeline = device.GetOrCreatePipeline(key, shaders);
-		_pipelinesByBucketIndex[bucketIndex] = pipeline;
+		_pipelinesByBucketId[bucket.BucketId] = pipeline;
 		return pipeline;
 	}
 

@@ -96,8 +96,8 @@ public static class GBufferPass
 				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{
-					var indicesOffsetBytes = (ulong)(bucket.BucketIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
-					var rangeOffsetBytes = (ulong)(bucket.BucketIndex * 2 * sizeof(uint));
+					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
+					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
 					commandList.ExecuteIndirectCommandBufferIndexed(
 						bucket.IndirectCommandBuffer,
 						config.VisibleDrawIdsPerBucketBuffer,

@@ -38,7 +38,7 @@ public sealed class GpuDrawPass
 	private readonly ulong[] _slotAppliedVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _slotBindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _slotFrameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
-	private readonly Dictionary<uint, uint> _materialDrawFlags = new();
+	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private int _activeIndirectSlot = -1;
 	private ulong _latestStructuralVersion;
 	private ulong _nextStructuralVersion = 1;
@@ -53,21 +53,24 @@ public sealed class GpuDrawPass
 
 	private readonly struct StructuralCommandRecord
 	{
-		public StructuralCommandRecord(ulong version, GpuDrawUpdateType type, GpuDrawHandle drawHandle, int bucketIndex, Mesh? mesh)
+		public StructuralCommandRecord(ulong version, GpuDrawUpdateType type, GpuDrawHandle drawHandle, GpuDrawBucketId bucketId, Mesh? mesh)
 		{
 			Version = version;
 			Type = type;
 			DrawHandle = drawHandle;
-			BucketIndex = bucketIndex;
+			BucketId = bucketId;
 			Mesh = mesh;
 		}
 
 		public ulong Version { get; }
 		public GpuDrawUpdateType Type { get; }
 		public GpuDrawHandle DrawHandle { get; }
-		public int BucketIndex { get; }
+		public GpuDrawBucketId BucketId { get; }
+		public int ExecutionIndex => GBufferDrawBuckets.GetExecutionIndex(BucketId);
 		public Mesh? Mesh { get; }
 	}
+
+	private readonly record struct MaterialDrawState(GpuDrawBucketId BucketId, int ExecutionIndex, uint DrawFlags);
 	
 	public GpuDrawPass(IShaderCompiler shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources, GpuDrawHardeningStats hardeningStats, IRenderer renderer,
@@ -88,6 +91,8 @@ public sealed class GpuDrawPass
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
+		SampleVisibilityDiagnostics();
+		_hardeningStats.ResetSubmissionDiagnostics();
 		EnsureGBufferPipelines(device);
 		var primaryGBufferPipeline = GetPrimaryGBufferPipeline();
 		var backendSignals = _backendBridge.PrepareFrame(device, _renderer, _gpuDrawResources, primaryGBufferPipeline);
@@ -133,7 +138,6 @@ public sealed class GpuDrawPass
 
 		drawDatabase.ConsumeUpdates(_updates);
 		UploadGenerationTables(drawDatabase);
-		SampleGpuDiagnosticCounters();
 		if (_gpuStateBootstrapPending)
 		{
 			var appended = AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
@@ -232,15 +236,17 @@ public sealed class GpuDrawPass
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
-			var bucketIndex = 0;
-			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+			var bucketId = GpuDrawBucketId.Opaque;
+			var bucketExecutionIndex = GBufferDrawBuckets.GetExecutionIndex(bucketId);
+			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketExecutionIndex);
 			var alphaCutoff = 0.0f;
 			var materialReady = material?.HasGpuResources ?? false;
 
 			var materialResources = material?.Resources;
 			if (material is not null)
 			{
-				bucketIndex = GetMaterialBucketIndex(material.AlphaMode);
+				bucketId = GBufferDrawBuckets.ResolveBucketId(material.AlphaMode);
+				bucketExecutionIndex = GBufferDrawBuckets.GetExecutionIndex(bucketId);
 				switch (material.AlphaMode)
 				{
 					case AlphaMode.AlphaTest:
@@ -248,23 +254,28 @@ public sealed class GpuDrawPass
 						break;
 				}
 
-				var desiredFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketIndex);
+				var desiredFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(bucketExecutionIndex);
 				drawFlags = materialReady ? desiredFlags : 0u;
-				_materialDrawFlags[update.MaterialHandle.Value] = drawFlags;
+				_materialDrawStates[update.MaterialHandle.Value] = new MaterialDrawState(bucketId, bucketExecutionIndex, drawFlags);
+				if (materialReady == false && update.Type != GpuDrawUpdateType.Remove)
+				{
+					_hardeningStats.AddMaterialFallbackIncident(bucketId);
+				}
 			}
 			else if (update.Type != GpuDrawUpdateType.Remove &&
-			         _materialDrawFlags.TryGetValue(update.MaterialHandle.Value, out var cachedFlags))
+			         _materialDrawStates.TryGetValue(update.MaterialHandle.Value, out var cachedState))
 			{
-				drawFlags = cachedFlags;
-				bucketIndex = (int)((cachedFlags >> DrawFlagBucketShift) & DrawFlagBucketMask);
+				drawFlags = cachedState.DrawFlags;
+				bucketId = cachedState.BucketId;
+				bucketExecutionIndex = cachedState.ExecutionIndex;
 			}
 
 			if (backendSignals.SupportsIndirectStructuralUpdates &&
 			    activeIndirectCommands is not null &&
 			    IsStructuralUpdateType(update.Type) &&
-			    ApplyStructuralUpdate(drawDatabase, update, mesh, activeIndirectCommands, bucketIndex))
+			    ApplyStructuralUpdate(drawDatabase, update, mesh, activeIndirectCommands, bucketId))
 			{
-				AppendStructuralRecord(update, mesh, bucketIndex);
+				AppendStructuralRecord(update, mesh, bucketId);
 			}
 
 			if (materialResources is not null)
@@ -368,6 +379,8 @@ public sealed class GpuDrawPass
 			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount((uint)_updateData.Count);
 			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
+
+		PublishSubmittedBucketDiagnostics(drawDatabase);
 	}
 
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
@@ -388,7 +401,7 @@ public sealed class GpuDrawPass
 			? _gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer
 			: _gpuDrawResources.DrawExecutionRangePerBucketBuffer;
 
-		var bucketCount = GBufferDrawBuckets.Definitions.Length;
+		var bucketCount = GBufferDrawBuckets.BucketCount;
 		if ((uint)bucketCount > (DrawFlagBucketMask + 1))
 		{
 			throw new InvalidOperationException(
@@ -518,17 +531,12 @@ public sealed class GpuDrawPass
 
 	private void EnsureGBufferPipelines(IGfxDevice device)
 	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
 		var allPipelinesReady = true;
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucket = bucketDefinitions[i];
-			if (bucket.SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			if (_gpuDrawResources.GetGBufferPipeline(i) is null)
+			if (_gpuDrawResources.GetGBufferPipeline(bucket.BucketId) is null)
 			{
 				allPipelinesReady = false;
 				break;
@@ -549,12 +557,7 @@ public sealed class GpuDrawPass
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucket = bucketDefinitions[i];
-			if (bucket.SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			if (_gpuDrawResources.GetGBufferPipeline(i) is not null)
+			if (_gpuDrawResources.GetGBufferPipeline(bucket.BucketId) is not null)
 			{
 				continue;
 			}
@@ -584,22 +587,17 @@ public sealed class GpuDrawPass
 				layout: GraphicsLayoutKind.Material,
 				shaderVariant: $"GBuffer:{bucket.ShaderVariant}");
 			_gpuDrawResources.SetGBufferPipeline(
-				i,
+				bucket.BucketId,
 				device.GetOrCreatePipeline(pipelineKey, shaderSet));
 		}
 	}
 
 	private IGfxPipeline? GetPrimaryGBufferPipeline()
 	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
-			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			var pipeline = _gpuDrawResources.GetGBufferPipeline(i);
+			var pipeline = _gpuDrawResources.GetGBufferPipeline(bucketDefinitions[i].BucketId);
 			if (pipeline is not null)
 			{
 				return pipeline;
@@ -637,7 +635,7 @@ public sealed class GpuDrawPass
 		in GpuDrawUpdate update,
 		Mesh? mesh,
 		IReadOnlyList<IGfxIndirectCommandBuffer> indirectCommands,
-		int bucketIndex)
+		GpuDrawBucketId bucketId)
 	{
 		if (IsStructuralUpdateType(update.Type) == false)
 		{
@@ -667,15 +665,12 @@ public sealed class GpuDrawPass
 			return true;
 		}
 
-		if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
-		{
-			bucketIndex = 0;
-		}
+		var bucketExecutionIndex = GBufferDrawBuckets.GetExecutionIndex(bucketId);
 
 		_renderer.EnsureMeshResources(mesh);
 		for (var i = 0; i < indirectCommands.Count; i++)
 		{
-			if (i == bucketIndex)
+			if (i == bucketExecutionIndex)
 			{
 				if (TryEncodeIndirectCommand(commandIndex, mesh, indirectCommands[i]) == false)
 				{
@@ -744,16 +739,12 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		var bucketIndex = record.BucketIndex;
-		if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
-		{
-			bucketIndex = 0;
-		}
+		var bucketExecutionIndex = record.ExecutionIndex;
 
 		_renderer.EnsureMeshResources(record.Mesh);
 		for (var i = 0; i < indirectCommands.Count; i++)
 		{
-			if (i == bucketIndex)
+			if (i == bucketExecutionIndex)
 			{
 				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, indirectCommands[i]) == false)
 				{
@@ -767,11 +758,11 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, int bucketIndex)
+	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, GpuDrawBucketId bucketId)
 	{
 		var version = _nextStructuralVersion++;
 		var type = update.Type == GpuDrawUpdateType.Remove ? GpuDrawUpdateType.Remove : update.Type;
-		_structuralReplayRecords.Add(new StructuralCommandRecord(version, type, update.DrawHandle, bucketIndex, mesh));
+		_structuralReplayRecords.Add(new StructuralCommandRecord(version, type, update.DrawHandle, bucketId, mesh));
 		_latestStructuralVersion = version;
 	}
 
@@ -821,11 +812,7 @@ public sealed class GpuDrawPass
 			}
 
 			_renderer.EnsureMeshResources(entry.Mesh);
-			var bucketIndex = GetMaterialBucketIndex(entry.Material.AlphaMode);
-			if (bucketIndex < 0 || bucketIndex >= indirectCommands.Count)
-			{
-				bucketIndex = 0;
-			}
+			var bucketIndex = GBufferDrawBuckets.GetExecutionIndex(GBufferDrawBuckets.ResolveBucketId(entry.Material.AlphaMode));
 
 			TryEncodeIndirectCommand((uint)entry.DrawIndex, entry.Mesh, indirectCommands[bucketIndex]);
 		}
@@ -856,15 +843,10 @@ public sealed class GpuDrawPass
 
 	private bool HasAnyGBufferPipeline()
 	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
-			if (bucketDefinitions[i].SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			if (_gpuDrawResources.GetGBufferPipeline(i) is not null)
+			if (_gpuDrawResources.GetGBufferPipeline(bucketDefinitions[i].BucketId) is not null)
 			{
 				return true;
 			}
@@ -904,29 +886,6 @@ public sealed class GpuDrawPass
 	private static uint CreateDrawFlags(int bucketIndex)
 	{
 		return DrawFlagActive | ((uint)bucketIndex & DrawFlagBucketMask) << DrawFlagBucketShift;
-	}
-
-	private static int GetMaterialBucketIndex(AlphaMode alphaMode)
-	{
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
-		if (bucketDefinitions.Length == 0)
-		{
-			return 0;
-		}
-
-		for (var i = 0; i < bucketDefinitions.Length; i++)
-		{
-			var supportedModes = bucketDefinitions[i].SupportedAlphaModes;
-			for (var modeIndex = 0; modeIndex < supportedModes.Length; modeIndex++)
-			{
-				if (supportedModes[modeIndex] == alphaMode)
-				{
-					return i;
-				}
-			}
-		}
-
-		return 0;
 	}
 
 	private int AppendFullGpuStateRefreshUpdates(GpuDrawDatabase drawDatabase, List<GpuDrawUpdate> destination)
@@ -982,6 +941,48 @@ public sealed class GpuDrawPass
 			_gpuDrawResources.DiagnosticsCounterBuffer,
 			_lastGpuDiagnosticCounters,
 			_hardeningStats);
+	}
+
+	private void SampleVisibilityDiagnostics()
+	{
+		_backendBridge.SampleVisibilityDiagnostics(
+			_gpuDrawResources.DrawCountPerBucketBuffer,
+			_gpuDrawResources.DrawExecutionRangePerBucketBuffer,
+			_hardeningStats);
+		SampleGpuDiagnosticCounters();
+	}
+
+	private void PublishSubmittedBucketDiagnostics(GpuDrawDatabase drawDatabase)
+	{
+		drawDatabase.CollectDrawEntries(_drawEntries);
+		var definitions = GBufferDrawBuckets.StableOrderDefinitions;
+		Span<int> submittedCounts = stackalloc int[definitions.Length];
+		submittedCounts.Clear();
+		for (var i = 0; i < _drawEntries.Count; i++)
+		{
+			var entry = _drawEntries[i];
+			var bucketId = GBufferDrawBuckets.ResolveBucketId(entry.Material.AlphaMode);
+			submittedCounts[GetStableBucketIndex(bucketId)]++;
+		}
+
+		for (var i = 0; i < definitions.Length; i++)
+		{
+			_hardeningStats.SetSubmittedDrawCount(definitions[i].BucketId, submittedCounts[i]);
+		}
+	}
+
+	private static int GetStableBucketIndex(GpuDrawBucketId bucketId)
+	{
+		var definitions = GBufferDrawBuckets.StableOrderDefinitions;
+		for (var i = 0; i < definitions.Length; i++)
+		{
+			if (definitions[i].BucketId == bucketId)
+			{
+				return i;
+			}
+		}
+
+		throw new InvalidOperationException($"Unknown draw bucket id '{bucketId}'.");
 	}
 
 	private void UploadFallbackTableEntries()

@@ -146,6 +146,38 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		return true;
 	}
 
+	public unsafe void SampleVisibilityDiagnostics(
+		IGfxBuffer? drawCountPerBucketBuffer,
+		IGfxBuffer? drawExecutionRangePerBucketBuffer,
+		GpuDrawHardeningStats stats)
+	{
+		if (drawCountPerBucketBuffer is not MetalBuffer drawCountBuffer ||
+		    drawCountBuffer.Buffer.NativePtr == IntPtr.Zero ||
+		    drawExecutionRangePerBucketBuffer is not MetalBuffer executionRangeBuffer ||
+		    executionRangeBuffer.Buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var definitions = GBufferDrawBuckets.StableOrderDefinitions;
+		var visibleCounts = new ReadOnlySpan<uint>(
+			(void*)drawCountBuffer.Buffer.Contents.ToPointer(),
+			GBufferDrawBuckets.BucketCount);
+		var executionRanges = new ReadOnlySpan<uint>(
+			(void*)executionRangeBuffer.Buffer.Contents.ToPointer(),
+			GBufferDrawBuckets.BucketCount * 2);
+		for (var i = 0; i < definitions.Length; i++)
+		{
+			var definition = definitions[i];
+			var executionIndex = definition.ExecutionIndex;
+			stats.SetVisibleDrawCount(definition.BucketId, visibleCounts[executionIndex]);
+			stats.SetExecutionRange(
+				definition.BucketId,
+				executionRanges[(executionIndex * 2) + 0],
+				executionRanges[(executionIndex * 2) + 1]);
+		}
+	}
+
 	public unsafe void SampleGpuDiagnosticCounters(
 		IGfxBuffer? diagnosticsCounterBuffer,
 		uint[] lastCounters,

@@ -99,6 +99,16 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		return true;
 	}
 
+	public void SampleVisibilityDiagnostics(
+		IGfxBuffer? drawCountPerBucketBuffer,
+		IGfxBuffer? drawExecutionRangePerBucketBuffer,
+		GpuDrawHardeningStats stats)
+	{
+		_ = drawCountPerBucketBuffer;
+		_ = drawExecutionRangePerBucketBuffer;
+		_ = stats;
+	}
+
 	public void SampleGpuDiagnosticCounters(
 		IGfxBuffer? diagnosticsCounterBuffer,
 		uint[] lastCounters,

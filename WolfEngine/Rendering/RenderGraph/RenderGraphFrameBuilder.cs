@@ -939,26 +939,22 @@ internal sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
 		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
-		var bucketDefinitions = GBufferDrawBuckets.Definitions;
+		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
 		var bucketList = new List<GBufferExecutionBucket>(bucketDefinitions.Length);
 		var activeIndirectSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
 		for (var i = 0; i < bucketDefinitions.Length; i++)
 		{
 			var bucketDefinition = bucketDefinitions[i];
-			if (bucketDefinition.SupportsPass(DrawPassParticipation.GBuffer) == false)
-			{
-				continue;
-			}
-
-			var pipeline = _gpuDrawResources.GetGBufferPipeline(i);
-			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, i);
+			var pipeline = _gpuDrawResources.GetGBufferPipeline(bucketDefinition.BucketId);
+			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, bucketDefinition.BucketId);
 			if (pipeline is null || indirectCommandBuffer is null)
 			{
 				continue;
 			}
 
 			bucketList.Add(new GBufferExecutionBucket(
-				i,
+				bucketDefinition.BucketId,
+				bucketDefinition.ExecutionIndex,
 				bucketDefinition.DebugName,
 				pipeline,
 				indirectCommandBuffer));
