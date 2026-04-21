@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
@@ -136,6 +137,17 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
 	}
 
+	[Test]
+	public void GpuDrawData_SharedGpuStructSizesRemain16ByteAligned()
+	{
+		AssertGpuStructSizeIs16ByteAligned<GpuInstanceData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuMaterialData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuMeshData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawCommand>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawArgs>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawUpdateData>();
+	}
+
 	private static void WriteEntity(
 		GpuDrawDatabase database,
 		Entity entity,
@@ -168,5 +180,14 @@ public sealed class FrameSnapshotGpuDrawTests
 				new Vector4(0.0f, 2.0f, 0.0f, 1.0f)
 			],
 			[0u, 1u, 2u]);
+	}
+
+	private static void AssertGpuStructSizeIs16ByteAligned<T>() where T : unmanaged
+	{
+		var size = Marshal.SizeOf<T>();
+		Assert.That(
+			size % 16,
+			Is.EqualTo(0),
+			$"{typeof(T).Name} size must remain a multiple of 16 bytes to match shader structured-buffer layout. Actual size: {size}.");
 	}
 }
