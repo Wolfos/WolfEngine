@@ -119,7 +119,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_FALLBACK_SUBSTITUTE], 1);
     }
 
-    GpuInstanceData instanceData;
+    GpuInstanceData instanceData = (GpuInstanceData)0;
     instanceData.previousWorld = update.previousWorld;
     instanceData.world = update.world;
     instanceData.boundsCenterRadius = update.boundsCenterRadius;
@@ -138,7 +138,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint materialGeneration = GetHandleGeneration(materialHandle);
         if (materialIndex < WOLF_MAX_MATERIAL_COUNT)
         {
-            GpuMaterialData materialData;
+            GpuMaterialData materialData = (GpuMaterialData)0;
             materialData.baseColor = update.baseColor;
             materialData.metallicRoughness = update.metallicRoughness;
             materialData.emissiveFactorIntensity = update.emissiveFactorIntensity;
@@ -152,7 +152,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
             materialData.pad1 = 0;
             g_MaterialTable[materialIndex] = materialData;
 
-            GpuTerrainMaterialData terrainMaterialData;
+            GpuTerrainMaterialData terrainMaterialData = (GpuTerrainMaterialData)0;
             terrainMaterialData.controlMapHandle = update.controlMapHandle;
             terrainMaterialData.hasControlMap = update.hasControlMap;
             terrainMaterialData.layerSamplerHandle = update.layerSamplerHandle;
@@ -204,7 +204,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint meshGeneration = GetHandleGeneration(meshHandle);
         if (meshIndex < WOLF_MAX_MESH_COUNT)
         {
-            GpuMeshData meshData;
+            GpuMeshData meshData = (GpuMeshData)0;
             meshData.vertexBufferHandle = update.vertexBufferHandle;
             meshData.indexBufferHandle = update.indexBufferHandle;
             meshData.indexCount = update.indexCount;
@@ -218,7 +218,7 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    GpuDrawCommand drawCommand;
+    GpuDrawCommand drawCommand = (GpuDrawCommand)0;
     drawCommand.instanceHandle = update.instanceHandle;
     drawCommand.drawHandle = update.drawHandle;
     drawCommand.flags = update.drawFlags;

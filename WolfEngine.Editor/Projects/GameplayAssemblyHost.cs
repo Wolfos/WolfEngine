@@ -380,7 +380,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 
 	private static IGameplayModule? TryCreateModule(Assembly assembly)
 	{
-		var entrypointType = assembly.GetTypes()
+		var entrypointType = ProjectTypeResolverUtility.GetLoadableTypes(assembly)
 			.FirstOrDefault(candidate => string.Equals(candidate.Name, "GameplayEntrypoint", StringComparison.Ordinal));
 		if (entrypointType is null)
 		{

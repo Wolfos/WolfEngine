@@ -12,7 +12,7 @@ public static class GraphicsConfig
 	/// <summary>
 	/// Enable the D3D12 debug layer when creating the device (Windows only).
 	/// </summary>
-	public static bool EnableD3DDebugLayer { get; set; } = false;
+	public static bool EnableD3DDebugLayer { get; set; } = true;
 
 	/// <summary>
 	/// Enable the hardening stress path that forces rapid draw churn.
@@ -24,7 +24,7 @@ public static class GraphicsConfig
 	/// Number of frames between hardening metric logs.
 	/// </summary>
 	public static int GpuHardeningLogIntervalFrames { get; } =
-		ParsePositiveIntEnvironmentVariable("WOLF_GPU_HARDENING_LOG_INTERVAL", 120);
+		ParsePositiveIntEnvironmentVariable("WOLF_GPU_HARDENING_LOG_INTERVAL", 0);
 
 	private static int ParsePositiveIntEnvironmentVariable(string name, int fallback)
 	{
