@@ -7,12 +7,14 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct TransparentExecutionBucket
 {
 	public TransparentExecutionBucket(
+		GpuDrawKind drawKind,
 		GpuDrawBucketId bucketId,
 		int executionIndex,
 		string debugName,
 		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer indirectCommandBuffer)
 	{
+		DrawKind = drawKind;
 		BucketId = bucketId;
 		ExecutionIndex = executionIndex;
 		DebugName = debugName;
@@ -20,6 +22,7 @@ public readonly struct TransparentExecutionBucket
 		IndirectCommandBuffer = indirectCommandBuffer;
 	}
 
+	public GpuDrawKind DrawKind { get; }
 	public GpuDrawBucketId BucketId { get; }
 	public int ExecutionIndex { get; }
 	public string DebugName { get; }
@@ -77,7 +80,7 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? ClusterHeaderBuffer { get; init; }
 	public required IGfxBuffer? ClusterLightIndexBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
-	public required IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; init; }
+	public required IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }
 
 	public required ReadOnlyMemory<TransparentExecutionBucket> Buckets { get; init; }

@@ -61,14 +61,14 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		out IGfxIndirectCommandBuffer[] commandBuffers)
 	{
 		commandBuffers = Array.Empty<IGfxIndirectCommandBuffer>();
-		var bucketCount = GBufferDrawBuckets.BucketCount;
-		if (bucketCount <= 0)
+		var executionLaneCount = GpuDrawExecutionLanes.ExecutionLaneCount;
+		if (executionLaneCount <= 0)
 		{
 			return false;
 		}
 
-		var resolved = new IGfxIndirectCommandBuffer[bucketCount];
-		for (var i = 0; i < bucketCount; i++)
+		var resolved = new IGfxIndirectCommandBuffer[executionLaneCount];
+		for (var i = 0; i < executionLaneCount; i++)
 		{
 			if (resources.GetIndirectCommandBufferSlot(slotIndex, i) is not MetalIndirectCommandBuffer commandBuffer)
 			{
@@ -162,19 +162,48 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		var definitions = GBufferDrawBuckets.StableOrderDefinitions;
 		var visibleCounts = new ReadOnlySpan<uint>(
 			(void*)drawCountBuffer.Buffer.Contents.ToPointer(),
-			GBufferDrawBuckets.BucketCount);
+			GpuDrawExecutionLanes.ExecutionLaneCount);
 		var executionRanges = new ReadOnlySpan<uint>(
 			(void*)executionRangeBuffer.Buffer.Contents.ToPointer(),
-			GBufferDrawBuckets.BucketCount * 2);
+			GpuDrawExecutionLanes.ExecutionLaneCount * 2);
 		for (var i = 0; i < definitions.Length; i++)
 		{
 			var definition = definitions[i];
-			var executionIndex = definition.ExecutionIndex;
-			stats.SetVisibleDrawCount(definition.BucketId, visibleCounts[executionIndex]);
-			stats.SetExecutionRange(
-				definition.BucketId,
-				executionRanges[(executionIndex * 2) + 0],
-				executionRanges[(executionIndex * 2) + 1]);
+			long visibleCount = 0;
+			var rangeStart = 0u;
+			var rangeEnd = 0u;
+			var hasRange = false;
+			var laneDefinitions = GpuDrawExecutionLanes.Definitions;
+			for (var laneIndex = 0; laneIndex < laneDefinitions.Length; laneIndex++)
+			{
+				var lane = laneDefinitions[laneIndex];
+				if (lane.BucketId != definition.BucketId)
+				{
+					continue;
+				}
+
+				visibleCount += visibleCounts[lane.ExecutionIndex];
+				var candidateStart = executionRanges[(lane.ExecutionIndex * 2) + 0];
+				var candidateEnd = executionRanges[(lane.ExecutionIndex * 2) + 1];
+				if (candidateEnd == 0)
+				{
+					continue;
+				}
+
+				if (hasRange == false)
+				{
+					rangeStart = candidateStart;
+					rangeEnd = candidateEnd;
+					hasRange = true;
+					continue;
+				}
+
+				rangeStart = Math.Min(rangeStart, candidateStart);
+				rangeEnd = Math.Max(rangeEnd, candidateEnd);
+			}
+
+			stats.SetVisibleDrawCount(definition.BucketId, visibleCount);
+			stats.SetExecutionRange(definition.BucketId, hasRange ? rangeStart : 0, hasRange ? rangeEnd : 0);
 		}
 	}
 

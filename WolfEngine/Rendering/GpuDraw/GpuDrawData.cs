@@ -7,7 +7,8 @@ namespace WolfEngine.Rendering;
 
 public enum GpuDrawKind : uint
 {
-	Mesh = 0
+	Mesh = 0,
+	DebugPrimitive = 1
 }
 
 public static class GpuDrawFlags

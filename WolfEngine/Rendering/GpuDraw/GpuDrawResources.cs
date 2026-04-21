@@ -24,7 +24,7 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? MeshBuffer { get; private set; }
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
-	public IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; private set; }
+	public IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; private set; }
 	public IGfxBuffer? DrawGenerationBuffer => _drawGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? InstanceGenerationBuffer => _instanceGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
@@ -51,8 +51,8 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private int _activeFrameSlot;
 	private readonly IGfxIndirectCommandBuffer?[] _gbufferIndirectCommandSlots =
-		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GBufferDrawBuckets.BucketCount];
-	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GBufferDrawBuckets.BucketCount];
+		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private int _activeIndirectCommandSlot;
 	private GraphicsBackendKind? _constantBufferLayoutBackend;
 	private ShaderConstantBufferLayout? _gBufferCameraLayout;
@@ -171,8 +171,8 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
-		VisibleDrawIdsPerBucketBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxDrawCount * GBufferDrawBuckets.BucketCount * sizeof(uint)),
+		VisibleDrawIdsPerExecutionLaneBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(MaxDrawCount * GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -213,22 +213,22 @@ public sealed class GpuDrawResources : IDisposable
 				$"TransparentLightingBuffer[{i}]");
 
 			_drawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GBufferDrawBuckets.BucketCount * sizeof(uint)),
+				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 			
 			_shadowDrawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GBufferDrawBuckets.BucketCount * sizeof(uint)),
+				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
 			_drawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GBufferDrawBuckets.BucketCount * 2 * sizeof(uint)),
+				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 			
 			_shadowDrawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GBufferDrawBuckets.BucketCount * 2 * sizeof(uint)),
+				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -255,7 +255,7 @@ public sealed class GpuDrawResources : IDisposable
 
 		for (var slotIndex = 0; slotIndex < IndirectCommandBufferSlotCount; slotIndex++)
 		{
-			for (var executionIndex = 0; executionIndex < GBufferDrawBuckets.BucketCount; executionIndex++)
+			for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
 			{
 				var index = FlattenSlotBucketIndex(slotIndex, executionIndex);
 				_gbufferIndirectCommandSlots[index] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
@@ -310,23 +310,23 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int bucketExecutionIndex)
+	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int executionLaneIndex)
 	{
 		if (slotIndex < 0 || slotIndex >= IndirectCommandBufferSlotCount)
 		{
 			throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Indirect command buffer slot is out of range.");
 		}
 
-		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= GBufferDrawBuckets.BucketCount)
+		if (executionLaneIndex < 0 || executionLaneIndex >= GpuDrawExecutionLanes.ExecutionLaneCount)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
 		}
 
-		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, bucketExecutionIndex)];
+		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, executionLaneIndex)];
 	}
 
-	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, GpuDrawBucketId bucketId) =>
-		GetIndirectCommandBufferSlot(slotIndex, GBufferDrawBuckets.GetExecutionIndex(bucketId));
+	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, GpuDrawExecutionLaneDefinition lane) =>
+		GetIndirectCommandBufferSlot(slotIndex, lane.ExecutionIndex);
 
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
 	{
@@ -352,31 +352,31 @@ public sealed class GpuDrawResources : IDisposable
 		return _materialGenerationBuffers[frameSlot];
 	}
 
-	public IGfxPipeline? GetGBufferPipeline(int bucketExecutionIndex)
+	public IGfxPipeline? GetGBufferPipeline(int executionLaneIndex)
 	{
-		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= _gbufferPipelines.Length)
+		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferPipelines.Length)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
 		}
 
-		return _gbufferPipelines[bucketExecutionIndex];
+		return _gbufferPipelines[executionLaneIndex];
 	}
 
-	public IGfxPipeline? GetGBufferPipeline(GpuDrawBucketId bucketId) =>
-		GetGBufferPipeline(GBufferDrawBuckets.GetExecutionIndex(bucketId));
+	public IGfxPipeline? GetGBufferPipeline(GpuDrawExecutionLaneDefinition lane) =>
+		GetGBufferPipeline(lane.ExecutionIndex);
 
-	public void SetGBufferPipeline(int bucketExecutionIndex, IGfxPipeline pipeline)
+	public void SetGBufferPipeline(int executionLaneIndex, IGfxPipeline pipeline)
 	{
-		if (bucketExecutionIndex < 0 || bucketExecutionIndex >= _gbufferPipelines.Length)
+		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferPipelines.Length)
 		{
-			throw new ArgumentOutOfRangeException(nameof(bucketExecutionIndex), bucketExecutionIndex, "GBuffer bucket execution index is out of range.");
+			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
 		}
 
-		_gbufferPipelines[bucketExecutionIndex] = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
+		_gbufferPipelines[executionLaneIndex] = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
 	}
 
-	public void SetGBufferPipeline(GpuDrawBucketId bucketId, IGfxPipeline pipeline) =>
-		SetGBufferPipeline(GBufferDrawBuckets.GetExecutionIndex(bucketId), pipeline);
+	public void SetGBufferPipeline(GpuDrawExecutionLaneDefinition lane, IGfxPipeline pipeline) =>
+		SetGBufferPipeline(lane.ExecutionIndex, pipeline);
 
 	public void Dispose()
 	{
@@ -385,7 +385,7 @@ public sealed class GpuDrawResources : IDisposable
 		(MeshBuffer as IDisposable)?.Dispose();
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
-		(VisibleDrawIdsPerBucketBuffer as IDisposable)?.Dispose();
+		(VisibleDrawIdsPerExecutionLaneBuffer as IDisposable)?.Dispose();
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
@@ -437,8 +437,8 @@ public sealed class GpuDrawResources : IDisposable
 		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
 	}
 
-	private static int FlattenSlotBucketIndex(int slotIndex, int bucketExecutionIndex) =>
-		(slotIndex * GBufferDrawBuckets.BucketCount) + bucketExecutionIndex;
+	private static int FlattenSlotBucketIndex(int slotIndex, int executionLaneIndex) =>
+		(slotIndex * GpuDrawExecutionLanes.ExecutionLaneCount) + executionLaneIndex;
 
 	private static void ValidateFrameSlot(int frameSlot)
 	{

@@ -35,14 +35,14 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		out IGfxIndirectCommandBuffer[] commandBuffers)
 	{
 		commandBuffers = Array.Empty<IGfxIndirectCommandBuffer>();
-		var bucketCount = GBufferDrawBuckets.BucketCount;
-		if (bucketCount <= 0)
+		var executionLaneCount = GpuDrawExecutionLanes.ExecutionLaneCount;
+		if (executionLaneCount <= 0)
 		{
 			return false;
 		}
 
-		var resolved = new IGfxIndirectCommandBuffer[bucketCount];
-		for (var i = 0; i < bucketCount; i++)
+		var resolved = new IGfxIndirectCommandBuffer[executionLaneCount];
+		for (var i = 0; i < executionLaneCount; i++)
 		{
 			if (resources.GetIndirectCommandBufferSlot(slotIndex, i) is not D3D12IndirectCommandBuffer commandBuffer)
 			{

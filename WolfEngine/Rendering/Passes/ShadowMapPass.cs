@@ -28,7 +28,7 @@ public sealed class ShadowMapPass
 	];
 
 	private readonly IShaderCompiler _shaderCompiler;
-	private readonly Dictionary<(int CascadeIndex, GpuDrawBucketId BucketId), IGfxPipeline> _pipelinesByCascadeBucket = new();
+	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -83,23 +83,24 @@ public sealed class ShadowMapPass
 			throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.");
 		}
 
-		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
-		var buckets = new List<ShadowMapExecutionBucket>(bucketDefinitions.Length);
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
+		var buckets = new List<ShadowMapExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
-		for (var i = 0; i < bucketDefinitions.Length; i++)
+		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			var bucketDefinition = bucketDefinitions[i];
-			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, bucketDefinition.BucketId);
+			var laneDefinition = laneDefinitions[i];
+			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
 			if (indirectCommandBuffer is null)
 			{
 				continue;
 			}
 
-			var pipeline = EnsurePipeline(device, bucketDefinition, cascadeIndex);
+			var pipeline = EnsurePipeline(device, laneDefinition, cascadeIndex);
 			buckets.Add(new ShadowMapExecutionBucket(
-				bucketDefinition.BucketId,
-				bucketDefinition.ExecutionIndex,
-				bucketDefinition.DebugName,
+				laneDefinition.DrawKind,
+				laneDefinition.BucketId,
+				laneDefinition.ExecutionIndex,
+				laneDefinition.DebugName,
 				pipeline,
 				indirectCommandBuffer));
 		}
@@ -115,7 +116,7 @@ public sealed class ShadowMapPass
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
 			CameraBuffer = gpuDrawResources.ShadowCameraBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
-			VisibleDrawIdsPerBucketBuffer = gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
+			VisibleDrawIdsPerExecutionLaneBuffer = gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer,
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
@@ -172,14 +173,14 @@ public sealed class ShadowMapPass
 				commandList.BindConstantBuffer(
 					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
 					config.CameraBuffer);
-				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
+				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{
 					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
 					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
 					commandList.ExecuteIndirectCommandBufferIndexed(
 						bucket.IndirectCommandBuffer,
-						config.VisibleDrawIdsPerBucketBuffer,
+						config.VisibleDrawIdsPerExecutionLaneBuffer,
 						indicesOffsetBytes,
 						config.DrawExecutionRangePerBucketBuffer,
 						rangeOffsetBytes);
@@ -192,11 +193,11 @@ public sealed class ShadowMapPass
 
 	private IGfxPipeline EnsurePipeline(
 		IGfxDevice device,
-		in GBufferDrawBucketDefinition bucket,
+		in GpuDrawExecutionLaneDefinition lane,
 		int cascadeIndex)
 	{
-		var pipelineKeyByCascadeBucket = (cascadeIndex, bucket.BucketId);
-		if (_pipelinesByCascadeBucket.TryGetValue(pipelineKeyByCascadeBucket, out var pipeline))
+		var pipelineKeyByCascadeBucket = (cascadeIndex, lane.Key);
+		if (_pipelinesByCascadeExecutionKey.TryGetValue(pipelineKeyByCascadeBucket, out var pipeline))
 		{
 			return pipeline;
 		}
@@ -217,7 +218,7 @@ public sealed class ShadowMapPass
 			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material,
-			shaderVariant: $"Shadow:{bucket.ShaderVariant}:C{cascadeIndex}");
+			shaderVariant: $"Shadow:{lane.ShaderVariant}:C{cascadeIndex}");
 
 		var cascadeDefine = $"WOLF_SHADOW_CASCADE_INDEX={cascadeIndex}";
 		var shaders = GraphicsShaderCompiler.Compile(
@@ -226,10 +227,10 @@ public sealed class ShadowMapPass
 			"shadow_map.slang",
 			"vertexShader",
 			"fragmentShader",
-			bucket.PreprocessorDefine,
+			lane.PreprocessorDefine,
 			cascadeDefine);
 		pipeline = device.GetOrCreatePipeline(key, shaders);
-		_pipelinesByCascadeBucket[pipelineKeyByCascadeBucket] = pipeline;
+		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;
 		return pipeline;
 	}
 

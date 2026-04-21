@@ -13,7 +13,7 @@ public sealed class TransparentForwardPass
 {
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly Dictionary<GpuDrawBucketId, IGfxPipeline> _pipelinesByBucketId = new();
+	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -105,7 +105,7 @@ public sealed class TransparentForwardPass
 			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer,
 			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
-			VisibleDrawIdsPerBucketBuffer = gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
+			VisibleDrawIdsPerExecutionLaneBuffer = gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
@@ -248,14 +248,14 @@ public sealed class TransparentForwardPass
 				}
 
 				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);
-				if (config.VisibleDrawIdsPerBucketBuffer is not null &&
+				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&
 				    config.DrawExecutionRangePerBucketBuffer is not null)
 				{
 					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
 					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
 					commandList.ExecuteIndirectCommandBufferIndexed(
 						bucket.IndirectCommandBuffer,
-						config.VisibleDrawIdsPerBucketBuffer,
+						config.VisibleDrawIdsPerExecutionLaneBuffer,
 						indicesOffsetBytes,
 						config.DrawExecutionRangePerBucketBuffer,
 						rangeOffsetBytes);
@@ -272,23 +272,24 @@ public sealed class TransparentForwardPass
 
 	private List<TransparentExecutionBucket> BuildBuckets(IGfxDevice device, GpuDrawResources gpuDrawResources)
 	{
-		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
-		var buckets = new List<TransparentExecutionBucket>(bucketDefinitions.Length);
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
+		var buckets = new List<TransparentExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
-		for (var i = 0; i < bucketDefinitions.Length; i++)
+		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			var bucketDefinition = bucketDefinitions[i];
-			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, bucketDefinition.BucketId);
+			var laneDefinition = laneDefinitions[i];
+			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
 			if (indirectCommandBuffer is null)
 			{
 				continue;
 			}
 
-			var pipeline = EnsurePipeline(device, bucketDefinition);
+			var pipeline = EnsurePipeline(device, laneDefinition);
 			buckets.Add(new TransparentExecutionBucket(
-				bucketDefinition.BucketId,
-				bucketDefinition.ExecutionIndex,
-				bucketDefinition.DebugName,
+				laneDefinition.DrawKind,
+				laneDefinition.BucketId,
+				laneDefinition.ExecutionIndex,
+				laneDefinition.DebugName,
 				pipeline,
 				indirectCommandBuffer));
 		}
@@ -296,9 +297,9 @@ public sealed class TransparentForwardPass
 		return buckets;
 	}
 
-	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GBufferDrawBucketDefinition bucket)
+	private IGfxPipeline EnsurePipeline(IGfxDevice device, in GpuDrawExecutionLaneDefinition lane)
 	{
-		if (_pipelinesByBucketId.TryGetValue(bucket.BucketId, out var pipeline))
+		if (_pipelinesByExecutionKey.TryGetValue(lane.Key, out var pipeline))
 		{
 			return pipeline;
 		}
@@ -319,19 +320,26 @@ public sealed class TransparentForwardPass
 			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material,
-			shaderVariant: $"Transparent:{bucket.ShaderVariant}");
+			shaderVariant: $"Transparent:{lane.ShaderVariant}");
 
 		var shaders = GraphicsShaderCompiler.Compile(
 			_shaderCompiler,
 			device.BackendKind,
-			"transparent_forward.slang",
+			GetShaderPath(lane.DrawKind),
 			"vertexShader",
 			"fragmentShader",
-			bucket.PreprocessorDefine);
+			lane.PreprocessorDefine);
 		pipeline = device.GetOrCreatePipeline(key, shaders);
-		_pipelinesByBucketId[bucket.BucketId] = pipeline;
+		_pipelinesByExecutionKey[lane.Key] = pipeline;
 		return pipeline;
 	}
+
+	private static string GetShaderPath(GpuDrawKind drawKind) => drawKind switch
+	{
+		GpuDrawKind.Mesh => "transparent_forward.slang",
+		GpuDrawKind.DebugPrimitive => "debug_primitive_forward.slang",
+		_ => throw new NotSupportedException($"Transparent shared draw kind '{drawKind}' does not define a shader.")
+	};
 
 	private void EnsureReflectionWriters(GraphicsBackendKind backendKind)
 	{

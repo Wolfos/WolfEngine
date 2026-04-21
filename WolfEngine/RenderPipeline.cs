@@ -20,6 +20,7 @@ public class RenderPipeline : IRenderPipeline
 {
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
+	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
 	private int _stressFrame;
 
 	public RenderPipeline(RenderGraph renderGraph)
@@ -100,6 +101,27 @@ public class RenderPipeline : IRenderPipeline
 
 						var transformMatrix = transform.LocalToWorld;
 						gpuDrawDatabase.TouchMesh(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+					}
+				}
+
+				using (FrameProfiler.Instance.Measure("Gather debug primitives"))
+				{
+					foreach (var entry in world.View<WorldTransform, DebugPrimitiveRenderer>())
+					{
+						if (world.IsEnabled(entry.Entity) == false)
+						{
+							continue;
+						}
+
+						ref var transform = ref entry.First;
+						ref var debugPrimitive = ref entry.Second;
+						var primitiveMesh = _debugPrimitiveMeshFactory.GetMesh(debugPrimitive.GetResolvedPrimitiveType());
+						gpuDrawDatabase.TouchDebugPrimitive(
+							entry.Entity,
+							primitiveMesh,
+							debugPrimitive.Tint,
+							debugPrimitive.GetResolvedAlphaMode(),
+							transform.LocalToWorld);
 					}
 				}
 

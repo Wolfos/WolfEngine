@@ -16,6 +16,11 @@ public static class GpuDrawClassification
 			case GpuDrawKind.Mesh:
 				bucketId = GBufferDrawBuckets.ResolveBucketId(material.AlphaMode);
 				return true;
+			case GpuDrawKind.DebugPrimitive:
+				bucketId = material.AlphaMode == AlphaMode.AlphaBlend
+					? GpuDrawBucketId.AlphaBlend
+					: GpuDrawBucketId.Opaque;
+				return true;
 			default:
 				bucketId = GpuDrawBucketId.Opaque;
 				return false;
@@ -32,6 +37,36 @@ public static class GpuDrawClassification
 		throw new NotSupportedException($"Shared draw kind '{drawKind}' does not define bucket participation yet.");
 	}
 
-	public static bool SupportsMeshGeometry(GpuDrawKind drawKind) => drawKind == GpuDrawKind.Mesh;
-	public static bool SupportsMeshMaterialInterpretation(GpuDrawKind drawKind) => drawKind == GpuDrawKind.Mesh;
+	public static bool TryResolveExecutionLane(GpuDrawKind drawKind, Material material,
+		out GpuDrawExecutionLaneDefinition laneDefinition)
+	{
+		ArgumentNullException.ThrowIfNull(material);
+
+		if (TryResolveBucketId(drawKind, material, out var bucketId) == false)
+		{
+			laneDefinition = default;
+			return false;
+		}
+
+		return GpuDrawExecutionLanes.TryGetDefinition(drawKind, bucketId, out laneDefinition);
+	}
+
+	public static GpuDrawExecutionLaneDefinition ResolveExecutionLane(GpuDrawKind drawKind, Material material)
+	{
+		if (TryResolveExecutionLane(drawKind, material, out var laneDefinition))
+		{
+			return laneDefinition;
+		}
+
+		throw new NotSupportedException(
+			$"Shared draw kind '{drawKind}' does not define an execution lane for material '{material.ShaderPath}'.");
+	}
+
+	public static bool SupportsMeshBackedGeometry(GpuDrawKind drawKind) =>
+		drawKind is GpuDrawKind.Mesh or GpuDrawKind.DebugPrimitive;
+
+	public static bool SupportsTexturedPbrMaterialInterpretation(GpuDrawKind drawKind) => drawKind == GpuDrawKind.Mesh;
+
+	public static bool SupportsUnlitTintMaterialInterpretation(GpuDrawKind drawKind) =>
+		drawKind == GpuDrawKind.DebugPrimitive;
 }

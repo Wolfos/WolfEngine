@@ -939,23 +939,24 @@ internal sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
 		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
-		var bucketDefinitions = GBufferDrawBuckets.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
-		var bucketList = new List<GBufferExecutionBucket>(bucketDefinitions.Length);
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
+		var bucketList = new List<GBufferExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
-		for (var i = 0; i < bucketDefinitions.Length; i++)
+		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
-			var bucketDefinition = bucketDefinitions[i];
-			var pipeline = _gpuDrawResources.GetGBufferPipeline(bucketDefinition.BucketId);
-			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, bucketDefinition.BucketId);
+			var laneDefinition = laneDefinitions[i];
+			var pipeline = _gpuDrawResources.GetGBufferPipeline(laneDefinition);
+			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
 			if (pipeline is null || indirectCommandBuffer is null)
 			{
 				continue;
 			}
 
 			bucketList.Add(new GBufferExecutionBucket(
-				bucketDefinition.BucketId,
-				bucketDefinition.ExecutionIndex,
-				bucketDefinition.DebugName,
+				laneDefinition.DrawKind,
+				laneDefinition.BucketId,
+				laneDefinition.ExecutionIndex,
+				laneDefinition.DebugName,
 				pipeline,
 				indirectCommandBuffer));
 		}
@@ -979,7 +980,7 @@ internal sealed class RenderGraphFrameBuilder
 			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
-			VisibleDrawIdsPerBucketBuffer = _gpuDrawResources.VisibleDrawIdsPerBucketBuffer,
+			VisibleDrawIdsPerExecutionLaneBuffer = _gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,

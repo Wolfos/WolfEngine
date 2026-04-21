@@ -134,4 +134,63 @@ public sealed class GpuDrawBucketHardeningTests
 		Assert.That(GpuDrawClassification.TryResolveBucketId((GpuDrawKind)99, material, out var bucketId), Is.False);
 		Assert.That(bucketId, Is.EqualTo(GpuDrawBucketId.Opaque));
 	}
+
+	[Test]
+	public void Classification_DebugPrimitive_UsesOnlyOpaqueAndTransparentBuckets()
+	{
+		var opaqueMaterial = new Material("debug-opaque") { AlphaMode = AlphaMode.Opaque };
+		var alphaBlendMaterial = new Material("debug-alpha") { AlphaMode = AlphaMode.AlphaBlend };
+		var alphaTestMaterial = new Material("debug-alpha-test") { AlphaMode = AlphaMode.AlphaTest };
+
+		Assert.That(
+			GpuDrawClassification.ResolveBucketId(GpuDrawKind.DebugPrimitive, opaqueMaterial),
+			Is.EqualTo(GpuDrawBucketId.Opaque));
+		Assert.That(
+			GpuDrawClassification.ResolveBucketId(GpuDrawKind.DebugPrimitive, alphaBlendMaterial),
+			Is.EqualTo(GpuDrawBucketId.AlphaBlend));
+		Assert.That(
+			GpuDrawClassification.ResolveBucketId(GpuDrawKind.DebugPrimitive, alphaTestMaterial),
+			Is.EqualTo(GpuDrawBucketId.Opaque));
+	}
+
+	[Test]
+	public void ExecutionLanes_DefaultConfiguration_PreservesMeshOrderingAndAppendsDebugPrimitiveLanes()
+	{
+		var definitions = GpuDrawExecutionLanes.Definitions.ToArray();
+
+		Assert.That(definitions.Select(definition => definition.Key), Is.EqualTo(new[]
+		{
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest),
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque),
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.AlphaBlend)
+		}));
+		Assert.That(definitions.Select(definition => definition.ExecutionIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
+	}
+
+	[Test]
+	public void ExecutionLanes_PassParticipation_ExcludesDebugPrimitiveFromShadowCasterPath()
+	{
+		var gbuffer = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.GBuffer).ToArray();
+		var transparent = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent).ToArray();
+		var shadow = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster).ToArray();
+
+		Assert.That(gbuffer.Select(definition => definition.Key), Is.EqualTo(new[]
+		{
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest),
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque)
+		}));
+		Assert.That(transparent.Select(definition => definition.Key), Is.EqualTo(new[]
+		{
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend),
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.AlphaBlend)
+		}));
+		Assert.That(shadow.Select(definition => definition.Key), Is.EqualTo(new[]
+		{
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest)
+		}));
+	}
 }

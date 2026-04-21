@@ -67,6 +67,51 @@ public sealed class GpuDrawDatabase
 			material));
 	}
 
+	public void TouchDebugPrimitive(
+		Entity entity,
+		Mesh primitiveMesh,
+		ColorRGBA tint,
+		AlphaMode alphaMode,
+		in Matrix4x4 worldTransform)
+	{
+		var resolvedAlphaMode = alphaMode == AlphaMode.AlphaBlend
+			? AlphaMode.AlphaBlend
+			: AlphaMode.Opaque;
+
+		if (_records.TryGetValue(entity, out var record))
+		{
+			if (record.DrawKind != GpuDrawKind.DebugPrimitive)
+			{
+				throw new InvalidOperationException(
+					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.DebugPrimitive}.");
+			}
+
+			ApplyDebugPrimitiveChanges(record, primitiveMesh, tint, resolvedAlphaMode, worldTransform);
+			record.LastSeenStamp = _syncStamp;
+			return;
+		}
+
+		var material = CreateDebugPrimitiveMaterial(tint, resolvedAlphaMode);
+		var newRecord = CreateRecord(entity, GpuDrawKind.DebugPrimitive, primitiveMesh, material, worldTransform);
+		_records.Add(entity, newRecord);
+		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
+		{
+			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
+		}
+
+		_updates.Add(GpuDrawUpdate.CreateAdd(
+			newRecord.DrawKind,
+			newRecord.DrawHandle,
+			newRecord.InstanceHandle,
+			newRecord.MeshHandle,
+			newRecord.MaterialHandle,
+			newRecord.PreviousWorld,
+			newRecord.World,
+			newRecord.BoundsCenterRadius,
+			primitiveMesh,
+			material));
+	}
+
 	public void EndSync()
 	{
 		var toRemove = new List<Entity>();
@@ -295,6 +340,100 @@ public sealed class GpuDrawDatabase
 		}
 	}
 
+	private void ApplyDebugPrimitiveChanges(
+		DrawRecord record,
+		Mesh primitiveMesh,
+		ColorRGBA tint,
+		AlphaMode alphaMode,
+		in Matrix4x4 worldTransform)
+	{
+		var material = record.Material;
+		var transformChanged = record.World.Equals(worldTransform) == false;
+		var meshChanged = ReferenceEquals(record.Mesh, primitiveMesh) == false;
+		var tintChanged = material.Color.Equals(tint) == false;
+		var alphaModeChanged = material.AlphaMode != alphaMode;
+		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
+
+		if ((transformChanged || meshChanged || tintChanged || alphaModeChanged || settlePreviousTransform) == false)
+		{
+			return;
+		}
+
+		var uploadPreviousWorld = record.World;
+
+		if (meshChanged)
+		{
+			ReleaseMesh(record.MeshHandle, record.Mesh);
+			record.Mesh = primitiveMesh;
+			record.MeshHandle = AcquireMeshHandle(primitiveMesh);
+		}
+
+		if (transformChanged || meshChanged)
+		{
+			record.World = worldTransform;
+			ComputeBounds(record, primitiveMesh);
+		}
+
+		if (meshChanged)
+		{
+			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
+				record.DrawKind,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.World,
+				record.World,
+				record.BoundsCenterRadius,
+				record.Mesh));
+		}
+
+		if (tintChanged || alphaModeChanged)
+		{
+			material.Color = tint;
+			material.AlphaMode = alphaMode;
+			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
+				record.DrawKind,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.World,
+				record.World,
+				record.BoundsCenterRadius,
+				record.Mesh,
+				record.Material));
+		}
+
+		if (transformChanged)
+		{
+			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
+				record.DrawKind,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				uploadPreviousWorld,
+				record.World,
+				record.BoundsCenterRadius));
+			record.PreviousWorld = uploadPreviousWorld;
+		}
+
+		if (settlePreviousTransform)
+		{
+			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
+				record.DrawKind,
+				record.DrawHandle,
+				record.InstanceHandle,
+				record.MeshHandle,
+				record.MaterialHandle,
+				record.World,
+				record.World,
+				record.BoundsCenterRadius));
+			record.PreviousWorld = record.World;
+		}
+	}
+
 	private DrawRecord CreateRecord(Entity entity, GpuDrawKind drawKind, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
 		var record = new DrawRecord
@@ -402,6 +541,20 @@ public sealed class GpuDrawDatabase
 		var scaleY = new Vector3(matrix.M21, matrix.M22, matrix.M23).Length();
 		var scaleZ = new Vector3(matrix.M31, matrix.M32, matrix.M33).Length();
 		return MathF.Max(scaleX, MathF.Max(scaleY, scaleZ));
+	}
+
+	private static Material CreateDebugPrimitiveMaterial(ColorRGBA tint, AlphaMode alphaMode)
+	{
+		return new Material("__debug_primitive__")
+		{
+			Color = tint,
+			AlphaMode = alphaMode,
+			AlphaCutoff = 0.0f,
+			MetallicFactor = 0.0f,
+			RoughnessFactor = 1.0f,
+			EmissiveFactor = Vector3.Zero,
+			EmissiveIntensity = 0.0f
+		};
 	}
 
 	internal sealed class DrawRecord

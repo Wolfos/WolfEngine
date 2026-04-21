@@ -9,12 +9,14 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct ShadowMapExecutionBucket
 {
 	public ShadowMapExecutionBucket(
+		GpuDrawKind drawKind,
 		GpuDrawBucketId bucketId,
 		int executionIndex,
 		string debugName,
 		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer indirectCommandBuffer)
 	{
+		DrawKind = drawKind;
 		BucketId = bucketId;
 		ExecutionIndex = executionIndex;
 		DebugName = debugName;
@@ -22,6 +24,7 @@ public readonly struct ShadowMapExecutionBucket
 		IndirectCommandBuffer = indirectCommandBuffer;
 	}
 
+	public GpuDrawKind DrawKind { get; }
 	public GpuDrawBucketId BucketId { get; }
 	public int ExecutionIndex { get; }
 	public string DebugName { get; }
@@ -100,7 +103,7 @@ public struct ShadowMapPassConfig
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
-	public required IGfxBuffer? VisibleDrawIdsPerBucketBuffer { get; init; }
+	public required IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }
 	public required ReadOnlyMemory<ShadowMapExecutionBucket> Buckets { get; init; }
 	public required uint FallbackMaxCommandCount { get; init; }

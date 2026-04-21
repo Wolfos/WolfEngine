@@ -138,6 +138,131 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_DebugPrimitiveRegistrationAndUpdates_PreserveDebugPrimitiveDrawKind()
+	{
+		var database = new GpuDrawDatabase();
+		var primitiveFactory = new DebugPrimitiveMeshFactory();
+		var boxMesh = primitiveFactory.GetMesh(DebugPrimitiveType.Box);
+		var sphereMesh = primitiveFactory.GetMesh(DebugPrimitiveType.Sphere);
+		var entity = new Entity(3, 1);
+		var updates = new List<GpuDrawUpdate>();
+
+		database.BeginSync();
+		database.TouchDebugPrimitive(
+			entity,
+			boxMesh,
+			new ColorRGBA(0.2f, 0.4f, 0.8f, 1.0f),
+			AlphaMode.Opaque,
+			Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
+		Assert.That(updates[0].Material, Is.Not.Null);
+		Assert.That(updates[0].Material!.AlphaMode, Is.EqualTo(AlphaMode.Opaque));
+
+		database.BeginSync();
+		database.TouchDebugPrimitive(
+			entity,
+			boxMesh,
+			new ColorRGBA(0.2f, 0.4f, 0.8f, 1.0f),
+			AlphaMode.Opaque,
+			Matrix4x4.CreateTranslation(3.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.UpdateTransform }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
+
+		database.BeginSync();
+		database.TouchDebugPrimitive(
+			entity,
+			boxMesh,
+			new ColorRGBA(1.0f, 0.2f, 0.1f, 0.5f),
+			AlphaMode.AlphaBlend,
+			Matrix4x4.CreateTranslation(3.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMaterial));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
+		var materialUpdate = updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMaterial);
+		Assert.That(materialUpdate.Material, Is.Not.Null);
+		Assert.That(materialUpdate.Material!.AlphaMode, Is.EqualTo(AlphaMode.AlphaBlend));
+		Assert.That(materialUpdate.Material.Color.R, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(materialUpdate.Material.Color.A, Is.EqualTo(0.5f).Within(0.0001f));
+
+		database.BeginSync();
+		database.TouchDebugPrimitive(
+			entity,
+			sphereMesh,
+			new ColorRGBA(1.0f, 0.2f, 0.1f, 0.5f),
+			AlphaMode.AlphaBlend,
+			Matrix4x4.CreateTranslation(3.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMesh));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
+		var meshUpdate = updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMesh);
+		Assert.That(meshUpdate.Mesh, Is.SameAs(sphereMesh));
+
+		database.BeginSync();
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_DualKindRegistration_PreservesIndependentHandlesAndKinds()
+	{
+		var database = new GpuDrawDatabase();
+		var primitiveFactory = new DebugPrimitiveMeshFactory();
+		var mesh = CreateTestMesh();
+		var material = new Material("mesh-shader");
+		var debugMesh = primitiveFactory.GetMesh(DebugPrimitiveType.Quad);
+		var meshEntity = new Entity(10, 1);
+		var debugEntity = new Entity(11, 1);
+		var updates = new List<GpuDrawUpdate>();
+
+		database.BeginSync();
+		database.TouchMesh(meshEntity, mesh, material, Matrix4x4.Identity);
+		database.TouchDebugPrimitive(
+			debugEntity,
+			debugMesh,
+			new ColorRGBA(0.7f, 0.1f, 0.3f, 1.0f),
+			AlphaMode.Opaque,
+			Matrix4x4.CreateTranslation(5.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates, Has.Count.EqualTo(2));
+		Assert.That(updates.Select(update => update.DrawKind), Is.EqualTo(new[]
+		{
+			GpuDrawKind.Mesh,
+			GpuDrawKind.DebugPrimitive
+		}));
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[]
+		{
+			GpuDrawUpdateType.Add,
+			GpuDrawUpdateType.Add
+		}));
+		Assert.That(updates[0].DrawHandle, Is.Not.EqualTo(updates[1].DrawHandle));
+		Assert.That(updates[0].InstanceHandle, Is.Not.EqualTo(updates[1].InstanceHandle));
+
+		var entries = new List<GpuDrawEntry>();
+		database.CollectDrawEntries(entries);
+
+		Assert.That(entries, Has.Count.EqualTo(2));
+		Assert.That(entries.Count(entry => entry.DrawKind == GpuDrawKind.Mesh), Is.EqualTo(1));
+		Assert.That(entries.Count(entry => entry.DrawKind == GpuDrawKind.DebugPrimitive), Is.EqualTo(1));
+		Assert.That(entries.Single(entry => entry.DrawKind == GpuDrawKind.DebugPrimitive).Mesh, Is.SameAs(debugMesh));
+	}
+
+	[Test]
 	public void GpuDrawData_SharedGpuStructSizesRemain16ByteAligned()
 	{
 		AssertGpuStructSizeIs16ByteAligned<GpuInstanceData>();
