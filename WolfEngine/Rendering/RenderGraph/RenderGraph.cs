@@ -1,7 +1,4 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using WolfEngine.Rendering.Abstraction;
@@ -496,7 +493,7 @@ public sealed class RenderGraph
 
 	private void LogGpuHardeningStatsIfNeeded()
 	{
-		if (GraphicsConfig.GpuHardeningStressEnabled == false || _gpuHardeningLogInterval <= 0 ||
+		if (_gpuHardeningLogInterval <= 0 ||
 		    (_frameIndex % _gpuHardeningLogInterval) != 0)
 		{
 			return;

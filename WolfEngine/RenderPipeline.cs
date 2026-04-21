@@ -99,7 +99,7 @@ public class RenderPipeline : IRenderPipeline
 
 
 						var transformMatrix = transform.LocalToWorld;
-						gpuDrawDatabase.Touch(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+						gpuDrawDatabase.TouchMesh(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
 					}
 				}
 

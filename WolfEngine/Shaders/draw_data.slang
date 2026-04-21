@@ -25,8 +25,8 @@ struct GpuInstanceData
     float4 boundsCenterRadius;
     uint materialHandle;
     uint meshHandle;
+    uint drawKind;
     uint flags;
-    uint pad0;
 };
 
 struct GpuMaterialData
@@ -87,6 +87,7 @@ struct GpuDrawUpdateData
     uint32_t type;
     uint32_t drawHandle;
     uint32_t instanceHandle;
+    uint32_t drawKind;
     uint32_t meshHandle;
     uint32_t materialHandle;
     uint32_t drawFlags;
@@ -103,5 +104,4 @@ struct GpuDrawUpdateData
     uint32_t samplerHandle;
     uint32_t pad0;
     uint32_t pad1;
-    uint32_t pad2;
 };

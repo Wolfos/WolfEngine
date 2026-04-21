@@ -124,8 +124,8 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
     instanceData.boundsCenterRadius = update.boundsCenterRadius;
     instanceData.materialHandle = materialHandle;
     instanceData.meshHandle = meshHandle;
+    instanceData.drawKind = update.drawKind;
     instanceData.flags = update.drawFlags;
-    instanceData.pad0 = 0;
     g_InstanceTable[instanceIndex] = instanceData;
 
     g_DrawGenerations[drawIndex] = drawGeneration;

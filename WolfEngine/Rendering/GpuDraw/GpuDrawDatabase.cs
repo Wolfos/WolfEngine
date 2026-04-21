@@ -35,14 +35,19 @@ public sealed class GpuDrawDatabase
 
 	public void Touch(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
+		TouchMesh(entity, mesh, material, worldTransform);
+	}
+
+	public void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	{
 		if (_records.TryGetValue(entity, out var record))
 		{
-			ApplyChanges(record, mesh, material, worldTransform);
+			ApplyChanges(record, GpuDrawKind.Mesh, mesh, material, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
-		var newRecord = CreateRecord(entity, mesh, material, worldTransform);
+		var newRecord = CreateRecord(entity, GpuDrawKind.Mesh, mesh, material, worldTransform);
 		_records.Add(entity, newRecord);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
@@ -50,6 +55,7 @@ public sealed class GpuDrawDatabase
 		}
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
+			newRecord.DrawKind,
 			newRecord.DrawHandle,
 			newRecord.InstanceHandle,
 			newRecord.MeshHandle,
@@ -80,7 +86,7 @@ public sealed class GpuDrawDatabase
 			}
 
 			_records.Remove(entity);
-			_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawHandle, record.InstanceHandle));
+			_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.DrawHandle, record.InstanceHandle));
 			ReleaseRecord(record);
 			if (record.DrawHandle.Index == _maxActiveDrawIndex)
 			{
@@ -101,6 +107,7 @@ public sealed class GpuDrawDatabase
 			}
 
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -119,6 +126,7 @@ public sealed class GpuDrawDatabase
 		foreach (var record in _records.Values)
 		{
 			destination.Add(new GpuDrawEntry(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -183,8 +191,14 @@ public sealed class GpuDrawDatabase
 
 	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) => _drawHandlePool.IsCurrent(handle);
 
-	private void ApplyChanges(DrawRecord record, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	private void ApplyChanges(DrawRecord record, GpuDrawKind drawKind, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
+		if (record.DrawKind != drawKind)
+		{
+			throw new InvalidOperationException(
+				$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={drawKind}.");
+		}
+
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
@@ -226,6 +240,7 @@ public sealed class GpuDrawDatabase
 		if (meshChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMeshUpdate(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -239,6 +254,7 @@ public sealed class GpuDrawDatabase
 		if (materialChanged || materialResourceChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -253,6 +269,7 @@ public sealed class GpuDrawDatabase
 		if (transformChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -266,6 +283,7 @@ public sealed class GpuDrawDatabase
 		if (settlePreviousTransform)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
+				record.DrawKind,
 				record.DrawHandle,
 				record.InstanceHandle,
 				record.MeshHandle,
@@ -277,11 +295,12 @@ public sealed class GpuDrawDatabase
 		}
 	}
 
-	private DrawRecord CreateRecord(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	private DrawRecord CreateRecord(Entity entity, GpuDrawKind drawKind, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
 		var record = new DrawRecord
 		{
 			Entity = entity,
+			DrawKind = drawKind,
 			DrawHandle = _drawHandlePool.Acquire(),
 			InstanceHandle = _instanceHandlePool.Acquire(),
 			Mesh = mesh,
@@ -388,6 +407,7 @@ public sealed class GpuDrawDatabase
 	internal sealed class DrawRecord
 	{
 		public Entity Entity = default;
+		public GpuDrawKind DrawKind;
 		public GpuDrawHandle DrawHandle;
 		public GpuDrawHandle InstanceHandle;
 		public GpuDrawHandle MeshHandle;
@@ -432,6 +452,7 @@ public sealed class GpuDrawDatabase
 public readonly struct GpuDrawEntry
 {
 	public GpuDrawEntry(
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -442,6 +463,7 @@ public readonly struct GpuDrawEntry
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius)
 	{
+		DrawKind = drawKind;
 		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
 		MeshHandle = meshHandle;
@@ -453,6 +475,7 @@ public readonly struct GpuDrawEntry
 		BoundsCenterRadius = boundsCenterRadius;
 	}
 
+	public GpuDrawKind DrawKind { get; }
 	public GpuDrawHandle DrawHandle { get; }
 	public GpuDrawHandle InstanceHandle { get; }
 	public GpuDrawHandle MeshHandle { get; }
@@ -473,6 +496,7 @@ public readonly struct GpuDrawUpdate
 {
 	private GpuDrawUpdate(
 		GpuDrawUpdateType type,
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -484,6 +508,7 @@ public readonly struct GpuDrawUpdate
 		Material? material)
 	{
 		Type = type;
+		DrawKind = drawKind;
 		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
 		MeshHandle = meshHandle;
@@ -496,6 +521,7 @@ public readonly struct GpuDrawUpdate
 	}
 
 	public GpuDrawUpdateType Type { get; }
+	public GpuDrawKind DrawKind { get; }
 	public GpuDrawHandle DrawHandle { get; }
 	public GpuDrawHandle InstanceHandle { get; }
 	public GpuDrawHandle MeshHandle { get; }
@@ -512,6 +538,7 @@ public readonly struct GpuDrawUpdate
 	public int MaterialIndex => MaterialHandle.Index;
 
 	public static GpuDrawUpdate CreateAdd(
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -524,6 +551,7 @@ public readonly struct GpuDrawUpdate
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.Add,
+			drawKind,
 			drawHandle,
 			instanceHandle,
 			meshHandle,
@@ -535,10 +563,11 @@ public readonly struct GpuDrawUpdate
 			material);
 	}
 
-	public static GpuDrawUpdate CreateRemove(GpuDrawHandle drawHandle, GpuDrawHandle instanceHandle)
+	public static GpuDrawUpdate CreateRemove(GpuDrawKind drawKind, GpuDrawHandle drawHandle, GpuDrawHandle instanceHandle)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.Remove,
+			drawKind,
 			drawHandle,
 			instanceHandle,
 			GpuDrawHandle.Invalid,
@@ -551,6 +580,7 @@ public readonly struct GpuDrawUpdate
 	}
 
 	public static GpuDrawUpdate CreateTransformUpdate(
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -561,6 +591,7 @@ public readonly struct GpuDrawUpdate
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateTransform,
+			drawKind,
 			drawHandle,
 			instanceHandle,
 			meshHandle,
@@ -573,6 +604,7 @@ public readonly struct GpuDrawUpdate
 	}
 
 	public static GpuDrawUpdate CreateMaterialUpdate(
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -585,6 +617,7 @@ public readonly struct GpuDrawUpdate
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMaterial,
+			drawKind,
 			drawHandle,
 			instanceHandle,
 			meshHandle,
@@ -597,6 +630,7 @@ public readonly struct GpuDrawUpdate
 	}
 
 	public static GpuDrawUpdate CreateMeshUpdate(
+		GpuDrawKind drawKind,
 		GpuDrawHandle drawHandle,
 		GpuDrawHandle instanceHandle,
 		GpuDrawHandle meshHandle,
@@ -608,6 +642,7 @@ public readonly struct GpuDrawUpdate
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMesh,
+			drawKind,
 			drawHandle,
 			instanceHandle,
 			meshHandle,

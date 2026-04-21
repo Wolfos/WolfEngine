@@ -24,6 +24,12 @@ public sealed class GpuDrawBucketHardeningTests
 		Assert.That(GBufferDrawBuckets.GetExecutionIndex(GpuDrawBucketId.Opaque), Is.EqualTo(0));
 		Assert.That(GBufferDrawBuckets.GetExecutionIndex(GpuDrawBucketId.AlphaBlend), Is.EqualTo(1));
 		Assert.That(GBufferDrawBuckets.GetExecutionIndex(GpuDrawBucketId.AlphaTest), Is.EqualTo(2));
+		var opaqueMaterial = new Material("opaque") { AlphaMode = AlphaMode.Opaque };
+		var alphaBlendMaterial = new Material("alpha-blend") { AlphaMode = AlphaMode.AlphaBlend };
+		var alphaTestMaterial = new Material("alpha-test") { AlphaMode = AlphaMode.AlphaTest };
+		Assert.That(GpuDrawClassification.ResolveBucketId(GpuDrawKind.Mesh, opaqueMaterial), Is.EqualTo(GpuDrawBucketId.Opaque));
+		Assert.That(GpuDrawClassification.ResolveBucketId(GpuDrawKind.Mesh, alphaBlendMaterial), Is.EqualTo(GpuDrawBucketId.AlphaBlend));
+		Assert.That(GpuDrawClassification.ResolveBucketId(GpuDrawKind.Mesh, alphaTestMaterial), Is.EqualTo(GpuDrawBucketId.AlphaTest));
 	}
 
 	[Test]
@@ -118,5 +124,14 @@ public sealed class GpuDrawBucketHardeningTests
 		Assert.That(alphaTest.ExecutionRangeEndExclusive, Is.EqualTo(21));
 		Assert.That(alphaTest.ExecutionRangeSpan, Is.EqualTo(10));
 		Assert.That(alphaTest.MaterialFallbackIncidents, Is.EqualTo(2));
+	}
+
+	[Test]
+	public void Classification_UnsupportedDrawKind_FailsClosed()
+	{
+		var material = new Material("unsupported");
+
+		Assert.That(GpuDrawClassification.TryResolveBucketId((GpuDrawKind)99, material, out var bucketId), Is.False);
+		Assert.That(bucketId, Is.EqualTo(GpuDrawBucketId.Opaque));
 	}
 }

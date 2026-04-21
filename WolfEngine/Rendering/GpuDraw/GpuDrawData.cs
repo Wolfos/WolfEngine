@@ -5,6 +5,11 @@ using System.Runtime.InteropServices;
 
 namespace WolfEngine.Rendering;
 
+public enum GpuDrawKind : uint
+{
+	Mesh = 0
+}
+
 public static class GpuDrawFlags
 {
 	public const uint Active = 1u << 0;
@@ -15,13 +20,31 @@ public static class GpuDrawFlags
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuInstanceData
 {
+	public GpuInstanceData(
+		Matrix4x4 previousWorld,
+		Matrix4x4 world,
+		Vector4 boundsCenterRadius,
+		uint materialHandle,
+		uint meshHandle,
+		uint drawKind,
+		uint flags)
+	{
+		PreviousWorld = previousWorld;
+		World = world;
+		BoundsCenterRadius = boundsCenterRadius;
+		MaterialHandle = materialHandle;
+		MeshHandle = meshHandle;
+		DrawKind = drawKind;
+		Flags = flags;
+	}
+
 	public readonly Matrix4x4 PreviousWorld;
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
 	public readonly uint MaterialHandle;
 	public readonly uint MeshHandle;
+	public readonly uint DrawKind;
 	public readonly uint Flags;
-	private readonly uint _pad0;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -124,6 +147,7 @@ public readonly struct GpuDrawUpdateData
 		uint type,
 		uint drawHandle,
 		uint instanceHandle,
+		uint drawKind,
 		uint meshHandle,
 		uint materialHandle,
 		uint drawFlags,
@@ -148,6 +172,7 @@ public readonly struct GpuDrawUpdateData
 		Type = type;
 		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
+		DrawKind = drawKind;
 		MeshHandle = meshHandle;
 		MaterialHandle = materialHandle;
 		DrawFlags = drawFlags;
@@ -164,7 +189,6 @@ public readonly struct GpuDrawUpdateData
 		SamplerHandle = samplerHandle;
 		_pad0 = 0;
 		_pad1 = 0;
-		_pad2 = 0;
 	}
 
 	public readonly Matrix4x4 PreviousWorld;
@@ -176,6 +200,7 @@ public readonly struct GpuDrawUpdateData
 	public readonly uint Type;
 	public readonly uint DrawHandle;
 	public readonly uint InstanceHandle;
+	public readonly uint DrawKind;
 	public readonly uint MeshHandle;
 	public readonly uint MaterialHandle;
 	public readonly uint DrawFlags;
@@ -192,5 +217,4 @@ public readonly struct GpuDrawUpdateData
 	public readonly uint SamplerHandle;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
-	private readonly uint _pad2;
 }

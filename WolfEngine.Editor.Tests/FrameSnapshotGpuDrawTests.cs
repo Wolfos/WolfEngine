@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using WolfEngine;
 using WolfEngine.ECS;
@@ -32,6 +33,7 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		Assert.That(entries, Has.Count.EqualTo(1));
 		Assert.That(entries[0].DrawHandle.Index, Is.EqualTo(1));
+		Assert.That(entries[0].DrawKind, Is.EqualTo(GpuDrawKind.Mesh));
 		Assert.That(entries[0].World.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
 	}
 
@@ -56,6 +58,7 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		Assert.That(updates, Is.Empty);
 		Assert.That(entries, Has.Count.EqualTo(1));
+		Assert.That(entries[0].DrawKind, Is.EqualTo(GpuDrawKind.Mesh));
 		Assert.That(entries[0].World.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
 	}
 
@@ -77,8 +80,60 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		Assert.That(updates, Has.Count.EqualTo(1));
 		Assert.That(updates[0].Type, Is.EqualTo(GpuDrawUpdateType.UpdateTransform));
+		Assert.That(updates[0].DrawKind, Is.EqualTo(GpuDrawKind.Mesh));
 		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
 		Assert.That(updates[0].World.Translation.X, Is.EqualTo(3.0f).Within(0.0001f));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_MeshRegistrationAndUpdates_PreserveMeshDrawKind()
+	{
+		var database = new GpuDrawDatabase();
+		var meshA = CreateTestMesh();
+		var meshB = CreateOffsetMesh();
+		var materialA = new Material("shader-a");
+		var materialB = new Material("shader-b");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+
+		database.BeginSync();
+		database.TouchMesh(entity, meshA, materialA, Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
+
+		database.BeginSync();
+		database.TouchMesh(entity, meshA, materialA, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.UpdateTransform }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
+
+		database.BeginSync();
+		database.TouchMesh(entity, meshA, materialB, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMaterial));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
+
+		database.BeginSync();
+		database.TouchMesh(entity, meshB, materialB, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMesh));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
+
+		database.BeginSync();
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Mesh), Is.True);
 	}
 
 	private static void WriteEntity(
@@ -89,7 +144,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		float translationX)
 	{
 		database.BeginSync();
-		database.Touch(entity, mesh, material, Matrix4x4.CreateTranslation(translationX, 0.0f, 0.0f));
+		database.TouchMesh(entity, mesh, material, Matrix4x4.CreateTranslation(translationX, 0.0f, 0.0f));
 		database.EndSync();
 	}
 
@@ -100,6 +155,17 @@ public sealed class FrameSnapshotGpuDrawTests
 				new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
 				new Vector4(1.0f, 0.0f, 0.0f, 1.0f),
 				new Vector4(0.0f, 1.0f, 0.0f, 1.0f)
+			],
+			[0u, 1u, 2u]);
+	}
+
+	private static Mesh CreateOffsetMesh()
+	{
+		return new Mesh(
+			[
+				new Vector4(0.0f, 0.0f, 0.0f, 1.0f),
+				new Vector4(2.0f, 0.0f, 0.0f, 1.0f),
+				new Vector4(0.0f, 2.0f, 0.0f, 1.0f)
 			],
 			[0u, 1u, 2u]);
 	}
