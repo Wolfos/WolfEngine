@@ -85,7 +85,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
 	private readonly ShadowMapPass _shadowMapPass;
-	private readonly TerrainGBufferPass _terrainGBufferPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly SkyboxPass _skyboxPass;
@@ -115,7 +114,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ResourceState[] _historyDepthStates = new ResourceState[2];
 	
 	private readonly Action<RenderGraphContext> _gbufferExecute;
-	private readonly Action<RenderGraphContext> _terrainGbufferExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurHorizontalExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurVerticalExecute;
@@ -165,14 +163,12 @@ internal sealed class RenderGraphFrameBuilder
 		_casSharpenPass = passSet.CasSharpenPass;
 		_copyToFinalPass = passSet.CopyToFinalPass;
 		_shadowMapPass = passSet.ShadowMapPass;
-		_terrainGBufferPass = passSet.TerrainGBufferPass;
 		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_skyboxPass = passSet.SkyboxPass;
 		_imGuiRenderer = imGuiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
-		_terrainGbufferExecute = ExecuteTerrainGBuffer;
 		_ambientOcclusionExecute = ExecuteAmbientOcclusion;
 		_ambientOcclusionBlurHorizontalExecute = ExecuteAmbientOcclusionBlurHorizontal;
 		_ambientOcclusionBlurVerticalExecute = ExecuteAmbientOcclusionBlurVertical;
@@ -518,15 +514,6 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.GBufferVelocity, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
 				.SetExecute(_gbufferExecute);
-
-			graph.AddPass("Terrain GBuffer", PassKind.Graphics)
-				.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferVelocity, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-				.SetExecute(_terrainGbufferExecute);
 
 			if (_frameResources.AmbientOcclusionRaw.IsValid)
 			{
@@ -979,6 +966,7 @@ internal sealed class RenderGraphFrameBuilder
 			DepthClearValue = 1.0f,
 			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
+			TerrainMaterialBuffer = _gpuDrawResources.TerrainMaterialBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
 			VisibleDrawIdsPerExecutionLaneBuffer = _gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
@@ -994,17 +982,6 @@ internal sealed class RenderGraphFrameBuilder
 
 		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
 	}
-
-	private void ExecuteTerrainGBuffer(RenderGraphContext context)
-	{
-		var config = _terrainGBufferPass.BuildConfig(
-			context,
-			_frameResources,
-			_renderer.GetGfxDevice());
-		_terrainGBufferPass.Record(context, config, context.SceneData!);
-	}
-	
-	
 	private void ExecuteDeferredLighting(RenderGraphContext context)
 	{
 		var config = _deferredLightingPass.BuildConfig(

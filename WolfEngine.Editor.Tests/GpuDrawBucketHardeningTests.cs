@@ -154,6 +154,20 @@ public sealed class GpuDrawBucketHardeningTests
 	}
 
 	[Test]
+	public void Classification_Terrain_UsesOnlyOpaqueBucket()
+	{
+		var opaqueMaterial = new Material("terrain") { AlphaMode = AlphaMode.Opaque };
+		var alphaBlendMaterial = new Material("terrain-alpha") { AlphaMode = AlphaMode.AlphaBlend };
+
+		Assert.That(
+			GpuDrawClassification.ResolveBucketId(GpuDrawKind.Terrain, opaqueMaterial),
+			Is.EqualTo(GpuDrawBucketId.Opaque));
+		Assert.That(
+			GpuDrawClassification.ResolveBucketId(GpuDrawKind.Terrain, alphaBlendMaterial),
+			Is.EqualTo(GpuDrawBucketId.Opaque));
+	}
+
+	[Test]
 	public void ExecutionLanes_DefaultConfiguration_PreservesMeshOrderingAndAppendsDebugPrimitiveLanes()
 	{
 		var definitions = GpuDrawExecutionLanes.Definitions.ToArray();
@@ -164,9 +178,10 @@ public sealed class GpuDrawBucketHardeningTests
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest),
 			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque),
-			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.AlphaBlend)
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.AlphaBlend),
+			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque)
 		}));
-		Assert.That(definitions.Select(definition => definition.ExecutionIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
+		Assert.That(definitions.Select(definition => definition.ExecutionIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4, 5 }));
 	}
 
 	[Test]
@@ -180,7 +195,8 @@ public sealed class GpuDrawBucketHardeningTests
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest),
-			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque)
+			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque),
+			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque)
 		}));
 		Assert.That(transparent.Select(definition => definition.Key), Is.EqualTo(new[]
 		{
@@ -190,7 +206,8 @@ public sealed class GpuDrawBucketHardeningTests
 		Assert.That(shadow.Select(definition => definition.Key), Is.EqualTo(new[]
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque),
-			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest)
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest),
+			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque)
 		}));
 	}
 }

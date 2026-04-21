@@ -91,6 +91,10 @@ public static class GBufferPass
 				{
 					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
 				}
+				if (config.TerrainMaterialBuffer is not null)
+				{
+					commandList.BindConstantBuffer(14, config.TerrainMaterialBuffer);
+				}
 
 				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);
 				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&

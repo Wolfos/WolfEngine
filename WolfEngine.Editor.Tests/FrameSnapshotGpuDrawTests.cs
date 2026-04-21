@@ -263,10 +263,81 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_TerrainChunkRegistration_TracksMultipleChunksPerEntity()
+	{
+		var database = new GpuDrawDatabase();
+		var meshA = CreateTestMesh();
+		var meshB = CreateOffsetMesh();
+		var entity = new Entity(20, 1);
+		var updates = new List<GpuDrawUpdate>();
+		var surface = CreateTerrainSurface();
+
+		database.BeginSync();
+		database.TouchTerrainChunk(entity, 0, meshA, surface, Matrix4x4.Identity);
+		database.TouchTerrainChunk(entity, 1, meshB, surface, Matrix4x4.CreateTranslation(10.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates, Has.Count.EqualTo(2));
+		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Terrain), Is.True);
+		Assert.That(updates.All(update => update.Type == GpuDrawUpdateType.Add), Is.True);
+		Assert.That(updates[0].DrawHandle, Is.Not.EqualTo(updates[1].DrawHandle));
+
+		var entries = new List<GpuDrawEntry>();
+		database.CollectDrawEntries(entries);
+
+		Assert.That(entries, Has.Count.EqualTo(2));
+		Assert.That(entries.All(entry => entry.DrawKind == GpuDrawKind.Terrain), Is.True);
+		Assert.That(entries.All(entry => entry.TerrainSurface.HasValue), Is.True);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_TerrainChunkUpdates_PreserveStableSubdrawIdentity()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var entity = new Entity(21, 1);
+		var updates = new List<GpuDrawUpdate>();
+		var initialSurface = CreateTerrainSurface();
+		var updatedSurface = CreateTerrainSurface(heightBlendSharpness: 8.0f);
+
+		database.BeginSync();
+		database.TouchTerrainChunk(entity, 0, mesh, initialSurface, Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		var initialDrawHandle = updates[0].DrawHandle;
+
+		database.BeginSync();
+		database.TouchTerrainChunk(entity, 0, mesh, initialSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.UpdateTransform }));
+		Assert.That(updates[0].DrawHandle, Is.EqualTo(initialDrawHandle));
+
+		database.BeginSync();
+		database.TouchTerrainChunk(entity, 0, mesh, updatedSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMaterial));
+		Assert.That(updates.All(update => update.DrawHandle.Equals(initialDrawHandle)), Is.True);
+		Assert.That(updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMaterial).TerrainSurface!.Value.HeightBlendSharpness, Is.EqualTo(8.0f).Within(0.0001f));
+
+		database.BeginSync();
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+		Assert.That(updates[0].DrawHandle, Is.EqualTo(initialDrawHandle));
+	}
+
+	[Test]
 	public void GpuDrawData_SharedGpuStructSizesRemain16ByteAligned()
 	{
 		AssertGpuStructSizeIs16ByteAligned<GpuInstanceData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMaterialData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuTerrainMaterialData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMeshData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuDrawCommand>();
 		AssertGpuStructSizeIs16ByteAligned<GpuDrawArgs>();
@@ -305,6 +376,18 @@ public sealed class FrameSnapshotGpuDrawTests
 				new Vector4(0.0f, 2.0f, 0.0f, 1.0f)
 			],
 			[0u, 1u, 2u]);
+	}
+
+	private static TerrainDrawSurface CreateTerrainSurface(float heightBlendSharpness = 4.0f)
+	{
+		return new TerrainDrawSurface(
+			controlMap: null,
+			layerCount: 1,
+			heightBlendSharpness: heightBlendSharpness,
+			layer0: new TerrainResolvedLayer(null, null, null, null, null, 8.0f),
+			layer1: default,
+			layer2: default,
+			layer3: default);
 	}
 
 	private static void AssertGpuStructSizeIs16ByteAligned<T>() where T : unmanaged

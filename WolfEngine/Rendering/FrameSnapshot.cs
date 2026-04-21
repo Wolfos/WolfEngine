@@ -19,7 +19,6 @@ public sealed class FrameSnapshot
 	public FrameSnapshot()
 	{
 		LightPackets = new List<LightPacket>(16);
-		TerrainRecords = new List<TerrainSnapshotRecord>(64);
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
@@ -29,7 +28,6 @@ public sealed class FrameSnapshot
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
 	public List<LightPacket> LightPackets { get; }
-	public List<TerrainSnapshotRecord> TerrainRecords { get; }
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
@@ -44,7 +42,6 @@ public sealed class FrameSnapshot
 	public void Clear()
 	{
 		LightPackets.Clear();
-		TerrainRecords.Clear();
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		GpuDrawDatabase.ResetForSnapshotWrite();
@@ -53,12 +50,6 @@ public sealed class FrameSnapshot
 	public void AddLight(Light light, Matrix4x4 transform)
 	{
 		LightPackets.Add(new LightPacket(light, transform));
-	}
-
-	public void AddTerrainRecord(TerrainSnapshotRecord record)
-	{
-		ArgumentNullException.ThrowIfNull(record);
-		TerrainRecords.Add(record);
 	}
 
 	public void SetSun(Vector3 sunDirection, float sunIntensityScale)

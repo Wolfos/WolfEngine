@@ -21,6 +21,7 @@ public sealed class GpuDrawResources : IDisposable
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }
+	public IGfxBuffer? TerrainMaterialBuffer { get; private set; }
 	public IGfxBuffer? MeshBuffer { get; private set; }
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
@@ -153,6 +154,11 @@ public sealed class GpuDrawResources : IDisposable
 
 		MaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuMaterialData>()),
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+		TerrainMaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuTerrainMaterialData>()),
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -382,6 +388,7 @@ public sealed class GpuDrawResources : IDisposable
 	{
 		(InstanceBuffer as IDisposable)?.Dispose();
 		(MaterialBuffer as IDisposable)?.Dispose();
+		(TerrainMaterialBuffer as IDisposable)?.Dispose();
 		(MeshBuffer as IDisposable)?.Dispose();
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
@@ -435,6 +442,7 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
+		TerrainMaterialBuffer = null;
 	}
 
 	private static int FlattenSlotBucketIndex(int slotIndex, int executionLaneIndex) =>

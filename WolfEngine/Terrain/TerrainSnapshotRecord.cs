@@ -2,17 +2,49 @@ using System.Numerics;
 
 namespace WolfEngine;
 
-public sealed class TerrainSnapshotRecord
+public readonly struct TerrainDrawSurface
 {
-	public required Mesh Mesh { get; init; }
-	public required Matrix4x4 WorldTransform { get; init; }
-	public required Texture? ControlMap { get; init; }
-	public required int LayerCount { get; init; }
-	public required float HeightBlendSharpness { get; init; }
-	public required TerrainResolvedLayer Layer0 { get; init; }
-	public required TerrainResolvedLayer Layer1 { get; init; }
-	public required TerrainResolvedLayer Layer2 { get; init; }
-	public required TerrainResolvedLayer Layer3 { get; init; }
+	public TerrainDrawSurface(
+		Texture? controlMap,
+		int layerCount,
+		float heightBlendSharpness,
+		TerrainResolvedLayer layer0,
+		TerrainResolvedLayer layer1,
+		TerrainResolvedLayer layer2,
+		TerrainResolvedLayer layer3)
+	{
+		ControlMap = controlMap;
+		LayerCount = layerCount;
+		HeightBlendSharpness = heightBlendSharpness;
+		Layer0 = layer0;
+		Layer1 = layer1;
+		Layer2 = layer2;
+		Layer3 = layer3;
+	}
+
+	public Texture? ControlMap { get; }
+	public int LayerCount { get; }
+	public float HeightBlendSharpness { get; }
+	public TerrainResolvedLayer Layer0 { get; }
+	public TerrainResolvedLayer Layer1 { get; }
+	public TerrainResolvedLayer Layer2 { get; }
+	public TerrainResolvedLayer Layer3 { get; }
+}
+
+public readonly struct TerrainChunkDrawRecord
+{
+	public TerrainChunkDrawRecord(int chunkIndex, Mesh mesh, Matrix4x4 worldTransform, TerrainDrawSurface surface)
+	{
+		ChunkIndex = chunkIndex;
+		Mesh = mesh;
+		WorldTransform = worldTransform;
+		Surface = surface;
+	}
+
+	public int ChunkIndex { get; }
+	public Mesh Mesh { get; }
+	public Matrix4x4 WorldTransform { get; }
+	public TerrainDrawSurface Surface { get; }
 }
 
 public readonly struct TerrainResolvedLayer

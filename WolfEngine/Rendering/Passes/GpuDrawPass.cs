@@ -17,6 +17,8 @@ public sealed class GpuDrawPass
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly IRenderer _renderer;
 	private readonly IGpuDrawBackendBridge _backendBridge;
+	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
+	private DescriptorHandle _terrainControlSampler = DescriptorHandle.Invalid;
 	private IGfxPipeline? _updatePipeline;
 	private IGfxPipeline? _cullPipeline;
 	private GraphicsBackendKind? _computeReflectionBackendKind;
@@ -106,6 +108,7 @@ public sealed class GpuDrawPass
 		var drawDatabase = context.GpuDrawDatabase;
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
+		EnsureTerrainSamplers();
 		_gpuDrawResources.EnsureCreated(device);
 		SampleVisibilityDiagnostics();
 		_hardeningStats.ResetSubmissionDiagnostics();
@@ -256,6 +259,40 @@ public sealed class GpuDrawPass
 			uint occlusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint emissiveHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
+			uint controlMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint hasControlMap = 0;
+			uint layerSamplerHandle = _terrainLayerSampler.Value;
+			uint controlSamplerHandle = _terrainControlSampler.Value;
+			uint layerCount = 0;
+			var heightBlendSharpness = 0.0f;
+			uint layer0AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer0NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer0MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer0OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer0HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer0HasHeight = 0;
+			var layer0Scale = 1.0f;
+			uint layer1AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer1NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer1MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer1OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer1HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer1HasHeight = 0;
+			var layer1Scale = 1.0f;
+			uint layer2AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer2NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer2MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer2OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer2HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer2HasHeight = 0;
+			var layer2Scale = 1.0f;
+			uint layer3AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer3NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer3MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer3OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer3HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layer3HasHeight = 0;
+			var layer3Scale = 1.0f;
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
@@ -267,6 +304,7 @@ public sealed class GpuDrawPass
 			{
 				GpuDrawKind.Mesh => material?.HasGpuResources ?? false,
 				GpuDrawKind.DebugPrimitive => material is not null,
+				GpuDrawKind.Terrain => material is not null,
 				_ => false
 			};
 
@@ -361,6 +399,58 @@ public sealed class GpuDrawPass
 				metallicRoughness = Vector4.Zero;
 				emissiveFactorIntensity = Vector4.Zero;
 			}
+			else if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
+			         update.TerrainSurface.HasValue)
+			{
+				var terrainSurface = update.TerrainSurface.Value;
+				baseColor = ColorRGBA.White;
+				metallicRoughness = Vector4.Zero;
+				emissiveFactorIntensity = Vector4.Zero;
+				layerCount = (uint)Math.Clamp(terrainSurface.LayerCount, 1, 4);
+				heightBlendSharpness = terrainSurface.HeightBlendSharpness;
+				if (terrainSurface.ControlMap is { } controlMap)
+				{
+					controlMapHandle = RegisterTerrainTexture(controlMap);
+					hasControlMap = 1;
+				}
+
+				PopulateTerrainLayerHandles(
+					terrainSurface.Layer0,
+					ref layer0AlbedoHandle,
+					ref layer0NormalHandle,
+					ref layer0MetallicRoughnessHandle,
+					ref layer0OcclusionHandle,
+					ref layer0HeightHandle,
+					ref layer0HasHeight,
+					ref layer0Scale);
+				PopulateTerrainLayerHandles(
+					terrainSurface.Layer1,
+					ref layer1AlbedoHandle,
+					ref layer1NormalHandle,
+					ref layer1MetallicRoughnessHandle,
+					ref layer1OcclusionHandle,
+					ref layer1HeightHandle,
+					ref layer1HasHeight,
+					ref layer1Scale);
+				PopulateTerrainLayerHandles(
+					terrainSurface.Layer2,
+					ref layer2AlbedoHandle,
+					ref layer2NormalHandle,
+					ref layer2MetallicRoughnessHandle,
+					ref layer2OcclusionHandle,
+					ref layer2HeightHandle,
+					ref layer2HasHeight,
+					ref layer2Scale);
+				PopulateTerrainLayerHandles(
+					terrainSurface.Layer3,
+					ref layer3AlbedoHandle,
+					ref layer3NormalHandle,
+					ref layer3MetallicRoughnessHandle,
+					ref layer3OcclusionHandle,
+					ref layer3HeightHandle,
+					ref layer3HasHeight,
+					ref layer3Scale);
+			}
 
 			_updateData.Add(new GpuDrawUpdateData(
 				update.PreviousWorld,
@@ -386,7 +476,41 @@ public sealed class GpuDrawPass
 				normalHandle,
 				occlusionHandle,
 				emissiveHandle,
-				samplerHandle));
+				samplerHandle,
+				controlMapHandle,
+				hasControlMap,
+				layerSamplerHandle,
+				controlSamplerHandle,
+				layerCount,
+				heightBlendSharpness,
+				layer0AlbedoHandle,
+				layer0NormalHandle,
+				layer0MetallicRoughnessHandle,
+				layer0OcclusionHandle,
+				layer0HeightHandle,
+				layer0HasHeight,
+				layer0Scale,
+				layer1AlbedoHandle,
+				layer1NormalHandle,
+				layer1MetallicRoughnessHandle,
+				layer1OcclusionHandle,
+				layer1HeightHandle,
+				layer1HasHeight,
+				layer1Scale,
+				layer2AlbedoHandle,
+				layer2NormalHandle,
+				layer2MetallicRoughnessHandle,
+				layer2OcclusionHandle,
+				layer2HeightHandle,
+				layer2HasHeight,
+				layer2Scale,
+				layer3AlbedoHandle,
+				layer3NormalHandle,
+				layer3MetallicRoughnessHandle,
+				layer3OcclusionHandle,
+				layer3HeightHandle,
+				layer3HasHeight,
+				layer3Scale));
 		}
 
 		if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
@@ -419,13 +543,14 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(0, _gpuDrawResources.UpdateBuffer!);
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 			commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialBuffer!);
-			commandList.SetComputeBuffer(3, _gpuDrawResources.MeshBuffer!);
-			commandList.SetComputeBuffer(4, _gpuDrawResources.DrawCommandBuffer!);
-			commandList.SetComputeBuffer(5, _gpuDrawResources.DrawGenerationBuffer!);
-			commandList.SetComputeBuffer(6, _gpuDrawResources.InstanceGenerationBuffer!);
-			commandList.SetComputeBuffer(7, _gpuDrawResources.MeshGenerationBuffer!);
-			commandList.SetComputeBuffer(8, _gpuDrawResources.MaterialGenerationBuffer!);
-			commandList.SetComputeBuffer(9, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			commandList.SetComputeBuffer(3, _gpuDrawResources.TerrainMaterialBuffer!);
+			commandList.SetComputeBuffer(4, _gpuDrawResources.MeshBuffer!);
+			commandList.SetComputeBuffer(5, _gpuDrawResources.DrawCommandBuffer!);
+			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawGenerationBuffer!);
+			commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
+			commandList.SetComputeBuffer(8, _gpuDrawResources.MeshGenerationBuffer!);
+			commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
+			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
 
 			var threadGroupSize = _updateThreadGroupSize
 			                      ?? throw new InvalidOperationException(
@@ -972,7 +1097,8 @@ public sealed class GpuDrawPass
 				entry.World,
 				entry.BoundsCenterRadius,
 				entry.Mesh,
-				entry.Material));
+				entry.Material,
+				entry.TerrainSurface));
 		}
 
 		return destination.Count - initialCount;
@@ -1057,10 +1183,62 @@ public sealed class GpuDrawPass
 		throw new InvalidOperationException($"Unknown draw bucket id '{bucketId}'.");
 	}
 
+	private void EnsureTerrainSamplers()
+	{
+		if (_terrainLayerSampler.IsValid == false)
+		{
+			_terrainLayerSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
+				FilterMode.Anisotropic,
+				AddressMode.Wrap,
+				AddressMode.Wrap,
+				AddressMode.Wrap,
+				maxAnisotropy: 8.0f));
+		}
+
+		if (_terrainControlSampler.IsValid == false)
+		{
+			_terrainControlSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
+				FilterMode.Bilinear,
+				AddressMode.Clamp,
+				AddressMode.Clamp,
+				AddressMode.Clamp));
+		}
+	}
+
+	private void PopulateTerrainLayerHandles(
+		in TerrainResolvedLayer layer,
+		ref uint albedoHandle,
+		ref uint normalHandle,
+		ref uint metallicRoughnessHandle,
+		ref uint occlusionHandle,
+		ref uint heightHandle,
+		ref uint hasHeight,
+		ref float scale)
+	{
+		albedoHandle = RegisterTerrainTexture(layer.Albedo);
+		normalHandle = RegisterTerrainTexture(layer.Normal);
+		metallicRoughnessHandle = RegisterTerrainTexture(layer.MetallicRoughness);
+		occlusionHandle = RegisterTerrainTexture(layer.Occlusion);
+		heightHandle = RegisterTerrainTexture(layer.Height);
+		hasHeight = layer.Height is null ? 0u : 1u;
+		scale = Math.Max(layer.Scale, 0.001f);
+	}
+
+	private uint RegisterTerrainTexture(Texture? texture)
+	{
+		if (texture is null)
+		{
+			return _bindlessRegistry.ErrorTextureHandle.Value;
+		}
+
+		return _bindlessRegistry.GetTextureHandle(texture.Resources).Value;
+	}
+
 	private static string GetGBufferShaderPath(GpuDrawKind drawKind) => drawKind switch
 	{
 		GpuDrawKind.Mesh => "gbuffer.slang",
 		GpuDrawKind.DebugPrimitive => "debug_primitive_gbuffer.slang",
+		GpuDrawKind.Terrain => "terrain_shared_gbuffer.slang",
 		_ => throw new NotSupportedException($"G-buffer shared draw kind '{drawKind}' does not define a shader.")
 	};
 
@@ -1082,8 +1260,44 @@ public sealed class GpuDrawPass
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorSamplerHandle.Value);
+		var fallbackTerrainMaterialData = new GpuTerrainMaterialData(
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			0,
+			_terrainLayerSampler.Value,
+			_terrainControlSampler.Value,
+			1,
+			4.0f,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			0,
+			1.0f,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			0,
+			1.0f,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			0,
+			1.0f,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
+			0,
+			1.0f);
 		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
 		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
+		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");
 	}
 
 	private void LogUnsupportedDrawKindOnce(GpuDrawKind drawKind)
@@ -1095,7 +1309,7 @@ public sealed class GpuDrawPass
 
 		_loggedUnsupportedDrawKind = true;
 		Console.WriteLine(
-			$"GpuDraw: shared draw kind '{drawKind}' is not supported by the current mesh-only path; draw will be skipped.");
+			$"GpuDraw: shared draw kind '{drawKind}' is not supported by the current shared draw path; draw will be skipped.");
 	}
 
 	private void LogCapacityExceededOnce(in GpuDrawUpdate update)

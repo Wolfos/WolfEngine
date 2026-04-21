@@ -178,7 +178,15 @@ public static class GpuDrawExecutionLanes
 			"ForwardTransparent.ExecuteDebugPrimitiveAlphaBlend",
 			"DebugPrimitiveAlphaBlend",
 			string.Empty,
-			DrawPassParticipation.ForwardTransparent));
+			DrawPassParticipation.ForwardTransparent),
+		new GpuDrawExecutionLaneDefinition(
+			GpuDrawKind.Terrain,
+			GpuDrawBucketId.Opaque,
+			executionIndex: 5,
+			"GBuffer.ExecuteTerrainOpaque",
+			"TerrainOpaque",
+			string.Empty,
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster));
 
 	public static GpuDrawExecutionLaneRegistry Registry => _registry;
 	public static ReadOnlySpan<GpuDrawExecutionLaneDefinition> Definitions => _registry.Definitions;

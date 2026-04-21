@@ -50,12 +50,9 @@ public class RenderPipeline : IRenderPipeline
 			var sunIntensityScale = 1.0f;
 			var hasSunDirection = false;
 			var gpuDrawDatabase = snapshot.GpuDrawDatabase;
-			var viewProjection = Matrix4x4.Identity;
 			var cameraOrigin = Vector3.Zero;
-			if (Matrix4x4.Invert(cameraWorldTransform.LocalToWorld, out var view) &&
-			    Matrix4x4.Decompose(cameraWorldTransform.LocalToWorld, out _, out _, out cameraOrigin))
+			if (Matrix4x4.Decompose(cameraWorldTransform.LocalToWorld, out _, out _, out cameraOrigin))
 			{
-				viewProjection = view * camera.Perspective;
 			}
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
@@ -134,15 +131,14 @@ public class RenderPipeline : IRenderPipeline
 							continue;
 						}
 
-						_terrainRuntimeCache.CollectVisibleTerrain(
+						_terrainRuntimeCache.CollectSharedTerrain(
 							_renderGraph,
 							world,
 							entry.Entity,
 							entry.Second,
 							entry.First,
 							cameraOrigin,
-							viewProjection,
-							snapshot.TerrainRecords);
+							gpuDrawDatabase);
 					}
 				}
 

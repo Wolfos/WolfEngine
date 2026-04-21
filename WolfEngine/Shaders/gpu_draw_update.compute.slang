@@ -27,13 +27,14 @@ cbuffer UpdateParams : register(b11)
 RWStructuredBuffer<GpuDrawUpdateData> g_Updates : register(u0);
 RWStructuredBuffer<GpuInstanceData> g_InstanceTable : register(u1);
 RWStructuredBuffer<GpuMaterialData> g_MaterialTable : register(u2);
-RWStructuredBuffer<GpuMeshData> g_MeshTable : register(u3);
-RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u4);
-RWStructuredBuffer<uint> g_DrawGenerations : register(u5);
-RWStructuredBuffer<uint> g_InstanceGenerations : register(u6);
-RWStructuredBuffer<uint> g_MeshGenerations : register(u7);
-RWStructuredBuffer<uint> g_MaterialGenerations : register(u8);
-RWStructuredBuffer<uint> g_Diagnostics : register(u9);
+RWStructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(u3);
+RWStructuredBuffer<GpuMeshData> g_MeshTable : register(u4);
+RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u5);
+RWStructuredBuffer<uint> g_DrawGenerations : register(u6);
+RWStructuredBuffer<uint> g_InstanceGenerations : register(u7);
+RWStructuredBuffer<uint> g_MeshGenerations : register(u8);
+RWStructuredBuffer<uint> g_MaterialGenerations : register(u9);
+RWStructuredBuffer<uint> g_Diagnostics : register(u10);
 
 uint NextGeneration(uint generation)
 {
@@ -150,6 +151,49 @@ void CSUpdate(uint3 dispatchThreadId : SV_DispatchThreadID)
             materialData.pad0 = 0;
             materialData.pad1 = 0;
             g_MaterialTable[materialIndex] = materialData;
+
+            GpuTerrainMaterialData terrainMaterialData;
+            terrainMaterialData.controlMapHandle = update.controlMapHandle;
+            terrainMaterialData.hasControlMap = update.hasControlMap;
+            terrainMaterialData.layerSamplerHandle = update.layerSamplerHandle;
+            terrainMaterialData.controlSamplerHandle = update.controlSamplerHandle;
+            terrainMaterialData.layerCount = update.layerCount;
+            terrainMaterialData.heightBlendSharpness = update.heightBlendSharpness;
+            terrainMaterialData.pad0 = 0;
+            terrainMaterialData.pad1 = 0;
+            terrainMaterialData.layer0AlbedoHandle = update.layer0AlbedoHandle;
+            terrainMaterialData.layer0NormalHandle = update.layer0NormalHandle;
+            terrainMaterialData.layer0MetallicRoughnessHandle = update.layer0MetallicRoughnessHandle;
+            terrainMaterialData.layer0OcclusionHandle = update.layer0OcclusionHandle;
+            terrainMaterialData.layer0HeightHandle = update.layer0HeightHandle;
+            terrainMaterialData.layer0HasHeight = update.layer0HasHeight;
+            terrainMaterialData.layer0Scale = update.layer0Scale;
+            terrainMaterialData.layer0Pad = 0;
+            terrainMaterialData.layer1AlbedoHandle = update.layer1AlbedoHandle;
+            terrainMaterialData.layer1NormalHandle = update.layer1NormalHandle;
+            terrainMaterialData.layer1MetallicRoughnessHandle = update.layer1MetallicRoughnessHandle;
+            terrainMaterialData.layer1OcclusionHandle = update.layer1OcclusionHandle;
+            terrainMaterialData.layer1HeightHandle = update.layer1HeightHandle;
+            terrainMaterialData.layer1HasHeight = update.layer1HasHeight;
+            terrainMaterialData.layer1Scale = update.layer1Scale;
+            terrainMaterialData.layer1Pad = 0;
+            terrainMaterialData.layer2AlbedoHandle = update.layer2AlbedoHandle;
+            terrainMaterialData.layer2NormalHandle = update.layer2NormalHandle;
+            terrainMaterialData.layer2MetallicRoughnessHandle = update.layer2MetallicRoughnessHandle;
+            terrainMaterialData.layer2OcclusionHandle = update.layer2OcclusionHandle;
+            terrainMaterialData.layer2HeightHandle = update.layer2HeightHandle;
+            terrainMaterialData.layer2HasHeight = update.layer2HasHeight;
+            terrainMaterialData.layer2Scale = update.layer2Scale;
+            terrainMaterialData.layer2Pad = 0;
+            terrainMaterialData.layer3AlbedoHandle = update.layer3AlbedoHandle;
+            terrainMaterialData.layer3NormalHandle = update.layer3NormalHandle;
+            terrainMaterialData.layer3MetallicRoughnessHandle = update.layer3MetallicRoughnessHandle;
+            terrainMaterialData.layer3OcclusionHandle = update.layer3OcclusionHandle;
+            terrainMaterialData.layer3HeightHandle = update.layer3HeightHandle;
+            terrainMaterialData.layer3HasHeight = update.layer3HasHeight;
+            terrainMaterialData.layer3Scale = update.layer3Scale;
+            terrainMaterialData.layer3Pad = 0;
+            g_TerrainMaterialTable[materialIndex] = terrainMaterialData;
             g_MaterialGenerations[materialIndex] = materialGeneration;
         }
     }

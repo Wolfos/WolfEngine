@@ -121,7 +121,7 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
-	public void CollectVisibleRecords_RejectsCulledChunksAndSelectsLodsByDistance()
+	public void CollectChunkDrawRecords_SelectsLodsByDistanceWithoutCpuFrustumCulling()
 	{
 		using var registry = new TestAssetRegistry();
 		var heightmapId = Guid.NewGuid();
@@ -139,31 +139,31 @@ public sealed class TerrainPrototypeTests
 
 		var renderGraph = CreateTestRenderGraph();
 		var nearCamera = new Vector3(0.0f, 40.0f, -60.0f);
-		var nearViewProjection = CreateViewProjection(nearCamera, Vector3.Zero, 500.0f);
-		var records = new List<TerrainSnapshotRecord>();
+		var records = new List<TerrainChunkDrawRecord>();
 
-		runtime.CollectVisibleRecords(renderGraph, nearCamera, nearViewProjection, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(renderGraph, nearCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[0]));
+		Assert.That(records[0].ChunkIndex, Is.EqualTo(0));
+		Assert.That(records[0].Surface.LayerCount, Is.EqualTo(1));
 
 		records.Clear();
 		var farCamera = new Vector3(0.0f, 50.0f, -400.0f);
-		var farViewProjection = CreateViewProjection(farCamera, Vector3.Zero, 1000.0f);
-		runtime.CollectVisibleRecords(renderGraph, farCamera, farViewProjection, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(renderGraph, farCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
 
 		records.Clear();
-		runtime.CollectVisibleRecords(
+		runtime.CollectChunkDrawRecords(
 			renderGraph,
 			nearCamera,
-			nearViewProjection,
 			Matrix4x4.CreateTranslation(5000.0f, 0.0f, 0.0f),
 			records);
 
-		Assert.That(records, Is.Empty);
+		Assert.That(records, Has.Count.EqualTo(1));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
 	}
 
 	[Test]
@@ -193,13 +193,6 @@ public sealed class TerrainPrototypeTests
 		Assert.That(runtime.HeightSampleHeight, Is.EqualTo(9));
 		Assert.That(runtime.Chunks.Count, Is.Not.EqualTo(initialChunkCount));
 		Assert.That(runtime.Chunks.Count, Is.EqualTo(4));
-	}
-
-	private static Matrix4x4 CreateViewProjection(Vector3 cameraPosition, Vector3 target, float farPlane)
-	{
-		var view = Matrix4x4.CreateLookAt(cameraPosition, target, Vector3.UnitY);
-		var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3.0f, 1.0f, 0.1f, farPlane);
-		return view * projection;
 	}
 
 	private static Texture CreateHeightTexture(string name, int width, int height)

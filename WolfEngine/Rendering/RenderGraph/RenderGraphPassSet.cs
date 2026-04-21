@@ -32,7 +32,6 @@ internal sealed class RenderGraphPassSet
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
 		ShadowMapPass = new(shaderCompiler);
-		TerrainGBufferPass = new(shaderCompiler, bindlessResourceRegistry);
 		GpuDrawPass = new(
 			shaderCompiler,
 			bindlessResourceRegistry,
@@ -55,7 +54,6 @@ internal sealed class RenderGraphPassSet
 	public CasSharpenPass CasSharpenPass { get; }
 	public CopyToFinalPass CopyToFinalPass { get; }
 	public ShadowMapPass ShadowMapPass { get; }
-	public TerrainGBufferPass TerrainGBufferPass { get; }
 	public GpuDrawPass GpuDrawPass { get; }
 	public SkyboxPass SkyboxPass { get; }
 }

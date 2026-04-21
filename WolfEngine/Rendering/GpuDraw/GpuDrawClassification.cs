@@ -21,6 +21,9 @@ public static class GpuDrawClassification
 					? GpuDrawBucketId.AlphaBlend
 					: GpuDrawBucketId.Opaque;
 				return true;
+			case GpuDrawKind.Terrain:
+				bucketId = GpuDrawBucketId.Opaque;
+				return true;
 			default:
 				bucketId = GpuDrawBucketId.Opaque;
 				return false;
@@ -63,10 +66,13 @@ public static class GpuDrawClassification
 	}
 
 	public static bool SupportsMeshBackedGeometry(GpuDrawKind drawKind) =>
-		drawKind is GpuDrawKind.Mesh or GpuDrawKind.DebugPrimitive;
+		drawKind is GpuDrawKind.Mesh or GpuDrawKind.DebugPrimitive or GpuDrawKind.Terrain;
 
 	public static bool SupportsTexturedPbrMaterialInterpretation(GpuDrawKind drawKind) => drawKind == GpuDrawKind.Mesh;
 
 	public static bool SupportsUnlitTintMaterialInterpretation(GpuDrawKind drawKind) =>
 		drawKind == GpuDrawKind.DebugPrimitive;
+
+	public static bool SupportsTerrainMaterialInterpretation(GpuDrawKind drawKind) =>
+		drawKind == GpuDrawKind.Terrain;
 }

@@ -11,19 +11,18 @@ internal sealed class TerrainRuntimeCache
 {
 	private readonly Dictionary<TerrainRuntimeKey, TerrainRuntimeData> _runtimeByKey = new();
 
-	public void CollectVisibleTerrain(
+	public void CollectSharedTerrain(
 		RenderGraph renderGraph,
 		World world,
 		Entity entity,
 		in TerrainComponent component,
 		in WorldTransform transform,
 		Vector3 cameraOrigin,
-		Matrix4x4 viewProjection,
-		List<TerrainSnapshotRecord> destination)
+		GpuDrawDatabase gpuDrawDatabase)
 	{
 		ArgumentNullException.ThrowIfNull(renderGraph);
 		ArgumentNullException.ThrowIfNull(world);
-		ArgumentNullException.ThrowIfNull(destination);
+		ArgumentNullException.ThrowIfNull(gpuDrawDatabase);
 		var key = new TerrainRuntimeKey(world, entity);
 		if (_runtimeByKey.TryGetValue(key, out var runtime) == false)
 		{
@@ -36,7 +35,13 @@ internal sealed class TerrainRuntimeCache
 			return;
 		}
 
-		runtime.CollectVisibleRecords(renderGraph, cameraOrigin, viewProjection, transform.LocalToWorld, destination);
+		var records = new List<TerrainChunkDrawRecord>(runtime.Chunks.Count);
+		runtime.CollectChunkDrawRecords(renderGraph, cameraOrigin, transform.LocalToWorld, records);
+		for (var i = 0; i < records.Count; i++)
+		{
+			var record = records[i];
+			gpuDrawDatabase.TouchTerrainChunk(entity, record.ChunkIndex, record.Mesh, record.Surface, record.WorldTransform);
+		}
 	}
 
 	private readonly struct TerrainRuntimeKey : IEquatable<TerrainRuntimeKey>

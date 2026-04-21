@@ -73,12 +73,11 @@ public sealed class TerrainRuntimeData
 		return _built;
 	}
 
-	public void CollectVisibleRecords(
+	public void CollectChunkDrawRecords(
 		RenderGraph renderGraph,
 		Vector3 cameraOrigin,
-		Matrix4x4 viewProjection,
 		Matrix4x4 worldTransform,
-		List<TerrainSnapshotRecord> destination)
+		List<TerrainChunkDrawRecord> destination)
 	{
 		ArgumentNullException.ThrowIfNull(renderGraph);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -88,8 +87,6 @@ public sealed class TerrainRuntimeData
 		}
 
 		EnsureTerrainResources(renderGraph);
-		Span<Vector4> frustumPlanes = stackalloc Vector4[6];
-		ExtractFrustumPlanes(viewProjection, frustumPlanes);
 		var selectedLods = new int[_chunks.Count];
 		for (var i = 0; i < _chunks.Count; i++)
 		{
@@ -108,11 +105,6 @@ public sealed class TerrainRuntimeData
 		for (var i = 0; i < _chunks.Count; i++)
 		{
 			var chunk = _chunks[i];
-			if (IsChunkVisible(chunk, worldTransform, frustumPlanes) == false)
-			{
-				continue;
-			}
-
 			var mesh = chunk.LodMeshes[selectedLods[i]];
 			if (mesh is null)
 			{
@@ -120,18 +112,18 @@ public sealed class TerrainRuntimeData
 			}
 
 			renderGraph.EnsureMeshResources(mesh);
-			destination.Add(new TerrainSnapshotRecord
-			{
-				Mesh = mesh,
-				WorldTransform = worldTransform,
-				ControlMap = _resolvedControlMap,
-				LayerCount = layerCount,
-				HeightBlendSharpness = heightBlendSharpness,
-				Layer0 = layer0,
-				Layer1 = layer1,
-				Layer2 = layer2,
-				Layer3 = layer3
-			});
+			destination.Add(new TerrainChunkDrawRecord(
+				i,
+				mesh,
+				worldTransform,
+				new TerrainDrawSurface(
+					_resolvedControlMap,
+					layerCount,
+					heightBlendSharpness,
+					layer0,
+					layer1,
+					layer2,
+					layer3)));
 		}
 	}
 
@@ -711,23 +703,6 @@ public sealed class TerrainRuntimeData
 		}
 	}
 
-	private static bool IsChunkVisible(TerrainChunkRuntime chunk, Matrix4x4 worldTransform, Span<Vector4> frustumPlanes)
-	{
-		var center = TransformPoint(chunk.LocalBounds.Center, worldTransform);
-		var radius = TransformRadius(chunk.LocalBounds.Radius, worldTransform);
-		for (var i = 0; i < frustumPlanes.Length; i++)
-		{
-			var plane = frustumPlanes[i];
-			var distance = plane.X * center.X + plane.Y * center.Y + plane.Z * center.Z + plane.W;
-			if (distance < -radius)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
 	private static Vector3 TransformPoint(Vector3 point, Matrix4x4 matrix) => Vector3.Transform(point, matrix);
 
 	private static float TransformRadius(float radius, Matrix4x4 matrix)
@@ -739,31 +714,6 @@ public sealed class TerrainRuntimeData
 		return radius * scale;
 	}
 
-	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)
-	{
-		var col1 = new Vector4(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
-		var col2 = new Vector4(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
-		var col3 = new Vector4(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
-		var col4 = new Vector4(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
-		planes[0] = NormalizePlane(col4 + col1);
-		planes[1] = NormalizePlane(col4 - col1);
-		planes[2] = NormalizePlane(col4 + col2);
-		planes[3] = NormalizePlane(col4 - col2);
-		planes[4] = NormalizePlane(col3);
-		planes[5] = NormalizePlane(col4 - col3);
-	}
-
-	private static Vector4 NormalizePlane(Vector4 plane)
-	{
-		var normal = new Vector3(plane.X, plane.Y, plane.Z);
-		var length = normal.Length();
-		if (length <= 0.0f)
-		{
-			return plane;
-		}
-
-		return plane / length;
-	}
 }
 
 public sealed class TerrainChunkRuntime
