@@ -16,12 +16,14 @@ public sealed class GpuDrawResources : IDisposable
 	public const int MaxInstanceCount = 65535;
 	public const int MaxMaterialCount = 65535;
 	public const int MaxMeshCount = 65535;
+	public const int MaxTerrainLayerCount = MaxMaterialCount * 16;
 	public const int HardeningCounterCount = 16;
 	private readonly IShaderCompiler _shaderCompiler;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }
 	public IGfxBuffer? TerrainMaterialBuffer { get; private set; }
+	public IGfxBuffer? TerrainLayerBuffer { get; private set; }
 	public IGfxBuffer? MeshBuffer { get; private set; }
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
@@ -31,7 +33,11 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MeshGenerationBuffer => _meshGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? DiagnosticsCounterBuffer { get; private set; }
-	private readonly IGfxBuffer?[] _updateBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _instanceUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _meshUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _materialUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _terrainMaterialUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _terrainLayerUpdateBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _cameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowCameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentEnvironmentBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -98,7 +104,15 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	public IGfxBuffer? UpdateBuffer => _updateBuffers[_activeFrameSlot];
+	public IGfxBuffer? InstanceUpdateBuffer => _instanceUpdateBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? MeshUpdateBuffer => _meshUpdateBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? MaterialUpdateBuffer => _materialUpdateBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? TerrainMaterialUpdateBuffer => _terrainMaterialUpdateBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? TerrainLayerUpdateBuffer => _terrainLayerUpdateBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? CameraBuffer => _cameraBuffers[_activeFrameSlot];
 	
@@ -163,6 +177,11 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
+		TerrainLayerBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(MaxTerrainLayerCount * Marshal.SizeOf<GpuTerrainLayerData>()),
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
 		MeshBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMeshCount * Marshal.SizeOf<GpuMeshData>()),
 			BufferUsage.Structured,
@@ -190,8 +209,28 @@ public sealed class GpuDrawResources : IDisposable
 
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
-			_updateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawUpdateData>()),
+			_instanceUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawInstanceUpdateData>()),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_meshUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawMeshUpdateData>()),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_materialUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawMaterialUpdateData>()),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_terrainMaterialUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuTerrainMaterialUpdateData>()),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+
+			_terrainLayerUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
+				(ulong)(MaxTerrainLayerCount * Marshal.SizeOf<GpuTerrainLayerUpdateData>()),
 				BufferUsage.Structured,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -428,6 +467,7 @@ public sealed class GpuDrawResources : IDisposable
 		(InstanceBuffer as IDisposable)?.Dispose();
 		(MaterialBuffer as IDisposable)?.Dispose();
 		(TerrainMaterialBuffer as IDisposable)?.Dispose();
+		(TerrainLayerBuffer as IDisposable)?.Dispose();
 		(MeshBuffer as IDisposable)?.Dispose();
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
@@ -435,7 +475,11 @@ public sealed class GpuDrawResources : IDisposable
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
-			(_updateBuffers[i] as IDisposable)?.Dispose();
+			(_instanceUpdateBuffers[i] as IDisposable)?.Dispose();
+			(_meshUpdateBuffers[i] as IDisposable)?.Dispose();
+			(_materialUpdateBuffers[i] as IDisposable)?.Dispose();
+			(_terrainMaterialUpdateBuffers[i] as IDisposable)?.Dispose();
+			(_terrainLayerUpdateBuffers[i] as IDisposable)?.Dispose();
 			(_cameraBuffers[i] as IDisposable)?.Dispose();
 			(_shadowCameraBuffers[i] as IDisposable)?.Dispose();
 			(_transparentEnvironmentBuffers[i] as IDisposable)?.Dispose();
@@ -454,7 +498,11 @@ public sealed class GpuDrawResources : IDisposable
 			(_instanceGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_materialGenerationBuffers[i] as IDisposable)?.Dispose();
 			(_meshGenerationBuffers[i] as IDisposable)?.Dispose();
-			_updateBuffers[i] = null;
+			_instanceUpdateBuffers[i] = null;
+			_meshUpdateBuffers[i] = null;
+			_materialUpdateBuffers[i] = null;
+			_terrainMaterialUpdateBuffers[i] = null;
+			_terrainLayerUpdateBuffers[i] = null;
 			_cameraBuffers[i] = null;
 			_shadowCameraBuffers[i] = null;
 			_transparentEnvironmentBuffers[i] = null;
@@ -483,6 +531,7 @@ public sealed class GpuDrawResources : IDisposable
 		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
 		Array.Clear(_gbufferBufferBindings, 0, _gbufferBufferBindings.Length);
 		TerrainMaterialBuffer = null;
+		TerrainLayerBuffer = null;
 	}
 
 	private static int FlattenSlotBucketIndex(int slotIndex, int executionLaneIndex) =>

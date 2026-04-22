@@ -11,6 +11,7 @@ StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
+StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t15);
 
 cbuffer CameraParams : register(b2)
 {
@@ -264,38 +265,57 @@ PSOutput fragmentShader(VSOutput input)
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
 
     float4 control = MaskInactiveLayers(SampleControlWeights(input.uv, terrainData), terrainData.layerCount);
-    LayerSample layer0 = SampleTriplanarLayer(input.worldPosition, input.normal, terrainData.layer0AlbedoHandle, terrainData.layer0NormalHandle, terrainData.layer0MetallicRoughnessHandle, terrainData.layer0OcclusionHandle, terrainData.layer0HeightHandle, terrainData.layer0HasHeight, terrainData.layer0Scale, terrainData);
-    LayerSample layer1 = SampleTriplanarLayer(input.worldPosition, input.normal, terrainData.layer1AlbedoHandle, terrainData.layer1NormalHandle, terrainData.layer1MetallicRoughnessHandle, terrainData.layer1OcclusionHandle, terrainData.layer1HeightHandle, terrainData.layer1HasHeight, terrainData.layer1Scale, terrainData);
-    LayerSample layer2 = SampleTriplanarLayer(input.worldPosition, input.normal, terrainData.layer2AlbedoHandle, terrainData.layer2NormalHandle, terrainData.layer2MetallicRoughnessHandle, terrainData.layer2OcclusionHandle, terrainData.layer2HeightHandle, terrainData.layer2HasHeight, terrainData.layer2Scale, terrainData);
-    LayerSample layer3 = SampleTriplanarLayer(input.worldPosition, input.normal, terrainData.layer3AlbedoHandle, terrainData.layer3NormalHandle, terrainData.layer3MetallicRoughnessHandle, terrainData.layer3OcclusionHandle, terrainData.layer3HeightHandle, terrainData.layer3HasHeight, terrainData.layer3Scale, terrainData);
-
     float4 biased = control;
-    if (terrainData.layerCount > 0) biased.x *= pow(max(layer0.height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 1) biased.y *= pow(max(layer1.height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 2) biased.z *= pow(max(layer2.height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 3) biased.w *= pow(max(layer3.height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    LayerSample layerSamples[4];
+    [unroll]
+    for (uint i = 0; i < 4; i++)
+    {
+        layerSamples[i] = (LayerSample)0;
+        if (i >= terrainData.layerCount)
+        {
+            continue;
+        }
+
+        GpuTerrainLayerData layerData = g_TerrainLayerTable[terrainData.layerStart + i];
+        layerSamples[i] = SampleTriplanarLayer(
+            input.worldPosition,
+            input.normal,
+            layerData.albedoHandle,
+            layerData.normalHandle,
+            layerData.metallicRoughnessHandle,
+            layerData.occlusionHandle,
+            layerData.heightHandle,
+            layerData.hasHeight,
+            layerData.scale,
+            terrainData);
+    }
+
+    if (terrainData.layerCount > 0) biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    if (terrainData.layerCount > 1) biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    if (terrainData.layerCount > 2) biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    if (terrainData.layerCount > 3) biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     float4 weights = NormalizeWeights(biased);
 
-    float4 albedo = layer0.albedo * weights.x +
-                    layer1.albedo * weights.y +
-                    layer2.albedo * weights.z +
-                    layer3.albedo * weights.w;
-    float3 normal = normalize(layer0.normal * weights.x +
-                              layer1.normal * weights.y +
-                              layer2.normal * weights.z +
-                              layer3.normal * weights.w);
-    float metallic = saturate(layer0.metallic * weights.x +
-                              layer1.metallic * weights.y +
-                              layer2.metallic * weights.z +
-                              layer3.metallic * weights.w);
-    float roughness = saturate(layer0.roughness * weights.x +
-                               layer1.roughness * weights.y +
-                               layer2.roughness * weights.z +
-                               layer3.roughness * weights.w);
-    float occlusion = saturate(layer0.occlusion * weights.x +
-                               layer1.occlusion * weights.y +
-                               layer2.occlusion * weights.z +
-                               layer3.occlusion * weights.w);
+    float4 albedo = layerSamples[0].albedo * weights.x +
+                    layerSamples[1].albedo * weights.y +
+                    layerSamples[2].albedo * weights.z +
+                    layerSamples[3].albedo * weights.w;
+    float3 normal = normalize(layerSamples[0].normal * weights.x +
+                              layerSamples[1].normal * weights.y +
+                              layerSamples[2].normal * weights.z +
+                              layerSamples[3].normal * weights.w);
+    float metallic = saturate(layerSamples[0].metallic * weights.x +
+                              layerSamples[1].metallic * weights.y +
+                              layerSamples[2].metallic * weights.z +
+                              layerSamples[3].metallic * weights.w);
+    float roughness = saturate(layerSamples[0].roughness * weights.x +
+                               layerSamples[1].roughness * weights.y +
+                               layerSamples[2].roughness * weights.z +
+                               layerSamples[3].roughness * weights.w);
+    float occlusion = saturate(layerSamples[0].occlusion * weights.x +
+                               layerSamples[1].occlusion * weights.y +
+                               layerSamples[2].occlusion * weights.z +
+                               layerSamples[3].occlusion * weights.w);
 
     output.albedo = albedo;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);

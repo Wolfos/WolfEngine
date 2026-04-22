@@ -12,6 +12,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		uint drawArgsRegisterIndex,
 		uint materialGenerationRegisterIndex,
 		uint? terrainMaterialRegisterIndex = null,
+		uint? terrainLayerRegisterIndex = null,
 		uint? pointLightRegisterIndex = null,
 		uint? clusterHeaderRegisterIndex = null,
 		uint? clusterLightIndexRegisterIndex = null)
@@ -21,6 +22,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		DrawArgsRegisterIndex = drawArgsRegisterIndex;
 		MaterialGenerationRegisterIndex = materialGenerationRegisterIndex;
 		TerrainMaterialRegisterIndex = terrainMaterialRegisterIndex;
+		TerrainLayerRegisterIndex = terrainLayerRegisterIndex;
 		PointLightRegisterIndex = pointLightRegisterIndex;
 		ClusterHeaderRegisterIndex = clusterHeaderRegisterIndex;
 		ClusterLightIndexRegisterIndex = clusterLightIndexRegisterIndex;
@@ -36,6 +38,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 
 	public uint? TerrainMaterialRegisterIndex { get; }
 
+	public uint? TerrainLayerRegisterIndex { get; }
+
 	public uint? PointLightRegisterIndex { get; }
 
 	public uint? ClusterHeaderRegisterIndex { get; }
@@ -50,7 +54,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 			reflection.GetResource("g_MaterialTable").RegisterIndex,
 			reflection.GetResource("g_DrawArgsTable").RegisterIndex,
 			reflection.GetResource("g_MaterialGenerations").RegisterIndex,
-			reflection.TryGetResource("g_TerrainMaterialTable", out var terrain) ? terrain.RegisterIndex : null);
+			reflection.TryGetResource("g_TerrainMaterialTable", out var terrain) ? terrain.RegisterIndex : null,
+			reflection.TryGetResource("g_TerrainLayerTable", out var terrainLayer) ? terrainLayer.RegisterIndex : null);
 	}
 
 	public static SharedDrawGraphicsBufferBindings FromTransparentReflection(ShaderReflectionLayout reflection)

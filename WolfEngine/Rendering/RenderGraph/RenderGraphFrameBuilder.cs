@@ -972,6 +972,7 @@ internal sealed class RenderGraphFrameBuilder
 			InstanceBuffer = _gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = _gpuDrawResources.MaterialBuffer,
 			TerrainMaterialBuffer = _gpuDrawResources.TerrainMaterialBuffer,
+			TerrainLayerBuffer = _gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
 			VisibleDrawIdsPerExecutionLaneBuffer = _gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,

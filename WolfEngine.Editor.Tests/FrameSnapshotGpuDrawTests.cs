@@ -346,10 +346,15 @@ public sealed class FrameSnapshotGpuDrawTests
 		AssertGpuStructSizeIs16ByteAligned<GpuInstanceData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMaterialData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuTerrainMaterialData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuTerrainLayerData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuMeshData>();
 		AssertGpuStructSizeIs16ByteAligned<GpuDrawCommand>();
 		AssertGpuStructSizeIs16ByteAligned<GpuDrawArgs>();
-		AssertGpuStructSizeIs16ByteAligned<GpuDrawUpdateData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawInstanceUpdateData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawMeshUpdateData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuDrawMaterialUpdateData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuTerrainMaterialUpdateData>();
+		AssertGpuStructSizeIs16ByteAligned<GpuTerrainLayerUpdateData>();
 	}
 
 	private static void WriteEntity(
@@ -406,10 +411,10 @@ public sealed class FrameSnapshotGpuDrawTests
 			controlMap: null,
 			layerCount: 1,
 			heightBlendSharpness: heightBlendSharpness,
-			layer0: new TerrainResolvedLayer(null, null, null, null, null, 8.0f),
-			layer1: default,
-			layer2: default,
-			layer3: default);
+			layers:
+			[
+				new TerrainResolvedLayer(null, null, null, null, null, 8.0f)
+			]);
 	}
 
 	private static void AssertGpuStructSizeIs16ByteAligned<T>() where T : unmanaged

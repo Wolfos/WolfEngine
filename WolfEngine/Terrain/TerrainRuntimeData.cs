@@ -100,10 +100,7 @@ public sealed class TerrainRuntimeData
 		var layerSet = _resolvedLayerSet;
 		var layerCount = layerSet?.ResolvedLayerCount ?? 1;
 		var heightBlendSharpness = layerSet?.HeightBlendSharpness ?? 4.0f;
-		var layer0 = ResolveLayer(layerSet, 0);
-		var layer1 = ResolveLayer(layerSet, 1);
-		var layer2 = ResolveLayer(layerSet, 2);
-		var layer3 = ResolveLayer(layerSet, 3);
+		var layers = ResolveLayers(layerSet);
 		for (var i = 0; i < _chunks.Count; i++)
 		{
 			var chunk = _chunks[i];
@@ -123,10 +120,7 @@ public sealed class TerrainRuntimeData
 					_resolvedControlMap,
 					layerCount,
 					heightBlendSharpness,
-					layer0,
-					layer1,
-					layer2,
-					layer3)));
+					layers)));
 		}
 	}
 
@@ -272,21 +266,28 @@ public sealed class TerrainRuntimeData
 		}
 	}
 
-	private static TerrainResolvedLayer ResolveLayer(TerrainLayerSet? layerSet, int index)
+	private static TerrainResolvedLayer[] ResolveLayers(TerrainLayerSet? layerSet)
 	{
-		if (layerSet is null || index >= layerSet.ResolvedLayerCount)
+		if (layerSet is null)
 		{
-			return default;
+			return [default];
 		}
 
-		var layer = layerSet.GetLayer(index);
-		return new TerrainResolvedLayer(
-			layer.Albedo.Asset,
-			layer.Normal.Asset,
-			layer.MetallicRoughness.Asset,
-			layer.Occlusion.Asset,
-			layer.Height.Asset,
-			layer.Scale);
+		var resolvedCount = layerSet.ResolvedLayerCount;
+		var layers = new TerrainResolvedLayer[resolvedCount];
+		for (var i = 0; i < resolvedCount; i++)
+		{
+			var layer = layerSet.GetLayer(i);
+			layers[i] = new TerrainResolvedLayer(
+				layer.Albedo.Asset,
+				layer.Normal.Asset,
+				layer.MetallicRoughness.Asset,
+				layer.Occlusion.Asset,
+				layer.Height.Asset,
+				layer.Scale);
+		}
+
+		return layers;
 	}
 
 	private void BuildChunks(float[] heights, Vector3[] normals, int sampleWidth, int sampleHeight)

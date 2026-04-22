@@ -79,6 +79,8 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? TerrainMaterialBuffer { get; set; }
 
+	public IGfxBuffer? TerrainLayerBuffer { get; set; }
+
 	public IGfxBuffer? DrawArgsBuffer { get; set; }
 
 	public IGfxBuffer? CameraBuffer { get; set; }

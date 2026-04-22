@@ -96,6 +96,11 @@ public static class GBufferPass
 				{
 					commandList.BindConstantBuffer(terrainMaterialRegisterIndex, config.TerrainMaterialBuffer);
 				}
+				if (config.TerrainLayerBuffer is not null &&
+				    bucket.BufferBindings.TerrainLayerRegisterIndex is { } terrainLayerRegisterIndex)
+				{
+					commandList.BindConstantBuffer(terrainLayerRegisterIndex, config.TerrainLayerBuffer);
+				}
 
 				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);
 				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&

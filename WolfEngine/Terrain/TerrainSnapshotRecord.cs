@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Rendering;
 
@@ -9,27 +11,18 @@ public readonly struct TerrainDrawSurface
 		Texture? controlMap,
 		int layerCount,
 		float heightBlendSharpness,
-		TerrainResolvedLayer layer0,
-		TerrainResolvedLayer layer1,
-		TerrainResolvedLayer layer2,
-		TerrainResolvedLayer layer3)
+		IReadOnlyList<TerrainResolvedLayer> layers)
 	{
 		ControlMap = controlMap;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
-		Layer0 = layer0;
-		Layer1 = layer1;
-		Layer2 = layer2;
-		Layer3 = layer3;
+		Layers = layers ?? throw new ArgumentNullException(nameof(layers));
 	}
 
 	public Texture? ControlMap { get; }
 	public int LayerCount { get; }
 	public float HeightBlendSharpness { get; }
-	public TerrainResolvedLayer Layer0 { get; }
-	public TerrainResolvedLayer Layer1 { get; }
-	public TerrainResolvedLayer Layer2 { get; }
-	public TerrainResolvedLayer Layer3 { get; }
+	public IReadOnlyList<TerrainResolvedLayer> Layers { get; }
 }
 
 public readonly struct TerrainChunkDrawRecord

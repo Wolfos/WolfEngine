@@ -166,6 +166,21 @@
         <None Update="Shaders\debug_primitive_gbuffer.slang">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\gpu_draw_instance_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\gpu_draw_material_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\gpu_draw_mesh_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\gpu_draw_terrain_layer_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\gpu_draw_terrain_material_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

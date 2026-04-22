@@ -62,6 +62,20 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void TerrainLayerSet_SupportsMoreThanFourLayers()
+	{
+		var layerSet = new TerrainLayerSet
+		{
+			ActiveLayerCount = 6
+		};
+		layerSet.EnsureLayerCapacity(6);
+		layerSet.Layers[5].Scale = 48.0f;
+
+		Assert.That(layerSet.ResolvedLayerCount, Is.EqualTo(6));
+		Assert.That(layerSet.GetLayer(5).Scale, Is.EqualTo(48.0f).Within(0.0001f));
+	}
+
+	[Test]
 	public void DecodeHeightSamples_UsesTopMipRedChannel()
 	{
 		var texture = new Texture(

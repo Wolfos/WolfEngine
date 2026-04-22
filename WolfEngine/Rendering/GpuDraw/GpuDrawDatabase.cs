@@ -717,13 +717,23 @@ public sealed class GpuDrawDatabase
 
 	private static bool TerrainSurfaceEquals(in TerrainDrawSurface left, in TerrainDrawSurface right)
 	{
-		return ReferenceEquals(left.ControlMap, right.ControlMap) &&
-		       left.LayerCount == right.LayerCount &&
-		       MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) <= 0.0001f &&
-		       TerrainLayerEquals(left.Layer0, right.Layer0) &&
-		       TerrainLayerEquals(left.Layer1, right.Layer1) &&
-		       TerrainLayerEquals(left.Layer2, right.Layer2) &&
-		       TerrainLayerEquals(left.Layer3, right.Layer3);
+		if (!ReferenceEquals(left.ControlMap, right.ControlMap) ||
+		    left.LayerCount != right.LayerCount ||
+		    MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) > 0.0001f ||
+		    left.Layers.Count != right.Layers.Count)
+		{
+			return false;
+		}
+
+		for (var i = 0; i < left.Layers.Count; i++)
+		{
+			if (!TerrainLayerEquals(left.Layers[i], right.Layers[i]))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)

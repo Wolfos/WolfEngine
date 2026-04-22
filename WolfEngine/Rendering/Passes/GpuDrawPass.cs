@@ -19,17 +19,37 @@ public sealed class GpuDrawPass
 	private readonly IGpuDrawBackendBridge _backendBridge;
 	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainControlSampler = DescriptorHandle.Invalid;
-	private IGfxPipeline? _updatePipeline;
+	private IGfxPipeline? _instanceUpdatePipeline;
+	private IGfxPipeline? _meshUpdatePipeline;
+	private IGfxPipeline? _materialUpdatePipeline;
+	private IGfxPipeline? _terrainMaterialUpdatePipeline;
+	private IGfxPipeline? _terrainLayerUpdatePipeline;
 	private IGfxPipeline? _cullPipeline;
 	private GraphicsBackendKind? _computeReflectionBackendKind;
-	private ReadOnlyMemory<byte> _updateShaderBytecode;
+	private ReadOnlyMemory<byte> _instanceUpdateShaderBytecode;
+	private ReadOnlyMemory<byte> _meshUpdateShaderBytecode;
+	private ReadOnlyMemory<byte> _materialUpdateShaderBytecode;
+	private ReadOnlyMemory<byte> _terrainMaterialUpdateShaderBytecode;
+	private ReadOnlyMemory<byte> _terrainLayerUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _cullShaderBytecode;
-	private ComputeThreadGroupSize? _updateThreadGroupSize;
+	private ComputeThreadGroupSize? _instanceUpdateThreadGroupSize;
+	private ComputeThreadGroupSize? _meshUpdateThreadGroupSize;
+	private ComputeThreadGroupSize? _materialUpdateThreadGroupSize;
+	private ComputeThreadGroupSize? _terrainMaterialUpdateThreadGroupSize;
+	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _cullThreadGroupSize;
-	private ShaderPropertyWriter? _updateParamsWriter;
+	private ShaderPropertyWriter? _instanceUpdateParamsWriter;
+	private ShaderPropertyWriter? _meshUpdateParamsWriter;
+	private ShaderPropertyWriter? _materialUpdateParamsWriter;
+	private ShaderPropertyWriter? _terrainMaterialUpdateParamsWriter;
+	private ShaderPropertyWriter? _terrainLayerUpdateParamsWriter;
 	private ShaderPropertyWriter? _cullParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
-	private readonly List<GpuDrawUpdateData> _updateData = new();
+	private readonly List<GpuDrawInstanceUpdateData> _instanceUpdateData = new();
+	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
+	private readonly List<GpuDrawMaterialUpdateData> _materialUpdateData = new();
+	private readonly List<GpuTerrainMaterialUpdateData> _terrainMaterialUpdateData = new();
+	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly List<uint> _drawGenerations = new();
 	private readonly List<uint> _instanceGenerations = new();
@@ -41,6 +61,9 @@ public sealed class GpuDrawPass
 	private readonly uint[] _slotBindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _slotFrameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
+	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
+	private readonly Dictionary<uint, TerrainMaterialAllocation> _terrainMaterialAllocations = new();
+	private int _nextTerrainLayerSlot = 1;
 	private int _activeIndirectSlot = -1;
 	private ulong _latestStructuralVersion;
 	private ulong _nextStructuralVersion = 1;
@@ -88,6 +111,8 @@ public sealed class GpuDrawPass
 		GpuDrawBucketId BucketId,
 		int ExecutionIndex,
 		uint DrawFlags);
+
+	private readonly record struct TerrainMaterialAllocation(uint LayerStart, uint LayerCount);
 
 	public GpuDrawPass(IShaderCompiler shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
@@ -189,7 +214,19 @@ public sealed class GpuDrawPass
 		}
 
 		_gpuDrawResources.ActiveDrawCommandUpperBound = drawDatabase.GetActiveDrawCommandUpperBound();
-		_updateData.Clear();
+		_instanceUpdateData.Clear();
+		_meshUpdateData.Clear();
+		_materialUpdateData.Clear();
+		_terrainMaterialUpdateData.Clear();
+		_terrainLayerUpdateData.Clear();
+
+		var forceGpuRefresh = _gpuStateBootstrapPending || requireFullGpuStateRefresh;
+		if (forceGpuRefresh)
+		{
+			_terrainMaterialStates.Clear();
+			_terrainMaterialAllocations.Clear();
+			_nextTerrainLayerSlot = 1;
+		}
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
 
@@ -263,36 +300,9 @@ public sealed class GpuDrawPass
 			uint hasControlMap = 0;
 			uint layerSamplerHandle = _terrainLayerSampler.Value;
 			uint controlSamplerHandle = _terrainControlSampler.Value;
+			uint layerStart = 0;
 			uint layerCount = 0;
 			var heightBlendSharpness = 0.0f;
-			uint layer0AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer0NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer0MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer0OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer0HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer0HasHeight = 0;
-			var layer0Scale = 1.0f;
-			uint layer1AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer1NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer1MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer1OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer1HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer1HasHeight = 0;
-			var layer1Scale = 1.0f;
-			uint layer2AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer2NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer2MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer2OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer2HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer2HasHeight = 0;
-			var layer2Scale = 1.0f;
-			uint layer3AlbedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer3NormalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer3MetallicRoughnessHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer3OcclusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer3HeightHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint layer3HasHeight = 0;
-			var layer3Scale = 1.0f;
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
@@ -406,111 +416,81 @@ public sealed class GpuDrawPass
 				baseColor = ColorRGBA.White;
 				metallicRoughness = Vector4.Zero;
 				emissiveFactorIntensity = Vector4.Zero;
-				layerCount = (uint)Math.Clamp(terrainSurface.LayerCount, 1, 4);
+				layerCount = (uint)Math.Max(terrainSurface.LayerCount, 1);
 				heightBlendSharpness = terrainSurface.HeightBlendSharpness;
 				if (terrainSurface.ControlMap is { } controlMap)
 				{
 					controlMapHandle = RegisterTerrainTexture(controlMap);
 					hasControlMap = 1;
 				}
-
-				PopulateTerrainLayerHandles(
-					terrainSurface.Layer0,
-					ref layer0AlbedoHandle,
-					ref layer0NormalHandle,
-					ref layer0MetallicRoughnessHandle,
-					ref layer0OcclusionHandle,
-					ref layer0HeightHandle,
-					ref layer0HasHeight,
-					ref layer0Scale);
-				PopulateTerrainLayerHandles(
-					terrainSurface.Layer1,
-					ref layer1AlbedoHandle,
-					ref layer1NormalHandle,
-					ref layer1MetallicRoughnessHandle,
-					ref layer1OcclusionHandle,
-					ref layer1HeightHandle,
-					ref layer1HasHeight,
-					ref layer1Scale);
-				PopulateTerrainLayerHandles(
-					terrainSurface.Layer2,
-					ref layer2AlbedoHandle,
-					ref layer2NormalHandle,
-					ref layer2MetallicRoughnessHandle,
-					ref layer2OcclusionHandle,
-					ref layer2HeightHandle,
-					ref layer2HasHeight,
-					ref layer2Scale);
-				PopulateTerrainLayerHandles(
-					terrainSurface.Layer3,
-					ref layer3AlbedoHandle,
-					ref layer3NormalHandle,
-					ref layer3MetallicRoughnessHandle,
-					ref layer3OcclusionHandle,
-					ref layer3HeightHandle,
-					ref layer3HasHeight,
-					ref layer3Scale);
 			}
 
-			_updateData.Add(new GpuDrawUpdateData(
+			_instanceUpdateData.Add(new GpuDrawInstanceUpdateData(
 				update.PreviousWorld,
 				update.World,
 				update.BoundsCenterRadius,
-				baseColor,
-				metallicRoughness,
-				emissiveFactorIntensity,
 				(uint)update.Type,
 				update.DrawHandle.Value,
 				update.InstanceHandle.Value,
 				(uint)drawKind,
 				update.MeshHandle.Value,
 				update.MaterialHandle.Value,
-				drawFlags,
-				vertexHandle,
-				indexHandle,
-				indexCount,
-				indexFormat,
-				baseVertex,
-				albedoHandle,
-				mrHandle,
-				normalHandle,
-				occlusionHandle,
-				emissiveHandle,
-				samplerHandle,
-				controlMapHandle,
-				hasControlMap,
-				layerSamplerHandle,
-				controlSamplerHandle,
-				layerCount,
-				heightBlendSharpness,
-				layer0AlbedoHandle,
-				layer0NormalHandle,
-				layer0MetallicRoughnessHandle,
-				layer0OcclusionHandle,
-				layer0HeightHandle,
-				layer0HasHeight,
-				layer0Scale,
-				layer1AlbedoHandle,
-				layer1NormalHandle,
-				layer1MetallicRoughnessHandle,
-				layer1OcclusionHandle,
-				layer1HeightHandle,
-				layer1HasHeight,
-				layer1Scale,
-				layer2AlbedoHandle,
-				layer2NormalHandle,
-				layer2MetallicRoughnessHandle,
-				layer2OcclusionHandle,
-				layer2HeightHandle,
-				layer2HasHeight,
-				layer2Scale,
-				layer3AlbedoHandle,
-				layer3NormalHandle,
-				layer3MetallicRoughnessHandle,
-				layer3OcclusionHandle,
-				layer3HeightHandle,
-				layer3HasHeight,
-				layer3Scale));
+				drawFlags));
+
+			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMesh)
+			{
+				_meshUpdateData.Add(new GpuDrawMeshUpdateData(
+					update.MeshHandle.Value,
+					vertexHandle,
+					indexHandle,
+					indexCount,
+					indexFormat,
+					baseVertex));
+			}
+
+			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMaterial)
+			{
+				_materialUpdateData.Add(new GpuDrawMaterialUpdateData(
+					update.MaterialHandle.Value,
+					baseColor,
+					metallicRoughness,
+					emissiveFactorIntensity,
+					albedoHandle,
+					mrHandle,
+					normalHandle,
+					occlusionHandle,
+					emissiveHandle,
+					samplerHandle));
+
+				if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
+				    update.TerrainSurface is { } terrainSurface)
+				{
+					var allocation = EnsureTerrainMaterialAllocation(update.MaterialHandle.Value, layerCount, forceGpuRefresh);
+					layerStart = allocation.LayerStart;
+					if (layerStart == 0)
+					{
+						layerCount = 1;
+					}
+					_terrainMaterialUpdateData.Add(new GpuTerrainMaterialUpdateData(
+						update.MaterialHandle.Value,
+						controlMapHandle,
+						hasControlMap,
+						layerSamplerHandle,
+						controlSamplerHandle,
+						layerStart,
+						layerCount,
+						heightBlendSharpness));
+
+					if (layerStart != 0)
+					{
+						var previousTerrainState = forceGpuRefresh || _terrainMaterialStates.TryGetValue(update.MaterialHandle.Value, out var uploadedSurface) == false
+							? default(TerrainDrawSurface?)
+							: uploadedSurface;
+						AppendTerrainLayerUpdates(update.MaterialHandle.Value, terrainSurface, previousTerrainState, forceGpuRefresh);
+					}
+					_terrainMaterialStates[update.MaterialHandle.Value] = terrainSurface;
+				}
+			}
 		}
 
 		if (activeIndirectCommands is not null && activeIndirectCommands.Length > 0)
@@ -519,46 +499,20 @@ public sealed class GpuDrawPass
 			CompactStructuralReplayRecords();
 		}
 
-		if (_updateData.Count == 0)
+		if (_instanceUpdateData.Count == 0 &&
+		    _meshUpdateData.Count == 0 &&
+		    _materialUpdateData.Count == 0 &&
+		    _terrainMaterialUpdateData.Count == 0 &&
+		    _terrainLayerUpdateData.Count == 0)
 		{
 			return;
 		}
 
-		WriteBuffer<GpuDrawUpdateData>(_gpuDrawResources.UpdateBuffer!, CollectionsMarshal.AsSpan(_updateData),
-			"UpdateBuffer");
-
-		var pipeline = EnsureUpdatePipeline(device);
-		var commandList = context.CommandList;
-		using (FrameProfiler.Instance.Measure("GpuDraw.Update"))
-		{
-			commandList.BindPipeline(pipeline);
-
-			var updateParamsWriter = _updateParamsWriter
-			                         ?? throw new InvalidOperationException(
-				                         "GpuDraw update reflection writer was not initialized.");
-			updateParamsWriter.Clear();
-			updateParamsWriter.SetUInt("updateCount", (uint)_updateData.Count);
-			commandList.SetComputeConstants(updateParamsWriter.RegisterIndex, updateParamsWriter.AsBytes());
-
-			commandList.SetComputeBuffer(0, _gpuDrawResources.UpdateBuffer!);
-			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
-			commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialBuffer!);
-			commandList.SetComputeBuffer(3, _gpuDrawResources.TerrainMaterialBuffer!);
-			commandList.SetComputeBuffer(4, _gpuDrawResources.MeshBuffer!);
-			commandList.SetComputeBuffer(5, _gpuDrawResources.DrawCommandBuffer!);
-			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawGenerationBuffer!);
-			commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
-			commandList.SetComputeBuffer(8, _gpuDrawResources.MeshGenerationBuffer!);
-			commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
-			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
-
-			var threadGroupSize = _updateThreadGroupSize
-			                      ?? throw new InvalidOperationException(
-				                      "GpuDraw update threadgroup size was not initialized.");
-			var (groupCountX, groupCountY, groupCountZ) =
-				threadGroupSize.GetDispatchGroupCount((uint)_updateData.Count);
-			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
-		}
+		DispatchInstanceUpdates(context, device);
+		DispatchMeshUpdates(context, device);
+		DispatchMaterialUpdates(context, device);
+		DispatchTerrainMaterialUpdates(context, device);
+		DispatchTerrainLayerUpdates(context, device);
 
 		PublishSubmittedBucketDiagnostics(drawDatabase);
 	}
@@ -651,19 +605,297 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	private IGfxPipeline EnsureUpdatePipeline(IGfxDevice device)
+	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(uint materialHandle, uint requiredLayerCount, bool forceReallocate)
 	{
-		if (_updatePipeline is not null)
+		requiredLayerCount = Math.Max(requiredLayerCount, 1u);
+		if (!forceReallocate &&
+		    _terrainMaterialAllocations.TryGetValue(materialHandle, out var existingAllocation) &&
+		    existingAllocation.LayerCount >= requiredLayerCount)
 		{
-			return _updatePipeline;
+			return existingAllocation;
+		}
+
+		if ((uint)_nextTerrainLayerSlot + requiredLayerCount > GpuDrawResources.MaxTerrainLayerCount)
+		{
+			return new TerrainMaterialAllocation(0, 1);
+		}
+
+		var allocation = new TerrainMaterialAllocation((uint)_nextTerrainLayerSlot, requiredLayerCount);
+		_nextTerrainLayerSlot += (int)requiredLayerCount;
+		_terrainMaterialAllocations[materialHandle] = allocation;
+		return allocation;
+	}
+
+	private void AppendTerrainLayerUpdates(
+		uint materialHandle,
+		in TerrainDrawSurface currentSurface,
+		TerrainDrawSurface? previousSurface,
+		bool forceAllLayers)
+	{
+		var activeLayerCount = Math.Max(currentSurface.LayerCount, 1);
+		for (var layerIndex = 0; layerIndex < activeLayerCount && layerIndex < currentSurface.Layers.Count; layerIndex++)
+		{
+			var currentLayer = currentSurface.Layers[layerIndex];
+			var layerChanged = forceAllLayers ||
+			                  previousSurface.HasValue == false ||
+			                  layerIndex >= previousSurface.Value.Layers.Count ||
+			                  !TerrainLayerEquals(currentLayer, previousSurface.Value.Layers[layerIndex]);
+			if (layerChanged == false)
+			{
+				continue;
+			}
+
+			uint albedoHandle = 0;
+			uint normalHandle = 0;
+			uint metallicRoughnessHandle = 0;
+			uint occlusionHandle = 0;
+			uint heightHandle = 0;
+			uint hasHeight = 0;
+			float scale = 1.0f;
+			PopulateTerrainLayerHandles(
+				currentLayer,
+				ref albedoHandle,
+				ref normalHandle,
+				ref metallicRoughnessHandle,
+				ref occlusionHandle,
+				ref heightHandle,
+				ref hasHeight,
+				ref scale);
+			_terrainLayerUpdateData.Add(new GpuTerrainLayerUpdateData(
+				materialHandle,
+				(uint)layerIndex,
+				albedoHandle,
+				normalHandle,
+				metallicRoughnessHandle,
+				occlusionHandle,
+				heightHandle,
+				hasHeight,
+				scale));
+		}
+	}
+
+	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)
+	{
+		return ReferenceEquals(left.Albedo, right.Albedo) &&
+		       ReferenceEquals(left.Normal, right.Normal) &&
+		       ReferenceEquals(left.MetallicRoughness, right.MetallicRoughness) &&
+		       ReferenceEquals(left.Occlusion, right.Occlusion) &&
+		       ReferenceEquals(left.Height, right.Height) &&
+		       Math.Abs(left.Scale - right.Scale) <= 0.0001f;
+	}
+
+	private void DispatchInstanceUpdates(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_instanceUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		WriteBuffer(_gpuDrawResources.InstanceUpdateBuffer!, CollectionsMarshal.AsSpan(_instanceUpdateData), "InstanceUpdateBuffer");
+		DispatchUpdatePass(
+			context,
+			EnsureInstanceUpdatePipeline(device),
+			_instanceUpdateParamsWriter!,
+			_instanceUpdateThreadGroupSize!.Value,
+			(uint)_instanceUpdateData.Count,
+			commandList =>
+			{
+				commandList.SetComputeBuffer(0, _gpuDrawResources.InstanceUpdateBuffer!);
+				commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
+				commandList.SetComputeBuffer(2, _gpuDrawResources.DrawCommandBuffer!);
+				commandList.SetComputeBuffer(3, _gpuDrawResources.DrawGenerationBuffer!);
+				commandList.SetComputeBuffer(4, _gpuDrawResources.InstanceGenerationBuffer!);
+				commandList.SetComputeBuffer(5, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			});
+	}
+
+	private void DispatchMeshUpdates(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_meshUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		WriteBuffer(_gpuDrawResources.MeshUpdateBuffer!, CollectionsMarshal.AsSpan(_meshUpdateData), "MeshUpdateBuffer");
+		DispatchUpdatePass(
+			context,
+			EnsureMeshUpdatePipeline(device),
+			_meshUpdateParamsWriter!,
+			_meshUpdateThreadGroupSize!.Value,
+			(uint)_meshUpdateData.Count,
+			commandList =>
+			{
+				commandList.SetComputeBuffer(0, _gpuDrawResources.MeshUpdateBuffer!);
+				commandList.SetComputeBuffer(1, _gpuDrawResources.MeshBuffer!);
+				commandList.SetComputeBuffer(2, _gpuDrawResources.MeshGenerationBuffer!);
+				commandList.SetComputeBuffer(3, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			});
+	}
+
+	private void DispatchMaterialUpdates(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_materialUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		WriteBuffer(_gpuDrawResources.MaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_materialUpdateData), "MaterialUpdateBuffer");
+		DispatchUpdatePass(
+			context,
+			EnsureMaterialUpdatePipeline(device),
+			_materialUpdateParamsWriter!,
+			_materialUpdateThreadGroupSize!.Value,
+			(uint)_materialUpdateData.Count,
+			commandList =>
+			{
+				commandList.SetComputeBuffer(0, _gpuDrawResources.MaterialUpdateBuffer!);
+				commandList.SetComputeBuffer(1, _gpuDrawResources.MaterialBuffer!);
+				commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(3, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			});
+	}
+
+	private void DispatchTerrainMaterialUpdates(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_terrainMaterialUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		WriteBuffer(_gpuDrawResources.TerrainMaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainMaterialUpdateData), "TerrainMaterialUpdateBuffer");
+		DispatchUpdatePass(
+			context,
+			EnsureTerrainMaterialUpdatePipeline(device),
+			_terrainMaterialUpdateParamsWriter!,
+			_terrainMaterialUpdateThreadGroupSize!.Value,
+			(uint)_terrainMaterialUpdateData.Count,
+			commandList =>
+			{
+				commandList.SetComputeBuffer(0, _gpuDrawResources.TerrainMaterialUpdateBuffer!);
+				commandList.SetComputeBuffer(1, _gpuDrawResources.TerrainMaterialBuffer!);
+				commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(3, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			});
+	}
+
+	private void DispatchTerrainLayerUpdates(RenderGraphContext context, IGfxDevice device)
+	{
+		if (_terrainLayerUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		WriteBuffer(_gpuDrawResources.TerrainLayerUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainLayerUpdateData), "TerrainLayerUpdateBuffer");
+		DispatchUpdatePass(
+			context,
+			EnsureTerrainLayerUpdatePipeline(device),
+			_terrainLayerUpdateParamsWriter!,
+			_terrainLayerUpdateThreadGroupSize!.Value,
+			(uint)_terrainLayerUpdateData.Count,
+			commandList =>
+			{
+				commandList.SetComputeBuffer(0, _gpuDrawResources.TerrainLayerUpdateBuffer!);
+				commandList.SetComputeBuffer(1, _gpuDrawResources.TerrainMaterialBuffer!);
+				commandList.SetComputeBuffer(2, _gpuDrawResources.TerrainLayerBuffer!);
+				commandList.SetComputeBuffer(3, _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(4, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			});
+	}
+
+	private void DispatchUpdatePass(
+		RenderGraphContext context,
+		IGfxPipeline pipeline,
+		ShaderPropertyWriter updateParamsWriter,
+		ComputeThreadGroupSize threadGroupSize,
+		uint updateCount,
+		Action<IGfxCommandList> bindBuffers)
+	{
+		var commandList = context.CommandList;
+		using (FrameProfiler.Instance.Measure("GpuDraw.Update"))
+		{
+			commandList.BindPipeline(pipeline);
+			updateParamsWriter.Clear();
+			updateParamsWriter.SetUInt("updateCount", updateCount);
+			commandList.SetComputeConstants(updateParamsWriter.RegisterIndex, updateParamsWriter.AsBytes());
+			bindBuffers(commandList);
+			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(updateCount);
+			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+		}
+	}
+
+	private IGfxPipeline EnsureInstanceUpdatePipeline(IGfxDevice device)
+	{
+		if (_instanceUpdatePipeline is not null)
+		{
+			return _instanceUpdatePipeline;
 		}
 
 		EnsureComputeReflectionResources(device.BackendKind);
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdate", default, default, default);
-		_updatePipeline = device.GetOrCreatePipeline(
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateInstance", default, default, default);
+		_instanceUpdatePipeline = device.GetOrCreatePipeline(
 			pipelineKey,
-			new ShaderBytecodeSet(compute: _updateShaderBytecode, computeThreadGroupSize: _updateThreadGroupSize));
-		return _updatePipeline;
+			new ShaderBytecodeSet(compute: _instanceUpdateShaderBytecode, computeThreadGroupSize: _instanceUpdateThreadGroupSize));
+		return _instanceUpdatePipeline;
+	}
+
+	private IGfxPipeline EnsureMeshUpdatePipeline(IGfxDevice device)
+	{
+		if (_meshUpdatePipeline is not null)
+		{
+			return _meshUpdatePipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateMesh", default, default, default);
+		_meshUpdatePipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _meshUpdateShaderBytecode, computeThreadGroupSize: _meshUpdateThreadGroupSize));
+		return _meshUpdatePipeline;
+	}
+
+	private IGfxPipeline EnsureMaterialUpdatePipeline(IGfxDevice device)
+	{
+		if (_materialUpdatePipeline is not null)
+		{
+			return _materialUpdatePipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateMaterial", default, default, default);
+		_materialUpdatePipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _materialUpdateShaderBytecode, computeThreadGroupSize: _materialUpdateThreadGroupSize));
+		return _materialUpdatePipeline;
+	}
+
+	private IGfxPipeline EnsureTerrainMaterialUpdatePipeline(IGfxDevice device)
+	{
+		if (_terrainMaterialUpdatePipeline is not null)
+		{
+			return _terrainMaterialUpdatePipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateTerrainMaterial", default, default, default);
+		_terrainMaterialUpdatePipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _terrainMaterialUpdateShaderBytecode, computeThreadGroupSize: _terrainMaterialUpdateThreadGroupSize));
+		return _terrainMaterialUpdatePipeline;
+	}
+
+	private IGfxPipeline EnsureTerrainLayerUpdatePipeline(IGfxDevice device)
+	{
+		if (_terrainLayerUpdatePipeline is not null)
+		{
+			return _terrainLayerUpdatePipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSUpdateTerrainLayer", default, default, default);
+		_terrainLayerUpdatePipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _terrainLayerUpdateShaderBytecode, computeThreadGroupSize: _terrainLayerUpdateThreadGroupSize));
+		return _terrainLayerUpdatePipeline;
 	}
 
 	private IGfxPipeline EnsureCullPipeline(IGfxDevice device)
@@ -685,24 +917,72 @@ public sealed class GpuDrawPass
 	{
 		if (_computeReflectionBackendKind.HasValue &&
 		    _computeReflectionBackendKind.Value == backendKind &&
-		    _updateParamsWriter is not null &&
+		    _instanceUpdateParamsWriter is not null &&
+		    _meshUpdateParamsWriter is not null &&
+		    _materialUpdateParamsWriter is not null &&
+		    _terrainMaterialUpdateParamsWriter is not null &&
+		    _terrainLayerUpdateParamsWriter is not null &&
 		    _cullParamsWriter is not null &&
-		    _updateThreadGroupSize.HasValue &&
+		    _instanceUpdateThreadGroupSize.HasValue &&
+		    _meshUpdateThreadGroupSize.HasValue &&
+		    _materialUpdateThreadGroupSize.HasValue &&
+		    _terrainMaterialUpdateThreadGroupSize.HasValue &&
+		    _terrainLayerUpdateThreadGroupSize.HasValue &&
 		    _cullThreadGroupSize.HasValue &&
-		    _updateShaderBytecode.IsEmpty == false &&
+		    _instanceUpdateShaderBytecode.IsEmpty == false &&
+		    _meshUpdateShaderBytecode.IsEmpty == false &&
+		    _materialUpdateShaderBytecode.IsEmpty == false &&
+		    _terrainMaterialUpdateShaderBytecode.IsEmpty == false &&
+		    _terrainLayerUpdateShaderBytecode.IsEmpty == false &&
 		    _cullShaderBytecode.IsEmpty == false)
 		{
 			return;
 		}
 
-		var updateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_update.compute.slang",
-			"CSUpdate",
+		var instanceUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_instance_update.compute.slang",
+			"CSUpdateInstance",
 			backendKind);
-		_updateShaderBytecode = updateCompiled.Bytecode;
-		_updateThreadGroupSize = updateCompiled.ThreadGroupSize;
-		_updateParamsWriter =
-			new ShaderPropertyWriter(updateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+		_instanceUpdateShaderBytecode = instanceUpdateCompiled.Bytecode;
+		_instanceUpdateThreadGroupSize = instanceUpdateCompiled.ThreadGroupSize;
+		_instanceUpdateParamsWriter =
+			new ShaderPropertyWriter(instanceUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+
+		var meshUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_mesh_update.compute.slang",
+			"CSUpdateMesh",
+			backendKind);
+		_meshUpdateShaderBytecode = meshUpdateCompiled.Bytecode;
+		_meshUpdateThreadGroupSize = meshUpdateCompiled.ThreadGroupSize;
+		_meshUpdateParamsWriter =
+			new ShaderPropertyWriter(meshUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+
+		var materialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_material_update.compute.slang",
+			"CSUpdateMaterial",
+			backendKind);
+		_materialUpdateShaderBytecode = materialUpdateCompiled.Bytecode;
+		_materialUpdateThreadGroupSize = materialUpdateCompiled.ThreadGroupSize;
+		_materialUpdateParamsWriter =
+			new ShaderPropertyWriter(materialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+
+		var terrainMaterialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_terrain_material_update.compute.slang",
+			"CSUpdateTerrainMaterial",
+			backendKind);
+		_terrainMaterialUpdateShaderBytecode = terrainMaterialUpdateCompiled.Bytecode;
+		_terrainMaterialUpdateThreadGroupSize = terrainMaterialUpdateCompiled.ThreadGroupSize;
+		_terrainMaterialUpdateParamsWriter =
+			new ShaderPropertyWriter(terrainMaterialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+
+		var terrainLayerUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_terrain_layer_update.compute.slang",
+			"CSUpdateTerrainLayer",
+			backendKind);
+		_terrainLayerUpdateShaderBytecode = terrainLayerUpdateCompiled.Bytecode;
+		_terrainLayerUpdateThreadGroupSize = terrainLayerUpdateCompiled.ThreadGroupSize;
+		_terrainLayerUpdateParamsWriter =
+			new ShaderPropertyWriter(terrainLayerUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 
 		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"gpu_draw_cull.compute.slang",
@@ -1271,29 +1551,10 @@ public sealed class GpuDrawPass
 			0,
 			_terrainLayerSampler.Value,
 			_terrainControlSampler.Value,
+			0,
 			1,
-			4.0f,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			0,
-			1.0f,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			0,
-			1.0f,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			0,
-			1.0f,
+			4.0f);
+		var fallbackTerrainLayerData = new GpuTerrainLayerData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
@@ -1304,6 +1565,7 @@ public sealed class GpuDrawPass
 		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
 		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");
+		WriteBufferElement(_gpuDrawResources.TerrainLayerBuffer!, fallbackTerrainLayerData, 0, "TerrainLayerBuffer");
 	}
 
 	private void LogUnsupportedDrawKindOnce(GpuDrawKind drawKind)
