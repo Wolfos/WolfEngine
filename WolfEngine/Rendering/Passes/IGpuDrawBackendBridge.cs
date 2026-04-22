@@ -36,7 +36,8 @@ public interface IGpuDrawBackendBridge
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		Mesh mesh,
-		GpuDrawResources resources);
+		GpuDrawResources resources,
+		in SharedDrawGraphicsBufferBindings bindings);
 
 	void SampleVisibilityDiagnostics(
 		IGfxBuffer? drawCountPerBucketBuffer,

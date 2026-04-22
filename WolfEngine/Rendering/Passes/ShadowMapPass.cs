@@ -29,6 +29,7 @@ public sealed class ShadowMapPass
 
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
+	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -96,11 +97,13 @@ public sealed class ShadowMapPass
 			}
 
 			var pipeline = EnsurePipeline(device, laneDefinition, cascadeIndex);
+			gpuDrawResources.SetExecutionLaneBufferBindings(laneDefinition, _bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)]);
 			buckets.Add(new ShadowMapExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
+				_bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)],
 				pipeline,
 				indirectCommandBuffer));
 		}
@@ -162,12 +165,12 @@ public sealed class ShadowMapPass
 			using (FrameProfiler.Instance.Measure($"Shadow.C{config.CascadeIndex}.{bucket.DebugName}"))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
-				commandList.BindConstantBuffer(10, config.InstanceBuffer);
-				commandList.BindConstantBuffer(11, config.MaterialBuffer);
-				commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
-					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
 
 				commandList.BindConstantBuffer(
@@ -221,7 +224,7 @@ public sealed class ShadowMapPass
 			shaderVariant: $"Shadow:{lane.ShaderVariant}:C{cascadeIndex}");
 
 		var cascadeDefine = $"WOLF_SHADOW_CASCADE_INDEX={cascadeIndex}";
-		var shaders = GraphicsShaderCompiler.Compile(
+		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			device.BackendKind,
 			"shadow_map.slang",
@@ -229,8 +232,10 @@ public sealed class ShadowMapPass
 			"fragmentShader",
 			lane.PreprocessorDefine,
 			cascadeDefine);
-		pipeline = device.GetOrCreatePipeline(key, shaders);
+		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;
+		_bufferBindingsByCascadeExecutionKey[pipelineKeyByCascadeBucket] =
+			SharedDrawGraphicsBufferBindings.FromShadowReflection(compiled.ReflectionLayout);
 		return pipeline;
 	}
 

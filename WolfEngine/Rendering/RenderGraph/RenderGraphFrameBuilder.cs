@@ -939,11 +939,16 @@ internal sealed class RenderGraphFrameBuilder
 				continue;
 			}
 
+			var bufferBindings = _gpuDrawResources.GetGBufferBufferBindings(laneDefinition)
+			                    ?? throw new InvalidOperationException(
+				                    $"Missing reflected GBuffer shared-draw buffer bindings for lane '{laneDefinition.DebugName}'.");
+
 			bucketList.Add(new GBufferExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
+				bufferBindings,
 				pipeline,
 				indirectCommandBuffer));
 		}

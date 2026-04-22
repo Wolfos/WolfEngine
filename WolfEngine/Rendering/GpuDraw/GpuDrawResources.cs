@@ -54,6 +54,7 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxIndirectCommandBuffer?[] _gbufferIndirectCommandSlots =
 		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
+	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private int _activeIndirectCommandSlot;
 	private GraphicsBackendKind? _constantBufferLayoutBackend;
 	private ShaderConstantBufferLayout? _gBufferCameraLayout;
@@ -384,6 +385,44 @@ public sealed class GpuDrawResources : IDisposable
 	public void SetGBufferPipeline(GpuDrawExecutionLaneDefinition lane, IGfxPipeline pipeline) =>
 		SetGBufferPipeline(lane.ExecutionIndex, pipeline);
 
+	public SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(int executionLaneIndex)
+	{
+		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferBufferBindings.Length)
+		{
+			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
+		}
+
+		return _gbufferBufferBindings[executionLaneIndex];
+	}
+
+	public SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+		GetGBufferBufferBindings(lane.ExecutionIndex);
+
+	public SharedDrawGraphicsBufferBindings? GetExecutionLaneBufferBindings(int executionLaneIndex) =>
+		GetGBufferBufferBindings(executionLaneIndex);
+
+	public SharedDrawGraphicsBufferBindings? GetExecutionLaneBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+		GetGBufferBufferBindings(lane);
+
+	public void SetGBufferBufferBindings(int executionLaneIndex, in SharedDrawGraphicsBufferBindings bindings)
+	{
+		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferBufferBindings.Length)
+		{
+			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
+		}
+
+		_gbufferBufferBindings[executionLaneIndex] = bindings;
+	}
+
+	public void SetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane, in SharedDrawGraphicsBufferBindings bindings) =>
+		SetGBufferBufferBindings(lane.ExecutionIndex, bindings);
+
+	public void SetExecutionLaneBufferBindings(int executionLaneIndex, in SharedDrawGraphicsBufferBindings bindings) =>
+		SetGBufferBufferBindings(executionLaneIndex, bindings);
+
+	public void SetExecutionLaneBufferBindings(GpuDrawExecutionLaneDefinition lane, in SharedDrawGraphicsBufferBindings bindings) =>
+		SetGBufferBufferBindings(lane, bindings);
+
 	public void Dispose()
 	{
 		(InstanceBuffer as IDisposable)?.Dispose();
@@ -442,6 +481,7 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
+		Array.Clear(_gbufferBufferBindings, 0, _gbufferBufferBindings.Length);
 		TerrainMaterialBuffer = null;
 	}
 

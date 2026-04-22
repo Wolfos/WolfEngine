@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
@@ -116,13 +117,14 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MetalBuffer shadowCameraBuffer,
 			MetalBuffer transparentEnvironmentBuffer,
 			MetalBuffer transparentLightingBuffer,
-			MetalBuffer instanceBuffer,
-			MetalBuffer materialBuffer,
-			MetalBuffer materialGenerationBuffer,
-			MetalBuffer drawArgsBuffer,
-			MTLBuffer bindlessCountBuffer,
-			MTLBuffer bindlessTextureBuffer,
-			MTLBuffer bindlessRwTextureBuffer,
+		MetalBuffer instanceBuffer,
+		MetalBuffer materialBuffer,
+		MetalBuffer materialGenerationBuffer,
+		MetalBuffer drawArgsBuffer,
+		in SharedDrawGraphicsBufferBindings bindings,
+		MTLBuffer bindlessCountBuffer,
+		MTLBuffer bindlessTextureBuffer,
+		MTLBuffer bindlessRwTextureBuffer,
 		MTLBuffer bindlessSamplerBuffer)
 	{
 		ValidateCommandIndex(commandIndex);
@@ -136,18 +138,18 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
 			command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
 			command.SetVertexBuffer(shadowCameraBuffer.Buffer, 0, 14);
-			command.SetVertexBuffer(instanceBuffer.Buffer, 0, 10);
-			command.SetVertexBuffer(materialBuffer.Buffer, 0, 11);
-			command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, 13);
-			command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
+			command.SetVertexBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
+			command.SetVertexBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
+			command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
+			command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
 			command.SetFragmentBuffer(transparentEnvironmentBuffer.Buffer, 0, 0);
 			command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
 			command.SetFragmentBuffer(shadowCameraBuffer.Buffer, 0, 14);
 			command.SetFragmentBuffer(transparentLightingBuffer.Buffer, 0, 3);
-			command.SetFragmentBuffer(instanceBuffer.Buffer, 0, 10);
-			command.SetFragmentBuffer(materialBuffer.Buffer, 0, 11);
-			command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, 13);
-			command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, 12);
+			command.SetFragmentBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
+			command.SetFragmentBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
+			command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
+			command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
 
 		if (bindlessCountBuffer.NativePtr != IntPtr.Zero)
 		{

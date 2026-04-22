@@ -96,7 +96,8 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		Mesh mesh,
-		GpuDrawResources resources)
+		GpuDrawResources resources,
+		in SharedDrawGraphicsBufferBindings bindings)
 	{
 		if (_descriptorTable is null ||
 		    commandBuffer is not MetalIndirectCommandBuffer indirectCommands ||
@@ -139,6 +140,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			materialBuffer,
 			materialGenerationBuffer,
 			drawArgsBuffer,
+			bindings,
 			_descriptorTable.CountBuffer,
 			_descriptorTable.TextureArgumentBuffer,
 			_descriptorTable.RWTextureArgumentBuffer,

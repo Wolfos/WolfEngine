@@ -11,6 +11,7 @@ public readonly struct TransparentExecutionBucket
 		GpuDrawBucketId bucketId,
 		int executionIndex,
 		string debugName,
+		SharedDrawGraphicsBufferBindings bufferBindings,
 		IGfxPipeline pipeline,
 		IGfxIndirectCommandBuffer indirectCommandBuffer)
 	{
@@ -18,6 +19,7 @@ public readonly struct TransparentExecutionBucket
 		BucketId = bucketId;
 		ExecutionIndex = executionIndex;
 		DebugName = debugName;
+		BufferBindings = bufferBindings;
 		Pipeline = pipeline;
 		IndirectCommandBuffer = indirectCommandBuffer;
 	}
@@ -26,6 +28,7 @@ public readonly struct TransparentExecutionBucket
 	public GpuDrawBucketId BucketId { get; }
 	public int ExecutionIndex { get; }
 	public string DebugName { get; }
+	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public IGfxPipeline Pipeline { get; }
 	public IGfxIndirectCommandBuffer IndirectCommandBuffer { get; }
 }

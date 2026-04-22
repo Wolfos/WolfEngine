@@ -14,6 +14,7 @@ public sealed class TransparentForwardPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
+	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -227,24 +228,27 @@ public sealed class TransparentForwardPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
-				commandList.BindConstantBuffer(10, config.InstanceBuffer);
-				commandList.BindConstantBuffer(11, config.MaterialBuffer);
-				commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
-					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
-				if (config.PointLightBuffer is not null)
+				if (config.PointLightBuffer is not null &&
+				    bucket.BufferBindings.PointLightRegisterIndex is { } pointLightRegisterIndex)
 				{
-					commandList.BindConstantBuffer(14, config.PointLightBuffer);
+					commandList.BindConstantBuffer(pointLightRegisterIndex, config.PointLightBuffer);
 				}
-				if (config.ClusterHeaderBuffer is not null)
+				if (config.ClusterHeaderBuffer is not null &&
+				    bucket.BufferBindings.ClusterHeaderRegisterIndex is { } clusterHeaderRegisterIndex)
 				{
-					commandList.BindConstantBuffer(15, config.ClusterHeaderBuffer);
+					commandList.BindConstantBuffer(clusterHeaderRegisterIndex, config.ClusterHeaderBuffer);
 				}
-				if (config.ClusterLightIndexBuffer is not null)
+				if (config.ClusterLightIndexBuffer is not null &&
+				    bucket.BufferBindings.ClusterLightIndexRegisterIndex is { } clusterLightIndexRegisterIndex)
 				{
-					commandList.BindConstantBuffer(16, config.ClusterLightIndexBuffer);
+					commandList.BindConstantBuffer(clusterLightIndexRegisterIndex, config.ClusterLightIndexBuffer);
 				}
 
 				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);
@@ -285,11 +289,13 @@ public sealed class TransparentForwardPass
 			}
 
 			var pipeline = EnsurePipeline(device, laneDefinition);
+			gpuDrawResources.SetExecutionLaneBufferBindings(laneDefinition, _bufferBindingsByExecutionKey[laneDefinition.Key]);
 			buckets.Add(new TransparentExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
+				_bufferBindingsByExecutionKey[laneDefinition.Key],
 				pipeline,
 				indirectCommandBuffer));
 		}
@@ -322,15 +328,16 @@ public sealed class TransparentForwardPass
 			layout: GraphicsLayoutKind.Material,
 			shaderVariant: $"Transparent:{lane.ShaderVariant}");
 
-		var shaders = GraphicsShaderCompiler.Compile(
+		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			device.BackendKind,
 			GetShaderPath(lane.DrawKind),
 			"vertexShader",
 			"fragmentShader",
 			lane.PreprocessorDefine);
-		pipeline = device.GetOrCreatePipeline(key, shaders);
+		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByExecutionKey[lane.Key] = pipeline;
+		_bufferBindingsByExecutionKey[lane.Key] = SharedDrawGraphicsBufferBindings.FromTransparentReflection(compiled.ReflectionLayout);
 		return pipeline;
 	}
 

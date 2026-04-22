@@ -84,16 +84,17 @@ public static class GBufferPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
-				commandList.BindConstantBuffer(10, config.InstanceBuffer);
-				commandList.BindConstantBuffer(11, config.MaterialBuffer);
-				commandList.BindConstantBuffer(12, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
+				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
 				if (config.MaterialGenerationBuffer is not null)
 				{
-					commandList.BindConstantBuffer(13, config.MaterialGenerationBuffer);
+					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
-				if (config.TerrainMaterialBuffer is not null)
+				if (config.TerrainMaterialBuffer is not null &&
+				    bucket.BufferBindings.TerrainMaterialRegisterIndex is { } terrainMaterialRegisterIndex)
 				{
-					commandList.BindConstantBuffer(14, config.TerrainMaterialBuffer);
+					commandList.BindConstantBuffer(terrainMaterialRegisterIndex, config.TerrainMaterialBuffer);
 				}
 
 				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);

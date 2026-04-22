@@ -70,8 +70,10 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		Mesh mesh,
-		GpuDrawResources resources)
+		GpuDrawResources resources,
+		in SharedDrawGraphicsBufferBindings bindings)
 	{
+		_ = bindings;
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer ||
 		    resources.InstanceBuffer is not D3D12Buffer instanceBuffer ||
 		    resources.MaterialBuffer is not D3D12Buffer materialBuffer ||

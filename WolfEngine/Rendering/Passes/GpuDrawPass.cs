@@ -748,13 +748,14 @@ public sealed class GpuDrawPass
 				continue;
 			}
 
-			var shaderSet = GraphicsShaderCompiler.Compile(
+			var compiled = GraphicsShaderCompiler.CompileWithReflection(
 				_shaderCompiler,
 				device.BackendKind,
 				GetGBufferShaderPath(lane.DrawKind),
 				"vertexShader",
 				"fragmentShader",
 				lane.PreprocessorDefine);
+			var shaderSet = compiled.Bytecode;
 			var pipelineKey = new PipelineKey(
 				PassKind.Graphics,
 				vertexEntryPoint: "vertexShader",
@@ -773,6 +774,7 @@ public sealed class GpuDrawPass
 				layout: GraphicsLayoutKind.Material,
 				shaderVariant: $"GBuffer:{lane.ShaderVariant}");
 			_gpuDrawResources.SetGBufferPipeline(lane, device.GetOrCreatePipeline(pipelineKey, shaderSet));
+			_gpuDrawResources.SetGBufferBufferBindings(lane, SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout));
 		}
 	}
 
@@ -855,7 +857,7 @@ public sealed class GpuDrawPass
 		{
 			if (i == executionLaneIndex)
 			{
-				if (TryEncodeIndirectCommand(commandIndex, mesh, indirectCommands[i]) == false)
+				if (TryEncodeIndirectCommand(commandIndex, mesh, indirectCommands[i], i) == false)
 				{
 					_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 				}
@@ -929,7 +931,7 @@ public sealed class GpuDrawPass
 		{
 			if (i == bucketExecutionIndex)
 			{
-				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, indirectCommands[i]) == false)
+				if (TryEncodeIndirectCommand(commandIndex, record.Mesh, indirectCommands[i], i) == false)
 				{
 					_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
 				}
@@ -1006,7 +1008,7 @@ public sealed class GpuDrawPass
 			_renderer.EnsureMeshResources(entry.Mesh);
 			var executionLane = GpuDrawClassification.ResolveExecutionLane(entry.DrawKind, entry.Material);
 
-			TryEncodeIndirectCommand((uint)entry.DrawIndex, entry.Mesh, indirectCommands[executionLane.ExecutionIndex]);
+			TryEncodeIndirectCommand((uint)entry.DrawIndex, entry.Mesh, indirectCommands[executionLane.ExecutionIndex], executionLane.ExecutionIndex);
 		}
 	}
 
@@ -1021,7 +1023,8 @@ public sealed class GpuDrawPass
 	private bool TryEncodeIndirectCommand(
 		uint commandIndex,
 		Mesh mesh,
-		IGfxIndirectCommandBuffer indirectCommands)
+		IGfxIndirectCommandBuffer indirectCommands,
+		int executionLaneIndex)
 	{
 		var bucketDefinitions = GBufferDrawBuckets.Definitions;
 		if (bucketDefinitions.Length == 0 ||
@@ -1030,7 +1033,10 @@ public sealed class GpuDrawPass
 			return false;
 		}
 
-		return _backendBridge.TryEncodeIndexedDrawCommand(indirectCommands, commandIndex, mesh, _gpuDrawResources);
+		var bindings = _gpuDrawResources.GetExecutionLaneBufferBindings(executionLaneIndex)
+		               ?? throw new InvalidOperationException(
+			               $"Missing reflected shared-draw buffer bindings for execution lane {executionLaneIndex}.");
+		return _backendBridge.TryEncodeIndexedDrawCommand(indirectCommands, commandIndex, mesh, _gpuDrawResources, bindings);
 	}
 
 	private bool HasAnyGBufferPipeline()

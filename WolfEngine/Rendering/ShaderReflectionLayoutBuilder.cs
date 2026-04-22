@@ -14,15 +14,20 @@ internal static class ShaderReflectionLayoutBuilder
 
 		var parameters = reflection.Parameters ?? [];
 		var constantBuffers = new List<ShaderConstantBufferLayout>(parameters.Length);
+		var resources = new List<ShaderResourceBindingLayout>(parameters.Length);
 		for (var i = 0; i < parameters.Length; i++)
 		{
 			var parameter = parameters[i];
-			if (IsConstantBufferType(parameter.Type) == false)
+			if (IsConstantBufferType(parameter.Type))
 			{
+				constantBuffers.Add(BuildConstantBuffer(parameter));
 				continue;
 			}
 
-			constantBuffers.Add(BuildConstantBuffer(parameter));
+			if (TryBuildResource(parameter, out var resource))
+			{
+				resources.Add(resource);
+			}
 		}
 
 		if (constantBuffers.Count == 0)
@@ -30,7 +35,26 @@ internal static class ShaderReflectionLayoutBuilder
 			throw new InvalidOperationException("Slang reflection did not expose any constant buffers.");
 		}
 
-		return new ShaderReflectionLayout(constantBuffers);
+		return new ShaderReflectionLayout(constantBuffers, resources);
+	}
+
+	private static bool TryBuildResource(SlangParameter parameter, out ShaderResourceBindingLayout layout)
+	{
+		layout = null!;
+		if (string.IsNullOrWhiteSpace(parameter.Name))
+		{
+			return false;
+		}
+
+		var bindings = parameter.Bindings;
+		if (bindings is not { Length: > 0 })
+		{
+			return false;
+		}
+
+		var registerIndex = ResolveRegisterIndex(parameter);
+		layout = new ShaderResourceBindingLayout(parameter.Name, registerIndex);
+		return true;
 	}
 
 	private static ShaderConstantBufferLayout BuildConstantBuffer(SlangParameter parameter)

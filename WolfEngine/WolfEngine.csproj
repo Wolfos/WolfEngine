@@ -157,9 +157,6 @@
         <None Update="Shaders\normal_decode.slang">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
-        <None Update="Shaders\terrain_gbuffer.slang">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
         <None Update="Shaders\terrain_shared_gbuffer.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

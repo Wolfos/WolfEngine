@@ -17,6 +17,7 @@ internal static class ShaderReflectionLayoutMerger
 
 		var mergedByName = new Dictionary<string, ShaderConstantBufferLayout>(StringComparer.Ordinal);
 		var mergedByRegister = new Dictionary<uint, ShaderConstantBufferLayout>();
+		var mergedResourcesByName = new Dictionary<string, ShaderResourceBindingLayout>(StringComparer.Ordinal);
 
 		for (var i = 0; i < layouts.Length; i++)
 		{
@@ -45,9 +46,20 @@ internal static class ShaderReflectionLayoutMerger
 				mergedByName.Add(candidate.Name, candidate);
 				mergedByRegister.Add(candidate.RegisterIndex, candidate);
 			}
+
+			foreach (var candidate in layout.ResourcesByName.Values)
+			{
+				if (mergedResourcesByName.TryGetValue(candidate.Name, out var existing))
+				{
+					EnsureCompatible(existing, candidate);
+					continue;
+				}
+
+				mergedResourcesByName.Add(candidate.Name, candidate);
+			}
 		}
 
-		return new ShaderReflectionLayout(mergedByName.Values);
+		return new ShaderReflectionLayout(mergedByName.Values, mergedResourcesByName.Values);
 	}
 
 	private static void EnsureCompatible(ShaderConstantBufferLayout expected, ShaderConstantBufferLayout actual)
@@ -85,6 +97,15 @@ internal static class ShaderReflectionLayoutMerger
 				throw new InvalidOperationException(
 					$"Reflected constant buffer '{expected.Name}' field '{path}' mismatch between merged stages.");
 			}
+		}
+	}
+
+	private static void EnsureCompatible(ShaderResourceBindingLayout expected, ShaderResourceBindingLayout actual)
+	{
+		if (expected.RegisterIndex != actual.RegisterIndex)
+		{
+			throw new InvalidOperationException(
+				$"Reflected shader resource '{expected.Name}' register mismatch: {expected.RegisterIndex} vs {actual.RegisterIndex}.");
 		}
 	}
 }
