@@ -161,7 +161,7 @@
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\terrain_shared_gbuffer.slang">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
         <None Update="Shaders\debug_primitive_forward.slang">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

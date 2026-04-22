@@ -75,11 +75,13 @@ public sealed class TerrainRuntimeData
 
 	public void CollectChunkDrawRecords(
 		RenderGraph renderGraph,
+		Material material,
 		Vector3 cameraOrigin,
 		Matrix4x4 worldTransform,
 		List<TerrainChunkDrawRecord> destination)
 	{
 		ArgumentNullException.ThrowIfNull(renderGraph);
+		ArgumentNullException.ThrowIfNull(material);
 		ArgumentNullException.ThrowIfNull(destination);
 		if (_built == false || _chunks.Count == 0)
 		{
@@ -115,6 +117,7 @@ public sealed class TerrainRuntimeData
 			destination.Add(new TerrainChunkDrawRecord(
 				i,
 				mesh,
+				material,
 				worldTransform,
 				new TerrainDrawSurface(
 					_resolvedControlMap,

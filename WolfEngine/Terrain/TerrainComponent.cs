@@ -1,7 +1,9 @@
 using System;
 using System.Numerics;
+using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -10,6 +12,8 @@ public struct TerrainComponent : IEntityComponent
 	public AssetRef<Texture> HeightmapAsset;
 	public AssetRef<Texture> ControlMapAsset;
 	public AssetRef<TerrainLayerSet> LayerSetAsset;
+	[JsonIgnore]
+	public Material? Material;
 	public Vector2 WorldSizeMeters;
 	public float HeightScaleMeters;
 	public int ChunkSizeInQuads;

@@ -138,32 +138,69 @@ public sealed class TerrainPrototypeTests
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 
 		var renderGraph = CreateTestRenderGraph();
+		var material = new Material("__terrain__");
 		var nearCamera = new Vector3(0.0f, 40.0f, -60.0f);
 		var records = new List<TerrainChunkDrawRecord>();
 
-		runtime.CollectChunkDrawRecords(renderGraph, nearCamera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(renderGraph, material, nearCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[0]));
+		Assert.That(records[0].Material, Is.SameAs(material));
 		Assert.That(records[0].ChunkIndex, Is.EqualTo(0));
 		Assert.That(records[0].Surface.LayerCount, Is.EqualTo(1));
 
 		records.Clear();
 		var farCamera = new Vector3(0.0f, 50.0f, -400.0f);
-		runtime.CollectChunkDrawRecords(renderGraph, farCamera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(renderGraph, material, farCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
+		Assert.That(records[0].Material, Is.SameAs(material));
 
 		records.Clear();
 		runtime.CollectChunkDrawRecords(
 			renderGraph,
+			material,
 			nearCamera,
 			Matrix4x4.CreateTranslation(5000.0f, 0.0f, 0.0f),
 			records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
+		Assert.That(records[0].Material, Is.SameAs(material));
+	}
+
+	[Test]
+	public void CollectChunkDrawRecords_ReusesSharedMaterialAcrossCalls()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 8.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var renderGraph = CreateTestRenderGraph();
+		var material = new Material("__terrain__");
+		var records = new List<TerrainChunkDrawRecord>();
+		var camera = new Vector3(0.0f, 40.0f, -60.0f);
+
+		runtime.CollectChunkDrawRecords(renderGraph, material, camera, Matrix4x4.Identity, records);
+		Assert.That(records, Has.Count.EqualTo(1));
+		var firstMaterial = records[0].Material;
+
+		records.Clear();
+		runtime.CollectChunkDrawRecords(renderGraph, material, camera, Matrix4x4.Identity, records);
+		Assert.That(records, Has.Count.EqualTo(1));
+		Assert.That(records[0].Material, Is.SameAs(firstMaterial));
 	}
 
 	[Test]

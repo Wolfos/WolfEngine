@@ -1284,6 +1284,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         while (_drawableAcquireRunning)
         {
+            // TODO: Verify correct display timing here, the millisecond timeout is sus
             if (Screen.VSyncEnabled)
             {
                 ThreadingThread.Sleep(1);

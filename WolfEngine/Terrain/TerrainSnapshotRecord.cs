@@ -1,4 +1,5 @@
 using System.Numerics;
+using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
@@ -33,16 +34,18 @@ public readonly struct TerrainDrawSurface
 
 public readonly struct TerrainChunkDrawRecord
 {
-	public TerrainChunkDrawRecord(int chunkIndex, Mesh mesh, Matrix4x4 worldTransform, TerrainDrawSurface surface)
+	public TerrainChunkDrawRecord(int chunkIndex, Mesh mesh, Material material, Matrix4x4 worldTransform, TerrainDrawSurface surface)
 	{
 		ChunkIndex = chunkIndex;
 		Mesh = mesh;
+		Material = material;
 		WorldTransform = worldTransform;
 		Surface = surface;
 	}
 
 	public int ChunkIndex { get; }
 	public Mesh Mesh { get; }
+	public Material Material { get; }
 	public Matrix4x4 WorldTransform { get; }
 	public TerrainDrawSurface Surface { get; }
 }

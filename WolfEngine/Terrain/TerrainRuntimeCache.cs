@@ -15,7 +15,7 @@ internal sealed class TerrainRuntimeCache
 		RenderGraph renderGraph,
 		World world,
 		Entity entity,
-		in TerrainComponent component,
+		ref TerrainComponent component,
 		in WorldTransform transform,
 		Vector3 cameraOrigin,
 		GpuDrawDatabase gpuDrawDatabase)
@@ -35,13 +35,37 @@ internal sealed class TerrainRuntimeCache
 			return;
 		}
 
+		var material = ResolveTerrainMaterial(ref component, renderGraph);
 		var records = new List<TerrainChunkDrawRecord>(runtime.Chunks.Count);
-		runtime.CollectChunkDrawRecords(renderGraph, cameraOrigin, transform.LocalToWorld, records);
+		runtime.CollectChunkDrawRecords(renderGraph, material, cameraOrigin, transform.LocalToWorld, records);
 		for (var i = 0; i < records.Count; i++)
 		{
 			var record = records[i];
-			gpuDrawDatabase.TouchTerrainChunk(entity, record.ChunkIndex, record.Mesh, record.Surface, record.WorldTransform);
+			gpuDrawDatabase.TouchTerrainChunk(entity, record.ChunkIndex, record.Mesh, record.Material, record.Surface, record.WorldTransform);
 		}
+	}
+
+	private static Material ResolveTerrainMaterial(ref TerrainComponent component, RenderGraph renderGraph)
+	{
+		ArgumentNullException.ThrowIfNull(renderGraph);
+
+		component.Material ??= CreateTerrainMaterial();
+		renderGraph.EnsureMaterialResources(component.Material);
+		return component.Material;
+	}
+
+	private static Material CreateTerrainMaterial()
+	{
+		return new Material("__terrain__")
+		{
+			Color = ColorRGBA.White,
+			AlphaMode = AlphaMode.Opaque,
+			AlphaCutoff = 0.0f,
+			MetallicFactor = 0.0f,
+			RoughnessFactor = 1.0f,
+			EmissiveFactor = Vector3.Zero,
+			EmissiveIntensity = 0.0f
+		};
 	}
 
 	private readonly struct TerrainRuntimeKey : IEquatable<TerrainRuntimeKey>

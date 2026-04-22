@@ -118,6 +118,7 @@ public sealed class GpuDrawDatabase
 		Entity entity,
 		int chunkIndex,
 		Mesh mesh,
+		Material material,
 		in TerrainDrawSurface surface,
 		in Matrix4x4 worldTransform)
 	{
@@ -130,12 +131,11 @@ public sealed class GpuDrawDatabase
 					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.Terrain}.");
 			}
 
-			ApplyTerrainChanges(record, mesh, surface, worldTransform);
+			ApplyTerrainChanges(record, mesh, material, surface, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
-		var material = CreateTerrainMaterial();
 		var newRecord = CreateRecord(key, GpuDrawKind.Terrain, mesh, material, worldTransform);
 		newRecord.TerrainSurface = surface;
 		_records.Add(key, newRecord);
@@ -484,15 +484,18 @@ public sealed class GpuDrawDatabase
 	private void ApplyTerrainChanges(
 		DrawRecord record,
 		Mesh mesh,
+		Material material,
 		in TerrainDrawSurface surface,
 		in Matrix4x4 worldTransform)
 	{
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
+		var materialChanged = ReferenceEquals(record.Material, material) == false;
+		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
 		var surfaceChanged = record.TerrainSurface.HasValue == false || TerrainSurfaceEquals(record.TerrainSurface.Value, surface) == false;
 		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || surfaceChanged || settlePreviousTransform) == false)
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || surfaceChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
@@ -506,13 +509,20 @@ public sealed class GpuDrawDatabase
 			record.MeshHandle = AcquireMeshHandle(mesh);
 		}
 
+		if (materialChanged)
+		{
+			ReleaseMaterial(record.MaterialHandle, record.Material);
+			record.Material = material;
+			record.MaterialHandle = AcquireMaterialHandle(material);
+			record.MaterialResourceRevision = material.ResourceRevision;
+		}
+		else if (materialResourceChanged)
+		{
+			record.MaterialResourceRevision = material.ResourceRevision;
+		}
+
 		if (surfaceChanged)
 		{
-			var newMaterial = CreateTerrainMaterial();
-			ReleaseMaterial(record.MaterialHandle, record.Material);
-			record.Material = newMaterial;
-			record.MaterialHandle = AcquireMaterialHandle(newMaterial);
-			record.MaterialResourceRevision = newMaterial.ResourceRevision;
 			record.TerrainSurface = surface;
 		}
 
@@ -537,7 +547,7 @@ public sealed class GpuDrawDatabase
 				record.TerrainSurface));
 		}
 
-		if (surfaceChanged)
+		if (materialChanged || materialResourceChanged || surfaceChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
@@ -697,20 +707,6 @@ public sealed class GpuDrawDatabase
 		{
 			Color = tint,
 			AlphaMode = alphaMode,
-			AlphaCutoff = 0.0f,
-			MetallicFactor = 0.0f,
-			RoughnessFactor = 1.0f,
-			EmissiveFactor = Vector3.Zero,
-			EmissiveIntensity = 0.0f
-		};
-	}
-
-	private static Material CreateTerrainMaterial()
-	{
-		return new Material("__terrain__")
-		{
-			Color = ColorRGBA.White,
-			AlphaMode = AlphaMode.Opaque,
 			AlphaCutoff = 0.0f,
 			MetallicFactor = 0.0f,
 			RoughnessFactor = 1.0f,

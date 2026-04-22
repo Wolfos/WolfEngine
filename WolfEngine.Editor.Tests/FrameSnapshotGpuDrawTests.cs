@@ -268,13 +268,14 @@ public sealed class FrameSnapshotGpuDrawTests
 		var database = new GpuDrawDatabase();
 		var meshA = CreateTestMesh();
 		var meshB = CreateOffsetMesh();
+		var material = CreateTerrainMaterial();
 		var entity = new Entity(20, 1);
 		var updates = new List<GpuDrawUpdate>();
 		var surface = CreateTerrainSurface();
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, meshA, surface, Matrix4x4.Identity);
-		database.TouchTerrainChunk(entity, 1, meshB, surface, Matrix4x4.CreateTranslation(10.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, meshA, material, surface, Matrix4x4.Identity);
+		database.TouchTerrainChunk(entity, 1, meshB, material, surface, Matrix4x4.CreateTranslation(10.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
@@ -282,6 +283,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.Terrain), Is.True);
 		Assert.That(updates.All(update => update.Type == GpuDrawUpdateType.Add), Is.True);
 		Assert.That(updates[0].DrawHandle, Is.Not.EqualTo(updates[1].DrawHandle));
+		Assert.That(updates[0].MaterialHandle, Is.EqualTo(updates[1].MaterialHandle));
 
 		var entries = new List<GpuDrawEntry>();
 		database.CollectDrawEntries(entries);
@@ -289,6 +291,8 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(entries, Has.Count.EqualTo(2));
 		Assert.That(entries.All(entry => entry.DrawKind == GpuDrawKind.Terrain), Is.True);
 		Assert.That(entries.All(entry => entry.TerrainSurface.HasValue), Is.True);
+		Assert.That(entries.All(entry => ReferenceEquals(entry.Material, material)), Is.True);
+		Assert.That(entries[0].MaterialHandle, Is.EqualTo(entries[1].MaterialHandle));
 	}
 
 	[Test]
@@ -296,32 +300,36 @@ public sealed class FrameSnapshotGpuDrawTests
 	{
 		var database = new GpuDrawDatabase();
 		var mesh = CreateTestMesh();
+		var material = CreateTerrainMaterial();
 		var entity = new Entity(21, 1);
 		var updates = new List<GpuDrawUpdate>();
 		var initialSurface = CreateTerrainSurface();
 		var updatedSurface = CreateTerrainSurface(heightBlendSharpness: 8.0f);
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, initialSurface, Matrix4x4.Identity);
+		database.TouchTerrainChunk(entity, 0, mesh, material, initialSurface, Matrix4x4.Identity);
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 		var initialDrawHandle = updates[0].DrawHandle;
+		var initialMaterialHandle = updates[0].MaterialHandle;
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, initialSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, mesh, material, initialSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.UpdateTransform }));
 		Assert.That(updates[0].DrawHandle, Is.EqualTo(initialDrawHandle));
+		Assert.That(updates[0].MaterialHandle, Is.EqualTo(initialMaterialHandle));
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, updatedSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, mesh, material, updatedSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
 		Assert.That(updates.Select(update => update.Type), Does.Contain(GpuDrawUpdateType.UpdateMaterial));
 		Assert.That(updates.All(update => update.DrawHandle.Equals(initialDrawHandle)), Is.True);
+		Assert.That(updates.All(update => update.MaterialHandle.Equals(initialMaterialHandle)), Is.True);
 		Assert.That(updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMaterial).TerrainSurface!.Value.HeightBlendSharpness, Is.EqualTo(8.0f).Within(0.0001f));
 
 		database.BeginSync();
@@ -354,6 +362,20 @@ public sealed class FrameSnapshotGpuDrawTests
 		database.BeginSync();
 		database.TouchMesh(entity, mesh, material, Matrix4x4.CreateTranslation(translationX, 0.0f, 0.0f));
 		database.EndSync();
+	}
+
+	private static Material CreateTerrainMaterial()
+	{
+		return new Material("__terrain__")
+		{
+			Color = ColorRGBA.White,
+			AlphaMode = AlphaMode.Opaque,
+			AlphaCutoff = 0.0f,
+			MetallicFactor = 0.0f,
+			RoughnessFactor = 1.0f,
+			EmissiveFactor = Vector3.Zero,
+			EmissiveIntensity = 0.0f
+		};
 	}
 
 	private static Mesh CreateTestMesh()

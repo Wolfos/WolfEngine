@@ -135,7 +135,7 @@ public class RenderPipeline : IRenderPipeline
 							_renderGraph,
 							world,
 							entry.Entity,
-							entry.Second,
+							ref entry.Second,
 							entry.First,
 							cameraOrigin,
 							gpuDrawDatabase);
