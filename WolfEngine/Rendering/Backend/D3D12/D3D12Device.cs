@@ -1087,7 +1087,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return _graphicsExecuteIndirectSignature;
 		}
 
-		var argumentDescs = stackalloc IndirectArgumentDesc[11];
+		var argumentDescs = stackalloc IndirectArgumentDesc[13];
 
 		argumentDescs[0].Type = IndirectArgumentType.VertexBufferView;
 		argumentDescs[0].Anonymous.VertexBuffer.Slot = 0;
@@ -1118,12 +1118,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		argumentDescs[9].Type = IndirectArgumentType.ShaderResourceView;
 		argumentDescs[9].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
 
-		argumentDescs[10].Type = IndirectArgumentType.DrawIndexed;
+		argumentDescs[10].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[10].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT14;
+
+		argumentDescs[11].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[11].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT15;
+
+		argumentDescs[12].Type = IndirectArgumentType.DrawIndexed;
 
 		var signatureDesc = new CommandSignatureDesc
 		{
 			ByteStride = (uint)sizeof(D3D12IndirectCommandBuffer.CommandRecord),
-			NumArgumentDescs = 11,
+			NumArgumentDescs = 13,
 			PArgumentDescs = argumentDescs,
 			NodeMask = 0
 		};

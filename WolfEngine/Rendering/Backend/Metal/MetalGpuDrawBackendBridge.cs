@@ -110,7 +110,9 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		    resources.InstanceBuffer is not MetalBuffer instanceBuffer ||
 		    resources.MaterialBuffer is not MetalBuffer materialBuffer ||
 		    resources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
-		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer)
+		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer ||
+		    resources.TerrainMaterialBuffer is not MetalBuffer terrainMaterialBuffer ||
+		    resources.TerrainLayerBuffer is not MetalBuffer terrainLayerBuffer)
 		{
 			return false;
 		}
@@ -139,6 +141,8 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			instanceBuffer,
 			materialBuffer,
 			materialGenerationBuffer,
+			terrainMaterialBuffer,
+			terrainLayerBuffer,
 			drawArgsBuffer,
 			bindings,
 			_descriptorTable.CountBuffer,

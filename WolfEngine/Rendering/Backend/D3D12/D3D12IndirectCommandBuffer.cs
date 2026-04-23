@@ -25,6 +25,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
 		public ulong SrvT13Address;
+		public ulong SrvT14Address;
+		public ulong SrvT15Address;
 		public DrawIndexedArguments DrawArguments;
 	}
 
@@ -101,6 +103,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		D3D12Buffer materialBuffer,
 		D3D12Buffer drawArgsBuffer,
 		D3D12Buffer materialGenerationBuffer,
+		D3D12Buffer terrainMaterialBuffer,
+		D3D12Buffer terrainLayerBuffer,
 		D3D12Buffer cameraBuffer,
 		D3D12Buffer shadowCameraBuffer,
 		D3D12Buffer transparentEnvironmentBuffer,
@@ -126,6 +130,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		    materialBuffer.Resource.Handle is null ||
 		    drawArgsBuffer.Resource.Handle is null ||
 		    materialGenerationBuffer.Resource.Handle is null ||
+		    terrainMaterialBuffer.Resource.Handle is null ||
+		    terrainLayerBuffer.Resource.Handle is null ||
 		    cameraBuffer.Resource.Handle is null ||
 		    shadowCameraBuffer.Resource.Handle is null ||
 		    transparentEnvironmentBuffer.Resource.Handle is null ||
@@ -157,6 +163,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			SrvT11Address = materialBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT12Address = drawArgsBuffer.Resource.Handle->GetGPUVirtualAddress() + (commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			SrvT13Address = materialGenerationBuffer.Resource.Handle->GetGPUVirtualAddress(),
+			SrvT14Address = terrainMaterialBuffer.Resource.Handle->GetGPUVirtualAddress(),
+			SrvT15Address = terrainLayerBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			DrawArguments = new DrawIndexedArguments
 			{
 				IndexCountPerInstance = mesh.IndexCount,

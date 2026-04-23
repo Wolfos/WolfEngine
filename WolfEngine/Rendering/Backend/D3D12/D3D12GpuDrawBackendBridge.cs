@@ -79,6 +79,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		    resources.MaterialBuffer is not D3D12Buffer materialBuffer ||
 		    resources.DrawArgsBuffer is not D3D12Buffer drawArgsBuffer ||
 		    resources.MaterialGenerationBuffer is not D3D12Buffer materialGenerationBuffer ||
+		    resources.TerrainMaterialBuffer is not D3D12Buffer terrainMaterialBuffer ||
+		    resources.TerrainLayerBuffer is not D3D12Buffer terrainLayerBuffer ||
 		    resources.CameraBuffer is not D3D12Buffer cameraBuffer ||
 		    resources.ShadowCameraBuffer is not D3D12Buffer shadowCameraBuffer ||
 		    resources.TransparentEnvironmentBuffer is not D3D12Buffer transparentEnvironmentBuffer ||
@@ -94,6 +96,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			materialBuffer,
 			drawArgsBuffer,
 			materialGenerationBuffer,
+			terrainMaterialBuffer,
+			terrainLayerBuffer,
 			cameraBuffer,
 			shadowCameraBuffer,
 			transparentEnvironmentBuffer,
