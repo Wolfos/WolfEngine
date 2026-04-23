@@ -367,6 +367,7 @@ public readonly struct GpuTerrainLayerUpdateData
 {
 	public GpuTerrainLayerUpdateData(
 		uint materialHandle,
+		uint layerStart,
 		uint layerIndex,
 		uint albedoHandle,
 		uint normalHandle,
@@ -377,6 +378,7 @@ public readonly struct GpuTerrainLayerUpdateData
 		float scale)
 	{
 		MaterialHandle = materialHandle;
+		LayerStart = layerStart;
 		LayerIndex = layerIndex;
 		AlbedoHandle = albedoHandle;
 		NormalHandle = normalHandle;
@@ -387,10 +389,10 @@ public readonly struct GpuTerrainLayerUpdateData
 		Scale = scale;
 		_pad0 = 0;
 		_pad1 = 0;
-		_pad2 = 0;
 	}
 
 	public readonly uint MaterialHandle;
+	public readonly uint LayerStart;
 	public readonly uint LayerIndex;
 	public readonly uint AlbedoHandle;
 	public readonly uint NormalHandle;
@@ -401,5 +403,4 @@ public readonly struct GpuTerrainLayerUpdateData
 	public readonly float Scale;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
-	private readonly uint _pad2;
 }

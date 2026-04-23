@@ -500,7 +500,7 @@ public sealed class GpuDrawPass
 						var previousTerrainState = forceGpuRefresh || _terrainMaterialStates.TryGetValue(update.MaterialHandle.Value, out var uploadedSurface) == false
 							? default(TerrainDrawSurface?)
 							: uploadedSurface;
-						AppendTerrainLayerUpdates(update.MaterialHandle.Value, terrainSurface, previousTerrainState, forceGpuRefresh);
+						AppendTerrainLayerUpdates(update.MaterialHandle.Value, layerStart, terrainSurface, previousTerrainState, forceGpuRefresh);
 					}
 					_terrainMaterialStates[update.MaterialHandle.Value] = terrainSurface;
 				}
@@ -642,6 +642,7 @@ public sealed class GpuDrawPass
 
 	private void AppendTerrainLayerUpdates(
 		uint materialHandle,
+		uint layerStart,
 		in TerrainDrawSurface currentSurface,
 		TerrainDrawSurface? previousSurface,
 		bool forceAllLayers)
@@ -677,6 +678,7 @@ public sealed class GpuDrawPass
 				ref scale);
 			_terrainLayerUpdateData.Add(new GpuTerrainLayerUpdateData(
 				materialHandle,
+				layerStart,
 				(uint)layerIndex,
 				albedoHandle,
 				normalHandle,
@@ -691,10 +693,15 @@ public sealed class GpuDrawPass
 	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)
 	{
 		return ReferenceEquals(left.Albedo, right.Albedo) &&
+		       left.AlbedoResourceRevision == right.AlbedoResourceRevision &&
 		       ReferenceEquals(left.Normal, right.Normal) &&
+		       left.NormalResourceRevision == right.NormalResourceRevision &&
 		       ReferenceEquals(left.MetallicRoughness, right.MetallicRoughness) &&
+		       left.MetallicRoughnessResourceRevision == right.MetallicRoughnessResourceRevision &&
 		       ReferenceEquals(left.Occlusion, right.Occlusion) &&
+		       left.OcclusionResourceRevision == right.OcclusionResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
+		       left.HeightResourceRevision == right.HeightResourceRevision &&
 		       Math.Abs(left.Scale - right.Scale) <= 0.0001f;
 	}
 
@@ -816,10 +823,9 @@ public sealed class GpuDrawPass
 				var slots = _terrainLayerUpdateBindings?.Slots
 					?? throw new InvalidOperationException("Terrain layer update bindings were not reflected.");
 				commandList.SetComputeBuffer(slots[0], _gpuDrawResources.TerrainLayerUpdateBuffer!);
-				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainMaterialBuffer!);
-				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.TerrainLayerBuffer!);
-				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.MaterialGenerationBuffer!);
-				commandList.SetComputeBuffer(slots[4], _gpuDrawResources.DiagnosticsCounterBuffer!);
+				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainLayerBuffer!);
+				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
 		if (_terrainMaterialUpdateData.Count > 0)
 		{
@@ -1016,7 +1022,6 @@ public sealed class GpuDrawPass
 			new ShaderPropertyWriter(terrainLayerUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 		_terrainLayerUpdateBindings = new ComputeResourceBindings(
 			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Updates").RegisterIndex,
-			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_TerrainMaterialTable").RegisterIndex,
 			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_TerrainLayerTable").RegisterIndex,
 			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_MaterialGenerations").RegisterIndex,
 			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);

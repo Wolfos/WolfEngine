@@ -718,6 +718,7 @@ public sealed class GpuDrawDatabase
 	private static bool TerrainSurfaceEquals(in TerrainDrawSurface left, in TerrainDrawSurface right)
 	{
 		if (!ReferenceEquals(left.ControlMap, right.ControlMap) ||
+		    left.ControlMapResourceRevision != right.ControlMapResourceRevision ||
 		    left.LayerCount != right.LayerCount ||
 		    MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) > 0.0001f ||
 		    left.Layers.Count != right.Layers.Count)
@@ -739,10 +740,15 @@ public sealed class GpuDrawDatabase
 	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)
 	{
 		return ReferenceEquals(left.Albedo, right.Albedo) &&
+		       left.AlbedoResourceRevision == right.AlbedoResourceRevision &&
 		       ReferenceEquals(left.Normal, right.Normal) &&
+		       left.NormalResourceRevision == right.NormalResourceRevision &&
 		       ReferenceEquals(left.MetallicRoughness, right.MetallicRoughness) &&
+		       left.MetallicRoughnessResourceRevision == right.MetallicRoughnessResourceRevision &&
 		       ReferenceEquals(left.Occlusion, right.Occlusion) &&
+		       left.OcclusionResourceRevision == right.OcclusionResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
+		       left.HeightResourceRevision == right.HeightResourceRevision &&
 		       MathF.Abs(left.Scale - right.Scale) <= 0.0001f;
 	}
 

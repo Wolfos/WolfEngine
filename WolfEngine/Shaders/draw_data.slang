@@ -165,6 +165,7 @@ struct GpuTerrainMaterialUpdateData
 struct GpuTerrainLayerUpdateData
 {
     uint32_t materialHandle;
+    uint32_t layerStart;
     uint32_t layerIndex;
     uint32_t albedoHandle;
     uint32_t normalHandle;
@@ -175,5 +176,4 @@ struct GpuTerrainLayerUpdateData
     float scale;
     uint32_t pad0;
     uint32_t pad1;
-    uint32_t pad2;
 };
