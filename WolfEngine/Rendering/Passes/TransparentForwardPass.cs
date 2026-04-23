@@ -289,7 +289,6 @@ public sealed class TransparentForwardPass
 			}
 
 			var pipeline = EnsurePipeline(device, laneDefinition);
-			gpuDrawResources.SetExecutionLaneBufferBindings(laneDefinition, _bufferBindingsByExecutionKey[laneDefinition.Key]);
 			buckets.Add(new TransparentExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,

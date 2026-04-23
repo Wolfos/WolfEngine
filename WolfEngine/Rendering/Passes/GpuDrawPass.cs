@@ -38,6 +38,8 @@ public sealed class GpuDrawPass
 	private ComputeThreadGroupSize? _terrainMaterialUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _cullThreadGroupSize;
+	private ComputeResourceBindings? _terrainMaterialUpdateBindings;
+	private ComputeResourceBindings? _terrainLayerUpdateBindings;
 	private ShaderPropertyWriter? _instanceUpdateParamsWriter;
 	private ShaderPropertyWriter? _meshUpdateParamsWriter;
 	private ShaderPropertyWriter? _materialUpdateParamsWriter;
@@ -72,6 +74,14 @@ public sealed class GpuDrawPass
 	private bool _loggedUpdateOverflowRecovery;
 	private bool _loggedUnsupportedDrawKind;
 	private bool _gpuStateBootstrapPending = true;
+	private bool _loggedMetalTerrainReflectionDiagnostics;
+	private bool _loggedMetalTerrainGraphicsBindingDiagnostics;
+	private bool _loggedMetalTerrainPayloadDiagnostics;
+	private bool _loggedMetalTerrainLayerPayloadDiagnostics;
+	private bool _loggedMetalTerrainReadbackDiagnostics;
+	private uint? _pendingMetalTerrainReadbackIndex;
+	private uint? _pendingMetalTerrainLayerReadbackStart;
+	private uint _pendingMetalTerrainLayerReadbackCount;
 
 	private const uint DrawFlagActive = GpuDrawFlags.Active;
 	private const int DrawFlagBucketShift = GpuDrawFlags.BucketShift;
@@ -114,6 +124,8 @@ public sealed class GpuDrawPass
 
 	private readonly record struct TerrainMaterialAllocation(uint LayerStart, uint LayerCount);
 
+	private readonly record struct ComputeResourceBindings(params uint[] Slots);
+
 	public GpuDrawPass(IShaderCompiler shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats, IRenderer renderer,
@@ -132,6 +144,8 @@ public sealed class GpuDrawPass
 	{
 		var drawDatabase = context.GpuDrawDatabase;
 		var device = _renderer.GetGfxDevice();
+		TryLogPendingMetalTerrainReadback(device.BackendKind);
+		TryLogPendingMetalTerrainLayerReadback(device.BackendKind);
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureTerrainSamplers();
 		_gpuDrawResources.EnsureCreated(device);
@@ -762,6 +776,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
+		TryLogMetalTerrainMaterialPayload(device.BackendKind);
 		WriteBuffer(_gpuDrawResources.TerrainMaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainMaterialUpdateData), "TerrainMaterialUpdateBuffer");
 		DispatchUpdatePass(
 			context,
@@ -771,11 +786,14 @@ public sealed class GpuDrawPass
 			(uint)_terrainMaterialUpdateData.Count,
 			commandList =>
 			{
-				commandList.SetComputeBuffer(0, _gpuDrawResources.TerrainMaterialUpdateBuffer!);
-				commandList.SetComputeBuffer(1, _gpuDrawResources.TerrainMaterialBuffer!);
-				commandList.SetComputeBuffer(2, _gpuDrawResources.MaterialGenerationBuffer!);
-				commandList.SetComputeBuffer(3, _gpuDrawResources.DiagnosticsCounterBuffer!);
+				var slots = _terrainMaterialUpdateBindings?.Slots
+					?? throw new InvalidOperationException("Terrain material update bindings were not reflected.");
+				commandList.SetComputeBuffer(slots[0], _gpuDrawResources.TerrainMaterialUpdateBuffer!);
+				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainMaterialBuffer!);
+				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
+		_pendingMetalTerrainReadbackIndex = GetPackedHandleIndex(_terrainMaterialUpdateData[0].MaterialHandle);
 	}
 
 	private void DispatchTerrainLayerUpdates(RenderGraphContext context, IGfxDevice device)
@@ -785,6 +803,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
+		TryLogMetalTerrainLayerPayload(device.BackendKind);
 		WriteBuffer(_gpuDrawResources.TerrainLayerUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainLayerUpdateData), "TerrainLayerUpdateBuffer");
 		DispatchUpdatePass(
 			context,
@@ -794,12 +813,19 @@ public sealed class GpuDrawPass
 			(uint)_terrainLayerUpdateData.Count,
 			commandList =>
 			{
-				commandList.SetComputeBuffer(0, _gpuDrawResources.TerrainLayerUpdateBuffer!);
-				commandList.SetComputeBuffer(1, _gpuDrawResources.TerrainMaterialBuffer!);
-				commandList.SetComputeBuffer(2, _gpuDrawResources.TerrainLayerBuffer!);
-				commandList.SetComputeBuffer(3, _gpuDrawResources.MaterialGenerationBuffer!);
-				commandList.SetComputeBuffer(4, _gpuDrawResources.DiagnosticsCounterBuffer!);
+				var slots = _terrainLayerUpdateBindings?.Slots
+					?? throw new InvalidOperationException("Terrain layer update bindings were not reflected.");
+				commandList.SetComputeBuffer(slots[0], _gpuDrawResources.TerrainLayerUpdateBuffer!);
+				commandList.SetComputeBuffer(slots[1], _gpuDrawResources.TerrainMaterialBuffer!);
+				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.TerrainLayerBuffer!);
+				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(slots[4], _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
+		if (_terrainMaterialUpdateData.Count > 0)
+		{
+			_pendingMetalTerrainLayerReadbackStart = _terrainMaterialUpdateData[0].LayerStart;
+			_pendingMetalTerrainLayerReadbackCount = _terrainMaterialUpdateData[0].LayerCount;
+		}
 	}
 
 	private void DispatchUpdatePass(
@@ -974,6 +1000,11 @@ public sealed class GpuDrawPass
 		_terrainMaterialUpdateThreadGroupSize = terrainMaterialUpdateCompiled.ThreadGroupSize;
 		_terrainMaterialUpdateParamsWriter =
 			new ShaderPropertyWriter(terrainMaterialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+		_terrainMaterialUpdateBindings = new ComputeResourceBindings(
+			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_Updates").RegisterIndex,
+			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_TerrainMaterialTable").RegisterIndex,
+			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_MaterialGenerations").RegisterIndex,
+			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
 
 		var terrainLayerUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"gpu_draw_terrain_layer_update.compute.slang",
@@ -983,6 +1014,13 @@ public sealed class GpuDrawPass
 		_terrainLayerUpdateThreadGroupSize = terrainLayerUpdateCompiled.ThreadGroupSize;
 		_terrainLayerUpdateParamsWriter =
 			new ShaderPropertyWriter(terrainLayerUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
+		_terrainLayerUpdateBindings = new ComputeResourceBindings(
+			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Updates").RegisterIndex,
+			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_TerrainMaterialTable").RegisterIndex,
+			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_TerrainLayerTable").RegisterIndex,
+			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_MaterialGenerations").RegisterIndex,
+			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
+		TryLogMetalTerrainReflectionBindings(backendKind);
 
 		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"gpu_draw_cull.compute.slang",
@@ -1054,7 +1092,9 @@ public sealed class GpuDrawPass
 				layout: GraphicsLayoutKind.Material,
 				shaderVariant: $"GBuffer:{lane.ShaderVariant}");
 			_gpuDrawResources.SetGBufferPipeline(lane, device.GetOrCreatePipeline(pipelineKey, shaderSet));
-			_gpuDrawResources.SetGBufferBufferBindings(lane, SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout));
+			var bindings = SharedDrawGraphicsBufferBindings.FromGBufferReflection(compiled.ReflectionLayout);
+			_gpuDrawResources.SetGBufferBufferBindings(lane, bindings);
+			TryLogMetalTerrainGraphicsBindings(device.BackendKind, lane.DrawKind, compiled.ReflectionLayout, bindings);
 		}
 	}
 
@@ -1313,7 +1353,7 @@ public sealed class GpuDrawPass
 			return false;
 		}
 
-		var bindings = _gpuDrawResources.GetExecutionLaneBufferBindings(executionLaneIndex)
+		var bindings = _gpuDrawResources.GetGBufferBufferBindings(executionLaneIndex)
 		               ?? throw new InvalidOperationException(
 			               $"Missing reflected shared-draw buffer bindings for execution lane {executionLaneIndex}.");
 		return _backendBridge.TryEncodeIndexedDrawCommand(indirectCommands, commandIndex, mesh, _gpuDrawResources, bindings);
@@ -1518,6 +1558,229 @@ public sealed class GpuDrawPass
 		}
 
 		return _bindlessRegistry.GetTextureHandle(texture.Resources).Value;
+	}
+
+	private void TryLogMetalTerrainReflectionBindings(GraphicsBackendKind backendKind)
+	{
+		if (backendKind != GraphicsBackendKind.Metal || _loggedMetalTerrainReflectionDiagnostics)
+		{
+			return;
+		}
+
+		var terrainMaterialSlots = _terrainMaterialUpdateBindings?.Slots;
+		var terrainLayerSlots = _terrainLayerUpdateBindings?.Slots;
+		if (terrainMaterialSlots is null || terrainLayerSlots is null)
+		{
+			return;
+		}
+
+		_loggedMetalTerrainReflectionDiagnostics = true;
+		Console.WriteLine(
+			$"GpuDraw Metal terrain reflection: CSUpdateTerrainMaterial slots=[{string.Join(", ", terrainMaterialSlots)}], " +
+			$"CSUpdateTerrainLayer slots=[{string.Join(", ", terrainLayerSlots)}].");
+	}
+
+	private void TryLogMetalTerrainGraphicsBindings(
+		GraphicsBackendKind backendKind,
+		GpuDrawKind drawKind,
+		ShaderReflectionLayout reflectionLayout,
+		in SharedDrawGraphicsBufferBindings bindings)
+	{
+		if (backendKind != GraphicsBackendKind.Metal ||
+		    drawKind != GpuDrawKind.Terrain ||
+		    _loggedMetalTerrainGraphicsBindingDiagnostics)
+		{
+			return;
+		}
+
+		_loggedMetalTerrainGraphicsBindingDiagnostics = true;
+		var cameraRegister = reflectionLayout.GetConstantBuffer("CameraParams").RegisterIndex;
+		Console.WriteLine(
+			$"GpuDraw Metal terrain graphics bindings: " +
+			$"camera=b{cameraRegister}, " +
+			$"instance=t{bindings.InstanceRegisterIndex}, " +
+			$"material=t{bindings.MaterialRegisterIndex}, " +
+			$"drawArgs=t{bindings.DrawArgsRegisterIndex}, " +
+			$"materialGenerations=t{bindings.MaterialGenerationRegisterIndex}, " +
+			$"terrainMaterial=t{bindings.TerrainMaterialRegisterIndex?.ToString() ?? "null"}, " +
+			$"terrainLayer=t{bindings.TerrainLayerRegisterIndex?.ToString() ?? "null"}.");
+	}
+
+	private void TryLogMetalTerrainMaterialPayload(GraphicsBackendKind backendKind)
+	{
+		if (backendKind != GraphicsBackendKind.Metal || _loggedMetalTerrainPayloadDiagnostics || _terrainMaterialUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		_loggedMetalTerrainPayloadDiagnostics = true;
+		var update = _terrainMaterialUpdateData[0];
+		var materialIndex = GetPackedHandleIndex(update.MaterialHandle);
+		var hasRow0 = TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, 0, out GpuTerrainMaterialData row0);
+		var hasRow1 = TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, 1, out GpuTerrainMaterialData row1);
+		var hasTargetRow = TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, materialIndex, out GpuTerrainMaterialData targetRow);
+		Console.WriteLine(
+			$"GpuDraw Metal terrain payload: update0 materialHandle=0x{update.MaterialHandle:X8} materialIndex={materialIndex} " +
+			$"controlMap=0x{update.ControlMapHandle:X8} hasControlMap={update.HasControlMap} " +
+			$"layerSampler=0x{update.LayerSamplerHandle:X8} controlSampler=0x{update.ControlSamplerHandle:X8} " +
+			$"layerStart={update.LayerStart} layerCount={update.LayerCount} heightBlendSharpness={update.HeightBlendSharpness:F4}.");
+		if (hasRow0)
+		{
+			Console.WriteLine($"GpuDraw Metal terrain payload: pre-dispatch row0={DescribeTerrainMaterialData(in row0)}.");
+		}
+
+		if (hasRow1)
+		{
+			Console.WriteLine($"GpuDraw Metal terrain payload: pre-dispatch row1={DescribeTerrainMaterialData(in row1)}.");
+		}
+
+		if (hasTargetRow)
+		{
+			Console.WriteLine($"GpuDraw Metal terrain payload: pre-dispatch targetRow[{materialIndex}]={DescribeTerrainMaterialData(in targetRow)}.");
+		}
+
+		LogTerrainMaterialRowRange("GpuDraw Metal terrain payload: pre-dispatch", 0, 4);
+	}
+
+	private void TryLogPendingMetalTerrainReadback(GraphicsBackendKind backendKind)
+	{
+		if (backendKind != GraphicsBackendKind.Metal ||
+		    _loggedMetalTerrainReadbackDiagnostics ||
+		    _pendingMetalTerrainReadbackIndex is not { } materialIndex)
+		{
+			return;
+		}
+
+		if (TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, 0, out GpuTerrainMaterialData row0) == false ||
+		    TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, 1, out GpuTerrainMaterialData row1) == false ||
+		    TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, materialIndex, out GpuTerrainMaterialData targetRow) == false)
+		{
+			return;
+		}
+
+		_loggedMetalTerrainReadbackDiagnostics = true;
+		_pendingMetalTerrainReadbackIndex = null;
+		Console.WriteLine(
+			$"GpuDraw Metal terrain readback: row0={DescribeTerrainMaterialData(in row0)}; " +
+			$"row1={DescribeTerrainMaterialData(in row1)}; " +
+			$"targetRow[{materialIndex}]={DescribeTerrainMaterialData(in targetRow)}.");
+		LogTerrainMaterialRowRange("GpuDraw Metal terrain readback", 0, 4);
+		TryLogPendingMetalTerrainLayerReadback(backendKind);
+	}
+
+	private void LogTerrainMaterialRowRange(string prefix, uint startInclusive, uint endInclusive)
+	{
+		if (_gpuDrawResources.TerrainMaterialBuffer is not IReadableGpuBuffer)
+		{
+			return;
+		}
+
+		for (var rowIndex = startInclusive; rowIndex <= endInclusive; rowIndex++)
+		{
+			if (TryReadBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, rowIndex, out GpuTerrainMaterialData row) == false)
+			{
+				return;
+			}
+
+			Console.WriteLine($"{prefix} row[{rowIndex}]={DescribeTerrainMaterialData(in row)}.");
+		}
+	}
+
+	private void TryLogMetalTerrainLayerPayload(GraphicsBackendKind backendKind)
+	{
+		if (backendKind != GraphicsBackendKind.Metal || _loggedMetalTerrainLayerPayloadDiagnostics || _terrainLayerUpdateData.Count == 0)
+		{
+			return;
+		}
+
+		_loggedMetalTerrainLayerPayloadDiagnostics = true;
+		var update0 = _terrainLayerUpdateData[0];
+		Console.WriteLine(
+			$"GpuDraw Metal terrain layer payload: update0 materialHandle=0x{update0.MaterialHandle:X8} " +
+			$"layerIndex={update0.LayerIndex} albedo=0x{update0.AlbedoHandle:X8} normal=0x{update0.NormalHandle:X8} " +
+			$"metallicRoughness=0x{update0.MetallicRoughnessHandle:X8} occlusion=0x{update0.OcclusionHandle:X8} " +
+			$"height=0x{update0.HeightHandle:X8} hasHeight={update0.HasHeight} scale={update0.Scale:F4}.");
+		for (var i = 0; i < Math.Min(_terrainLayerUpdateData.Count, 4); i++)
+		{
+			var update = _terrainLayerUpdateData[i];
+			Console.WriteLine(
+				$"GpuDraw Metal terrain layer payload: queued[{i}] layerIndex={update.LayerIndex} " +
+				$"albedo=0x{update.AlbedoHandle:X8} normal=0x{update.NormalHandle:X8} " +
+				$"metallicRoughness=0x{update.MetallicRoughnessHandle:X8} occlusion=0x{update.OcclusionHandle:X8} " +
+				$"height=0x{update.HeightHandle:X8} hasHeight={update.HasHeight} scale={update.Scale:F4}.");
+		}
+
+		if (_terrainMaterialUpdateData.Count > 0)
+		{
+			var layerStart = _terrainMaterialUpdateData[0].LayerStart;
+			var layerCount = Math.Max(_terrainMaterialUpdateData[0].LayerCount, 1u);
+			LogTerrainLayerRowRange("GpuDraw Metal terrain layer payload: pre-dispatch", layerStart, layerStart + Math.Min(layerCount, 4u) - 1u);
+		}
+	}
+
+	private void TryLogPendingMetalTerrainLayerReadback(GraphicsBackendKind backendKind)
+	{
+		if (backendKind != GraphicsBackendKind.Metal ||
+		    _pendingMetalTerrainLayerReadbackStart is not { } layerStart ||
+		    _pendingMetalTerrainLayerReadbackCount == 0)
+		{
+			return;
+		}
+
+		var rowCount = Math.Min(_pendingMetalTerrainLayerReadbackCount, 4u);
+		LogTerrainLayerRowRange("GpuDraw Metal terrain layer readback", layerStart, layerStart + rowCount - 1u);
+		_pendingMetalTerrainLayerReadbackStart = null;
+		_pendingMetalTerrainLayerReadbackCount = 0;
+	}
+
+	private void LogTerrainLayerRowRange(string prefix, uint startInclusive, uint endInclusive)
+	{
+		if (_gpuDrawResources.TerrainLayerBuffer is not IReadableGpuBuffer)
+		{
+			return;
+		}
+
+		for (var rowIndex = startInclusive; rowIndex <= endInclusive; rowIndex++)
+		{
+			if (TryReadBufferElement(_gpuDrawResources.TerrainLayerBuffer!, rowIndex, out GpuTerrainLayerData row) == false)
+			{
+				return;
+			}
+
+			Console.WriteLine($"{prefix} row[{rowIndex}]={DescribeTerrainLayerData(in row)}.");
+		}
+	}
+
+	private static string DescribeTerrainLayerData(in GpuTerrainLayerData data)
+	{
+		return $"albedo=0x{data.AlbedoHandle:X8}, normal=0x{data.NormalHandle:X8}, " +
+		       $"metallicRoughness=0x{data.MetallicRoughnessHandle:X8}, occlusion=0x{data.OcclusionHandle:X8}, " +
+		       $"height=0x{data.HeightHandle:X8}, hasHeight={data.HasHeight}, scale={data.Scale:F4}";
+	}
+
+	private static string DescribeTerrainMaterialData(in GpuTerrainMaterialData data)
+	{
+		return $"controlMap=0x{data.ControlMapHandle:X8}, hasControlMap={data.HasControlMap}, " +
+		       $"layerSampler=0x{data.LayerSamplerHandle:X8}, controlSampler=0x{data.ControlSamplerHandle:X8}, " +
+		       $"layerStart={data.LayerStart}, layerCount={data.LayerCount}, heightBlendSharpness={data.HeightBlendSharpness:F4}";
+	}
+
+	private static uint GetPackedHandleIndex(uint handle) => handle & 0xFFFFu;
+
+	private static bool TryReadBufferElement<T>(IGfxBuffer buffer, ulong elementOffset, out T value)
+		where T : unmanaged
+	{
+		if (buffer is not IReadableGpuBuffer readableBuffer)
+		{
+			value = default;
+			return false;
+		}
+
+		var byteSize = Marshal.SizeOf<T>();
+		Span<byte> bytes = stackalloc byte[byteSize];
+		readableBuffer.Read(bytes, elementOffset * (ulong)byteSize);
+		value = MemoryMarshal.Read<T>(bytes);
+		return true;
 	}
 
 	private static string GetGBufferShaderPath(GpuDrawKind drawKind) => drawKind switch

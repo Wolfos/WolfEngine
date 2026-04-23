@@ -102,8 +102,9 @@ public class ShaderCompiler : IShaderCompiler
 			}
 		}
 
-		var metalLibrary = SlangCompiler.Compile(args.ToArray());
-		DumpMetalLibraryIfRequested(shaderPath, metalLibrary);
+		var compileArgs = args.ToArray();
+		var metalLibrary = SlangCompiler.Compile(compileArgs);
+		DumpMetalLibraryIfRequested(shaderPath, compileArgs, metalLibrary);
 		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
 		return metalLibrary;
 	}
@@ -148,23 +149,98 @@ public class ShaderCompiler : IShaderCompiler
 		};
 
 		var metalLibrary = SlangCompiler.Compile(args);
-		DumpMetalLibraryIfRequested(shaderPath, metalLibrary);
+		DumpMetalLibraryIfRequested(shaderPath, args, metalLibrary);
 		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
 		return metalLibrary;
 	}
 
-	private static void DumpMetalLibraryIfRequested(string shaderPath, ReadOnlySpan<byte> metalLibrary)
+	private static void DumpMetalLibraryIfRequested(string shaderPath, IReadOnlyList<string> compileArgs, ReadOnlySpan<byte> metalLibrary)
 	{
-		var shouldDump = Environment.GetEnvironmentVariable("WOLF_DUMP_METALLIB") == "1" ||
-		                 Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") == "1";
-		if (shouldDump == false)
+		var shouldDumpMetallib = Environment.GetEnvironmentVariable("WOLF_DUMP_METALLIB") == "1";
+		var shouldDumpMsl = Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") == "1";
+		if (shouldDumpMetallib == false && shouldDumpMsl == false)
 		{
 			return;
 		}
 
-		var fileName = Path.GetFileNameWithoutExtension(shaderPath) + ".metallib";
-		var outputPath = Path.Combine(AppContext.BaseDirectory, "Shaders", fileName);
-		File.WriteAllBytes(outputPath, metalLibrary.ToArray());
+		var dumpBaseName = BuildMetalDumpBaseName(shaderPath, compileArgs);
+		var shaderOutputDirectory = Path.Combine(AppContext.BaseDirectory, "Shaders");
+		if (shouldDumpMetallib)
+		{
+			var metallibPath = Path.Combine(shaderOutputDirectory, $"{dumpBaseName}.metallib");
+			File.WriteAllBytes(metallibPath, metalLibrary.ToArray());
+		}
+
+		if (shouldDumpMsl)
+		{
+			var metalSourceArgs = RewriteMetalCompileArgsForSource(compileArgs);
+			var metalSource = SlangCompiler.Compile(metalSourceArgs);
+			var metalSourcePath = Path.Combine(shaderOutputDirectory, $"{dumpBaseName}.metal");
+			File.WriteAllBytes(metalSourcePath, metalSource.ToArray());
+		}
+	}
+
+	private static string[] RewriteMetalCompileArgsForSource(IReadOnlyList<string> compileArgs)
+	{
+		var rewritten = new List<string>(compileArgs.Count);
+		for (var i = 0; i < compileArgs.Count; i++)
+		{
+			var arg = compileArgs[i];
+			if (arg == "-target" && i + 1 < compileArgs.Count)
+			{
+				rewritten.Add(arg);
+				rewritten.Add("metal");
+				i++;
+				continue;
+			}
+
+			rewritten.Add(arg);
+		}
+
+		return rewritten.ToArray();
+	}
+
+	private static string BuildMetalDumpBaseName(string shaderPath, IReadOnlyList<string> compileArgs)
+	{
+		var baseName = Path.GetFileNameWithoutExtension(shaderPath);
+		var entrySuffixParts = new List<string>();
+		for (var i = 0; i < compileArgs.Count; i++)
+		{
+			if (compileArgs[i] != "-entry" || i + 1 >= compileArgs.Count)
+			{
+				continue;
+			}
+
+			entrySuffixParts.Add(SanitizeFileNamePart(compileArgs[i + 1]));
+			i++;
+		}
+
+		if (entrySuffixParts.Count == 0)
+		{
+			return baseName;
+		}
+
+		return $"{baseName}.{string.Join(".", entrySuffixParts)}";
+	}
+
+	private static string SanitizeFileNamePart(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return "unnamed";
+		}
+
+		var invalidChars = Path.GetInvalidFileNameChars();
+		var sanitizedChars = value.ToCharArray();
+		for (var i = 0; i < sanitizedChars.Length; i++)
+		{
+			if (Array.IndexOf(invalidChars, sanitizedChars[i]) >= 0)
+			{
+				sanitizedChars[i] = '_';
+			}
+		}
+
+		return new string(sanitizedChars);
 	}
 
 

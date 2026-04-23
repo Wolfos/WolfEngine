@@ -97,7 +97,6 @@ public sealed class ShadowMapPass
 			}
 
 			var pipeline = EnsurePipeline(device, laneDefinition, cascadeIndex);
-			gpuDrawResources.SetExecutionLaneBufferBindings(laneDefinition, _bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)]);
 			buckets.Add(new ShadowMapExecutionBucket(
 				laneDefinition.DrawKind,
 				laneDefinition.BucketId,

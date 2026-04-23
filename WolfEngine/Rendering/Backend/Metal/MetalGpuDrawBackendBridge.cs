@@ -104,9 +104,6 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
 		    resources.CameraBuffer is not MetalBuffer cameraBuffer ||
-		    resources.ShadowCameraBuffer is not MetalBuffer shadowCameraBuffer ||
-		    resources.TransparentEnvironmentBuffer is not MetalBuffer transparentEnvironmentBuffer ||
-		    resources.TransparentLightingBuffer is not MetalBuffer transparentLightingBuffer ||
 		    resources.InstanceBuffer is not MetalBuffer instanceBuffer ||
 		    resources.MaterialBuffer is not MetalBuffer materialBuffer ||
 		    resources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
@@ -135,9 +132,6 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			0,
 			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
 			cameraBuffer,
-			shadowCameraBuffer,
-			transparentEnvironmentBuffer,
-			transparentLightingBuffer,
 			instanceBuffer,
 			materialBuffer,
 			materialGenerationBuffer,

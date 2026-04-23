@@ -437,12 +437,6 @@ public sealed class GpuDrawResources : IDisposable
 	public SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
 		GetGBufferBufferBindings(lane.ExecutionIndex);
 
-	public SharedDrawGraphicsBufferBindings? GetExecutionLaneBufferBindings(int executionLaneIndex) =>
-		GetGBufferBufferBindings(executionLaneIndex);
-
-	public SharedDrawGraphicsBufferBindings? GetExecutionLaneBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
-		GetGBufferBufferBindings(lane);
-
 	public void SetGBufferBufferBindings(int executionLaneIndex, in SharedDrawGraphicsBufferBindings bindings)
 	{
 		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferBufferBindings.Length)
@@ -455,12 +449,6 @@ public sealed class GpuDrawResources : IDisposable
 
 	public void SetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane, in SharedDrawGraphicsBufferBindings bindings) =>
 		SetGBufferBufferBindings(lane.ExecutionIndex, bindings);
-
-	public void SetExecutionLaneBufferBindings(int executionLaneIndex, in SharedDrawGraphicsBufferBindings bindings) =>
-		SetGBufferBufferBindings(executionLaneIndex, bindings);
-
-	public void SetExecutionLaneBufferBindings(GpuDrawExecutionLaneDefinition lane, in SharedDrawGraphicsBufferBindings bindings) =>
-		SetGBufferBufferBindings(lane, bindings);
 
 	public void Dispose()
 	{
