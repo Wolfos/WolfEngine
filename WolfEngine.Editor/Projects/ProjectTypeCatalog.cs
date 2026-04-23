@@ -238,7 +238,7 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 		}
 	}
 
-	internal static string? TryFindGameplayAssemblyPath(string gameplayProjectPath)
+	internal static string? TryFindGameplayAssemblyPath(string gameplayProjectPath, string? configuration = null)
 	{
 		if (string.IsNullOrWhiteSpace(gameplayProjectPath) || File.Exists(gameplayProjectPath) == false)
 		{
@@ -263,10 +263,36 @@ public sealed class ProjectTypeCatalog : IProjectTypeCatalog, IProjectTypeResolv
 			return null;
 		}
 
-		return Directory.EnumerateFiles(binDirectory, $"{assemblyName}.dll", SearchOption.AllDirectories)
+		var assemblyCandidates = Directory.EnumerateFiles(binDirectory, $"{assemblyName}.dll", SearchOption.AllDirectories)
 			.Where(path => File.Exists(Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}.deps.json")))
+			.ToList();
+		if (string.IsNullOrWhiteSpace(configuration) == false)
+		{
+			var configuredAssemblyPath = assemblyCandidates
+				.Where(path => IsInConfigurationOutput(path, binDirectory, configuration))
+				.OrderByDescending(File.GetLastWriteTimeUtc)
+				.FirstOrDefault();
+			if (configuredAssemblyPath is not null)
+			{
+				return configuredAssemblyPath;
+			}
+		}
+
+		return assemblyCandidates
 			.OrderByDescending(File.GetLastWriteTimeUtc)
 			.FirstOrDefault();
+	}
+
+	private static bool IsInConfigurationOutput(string assemblyPath, string binDirectory, string configuration)
+	{
+		var relativePath = Path.GetRelativePath(binDirectory, assemblyPath);
+		var firstSeparator = relativePath.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+		if (firstSeparator < 0)
+		{
+			return false;
+		}
+
+		return string.Equals(relativePath[..firstSeparator], configuration, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static string? TryReadAssemblyName(string gameplayProjectPath)

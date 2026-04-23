@@ -181,7 +181,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			}
 		}
 
-		var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath);
+		var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath, GetCurrentBuildConfiguration());
 		if (string.IsNullOrWhiteSpace(gameplayAssemblyPath))
 		{
 			return new GameplayLoadResult
@@ -237,7 +237,8 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		GameplayBuildResult buildResult;
 		try
 		{
-			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\"")
+			var configuration = GetCurrentBuildConfiguration();
+			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" --configuration {configuration}")
 			{
 				WorkingDirectory = projectRootPath,
 				RedirectStandardOutput = true,
@@ -276,7 +277,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 				}
 				else
 				{
-					var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath);
+					var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath, configuration);
 					buildResult = string.IsNullOrWhiteSpace(gameplayAssemblyPath)
 						? new GameplayBuildResult
 						{
@@ -469,5 +470,13 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 	private IEditorProjectService GetProjectService()
 	{
 		return _projectServiceAccessor();
+	}
+
+	private static string GetCurrentBuildConfiguration()
+	{
+		var configuration = typeof(GameplayAssemblyHost).Assembly
+			.GetCustomAttribute<AssemblyConfigurationAttribute>()?
+			.Configuration;
+		return string.IsNullOrWhiteSpace(configuration) ? "Debug" : configuration;
 	}
 }

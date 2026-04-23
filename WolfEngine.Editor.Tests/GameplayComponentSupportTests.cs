@@ -43,6 +43,54 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
+	public void TryFindGameplayAssemblyPath_PrefersRequestedConfigurationOverNewerOtherConfiguration()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineGameplayPathTests", Guid.NewGuid().ToString("N"));
+		try
+		{
+			var gameplayDirectory = Path.Combine(projectRoot, "Gameplay");
+			var debugOutput = Path.Combine(gameplayDirectory, "bin", "Debug", "net10.0");
+			var releaseOutput = Path.Combine(gameplayDirectory, "bin", "Release", "net10.0");
+			Directory.CreateDirectory(debugOutput);
+			Directory.CreateDirectory(releaseOutput);
+
+			var projectPath = Path.Combine(gameplayDirectory, "Sample.Gameplay.csproj");
+			File.WriteAllText(
+				projectPath,
+				"""
+				<Project Sdk="Microsoft.NET.Sdk">
+					<PropertyGroup>
+						<TargetFramework>net10.0</TargetFramework>
+						<AssemblyName>Sample.Gameplay</AssemblyName>
+					</PropertyGroup>
+				</Project>
+				""");
+
+			var debugAssemblyPath = Path.Combine(debugOutput, "Sample.Gameplay.dll");
+			var releaseAssemblyPath = Path.Combine(releaseOutput, "Sample.Gameplay.dll");
+			File.WriteAllBytes(debugAssemblyPath, []);
+			File.WriteAllBytes(Path.ChangeExtension(debugAssemblyPath, ".deps.json"), []);
+			File.WriteAllBytes(releaseAssemblyPath, []);
+			File.WriteAllBytes(Path.ChangeExtension(releaseAssemblyPath, ".deps.json"), []);
+
+			var now = DateTime.UtcNow;
+			File.SetLastWriteTimeUtc(debugAssemblyPath, now.AddMinutes(-10));
+			File.SetLastWriteTimeUtc(releaseAssemblyPath, now);
+
+			var assemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(projectPath, "Debug");
+
+			Assert.That(assemblyPath, Is.EqualTo(debugAssemblyPath));
+		}
+		finally
+		{
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
 	public void GameplayComponent_CanBeDiscoveredAddedEditedSavedAndLoaded()
 	{
 		using var environment = new GameplayTestEnvironment();
