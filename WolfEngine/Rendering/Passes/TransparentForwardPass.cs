@@ -15,6 +15,7 @@ public sealed class TransparentForwardPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
+	private readonly SharedDrawIndirectCommandSet _indirectCommandSet = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -27,6 +28,25 @@ public sealed class TransparentForwardPass
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
+
+	public SharedDrawIndirectCommandSet IndirectCommandSet => _indirectCommandSet;
+
+	public void EnsureIndirectResources(IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
+		for (var i = 0; i < laneDefinitions.Length; i++)
+		{
+			EnsurePipeline(device, laneDefinitions[i]);
+		}
+
+		_indirectCommandSet.EnsureCreated(device);
+	}
+
+	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
+
+	public SharedDrawGraphicsBufferBindings? GetBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
+		_bufferBindingsByExecutionKey.TryGetValue(lane.Key, out var bindings) ? bindings : null;
 
 	public TransparentForwardPassConfig BuildConfig(
 		RenderGraphContext context,
@@ -279,15 +299,10 @@ public sealed class TransparentForwardPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
 		var buckets = new List<TransparentExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
+		_indirectCommandSet.EnsureCreated(device);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
-			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
-			if (indirectCommandBuffer is null)
-			{
-				continue;
-			}
-
 			var pipeline = EnsurePipeline(device, laneDefinition);
 			buckets.Add(new TransparentExecutionBucket(
 				laneDefinition.DrawKind,
@@ -296,7 +311,7 @@ public sealed class TransparentForwardPass
 				laneDefinition.DebugName,
 				_bufferBindingsByExecutionKey[laneDefinition.Key],
 				pipeline,
-				indirectCommandBuffer));
+				_indirectCommandSet.GetCommandBuffer(activeIndirectSlot, laneDefinition)));
 		}
 
 		return buckets;

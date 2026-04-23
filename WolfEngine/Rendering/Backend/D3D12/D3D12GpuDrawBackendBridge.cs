@@ -29,33 +29,6 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			supportsIndirectStructuralUpdates: true);
 	}
 
-	public bool TryGetSlotIndirectCommands(
-		GpuDrawResources resources,
-		int slotIndex,
-		out IGfxIndirectCommandBuffer[] commandBuffers)
-	{
-		commandBuffers = Array.Empty<IGfxIndirectCommandBuffer>();
-		var executionLaneCount = GpuDrawExecutionLanes.ExecutionLaneCount;
-		if (executionLaneCount <= 0)
-		{
-			return false;
-		}
-
-		var resolved = new IGfxIndirectCommandBuffer[executionLaneCount];
-		for (var i = 0; i < executionLaneCount; i++)
-		{
-			if (resources.GetIndirectCommandBufferSlot(slotIndex, i) is not D3D12IndirectCommandBuffer commandBuffer)
-			{
-				return false;
-			}
-
-			resolved[i] = commandBuffer;
-		}
-
-		commandBuffers = resolved;
-		return true;
-	}
-
 	public void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex)
 	{
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
@@ -70,7 +43,7 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		Mesh mesh,
-		GpuDrawResources resources,
+		in SharedDrawIndirectEncodeResources resources,
 		in SharedDrawGraphicsBufferBindings bindings)
 	{
 		_ = bindings;

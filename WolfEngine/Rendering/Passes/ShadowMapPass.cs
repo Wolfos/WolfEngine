@@ -30,6 +30,12 @@ public sealed class ShadowMapPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
+	private readonly SharedDrawIndirectCommandSet[] _indirectCommandSets =
+	[
+		new(),
+		new(),
+		new()
+	];
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -66,6 +72,39 @@ public sealed class ShadowMapPass
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
 
+	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int cascadeIndex)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		return _indirectCommandSets[cascadeIndex];
+	}
+
+	public void EnsureIndirectResources(IGfxDevice device, int cascadeIndex)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		ValidateCascadeIndex(cascadeIndex);
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
+		for (var i = 0; i < laneDefinitions.Length; i++)
+		{
+			EnsurePipeline(device, laneDefinitions[i], cascadeIndex);
+		}
+
+		_indirectCommandSets[cascadeIndex].EnsureCreated(device);
+	}
+
+	public bool HasIndirectLane(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		return _pipelinesByCascadeExecutionKey.ContainsKey((cascadeIndex, lane.Key));
+	}
+
+	public SharedDrawGraphicsBufferBindings? GetBufferBindings(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		return _bufferBindingsByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var bindings)
+			? bindings
+			: null;
+	}
+
 	public ShadowMapPassConfig BuildConfig(
 		RenderGraphContext context,
 		IGfxTexture depthTarget,
@@ -79,23 +118,16 @@ public sealed class ShadowMapPass
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		EnsureCameraWriter(device.BackendKind);
 
-		if (cascadeIndex < 0 || cascadeIndex >= CascadeCount)
-		{
-			throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.");
-		}
+		ValidateCascadeIndex(cascadeIndex);
 
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
 		var buckets = new List<ShadowMapExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
+		var commandSet = _indirectCommandSets[cascadeIndex];
+		commandSet.EnsureCreated(device);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
-			var indirectCommandBuffer = gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
-			if (indirectCommandBuffer is null)
-			{
-				continue;
-			}
-
 			var pipeline = EnsurePipeline(device, laneDefinition, cascadeIndex);
 			buckets.Add(new ShadowMapExecutionBucket(
 				laneDefinition.DrawKind,
@@ -104,7 +136,7 @@ public sealed class ShadowMapPass
 				laneDefinition.DebugName,
 				_bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)],
 				pipeline,
-				indirectCommandBuffer));
+				commandSet.GetCommandBuffer(activeIndirectSlot, laneDefinition)));
 		}
 
 		return new ShadowMapPassConfig
@@ -275,6 +307,14 @@ public sealed class ShadowMapPass
 			"fragmentShader");
 		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));
 		_reflectionBackendKind = backendKind;
+	}
+
+	private static void ValidateCascadeIndex(int cascadeIndex)
+	{
+		if (cascadeIndex < 0 || cascadeIndex >= CascadeCount)
+		{
+			throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.");
+		}
 	}
 
 	private static ShadowFrameData CreateDisabledFrameData() => new(

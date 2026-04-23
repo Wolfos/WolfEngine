@@ -57,10 +57,6 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private int _activeFrameSlot;
-	private readonly IGfxIndirectCommandBuffer?[] _gbufferIndirectCommandSlots =
-		new IGfxIndirectCommandBuffer?[IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private int _activeIndirectCommandSlot;
 	private GraphicsBackendKind? _constantBufferLayoutBackend;
 	private ShaderConstantBufferLayout? _gBufferCameraLayout;
@@ -299,17 +295,6 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		}
 
-		for (var slotIndex = 0; slotIndex < IndirectCommandBufferSlotCount; slotIndex++)
-		{
-			for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
-			{
-				var index = FlattenSlotBucketIndex(slotIndex, executionIndex);
-				_gbufferIndirectCommandSlots[index] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-					PassKind.Graphics,
-					(uint)MaxDrawCount,
-					supportsIndexedExecution: true));
-			}
-		}
 	}
 
 	public void EnsureClusteredLightingCapacity(IGfxDevice device, Int2 sceneFramebufferSize)
@@ -356,24 +341,6 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
-	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, int executionLaneIndex)
-	{
-		if (slotIndex < 0 || slotIndex >= IndirectCommandBufferSlotCount)
-		{
-			throw new ArgumentOutOfRangeException(nameof(slotIndex), slotIndex, "Indirect command buffer slot is out of range.");
-		}
-
-		if (executionLaneIndex < 0 || executionLaneIndex >= GpuDrawExecutionLanes.ExecutionLaneCount)
-		{
-			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
-		}
-
-		return _gbufferIndirectCommandSlots[FlattenSlotBucketIndex(slotIndex, executionLaneIndex)];
-	}
-
-	public IGfxIndirectCommandBuffer? GetIndirectCommandBufferSlot(int slotIndex, GpuDrawExecutionLaneDefinition lane) =>
-		GetIndirectCommandBufferSlot(slotIndex, lane.ExecutionIndex);
-
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
 	{
 		ValidateFrameSlot(frameSlot);
@@ -397,58 +364,6 @@ public sealed class GpuDrawResources : IDisposable
 		ValidateFrameSlot(frameSlot);
 		return _materialGenerationBuffers[frameSlot];
 	}
-
-	public IGfxPipeline? GetGBufferPipeline(int executionLaneIndex)
-	{
-		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferPipelines.Length)
-		{
-			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
-		}
-
-		return _gbufferPipelines[executionLaneIndex];
-	}
-
-	public IGfxPipeline? GetGBufferPipeline(GpuDrawExecutionLaneDefinition lane) =>
-		GetGBufferPipeline(lane.ExecutionIndex);
-
-	public void SetGBufferPipeline(int executionLaneIndex, IGfxPipeline pipeline)
-	{
-		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferPipelines.Length)
-		{
-			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
-		}
-
-		_gbufferPipelines[executionLaneIndex] = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
-	}
-
-	public void SetGBufferPipeline(GpuDrawExecutionLaneDefinition lane, IGfxPipeline pipeline) =>
-		SetGBufferPipeline(lane.ExecutionIndex, pipeline);
-
-	public SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(int executionLaneIndex)
-	{
-		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferBufferBindings.Length)
-		{
-			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
-		}
-
-		return _gbufferBufferBindings[executionLaneIndex];
-	}
-
-	public SharedDrawGraphicsBufferBindings? GetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane) =>
-		GetGBufferBufferBindings(lane.ExecutionIndex);
-
-	public void SetGBufferBufferBindings(int executionLaneIndex, in SharedDrawGraphicsBufferBindings bindings)
-	{
-		if (executionLaneIndex < 0 || executionLaneIndex >= _gbufferBufferBindings.Length)
-		{
-			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
-		}
-
-		_gbufferBufferBindings[executionLaneIndex] = bindings;
-	}
-
-	public void SetGBufferBufferBindings(GpuDrawExecutionLaneDefinition lane, in SharedDrawGraphicsBufferBindings bindings) =>
-		SetGBufferBufferBindings(lane.ExecutionIndex, bindings);
 
 	public void Dispose()
 	{
@@ -510,20 +425,9 @@ public sealed class GpuDrawResources : IDisposable
 			_materialGenerationBuffers[i] = null;
 			_meshGenerationBuffers[i] = null;
 		}
-		for (var i = 0; i < _gbufferIndirectCommandSlots.Length; i++)
-		{
-			(_gbufferIndirectCommandSlots[i] as IDisposable)?.Dispose();
-			_gbufferIndirectCommandSlots[i] = null;
-		}
-
-		Array.Clear(_gbufferPipelines, 0, _gbufferPipelines.Length);
-		Array.Clear(_gbufferBufferBindings, 0, _gbufferBufferBindings.Length);
 		TerrainMaterialBuffer = null;
 		TerrainLayerBuffer = null;
 	}
-
-	private static int FlattenSlotBucketIndex(int slotIndex, int executionLaneIndex) =>
-		(slotIndex * GpuDrawExecutionLanes.ExecutionLaneCount) + executionLaneIndex;
 
 	private static void ValidateFrameSlot(int frameSlot)
 	{

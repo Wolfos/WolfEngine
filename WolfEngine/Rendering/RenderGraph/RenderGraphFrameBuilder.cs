@@ -880,14 +880,23 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteShadowMap(RenderGraphContext context)
 	{
+		var device = _renderer.GetGfxDevice();
 		for (var cascadeIndex = 0; cascadeIndex < ShadowMapPass.CascadeCount; cascadeIndex++)
 		{
 			var shadowMapHandle = GetShadowMapHandle(_frameResources, cascadeIndex);
 			var depthTexture = context.GetTexture(shadowMapHandle);
+			_shadowMapPass.EnsureIndirectResources(device, cascadeIndex);
+			_gpuDrawPass.EnsureIndirectCommandsForPass(
+				context.GpuDrawDatabase,
+				_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
+				DrawPassParticipation.ShadowCaster,
+				SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources, _gpuDrawResources.ShadowCameraBuffer),
+				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
+				lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane));
 			var config = _shadowMapPass.BuildConfig(
 				context,
 				depthTexture,
-				_renderer.GetGfxDevice(),
+				device,
 				_gpuDrawResources,
 				cascadeIndex);
 			_shadowMapPass.Record(context, in config);
@@ -926,32 +935,8 @@ internal sealed class RenderGraphFrameBuilder
 		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
 		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
-		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.GBuffer);
-		var bucketList = new List<GBufferExecutionBucket>(laneDefinitions.Length);
-		var activeIndirectSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
-		for (var i = 0; i < laneDefinitions.Length; i++)
-		{
-			var laneDefinition = laneDefinitions[i];
-			var pipeline = _gpuDrawResources.GetGBufferPipeline(laneDefinition);
-			var indirectCommandBuffer = _gpuDrawResources.GetIndirectCommandBufferSlot(activeIndirectSlot, laneDefinition);
-			if (pipeline is null || indirectCommandBuffer is null)
-			{
-				continue;
-			}
-
-			var bufferBindings = _gpuDrawResources.GetGBufferBufferBindings(laneDefinition)
-			                    ?? throw new InvalidOperationException(
-				                    $"Missing reflected GBuffer shared-draw buffer bindings for lane '{laneDefinition.DebugName}'.");
-
-			bucketList.Add(new GBufferExecutionBucket(
-				laneDefinition.DrawKind,
-				laneDefinition.BucketId,
-				laneDefinition.ExecutionIndex,
-				laneDefinition.DebugName,
-				bufferBindings,
-				pipeline,
-				indirectCommandBuffer));
-		}
+		_gpuDrawPass.EnsureGBufferIndirectCommands(context);
+		var bucketList = _gpuDrawPass.BuildGBufferBuckets();
 
 		var gbufferConfig = new GBufferPassConfig
 		{
@@ -1078,10 +1063,19 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteTransparentForward(RenderGraphContext context)
 	{
+		var device = _renderer.GetGfxDevice();
+		_transparentForwardPass.EnsureIndirectResources(device);
+		_gpuDrawPass.EnsureIndirectCommandsForPass(
+			context.GpuDrawDatabase,
+			_transparentForwardPass.IndirectCommandSet,
+			DrawPassParticipation.ForwardTransparent,
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources, _gpuDrawResources.CameraBuffer),
+			lane => _transparentForwardPass.HasIndirectLane(lane),
+			lane => _transparentForwardPass.GetBufferBindings(lane));
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_frameResources,
-			_renderer.GetGfxDevice(),
+			device,
 			_gpuDrawResources,
 			_shadowMapPass.GetCurrentFrameData(),
 			context.SceneData!);

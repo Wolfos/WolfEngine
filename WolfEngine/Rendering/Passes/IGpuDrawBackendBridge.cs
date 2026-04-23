@@ -25,18 +25,13 @@ public interface IGpuDrawBackendBridge
 		GpuDrawResources resources,
 		IGfxPipeline? primaryGBufferPipeline);
 
-	bool TryGetSlotIndirectCommands(
-		GpuDrawResources resources,
-		int slotIndex,
-		out IGfxIndirectCommandBuffer[] commandBuffers);
-
 	void ResetCommand(IGfxIndirectCommandBuffer commandBuffer, uint commandIndex);
 
 	bool TryEncodeIndexedDrawCommand(
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
 		Mesh mesh,
-		GpuDrawResources resources,
+		in SharedDrawIndirectEncodeResources resources,
 		in SharedDrawGraphicsBufferBindings bindings);
 
 	void SampleVisibilityDiagnostics(
