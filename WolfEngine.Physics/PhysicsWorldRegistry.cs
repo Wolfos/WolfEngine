@@ -196,6 +196,7 @@ internal sealed class PhysicsWorldState : IDisposable
 	public int LastBoxColliderCount { get; set; } = -1;
 	public int LastCapsuleColliderCount { get; set; } = -1;
 	public int LastMeshColliderCount { get; set; } = -1;
+	public int LastTerrainColliderCount { get; set; } = -1;
 
 	public void Dispose()
 	{
@@ -411,6 +412,11 @@ internal readonly record struct PhysicsShapeDefinition(
 	{
 		return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale);
 	}
+
+	public static PhysicsShapeDefinition CreateTerrain(Mesh mesh, Vector3 meshScale)
+	{
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Terrain, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale);
+	}
 }
 
 internal readonly record struct PhysicsBodyDefinition(
@@ -431,6 +437,7 @@ internal readonly record struct PhysicsBodyDefinition(
 
 internal enum PhysicsColliderKind
 {
+	Terrain,
 	Box,
 	Capsule,
 	Mesh

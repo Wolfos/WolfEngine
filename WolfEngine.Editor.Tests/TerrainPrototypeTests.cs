@@ -246,9 +246,93 @@ public sealed class TerrainPrototypeTests
 		Assert.That(runtime.Chunks.Count, Is.EqualTo(4));
 	}
 
+	[Test]
+	public void TrySampleSurface_ReturnsExpectedHeightAndNormal()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-2x2", 2, 2, [0, 128, 128, 255]));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(2.0f, 2.0f),
+			HeightScaleMeters = 8.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var sampled = runtime.TrySampleSurface(Matrix4x4.Identity, new Vector3(0.0f, 100.0f, 0.0f), out var point, out var normal);
+
+		Assert.That(sampled, Is.True);
+		Assert.That(point.Y, Is.EqualTo((128.0f / 255.0f) * 8.0f).Within(0.05f));
+		Assert.That(normal.Y, Is.GreaterThan(0.3f));
+		Assert.That(normal.X, Is.LessThan(0.0f));
+		Assert.That(normal.Z, Is.LessThan(0.0f));
+	}
+
+	[Test]
+	public void TrySampleSurface_ReturnsFalseOutsideTerrainBounds()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-2x2", 2, 2, [0, 0, 0, 0]));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(2.0f, 2.0f),
+			HeightScaleMeters = 4.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var sampled = runtime.TrySampleSurface(Matrix4x4.Identity, new Vector3(2.1f, 0.0f, 0.0f), out _, out _);
+
+		Assert.That(sampled, Is.False);
+	}
+
+	[Test]
+	public void TrySampleSurface_RespectsWorldTransform()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-2x2", 2, 2, [0, 255, 0, 255]));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(2.0f, 2.0f),
+			HeightScaleMeters = 2.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var localToWorld = Matrix4x4.CreateScale(2.0f) *
+		                   Matrix4x4.CreateFromQuaternion(Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI * 0.5f)) *
+		                   Matrix4x4.CreateTranslation(new Vector3(10.0f, 3.0f, 20.0f));
+		var localSurfacePoint = new Vector3(1.0f, 2.0f, -1.0f);
+		var expectedWorldPoint = Vector3.Transform(localSurfacePoint, localToWorld);
+		var queryPoint = new Vector3(expectedWorldPoint.X, 100.0f, expectedWorldPoint.Z);
+
+		var sampled = runtime.TrySampleSurface(localToWorld, queryPoint, out var point, out var normal);
+
+		Assert.That(sampled, Is.True);
+		Assert.That(point.Y, Is.EqualTo(expectedWorldPoint.Y).Within(0.05f));
+		Assert.That(normal.Y, Is.GreaterThan(0.4f));
+	}
+
 	private static Texture CreateHeightTexture(string name, int width, int height)
 	{
 		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(width, height));
+	}
+
+	private static Texture CreateHeightTexture(string name, int width, int height, byte[] normalizedHeights)
+	{
+		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, [new TextureMipData(width, height, CreateRgbaHeightData(width, height, normalizedHeights))]);
 	}
 
 	private static TextureMipData[] CreateHeightMipLevels(int width, int height)
@@ -268,6 +352,26 @@ public sealed class TerrainPrototypeTests
 		}
 
 		return [new TextureMipData(width, height, data)];
+	}
+
+	private static byte[] CreateRgbaHeightData(int width, int height, byte[] normalizedHeights)
+	{
+		if (normalizedHeights.Length != width * height)
+		{
+			throw new ArgumentException("Height sample count must match width * height.", nameof(normalizedHeights));
+		}
+
+		var data = new byte[width * height * 4];
+		for (var i = 0; i < normalizedHeights.Length; i++)
+		{
+			var offset = i * 4;
+			data[offset] = normalizedHeights[i];
+			data[offset + 1] = 0;
+			data[offset + 2] = 0;
+			data[offset + 3] = 255;
+		}
+
+		return data;
 	}
 
 	private static RenderGraph CreateTestRenderGraph()

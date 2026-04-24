@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
 
@@ -9,8 +8,6 @@ namespace WolfEngine;
 
 internal sealed class TerrainRuntimeCache
 {
-	private readonly Dictionary<TerrainRuntimeKey, TerrainRuntimeData> _runtimeByKey = new();
-
 	public void CollectSharedTerrain(
 		RenderGraph renderGraph,
 		World world,
@@ -23,13 +20,7 @@ internal sealed class TerrainRuntimeCache
 		ArgumentNullException.ThrowIfNull(renderGraph);
 		ArgumentNullException.ThrowIfNull(world);
 		ArgumentNullException.ThrowIfNull(gpuDrawDatabase);
-		var key = new TerrainRuntimeKey(world, entity);
-		if (_runtimeByKey.TryGetValue(key, out var runtime) == false)
-		{
-			runtime = new TerrainRuntimeData();
-			_runtimeByKey.Add(key, runtime);
-		}
-
+		var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
 		if (runtime.EnsureBuilt(component) == false)
 		{
 			return;
@@ -66,23 +57,5 @@ internal sealed class TerrainRuntimeCache
 			EmissiveFactor = Vector3.Zero,
 			EmissiveIntensity = 0.0f
 		};
-	}
-
-	private readonly struct TerrainRuntimeKey : IEquatable<TerrainRuntimeKey>
-	{
-		public TerrainRuntimeKey(World world, Entity entity)
-		{
-			World = world;
-			Entity = entity;
-		}
-
-		private World World { get; }
-		private Entity Entity { get; }
-
-		public bool Equals(TerrainRuntimeKey other) => ReferenceEquals(World, other.World) && Entity.Equals(other.Entity);
-
-		public override bool Equals(object? obj) => obj is TerrainRuntimeKey other && Equals(other);
-
-		public override int GetHashCode() => HashCode.Combine(RuntimeHelpers.GetHashCode(World), Entity);
 	}
 }

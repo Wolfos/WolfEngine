@@ -33,13 +33,18 @@ public sealed class TerrainRuntimeData
 	private TextureFormat _lastControlFormat;
 	private byte[]? _lastControlTopMipData;
 	private bool _built;
+	private float[]? _heightSamples;
+	private Vector3[]? _normals;
 
 	public IReadOnlyList<TerrainChunkRuntime> Chunks => _chunks;
-	public Texture? Heightmap => _resolvedHeightmap;
-	public Texture? ControlMap => _resolvedControlMap;
-	public TerrainLayerSet? LayerSet => _resolvedLayerSet;
 	public int HeightSampleWidth { get; private set; }
 	public int HeightSampleHeight { get; private set; }
+	public Vector2 ResolvedWorldSize => _resolvedWorldSize;
+	public float ResolvedHeightScale => _resolvedHeightScale;
+	public Vector2 SampleSpacing { get; private set; }
+	public Box LocalBounds { get; private set; }
+	public Mesh? CollisionMesh { get; private set; }
+	public int RuntimeVersion { get; private set; }
 
 	public bool EnsureBuilt(TerrainComponent component)
 	{
@@ -51,6 +56,13 @@ public sealed class TerrainRuntimeData
 
 		_chunks.Clear();
 		_built = false;
+		_heightSamples = null;
+		_normals = null;
+		CollisionMesh = null;
+		HeightSampleWidth = 0;
+		HeightSampleHeight = 0;
+		SampleSpacing = Vector2.Zero;
+		LocalBounds = default;
 		if (_resolvedHeightmap is null)
 		{
 			CaptureBuildState(component);
@@ -66,10 +78,25 @@ public sealed class TerrainRuntimeData
 
 		HeightSampleWidth = sampleWidth;
 		HeightSampleHeight = sampleHeight;
-		var normals = BuildNormals(heightSamples, sampleWidth, sampleHeight, _resolvedWorldSize, _resolvedHeightScale);
-		BuildChunks(heightSamples, normals, sampleWidth, sampleHeight);
+		SampleSpacing = new Vector2(
+			_resolvedWorldSize.X / Math.Max(sampleWidth - 1, 1),
+			_resolvedWorldSize.Y / Math.Max(sampleHeight - 1, 1));
+		_heightSamples = heightSamples;
+		_normals = BuildNormals(heightSamples, sampleWidth, sampleHeight, _resolvedWorldSize, _resolvedHeightScale);
+		LocalBounds = new Box
+		{
+			Center = new Vector3(0.0f, _resolvedHeightScale * 0.5f, 0.0f),
+			Size = new Vector3(_resolvedWorldSize.X, _resolvedHeightScale, _resolvedWorldSize.Y)
+		};
+		CollisionMesh = BuildCollisionMesh(heightSamples, _normals, sampleWidth, sampleHeight);
+		BuildChunks(heightSamples, _normals, sampleWidth, sampleHeight);
 		CaptureBuildState(component);
 		_built = _chunks.Count > 0;
+		if (_built)
+		{
+			RuntimeVersion++;
+		}
+
 		return _built;
 	}
 
@@ -121,6 +148,113 @@ public sealed class TerrainRuntimeData
 					layerCount,
 					heightBlendSharpness,
 					layers)));
+		}
+	}
+
+	public bool TrySampleHeight(Matrix4x4 localToWorld, Vector3 worldPosition, out float height)
+	{
+		if (TrySampleSurface(localToWorld, worldPosition, out var surfacePoint, out _))
+		{
+			height = surfacePoint.Y;
+			return true;
+		}
+
+		height = 0.0f;
+		return false;
+	}
+
+	public bool TrySampleNormal(Matrix4x4 localToWorld, Vector3 worldPosition, out Vector3 normal)
+	{
+		if (TrySampleSurface(localToWorld, worldPosition, out _, out normal))
+		{
+			return true;
+		}
+
+		normal = Vector3.UnitY;
+		return false;
+	}
+
+	public bool TrySampleSurface(Matrix4x4 localToWorld, Vector3 worldPosition, out Vector3 surfacePoint, out Vector3 surfaceNormal)
+	{
+		surfacePoint = Vector3.Zero;
+		surfaceNormal = Vector3.UnitY;
+		if (TryGetInverseTransform(localToWorld, out var worldToLocal) == false)
+		{
+			return false;
+		}
+
+		var localPosition = Vector3.Transform(worldPosition, worldToLocal);
+		if (TrySampleLocalSurface(localPosition.X, localPosition.Z, out var localSurfacePoint, out var localSurfaceNormal) == false)
+		{
+			return false;
+		}
+
+		surfacePoint = Vector3.Transform(localSurfacePoint, localToWorld);
+		surfaceNormal = TransformNormal(localSurfaceNormal, localToWorld, worldToLocal);
+		return true;
+	}
+
+	public bool TryRaycast(Matrix4x4 localToWorld, Vector3 origin, Vector3 direction, out TerrainRaycastHit hit)
+	{
+		hit = default;
+		if (_built == false ||
+		    _heightSamples is null ||
+		    HeightSampleWidth < 2 ||
+		    HeightSampleHeight < 2 ||
+		    direction.LengthSquared() <= 1e-8f ||
+		    TryGetInverseTransform(localToWorld, out var worldToLocal) == false)
+		{
+			return false;
+		}
+
+		var localOrigin = Vector3.Transform(origin, worldToLocal);
+		var localEnd = Vector3.Transform(origin + direction, worldToLocal);
+		var localDirection = localEnd - localOrigin;
+		if (localDirection.LengthSquared() <= 1e-8f)
+		{
+			return false;
+		}
+
+		var bestFraction = float.MaxValue;
+		var bestPoint = Vector3.Zero;
+		var bestNormal = Vector3.UnitY;
+		var foundHit = false;
+		for (var y = 0; y < HeightSampleHeight - 1; y++)
+		{
+			for (var x = 0; x < HeightSampleWidth - 1; x++)
+			{
+				var p00 = GetLocalVertexPosition(x, y);
+				var p10 = GetLocalVertexPosition(x + 1, y);
+				var p01 = GetLocalVertexPosition(x, y + 1);
+				var p11 = GetLocalVertexPosition(x + 1, y + 1);
+
+				TryUpdateClosestHit(p00, p01, p10);
+				TryUpdateClosestHit(p10, p01, p11);
+			}
+		}
+
+		if (foundHit == false)
+		{
+			return false;
+		}
+
+		var worldPoint = Vector3.Transform(bestPoint, localToWorld);
+		var worldNormal = TransformNormal(bestNormal, localToWorld, worldToLocal);
+		hit = new TerrainRaycastHit(worldPoint, worldNormal, bestFraction);
+		return true;
+
+		void TryUpdateClosestHit(Vector3 a, Vector3 b, Vector3 c)
+		{
+			if (TryIntersectSegmentTriangle(localOrigin, localDirection, a, b, c, out var fraction, out var point, out var normal) == false ||
+			    fraction >= bestFraction)
+			{
+				return;
+			}
+
+			bestFraction = fraction;
+			bestPoint = point;
+			bestNormal = normal;
+			foundHit = true;
 		}
 	}
 
@@ -473,6 +607,50 @@ public sealed class TerrainRuntimeData
 		return normals;
 	}
 
+	private Mesh BuildCollisionMesh(float[] heights, Vector3[] normals, int sampleWidth, int sampleHeight)
+	{
+		var vertexCount = sampleWidth * sampleHeight;
+		var vertices = new Vector4[vertexCount];
+		var uvs = new Vector2[vertexCount];
+		var tangents = new Vector4[vertexCount];
+		var totalQuadsX = sampleWidth - 1;
+		var totalQuadsY = sampleHeight - 1;
+		for (var y = 0; y < sampleHeight; y++)
+		{
+			for (var x = 0; x < sampleWidth; x++)
+			{
+				var index = y * sampleWidth + x;
+				var position = CreateLocalVertexPosition(x, y, heights[index]);
+				vertices[index] = new Vector4(position, 1.0f);
+				uvs[index] = new Vector2(
+					totalQuadsX > 0 ? x / (float)totalQuadsX : 0.0f,
+					totalQuadsY > 0 ? y / (float)totalQuadsY : 0.0f);
+				tangents[index] = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
+			}
+		}
+
+		var indices = new uint[totalQuadsX * totalQuadsY * 6];
+		var writeIndex = 0;
+		for (var y = 0; y < totalQuadsY; y++)
+		{
+			for (var x = 0; x < totalQuadsX; x++)
+			{
+				var i0 = y * sampleWidth + x;
+				var i1 = i0 + 1;
+				var i2 = i0 + sampleWidth;
+				var i3 = i2 + 1;
+				indices[writeIndex++] = (uint)i0;
+				indices[writeIndex++] = (uint)i2;
+				indices[writeIndex++] = (uint)i1;
+				indices[writeIndex++] = (uint)i1;
+				indices[writeIndex++] = (uint)i2;
+				indices[writeIndex++] = (uint)i3;
+			}
+		}
+
+		return new Mesh(vertices, indices, normals, uvs, tangents);
+	}
+
 	private static float[]? DecodeHeightSamples(Texture texture, out int width, out int height)
 	{
 		width = 0;
@@ -707,7 +885,159 @@ public sealed class TerrainRuntimeData
 		}
 	}
 
+	private bool TryGetInverseTransform(Matrix4x4 localToWorld, out Matrix4x4 worldToLocal)
+	{
+		worldToLocal = Matrix4x4.Identity;
+		return _built &&
+		       _heightSamples is not null &&
+		       _normals is not null &&
+		       Matrix4x4.Invert(localToWorld, out worldToLocal);
+	}
+
+	private bool TrySampleLocalSurface(float localX, float localZ, out Vector3 surfacePoint, out Vector3 surfaceNormal)
+	{
+		surfacePoint = Vector3.Zero;
+		surfaceNormal = Vector3.UnitY;
+		if (_built == false ||
+		    _heightSamples is null ||
+		    _normals is null ||
+		    HeightSampleWidth < 2 ||
+		    HeightSampleHeight < 2 ||
+		    _resolvedWorldSize.X <= 1e-6f ||
+		    _resolvedWorldSize.Y <= 1e-6f)
+		{
+			return false;
+		}
+
+		var halfWidth = _resolvedWorldSize.X * 0.5f;
+		var halfDepth = _resolvedWorldSize.Y * 0.5f;
+		if (localX < -halfWidth || localX > halfWidth || localZ < -halfDepth || localZ > halfDepth)
+		{
+			return false;
+		}
+
+		var sampleX = ((localX + halfWidth) / _resolvedWorldSize.X) * (HeightSampleWidth - 1);
+		var sampleZ = ((localZ + halfDepth) / _resolvedWorldSize.Y) * (HeightSampleHeight - 1);
+		sampleX = Math.Clamp(sampleX, 0.0f, HeightSampleWidth - 1);
+		sampleZ = Math.Clamp(sampleZ, 0.0f, HeightSampleHeight - 1);
+		var cellX = Math.Min((int)MathF.Floor(sampleX), HeightSampleWidth - 2);
+		var cellZ = Math.Min((int)MathF.Floor(sampleZ), HeightSampleHeight - 2);
+		var tx = Math.Clamp(sampleX - cellX, 0.0f, 1.0f);
+		var tz = Math.Clamp(sampleZ - cellZ, 0.0f, 1.0f);
+
+		var h00 = _heightSamples[cellZ * HeightSampleWidth + cellX] * _resolvedHeightScale;
+		var h10 = _heightSamples[cellZ * HeightSampleWidth + cellX + 1] * _resolvedHeightScale;
+		var h01 = _heightSamples[(cellZ + 1) * HeightSampleWidth + cellX] * _resolvedHeightScale;
+		var h11 = _heightSamples[(cellZ + 1) * HeightSampleWidth + cellX + 1] * _resolvedHeightScale;
+		var n00 = _normals[cellZ * HeightSampleWidth + cellX];
+		var n10 = _normals[cellZ * HeightSampleWidth + cellX + 1];
+		var n01 = _normals[(cellZ + 1) * HeightSampleWidth + cellX];
+		var n11 = _normals[(cellZ + 1) * HeightSampleWidth + cellX + 1];
+
+		if (tx + tz <= 1.0f)
+		{
+			var w00 = 1.0f - tx - tz;
+			var w01 = tz;
+			var w10 = tx;
+			surfacePoint = new Vector3(localX, h00 * w00 + h01 * w01 + h10 * w10, localZ);
+			surfaceNormal = NormalizeDirection(n00 * w00 + n01 * w01 + n10 * w10);
+			return true;
+		}
+
+		var w10b = 1.0f - tz;
+		var w01b = 1.0f - tx;
+		var w11 = tx + tz - 1.0f;
+		surfacePoint = new Vector3(localX, h10 * w10b + h01 * w01b + h11 * w11, localZ);
+		surfaceNormal = NormalizeDirection(n10 * w10b + n01 * w01b + n11 * w11);
+		return true;
+	}
+
+	private Vector3 GetLocalVertexPosition(int sampleX, int sampleY)
+	{
+		if (_heightSamples is null)
+		{
+			return Vector3.Zero;
+		}
+
+		var index = sampleY * HeightSampleWidth + sampleX;
+		return CreateLocalVertexPosition(sampleX, sampleY, _heightSamples[index]);
+	}
+
+	private Vector3 CreateLocalVertexPosition(int sampleX, int sampleY, float normalizedHeight)
+	{
+		var halfWidth = _resolvedWorldSize.X * 0.5f;
+		var halfDepth = _resolvedWorldSize.Y * 0.5f;
+		var spacingX = _resolvedWorldSize.X / Math.Max(HeightSampleWidth - 1, 1);
+		var spacingZ = _resolvedWorldSize.Y / Math.Max(HeightSampleHeight - 1, 1);
+		return new Vector3(
+			sampleX * spacingX - halfWidth,
+			normalizedHeight * _resolvedHeightScale,
+			sampleY * spacingZ - halfDepth);
+	}
+
+	private static bool TryIntersectSegmentTriangle(
+		Vector3 origin,
+		Vector3 direction,
+		Vector3 a,
+		Vector3 b,
+		Vector3 c,
+		out float fraction,
+		out Vector3 point,
+		out Vector3 normal)
+	{
+		fraction = 0.0f;
+		point = Vector3.Zero;
+		normal = Vector3.UnitY;
+
+		var edge1 = b - a;
+		var edge2 = c - a;
+		var p = Vector3.Cross(direction, edge2);
+		var determinant = Vector3.Dot(edge1, p);
+		if (MathF.Abs(determinant) <= 1e-8f)
+		{
+			return false;
+		}
+
+		var inverseDeterminant = 1.0f / determinant;
+		var tVector = origin - a;
+		var u = Vector3.Dot(tVector, p) * inverseDeterminant;
+		if (u < 0.0f || u > 1.0f)
+		{
+			return false;
+		}
+
+		var q = Vector3.Cross(tVector, edge1);
+		var v = Vector3.Dot(direction, q) * inverseDeterminant;
+		if (v < 0.0f || u + v > 1.0f)
+		{
+			return false;
+		}
+
+		var t = Vector3.Dot(edge2, q) * inverseDeterminant;
+		if (t < 0.0f || t > 1.0f)
+		{
+			return false;
+		}
+
+		var triangleNormal = Vector3.Cross(edge1, edge2);
+		if (triangleNormal.LengthSquared() <= 1e-8f)
+		{
+			return false;
+		}
+
+		fraction = t;
+		point = origin + direction * t;
+		normal = Vector3.Normalize(triangleNormal);
+		return true;
+	}
+
 	private static Vector3 TransformPoint(Vector3 point, Matrix4x4 matrix) => Vector3.Transform(point, matrix);
+
+	private static Vector3 TransformNormal(Vector3 normal, Matrix4x4 localToWorld, Matrix4x4 worldToLocal)
+	{
+		var normalMatrix = Matrix4x4.Transpose(worldToLocal);
+		return NormalizeDirection(Vector3.TransformNormal(normal, normalMatrix));
+	}
 
 	private static float TransformRadius(float radius, Matrix4x4 matrix)
 	{
@@ -718,7 +1048,13 @@ public sealed class TerrainRuntimeData
 		return radius * scale;
 	}
 
+	private static Vector3 NormalizeDirection(Vector3 value)
+	{
+		return value.LengthSquared() > 0.0f ? Vector3.Normalize(value) : Vector3.UnitY;
+	}
 }
+
+public readonly record struct TerrainRaycastHit(Vector3 Point, Vector3 Normal, float Fraction);
 
 public sealed class TerrainChunkRuntime
 {

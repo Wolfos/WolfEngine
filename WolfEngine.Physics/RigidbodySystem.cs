@@ -55,6 +55,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		}
 
 		PhysicsWorldRegistry.RemoveWorld(world);
+		TerrainRuntimeRegistry.RemoveWorld(world);
 	}
 
 	public bool TryMoveKinematicBody(
@@ -96,13 +97,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(world);
 		hit = default;
 
-		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false || direction.LengthSquared() <= 0.0f)
+		if (direction.LengthSquared() <= 0.0f)
 		{
 			return false;
 		}
 
 		using (FrameProfiler.Instance.Measure("Physics.Query.Raycast"))
 		{
+			var state = EnsureWorldStateForQueries(world);
 			using var objectLayerFilter = new PhysicsQueryObjectLayerFilter(layerMask);
 			using var bodyFilter = new PhysicsQueryBodyFilter(GetIgnoredBodyId(state, ignoredEntity));
 			var ray = new Ray(origin, direction);
@@ -143,13 +145,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(world);
 		hit = default;
 
-		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false || direction.LengthSquared() <= 0.0f)
+		if (direction.LengthSquared() <= 0.0f)
 		{
 			return false;
 		}
 
 		using (FrameProfiler.Instance.Measure("Physics.Query.CastCapsule"))
 		{
+			var state = EnsureWorldStateForQueries(world);
 			var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
 			var shapeHandle = CreateShape(queryShapeDefinition);
 			try
@@ -213,13 +216,9 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		ArgumentNullException.ThrowIfNull(hits);
 		hits.Clear();
 
-		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false)
-		{
-			return 0;
-		}
-
 		using (FrameProfiler.Instance.Measure("Physics.Query.OverlapCapsule"))
 		{
+			var state = EnsureWorldStateForQueries(world);
 			var queryShapeDefinition = CreateCapsuleShapeDefinition(capsule, Vector3.One) with { Center = Vector3.Zero };
 			var shapeHandle = CreateShape(queryShapeDefinition);
 			try
@@ -279,6 +278,81 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		return PhysicsWorldRegistry.TryGetWorldState(world, out var state) ? state.ContactEvents : Array.Empty<PhysicsContactEvent>();
 	}
 
+	public bool TrySampleTerrainHeight(World world, Vector3 worldPosition, out float height, out Entity terrainEntity)
+	{
+		if (TrySampleTerrainSurface(world, worldPosition, out var sample))
+		{
+			height = sample.Point.Y;
+			terrainEntity = sample.Entity;
+			return true;
+		}
+
+		height = 0.0f;
+		terrainEntity = default;
+		return false;
+	}
+
+	public bool TrySampleTerrainNormal(World world, Vector3 worldPosition, out Vector3 normal, out Entity terrainEntity)
+	{
+		if (TrySampleTerrainSurface(world, worldPosition, out var sample))
+		{
+			normal = sample.Normal;
+			terrainEntity = sample.Entity;
+			return true;
+		}
+
+		normal = Vector3.UnitY;
+		terrainEntity = default;
+		return false;
+	}
+
+	public bool TrySampleTerrainSurface(World world, Vector3 worldPosition, out TerrainSurfaceSample sample)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		sample = default;
+		var foundHit = false;
+		var bestPoint = Vector3.Zero;
+		var bestNormal = Vector3.UnitY;
+		var bestEntity = default(Entity);
+		foreach (var entry in world.View<WorldTransform, TerrainComponent>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			if (world.TryGetWorldPoseAndScale(entry.Entity, out _, out _, out _) == false)
+			{
+				continue;
+			}
+
+			var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entry.Entity);
+			if (runtime.EnsureBuilt(entry.Second) == false ||
+			    runtime.TrySampleSurface(entry.First.LocalToWorld, worldPosition, out var point, out var normal) == false)
+			{
+				continue;
+			}
+
+			if (foundHit && point.Y <= bestPoint.Y)
+			{
+				continue;
+			}
+
+			foundHit = true;
+			bestPoint = point;
+			bestNormal = normal;
+			bestEntity = entry.Entity;
+		}
+
+		if (foundHit == false)
+		{
+			return false;
+		}
+
+		sample = new TerrainSurfaceSample(bestEntity, bestPoint, bestNormal);
+		return true;
+	}
+
 	public void Dispose()
 	{
 		if (_disposed)
@@ -333,7 +407,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			var bodiesToRemove = new List<Entity>();
 			var totalColliderCount = world.GetComponentCount<BoxCollider>() +
 			                         world.GetComponentCount<CapsuleCollider>() +
-			                         world.GetComponentCount<MeshCollider>();
+			                         world.GetComponentCount<MeshCollider>() +
+			                         world.GetComponentCount<TerrainComponent>();
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.ApplyChanges"))
 			{
@@ -405,6 +480,17 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				state.LastMeshColliderCount = world.GetComponentCount<MeshCollider>();
 			}
 
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateTerrain"))
+			{
+				if (state.LastTerrainColliderCount != world.GetComponentCount<TerrainComponent>() ||
+				    state.BodiesByEntity.Count < totalColliderCount)
+				{
+					CreateBodiesForView(world, state, world.View<TerrainComponent>(), ref changed);
+				}
+
+				state.LastTerrainColliderCount = world.GetComponentCount<TerrainComponent>();
+			}
+
 			if (changed)
 			{
 				using (FrameProfiler.Instance.Measure("Physics.SyncBodies.OptimizeBroadPhase"))
@@ -456,7 +542,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return null;
 		}
 
-		var hasRigidbody = world.HasComponent<Rigidbody>(entity);
+		var isTerrainCollider = colliderKind == PhysicsColliderKind.Terrain;
+		var hasRigidbody = isTerrainCollider == false && world.HasComponent<Rigidbody>(entity);
 		var rigidbody = hasRigidbody ? world.GetComponent<Rigidbody>(entity) : CreateStaticFallback();
 		var collisionFilter = world.HasComponent<CollisionFilter>(entity)
 			? world.GetComponent<CollisionFilter>(entity)
@@ -544,6 +631,21 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 			UpdateMeshColliderCache(ref collider, collisionFilter);
 			shapeDefinition = PhysicsShapeDefinition.CreateMesh(collider.Mesh!, SanitizeMeshScale(worldScale));
+			return true;
+		}
+
+		if (colliderKind == PhysicsColliderKind.Terrain)
+		{
+			ref var terrain = ref world.GetComponent<TerrainComponent>(entity);
+			var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
+			if (runtime.EnsureBuilt(terrain) == false || runtime.CollisionMesh is null)
+			{
+				shapeDefinition = default;
+				return false;
+			}
+
+			UpdateTerrainColliderCache(ref terrain, runtime.RuntimeVersion, collisionFilter);
+			shapeDefinition = PhysicsShapeDefinition.CreateTerrain(runtime.CollisionMesh, SanitizeMeshScale(worldScale));
 			return true;
 		}
 
@@ -825,6 +927,12 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 	private static bool TryGetColliderKind(World world, Entity entity, out PhysicsColliderKind colliderKind)
 	{
+		if (world.HasComponent<TerrainComponent>(entity))
+		{
+			colliderKind = PhysicsColliderKind.Terrain;
+			return true;
+		}
+
 		if (world.HasComponent<BoxCollider>(entity))
 		{
 			colliderKind = PhysicsColliderKind.Box;
@@ -868,6 +976,15 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 	private static bool HasShapeChanged(World world, Entity entity, PhysicsColliderKind colliderKind)
 	{
+		if (colliderKind == PhysicsColliderKind.Terrain)
+		{
+			ref var terrain = ref world.GetComponent<TerrainComponent>(entity);
+			var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
+			runtime.EnsureBuilt(terrain);
+			return terrain.PhysicsCacheValid == false ||
+			       terrain.CachedRuntimeVersion != runtime.RuntimeVersion;
+		}
+
 		if (colliderKind == PhysicsColliderKind.Box)
 		{
 			ref var collider = ref world.GetComponent<BoxCollider>(entity);
@@ -895,6 +1012,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	{
 		Shape baseShape = definition.Kind switch
 		{
+			PhysicsColliderKind.Terrain => CreateMeshShape(definition.Mesh!, definition.MeshScale),
 			PhysicsColliderKind.Box => new BoxShape(definition.BoxHalfExtents),
 			PhysicsColliderKind.Capsule => new CapsuleShape(definition.CapsuleHalfHeight, definition.CapsuleRadius),
 			PhysicsColliderKind.Mesh => CreateMeshShape(definition.Mesh!, definition.MeshScale),
@@ -939,6 +1057,9 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		var layer = ClampLayer(collisionFilter.Layer);
 		return colliderKind switch
 		{
+			PhysicsColliderKind.Terrain => world.GetComponent<TerrainComponent>(entity).PhysicsCacheValid == false ||
+			                               world.GetComponent<TerrainComponent>(entity).CachedLayer != layer ||
+			                               world.GetComponent<TerrainComponent>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
 			PhysicsColliderKind.Box => world.GetComponent<BoxCollider>(entity).PhysicsCacheValid == false ||
 			                           world.GetComponent<BoxCollider>(entity).CachedLayer != layer ||
 			                           world.GetComponent<BoxCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
@@ -988,6 +1109,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		collider.PhysicsCacheValid = true;
 	}
 
+	private static void UpdateTerrainColliderCache(ref TerrainComponent terrain, int runtimeVersion, CollisionFilter collisionFilter)
+	{
+		terrain.CachedRuntimeVersion = runtimeVersion;
+		terrain.CachedLayer = ClampLayer(collisionFilter.Layer);
+		terrain.CachedCollidesWith = collisionFilter.CollidesWith;
+		terrain.PhysicsCacheValid = true;
+	}
+
 	private static void CacheRigidbodyState(World world, Entity entity, bool hasRigidbody, Rigidbody rigidbody)
 	{
 		if (hasRigidbody == false)
@@ -1017,6 +1146,13 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	private static bool IsMeshColliderBodySupported(bool hasRigidbody, Rigidbody rigidbody)
 	{
 		return hasRigidbody == false || rigidbody.BodyType == RigidbodyBodyType.Static;
+	}
+
+	private static PhysicsWorldState EnsureWorldStateForQueries(World world)
+	{
+		var state = PhysicsWorldRegistry.GetOrCreateWorldState(world);
+		SynchronizeBodies(world, state, 0.0f);
+		return state;
 	}
 
 	private static Shape CreateMeshShape(Mesh mesh, Vector3 worldScale)

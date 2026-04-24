@@ -2,12 +2,19 @@ using System.Numerics;
 using JoltPhysicsSharp;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Physics.Tests;
 
 [TestFixture]
 public sealed class RigidbodySystemTests
 {
+	[TearDown]
+	public void TearDown()
+	{
+		AssetDatabase.ClearInstanceRegistry();
+	}
+
 	[Test]
 	public void PhysicsUpdate_BoxColliderWithoutRigidbodyCreatesStaticBody()
 	{
@@ -238,6 +245,25 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_TerrainComponentCreatesStaticBody()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-flat", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateTerrainComponent(heightmapId));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(1));
+		Assert.That(system.TryGetBodyMotionType(world, entity, out var motionType), Is.True);
+		Assert.That(motionType, Is.EqualTo(MotionType.Static));
+	}
+
+	[Test]
 	public void TryRaycast_HitsMeshCollider()
 	{
 		var world = new World(WorldTag.Game);
@@ -257,6 +283,54 @@ public sealed class RigidbodySystemTests
 		Assert.That(hit.Entity, Is.EqualTo(entity));
 		Assert.That(hit.Point.Y, Is.EqualTo(0.0f).Within(0.05f));
 		Assert.That(MathF.Abs(hit.Normal.Y), Is.GreaterThan(0.9f));
+	}
+
+	[Test]
+	public void TryRaycast_HitsTerrainComponent()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-flat", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateTerrainComponent(heightmapId));
+		using var system = new RigidbodySystem();
+
+		var hitSomething = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 2.0f, 0.0f),
+			new Vector3(0.0f, -4.0f, 0.0f),
+			out var hit);
+
+		Assert.That(hitSomething, Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(entity));
+		Assert.That(hit.Point.Y, Is.EqualTo(0.0f).Within(0.05f));
+		Assert.That(hit.Normal.Y, Is.GreaterThan(0.9f));
+	}
+
+	[Test]
+	public void TrySampleTerrainSurface_ReturnsHighestTerrain()
+	{
+		using var registry = new TestAssetRegistry();
+		var lowerHeightmapId = Guid.NewGuid();
+		var upperHeightmapId = Guid.NewGuid();
+		registry.Register(lowerHeightmapId, CreateHeightTexture("terrain-low", 5, 5, 0));
+		registry.Register(upperHeightmapId, CreateHeightTexture("terrain-high", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var lower = world.CreateEntity("Lower Terrain", Matrix4x4.Identity);
+		world.AddComponent(lower, CreateTerrainComponent(lowerHeightmapId));
+		var upper = world.CreateEntity("Upper Terrain", Matrix4x4.CreateTranslation(0.0f, 2.0f, 0.0f));
+		world.AddComponent(upper, CreateTerrainComponent(upperHeightmapId));
+		using var system = new RigidbodySystem();
+
+		var sampled = system.TrySampleTerrainSurface(world, Vector3.Zero, out var sample);
+
+		Assert.That(sampled, Is.True);
+		Assert.That(sample.Entity, Is.EqualTo(upper));
+		Assert.That(sample.Point.Y, Is.EqualTo(2.0f).Within(0.05f));
+		Assert.That(sample.Normal.Y, Is.GreaterThan(0.9f));
 	}
 
 	[Test]
@@ -314,6 +388,61 @@ public sealed class RigidbodySystemTests
 
 		Assert.That(hitsOldLayer, Is.False);
 		Assert.That(hitsNewLayer, Is.True);
+	}
+
+	[Test]
+	public void PhysicsUpdate_TerrainCollisionFilterBlocksRaycasts()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-flat", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var terrain = world.CreateEntity("Filtered Terrain", Matrix4x4.Identity);
+		world.AddComponent(terrain, CreateTerrainComponent(heightmapId));
+		world.AddComponent(terrain, new CollisionFilter { Layer = 2, CollidesWith = 1u << 2 });
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		var hitsOldLayer = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 2.0f, 0.0f),
+			new Vector3(0.0f, -4.0f, 0.0f),
+			out _,
+			layerMask: 1u << 1);
+		var hitsNewLayer = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 2.0f, 0.0f),
+			new Vector3(0.0f, -4.0f, 0.0f),
+			out _,
+			layerMask: 1u << 2);
+
+		Assert.That(hitsOldLayer, Is.False);
+		Assert.That(hitsNewLayer, Is.True);
+	}
+
+	[Test]
+	public void PhysicsUpdate_TerrainHeightmapChangeRecreatesBody()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		var texture = CreateHeightTexture("terrain-flat", 5, 5, 0);
+		registry.Register(heightmapId, texture);
+
+		var world = new World(WorldTag.Game);
+		var terrain = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(terrain, CreateTerrainComponent(heightmapId));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(system.TryGetTrackedBodyId(world, terrain, out var bodyIdBefore), Is.True);
+
+		texture.ApplyTextureData(9, 9, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(9, 9, 0));
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.TryGetTrackedBodyId(world, terrain, out var bodyIdAfter), Is.True);
+		Assert.That(bodyIdAfter, Is.Not.EqualTo(bodyIdBefore));
 	}
 
 	[TestCase(RigidbodyBodyType.Dynamic)]
@@ -528,6 +657,56 @@ public sealed class RigidbodySystemTests
 			layerMask: 1u << 1,
 			ignoredEntity: box);
 		Assert.That(hitOnLayer1, Is.False);
+	}
+
+	[Test]
+	public void PhysicsUpdate_DynamicBodySettlesOnTerrain()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-flat", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var terrain = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(terrain, CreateTerrainComponent(heightmapId));
+
+		var box = world.CreateEntity("Box", Matrix4x4.CreateTranslation(0.0f, 2.0f, 0.0f));
+		world.AddComponent(box, BoxCollider.CreateDefault());
+		world.AddComponent(box, Rigidbody.CreateDefault());
+		using var system = new RigidbodySystem();
+
+		for (var i = 0; i < 120; i++)
+		{
+			system.PhysicsUpdate(1.0f / 60.0f, world);
+		}
+
+		Assert.That(world.GetComponent<LocalTransform>(box).LocalPosition.Y, Is.GreaterThan(0.35f));
+		Assert.That(world.GetComponent<LocalTransform>(box).LocalPosition.Y, Is.LessThan(0.75f));
+	}
+
+	[Test]
+	public void TryRaycast_ReturnsClosestHitWhenBoxIsAboveTerrain()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-flat", 5, 5, 0));
+
+		var world = new World(WorldTag.Game);
+		var terrain = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(terrain, CreateTerrainComponent(heightmapId));
+
+		var box = world.CreateEntity("Box", Matrix4x4.CreateTranslation(0.0f, 1.0f, 0.0f));
+		world.AddComponent(box, BoxCollider.CreateDefault());
+		using var system = new RigidbodySystem();
+
+		var hitSomething = system.TryRaycast(
+			world,
+			new Vector3(0.0f, 4.0f, 0.0f),
+			new Vector3(0.0f, -8.0f, 0.0f),
+			out var hit);
+
+		Assert.That(hitSomething, Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(box));
 	}
 
 	[Test]
@@ -762,6 +941,51 @@ public sealed class RigidbodySystemTests
 		};
 	}
 
+	private static TerrainComponent CreateTerrainComponent(Guid heightmapId)
+	{
+		return new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(4.0f, 4.0f),
+			HeightScaleMeters = 4.0f,
+			ChunkSizeInQuads = 4
+		};
+	}
+
+	private static Texture CreateHeightTexture(string name, int width, int height, byte normalizedHeight)
+	{
+		var samples = new byte[width * height];
+		Array.Fill(samples, normalizedHeight);
+		return CreateHeightTexture(name, width, height, samples);
+	}
+
+	private static Texture CreateHeightTexture(string name, int width, int height, byte[] normalizedHeights)
+	{
+		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(width, height, normalizedHeights));
+	}
+
+	private static TextureMipData[] CreateHeightMipLevels(int width, int height, byte normalizedHeight)
+	{
+		var samples = new byte[width * height];
+		Array.Fill(samples, normalizedHeight);
+		return CreateHeightMipLevels(width, height, samples);
+	}
+
+	private static TextureMipData[] CreateHeightMipLevels(int width, int height, byte[] normalizedHeights)
+	{
+		var data = new byte[width * height * 4];
+		for (var i = 0; i < normalizedHeights.Length; i++)
+		{
+			var offset = i * 4;
+			data[offset] = normalizedHeights[i];
+			data[offset + 1] = 0;
+			data[offset + 2] = 0;
+			data[offset + 3] = 255;
+		}
+
+		return [new TextureMipData(width, height, data)];
+	}
+
 	private static Mesh CreateQuadMesh(float y = 0.0f)
 	{
 		return new Mesh(
@@ -832,6 +1056,58 @@ public sealed class RigidbodySystemTests
 		{
 			vehicleSystem.PhysicsUpdate(1.0f / 60.0f, world);
 			rigidbodySystem.PhysicsUpdate(1.0f / 60.0f, world);
+		}
+	}
+
+	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable
+	{
+		private readonly Dictionary<Guid, object> _assets = new();
+
+		public TestAssetRegistry()
+		{
+			AssetDatabase.SetInstanceRegistry(this);
+		}
+
+		public void Register(Guid assetId, object asset)
+		{
+			_assets[assetId] = asset;
+		}
+
+		public object? GetInstance(Guid assetId, Type expectedType)
+		{
+			if (_assets.TryGetValue(assetId, out var asset) == false)
+			{
+				return null;
+			}
+
+			return expectedType.IsInstanceOfType(asset) ? asset : null;
+		}
+
+		public void RefreshProject(string projectRootPath, AssetDatabase database)
+		{
+		}
+
+		public void InvalidateAssets(IEnumerable<Guid> assetIds)
+		{
+			foreach (var assetId in assetIds)
+			{
+				_assets.Remove(assetId);
+			}
+		}
+
+		public void ClearCachedInstances()
+		{
+			_assets.Clear();
+		}
+
+		public void Clear()
+		{
+			_assets.Clear();
+		}
+
+		public void Dispose()
+		{
+			AssetDatabase.ClearInstanceRegistry();
 		}
 	}
 }

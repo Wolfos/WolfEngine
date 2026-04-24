@@ -35,6 +35,11 @@ public readonly record struct PhysicsOverlapHit(
 	bool IsSensor,
 	uint Layer);
 
+public readonly record struct TerrainSurfaceSample(
+	Entity Entity,
+	Vector3 Point,
+	Vector3 Normal);
+
 public readonly record struct PhysicsContactEvent(
 	PhysicsContactEventType EventType,
 	Entity EntityA,

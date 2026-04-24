@@ -17,6 +17,18 @@ public struct TerrainComponent : IEntityComponent
 	public Vector2 WorldSizeMeters;
 	public float HeightScaleMeters;
 	public int ChunkSizeInQuads;
+	[NotSerialized]
+	[HideFromEditor]
+	internal bool PhysicsCacheValid;
+	[NotSerialized]
+	[HideFromEditor]
+	internal int CachedRuntimeVersion;
+	[NotSerialized]
+	[HideFromEditor]
+	internal uint CachedLayer;
+	[NotSerialized]
+	[HideFromEditor]
+	internal uint CachedCollidesWith;
 
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
@@ -25,6 +37,7 @@ public struct TerrainComponent : IEntityComponent
 		WorldSizeMeters = new Vector2(512.0f, 512.0f);
 		HeightScaleMeters = 64.0f;
 		ChunkSizeInQuads = 64;
+		PhysicsCacheValid = false;
 	}
 
 	public Vector2 GetResolvedWorldSize()
