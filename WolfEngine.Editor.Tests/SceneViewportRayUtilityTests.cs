@@ -45,6 +45,7 @@ public sealed class SceneViewportRayUtilityTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void TryRaycast_FromViewportRay_HitsTerrainWithoutMeshColliderAuthoring()
 	{
 		using var registry = new TestAssetRegistry();

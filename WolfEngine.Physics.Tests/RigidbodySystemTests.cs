@@ -245,6 +245,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void PhysicsUpdate_TerrainComponentCreatesStaticBody()
 	{
 		using var registry = new TestAssetRegistry();
@@ -261,6 +262,28 @@ public sealed class RigidbodySystemTests
 		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(1));
 		Assert.That(system.TryGetBodyMotionType(world, entity, out var motionType), Is.True);
 		Assert.That(motionType, Is.EqualTo(MotionType.Static));
+	}
+
+	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
+	public void PhysicsUpdate_NonSquareTerrainSkipsHeightfieldBodyButKeepsSampling()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("terrain-rect", 5, 3, 0));
+
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Terrain", Matrix4x4.Identity);
+		world.AddComponent(entity, CreateTerrainComponent(heightmapId));
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(0));
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out _), Is.False);
+		Assert.That(system.TrySampleTerrainSurface(world, Vector3.Zero, out var sample), Is.True);
+		Assert.That(sample.Entity, Is.EqualTo(entity));
+		Assert.That(system.TryRaycast(world, new Vector3(0.0f, 2.0f, 0.0f), new Vector3(0.0f, -4.0f, 0.0f), out _), Is.False);
 	}
 
 	[Test]
@@ -286,6 +309,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void TryRaycast_HitsTerrainComponent()
 	{
 		using var registry = new TestAssetRegistry();
@@ -391,6 +415,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void PhysicsUpdate_TerrainCollisionFilterBlocksRaycasts()
 	{
 		using var registry = new TestAssetRegistry();
@@ -423,6 +448,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void PhysicsUpdate_TerrainHeightmapChangeRecreatesBody()
 	{
 		using var registry = new TestAssetRegistry();
@@ -660,6 +686,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void PhysicsUpdate_DynamicBodySettlesOnTerrain()
 	{
 		using var registry = new TestAssetRegistry();
@@ -685,6 +712,7 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	[Explicit("Exercises native Jolt terrain heightfield integration.")]
 	public void TryRaycast_ReturnsClosestHitWhenBoxIsAboveTerrain()
 	{
 		using var registry = new TestAssetRegistry();

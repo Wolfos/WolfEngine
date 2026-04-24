@@ -638,14 +638,39 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		{
 			ref var terrain = ref world.GetComponent<TerrainComponent>(entity);
 			var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
-			if (runtime.EnsureBuilt(terrain) == false || runtime.CollisionMesh is null)
+			if (runtime.EnsureBuilt(terrain) == false)
+			{
+				shapeDefinition = default;
+				return false;
+			}
+
+			if (runtime.HeightSampleWidth != runtime.HeightSampleHeight)
+			{
+				LogTerrainHeightfieldRequirement(entity, ref terrain, runtime, "Terrain heightfield physics requires a square heightmap.");
+				shapeDefinition = default;
+				return false;
+			}
+
+			var terrainScale = SanitizeTerrainScale(worldScale);
+			var halfWidth = runtime.ResolvedWorldSize.X * 0.5f * terrainScale.X;
+			var halfDepth = runtime.ResolvedWorldSize.Y * 0.5f * terrainScale.Z;
+			var sampleSpacing = new Vector3(
+				runtime.SampleSpacing.X * terrainScale.X,
+				runtime.ResolvedHeightScale * terrainScale.Y,
+				runtime.SampleSpacing.Y * terrainScale.Z);
+			var heightSamples = runtime.HeightSamples;
+			if (heightSamples.IsEmpty)
 			{
 				shapeDefinition = default;
 				return false;
 			}
 
 			UpdateTerrainColliderCache(ref terrain, runtime.RuntimeVersion, collisionFilter);
-			shapeDefinition = PhysicsShapeDefinition.CreateTerrain(runtime.CollisionMesh, SanitizeMeshScale(worldScale));
+			shapeDefinition = PhysicsShapeDefinition.CreateTerrain(
+				heightSamples.ToArray(),
+				new Vector3(-halfWidth, 0.0f, -halfDepth),
+				sampleSpacing,
+				(uint)runtime.HeightSampleWidth);
 			return true;
 		}
 
@@ -1012,7 +1037,11 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	{
 		Shape baseShape = definition.Kind switch
 		{
-			PhysicsColliderKind.Terrain => CreateMeshShape(definition.Mesh!, definition.MeshScale),
+			PhysicsColliderKind.Terrain => CreateHeightfieldShape(
+				definition.HeightSamples!,
+				definition.HeightfieldOffset,
+				definition.HeightfieldScale,
+				definition.HeightfieldSampleCount),
 			PhysicsColliderKind.Box => new BoxShape(definition.BoxHalfExtents),
 			PhysicsColliderKind.Capsule => new CapsuleShape(definition.CapsuleHalfHeight, definition.CapsuleRadius),
 			PhysicsColliderKind.Mesh => CreateMeshShape(definition.Mesh!, definition.MeshScale),
@@ -1114,6 +1143,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		terrain.CachedRuntimeVersion = runtimeVersion;
 		terrain.CachedLayer = ClampLayer(collisionFilter.Layer);
 		terrain.CachedCollidesWith = collisionFilter.CollidesWith;
+		terrain.CachedHeightfieldFailureVersion = -1;
 		terrain.PhysicsCacheValid = true;
 	}
 
@@ -1164,6 +1194,16 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		return new MeshShape(settings);
 	}
 
+	private static Shape CreateHeightfieldShape(
+		float[] heightSamples,
+		Vector3 offset,
+		Vector3 scale,
+		uint sampleCount)
+	{
+		using var settings = new HeightFieldShapeSettings(heightSamples.AsSpan(), offset, scale, sampleCount);
+		return new HeightFieldShape(settings);
+	}
+
 	private static Vector3[] CreateMeshVertices(Mesh mesh, Vector3 worldScale)
 	{
 		var scale = SanitizeMeshScale(worldScale);
@@ -1201,6 +1241,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			SanitizeMeshScaleComponent(scale.Z));
 	}
 
+	private static Vector3 SanitizeTerrainScale(Vector3 scale)
+	{
+		return new Vector3(
+			SanitizeMeshScaleComponent(scale.X),
+			SanitizeMeshScaleComponent(scale.Y),
+			SanitizeMeshScaleComponent(scale.Z));
+	}
+
 	private static float SanitizeMeshScaleComponent(float value)
 	{
 		if (MathF.Abs(value) >= 0.001f)
@@ -1209,6 +1257,23 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		}
 
 		return value < 0.0f ? -0.001f : 0.001f;
+	}
+
+	private static void LogTerrainHeightfieldRequirement(
+		Entity entity,
+		ref TerrainComponent terrain,
+		TerrainRuntimeData runtime,
+		string reason)
+	{
+		if (terrain.CachedHeightfieldFailureVersion == runtime.RuntimeVersion)
+		{
+			return;
+		}
+
+		terrain.CachedHeightfieldFailureVersion = runtime.RuntimeVersion;
+		Console.WriteLine(
+			$"Terrain heightfield collider skipped for entity {entity.Index}:{entity.Generation}: {reason} " +
+			$"({runtime.HeightSampleWidth}x{runtime.HeightSampleHeight} samples).");
 	}
 
 	private static bool HasWorldPoseChanged(

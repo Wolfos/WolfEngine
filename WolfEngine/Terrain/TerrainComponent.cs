@@ -29,6 +29,9 @@ public struct TerrainComponent : IEntityComponent
 	[NotSerialized]
 	[HideFromEditor]
 	internal uint CachedCollidesWith;
+	[NotSerialized]
+	[HideFromEditor]
+	internal int CachedHeightfieldFailureVersion;
 
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
@@ -38,6 +41,7 @@ public struct TerrainComponent : IEntityComponent
 		HeightScaleMeters = 64.0f;
 		ChunkSizeInQuads = 64;
 		PhysicsCacheValid = false;
+		CachedHeightfieldFailureVersion = -1;
 	}
 
 	public Vector2 GetResolvedWorldSize()

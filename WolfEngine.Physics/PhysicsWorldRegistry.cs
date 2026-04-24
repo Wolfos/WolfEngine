@@ -396,26 +396,45 @@ internal readonly record struct PhysicsShapeDefinition(
 	float CapsuleRadius,
 	Vector3 Center,
 	Mesh? Mesh,
-	Vector3 MeshScale)
+	Vector3 MeshScale,
+	float[]? HeightSamples,
+	Vector3 HeightfieldOffset,
+	Vector3 HeightfieldScale,
+	uint HeightfieldSampleCount)
 {
 	public static PhysicsShapeDefinition CreateBox(Vector3 halfExtents, Vector3 center)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Box, halfExtents, 0.0f, 0.0f, center, null, Vector3.One);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Box, halfExtents, 0.0f, 0.0f, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
 	}
 
 	public static PhysicsShapeDefinition CreateCapsule(float halfHeight, float radius, Vector3 center)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Capsule, Vector3.Zero, halfHeight, radius, center, null, Vector3.One);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Capsule, Vector3.Zero, halfHeight, radius, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
 	}
 
 	public static PhysicsShapeDefinition CreateMesh(Mesh mesh, Vector3 meshScale)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale, null, Vector3.Zero, Vector3.One, 0);
 	}
 
-	public static PhysicsShapeDefinition CreateTerrain(Mesh mesh, Vector3 meshScale)
+	public static PhysicsShapeDefinition CreateTerrain(
+		float[] heightSamples,
+		Vector3 heightfieldOffset,
+		Vector3 heightfieldScale,
+		uint heightfieldSampleCount)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Terrain, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale);
+		return new PhysicsShapeDefinition(
+			PhysicsColliderKind.Terrain,
+			Vector3.Zero,
+			0.0f,
+			0.0f,
+			Vector3.Zero,
+			null,
+			Vector3.One,
+			heightSamples,
+			heightfieldOffset,
+			heightfieldScale,
+			heightfieldSampleCount);
 	}
 }
 

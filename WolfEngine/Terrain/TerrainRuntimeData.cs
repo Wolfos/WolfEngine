@@ -39,11 +39,11 @@ public sealed class TerrainRuntimeData
 	public IReadOnlyList<TerrainChunkRuntime> Chunks => _chunks;
 	public int HeightSampleWidth { get; private set; }
 	public int HeightSampleHeight { get; private set; }
+	public ReadOnlyMemory<float> HeightSamples => _heightSamples ?? Array.Empty<float>();
 	public Vector2 ResolvedWorldSize => _resolvedWorldSize;
 	public float ResolvedHeightScale => _resolvedHeightScale;
 	public Vector2 SampleSpacing { get; private set; }
 	public Box LocalBounds { get; private set; }
-	public Mesh? CollisionMesh { get; private set; }
 	public int RuntimeVersion { get; private set; }
 
 	public bool EnsureBuilt(TerrainComponent component)
@@ -58,7 +58,6 @@ public sealed class TerrainRuntimeData
 		_built = false;
 		_heightSamples = null;
 		_normals = null;
-		CollisionMesh = null;
 		HeightSampleWidth = 0;
 		HeightSampleHeight = 0;
 		SampleSpacing = Vector2.Zero;
@@ -88,7 +87,6 @@ public sealed class TerrainRuntimeData
 			Center = new Vector3(0.0f, _resolvedHeightScale * 0.5f, 0.0f),
 			Size = new Vector3(_resolvedWorldSize.X, _resolvedHeightScale, _resolvedWorldSize.Y)
 		};
-		CollisionMesh = BuildCollisionMesh(heightSamples, _normals, sampleWidth, sampleHeight);
 		BuildChunks(heightSamples, _normals, sampleWidth, sampleHeight);
 		CaptureBuildState(component);
 		_built = _chunks.Count > 0;
@@ -605,50 +603,6 @@ public sealed class TerrainRuntimeData
 		}
 
 		return normals;
-	}
-
-	private Mesh BuildCollisionMesh(float[] heights, Vector3[] normals, int sampleWidth, int sampleHeight)
-	{
-		var vertexCount = sampleWidth * sampleHeight;
-		var vertices = new Vector4[vertexCount];
-		var uvs = new Vector2[vertexCount];
-		var tangents = new Vector4[vertexCount];
-		var totalQuadsX = sampleWidth - 1;
-		var totalQuadsY = sampleHeight - 1;
-		for (var y = 0; y < sampleHeight; y++)
-		{
-			for (var x = 0; x < sampleWidth; x++)
-			{
-				var index = y * sampleWidth + x;
-				var position = CreateLocalVertexPosition(x, y, heights[index]);
-				vertices[index] = new Vector4(position, 1.0f);
-				uvs[index] = new Vector2(
-					totalQuadsX > 0 ? x / (float)totalQuadsX : 0.0f,
-					totalQuadsY > 0 ? y / (float)totalQuadsY : 0.0f);
-				tangents[index] = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
-			}
-		}
-
-		var indices = new uint[totalQuadsX * totalQuadsY * 6];
-		var writeIndex = 0;
-		for (var y = 0; y < totalQuadsY; y++)
-		{
-			for (var x = 0; x < totalQuadsX; x++)
-			{
-				var i0 = y * sampleWidth + x;
-				var i1 = i0 + 1;
-				var i2 = i0 + sampleWidth;
-				var i3 = i2 + 1;
-				indices[writeIndex++] = (uint)i0;
-				indices[writeIndex++] = (uint)i2;
-				indices[writeIndex++] = (uint)i1;
-				indices[writeIndex++] = (uint)i1;
-				indices[writeIndex++] = (uint)i2;
-				indices[writeIndex++] = (uint)i3;
-			}
-		}
-
-		return new Mesh(vertices, indices, normals, uvs, tangents);
 	}
 
 	private static float[]? DecodeHeightSamples(Texture texture, out int width, out int height)
