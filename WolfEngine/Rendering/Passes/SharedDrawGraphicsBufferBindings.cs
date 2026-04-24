@@ -7,6 +7,7 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct SharedDrawGraphicsBufferBindings
 {
 	public SharedDrawGraphicsBufferBindings(
+		uint cameraRegisterIndex,
 		uint instanceRegisterIndex,
 		uint materialRegisterIndex,
 		uint drawArgsRegisterIndex,
@@ -17,6 +18,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		uint? clusterHeaderRegisterIndex = null,
 		uint? clusterLightIndexRegisterIndex = null)
 	{
+		CameraRegisterIndex = cameraRegisterIndex;
 		InstanceRegisterIndex = instanceRegisterIndex;
 		MaterialRegisterIndex = materialRegisterIndex;
 		DrawArgsRegisterIndex = drawArgsRegisterIndex;
@@ -27,6 +29,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		ClusterHeaderRegisterIndex = clusterHeaderRegisterIndex;
 		ClusterLightIndexRegisterIndex = clusterLightIndexRegisterIndex;
 	}
+
+	public uint CameraRegisterIndex { get; }
 
 	public uint InstanceRegisterIndex { get; }
 
@@ -50,6 +54,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 	{
 		ArgumentNullException.ThrowIfNull(reflection);
 		return new SharedDrawGraphicsBufferBindings(
+			reflection.GetConstantBuffer("CameraParams").RegisterIndex,
 			reflection.GetResource("g_InstanceTable").RegisterIndex,
 			reflection.GetResource("g_MaterialTable").RegisterIndex,
 			reflection.GetResource("g_DrawArgsTable").RegisterIndex,
@@ -62,6 +67,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 	{
 		ArgumentNullException.ThrowIfNull(reflection);
 		return new SharedDrawGraphicsBufferBindings(
+			reflection.GetConstantBuffer("CameraParams").RegisterIndex,
 			reflection.GetResource("g_InstanceTable").RegisterIndex,
 			reflection.GetResource("g_MaterialTable").RegisterIndex,
 			reflection.GetResource("g_DrawArgsTable").RegisterIndex,
@@ -75,6 +81,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 	{
 		ArgumentNullException.ThrowIfNull(reflection);
 		return new SharedDrawGraphicsBufferBindings(
+			reflection.GetConstantBuffer("CameraParams").RegisterIndex,
 			reflection.GetResource("g_InstanceTable").RegisterIndex,
 			reflection.GetResource("g_MaterialTable").RegisterIndex,
 			reflection.GetResource("g_DrawArgsTable").RegisterIndex,

@@ -132,7 +132,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		using var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
-		command.SetVertexBuffer(cameraBuffer.Buffer, 0, 2);
+		command.SetVertexBuffer(cameraBuffer.Buffer, 0, bindings.CameraRegisterIndex);
 		command.SetVertexBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
 		command.SetVertexBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
 		command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
@@ -147,7 +147,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		}
 
 		command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
-		command.SetFragmentBuffer(cameraBuffer.Buffer, 0, 2);
+		command.SetFragmentBuffer(cameraBuffer.Buffer, 0, bindings.CameraRegisterIndex);
 		command.SetFragmentBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
 		command.SetFragmentBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
 		command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
