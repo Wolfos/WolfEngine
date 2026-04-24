@@ -677,7 +677,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		WriteBuffer(_gpuDrawResources.InstanceUpdateBuffer!, CollectionsMarshal.AsSpan(_instanceUpdateData), "InstanceUpdateBuffer");
+		WriteBuffer<GpuDrawInstanceUpdateData>(_gpuDrawResources.InstanceUpdateBuffer!, CollectionsMarshal.AsSpan(_instanceUpdateData), "InstanceUpdateBuffer");
 		DispatchUpdatePass(
 			context,
 			EnsureInstanceUpdatePipeline(device),
@@ -702,7 +702,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		WriteBuffer(_gpuDrawResources.MeshUpdateBuffer!, CollectionsMarshal.AsSpan(_meshUpdateData), "MeshUpdateBuffer");
+		WriteBuffer<GpuDrawMeshUpdateData>(_gpuDrawResources.MeshUpdateBuffer!, CollectionsMarshal.AsSpan(_meshUpdateData), "MeshUpdateBuffer");
 		DispatchUpdatePass(
 			context,
 			EnsureMeshUpdatePipeline(device),
@@ -725,7 +725,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		WriteBuffer(_gpuDrawResources.MaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_materialUpdateData), "MaterialUpdateBuffer");
+		WriteBuffer<GpuDrawMaterialUpdateData>(_gpuDrawResources.MaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_materialUpdateData), "MaterialUpdateBuffer");
 		DispatchUpdatePass(
 			context,
 			EnsureMaterialUpdatePipeline(device),
@@ -748,7 +748,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		WriteBuffer(_gpuDrawResources.TerrainMaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainMaterialUpdateData), "TerrainMaterialUpdateBuffer");
+		WriteBuffer<GpuTerrainMaterialUpdateData>(_gpuDrawResources.TerrainMaterialUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainMaterialUpdateData), "TerrainMaterialUpdateBuffer");
 		DispatchUpdatePass(
 			context,
 			EnsureTerrainMaterialUpdatePipeline(device),
@@ -774,7 +774,7 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		WriteBuffer(_gpuDrawResources.TerrainLayerUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainLayerUpdateData), "TerrainLayerUpdateBuffer");
+		WriteBuffer<GpuTerrainLayerUpdateData>(_gpuDrawResources.TerrainLayerUpdateBuffer!, CollectionsMarshal.AsSpan(_terrainLayerUpdateData), "TerrainLayerUpdateBuffer");
 		DispatchUpdatePass(
 			context,
 			EnsureTerrainLayerUpdatePipeline(device),
