@@ -150,7 +150,7 @@ public sealed class TextureAsset
 
 public sealed class TextureImportSettings
 {
-	public TextureSemantic TextureSemantic { get; set; }
+	public TextureSemantic TextureSemantic { get; set; } = TextureSemantic.BaseColor;
 	public int MaxResolution { get; set; } = 8192;
 }
 
