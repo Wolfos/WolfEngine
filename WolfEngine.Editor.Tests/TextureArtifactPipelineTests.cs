@@ -84,6 +84,44 @@ public sealed class TextureArtifactPipelineTests
 		factory.Received(1).GetTexture(Arg.Is<Texture>(texture => texture.Format == TextureFormat.Bc3Unorm));
 	}
 
+	[Test]
+	public void TextureImportSettings_RoundTripSemantic()
+	{
+		using var tempDirectory = new TempDirectory();
+		var metadataPath = Path.Combine(tempDirectory.Path, "texture.png.meta");
+		var metadata = new AssetSourceMetaFile
+		{
+			SourceId = Guid.NewGuid(),
+			ImporterId = AssetImporterIds.Texture,
+			TextureImportSettings = new TextureImportSettings
+			{
+				TextureSemantic = TextureSemantic.BaseColorTransparent,
+				MaxResolution = 2048
+			}
+		};
+
+		var store = new AssetMetadataStore();
+		store.Save(metadataPath, metadata);
+		var loaded = store.Load(metadataPath);
+
+		Assert.That(loaded.TextureImportSettings, Is.Not.Null);
+		Assert.That(loaded.TextureImportSettings!.TextureSemantic, Is.EqualTo(TextureSemantic.BaseColorTransparent));
+		Assert.That(loaded.TextureImportSettings.MaxResolution, Is.EqualTo(2048));
+	}
+
+	[TestCase(TextureSemantic.Unknown, false, TextureFormat.Unknown)]
+	[TestCase(TextureSemantic.BaseColor, true, TextureFormat.Bc1Unorm)]
+	[TestCase(TextureSemantic.BaseColorTransparent, true, TextureFormat.Bc3Unorm)]
+	[TestCase(TextureSemantic.Normal, true, TextureFormat.Bc5Unorm)]
+	[TestCase(TextureSemantic.Occlusion, true, TextureFormat.Bc4Unorm)]
+	public void TextureCompressionCompiler_MapsSemanticsToExpectedRuntimeFormat(TextureSemantic semantic, bool expectedResult, TextureFormat expectedFormat)
+	{
+		var result = TextureCompressionCompiler.TryGetBcRuntimeFormat(semantic, out var format);
+
+		Assert.That(result, Is.EqualTo(expectedResult));
+		Assert.That(format, Is.EqualTo(expectedFormat));
+	}
+
 	private sealed class TempDirectory : IDisposable
 	{
 		public TempDirectory()

@@ -1,9 +1,8 @@
-using System;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Rendering.UI;
+using WolfEngine.Importing;
 
 namespace WolfEngine.Editor.UI;
 
@@ -36,9 +35,13 @@ public sealed class TextureAssetEditor
 			return;
 		}
 
+		var metadata = asset.IsGenerated ? null : EnsureMetadataLoaded(asset);
+		var previewIsSrgb = metadata?.TextureImportSettings is { } importSettings
+			? StbImageLoader.IsSrgb(importSettings.TextureSemantic)
+			: StbImageLoader.IsSrgb(asset.TextureSummary.Semantic);
 		var previewRelativePath = asset.IsGenerated ? string.Empty : asset.TextureSummary.RelativeSourceAssetPath;
 		if (string.IsNullOrWhiteSpace(previewRelativePath) == false &&
-		    _imageLoader.TryGetImGuiTextureId(_projectService.GetAbsolutePath(previewRelativePath), out var textureId, asset.TextureSummary.IsSrgb))
+		    _imageLoader.TryGetImGuiTextureId(_projectService.GetAbsolutePath(previewRelativePath), out var textureId, previewIsSrgb))
 		{
 			ImGui.Image(textureId, PreviewSize);
 		}
@@ -51,7 +54,7 @@ public sealed class TextureAssetEditor
 
 		ImGui.Spacing();
 		ImGui.TextUnformatted($"Imported: {asset.TextureSummary.Width}x{asset.TextureSummary.Height}, {asset.TextureSummary.Channels} channel(s)");
-		ImGui.TextUnformatted($"Color Space: {(asset.TextureSummary.IsSrgb ? "sRGB" : "Linear")}");
+		ImGui.TextUnformatted($"Color Space: {(StbImageLoader.IsSrgb(asset.TextureSummary.Semantic) ? "sRGB" : "Linear")}");
 
 		if (asset.IsGenerated)
 		{
@@ -59,7 +62,6 @@ public sealed class TextureAssetEditor
 			return;
 		}
 
-		var metadata = EnsureMetadataLoaded(asset);
 		if (metadata is null)
 		{
 			ImGui.TextUnformatted("Failed to load texture metadata.");
@@ -67,12 +69,31 @@ public sealed class TextureAssetEditor
 		}
 
 		metadata.TextureImportSettings ??= new TextureImportSettings();
+		var currentSemantic = metadata.TextureImportSettings.TextureSemantic;
 		var currentResolution = metadata.TextureImportSettings.MaxResolution;
 		var selectedIndex = Array.IndexOf(ResolutionOptions, currentResolution);
 		if (selectedIndex < 0)
 		{
 			selectedIndex = ResolutionOptions.Length - 1;
 		}
+
+		EditorUIUtility.Combo("Texture Semantic", FormatSemanticLabel(currentSemantic), () =>
+		{
+			foreach (TextureSemantic semantic in Enum.GetValues<TextureSemantic>())
+			{
+				var isSelected = semantic == currentSemantic;
+				if (ImGui.Selectable(FormatSemanticLabel(semantic), isSelected))
+				{
+					metadata.TextureImportSettings.TextureSemantic = semantic;
+					SaveTextureMetadata(asset, metadata);
+				}
+
+				if (isSelected)
+				{
+					ImGui.SetItemDefaultFocus();
+				}
+			}
+		});
 
 		EditorUIUtility.Combo("Import Resolution", FormatResolutionLabel(ResolutionOptions[selectedIndex]), () =>
 		{
@@ -126,5 +147,16 @@ public sealed class TextureAssetEditor
 	private static string FormatResolutionLabel(int resolution)
 	{
 		return $"{resolution}x{resolution}";
+	}
+
+	private static string FormatSemanticLabel(TextureSemantic semantic)
+	{
+		return semantic switch
+		{
+			TextureSemantic.BaseColor => "Base Color",
+			TextureSemantic.BaseColorTransparent => "Base Color Transparent",
+			TextureSemantic.MetallicRoughness => "Metallic Roughness",
+			_ => semantic.ToString()
+		};
 	}
 }

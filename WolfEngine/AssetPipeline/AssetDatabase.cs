@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.AssetPipeline;
@@ -101,7 +102,7 @@ public sealed class TextureAssetSummary
 	public int Width { get; set; }
 	public int Height { get; set; }
 	public int Channels { get; set; }
-	public bool IsSrgb { get; set; }
+	public TextureSemantic Semantic { get; set; }
 	public string SourceExtension { get; set; } = string.Empty;
 }
 
@@ -149,7 +150,7 @@ public sealed class TextureAsset
 
 public sealed class TextureImportSettings
 {
-	public bool IsSrgb { get; set; }
+	public TextureSemantic TextureSemantic { get; set; }
 	public int MaxResolution { get; set; } = 8192;
 }
 

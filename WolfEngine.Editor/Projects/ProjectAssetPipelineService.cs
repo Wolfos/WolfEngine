@@ -495,7 +495,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		AssetSourceMetaFile metadata)
 	{
 		metadata.TextureImportSettings ??= new TextureImportSettings();
-		var semantic = metadata.TextureImportSettings.IsSrgb ? TextureSemantic.BaseColor : TextureSemantic.Unknown;
+		var semantic = metadata.TextureImportSettings.TextureSemantic;
 		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
 		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D, Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
@@ -513,7 +513,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			Width = importedTexture.Width,
 			Height = importedTexture.Height,
 			Channels = importedTexture.Channels,
-			IsSrgb = importedTexture.IsSrgb,
+			Semantic = importedTexture.Semantic,
 			SourceExtension = Path.GetExtension(relativeSourcePath).ToLowerInvariant()
 		};
 
@@ -671,7 +671,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					Width = importedTexture.Width,
 					Height = importedTexture.Height,
 					Channels = importedTexture.Channels,
-					IsSrgb = importedTexture.IsSrgb,
+					Semantic = importedTexture.Semantic,
 					SourceExtension = Path.GetExtension(importedTexture.NameOrPath ?? string.Empty).ToLowerInvariant()
 				})
 			});

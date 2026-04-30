@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Importing;
 
 namespace WolfEngine.Editor.Projects;
 
@@ -125,7 +126,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 		{
 			return _textureFactory.LoadFromFile(
 				context.GetAbsolutePath(summary.RelativeSourceAssetPath),
-				summary.IsSrgb);
+				StbImageLoader.IsSrgb(summary.Semantic));
 		}
 
 		throw new InvalidOperationException(

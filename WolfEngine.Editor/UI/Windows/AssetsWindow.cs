@@ -7,6 +7,7 @@ using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Importing;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -796,7 +797,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null && string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
 		{
 			var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
-			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, asset.TextureSummary.IsSrgb))
+			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, StbImageLoader.IsSrgb(asset.TextureSummary.Semantic)))
 			{
 				drawList.AddImage(textureId, min, max);
 				return;

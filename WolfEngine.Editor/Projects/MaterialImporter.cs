@@ -6,6 +6,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using StbImageSharp;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Projects;
@@ -113,7 +114,7 @@ public sealed class MaterialImporter : IMaterialImporter
 				relativeFolderPath,
 				materialName,
 				"Albedo",
-				isSrgb: true);
+				GetAlbedoSemantic(request.MaterialType));
 			var normalTextureId = WriteNormalTexture(
 				request.NormalPath,
 				relativeFolderPath,
@@ -132,7 +133,7 @@ public sealed class MaterialImporter : IMaterialImporter
 				relativeFolderPath,
 				materialName,
 				"Emissive",
-				isSrgb: true);
+				TextureSemantic.Emissive);
 			var occlusionTextureId = WriteOcclusionTexture(
 				request.OcclusionPath,
 				request.OcclusionChannel,
@@ -172,7 +173,7 @@ public sealed class MaterialImporter : IMaterialImporter
 		string relativeFolderPath,
 		string materialName,
 		string suffix,
-		bool isSrgb)
+		TextureSemantic semantic)
 	{
 		if (string.IsNullOrWhiteSpace(sourcePath))
 		{
@@ -180,7 +181,7 @@ public sealed class MaterialImporter : IMaterialImporter
 		}
 
 		using var image = LoadSourceImage(sourcePath);
-		return WriteTextureAsset(image, relativeFolderPath, $"{materialName}_{suffix}.png", isSrgb);
+		return WriteTextureAsset(image, relativeFolderPath, $"{materialName}_{suffix}.png", semantic);
 	}
 
 	private Guid WriteNormalTexture(
@@ -223,7 +224,7 @@ public sealed class MaterialImporter : IMaterialImporter
 			}
 		}
 
-		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_Normal.png", isSrgb: false);
+		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_Normal.png", TextureSemantic.Normal);
 	}
 
 	private Guid WriteMetallicRoughnessTexture(
@@ -265,7 +266,7 @@ public sealed class MaterialImporter : IMaterialImporter
 			}
 		}
 
-		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_MetallicRoughness.png", isSrgb: false);
+		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_MetallicRoughness.png", TextureSemantic.MetallicRoughness);
 	}
 
 	private Guid WriteOcclusionTexture(
@@ -290,10 +291,10 @@ public sealed class MaterialImporter : IMaterialImporter
 			}
 		}
 
-		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_AO.png", isSrgb: false);
+		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_AO.png", TextureSemantic.Occlusion);
 	}
 
-	private Guid WriteTextureAsset(Image<Rgba32> image, string relativeFolderPath, string fileName, bool isSrgb)
+	private Guid WriteTextureAsset(Image<Rgba32> image, string relativeFolderPath, string fileName, TextureSemantic semantic)
 	{
 		var relativeTexturePath = $"{relativeFolderPath}/{fileName}";
 		var absoluteTexturePath = _projectService.GetAbsolutePath(relativeTexturePath);
@@ -303,18 +304,25 @@ public sealed class MaterialImporter : IMaterialImporter
 		image.SaveAsPng(absoluteTexturePath);
 		_metadataStore.Save(
 			AssetFileExtensions.GetMetaPath(absoluteTexturePath),
-			CreateTextureMetadata(textureName, nodeId, isSrgb));
+			CreateTextureMetadata(textureName, nodeId, semantic));
 		return nodeId;
 	}
 
-	private static AssetSourceMetaFile CreateTextureMetadata(string name, Guid nodeId, bool isSrgb)
+	private static AssetSourceMetaFile CreateTextureMetadata(string name, Guid nodeId, TextureSemantic semantic)
 	{
 		var metadata = CreateMetadata(AssetImporterIds.Texture, AssetType.Texture2D, name, nodeId);
 		metadata.TextureImportSettings = new TextureImportSettings
 		{
-			IsSrgb = isSrgb
+			TextureSemantic = semantic
 		};
 		return metadata;
+	}
+
+	private static TextureSemantic GetAlbedoSemantic(MaterialAssetType materialType)
+	{
+		return materialType == MaterialAssetType.Opaque
+			? TextureSemantic.BaseColor
+			: TextureSemantic.BaseColorTransparent;
 	}
 
 	private static AssetSourceMetaFile CreateMetadata(string importerId, AssetType assetType, string name, Guid nodeId)

@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Importing;
 using WolfEngine.Editor.UI;
 
 namespace WolfEngine.Editor.Projects;
@@ -432,7 +433,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		       left.Width == right.Width &&
 		       left.Height == right.Height &&
 		       left.Channels == right.Channels &&
-		       left.IsSrgb == right.IsSrgb &&
+		       left.Semantic == right.Semantic &&
 		       string.Equals(left.SourceExtension, right.SourceExtension, StringComparison.Ordinal);
 	}
 
@@ -606,7 +607,7 @@ public sealed class EditorProjectService : IEditorProjectService
 					Width = asset.TextureSummary.Width,
 					Height = asset.TextureSummary.Height,
 					Channels = asset.TextureSummary.Channels,
-					IsSrgb = asset.TextureSummary.IsSrgb,
+					Semantic = asset.TextureSummary.Semantic,
 					SourceExtension = asset.TextureSummary.SourceExtension
 				},
 			MaterialSummary = asset.MaterialSummary is null
