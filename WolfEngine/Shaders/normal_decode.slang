@@ -23,11 +23,7 @@ struct RgbNormalMapDecoder : INormalMapDecoder
 
 float3 DecodeNormalMapSample(float4 normalSample)
 {
-#if defined(WOLF_TARGET_D3D12)
     Bc5NormalMapDecoder decoder;
-#else
-    RgbNormalMapDecoder decoder;
-#endif
 
     return decoder.Decode(normalSample);
 }
