@@ -30,16 +30,30 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
-	public void Catalog_MissingGameplayBuild_DoesNotThrowAndIgnoresUnbuiltProjectAssembly()
+	public void EnsureLoaded_MissingGameplayBuild_BuildsAndLoadsProjectAssembly()
 	{
 		using var environment = new GameplayTestEnvironment();
+		environment.WriteGameplaySource(
+			"""
+			using WolfEngine.ECS;
 
+			namespace GameplayComponentSupport;
+
+			public struct AutoBuiltGameplayComponent : IEntityComponent
+			{
+				public int Count;
+			}
+			""");
+
+		var loadResult = environment.Host.EnsureLoaded();
 		var componentTypes = environment.TypeCatalog.GetComponentTypes();
 
+		Assert.That(loadResult.Generation, Is.GreaterThan(0));
+		Assert.That(loadResult.Assembly?.GetName().Name, Is.EqualTo(environment.GameplayAssemblyName));
 		Assert.That(componentTypes.Select(descriptor => descriptor.Type), Does.Contain(typeof(NameComponent)));
 		Assert.That(
-			componentTypes.Any(descriptor => string.Equals(descriptor.Type.Assembly.GetName().Name, environment.GameplayAssemblyName, StringComparison.Ordinal)),
-			Is.False);
+			componentTypes.Any(descriptor => string.Equals(descriptor.Type.Name, "AutoBuiltGameplayComponent", StringComparison.Ordinal)),
+			Is.True);
 	}
 
 	[Test]
@@ -890,7 +904,7 @@ public sealed class GameplayComponentSupportTests
 			File.WriteAllText(gameplayProjectPath, projectContents);
 		}
 
-		private void WriteGameplaySource(string source)
+		public void WriteGameplaySource(string source)
 		{
 			var gameplaySourcePath = Path.Combine(ProjectRootPath, ProjectGameplayScaffolder.GameplayFolderName, ProjectGameplayScaffolder.GameplaySourceFileName);
 			File.WriteAllText(gameplaySourcePath, source);

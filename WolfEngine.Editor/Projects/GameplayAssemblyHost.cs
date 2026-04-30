@@ -18,7 +18,7 @@ public sealed class GameplayBuildResult
 	public string? ShadowDirectoryPath { get; init; }
 }
 
-public sealed class GameplayLoadResult
+public record struct GameplayLoadResult
 {
 	public long Generation { get; init; }
 	public Assembly? Assembly { get; init; }
@@ -139,7 +139,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 
 		var fullGameplayProjectPath = Path.GetFullPath(gameplayProjectPath);
 		var fullProjectRootPath = Path.GetFullPath(projectRootPath);
-		Task.Run(() => BuildAndPrepareShadowCopy(fullProjectRootPath, fullGameplayProjectPath));
+		Task.Run(() => BuildAndPublishPendingResult(fullProjectRootPath, fullGameplayProjectPath));
 		return true;
 	}
 
@@ -164,9 +164,11 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		var projectService = GetProjectService();
 		var gameplayProjectPath = projectService.GameplayProjectPath;
 		var projectRootPath = projectService.ProjectRootPath;
+		
+		// No project built
 		if (string.IsNullOrWhiteSpace(projectRootPath) || string.IsNullOrWhiteSpace(gameplayProjectPath))
 		{
-			return new GameplayLoadResult
+			return new()
 			{
 				Generation = CurrentGeneration
 			};
@@ -182,12 +184,18 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		}
 
 		var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath, GetCurrentBuildConfiguration());
+		// No gameplay assembly was built yet, force a build
 		if (string.IsNullOrWhiteSpace(gameplayAssemblyPath))
 		{
-			return new GameplayLoadResult
+			var buildResult = BuildAndPrepareShadowCopy(Path.GetFullPath(projectRootPath), Path.GetFullPath(gameplayProjectPath));
+			if (buildResult.Succeeded == false)
 			{
-				Generation = CurrentGeneration
-			};
+				throw new InvalidOperationException(string.IsNullOrWhiteSpace(buildResult.Output)
+					? "Gameplay assembly is missing and gameplay build failed."
+					: buildResult.Output);
+			}
+
+			return ApplyPreparedBuild(buildResult);
 		}
 
 		var preparedBuild = PrepareShadowCopy(Path.GetFullPath(projectRootPath), gameplayAssemblyPath);
@@ -199,7 +207,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		ArgumentNullException.ThrowIfNull(result);
 		if (result.Succeeded == false || string.IsNullOrWhiteSpace(result.ShadowAssemblyPath) || string.IsNullOrWhiteSpace(result.ShadowDirectoryPath))
 		{
-			return new GameplayLoadResult
+			return new()
 			{
 				Generation = CurrentGeneration
 			};
@@ -232,9 +240,8 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		WaitForUnloadAndDeleteShadowDirectory(pendingUnload);
 	}
 
-	private void BuildAndPrepareShadowCopy(string projectRootPath, string gameplayProjectPath)
+	private GameplayBuildResult BuildAndPrepareShadowCopy(string projectRootPath, string gameplayProjectPath)
 	{
-		GameplayBuildResult buildResult;
 		try
 		{
 			var configuration = GetCurrentBuildConfiguration();
@@ -249,7 +256,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			using var process = Process.Start(startInfo);
 			if (process is null)
 			{
-				buildResult = new GameplayBuildResult
+				return new()
 				{
 					Succeeded = false,
 					Output = "Failed to start gameplay build process."
@@ -267,7 +274,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 				var output = string.Concat(standardOutput, string.IsNullOrWhiteSpace(standardError) ? string.Empty : Environment.NewLine + standardError).Trim();
 				if (process.ExitCode != 0)
 				{
-					buildResult = new GameplayBuildResult
+					return new()
 					{
 						Succeeded = false,
 						Output = string.IsNullOrWhiteSpace(output)
@@ -278,8 +285,8 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 				else
 				{
 					var gameplayAssemblyPath = ProjectTypeCatalog.TryFindGameplayAssemblyPath(gameplayProjectPath, configuration);
-					buildResult = string.IsNullOrWhiteSpace(gameplayAssemblyPath)
-						? new GameplayBuildResult
+					return string.IsNullOrWhiteSpace(gameplayAssemblyPath)
+						? new()
 						{
 							Succeeded = false,
 							Output = string.IsNullOrWhiteSpace(output)
@@ -292,13 +299,17 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		}
 		catch (Exception exception)
 		{
-			buildResult = new GameplayBuildResult
+			return new()
 			{
 				Succeeded = false,
 				Output = exception.ToString()
 			};
 		}
+	}
 
+	private void BuildAndPublishPendingResult(string projectRootPath, string gameplayProjectPath)
+	{
+		var buildResult = BuildAndPrepareShadowCopy(projectRootPath, gameplayProjectPath);
 		lock (_sync)
 		{
 			_pendingBuildResult = buildResult;
@@ -310,7 +321,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 	{
 		var sourceDirectory = Path.GetDirectoryName(gameplayAssemblyPath)
 		                      ?? throw new InvalidOperationException($"Gameplay assembly '{gameplayAssemblyPath}' does not have a parent directory.");
-		var libraryRoot = global::WolfEngine.AssetPipeline.AssetPipelinePaths.GetLibraryPath(projectRootPath);
+		var libraryRoot = AssetPipelinePaths.GetLibraryPath(projectRootPath);
 		var loadsRoot = Path.Combine(libraryRoot, "Gameplay", "loads");
 		Directory.CreateDirectory(loadsRoot);
 
@@ -338,7 +349,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		var assembly = loadContext.LoadManagedAssembly(shadowAssemblyPath);
 		var module = TryCreateModule(assembly);
 
-		return new GameplayLoadedAssembly
+		return new()
 		{
 			ProjectRootPath = GetProjectService().ProjectRootPath is { } projectRootPath
 				? Path.GetFullPath(projectRootPath)
@@ -360,7 +371,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 
 		var pendingUnload = new GameplayPendingUnload
 		{
-			LoadContextReference = new WeakReference(_current.LoadContext),
+			LoadContextReference = new(_current.LoadContext),
 			ShadowDirectoryPath = _current.ShadowDirectoryPath
 		};
 		_current.LoadContext.Unload();
@@ -370,7 +381,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 
 	private static GameplayLoadResult CreateLoadResult(long generation, GameplayLoadedAssembly? current, WeakReference? unloadedContextReference)
 	{
-		return new GameplayLoadResult
+		return new()
 		{
 			Generation = generation,
 			Assembly = current?.Assembly,
