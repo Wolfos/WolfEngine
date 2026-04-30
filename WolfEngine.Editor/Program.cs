@@ -40,6 +40,9 @@ public static class Program
 
 			var projectService = provider.GetRequiredService<IEditorProjectService>();
 			projectService.OpenProject(lastProjectPath, out _);
+
+			var gameplayAssemblyHost = provider.GetRequiredService<IGameplayAssemblyHost>();
+			gameplayAssemblyHost.EnsureLoaded();
 		});
 		
 		editor.Stop();

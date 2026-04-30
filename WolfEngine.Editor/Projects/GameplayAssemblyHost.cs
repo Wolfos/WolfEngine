@@ -333,6 +333,8 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		{
 			throw new FileNotFoundException("Shadow-copied gameplay assembly was not found.", shadowAssemblyPath);
 		}
+		
+		CleanupStaleShadowCopies(loadsRoot, shadowDirectory);
 
 		return new()
 		{
@@ -342,6 +344,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			ShadowDirectoryPath = shadowDirectory
 		};
 	}
+	
 
 	private GameplayLoadedAssembly LoadShadowAssembly_NoLock(string shadowDirectoryPath, string shadowAssemblyPath)
 	{
@@ -360,6 +363,37 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 			Assembly = assembly,
 			Module = module
 		};
+	}
+	
+	private void CleanupStaleShadowCopies(string loadsRoot, string preparedDirectory)
+	{
+		var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			Path.GetFullPath(preparedDirectory)
+		};
+
+		lock (_sync)
+		{
+			if (_current?.ShadowDirectoryPath is { } current)
+			{
+				keep.Add(Path.GetFullPath(current));
+			}
+
+			if (_pendingBuildResult?.ShadowDirectoryPath is { } pending)
+			{
+				keep.Add(Path.GetFullPath(pending));
+			}
+		}
+
+		foreach (var directory in Directory.EnumerateDirectories(loadsRoot))
+		{
+			if (keep.Contains(Path.GetFullPath(directory)))
+			{
+				continue;
+			}
+
+			TryDeleteShadowDirectory(directory);
+		}
 	}
 
 	private GameplayPendingUnload? UnloadCurrent_NoLock()
