@@ -17,6 +17,7 @@ internal static class TextureCompressionCompiler
 			TextureSemantic.MetallicRoughness => TextureFormat.Bc3Unorm,
 			TextureSemantic.Occlusion => TextureFormat.Bc4Unorm,
 			TextureSemantic.Emissive => TextureFormat.Bc1Unorm,
+			TextureSemantic.BaseColorTransparent => TextureFormat.Bc3Unorm,
 			_ => TextureFormat.Unknown
 		};
 

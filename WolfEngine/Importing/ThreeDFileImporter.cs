@@ -100,8 +100,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     scene,
                     modelDirectory,
                     textureLookup,
-                    textures,
-                    TextureSemantic.BaseColor,
+                    textures, alphaMode == AlphaMode.Opaque ? TextureSemantic.BaseColor : TextureSemantic.BaseColorTransparent,
                     TextureType.BaseColor,
                     TextureType.Diffuse);
 

@@ -11,7 +11,8 @@ public enum TextureSemantic
     Normal,
     MetallicRoughness,
     Occlusion,
-    Emissive
+    Emissive,
+    BaseColorTransparent
 }
 
 public record ImportedScene(
