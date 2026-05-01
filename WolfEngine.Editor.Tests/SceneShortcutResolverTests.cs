@@ -12,6 +12,7 @@ public sealed class SceneShortcutResolverTests
 			SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 				true, false,
 				true, false, false,
+				false,
 				false, false, false, false, false, false,
 				false,
 				SceneToolMode.Transform)),
@@ -21,6 +22,7 @@ public sealed class SceneShortcutResolverTests
 			SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 				true, false,
 				false, true, false,
+				false,
 				false, false, false, false, false, false,
 				false,
 				SceneToolMode.Transform)),
@@ -30,10 +32,21 @@ public sealed class SceneShortcutResolverTests
 			SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 				true, false,
 				false, false, true,
+				false,
 				false, false, false, false, false, false,
 				false,
 				SceneToolMode.Transform)),
 			Is.EqualTo(SceneShortcutCommand.SelectScale));
+
+		Assert.That(
+			SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
+				true, false,
+				false, false, false,
+				true,
+				false, false, false, false, false, false,
+				false,
+				SceneToolMode.Transform)),
+			Is.EqualTo(SceneShortcutCommand.SelectTerrainMode));
 	}
 
 	[Test]
@@ -65,6 +78,7 @@ public sealed class SceneShortcutResolverTests
 		var command = SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 			true, false,
 			false, false, false,
+			false,
 			true, false, false, false, false, false,
 			false,
 			SceneToolMode.Transform));
@@ -78,6 +92,7 @@ public sealed class SceneShortcutResolverTests
 		var command = SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 			true, false,
 			true, false, false,
+			false,
 			true, true, true, true, true, true,
 			true,
 			SceneToolMode.Terrain));
@@ -91,6 +106,7 @@ public sealed class SceneShortcutResolverTests
 		var command = SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 			false, false,
 			true, true, true,
+			true,
 			true, true, true, true, true, true,
 			false,
 			SceneToolMode.Terrain));
@@ -104,6 +120,7 @@ public sealed class SceneShortcutResolverTests
 		var command = SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
 			true, true,
 			true, true, true,
+			true,
 			true, true, true, true, true, true,
 			false,
 			SceneToolMode.Terrain));
@@ -122,6 +139,7 @@ public sealed class SceneShortcutResolverTests
 		return new SceneShortcutSnapshot(
 			true, false,
 			false, false, false,
+			false,
 			tool1Pressed, tool2Pressed, tool3Pressed, tool4Pressed, tool5Pressed, tool6Pressed,
 			false,
 			SceneToolMode.Terrain);

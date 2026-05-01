@@ -6,6 +6,7 @@ internal enum SceneShortcutCommand
 	SelectTranslate,
 	SelectRotate,
 	SelectScale,
+	SelectTerrainMode,
 	SelectRaiseLower,
 	SelectFlatten,
 	SelectSmooth,
@@ -20,6 +21,7 @@ internal readonly record struct SceneShortcutSnapshot(
 	bool TranslatePressed,
 	bool RotatePressed,
 	bool ScalePressed,
+	bool TerrainPressed,
 	bool Tool1Pressed,
 	bool Tool2Pressed,
 	bool Tool3Pressed,
@@ -53,6 +55,11 @@ internal static class SceneShortcutResolver
 		if (snapshot.ScalePressed)
 		{
 			return SceneShortcutCommand.SelectScale;
+		}
+
+		if (snapshot.TerrainPressed)
+		{
+			return SceneShortcutCommand.SelectTerrainMode;
 		}
 
 		if (snapshot.CurrentMode != SceneToolMode.Terrain)

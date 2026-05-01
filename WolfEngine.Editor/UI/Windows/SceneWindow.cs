@@ -181,6 +181,7 @@ public class SceneWindow: EditorWindow
             ImGui.IsKeyPressed(ImGuiKey.W),
             ImGui.IsKeyPressed(ImGuiKey.E),
             ImGui.IsKeyPressed(ImGuiKey.R),
+            ImGui.IsKeyPressed(ImGuiKey.T),
             ImGui.IsKeyPressed(ImGuiKey._1),
             ImGui.IsKeyPressed(ImGuiKey._2),
             ImGui.IsKeyPressed(ImGuiKey._3),
@@ -266,6 +267,9 @@ public class SceneWindow: EditorWindow
                 break;
             case SceneShortcutCommand.SelectScale:
                 SelectTransformMode(TransformGizmoMode.Scale);
+                break;
+            case SceneShortcutCommand.SelectTerrainMode:
+                _sceneToolMode = SceneToolMode.Terrain;
                 break;
             case SceneShortcutCommand.SelectRaiseLower:
                 _terrainTool = TerrainTool.RaiseLower;
