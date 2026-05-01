@@ -35,6 +35,7 @@ public sealed class TerrainRuntimeData
 	private bool _built;
 	private float[]? _heightSamples;
 	private Vector3[]? _normals;
+	private readonly List<Mesh> _pendingReleasedMeshes = new();
 
 	public IReadOnlyList<TerrainChunkRuntime> Chunks => _chunks;
 	public int HeightSampleWidth { get; private set; }
@@ -54,6 +55,7 @@ public sealed class TerrainRuntimeData
 			return _built;
 		}
 
+		CaptureReleasedChunkMeshes();
 		_chunks.Clear();
 		_built = false;
 		_heightSamples = null;
@@ -96,6 +98,22 @@ public sealed class TerrainRuntimeData
 		}
 
 		return _built;
+	}
+
+	public void ReleasePendingMeshResources(RenderGraph renderGraph)
+	{
+		ArgumentNullException.ThrowIfNull(renderGraph);
+		if (_pendingReleasedMeshes.Count == 0)
+		{
+			return;
+		}
+
+		for (var i = 0; i < _pendingReleasedMeshes.Count; i++)
+		{
+			renderGraph.ReleaseMeshResources(_pendingReleasedMeshes[i]);
+		}
+
+		_pendingReleasedMeshes.Clear();
 	}
 
 	public void CollectChunkDrawRecords(
@@ -445,6 +463,27 @@ public sealed class TerrainRuntimeData
 				}
 
 				_chunks.Add(new TerrainChunkRuntime(chunkX, chunkY, lodMeshes, primaryMesh.BoundingSphere));
+			}
+		}
+	}
+
+	private void CaptureReleasedChunkMeshes()
+	{
+		if (_chunks.Count == 0)
+		{
+			return;
+		}
+
+		for (var chunkIndex = 0; chunkIndex < _chunks.Count; chunkIndex++)
+		{
+			var lodMeshes = _chunks[chunkIndex].LodMeshes;
+			for (var lodIndex = 0; lodIndex < lodMeshes.Length; lodIndex++)
+			{
+				var mesh = lodMeshes[lodIndex];
+				if (mesh is not null)
+				{
+					_pendingReleasedMeshes.Add(mesh);
+				}
 			}
 		}
 	}

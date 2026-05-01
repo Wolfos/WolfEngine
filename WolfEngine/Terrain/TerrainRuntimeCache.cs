@@ -21,7 +21,9 @@ internal sealed class TerrainRuntimeCache
 		ArgumentNullException.ThrowIfNull(world);
 		ArgumentNullException.ThrowIfNull(gpuDrawDatabase);
 		var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
-		if (runtime.EnsureBuilt(component) == false)
+		var built = runtime.EnsureBuilt(component);
+		runtime.ReleasePendingMeshResources(renderGraph);
+		if (built == false)
 		{
 			return;
 		}

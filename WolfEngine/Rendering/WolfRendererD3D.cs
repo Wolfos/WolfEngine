@@ -1352,6 +1352,36 @@ private sealed class MeshResources
 		_meshResources.Add(mesh, resources);
 	}
 
+	public void ReleaseMeshResources(Mesh mesh)
+	{
+		ArgumentNullException.ThrowIfNull(mesh);
+		if (_meshResources.Remove(mesh, out var resources) == false)
+		{
+			return;
+		}
+
+		// Terrain authoring can hot-swap many chunk meshes; wait here so retired buffers are not
+		// destroyed while previous frames may still reference them.
+		WaitForGpu();
+		if (resources.VertexBuffer.Handle is not null)
+		{
+			resources.VertexBuffer.Dispose();
+		}
+
+		if (resources.IndexBuffer.Handle is not null)
+		{
+			resources.IndexBuffer.Dispose();
+		}
+
+		mesh.VertexBuffer = null!;
+		mesh.IndexBuffer = null!;
+		mesh.StrideInBytes = 0;
+		mesh.IndexCount = 0;
+		mesh.PackedVertexOffsetBytes = 0;
+		mesh.PackedIndexOffsetBytes = 0;
+		mesh.PackedBaseVertex = 0;
+	}
+
 	public bool SupportsGpuCapture => false;
 
 	public bool IsGpuCaptureActive => false;

@@ -1120,6 +1120,24 @@ internal unsafe class WolfRendererMetal : IRenderer
         } 
     }
 
+    public void ReleaseMeshResources(Mesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        if (_meshResources.Remove(mesh) == false)
+        {
+            return;
+        }
+
+        mesh.VertexBuffer = null!;
+        mesh.IndexBuffer = null!;
+        mesh.StrideInBytes = 0;
+        mesh.IndexCount = 0;
+        mesh.PackedVertexOffsetBytes = 0;
+        mesh.PackedIndexOffsetBytes = 0;
+        mesh.PackedBaseVertex = 0;
+        _needsPackedGeometryReencode = true;
+    }
+
     public bool SupportsGpuCapture => true;
 
     public bool IsGpuCaptureActive => _isGpuCaptureActive;

@@ -19,6 +19,7 @@ public interface IRenderer
 		RenderGraphResourceHandle finalColor);
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
+	void ReleaseMeshResources(Mesh mesh);
 	bool SupportsGpuCapture { get; }
 	bool IsGpuCaptureActive { get; }
 	string LastGpuCapturePath { get; }

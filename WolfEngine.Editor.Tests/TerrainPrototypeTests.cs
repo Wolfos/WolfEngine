@@ -4,12 +4,15 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -247,6 +250,34 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void EnsureBuilt_ReleasesSupersededChunkMeshesAfterRebuild()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeInQuads = 4
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		var initialMeshes = runtime.Chunks.SelectMany(chunk => chunk.LodMeshes).ToArray();
+
+		component.WorldSizeMeters = new Vector2(128.0f, 128.0f);
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		var renderer = new TestRenderer();
+		var renderGraph = CreateTestRenderGraph(renderer);
+		runtime.ReleasePendingMeshResources(renderGraph);
+
+		Assert.That(renderer.ReleasedMeshes, Is.EquivalentTo(initialMeshes));
+	}
+
+	[Test]
 	public void TrySampleSurface_ReturnsExpectedHeightAndNormal()
 	{
 		using var registry = new TestAssetRegistry();
@@ -374,9 +405,10 @@ public sealed class TerrainPrototypeTests
 		return data;
 	}
 
-	private static RenderGraph CreateTestRenderGraph()
+	private static RenderGraph CreateTestRenderGraph(IRenderer? renderer = null)
 	{
 		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		SetField(renderGraph, "_renderer", renderer ?? new TestRenderer());
 		SetField(renderGraph, "_resourceSync", new object());
 		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
 		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());
@@ -388,6 +420,35 @@ public sealed class TerrainPrototypeTests
 		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
 			?? throw new AssertionException($"Field '{fieldName}' was not found.");
 		field.SetValue(instance, value);
+	}
+
+	private sealed class TestRenderer : IRenderer
+	{
+		public List<Mesh> ReleasedMeshes { get; } = new();
+
+		public void Run(Action startup, Action<float> update, Action<float> render) => throw new NotSupportedException();
+		public IMaterialResources CreateMaterialResources(Material material) => throw new NotSupportedException();
+		public ITextureResources CreateTextureResources(Texture texture) => throw new NotSupportedException();
+		public IGfxDevice GetGfxDevice() => throw new NotSupportedException();
+		public Int2 GetFrameBufferSize() => Int2.Zero;
+		public Int2 GetWindowSize() => Int2.Zero;
+		public void BeginFrame() => throw new NotSupportedException();
+		public void Render(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle finalColor) => throw new NotSupportedException();
+		public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) => throw new NotSupportedException();
+		public void EnsureMeshResources(Mesh mesh)
+		{
+		}
+
+		public void ReleaseMeshResources(Mesh mesh)
+		{
+			ReleasedMeshes.Add(mesh);
+		}
+
+		public bool SupportsGpuCapture => false;
+		public bool IsGpuCaptureActive => false;
+		public string LastGpuCapturePath => string.Empty;
+		public bool TryStartGpuCapture(string outputPath, out string error) => throw new NotSupportedException();
+		public bool TryStopGpuCapture(out string error) => throw new NotSupportedException();
 	}
 
 	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable

@@ -453,6 +453,16 @@ public sealed class RenderGraph
 		_ensureMeshQueue.Enqueue(mesh);
 	}
 
+	public void ReleaseMeshResources(Mesh mesh)
+	{
+		if (mesh is null)
+		{
+			throw new ArgumentNullException(nameof(mesh));
+		}
+
+		_renderer.ReleaseMeshResources(mesh);
+	}
+
 
 	private void ReleasePasses()
 	{
