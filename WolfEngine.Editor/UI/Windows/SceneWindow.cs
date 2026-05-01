@@ -21,6 +21,7 @@ public class SceneWindow: EditorWindow
     private readonly IEditorPlaySession _playSession;
     private readonly IGizmoLineRenderer _gizmoLineRenderer;
     private readonly IIconManager _icons;
+    private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
     private readonly TransformGizmoController _transformGizmoController;
     private float _sceneViewportScale;
     private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
@@ -38,6 +39,7 @@ public class SceneWindow: EditorWindow
         IEditorPlaySession playSession,
         IGizmoLineRenderer gizmoLineRenderer,
         IIconManager icons,
+        TerrainToolSettingsOverlay terrainToolSettingsOverlay,
         TransformGizmoController transformGizmoController)
     {
         _viewportStateBus = viewportStateBus;
@@ -45,6 +47,7 @@ public class SceneWindow: EditorWindow
         _playSession = playSession;
         _gizmoLineRenderer = gizmoLineRenderer;
         _icons = icons;
+        _terrainToolSettingsOverlay = terrainToolSettingsOverlay;
         _transformGizmoController = transformGizmoController;
         
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
@@ -216,6 +219,11 @@ public class SceneWindow: EditorWindow
                 imageMin + new Vector2(10.0f, 10.0f),
                 ImGui.ColorConvertFloat4ToU32(new ColorRGBA(0.9f, 0.9f, 0.9f, 1.0f)),
                 "Scene render target unavailable.");
+        }
+
+        if (_sceneToolMode == SceneToolMode.Terrain)
+        {
+            _terrainToolSettingsOverlay.Draw(_terrainTool, imageMin, imageMax);
         }
 
         _viewportStateBus.PublishUiState(new SceneViewportUiState(

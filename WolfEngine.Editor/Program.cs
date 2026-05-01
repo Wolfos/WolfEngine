@@ -108,6 +108,7 @@ public static class Program
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<IGizmoLineRenderer, GizmoLineRenderer>();
+		services.AddSingleton<TerrainToolSettingsOverlay>();
 		services.AddSingleton<BoxColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
