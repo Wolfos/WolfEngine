@@ -316,7 +316,7 @@ PSOutput fragmentShader(VSOutput input)
 
     output.albedo = albedo;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);
-    output.material = float4(metallic, roughness, occlusion, 0.0f);
+    output.material = float4(occlusion, roughness, metallic, 0.0f);
     output.emissive = float4(0.0f, 0.0f, 0.0f, 1.0f);
 
     uint2 frameSize = uint2(max(frameSizeX, 1u), max(frameSizeY, 1u));
