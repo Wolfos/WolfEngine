@@ -14,10 +14,9 @@ public interface IMaterialFactory
 		Vector3? emissiveFactor = null,
 		float emissiveIntensity = 1.0f,
 		Texture albedoTexture = null,
-		Texture metallicRoughnessTexture = null,
+		Texture ormTexture = null,
 		Texture normalTexture = null,
 		Texture emissiveTexture = null,
-		Texture occlusionTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f);
 }
@@ -41,10 +40,9 @@ public class MaterialFactory : IMaterialFactory
 		Vector3? emissiveFactor = null,
 		float emissiveIntensity = 1.0f,
 		Texture albedoTexture = null,
-		Texture metallicRoughnessTexture = null,
+		Texture ormTexture = null,
 		Texture normalTexture = null,
 		Texture emissiveTexture = null,
-		Texture occlusionTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f)
 	{
@@ -61,10 +59,9 @@ public class MaterialFactory : IMaterialFactory
 			EmissiveFactor = emissiveFactor ?? Vector3.Zero,
 			EmissiveIntensity = Math.Max(0.0f, emissiveIntensity),
 			AlbedoTexture = albedoTexture ?? _textureFactory.GetWhiteTexture(),
-			MetallicRoughnessTexture = metallicRoughnessTexture ?? _textureFactory.GetWhiteTexture(),
+			OrmTexture = ormTexture ?? _textureFactory.GetWhiteTexture(),
 			NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture(),
 			EmissiveTexture = emissiveTexture ?? _textureFactory.GetWhiteTexture(),
-			OcclusionTexture = occlusionTexture ?? _textureFactory.GetWhiteTexture(),
 			AlphaMode = alphaMode,
 			AlphaCutoff = alphaCutoff
 		};

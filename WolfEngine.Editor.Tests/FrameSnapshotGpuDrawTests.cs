@@ -413,7 +413,7 @@ public sealed class FrameSnapshotGpuDrawTests
 			heightBlendSharpness: heightBlendSharpness,
 			layers:
 			[
-				new TerrainResolvedLayer(null, null, null, null, null, 8.0f)
+				new TerrainResolvedLayer(null, null, null, null, 8.0f)
 			]);
 	}
 

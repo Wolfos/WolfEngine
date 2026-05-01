@@ -57,9 +57,8 @@ public readonly struct GpuMaterialData
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
 		uint albedoHandle,
-		uint metallicRoughnessHandle,
+		uint ormHandle,
 		uint normalHandle,
-		uint occlusionHandle,
 		uint emissiveHandle,
 		uint samplerHandle)
 	{
@@ -67,26 +66,26 @@ public readonly struct GpuMaterialData
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
 		AlbedoHandle = albedoHandle;
-		MetallicRoughnessHandle = metallicRoughnessHandle;
+		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
-		OcclusionHandle = occlusionHandle;
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
 		_pad0 = 0;
 		_pad1 = 0;
+		_pad2 = 0;
 	}
 
 	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint AlbedoHandle;
-	public readonly uint MetallicRoughnessHandle;
+	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;
-	public readonly uint OcclusionHandle;
 	public readonly uint EmissiveHandle;
 	public readonly uint SamplerHandle;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
+	private readonly uint _pad2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -135,30 +134,29 @@ public readonly struct GpuTerrainLayerData
 	public GpuTerrainLayerData(
 		uint albedoHandle,
 		uint normalHandle,
-		uint metallicRoughnessHandle,
-		uint occlusionHandle,
+		uint ormHandle,
 		uint heightHandle,
 		uint hasHeight,
 		float scale)
 	{
 		AlbedoHandle = albedoHandle;
 		NormalHandle = normalHandle;
-		MetallicRoughnessHandle = metallicRoughnessHandle;
-		OcclusionHandle = occlusionHandle;
+		OrmHandle = ormHandle;
 		HeightHandle = heightHandle;
 		HasHeight = hasHeight;
 		Scale = scale;
 		_pad0 = 0;
+		_pad1 = 0;
 	}
 
 	public readonly uint AlbedoHandle;
 	public readonly uint NormalHandle;
-	public readonly uint MetallicRoughnessHandle;
-	public readonly uint OcclusionHandle;
+	public readonly uint OrmHandle;
 	public readonly uint HeightHandle;
 	public readonly uint HasHeight;
 	public readonly float Scale;
 	private readonly uint _pad0;
+	private readonly uint _pad1;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -289,9 +287,8 @@ public readonly struct GpuDrawMaterialUpdateData
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
 		uint albedoHandle,
-		uint metallicRoughnessHandle,
+		uint ormHandle,
 		uint normalHandle,
-		uint occlusionHandle,
 		uint emissiveHandle,
 		uint samplerHandle)
 	{
@@ -303,13 +300,13 @@ public readonly struct GpuDrawMaterialUpdateData
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
 		AlbedoHandle = albedoHandle;
-		MetallicRoughnessHandle = metallicRoughnessHandle;
+		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
-		OcclusionHandle = occlusionHandle;
 		EmissiveHandle = emissiveHandle;
 		SamplerHandle = samplerHandle;
 		_pad3 = 0;
 		_pad4 = 0;
+		_pad5 = 0;
 	}
 
 	public readonly uint MaterialHandle;
@@ -320,13 +317,13 @@ public readonly struct GpuDrawMaterialUpdateData
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
 	public readonly uint AlbedoHandle;
-	public readonly uint MetallicRoughnessHandle;
+	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;
-	public readonly uint OcclusionHandle;
 	public readonly uint EmissiveHandle;
 	public readonly uint SamplerHandle;
 	private readonly uint _pad3;
 	private readonly uint _pad4;
+	private readonly uint _pad5;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -371,8 +368,7 @@ public readonly struct GpuTerrainLayerUpdateData
 		uint layerIndex,
 		uint albedoHandle,
 		uint normalHandle,
-		uint metallicRoughnessHandle,
-		uint occlusionHandle,
+		uint ormHandle,
 		uint heightHandle,
 		uint hasHeight,
 		float scale)
@@ -382,13 +378,13 @@ public readonly struct GpuTerrainLayerUpdateData
 		LayerIndex = layerIndex;
 		AlbedoHandle = albedoHandle;
 		NormalHandle = normalHandle;
-		MetallicRoughnessHandle = metallicRoughnessHandle;
-		OcclusionHandle = occlusionHandle;
+		OrmHandle = ormHandle;
 		HeightHandle = heightHandle;
 		HasHeight = hasHeight;
 		Scale = scale;
 		_pad0 = 0;
 		_pad1 = 0;
+		_pad2 = 0;
 	}
 
 	public readonly uint MaterialHandle;
@@ -396,11 +392,11 @@ public readonly struct GpuTerrainLayerUpdateData
 	public readonly uint LayerIndex;
 	public readonly uint AlbedoHandle;
 	public readonly uint NormalHandle;
-	public readonly uint MetallicRoughnessHandle;
-	public readonly uint OcclusionHandle;
+	public readonly uint OrmHandle;
 	public readonly uint HeightHandle;
 	public readonly uint HasHeight;
 	public readonly float Scale;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
+	private readonly uint _pad2;
 }

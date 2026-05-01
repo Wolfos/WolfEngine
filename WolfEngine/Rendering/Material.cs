@@ -16,10 +16,9 @@ public sealed class Material
     private System.Numerics.Vector3 _emissiveFactor = System.Numerics.Vector3.Zero;
     private float _emissiveIntensity = 1.0f;
     private Texture _albedoTexture = null!;
-    private Texture _metallicRoughnessTexture = null!;
+    private Texture _ormTexture = null!;
     private Texture _normalTexture = null!;
     private Texture _emissiveTexture = null!;
-    private Texture _occlusionTexture = null!;
     private AlphaMode _alphaMode;
     private float _alphaCutoff;
     private IMaterialResources? _resources;
@@ -78,10 +77,10 @@ public sealed class Material
         set => SetReferenceField(ref _albedoTexture, value);
     }
 
-    public Texture MetallicRoughnessTexture
+    public Texture OrmTexture
     {
-        get => _metallicRoughnessTexture;
-        set => SetReferenceField(ref _metallicRoughnessTexture, value);
+        get => _ormTexture;
+        set => SetReferenceField(ref _ormTexture, value);
     }
 
     public Texture NormalTexture
@@ -94,12 +93,6 @@ public sealed class Material
     {
         get => _emissiveTexture;
         set => SetReferenceField(ref _emissiveTexture, value);
-    }
-
-    public Texture OcclusionTexture
-    {
-        get => _occlusionTexture;
-        set => SetReferenceField(ref _occlusionTexture, value);
     }
 
     public AlphaMode AlphaMode
@@ -240,10 +233,9 @@ public sealed class Material
         lock (_stateSync)
         {
             return _albedoTexture?.HasGpuResources == true &&
-                   _metallicRoughnessTexture?.HasGpuResources == true &&
+                   _ormTexture?.HasGpuResources == true &&
                    _normalTexture?.HasGpuResources == true &&
-                   _emissiveTexture?.HasGpuResources == true &&
-                   _occlusionTexture?.HasGpuResources == true;
+                   _emissiveTexture?.HasGpuResources == true;
         }
     }
 
@@ -254,10 +246,9 @@ public sealed class Material
             return new[]
             {
                 _albedoTexture,
-                _metallicRoughnessTexture,
+                _ormTexture,
                 _normalTexture,
-                _emissiveTexture,
-                _occlusionTexture
+                _emissiveTexture
             };
         }
     }
@@ -269,10 +260,9 @@ public sealed class Material
         lock (_stateSync)
         {
             return ReferenceEquals(_albedoTexture, texture) ||
-                   ReferenceEquals(_metallicRoughnessTexture, texture) ||
+                   ReferenceEquals(_ormTexture, texture) ||
                    ReferenceEquals(_normalTexture, texture) ||
-                   ReferenceEquals(_emissiveTexture, texture) ||
-                   ReferenceEquals(_occlusionTexture, texture);
+                   ReferenceEquals(_emissiveTexture, texture);
         }
     }
 
@@ -313,10 +303,9 @@ public sealed class Material
     {
         var hash = new HashCode();
         hash.Add(_albedoTexture?.ResourceRevision ?? 0);
-        hash.Add(_metallicRoughnessTexture?.ResourceRevision ?? 0);
+        hash.Add(_ormTexture?.ResourceRevision ?? 0);
         hash.Add(_normalTexture?.ResourceRevision ?? 0);
         hash.Add(_emissiveTexture?.ResourceRevision ?? 0);
-        hash.Add(_occlusionTexture?.ResourceRevision ?? 0);
         return hash.ToHashCode();
     }
 }

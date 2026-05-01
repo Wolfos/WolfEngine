@@ -682,12 +682,23 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		for (var i = 0; i < importedScene.Materials.Count; i++)
 		{
 			var importedMaterial = importedScene.Materials[i];
+			var ormTextureIndex = EnsureOrmTexture(
+				projectRootPath,
+				metadata,
+				relativeSourcePath,
+				relativeMetaPath,
+				importedScene.Textures,
+				textureNodeIds,
+				nodes,
+				artifacts,
+				importedMaterial,
+				i);
 			var nodeKey = $"material:{i}";
 			var name = $"Material {i}";
 			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Material, name);
 			materialNodeIds.Add(nodeId);
 
-			var materialAsset = CreateGeneratedMaterialAsset(importedMaterial, textureNodeIds);
+			var materialAsset = CreateGeneratedMaterialAsset(importedMaterial, textureNodeIds, ormTextureIndex);
 			var relativeMaterialPath = NormalizeRelativePath(Path.Combine(
 				AssetPipelinePaths.LibraryFolderName,
 				AssetPipelinePaths.ImportedFolderName,
@@ -783,6 +794,70 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			Artifacts = artifacts,
 			Dependencies = dependencies
 		};
+	}
+
+	private int? EnsureOrmTexture(
+		string projectRootPath,
+		AssetSourceMetaFile metadata,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		List<ImportedTexture> textures,
+		List<Guid> textureNodeIds,
+		List<AssetNodeRecord> nodes,
+		List<AssetArtifactRecord> artifacts,
+		ImportedMaterial importedMaterial,
+		int materialIndex)
+	{
+		if (importedMaterial.MetallicRoughnessTextureIndex is not { } metallicRoughnessIndex &&
+		    importedMaterial.OcclusionTextureIndex is not { })
+		{
+			return null;
+		}
+
+		var metallicRoughnessTexture = ResolveImportedTexture(importedMaterial.MetallicRoughnessTextureIndex, textures);
+		var occlusionTexture = ResolveImportedTexture(importedMaterial.OcclusionTextureIndex, textures);
+		var ormTexture = CreateOrmImportedTexture(metallicRoughnessTexture, occlusionTexture, materialIndex);
+		var ormTextureIndex = textures.Count;
+		textures.Add(ormTexture);
+
+		var nodeKey = $"texture:orm:{materialIndex}";
+		var name = string.IsNullOrWhiteSpace(ormTexture.NameOrPath) ? $"ORM {materialIndex}" : Path.GetFileNameWithoutExtension(ormTexture.NameOrPath);
+		var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Texture2D, name);
+		textureNodeIds.Add(nodeId);
+
+		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ImportedFolderName,
+			metadata.SourceId.ToString("D"),
+			"textures",
+			$"{nodeKey.Replace(':', '_')}.bin"));
+		var runtimeArtifacts = WriteTextureArtifacts(projectRootPath, nodeId, relativeImportedPath, ormTexture);
+
+		nodes.Add(new AssetNodeRecord
+		{
+			NodeId = nodeId,
+			SourceId = metadata.SourceId,
+			Type = AssetType.Texture2D,
+			NodeKey = nodeKey,
+			Name = name,
+			IsGenerated = true,
+			RelativeSourcePath = relativeSourcePath,
+			RelativeAssetPath = string.Empty,
+			RelativeMetaPath = relativeMetaPath,
+			SummaryJson = AssetPipelineSerialization.Serialize(new TextureAssetSummary
+			{
+				RelativeSourceAssetPath = string.Empty,
+				RelativeImportedPath = relativeImportedPath,
+				RelativeRuntimeArtifactPath = string.Empty,
+				Width = ormTexture.Width,
+				Height = ormTexture.Height,
+				Channels = ormTexture.Channels,
+				Semantic = ormTexture.Semantic,
+				SourceExtension = Path.GetExtension(ormTexture.NameOrPath ?? string.Empty).ToLowerInvariant()
+			})
+		});
+		artifacts.AddRange(runtimeArtifacts);
+		return ormTextureIndex;
 	}
 
 		private ImportGraph ImportEditorSceneSource(
@@ -1262,10 +1337,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var properties = materialAsset.GetActiveProperties();
 		var dependencies = new List<MaterialDependency>(5);
 		AddDependency(properties.Textures.Albedo, "material-texture:albedo");
-		AddDependency(properties.Textures.MetallicRoughness, "material-texture:metallic-roughness");
+		AddDependency(properties.Textures.Orm, "material-texture:orm");
 		AddDependency(properties.Textures.Normal, "material-texture:normal");
 		AddDependency(properties.Textures.Emissive, "material-texture:emissive");
-		AddDependency(properties.Textures.Occlusion, "material-texture:occlusion");
 		return dependencies;
 
 		void AddDependency(AssetRef<Texture> reference, string kind)
@@ -1279,7 +1353,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private static MaterialAsset CreateGeneratedMaterialAsset(ImportedMaterial importedMaterial, IReadOnlyList<Guid> textureNodeIds)
+	private static MaterialAsset CreateGeneratedMaterialAsset(
+		ImportedMaterial importedMaterial,
+		IReadOnlyList<Guid> textureNodeIds,
+		int? ormTextureIndex)
 	{
 		var materialType = importedMaterial.AlphaMode switch
 		{
@@ -1300,8 +1377,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		properties.EmissiveIntensity = importedMaterial.EmissiveIntensity;
 		properties.Textures.Albedo = CreateTextureRef(importedMaterial.BaseColorTextureIndex, textureNodeIds);
 		properties.Textures.Normal = CreateTextureRef(importedMaterial.NormalTextureIndex, textureNodeIds);
-		properties.Textures.MetallicRoughness = CreateTextureRef(importedMaterial.MetallicRoughnessTextureIndex, textureNodeIds);
-		properties.Textures.Occlusion = CreateTextureRef(importedMaterial.OcclusionTextureIndex, textureNodeIds);
+		properties.Textures.Orm = CreateTextureRef(ormTextureIndex, textureNodeIds);
 		properties.Textures.Emissive = CreateTextureRef(importedMaterial.EmissiveTextureIndex, textureNodeIds);
 
 		if (properties is AlphaTestMaterialProperties alphaTest)
@@ -1324,6 +1400,55 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		return new AssetRef<Texture> { NodeId = textureNodeIds[resolvedIndex] };
+	}
+
+	private static ImportedTexture? ResolveImportedTexture(int? index, IReadOnlyList<ImportedTexture> textures)
+	{
+		if (index is not { } resolvedIndex || resolvedIndex < 0 || resolvedIndex >= textures.Count)
+		{
+			return null;
+		}
+
+		return textures[resolvedIndex];
+	}
+
+	private static ImportedTexture CreateOrmImportedTexture(
+		ImportedTexture? metallicRoughnessTexture,
+		ImportedTexture? occlusionTexture,
+		int materialIndex)
+	{
+		var sourceTexture = metallicRoughnessTexture ?? occlusionTexture
+			?? throw new InvalidOperationException("ORM texture generation requires at least one source texture.");
+		var width = sourceTexture.Width;
+		var height = sourceTexture.Height;
+		var ormPixels = new byte[width * height * 4];
+		var metallicRoughnessPixels = metallicRoughnessTexture?.PixelData;
+		var occlusionPixels = occlusionTexture?.PixelData;
+
+		for (var pixelOffset = 0; pixelOffset < ormPixels.Length; pixelOffset += 4)
+		{
+			ormPixels[pixelOffset + 0] = occlusionPixels is not null && pixelOffset < occlusionPixels.Length
+				? occlusionPixels[pixelOffset + 0]
+				: (byte)255;
+			ormPixels[pixelOffset + 1] = metallicRoughnessPixels is not null && pixelOffset + 1 < metallicRoughnessPixels.Length
+				? metallicRoughnessPixels[pixelOffset + 1]
+				: (byte)255;
+			ormPixels[pixelOffset + 2] = metallicRoughnessPixels is not null && pixelOffset + 2 < metallicRoughnessPixels.Length
+				? metallicRoughnessPixels[pixelOffset + 2]
+				: (byte)255;
+			ormPixels[pixelOffset + 3] = 255;
+		}
+
+		var name = metallicRoughnessTexture?.NameOrPath
+			?? occlusionTexture?.NameOrPath
+			?? $"Material_{materialIndex}_ORM";
+		return new ImportedTexture(
+			$"{Path.GetFileNameWithoutExtension(name)}_ORM.png",
+			width,
+			height,
+			false,
+			TextureSemantic.MetallicRoughness,
+			[new TextureMipData(width, height, ormPixels)]);
 	}
 
 	private List<AssetArtifactRecord> WriteTextureArtifacts(

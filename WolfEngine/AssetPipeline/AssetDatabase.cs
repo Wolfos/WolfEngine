@@ -193,10 +193,9 @@ public sealed class DataAssetFile
 public sealed class MaterialTextureAssignments
 {
 	public AssetRef<Texture> Albedo { get; set; }
-	public AssetRef<Texture> MetallicRoughness { get; set; }
+	public AssetRef<Texture> Orm { get; set; }
 	public AssetRef<Texture> Normal { get; set; }
 	public AssetRef<Texture> Emissive { get; set; }
-	public AssetRef<Texture> Occlusion { get; set; }
 }
 
 public abstract class MaterialSurfaceProperties

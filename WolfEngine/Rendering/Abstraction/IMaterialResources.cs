@@ -4,9 +4,8 @@ public interface IMaterialResources
 {
 	IGfxPipeline Pipeline { get; }
 	DescriptorHandle AlbedoTexture { get; }
-	DescriptorHandle MetallicRoughnessTexture { get; }
+	DescriptorHandle OrmTexture { get; }
 	DescriptorHandle NormalTexture { get; }
-	DescriptorHandle OcclusionTexture { get; }
 	DescriptorHandle EmissiveTexture { get; }
 	DescriptorHandle Sampler { get; }
 }

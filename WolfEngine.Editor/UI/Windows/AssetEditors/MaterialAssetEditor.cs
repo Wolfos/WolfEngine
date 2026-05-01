@@ -131,10 +131,9 @@ public sealed class MaterialAssetEditor
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
-		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.MetallicRoughness), "Metallic / Roughness", properties.Textures.MetallicRoughness);
+		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Orm), "ORM", properties.Textures.Orm);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
-		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Occlusion), "Occlusion", properties.Textures.Occlusion);
 
 		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
 		{
@@ -223,17 +222,14 @@ public sealed class MaterialAssetEditor
 			case nameof(MaterialTextureAssignments.Albedo):
 				assignments.Albedo = reference;
 				break;
-			case nameof(MaterialTextureAssignments.MetallicRoughness):
-				assignments.MetallicRoughness = reference;
+			case nameof(MaterialTextureAssignments.Orm):
+				assignments.Orm = reference;
 				break;
 			case nameof(MaterialTextureAssignments.Normal):
 				assignments.Normal = reference;
 				break;
 			case nameof(MaterialTextureAssignments.Emissive):
 				assignments.Emissive = reference;
-				break;
-			case nameof(MaterialTextureAssignments.Occlusion):
-				assignments.Occlusion = reference;
 				break;
 			default:
 				throw new InvalidOperationException($"Unknown material texture assignment '{propertyName}'.");

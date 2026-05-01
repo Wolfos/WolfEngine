@@ -11,11 +11,9 @@ internal class MtlMaterialResources: IMaterialResources
 
 	public DescriptorHandle AlbedoTexture { get; init; }
 
-	public DescriptorHandle MetallicRoughnessTexture { get; init; }
+	public DescriptorHandle OrmTexture { get; init; }
 
 	public DescriptorHandle NormalTexture { get; init; }
-
-	public DescriptorHandle OcclusionTexture { get; init; }
 
 	public DescriptorHandle EmissiveTexture { get; init; }
 

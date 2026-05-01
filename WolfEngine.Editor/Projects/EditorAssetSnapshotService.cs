@@ -140,10 +140,9 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
 		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
 		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.MetallicRoughnessTexture = ResolveTexture(properties.Textures.MetallicRoughness) ?? _textureFactory.GetWhiteTexture();
+		runtimeMaterial.OrmTexture = ResolveTexture(properties.Textures.Orm) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();
 		runtimeMaterial.EmissiveTexture = ResolveTexture(properties.Textures.Emissive) ?? _textureFactory.GetWhiteTexture();
-		runtimeMaterial.OcclusionTexture = ResolveTexture(properties.Textures.Occlusion) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.AlphaMode = descriptor.RuntimeAlphaMode;
 		runtimeMaterial.AlphaCutoff = properties switch
 		{

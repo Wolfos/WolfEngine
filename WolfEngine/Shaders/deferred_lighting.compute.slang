@@ -87,9 +87,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float4 material = gbufferMaterial.SampleLevel(linearSampler, uv, 0.0f);
     float3 emissive = gbufferEmissive.SampleLevel(linearSampler, uv, 0.0f).rgb;
 
-    float metallic = material.r;
+    float occlusion = material.r;
     float roughness = material.g;
-    float occlusion = material.b;
+    float metallic = material.b;
     if (aoEnabled != 0u)
     {
         float aoFactor = ambientOcclusionTexture.SampleLevel(linearSampler, uv, 0.0f).r;

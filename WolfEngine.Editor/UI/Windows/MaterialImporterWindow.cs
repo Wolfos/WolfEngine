@@ -86,10 +86,10 @@ public sealed class MaterialImporterWindow : EditorWindow
 		ImGui.SeparatorText("Textures");
 		_request.AlbedoPath = DrawTexturePicker("Albedo", _request.AlbedoPath);
 		DrawNormalTexturePicker();
+		DrawOcclusionTexturePicker();
 		DrawMetallicTexturePicker();
 		DrawRoughnessTexturePicker();
 		_request.EmissivePath = DrawTexturePicker("Emissive", _request.EmissivePath);
-		DrawOcclusionTexturePicker();
 
 		ImGui.SeparatorText("Material Values");
 		var baseColor = _request.BaseColor.ToVector4();
@@ -284,7 +284,7 @@ public sealed class MaterialImporterWindow : EditorWindow
 	private void DrawOcclusionTexturePicker()
 	{
 		ImGui.PushID("AmbientOcclusion");
-		ImGui.TextUnformatted("Ambient Occlusion");
+		ImGui.TextUnformatted("Ambient Occlusion (ORM.R)");
 
 		var path = _request.OcclusionPath ?? string.Empty;
 		var availableWidth = MathF.Max(1.0f, ImGui.GetContentRegionAvail().X);

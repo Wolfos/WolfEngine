@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
+using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -51,9 +53,36 @@ public sealed class MaterialImporterTests
 		var importDirectory = Path.Combine(projectRoot, "Assets", "Imported", $"Material_{materialType}");
 		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_Albedo.png.meta"), expectedAlbedoSemantic);
 		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_Normal.png.meta"), TextureSemantic.Normal);
-		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_MetallicRoughness.png.meta"), TextureSemantic.MetallicRoughness);
+		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_ORM.png.meta"), TextureSemantic.MetallicRoughness);
 		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_Emissive.png.meta"), TextureSemantic.Emissive);
-		AssertTextureSemantic(metadataStore, Path.Combine(importDirectory, $"Material_{materialType}_AO.png.meta"), TextureSemantic.Occlusion);
+	}
+
+	[Test]
+	public void ProjectAssetPipelineService_CreateOrmImportedTexture_PacksOcclusionRoughnessAndMetallic()
+	{
+		var metallicRoughness = new ImportedTexture(
+			"mr.png",
+			1,
+			1,
+			false,
+			TextureSemantic.MetallicRoughness,
+			[new TextureMipData(1, 1, [11, 128, 64, 255])]);
+		var occlusion = new ImportedTexture(
+			"ao.png",
+			1,
+			1,
+			false,
+			TextureSemantic.Occlusion,
+			[new TextureMipData(1, 1, [200, 7, 9, 255])]);
+		var method = typeof(ProjectAssetPipelineService).GetMethod(
+			"CreateOrmImportedTexture",
+			BindingFlags.NonPublic | BindingFlags.Static)
+			?? throw new AssertionException("CreateOrmImportedTexture method was not found.");
+
+		var ormTexture = (ImportedTexture)method.Invoke(null, [metallicRoughness, occlusion, 0])!;
+
+		Assert.That(ormTexture.Semantic, Is.EqualTo(TextureSemantic.MetallicRoughness));
+		Assert.That(ormTexture.PixelData, Is.EqualTo(new byte[] { 200, 128, 64, 255 }));
 	}
 
 	private static void AssertTextureSemantic(AssetMetadataStore metadataStore, string metaPath, TextureSemantic expectedSemantic)

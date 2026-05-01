@@ -221,8 +221,7 @@ LayerSample SampleTriplanarLayer(
     float3 geometryNormal,
     uint albedoHandle,
     uint normalHandle,
-    uint mrHandle,
-    uint occlusionHandle,
+    uint ormHandle,
     uint heightHandle,
     uint hasHeightMap,
     float layerScale,
@@ -231,8 +230,7 @@ LayerSample SampleTriplanarLayer(
     SamplerState samplerState = GetSampler(terrainData.layerSamplerHandle);
     LayerSample sample;
     sample.albedo = SampleTriplanarFloat4(albedoHandle, samplerState, worldPosition, geometryNormal, layerScale);
-    float4 mr = SampleTriplanarFloat4(mrHandle, samplerState, worldPosition, geometryNormal, layerScale);
-    float4 occ = SampleTriplanarFloat4(occlusionHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    float4 orm = SampleTriplanarFloat4(ormHandle, samplerState, worldPosition, geometryNormal, layerScale);
     float heightValue = 0.5f;
     if (hasHeightMap != 0)
     {
@@ -240,9 +238,9 @@ LayerSample SampleTriplanarLayer(
     }
 
     sample.normal = DecodeTriplanarNormal(normalHandle, samplerState, worldPosition, geometryNormal, layerScale);
-    sample.metallic = saturate(mr.b);
-    sample.roughness = saturate(mr.g);
-    sample.occlusion = saturate(occ.r);
+    sample.occlusion = saturate(orm.r);
+    sample.roughness = saturate(orm.g);
+    sample.metallic = saturate(orm.b);
     sample.height = saturate(heightValue);
     return sample;
 }
@@ -282,8 +280,7 @@ PSOutput fragmentShader(VSOutput input)
             input.normal,
             layerData.albedoHandle,
             layerData.normalHandle,
-            layerData.metallicRoughnessHandle,
-            layerData.occlusionHandle,
+            layerData.ormHandle,
             layerData.heightHandle,
             layerData.hasHeight,
             layerData.scale,

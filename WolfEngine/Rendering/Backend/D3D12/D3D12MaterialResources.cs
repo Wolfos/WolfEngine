@@ -6,9 +6,8 @@ internal class D3D12MaterialResources: IMaterialResources
 {
 	public required IGfxPipeline Pipeline { get; init; }
 	public DescriptorHandle AlbedoTexture { get; init; }
-	public DescriptorHandle MetallicRoughnessTexture { get; init; }
+	public DescriptorHandle OrmTexture { get; init; }
 	public DescriptorHandle NormalTexture { get; init; }
-	public DescriptorHandle OcclusionTexture { get; init; }
 	public DescriptorHandle EmissiveTexture { get; init; }
 	public DescriptorHandle Sampler { get; init; }
 }

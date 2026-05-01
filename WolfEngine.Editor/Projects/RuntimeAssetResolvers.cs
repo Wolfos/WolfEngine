@@ -57,10 +57,9 @@ public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 			emissiveFactor: properties.EmissiveFactor,
 			emissiveIntensity: properties.EmissiveIntensity,
 			albedoTexture: ResolveTexture(properties.Textures.Albedo),
-			metallicRoughnessTexture: ResolveTexture(properties.Textures.MetallicRoughness),
+			ormTexture: ResolveTexture(properties.Textures.Orm),
 			normalTexture: ResolveTexture(properties.Textures.Normal),
 			emissiveTexture: ResolveTexture(properties.Textures.Emissive),
-			occlusionTexture: ResolveTexture(properties.Textures.Occlusion),
 			alphaMode: descriptor.RuntimeAlphaMode,
 			alphaCutoff: properties switch
 			{

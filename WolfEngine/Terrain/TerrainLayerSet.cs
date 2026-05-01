@@ -108,7 +108,6 @@ public sealed class TerrainLayerDefinition
 	public float Scale { get; set; } = 8.0f;
 	public AssetRef<Texture> Albedo { get; set; }
 	public AssetRef<Texture> Normal { get; set; }
-	public AssetRef<Texture> MetallicRoughness { get; set; }
-	public AssetRef<Texture> Occlusion { get; set; }
+	public AssetRef<Texture> Orm { get; set; }
 	public AssetRef<Texture> Height { get; set; }
 }

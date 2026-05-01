@@ -275,9 +275,8 @@ public sealed class GpuDrawPass
 			}
 
 			uint albedoHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint mrHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint ormHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint normalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint occlusionHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint emissiveHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
 			uint controlMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
@@ -359,14 +358,11 @@ public sealed class GpuDrawPass
 				albedoHandle = materialResources.AlbedoTexture.IsValid
 					? materialResources.AlbedoTexture.Value
 					: _bindlessRegistry.ErrorTextureHandle.Value;
-				mrHandle = materialResources.MetallicRoughnessTexture.IsValid
-					? materialResources.MetallicRoughnessTexture.Value
+				ormHandle = materialResources.OrmTexture.IsValid
+					? materialResources.OrmTexture.Value
 					: _bindlessRegistry.ErrorTextureHandle.Value;
 				normalHandle = materialResources.NormalTexture.IsValid
 					? materialResources.NormalTexture.Value
-					: _bindlessRegistry.ErrorTextureHandle.Value;
-				occlusionHandle = materialResources.OcclusionTexture.IsValid
-					? materialResources.OcclusionTexture.Value
 					: _bindlessRegistry.ErrorTextureHandle.Value;
 				emissiveHandle = materialResources.EmissiveTexture.IsValid
 					? materialResources.EmissiveTexture.Value
@@ -375,9 +371,8 @@ public sealed class GpuDrawPass
 					? materialResources.Sampler.Value
 					: _bindlessRegistry.ErrorSamplerHandle.Value;
 				if (albedoHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
-				    mrHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
+				    ormHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
 				    normalHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
-				    occlusionHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
 				    emissiveHandle == _bindlessRegistry.ErrorTextureHandle.Value ||
 				    samplerHandle == _bindlessRegistry.ErrorSamplerHandle.Value)
 				{
@@ -441,9 +436,8 @@ public sealed class GpuDrawPass
 					metallicRoughness,
 					emissiveFactorIntensity,
 					albedoHandle,
-					mrHandle,
+					ormHandle,
 					normalHandle,
-					occlusionHandle,
 					emissiveHandle,
 					samplerHandle));
 
@@ -627,8 +621,7 @@ public sealed class GpuDrawPass
 
 			uint albedoHandle = 0;
 			uint normalHandle = 0;
-			uint metallicRoughnessHandle = 0;
-			uint occlusionHandle = 0;
+			uint ormHandle = 0;
 			uint heightHandle = 0;
 			uint hasHeight = 0;
 			float scale = 1.0f;
@@ -636,8 +629,7 @@ public sealed class GpuDrawPass
 				currentLayer,
 				ref albedoHandle,
 				ref normalHandle,
-				ref metallicRoughnessHandle,
-				ref occlusionHandle,
+				ref ormHandle,
 				ref heightHandle,
 				ref hasHeight,
 				ref scale);
@@ -647,8 +639,7 @@ public sealed class GpuDrawPass
 				(uint)layerIndex,
 				albedoHandle,
 				normalHandle,
-				metallicRoughnessHandle,
-				occlusionHandle,
+				ormHandle,
 				heightHandle,
 				hasHeight,
 				scale));
@@ -661,10 +652,8 @@ public sealed class GpuDrawPass
 		       left.AlbedoResourceRevision == right.AlbedoResourceRevision &&
 		       ReferenceEquals(left.Normal, right.Normal) &&
 		       left.NormalResourceRevision == right.NormalResourceRevision &&
-		       ReferenceEquals(left.MetallicRoughness, right.MetallicRoughness) &&
-		       left.MetallicRoughnessResourceRevision == right.MetallicRoughnessResourceRevision &&
-		       ReferenceEquals(left.Occlusion, right.Occlusion) &&
-		       left.OcclusionResourceRevision == right.OcclusionResourceRevision &&
+		       ReferenceEquals(left.Orm, right.Orm) &&
+		       left.OrmResourceRevision == right.OrmResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
 		       left.HeightResourceRevision == right.HeightResourceRevision &&
 		       Math.Abs(left.Scale - right.Scale) <= 0.0001f;
@@ -1597,16 +1586,14 @@ public sealed class GpuDrawPass
 		in TerrainResolvedLayer layer,
 		ref uint albedoHandle,
 		ref uint normalHandle,
-		ref uint metallicRoughnessHandle,
-		ref uint occlusionHandle,
+		ref uint ormHandle,
 		ref uint heightHandle,
 		ref uint hasHeight,
 		ref float scale)
 	{
 		albedoHandle = RegisterTerrainTexture(layer.Albedo);
 		normalHandle = RegisterTerrainTexture(layer.Normal);
-		metallicRoughnessHandle = RegisterTerrainTexture(layer.MetallicRoughness);
-		occlusionHandle = RegisterTerrainTexture(layer.Occlusion);
+		ormHandle = RegisterTerrainTexture(layer.Orm);
 		heightHandle = RegisterTerrainTexture(layer.Height);
 		hasHeight = layer.Height is null ? 0u : 1u;
 		scale = Math.Max(layer.Scale, 0.001f);
@@ -1648,7 +1635,6 @@ public sealed class GpuDrawPass
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorSamplerHandle.Value);
 		var fallbackTerrainMaterialData = new GpuTerrainMaterialData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
@@ -1659,7 +1645,6 @@ public sealed class GpuDrawPass
 			1,
 			4.0f);
 		var fallbackTerrainLayerData = new GpuTerrainLayerData(
-			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,

@@ -58,8 +58,7 @@ void CSUpdateTerrainLayer(uint3 dispatchThreadId : SV_DispatchThreadID)
     GpuTerrainLayerData layerData = (GpuTerrainLayerData)0;
     layerData.albedoHandle = update.albedoHandle;
     layerData.normalHandle = update.normalHandle;
-    layerData.metallicRoughnessHandle = update.metallicRoughnessHandle;
-    layerData.occlusionHandle = update.occlusionHandle;
+    layerData.ormHandle = update.ormHandle;
     layerData.heightHandle = update.heightHandle;
     layerData.hasHeight = update.hasHeight;
     layerData.scale = update.scale;

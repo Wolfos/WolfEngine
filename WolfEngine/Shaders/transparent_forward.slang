@@ -148,15 +148,13 @@ float4 fragmentShader(VSOutput input) : SV_Target0
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
-    Texture2D<float4> metallicRoughnessTex = GetTexture(materialData.metallicRoughnessHandle);
+    Texture2D<float4> ormTex = GetTexture(materialData.ormHandle);
     Texture2D<float4> normalTex = GetTexture(materialData.normalHandle);
-    Texture2D<float4> occlusionTex = GetTexture(materialData.occlusionHandle);
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
     float4 albedoSample = albedoTex.Sample(sampler, input.uv);
-    float4 mrSample = metallicRoughnessTex.Sample(sampler, input.uv);
+    float4 ormSample = ormTex.Sample(sampler, input.uv);
     float3 tangentNormal = DecodeNormalMapSample(normalTex.Sample(sampler, input.uv));
-    float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 
@@ -170,9 +168,9 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     surface.worldPos = input.worldPos;
     surface.normal = normal;
     surface.albedo = (materialData.baseColor * albedoSample).rgb;
-    surface.metallic = saturate(mrSample.b * materialData.metallicRoughness.x);
-    surface.roughness = saturate(mrSample.g * materialData.metallicRoughness.y);
-    surface.occlusion = saturate(occlusionSample.r);
+    surface.occlusion = saturate(ormSample.r);
+    surface.roughness = saturate(ormSample.g * materialData.metallicRoughness.y);
+    surface.metallic = saturate(ormSample.b * materialData.metallicRoughness.x);
     surface.emissive = emissive;
 
     float3 viewDir = normalize(-input.worldPos);

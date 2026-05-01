@@ -35,13 +35,13 @@ struct GpuMaterialData
     float4 metallicRoughness;
     float4 emissiveFactorIntensity;
     uint albedoHandle;
-    uint metallicRoughnessHandle;
+    uint ormHandle;
     uint normalHandle;
-    uint occlusionHandle;
     uint emissiveHandle;
     uint samplerHandle;
     uint pad0;
     uint pad1;
+    uint pad2;
 };
 
 struct GpuTerrainMaterialData
@@ -64,12 +64,12 @@ struct GpuTerrainLayerData
 {
     uint albedoHandle;
     uint normalHandle;
-    uint metallicRoughnessHandle;
-    uint occlusionHandle;
+    uint ormHandle;
     uint heightHandle;
     uint hasHeight;
     float scale;
     uint pad0;
+    uint pad1;
 };
 
 struct GpuMeshData
@@ -141,13 +141,13 @@ struct GpuDrawMaterialUpdateData
     float4 metallicRoughness;
     float4 emissiveFactorIntensity;
     uint32_t albedoHandle;
-    uint32_t metallicRoughnessHandle;
+    uint32_t ormHandle;
     uint32_t normalHandle;
-    uint32_t occlusionHandle;
     uint32_t emissiveHandle;
     uint32_t samplerHandle;
     uint32_t pad3;
     uint32_t pad4;
+    uint32_t pad5;
 };
 
 struct GpuTerrainMaterialUpdateData
@@ -169,11 +169,11 @@ struct GpuTerrainLayerUpdateData
     uint32_t layerIndex;
     uint32_t albedoHandle;
     uint32_t normalHandle;
-    uint32_t metallicRoughnessHandle;
-    uint32_t occlusionHandle;
+    uint32_t ormHandle;
     uint32_t heightHandle;
     uint32_t hasHeight;
     float scale;
     uint32_t pad0;
     uint32_t pad1;
+    uint32_t pad2;
 };

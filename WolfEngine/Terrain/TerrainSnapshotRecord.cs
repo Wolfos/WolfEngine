@@ -47,16 +47,14 @@ public readonly struct TerrainChunkDrawRecord
 
 public readonly struct TerrainResolvedLayer
 {
-	public TerrainResolvedLayer(Texture? albedo, Texture? normal, Texture? metallicRoughness, Texture? occlusion, Texture? height, float scale)
+	public TerrainResolvedLayer(Texture? albedo, Texture? normal, Texture? orm, Texture? height, float scale)
 	{
 		Albedo = albedo;
 		AlbedoResourceRevision = albedo?.ResourceRevision ?? 0;
 		Normal = normal;
 		NormalResourceRevision = normal?.ResourceRevision ?? 0;
-		MetallicRoughness = metallicRoughness;
-		MetallicRoughnessResourceRevision = metallicRoughness?.ResourceRevision ?? 0;
-		Occlusion = occlusion;
-		OcclusionResourceRevision = occlusion?.ResourceRevision ?? 0;
+		Orm = orm;
+		OrmResourceRevision = orm?.ResourceRevision ?? 0;
 		Height = height;
 		HeightResourceRevision = height?.ResourceRevision ?? 0;
 		Scale = scale;
@@ -66,10 +64,8 @@ public readonly struct TerrainResolvedLayer
 	public int AlbedoResourceRevision { get; }
 	public Texture? Normal { get; }
 	public int NormalResourceRevision { get; }
-	public Texture? MetallicRoughness { get; }
-	public int MetallicRoughnessResourceRevision { get; }
-	public Texture? Occlusion { get; }
-	public int OcclusionResourceRevision { get; }
+	public Texture? Orm { get; }
+	public int OrmResourceRevision { get; }
 	public Texture? Height { get; }
 	public int HeightResourceRevision { get; }
 	public float Scale { get; }

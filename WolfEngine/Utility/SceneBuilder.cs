@@ -39,10 +39,9 @@ public class SceneBuilder : ISceneBuilder
 		{
 			var importedMaterial = importedScene.Materials[i];
 			Texture albedoTexture = null;
-			Texture metallicRoughnessTexture = null;
+			Texture ormTexture = null;
 			Texture normalTexture = null;
 			Texture emissiveTexture = null;
-			Texture occlusionTexture = null;
 			if (importedMaterial.BaseColorTextureIndex is { } texIndex &&
 			    texIndex >= 0 &&
 			    texIndex < runtimeTextures.Count)
@@ -54,7 +53,7 @@ public class SceneBuilder : ISceneBuilder
 			    mrIndex >= 0 &&
 			    mrIndex < runtimeTextures.Count)
 			{
-				metallicRoughnessTexture = runtimeTextures[mrIndex];
+				ormTexture = runtimeTextures[mrIndex];
 			}
 
 			if (importedMaterial.NormalTextureIndex is { } normalIndex &&
@@ -71,13 +70,6 @@ public class SceneBuilder : ISceneBuilder
 				emissiveTexture = runtimeTextures[emissiveIndex];
 			}
 
-			if (importedMaterial.OcclusionTextureIndex is { } occlusionIndex &&
-			    occlusionIndex >= 0 &&
-			    occlusionIndex < runtimeTextures.Count)
-			{
-				occlusionTexture = runtimeTextures[occlusionIndex];
-			}
-
 			var material = _materialFactory.GetMaterial(
 				"gbuffer.slang",
 				importedMaterial.BaseColor,
@@ -86,10 +78,9 @@ public class SceneBuilder : ISceneBuilder
 				importedMaterial.EmissiveFactor,
 				importedMaterial.EmissiveIntensity,
 				albedoTexture,
-				metallicRoughnessTexture,
+				ormTexture,
 				normalTexture,
 				emissiveTexture,
-				occlusionTexture,
 				importedMaterial.AlphaMode,
 				importedMaterial.AlphaCutoff);
 			

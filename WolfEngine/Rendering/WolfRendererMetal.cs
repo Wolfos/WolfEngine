@@ -573,9 +573,8 @@ internal unsafe class WolfRendererMetal : IRenderer
             Pipeline = pipeline,
             PipelineState = default,
             AlbedoTexture = _bindlessRegistry.GetTextureHandle(material.AlbedoTexture?.Resources),
-            MetallicRoughnessTexture = _bindlessRegistry.GetTextureHandle(material.MetallicRoughnessTexture?.Resources),
+            OrmTexture = _bindlessRegistry.GetTextureHandle(material.OrmTexture?.Resources),
             NormalTexture = _bindlessRegistry.GetTextureHandle(material.NormalTexture?.Resources),
-            OcclusionTexture = _bindlessRegistry.GetTextureHandle(material.OcclusionTexture?.Resources),
             EmissiveTexture = _bindlessRegistry.GetTextureHandle(material.EmissiveTexture?.Resources),
             Sampler = _linearSamplerHandle
         };

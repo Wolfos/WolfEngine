@@ -46,9 +46,8 @@ void CSUpdateMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     materialData.metallicRoughness = update.metallicRoughness;
     materialData.emissiveFactorIntensity = update.emissiveFactorIntensity;
     materialData.albedoHandle = update.albedoHandle;
-    materialData.metallicRoughnessHandle = update.metallicRoughnessHandle;
+    materialData.ormHandle = update.ormHandle;
     materialData.normalHandle = update.normalHandle;
-    materialData.occlusionHandle = update.occlusionHandle;
     materialData.emissiveHandle = update.emissiveHandle;
     materialData.samplerHandle = update.samplerHandle;
     g_MaterialTable[materialIndex] = materialData;

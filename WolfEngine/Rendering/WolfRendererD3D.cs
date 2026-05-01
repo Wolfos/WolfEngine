@@ -818,19 +818,17 @@ private sealed class MeshResources
 
 		var albedoResources = material.AlbedoTexture?.Resources
 		                      ?? throw new InvalidOperationException("Material is missing albedo texture resources.");
-		var mrResources = material.MetallicRoughnessTexture?.Resources
-		                  ?? throw new InvalidOperationException("Material is missing metallic/roughness texture resources.");
+		var ormResources = material.OrmTexture?.Resources
+		                   ?? throw new InvalidOperationException("Material is missing ORM texture resources.");
 		var normalResources = material.NormalTexture?.Resources;
-		var occlusionResources = material.OcclusionTexture?.Resources;
 		var emissiveResources = material.EmissiveTexture?.Resources;
 
 		return new D3D12MaterialResources
 		{
 			Pipeline = pipeline,
 			AlbedoTexture = albedoResources.ShaderResourceView,
-			MetallicRoughnessTexture = mrResources.ShaderResourceView,
+			OrmTexture = ormResources.ShaderResourceView,
 			NormalTexture = normalResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
-			OcclusionTexture = occlusionResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
 			EmissiveTexture = emissiveResources?.ShaderResourceView ?? DescriptorHandle.Invalid,
 			Sampler = GetOrCreateDefaultMaterialSampler()
 		};

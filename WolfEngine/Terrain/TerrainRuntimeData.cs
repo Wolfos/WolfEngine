@@ -383,13 +383,9 @@ public sealed class TerrainRuntimeData
 			{
 				renderGraph.EnsureTextureResources(normal);
 			}
-			if (layer.MetallicRoughness.Asset is { } metallicRoughness)
+			if (layer.Orm.Asset is { } orm)
 			{
-				renderGraph.EnsureTextureResources(metallicRoughness);
-			}
-			if (layer.Occlusion.Asset is { } occlusion)
-			{
-				renderGraph.EnsureTextureResources(occlusion);
+				renderGraph.EnsureTextureResources(orm);
 			}
 			if (layer.Height.Asset is { } height)
 			{
@@ -413,8 +409,7 @@ public sealed class TerrainRuntimeData
 			layers[i] = new TerrainResolvedLayer(
 				layer.Albedo.Asset,
 				layer.Normal.Asset,
-				layer.MetallicRoughness.Asset,
-				layer.Occlusion.Asset,
+				layer.Orm.Asset,
 				layer.Height.Asset,
 				layer.Scale);
 		}

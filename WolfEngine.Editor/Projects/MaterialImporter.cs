@@ -39,9 +39,9 @@ public sealed class MaterialImportRequest
 	public string? RoughnessPath { get; set; }
 	public MaterialTextureChannel RoughnessChannel { get; set; } = MaterialTextureChannel.G;
 	public bool InvertRoughness { get; set; }
-	public string? EmissivePath { get; set; }
 	public string? OcclusionPath { get; set; }
 	public MaterialTextureChannel OcclusionChannel { get; set; } = MaterialTextureChannel.R;
+	public string? EmissivePath { get; set; }
 	public ColorRGBA BaseColor { get; set; } = ColorRGBA.White;
 	public Vector3 EmissiveFactor { get; set; } = Vector3.One;
 	public float MetallicFactor { get; set; } = 1.0f;
@@ -120,7 +120,9 @@ public sealed class MaterialImporter : IMaterialImporter
 				relativeFolderPath,
 				materialName,
 				request.NormalFormat);
-			var metallicRoughnessTextureId = WriteMetallicRoughnessTexture(
+			var ormTextureId = WriteOrmTexture(
+				request.OcclusionPath,
+				request.OcclusionChannel,
 				request.MetallicPath,
 				request.MetallicChannel,
 				request.RoughnessPath,
@@ -134,19 +136,13 @@ public sealed class MaterialImporter : IMaterialImporter
 				materialName,
 				"Emissive",
 				TextureSemantic.Emissive);
-			var occlusionTextureId = WriteOcclusionTexture(
-				request.OcclusionPath,
-				request.OcclusionChannel,
-				relativeFolderPath,
-				materialName);
 
 			var materialAsset = CreateMaterialAsset(
 				request,
 				albedoTextureId,
 				normalTextureId,
-				metallicRoughnessTextureId,
-				emissiveTextureId,
-				occlusionTextureId);
+				ormTextureId,
+				emissiveTextureId);
 			var relativeMaterialPath = $"{relativeFolderPath}/{materialName}{MaterialAsset.FileExtension}";
 			var absoluteMaterialPath = _projectService.GetAbsolutePath(relativeMaterialPath);
 			_materialAssetStore.SaveAsset(absoluteMaterialPath, materialAsset);
@@ -227,7 +223,9 @@ public sealed class MaterialImporter : IMaterialImporter
 		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_Normal.png", TextureSemantic.Normal);
 	}
 
-	private Guid WriteMetallicRoughnessTexture(
+	private Guid WriteOrmTexture(
+		string? occlusionPath,
+		MaterialTextureChannel occlusionChannel,
 		string? metallicPath,
 		MaterialTextureChannel metallicChannel,
 		string? roughnessPath,
@@ -236,17 +234,20 @@ public sealed class MaterialImporter : IMaterialImporter
 		string relativeFolderPath,
 		string materialName)
 	{
+		var hasOcclusion = string.IsNullOrWhiteSpace(occlusionPath) == false;
 		var hasMetallic = string.IsNullOrWhiteSpace(metallicPath) == false;
 		var hasRoughness = string.IsNullOrWhiteSpace(roughnessPath) == false;
-		if (hasMetallic == false && hasRoughness == false)
+		if (hasOcclusion == false && hasMetallic == false && hasRoughness == false)
 		{
 			return Guid.Empty;
 		}
 
+		using var occlusionImage = hasOcclusion ? LoadSourceImage(occlusionPath!) : null;
 		using var metallicImage = hasMetallic ? LoadSourceImage(metallicPath!) : null;
 		using var roughnessImage = hasRoughness ? LoadSourceImage(roughnessPath!) : null;
-		var outputWidth = Math.Max(metallicImage?.Width ?? 0, roughnessImage?.Width ?? 0);
-		var outputHeight = Math.Max(metallicImage?.Height ?? 0, roughnessImage?.Height ?? 0);
+		var outputWidth = Math.Max(occlusionImage?.Width ?? 0, Math.Max(metallicImage?.Width ?? 0, roughnessImage?.Width ?? 0));
+		var outputHeight = Math.Max(occlusionImage?.Height ?? 0, Math.Max(metallicImage?.Height ?? 0, roughnessImage?.Height ?? 0));
+		using var occlusionSource = ResizeIfNeeded(occlusionImage, outputWidth, outputHeight);
 		using var metallicSource = ResizeIfNeeded(metallicImage, outputWidth, outputHeight);
 		using var roughnessSource = ResizeIfNeeded(roughnessImage, outputWidth, outputHeight);
 		using var output = new Image<Rgba32>(outputWidth, outputHeight, new Rgba32(255, 255, 255, 255));
@@ -255,6 +256,7 @@ public sealed class MaterialImporter : IMaterialImporter
 		{
 			for (var x = 0; x < outputWidth; x++)
 			{
+				var occlusionValue = occlusionSource is null ? (byte)255 : ReadChannel(occlusionSource[x, y], occlusionChannel);
 				var metallicValue = metallicSource is null ? (byte)255 : ReadChannel(metallicSource[x, y], metallicChannel);
 				var roughnessValue = roughnessSource is null ? (byte)255 : ReadChannel(roughnessSource[x, y], roughnessChannel);
 				if (roughnessSource is not null && invertRoughness)
@@ -262,36 +264,11 @@ public sealed class MaterialImporter : IMaterialImporter
 					roughnessValue = (byte)(255 - roughnessValue);
 				}
 
-				output[x, y] = new Rgba32(255, roughnessValue, metallicValue, 255);
+				output[x, y] = new Rgba32(occlusionValue, roughnessValue, metallicValue, 255);
 			}
 		}
 
-		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_MetallicRoughness.png", TextureSemantic.MetallicRoughness);
-	}
-
-	private Guid WriteOcclusionTexture(
-		string? sourcePath,
-		MaterialTextureChannel occlusionChannel,
-		string relativeFolderPath,
-		string materialName)
-	{
-		if (string.IsNullOrWhiteSpace(sourcePath))
-		{
-			return Guid.Empty;
-		}
-
-		using var source = LoadSourceImage(sourcePath);
-		using var output = new Image<Rgba32>(source.Width, source.Height);
-		for (var y = 0; y < source.Height; y++)
-		{
-			for (var x = 0; x < source.Width; x++)
-			{
-				var value = ReadChannel(source[x, y], occlusionChannel);
-				output[x, y] = new Rgba32(value, value, value, 255);
-			}
-		}
-
-		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_AO.png", TextureSemantic.Occlusion);
+		return WriteTextureAsset(output, relativeFolderPath, $"{materialName}_ORM.png", TextureSemantic.MetallicRoughness);
 	}
 
 	private Guid WriteTextureAsset(Image<Rgba32> image, string relativeFolderPath, string fileName, TextureSemantic semantic)
@@ -349,14 +326,13 @@ public sealed class MaterialImporter : IMaterialImporter
 		MaterialImportRequest request,
 		Guid albedoTextureId,
 		Guid normalTextureId,
-		Guid metallicRoughnessTextureId,
-		Guid emissiveTextureId,
-		Guid occlusionTextureId)
+		Guid ormTextureId,
+		Guid emissiveTextureId)
 	{
 		var materialAsset = _materialAssetStore.CreateDefault(request.MaterialType);
-		ApplyMaterialProperties(materialAsset.Opaque, request, albedoTextureId, normalTextureId, metallicRoughnessTextureId, emissiveTextureId, occlusionTextureId);
-		ApplyMaterialProperties(materialAsset.AlphaTest, request, albedoTextureId, normalTextureId, metallicRoughnessTextureId, emissiveTextureId, occlusionTextureId);
-		ApplyMaterialProperties(materialAsset.AlphaBlend, request, albedoTextureId, normalTextureId, metallicRoughnessTextureId, emissiveTextureId, occlusionTextureId);
+		ApplyMaterialProperties(materialAsset.Opaque, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
+		ApplyMaterialProperties(materialAsset.AlphaTest, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
+		ApplyMaterialProperties(materialAsset.AlphaBlend, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
 		materialAsset.AlphaTest.AlphaCutoff = request.AlphaCutoff;
 		materialAsset.AlphaBlend.AlphaCutoff = request.AlphaCutoff;
 		return materialAsset;
@@ -367,9 +343,8 @@ public sealed class MaterialImporter : IMaterialImporter
 		MaterialImportRequest request,
 		Guid albedoTextureId,
 		Guid normalTextureId,
-		Guid metallicRoughnessTextureId,
-		Guid emissiveTextureId,
-		Guid occlusionTextureId)
+		Guid ormTextureId,
+		Guid emissiveTextureId)
 	{
 		properties.BaseColor = request.BaseColor;
 		properties.MetallicFactor = request.MetallicFactor;
@@ -378,9 +353,8 @@ public sealed class MaterialImporter : IMaterialImporter
 		properties.EmissiveIntensity = MathF.Max(0.0f, request.EmissiveIntensity);
 		properties.Textures.Albedo = new AssetRef<Texture> { NodeId = albedoTextureId };
 		properties.Textures.Normal = new AssetRef<Texture> { NodeId = normalTextureId };
-		properties.Textures.MetallicRoughness = new AssetRef<Texture> { NodeId = metallicRoughnessTextureId };
+		properties.Textures.Orm = new AssetRef<Texture> { NodeId = ormTextureId };
 		properties.Textures.Emissive = new AssetRef<Texture> { NodeId = emissiveTextureId };
-		properties.Textures.Occlusion = new AssetRef<Texture> { NodeId = occlusionTextureId };
 	}
 
 	private static Image<Rgba32>? ResizeIfNeeded(Image<Rgba32>? image, int width, int height)

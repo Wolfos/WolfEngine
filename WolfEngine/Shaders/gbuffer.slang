@@ -142,18 +142,16 @@ PSOutput EvaluateFragment(VSOutput input)
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
-    Texture2D<float4> metallicRoughnessTex = GetTexture(materialData.metallicRoughnessHandle);
+    Texture2D<float4> ormTex = GetTexture(materialData.ormHandle);
     Texture2D<float4> normalTex = GetTexture(materialData.normalHandle);
-    Texture2D<float4> occlusionTex = GetTexture(materialData.occlusionHandle);
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
     float4 albedoSample = albedoTex.Sample(sampler, input.uv);
-    float4 mrSample = metallicRoughnessTex.Sample(sampler, input.uv);
+    float4 ormSample = ormTex.Sample(sampler, input.uv);
 #ifdef WOLF_ALPHA_CLIP
     if(albedoSample.a < materialData.metallicRoughness.z) discard;
 #endif
     float3 tangentNormal = DecodeNormalMapSample(normalTex.Sample(sampler, input.uv));
-    float4 occlusionSample = occlusionTex.Sample(sampler, input.uv);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;
@@ -162,14 +160,14 @@ PSOutput EvaluateFragment(VSOutput input)
     float3x3 TBN = float3x3(T, B, N);
     normal = normalize(mul(tangentNormal, TBN));
    
-    float metallic = saturate(mrSample.b * materialData.metallicRoughness.x);
-    float roughness = saturate(mrSample.g * materialData.metallicRoughness.y);
-    float occlusion = saturate(occlusionSample.r);
+    float occlusion = saturate(ormSample.r);
+    float roughness = saturate(ormSample.g * materialData.metallicRoughness.y);
+    float metallic = saturate(ormSample.b * materialData.metallicRoughness.x);
     float alphaTestMask = 0.0f;
 #ifdef WOLF_ALPHA_CLIP
     alphaTestMask = 1.0f;
 #endif
-    float4 materialParams = float4(metallic, roughness, occlusion, alphaTestMask);
+    float4 materialParams = float4(occlusion, roughness, metallic, alphaTestMask);
 
     output.albedo = materialData.baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);

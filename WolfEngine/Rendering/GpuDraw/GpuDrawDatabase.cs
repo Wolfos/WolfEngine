@@ -743,10 +743,8 @@ public sealed class GpuDrawDatabase
 		       left.AlbedoResourceRevision == right.AlbedoResourceRevision &&
 		       ReferenceEquals(left.Normal, right.Normal) &&
 		       left.NormalResourceRevision == right.NormalResourceRevision &&
-		       ReferenceEquals(left.MetallicRoughness, right.MetallicRoughness) &&
-		       left.MetallicRoughnessResourceRevision == right.MetallicRoughnessResourceRevision &&
-		       ReferenceEquals(left.Occlusion, right.Occlusion) &&
-		       left.OcclusionResourceRevision == right.OcclusionResourceRevision &&
+		       ReferenceEquals(left.Orm, right.Orm) &&
+		       left.OrmResourceRevision == right.OrmResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
 		       left.HeightResourceRevision == right.HeightResourceRevision &&
 		       MathF.Abs(left.Scale - right.Scale) <= 0.0001f;
