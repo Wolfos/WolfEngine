@@ -40,6 +40,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
+    private readonly Dictionary<TerrainEditKey, TerrainComponent> _pendingTerrainEdits = new();
     private Type? _pendingRemovedComponentType;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
@@ -72,6 +73,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         _addableComponentTypes.Clear();
         _existingComponentTypes.Clear();
         _componentNameCounts.Clear();
+        _pendingTerrainEdits.Clear();
     }
 
     public override void Draw(EditorScene scene)
@@ -139,6 +141,12 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
+
+        if (componentType == typeof(TerrainComponent))
+        {
+            DrawTerrainComponentEditor(scene, scene.World, entity, _propertyDrawerRegistry, _interactionState);
+            return;
+        }
 
         if (componentType == typeof(NameComponent) ||
             componentType == typeof(LocalTransform) ||
@@ -434,6 +442,105 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         ImGui.PopID();
     }
 
+    private void DrawTerrainComponentEditor(
+        EditorScene scene,
+        World world,
+        Entity entity,
+        IPropertyDrawerRegistry propertyDrawerRegistry,
+        IEditorInteractionState interactionState)
+    {
+        var componentType = typeof(TerrainComponent);
+        object componentValue;
+        try
+        {
+            componentValue = RuntimeComponentAccessor.ReadBoxed(world, entity, componentType);
+        }
+        catch (InvalidOperationException)
+        {
+            ClearPendingTerrainEdit(world, entity);
+            return;
+        }
+
+        var currentComponent = (TerrainComponent)componentValue;
+        var key = new TerrainEditKey(world, entity);
+        if (_pendingTerrainEdits.TryGetValue(key, out var stagedComponent) == false)
+        {
+            stagedComponent = currentComponent;
+        }
+
+        object stagedValue = stagedComponent;
+        ImGui.PushID(componentType.FullName);
+        var isOpen = BeginComponentSection(componentType.Name, out var removeRequested);
+        if (removeRequested)
+        {
+            QueueComponentRemoval(componentType);
+            ImGui.PopID();
+            return;
+        }
+
+        if (isOpen == false)
+        {
+            ImGui.PopID();
+            return;
+        }
+
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref stagedValue, scene, entity))
+        {
+            stagedComponent = (TerrainComponent)stagedValue;
+            _pendingTerrainEdits[key] = stagedComponent;
+        }
+
+        var hasPendingChanges = TerrainComponentEquals(stagedComponent, currentComponent) == false;
+        if (hasPendingChanges == false)
+        {
+            _pendingTerrainEdits.Remove(key);
+        }
+        else
+        {
+            _pendingTerrainEdits[key] = stagedComponent;
+            ImGui.TextDisabled("Changes staged until Apply.");
+        }
+
+        if (hasPendingChanges == false)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button("Apply Terrain Settings"))
+        {
+            var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
+            RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, stagedComponent);
+            PushComponentEdit("Edit TerrainComponent", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
+            interactionState.MarkSceneDirty();
+            _pendingTerrainEdits.Remove(key);
+        }
+
+        if (hasPendingChanges == false)
+        {
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+
+        if (hasPendingChanges == false)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button("Revert Terrain Settings"))
+        {
+            _pendingTerrainEdits.Remove(key);
+        }
+
+        if (hasPendingChanges == false)
+        {
+            ImGui.EndDisabled();
+        }
+
+        ImGui.Separator();
+        ImGui.PopID();
+    }
+
     private SceneComponentSnapshot CaptureSingleComponentSnapshot(EditorScene scene, Entity entity, Type componentType)
     {
         return _sceneSnapshotService.CaptureComponent(scene, entity, componentType);
@@ -512,10 +619,28 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     {
         var snapshot = CaptureSingleComponentSnapshot(scene, entity, componentType);
         RuntimeComponentAccessor.Remove(scene.World, entity, componentType);
+        if (componentType == typeof(TerrainComponent))
+        {
+            ClearPendingTerrainEdit(scene.World, entity);
+        }
+
         EditorGui.RefreshSelectedEntity(scene.World, requestFocus: false);
         _undoRedoService.BeginCapture($"Remove {componentType.Name}");
         _undoRedoService.CommitCapture(new SceneComponentRemovalUndoRedoEntry($"Remove {componentType.Name}", [snapshot]));
         _interactionState.MarkSceneDirty();
+    }
+
+    private void ClearPendingTerrainEdit(World world, Entity entity)
+    {
+        _pendingTerrainEdits.Remove(new TerrainEditKey(world, entity));
+    }
+
+    private static bool TerrainComponentEquals(in TerrainComponent left, in TerrainComponent right)
+    {
+        return string.Equals(
+            JsonSerializer.Serialize(left, AssetJson.SerializerOptions),
+            JsonSerializer.Serialize(right, AssetJson.SerializerOptions),
+            StringComparison.Ordinal);
     }
 
     private void QueueComponentRemoval(Type componentType)
@@ -752,6 +877,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         ApplySavedEntityToScene(scene, entity, sourceEntity);
         _interactionState.MarkSceneDirty();
+    }
+
+    private readonly record struct TerrainEditKey(World World, Entity Entity)
+    {
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(RuntimeHelpers.GetHashCode(World), Entity);
+        }
     }
 
     private void ApplyPrefabOverrides(EditorScene scene, Entity entity)

@@ -9,6 +9,7 @@ namespace WolfEngine;
 public sealed class TerrainRuntimeData
 {
 	private const int LODCount = 3;
+	private const int MaxChunkTileCount = 10_000;
 	private readonly List<TerrainChunkRuntime> _chunks = new();
 	private Texture? _resolvedHeightmap;
 	private Texture? _resolvedControlMap;
@@ -33,6 +34,7 @@ public sealed class TerrainRuntimeData
 	private TextureFormat _lastControlFormat;
 	private byte[]? _lastControlTopMipData;
 	private bool _built;
+	private bool _hasBuildState;
 	private float[]? _heightSamples;
 	private Vector3[]? _normals;
 	private readonly List<Mesh> _pendingReleasedMeshes = new();
@@ -89,6 +91,15 @@ public sealed class TerrainRuntimeData
 			Center = new Vector3(0.0f, _resolvedHeightScale * 0.5f, 0.0f),
 			Size = new Vector3(_resolvedWorldSize.X, _resolvedHeightScale, _resolvedWorldSize.Y)
 		};
+		if (ExceedsChunkTileLimit(sampleWidth, sampleHeight, _resolvedChunkSize, out var chunkTileCount))
+		{
+			Console.WriteLine(
+				$"Terrain mesh build refused: {chunkTileCount} terrain tiles exceeds the limit of {MaxChunkTileCount}. " +
+				$"Heightmap={sampleWidth}x{sampleHeight}, ChunkSizeInQuads={_resolvedChunkSize}.");
+			CaptureBuildState(component);
+			return false;
+		}
+
 		BuildChunks(heightSamples, _normals, sampleWidth, sampleHeight);
 		CaptureBuildState(component);
 		_built = _chunks.Count > 0;
@@ -289,7 +300,7 @@ public sealed class TerrainRuntimeData
 
 	private bool NeedsRebuild(TerrainComponent component)
 	{
-		if (_built == false)
+		if (_hasBuildState == false)
 		{
 			return true;
 		}
@@ -340,6 +351,7 @@ public sealed class TerrainRuntimeData
 
 	private void CaptureBuildState(TerrainComponent component)
 	{
+		_hasBuildState = true;
 		_lastWorldSize = component.GetResolvedWorldSize();
 		_lastHeightScale = component.GetResolvedHeightScale();
 		_lastChunkSize = component.GetResolvedChunkSizeInQuads();
@@ -486,6 +498,16 @@ public sealed class TerrainRuntimeData
 				}
 			}
 		}
+	}
+
+	private static bool ExceedsChunkTileLimit(int sampleWidth, int sampleHeight, int chunkSizeInQuads, out int chunkTileCount)
+	{
+		var quadsX = Math.Max(sampleWidth - 1, 0);
+		var quadsY = Math.Max(sampleHeight - 1, 0);
+		var chunkCountX = (quadsX + chunkSizeInQuads - 1) / chunkSizeInQuads;
+		var chunkCountY = (quadsY + chunkSizeInQuads - 1) / chunkSizeInQuads;
+		chunkTileCount = chunkCountX * chunkCountY;
+		return chunkTileCount > MaxChunkTileCount;
 	}
 
 	private Mesh BuildChunkMesh(

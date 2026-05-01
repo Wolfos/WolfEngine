@@ -278,6 +278,26 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void EnsureBuilt_RefusesBuildWhenChunkTileCountExceedsLimit()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-402x402", 402, 402));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeInQuads = 3
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.False);
+		Assert.That(runtime.Chunks, Is.Empty);
+	}
+
+	[Test]
 	public void TrySampleSurface_ReturnsExpectedHeightAndNormal()
 	{
 		using var registry = new TestAssetRegistry();
