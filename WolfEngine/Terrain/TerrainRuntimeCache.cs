@@ -34,7 +34,15 @@ internal sealed class TerrainRuntimeCache
 		for (var i = 0; i < records.Count; i++)
 		{
 			var record = records[i];
-			gpuDrawDatabase.TouchTerrainChunk(entity, record.ChunkIndex, record.Mesh, record.Material, record.Surface, record.WorldTransform);
+			gpuDrawDatabase.TouchTerrainChunk(
+				entity,
+				record.ChunkIndex,
+				record.Mesh,
+				record.Material,
+				record.LocalBounds,
+				record.InstanceData,
+				record.Surface,
+				record.WorldTransform);
 		}
 	}
 

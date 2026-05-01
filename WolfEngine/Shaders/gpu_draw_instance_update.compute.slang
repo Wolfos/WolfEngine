@@ -112,6 +112,8 @@ void CSUpdateInstance(uint3 dispatchThreadId : SV_DispatchThreadID)
     instanceData.previousWorld = update.previousWorld;
     instanceData.world = update.world;
     instanceData.boundsCenterRadius = update.boundsCenterRadius;
+    instanceData.terrainChunkOriginSize = update.terrainChunkOriginSize;
+    instanceData.terrainHeightmapUvScaleOffset = update.terrainHeightmapUvScaleOffset;
     instanceData.materialHandle = materialHandle;
     instanceData.meshHandle = meshHandle;
     instanceData.drawKind = update.drawKind;

@@ -19,6 +19,7 @@ public sealed class GpuDrawPass
 	private readonly IGpuDrawBackendBridge _backendBridge;
 	private DescriptorHandle _terrainLayerSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _terrainControlSampler = DescriptorHandle.Invalid;
+	private DescriptorHandle _terrainHeightSampler = DescriptorHandle.Invalid;
 	private IGfxPipeline? _instanceUpdatePipeline;
 	private IGfxPipeline? _meshUpdatePipeline;
 	private IGfxPipeline? _materialUpdatePipeline;
@@ -279,13 +280,16 @@ public sealed class GpuDrawPass
 			uint normalHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint emissiveHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
+			uint heightmapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint controlMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint hasControlMap = 0;
+			uint heightmapSamplerHandle = _terrainHeightSampler.Value;
 			uint layerSamplerHandle = _terrainLayerSampler.Value;
 			uint controlSamplerHandle = _terrainControlSampler.Value;
 			uint layerStart = 0;
 			uint layerCount = 0;
 			var heightBlendSharpness = 0.0f;
+			var terrainHeightScale = 0.0f;
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
@@ -398,6 +402,12 @@ public sealed class GpuDrawPass
 				emissiveFactorIntensity = Vector4.Zero;
 				layerCount = (uint)Math.Max(terrainSurface.LayerCount, 1);
 				heightBlendSharpness = terrainSurface.HeightBlendSharpness;
+				terrainHeightScale = terrainSurface.HeightScale;
+				if (terrainSurface.Heightmap is { } heightmap)
+				{
+					heightmapHandle = RegisterTerrainTexture(heightmap);
+				}
+
 				if (terrainSurface.ControlMap is { } controlMap)
 				{
 					controlMapHandle = RegisterTerrainTexture(controlMap);
@@ -409,6 +419,8 @@ public sealed class GpuDrawPass
 				update.PreviousWorld,
 				update.World,
 				update.BoundsCenterRadius,
+				update.TerrainInstanceData.ChunkOriginSize,
+				update.TerrainInstanceData.HeightmapUvScaleOffset,
 				(uint)update.Type,
 				update.DrawHandle.Value,
 				update.InstanceHandle.Value,
@@ -452,13 +464,16 @@ public sealed class GpuDrawPass
 					}
 					_terrainMaterialUpdateData.Add(new GpuTerrainMaterialUpdateData(
 						update.MaterialHandle.Value,
+						heightmapHandle,
 						controlMapHandle,
 						hasControlMap,
+						heightmapSamplerHandle,
 						layerSamplerHandle,
 						controlSamplerHandle,
 						layerStart,
 						layerCount,
-						heightBlendSharpness));
+						heightBlendSharpness,
+						terrainHeightScale));
 
 					if (layerStart != 0)
 					{
@@ -1475,6 +1490,7 @@ public sealed class GpuDrawPass
 				entry.BoundsCenterRadius,
 				entry.Mesh,
 				entry.Material,
+				entry.TerrainInstanceData,
 				entry.TerrainSurface));
 		}
 
@@ -1580,6 +1596,15 @@ public sealed class GpuDrawPass
 				AddressMode.Clamp,
 				AddressMode.Clamp));
 		}
+
+		if (_terrainHeightSampler.IsValid == false)
+		{
+			_terrainHeightSampler = _bindlessRegistry.GetSamplerHandle(new SamplerDescriptor(
+				FilterMode.Bilinear,
+				AddressMode.Clamp,
+				AddressMode.Clamp,
+				AddressMode.Clamp));
+		}
 	}
 
 	private void PopulateTerrainLayerHandles(
@@ -1638,12 +1663,15 @@ public sealed class GpuDrawPass
 			_bindlessRegistry.ErrorSamplerHandle.Value);
 		var fallbackTerrainMaterialData = new GpuTerrainMaterialData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
+			_bindlessRegistry.ErrorTextureHandle.Value,
 			0,
+			_terrainHeightSampler.Value,
 			_terrainLayerSampler.Value,
 			_terrainControlSampler.Value,
 			0,
 			1,
-			4.0f);
+			4.0f,
+			64.0f);
 		var fallbackTerrainLayerData = new GpuTerrainLayerData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,

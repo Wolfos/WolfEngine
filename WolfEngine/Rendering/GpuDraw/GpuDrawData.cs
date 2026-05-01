@@ -26,6 +26,8 @@ public readonly struct GpuInstanceData
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
+		Vector4 terrainChunkOriginSize,
+		Vector4 terrainHeightmapUvScaleOffset,
 		uint materialHandle,
 		uint meshHandle,
 		uint drawKind,
@@ -34,6 +36,8 @@ public readonly struct GpuInstanceData
 		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
+		TerrainChunkOriginSize = terrainChunkOriginSize;
+		TerrainHeightmapUvScaleOffset = terrainHeightmapUvScaleOffset;
 		MaterialHandle = materialHandle;
 		MeshHandle = meshHandle;
 		DrawKind = drawKind;
@@ -43,6 +47,8 @@ public readonly struct GpuInstanceData
 	public readonly Matrix4x4 PreviousWorld;
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
+	public readonly Vector4 TerrainChunkOriginSize;
+	public readonly Vector4 TerrainHeightmapUvScaleOffset;
 	public readonly uint MaterialHandle;
 	public readonly uint MeshHandle;
 	public readonly uint DrawKind;
@@ -92,40 +98,43 @@ public readonly struct GpuMaterialData
 public readonly struct GpuTerrainMaterialData
 {
 	public GpuTerrainMaterialData(
+		uint heightmapHandle,
 		uint controlMapHandle,
 		uint hasControlMap,
+		uint heightmapSamplerHandle,
 		uint layerSamplerHandle,
 		uint controlSamplerHandle,
 		uint layerStart,
 		uint layerCount,
-		float heightBlendSharpness)
+		float heightBlendSharpness,
+		float heightScale)
 	{
+		HeightmapHandle = heightmapHandle;
 		ControlMapHandle = controlMapHandle;
 		HasControlMap = hasControlMap;
+		HeightmapSamplerHandle = heightmapSamplerHandle;
 		LayerSamplerHandle = layerSamplerHandle;
 		ControlSamplerHandle = controlSamplerHandle;
 		LayerStart = layerStart;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
+		HeightScale = heightScale;
 		_pad0 = 0;
 		_pad1 = 0;
-		_pad2 = 0;
-		_pad3 = 0;
-		_pad4 = 0;
 	}
 
+	public readonly uint HeightmapHandle;
 	public readonly uint ControlMapHandle;
 	public readonly uint HasControlMap;
+	public readonly uint HeightmapSamplerHandle;
 	public readonly uint LayerSamplerHandle;
 	public readonly uint ControlSamplerHandle;
 	public readonly uint LayerStart;
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
+	public readonly float HeightScale;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
-	private readonly uint _pad2;
-	private readonly uint _pad3;
-	private readonly uint _pad4;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -213,6 +222,8 @@ public readonly struct GpuDrawInstanceUpdateData
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius,
+		Vector4 terrainChunkOriginSize,
+		Vector4 terrainHeightmapUvScaleOffset,
 		uint type,
 		uint drawHandle,
 		uint instanceHandle,
@@ -224,6 +235,8 @@ public readonly struct GpuDrawInstanceUpdateData
 		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
+		TerrainChunkOriginSize = terrainChunkOriginSize;
+		TerrainHeightmapUvScaleOffset = terrainHeightmapUvScaleOffset;
 		Type = type;
 		DrawHandle = drawHandle;
 		InstanceHandle = instanceHandle;
@@ -237,6 +250,8 @@ public readonly struct GpuDrawInstanceUpdateData
 	public readonly Matrix4x4 PreviousWorld;
 	public readonly Matrix4x4 World;
 	public readonly Vector4 BoundsCenterRadius;
+	public readonly Vector4 TerrainChunkOriginSize;
+	public readonly Vector4 TerrainHeightmapUvScaleOffset;
 	public readonly uint Type;
 	public readonly uint DrawHandle;
 	public readonly uint InstanceHandle;
@@ -331,32 +346,43 @@ public readonly struct GpuTerrainMaterialUpdateData
 {
 	public GpuTerrainMaterialUpdateData(
 		uint materialHandle,
+		uint heightmapHandle,
 		uint controlMapHandle,
 		uint hasControlMap,
+		uint heightmapSamplerHandle,
 		uint layerSamplerHandle,
 		uint controlSamplerHandle,
 		uint layerStart,
 		uint layerCount,
-		float heightBlendSharpness)
+		float heightBlendSharpness,
+		float heightScale)
 	{
 		MaterialHandle = materialHandle;
+		HeightmapHandle = heightmapHandle;
 		ControlMapHandle = controlMapHandle;
 		HasControlMap = hasControlMap;
+		HeightmapSamplerHandle = heightmapSamplerHandle;
 		LayerSamplerHandle = layerSamplerHandle;
 		ControlSamplerHandle = controlSamplerHandle;
 		LayerStart = layerStart;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
+		HeightScale = heightScale;
+		_pad0 = 0;
 	}
 
 	public readonly uint MaterialHandle;
+	public readonly uint HeightmapHandle;
 	public readonly uint ControlMapHandle;
 	public readonly uint HasControlMap;
+	public readonly uint HeightmapSamplerHandle;
 	public readonly uint LayerSamplerHandle;
 	public readonly uint ControlSamplerHandle;
 	public readonly uint LayerStart;
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
+	public readonly float HeightScale;
+	private readonly uint _pad0;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

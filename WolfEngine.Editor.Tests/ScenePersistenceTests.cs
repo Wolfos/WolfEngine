@@ -183,7 +183,10 @@ public sealed class ScenePersistenceTests
 			LayerSetAsset = new AssetRef<TerrainLayerSet> { NodeId = layerSetId },
 			WorldSizeMeters = new Vector2(1024.0f, 768.0f),
 			HeightScaleMeters = 96.0f,
-			ChunkSizeInQuads = 32
+			ChunkSizeMeters = 96.0f,
+			LodCount = 4,
+			Lod0ResolutionInQuads = 32,
+			LodDistancesMeters = [100.0f, 240.0f, 520.0f]
 		});
 
 		environment.Factory.Save(scene);
@@ -196,7 +199,10 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedTerrain.LayerSetAsset.NodeId, Is.EqualTo(layerSetId));
 		Assert.That(loadedTerrain.WorldSizeMeters, Is.EqualTo(new Vector2(1024.0f, 768.0f)));
 		Assert.That(loadedTerrain.HeightScaleMeters, Is.EqualTo(96.0f));
-		Assert.That(loadedTerrain.ChunkSizeInQuads, Is.EqualTo(32));
+		Assert.That(loadedTerrain.ChunkSizeMeters, Is.EqualTo(96.0f));
+		Assert.That(loadedTerrain.LodCount, Is.EqualTo(4));
+		Assert.That(loadedTerrain.Lod0ResolutionInQuads, Is.EqualTo(32));
+		Assert.That(loadedTerrain.LodDistancesMeters, Is.EqualTo(new[] { 100.0f, 240.0f, 520.0f }));
 	}
 
 	[Test]

@@ -58,6 +58,11 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			return assetLinkResult;
 		}
 
+		if (valueType == typeof(float[]))
+		{
+			return DrawFloatArray(context.Label, value as float[]);
+		}
+
 		if (valueType == typeof(string))
 		{
 			var stringValue = (string?)value ?? string.Empty;
@@ -502,6 +507,53 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 
 		numericValue = null;
 		return false;
+	}
+
+	private static PropertyDrawerResult DrawFloatArray(string label, float[]? value)
+	{
+		var current = value ?? Array.Empty<float>();
+		var next = (float[])current.Clone();
+		var changed = false;
+
+		ImGui.PushID(label);
+		try
+		{
+			ImGui.TextUnformatted(label);
+			EditorUIUtility.BeginIndentedGroup();
+			try
+			{
+				var count = next.Length;
+				if (EditorUIUtility.InputInt("Count", ref count))
+				{
+					count = Math.Clamp(count, 0, 32);
+					if (count != next.Length)
+					{
+						Array.Resize(ref next, count);
+						changed = true;
+					}
+				}
+
+				for (var i = 0; i < next.Length; i++)
+				{
+					var item = next[i];
+					if (EditorUIUtility.InputFloat($"[{i}]", ref item))
+					{
+						next[i] = item;
+						changed = true;
+					}
+				}
+			}
+			finally
+			{
+				EditorUIUtility.EndIndentedGroup();
+			}
+		}
+		finally
+		{
+			ImGui.PopID();
+		}
+
+		return new PropertyDrawerResult(true, changed, next);
 	}
 
 	private static bool TryGetRuntimeAssetDescriptor(Type runtimeType, out RuntimeAssetAttribute descriptor)

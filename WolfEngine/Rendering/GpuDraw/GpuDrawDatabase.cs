@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering;
 
@@ -119,6 +120,8 @@ public sealed class GpuDrawDatabase
 		int chunkIndex,
 		Mesh mesh,
 		Material material,
+		in BoundingSphere localBounds,
+		in TerrainChunkInstanceData instanceData,
 		in TerrainDrawSurface surface,
 		in Matrix4x4 worldTransform)
 	{
@@ -131,12 +134,12 @@ public sealed class GpuDrawDatabase
 					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.Terrain}.");
 			}
 
-			ApplyTerrainChanges(record, mesh, material, surface, worldTransform);
+			ApplyTerrainChanges(record, mesh, material, localBounds, instanceData, surface, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
-		var newRecord = CreateRecord(key, GpuDrawKind.Terrain, mesh, material, worldTransform);
+		var newRecord = CreateRecord(key, GpuDrawKind.Terrain, mesh, material, worldTransform, localBounds, instanceData);
 		newRecord.TerrainSurface = surface;
 		_records.Add(key, newRecord);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
@@ -155,6 +158,7 @@ public sealed class GpuDrawDatabase
 			newRecord.BoundsCenterRadius,
 			mesh,
 			material,
+			newRecord.TerrainInstanceData,
 			surface));
 	}
 
@@ -224,6 +228,7 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				record.Mesh,
 				record.Material,
+				record.TerrainInstanceData,
 				record.TerrainSurface,
 				record.PreviousWorld,
 				record.World,
@@ -485,6 +490,8 @@ public sealed class GpuDrawDatabase
 		DrawRecord record,
 		Mesh mesh,
 		Material material,
+		in BoundingSphere localBounds,
+		in TerrainChunkInstanceData instanceData,
 		in TerrainDrawSurface surface,
 		in Matrix4x4 worldTransform)
 	{
@@ -492,10 +499,12 @@ public sealed class GpuDrawDatabase
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
 		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
+		var terrainInstanceChanged = TerrainInstanceEquals(record.TerrainInstanceData, instanceData) == false;
+		var boundsChanged = record.HasBoundsOverride == false || record.LocalBoundsOverride.Equals(localBounds) == false;
 		var surfaceChanged = record.TerrainSurface.HasValue == false || TerrainSurfaceEquals(record.TerrainSurface.Value, surface) == false;
 		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || surfaceChanged || settlePreviousTransform) == false)
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || terrainInstanceChanged || boundsChanged || surfaceChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
@@ -526,7 +535,18 @@ public sealed class GpuDrawDatabase
 			record.TerrainSurface = surface;
 		}
 
-		if (transformChanged || meshChanged)
+		if (terrainInstanceChanged)
+		{
+			record.TerrainInstanceData = instanceData;
+		}
+
+		if (boundsChanged)
+		{
+			record.HasBoundsOverride = true;
+			record.LocalBoundsOverride = localBounds;
+		}
+
+		if (transformChanged || meshChanged || boundsChanged || terrainInstanceChanged)
 		{
 			record.World = worldTransform;
 			ComputeBounds(record, mesh);
@@ -544,6 +564,7 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
+				record.TerrainInstanceData,
 				record.TerrainSurface));
 		}
 
@@ -560,10 +581,11 @@ public sealed class GpuDrawDatabase
 				record.BoundsCenterRadius,
 				record.Mesh,
 				record.Material,
+				record.TerrainInstanceData,
 				record.TerrainSurface));
 		}
 
-		if (transformChanged)
+		if (transformChanged || terrainInstanceChanged || boundsChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -573,7 +595,8 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				uploadPreviousWorld,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				record.TerrainInstanceData));
 			record.PreviousWorld = uploadPreviousWorld;
 		}
 
@@ -587,12 +610,20 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				record.World,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				record.TerrainInstanceData));
 			record.PreviousWorld = record.World;
 		}
 	}
 
-	private DrawRecord CreateRecord(DrawRecordKey key, GpuDrawKind drawKind, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	private DrawRecord CreateRecord(
+		DrawRecordKey key,
+		GpuDrawKind drawKind,
+		Mesh mesh,
+		Material material,
+		in Matrix4x4 worldTransform,
+		BoundingSphere? localBoundsOverride = null,
+		TerrainChunkInstanceData? terrainInstanceData = null)
 	{
 		var record = new DrawRecord
 		{
@@ -607,7 +638,10 @@ public sealed class GpuDrawDatabase
 			MaterialResourceRevision = material.ResourceRevision,
 			World = worldTransform,
 			PreviousWorld = worldTransform,
-			LastSeenStamp = _syncStamp
+			LastSeenStamp = _syncStamp,
+			HasBoundsOverride = localBoundsOverride.HasValue,
+			LocalBoundsOverride = localBoundsOverride ?? default,
+			TerrainInstanceData = terrainInstanceData ?? default
 		};
 
 		ComputeBounds(record, mesh);
@@ -688,7 +722,7 @@ public sealed class GpuDrawDatabase
 
 	private static void ComputeBounds(DrawRecord record, Mesh mesh)
 	{
-		var bounds = mesh.BoundingSphere;
+		var bounds = record.HasBoundsOverride ? record.LocalBoundsOverride : mesh.BoundingSphere;
 		record.BoundsCenterRadius = new(Vector3.Transform(bounds.Center, record.World),
 			bounds.Radius * GetMaxScale(record.World));
 	}
@@ -717,8 +751,11 @@ public sealed class GpuDrawDatabase
 
 	private static bool TerrainSurfaceEquals(in TerrainDrawSurface left, in TerrainDrawSurface right)
 	{
-		if (!ReferenceEquals(left.ControlMap, right.ControlMap) ||
+		if (!ReferenceEquals(left.Heightmap, right.Heightmap) ||
+		    left.HeightmapResourceRevision != right.HeightmapResourceRevision ||
+		    !ReferenceEquals(left.ControlMap, right.ControlMap) ||
 		    left.ControlMapResourceRevision != right.ControlMapResourceRevision ||
+		    MathF.Abs(left.HeightScale - right.HeightScale) > 0.0001f ||
 		    left.LayerCount != right.LayerCount ||
 		    MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) > 0.0001f ||
 		    left.Layers.Count != right.Layers.Count)
@@ -735,6 +772,12 @@ public sealed class GpuDrawDatabase
 		}
 
 		return true;
+	}
+
+	private static bool TerrainInstanceEquals(in TerrainChunkInstanceData left, in TerrainChunkInstanceData right)
+	{
+		return left.ChunkOriginSize.Equals(right.ChunkOriginSize) &&
+		       left.HeightmapUvScaleOffset.Equals(right.HeightmapUvScaleOffset);
 	}
 
 	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)
@@ -762,6 +805,9 @@ public sealed class GpuDrawDatabase
 		public Material Material = null!;
 		public int MaterialResourceRevision;
 		public TerrainDrawSurface? TerrainSurface;
+		public TerrainChunkInstanceData TerrainInstanceData;
+		public bool HasBoundsOverride;
+		public BoundingSphere LocalBoundsOverride;
 		public Matrix4x4 PreviousWorld;
 		public Matrix4x4 World;
 		public Vector4 BoundsCenterRadius;
@@ -808,6 +854,7 @@ public readonly struct GpuDrawEntry
 		GpuDrawHandle materialHandle,
 		Mesh mesh,
 		Material material,
+		TerrainChunkInstanceData terrainInstanceData,
 		TerrainDrawSurface? terrainSurface,
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
@@ -820,6 +867,7 @@ public readonly struct GpuDrawEntry
 		MaterialHandle = materialHandle;
 		Mesh = mesh;
 		Material = material;
+		TerrainInstanceData = terrainInstanceData;
 		TerrainSurface = terrainSurface;
 		PreviousWorld = previousWorld;
 		World = world;
@@ -833,6 +881,7 @@ public readonly struct GpuDrawEntry
 	public GpuDrawHandle MaterialHandle { get; }
 	public Mesh Mesh { get; }
 	public Material Material { get; }
+	public TerrainChunkInstanceData TerrainInstanceData { get; }
 	public TerrainDrawSurface? TerrainSurface { get; }
 	public Matrix4x4 PreviousWorld { get; }
 	public Matrix4x4 World { get; }
@@ -858,6 +907,7 @@ public readonly struct GpuDrawUpdate
 		Vector4 boundsCenterRadius,
 		Mesh? mesh,
 		Material? material,
+		TerrainChunkInstanceData terrainInstanceData,
 		TerrainDrawSurface? terrainSurface)
 	{
 		Type = type;
@@ -871,6 +921,7 @@ public readonly struct GpuDrawUpdate
 		BoundsCenterRadius = boundsCenterRadius;
 		Mesh = mesh;
 		Material = material;
+		TerrainInstanceData = terrainInstanceData;
 		TerrainSurface = terrainSurface;
 	}
 
@@ -885,6 +936,7 @@ public readonly struct GpuDrawUpdate
 	public Vector4 BoundsCenterRadius { get; }
 	public Mesh? Mesh { get; }
 	public Material? Material { get; }
+	public TerrainChunkInstanceData TerrainInstanceData { get; }
 	public TerrainDrawSurface? TerrainSurface { get; }
 
 	public int DrawIndex => DrawHandle.Index;
@@ -903,6 +955,7 @@ public readonly struct GpuDrawUpdate
 		Vector4 boundsCenterRadius,
 		Mesh mesh,
 		Material material,
+		TerrainChunkInstanceData terrainInstanceData = default,
 		TerrainDrawSurface? terrainSurface = null)
 	{
 		return new GpuDrawUpdate(
@@ -917,6 +970,7 @@ public readonly struct GpuDrawUpdate
 			boundsCenterRadius,
 			mesh,
 			material,
+			terrainInstanceData,
 			terrainSurface);
 	}
 
@@ -934,6 +988,7 @@ public readonly struct GpuDrawUpdate
 			Vector4.Zero,
 			null,
 			null,
+			default,
 			null);
 	}
 
@@ -945,7 +1000,8 @@ public readonly struct GpuDrawUpdate
 		GpuDrawHandle materialHandle,
 		in Matrix4x4 previousWorld,
 		in Matrix4x4 world,
-		Vector4 boundsCenterRadius)
+		Vector4 boundsCenterRadius,
+		TerrainChunkInstanceData terrainInstanceData = default)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateTransform,
@@ -959,6 +1015,7 @@ public readonly struct GpuDrawUpdate
 			boundsCenterRadius,
 			null,
 			null,
+			terrainInstanceData,
 			null);
 	}
 
@@ -973,6 +1030,7 @@ public readonly struct GpuDrawUpdate
 		Vector4 boundsCenterRadius,
 		Mesh mesh,
 		Material material,
+		TerrainChunkInstanceData terrainInstanceData = default,
 		TerrainDrawSurface? terrainSurface = null)
 	{
 		return new GpuDrawUpdate(
@@ -987,6 +1045,7 @@ public readonly struct GpuDrawUpdate
 			boundsCenterRadius,
 			mesh,
 			material,
+			terrainInstanceData,
 			terrainSurface);
 	}
 
@@ -1000,6 +1059,7 @@ public readonly struct GpuDrawUpdate
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		Mesh mesh,
+		TerrainChunkInstanceData terrainInstanceData = default,
 		TerrainDrawSurface? terrainSurface = null)
 	{
 		return new GpuDrawUpdate(
@@ -1014,6 +1074,7 @@ public readonly struct GpuDrawUpdate
 			boundsCenterRadius,
 			mesh,
 			null,
+			terrainInstanceData,
 			terrainSurface);
 	}
 }

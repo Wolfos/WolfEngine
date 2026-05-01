@@ -119,7 +119,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 
@@ -128,13 +131,13 @@ public sealed class TerrainPrototypeTests
 		Assert.That(runtime.HeightSampleHeight, Is.EqualTo(5));
 		Assert.That(runtime.Chunks, Has.Count.EqualTo(1));
 
-		var chunk = runtime.Chunks[0];
-		Assert.That(chunk.LodMeshes[0].Vertices, Has.Length.EqualTo(45));
-		Assert.That(chunk.LodMeshes[0].Indices, Has.Length.EqualTo(192));
-		Assert.That(chunk.LodMeshes[1].Vertices, Has.Length.EqualTo(21));
-		Assert.That(chunk.LodMeshes[1].Indices, Has.Length.EqualTo(72));
-		Assert.That(chunk.LodMeshes[2].Vertices, Has.Length.EqualTo(12));
-		Assert.That(chunk.LodMeshes[2].Indices, Has.Length.EqualTo(30));
+		Assert.That(runtime.SharedLodMeshes, Has.Count.EqualTo(3));
+		Assert.That(runtime.SharedLodMeshes[0].Vertices, Has.Length.EqualTo(45));
+		Assert.That(runtime.SharedLodMeshes[0].Indices, Has.Length.EqualTo(192));
+		Assert.That(runtime.SharedLodMeshes[1].Vertices, Has.Length.EqualTo(21));
+		Assert.That(runtime.SharedLodMeshes[1].Indices, Has.Length.EqualTo(72));
+		Assert.That(runtime.SharedLodMeshes[2].Vertices, Has.Length.EqualTo(12));
+		Assert.That(runtime.SharedLodMeshes[2].Indices, Has.Length.EqualTo(30));
 	}
 
 	[Test]
@@ -149,7 +152,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -162,7 +168,7 @@ public sealed class TerrainPrototypeTests
 		runtime.CollectChunkDrawRecords(renderGraph, material, nearCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
-		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[0]));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.SharedLodMeshes[0]));
 		Assert.That(records[0].Material, Is.SameAs(material));
 		Assert.That(records[0].ChunkIndex, Is.EqualTo(0));
 		Assert.That(records[0].Surface.LayerCount, Is.EqualTo(1));
@@ -172,7 +178,7 @@ public sealed class TerrainPrototypeTests
 		runtime.CollectChunkDrawRecords(renderGraph, material, farCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
-		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.SharedLodMeshes[2]));
 		Assert.That(records[0].Material, Is.SameAs(material));
 
 		records.Clear();
@@ -184,8 +190,34 @@ public sealed class TerrainPrototypeTests
 			records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
-		Assert.That(records[0].Mesh, Is.SameAs(runtime.Chunks[0].LodMeshes[2]));
+		Assert.That(records[0].Mesh, Is.SameAs(runtime.SharedLodMeshes[2]));
 		Assert.That(records[0].Material, Is.SameAs(material));
+	}
+
+	[Test]
+	public void EnsureBuilt_ChunkGridAndSharedLodsFollowTerrainSettings()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(128.0f, 128.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeMeters = 32.0f,
+			LodCount = 4,
+			Lod0ResolutionInQuads = 8,
+			LodDistancesMeters = [80.0f, 160.0f, 320.0f]
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		Assert.That(runtime.Chunks, Has.Count.EqualTo(16));
+		Assert.That(runtime.SharedLodMeshes, Has.Count.EqualTo(4));
+		Assert.That(runtime.SharedLodMeshes[0].Vertices.Length, Is.GreaterThan(runtime.SharedLodMeshes[1].Vertices.Length));
+		Assert.That(runtime.SharedLodMeshes[1].Vertices.Length, Is.GreaterThan(runtime.SharedLodMeshes[2].Vertices.Length));
 	}
 
 	[Test]
@@ -200,7 +232,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -233,20 +268,24 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 		var initialChunkCount = runtime.Chunks.Count;
+		var initialSharedMeshes = runtime.SharedLodMeshes.ToArray();
 
 		texture.ApplyTextureData(9, 9, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(9, 9));
 
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 		Assert.That(runtime.HeightSampleWidth, Is.EqualTo(9));
 		Assert.That(runtime.HeightSampleHeight, Is.EqualTo(9));
-		Assert.That(runtime.Chunks.Count, Is.Not.EqualTo(initialChunkCount));
-		Assert.That(runtime.Chunks.Count, Is.EqualTo(4));
+		Assert.That(runtime.Chunks.Count, Is.EqualTo(initialChunkCount));
+		Assert.That(runtime.SharedLodMeshes.SequenceEqual(initialSharedMeshes), Is.True);
 	}
 
 	[Test]
@@ -261,11 +300,14 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
-		var initialMeshes = runtime.Chunks.SelectMany(chunk => chunk.LodMeshes).ToArray();
+		var initialMeshes = runtime.SharedLodMeshes.ToArray();
 
 		component.WorldSizeMeters = new Vector2(128.0f, 128.0f);
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -278,6 +320,32 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void EnsureBuilt_FlatTerrainChunksUseConservativeBounds()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-flat", 5, 5, 0));
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 32.0f,
+			ChunkSizeMeters = 64.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		Assert.That(runtime.Chunks, Has.Count.EqualTo(1));
+		var bounds = runtime.Chunks[0].LocalBounds;
+		Assert.That(bounds.Center, Is.EqualTo(new Vector3(0.0f, 16.0f, 0.0f)));
+		Assert.That(bounds.Radius, Is.EqualTo(new Vector3(32.0f, 16.0f, 32.0f).Length()).Within(0.0001f));
+	}
+
+	[Test]
 	public void EnsureBuilt_RefusesBuildWhenChunkTileCountExceedsLimit()
 	{
 		using var registry = new TestAssetRegistry();
@@ -287,9 +355,12 @@ public sealed class TerrainPrototypeTests
 		var component = new TerrainComponent
 		{
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
-			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			WorldSizeMeters = new Vector2(402.0f, 402.0f),
 			HeightScaleMeters = 16.0f,
-			ChunkSizeInQuads = 3
+			ChunkSizeMeters = 1.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 
@@ -309,7 +380,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 8.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 2.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -335,7 +409,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 4.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 2.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -357,7 +434,10 @@ public sealed class TerrainPrototypeTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 2.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 2.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		};
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
@@ -379,6 +459,11 @@ public sealed class TerrainPrototypeTests
 	private static Texture CreateHeightTexture(string name, int width, int height)
 	{
 		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(width, height));
+	}
+
+	private static Texture CreateHeightTexture(string name, int width, int height, byte normalizedHeights)
+	{
+		return CreateHeightTexture(name, width, height, Enumerable.Repeat(normalizedHeights, width * height).ToArray());
 	}
 
 	private static Texture CreateHeightTexture(string name, int width, int height, byte[] normalizedHeights)

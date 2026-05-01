@@ -23,6 +23,8 @@ struct GpuInstanceData
     row_major float4x4 previousWorld;
     row_major float4x4 world;
     float4 boundsCenterRadius;
+    float4 terrainChunkOriginSize;
+    float4 terrainHeightmapUvScaleOffset;
     uint materialHandle;
     uint meshHandle;
     uint drawKind;
@@ -46,18 +48,18 @@ struct GpuMaterialData
 
 struct GpuTerrainMaterialData
 {
+    uint heightmapHandle;
     uint controlMapHandle;
     uint hasControlMap;
+    uint heightmapSamplerHandle;
     uint layerSamplerHandle;
     uint controlSamplerHandle;
     uint layerStart;
     uint layerCount;
     float heightBlendSharpness;
+    float heightScale;
     uint pad0;
     uint pad1;
-    uint pad2;
-    uint pad3;
-    uint pad4;
 };
 
 struct GpuTerrainLayerData
@@ -109,6 +111,8 @@ struct GpuDrawInstanceUpdateData
     row_major float4x4 previousWorld;
     row_major float4x4 world;
     float4 boundsCenterRadius;
+    float4 terrainChunkOriginSize;
+    float4 terrainHeightmapUvScaleOffset;
     uint32_t type;
     uint32_t drawHandle;
     uint32_t instanceHandle;
@@ -153,13 +157,17 @@ struct GpuDrawMaterialUpdateData
 struct GpuTerrainMaterialUpdateData
 {
     uint32_t materialHandle;
+    uint32_t heightmapHandle;
     uint32_t controlMapHandle;
     uint32_t hasControlMap;
+    uint32_t heightmapSamplerHandle;
     uint32_t layerSamplerHandle;
     uint32_t controlSamplerHandle;
     uint32_t layerStart;
     uint32_t layerCount;
     float heightBlendSharpness;
+    float heightScale;
+    uint32_t pad0;
 };
 
 struct GpuTerrainLayerUpdateData

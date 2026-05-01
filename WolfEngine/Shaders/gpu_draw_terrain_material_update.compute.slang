@@ -42,13 +42,16 @@ void CSUpdateTerrainMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     GpuTerrainMaterialData terrainData = (GpuTerrainMaterialData)0;
+    terrainData.heightmapHandle = update.heightmapHandle;
     terrainData.controlMapHandle = update.controlMapHandle;
     terrainData.hasControlMap = update.hasControlMap;
+    terrainData.heightmapSamplerHandle = update.heightmapSamplerHandle;
     terrainData.layerSamplerHandle = update.layerSamplerHandle;
     terrainData.controlSamplerHandle = update.controlSamplerHandle;
     terrainData.layerStart = update.layerStart;
     terrainData.layerCount = update.layerCount;
     terrainData.heightBlendSharpness = update.heightBlendSharpness;
+    terrainData.heightScale = update.heightScale;
     g_TerrainMaterialTable[materialIndex] = terrainData;
     g_MaterialGenerations[materialIndex] = materialGeneration;
 }

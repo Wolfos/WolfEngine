@@ -8,38 +8,48 @@ namespace WolfEngine;
 
 public sealed class TerrainRuntimeData
 {
-	private const int LODCount = 3;
 	private const int MaxChunkTileCount = 10_000;
 	private readonly List<TerrainChunkRuntime> _chunks = new();
+	private readonly List<Mesh> _pendingReleasedMeshes = new();
+	private Mesh[] _sharedLodMeshes = Array.Empty<Mesh>();
 	private Texture? _resolvedHeightmap;
 	private Texture? _resolvedControlMap;
 	private TerrainLayerSet? _resolvedLayerSet;
 	private Vector2 _resolvedWorldSize;
 	private float _resolvedHeightScale;
-	private int _resolvedChunkSize;
+	private float _resolvedChunkSizeMeters;
+	private int _resolvedLodCount;
+	private int _resolvedLod0Resolution;
+	private float[] _resolvedLodDistances = Array.Empty<float>();
 	private Guid _heightmapNodeId;
 	private Guid _controlMapNodeId;
 	private Guid _layerSetNodeId;
-	private Vector2 _lastWorldSize;
-	private float _lastHeightScale;
-	private int _lastChunkSize;
+	private Vector2 _lastSampleWorldSize;
+	private float _lastSampleHeightScale;
 	private int _lastHeightResourceRevision = -1;
-	private int _lastControlResourceRevision = -1;
 	private int _lastHeightWidth;
 	private int _lastHeightHeight;
 	private TextureFormat _lastHeightFormat;
 	private byte[]? _lastHeightTopMipData;
+	private bool _hasSampleState;
+	private Vector2 _lastLayoutWorldSize;
+	private float _lastLayoutHeightScale;
+	private float _lastLayoutChunkSizeMeters;
+	private int _lastLayoutLodCount;
+	private int _lastLayoutLod0Resolution;
+	private float[] _lastLayoutLodDistances = Array.Empty<float>();
+	private bool _hasLayoutState;
+	private int _lastControlResourceRevision = -1;
 	private int _lastControlWidth;
 	private int _lastControlHeight;
 	private TextureFormat _lastControlFormat;
 	private byte[]? _lastControlTopMipData;
 	private bool _built;
-	private bool _hasBuildState;
 	private float[]? _heightSamples;
 	private Vector3[]? _normals;
-	private readonly List<Mesh> _pendingReleasedMeshes = new();
 
 	public IReadOnlyList<TerrainChunkRuntime> Chunks => _chunks;
+	public IReadOnlyList<Mesh> SharedLodMeshes => _sharedLodMeshes;
 	public int HeightSampleWidth { get; private set; }
 	public int HeightSampleHeight { get; private set; }
 	public ReadOnlyMemory<float> HeightSamples => _heightSamples ?? Array.Empty<float>();
@@ -52,62 +62,19 @@ public sealed class TerrainRuntimeData
 	public bool EnsureBuilt(TerrainComponent component)
 	{
 		Resolve(component);
-		if (NeedsRebuild(component) == false)
+		if (EnsureSamplingState(component) == false)
 		{
-			return _built;
-		}
-
-		CaptureReleasedChunkMeshes();
-		_chunks.Clear();
-		_built = false;
-		_heightSamples = null;
-		_normals = null;
-		HeightSampleWidth = 0;
-		HeightSampleHeight = 0;
-		SampleSpacing = Vector2.Zero;
-		LocalBounds = default;
-		if (_resolvedHeightmap is null)
-		{
-			CaptureBuildState(component);
+			ClearRenderLayout();
+			_built = false;
 			return false;
 		}
 
-		var heightSamples = DecodeHeightSamples(_resolvedHeightmap, out var sampleWidth, out var sampleHeight);
-		if (heightSamples is null || sampleWidth < 2 || sampleHeight < 2)
+		if (NeedsRenderLayoutRebuild())
 		{
-			CaptureBuildState(component);
-			return false;
+			RebuildRenderLayout();
 		}
 
-		HeightSampleWidth = sampleWidth;
-		HeightSampleHeight = sampleHeight;
-		SampleSpacing = new Vector2(
-			_resolvedWorldSize.X / Math.Max(sampleWidth - 1, 1),
-			_resolvedWorldSize.Y / Math.Max(sampleHeight - 1, 1));
-		_heightSamples = heightSamples;
-		_normals = BuildNormals(heightSamples, sampleWidth, sampleHeight, _resolvedWorldSize, _resolvedHeightScale);
-		LocalBounds = new Box
-		{
-			Center = new Vector3(0.0f, _resolvedHeightScale * 0.5f, 0.0f),
-			Size = new Vector3(_resolvedWorldSize.X, _resolvedHeightScale, _resolvedWorldSize.Y)
-		};
-		if (ExceedsChunkTileLimit(sampleWidth, sampleHeight, _resolvedChunkSize, out var chunkTileCount))
-		{
-			Console.WriteLine(
-				$"Terrain mesh build refused: {chunkTileCount} terrain tiles exceeds the limit of {MaxChunkTileCount}. " +
-				$"Heightmap={sampleWidth}x{sampleHeight}, ChunkSizeInQuads={_resolvedChunkSize}.");
-			CaptureBuildState(component);
-			return false;
-		}
-
-		BuildChunks(heightSamples, _normals, sampleWidth, sampleHeight);
-		CaptureBuildState(component);
-		_built = _chunks.Count > 0;
-		if (_built)
-		{
-			RuntimeVersion++;
-		}
-
+		_built = _sharedLodMeshes.Length > 0 && _chunks.Count > 0;
 		return _built;
 	}
 
@@ -137,7 +104,7 @@ public sealed class TerrainRuntimeData
 		ArgumentNullException.ThrowIfNull(renderGraph);
 		ArgumentNullException.ThrowIfNull(material);
 		ArgumentNullException.ThrowIfNull(destination);
-		if (_built == false || _chunks.Count == 0)
+		if (_built == false || _chunks.Count == 0 || _sharedLodMeshes.Length == 0)
 		{
 			return;
 		}
@@ -158,20 +125,20 @@ public sealed class TerrainRuntimeData
 		for (var i = 0; i < _chunks.Count; i++)
 		{
 			var chunk = _chunks[i];
-			var mesh = chunk.LodMeshes[selectedLods[i]];
-			if (mesh is null)
-			{
-				continue;
-			}
-
+			var lodIndex = Math.Clamp(selectedLods[i], 0, _sharedLodMeshes.Length - 1);
+			var mesh = _sharedLodMeshes[lodIndex];
 			renderGraph.EnsureMeshResources(mesh);
 			destination.Add(new TerrainChunkDrawRecord(
 				i,
 				mesh,
 				material,
 				worldTransform,
+				chunk.LocalBounds,
+				chunk.InstanceData,
 				new TerrainDrawSurface(
+					_resolvedHeightmap,
 					_resolvedControlMap,
+					_resolvedHeightScale,
 					layerCount,
 					heightBlendSharpness,
 					layers)));
@@ -217,15 +184,14 @@ public sealed class TerrainRuntimeData
 		}
 
 		surfacePoint = Vector3.Transform(localSurfacePoint, localToWorld);
-		surfaceNormal = TransformNormal(localSurfaceNormal, localToWorld, worldToLocal);
+		surfaceNormal = TransformNormal(localSurfaceNormal, worldToLocal);
 		return true;
 	}
 
 	public bool TryRaycast(Matrix4x4 localToWorld, Vector3 origin, Vector3 direction, out TerrainRaycastHit hit)
 	{
 		hit = default;
-		if (_built == false ||
-		    _heightSamples is null ||
+		if (_heightSamples is null ||
 		    HeightSampleWidth < 2 ||
 		    HeightSampleHeight < 2 ||
 		    direction.LengthSquared() <= 1e-8f ||
@@ -266,7 +232,7 @@ public sealed class TerrainRuntimeData
 		}
 
 		var worldPoint = Vector3.Transform(bestPoint, localToWorld);
-		var worldNormal = TransformNormal(bestNormal, localToWorld, worldToLocal);
+		var worldNormal = TransformNormal(bestNormal, worldToLocal);
 		hit = new TerrainRaycastHit(worldPoint, worldNormal, bestFraction);
 		return true;
 
@@ -295,26 +261,70 @@ public sealed class TerrainRuntimeData
 		_resolvedLayerSet = component.LayerSetAsset.Asset;
 		_resolvedWorldSize = component.GetResolvedWorldSize();
 		_resolvedHeightScale = component.GetResolvedHeightScale();
-		_resolvedChunkSize = component.GetResolvedChunkSizeInQuads();
+		_resolvedLodCount = component.GetResolvedLodCount();
+		_resolvedLod0Resolution = component.GetResolvedLod0ResolutionInQuads();
+		_resolvedLodDistances = component.GetResolvedLodDistancesMeters();
+		_resolvedChunkSizeMeters = ResolveChunkSizeMeters(component);
 	}
 
-	private bool NeedsRebuild(TerrainComponent component)
+	private bool EnsureSamplingState(TerrainComponent component)
 	{
-		if (_hasBuildState == false)
+		if (NeedsSamplingRefresh(component) == false)
+		{
+			return _heightSamples is not null && _normals is not null && HeightSampleWidth >= 2 && HeightSampleHeight >= 2;
+		}
+
+		_heightSamples = null;
+		_normals = null;
+		HeightSampleWidth = 0;
+		HeightSampleHeight = 0;
+		SampleSpacing = Vector2.Zero;
+		LocalBounds = default;
+		if (_resolvedHeightmap is null)
+		{
+			CaptureSamplingState(component);
+			return false;
+		}
+
+		var heightSamples = DecodeHeightSamples(_resolvedHeightmap, out var sampleWidth, out var sampleHeight);
+		if (heightSamples is null || sampleWidth < 2 || sampleHeight < 2)
+		{
+			CaptureSamplingState(component);
+			return false;
+		}
+
+		HeightSampleWidth = sampleWidth;
+		HeightSampleHeight = sampleHeight;
+		SampleSpacing = new Vector2(
+			_resolvedWorldSize.X / Math.Max(sampleWidth - 1, 1),
+			_resolvedWorldSize.Y / Math.Max(sampleHeight - 1, 1));
+		_heightSamples = heightSamples;
+		_normals = BuildNormals(heightSamples, sampleWidth, sampleHeight, _resolvedWorldSize, _resolvedHeightScale);
+		LocalBounds = new Box
+		{
+			Center = new Vector3(0.0f, _resolvedHeightScale * 0.5f, 0.0f),
+			Size = new Vector3(_resolvedWorldSize.X, _resolvedHeightScale, _resolvedWorldSize.Y)
+		};
+		_resolvedChunkSizeMeters = ResolveChunkSizeMeters(component);
+		CaptureSamplingState(component);
+		RuntimeVersion++;
+		return true;
+	}
+
+	private bool NeedsSamplingRefresh(TerrainComponent component)
+	{
+		if (_hasSampleState == false)
 		{
 			return true;
 		}
 
-		if (_heightmapNodeId != component.HeightmapAsset.NodeId ||
-		    _controlMapNodeId != component.ControlMapAsset.NodeId ||
-		    _layerSetNodeId != component.LayerSetAsset.NodeId)
+		if (_heightmapNodeId != component.HeightmapAsset.NodeId)
 		{
 			return true;
 		}
 
-		if (_lastWorldSize != component.GetResolvedWorldSize() ||
-		    Math.Abs(_lastHeightScale - component.GetResolvedHeightScale()) > 0.0001f ||
-		    _lastChunkSize != component.GetResolvedChunkSizeInQuads())
+		if (_lastSampleWorldSize != component.GetResolvedWorldSize() ||
+		    Math.Abs(_lastSampleHeightScale - component.GetResolvedHeightScale()) > 0.0001f)
 		{
 			return true;
 		}
@@ -325,73 +335,103 @@ public sealed class TerrainRuntimeData
 			return true;
 		}
 
-		if (HasTextureContentChanged(
-			    _resolvedHeightmap,
-			    _lastHeightWidth,
-			    _lastHeightHeight,
-			    _lastHeightFormat,
-			    _lastHeightTopMipData))
-		{
-			return true;
-		}
-
-		var controlRevision = _resolvedControlMap?.ResourceRevision ?? -1;
-		if (_lastControlResourceRevision != controlRevision)
-		{
-			return true;
-		}
-
 		return HasTextureContentChanged(
-			_resolvedControlMap,
-			_lastControlWidth,
-			_lastControlHeight,
-			_lastControlFormat,
-			_lastControlTopMipData);
+			_resolvedHeightmap,
+			_lastHeightWidth,
+			_lastHeightHeight,
+			_lastHeightFormat,
+			_lastHeightTopMipData);
 	}
 
-	private void CaptureBuildState(TerrainComponent component)
+	private void CaptureSamplingState(TerrainComponent component)
 	{
-		_hasBuildState = true;
-		_lastWorldSize = component.GetResolvedWorldSize();
-		_lastHeightScale = component.GetResolvedHeightScale();
-		_lastChunkSize = component.GetResolvedChunkSizeInQuads();
+		_hasSampleState = true;
+		_lastSampleWorldSize = component.GetResolvedWorldSize();
+		_lastSampleHeightScale = component.GetResolvedHeightScale();
 		_lastHeightResourceRevision = _resolvedHeightmap?.ResourceRevision ?? -1;
-		_lastControlResourceRevision = _resolvedControlMap?.ResourceRevision ?? -1;
 		_lastHeightWidth = _resolvedHeightmap?.Width ?? 0;
 		_lastHeightHeight = _resolvedHeightmap?.Height ?? 0;
 		_lastHeightFormat = _resolvedHeightmap?.Format ?? default;
 		_lastHeightTopMipData = GetTopMipData(_resolvedHeightmap);
-		_lastControlWidth = _resolvedControlMap?.Width ?? 0;
-		_lastControlHeight = _resolvedControlMap?.Height ?? 0;
-		_lastControlFormat = _resolvedControlMap?.Format ?? default;
-		_lastControlTopMipData = GetTopMipData(_resolvedControlMap);
 	}
 
-	private static bool HasTextureContentChanged(
-		Texture? texture,
-		int lastWidth,
-		int lastHeight,
-		TextureFormat lastFormat,
-		byte[]? lastTopMipData)
+	private bool NeedsRenderLayoutRebuild()
 	{
-		if (texture is null)
+		if (_hasLayoutState == false)
 		{
-			return lastWidth != 0 || lastHeight != 0 || lastTopMipData is not null;
+			return true;
 		}
 
-		return texture.Width != lastWidth ||
-		       texture.Height != lastHeight ||
-		       texture.Format != lastFormat ||
-		       ReferenceEquals(GetTopMipData(texture), lastTopMipData) == false;
+		if (_lastLayoutWorldSize != _resolvedWorldSize ||
+		    Math.Abs(_lastLayoutHeightScale - _resolvedHeightScale) > 0.0001f ||
+		    Math.Abs(_lastLayoutChunkSizeMeters - _resolvedChunkSizeMeters) > 0.0001f ||
+		    _lastLayoutLodCount != _resolvedLodCount ||
+		    _lastLayoutLod0Resolution != _resolvedLod0Resolution)
+		{
+			return true;
+		}
+
+		if (_lastLayoutLodDistances.Length != _resolvedLodDistances.Length)
+		{
+			return true;
+		}
+
+		for (var i = 0; i < _resolvedLodDistances.Length; i++)
+		{
+			if (Math.Abs(_lastLayoutLodDistances[i] - _resolvedLodDistances[i]) > 0.0001f)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
-	private static byte[]? GetTopMipData(Texture? texture)
+	private void CaptureRenderLayoutState()
 	{
-		return texture is { MipLevels.Length: > 0 } ? texture.MipLevels[0].Data : null;
+		_hasLayoutState = true;
+		_lastLayoutWorldSize = _resolvedWorldSize;
+		_lastLayoutHeightScale = _resolvedHeightScale;
+		_lastLayoutChunkSizeMeters = _resolvedChunkSizeMeters;
+		_lastLayoutLodCount = _resolvedLodCount;
+		_lastLayoutLod0Resolution = _resolvedLod0Resolution;
+		_lastLayoutLodDistances = (float[])_resolvedLodDistances.Clone();
+	}
+
+	private void RebuildRenderLayout()
+	{
+		CaptureReleasedSharedMeshes();
+		_chunks.Clear();
+		_sharedLodMeshes = Array.Empty<Mesh>();
+		if (ExceedsChunkTileLimit(_resolvedWorldSize, _resolvedChunkSizeMeters, out var chunkTileCount))
+		{
+			Console.WriteLine(
+				$"Terrain mesh build refused: {chunkTileCount} terrain tiles exceeds the limit of {MaxChunkTileCount}. " +
+				$"WorldSize={_resolvedWorldSize.X}x{_resolvedWorldSize.Y}, ChunkSizeMeters={_resolvedChunkSizeMeters}.");
+			CaptureRenderLayoutState();
+			return;
+		}
+
+		_sharedLodMeshes = BuildSharedLodMeshes();
+		BuildChunks();
+		CaptureRenderLayoutState();
+	}
+
+	private void ClearRenderLayout()
+	{
+		CaptureReleasedSharedMeshes();
+		_chunks.Clear();
+		_sharedLodMeshes = Array.Empty<Mesh>();
+		_hasLayoutState = false;
 	}
 
 	private void EnsureTerrainResources(RenderGraph renderGraph)
 	{
+		if (_resolvedHeightmap is not null)
+		{
+			renderGraph.EnsureTextureResources(_resolvedHeightmap);
+		}
+
 		if (_resolvedControlMap is not null)
 		{
 			renderGraph.EnsureTextureResources(_resolvedControlMap);
@@ -447,115 +487,45 @@ public sealed class TerrainRuntimeData
 		return layers;
 	}
 
-	private void BuildChunks(float[] heights, Vector3[] normals, int sampleWidth, int sampleHeight)
+	private Mesh[] BuildSharedLodMeshes()
 	{
-		var quadsX = sampleWidth - 1;
-		var quadsY = sampleHeight - 1;
-		var chunkCountX = (quadsX + _resolvedChunkSize - 1) / _resolvedChunkSize;
-		var chunkCountY = (quadsY + _resolvedChunkSize - 1) / _resolvedChunkSize;
-		for (var chunkY = 0; chunkY < chunkCountY; chunkY++)
+		var meshes = new Mesh[_resolvedLodCount];
+		for (var lodIndex = 0; lodIndex < meshes.Length; lodIndex++)
 		{
-			for (var chunkX = 0; chunkX < chunkCountX; chunkX++)
-			{
-				var startX = chunkX * _resolvedChunkSize;
-				var startY = chunkY * _resolvedChunkSize;
-				var chunkQuadsX = Math.Min(_resolvedChunkSize, quadsX - startX);
-				var chunkQuadsY = Math.Min(_resolvedChunkSize, quadsY - startY);
-				var lodMeshes = new Mesh[LODCount];
-				for (var lodIndex = 0; lodIndex < LODCount; lodIndex++)
-				{
-					var step = 1 << lodIndex;
-					lodMeshes[lodIndex] = BuildChunkMesh(heights, normals, sampleWidth, sampleHeight, startX, startY, chunkQuadsX, chunkQuadsY, step);
-				}
-
-				var primaryMesh = lodMeshes[0];
-				if (primaryMesh is null)
-				{
-					continue;
-				}
-
-				_chunks.Add(new TerrainChunkRuntime(chunkX, chunkY, lodMeshes, primaryMesh.BoundingSphere));
-			}
-		}
-	}
-
-	private void CaptureReleasedChunkMeshes()
-	{
-		if (_chunks.Count == 0)
-		{
-			return;
+			var resolution = Math.Max(1, _resolvedLod0Resolution >> lodIndex);
+			meshes[lodIndex] = BuildSharedChunkMesh(resolution);
 		}
 
-		for (var chunkIndex = 0; chunkIndex < _chunks.Count; chunkIndex++)
-		{
-			var lodMeshes = _chunks[chunkIndex].LodMeshes;
-			for (var lodIndex = 0; lodIndex < lodMeshes.Length; lodIndex++)
-			{
-				var mesh = lodMeshes[lodIndex];
-				if (mesh is not null)
-				{
-					_pendingReleasedMeshes.Add(mesh);
-				}
-			}
-		}
+		return meshes;
 	}
 
-	private static bool ExceedsChunkTileLimit(int sampleWidth, int sampleHeight, int chunkSizeInQuads, out int chunkTileCount)
+	private Mesh BuildSharedChunkMesh(int quadsPerAxis)
 	{
-		var quadsX = Math.Max(sampleWidth - 1, 0);
-		var quadsY = Math.Max(sampleHeight - 1, 0);
-		var chunkCountX = (quadsX + chunkSizeInQuads - 1) / chunkSizeInQuads;
-		var chunkCountY = (quadsY + chunkSizeInQuads - 1) / chunkSizeInQuads;
-		chunkTileCount = chunkCountX * chunkCountY;
-		return chunkTileCount > MaxChunkTileCount;
-	}
+		var vertsPerAxis = quadsPerAxis + 1;
+		var baseVertexCount = vertsPerAxis * vertsPerAxis;
+		var vertices = new List<Vector4>(baseVertexCount + vertsPerAxis * 4);
+		var normals = new List<Vector3>(baseVertexCount + vertsPerAxis * 4);
+		var uvs = new List<Vector2>(baseVertexCount + vertsPerAxis * 4);
+		var tangents = new List<Vector4>(baseVertexCount + vertsPerAxis * 4);
+		var indices = new List<uint>(quadsPerAxis * quadsPerAxis * 6 + vertsPerAxis * 24);
 
-	private Mesh BuildChunkMesh(
-		float[] heights,
-		Vector3[] normals,
-		int sampleWidth,
-		int sampleHeight,
-		int startX,
-		int startY,
-		int chunkQuadsX,
-		int chunkQuadsY,
-		int step)
-	{
-		var effectiveQuadsX = Math.Max(step, (chunkQuadsX / step) * step);
-		var effectiveQuadsY = Math.Max(step, (chunkQuadsY / step) * step);
-		var vertsX = effectiveQuadsX / step + 1;
-		var vertsY = effectiveQuadsY / step + 1;
-		var baseVertexCount = vertsX * vertsY;
-		var vertices = new List<Vector4>(baseVertexCount + vertsX * 2 + vertsY * 2);
-		var vertexNormals = new List<Vector3>(baseVertexCount + vertsX * 2 + vertsY * 2);
-		var uvs = new List<Vector2>(baseVertexCount + vertsX * 2 + vertsY * 2);
-		var tangents = new List<Vector4>(baseVertexCount + vertsX * 2 + vertsY * 2);
-		var indices = new List<uint>(effectiveQuadsX * effectiveQuadsY * 6);
-
-		var totalQuadsX = sampleWidth - 1;
-		var totalQuadsY = sampleHeight - 1;
-		var spacingX = _resolvedWorldSize.X / Math.Max(totalQuadsX, 1);
-		var spacingY = _resolvedWorldSize.Y / Math.Max(totalQuadsY, 1);
-		var halfWidth = _resolvedWorldSize.X * 0.5f;
-		var halfHeight = _resolvedWorldSize.Y * 0.5f;
-
-		for (var localY = 0; localY < vertsY; localY++)
+		for (var y = 0; y < vertsPerAxis; y++)
 		{
-			for (var localX = 0; localX < vertsX; localX++)
+			var v = quadsPerAxis > 0 ? y / (float)quadsPerAxis : 0.0f;
+			for (var x = 0; x < vertsPerAxis; x++)
 			{
-				var sampleX = startX + localX * step;
-				var sampleY = startY + localY * step;
-				AddVertex(sampleX, sampleY, false);
+				var u = quadsPerAxis > 0 ? x / (float)quadsPerAxis : 0.0f;
+				AddVertex(u, v, 0.0f);
 			}
 		}
 
-		for (var localY = 0; localY < vertsY - 1; localY++)
+		for (var y = 0; y < quadsPerAxis; y++)
 		{
-			for (var localX = 0; localX < vertsX - 1; localX++)
+			for (var x = 0; x < quadsPerAxis; x++)
 			{
-				var i0 = localY * vertsX + localX;
+				var i0 = y * vertsPerAxis + x;
 				var i1 = i0 + 1;
-				var i2 = i0 + vertsX;
+				var i2 = i0 + vertsPerAxis;
 				var i3 = i2 + 1;
 				indices.Add((uint)i0);
 				indices.Add((uint)i2);
@@ -566,58 +536,54 @@ public sealed class TerrainRuntimeData
 			}
 		}
 
-		var skirtDepth = Math.Max(spacingX, spacingY) * (2.0f * step) + _resolvedHeightScale * 0.05f;
+		var skirtDepth = (_resolvedChunkSizeMeters / Math.Max(quadsPerAxis, 1)) * 2.0f + _resolvedHeightScale * 0.05f;
 		var topStart = vertices.Count;
-		for (var localX = 0; localX < vertsX; localX++)
+		for (var x = 0; x < vertsPerAxis; x++)
 		{
-			AddVertex(startX + localX * step, startY, true, skirtDepth);
+			var u = quadsPerAxis > 0 ? x / (float)quadsPerAxis : 0.0f;
+			AddVertex(u, 0.0f, -skirtDepth);
 		}
 
 		var bottomStart = vertices.Count;
-		for (var localX = 0; localX < vertsX; localX++)
+		for (var x = 0; x < vertsPerAxis; x++)
 		{
-			AddVertex(startX + localX * step, startY + effectiveQuadsY, true, skirtDepth);
+			var u = quadsPerAxis > 0 ? x / (float)quadsPerAxis : 0.0f;
+			AddVertex(u, 1.0f, -skirtDepth);
 		}
 
 		var leftStart = vertices.Count;
-		for (var localY = 0; localY < vertsY; localY++)
+		for (var y = 0; y < vertsPerAxis; y++)
 		{
-			AddVertex(startX, startY + localY * step, true, skirtDepth);
+			var v = quadsPerAxis > 0 ? y / (float)quadsPerAxis : 0.0f;
+			AddVertex(0.0f, v, -skirtDepth);
 		}
 
 		var rightStart = vertices.Count;
-		for (var localY = 0; localY < vertsY; localY++)
+		for (var y = 0; y < vertsPerAxis; y++)
 		{
-			AddVertex(startX + effectiveQuadsX, startY + localY * step, true, skirtDepth);
+			var v = quadsPerAxis > 0 ? y / (float)quadsPerAxis : 0.0f;
+			AddVertex(1.0f, v, -skirtDepth);
 		}
 
-		for (var localX = 0; localX < vertsX - 1; localX++)
+		for (var x = 0; x < vertsPerAxis - 1; x++)
 		{
-			AddSkirtQuad(localX, localX + 1, topStart + localX, topStart + localX + 1);
-			AddSkirtQuad((vertsY - 1) * vertsX + localX + 1, (vertsY - 1) * vertsX + localX, bottomStart + localX + 1, bottomStart + localX);
+			AddSkirtQuad(x, x + 1, topStart + x, topStart + x + 1);
+			AddSkirtQuad((vertsPerAxis - 1) * vertsPerAxis + x + 1, (vertsPerAxis - 1) * vertsPerAxis + x, bottomStart + x + 1, bottomStart + x);
 		}
 
-		for (var localY = 0; localY < vertsY - 1; localY++)
+		for (var y = 0; y < vertsPerAxis - 1; y++)
 		{
-			AddSkirtQuad((localY + 1) * vertsX, localY * vertsX, leftStart + localY + 1, leftStart + localY);
-			AddSkirtQuad(localY * vertsX + (vertsX - 1), (localY + 1) * vertsX + (vertsX - 1), rightStart + localY, rightStart + localY + 1);
+			AddSkirtQuad((y + 1) * vertsPerAxis, y * vertsPerAxis, leftStart + y + 1, leftStart + y);
+			AddSkirtQuad(y * vertsPerAxis + (vertsPerAxis - 1), (y + 1) * vertsPerAxis + (vertsPerAxis - 1), rightStart + y, rightStart + y + 1);
 		}
 
-		return new Mesh(vertices, indices, vertexNormals, uvs, tangents);
+		return new Mesh(vertices, indices, normals, uvs, tangents);
 
-		void AddVertex(int sampleX, int sampleY, bool isSkirt, float additionalDepth = 0.0f)
+		void AddVertex(float x, float z, float y)
 		{
-			sampleX = Math.Clamp(sampleX, 0, sampleWidth - 1);
-			sampleY = Math.Clamp(sampleY, 0, sampleHeight - 1);
-			var index = sampleY * sampleWidth + sampleX;
-			var height = heights[index] * _resolvedHeightScale - (isSkirt ? additionalDepth : 0.0f);
-			var x = sampleX * spacingX - halfWidth;
-			var z = sampleY * spacingY - halfHeight;
-			vertices.Add(new Vector4(x, height, z, 1.0f));
-			vertexNormals.Add(normals[index]);
-			uvs.Add(new Vector2(
-				totalQuadsX > 0 ? sampleX / (float)totalQuadsX : 0.0f,
-				totalQuadsY > 0 ? sampleY / (float)totalQuadsY : 0.0f));
+			vertices.Add(new Vector4(x, y, z, 1.0f));
+			normals.Add(Vector3.UnitY);
+			uvs.Add(new Vector2(x, z));
 			tangents.Add(new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
 		}
 
@@ -630,6 +596,63 @@ public sealed class TerrainRuntimeData
 			indices.Add((uint)b);
 			indices.Add((uint)skirtB);
 		}
+	}
+
+	private void BuildChunks()
+	{
+		var chunkCountX = Math.Max(1, (int)MathF.Ceiling(_resolvedWorldSize.X / _resolvedChunkSizeMeters));
+		var chunkCountY = Math.Max(1, (int)MathF.Ceiling(_resolvedWorldSize.Y / _resolvedChunkSizeMeters));
+		var halfWidth = _resolvedWorldSize.X * 0.5f;
+		var halfDepth = _resolvedWorldSize.Y * 0.5f;
+
+		for (var chunkY = 0; chunkY < chunkCountY; chunkY++)
+		{
+			for (var chunkX = 0; chunkX < chunkCountX; chunkX++)
+			{
+				var originX = -halfWidth + chunkX * _resolvedChunkSizeMeters;
+				var originZ = -halfDepth + chunkY * _resolvedChunkSizeMeters;
+				var sizeX = MathF.Min(_resolvedChunkSizeMeters, halfWidth - originX);
+				var sizeZ = MathF.Min(_resolvedChunkSizeMeters, halfDepth - originZ);
+				sizeX = MathF.Max(sizeX, 0.001f);
+				sizeZ = MathF.Max(sizeZ, 0.001f);
+				var uvOffsetX = _resolvedWorldSize.X > 1e-6f ? (originX + halfWidth) / _resolvedWorldSize.X : 0.0f;
+				var uvOffsetZ = _resolvedWorldSize.Y > 1e-6f ? (originZ + halfDepth) / _resolvedWorldSize.Y : 0.0f;
+				var uvScaleX = _resolvedWorldSize.X > 1e-6f ? sizeX / _resolvedWorldSize.X : 1.0f;
+				var uvScaleZ = _resolvedWorldSize.Y > 1e-6f ? sizeZ / _resolvedWorldSize.Y : 1.0f;
+				var bounds = CreateChunkBounds(originX, originZ, sizeX, sizeZ, _resolvedHeightScale);
+				var instanceData = new TerrainChunkInstanceData(
+					new Vector4(originX, originZ, sizeX, sizeZ),
+					new Vector4(uvScaleX, uvScaleZ, uvOffsetX, uvOffsetZ));
+				_chunks.Add(new TerrainChunkRuntime(chunkX, chunkY, bounds, instanceData));
+			}
+		}
+	}
+
+	private static BoundingSphere CreateChunkBounds(float originX, float originZ, float sizeX, float sizeZ, float heightScale)
+	{
+		var center = new Vector3(originX + sizeX * 0.5f, heightScale * 0.5f, originZ + sizeZ * 0.5f);
+		var halfExtents = new Vector3(sizeX * 0.5f, heightScale * 0.5f, sizeZ * 0.5f);
+		return new BoundingSphere(center, halfExtents.Length());
+	}
+
+	private void CaptureReleasedSharedMeshes()
+	{
+		for (var lodIndex = 0; lodIndex < _sharedLodMeshes.Length; lodIndex++)
+		{
+			var mesh = _sharedLodMeshes[lodIndex];
+			if (mesh is not null)
+			{
+				_pendingReleasedMeshes.Add(mesh);
+			}
+		}
+	}
+
+	private static bool ExceedsChunkTileLimit(Vector2 worldSize, float chunkSizeMeters, out int chunkTileCount)
+	{
+		var chunkCountX = Math.Max(1, (int)MathF.Ceiling(worldSize.X / Math.Max(chunkSizeMeters, 1.0f)));
+		var chunkCountY = Math.Max(1, (int)MathF.Ceiling(worldSize.Y / Math.Max(chunkSizeMeters, 1.0f)));
+		chunkTileCount = chunkCountX * chunkCountY;
+		return chunkTileCount > MaxChunkTileCount;
 	}
 
 	private static Vector3[] BuildNormals(float[] heights, int width, int height, Vector2 worldSize, float heightScale)
@@ -659,6 +682,31 @@ public sealed class TerrainRuntimeData
 		}
 
 		return normals;
+	}
+
+	private float ResolveChunkSizeMeters(TerrainComponent component)
+	{
+		if (component.ChunkSizeMeters > 0.01f)
+		{
+			return component.GetResolvedChunkSizeMeters();
+		}
+
+		if (_resolvedHeightmap is not null &&
+		    _resolvedHeightmap.Width > 1 &&
+		    _resolvedHeightmap.Height > 1 &&
+		    component.ChunkSizeInQuads > 0)
+		{
+			var legacyQuads = component.GetResolvedLegacyChunkSizeInQuads();
+			var quadsX = Math.Max(_resolvedHeightmap.Width - 1, 1);
+			var quadsY = Math.Max(_resolvedHeightmap.Height - 1, 1);
+			var chunkCountX = Math.Max(1, (quadsX + legacyQuads - 1) / legacyQuads);
+			var chunkCountY = Math.Max(1, (quadsY + legacyQuads - 1) / legacyQuads);
+			var sizeX = _resolvedWorldSize.X / chunkCountX;
+			var sizeY = _resolvedWorldSize.Y / chunkCountY;
+			return Math.Max(1.0f, MathF.Min(sizeX, sizeY));
+		}
+
+		return component.GetResolvedChunkSizeMeters();
 	}
 
 	private static float[]? DecodeHeightSamples(Texture texture, out int width, out int height)
@@ -842,20 +890,19 @@ public sealed class TerrainRuntimeData
 			a.A * aWeight + b.A * bWeight);
 	}
 
-	private static int SelectLod(TerrainChunkRuntime chunk, Matrix4x4 worldTransform, Vector3 cameraOrigin)
+	private int SelectLod(TerrainChunkRuntime chunk, Matrix4x4 worldTransform, Vector3 cameraOrigin)
 	{
-		var center = TransformPoint(chunk.LocalBounds.Center, worldTransform);
+		var center = Vector3.Transform(chunk.LocalBounds.Center, worldTransform);
 		var distance = Vector3.Distance(center, cameraOrigin);
-		if (distance < 120.0f)
+		for (var lodIndex = 0; lodIndex < _resolvedLodDistances.Length; lodIndex++)
 		{
-			return 0;
-		}
-		if (distance < 320.0f)
-		{
-			return 1;
+			if (distance < _resolvedLodDistances[lodIndex])
+			{
+				return lodIndex;
+			}
 		}
 
-		return 2;
+		return Math.Max(_resolvedLodCount - 1, 0);
 	}
 
 	private void EnforceNeighborLodDelta(int[] lods)
@@ -898,8 +945,7 @@ public sealed class TerrainRuntimeData
 	private bool TryGetInverseTransform(Matrix4x4 localToWorld, out Matrix4x4 worldToLocal)
 	{
 		worldToLocal = Matrix4x4.Identity;
-		return _built &&
-		       _heightSamples is not null &&
+		return _heightSamples is not null &&
 		       _normals is not null &&
 		       Matrix4x4.Invert(localToWorld, out worldToLocal);
 	}
@@ -908,8 +954,7 @@ public sealed class TerrainRuntimeData
 	{
 		surfacePoint = Vector3.Zero;
 		surfaceNormal = Vector3.UnitY;
-		if (_built == false ||
-		    _heightSamples is null ||
+		if (_heightSamples is null ||
 		    _normals is null ||
 		    HeightSampleWidth < 2 ||
 		    HeightSampleHeight < 2 ||
@@ -1041,21 +1086,33 @@ public sealed class TerrainRuntimeData
 		return true;
 	}
 
-	private static Vector3 TransformPoint(Vector3 point, Matrix4x4 matrix) => Vector3.Transform(point, matrix);
-
-	private static Vector3 TransformNormal(Vector3 normal, Matrix4x4 localToWorld, Matrix4x4 worldToLocal)
+	private static Vector3 TransformNormal(Vector3 normal, Matrix4x4 worldToLocal)
 	{
 		var normalMatrix = Matrix4x4.Transpose(worldToLocal);
 		return NormalizeDirection(Vector3.TransformNormal(normal, normalMatrix));
 	}
 
-	private static float TransformRadius(float radius, Matrix4x4 matrix)
+	private static bool HasTextureContentChanged(
+		Texture? texture,
+		int lastWidth,
+		int lastHeight,
+		TextureFormat lastFormat,
+		byte[]? lastTopMipData)
 	{
-		var scaleX = new Vector3(matrix.M11, matrix.M12, matrix.M13).Length();
-		var scaleY = new Vector3(matrix.M21, matrix.M22, matrix.M23).Length();
-		var scaleZ = new Vector3(matrix.M31, matrix.M32, matrix.M33).Length();
-		var scale = Math.Max(scaleX, Math.Max(scaleY, scaleZ));
-		return radius * scale;
+		if (texture is null)
+		{
+			return lastWidth != 0 || lastHeight != 0 || lastTopMipData is not null;
+		}
+
+		return texture.Width != lastWidth ||
+		       texture.Height != lastHeight ||
+		       texture.Format != lastFormat ||
+		       ReferenceEquals(GetTopMipData(texture), lastTopMipData) == false;
+	}
+
+	private static byte[]? GetTopMipData(Texture? texture)
+	{
+		return texture is { MipLevels.Length: > 0 } ? texture.MipLevels[0].Data : null;
 	}
 
 	private static Vector3 NormalizeDirection(Vector3 value)
@@ -1068,16 +1125,16 @@ public readonly record struct TerrainRaycastHit(Vector3 Point, Vector3 Normal, f
 
 public sealed class TerrainChunkRuntime
 {
-	public TerrainChunkRuntime(int chunkX, int chunkY, Mesh[] lodMeshes, BoundingSphere localBounds)
+	public TerrainChunkRuntime(int chunkX, int chunkY, BoundingSphere localBounds, TerrainChunkInstanceData instanceData)
 	{
 		ChunkX = chunkX;
 		ChunkY = chunkY;
-		LodMeshes = lodMeshes ?? throw new ArgumentNullException(nameof(lodMeshes));
 		LocalBounds = localBounds;
+		InstanceData = instanceData;
 	}
 
 	public int ChunkX { get; }
 	public int ChunkY { get; }
-	public Mesh[] LodMeshes { get; }
 	public BoundingSphere LocalBounds { get; }
+	public TerrainChunkInstanceData InstanceData { get; }
 }

@@ -16,6 +16,12 @@ public struct TerrainComponent : IEntityComponent
 	public Material? Material;
 	public Vector2 WorldSizeMeters;
 	public float HeightScaleMeters;
+	public float ChunkSizeMeters;
+	public int LodCount;
+	public int Lod0ResolutionInQuads;
+	public float[] LodDistancesMeters;
+	[HideFromEditor]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
 	public int ChunkSizeInQuads;
 	[NotSerialized]
 	[HideFromEditor]
@@ -39,7 +45,11 @@ public struct TerrainComponent : IEntityComponent
 		_ = entity;
 		WorldSizeMeters = new Vector2(512.0f, 512.0f);
 		HeightScaleMeters = 64.0f;
-		ChunkSizeInQuads = 64;
+		ChunkSizeMeters = 64.0f;
+		LodCount = 3;
+		Lod0ResolutionInQuads = 32;
+		LodDistancesMeters = [120.0f, 320.0f];
+		ChunkSizeInQuads = 0;
 		PhysicsCacheValid = false;
 		CachedHeightfieldFailureVersion = -1;
 	}
@@ -53,14 +63,92 @@ public struct TerrainComponent : IEntityComponent
 
 	public float GetResolvedHeightScale() => HeightScaleMeters > 0.01f ? HeightScaleMeters : 64.0f;
 
-	public int GetResolvedChunkSizeInQuads()
+	public float GetResolvedChunkSizeMeters()
+	{
+		var chunkSize = ChunkSizeMeters;
+		if (chunkSize <= 0.01f)
+		{
+			chunkSize = 64.0f;
+		}
+
+		return Math.Max(1.0f, chunkSize);
+	}
+
+	public int GetResolvedLegacyChunkSizeInQuads()
 	{
 		var chunkSize = ChunkSizeInQuads;
 		if (chunkSize < 4)
 		{
-			chunkSize = 4;
+			chunkSize = 64;
 		}
 
 		return Math.Max(4, chunkSize);
+	}
+
+	public int GetResolvedLodCount()
+	{
+		var count = LodCount;
+		if (count < 1)
+		{
+			count = 3;
+		}
+
+		return Math.Clamp(count, 1, 8);
+	}
+
+	public int GetResolvedLod0ResolutionInQuads()
+	{
+		var resolution = Lod0ResolutionInQuads;
+		if (resolution < 2)
+		{
+			resolution = 32;
+		}
+
+		return Math.Clamp(resolution, 2, 512);
+	}
+
+	public float[] GetResolvedLodDistancesMeters()
+	{
+		var lodCount = GetResolvedLodCount();
+		if (lodCount <= 1)
+		{
+			return Array.Empty<float>();
+		}
+
+		var source = LodDistancesMeters ?? Array.Empty<float>();
+		var result = new float[lodCount - 1];
+		var previous = 0.0f;
+		for (var i = 0; i < result.Length; i++)
+		{
+			var fallback = GetDefaultLodDistance(i);
+			var candidate = i < source.Length ? source[i] : fallback;
+			if (candidate <= previous + 0.001f)
+			{
+				candidate = Math.Max(fallback, previous + 1.0f);
+			}
+
+			result[i] = candidate;
+			previous = candidate;
+		}
+
+		return result;
+	}
+
+	private static float GetDefaultLodDistance(int index)
+	{
+		if (index <= 0)
+		{
+			return 120.0f;
+		}
+
+		var distance = 120.0f;
+		var step = 200.0f;
+		for (var i = 0; i < index; i++)
+		{
+			distance += step;
+			step *= 2.0f;
+		}
+
+		return distance;
 	}
 }

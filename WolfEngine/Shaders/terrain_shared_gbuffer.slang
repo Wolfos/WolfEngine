@@ -71,6 +71,50 @@ struct LayerSample
     float height;
 };
 
+float2 GetTerrainUv(float2 baseUv, GpuInstanceData instanceData)
+{
+    return instanceData.terrainHeightmapUvScaleOffset.zw + baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
+}
+
+float2 GetTerrainWorldSize(GpuInstanceData instanceData)
+{
+    float sizeX = abs(instanceData.terrainHeightmapUvScaleOffset.x) > 1e-5f
+        ? instanceData.terrainChunkOriginSize.z / instanceData.terrainHeightmapUvScaleOffset.x
+        : instanceData.terrainChunkOriginSize.z;
+    float sizeZ = abs(instanceData.terrainHeightmapUvScaleOffset.y) > 1e-5f
+        ? instanceData.terrainChunkOriginSize.w / instanceData.terrainHeightmapUvScaleOffset.y
+        : instanceData.terrainChunkOriginSize.w;
+    return float2(max(sizeX, 0.001f), max(sizeZ, 0.001f));
+}
+
+float SampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
+{
+    Texture2D<float4> heightmap = GetTexture(terrainData.heightmapHandle);
+    SamplerState samplerState = GetSampler(terrainData.heightmapSamplerHandle);
+    return heightmap.SampleLevel(samplerState, saturate(uv), 0.0f).r * terrainData.heightScale;
+}
+
+float3 ComputeTerrainLocalNormal(float2 uv, GpuInstanceData instanceData, GpuTerrainMaterialData terrainData)
+{
+    Texture2D<float4> heightmap = GetTexture(terrainData.heightmapHandle);
+    uint width = 1;
+    uint height = 1;
+    heightmap.GetDimensions(width, height);
+    float2 texel = float2(
+        width > 1 ? 1.0f / (width - 1) : 0.0f,
+        height > 1 ? 1.0f / (height - 1) : 0.0f);
+    float left = SampleTerrainHeight(uv - float2(texel.x, 0.0f), terrainData);
+    float right = SampleTerrainHeight(uv + float2(texel.x, 0.0f), terrainData);
+    float down = SampleTerrainHeight(uv - float2(0.0f, texel.y), terrainData);
+    float up = SampleTerrainHeight(uv + float2(0.0f, texel.y), terrainData);
+    float2 terrainWorldSize = GetTerrainWorldSize(instanceData);
+    float spacingX = terrainWorldSize.x / max(width - 1, 1);
+    float spacingZ = terrainWorldSize.y / max(height - 1, 1);
+    float3 tangentX = float3(max(spacingX * 2.0f, 0.001f), right - left, 0.0f);
+    float3 tangentZ = float3(0.0f, up - down, max(spacingZ * 2.0f, 0.001f));
+    return normalize(cross(tangentZ, tangentX));
+}
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -90,19 +134,28 @@ VSOutput vertexShader(VSInput input)
 
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
-    float4 absoluteWorldPosition = mul(input.position, instanceData.world);
+    uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
+    GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
+    float2 terrainUv = GetTerrainUv(input.uv, instanceData);
+    float3 localPosition;
+    localPosition.x = instanceData.terrainChunkOriginSize.x + input.position.x * instanceData.terrainChunkOriginSize.z;
+    localPosition.y = SampleTerrainHeight(terrainUv, terrainData) + input.position.y;
+    localPosition.z = instanceData.terrainChunkOriginSize.y + input.position.z * instanceData.terrainChunkOriginSize.w;
+    float3 localNormal = ComputeTerrainLocalNormal(terrainUv, instanceData, terrainData);
+    float3 localTangent = float3(1.0f, 0.0f, 0.0f);
+    float4 absoluteWorldPosition = mul(float4(localPosition, 1.0f), instanceData.world);
     float4 worldPosition = absoluteWorldPosition;
-    float4 previousWorldPosition = mul(input.position, instanceData.previousWorld);
+    float4 previousWorldPosition = mul(float4(localPosition, 1.0f), instanceData.previousWorld);
     worldPosition.xyz -= cameraPosition;
     previousWorldPosition.xyz -= previousCameraPosition;
-    float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
-    float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
+    float4 worldNormal = mul(float4(localNormal, 0.0f), instanceData.world);
+    float3 worldTangent = mul(float4(localTangent, 0.0f), instanceData.world).xyz;
 
     output.position = mul(worldPosition, viewProjection);
     output.currentClip = mul(worldPosition, unjitteredViewProjection);
     output.previousClip = mul(previousWorldPosition, previousViewProjection);
     output.normal = normalize(worldNormal.xyz);
-    output.uv = input.uv;
+    output.uv = terrainUv;
     output.tangent = float4(normalize(worldTangent), input.tangent.w);
     output.instanceId = instanceId;
     output.worldPosition = absoluteWorldPosition.xyz;

@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Tests;
@@ -272,10 +273,11 @@ public sealed class FrameSnapshotGpuDrawTests
 		var entity = new Entity(20, 1);
 		var updates = new List<GpuDrawUpdate>();
 		var surface = CreateTerrainSurface();
+		var bounds = new BoundingSphere(Vector3.Zero, 4.0f);
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, meshA, material, surface, Matrix4x4.Identity);
-		database.TouchTerrainChunk(entity, 1, meshB, material, surface, Matrix4x4.CreateTranslation(10.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, meshA, material, bounds, CreateTerrainInstanceData(), surface, Matrix4x4.Identity);
+		database.TouchTerrainChunk(entity, 1, meshB, material, bounds, CreateTerrainInstanceData(offsetX: 10.0f), surface, Matrix4x4.CreateTranslation(10.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
@@ -305,16 +307,17 @@ public sealed class FrameSnapshotGpuDrawTests
 		var updates = new List<GpuDrawUpdate>();
 		var initialSurface = CreateTerrainSurface();
 		var updatedSurface = CreateTerrainSurface(heightBlendSharpness: 8.0f);
+		var bounds = new BoundingSphere(Vector3.Zero, 4.0f);
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, material, initialSurface, Matrix4x4.Identity);
+		database.TouchTerrainChunk(entity, 0, mesh, material, bounds, CreateTerrainInstanceData(), initialSurface, Matrix4x4.Identity);
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 		var initialDrawHandle = updates[0].DrawHandle;
 		var initialMaterialHandle = updates[0].MaterialHandle;
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, material, initialSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, mesh, material, bounds, CreateTerrainInstanceData(offsetX: 2.0f), initialSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
@@ -323,7 +326,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates[0].MaterialHandle, Is.EqualTo(initialMaterialHandle));
 
 		database.BeginSync();
-		database.TouchTerrainChunk(entity, 0, mesh, material, updatedSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
+		database.TouchTerrainChunk(entity, 0, mesh, material, bounds, CreateTerrainInstanceData(offsetX: 2.0f), updatedSurface, Matrix4x4.CreateTranslation(2.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
 
@@ -408,13 +411,22 @@ public sealed class FrameSnapshotGpuDrawTests
 	private static TerrainDrawSurface CreateTerrainSurface(float heightBlendSharpness = 4.0f)
 	{
 		return new TerrainDrawSurface(
+			heightmap: null,
 			controlMap: null,
+			heightScale: 16.0f,
 			layerCount: 1,
 			heightBlendSharpness: heightBlendSharpness,
 			layers:
 			[
 				new TerrainResolvedLayer(null, null, null, null, 8.0f)
 			]);
+	}
+
+	private static TerrainChunkInstanceData CreateTerrainInstanceData(float offsetX = 0.0f)
+	{
+		return new TerrainChunkInstanceData(
+			new Vector4(offsetX, 0.0f, 8.0f, 8.0f),
+			new Vector4(0.25f, 0.25f, 0.0f, 0.0f));
 	}
 
 	private static void AssertGpuStructSizeIs16ByteAligned<T>() where T : unmanaged

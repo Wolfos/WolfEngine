@@ -59,7 +59,10 @@ public sealed class SceneViewportRayUtilityTests
 			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(4.0f, 4.0f),
 			HeightScaleMeters = 4.0f,
-			ChunkSizeInQuads = 4
+			ChunkSizeMeters = 4.0f,
+			LodCount = 3,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f, 320.0f]
 		});
 
 		var camera = CreateCamera(800, 600, 70.0f);
