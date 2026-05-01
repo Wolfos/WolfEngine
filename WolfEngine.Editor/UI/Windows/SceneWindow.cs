@@ -10,6 +10,7 @@ namespace WolfEngine.Editor.UI;
 
 public class SceneWindow: EditorWindow
 {
+    private const float ToolbarIconSize = 15.5f;
     private static readonly SceneDebugViewOption[] FallbackDebugViews =
     [
         new SceneDebugViewOption(SceneDebugViewIds.FinalColor, "Final Color", SceneDebugViewKind.Color)
@@ -24,7 +25,8 @@ public class SceneWindow: EditorWindow
     private float _sceneViewportScale;
     private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
     private bool _rightMousePressStartedHere;
-    
+    private SceneToolMode _sceneToolMode = SceneToolMode.Transform;
+    private TerrainTool _terrainTool = TerrainTool.RaiseLower;
     private TransformGizmoMode _gizmoMode = TransformGizmoMode.Translate;
     private TransformSpace _transformSpace = TransformSpace.Local;
     private TransformPivotMode _pivotMode = TransformPivotMode.Center;
@@ -63,17 +65,22 @@ public class SceneWindow: EditorWindow
         ImGui.SetCursorPosX(3);
         if (DrawTransformModeButton("Translate", "translate", TransformGizmoMode.Translate))
         {
-            _gizmoMode = TransformGizmoMode.Translate;
+            SelectTransformMode(TransformGizmoMode.Translate);
         }
         ImGui.SameLine();
         if (DrawTransformModeButton("Rotate", "rotate", TransformGizmoMode.Rotate))
         {
-            _gizmoMode = TransformGizmoMode.Rotate;
+            SelectTransformMode(TransformGizmoMode.Rotate);
         }
         ImGui.SameLine();
         if (DrawTransformModeButton("Scale", "scale", TransformGizmoMode.Scale))
         {
-            _gizmoMode = TransformGizmoMode.Scale;
+            SelectTransformMode(TransformGizmoMode.Scale);
+        }
+        ImGui.SameLine();
+        if (DrawToolbarButton("Terrain", "terrain", _sceneToolMode == SceneToolMode.Terrain))
+        {
+            _sceneToolMode = SceneToolMode.Terrain;
         }
 
         ImGui.SameLine();
@@ -152,13 +159,7 @@ public class SceneWindow: EditorWindow
             EditorPreferences.SetSceneViewportResolutionScale(_sceneViewportScale);
         }
 
-        var contentSize = ImGui.GetContentRegionAvail();
         var io = ImGui.GetIO();
-        var contentPixels = new Int2(
-            Math.Max(0, (int)MathF.Round(contentSize.X * io.DisplayFramebufferScale.X)),
-            Math.Max(0, (int)MathF.Round(contentSize.Y * io.DisplayFramebufferScale.Y)));
-
-        var visible = ImGui.IsWindowCollapsed() == false && contentPixels.X > 0 && contentPixels.Y > 0;
         var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows);
         if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
@@ -174,23 +175,33 @@ public class SceneWindow: EditorWindow
                                   || ImGui.IsKeyDown(ImGuiKey.RightCtrl)
                                   || ImGui.IsKeyDown(ImGuiKey.LeftSuper)
                                   || ImGui.IsKeyDown(ImGuiKey.RightSuper);
-        if ((hovered || focused) && io.WantTextInput == false && primaryModifierDown == false)
+        ApplyShortcut(SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
+            hovered || focused,
+            primaryModifierDown,
+            ImGui.IsKeyPressed(ImGuiKey.W),
+            ImGui.IsKeyPressed(ImGuiKey.E),
+            ImGui.IsKeyPressed(ImGuiKey.R),
+            ImGui.IsKeyPressed(ImGuiKey._1),
+            ImGui.IsKeyPressed(ImGuiKey._2),
+            ImGui.IsKeyPressed(ImGuiKey._3),
+            ImGui.IsKeyPressed(ImGuiKey._4),
+            ImGui.IsKeyPressed(ImGuiKey._5),
+            ImGui.IsKeyPressed(ImGuiKey._6),
+            io.WantTextInput,
+            _sceneToolMode)));
+
+        if (_sceneToolMode == SceneToolMode.Terrain)
         {
-            if (ImGui.IsKeyPressed(ImGuiKey.W))
-            {
-                _gizmoMode = TransformGizmoMode.Translate;
-            }
-            else if (ImGui.IsKeyPressed(ImGuiKey.E))
-            {
-                _gizmoMode = TransformGizmoMode.Rotate;
-            }
-            else if (ImGui.IsKeyPressed(ImGuiKey.R))
-            {
-                _gizmoMode = TransformGizmoMode.Scale;
-            }
+            ImGui.Separator();
+            DrawTerrainToolbar();
         }
 
         var imageMin = ImGui.GetCursorScreenPos();
+        var contentSize = ImGui.GetContentRegionAvail();
+        var contentPixels = new Int2(
+            Math.Max(0, (int)MathF.Round(contentSize.X * io.DisplayFramebufferScale.X)),
+            Math.Max(0, (int)MathF.Round(contentSize.Y * io.DisplayFramebufferScale.Y)));
+        var visible = ImGui.IsWindowCollapsed() == false && contentPixels.X > 0 && contentPixels.Y > 0;
         var imageMax = imageMin + contentSize;
         if (renderState.TextureId != 0 && contentSize.X > 0.0f && contentSize.Y > 0.0f)
         {
@@ -223,14 +234,17 @@ public class SceneWindow: EditorWindow
             _worldManager.OnDrawGizmos(WorldTag.Authoring);
         }
 
-        _transformGizmoController.DrawAndHandle(
-            scene,
-            world,
-            EditorGui.SelectedEntity,
-            EditorGui.HasSelectedEntity,
-            _gizmoMode,
-            _transformSpace,
-            _pivotMode);
+        if (_sceneToolMode == SceneToolMode.Transform)
+        {
+            _transformGizmoController.DrawAndHandle(
+                scene,
+                world,
+                EditorGui.SelectedEntity,
+                EditorGui.HasSelectedEntity,
+                _gizmoMode,
+                _transformSpace,
+                _pivotMode);
+        }
 
         ImGui.End();
     }
@@ -240,9 +254,69 @@ public class SceneWindow: EditorWindow
         return playState == EditorPlayState.Edit;
     }
 
-    private bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
+    private void ApplyShortcut(SceneShortcutCommand command)
     {
-        var isSelected = _gizmoMode == mode;
+        switch (command)
+        {
+            case SceneShortcutCommand.SelectTranslate:
+                SelectTransformMode(TransformGizmoMode.Translate);
+                break;
+            case SceneShortcutCommand.SelectRotate:
+                SelectTransformMode(TransformGizmoMode.Rotate);
+                break;
+            case SceneShortcutCommand.SelectScale:
+                SelectTransformMode(TransformGizmoMode.Scale);
+                break;
+            case SceneShortcutCommand.SelectRaiseLower:
+                _terrainTool = TerrainTool.RaiseLower;
+                break;
+            case SceneShortcutCommand.SelectFlatten:
+                _terrainTool = TerrainTool.Flatten;
+                break;
+            case SceneShortcutCommand.SelectSmooth:
+                _terrainTool = TerrainTool.Smooth;
+                break;
+            case SceneShortcutCommand.SelectBrush:
+                _terrainTool = TerrainTool.Brush;
+                break;
+            case SceneShortcutCommand.SelectEyedropper:
+                _terrainTool = TerrainTool.Eyedropper;
+                break;
+            case SceneShortcutCommand.SelectPen:
+                _terrainTool = TerrainTool.Pen;
+                break;
+        }
+    }
+
+    private void DrawTerrainToolbar()
+    {
+        ImGui.SetCursorPosX(3);
+        DrawTerrainToolButton("RaiseLower", "raiselower", TerrainTool.RaiseLower);
+        ImGui.SameLine();
+        DrawTerrainToolButton("Flatten", "flatten", TerrainTool.Flatten);
+        ImGui.SameLine();
+        DrawTerrainToolButton("Smooth", "smooth", TerrainTool.Smooth);
+        ImGui.SameLine();
+        DrawTerrainToolButton("Brush", "brush", TerrainTool.Brush);
+        ImGui.SameLine();
+        DrawTerrainToolButton("Eyedropper", "eyedropper", TerrainTool.Eyedropper);
+        ImGui.SameLine();
+        DrawTerrainToolButton("Pen", "pen", TerrainTool.Pen);
+    }
+
+    private bool DrawTerrainToolButton(string buttonId, string iconName, TerrainTool tool)
+    {
+        var clicked = DrawToolbarButton(buttonId, iconName, _terrainTool == tool);
+        if (clicked)
+        {
+            _terrainTool = tool;
+        }
+
+        return clicked;
+    }
+
+    private bool DrawToolbarButton(string buttonId, string iconName, bool isSelected)
+    {
         if (isSelected)
         {
             var selectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive];
@@ -251,13 +325,24 @@ public class SceneWindow: EditorWindow
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, selectedColor);
         }
 
-        var clicked = ImGui.ImageButton(buttonId, _icons.Get(iconName), Vector2.One * 15.5f);
+        var clicked = ImGui.ImageButton(buttonId, _icons.Get(iconName), Vector2.One * ToolbarIconSize);
         if (isSelected)
         {
             ImGui.PopStyleColor(3);
         }
 
         return clicked;
+    }
+
+    private void SelectTransformMode(TransformGizmoMode mode)
+    {
+        _sceneToolMode = SceneToolMode.Transform;
+        _gizmoMode = mode;
+    }
+
+    private bool DrawTransformModeButton(string buttonId, string iconName, TransformGizmoMode mode)
+    {
+        return DrawToolbarButton(buttonId, iconName, _sceneToolMode == SceneToolMode.Transform && _gizmoMode == mode);
     }
 
     private string GetDebugViewLabel(SceneDebugViewOption[] debugViews, string activeDebugViewId)
