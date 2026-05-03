@@ -19,6 +19,7 @@ public sealed class FrameSnapshot
 	public FrameSnapshot()
 	{
 		LightPackets = new List<LightPacket>(16);
+		DecalPackets = new List<DecalProjectorPacket>(16);
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
@@ -28,6 +29,7 @@ public sealed class FrameSnapshot
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
 	public List<LightPacket> LightPackets { get; }
+	public List<DecalProjectorPacket> DecalPackets { get; }
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
@@ -42,6 +44,7 @@ public sealed class FrameSnapshot
 	public void Clear()
 	{
 		LightPackets.Clear();
+		DecalPackets.Clear();
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		GpuDrawDatabase.ResetForSnapshotWrite();
@@ -50,6 +53,11 @@ public sealed class FrameSnapshot
 	public void AddLight(Light light, Matrix4x4 transform)
 	{
 		LightPackets.Add(new LightPacket(light, transform));
+	}
+
+	public void AddDecal(DecalProjector projector, Matrix4x4 transform)
+	{
+		DecalPackets.Add(new DecalProjectorPacket(projector, transform));
 	}
 
 	public void SetSun(Vector3 sunDirection, float sunIntensityScale)
@@ -66,6 +74,7 @@ public sealed class FrameSnapshot
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
+		Config.Decals = config.Decals;
 	}
 
 	public readonly struct LightPacket

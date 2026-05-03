@@ -23,6 +23,10 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
 	public RenderGraphResourceHandle GBufferEmissive { get; init; }
+	public RenderGraphResourceHandle DecalSourceGBufferAlbedo { get; init; }
+	public RenderGraphResourceHandle DecalSourceGBufferNormal { get; init; }
+	public RenderGraphResourceHandle DecalSourceGBufferMaterial { get; init; }
+	public RenderGraphResourceHandle DecalSourceGBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle GBufferVelocity { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionRaw { get; init; }
@@ -77,6 +81,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly AmbientOcclusionBlurPass _ambientOcclusionBlurPass;
 	private readonly AmbientOcclusionUpsamplePass _ambientOcclusionUpsamplePass;
 	private readonly ClusteredLightingPass _clusteredLightingPass;
+	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
@@ -120,6 +125,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
+	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
@@ -155,6 +161,7 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
 		_clusteredLightingPass = passSet.ClusteredLightingPass;
+		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
@@ -175,6 +182,7 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
 		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
 		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
+		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
@@ -203,6 +211,7 @@ internal sealed class RenderGraphFrameBuilder
 		Int2 sceneFramebufferSize,
 		RenderGraphResourceHandle sceneColorHandle,
 		bool sceneEnabled,
+		bool hasActiveDecals,
 		Vector3 sunDirection,
 		float sunIntensityScale,
 		RenderConfig config)
@@ -258,6 +267,10 @@ internal sealed class RenderGraphFrameBuilder
 		var gbufferNormalHandle = default(RenderGraphResourceHandle);
 		var gbufferMaterialHandle = default(RenderGraphResourceHandle);
 		var gbufferEmissiveHandle = default(RenderGraphResourceHandle);
+		var decalSourceAlbedoHandle = default(RenderGraphResourceHandle);
+		var decalSourceNormalHandle = default(RenderGraphResourceHandle);
+		var decalSourceMaterialHandle = default(RenderGraphResourceHandle);
+		var decalSourceEmissiveHandle = default(RenderGraphResourceHandle);
 		var gbufferDepthHandle = default(RenderGraphResourceHandle);
 		var gbufferVelocityHandle = default(RenderGraphResourceHandle);
 		var shadowMapHandle0 = default(RenderGraphResourceHandle);
@@ -310,6 +323,37 @@ internal sealed class RenderGraphFrameBuilder
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				default(ColorRGBA),
 				1.0f));
+			if (config.Decals.Enabled && hasActiveDecals)
+			{
+				decalSourceAlbedoHandle = gbufferAlbedoHandle;
+				decalSourceNormalHandle = gbufferNormalHandle;
+				decalSourceMaterialHandle = gbufferMaterialHandle;
+				decalSourceEmissiveHandle = gbufferEmissiveHandle;
+				gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Bgra8Unorm,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					new ColorRGBA(0.392f, 0.584f, 0.929f, 1.0f)));
+				gbufferNormalHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					new ColorRGBA(0.5f, 0.5f, 1.0f, 1.0f)));
+				gbufferMaterialHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba8Unorm,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+				gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba8Unorm,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+			}
 			shadowMapHandle0 = _resources.CreateTransientTexture(new TextureDescriptor(
 				ShadowMapPass.CascadeResolution,
 				ShadowMapPass.CascadeResolution,
@@ -438,6 +482,10 @@ internal sealed class RenderGraphFrameBuilder
 			GBufferNormal = gbufferNormalHandle,
 			GBufferMaterial = gbufferMaterialHandle,
 			GBufferEmissive = gbufferEmissiveHandle,
+			DecalSourceGBufferAlbedo = decalSourceAlbedoHandle,
+			DecalSourceGBufferNormal = decalSourceNormalHandle,
+			DecalSourceGBufferMaterial = decalSourceMaterialHandle,
+			DecalSourceGBufferEmissive = decalSourceEmissiveHandle,
 			GBufferDepth = gbufferDepthHandle,
 			GBufferVelocity = gbufferVelocityHandle,
 			AmbientOcclusionRaw = ambientOcclusionRawHandle,
@@ -507,13 +555,28 @@ internal sealed class RenderGraphFrameBuilder
 				.SetExecute(_gpuDrawCameraCullExecute);
 
 			graph.AddPass("GBuffer", PassKind.Graphics)
-				.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.DecalSourceGBufferAlbedo.IsValid ? _frameResources.DecalSourceGBufferAlbedo : _frameResources.GBufferAlbedo, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.DecalSourceGBufferNormal.IsValid ? _frameResources.DecalSourceGBufferNormal : _frameResources.GBufferNormal, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.DecalSourceGBufferMaterial.IsValid ? _frameResources.DecalSourceGBufferMaterial : _frameResources.GBufferMaterial, ResourceState.RenderTarget)
+				.WriteTexture(_frameResources.DecalSourceGBufferEmissive.IsValid ? _frameResources.DecalSourceGBufferEmissive : _frameResources.GBufferEmissive, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferVelocity, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
 				.SetExecute(_gbufferExecute);
+
+			if (_frameResources.DecalSourceGBufferAlbedo.IsValid)
+			{
+				graph.AddPass("ScreenSpaceDecal", PassKind.Graphics)
+					.ReadTexture(_frameResources.DecalSourceGBufferAlbedo, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferMaterial, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferEmissive, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.RenderTarget)
+					.WriteTexture(_frameResources.GBufferNormal, ResourceState.RenderTarget)
+					.WriteTexture(_frameResources.GBufferMaterial, ResourceState.RenderTarget)
+					.WriteTexture(_frameResources.GBufferEmissive, ResourceState.RenderTarget)
+					.SetExecute(_screenSpaceDecalExecute);
+			}
 
 			if (_frameResources.AmbientOcclusionRaw.IsValid)
 			{
@@ -930,10 +993,22 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteGBuffer(RenderGraphContext context)
 	{
-		var albedoTexture = context.GetTexture(_frameResources.GBufferAlbedo);
-		var normalTexture = context.GetTexture(_frameResources.GBufferNormal);
-		var materialTexture = context.GetTexture(_frameResources.GBufferMaterial);
-		var emissiveTexture = context.GetTexture(_frameResources.GBufferEmissive);
+		var albedoHandle = _frameResources.DecalSourceGBufferAlbedo.IsValid
+			? _frameResources.DecalSourceGBufferAlbedo
+			: _frameResources.GBufferAlbedo;
+		var normalHandle = _frameResources.DecalSourceGBufferNormal.IsValid
+			? _frameResources.DecalSourceGBufferNormal
+			: _frameResources.GBufferNormal;
+		var materialHandle = _frameResources.DecalSourceGBufferMaterial.IsValid
+			? _frameResources.DecalSourceGBufferMaterial
+			: _frameResources.GBufferMaterial;
+		var emissiveHandle = _frameResources.DecalSourceGBufferEmissive.IsValid
+			? _frameResources.DecalSourceGBufferEmissive
+			: _frameResources.GBufferEmissive;
+		var albedoTexture = context.GetTexture(albedoHandle);
+		var normalTexture = context.GetTexture(normalHandle);
+		var materialTexture = context.GetTexture(materialHandle);
+		var emissiveTexture = context.GetTexture(emissiveHandle);
 		var depthTexture = context.GetTexture(_frameResources.GBufferDepth);
 		_gpuDrawPass.EnsureGBufferIndirectCommands(context);
 		var bucketList = _gpuDrawPass.BuildGBufferBuckets();
@@ -973,6 +1048,18 @@ internal sealed class RenderGraphFrameBuilder
 
 		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
 	}
+
+	private void ExecuteScreenSpaceDecal(RenderGraphContext context)
+	{
+		var config = _screenSpaceDecalPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			_gpuDrawResources,
+			context.SceneData!);
+		_screenSpaceDecalPass.Record(context, in config, context.SceneData!);
+	}
+
 	private void ExecuteDeferredLighting(RenderGraphContext context)
 	{
 		var config = _deferredLightingPass.BuildConfig(

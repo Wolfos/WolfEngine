@@ -184,6 +184,9 @@
         <None Update="Shaders\TerrainTools\terrain_authoring_brushes.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\screen_space_decal.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

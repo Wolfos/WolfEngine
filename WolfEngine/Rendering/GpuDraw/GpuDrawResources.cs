@@ -48,6 +48,7 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _clusterLightIndexBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterWriteCursorBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterOverflowBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _decalProjectorBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowDrawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -64,6 +65,7 @@ public sealed class GpuDrawResources : IDisposable
 	private int _shadowCameraBufferSizeInBytes;
 	private int _transparentEnvironmentBufferSizeInBytes;
 	private int _transparentLightingBufferSizeInBytes;
+	private int _decalProjectorCapacity;
 	private ClusteredLightingFrameLayout _clusteredLightingLayout;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
@@ -117,6 +119,8 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? TransparentEnvironmentBuffer => _transparentEnvironmentBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? TransparentLightingBuffer => _transparentLightingBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? DecalProjectorBuffer => _decalProjectorBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? ClusterPointLightBuffer => _clusterPointLightBuffers[_activeFrameSlot];
 
@@ -341,6 +345,22 @@ public sealed class GpuDrawResources : IDisposable
 		}
 	}
 
+	public void EnsureDecalCapacity(IGfxDevice device, int maxProjectorCount)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var clampedCount = Math.Max(1, maxProjectorCount);
+		_decalProjectorCapacity = Math.Max(_decalProjectorCapacity, clampedCount);
+		for (var i = 0; i < MaxFramesInFlight; i++)
+		{
+			_decalProjectorBuffers[i] = EnsureStructuredBufferCapacity(
+				device,
+				_decalProjectorBuffers[i],
+				_decalProjectorCapacity,
+				Marshal.SizeOf<GpuDecalProjectorData>());
+		}
+	}
+
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
 	{
 		ValidateFrameSlot(frameSlot);
@@ -387,6 +407,7 @@ public sealed class GpuDrawResources : IDisposable
 			(_shadowCameraBuffers[i] as IDisposable)?.Dispose();
 			(_transparentEnvironmentBuffers[i] as IDisposable)?.Dispose();
 			(_transparentLightingBuffers[i] as IDisposable)?.Dispose();
+			(_decalProjectorBuffers[i] as IDisposable)?.Dispose();
 			(_clusterPointLightBuffers[i] as IDisposable)?.Dispose();
 			(_clusterAabbBuffers[i] as IDisposable)?.Dispose();
 			(_clusterHeaderBuffers[i] as IDisposable)?.Dispose();
@@ -410,6 +431,7 @@ public sealed class GpuDrawResources : IDisposable
 			_shadowCameraBuffers[i] = null;
 			_transparentEnvironmentBuffers[i] = null;
 			_transparentLightingBuffers[i] = null;
+			_decalProjectorBuffers[i] = null;
 			_clusterPointLightBuffers[i] = null;
 			_clusterAabbBuffers[i] = null;
 			_clusterHeaderBuffers[i] = null;

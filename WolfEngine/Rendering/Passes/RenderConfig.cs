@@ -9,6 +9,18 @@ public class RenderConfig: IDataAsset
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
+	public DecalConfig Decals { get; set; } = new();
+}
+
+public struct DecalConfig
+{
+	public DecalConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = true;
+	public int MaxProjectorCount { get; set; } = 256;
+	public bool DebugProjectorBounds { get; set; }
 }
 
 public struct TonemappingConfig

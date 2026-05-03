@@ -178,7 +178,8 @@ public sealed class RenderGraph
 				jitterPixels,
 				jitterNdc,
 				_hasPreviousCameraState == false || (taaEnabled && _previousTaaEnabled == false),
-				_renderLights);
+				_renderLights,
+				snapshot.DecalPackets);
 
 			_previousUnjitteredViewProjection = unjitteredViewProjection;
 			_previousCameraOrigin = cameraPosition;
@@ -359,6 +360,7 @@ public sealed class RenderGraph
 					sceneRenderSize,
 					sceneColorHandle,
 					renderSceneToViewport,
+					snapshot.DecalPackets.Count > 0,
 					snapshot.SunDirection,
 					snapshot.SunIntensityScale,
 					snapshot.Config);

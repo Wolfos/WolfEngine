@@ -165,6 +165,11 @@ public class RenderPipeline : IRenderPipeline
 
 					snapshot.SetSun(sunDirection, sunIntensityScale);
 				}
+
+				using (FrameProfiler.Instance.Measure("Gather decals"))
+				{
+					CollectDecalProjectors(snapshot, world, _renderGraph);
+				}
 			}
 
 
@@ -173,6 +178,31 @@ public class RenderPipeline : IRenderPipeline
 
 
 			_stressFrame++;
+		}
+	}
+
+	internal static void CollectDecalProjectors(FrameSnapshot snapshot, World world, RenderGraph renderGraph)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		ArgumentNullException.ThrowIfNull(world);
+		ArgumentNullException.ThrowIfNull(renderGraph);
+
+		foreach (var entry in world.View<WorldTransform, DecalProjector>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			ref var transform = ref entry.First;
+			ref var projector = ref entry.Second;
+			if (projector.IsValid == false)
+			{
+				continue;
+			}
+
+			projector.EnsureTextureResources(renderGraph);
+			snapshot.AddDecal(projector, transform.LocalToWorld);
 		}
 	}
 }

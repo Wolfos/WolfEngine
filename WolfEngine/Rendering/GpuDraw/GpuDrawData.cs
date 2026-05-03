@@ -342,6 +342,57 @@ public readonly struct GpuDrawMaterialUpdateData
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuDecalProjectorData
+{
+	public GpuDecalProjectorData(
+		Matrix4x4 localToWorld,
+		Matrix4x4 worldToLocal,
+		Vector4 uvScaleOffset,
+		ColorRGBA tint,
+		Vector4 opacities,
+		Vector4 materialFactorsEmissive,
+		uint channelMask,
+		uint albedoHandle,
+		uint normalHandle,
+		uint materialHandle,
+		uint emissiveHandle,
+		uint samplerHandle)
+	{
+		LocalToWorld = localToWorld;
+		WorldToLocal = worldToLocal;
+		UvScaleOffset = uvScaleOffset;
+		Tint = tint;
+		Opacities = opacities;
+		MaterialFactorsEmissive = materialFactorsEmissive;
+		ChannelMask = channelMask;
+		AlbedoHandle = albedoHandle;
+		NormalHandle = normalHandle;
+		MaterialHandle = materialHandle;
+		EmissiveHandle = emissiveHandle;
+		SamplerHandle = samplerHandle;
+		_pad0 = 0;
+		_pad1 = 0;
+		_pad2 = 0;
+	}
+
+	public readonly Matrix4x4 LocalToWorld;
+	public readonly Matrix4x4 WorldToLocal;
+	public readonly Vector4 UvScaleOffset;
+	public readonly ColorRGBA Tint;
+	public readonly Vector4 Opacities;
+	public readonly Vector4 MaterialFactorsEmissive;
+	public readonly uint ChannelMask;
+	public readonly uint AlbedoHandle;
+	public readonly uint NormalHandle;
+	public readonly uint MaterialHandle;
+	public readonly uint EmissiveHandle;
+	public readonly uint SamplerHandle;
+	private readonly uint _pad0;
+	private readonly uint _pad1;
+	private readonly uint _pad2;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuTerrainMaterialUpdateData
 {
 	public GpuTerrainMaterialUpdateData(

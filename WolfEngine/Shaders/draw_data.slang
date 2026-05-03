@@ -185,3 +185,22 @@ struct GpuTerrainLayerUpdateData
     uint32_t pad1;
     uint32_t pad2;
 };
+
+struct GpuDecalProjectorData
+{
+    row_major float4x4 localToWorld;
+    row_major float4x4 worldToLocal;
+    float4 uvScaleOffset;
+    float4 tint;
+    float4 opacities;
+    float4 materialFactorsEmissive;
+    uint channelMask;
+    uint albedoHandle;
+    uint normalHandle;
+    uint materialHandle;
+    uint emissiveHandle;
+    uint samplerHandle;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
