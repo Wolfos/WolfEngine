@@ -98,7 +98,7 @@ PSOutput fragmentShader(VSOutput input)
 
     Texture2D<float4> depthTexture = GetTexture(depthHandle);
     float depth = depthTexture.Load(int3(pixel, 0)).r;
-    if (depth >= 0.9999f)
+    if (IsBackgroundDepth(depth))
     {
         discard;
     }

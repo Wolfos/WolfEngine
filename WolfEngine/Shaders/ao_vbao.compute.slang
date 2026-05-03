@@ -131,7 +131,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float2 uv = (float2(dispatchThreadId.xy) + 0.5f) / float2(outputSize);
     float centerDepth = LoadDepthNearest(depthTexture, uv, fullSize);
-    if (centerDepth >= 0.9999f)
+    if (IsBackgroundDepth(centerDepth))
     {
         outputTexture[dispatchThreadId.xy] = float4(1.0f, 1.0f, 1.0f, 1.0f);
         return;
@@ -198,7 +198,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 }
 
                 float sampleDepth = LoadDepthNearest(depthTexture, sampleUv, fullSize);
-                if (sampleDepth >= 0.9999f)
+                if (IsBackgroundDepth(sampleDepth))
                 {
                     continue;
                 }

@@ -1,3 +1,4 @@
+import "common.slang";
 import "common_bindless.slang";
 import "common_lighting.slang";
 
@@ -75,7 +76,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     int2 fullPixel = int2(dispatchThreadId.xy);
     float centerDepth = depthTexture.Load(int3(fullPixel, 0)).r;
-    if (centerDepth >= 0.9999f)
+    if (IsBackgroundDepth(centerDepth))
     {
         outputTexture[dispatchThreadId.xy] = float4(1.0f, 1.0f, 1.0f, 1.0f);
         return;

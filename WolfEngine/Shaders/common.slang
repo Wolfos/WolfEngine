@@ -11,6 +11,8 @@ struct CameraParams
     uint frameSizeY;
 };
 
+static const float WOLF_BACKGROUND_DEPTH_THRESHOLD = 0.999999f;
+
 float3 ReconstructViewPosition(uint2 pixel, uint2 size, float depth, float4x4 invProjection)
 {
     // Map pixel center to NDC [-1,1], Y flipped for typical render target orientation
@@ -43,4 +45,9 @@ float3 ComputeViewDir(float3 viewPos)
 float3 ViewToWorld(float3 viewPos, float3 cameraOrigin)
 {
     return viewPos + cameraOrigin;
+}
+
+bool IsBackgroundDepth(float depth)
+{
+    return depth >= WOLF_BACKGROUND_DEPTH_THRESHOLD;
 }

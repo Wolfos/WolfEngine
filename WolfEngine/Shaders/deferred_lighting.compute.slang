@@ -97,7 +97,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float depth = gbufferDepth.Load(int3(dispatchThreadId.xy, 0)).r;
-    if (depth >= 0.9999f)
+    if (IsBackgroundDepth(depth))
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
         float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
