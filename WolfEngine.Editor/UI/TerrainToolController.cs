@@ -21,17 +21,20 @@ public sealed class TerrainToolController
 	private readonly EditorCameraContext _cameraContext;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly RigidbodySystem _rigidbodySystem;
+	private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
 
 	public TerrainToolController(
 		EditorViewportStateBus viewportStateBus,
 		EditorCameraContext cameraContext,
 		ITerrainAuthoringService terrainAuthoringService,
-		RigidbodySystem rigidbodySystem)
+		RigidbodySystem rigidbodySystem,
+		TerrainToolSettingsOverlay terrainToolSettingsOverlay)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_terrainAuthoringService = terrainAuthoringService ?? throw new ArgumentNullException(nameof(terrainAuthoringService));
 		_rigidbodySystem = rigidbodySystem ?? throw new ArgumentNullException(nameof(rigidbodySystem));
+		_terrainToolSettingsOverlay = terrainToolSettingsOverlay ?? throw new ArgumentNullException(nameof(terrainToolSettingsOverlay));
 	}
 
 	public TerrainToolSettings Settings { get; } = new();
@@ -53,6 +56,12 @@ public sealed class TerrainToolController
 		}
 
 		if (terrainTool is TerrainTool.Eyedropper or TerrainTool.Pen)
+		{
+			HandleRelease();
+			return;
+		}
+
+		if (_terrainToolSettingsOverlay.BlocksPainting)
 		{
 			HandleRelease();
 			return;
