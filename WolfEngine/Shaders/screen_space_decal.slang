@@ -11,7 +11,7 @@ static const uint DECAL_CHANNEL_EMISSIVE = 1u << 3;
 
 StructuredBuffer<GpuDecalProjectorData> g_Decals : register(t16);
 
-cbuffer BindlessHandles : register(b0)
+cbuffer BindlessHandles : register(b17)
 {
     uint sourceAlbedoHandle;
     uint sourceNormalHandle;
@@ -20,7 +20,7 @@ cbuffer BindlessHandles : register(b0)
     uint depthHandle;
 };
 
-cbuffer CameraParams : register(b3)
+cbuffer CameraParams : register(b18)
 {
     row_major float4x4 viewProjection;
     row_major float4x4 invViewProjection;
@@ -29,7 +29,7 @@ cbuffer CameraParams : register(b3)
     float2 _cameraPadding;
 };
 
-cbuffer DrawParams : register(b2)
+cbuffer DrawParams : register(b19)
 {
     uint decalIndex;
     float3 _drawPadding;

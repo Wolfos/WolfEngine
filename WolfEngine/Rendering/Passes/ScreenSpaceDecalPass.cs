@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
@@ -22,6 +23,19 @@ public sealed class ScreenSpaceDecalPass
 	private uint _decalProjectorBufferRegisterIndex = 20;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private Mesh? _projectorMesh;
+	private IGfxBuffer? _projectorVertexBuffer;
+	private IGfxBuffer? _projectorIndexBuffer;
+	private uint _projectorIndexCount;
+	private GraphicsBackendKind? _projectorGeometryBackendKind;
+
+	[StructLayout(LayoutKind.Sequential, Pack = 1)]
+	private struct VertexData
+	{
+		public Vector4 Position;
+		public Vector3 Normal;
+		public Vector2 UV;
+		public Vector4 Tangent;
+	}
 
 	public ScreenSpaceDecalPass(
 		IRenderer renderer,
@@ -53,6 +67,8 @@ public sealed class ScreenSpaceDecalPass
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
 			_linearSampler = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
+
+		EnsureProjectorGeometry(device);
 
 		var maxProjectorCount = Math.Max(resources.Config.Decals.MaxProjectorCount, 1);
 		var decalCount = Math.Min(sceneData.Decals.Count, maxProjectorCount);
@@ -103,8 +119,9 @@ public sealed class ScreenSpaceDecalPass
 			return;
 		}
 
-		var mesh = EnsureProjectorMesh();
-		if (mesh.VertexBuffer is null || mesh.IndexBuffer is null || mesh.IndexCount == 0)
+		if (_projectorVertexBuffer is null ||
+		    _projectorIndexBuffer is null ||
+		    _projectorIndexCount == 0)
 		{
 			commandList.EndPass();
 			return;
@@ -112,8 +129,8 @@ public sealed class ScreenSpaceDecalPass
 
 		commandList.BindPipeline(config.Pipeline);
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
-		commandList.SetVertexBuffer(new VertexBufferView(mesh.VertexBuffer, mesh.StrideInBytes, checked((uint)mesh.PackedVertexOffsetBytes)));
-		commandList.SetIndexBuffer(new IndexBufferView(mesh.IndexBuffer, IndexFormat.UInt32, checked((uint)mesh.PackedIndexOffsetBytes)));
+		commandList.SetVertexBuffer(new VertexBufferView(_projectorVertexBuffer, (uint)Marshal.SizeOf<VertexData>(), 0));
+		commandList.SetIndexBuffer(new IndexBufferView(_projectorIndexBuffer, IndexFormat.UInt32, 0));
 		commandList.BindConstantBuffer(_decalProjectorBufferRegisterIndex, config.DecalProjectorBuffer);
 
 		var bindlessWriter = _bindlessWriter
@@ -142,7 +159,7 @@ public sealed class ScreenSpaceDecalPass
 			drawWriter.Clear();
 			drawWriter.SetUInt("decalIndex", decalIndex);
 			commandList.SetGraphicsConstants(drawWriter.RegisterIndex, drawWriter.AsBytes());
-			commandList.Draw(new DrawArguments(mesh.IndexCount, 1, 0, mesh.PackedBaseVertex, 0));
+			commandList.Draw(new DrawArguments(_projectorIndexCount, 1, 0, 0, 0));
 		}
 
 		commandList.EndPass();
@@ -192,8 +209,50 @@ public sealed class ScreenSpaceDecalPass
 	private Mesh EnsureProjectorMesh()
 	{
 		_projectorMesh ??= _meshFactory.GetMesh(DebugPrimitiveType.Box);
-		_renderer.EnsureMeshResources(_projectorMesh);
 		return _projectorMesh;
+	}
+
+	private void EnsureProjectorGeometry(IGfxDevice device)
+	{
+		if (_projectorVertexBuffer is not null &&
+		    _projectorIndexBuffer is not null &&
+		    _projectorIndexCount > 0 &&
+		    _projectorGeometryBackendKind == device.BackendKind)
+		{
+			return;
+		}
+
+		var mesh = EnsureProjectorMesh();
+		var vertexData = new VertexData[mesh.Vertices.Length];
+		for (var i = 0; i < mesh.Vertices.Length; i++)
+		{
+			vertexData[i] = new VertexData
+			{
+				Position = mesh.Vertices[i],
+				Normal = mesh.Normals[i],
+				UV = mesh.UVs[i],
+				Tangent = mesh.Tangents[i]
+			};
+		}
+
+		var vertexBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(vertexData.Length * Marshal.SizeOf<VertexData>()),
+			BufferUsage.Vertex));
+		var indexBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(mesh.Indices.Length * sizeof(uint)),
+			BufferUsage.Index));
+		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer ||
+		    indexBuffer is not IWritableGpuBuffer writableIndexBuffer)
+		{
+			throw new InvalidOperationException("Screen-space decal projector buffers were not writable.");
+		}
+
+		writableVertexBuffer.Write(vertexData);
+		writableIndexBuffer.Write(mesh.Indices);
+		_projectorVertexBuffer = vertexBuffer;
+		_projectorIndexBuffer = indexBuffer;
+		_projectorIndexCount = (uint)mesh.Indices.Length;
+		_projectorGeometryBackendKind = device.BackendKind;
 	}
 
 	private void EnsurePipeline(IGfxDevice device)
