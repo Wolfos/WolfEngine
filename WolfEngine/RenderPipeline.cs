@@ -204,5 +204,26 @@ public class RenderPipeline : IRenderPipeline
 			projector.EnsureTextureResources(renderGraph);
 			snapshot.AddDecal(projector, transform.LocalToWorld);
 		}
+
+		foreach (var entry in world.View<WorldTransform, TerrainComponent>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			ref var terrainTransform = ref entry.First;
+			ref var terrain = ref entry.Second;
+			if (terrain.AuthoringBrushPreviewDecal is not { } previewProjector ||
+			    previewProjector.IsValid == false)
+			{
+				continue;
+			}
+
+			previewProjector.EnsureTextureResources(renderGraph);
+			snapshot.AddDecal(
+				previewProjector,
+				terrain.AuthoringBrushPreviewLocalTransform * terrainTransform.LocalToWorld);
+		}
 	}
 }

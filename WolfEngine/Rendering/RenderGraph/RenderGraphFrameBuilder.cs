@@ -81,6 +81,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly AmbientOcclusionBlurPass _ambientOcclusionBlurPass;
 	private readonly AmbientOcclusionUpsamplePass _ambientOcclusionUpsamplePass;
 	private readonly ClusteredLightingPass _clusteredLightingPass;
+	private readonly GBufferDecalSeedPass _gBufferDecalSeedPass;
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
@@ -125,6 +126,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
+	private readonly Action<RenderGraphContext> _gBufferDecalSeedExecute;
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
@@ -161,6 +163,7 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionBlurPass = passSet.AmbientOcclusionBlurPass;
 		_ambientOcclusionUpsamplePass = passSet.AmbientOcclusionUpsamplePass;
 		_clusteredLightingPass = passSet.ClusteredLightingPass;
+		_gBufferDecalSeedPass = passSet.GBufferDecalSeedPass;
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
@@ -182,6 +185,7 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
 		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
 		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
+		_gBufferDecalSeedExecute = ExecuteGBufferDecalSeed;
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_taaResolveExecute = ExecuteTemporalResolve;
@@ -565,6 +569,17 @@ internal sealed class RenderGraphFrameBuilder
 
 			if (_frameResources.DecalSourceGBufferAlbedo.IsValid)
 			{
+				graph.AddPass("GBuffer Decal Seed", PassKind.Compute)
+					.ReadTexture(_frameResources.DecalSourceGBufferAlbedo, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferMaterial, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DecalSourceGBufferEmissive, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.GBufferAlbedo, ResourceState.UnorderedAccess)
+					.WriteTexture(_frameResources.GBufferNormal, ResourceState.UnorderedAccess)
+					.WriteTexture(_frameResources.GBufferMaterial, ResourceState.UnorderedAccess)
+					.WriteTexture(_frameResources.GBufferEmissive, ResourceState.UnorderedAccess)
+					.SetExecute(_gBufferDecalSeedExecute);
+
 				graph.AddPass("ScreenSpaceDecal", PassKind.Graphics)
 					.ReadTexture(_frameResources.DecalSourceGBufferAlbedo, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.DecalSourceGBufferNormal, ResourceState.ShaderResource)
@@ -1058,6 +1073,15 @@ internal sealed class RenderGraphFrameBuilder
 			_gpuDrawResources,
 			context.SceneData!);
 		_screenSpaceDecalPass.Record(context, in config, context.SceneData!);
+	}
+
+	private void ExecuteGBufferDecalSeed(RenderGraphContext context)
+	{
+		var config = _gBufferDecalSeedPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_gBufferDecalSeedPass.Record(context, in config);
 	}
 
 	private void ExecuteDeferredLighting(RenderGraphContext context)

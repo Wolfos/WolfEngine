@@ -130,8 +130,6 @@ PSOutput fragmentShader(VSOutput input)
     float4 materialSample = GetTexture(decal.materialHandle).SampleLevel(samplerState, decalUv, 0.0f);
     float4 emissiveSample = GetTexture(decal.emissiveHandle).SampleLevel(samplerState, decalUv, 0.0f);
 
-    float coverage = ((decal.channelMask & DECAL_CHANNEL_ALBEDO) != 0u) ? saturate(albedoSample.a) : 1.0f;
-
     output.albedo = existingAlbedo;
     output.normal = existingNormal;
     output.material = existingMaterial;
@@ -139,14 +137,14 @@ PSOutput fragmentShader(VSOutput input)
 
     if ((decal.channelMask & DECAL_CHANNEL_ALBEDO) != 0u)
     {
-        float albedoBlend = saturate(coverage * decal.opacities.x);
+        float albedoBlend = saturate(albedoSample.a * decal.opacities.x);
         float3 decalColor = albedoSample.rgb * decal.tint.rgb;
         output.albedo = float4(lerp(existingAlbedo.rgb, decalColor, albedoBlend), existingAlbedo.a);
     }
 
     if ((decal.channelMask & DECAL_CHANNEL_NORMAL) != 0u)
     {
-        float normalBlend = saturate(coverage * decal.opacities.y);
+        float normalBlend = saturate(normalSample.a * decal.opacities.y);
         float3 existingNormalWs = DecodeStoredNormal(existingNormal);
         float3 decalNormalLocal = DecodeNormalMapSample(normalSample);
         float3 decalNormalWs = normalize(mul(float4(decalNormalLocal, 0.0f), decal.localToWorld).xyz);
@@ -155,14 +153,14 @@ PSOutput fragmentShader(VSOutput input)
 
     if ((decal.channelMask & DECAL_CHANNEL_MATERIAL) != 0u)
     {
-        float materialBlend = saturate(coverage * decal.opacities.z);
+        float materialBlend = saturate(materialSample.a * decal.opacities.z);
         float3 decalMaterial = saturate(materialSample.rgb * decal.materialFactorsEmissive.rgb);
         output.material = float4(lerp(existingMaterial.rgb, decalMaterial, materialBlend), existingMaterial.a);
     }
 
     if ((decal.channelMask & DECAL_CHANNEL_EMISSIVE) != 0u)
     {
-        float emissiveBlend = saturate(coverage * decal.opacities.w);
+        float emissiveBlend = saturate(emissiveSample.a * decal.opacities.w);
         float3 decalEmissive = emissiveSample.rgb * decal.materialFactorsEmissive.w * decal.tint.rgb;
         output.emissive = float4(lerp(existingEmissive.rgb, decalEmissive, emissiveBlend), existingEmissive.a);
     }

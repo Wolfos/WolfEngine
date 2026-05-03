@@ -22,19 +22,24 @@ public sealed class TerrainToolController
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly RigidbodySystem _rigidbodySystem;
 	private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
+	private readonly TerrainBrushPreviewDecalController _terrainBrushPreviewDecalController;
+	private EditorScene? _previewScene;
+	private Entity _previewTerrainEntity;
 
 	public TerrainToolController(
 		EditorViewportStateBus viewportStateBus,
 		EditorCameraContext cameraContext,
 		ITerrainAuthoringService terrainAuthoringService,
 		RigidbodySystem rigidbodySystem,
-		TerrainToolSettingsOverlay terrainToolSettingsOverlay)
+		TerrainToolSettingsOverlay terrainToolSettingsOverlay,
+		TerrainBrushPreviewDecalController terrainBrushPreviewDecalController)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_terrainAuthoringService = terrainAuthoringService ?? throw new ArgumentNullException(nameof(terrainAuthoringService));
 		_rigidbodySystem = rigidbodySystem ?? throw new ArgumentNullException(nameof(rigidbodySystem));
 		_terrainToolSettingsOverlay = terrainToolSettingsOverlay ?? throw new ArgumentNullException(nameof(terrainToolSettingsOverlay));
+		_terrainBrushPreviewDecalController = terrainBrushPreviewDecalController ?? throw new ArgumentNullException(nameof(terrainBrushPreviewDecalController));
 	}
 
 	public TerrainToolSettings Settings { get; } = new();
@@ -51,18 +56,21 @@ public sealed class TerrainToolController
 		    scene.World.HasComponent<WorldTransform>(EditorGui.SelectedEntity) == false ||
 		    _cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false)
 		{
+			ClearPreview();
 			HandleRelease();
 			return;
 		}
 
 		if (terrainTool is TerrainTool.Eyedropper or TerrainTool.Pen)
 		{
+			ClearPreview();
 			HandleRelease();
 			return;
 		}
 
 		if (_terrainToolSettingsOverlay.BlocksPainting)
 		{
+			ClearPreview();
 			HandleRelease();
 			return;
 		}
@@ -71,6 +79,7 @@ public sealed class TerrainToolController
 		if (SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection) == false ||
 		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, io.MousePos, inverseViewProjection, out var sceneRay) == false)
 		{
+			ClearPreview();
 			HandleRelease();
 			return;
 		}
@@ -84,12 +93,15 @@ public sealed class TerrainToolController
 		    hit.Entity != EditorGui.SelectedEntity ||
 		    Matrix4x4.Invert(transform.LocalToWorld, out var worldToLocal) == false)
 		{
+			ClearPreview();
 			HandleRelease();
 			return;
 		}
 
 		var leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
 		var localHit = Vector3.Transform(hit.Point, worldToLocal);
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(EditorGui.SelectedEntity);
+		UpdatePreview(scene, EditorGui.SelectedEntity, ref terrain, localHit);
 		if (leftDown)
 		{
 			if (_terrainAuthoringService.HasActiveStroke == false)
@@ -107,6 +119,35 @@ public sealed class TerrainToolController
 		{
 			HandleRelease();
 		}
+	}
+
+	private void UpdatePreview(EditorScene scene, Entity terrainEntity, ref TerrainComponent terrain, Vector3 localHit)
+	{
+		if (!ReferenceEquals(_previewScene, scene) || _previewTerrainEntity != terrainEntity)
+		{
+			ClearPreview();
+			_previewScene = scene;
+			_previewTerrainEntity = terrainEntity;
+		}
+
+		_terrainBrushPreviewDecalController.ApplyPreview(ref terrain, localHit, Settings.RadiusMeters, Settings.Falloff);
+	}
+
+	internal void ClearPreview()
+	{
+		if (_previewScene is null ||
+		    _previewScene.World.IsAlive(_previewTerrainEntity) == false ||
+		    _previewScene.World.HasComponent<TerrainComponent>(_previewTerrainEntity) == false)
+		{
+			_previewScene = null;
+			_previewTerrainEntity = default;
+			return;
+		}
+
+		ref var terrain = ref _previewScene.World.GetComponent<TerrainComponent>(_previewTerrainEntity);
+		_terrainBrushPreviewDecalController.ClearPreview(ref terrain);
+		_previewScene = null;
+		_previewTerrainEntity = default;
 	}
 
 	private void HandleRelease()

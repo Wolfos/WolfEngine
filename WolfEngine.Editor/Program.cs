@@ -114,6 +114,7 @@ public static class Program
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<IGizmoLineRenderer, GizmoLineRenderer>();
 		services.AddSingleton<TerrainToolSettingsOverlay>();
+		services.AddSingleton<TerrainBrushPreviewDecalController>();
 		services.AddSingleton<ITerrainBrushGpuExecutor, TerrainBrushGpuExecutor>();
 		services.AddSingleton<ITerrainAuthoringService, TerrainAuthoringService>();
 		services.AddSingleton<TerrainToolController>();

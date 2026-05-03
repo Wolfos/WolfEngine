@@ -46,6 +46,14 @@ public struct TerrainComponent : IEntityComponent
 	[JsonIgnore]
 	[HideFromEditor]
 	public Texture? AuthoringPreviewControlMap;
+	[NotSerialized]
+	[JsonIgnore]
+	[HideFromEditor]
+	public DecalProjector? AuthoringBrushPreviewDecal;
+	[NotSerialized]
+	[JsonIgnore]
+	[HideFromEditor]
+	public Matrix4x4 AuthoringBrushPreviewLocalTransform;
 
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
@@ -62,6 +70,8 @@ public struct TerrainComponent : IEntityComponent
 		CachedHeightfieldFailureVersion = -1;
 		AuthoringPreviewHeightmap = null;
 		AuthoringPreviewControlMap = null;
+		AuthoringBrushPreviewDecal = null;
+		AuthoringBrushPreviewLocalTransform = Matrix4x4.Identity;
 	}
 
 	public Vector2 GetResolvedWorldSize()

@@ -178,12 +178,14 @@ public sealed class ScreenSpaceDecalPassTests
 		var passes = (List<RenderGraphPass>)GetField(renderGraph, "_passes");
 		var passNames = passes.Select(pass => pass.Name).ToArray();
 		var gbufferIndex = Array.IndexOf(passNames, "GBuffer");
+		var seedIndex = Array.IndexOf(passNames, "GBuffer Decal Seed");
 		var decalIndex = Array.IndexOf(passNames, "ScreenSpaceDecal");
 		var aoIndex = Array.IndexOf(passNames, "VBAO Evaluate");
 		var deferredIndex = Array.IndexOf(passNames, "Deferred Lighting");
 
 		Assert.That(gbufferIndex, Is.GreaterThanOrEqualTo(0));
-		Assert.That(decalIndex, Is.GreaterThan(gbufferIndex));
+		Assert.That(seedIndex, Is.GreaterThan(gbufferIndex));
+		Assert.That(decalIndex, Is.GreaterThan(seedIndex));
 		Assert.That(aoIndex, Is.GreaterThan(decalIndex));
 		Assert.That(deferredIndex, Is.GreaterThan(decalIndex));
 	}

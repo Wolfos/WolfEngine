@@ -252,6 +252,7 @@ public class SceneWindow: EditorWindow
 
         if (_sceneToolMode == SceneToolMode.Transform)
         {
+            _terrainToolController.ClearPreview();
             _transformGizmoController.DrawAndHandle(
                 scene,
                 world,
@@ -264,6 +265,10 @@ public class SceneWindow: EditorWindow
         else if (_sceneToolMode == SceneToolMode.Terrain)
         {
             _terrainToolController.DrawAndHandle(scene, _terrainTool);
+        }
+        else
+        {
+            _terrainToolController.ClearPreview();
         }
 
         ImGui.End();
