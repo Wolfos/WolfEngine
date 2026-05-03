@@ -9,7 +9,7 @@ static const uint DECAL_CHANNEL_NORMAL = 1u << 1;
 static const uint DECAL_CHANNEL_MATERIAL = 1u << 2;
 static const uint DECAL_CHANNEL_EMISSIVE = 1u << 3;
 
-StructuredBuffer<GpuDecalProjectorData> g_Decals : register(t20);
+StructuredBuffer<GpuDecalProjectorData> g_Decals : register(t16);
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -20,7 +20,7 @@ cbuffer BindlessHandles : register(b0)
     uint depthHandle;
 };
 
-cbuffer CameraParams : register(b1)
+cbuffer CameraParams : register(b3)
 {
     row_major float4x4 viewProjection;
     row_major float4x4 invViewProjection;

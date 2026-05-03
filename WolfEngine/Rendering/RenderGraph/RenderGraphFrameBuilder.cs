@@ -337,25 +337,25 @@ internal sealed class RenderGraphFrameBuilder
 					sceneFramebufferSize.X,
 					sceneFramebufferSize.Y,
 					TextureFormat.Bgra8Unorm,
-					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.392f, 0.584f, 0.929f, 1.0f)));
 				gbufferNormalHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 					sceneFramebufferSize.X,
 					sceneFramebufferSize.Y,
 					TextureFormat.Rgba16Float,
-					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.5f, 0.5f, 1.0f, 1.0f)));
 				gbufferMaterialHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 					sceneFramebufferSize.X,
 					sceneFramebufferSize.Y,
 					TextureFormat.Rgba8Unorm,
-					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 				gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 					sceneFramebufferSize.X,
 					sceneFramebufferSize.Y,
 					TextureFormat.Rgba8Unorm,
-					TextureUsage.RenderTarget | TextureUsage.ShaderResource,
+					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			}
 			shadowMapHandle0 = _resources.CreateTransientTexture(new TextureDescriptor(
