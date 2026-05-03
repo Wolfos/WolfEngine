@@ -14,6 +14,8 @@ public sealed class TerrainRuntimeData
 	private Mesh[] _sharedLodMeshes = Array.Empty<Mesh>();
 	private Texture? _resolvedHeightmap;
 	private Texture? _resolvedControlMap;
+	private Texture? _resolvedRenderHeightmap;
+	private Texture? _resolvedRenderControlMap;
 	private TerrainLayerSet? _resolvedLayerSet;
 	private Vector2 _resolvedWorldSize;
 	private float _resolvedHeightScale;
@@ -136,8 +138,8 @@ public sealed class TerrainRuntimeData
 				chunk.LocalBounds,
 				chunk.InstanceData,
 				new TerrainDrawSurface(
-					_resolvedHeightmap,
-					_resolvedControlMap,
+					_resolvedRenderHeightmap,
+					_resolvedRenderControlMap,
 					_resolvedHeightScale,
 					layerCount,
 					heightBlendSharpness,
@@ -258,6 +260,8 @@ public sealed class TerrainRuntimeData
 		_layerSetNodeId = component.LayerSetAsset.NodeId;
 		_resolvedHeightmap = component.HeightmapAsset.Asset;
 		_resolvedControlMap = component.ControlMapAsset.Asset;
+		_resolvedRenderHeightmap = component.AuthoringPreviewHeightmap ?? _resolvedHeightmap;
+		_resolvedRenderControlMap = component.AuthoringPreviewControlMap ?? _resolvedControlMap;
 		_resolvedLayerSet = component.LayerSetAsset.Asset;
 		_resolvedWorldSize = component.GetResolvedWorldSize();
 		_resolvedHeightScale = component.GetResolvedHeightScale();
@@ -427,14 +431,14 @@ public sealed class TerrainRuntimeData
 
 	private void EnsureTerrainResources(RenderGraph renderGraph)
 	{
-		if (_resolvedHeightmap is not null)
+		if (_resolvedRenderHeightmap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedHeightmap);
+			renderGraph.EnsureTextureResources(_resolvedRenderHeightmap);
 		}
 
-		if (_resolvedControlMap is not null)
+		if (_resolvedRenderControlMap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedControlMap);
+			renderGraph.EnsureTextureResources(_resolvedRenderControlMap);
 		}
 
 		if (_resolvedLayerSet is null)

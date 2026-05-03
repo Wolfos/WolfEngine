@@ -18,7 +18,9 @@ public static class Program
 		
 		var provider = services.BuildServiceProvider();
 
-		WolfEnginePhysics.AddDefaultSystems(provider.GetRequiredService<IWorldManager>());
+		var worldManager = provider.GetRequiredService<IWorldManager>();
+		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
+		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
 		
 		AssetDatabase.SetInstanceRegistry(provider.GetRequiredService<IAssetInstanceRegistry>());
 		provider.GetRequiredService<IUiFrameProvider>();
@@ -53,6 +55,7 @@ public static class Program
 	private static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
+		services.AddSingleton<RigidbodySystem>();
 		services.AddSingleton<IEditorPlaySession, EditorPlaySession>();
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
@@ -61,6 +64,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetRefreshService, EditorAssetRefreshService>();
 		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();
 		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
+		services.AddSingleton<ITerrainTexturePersistenceService, TerrainTexturePersistenceService>();
 		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();
 		services.AddSingleton<IEditorCommandService, EditorCommandService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
@@ -109,6 +113,9 @@ public static class Program
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<IGizmoLineRenderer, GizmoLineRenderer>();
 		services.AddSingleton<TerrainToolSettingsOverlay>();
+		services.AddSingleton<ITerrainBrushGpuExecutor, TerrainBrushGpuExecutor>();
+		services.AddSingleton<ITerrainAuthoringService, TerrainAuthoringService>();
+		services.AddSingleton<TerrainToolController>();
 		services.AddSingleton<BoxColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();

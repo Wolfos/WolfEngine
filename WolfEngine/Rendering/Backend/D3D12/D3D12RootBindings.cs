@@ -21,6 +21,7 @@ internal static class D3D12RootBindings
 		internal const uint SrvT14 = 12;
 		internal const uint SrvT15 = 13;
 		internal const uint SrvT16 = 14;
+		internal const uint CbvB16 = 15;
 	}
 
 	internal static class Compute
@@ -52,6 +53,9 @@ internal static class D3D12RootBindings
 				return true;
 			case 14:
 				rootIndex = Graphics.CbvB14;
+				return true;
+			case 16:
+				rootIndex = Graphics.CbvB16;
 				return true;
 			case 27:
 				rootIndex = Graphics.BindlessCountsCbv;

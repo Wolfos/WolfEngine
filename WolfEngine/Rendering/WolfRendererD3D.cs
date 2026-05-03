@@ -866,6 +866,7 @@ private sealed class MeshResources
 			throw new ArgumentException("Texture must contain mip data.", nameof(texture));
 		}
 
+		var supportsUnorderedAccess = SupportsUnorderedAccess(texture);
 		var texDesc = new ResourceDesc
 		{
 			Dimension = ResourceDimension.Texture2D,
@@ -877,7 +878,7 @@ private sealed class MeshResources
 			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
 			SampleDesc = new(1, 0),
 			Layout = TextureLayout.LayoutUnknown,
-			Flags = ResourceFlags.None
+			Flags = supportsUnorderedAccess ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None
 		};
 
 		var defaultHeap = new HeapProperties(HeapType.Default);
@@ -1012,20 +1013,30 @@ private sealed class MeshResources
 			texture.Width,
 			texture.Height,
 			texture.Format,
-			TextureUsage.ShaderResource,
+			supportsUnorderedAccess ? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess : TextureUsage.ShaderResource,
 			mipLevels: texture.MipCount,
 			isSrgb: texture.IsSrgb);
 
 		var backendTexture = new BackendD3D12Texture();
 		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
 		var srvHandle = _gfxDevice.GlobalTable.AllocateShaderResourceView(backendTexture);
-		backendTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, DescriptorHandle.Invalid);
+		var uavHandle = supportsUnorderedAccess
+			? _gfxDevice.GlobalTable.AllocateUnorderedAccessView(backendTexture)
+			: DescriptorHandle.Invalid;
+		backendTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, uavHandle);
 
 		return new D3D12TextureResources
 		{
 			Texture = backendTexture,
 			ShaderResourceView = srvHandle
 		};
+	}
+
+	private static bool SupportsUnorderedAccess(Texture texture)
+	{
+		return texture is not null &&
+		       texture.IsSrgb == false &&
+		       (texture.Format == TextureFormat.Rgba8Unorm || texture.Format == TextureFormat.Bgra8Unorm);
 	}
 
 	private static Format ToDxgiTextureFormat(TextureFormat format, bool isSrgb)

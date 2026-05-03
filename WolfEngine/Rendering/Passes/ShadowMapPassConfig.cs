@@ -103,6 +103,8 @@ public struct ShadowMapPassConfig
 	public required IGfxTexture DepthTarget { get; init; }
 	public required IGfxBuffer? InstanceBuffer { get; init; }
 	public required IGfxBuffer? MaterialBuffer { get; init; }
+	public required IGfxBuffer? TerrainMaterialBuffer { get; init; }
+	public required IGfxBuffer? TerrainLayerBuffer { get; init; }
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }

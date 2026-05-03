@@ -9,8 +9,9 @@ StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
 
-cbuffer CameraParams : register(b14)
+cbuffer CameraParams : register(b16)
 {
     row_major float4x4 viewProjection0;
     row_major float4x4 viewProjection1;
@@ -39,6 +40,34 @@ struct VSOutput
     uint instanceId : TEXCOORD1;
 };
 
+uint ResolveMaterialIndex(uint materialHandle)
+{
+    if (IsPackedHandleValid(materialHandle))
+    {
+        uint candidateIndex = GetHandleIndex(materialHandle);
+        uint candidateGeneration = GetHandleGeneration(materialHandle);
+        if (candidateIndex < WOLF_MAX_MATERIAL_COUNT &&
+            g_MaterialGenerations[candidateIndex] == candidateGeneration)
+        {
+            return candidateIndex;
+        }
+    }
+
+    return 0;
+}
+
+float2 GetTerrainUv(float2 baseUv, GpuInstanceData instanceData)
+{
+    return instanceData.terrainHeightmapUvScaleOffset.zw + baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
+}
+
+float SampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
+{
+    Texture2D<float4> heightmap = GetTexture(terrainData.heightmapHandle);
+    SamplerState samplerState = GetSampler(terrainData.heightmapSamplerHandle);
+    return heightmap.SampleLevel(samplerState, saturate(uv), 0.0f).r * terrainData.heightScale;
+}
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -53,7 +82,19 @@ VSOutput vertexShader(VSInput input)
 
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
-    float4 worldPosition = mul(input.position, instanceData.world);
+    uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
+    float2 uv = input.uv;
+    float3 localPosition = input.position.xyz;
+    if (instanceData.drawKind == 2)
+    {
+        GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
+        uv = GetTerrainUv(input.uv, instanceData);
+        localPosition.x = instanceData.terrainChunkOriginSize.x + input.position.x * instanceData.terrainChunkOriginSize.z;
+        localPosition.y = SampleTerrainHeight(uv, terrainData) + input.position.y;
+        localPosition.z = instanceData.terrainChunkOriginSize.y + input.position.z * instanceData.terrainChunkOriginSize.w;
+    }
+
+    float4 worldPosition = mul(float4(localPosition, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
 
     row_major float4x4 viewProjection = viewProjection0;
@@ -63,7 +104,7 @@ VSOutput vertexShader(VSInput input)
     viewProjection = viewProjection2;
 #endif
     output.position = mul(worldPosition, viewProjection);
-    output.uv = input.uv;
+    output.uv = uv;
     output.instanceId = instanceId;
     return output;
 }

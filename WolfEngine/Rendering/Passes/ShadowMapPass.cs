@@ -147,6 +147,8 @@ public sealed class ShadowMapPass
 			DepthTarget = depthTarget,
 			InstanceBuffer = gpuDrawResources.InstanceBuffer,
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
+			TerrainMaterialBuffer = gpuDrawResources.TerrainMaterialBuffer,
+			TerrainLayerBuffer = gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
 			CameraBuffer = gpuDrawResources.ShadowCameraBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
@@ -202,6 +204,16 @@ public sealed class ShadowMapPass
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
+				}
+				if (config.TerrainMaterialBuffer is not null &&
+				    bucket.BufferBindings.TerrainMaterialRegisterIndex is { } terrainMaterialRegisterIndex)
+				{
+					commandList.BindConstantBuffer(terrainMaterialRegisterIndex, config.TerrainMaterialBuffer);
+				}
+				if (config.TerrainLayerBuffer is not null &&
+				    bucket.BufferBindings.TerrainLayerRegisterIndex is { } terrainLayerRegisterIndex)
+				{
+					commandList.BindConstantBuffer(terrainLayerRegisterIndex, config.TerrainLayerBuffer);
 				}
 
 				commandList.BindConstantBuffer(

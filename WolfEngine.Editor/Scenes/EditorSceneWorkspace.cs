@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using WolfEngine.Editor.Projects;
 using WolfEngine.ECS;
 
 namespace WolfEngine.Editor;
@@ -16,12 +18,22 @@ public interface IEditorSceneWorkspace
 public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 {
 	private readonly IEditorSceneFactory _sceneFactory;
+	private readonly ITerrainTexturePersistenceService _terrainTexturePersistenceService;
 	private readonly IWorldManager _worldManager;
 	private EditorScene _currentScene = new();
 
 	public EditorSceneWorkspace(IEditorSceneFactory sceneFactory, IWorldManager worldManager)
+		: this(sceneFactory, NoOpTerrainTexturePersistenceService.Instance, worldManager)
+	{
+	}
+
+	public EditorSceneWorkspace(
+		IEditorSceneFactory sceneFactory,
+		ITerrainTexturePersistenceService terrainTexturePersistenceService,
+		IWorldManager worldManager)
 	{
 		_sceneFactory = sceneFactory ?? throw new ArgumentNullException(nameof(sceneFactory));
+		_terrainTexturePersistenceService = terrainTexturePersistenceService ?? throw new ArgumentNullException(nameof(terrainTexturePersistenceService));
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 	}
 
@@ -49,6 +61,7 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 
 	public void SaveCurrentScene()
 	{
+		_terrainTexturePersistenceService.SaveDirtyTextures();
 		_sceneFactory.Save(_currentScene);
 	}
 
@@ -69,5 +82,22 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 		}
 
 		_worldManager.RegisterWorld(nextWorld);
+	}
+
+	private sealed class NoOpTerrainTexturePersistenceService : ITerrainTexturePersistenceService
+	{
+		public static readonly NoOpTerrainTexturePersistenceService Instance = new();
+
+		public void RecordPendingTextureState(IReadOnlyList<TerrainTextureStateSnapshot> snapshots)
+		{
+		}
+
+		public void ApplyTextureStates(IReadOnlyList<TerrainTextureStateSnapshot> snapshots)
+		{
+		}
+
+		public void SaveDirtyTextures()
+		{
+		}
 	}
 }

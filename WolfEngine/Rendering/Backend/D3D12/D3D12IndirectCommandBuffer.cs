@@ -20,7 +20,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		public ulong CbvB0Address;
 		public ulong CbvB2Address;
 		public ulong CbvB3Address;
-		public ulong CbvB14Address;
+		public ulong CbvB16Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
@@ -158,7 +158,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			CbvB0Address = transparentEnvironmentBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			CbvB2Address = cameraBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			CbvB3Address = transparentLightingBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			CbvB14Address = shadowCameraBuffer.Resource.Handle->GetGPUVirtualAddress(),
+			CbvB16Address = shadowCameraBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT10Address = instanceBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT11Address = materialBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT12Address = drawArgsBuffer.Resource.Handle->GetGPUVirtualAddress() + (commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),

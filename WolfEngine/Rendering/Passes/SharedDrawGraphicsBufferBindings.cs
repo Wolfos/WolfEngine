@@ -85,6 +85,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 			reflection.GetResource("g_InstanceTable").RegisterIndex,
 			reflection.GetResource("g_MaterialTable").RegisterIndex,
 			reflection.GetResource("g_DrawArgsTable").RegisterIndex,
-			reflection.GetResource("g_MaterialGenerations").RegisterIndex);
+			reflection.GetResource("g_MaterialGenerations").RegisterIndex,
+			reflection.TryGetResource("g_TerrainMaterialTable", out var terrain) ? terrain.RegisterIndex : null,
+			reflection.TryGetResource("g_TerrainLayerTable", out var terrainLayer) ? terrainLayer.RegisterIndex : null);
 	}
 }

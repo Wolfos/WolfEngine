@@ -592,11 +592,14 @@ internal unsafe class WolfRendererMetal : IRenderer
             throw new ArgumentException("Texture must contain mip data.", nameof(texture));
         }
 
+        var usage = SupportsUnorderedAccess(texture)
+            ? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess
+            : TextureUsage.ShaderResource;
         var descriptor = new TextureDescriptor(
             texture.Width,
             texture.Height,
             texture.Format,
-            TextureUsage.ShaderResource,
+            usage,
             mipLevels: texture.MipCount,
             isSrgb: texture.IsSrgb);
 
@@ -744,6 +747,13 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         _presentFrameIndex++;
+    }
+
+    private static bool SupportsUnorderedAccess(Texture texture)
+    {
+        return texture is not null &&
+               texture.IsSrgb == false &&
+               (texture.Format == TextureFormat.Rgba8Unorm || texture.Format == TextureFormat.Bgra8Unorm);
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)

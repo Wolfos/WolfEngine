@@ -1104,7 +1104,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		argumentDescs[4].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB3;
 
 		argumentDescs[5].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[5].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB14;
+		argumentDescs[5].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB16;
 
 		argumentDescs[6].Type = IndirectArgumentType.ShaderResourceView;
 		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
@@ -1367,7 +1367,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
-		var rootParameters = stackalloc RootParameter[15];
+		var rootParameters = stackalloc RootParameter[16];
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
@@ -1404,6 +1404,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.CbvB14].Anonymous.Descriptor = new RootDescriptor(14, 0);
 		rootParameters[D3D12RootBindings.Graphics.CbvB14].ShaderVisibility = ShaderVisibility.All;
 
+		rootParameters[D3D12RootBindings.Graphics.CbvB16].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB16].Anonymous.Descriptor = new RootDescriptor(16, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB16].ShaderVisibility = ShaderVisibility.All;
+
 		rootParameters[D3D12RootBindings.Graphics.SrvT10].ParameterType = RootParameterType.TypeSrv;
 		rootParameters[D3D12RootBindings.Graphics.SrvT10].Anonymous.Descriptor = new RootDescriptor(10, 0);
 		rootParameters[D3D12RootBindings.Graphics.SrvT10].ShaderVisibility = ShaderVisibility.All;
@@ -1434,7 +1438,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 15,
+			NumParameters = 16,
 			PParameters = rootParameters,
 			NumStaticSamplers = 0,
 			PStaticSamplers = null,

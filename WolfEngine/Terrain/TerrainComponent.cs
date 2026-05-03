@@ -38,6 +38,14 @@ public struct TerrainComponent : IEntityComponent
 	[NotSerialized]
 	[HideFromEditor]
 	internal int CachedHeightfieldFailureVersion;
+	[NotSerialized]
+	[JsonIgnore]
+	[HideFromEditor]
+	public Texture? AuthoringPreviewHeightmap;
+	[NotSerialized]
+	[JsonIgnore]
+	[HideFromEditor]
+	public Texture? AuthoringPreviewControlMap;
 
 	public void ApplyDefaultValues(World world, Entity entity)
 	{
@@ -52,6 +60,8 @@ public struct TerrainComponent : IEntityComponent
 		ChunkSizeInQuads = 0;
 		PhysicsCacheValid = false;
 		CachedHeightfieldFailureVersion = -1;
+		AuthoringPreviewHeightmap = null;
+		AuthoringPreviewControlMap = null;
 	}
 
 	public Vector2 GetResolvedWorldSize()

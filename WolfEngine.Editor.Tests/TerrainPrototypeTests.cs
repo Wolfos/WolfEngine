@@ -221,6 +221,41 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void EnsureBuilt_UsesAuthoringPreviewForRenderingWithoutRefreshingHeightSamples()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		var sourceTexture = CreateHeightTexture("height-source", 5, 5, 0);
+		registry.Register(heightmapId, sourceTexture);
+
+		var component = new TerrainComponent
+		{
+			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64.0f, 64.0f),
+			HeightScaleMeters = 8.0f,
+			ChunkSizeMeters = 64.0f,
+			LodCount = 2,
+			Lod0ResolutionInQuads = 4,
+			LodDistancesMeters = [120.0f]
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		var baselineVersion = runtime.RuntimeVersion;
+
+		component.AuthoringPreviewHeightmap = CreateHeightTexture("height-preview", 5, 5, 255);
+		var renderGraph = CreateTestRenderGraph();
+		var material = new Material("__terrain__");
+		var records = new List<TerrainChunkDrawRecord>();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		runtime.CollectChunkDrawRecords(renderGraph, material, new Vector3(0.0f, 10.0f, -20.0f), Matrix4x4.Identity, records);
+
+		Assert.That(runtime.RuntimeVersion, Is.EqualTo(baselineVersion));
+		Assert.That(records, Has.Count.EqualTo(1));
+		Assert.That(records[0].Surface.Heightmap, Is.SameAs(component.AuthoringPreviewHeightmap));
+	}
+
+	[Test]
 	public void CollectChunkDrawRecords_ReusesSharedMaterialAcrossCalls()
 	{
 		using var registry = new TestAssetRegistry();
