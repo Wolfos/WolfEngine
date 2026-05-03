@@ -20,13 +20,13 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		public ulong CbvB0Address;
 		public ulong CbvB2Address;
 		public ulong CbvB3Address;
-		public ulong CbvB16Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
 		public ulong SrvT13Address;
 		public ulong SrvT14Address;
 		public ulong SrvT15Address;
+		public ulong CbvB16Address;
 		public DrawIndexedArguments DrawArguments;
 	}
 

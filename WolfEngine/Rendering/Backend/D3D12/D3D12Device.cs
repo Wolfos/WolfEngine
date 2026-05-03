@@ -1103,26 +1103,26 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		argumentDescs[4].Type = IndirectArgumentType.ConstantBufferView;
 		argumentDescs[4].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB3;
 
-		argumentDescs[5].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[5].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB16;
+		argumentDescs[5].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[5].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
 
 		argumentDescs[6].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
+		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
 
 		argumentDescs[7].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[7].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
+		argumentDescs[7].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
 
 		argumentDescs[8].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[8].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
+		argumentDescs[8].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
 
 		argumentDescs[9].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[9].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
+		argumentDescs[9].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT14;
 
 		argumentDescs[10].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[10].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT14;
+		argumentDescs[10].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT15;
 
-		argumentDescs[11].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[11].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT15;
+		argumentDescs[11].Type = IndirectArgumentType.ConstantBufferView;
+		argumentDescs[11].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB16;
 
 		argumentDescs[12].Type = IndirectArgumentType.DrawIndexed;
 
