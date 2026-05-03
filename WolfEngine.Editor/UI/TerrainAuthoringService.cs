@@ -141,6 +141,12 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		{
 			return;
 		}
+		
+		// Decreased sensitivity for RaiseLower action
+		if (stroke.Request.Operation == TerrainBrushOperation.RaiseLower)
+		{
+			strength *= 0.1f;
+		}
 
 		if (TryBuildBrushPlacement(ref terrain, stroke.CurrentPreviewTexture.Width, stroke.CurrentPreviewTexture.Height, localPosition, radius, out var placement) == false)
 		{
