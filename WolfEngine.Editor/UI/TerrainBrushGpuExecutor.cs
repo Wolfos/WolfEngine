@@ -34,6 +34,8 @@ public interface ITerrainBrushGpuExecutor
 	TerrainGpuStrokePreviewSet CreateStrokeResources(Texture sourceTexture, TerrainAuthoringSurfaceTarget surfaceTarget);
 	void ApplyStamp(in TerrainGpuBrushDispatch dispatch);
 	byte[] ReadTopMip(Texture texture);
+	void RefreshTextureResources(Texture texture);
+	void SynchronizePreviewTexture(Texture previewTexture, Texture sourceTexture, TerrainAuthoringSurfaceTarget surfaceTarget);
 }
 
 internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
@@ -88,6 +90,34 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	{
 		ArgumentNullException.ThrowIfNull(texture);
 		return _mainThreadDispatcher.Invoke(() => ReadTopMipOnMainThread(texture));
+	}
+
+	public void RefreshTextureResources(Texture texture)
+	{
+		ArgumentNullException.ThrowIfNull(texture);
+		_mainThreadDispatcher.Invoke(() =>
+		{
+			var resources = _renderer.CreateTextureResources(texture);
+			texture.MarkGpuResourcesCreated(resources);
+		});
+	}
+
+	public void SynchronizePreviewTexture(Texture previewTexture, Texture sourceTexture, TerrainAuthoringSurfaceTarget surfaceTarget)
+	{
+		ArgumentNullException.ThrowIfNull(previewTexture);
+		ArgumentNullException.ThrowIfNull(sourceTexture);
+		_mainThreadDispatcher.Invoke(() =>
+		{
+			var synchronizedPreview = CreatePreviewTexture(previewTexture.Name, sourceTexture, surfaceTarget);
+			previewTexture.ApplyTextureData(
+				synchronizedPreview.Width,
+				synchronizedPreview.Height,
+				synchronizedPreview.IsSrgb,
+				synchronizedPreview.Format,
+				synchronizedPreview.MipLevels);
+			var resources = _renderer.CreateTextureResources(previewTexture);
+			previewTexture.MarkGpuResourcesCreated(resources);
+		});
 	}
 
 	private void ApplyStampOnMainThread(in TerrainGpuBrushDispatch dispatch)
@@ -357,17 +387,35 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 
 	private static Texture CreateHeightPreviewTexture(string name, Texture source)
 	{
+		if (source.Format == TextureFormat.Rgba16Float)
+		{
+			return CloneTexture(name, source);
+		}
+
 		if (source.Format != TextureFormat.Rgba8Unorm && source.Format != TextureFormat.Bgra8Unorm)
 		{
 			throw new InvalidOperationException($"Terrain height painting currently expects an RGBA8 source heightmap, but got '{source.Format}'.");
 		}
 
 		var sourceTopMip = source.MipLevels[0];
+		var previewData = ConvertHeightTopMipToRgba16Float(sourceTopMip, source.Format);
+
+		return new Texture(
+			name,
+			source.Width,
+			source.Height,
+			false,
+			TextureFormat.Rgba16Float,
+			[new TextureMipData(sourceTopMip.Width, sourceTopMip.Height, previewData)]);
+	}
+
+	private static byte[] ConvertHeightTopMipToRgba16Float(TextureMipData sourceTopMip, TextureFormat sourceFormat)
+	{
 		var previewData = new byte[sourceTopMip.Width * sourceTopMip.Height * 8];
 		for (var pixelIndex = 0; pixelIndex < sourceTopMip.Width * sourceTopMip.Height; pixelIndex++)
 		{
 			var sourceOffset = pixelIndex * 4;
-			var encoded = source.Format == TextureFormat.Bgra8Unorm
+			var encoded = sourceFormat == TextureFormat.Bgra8Unorm
 				? sourceTopMip.Data[sourceOffset + 2]
 				: sourceTopMip.Data[sourceOffset];
 			var normalizedHeight = encoded / 255.0f;
@@ -380,13 +428,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 			WriteUInt16(previewData, destinationOffset + 6, halfAlpha);
 		}
 
-		return new Texture(
-			name,
-			source.Width,
-			source.Height,
-			false,
-			TextureFormat.Rgba16Float,
-			[new TextureMipData(sourceTopMip.Width, sourceTopMip.Height, previewData)]);
+		return previewData;
 	}
 
 	private static string GetEntryPoint(TerrainBrushOperation operation)

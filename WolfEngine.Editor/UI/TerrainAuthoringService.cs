@@ -50,6 +50,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly ITerrainTexturePersistenceService _terrainTexturePersistenceService;
+	private readonly ITerrainTexturePreviewRegistry _terrainTexturePreviewRegistry;
 	private readonly ITerrainBrushGpuExecutor _terrainBrushGpuExecutor;
 	private StrokeState? _activeStroke;
 
@@ -57,11 +58,13 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		IEditorUndoRedoService undoRedoService,
 		IEditorInteractionState interactionState,
 		ITerrainTexturePersistenceService terrainTexturePersistenceService,
+		ITerrainTexturePreviewRegistry terrainTexturePreviewRegistry,
 		ITerrainBrushGpuExecutor terrainBrushGpuExecutor)
 	{
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_terrainTexturePersistenceService = terrainTexturePersistenceService ?? throw new ArgumentNullException(nameof(terrainTexturePersistenceService));
+		_terrainTexturePreviewRegistry = terrainTexturePreviewRegistry ?? throw new ArgumentNullException(nameof(terrainTexturePreviewRegistry));
 		_terrainBrushGpuExecutor = terrainBrushGpuExecutor ?? throw new ArgumentNullException(nameof(terrainBrushGpuExecutor));
 	}
 
@@ -85,10 +88,18 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			return false;
 		}
 
+		var previousPreviewTexture = GetPreviewTexture(ref terrain, request.SurfaceTarget);
+
 		try
 		{
-			var previewSet = _terrainBrushGpuExecutor.CreateStrokeResources(sourceTexture, request.SurfaceTarget);
+			var previewSet = _terrainBrushGpuExecutor.CreateStrokeResources(previousPreviewTexture ?? sourceTexture, request.SurfaceTarget);
+			if (previousPreviewTexture is not null)
+			{
+				_terrainTexturePreviewRegistry.UnregisterPreview(sourceAssetId, request.SurfaceTarget, previousPreviewTexture);
+			}
+
 			AssignPreviewTexture(ref terrain, request.SurfaceTarget, previewSet.CurrentPreviewTexture);
+			_terrainTexturePreviewRegistry.RegisterPreview(sourceAssetId, request.SurfaceTarget, previewSet.CurrentPreviewTexture);
 			_activeStroke = new StrokeState(
 				scene,
 				terrainEntity,
@@ -97,12 +108,19 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 				previewSet.CurrentPreviewTexture,
 				previewSet.ScratchPreviewTexture,
 				sourceAssetId,
-				CaptureTextureSnapshot(sourceAssetId, sourceTexture));
+				CaptureTextureSnapshot(sourceAssetId, sourceTexture),
+				previousPreviewTexture);
 			return true;
 		}
 		catch
 		{
 			ClearPreviewTexture(ref terrain, request.SurfaceTarget);
+			if (previousPreviewTexture is not null)
+			{
+				AssignPreviewTexture(ref terrain, request.SurfaceTarget, previousPreviewTexture);
+				_terrainTexturePreviewRegistry.RegisterPreview(sourceAssetId, request.SurfaceTarget, previousPreviewTexture);
+			}
+
 			_activeStroke = null;
 			throw;
 		}
@@ -173,8 +191,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			placement.CenterPixels,
 			placement.RadiusPixels,
 			stroke.FlattenHeightNormalized));
+		_terrainTexturePreviewRegistry.UnregisterPreview(stroke.SourceAssetId, stroke.Request.SurfaceTarget, stroke.CurrentPreviewTexture);
 		stroke.SwapPreviewTextures();
 		AssignPreviewTexture(ref terrain, stroke.Request.SurfaceTarget, stroke.CurrentPreviewTexture);
+		_terrainTexturePreviewRegistry.RegisterPreview(stroke.SourceAssetId, stroke.Request.SurfaceTarget, stroke.CurrentPreviewTexture);
 	}
 
 	public bool EndStroke()
@@ -210,7 +230,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			stroke.SourceTexture.IsSrgb,
 			stroke.SourceTexture.Format,
 			TextureMipGenerator.GenerateRgba32MipChain(topMip));
-		ClearPreviewTexture(ref terrain, stroke.Request.SurfaceTarget);
+		_terrainBrushGpuExecutor.SynchronizePreviewTexture(previewTexture, stroke.SourceTexture, stroke.Request.SurfaceTarget);
 
 		var afterSnapshot = CaptureTextureSnapshot(stroke.SourceAssetId, stroke.SourceTexture);
 		var snapshots = new[] { afterSnapshot };
@@ -237,7 +257,16 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		if (world.IsAlive(stroke.TerrainEntity) && world.HasComponent<TerrainComponent>(stroke.TerrainEntity))
 		{
 			ref var terrain = ref world.GetComponent<TerrainComponent>(stroke.TerrainEntity);
-			ClearPreviewTexture(ref terrain, stroke.Request.SurfaceTarget);
+			_terrainTexturePreviewRegistry.UnregisterPreview(stroke.SourceAssetId, stroke.Request.SurfaceTarget, stroke.CurrentPreviewTexture);
+			if (stroke.PreviousPreviewTexture is not null)
+			{
+				AssignPreviewTexture(ref terrain, stroke.Request.SurfaceTarget, stroke.PreviousPreviewTexture);
+				_terrainTexturePreviewRegistry.RegisterPreview(stroke.SourceAssetId, stroke.Request.SurfaceTarget, stroke.PreviousPreviewTexture);
+			}
+			else
+			{
+				ClearPreviewTexture(ref terrain, stroke.Request.SurfaceTarget);
+			}
 		}
 
 		_activeStroke = null;
@@ -371,7 +400,8 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			Texture currentPreviewTexture,
 			Texture scratchPreviewTexture,
 			Guid sourceAssetId,
-			TerrainTextureStateSnapshot beforeSnapshot)
+			TerrainTextureStateSnapshot beforeSnapshot,
+			Texture? previousPreviewTexture)
 		{
 			Scene = scene;
 			TerrainEntity = terrainEntity;
@@ -381,6 +411,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			ScratchPreviewTexture = scratchPreviewTexture;
 			SourceAssetId = sourceAssetId;
 			BeforeSnapshot = beforeSnapshot;
+			PreviousPreviewTexture = previousPreviewTexture;
 			FlattenHeightNormalized = request.Settings.FlattenHeightNormalized;
 		}
 
@@ -392,6 +423,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		public Texture ScratchPreviewTexture { get; private set; }
 		public Guid SourceAssetId { get; }
 		public TerrainTextureStateSnapshot BeforeSnapshot { get; }
+		public Texture? PreviousPreviewTexture { get; }
 		public float? FlattenHeightNormalized { get; set; }
 
 		public void SwapPreviewTextures()

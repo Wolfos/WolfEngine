@@ -71,6 +71,8 @@ public sealed class TerrainAuthoringServiceTests
 		var centerOffset = ((2 * 5) + 2) * 4;
 		Assert.That(source.MipLevels[0].Data[centerOffset], Is.GreaterThan(10));
 		Assert.That(interactionState.IsSceneDirty, Is.True);
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(GetTerrainEntity(scene));
+		Assert.That(terrain.AuthoringPreviewHeightmap, Is.Not.Null);
 		undoRedo.Received(1).CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
 
@@ -108,10 +110,12 @@ public sealed class TerrainAuthoringServiceTests
 	{
 		undoRedo = Substitute.For<IEditorUndoRedoService>();
 		interactionState = new EditorInteractionState();
+		var previewRegistry = new TerrainTexturePreviewRegistry();
 		return new TerrainAuthoringService(
 			undoRedo,
 			interactionState,
 			new TestTerrainTexturePersistenceService(),
+			previewRegistry,
 			new TestTerrainBrushGpuExecutor());
 	}
 
@@ -257,6 +261,41 @@ public sealed class TerrainAuthoringServiceTests
 			return texture.MipLevels[0].Data.ToArray();
 		}
 
+		public void RefreshTextureResources(Texture texture)
+		{
+		}
+
+		public void SynchronizePreviewTexture(Texture previewTexture, Texture sourceTexture, TerrainAuthoringSurfaceTarget surfaceTarget)
+		{
+			var clone = CloneTexture(previewTexture.Name, sourceTexture);
+			if (surfaceTarget == TerrainAuthoringSurfaceTarget.Heightmap)
+			{
+				var sourceData = sourceTexture.MipLevels[0].Data;
+				var previewData = new byte[sourceTexture.Width * sourceTexture.Height * 8];
+				for (var i = 0; i < sourceTexture.Width * sourceTexture.Height; i++)
+				{
+					var encoded = sourceData[i * 4] / 255.0f;
+					var half = (ushort)BitConverter.HalfToUInt16Bits((Half)encoded);
+					var alpha = (ushort)BitConverter.HalfToUInt16Bits((Half)1.0f);
+					var offset = i * 8;
+					WriteHalf(previewData, offset, half);
+					WriteHalf(previewData, offset + 2, half);
+					WriteHalf(previewData, offset + 4, half);
+					WriteHalf(previewData, offset + 6, alpha);
+				}
+
+				previewTexture.ApplyTextureData(
+					sourceTexture.Width,
+					sourceTexture.Height,
+					false,
+					TextureFormat.Rgba16Float,
+					[new TextureMipData(sourceTexture.Width, sourceTexture.Height, previewData)]);
+				return;
+			}
+
+			previewTexture.ApplyTextureData(clone.Width, clone.Height, clone.IsSrgb, clone.Format, clone.MipLevels);
+		}
+
 		private static Texture CloneTexture(string name, Texture source)
 		{
 			var mipLevels = new TextureMipData[source.MipLevels.Length];
@@ -272,6 +311,12 @@ public sealed class TerrainAuthoringServiceTests
 		private static byte EncodeNormalized(float value)
 		{
 			return (byte)Math.Clamp((int)MathF.Round(Math.Clamp(value, 0.0f, 1.0f) * 255.0f), 0, 255);
+		}
+
+		private static void WriteHalf(byte[] data, int offset, ushort value)
+		{
+			data[offset] = (byte)(value & 0xff);
+			data[offset + 1] = (byte)(value >> 8);
 		}
 	}
 

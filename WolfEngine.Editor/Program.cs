@@ -64,6 +64,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetRefreshService, EditorAssetRefreshService>();
 		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();
 		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
+		services.AddSingleton<ITerrainTexturePreviewRegistry, TerrainTexturePreviewRegistry>();
 		services.AddSingleton<ITerrainTexturePersistenceService, TerrainTexturePersistenceService>();
 		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();
 		services.AddSingleton<IEditorCommandService, EditorCommandService>();

@@ -181,21 +181,25 @@ public class SceneWindow: EditorWindow
                                   || ImGui.IsKeyDown(ImGuiKey.RightCtrl)
                                   || ImGui.IsKeyDown(ImGuiKey.LeftSuper)
                                   || ImGui.IsKeyDown(ImGuiKey.RightSuper);
-        ApplyShortcut(SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
-            hovered || focused,
-            primaryModifierDown,
-            ImGui.IsKeyPressed(ImGuiKey.W),
-            ImGui.IsKeyPressed(ImGuiKey.E),
-            ImGui.IsKeyPressed(ImGuiKey.R),
-            ImGui.IsKeyPressed(ImGuiKey.T),
-            ImGui.IsKeyPressed(ImGuiKey._1),
-            ImGui.IsKeyPressed(ImGuiKey._2),
-            ImGui.IsKeyPressed(ImGuiKey._3),
-            ImGui.IsKeyPressed(ImGuiKey._4),
-            ImGui.IsKeyPressed(ImGuiKey._5),
-            ImGui.IsKeyPressed(ImGuiKey._6),
-            io.WantTextInput,
-            _sceneToolMode)));
+
+        if (_rightMousePressStartedHere == false)
+        {
+            ApplyShortcut(SceneShortcutResolver.Resolve(new SceneShortcutSnapshot(
+                hovered || focused,
+                primaryModifierDown,
+                ImGui.IsKeyPressed(ImGuiKey.W),
+                ImGui.IsKeyPressed(ImGuiKey.E),
+                ImGui.IsKeyPressed(ImGuiKey.R),
+                ImGui.IsKeyPressed(ImGuiKey.T),
+                ImGui.IsKeyPressed(ImGuiKey._1),
+                ImGui.IsKeyPressed(ImGuiKey._2),
+                ImGui.IsKeyPressed(ImGuiKey._3),
+                ImGui.IsKeyPressed(ImGuiKey._4),
+                ImGui.IsKeyPressed(ImGuiKey._5),
+                ImGui.IsKeyPressed(ImGuiKey._6),
+                io.WantTextInput,
+                _sceneToolMode)));
+        }
 
         if (_sceneToolMode == SceneToolMode.Terrain)
         {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
@@ -27,16 +28,22 @@ public sealed class TerrainTexturePersistenceService : ITerrainTexturePersistenc
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
 	private readonly IRuntimeArtifactTargetProvider _runtimeArtifactTargetProvider;
+	private readonly ITerrainTexturePreviewRegistry _terrainTexturePreviewRegistry;
+	private readonly ITerrainBrushGpuExecutor _terrainBrushGpuExecutor;
 	private readonly Dictionary<Guid, TerrainTextureStateSnapshot> _dirtyStates = new();
 
 	public TerrainTexturePersistenceService(
 		IEditorProjectService projectService,
 		ITextureGpuCompressionService textureGpuCompressionService,
-		IRuntimeArtifactTargetProvider runtimeArtifactTargetProvider)
+		IRuntimeArtifactTargetProvider runtimeArtifactTargetProvider,
+		ITerrainTexturePreviewRegistry terrainTexturePreviewRegistry,
+		ITerrainBrushGpuExecutor terrainBrushGpuExecutor)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_textureGpuCompressionService = textureGpuCompressionService ?? throw new ArgumentNullException(nameof(textureGpuCompressionService));
 		_runtimeArtifactTargetProvider = runtimeArtifactTargetProvider ?? throw new ArgumentNullException(nameof(runtimeArtifactTargetProvider));
+		_terrainTexturePreviewRegistry = terrainTexturePreviewRegistry ?? throw new ArgumentNullException(nameof(terrainTexturePreviewRegistry));
+		_terrainBrushGpuExecutor = terrainBrushGpuExecutor ?? throw new ArgumentNullException(nameof(terrainBrushGpuExecutor));
 	}
 
 	public void RecordPendingTextureState(IReadOnlyList<TerrainTextureStateSnapshot> snapshots)
@@ -69,6 +76,7 @@ public sealed class TerrainTexturePersistenceService : ITerrainTexturePersistenc
 					snapshot.IsSrgb,
 					snapshot.Format,
 					CloneMipLevels(snapshot.MipLevels));
+				SynchronizeRegisteredPreviews(snapshot.AssetId, texture);
 			}
 
 			if (snapshot.AssetId != Guid.Empty)
@@ -163,6 +171,19 @@ public sealed class TerrainTexturePersistenceService : ITerrainTexturePersistenc
 			.Where(artifact => string.Equals(artifact.Kind, "RuntimeTexture", StringComparison.Ordinal))
 			.FirstOrDefault(artifact => string.Equals(artifact.Target, target, StringComparison.OrdinalIgnoreCase));
 		return targetArtifact?.RelativePath ?? string.Empty;
+	}
+
+	private void SynchronizeRegisteredPreviews(Guid assetId, Texture sourceTexture)
+	{
+		var registrations = _terrainTexturePreviewRegistry.GetPreviews(assetId);
+		for (var i = 0; i < registrations.Count; i++)
+		{
+			var registration = registrations[i];
+			_terrainBrushGpuExecutor.SynchronizePreviewTexture(
+				registration.PreviewTexture,
+				sourceTexture,
+				registration.SurfaceTarget);
+		}
 	}
 
 	private static TerrainTextureStateSnapshot CloneSnapshot(TerrainTextureStateSnapshot snapshot)
