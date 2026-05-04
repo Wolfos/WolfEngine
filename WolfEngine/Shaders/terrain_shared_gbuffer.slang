@@ -193,16 +193,28 @@ uint ResolveMaterialIndex(uint materialHandle)
     return 0;
 }
 
-float4 SampleControlWeights(float2 uv, GpuTerrainMaterialData terrainData)
+struct TerrainLayerBlend
 {
-    if (terrainData.hasControlMap == 0)
+    uint4 indices;
+    float4 weights;
+};
+
+TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terrainData)
+{
+    TerrainLayerBlend blend;
+    blend.indices = uint4(0, 0, 0, 0);
+    blend.weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
+
+    if (terrainData.hasLayerMaps == 0)
     {
-        return float4(1.0f, 0.0f, 0.0f, 0.0f);
+        return blend;
     }
 
-    Texture2D<float4> controlTex = GetTexture(terrainData.controlMapHandle);
-    SamplerState samplerState = GetSampler(terrainData.controlSamplerHandle);
-    return saturate(controlTex.Sample(samplerState, uv));
+    SamplerState samplerState = GetSampler(terrainData.layerMapSamplerHandle);
+    float4 indexSample = GetTexture(terrainData.layerIndexMapHandle).SampleLevel(samplerState, uv, 0.0f);
+    blend.indices = uint4(round(saturate(indexSample) * 255.0f));
+    blend.weights = saturate(GetTexture(terrainData.layerWeightMapHandle).Sample(samplerState, uv));
+    return blend;
 }
 
 float4 NormalizeWeights(float4 weights)
@@ -315,19 +327,21 @@ PSOutput fragmentShader(VSOutput input)
     uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
 
-    float4 control = MaskInactiveLayers(SampleControlWeights(input.uv, terrainData), terrainData.layerCount);
-    float4 biased = control;
+    TerrainLayerBlend blend = SampleTerrainLayerBlend(input.uv, terrainData);
+    blend.weights = MaskInactiveLayers(blend.weights, terrainData.layerCount);
+    float4 biased = blend.weights;
     LayerSample layerSamples[4];
     [unroll]
     for (uint i = 0; i < 4; i++)
     {
         layerSamples[i] = (LayerSample)0;
-        if (i >= terrainData.layerCount)
+        uint layerIndex = min(blend.indices[i], max(terrainData.layerCount, 1u) - 1u);
+        if (blend.weights[i] <= 0.0f || layerIndex >= terrainData.layerCount)
         {
             continue;
         }
 
-        GpuTerrainLayerData layerData = g_TerrainLayerTable[terrainData.layerStart + i];
+        GpuTerrainLayerData layerData = g_TerrainLayerTable[terrainData.layerStart + layerIndex];
         layerSamples[i] = SampleTriplanarLayer(
             input.worldPosition,
             input.normal,
@@ -340,10 +354,10 @@ PSOutput fragmentShader(VSOutput input)
             terrainData);
     }
 
-    if (terrainData.layerCount > 0) biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 1) biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 2) biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    if (terrainData.layerCount > 3) biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     float4 weights = NormalizeWeights(biased);
 
     float4 albedo = layerSamples[0].albedo * weights.x +

@@ -973,7 +973,7 @@ public sealed class RigidbodySystemTests
 	{
 		return new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(4.0f, 4.0f),
 			HeightScaleMeters = 4.0f,
 			ChunkSizeMeters = 4.0f,
@@ -993,6 +993,34 @@ public sealed class RigidbodySystemTests
 	private static Texture CreateHeightTexture(string name, int width, int height, byte[] normalizedHeights)
 	{
 		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(width, height, normalizedHeights));
+	}
+
+	private static TerrainAsset CreateTerrainAssetFromHeightTexture(Texture heightTexture)
+	{
+		var topMip = heightTexture.MipLevels[0];
+		var heightData = new byte[topMip.Width * topMip.Height * 2];
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			var height = (ushort)(topMip.Data[i * 4] * 257);
+			var offset = i * 2;
+			heightData[offset] = (byte)(height & 0xFF);
+			heightData[offset + 1] = (byte)(height >> 8);
+		}
+
+		var heightmap = new Texture(heightTexture.Name, topMip.Width, topMip.Height, false, TextureFormat.R16Unorm, [new TextureMipData(topMip.Width, topMip.Height, heightData)]);
+		var indexData = new byte[topMip.Width * topMip.Height * 4];
+		var weightData = new byte[topMip.Width * topMip.Height * 4];
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			weightData[i * 4] = 255;
+		}
+
+		var layerMips = TerrainLayerMapUtility.GenerateLayerMipChain(
+			new TextureMipData(topMip.Width, topMip.Height, indexData),
+			new TextureMipData(topMip.Width, topMip.Height, weightData));
+		var layerIndexMap = new Texture($"{heightTexture.Name}_layers", topMip.Width, topMip.Height, false, TextureFormat.Rgba8Uint, layerMips.Indices);
+		var layerWeightMap = new Texture($"{heightTexture.Name}_weights", topMip.Width, topMip.Height, false, TextureFormat.Rgba8Unorm, layerMips.Weights);
+		return new TerrainAsset(heightTexture.Name, heightmap, layerIndexMap, layerWeightMap);
 	}
 
 	private static TextureMipData[] CreateHeightMipLevels(int width, int height, byte normalizedHeight)
@@ -1111,7 +1139,14 @@ public sealed class RigidbodySystemTests
 				return null;
 			}
 
-			return expectedType.IsInstanceOfType(asset) ? asset : null;
+			if (expectedType.IsInstanceOfType(asset))
+			{
+				return asset;
+			}
+
+			return expectedType == typeof(TerrainAsset) && asset is Texture heightTexture
+				? CreateTerrainAssetFromHeightTexture(heightTexture)
+				: null;
 		}
 
 		public void RefreshProject(string projectRootPath, AssetDatabase database)

@@ -281,11 +281,12 @@ public sealed class GpuDrawPass
 			uint emissiveHandle = _bindlessRegistry.ErrorTextureHandle.Value;
 			uint samplerHandle = _bindlessRegistry.ErrorSamplerHandle.Value;
 			uint heightmapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint controlMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
-			uint hasControlMap = 0;
+			uint layerIndexMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint layerWeightMapHandle = _bindlessRegistry.ErrorTextureHandle.Value;
+			uint hasLayerMaps = 0;
 			uint heightmapSamplerHandle = _terrainHeightSampler.Value;
 			uint layerSamplerHandle = _terrainLayerSampler.Value;
-			uint controlSamplerHandle = _terrainControlSampler.Value;
+			uint layerMapSamplerHandle = _terrainControlSampler.Value;
 			uint layerStart = 0;
 			uint layerCount = 0;
 			var heightBlendSharpness = 0.0f;
@@ -408,10 +409,19 @@ public sealed class GpuDrawPass
 					heightmapHandle = RegisterTerrainTexture(heightmap);
 				}
 
-				if (terrainSurface.ControlMap is { } controlMap)
+				if (terrainSurface.LayerIndexMap is { } layerIndexMap)
 				{
-					controlMapHandle = RegisterTerrainTexture(controlMap);
-					hasControlMap = 1;
+					layerIndexMapHandle = RegisterTerrainTexture(layerIndexMap);
+				}
+
+				if (terrainSurface.LayerWeightMap is { } layerWeightMap)
+				{
+					layerWeightMapHandle = RegisterTerrainTexture(layerWeightMap);
+				}
+
+				if (terrainSurface.LayerIndexMap is not null && terrainSurface.LayerWeightMap is not null)
+				{
+					hasLayerMaps = 1;
 				}
 			}
 
@@ -465,11 +475,12 @@ public sealed class GpuDrawPass
 					_terrainMaterialUpdateData.Add(new GpuTerrainMaterialUpdateData(
 						update.MaterialHandle.Value,
 						heightmapHandle,
-						controlMapHandle,
-						hasControlMap,
+						layerIndexMapHandle,
+						layerWeightMapHandle,
+						hasLayerMaps,
 						heightmapSamplerHandle,
 						layerSamplerHandle,
-						controlSamplerHandle,
+						layerMapSamplerHandle,
 						layerStart,
 						layerCount,
 						heightBlendSharpness,
@@ -1661,12 +1672,13 @@ public sealed class GpuDrawPass
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorSamplerHandle.Value);
-		var fallbackTerrainMaterialData = new GpuTerrainMaterialData(
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			_bindlessRegistry.ErrorTextureHandle.Value,
-			0,
-			_terrainHeightSampler.Value,
-			_terrainLayerSampler.Value,
+			var fallbackTerrainMaterialData = new GpuTerrainMaterialData(
+				_bindlessRegistry.ErrorTextureHandle.Value,
+				_bindlessRegistry.ErrorTextureHandle.Value,
+				_bindlessRegistry.ErrorTextureHandle.Value,
+				0,
+				_terrainHeightSampler.Value,
+				_terrainLayerSampler.Value,
 			_terrainControlSampler.Value,
 			0,
 			1,

@@ -173,13 +173,11 @@ public sealed class ScenePersistenceTests
 		var entity = scene.World.CreateEntity("Terrain");
 		scene.World.AddTransform(entity, Matrix4x4.CreateTranslation(10.0f, 2.0f, -4.0f));
 
-		var heightmapId = Guid.NewGuid();
-		var controlMapId = Guid.NewGuid();
+		var terrainAssetId = Guid.NewGuid();
 		var layerSetId = Guid.NewGuid();
 		scene.World.AddComponent(entity, new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
-			ControlMapAsset = new AssetRef<Texture> { NodeId = controlMapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = terrainAssetId },
 			LayerSetAsset = new AssetRef<TerrainLayerSet> { NodeId = layerSetId },
 			WorldSizeMeters = new Vector2(1024.0f, 768.0f),
 			HeightScaleMeters = 96.0f,
@@ -194,8 +192,7 @@ public sealed class ScenePersistenceTests
 		var loadedEntity = FindEntityByName(loadedScene.World, "Terrain");
 		var loadedTerrain = loadedScene.World.GetComponent<TerrainComponent>(loadedEntity);
 
-		Assert.That(loadedTerrain.HeightmapAsset.NodeId, Is.EqualTo(heightmapId));
-		Assert.That(loadedTerrain.ControlMapAsset.NodeId, Is.EqualTo(controlMapId));
+		Assert.That(loadedTerrain.TerrainAsset.NodeId, Is.EqualTo(terrainAssetId));
 		Assert.That(loadedTerrain.LayerSetAsset.NodeId, Is.EqualTo(layerSetId));
 		Assert.That(loadedTerrain.WorldSizeMeters, Is.EqualTo(new Vector2(1024.0f, 768.0f)));
 		Assert.That(loadedTerrain.HeightScaleMeters, Is.EqualTo(96.0f));

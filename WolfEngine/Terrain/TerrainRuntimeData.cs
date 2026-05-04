@@ -12,10 +12,11 @@ public sealed class TerrainRuntimeData
 	private readonly List<TerrainChunkRuntime> _chunks = new();
 	private readonly List<Mesh> _pendingReleasedMeshes = new();
 	private Mesh[] _sharedLodMeshes = Array.Empty<Mesh>();
+	private TerrainAsset? _resolvedTerrainAsset;
 	private Texture? _resolvedHeightmap;
-	private Texture? _resolvedControlMap;
 	private Texture? _resolvedRenderHeightmap;
-	private Texture? _resolvedRenderControlMap;
+	private Texture? _resolvedRenderLayerIndexMap;
+	private Texture? _resolvedRenderLayerWeightMap;
 	private TerrainLayerSet? _resolvedLayerSet;
 	private Vector2 _resolvedWorldSize;
 	private float _resolvedHeightScale;
@@ -23,8 +24,7 @@ public sealed class TerrainRuntimeData
 	private int _resolvedLodCount;
 	private int _resolvedLod0Resolution;
 	private float[] _resolvedLodDistances = Array.Empty<float>();
-	private Guid _heightmapNodeId;
-	private Guid _controlMapNodeId;
+	private Guid _terrainAssetNodeId;
 	private Guid _layerSetNodeId;
 	private Vector2 _lastSampleWorldSize;
 	private float _lastSampleHeightScale;
@@ -41,11 +41,6 @@ public sealed class TerrainRuntimeData
 	private int _lastLayoutLod0Resolution;
 	private float[] _lastLayoutLodDistances = Array.Empty<float>();
 	private bool _hasLayoutState;
-	private int _lastControlResourceRevision = -1;
-	private int _lastControlWidth;
-	private int _lastControlHeight;
-	private TextureFormat _lastControlFormat;
-	private byte[]? _lastControlTopMipData;
 	private bool _built;
 	private float[]? _heightSamples;
 	private Vector3[]? _normals;
@@ -139,7 +134,8 @@ public sealed class TerrainRuntimeData
 				chunk.InstanceData,
 				new TerrainDrawSurface(
 					_resolvedRenderHeightmap,
-					_resolvedRenderControlMap,
+					_resolvedRenderLayerIndexMap,
+					_resolvedRenderLayerWeightMap,
 					_resolvedHeightScale,
 					layerCount,
 					heightBlendSharpness,
@@ -255,13 +251,13 @@ public sealed class TerrainRuntimeData
 
 	private void Resolve(TerrainComponent component)
 	{
-		_heightmapNodeId = component.HeightmapAsset.NodeId;
-		_controlMapNodeId = component.ControlMapAsset.NodeId;
+		_terrainAssetNodeId = component.TerrainAsset.NodeId;
+		_resolvedTerrainAsset = component.TerrainAsset.Asset;
 		_layerSetNodeId = component.LayerSetAsset.NodeId;
-		_resolvedHeightmap = component.HeightmapAsset.Asset;
-		_resolvedControlMap = component.ControlMapAsset.Asset;
+		_resolvedHeightmap = _resolvedTerrainAsset?.Heightmap;
 		_resolvedRenderHeightmap = component.AuthoringPreviewHeightmap ?? _resolvedHeightmap;
-		_resolvedRenderControlMap = component.AuthoringPreviewControlMap ?? _resolvedControlMap;
+		_resolvedRenderLayerIndexMap = component.AuthoringPreviewLayerIndexMap ?? _resolvedTerrainAsset?.LayerIndexMap;
+		_resolvedRenderLayerWeightMap = component.AuthoringPreviewLayerWeightMap ?? _resolvedTerrainAsset?.LayerWeightMap;
 		_resolvedLayerSet = component.LayerSetAsset.Asset;
 		_resolvedWorldSize = component.GetResolvedWorldSize();
 		_resolvedHeightScale = component.GetResolvedHeightScale();
@@ -322,7 +318,7 @@ public sealed class TerrainRuntimeData
 			return true;
 		}
 
-		if (_heightmapNodeId != component.HeightmapAsset.NodeId)
+		if (_terrainAssetNodeId != component.TerrainAsset.NodeId)
 		{
 			return true;
 		}
@@ -436,9 +432,14 @@ public sealed class TerrainRuntimeData
 			renderGraph.EnsureTextureResources(_resolvedRenderHeightmap);
 		}
 
-		if (_resolvedRenderControlMap is not null)
+		if (_resolvedRenderLayerIndexMap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedRenderControlMap);
+			renderGraph.EnsureTextureResources(_resolvedRenderLayerIndexMap);
+		}
+
+		if (_resolvedRenderLayerWeightMap is not null)
+		{
+			renderGraph.EnsureTextureResources(_resolvedRenderLayerWeightMap);
 		}
 
 		if (_resolvedLayerSet is null)
@@ -732,11 +733,25 @@ public sealed class TerrainRuntimeData
 
 		return texture.Format switch
 		{
+			TextureFormat.R16Unorm => DecodeR16Height(mip.Data, width, height),
 			TextureFormat.Rgba8Unorm => DecodeRgba8Height(mip.Data, width, height),
 			TextureFormat.Bgra8Unorm => DecodeBgra8Height(mip.Data, width, height),
 			TextureFormat.Bc1Unorm => DecodeBc1Height(mip.Data, width, height),
 			_ => null
 		};
+	}
+
+	private static float[] DecodeR16Height(byte[] data, int width, int height)
+	{
+		var result = new float[width * height];
+		for (var i = 0; i < result.Length; i++)
+		{
+			var offset = i * 2;
+			var encoded = (ushort)(data[offset] | (data[offset + 1] << 8));
+			result[i] = encoded / 65535.0f;
+		}
+
+		return result;
 	}
 
 	private static float[] DecodeRgba8Height(byte[] data, int width, int height)

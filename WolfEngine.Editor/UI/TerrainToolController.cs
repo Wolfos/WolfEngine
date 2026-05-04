@@ -175,7 +175,7 @@ public sealed class TerrainToolController
 			TerrainTool.RaiseLower => new TerrainBrushStrokeRequest(TerrainAuthoringSurfaceTarget.Heightmap, TerrainBrushOperation.RaiseLower, settings),
 			TerrainTool.Flatten => new TerrainBrushStrokeRequest(TerrainAuthoringSurfaceTarget.Heightmap, TerrainBrushOperation.Flatten, settings),
 			TerrainTool.Smooth => new TerrainBrushStrokeRequest(TerrainAuthoringSurfaceTarget.Heightmap, TerrainBrushOperation.Smooth, settings),
-			_ => new TerrainBrushStrokeRequest(TerrainAuthoringSurfaceTarget.ControlMap, TerrainBrushOperation.PaintLayer, settings)
+			_ => new TerrainBrushStrokeRequest(TerrainAuthoringSurfaceTarget.LayerMaps, TerrainBrushOperation.PaintLayer, settings)
 		};
 	}
 }

@@ -438,8 +438,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			AssetImporterIds.Texture => ImportTextureSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 			AssetImporterIds.Material => ImportMaterialSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-				AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-				AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.Terrain => ImportTerrainSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
+			AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 				AssetImporterIds.EditorScene => ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 				AssetImporterIds.EditorPrefab => ImportPrefabSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
 				_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
@@ -609,6 +610,46 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					NodeId = nodeId,
 					SourceId = metadata.SourceId,
 					Type = AssetType.DataAsset,
+					NodeKey = "main",
+					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts = [],
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportTerrainSource(
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var terrainAsset = TerrainAssetSerializer.Read(absoluteSourcePath, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Terrain, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var summary = new TerrainAssetSummary
+		{
+			HeightmapWidth = terrainAsset.HeightmapWidth,
+			HeightmapHeight = terrainAsset.HeightmapHeight,
+			LayerMapWidth = terrainAsset.LayerMapWidth,
+			LayerMapHeight = terrainAsset.LayerMapHeight,
+			LayerMipCount = terrainAsset.LayerIndexMap.MipCount
+		};
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.Terrain,
 					NodeKey = "main",
 					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
 					IsGenerated = false,
@@ -1259,6 +1300,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
 			       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
 			       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
+			       || absolutePath.EndsWith(TerrainAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
 			       || absolutePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
 			       || absolutePath.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
 	}
@@ -1285,6 +1327,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		if (relativeSourcePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
 		{
 			return AssetImporterIds.DataAsset;
+		}
+
+		if (relativeSourcePath.EndsWith(TerrainAsset.FileExtension, StringComparison.OrdinalIgnoreCase))
+		{
+			return AssetImporterIds.Terrain;
 		}
 
 			if (relativeSourcePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
@@ -1579,6 +1626,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				break;
 			case AssetType.DataAsset:
 				entry.DataAssetSummary = AssetPipelineSerialization.Deserialize<DataAssetSummary>(node.SummaryJson);
+				break;
+			case AssetType.Terrain:
+				entry.TerrainSummary = AssetPipelineSerialization.Deserialize<TerrainAssetSummary>(node.SummaryJson);
 				break;
 			case AssetType.Mesh:
 				entry.MeshSummary = AssetPipelineSerialization.Deserialize<MeshAssetSummary>(node.SummaryJson);

@@ -753,8 +753,10 @@ public sealed class GpuDrawDatabase
 	{
 		if (!ReferenceEquals(left.Heightmap, right.Heightmap) ||
 		    left.HeightmapResourceRevision != right.HeightmapResourceRevision ||
-		    !ReferenceEquals(left.ControlMap, right.ControlMap) ||
-		    left.ControlMapResourceRevision != right.ControlMapResourceRevision ||
+		    !ReferenceEquals(left.LayerIndexMap, right.LayerIndexMap) ||
+		    left.LayerIndexMapResourceRevision != right.LayerIndexMapResourceRevision ||
+		    !ReferenceEquals(left.LayerWeightMap, right.LayerWeightMap) ||
+		    left.LayerWeightMapResourceRevision != right.LayerWeightMapResourceRevision ||
 		    MathF.Abs(left.HeightScale - right.HeightScale) > 0.0001f ||
 		    left.LayerCount != right.LayerCount ||
 		    MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) > 0.0001f ||

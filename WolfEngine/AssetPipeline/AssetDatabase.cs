@@ -13,6 +13,7 @@ public enum AssetType
 	Texture2D,
 	Material,
 	DataAsset,
+	Terrain,
 	Mesh,
 	Model3D,
 	Scene,
@@ -83,6 +84,7 @@ public sealed class AssetDatabaseEntry
 	public TextureAssetSummary? TextureSummary { get; set; }
 	public MaterialAssetSummary? MaterialSummary { get; set; }
 	public DataAssetSummary? DataAssetSummary { get; set; }
+	public TerrainAssetSummary? TerrainSummary { get; set; }
 	public MeshAssetSummary? MeshSummary { get; set; }
 	public Model3DAssetSummary? ModelSummary { get; set; }
 	public SceneAssetSummary? SceneSummary { get; set; }
@@ -116,6 +118,15 @@ public sealed class DataAssetSummary
 	public string DataAssetType { get; set; } = string.Empty;
 	public string DataAssetTypeId { get; set; } = string.Empty;
 	public string DisplayName { get; set; } = string.Empty;
+}
+
+public sealed class TerrainAssetSummary
+{
+	public int HeightmapWidth { get; set; }
+	public int HeightmapHeight { get; set; }
+	public int LayerMapWidth { get; set; }
+	public int LayerMapHeight { get; set; }
+	public int LayerMipCount { get; set; }
 }
 
 public sealed class MeshAssetSummary

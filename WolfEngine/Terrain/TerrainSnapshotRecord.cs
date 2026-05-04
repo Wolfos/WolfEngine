@@ -10,7 +10,8 @@ public readonly struct TerrainDrawSurface
 {
 	public TerrainDrawSurface(
 		Texture? heightmap,
-		Texture? controlMap,
+		Texture? layerIndexMap,
+		Texture? layerWeightMap,
 		float heightScale,
 		int layerCount,
 		float heightBlendSharpness,
@@ -18,8 +19,10 @@ public readonly struct TerrainDrawSurface
 	{
 		Heightmap = heightmap;
 		HeightmapResourceRevision = heightmap?.ResourceRevision ?? 0;
-		ControlMap = controlMap;
-		ControlMapResourceRevision = controlMap?.ResourceRevision ?? 0;
+		LayerIndexMap = layerIndexMap;
+		LayerIndexMapResourceRevision = layerIndexMap?.ResourceRevision ?? 0;
+		LayerWeightMap = layerWeightMap;
+		LayerWeightMapResourceRevision = layerWeightMap?.ResourceRevision ?? 0;
 		HeightScale = heightScale;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
@@ -28,8 +31,10 @@ public readonly struct TerrainDrawSurface
 
 	public Texture? Heightmap { get; }
 	public int HeightmapResourceRevision { get; }
-	public Texture? ControlMap { get; }
-	public int ControlMapResourceRevision { get; }
+	public Texture? LayerIndexMap { get; }
+	public int LayerIndexMapResourceRevision { get; }
+	public Texture? LayerWeightMap { get; }
+	public int LayerWeightMapResourceRevision { get; }
 	public float HeightScale { get; }
 	public int LayerCount { get; }
 	public float HeightBlendSharpness { get; }

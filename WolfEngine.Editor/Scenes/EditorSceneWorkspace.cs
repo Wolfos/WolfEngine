@@ -18,22 +18,22 @@ public interface IEditorSceneWorkspace
 public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 {
 	private readonly IEditorSceneFactory _sceneFactory;
-	private readonly ITerrainTexturePersistenceService _terrainTexturePersistenceService;
+	private readonly ITerrainAssetPersistenceService _terrainAssetPersistenceService;
 	private readonly IWorldManager _worldManager;
 	private EditorScene _currentScene = new();
 
 	public EditorSceneWorkspace(IEditorSceneFactory sceneFactory, IWorldManager worldManager)
-		: this(sceneFactory, NoOpTerrainTexturePersistenceService.Instance, worldManager)
+		: this(sceneFactory, NoOpTerrainAssetPersistenceService.Instance, worldManager)
 	{
 	}
 
 	public EditorSceneWorkspace(
 		IEditorSceneFactory sceneFactory,
-		ITerrainTexturePersistenceService terrainTexturePersistenceService,
+		ITerrainAssetPersistenceService terrainAssetPersistenceService,
 		IWorldManager worldManager)
 	{
 		_sceneFactory = sceneFactory ?? throw new ArgumentNullException(nameof(sceneFactory));
-		_terrainTexturePersistenceService = terrainTexturePersistenceService ?? throw new ArgumentNullException(nameof(terrainTexturePersistenceService));
+		_terrainAssetPersistenceService = terrainAssetPersistenceService ?? throw new ArgumentNullException(nameof(terrainAssetPersistenceService));
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 	}
 
@@ -61,7 +61,7 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 
 	public void SaveCurrentScene()
 	{
-		_terrainTexturePersistenceService.SaveDirtyTextures();
+		_terrainAssetPersistenceService.SaveDirtyTerrainAssets();
 		_sceneFactory.Save(_currentScene);
 	}
 
@@ -84,19 +84,19 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 		_worldManager.RegisterWorld(nextWorld);
 	}
 
-	private sealed class NoOpTerrainTexturePersistenceService : ITerrainTexturePersistenceService
+	private sealed class NoOpTerrainAssetPersistenceService : ITerrainAssetPersistenceService
 	{
-		public static readonly NoOpTerrainTexturePersistenceService Instance = new();
+		public static readonly NoOpTerrainAssetPersistenceService Instance = new();
 
-		public void RecordPendingTextureState(IReadOnlyList<TerrainTextureStateSnapshot> snapshots)
+		public void RecordPendingTerrainAssetState(IReadOnlyList<TerrainAssetSnapshot> snapshots)
 		{
 		}
 
-		public void ApplyTextureStates(IReadOnlyList<TerrainTextureStateSnapshot> snapshots)
+		public void ApplyTerrainAssetStates(IReadOnlyList<TerrainAssetSnapshot> snapshots)
 		{
 		}
 
-		public void SaveDirtyTextures()
+		public void SaveDirtyTerrainAssets()
 		{
 		}
 	}

@@ -56,7 +56,7 @@ public sealed class SceneViewportRayUtilityTests
 		var terrain = world.CreateEntity("Terrain", Matrix4x4.Identity);
 		world.AddComponent(terrain, new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(4.0f, 4.0f),
 			HeightScaleMeters = 4.0f,
 			ChunkSizeMeters = 4.0f,
@@ -140,6 +140,34 @@ public sealed class SceneViewportRayUtilityTests
 		return new Texture(name, width, height, false, TextureFormat.Rgba8Unorm, [new TextureMipData(width, height, data)]);
 	}
 
+	private static TerrainAsset CreateTerrainAssetFromHeightTexture(Texture heightTexture)
+	{
+		var topMip = heightTexture.MipLevels[0];
+		var heightData = new byte[topMip.Width * topMip.Height * 2];
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			var height = (ushort)(topMip.Data[i * 4] * 257);
+			var offset = i * 2;
+			heightData[offset] = (byte)(height & 0xFF);
+			heightData[offset + 1] = (byte)(height >> 8);
+		}
+
+		var heightmap = new Texture(heightTexture.Name, topMip.Width, topMip.Height, false, TextureFormat.R16Unorm, [new TextureMipData(topMip.Width, topMip.Height, heightData)]);
+		var indexData = new byte[topMip.Width * topMip.Height * 4];
+		var weightData = new byte[topMip.Width * topMip.Height * 4];
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			weightData[i * 4] = 255;
+		}
+
+		var layerMips = TerrainLayerMapUtility.GenerateLayerMipChain(
+			new TextureMipData(topMip.Width, topMip.Height, indexData),
+			new TextureMipData(topMip.Width, topMip.Height, weightData));
+		var layerIndexMap = new Texture($"{heightTexture.Name}_layers", topMip.Width, topMip.Height, false, TextureFormat.Rgba8Uint, layerMips.Indices);
+		var layerWeightMap = new Texture($"{heightTexture.Name}_weights", topMip.Width, topMip.Height, false, TextureFormat.Rgba8Unorm, layerMips.Weights);
+		return new TerrainAsset(heightTexture.Name, heightmap, layerIndexMap, layerWeightMap);
+	}
+
 	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable
 	{
 		private readonly Dictionary<Guid, object> _assets = new();
@@ -161,7 +189,14 @@ public sealed class SceneViewportRayUtilityTests
 				return null;
 			}
 
-			return expectedType.IsInstanceOfType(asset) ? asset : null;
+			if (expectedType.IsInstanceOfType(asset))
+			{
+				return asset;
+			}
+
+			return expectedType == typeof(TerrainAsset) && asset is Texture heightTexture
+				? CreateTerrainAssetFromHeightTexture(heightTexture)
+				: null;
 		}
 
 		public void RefreshProject(string projectRootPath, AssetDatabase database)

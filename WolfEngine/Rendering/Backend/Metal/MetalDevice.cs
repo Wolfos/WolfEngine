@@ -587,6 +587,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	{
 		TextureFormat.Bgra8Unorm => isSrgb ? MTLPixelFormat.BGRA8UnormsRGB : MTLPixelFormat.BGRA8Unorm,
 		TextureFormat.Rgba8Unorm => isSrgb ? MTLPixelFormat.RGBA8UnormsRGB : MTLPixelFormat.RGBA8Unorm,
+		TextureFormat.Rgba8Uint => MTLPixelFormat.RGBA8Uint,
+		TextureFormat.R16Unorm => MTLPixelFormat.R16Unorm,
 		TextureFormat.Rg16Float => MTLPixelFormat.RG16Float,
 		TextureFormat.Rgba16Float => MTLPixelFormat.RGBA16Float,
 		TextureFormat.R32Float => MTLPixelFormat.R32Float,

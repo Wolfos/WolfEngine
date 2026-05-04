@@ -9,8 +9,7 @@ namespace WolfEngine;
 
 public struct TerrainComponent : IEntityComponent
 {
-	public AssetRef<Texture> HeightmapAsset;
-	public AssetRef<Texture> ControlMapAsset;
+	public AssetRef<TerrainAsset> TerrainAsset;
 	public AssetRef<TerrainLayerSet> LayerSetAsset;
 	[JsonIgnore]
 	public Material? Material;
@@ -45,7 +44,11 @@ public struct TerrainComponent : IEntityComponent
 	[NotSerialized]
 	[JsonIgnore]
 	[HideFromEditor]
-	public Texture? AuthoringPreviewControlMap;
+	public Texture? AuthoringPreviewLayerIndexMap;
+	[NotSerialized]
+	[JsonIgnore]
+	[HideFromEditor]
+	public Texture? AuthoringPreviewLayerWeightMap;
 	[NotSerialized]
 	[JsonIgnore]
 	[HideFromEditor]
@@ -69,7 +72,8 @@ public struct TerrainComponent : IEntityComponent
 		PhysicsCacheValid = false;
 		CachedHeightfieldFailureVersion = -1;
 		AuthoringPreviewHeightmap = null;
-		AuthoringPreviewControlMap = null;
+		AuthoringPreviewLayerIndexMap = null;
+		AuthoringPreviewLayerWeightMap = null;
 		AuthoringBrushPreviewDecal = null;
 		AuthoringBrushPreviewLocalTransform = Matrix4x4.Identity;
 	}

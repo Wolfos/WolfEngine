@@ -176,8 +176,9 @@ internal static class AssetsWindowBrowserModelBuilder
 				AssetType.Model3D => 2,
 				AssetType.Mesh => 3,
 				AssetType.Material => 4,
-				AssetType.Texture2D => 5,
-				AssetType.DataAsset => 6,
+				AssetType.Terrain => 5,
+				AssetType.Texture2D => 6,
+				AssetType.DataAsset => 7,
 				_ => 10
 			};
 		}

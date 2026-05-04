@@ -25,6 +25,7 @@ public static class AssetImporterIds
 	public const string Texture = "texture";
 	public const string Material = "material";
 	public const string DataAsset = "data";
+	public const string Terrain = "terrain";
 	public const string ThreeDScene = "three-d-scene";
 	public const string EditorScene = "editor-scene";
 	public const string EditorPrefab = "editor-prefab";

@@ -178,6 +178,44 @@ public sealed class DataEditorAssetHandler : IEditorAssetHandler
 	}
 }
 
+public sealed class TerrainEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly ITerrainAssetCreator _terrainAssetCreator;
+
+	public TerrainEditorAssetHandler(ITerrainAssetCreator terrainAssetCreator)
+	{
+		_terrainAssetCreator = terrainAssetCreator ?? throw new ArgumentNullException(nameof(terrainAssetCreator));
+	}
+
+	public AssetType AssetType => AssetType.Terrain;
+	public string DisplayName => "Terrain";
+	public string ThumbnailLabel => "TRN";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.TerrainSummary is null
+			? "Terrain"
+			: $"Terrain | H {asset.TerrainSummary.HeightmapWidth}x{asset.TerrainSummary.HeightmapHeight} | L {asset.TerrainSummary.LayerMapWidth}x{asset.TerrainSummary.LayerMapHeight}";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems()
+	{
+		return
+		[
+			new EditorAssetCreateMenuItem
+			{
+				Label = "Terrain Asset",
+				CreateAction = targetRelativeFolderPath => _terrainAssetCreator.CreateTerrainAsset(targetRelativeFolderPath)
+			}
+		];
+	}
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		_ = asset;
+	}
+}
+
 public sealed class SceneEditorAssetHandler : IEditorAssetHandler
 {
 	private readonly SceneAssetEditor _editor;

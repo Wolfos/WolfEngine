@@ -85,9 +85,6 @@
         <None Update="Shaders\constants.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
-        <None Update="Shaders\gpu_draw_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
         <None Update="Shaders\gpu_draw_cull.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

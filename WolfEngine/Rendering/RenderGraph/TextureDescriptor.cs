@@ -43,6 +43,8 @@ public enum TextureFormat
 	Unknown = 0,
 	Bgra8Unorm,
 	Rgba8Unorm,
+	Rgba8Uint,
+	R16Unorm,
 	Rg16Float,
 	Rgba16Float,
 	R32Float,

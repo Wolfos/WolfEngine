@@ -412,7 +412,8 @@ public sealed class FrameSnapshotGpuDrawTests
 	{
 		return new TerrainDrawSurface(
 			heightmap: null,
-			controlMap: null,
+			layerIndexMap: null,
+			layerWeightMap: null,
 			heightScale: 16.0f,
 			layerCount: 1,
 			heightBlendSharpness: heightBlendSharpness,

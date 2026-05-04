@@ -43,11 +43,12 @@ void CSUpdateTerrainMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     GpuTerrainMaterialData terrainData = (GpuTerrainMaterialData)0;
     terrainData.heightmapHandle = update.heightmapHandle;
-    terrainData.controlMapHandle = update.controlMapHandle;
-    terrainData.hasControlMap = update.hasControlMap;
+    terrainData.layerIndexMapHandle = update.layerIndexMapHandle;
+    terrainData.layerWeightMapHandle = update.layerWeightMapHandle;
+    terrainData.hasLayerMaps = update.hasLayerMaps;
     terrainData.heightmapSamplerHandle = update.heightmapSamplerHandle;
     terrainData.layerSamplerHandle = update.layerSamplerHandle;
-    terrainData.controlSamplerHandle = update.controlSamplerHandle;
+    terrainData.layerMapSamplerHandle = update.layerMapSamplerHandle;
     terrainData.layerStart = update.layerStart;
     terrainData.layerCount = update.layerCount;
     terrainData.heightBlendSharpness = update.heightBlendSharpness;

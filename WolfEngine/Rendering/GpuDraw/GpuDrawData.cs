@@ -99,42 +99,51 @@ public readonly struct GpuTerrainMaterialData
 {
 	public GpuTerrainMaterialData(
 		uint heightmapHandle,
-		uint controlMapHandle,
-		uint hasControlMap,
+		uint layerIndexMapHandle,
+		uint layerWeightMapHandle,
+		uint hasLayerMaps,
 		uint heightmapSamplerHandle,
 		uint layerSamplerHandle,
-		uint controlSamplerHandle,
+		uint layerMapSamplerHandle,
 		uint layerStart,
 		uint layerCount,
 		float heightBlendSharpness,
 		float heightScale)
 	{
 		HeightmapHandle = heightmapHandle;
-		ControlMapHandle = controlMapHandle;
-		HasControlMap = hasControlMap;
+		LayerIndexMapHandle = layerIndexMapHandle;
+		LayerWeightMapHandle = layerWeightMapHandle;
+		HasLayerMaps = hasLayerMaps;
 		HeightmapSamplerHandle = heightmapSamplerHandle;
 		LayerSamplerHandle = layerSamplerHandle;
-		ControlSamplerHandle = controlSamplerHandle;
+		LayerMapSamplerHandle = layerMapSamplerHandle;
 		LayerStart = layerStart;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
 		HeightScale = heightScale;
 		_pad0 = 0;
 		_pad1 = 0;
+		_pad2 = 0;
+		_pad3 = 0;
+		_pad4 = 0;
 	}
 
 	public readonly uint HeightmapHandle;
-	public readonly uint ControlMapHandle;
-	public readonly uint HasControlMap;
+	public readonly uint LayerIndexMapHandle;
+	public readonly uint LayerWeightMapHandle;
+	public readonly uint HasLayerMaps;
 	public readonly uint HeightmapSamplerHandle;
 	public readonly uint LayerSamplerHandle;
-	public readonly uint ControlSamplerHandle;
+	public readonly uint LayerMapSamplerHandle;
 	public readonly uint LayerStart;
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
 	public readonly float HeightScale;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
+	private readonly uint _pad2;
+	private readonly uint _pad3;
+	private readonly uint _pad4;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -398,11 +407,12 @@ public readonly struct GpuTerrainMaterialUpdateData
 	public GpuTerrainMaterialUpdateData(
 		uint materialHandle,
 		uint heightmapHandle,
-		uint controlMapHandle,
-		uint hasControlMap,
+		uint layerIndexMapHandle,
+		uint layerWeightMapHandle,
+		uint hasLayerMaps,
 		uint heightmapSamplerHandle,
 		uint layerSamplerHandle,
-		uint controlSamplerHandle,
+		uint layerMapSamplerHandle,
 		uint layerStart,
 		uint layerCount,
 		float heightBlendSharpness,
@@ -410,30 +420,38 @@ public readonly struct GpuTerrainMaterialUpdateData
 	{
 		MaterialHandle = materialHandle;
 		HeightmapHandle = heightmapHandle;
-		ControlMapHandle = controlMapHandle;
-		HasControlMap = hasControlMap;
+		LayerIndexMapHandle = layerIndexMapHandle;
+		LayerWeightMapHandle = layerWeightMapHandle;
+		HasLayerMaps = hasLayerMaps;
 		HeightmapSamplerHandle = heightmapSamplerHandle;
 		LayerSamplerHandle = layerSamplerHandle;
-		ControlSamplerHandle = controlSamplerHandle;
+		LayerMapSamplerHandle = layerMapSamplerHandle;
 		LayerStart = layerStart;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
 		HeightScale = heightScale;
 		_pad0 = 0;
+		_pad1 = 0;
+		_pad2 = 0;
+		_pad3 = 0;
 	}
 
 	public readonly uint MaterialHandle;
 	public readonly uint HeightmapHandle;
-	public readonly uint ControlMapHandle;
-	public readonly uint HasControlMap;
+	public readonly uint LayerIndexMapHandle;
+	public readonly uint LayerWeightMapHandle;
+	public readonly uint HasLayerMaps;
 	public readonly uint HeightmapSamplerHandle;
 	public readonly uint LayerSamplerHandle;
-	public readonly uint ControlSamplerHandle;
+	public readonly uint LayerMapSamplerHandle;
 	public readonly uint LayerStart;
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
 	public readonly float HeightScale;
 	private readonly uint _pad0;
+	private readonly uint _pad1;
+	private readonly uint _pad2;
+	private readonly uint _pad3;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -129,7 +129,7 @@ void ApplyHeightmapSmoothBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
-void ApplyControlMapLayerBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ApplyLayerMapLayerBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= textureWidth || dispatchThreadId.y >= textureHeight)
     {

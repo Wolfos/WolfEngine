@@ -49,17 +49,21 @@ struct GpuMaterialData
 struct GpuTerrainMaterialData
 {
     uint heightmapHandle;
-    uint controlMapHandle;
-    uint hasControlMap;
+    uint layerIndexMapHandle;
+    uint layerWeightMapHandle;
+    uint hasLayerMaps;
     uint heightmapSamplerHandle;
     uint layerSamplerHandle;
-    uint controlSamplerHandle;
+    uint layerMapSamplerHandle;
     uint layerStart;
     uint layerCount;
     float heightBlendSharpness;
     float heightScale;
     uint pad0;
     uint pad1;
+    uint pad2;
+    uint pad3;
+    uint pad4;
 };
 
 struct GpuTerrainLayerData
@@ -158,16 +162,20 @@ struct GpuTerrainMaterialUpdateData
 {
     uint32_t materialHandle;
     uint32_t heightmapHandle;
-    uint32_t controlMapHandle;
-    uint32_t hasControlMap;
+    uint32_t layerIndexMapHandle;
+    uint32_t layerWeightMapHandle;
+    uint32_t hasLayerMaps;
     uint32_t heightmapSamplerHandle;
     uint32_t layerSamplerHandle;
-    uint32_t controlSamplerHandle;
+    uint32_t layerMapSamplerHandle;
     uint32_t layerStart;
     uint32_t layerCount;
     float heightBlendSharpness;
     float heightScale;
     uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
+    uint32_t pad3;
 };
 
 struct GpuTerrainLayerUpdateData

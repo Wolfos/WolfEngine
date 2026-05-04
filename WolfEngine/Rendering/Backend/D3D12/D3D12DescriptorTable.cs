@@ -510,6 +510,8 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 			{
 				TextureFormat.Bgra8Unorm => texture.Descriptor.IsSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
 				TextureFormat.Rgba8Unorm => texture.Descriptor.IsSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
+				TextureFormat.Rgba8Uint => Format.FormatR8G8B8A8Uint,
+				TextureFormat.R16Unorm => Format.FormatR16Unorm,
 				TextureFormat.Rg16Float => Format.FormatR16G16Float,
 				TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 				TextureFormat.R32Float => Format.FormatR32Float,
@@ -561,6 +563,8 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 		{
 			TextureFormat.Bgra8Unorm => texture.Descriptor.IsSrgb ? Format.FormatB8G8R8A8UnormSrgb : Format.FormatB8G8R8A8Unorm,
 			TextureFormat.Rgba8Unorm => texture.Descriptor.IsSrgb ? Format.FormatR8G8B8A8UnormSrgb : Format.FormatR8G8B8A8Unorm,
+			TextureFormat.Rgba8Uint => Format.FormatR8G8B8A8Uint,
+			TextureFormat.R16Unorm => Format.FormatR16Unorm,
 			TextureFormat.Rg16Float => Format.FormatR16G16Float,
 			TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 			TextureFormat.R32Float => Format.FormatR32Float,

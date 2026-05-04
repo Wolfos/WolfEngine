@@ -44,7 +44,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	private const string RaiseLowerEntryPoint = "ApplyHeightmapRaiseLowerBrush";
 	private const string FlattenEntryPoint = "ApplyHeightmapFlattenBrush";
 	private const string SmoothEntryPoint = "ApplyHeightmapSmoothBrush";
-	private const string PaintLayerEntryPoint = "ApplyControlMapLayerBrush";
+	private const string PaintLayerEntryPoint = "ApplyLayerMapLayerBrush";
 
 	private readonly IRenderer _renderer;
 	private readonly IShaderCompiler _shaderCompiler;
@@ -392,9 +392,11 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 			return CloneTexture(name, source);
 		}
 
-		if (source.Format != TextureFormat.Rgba8Unorm && source.Format != TextureFormat.Bgra8Unorm)
+		if (source.Format != TextureFormat.Rgba8Unorm &&
+		    source.Format != TextureFormat.Bgra8Unorm &&
+		    source.Format != TextureFormat.R16Unorm)
 		{
-			throw new InvalidOperationException($"Terrain height painting currently expects an RGBA8 source heightmap, but got '{source.Format}'.");
+			throw new InvalidOperationException($"Terrain height painting expects an R16 or RGBA8 source heightmap, but got '{source.Format}'.");
 		}
 
 		var sourceTopMip = source.MipLevels[0];
@@ -414,11 +416,11 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 		var previewData = new byte[sourceTopMip.Width * sourceTopMip.Height * 8];
 		for (var pixelIndex = 0; pixelIndex < sourceTopMip.Width * sourceTopMip.Height; pixelIndex++)
 		{
-			var sourceOffset = pixelIndex * 4;
-			var encoded = sourceFormat == TextureFormat.Bgra8Unorm
-				? sourceTopMip.Data[sourceOffset + 2]
-				: sourceTopMip.Data[sourceOffset];
-			var normalizedHeight = encoded / 255.0f;
+			var normalizedHeight = sourceFormat == TextureFormat.R16Unorm
+				? ReadUInt16(sourceTopMip.Data, pixelIndex * 2) / 65535.0f
+				: (sourceFormat == TextureFormat.Bgra8Unorm
+					? sourceTopMip.Data[pixelIndex * 4 + 2]
+					: sourceTopMip.Data[pixelIndex * 4]) / 255.0f;
 			var halfHeight = (ushort)BitConverter.HalfToUInt16Bits((Half)normalizedHeight);
 			var halfAlpha = (ushort)BitConverter.HalfToUInt16Bits((Half)1.0f);
 			var destinationOffset = pixelIndex * 8;

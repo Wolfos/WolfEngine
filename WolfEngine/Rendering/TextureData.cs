@@ -56,6 +56,8 @@ public static class TextureFormatUtilities
 		TextureFormat.Astc4x4Unorm => 16,
 		TextureFormat.Bgra8Unorm => 4,
 		TextureFormat.Rgba8Unorm => 4,
+		TextureFormat.Rgba8Uint => 4,
+		TextureFormat.R16Unorm => 2,
 		TextureFormat.Rg16Float => 4,
 		TextureFormat.Rgba16Float => 8,
 		TextureFormat.R32Float => 4,

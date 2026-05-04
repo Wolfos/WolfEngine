@@ -48,6 +48,10 @@ public interface IDataAssetRuntimeResolver : IRuntimeAssetResolver
 {
 }
 
+public interface ITerrainAssetRuntimeResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IMaterialRuntimeAssetResolver : IRuntimeAssetResolver
 {
 }

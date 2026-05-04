@@ -30,7 +30,7 @@ public sealed class EditorUndoRedoContext
 	public required IEditorInteractionState InteractionState { get; init; }
 	public required IEditorSceneSnapshotService SceneSnapshotService { get; init; }
 	public required IEditorAssetSnapshotService AssetSnapshotService { get; init; }
-	public required ITerrainTexturePersistenceService TerrainTexturePersistenceService { get; init; }
+	public required ITerrainAssetPersistenceService TerrainAssetPersistenceService { get; init; }
 }
 
 public readonly record struct EditorAssetFileSnapshot(
@@ -242,15 +242,15 @@ public sealed class DataAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 	}
 }
 
-public sealed class TerrainTextureEditUndoRedoEntry : IEditorUndoRedoEntry
+public sealed class TerrainAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 {
-	private readonly IReadOnlyList<TerrainTextureStateSnapshot> _before;
-	private readonly IReadOnlyList<TerrainTextureStateSnapshot> _after;
+	private readonly IReadOnlyList<TerrainAssetSnapshot> _before;
+	private readonly IReadOnlyList<TerrainAssetSnapshot> _after;
 
-	public TerrainTextureEditUndoRedoEntry(
+	public TerrainAssetEditUndoRedoEntry(
 		string description,
-		IReadOnlyList<TerrainTextureStateSnapshot> before,
-		IReadOnlyList<TerrainTextureStateSnapshot> after)
+		IReadOnlyList<TerrainAssetSnapshot> before,
+		IReadOnlyList<TerrainAssetSnapshot> after)
 	{
 		Description = string.IsNullOrWhiteSpace(description) ? "Terrain Stroke" : description;
 		_before = before ?? throw new ArgumentNullException(nameof(before));
@@ -261,13 +261,13 @@ public sealed class TerrainTextureEditUndoRedoEntry : IEditorUndoRedoEntry
 
 	public void Undo(EditorUndoRedoContext context)
 	{
-		context.TerrainTexturePersistenceService.ApplyTextureStates(_before);
+		context.TerrainAssetPersistenceService.ApplyTerrainAssetStates(_before);
 		context.InteractionState.MarkSceneDirty();
 	}
 
 	public void Redo(EditorUndoRedoContext context)
 	{
-		context.TerrainTexturePersistenceService.ApplyTextureStates(_after);
+		context.TerrainAssetPersistenceService.ApplyTerrainAssetStates(_after);
 		context.InteractionState.MarkSceneDirty();
 	}
 }
@@ -285,7 +285,7 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 		IEditorInteractionState interactionState,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorAssetSnapshotService assetSnapshotService,
-		ITerrainTexturePersistenceService terrainTexturePersistenceService)
+		ITerrainAssetPersistenceService terrainAssetPersistenceService)
 	{
 		_context = new EditorUndoRedoContext
 		{
@@ -293,7 +293,7 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 			InteractionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState)),
 			SceneSnapshotService = sceneSnapshotService ?? throw new ArgumentNullException(nameof(sceneSnapshotService)),
 			AssetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService)),
-			TerrainTexturePersistenceService = terrainTexturePersistenceService ?? throw new ArgumentNullException(nameof(terrainTexturePersistenceService))
+			TerrainAssetPersistenceService = terrainAssetPersistenceService ?? throw new ArgumentNullException(nameof(terrainAssetPersistenceService))
 		};
 	}
 

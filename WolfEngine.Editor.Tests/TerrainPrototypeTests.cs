@@ -116,7 +116,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
 			ChunkSizeMeters = 64.0f,
@@ -149,7 +149,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
 			ChunkSizeMeters = 64.0f,
@@ -203,7 +203,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(128.0f, 128.0f),
 			HeightScaleMeters = 16.0f,
 			ChunkSizeMeters = 32.0f,
@@ -230,7 +230,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
 			ChunkSizeMeters = 64.0f,
@@ -264,7 +264,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
 			ChunkSizeMeters = 64.0f,
@@ -300,7 +300,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
 			ChunkSizeMeters = 64.0f,
@@ -314,7 +314,7 @@ public sealed class TerrainPrototypeTests
 		var initialChunkCount = runtime.Chunks.Count;
 		var initialSharedMeshes = runtime.SharedLodMeshes.ToArray();
 
-		texture.ApplyTextureData(9, 9, false, TextureFormat.Rgba8Unorm, CreateHeightMipLevels(9, 9));
+		registry.Register(heightmapId, CreateTerrainAssetFromHeightTexture(CreateHeightTexture("height-9x9", 9, 9)));
 
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 		Assert.That(runtime.HeightSampleWidth, Is.EqualTo(9));
@@ -332,7 +332,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 16.0f,
 			ChunkSizeMeters = 64.0f,
@@ -363,7 +363,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 32.0f,
 			ChunkSizeMeters = 64.0f,
@@ -389,7 +389,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(402.0f, 402.0f),
 			HeightScaleMeters = 16.0f,
 			ChunkSizeMeters = 1.0f,
@@ -412,7 +412,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 8.0f,
 			ChunkSizeMeters = 2.0f,
@@ -441,7 +441,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 4.0f,
 			ChunkSizeMeters = 2.0f,
@@ -466,7 +466,7 @@ public sealed class TerrainPrototypeTests
 
 		var component = new TerrainComponent
 		{
-			HeightmapAsset = new AssetRef<Texture> { NodeId = heightmapId },
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
 			WorldSizeMeters = new Vector2(2.0f, 2.0f),
 			HeightScaleMeters = 2.0f,
 			ChunkSizeMeters = 2.0f,
@@ -545,6 +545,54 @@ public sealed class TerrainPrototypeTests
 		return data;
 	}
 
+	private static TerrainAsset CreateTerrainAssetFromHeightTexture(Texture heightTexture)
+	{
+		var topMip = heightTexture.MipLevels[0];
+		var heightData = new byte[topMip.Width * topMip.Height * 2];
+		var bytesPerPixel = TextureFormatUtilities.GetBytesPerBlock(heightTexture.Format);
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			var normalizedHeight = topMip.Data[i * bytesPerPixel];
+			var height = (ushort)(normalizedHeight * 257);
+			var offset = i * 2;
+			heightData[offset] = (byte)(height & 0xFF);
+			heightData[offset + 1] = (byte)(height >> 8);
+		}
+
+		var heightmap = new Texture(
+			heightTexture.Name,
+			topMip.Width,
+			topMip.Height,
+			isSrgb: false,
+			TextureFormat.R16Unorm,
+			[new TextureMipData(topMip.Width, topMip.Height, heightData)]);
+		var indexData = new byte[topMip.Width * topMip.Height * 4];
+		var weightData = new byte[topMip.Width * topMip.Height * 4];
+		for (var i = 0; i < topMip.Width * topMip.Height; i++)
+		{
+			weightData[i * 4] = 255;
+		}
+
+		var layerMips = TerrainLayerMapUtility.GenerateLayerMipChain(
+			new TextureMipData(topMip.Width, topMip.Height, indexData),
+			new TextureMipData(topMip.Width, topMip.Height, weightData));
+		var layerIndexMap = new Texture(
+			$"{heightTexture.Name}_layers",
+			topMip.Width,
+			topMip.Height,
+			isSrgb: false,
+			TextureFormat.Rgba8Uint,
+			layerMips.Indices);
+		var layerWeightMap = new Texture(
+			$"{heightTexture.Name}_weights",
+			topMip.Width,
+			topMip.Height,
+			isSrgb: false,
+			TextureFormat.Rgba8Unorm,
+			layerMips.Weights);
+		return new TerrainAsset(heightTexture.Name, heightmap, layerIndexMap, layerWeightMap);
+	}
+
 	private static RenderGraph CreateTestRenderGraph(IRenderer? renderer = null)
 	{
 		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
@@ -594,6 +642,7 @@ public sealed class TerrainPrototypeTests
 	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable
 	{
 		private readonly Dictionary<Guid, object> _assets = new();
+		private readonly Dictionary<Guid, TerrainAsset> _terrainAssets = new();
 
 		public TestAssetRegistry()
 		{
@@ -603,6 +652,7 @@ public sealed class TerrainPrototypeTests
 		public void Register(Guid assetId, object asset)
 		{
 			_assets[assetId] = asset;
+			_terrainAssets.Remove(assetId);
 		}
 
 		public object? GetInstance(Guid assetId, Type expectedType)
@@ -612,7 +662,23 @@ public sealed class TerrainPrototypeTests
 				return null;
 			}
 
-			return expectedType.IsInstanceOfType(asset) ? asset : null;
+			if (expectedType.IsInstanceOfType(asset))
+			{
+				return asset;
+			}
+
+			if (expectedType == typeof(TerrainAsset) && asset is Texture heightTexture)
+			{
+				if (_terrainAssets.TryGetValue(assetId, out var terrainAsset) == false)
+				{
+					terrainAsset = CreateTerrainAssetFromHeightTexture(heightTexture);
+					_terrainAssets[assetId] = terrainAsset;
+				}
+
+				return terrainAsset;
+			}
+
+			return null;
 		}
 
 		public void RefreshProject(string projectRootPath, AssetDatabase database)
@@ -624,17 +690,20 @@ public sealed class TerrainPrototypeTests
 			foreach (var assetId in assetIds)
 			{
 				_assets.Remove(assetId);
+				_terrainAssets.Remove(assetId);
 			}
 		}
 
 		public void ClearCachedInstances()
 		{
 			_assets.Clear();
+			_terrainAssets.Clear();
 		}
 
 		public void Clear()
 		{
 			_assets.Clear();
+			_terrainAssets.Clear();
 		}
 
 		public void Dispose()

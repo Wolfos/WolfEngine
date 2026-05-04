@@ -55,7 +55,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
-		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
+		_assetSelectionService =
+			assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
@@ -93,7 +94,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return;
 		}
 
-		var browserModel = AssetsWindowBrowserModelBuilder.Build(_projectService.CurrentAssetDatabase.Assets, _projectService.AssetsPath);
+		var browserModel =
+			AssetsWindowBrowserModelBuilder.Build(_projectService.CurrentAssetDatabase.Assets,
+				_projectService.AssetsPath);
 		PruneState(browserModel);
 		var selectedFolder = browserModel.FoldersByPath[_selectedFolderPath];
 
@@ -110,7 +113,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		PushPaneStyle();
 		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.Borders);
 		DrawFolderTreeNode(browserModel.RootFolder);
-		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree", ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
+		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
+			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
 			DrawFolderScopedContextMenu(_selectedFolderPath);
 			ImGui.EndPopup();
@@ -129,7 +133,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		PushPaneStyle();
 		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.Borders);
 		DrawCurrentFolderContents(selectedFolder, scene);
-		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId, ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
+		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
+			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
 			DrawFolderScopedContextMenu(_selectedFolderPath);
 			ImGui.EndPopup();
@@ -145,7 +150,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.PushID(folder.RelativePath);
 
 		var isSelected = string.Equals(_selectedFolderPath, folder.RelativePath, StringComparison.OrdinalIgnoreCase);
-		var containsSelectedDescendant = ProjectPathUtility.IsSameOrDescendant(_selectedFolderPath, folder.RelativePath);
+		var containsSelectedDescendant =
+			ProjectPathUtility.IsSameOrDescendant(_selectedFolderPath, folder.RelativePath);
 		var hasChildren = folder.Children.Count > 0;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (hasChildren == false)
@@ -263,7 +269,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		var availableWidth = MathF.Max(ImGui.GetContentRegionAvail().X, GridMinItemWidth);
 		var columnCount = Math.Max(1, (int)MathF.Floor(availableWidth / GridMinItemWidth));
-		if (ImGui.BeginTable("AssetsGrid", columnCount, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.PadOuterX) == false)
+		if (ImGui.BeginTable("AssetsGrid", columnCount,
+			    ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.PadOuterX) == false)
 		{
 			return;
 		}
@@ -287,7 +294,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawFolderCard(AssetsWindowFolderNode folder)
 	{
 		ImGui.PushID(folder.RelativePath);
-		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders,
+			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 		var buttonSize = new Vector2(ImGui.GetContentRegionAvail().X, FolderCardHeight - 6.0f);
 		ImGui.InvisibleButton("FolderCardButton", buttonSize);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
@@ -330,7 +338,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
 		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
 
-		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
+		var thumbnailMin =
+			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
 		var thumbnailMax = thumbnailMin + ThumbnailSize;
 		if (TryGetFolderIconTexture(out var textureId))
 		{
@@ -354,11 +363,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		var isExpanded = _expandedSourceId == source.SourceId;
 		var toggleHeight = source.SubAssets.Count > 0 ? SourceCardToggleHeight : 0.0f;
-		var totalHeight = SourceCardHeaderHeight + toggleHeight + (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
+		var totalHeight = SourceCardHeaderHeight + toggleHeight +
+		                  (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
 		ImGui.PushID(source.SourceId.ToString());
-		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders,
+			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-		ImGui.InvisibleButton("SourceHeaderButton", new Vector2(ImGui.GetContentRegionAvail().X, SourceCardHeaderHeight - 6.0f));
+		ImGui.InvisibleButton("SourceHeaderButton",
+			new Vector2(ImGui.GetContentRegionAvail().X, SourceCardHeaderHeight - 6.0f));
 		var headerLeftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var headerRightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		var headerDoubleClicked = headerLeftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
@@ -375,7 +387,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			}
 			else if (wasPrimarySelected && source.SubAssets.Count > 0)
 			{
-				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
+				_expandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
 			}
 		}
 
@@ -402,7 +415,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2.0f);
 			if (ImGui.SmallButton(isExpanded ? "Hide Sub-assets" : $"Show Sub-assets ({source.SubAssets.Count})"))
 			{
-				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
+				_expandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
 			}
 		}
 
@@ -430,7 +444,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
 		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
 
-		var thumbnailMin = new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
+		var thumbnailMin =
+			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
 		var thumbnailMax = thumbnailMin + ThumbnailSize;
 		DrawAssetThumbnail(drawList, thumbnailMin, thumbnailMax, source.PrimaryAsset);
 		DrawCardTextBlock(
@@ -487,19 +502,21 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			ImGui.EndMenu();
 		}
 
-		var canDelete = string.Equals(folderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false;
+		var canDelete =
+			string.Equals(folderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false;
 		if (canDelete && ImGui.MenuItem("Delete Folder"))
 		{
 			RequestDelete(PendingDeleteTarget.ForFolder(folderPath));
 		}
 	}
 
-	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem, BrowserContextTarget contextTarget, string deleteLabel)
+	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem,
+		BrowserContextTarget contextTarget, string deleteLabel)
 	{
 		var asset = ResolveTargetAsset(contextTarget);
-			if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
-			{
-				try
+		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
+		{
+			try
 			{
 				_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, asset.Id, scene.World);
 				_interactionState.MarkSceneDirty();
@@ -507,28 +524,29 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			catch (Exception ex)
 			{
 				ShowError($"Failed to add model to scene: {ex.Message}");
-				}
 			}
+		}
 
-			if (asset is not null && asset.Type == AssetType.Prefab && ImGui.MenuItem("Add to Scene"))
+		if (asset is not null && asset.Type == AssetType.Prefab && ImGui.MenuItem("Add to Scene"))
+		{
+			try
 			{
-				try
-				{
-					_assetPipelineService.InstantiatePrefab(_projectService.ProjectRootPath!, asset.Id, scene);
-					_interactionState.MarkSceneDirty();
-				}
-				catch (Exception ex)
-				{
-					ShowError($"Failed to add prefab to scene: {ex.Message}");
-				}
+				_assetPipelineService.InstantiatePrefab(_projectService.ProjectRootPath!, asset.Id, scene);
+				_interactionState.MarkSceneDirty();
 			}
+			catch (Exception ex)
+			{
+				ShowError($"Failed to add prefab to scene: {ex.Message}");
+			}
+		}
 
 		if (sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
 		{
 			var isExpanded = _expandedSourceId == sourceItem.SourceId;
 			if (ImGui.MenuItem(isExpanded ? "Hide Sub-assets" : "Show Sub-assets"))
 			{
-				_expandedSourceId = AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, sourceItem.SourceId);
+				_expandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, sourceItem.SourceId);
 			}
 		}
 
@@ -721,13 +739,15 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void PruneState(AssetsWindowBrowserModel browserModel)
 	{
-		_selectedFolderPath = AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath);
+		_selectedFolderPath =
+			AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath);
 		if (_expandedSourceId.HasValue && browserModel.SourcesBySourceId.ContainsKey(_expandedSourceId.Value) == false)
 		{
 			_expandedSourceId = null;
 		}
 
-		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId && _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
 			_selectedFolderPath = ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath);
 		}
@@ -739,7 +759,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void ValidateSelectionAfterProjectMutation()
 	{
-		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId && _projectService.TryGetAsset(selectedAssetId, out _) == false)
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+		    _projectService.TryGetAsset(selectedAssetId, out _) == false)
 		{
 			_assetSelectionService.Clear();
 		}
@@ -749,7 +770,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			_selectedFolderPath = GetNearestExistingFolderPath(_selectedFolderPath);
 		}
 
-		if (_expandedSourceId.HasValue && _projectService.CurrentAssetDatabase.Assets.Any(asset => asset.SourceId == _expandedSourceId.Value) == false)
+		if (_expandedSourceId.HasValue &&
+		    _projectService.CurrentAssetDatabase.Assets.Any(asset => asset.SourceId == _expandedSourceId.Value) ==
+		    false)
 		{
 			_expandedSourceId = null;
 		}
@@ -758,7 +781,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private string GetNearestExistingFolderPath(string relativeFolderPath)
 	{
 		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
-		while (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false)
+		while (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName,
+			       StringComparison.OrdinalIgnoreCase) == false)
 		{
 			var absoluteFolderPath = _projectService.GetAbsolutePath(normalizedFolderPath);
 			if (Directory.Exists(absoluteFolderPath))
@@ -794,10 +818,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
 	{
-		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null && string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
+		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null &&
+		    string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
 		{
 			var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
-			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId, StbImageLoader.IsSrgb(asset.TextureSummary.Semantic)))
+			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId,
+				    StbImageLoader.IsSrgb(asset.TextureSummary.Semantic)))
 			{
 				drawList.AddImage(textureId, min, max);
 				return;
@@ -809,7 +835,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			? handler.ThumbnailLabel
 			: GetFallbackThumbnailLabel(asset.Type);
 		var textSize = ImGui.CalcTextSize(label);
-		var textPos = new Vector2(min.X + ((max.X - min.X) - textSize.X) * 0.5f, min.Y + ((max.Y - min.Y) - textSize.Y) * 0.5f);
+		var textPos = new Vector2(min.X + ((max.X - min.X) - textSize.X) * 0.5f,
+			min.Y + ((max.Y - min.Y) - textSize.Y) * 0.5f);
 		drawList.AddText(textPos, ImGui.GetColorU32(ImGuiCol.TextDisabled), label);
 	}
 
@@ -833,16 +860,17 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private static string GetFallbackThumbnailLabel(AssetType assetType)
 	{
-			return assetType switch
-			{
-				AssetType.Scene => "SCN",
-				AssetType.Prefab => "PFB",
-				AssetType.Model3D => "3D",
-				_ => assetType.ToString().ToUpperInvariant()
-			};
-		}
+		return assetType switch
+		{
+			AssetType.Scene => "SCN",
+			AssetType.Prefab => "PFB",
+			AssetType.Model3D => "3D",
+			_ => assetType.ToString().ToUpperInvariant()
+		};
+	}
 
-	private static void DrawCenteredText(ImDrawListPtr drawList, string text, float minX, float maxX, float y, uint color)
+	private static void DrawCenteredText(ImDrawListPtr drawList, string text, float minX, float maxX, float y,
+		uint color)
 	{
 		var textSize = ImGui.CalcTextSize(text);
 		var availableWidth = maxX - minX;
@@ -850,7 +878,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		drawList.AddText(new Vector2(textX, y), color, text);
 	}
 
-	private static void DrawCardTextBlock(ImDrawListPtr drawList, Vector2 itemMin, Vector2 itemMax, float startY, string title, string? subtitle)
+	private static void DrawCardTextBlock(ImDrawListPtr drawList, Vector2 itemMin, Vector2 itemMax, float startY,
+		string title, string? subtitle)
 	{
 		var textInset = 8.0f;
 		var titleMin = new Vector2(itemMin.X + textInset, startY);
@@ -865,7 +894,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var subtitleY = startY + ImGui.GetTextLineHeightWithSpacing();
 		var subtitleMin = new Vector2(itemMin.X + textInset, subtitleY);
 		var subtitleMax = new Vector2(itemMax.X - textInset, subtitleY + ImGui.GetTextLineHeight());
-		drawList.AddText(subtitleMin, ImGui.GetColorU32(ImGuiCol.TextDisabled), ClipTextToWidth(subtitle, subtitleMax.X - subtitleMin.X));
+		drawList.AddText(subtitleMin, ImGui.GetColorU32(ImGuiCol.TextDisabled),
+			ClipTextToWidth(subtitle, subtitleMax.X - subtitleMin.X));
 	}
 
 	private static string ClipTextToWidth(string text, float maxWidth)
@@ -916,14 +946,26 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_openErrorPopup = true;
 	}
 
-	private sealed record BrowserContextTarget(BrowserContextKind Kind, string FolderPath, string? RelativeSourcePath, Guid? SourceId, Guid? AssetId)
+	private sealed record BrowserContextTarget(
+		BrowserContextKind Kind,
+		string FolderPath,
+		string? RelativeSourcePath,
+		Guid? SourceId,
+		Guid? AssetId)
 	{
-		public static BrowserContextTarget ForCurrentFolder(string folderPath) => new(BrowserContextKind.CurrentFolder, folderPath, null, null, null);
-		public static BrowserContextTarget ForFolder(string folderPath) => new(BrowserContextKind.Folder, folderPath, null, null, null);
+		public static BrowserContextTarget ForCurrentFolder(string folderPath) =>
+			new(BrowserContextKind.CurrentFolder, folderPath, null, null, null);
+
+		public static BrowserContextTarget ForFolder(string folderPath) =>
+			new(BrowserContextKind.Folder, folderPath, null, null, null);
+
 		public static BrowserContextTarget ForSource(string relativeSourcePath, Guid sourceId, Guid assetId) =>
-			new(BrowserContextKind.Source, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath, sourceId, assetId);
+			new(BrowserContextKind.Source, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath,
+				sourceId, assetId);
+
 		public static BrowserContextTarget ForSubAsset(string relativeSourcePath, Guid sourceId, Guid assetId) =>
-			new(BrowserContextKind.SubAsset, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath, sourceId, assetId);
+			new(BrowserContextKind.SubAsset, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath,
+				sourceId, assetId);
 	}
 
 	private enum BrowserContextKind
@@ -934,7 +976,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		SubAsset
 	}
 
-	private sealed record PendingDeleteTarget(DeleteTargetKind Kind, string RelativePath, string DisplayName, string ConfirmationText)
+	private sealed record PendingDeleteTarget(
+		DeleteTargetKind Kind,
+		string RelativePath,
+		string DisplayName,
+		string ConfirmationText)
 	{
 		public static PendingDeleteTarget ForSource(string relativeSourcePath)
 		{

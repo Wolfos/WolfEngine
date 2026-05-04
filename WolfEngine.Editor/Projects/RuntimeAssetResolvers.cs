@@ -27,6 +27,17 @@ public sealed class DataAssetRuntimeResolver : IDataAssetRuntimeResolver
 	}
 }
 
+public sealed class TerrainAssetRuntimeResolver : ITerrainAssetRuntimeResolver
+{
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var terrainAsset = TerrainAssetSerializer.Read(
+			context.GetAbsolutePath(context.Asset.RelativeAssetPath),
+			context.Asset.Name);
+		return terrainAsset;
+	}
+}
+
 public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 {
 	private readonly IMaterialAssetStore _materialAssetStore;

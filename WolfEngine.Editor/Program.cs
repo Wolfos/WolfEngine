@@ -65,7 +65,7 @@ public static class Program
 		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();
 		services.AddSingleton<IEditorAssetSnapshotService, EditorAssetSnapshotService>();
 		services.AddSingleton<ITerrainTexturePreviewRegistry, TerrainTexturePreviewRegistry>();
-		services.AddSingleton<ITerrainTexturePersistenceService, TerrainTexturePersistenceService>();
+		services.AddSingleton<ITerrainAssetPersistenceService, TerrainAssetPersistenceService>();
 		services.AddSingleton<IEditorUndoRedoService, EditorUndoRedoService>();
 		services.AddSingleton<IEditorCommandService, EditorCommandService>();
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
@@ -89,10 +89,12 @@ public static class Program
 		services.AddSingleton<IDataAssetStore, DataAssetStore>();
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
+		services.AddSingleton<ITerrainAssetCreator, TerrainAssetCreator>();
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IMaterialImporter, MaterialImporter>();
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
+		services.AddSingleton<ITerrainAssetRuntimeResolver, TerrainAssetRuntimeResolver>();
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
@@ -105,6 +107,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, SceneEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, PrefabEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
