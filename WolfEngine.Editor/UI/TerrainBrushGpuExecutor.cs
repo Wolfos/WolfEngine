@@ -266,17 +266,16 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 		var raw = new byte[readbackSize];
 		readableBuffer.Read(raw);
 
-		var packed = new byte[texture.Width * texture.Height * 4];
+		var packedBytesPerPixel = (int)bytesPerPixel;
+		var packed = new byte[texture.Width * texture.Height * packedBytesPerPixel];
 		var sourceOffset = 0;
 		for (var y = 0; y < texture.Height; y++)
 		{
-			Buffer.BlockCopy(raw, sourceOffset, packed, y * texture.Width * 4, texture.Width * 4);
+			Buffer.BlockCopy(raw, sourceOffset, packed, y * texture.Width * packedBytesPerPixel, texture.Width * packedBytesPerPixel);
 			sourceOffset += (int)rowPitch;
 		}
 
-		return texture.Format == TextureFormat.Rgba16Float
-			? ConvertRgba16FloatToRgba8(packed, texture.Width, texture.Height)
-			: packed;
+		return packed;
 	}
 
 	private static unsafe byte[] ReadTopMipMetal(Texture texture)
@@ -306,9 +305,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 			metalTexture.Texture.GetBytes((nint)destination, (nuint)bytesPerRow, region, 0);
 		}
 
-		return texture.Format == TextureFormat.Rgba16Float
-			? ConvertRgba16FloatToRgba8(data, texture.Width, texture.Height)
-			: data;
+		return data;
 	}
 
 	private BrushPipelineState EnsurePipelineState(IGfxDevice device, TerrainBrushOperation operation)

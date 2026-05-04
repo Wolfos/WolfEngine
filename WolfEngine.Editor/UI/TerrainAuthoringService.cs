@@ -365,6 +365,13 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 
 	private static byte[] ConvertHeightReadbackToR16(byte[] source, TextureFormat sourceFormat, int width, int height)
 	{
+		var expectedByteCount = TextureFormatUtilities.GetMipDataSize(sourceFormat, width, height);
+		if (source.Length < expectedByteCount)
+		{
+			throw new InvalidOperationException(
+				$"Terrain height readback for {sourceFormat} expected at least {expectedByteCount} bytes for {width}x{height}, but got {source.Length}.");
+		}
+
 		if (sourceFormat == TextureFormat.R16Unorm)
 		{
 			return source.ToArray();
@@ -375,7 +382,9 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		{
 			float normalized = sourceFormat == TextureFormat.Rgba16Float
 				? (float)BitConverter.UInt16BitsToHalf((ushort)(source[pixelIndex * 8] | (source[pixelIndex * 8 + 1] << 8)))
-				: source[pixelIndex * 4] / 255.0f;
+				: (sourceFormat == TextureFormat.Bgra8Unorm
+					? source[pixelIndex * 4 + 2]
+					: source[pixelIndex * 4]) / 255.0f;
 			var encoded = (ushort)Math.Clamp((int)MathF.Round(Math.Clamp(normalized, 0.0f, 1.0f) * 65535.0f), 0, 65535);
 			result[pixelIndex * 2] = (byte)(encoded & 0xff);
 			result[pixelIndex * 2 + 1] = (byte)(encoded >> 8);
