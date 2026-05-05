@@ -99,14 +99,49 @@ public sealed class TerrainAuthoringServiceTests
 		var centerOffset = ((2 * 5) + 2) * 4;
 		var paintedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)2, centerOffset, 4);
 		Assert.That(paintedSlot, Is.GreaterThanOrEqualTo(centerOffset));
-		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[paintedSlot], Is.GreaterThan(0));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[paintedSlot], Is.EqualTo(255));
 		var weightSum =
 			terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset] +
 			terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset + 1] +
 			terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset + 2] +
 			terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset + 3];
 		Assert.That(weightSum, Is.EqualTo(255));
+		for (var i = 0; i < 4; i++)
+		{
+			if (centerOffset + i != paintedSlot)
+			{
+				Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset + i], Is.EqualTo(0));
+			}
+		}
+
 		Assert.That(terrainAsset.LayerWeightMap.MipLevels.Length, Is.GreaterThan(1));
+	}
+
+	[Test]
+	public void EndStroke_PartialLayerPaintStealsWeightFromExistingLayers()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 0);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			GetTerrainEntity(scene),
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(8.0f, 0.5f, 1.0f, 1, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.EndStroke();
+
+		var centerOffset = ((2 * 5) + 2) * 4;
+		var paintedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)1, centerOffset, 4);
+		Assert.That(paintedSlot, Is.GreaterThanOrEqualTo(centerOffset));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[paintedSlot], Is.EqualTo(128));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset], Is.EqualTo(127));
 	}
 
 	[Test]

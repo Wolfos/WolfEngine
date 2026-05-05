@@ -325,8 +325,14 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		{
 			if (indices[offset + i] == targetLayer)
 			{
-				slot = i;
-				break;
+				if (slot < 0)
+				{
+					slot = i;
+				}
+				else
+				{
+					weights[offset + i] = 0;
+				}
 			}
 
 			if (weights[offset + i] < weights[offset + lowestSlot])
@@ -347,7 +353,86 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			weights[offset + slot] = 0;
 		}
 
-		weights[offset + slot] = (byte)Math.Clamp(weights[offset + slot] + delta, 0, 255);
+		var targetWeight = Math.Clamp(weights[offset + slot] + delta, 0, 255);
+		ApplyTargetLayerWeight(indices, weights, pixelIndex, slot, targetLayer, targetWeight);
+	}
+
+	private static void ApplyTargetLayerWeight(byte[] indices, byte[] weights, int pixelIndex, int targetSlot, byte targetLayer, int targetWeight)
+	{
+		var offset = pixelIndex * 4;
+		indices[offset + targetSlot] = targetLayer;
+		weights[offset + targetSlot] = (byte)targetWeight;
+
+		var remaining = 255 - targetWeight;
+		if (remaining <= 0)
+		{
+			for (var i = 0; i < 4; i++)
+			{
+				if (i != targetSlot)
+				{
+					weights[offset + i] = 0;
+				}
+			}
+
+			return;
+		}
+
+		var otherWeightSum = 0;
+		for (var i = 0; i < 4; i++)
+		{
+			if (i != targetSlot)
+			{
+				otherWeightSum += weights[offset + i];
+			}
+		}
+
+		if (otherWeightSum <= 0)
+		{
+			var fallbackSlot = targetSlot == 0 ? 1 : 0;
+			indices[offset + fallbackSlot] = 0;
+			weights[offset + fallbackSlot] = (byte)remaining;
+			for (var i = 0; i < 4; i++)
+			{
+				if (i != targetSlot && i != fallbackSlot)
+				{
+					weights[offset + i] = 0;
+				}
+			}
+
+			return;
+		}
+
+		var distributed = 0;
+		var lastWeightedSlot = -1;
+		for (var i = 0; i < 4; i++)
+		{
+			if (i == targetSlot)
+			{
+				continue;
+			}
+
+			if (weights[offset + i] > 0)
+			{
+				lastWeightedSlot = i;
+			}
+		}
+
+		for (var i = 0; i < 4; i++)
+		{
+			if (i == targetSlot)
+			{
+				continue;
+			}
+
+			var value = weights[offset + i] <= 0
+				? 0
+				: i == lastWeightedSlot
+					? remaining - distributed
+					: Math.Clamp((int)MathF.Round(weights[offset + i] / (float)otherWeightSum * remaining), 0, remaining - distributed);
+			weights[offset + i] = (byte)value;
+			distributed += value;
+		}
+
 		TerrainLayerMapUtility.NormalizePixel(indices, weights, pixelIndex);
 	}
 

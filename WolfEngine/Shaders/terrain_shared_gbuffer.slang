@@ -199,6 +199,129 @@ struct TerrainLayerBlend
     float4 weights;
 };
 
+void AddLayerContribution(inout uint4 indices, inout float4 weights, uint layerIndex, float contribution)
+{
+    if (contribution <= 0.0f)
+    {
+        return;
+    }
+
+    if (weights.x > 0.0f && indices.x == layerIndex)
+    {
+        weights.x += contribution;
+        return;
+    }
+
+    if (weights.y > 0.0f && indices.y == layerIndex)
+    {
+        weights.y += contribution;
+        return;
+    }
+
+    if (weights.z > 0.0f && indices.z == layerIndex)
+    {
+        weights.z += contribution;
+        return;
+    }
+
+    if (weights.w > 0.0f && indices.w == layerIndex)
+    {
+        weights.w += contribution;
+        return;
+    }
+
+    if (weights.x <= 0.0f)
+    {
+        indices.x = layerIndex;
+        weights.x = contribution;
+        return;
+    }
+
+    if (weights.y <= 0.0f)
+    {
+        indices.y = layerIndex;
+        weights.y = contribution;
+        return;
+    }
+
+    if (weights.z <= 0.0f)
+    {
+        indices.z = layerIndex;
+        weights.z = contribution;
+        return;
+    }
+
+    if (weights.w <= 0.0f)
+    {
+        indices.w = layerIndex;
+        weights.w = contribution;
+        return;
+    }
+
+    float minWeight = weights.x;
+    uint minSlot = 0;
+    if (weights.y < minWeight)
+    {
+        minWeight = weights.y;
+        minSlot = 1;
+    }
+
+    if (weights.z < minWeight)
+    {
+        minWeight = weights.z;
+        minSlot = 2;
+    }
+
+    if (weights.w < minWeight)
+    {
+        minWeight = weights.w;
+        minSlot = 3;
+    }
+
+    if (contribution <= minWeight)
+    {
+        return;
+    }
+
+    if (minSlot == 0)
+    {
+        indices.x = layerIndex;
+        weights.x = contribution;
+    }
+    else if (minSlot == 1)
+    {
+        indices.y = layerIndex;
+        weights.y = contribution;
+    }
+    else if (minSlot == 2)
+    {
+        indices.z = layerIndex;
+        weights.z = contribution;
+    }
+    else
+    {
+        indices.w = layerIndex;
+        weights.w = contribution;
+    }
+}
+
+void AccumulateLayerMapTexel(
+    Texture2D<float4> indexMap,
+    Texture2D<float4> weightMap,
+    uint2 texel,
+    float bilinearWeight,
+    inout uint4 indices,
+    inout float4 weights)
+{
+    float4 indexSample = indexMap.Load(int3(texel, 0));
+    float4 weightSample = saturate(weightMap.Load(int3(texel, 0))) * bilinearWeight;
+    uint4 texelIndices = uint4(round(saturate(indexSample) * 255.0f));
+    AddLayerContribution(indices, weights, texelIndices.x, weightSample.x);
+    AddLayerContribution(indices, weights, texelIndices.y, weightSample.y);
+    AddLayerContribution(indices, weights, texelIndices.z, weightSample.z);
+    AddLayerContribution(indices, weights, texelIndices.w, weightSample.w);
+}
+
 TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terrainData)
 {
     TerrainLayerBlend blend;
@@ -214,13 +337,22 @@ TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terr
     uint indexWidth = 1;
     uint indexHeight = 1;
     indexMap.GetDimensions(indexWidth, indexHeight);
-    uint2 indexTexel = uint2(
-        min((uint)floor(saturate(uv.x) * indexWidth), max(indexWidth, 1u) - 1u),
-        min((uint)floor(saturate(uv.y) * indexHeight), max(indexHeight, 1u) - 1u));
-    float4 indexSample = indexMap.Load(int3(indexTexel, 0));
-    blend.indices = uint4(round(saturate(indexSample) * 255.0f));
-    SamplerState samplerState = GetSampler(terrainData.layerMapSamplerHandle);
-    blend.weights = saturate(GetTexture(terrainData.layerWeightMapHandle).SampleLevel(samplerState, uv, 0.0f));
+    float2 samplePosition = saturate(uv) * float2(indexWidth, indexHeight) - 0.5f;
+    float2 basePosition = floor(samplePosition);
+    float2 fraction = saturate(samplePosition - basePosition);
+    int2 maxTexel = int2(max(indexWidth, 1u) - 1u, max(indexHeight, 1u) - 1u);
+    int2 texel00 = clamp(int2(basePosition), int2(0, 0), maxTexel);
+    int2 texel10 = clamp(texel00 + int2(1, 0), int2(0, 0), maxTexel);
+    int2 texel01 = clamp(texel00 + int2(0, 1), int2(0, 0), maxTexel);
+    int2 texel11 = clamp(texel00 + int2(1, 1), int2(0, 0), maxTexel);
+
+    blend.indices = uint4(0, 0, 0, 0);
+    blend.weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    Texture2D<float4> weightMap = GetTexture(terrainData.layerWeightMapHandle);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, blend.indices, blend.weights);
     return blend;
 }
 

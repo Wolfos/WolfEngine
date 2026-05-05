@@ -128,6 +128,29 @@ void ApplyHeightmapSmoothBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
     outputTexture[pixel] = current;
 }
 
+float4 NormalizeWeights(float4 weights)
+{
+    float sum = weights.x + weights.y + weights.z + weights.w;
+    if (sum <= 1e-5f)
+    {
+        return float4(1.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    return weights / sum;
+}
+
+float4 PaintTowardLayer(float4 current, uint layerIndex, float amount)
+{
+    float4 target = 0.0f;
+
+    if (layerIndex == 0u) target.r = 1.0f;
+    if (layerIndex == 1u) target.g = 1.0f;
+    if (layerIndex == 2u) target.b = 1.0f;
+    if (layerIndex == 3u) target.a = 1.0f;
+
+    return NormalizeWeights(lerp(current, target, saturate(amount)));
+}
+
 [numthreads(8, 8, 1)]
 void ApplyLayerMapLayerBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -146,22 +169,5 @@ void ApplyLayerMapLayerBrush(uint3 dispatchThreadId : SV_DispatchThreadID)
     float delta = brushStrength * weight * brushInvertSign;
     uint clampedLayerIndex = min(layerIndex, 3u);
 
-    if (clampedLayerIndex == 0u)
-    {
-        current.r = saturate(current.r + delta);
-    }
-    else if (clampedLayerIndex == 1u)
-    {
-        current.g = saturate(current.g + delta);
-    }
-    else if (clampedLayerIndex == 2u)
-    {
-        current.b = saturate(current.b + delta);
-    }
-    else
-    {
-        current.a = saturate(current.a + delta);
-    }
-
-    outputTexture[pixel] = current;
+    outputTexture[pixel] = PaintTowardLayer(current, clampedLayerIndex, delta);
 }
