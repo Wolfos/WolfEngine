@@ -17,6 +17,9 @@ public sealed class TerrainRuntimeData
 	private Texture? _resolvedRenderHeightmap;
 	private Texture? _resolvedRenderLayerIndexMap;
 	private Texture? _resolvedRenderLayerWeightMap;
+	private Texture? _layerIndexSamplingSource;
+	private Texture? _layerIndexSamplingTexture;
+	private int _layerIndexSamplingSourceRevision = -1;
 	private TerrainLayerSet? _resolvedLayerSet;
 	private Vector2 _resolvedWorldSize;
 	private float _resolvedHeightScale;
@@ -256,7 +259,7 @@ public sealed class TerrainRuntimeData
 		_layerSetNodeId = component.LayerSetAsset.NodeId;
 		_resolvedHeightmap = _resolvedTerrainAsset?.Heightmap;
 		_resolvedRenderHeightmap = component.AuthoringPreviewHeightmap ?? _resolvedHeightmap;
-		_resolvedRenderLayerIndexMap = component.AuthoringPreviewLayerIndexMap ?? _resolvedTerrainAsset?.LayerIndexMap;
+		_resolvedRenderLayerIndexMap = ResolveLayerIndexSamplingTexture(component.AuthoringPreviewLayerIndexMap ?? _resolvedTerrainAsset?.LayerIndexMap);
 		_resolvedRenderLayerWeightMap = component.AuthoringPreviewLayerWeightMap ?? _resolvedTerrainAsset?.LayerWeightMap;
 		_resolvedLayerSet = component.LayerSetAsset.Asset;
 		_resolvedWorldSize = component.GetResolvedWorldSize();
@@ -265,6 +268,48 @@ public sealed class TerrainRuntimeData
 		_resolvedLod0Resolution = component.GetResolvedLod0ResolutionInQuads();
 		_resolvedLodDistances = component.GetResolvedLodDistancesMeters();
 		_resolvedChunkSizeMeters = ResolveChunkSizeMeters(component);
+	}
+
+	private Texture? ResolveLayerIndexSamplingTexture(Texture? source)
+	{
+		if (source is null || source.Format != TextureFormat.Rgba8Uint)
+		{
+			return source;
+		}
+
+		var sourceRevision = source.ResourceRevision;
+		if (ReferenceEquals(_layerIndexSamplingSource, source) &&
+		    _layerIndexSamplingSourceRevision == sourceRevision &&
+		    _layerIndexSamplingTexture is not null)
+		{
+			return _layerIndexSamplingTexture;
+		}
+
+		var mipLevels = new TextureMipData[source.MipLevels.Length];
+		for (var i = 0; i < source.MipLevels.Length; i++)
+		{
+			var mip = source.MipLevels[i];
+			mipLevels[i] = new TextureMipData(mip.Width, mip.Height, mip.Data.ToArray());
+		}
+
+		if (_layerIndexSamplingTexture is null)
+		{
+			_layerIndexSamplingTexture = new Texture(
+				$"{source.Name}:sampling",
+				source.Width,
+				source.Height,
+				false,
+				TextureFormat.Rgba8Unorm,
+				mipLevels);
+		}
+		else
+		{
+			_layerIndexSamplingTexture.ApplyTextureData(source.Width, source.Height, false, TextureFormat.Rgba8Unorm, mipLevels);
+		}
+
+		_layerIndexSamplingSource = source;
+		_layerIndexSamplingSourceRevision = sourceRevision;
+		return _layerIndexSamplingTexture;
 	}
 
 	private bool EnsureSamplingState(TerrainComponent component)

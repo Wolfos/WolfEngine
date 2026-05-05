@@ -88,6 +88,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			return false;
 		}
 
+		request = NormalizeStrokeRequest(in terrain, request);
 		var beforeSnapshot = terrainAsset.CaptureSnapshot(terrainAssetId);
 		if (request.SurfaceTarget == TerrainAuthoringSurfaceTarget.Heightmap)
 		{
@@ -115,6 +116,25 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		_terrainTexturePreviewRegistry.RegisterPreview(terrainAssetId, request.SurfaceTarget, currentWeight);
 		_activeStroke = StrokeState.ForLayerMaps(scene, terrainEntity, request, terrainAsset, terrainAssetId, beforeSnapshot, currentIndex, currentWeight);
 		return true;
+	}
+
+	private static TerrainBrushStrokeRequest NormalizeStrokeRequest(in TerrainComponent terrain, TerrainBrushStrokeRequest request)
+	{
+		if (request.Operation != TerrainBrushOperation.PaintLayer)
+		{
+			return request;
+		}
+
+		var layerCount = terrain.LayerSetAsset.Asset?.ResolvedLayerCount ?? 4;
+		var maxLayerIndex = Math.Clamp(layerCount - 1, 0, 255);
+		var layerIndex = Math.Clamp(request.Settings.LayerIndex, 0, maxLayerIndex);
+		return request with
+		{
+			Settings = request.Settings with
+			{
+				LayerIndex = layerIndex
+			}
+		};
 	}
 
 	public void AppendStamp(Vector3 localPosition, float pressure, TerrainBrushModifierState modifiers)
@@ -149,7 +169,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 
 		if (strength <= 0.0f ||
-		    TryBuildBrushPlacement(ref terrain, previewTexture.Width, previewTexture.Height, localPosition, radius, out var placement) == false)
+		    TryBuildBrushPlacement(in terrain, previewTexture.Width, previewTexture.Height, localPosition, radius, out var placement) == false)
 		{
 			return;
 		}
@@ -290,6 +310,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 				ApplyLayerDelta(indexMip.Data, weightMip.Data, pixelIndex, targetLayer, delta);
 			}
 		}
+
+		var mips = TerrainLayerMapUtility.GenerateLayerMipChain(indexMip, weightMip);
+		stroke.CurrentLayerIndexMap!.ApplyTextureData(indexMip.Width, indexMip.Height, false, TextureFormat.Rgba8Uint, mips.Indices);
+		stroke.CurrentLayerWeightMap!.ApplyTextureData(weightMip.Width, weightMip.Height, false, TextureFormat.Rgba8Unorm, mips.Weights);
 	}
 
 	private static void ApplyLayerDelta(byte[] indices, byte[] weights, int pixelIndex, byte targetLayer, int delta)

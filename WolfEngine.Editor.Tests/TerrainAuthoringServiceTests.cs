@@ -109,6 +109,61 @@ public sealed class TerrainAuthoringServiceTests
 		Assert.That(terrainAsset.LayerWeightMap.MipLevels.Length, Is.GreaterThan(1));
 	}
 
+	[Test]
+	public void EndStroke_LeavesUnpaintedLayerPixelsOnLayerZero()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 0);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			GetTerrainEntity(scene),
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 1, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.EndStroke();
+
+		var cornerOffset = 0;
+		Assert.That(terrainAsset.LayerIndexMap.MipLevels[0].Data[cornerOffset], Is.EqualTo(0));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[cornerOffset], Is.EqualTo(255));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[cornerOffset + 1], Is.EqualTo(0));
+	}
+
+	[Test]
+	public void EndStroke_ClampsPaintLayerToActiveLayerSet()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var layerSetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 0);
+		registry.Register(terrainAssetId, terrainAsset);
+		registry.Register(layerSetId, new TerrainLayerSet { ActiveLayerCount = 2 });
+		var scene = CreateScene(terrainAssetId, layerSetId);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			GetTerrainEntity(scene),
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 3, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.EndStroke();
+
+		var centerOffset = ((2 * 5) + 2) * 4;
+		var clampedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)1, centerOffset, 4);
+		Assert.That(clampedSlot, Is.GreaterThanOrEqualTo(centerOffset));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[clampedSlot], Is.GreaterThan(0));
+		Assert.That(Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)3, centerOffset, 4), Is.EqualTo(-1));
+	}
+
 	private static ITerrainAuthoringService CreateService(
 		out IEditorUndoRedoService undoRedo,
 		out IEditorInteractionState interactionState)
@@ -123,7 +178,7 @@ public sealed class TerrainAuthoringServiceTests
 			new TestTerrainBrushGpuExecutor());
 	}
 
-	private static EditorScene CreateScene(Guid terrainAssetId)
+	private static EditorScene CreateScene(Guid terrainAssetId, Guid layerSetId = default)
 	{
 		var world = new World(WorldTag.Authoring);
 		var terrainEntity = world.CreateEntity("Terrain");
@@ -131,6 +186,7 @@ public sealed class TerrainAuthoringServiceTests
 		world.AddComponent(terrainEntity, new TerrainComponent
 		{
 			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = terrainAssetId },
+			LayerSetAsset = new AssetRef<TerrainLayerSet> { NodeId = layerSetId },
 			WorldSizeMeters = new Vector2(64.0f, 64.0f),
 			HeightScaleMeters = 8.0f,
 			ChunkSizeMeters = 64.0f,

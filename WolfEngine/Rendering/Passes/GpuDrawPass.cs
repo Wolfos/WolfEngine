@@ -125,7 +125,7 @@ public sealed class GpuDrawPass
 		int ExecutionIndex,
 		uint DrawFlags);
 
-	private readonly record struct TerrainMaterialAllocation(uint LayerStart, uint LayerCount);
+	private readonly record struct TerrainMaterialAllocation(uint LayerStart, uint LayerCount, bool Reallocated);
 
 	private readonly record struct ComputeResourceBindings(params uint[] Slots);
 
@@ -488,10 +488,12 @@ public sealed class GpuDrawPass
 
 					if (layerStart != 0)
 					{
-						var previousTerrainState = forceGpuRefresh || _terrainMaterialStates.TryGetValue(update.MaterialHandle.Value, out var uploadedSurface) == false
+						var previousTerrainState = forceGpuRefresh ||
+						                           allocation.Reallocated ||
+						                           _terrainMaterialStates.TryGetValue(update.MaterialHandle.Value, out var uploadedSurface) == false
 							? default(TerrainDrawSurface?)
 							: uploadedSurface;
-						AppendTerrainLayerUpdates(update.MaterialHandle.Value, layerStart, terrainSurface, previousTerrainState, forceGpuRefresh);
+						AppendTerrainLayerUpdates(update.MaterialHandle.Value, layerStart, terrainSurface, previousTerrainState, forceGpuRefresh || allocation.Reallocated);
 					}
 					_terrainMaterialStates[update.MaterialHandle.Value] = terrainSurface;
 				}
@@ -611,15 +613,15 @@ public sealed class GpuDrawPass
 		    _terrainMaterialAllocations.TryGetValue(materialHandle, out var existingAllocation) &&
 		    existingAllocation.LayerCount >= requiredLayerCount)
 		{
-			return existingAllocation;
+			return existingAllocation with { Reallocated = false };
 		}
 
 		if ((uint)_nextTerrainLayerSlot + requiredLayerCount > GpuDrawResources.MaxTerrainLayerCount)
 		{
-			return new TerrainMaterialAllocation(0, 1);
+			return new TerrainMaterialAllocation(0, 1, true);
 		}
 
-		var allocation = new TerrainMaterialAllocation((uint)_nextTerrainLayerSlot, requiredLayerCount);
+		var allocation = new TerrainMaterialAllocation((uint)_nextTerrainLayerSlot, requiredLayerCount, true);
 		_nextTerrainLayerSlot += (int)requiredLayerCount;
 		_terrainMaterialAllocations[materialHandle] = allocation;
 		return allocation;

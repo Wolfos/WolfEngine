@@ -3,11 +3,25 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Editor.Tests;
 
 public sealed class TextureArtifactPipelineTests
 {
+	[Test]
+	public void ApplyTextureData_KeepsPreviousGpuResourcesUntilReplacementUpload()
+	{
+		var texture = new Texture("texture", 1, 1, false, TextureFormat.Rgba8Unorm, [new TextureMipData(1, 1, [0, 0, 0, 255])]);
+		var resources = new TestTextureResources();
+		texture.MarkGpuResourcesCreated(resources);
+
+		texture.ApplyTextureData(1, 1, false, TextureFormat.Rgba8Unorm, [new TextureMipData(1, 1, [255, 255, 255, 255])]);
+
+		Assert.That(texture.HasGpuResources, Is.False);
+		Assert.That(texture.Resources, Is.SameAs(resources));
+	}
+
 	[Test]
 	public void TextureArtifactSerializer_RoundTripsCompressedMipChain()
 	{
@@ -120,6 +134,12 @@ public sealed class TextureArtifactPipelineTests
 
 		Assert.That(result, Is.EqualTo(expectedResult));
 		Assert.That(format, Is.EqualTo(expectedFormat));
+	}
+
+	private sealed class TestTextureResources : ITextureResources
+	{
+		public IGfxTexture Texture { get; } = Substitute.For<IGfxTexture>();
+		public DescriptorHandle ShaderResourceView { get; } = new(DescriptorKind.ShaderResourceView, 42);
 	}
 
 	private sealed class TempDirectory : IDisposable

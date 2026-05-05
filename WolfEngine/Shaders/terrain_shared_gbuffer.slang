@@ -210,10 +210,17 @@ TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terr
         return blend;
     }
 
-    SamplerState samplerState = GetSampler(terrainData.layerMapSamplerHandle);
-    float4 indexSample = GetTexture(terrainData.layerIndexMapHandle).SampleLevel(samplerState, uv, 0.0f);
+    Texture2D<float4> indexMap = GetTexture(terrainData.layerIndexMapHandle);
+    uint indexWidth = 1;
+    uint indexHeight = 1;
+    indexMap.GetDimensions(indexWidth, indexHeight);
+    uint2 indexTexel = uint2(
+        min((uint)floor(saturate(uv.x) * indexWidth), max(indexWidth, 1u) - 1u),
+        min((uint)floor(saturate(uv.y) * indexHeight), max(indexHeight, 1u) - 1u));
+    float4 indexSample = indexMap.Load(int3(indexTexel, 0));
     blend.indices = uint4(round(saturate(indexSample) * 255.0f));
-    blend.weights = saturate(GetTexture(terrainData.layerWeightMapHandle).Sample(samplerState, uv));
+    SamplerState samplerState = GetSampler(terrainData.layerMapSamplerHandle);
+    blend.weights = saturate(GetTexture(terrainData.layerWeightMapHandle).SampleLevel(samplerState, uv, 0.0f));
     return blend;
 }
 

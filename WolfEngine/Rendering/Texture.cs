@@ -124,9 +124,9 @@ public sealed class Texture
     {
         lock (_resourceSync)
         {
-            _resources = null;
             _hasGpuResources = false;
             _resourceRequestPending = false;
+            _resourceRevision++;
         }
     }
 
