@@ -17,6 +17,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 	private DescriptorHandle _srvHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _depthSrvHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _uavHandle = DescriptorHandle.Invalid;
+	private D3D12DescriptorTable _descriptorTable;
 
 	public D3D12Texture(string name, TextureDescriptor descriptor, ComPtr<ID3D12Resource> resource)
 	{
@@ -59,11 +60,12 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 		_uavHandle = DescriptorHandle.Invalid;
 	}
 
-	public void SetHandles(DescriptorHandle srvHandle, DescriptorHandle depthSrvHandle, DescriptorHandle uavHandle)
+	public void SetHandles(DescriptorHandle srvHandle, DescriptorHandle depthSrvHandle, DescriptorHandle uavHandle, D3D12DescriptorTable descriptorTable = null)
 	{
 		_srvHandle = srvHandle;
 		_depthSrvHandle = depthSrvHandle;
 		_uavHandle = uavHandle;
+		_descriptorTable = descriptorTable;
 	}
 
 	public void SetRenderTargetView(ComPtr<ID3D12DescriptorHeap> heap, CpuDescriptorHandle handle)
@@ -91,6 +93,7 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 	public void Dispose()
 	{
+		FreeDescriptors();
 		DisposeHeap(ref _rtvHeap);
 		DisposeHeap(ref _dsvHeap);
 		if (Resource.Handle is not null)
@@ -101,6 +104,22 @@ internal sealed unsafe class D3D12Texture : ID3D12BackendTexture, IDisposable
 
 		_rtvHandle = null;
 		_dsvHandle = null;
+		_srvHandle = DescriptorHandle.Invalid;
+		_depthSrvHandle = DescriptorHandle.Invalid;
+		_uavHandle = DescriptorHandle.Invalid;
+		_descriptorTable = null;
+	}
+
+	private void FreeDescriptors()
+	{
+		if (_descriptorTable == null)
+		{
+			return;
+		}
+
+		_descriptorTable.Free(_srvHandle);
+		_descriptorTable.Free(_depthSrvHandle);
+		_descriptorTable.Free(_uavHandle);
 		_srvHandle = DescriptorHandle.Invalid;
 		_depthSrvHandle = DescriptorHandle.Invalid;
 		_uavHandle = DescriptorHandle.Invalid;

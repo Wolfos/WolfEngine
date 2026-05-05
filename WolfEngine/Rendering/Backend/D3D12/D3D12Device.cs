@@ -318,7 +318,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			uavHandle = _globalTable.AllocateUnorderedAccessView(texture);
 		}
 
-		texture.SetHandles(srvHandle, depthSrvHandle, uavHandle);
+		texture.SetHandles(srvHandle, depthSrvHandle, uavHandle, _globalTable);
 
 		return texture;
 	}

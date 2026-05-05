@@ -1023,7 +1023,11 @@ private sealed class MeshResources
 		var uavHandle = supportsUnorderedAccess
 			? _gfxDevice.GlobalTable.AllocateUnorderedAccessView(backendTexture)
 			: DescriptorHandle.Invalid;
-		backendTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, uavHandle);
+		backendTexture.SetHandles(
+			srvHandle,
+			DescriptorHandle.Invalid,
+			uavHandle,
+			_gfxDevice.GlobalTable as D3D12DescriptorTable);
 
 		return new D3D12TextureResources
 		{

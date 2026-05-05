@@ -107,16 +107,18 @@ public sealed class Texture
         }
     }
 
-    internal void MarkGpuResourcesCreated(ITextureResources resources)
+    internal ITextureResources? MarkGpuResourcesCreated(ITextureResources resources)
     {
         ArgumentNullException.ThrowIfNull(resources);
 
         lock (_resourceSync)
         {
+            var previousResources = ReferenceEquals(_resources, resources) ? null : _resources;
             _resources = resources;
             _hasGpuResources = true;
             _resourceRequestPending = false;
             _resourceRevision++;
+            return previousResources;
         }
     }
 

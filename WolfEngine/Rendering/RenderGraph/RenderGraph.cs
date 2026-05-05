@@ -49,7 +49,12 @@ public sealed class RenderGraph
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
 	private readonly HashSet<Texture> _pendingTextures = new(new ReferenceComparer<Texture>());
 	private readonly HashSet<Material> _trackedMaterials = new(new ReferenceComparer<Material>());
+	private readonly List<PendingTextureResourceRelease> _pendingTextureResourceReleases = new();
 	private readonly ConcurrentQueue<Mesh> _ensureMeshQueue = new();
+
+	private readonly record struct PendingTextureResourceRelease(
+		ITextureResources Resources,
+		ulong ReleaseAfterSubmissionId);
 
 	public RenderGraph(
 		RenderGraphResourceRegistry resourceRegistry,
@@ -267,6 +272,7 @@ public sealed class RenderGraph
 		{
 			submissionTimeline.PumpCompleted();
 		}
+		ReleaseRetiredTextureResources();
 
 		using (FrameProfiler.Instance.Measure("Upload resources"))
 		{
@@ -545,8 +551,47 @@ public sealed class RenderGraph
 			}
 
 			var resources = _renderer.CreateTextureResources(texture);
-			texture.MarkGpuResourcesCreated(resources);
+			var previousResources = texture.MarkGpuResourcesCreated(resources);
+			if (previousResources is not null)
+			{
+				QueueTextureResourceRelease(previousResources);
+			}
+
 			changedTextures.Add(texture);
+		}
+	}
+
+	private void QueueTextureResourceRelease(ITextureResources resources)
+	{
+		var releaseAfterSubmissionId = _renderer.GetGfxDevice() is IGpuSubmissionTimeline submissionTimeline
+			? submissionTimeline.LastSubmittedId
+			: 0UL;
+		lock (_resourceSync)
+		{
+			_pendingTextureResourceReleases.Add(new PendingTextureResourceRelease(resources, releaseAfterSubmissionId));
+		}
+	}
+
+	private void ReleaseRetiredTextureResources()
+	{
+		var completedSubmissionId = _renderer.GetGfxDevice() is IGpuSubmissionTimeline submissionTimeline
+			? submissionTimeline.CompletedId
+			: ulong.MaxValue;
+
+		lock (_resourceSync)
+		{
+			for (var i = _pendingTextureResourceReleases.Count - 1; i >= 0; i--)
+			{
+				var pending = _pendingTextureResourceReleases[i];
+				if (pending.ReleaseAfterSubmissionId > completedSubmissionId)
+				{
+					continue;
+				}
+
+				(pending.Resources.Texture as IDisposable)?.Dispose();
+				(pending.Resources as IDisposable)?.Dispose();
+				_pendingTextureResourceReleases.RemoveAt(i);
+			}
 		}
 	}
 
