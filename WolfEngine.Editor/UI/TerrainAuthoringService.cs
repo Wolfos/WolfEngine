@@ -109,12 +109,9 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			return false;
 		}
 
-		var currentIndex = TerrainAsset.CloneTexture(terrain.AuthoringPreviewLayerIndexMap ?? terrainAsset.LayerIndexMap);
-		var currentWeight = TerrainAsset.CloneTexture(terrain.AuthoringPreviewLayerWeightMap ?? terrainAsset.LayerWeightMap);
-		terrain.AuthoringPreviewLayerIndexMap = currentIndex;
-		terrain.AuthoringPreviewLayerWeightMap = currentWeight;
-		_terrainTexturePreviewRegistry.RegisterPreview(terrainAssetId, request.SurfaceTarget, currentWeight);
-		_activeStroke = StrokeState.ForLayerMaps(scene, terrainEntity, request, terrainAsset, terrainAssetId, beforeSnapshot, currentIndex, currentWeight);
+		terrain.AuthoringPreviewLayerIndexMap = null;
+		terrain.AuthoringPreviewLayerWeightMap = null;
+		_activeStroke = StrokeState.ForLayerMaps(scene, terrainEntity, request, terrainAsset, terrainAssetId, beforeSnapshot);
 		return true;
 	}
 
@@ -153,10 +150,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 
 		ref var terrain = ref world.GetComponent<TerrainComponent>(stroke.TerrainEntity);
-		var previewTexture = stroke.Request.SurfaceTarget == TerrainAuthoringSurfaceTarget.Heightmap
+		var targetTexture = stroke.Request.SurfaceTarget == TerrainAuthoringSurfaceTarget.Heightmap
 			? stroke.CurrentPreviewTexture
-			: stroke.CurrentLayerWeightMap;
-		if (previewTexture is null)
+			: stroke.TerrainAsset.LayerWeightMap;
+		if (targetTexture is null)
 		{
 			return;
 		}
@@ -169,7 +166,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 
 		if (strength <= 0.0f ||
-		    TryBuildBrushPlacement(in terrain, previewTexture.Width, previewTexture.Height, localPosition, radius, out var placement) == false)
+		    TryBuildBrushPlacement(in terrain, targetTexture.Width, targetTexture.Height, localPosition, radius, out var placement) == false)
 		{
 			return;
 		}
@@ -177,8 +174,6 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		if (stroke.Request.Operation == TerrainBrushOperation.PaintLayer)
 		{
 			ApplyLayerStamp(stroke, placement, strength, modifiers);
-			terrain.AuthoringPreviewLayerIndexMap = stroke.CurrentLayerIndexMap;
-			terrain.AuthoringPreviewLayerWeightMap = stroke.CurrentLayerWeightMap;
 			return;
 		}
 
@@ -231,13 +226,13 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 		else
 		{
-			var baseIndices = stroke.CurrentLayerIndexMap!.MipLevels[0];
-			var baseWeights = stroke.CurrentLayerWeightMap!.MipLevels[0];
+			var baseIndices = stroke.TerrainAsset.LayerIndexMap.MipLevels[0];
+			var baseWeights = stroke.TerrainAsset.LayerWeightMap.MipLevels[0];
 			var mips = TerrainLayerMapUtility.GenerateLayerMipChain(baseIndices, baseWeights);
 			stroke.TerrainAsset.LayerIndexMap.ApplyTextureData(baseIndices.Width, baseIndices.Height, false, TextureFormat.Rgba8Uint, mips.Indices);
 			stroke.TerrainAsset.LayerWeightMap.ApplyTextureData(baseWeights.Width, baseWeights.Height, false, TextureFormat.Rgba8Unorm, mips.Weights);
-			terrain.AuthoringPreviewLayerIndexMap = stroke.CurrentLayerIndexMap;
-			terrain.AuthoringPreviewLayerWeightMap = stroke.CurrentLayerWeightMap;
+			terrain.AuthoringPreviewLayerIndexMap = null;
+			terrain.AuthoringPreviewLayerWeightMap = null;
 		}
 
 		var afterSnapshot = stroke.TerrainAsset.CaptureSnapshot(stroke.TerrainAssetId);
@@ -268,6 +263,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			}
 			else
 			{
+				stroke.TerrainAsset.ApplyMaps(
+					stroke.BeforeSnapshot.Heightmap,
+					stroke.BeforeSnapshot.LayerIndexMap,
+					stroke.BeforeSnapshot.LayerWeightMap);
 				terrain.AuthoringPreviewLayerIndexMap = null;
 				terrain.AuthoringPreviewLayerWeightMap = null;
 			}
@@ -278,8 +277,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 
 	private static void ApplyLayerStamp(StrokeState stroke, BrushPlacement placement, float strength, TerrainBrushModifierState modifiers)
 	{
-		var indexMip = stroke.CurrentLayerIndexMap!.MipLevels[0];
-		var weightMip = stroke.CurrentLayerWeightMap!.MipLevels[0];
+		var indexMap = stroke.TerrainAsset.LayerIndexMap;
+		var weightMap = stroke.TerrainAsset.LayerWeightMap;
+		var indexMip = indexMap.MipLevels[0];
+		var weightMip = weightMap.MipLevels[0];
 		var targetLayer = (byte)Math.Clamp(stroke.Request.Settings.LayerIndex, 0, 255);
 		var minX = Math.Clamp((int)MathF.Floor(placement.CenterPixels.X - placement.RadiusPixels.X), 0, indexMip.Width - 1);
 		var maxX = Math.Clamp((int)MathF.Ceiling(placement.CenterPixels.X + placement.RadiusPixels.X), 0, indexMip.Width - 1);
@@ -311,9 +312,8 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			}
 		}
 
-		var mips = TerrainLayerMapUtility.GenerateLayerMipChain(indexMip, weightMip);
-		stroke.CurrentLayerIndexMap!.ApplyTextureData(indexMip.Width, indexMip.Height, false, TextureFormat.Rgba8Uint, mips.Indices);
-		stroke.CurrentLayerWeightMap!.ApplyTextureData(weightMip.Width, weightMip.Height, false, TextureFormat.Rgba8Unorm, mips.Weights);
+		indexMap.ApplyTextureData(indexMap.Width, indexMap.Height, indexMap.IsSrgb, indexMap.Format, indexMap.MipLevels);
+		weightMap.ApplyTextureData(weightMap.Width, weightMap.Height, weightMap.IsSrgb, weightMap.Format, weightMap.MipLevels);
 	}
 
 	private static void ApplyLayerDelta(byte[] indices, byte[] weights, int pixelIndex, byte targetLayer, int delta)
@@ -438,8 +438,6 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		public TerrainAssetSnapshot BeforeSnapshot { get; }
 		public Texture? CurrentPreviewTexture { get; private set; }
 		public Texture? ScratchPreviewTexture { get; private set; }
-		public Texture? CurrentLayerIndexMap { get; private set; }
-		public Texture? CurrentLayerWeightMap { get; private set; }
 		public float? FlattenHeightNormalized { get; set; }
 
 		public static StrokeState ForHeight(EditorScene scene, Entity terrainEntity, TerrainBrushStrokeRequest request, TerrainAsset terrainAsset, Guid terrainAssetId, TerrainAssetSnapshot beforeSnapshot, Texture currentPreview, Texture scratchPreview)
@@ -451,13 +449,9 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			};
 		}
 
-		public static StrokeState ForLayerMaps(EditorScene scene, Entity terrainEntity, TerrainBrushStrokeRequest request, TerrainAsset terrainAsset, Guid terrainAssetId, TerrainAssetSnapshot beforeSnapshot, Texture currentIndexMap, Texture currentWeightMap)
+		public static StrokeState ForLayerMaps(EditorScene scene, Entity terrainEntity, TerrainBrushStrokeRequest request, TerrainAsset terrainAsset, Guid terrainAssetId, TerrainAssetSnapshot beforeSnapshot)
 		{
-			return new StrokeState(scene, terrainEntity, request, terrainAsset, terrainAssetId, beforeSnapshot)
-			{
-				CurrentLayerIndexMap = currentIndexMap,
-				CurrentLayerWeightMap = currentWeightMap
-			};
+			return new StrokeState(scene, terrainEntity, request, terrainAsset, terrainAssetId, beforeSnapshot);
 		}
 
 		public void SwapHeightPreviewTextures()

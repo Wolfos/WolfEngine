@@ -110,6 +110,59 @@ public sealed class TerrainAuthoringServiceTests
 	}
 
 	[Test]
+	public void AppendStamp_PaintsLayerDirectlyIntoTerrainAssetWithoutPreviewMaps()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 0);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			GetTerrainEntity(scene),
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 1, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+
+		var centerOffset = ((2 * 5) + 2) * 4;
+		var paintedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)1, centerOffset, 4);
+		Assert.That(paintedSlot, Is.GreaterThanOrEqualTo(centerOffset));
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(GetTerrainEntity(scene));
+		Assert.That(terrain.AuthoringPreviewLayerIndexMap, Is.Null);
+		Assert.That(terrain.AuthoringPreviewLayerWeightMap, Is.Null);
+	}
+
+	[Test]
+	public void CancelStroke_RestoresDirectLayerPaint()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 0);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			GetTerrainEntity(scene),
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 1, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.CancelStroke();
+
+		var centerOffset = ((2 * 5) + 2) * 4;
+		Assert.That(Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)1, centerOffset, 4), Is.EqualTo(-1));
+		Assert.That(terrainAsset.LayerIndexMap.MipLevels[0].Data[centerOffset], Is.EqualTo(0));
+		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[centerOffset], Is.EqualTo(255));
+	}
+
+	[Test]
 	public void EndStroke_LeavesUnpaintedLayerPixelsOnLayerZero()
 	{
 		using var registry = new TestAssetRegistry();

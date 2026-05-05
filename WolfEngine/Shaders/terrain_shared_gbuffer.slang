@@ -336,13 +336,13 @@ PSOutput fragmentShader(VSOutput input)
 
     TerrainLayerBlend blend = SampleTerrainLayerBlend(input.uv, terrainData);
     blend.weights = MaskInactiveLayers(blend.weights, terrainData.layerCount);
-    float4 biased = blend.weights;
     LayerSample layerSamples[4];
     [unroll]
     for (uint i = 0; i < 4; i++)
     {
         layerSamples[i] = (LayerSample)0;
         uint layerIndex = min(blend.indices[i], max(terrainData.layerCount, 1u) - 1u);
+        blend.weights[i] = saturate((blend.weights[i] - 0.1f) / (1.0f - 0.1f));
         if (blend.weights[i] <= 0.0f || layerIndex >= terrainData.layerCount)
         {
             continue;
@@ -360,6 +360,8 @@ PSOutput fragmentShader(VSOutput input)
             layerData.scale,
             terrainData);
     }
+
+    float4 biased = blend.weights;
 
     biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
