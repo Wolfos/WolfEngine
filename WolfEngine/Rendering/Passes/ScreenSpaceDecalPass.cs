@@ -182,7 +182,7 @@ public sealed class ScreenSpaceDecalPass
 
 		if (_packedProjectors.Count > 0)
 		{
-			writableBuffer.Write(_packedProjectors.ToArray());
+			writableBuffer.Write<GpuDecalProjectorData>(_packedProjectors.ToArray());
 		}
 	}
 
@@ -247,8 +247,8 @@ public sealed class ScreenSpaceDecalPass
 			throw new InvalidOperationException("Screen-space decal projector buffers were not writable.");
 		}
 
-		writableVertexBuffer.Write(vertexData);
-		writableIndexBuffer.Write(mesh.Indices);
+		writableVertexBuffer.Write<VertexData>(vertexData);
+		writableIndexBuffer.Write<uint>(mesh.Indices);
 		_projectorVertexBuffer = vertexBuffer;
 		_projectorIndexBuffer = indexBuffer;
 		_projectorIndexCount = (uint)mesh.Indices.Length;

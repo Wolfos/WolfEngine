@@ -342,7 +342,6 @@ PSOutput fragmentShader(VSOutput input)
     {
         layerSamples[i] = (LayerSample)0;
         uint layerIndex = min(blend.indices[i], max(terrainData.layerCount, 1u) - 1u);
-        blend.weights[i] = saturate((blend.weights[i] - 0.1f) / (1.0f - 0.1f));
         if (blend.weights[i] <= 0.0f || layerIndex >= terrainData.layerCount)
         {
             continue;

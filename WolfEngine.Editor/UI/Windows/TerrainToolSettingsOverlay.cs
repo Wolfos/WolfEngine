@@ -5,7 +5,8 @@ namespace WolfEngine.Editor.UI;
 
 public sealed class TerrainToolSettingsOverlay
 {
-	private static readonly Vector2 OverlaySize = new(240.0f, 160.0f);
+	private static readonly Vector2 OverlaySizeNormal = new(240.0f, 148.0f);
+	private static readonly Vector2 OverlaySizeBrush = new(240.0f, 178.0f);
 	private static readonly Vector2 OverlayOffset = new(16.0f, 16.0f);
 
 	public bool BlocksPainting { get; private set; }
@@ -21,8 +22,10 @@ public sealed class TerrainToolSettingsOverlay
 			return;
 		}
 
-		var width = MathF.Min(OverlaySize.X, availableWidth - OverlayOffset.X);
-		var height = MathF.Min(OverlaySize.Y, availableHeight - OverlayOffset.Y);
+		var overlaySize = terrainTool == TerrainTool.Brush ? OverlaySizeBrush : OverlaySizeNormal;
+
+		var width = MathF.Min(overlaySize.X, availableWidth - OverlayOffset.X);
+		var height = MathF.Min(overlaySize.Y, availableHeight - OverlayOffset.Y);
 		if (width <= 0.0f || height <= 0.0f)
 		{
 			return;

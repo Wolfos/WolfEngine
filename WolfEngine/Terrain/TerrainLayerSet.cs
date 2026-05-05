@@ -29,15 +29,6 @@ public sealed class TerrainLayerSet : IDataAsset
 		}
 	}
 
-	public IEnumerable<TerrainLayerDefinition> EnumerateActiveLayers()
-	{
-		var count = ResolvedLayerCount;
-		for (var i = 0; i < count; i++)
-		{
-			yield return Layers[i];
-		}
-	}
-
 	public TerrainLayerDefinition GetLayer(int index)
 	{
 		if (index < 0 || index >= ResolvedLayerCount)
