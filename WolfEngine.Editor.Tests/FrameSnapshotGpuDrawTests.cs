@@ -40,6 +40,42 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshotBuffer_ReusedSnapshotKeepsCameraHistoryAlignedWithGpuDrawHistory()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var mesh = CreateTestMesh();
+		var material = new Material("test-shader");
+		var entity = new Entity(1, 1);
+
+		var snapshotA = buffer.BeginWrite();
+		snapshotA.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
+		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
+		buffer.PublishWrite();
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		var snapshotB = buffer.BeginWrite();
+		snapshotB.SetCamera(CreateCamera(), CreateCameraTransform(5.0f));
+		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 5.0f);
+		buffer.PublishWrite();
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		var reusedSnapshotA = buffer.BeginWrite();
+		reusedSnapshotA.SetCamera(CreateCamera(), CreateCameraTransform(9.0f));
+		WriteEntity(reusedSnapshotA.GpuDrawDatabase, entity, mesh, material, 9.0f);
+
+		var updates = new List<GpuDrawUpdate>();
+		reusedSnapshotA.GpuDrawDatabase.ConsumeUpdates(updates);
+
+		Assert.That(reusedSnapshotA.HasPreviousCameraState, Is.True);
+		Assert.That(reusedSnapshotA.PreviousCameraWorldTransform.LocalToWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(reusedSnapshotA.CameraWorldTransform.LocalToWorld.Translation.X, Is.EqualTo(9.0f).Within(0.0001f));
+		Assert.That(updates, Has.Count.EqualTo(1));
+		Assert.That(updates[0].Type, Is.EqualTo(GpuDrawUpdateType.UpdateTransform));
+		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(updates[0].World.Translation.X, Is.EqualTo(9.0f).Within(0.0001f));
+	}
+
+	[Test]
 	public void GpuDrawDatabase_ResetForSnapshotWrite_ClearsPendingUpdatesButPreservesTrackedEntries()
 	{
 		var database = new GpuDrawDatabase();
@@ -406,6 +442,27 @@ public sealed class FrameSnapshotGpuDrawTests
 				new Vector4(0.0f, 2.0f, 0.0f, 1.0f)
 			],
 			[0u, 1u, 2u]);
+	}
+
+	private static Camera CreateCamera()
+	{
+		var camera = new Camera
+		{
+			ScreenResolution = new Int2(1280, 720),
+			NearPlane = Camera.DefaultNearPlane,
+			FarPlane = Camera.DefaultFarPlane
+		};
+		camera.SetPerspective(70.0f);
+		return camera;
+	}
+
+	private static WorldTransform CreateCameraTransform(float translationX)
+	{
+		return new WorldTransform
+		{
+			LocalToWorld = Matrix4x4.CreateTranslation(translationX, 0.0f, 0.0f),
+			WorldToLocal = Matrix4x4.CreateTranslation(-translationX, 0.0f, 0.0f)
+		};
 	}
 
 	private static TerrainDrawSurface CreateTerrainSurface(float heightBlendSharpness = 4.0f)

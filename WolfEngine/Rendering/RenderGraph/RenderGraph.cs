@@ -39,11 +39,8 @@ public sealed class RenderGraph
 	private long _lastProcessWorkingSetBytes;
 	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
-	private bool _hasPreviousCameraState;
 	private bool _previousTaaEnabled;
 	private Int2 _currentSceneRenderSize;
-	private Vector3 _previousCameraOrigin;
-	private Matrix4x4 _previousUnjitteredViewProjection;
 
 	private readonly object _resourceSync = new();
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
@@ -160,12 +157,12 @@ public sealed class RenderGraph
 				return;
 			}
 
-			var previousViewProjection = _hasPreviousCameraState
-				? _previousUnjitteredViewProjection
-				: unjitteredViewProjection;
-			var previousCameraOrigin = _hasPreviousCameraState
-				? _previousCameraOrigin
-				: cameraPosition;
+			var hasPreviousCameraState = TryCreatePreviousCameraState(
+				snapshot,
+				unjitteredViewProjection,
+				cameraPosition,
+				out var previousViewProjection,
+				out var previousCameraOrigin);
 
 			sceneData = new(
 				view,
@@ -182,13 +179,10 @@ public sealed class RenderGraph
 				snapshot.Camera.FarPlane > 0.0f ? snapshot.Camera.FarPlane : Camera.DefaultFarPlane,
 				jitterPixels,
 				jitterNdc,
-				_hasPreviousCameraState == false || (taaEnabled && _previousTaaEnabled == false),
+				hasPreviousCameraState == false || (taaEnabled && _previousTaaEnabled == false),
 				_renderLights,
 				snapshot.DecalPackets);
 
-			_previousUnjitteredViewProjection = unjitteredViewProjection;
-			_previousCameraOrigin = cameraPosition;
-			_hasPreviousCameraState = true;
 			_previousTaaEnabled = taaEnabled;
 		}
 
@@ -242,6 +236,27 @@ public sealed class RenderGraph
 		}
 
 		ReleasePasses();
+	}
+
+	private static bool TryCreatePreviousCameraState(
+		FrameSnapshot snapshot,
+		in Matrix4x4 fallbackViewProjection,
+		in Vector3 fallbackCameraOrigin,
+		out Matrix4x4 previousViewProjection,
+		out Vector3 previousCameraOrigin)
+	{
+		if (snapshot.HasPreviousCameraState == false ||
+		    Matrix4x4.Invert(snapshot.PreviousCameraWorldTransform.LocalToWorld, out var previousView) == false ||
+		    Matrix4x4.Decompose(snapshot.PreviousCameraWorldTransform.LocalToWorld, out _, out _, out previousCameraOrigin) == false)
+		{
+			previousViewProjection = fallbackViewProjection;
+			previousCameraOrigin = fallbackCameraOrigin;
+			return false;
+		}
+
+		previousView.Translation = Vector3.Zero;
+		previousViewProjection = previousView * snapshot.PreviousCamera.Perspective;
+		return true;
 	}
 
 	public void Startup(Action startup, Action<float> update)

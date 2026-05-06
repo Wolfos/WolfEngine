@@ -28,17 +28,35 @@ public sealed class FrameSnapshot
 
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
+	public Camera PreviousCamera { get; private set; }
+	public WorldTransform PreviousCameraWorldTransform { get; private set; }
+	public bool HasPreviousCameraState { get; private set; }
 	public List<LightPacket> LightPackets { get; }
 	public List<DecalProjectorPacket> DecalPackets { get; }
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
 	public GpuDrawDatabase GpuDrawDatabase { get; }
+	private bool _hasCameraState;
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
+		if (_hasCameraState)
+		{
+			PreviousCamera = Camera;
+			PreviousCameraWorldTransform = CameraWorldTransform;
+			HasPreviousCameraState = true;
+		}
+		else
+		{
+			PreviousCamera = camera;
+			PreviousCameraWorldTransform = worldTransform;
+			HasPreviousCameraState = false;
+		}
+
 		Camera = camera;
 		CameraWorldTransform = worldTransform;
+		_hasCameraState = true;
 	}
 
 	public void Clear()
