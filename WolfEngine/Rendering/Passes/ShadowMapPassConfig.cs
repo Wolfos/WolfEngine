@@ -47,7 +47,7 @@ public readonly struct ShadowFrameData
 		float cascadeSplit2,
 		float cascadeBlendDistance,
 		int shadowedDirectionalLightIndex,
-		float depthBias,
+		Vector3 depthBiases,
 		float strength,
 		int mapResolution)
 	{
@@ -60,7 +60,7 @@ public readonly struct ShadowFrameData
 		CascadeSplit2 = cascadeSplit2;
 		CascadeBlendDistance = cascadeBlendDistance;
 		ShadowedDirectionalLightIndex = shadowedDirectionalLightIndex;
-		DepthBias = depthBias;
+		DepthBiases = depthBiases;
 		Strength = strength;
 		MapResolution = mapResolution;
 	}
@@ -74,7 +74,7 @@ public readonly struct ShadowFrameData
 	public float CascadeSplit2 { get; }
 	public float CascadeBlendDistance { get; }
 	public int ShadowedDirectionalLightIndex { get; }
-	public float DepthBias { get; }
+	public Vector3 DepthBiases { get; }
 	public float Strength { get; }
 	public int MapResolution { get; }
 

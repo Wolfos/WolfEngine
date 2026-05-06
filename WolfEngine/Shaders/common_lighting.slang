@@ -235,23 +235,32 @@ float SampleDirectionalShadowCascade(
     uint shadowMapHandle2,
     uint shadowSamplerHandle,
     float2 shadowTexelSize,
-    float shadowDepthBias)
+    float3 shadowDepthBiases,
+    float receiverSlopeBiasScale)
 {
     if (cascadeIndex == 0u)
     {
-        return ComputeDirectionalShadow(worldPos, shadowViewProjection0, shadowMapHandle0, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
+        return ComputeDirectionalShadow(worldPos, shadowViewProjection0, shadowMapHandle0, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.x * receiverSlopeBiasScale);
     }
 
     if (cascadeIndex == 1u)
     {
-        return ComputeDirectionalShadow(worldPos, shadowViewProjection1, shadowMapHandle1, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
+        return ComputeDirectionalShadow(worldPos, shadowViewProjection1, shadowMapHandle1, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.y * receiverSlopeBiasScale);
     }
 
-    return ComputeDirectionalShadow(worldPos, shadowViewProjection2, shadowMapHandle2, shadowSamplerHandle, shadowTexelSize, shadowDepthBias);
+    return ComputeDirectionalShadow(worldPos, shadowViewProjection2, shadowMapHandle2, shadowSamplerHandle, shadowTexelSize, shadowDepthBiases.z * receiverSlopeBiasScale);
+}
+
+float ComputeReceiverSlopeBiasScale(float3 normal, float3 lightDirection)
+{
+    float nDotL = saturate(dot(normalize(normal), normalize(lightDirection)));
+    return lerp(1.75f, 1.0f, nDotL);
 }
 
 float ComputeCascadedDirectionalShadow(
     float3 worldPos,
+    float3 receiverNormal,
+    float3 lightDirection,
     float receiverDistance,
     float4x4 shadowViewProjection0,
     float4x4 shadowViewProjection1,
@@ -263,7 +272,7 @@ float ComputeCascadedDirectionalShadow(
     float3 shadowSplits,
     float shadowCascadeBlendDistance,
     float2 shadowTexelSize,
-    float shadowDepthBias)
+    float3 shadowDepthBiases)
 {
     uint cascadeIndex = 2u;
     if (receiverDistance <= shadowSplits.x)
@@ -274,6 +283,7 @@ float ComputeCascadedDirectionalShadow(
     {
         cascadeIndex = 1u;
     }
+    float receiverSlopeBiasScale = ComputeReceiverSlopeBiasScale(receiverNormal, lightDirection);
 
     float primary = SampleDirectionalShadowCascade(
         worldPos,
@@ -286,7 +296,8 @@ float ComputeCascadedDirectionalShadow(
         shadowMapHandle2,
         shadowSamplerHandle,
         shadowTexelSize,
-        shadowDepthBias);
+        shadowDepthBiases,
+        receiverSlopeBiasScale);
 
     if (shadowCascadeBlendDistance <= 0.0f)
     {
@@ -309,7 +320,8 @@ float ComputeCascadedDirectionalShadow(
                 shadowMapHandle2,
                 shadowSamplerHandle,
                 shadowTexelSize,
-                shadowDepthBias);
+                shadowDepthBiases,
+                receiverSlopeBiasScale);
             float blendRange = max(shadowCascadeBlendDistance * 2.0f, 1e-6f);
             float t = saturate((receiverDistance - (boundary - shadowCascadeBlendDistance)) / blendRange);
             return lerp(primary, nextShadow, t);
@@ -363,7 +375,7 @@ float3 EvaluateDirectionalLights(
     float shadowCascadeBlendDistance,
     uint shadowLightIndex,
     float2 shadowTexelSize,
-    float shadowDepthBias,
+    float3 shadowDepthBiases,
     float shadowStrength,
     uint shadowsEnabled,
     float shadowMaxDistance)
@@ -385,6 +397,8 @@ float3 EvaluateDirectionalLights(
                 float receiverDistance = sqrt(receiverDistanceSq);
                 float pcf = ComputeCascadedDirectionalShadow(
                     surface.worldPos,
+                    surface.normal,
+                    L,
                     receiverDistance,
                     shadowViewProjection0,
                     shadowViewProjection1,
@@ -396,7 +410,7 @@ float3 EvaluateDirectionalLights(
                     shadowSplits,
                     shadowCascadeBlendDistance,
                     shadowTexelSize,
-                    shadowDepthBias);
+                    shadowDepthBiases);
                 shadow = lerp(1.0f, pcf, saturate(shadowStrength));
             }
         }

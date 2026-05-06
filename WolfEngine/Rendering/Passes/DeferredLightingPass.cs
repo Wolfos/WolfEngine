@@ -114,7 +114,7 @@ public sealed class DeferredLightingPass
 			ShadowSplit2 = shadowData.CascadeSplit2,
 			ShadowCascadeBlendDistance = shadowData.CascadeBlendDistance,
 			ShadowedDirectionalLightIndex = shadowData.ShadowedDirectionalLightIndex,
-			ShadowDepthBias = shadowData.DepthBias,
+			ShadowDepthBiases = shadowData.DepthBiases,
 			ShadowStrength = shadowData.Strength,
 			ShadowsEnabled = shadowData.Enabled,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
@@ -217,8 +217,9 @@ public sealed class DeferredLightingPass
 			new Vector4(
 				config.ShadowTexelSizeX,
 				config.ShadowTexelSizeY,
-				config.ShadowDepthBias,
+				0.0f,
 				config.ShadowStrength));
+		lightingWriter.SetVector4("shadowDepthBiases", new Vector4(config.ShadowDepthBiases, 0.0f));
 		lightingWriter.SetUInt(
 			"shadowLightIndex",
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);

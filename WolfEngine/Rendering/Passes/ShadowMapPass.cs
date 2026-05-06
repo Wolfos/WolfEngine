@@ -14,7 +14,8 @@ public sealed class ShadowMapPass
 	public const int CascadeResolution = 2048;
 	public const float MaxShadowDistance = 150.0f;
 
-	private const float DefaultDepthBias = 0.0015f;
+	private const float DefaultDepthBiasWorld = 0.2f;
+	private const float DefaultDepthBiasTexelScale = 10.0f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
@@ -61,7 +62,7 @@ public sealed class ShadowMapPass
 				cascadeSplit2: splits[2],
 				cascadeBlendDistance: DefaultCascadeBlendDistance,
 				shadowedDirectionalLightIndex: shadowedLightIndex,
-				depthBias: DefaultDepthBias,
+				depthBiases: ComputeCascadeDepthBiases(splits),
 				strength: DefaultStrength,
 				mapResolution: CascadeResolution);
 			return;
@@ -339,9 +340,16 @@ public sealed class ShadowMapPass
 		cascadeSplit2: CascadeSplitDistances[2],
 		cascadeBlendDistance: DefaultCascadeBlendDistance,
 		shadowedDirectionalLightIndex: -1,
-		depthBias: DefaultDepthBias,
+		depthBiases: ComputeDefaultCascadeDepthBiases(),
 		strength: DefaultStrength,
 		mapResolution: CascadeResolution);
+
+	private static Vector3 ComputeDefaultCascadeDepthBiases()
+	{
+		Span<float> splits = stackalloc float[CascadeCount];
+		BuildConfiguredCascadeSplits(splits);
+		return ComputeCascadeDepthBiases(splits);
+	}
 
 	private static bool TryBuildShadowCascades(
 		SceneDrawData sceneData,
@@ -466,4 +474,26 @@ public sealed class ShadowMapPass
 		return lightView * lightProjection;
 	}
 
+	private static Vector3 ComputeCascadeDepthBiases(ReadOnlySpan<float> cascadeSplits)
+	{
+		if (cascadeSplits.Length < CascadeCount)
+		{
+			throw new ArgumentException("Cascade split span must contain all cascade splits.", nameof(cascadeSplits));
+		}
+
+		return new Vector3(
+			ComputeCascadeDepthBias(cascadeSplits[0]),
+			ComputeCascadeDepthBias(cascadeSplits[1]),
+			ComputeCascadeDepthBias(cascadeSplits[2]));
+	}
+
+	private static float ComputeCascadeDepthBias(float receiverRadius)
+	{
+		var worldUnitsPerTexel = MathF.Max((receiverRadius * 2.0f) / CascadeResolution, 1e-6f);
+		var worldBias = DefaultDepthBiasWorld + (worldUnitsPerTexel * DefaultDepthBiasTexelScale);
+		return worldBias / ComputeCascadeDepthSpan(receiverRadius);
+	}
+
+	private static float ComputeCascadeDepthSpan(float receiverRadius) =>
+		MathF.Max((receiverRadius * 2.0f) + CasterPaddingNear + CasterPaddingFar, 1.0f);
 }

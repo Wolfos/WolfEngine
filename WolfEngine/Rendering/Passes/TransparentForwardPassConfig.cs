@@ -65,7 +65,7 @@ public struct TransparentForwardPassConfig
 	public required float ShadowSplit2 { get; init; }
 	public required float ShadowCascadeBlendDistance { get; init; }
 	public required int ShadowedDirectionalLightIndex { get; init; }
-	public required float ShadowDepthBias { get; init; }
+	public required Vector3 ShadowDepthBiases { get; init; }
 	public required float ShadowStrength { get; init; }
 	public required bool ShadowsEnabled { get; init; }
 	public required float ShadowTexelSizeX { get; init; }

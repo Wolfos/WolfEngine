@@ -39,6 +39,7 @@ cbuffer LightingParams : register(b2)
     row_major float4x4 shadowViewProjection2;
     float4 shadowSplitsBlend;
     float4 shadowTexelSizeBiasStrength;
+    float4 shadowDepthBiases;
     float shadowMaxDistance;
     float nearPlane;
     float farPlane;
@@ -134,7 +135,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         shadowSplitsBlend.w,
         shadowLightIndex,
         shadowTexelSizeBiasStrength.xy,
-        shadowTexelSizeBiasStrength.z,
+        shadowDepthBiases.xyz,
         shadowTexelSizeBiasStrength.w,
         shadowsEnabled,
         shadowMaxDistance);
