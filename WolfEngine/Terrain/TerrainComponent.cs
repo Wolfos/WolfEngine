@@ -128,7 +128,7 @@ public struct TerrainComponent : IEntityComponent
 			resolution = 32;
 		}
 
-		return Math.Clamp(resolution, 2, 512);
+		return Math.Clamp(resolution, 2, 1024);
 	}
 
 	public float[] GetResolvedLodDistancesMeters()

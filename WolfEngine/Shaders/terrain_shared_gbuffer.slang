@@ -407,16 +407,26 @@ float4 SampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, floa
     return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
 }
 
+float NonZeroSign(float value)
+{
+    return value < 0.0f ? -1.0f : 1.0f;
+}
+
 float3 DecodeTriplanarNormal(uint normalHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
 {
-    float3 weights = GetTriplanarWeights(worldNormal);
+    float3 geometryNormal = normalize(worldNormal);
+    float3 weights = GetTriplanarWeights(geometryNormal);
+    float3 axisSign = float3(
+        NonZeroSign(geometryNormal.x),
+        NonZeroSign(geometryNormal.y),
+        NonZeroSign(geometryNormal.z));
     float3 normalX = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvX(worldPosition, layerScale)));
     float3 normalY = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvY(worldPosition, layerScale)));
     float3 normalZ = DecodeNormalMapSample(GetTexture(normalHandle).Sample(samplerState, GetTriplanarUvZ(worldPosition, layerScale)));
 
-    float3 worldNormalX = normalize(float3(normalX.z, normalX.y, normalX.x));
-    float3 worldNormalY = normalize(float3(normalY.x, normalY.z, normalY.y));
-    float3 worldNormalZ = normalize(float3(normalZ.x, normalZ.y, normalZ.z));
+    float3 worldNormalX = normalize(float3(normalX.z * axisSign.x, normalX.y, normalX.x));
+    float3 worldNormalY = normalize(float3(normalY.x, normalY.z * axisSign.y, normalY.y));
+    float3 worldNormalZ = normalize(float3(normalZ.x, normalZ.y, normalZ.z * axisSign.z));
     return normalize(worldNormalX * weights.x + worldNormalY * weights.y + worldNormalZ * weights.z);
 }
 
