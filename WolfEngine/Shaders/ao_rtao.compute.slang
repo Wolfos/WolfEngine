@@ -79,10 +79,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         1.0f);
     float4 cameraRelativeWorldPositionH = mul(clipPosition, camera.invViewProjection);
     float3 cameraRelativeWorldPosition = cameraRelativeWorldPositionH.xyz / cameraRelativeWorldPositionH.w;
+    float3 worldPosition = cameraRelativeWorldPosition + camera.cameraOrigin;
     float3 rayDirection = BuildHemisphereDirection(normal, Hash12(pixel, frameIndex));
 
     RayDesc ray;
-    ray.Origin = cameraRelativeWorldPosition + normal * bias;
+    ray.Origin = worldPosition + normal * bias;
     ray.Direction = rayDirection;
     ray.TMin = 0.001f;
     ray.TMax = radius;

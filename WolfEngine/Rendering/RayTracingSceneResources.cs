@@ -9,6 +9,7 @@ namespace WolfEngine.Rendering;
 
 public interface IRayTracingSceneResources
 {
+	object SyncRoot { get; }
 	IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; }
 }
 
@@ -19,13 +20,23 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly List<RayTracingInstanceDescription> _instanceDescriptions = new();
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
+	private readonly object _syncRoot = new();
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
-	private Vector3 _lastCameraOrigin;
 	private bool _bootstrapPending = true;
-	private bool _hasLastCameraOrigin;
 	private bool _tlasDirty;
 
-	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
+	public object SyncRoot => _syncRoot;
+
+	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure
+	{
+		get
+		{
+			lock (_syncRoot)
+			{
+				return _topLevelAccelerationStructure;
+			}
+		}
+	}
 
 	public void RecordUpdate(
 		RenderGraphContext context,
@@ -42,40 +53,35 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			return;
 		}
 
-		_topLevelAccelerationStructure ??= device.CreateTopLevelAccelerationStructure(
-			new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
-
-		if (_bootstrapPending)
+		lock (_syncRoot)
 		{
-			RebuildFromCurrentDrawEntries(context.GpuDrawDatabase, renderer, device);
-			_bootstrapPending = false;
-		}
+			_topLevelAccelerationStructure ??= device.CreateTopLevelAccelerationStructure(
+				new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
 
-		var cameraOrigin = context.SceneData?.CameraOrigin ?? Vector3.Zero;
-		if (_hasLastCameraOrigin == false || _lastCameraOrigin.Equals(cameraOrigin) == false)
-		{
-			_lastCameraOrigin = cameraOrigin;
-			_hasLastCameraOrigin = true;
-			_tlasDirty = true;
-		}
+			if (_bootstrapPending)
+			{
+				RebuildFromCurrentDrawEntries(context.GpuDrawDatabase, renderer, device);
+				_bootstrapPending = false;
+			}
 
-		for (var i = 0; i < updates.Count; i++)
-		{
-			ApplyUpdate(updates[i], renderer, device);
-		}
+			for (var i = 0; i < updates.Count; i++)
+			{
+				ApplyUpdate(updates[i], renderer, device);
+			}
 
-		var commandList = context.CommandList;
-		for (var i = 0; i < _pendingBlasBuilds.Count; i++)
-		{
-			commandList.BuildBottomLevelAccelerationStructure(_pendingBlasBuilds[i]);
-		}
-		_pendingBlasBuilds.Clear();
+			var commandList = context.CommandList;
+			for (var i = 0; i < _pendingBlasBuilds.Count; i++)
+			{
+				commandList.BuildBottomLevelAccelerationStructure(_pendingBlasBuilds[i]);
+			}
+			_pendingBlasBuilds.Clear();
 
-		if (_tlasDirty)
-		{
-			BuildInstanceDescriptions(cameraOrigin);
-			commandList.BuildTopLevelAccelerationStructure(_topLevelAccelerationStructure, CollectionsMarshalAsSpan(_instanceDescriptions));
-			_tlasDirty = false;
+			if (_tlasDirty)
+			{
+				BuildInstanceDescriptions();
+				commandList.BuildTopLevelAccelerationStructure(_topLevelAccelerationStructure, CollectionsMarshalAsSpan(_instanceDescriptions));
+				_tlasDirty = false;
+			}
 		}
 	}
 
@@ -213,19 +219,15 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		_tlasDirty = true;
 	}
 
-	private void BuildInstanceDescriptions(Vector3 cameraOrigin)
+	private void BuildInstanceDescriptions()
 	{
 		_instanceDescriptions.Clear();
 		foreach (var record in _instances.Values)
 		{
-			var relativeWorld = record.World;
-			relativeWorld.M41 -= cameraOrigin.X;
-			relativeWorld.M42 -= cameraOrigin.Y;
-			relativeWorld.M43 -= cameraOrigin.Z;
 			_instanceDescriptions.Add(new RayTracingInstanceDescription(
 				(uint)_instanceDescriptions.Count,
 				record.AccelerationStructure,
-				relativeWorld));
+				record.World));
 		}
 	}
 
@@ -243,20 +245,23 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 	public void Dispose()
 	{
-		foreach (var record in _meshRecords.Values)
+		lock (_syncRoot)
 		{
-			if (record.AccelerationStructure is IDisposable disposable)
+			foreach (var record in _meshRecords.Values)
 			{
-				disposable.Dispose();
+				if (record.AccelerationStructure is IDisposable disposable)
+				{
+					disposable.Dispose();
+				}
 			}
-		}
-		_meshRecords.Clear();
+			_meshRecords.Clear();
 
-		if (_topLevelAccelerationStructure is IDisposable tlasDisposable)
-		{
-			tlasDisposable.Dispose();
+			if (_topLevelAccelerationStructure is IDisposable tlasDisposable)
+			{
+				tlasDisposable.Dispose();
+			}
+			_topLevelAccelerationStructure = null;
 		}
-		_topLevelAccelerationStructure = null;
 	}
 
 	private readonly record struct InstanceRecord(

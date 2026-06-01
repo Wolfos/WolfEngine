@@ -10,6 +10,7 @@ public readonly struct AmbientOcclusionPassConfig
 	public required DescriptorHandle DepthHandle { get; init; }
 	public required DescriptorHandle NormalHandle { get; init; }
 	public required DescriptorHandle OutputHandle { get; init; }
+	public object? RayTracingSyncRoot { get; init; }
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; init; }
 	public required Int2 FullResolution { get; init; }
 	public required Int2 OutputResolution { get; init; }

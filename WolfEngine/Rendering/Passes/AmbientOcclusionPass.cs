@@ -64,6 +64,7 @@ public sealed class AmbientOcclusionPass
 			DepthHandle = depthHandle,
 			NormalHandle = normalHandle,
 			OutputHandle = outputHandle,
+			RayTracingSyncRoot = rayTracingSceneResources?.SyncRoot,
 			TopLevelAccelerationStructure = rayTracingSceneResources?.TopLevelAccelerationStructure,
 			FullResolution = resources.SceneFramebufferSize,
 			OutputResolution = new(output.Descriptor.Width, output.Descriptor.Height),
@@ -158,6 +159,21 @@ public sealed class AmbientOcclusionPass
 			throw new InvalidOperationException("Ray traced ambient occlusion requires a valid top-level acceleration structure.");
 		}
 
+		if (config.RayTracingSyncRoot is not null)
+		{
+			lock (config.RayTracingSyncRoot)
+			{
+				RecordRayTracedLocked(context, in config, sceneData);
+			}
+
+			return;
+		}
+
+		RecordRayTracedLocked(context, in config, sceneData);
+	}
+
+	private void RecordRayTracedLocked(RenderGraphContext context, in AmbientOcclusionPassConfig config, SceneDrawData sceneData)
+	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
