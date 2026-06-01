@@ -103,6 +103,9 @@
         <None Update="Shaders\ao_vbao.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\ao_rtao.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\ao_blur.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

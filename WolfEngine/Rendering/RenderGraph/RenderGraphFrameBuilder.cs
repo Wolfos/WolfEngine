@@ -77,7 +77,7 @@ internal sealed class RenderGraphFrameBuilder
 
 	private readonly RenderGraphResourceRegistry _resources;
 	private readonly IRenderer _renderer;
-	private readonly VBAOPass _ambientOcclusionPass;
+	private readonly AmbientOcclusionPass _ambientOcclusionPass;
 	private readonly AmbientOcclusionBlurPass _ambientOcclusionBlurPass;
 	private readonly AmbientOcclusionUpsamplePass _ambientOcclusionUpsamplePass;
 	private readonly ClusteredLightingPass _clusteredLightingPass;
@@ -93,12 +93,14 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
+	private readonly RayTracingSceneResources _rayTracingSceneResources = new();
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
+	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 	private string _requestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
 	private SceneViewportRenderState _resolvedSceneViewportState = SceneViewportRenderState.Empty;
@@ -429,7 +431,7 @@ internal sealed class RenderGraphFrameBuilder
 
 			if (HasAmbientOcclusion(config))
 			{
-				var aoSize = GetAmbientOcclusionInternalSize(sceneFramebufferSize, config.VBAOConfig.Resolution);
+				var aoSize = GetAmbientOcclusionInternalSize(sceneFramebufferSize, config.AmbientOcclusion.Resolution);
 				ambientOcclusionRawHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 					aoSize.X,
 					aoSize.Y,
@@ -595,30 +597,30 @@ internal sealed class RenderGraphFrameBuilder
 
 			if (_frameResources.AmbientOcclusionRaw.IsValid)
 			{
-				graph.AddPass("VBAO Evaluate", PassKind.Compute)
+				graph.AddPass("Ambient Occlusion Evaluate", PassKind.Compute)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess)
 					.SetExecute(_ambientOcclusionExecute);
 
-				graph.AddPass("VBAO Blur X", PassKind.Compute)
+				graph.AddPass("Ambient Occlusion Blur X", PassKind.Compute)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.AmbientOcclusionRaw, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.AmbientOcclusionTemp, ResourceState.UnorderedAccess)
 					.SetExecute(_ambientOcclusionBlurHorizontalExecute);
 
-				var blurVerticalBuilder = graph.AddPass("VBAO Blur Y", PassKind.Compute)
+				var blurVerticalBuilder = graph.AddPass("Ambient Occlusion Blur Y", PassKind.Compute)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.AmbientOcclusionTemp, ResourceState.ShaderResource);
-				if (_frameResources.Config.VBAOConfig.Resolution == VBAOPass.AmbientOcclusionResolution.Half)
+				if (_frameResources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half)
 				{
 					blurVerticalBuilder
 						.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess)
 						.SetExecute(_ambientOcclusionBlurVerticalExecute);
 
-					graph.AddPass("VBAO Upsample", PassKind.Compute)
+					graph.AddPass("Ambient Occlusion Upsample", PassKind.Compute)
 						.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 						.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
 						.ReadTexture(_frameResources.AmbientOcclusionRaw, ResourceState.ShaderResource)
@@ -936,6 +938,13 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
+		context.GpuDrawDatabase.CopyUpdates(_frameGpuDrawUpdates);
+		if (_frameResources.Config.AmbientOcclusion.Enabled &&
+		    _frameResources.Config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced)
+		{
+			_rayTracingSceneResources.RecordUpdate(context, _renderer, _frameGpuDrawUpdates);
+		}
+
 		_gpuDrawPass.RecordUpdate(context);
 	}
 
@@ -1139,7 +1148,10 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _ambientOcclusionPass.BuildConfig(
 			context,
 			_frameResources,
-			_renderer.GetGfxDevice());
+			_renderer.GetGfxDevice(),
+			_frameResources.Config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced
+				? _rayTracingSceneResources
+				: null);
 		_ambientOcclusionPass.Record(context, in config, context.SceneData!);
 	}
 
@@ -1409,16 +1421,17 @@ internal sealed class RenderGraphFrameBuilder
 
 	private static bool HasAmbientOcclusion(RenderConfig config)
 	{
-		return config.VBAOConfig.Enabled &&
-		       config.VBAOConfig.SliceCount > 0 &&
-		       config.VBAOConfig.StepCount > 0;
+		return config.AmbientOcclusion.Enabled &&
+		       (config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced ||
+		        (config.AmbientOcclusion.VisibilityBitmaskSettings.SliceCount > 0 &&
+		         config.AmbientOcclusion.VisibilityBitmaskSettings.StepCount > 0));
 	}
 
 	private static Int2 GetAmbientOcclusionInternalSize(
 		Int2 sceneFramebufferSize,
-		VBAOPass.AmbientOcclusionResolution resolution)
+		AmbientOcclusionResolution resolution)
 	{
-		return resolution == VBAOPass.AmbientOcclusionResolution.Half
+		return resolution == AmbientOcclusionResolution.Half
 			? new Int2(
 				(sceneFramebufferSize.X + 1) / 2,
 				(sceneFramebufferSize.Y + 1) / 2)

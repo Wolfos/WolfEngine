@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
+using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
 
@@ -445,6 +446,80 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			(nuint)commandCountOffsetBytes);
 	}
 
+	public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
+	{
+		ThrowIfDisposed();
+		if (accelerationStructure is not MetalBottomLevelAccelerationStructure blas)
+		{
+			throw new InvalidOperationException("Bottom-level acceleration structure was not created by the Metal backend.");
+		}
+
+		EndActiveEncoders();
+		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		encoder.BuildAccelerationStructure(
+			blas.AccelerationStructure,
+			blas.MetalDescriptor,
+			blas.ScratchBuffer,
+			0);
+		encoder.EndEncoding();
+		encoder.Dispose();
+	}
+
+	public unsafe void BuildTopLevelAccelerationStructure(
+		IGfxTopLevelAccelerationStructure accelerationStructure,
+		ReadOnlySpan<RayTracingInstanceDescription> instances)
+	{
+		ThrowIfDisposed();
+		if (accelerationStructure is not MetalTopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Metal backend.");
+		}
+
+		var instanceCount = Math.Min((uint)instances.Length, tlas.Descriptor.MaxInstanceCount);
+		var descriptorSpan = new Span<MetalAccelerationStructureInstanceDescriptorData>(
+			tlas.InstanceDescriptorBuffer.Contents.ToPointer(),
+			(int)tlas.Descriptor.MaxInstanceCount);
+		descriptorSpan.Clear();
+
+		var nativeAccelerationStructures = new IntPtr[instanceCount];
+		for (var i = 0; i < instanceCount; i++)
+		{
+			var instance = instances[i];
+			if (instance.AccelerationStructure is not MetalBottomLevelAccelerationStructure blas)
+			{
+				throw new InvalidOperationException("TLAS instance references a BLAS not created by the Metal backend.");
+			}
+
+			nativeAccelerationStructures[i] = (IntPtr)blas.AccelerationStructure;
+			descriptorSpan[i] = CreateInstanceDescriptor(instance, (uint)i);
+		}
+
+		tlas.MetalDescriptor.InstanceCount = instanceCount;
+		tlas.MetalDescriptor.InstancedAccelerationStructures = CreateNativeArray(nativeAccelerationStructures);
+
+		EndActiveEncoders();
+		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		encoder.BuildAccelerationStructure(
+			tlas.AccelerationStructure,
+			tlas.MetalDescriptor,
+			tlas.ScratchBuffer,
+			0);
+		encoder.EndEncoding();
+		encoder.Dispose();
+	}
+
+	public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure)
+	{
+		ThrowIfDisposed();
+		if (accelerationStructure is not MetalTopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Metal backend.");
+		}
+
+		EnsureComputeEncoder();
+		_computeEncoder.SetAccelerationStructure(tlas.AccelerationStructure, slot);
+	}
+
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
 		ThrowIfDisposed();
@@ -464,6 +539,49 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			depth = reflectedThreadGroupSize.Z
 		};
 		_computeEncoder.DispatchThreadgroups(threadgroups, threadsPerGroup);
+	}
+
+	private static MetalAccelerationStructureInstanceDescriptorData CreateInstanceDescriptor(
+		in RayTracingInstanceDescription instance,
+		uint accelerationStructureIndex)
+	{
+		var transform = instance.Transform;
+		return new MetalAccelerationStructureInstanceDescriptorData
+		{
+			Column0X = transform.M11,
+			Column0Y = transform.M12,
+			Column0Z = transform.M13,
+			Column1X = transform.M21,
+			Column1Y = transform.M22,
+			Column1Z = transform.M23,
+			Column2X = transform.M31,
+			Column2Y = transform.M32,
+			Column2Z = transform.M33,
+			Column3X = transform.M41,
+			Column3Y = transform.M42,
+			Column3Z = transform.M43,
+			Options = (uint)(instance.Active
+				? MTLAccelerationStructureInstanceOptions.Opaque
+				: MTLAccelerationStructureInstanceOptions.NonOpaque),
+			Mask = instance.Active ? instance.Mask : 0u,
+			IntersectionFunctionTableOffset = 0,
+			AccelerationStructureIndex = accelerationStructureIndex
+		};
+	}
+
+	private static NSArray CreateNativeArray(params IntPtr[] objects)
+	{
+		var arrayClass = new ObjectiveCClass("NSMutableArray");
+		var array = ObjectiveC.IntPtr_objc_msgSend(arrayClass.Alloc(), new Selector("init"));
+		for (var i = 0; i < objects.Length; i++)
+		{
+			if (objects[i] != IntPtr.Zero)
+			{
+				ObjectiveC.objc_msgSend(array, new Selector("addObject:"), objects[i]);
+			}
+		}
+
+		return new NSArray(array);
 	}
 
 	public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes)

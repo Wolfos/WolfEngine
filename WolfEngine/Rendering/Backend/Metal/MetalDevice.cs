@@ -6,6 +6,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
+using SharpMetal.ObjectiveCCore;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Platform;
 
@@ -319,6 +320,131 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		{
 			indirectDescriptor.Dispose();
 		}
+	}
+
+	public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(
+		in BottomLevelAccelerationStructureDescriptor descriptor)
+	{
+		if (_device.SupportsRaytracing == false)
+		{
+			throw new NotSupportedException("The current Metal device does not support ray tracing.");
+		}
+
+		if (descriptor.VertexBuffer is not MetalBuffer vertexBuffer ||
+		    descriptor.IndexBuffer is not MetalBuffer indexBuffer)
+		{
+			throw new InvalidOperationException("Acceleration structure geometry buffers were not created by the Metal backend.");
+		}
+
+		var geometryDescriptor = new MTLAccelerationStructureTriangleGeometryDescriptor
+		{
+			VertexBuffer = vertexBuffer.Buffer,
+			VertexBufferOffset = descriptor.VertexBufferOffsetBytes,
+			VertexStride = descriptor.VertexStrideBytes,
+			VertexFormat = MTLAttributeFormat.Float4,
+			IndexBuffer = indexBuffer.Buffer,
+			IndexBufferOffset = descriptor.IndexBufferOffsetBytes,
+			IndexType = MTLIndexType.UInt32,
+			TriangleCount = descriptor.TriangleCount,
+			Opaque = true
+		};
+
+		var primitiveDescriptor = new MTLPrimitiveAccelerationStructureDescriptor
+		{
+			GeometryDescriptors = CreateNativeArray((IntPtr)geometryDescriptor),
+			Usage = MTLAccelerationStructureUsage.PreferFastIntersection
+		};
+
+		var sizes = _device.AccelerationStructureSizes(primitiveDescriptor);
+		var accelerationStructure = _device.NewAccelerationStructure(sizes.accelerationStructureSize);
+		if (accelerationStructure.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bottom-level acceleration structure.");
+		}
+
+		var scratchBuffer = _device.NewBuffer(
+			Math.Max(sizes.buildScratchBufferSize, 1),
+			MTLResourceOptions.ResourceStorageModePrivate);
+		if (scratchBuffer.NativePtr == IntPtr.Zero)
+		{
+			accelerationStructure.Dispose();
+			throw new InvalidOperationException("Failed to create Metal BLAS scratch buffer.");
+		}
+
+		return new MetalBottomLevelAccelerationStructure(
+			null,
+			descriptor,
+			primitiveDescriptor,
+			accelerationStructure,
+			scratchBuffer);
+	}
+
+	public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(
+		in TopLevelAccelerationStructureDescriptor descriptor)
+	{
+		if (_device.SupportsRaytracing == false)
+		{
+			throw new NotSupportedException("The current Metal device does not support ray tracing.");
+		}
+
+		var instanceDescriptorSize = (ulong)Marshal.SizeOf<MetalAccelerationStructureInstanceDescriptorData>();
+		var instanceDescriptorBuffer = _device.NewBuffer(
+			Math.Max((ulong)descriptor.MaxInstanceCount * instanceDescriptorSize, 1),
+			MTLResourceOptions.ResourceStorageModeShared);
+		if (instanceDescriptorBuffer.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal TLAS instance descriptor buffer.");
+		}
+
+		var instanceDescriptor = new MTLInstanceAccelerationStructureDescriptor
+		{
+			InstanceCount = descriptor.MaxInstanceCount,
+			InstanceDescriptorBuffer = instanceDescriptorBuffer,
+			InstanceDescriptorStride = instanceDescriptorSize,
+			InstanceDescriptorType = MTLAccelerationStructureInstanceDescriptorType.Default,
+			Usage = MTLAccelerationStructureUsage.PreferFastIntersection
+		};
+
+		var sizes = _device.AccelerationStructureSizes(instanceDescriptor);
+		var accelerationStructure = _device.NewAccelerationStructure(sizes.accelerationStructureSize);
+		if (accelerationStructure.NativePtr == IntPtr.Zero)
+		{
+			instanceDescriptorBuffer.Dispose();
+			throw new InvalidOperationException("Failed to create Metal top-level acceleration structure.");
+		}
+
+		var scratchBuffer = _device.NewBuffer(
+			Math.Max(sizes.buildScratchBufferSize, 1),
+			MTLResourceOptions.ResourceStorageModePrivate);
+		if (scratchBuffer.NativePtr == IntPtr.Zero)
+		{
+			accelerationStructure.Dispose();
+			instanceDescriptorBuffer.Dispose();
+			throw new InvalidOperationException("Failed to create Metal TLAS scratch buffer.");
+		}
+
+		return new MetalTopLevelAccelerationStructure(
+			null,
+			descriptor,
+			instanceDescriptor,
+			accelerationStructure,
+			instanceDescriptorBuffer,
+			scratchBuffer);
+	}
+
+	private static NSArray CreateNativeArray(params IntPtr[] objects)
+	{
+		var arrayClass = new ObjectiveCClass("NSMutableArray");
+		var array = ObjectiveC.IntPtr_objc_msgSend(arrayClass.Alloc(), new Selector("init"));
+		for (var i = 0; i < objects.Length; i++)
+		{
+			if (objects[i] != IntPtr.Zero)
+			{
+				ObjectiveC.objc_msgSend(array, new Selector("addObject:"), objects[i]);
+			}
+		}
+
+		return new NSArray(array);
 	}
 
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)

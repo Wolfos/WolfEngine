@@ -446,6 +446,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		return new D3D12IndirectCommandBuffer(null, descriptor, _device, signature);
 	}
 
+	public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(
+		in BottomLevelAccelerationStructureDescriptor descriptor)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
+	public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(
+		in TopLevelAccelerationStructureDescriptor descriptor)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
 	{
 		lock (_pipelineLock)

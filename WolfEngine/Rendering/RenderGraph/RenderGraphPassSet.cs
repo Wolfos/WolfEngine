@@ -44,7 +44,7 @@ internal sealed class RenderGraphPassSet
 		SkyboxPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 	}
 
-	public VBAOPass AmbientOcclusionPass { get; }
+	public AmbientOcclusionPass AmbientOcclusionPass { get; }
 	public AmbientOcclusionBlurPass AmbientOcclusionBlurPass { get; }
 	public AmbientOcclusionUpsamplePass AmbientOcclusionUpsamplePass { get; }
 	public ClusteredLightingPass ClusteredLightingPass { get; }

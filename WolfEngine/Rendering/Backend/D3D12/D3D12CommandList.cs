@@ -614,6 +614,23 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		TransitionBufferIfNeeded(countBuffer, previousState);
 	}
 
+	public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
+	public void BuildTopLevelAccelerationStructure(
+		IGfxTopLevelAccelerationStructure accelerationStructure,
+		ReadOnlySpan<RayTracingInstanceDescription> instances)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
+	public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
 	{
 		EnsureBindlessDescriptorHeaps();

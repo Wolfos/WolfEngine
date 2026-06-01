@@ -72,6 +72,14 @@ public interface IGfxCommandList
 		IGfxBuffer commandCountBuffer,
 		ulong commandCountOffsetBytes);
 
+	void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure);
+
+	void BuildTopLevelAccelerationStructure(
+		IGfxTopLevelAccelerationStructure accelerationStructure,
+		ReadOnlySpan<RayTracingInstanceDescription> instances);
+
+	void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure);
+
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);
 
 	void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes);

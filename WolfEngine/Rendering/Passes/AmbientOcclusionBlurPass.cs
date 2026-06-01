@@ -38,7 +38,7 @@ public sealed class AmbientOcclusionBlurPass
 		var source = context.GetTexture(blurHorizontally ? resources.AmbientOcclusionRaw : resources.AmbientOcclusionTemp);
 		var destinationHandle = blurHorizontally
 			? resources.AmbientOcclusionTemp
-			: resources.Config.VBAOConfig.Resolution == VBAOPass.AmbientOcclusionResolution.Half
+			: resources.Config.AmbientOcclusion.Resolution == AmbientOcclusionResolution.Half
 				? resources.AmbientOcclusionRaw
 				: resources.AmbientOcclusionFinal;
 		var destination = context.GetTexture(destinationHandle);
@@ -56,7 +56,7 @@ public sealed class AmbientOcclusionBlurPass
 			OutputHandle = outputHandle,
 			FullResolution = resources.SceneFramebufferSize,
 			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height),
-			BlurSharpness = Math.Max(resources.Config.VBAOConfig.BlurSharpness, 0.001f),
+			BlurSharpness = Math.Max(resources.Config.AmbientOcclusion.BlurSharpness, 0.001f),
 			BlurHorizontally = blurHorizontally
 		};
 	}

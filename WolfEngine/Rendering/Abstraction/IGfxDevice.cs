@@ -44,6 +44,12 @@ public interface IGfxDevice
 	/// </summary>
 	IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor);
 
+	IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(
+		in BottomLevelAccelerationStructureDescriptor descriptor);
+
+	IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(
+		in TopLevelAccelerationStructureDescriptor descriptor);
+
 	/// <summary>
 	/// Retrieves an existing pipeline matching the key or creates one using the provided shader bytecodes.
 	/// </summary>

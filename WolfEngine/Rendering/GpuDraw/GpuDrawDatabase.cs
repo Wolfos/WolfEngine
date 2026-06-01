@@ -243,6 +243,12 @@ public sealed class GpuDrawDatabase
 		_updates.Clear();
 	}
 
+	public void CopyUpdates(List<GpuDrawUpdate> destination)
+	{
+		destination.Clear();
+		destination.AddRange(_updates);
+	}
+
 	public uint GetActiveDrawCommandUpperBound()
 	{
 		if (_records.Count == 0)

@@ -151,7 +151,7 @@ public sealed class ScreenSpaceDecalPassTests
 			Config = new RenderConfig
 			{
 				Decals = new DecalConfig { Enabled = true },
-				VBAOConfig = new VBAOPass.Config { Enabled = true }
+				AmbientOcclusion = new AmbientOcclusionConfig { Enabled = true }
 			}
 		};
 

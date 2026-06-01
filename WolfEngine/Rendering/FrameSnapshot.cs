@@ -88,7 +88,7 @@ public sealed class FrameSnapshot
 
 	public void SetConfig(RenderConfig config)
 	{
-		Config.VBAOConfig = config.VBAOConfig;
+		Config.AmbientOcclusion = config.AmbientOcclusion;
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
 		Config.Tonemapping = config.Tonemapping;

@@ -50,7 +50,7 @@ public sealed class AmbientOcclusionUpsamplePass
 			OutputHandle = outputHandle,
 			FullResolution = resources.SceneFramebufferSize,
 			AoResolution = new(source.Descriptor.Width, source.Descriptor.Height),
-			BlurSharpness = Math.Max(resources.Config.VBAOConfig.BlurSharpness, 0.001f)
+			BlurSharpness = Math.Max(resources.Config.AmbientOcclusion.BlurSharpness, 0.001f)
 		};
 	}
 

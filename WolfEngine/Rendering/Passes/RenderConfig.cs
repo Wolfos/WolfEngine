@@ -5,11 +5,63 @@ namespace WolfEngine.Rendering.Passes;
 [RuntimeAsset(AssetType.DataAsset, typeof(RenderConfig), typeof(IDataAssetRuntimeResolver))]
 public class RenderConfig: IDataAsset
 {
-	public VBAOPass.Config VBAOConfig { get; set; } = new();
+	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+}
+
+public enum AmbientOcclusionMode
+{
+	VisibilityBitmask,
+	RayTraced
+}
+
+public enum AmbientOcclusionResolution
+{
+	Full,
+	Half
+}
+
+public struct AmbientOcclusionConfig
+{
+	public AmbientOcclusionConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = true;
+	public AmbientOcclusionMode Mode { get; set; } = AmbientOcclusionMode.VisibilityBitmask;
+	public AmbientOcclusionResolution Resolution { get; set; } = AmbientOcclusionResolution.Full;
+	public VisibilityBitmaskAmbientOcclusionSettings VisibilityBitmaskSettings { get; set; } = new();
+	public RayTracedAmbientOcclusionSettings RayTracedSettings { get; set; } = new();
+	public float BlurSharpness { get; set; } = 16.0f;
+}
+
+public struct VisibilityBitmaskAmbientOcclusionSettings
+{
+	public VisibilityBitmaskAmbientOcclusionSettings()
+	{
+	}
+
+	public int SliceCount { get; set; } = 2;
+	public int StepCount { get; set; } = 4;
+	public float Radius { get; set; } = 0.4f;
+	public float Thickness { get; set; } = 0.3f;
+	public float Bias { get; set; } = 0.03f;
+	public float Strength { get; set; } = 0.6f;
+	public float Power { get; set; } = 1.5f;
+}
+
+public struct RayTracedAmbientOcclusionSettings
+{
+	public RayTracedAmbientOcclusionSettings()
+	{
+	}
+
+	public float Radius { get; set; } = 2.0f;
+	public float Bias { get; set; } = 0.03f;
+	public float Strength { get; set; } = 1.0f;
 }
 
 public struct DecalConfig

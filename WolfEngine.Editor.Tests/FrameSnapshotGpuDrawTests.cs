@@ -101,6 +101,27 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_CopyUpdates_DoesNotConsumePendingUpdates()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("test-shader");
+		var entity = new Entity(1, 1);
+
+		WriteEntity(database, entity, mesh, material, 1.0f);
+		var copiedUpdates = new List<GpuDrawUpdate>();
+		var consumedUpdates = new List<GpuDrawUpdate>();
+
+		database.CopyUpdates(copiedUpdates);
+		database.ConsumeUpdates(consumedUpdates);
+
+		Assert.That(copiedUpdates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+		Assert.That(consumedUpdates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+		database.ConsumeUpdates(consumedUpdates);
+		Assert.That(consumedUpdates, Is.Empty);
+	}
+
+	[Test]
 	public void GpuDrawDatabase_AfterReset_NextTransformUpdateUsesPreservedPreviousWorld()
 	{
 		var database = new GpuDrawDatabase();
