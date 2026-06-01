@@ -32,6 +32,8 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle AmbientOcclusionRaw { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionTemp { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionFinal { get; init; }
+	public RenderGraphResourceHandle RayTracingHitMask { get; init; }
+	public RenderGraphResourceHandle RayTracingHitDistance { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
@@ -285,6 +287,8 @@ internal sealed class RenderGraphFrameBuilder
 		var ambientOcclusionRawHandle = default(RenderGraphResourceHandle);
 		var ambientOcclusionTempHandle = default(RenderGraphResourceHandle);
 		var ambientOcclusionFinalHandle = default(RenderGraphResourceHandle);
+		var rayTracingHitMaskHandle = default(RenderGraphResourceHandle);
+		var rayTracingHitDistanceHandle = default(RenderGraphResourceHandle);
 		var resolvedSceneColorHandle = default(RenderGraphResourceHandle);
 		var historyColorReadHandle = default(RenderGraphResourceHandle);
 		var historyColorWriteHandle = default(RenderGraphResourceHandle);
@@ -450,6 +454,21 @@ internal sealed class RenderGraphFrameBuilder
 					TextureFormat.Rgba16Float,
 					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+				if (config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced)
+				{
+					rayTracingHitMaskHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+						aoSize.X,
+						aoSize.Y,
+						TextureFormat.Rgba16Float,
+						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+					rayTracingHitDistanceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+						aoSize.X,
+						aoSize.Y,
+						TextureFormat.Rgba16Float,
+						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+						new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+				}
 			}
 		}
 
@@ -497,6 +516,8 @@ internal sealed class RenderGraphFrameBuilder
 			AmbientOcclusionRaw = ambientOcclusionRawHandle,
 			AmbientOcclusionTemp = ambientOcclusionTempHandle,
 			AmbientOcclusionFinal = ambientOcclusionFinalHandle,
+			RayTracingHitMask = rayTracingHitMaskHandle,
+			RayTracingHitDistance = rayTracingHitDistanceHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
@@ -519,6 +540,14 @@ internal sealed class RenderGraphFrameBuilder
 			if (ambientOcclusionFinalHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
+			}
+			if (rayTracingHitMaskHandle.IsValid)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.RayTracingHitMask, "Ray Tracing Hit Mask", rayTracingHitMaskHandle, SceneDebugViewKind.Color);
+			}
+			if (rayTracingHitDistanceHandle.IsValid)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.RayTracingHitDistance, "Ray Tracing Hit Distance", rayTracingHitDistanceHandle, SceneDebugViewKind.Color);
 			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferNormal, "GBuffer Normal", gbufferNormalHandle, SceneDebugViewKind.Color);
@@ -597,11 +626,19 @@ internal sealed class RenderGraphFrameBuilder
 
 			if (_frameResources.AmbientOcclusionRaw.IsValid)
 			{
-				graph.AddPass("Ambient Occlusion Evaluate", PassKind.Compute)
+				var ambientOcclusionEvaluateBuilder = graph.AddPass("Ambient Occlusion Evaluate", PassKind.Compute)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess)
-					.SetExecute(_ambientOcclusionExecute);
+					.WriteTexture(_frameResources.AmbientOcclusionRaw, ResourceState.UnorderedAccess);
+				if (_frameResources.RayTracingHitMask.IsValid)
+				{
+					ambientOcclusionEvaluateBuilder.WriteTexture(_frameResources.RayTracingHitMask, ResourceState.UnorderedAccess);
+				}
+				if (_frameResources.RayTracingHitDistance.IsValid)
+				{
+					ambientOcclusionEvaluateBuilder.WriteTexture(_frameResources.RayTracingHitDistance, ResourceState.UnorderedAccess);
+				}
+				ambientOcclusionEvaluateBuilder.SetExecute(_ambientOcclusionExecute);
 
 				graph.AddPass("Ambient Occlusion Blur X", PassKind.Compute)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)

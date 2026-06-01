@@ -626,6 +626,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		throw new NotImplementedException("DXR support is not implemented yet.");
 	}
 
+	public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure)
+	{
+		throw new NotImplementedException("DXR support is not implemented yet.");
+	}
+
 	public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure)
 	{
 		throw new NotImplementedException("DXR support is not implemented yet.");

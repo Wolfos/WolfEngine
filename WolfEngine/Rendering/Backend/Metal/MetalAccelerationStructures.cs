@@ -37,13 +37,15 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 		in BottomLevelAccelerationStructureDescriptor descriptor,
 		MTLPrimitiveAccelerationStructureDescriptor metalDescriptor,
 		MTLAccelerationStructure accelerationStructure,
-		MTLBuffer scratchBuffer)
+		MTLBuffer scratchBuffer,
+		MTLFence buildFence)
 	{
 		Name = name;
 		Descriptor = descriptor;
 		MetalDescriptor = metalDescriptor;
 		AccelerationStructure = accelerationStructure;
 		ScratchBuffer = scratchBuffer;
+		BuildFence = buildFence;
 	}
 
 	public string Name { get; }
@@ -54,8 +56,15 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 
 	public MTLBuffer ScratchBuffer { get; }
 
+	public MTLFence BuildFence { get; }
+
 	public void Dispose()
 	{
+		if (BuildFence.NativePtr != IntPtr.Zero)
+		{
+			BuildFence.Dispose();
+		}
+
 		if (ScratchBuffer.NativePtr != IntPtr.Zero)
 		{
 			ScratchBuffer.Dispose();
@@ -85,7 +94,8 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 		MTLInstanceAccelerationStructureDescriptor metalDescriptor,
 		MTLAccelerationStructure accelerationStructure,
 		MTLBuffer instanceDescriptorBuffer,
-		MTLBuffer scratchBuffer)
+		MTLBuffer scratchBuffer,
+		MTLFence buildFence)
 	{
 		Name = name;
 		Descriptor = descriptor;
@@ -93,6 +103,7 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 		AccelerationStructure = accelerationStructure;
 		InstanceDescriptorBuffer = instanceDescriptorBuffer;
 		ScratchBuffer = scratchBuffer;
+		BuildFence = buildFence;
 	}
 
 	public string Name { get; }
@@ -105,8 +116,15 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 
 	public MTLBuffer ScratchBuffer { get; }
 
+	public MTLFence BuildFence { get; }
+
 	public void Dispose()
 	{
+		if (BuildFence.NativePtr != IntPtr.Zero)
+		{
+			BuildFence.Dispose();
+		}
+
 		if (ScratchBuffer.NativePtr != IntPtr.Zero)
 		{
 			ScratchBuffer.Dispose();

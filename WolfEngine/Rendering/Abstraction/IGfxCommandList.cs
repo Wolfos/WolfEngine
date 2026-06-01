@@ -78,6 +78,8 @@ public interface IGfxCommandList
 		IGfxTopLevelAccelerationStructure accelerationStructure,
 		ReadOnlySpan<RayTracingInstanceDescription> instances);
 
+	void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure);
+
 	void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure);
 
 	void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ);

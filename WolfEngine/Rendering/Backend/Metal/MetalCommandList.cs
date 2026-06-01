@@ -461,6 +461,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			blas.MetalDescriptor,
 			blas.ScratchBuffer,
 			0);
+		encoder.UpdateFence(blas.BuildFence);
 		encoder.EndEncoding();
 		encoder.Dispose();
 	}
@@ -506,13 +507,34 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		for (var i = 0; i < instances.Length; i++)
+		{
+			if (instances[i].AccelerationStructure is MetalBottomLevelAccelerationStructure blas)
+			{
+				encoder.WaitForFence(blas.BuildFence);
+			}
+		}
 		encoder.BuildAccelerationStructure(
 			tlas.AccelerationStructure,
 			tlas.MetalDescriptor,
 			tlas.ScratchBuffer,
 			0);
+		encoder.UpdateFence(tlas.BuildFence);
 		encoder.EndEncoding();
 		encoder.Dispose();
+	}
+
+	public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure)
+	{
+		ThrowIfDisposed();
+		if (accelerationStructure is not MetalTopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Metal backend.");
+		}
+
+		EnsureComputeEncoder();
+		_computeEncoder.WaitForFence(tlas.BuildFence);
+		_computeEncoder.MemoryBarrier(MTLBarrierScope.Buffers);
 	}
 
 	public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure)

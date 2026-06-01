@@ -371,12 +371,21 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			throw new InvalidOperationException("Failed to create Metal BLAS scratch buffer.");
 		}
 
+		var buildFence = _device.NewFence;
+		if (buildFence.NativePtr == IntPtr.Zero)
+		{
+			scratchBuffer.Dispose();
+			accelerationStructure.Dispose();
+			throw new InvalidOperationException("Failed to create Metal BLAS build fence.");
+		}
+
 		return new MetalBottomLevelAccelerationStructure(
 			null,
 			descriptor,
 			primitiveDescriptor,
 			accelerationStructure,
-			scratchBuffer);
+			scratchBuffer,
+			buildFence);
 	}
 
 	public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(
@@ -423,13 +432,23 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			throw new InvalidOperationException("Failed to create Metal TLAS scratch buffer.");
 		}
 
+		var buildFence = _device.NewFence;
+		if (buildFence.NativePtr == IntPtr.Zero)
+		{
+			scratchBuffer.Dispose();
+			accelerationStructure.Dispose();
+			instanceDescriptorBuffer.Dispose();
+			throw new InvalidOperationException("Failed to create Metal TLAS build fence.");
+		}
+
 		return new MetalTopLevelAccelerationStructure(
 			null,
 			descriptor,
 			instanceDescriptor,
 			accelerationStructure,
 			instanceDescriptorBuffer,
-			scratchBuffer);
+			scratchBuffer,
+			buildFence);
 	}
 
 	private static NSArray CreateNativeArray(params IntPtr[] objects)

@@ -7,6 +7,8 @@ cbuffer BindlessHandles : register(b0)
     uint depthHandle;
     uint normalHandle;
     uint outputHandle;
+    uint hitMaskHandle;
+    uint hitDistanceHandle;
 };
 
 cbuffer CameraParams : register(b1)
@@ -24,6 +26,7 @@ cbuffer AoSettings : register(b2)
     float bias;
     float strength;
     uint frameIndex;
+    uint debugOutputsEnabled;
 };
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
@@ -44,6 +47,47 @@ float3 BuildHemisphereDirection(float3 normal, float randomAngle)
     float angle = randomAngle * 6.28318530718f;
     float r = 0.70710678f;
     return normalize(normal * r + tangent * cos(angle) * r + bitangent * sin(angle) * r);
+}
+
+struct RtaoRayQueryResult
+{
+    bool hit;
+    float committedRayT;
+};
+
+RtaoRayQueryResult TraceRtaoRay(float3 worldPosition, float3 normal, uint2 pixel)
+{
+    float3 rayDirection = BuildHemisphereDirection(normal, Hash12(pixel, frameIndex));
+
+    RayDesc ray;
+    ray.Origin = worldPosition + normal * bias;
+    ray.Direction = rayDirection;
+    ray.TMin = 0.001f;
+    ray.TMax = radius;
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
+    query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
+    query.Proceed();
+
+    RtaoRayQueryResult result;
+    result.hit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    result.committedRayT = result.hit ? query.CommittedRayT() : radius;
+    return result;
+}
+
+void WriteDebugOutputs(uint2 pixel, bool hit, float committedRayT)
+{
+    if (debugOutputsEnabled == 0u)
+    {
+        return;
+    }
+
+    RWTexture2D<float4> hitMaskTexture = GetRWTexture(hitMaskHandle);
+    RWTexture2D<float4> hitDistanceTexture = GetRWTexture(hitDistanceHandle);
+    float hitMask = hit ? 1.0f : 0.0f;
+    float hitDistance = hit ? saturate(committedRayT / radius) : 1.0f;
+    hitMaskTexture[pixel] = float4(hitMask, hitMask, hitMask, 1.0f);
+    hitDistanceTexture[pixel] = float4(hitDistance, hitDistance, hitDistance, 1.0f);
 }
 
 [numthreads(8, 8, 1)]
@@ -68,6 +112,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsBackgroundDepth(depth))
     {
         outputTexture[pixel] = float4(1.0f, 1.0f, 1.0f, 1.0f);
+        WriteDebugOutputs(pixel, false, radius);
         return;
     }
 
@@ -80,17 +125,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float4 cameraRelativeWorldPositionH = mul(clipPosition, camera.invViewProjection);
     float3 cameraRelativeWorldPosition = cameraRelativeWorldPositionH.xyz / cameraRelativeWorldPositionH.w;
     float3 worldPosition = cameraRelativeWorldPosition + camera.cameraOrigin;
-    float3 rayDirection = BuildHemisphereDirection(normal, Hash12(pixel, frameIndex));
-
-    RayDesc ray;
-    ray.Origin = worldPosition + normal * bias;
-    ray.Direction = rayDirection;
-    ray.TMin = 0.001f;
-    ray.TMax = radius;
-
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    query.Proceed();
-    float occlusion = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? saturate(1.0f - strength) : 1.0f;
+    RtaoRayQueryResult rayResult = TraceRtaoRay(worldPosition, normal, pixel);
+    float occlusion = rayResult.hit ? saturate(1.0f - strength) : 1.0f;
+    WriteDebugOutputs(pixel, rayResult.hit, rayResult.committedRayT);
     outputTexture[pixel] = float4(occlusion, occlusion, occlusion, 1.0f);
 }

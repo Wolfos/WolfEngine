@@ -56,6 +56,15 @@ public sealed class AmbientOcclusionPass
 		var depthHandle = _bindlessRegistry.RegisterDepthTexture(depth);
 		var normalHandle = _bindlessRegistry.GetTextureHandle(normal);
 		var outputHandle = _bindlessRegistry.RegisterRwTexture(output);
+		var hitMaskHandle = DescriptorHandle.Invalid;
+		var hitDistanceHandle = DescriptorHandle.Invalid;
+		if (mode == AmbientOcclusionMode.RayTraced &&
+		    resources.RayTracingHitMask.IsValid &&
+		    resources.RayTracingHitDistance.IsValid)
+		{
+			hitMaskHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.RayTracingHitMask));
+			hitDistanceHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.RayTracingHitDistance));
+		}
 
 		return new AmbientOcclusionPassConfig
 		{
@@ -64,7 +73,8 @@ public sealed class AmbientOcclusionPass
 			DepthHandle = depthHandle,
 			NormalHandle = normalHandle,
 			OutputHandle = outputHandle,
-			RayTracingSyncRoot = rayTracingSceneResources?.SyncRoot,
+			RayTracingHitMaskHandle = hitMaskHandle,
+			RayTracingHitDistanceHandle = hitDistanceHandle,
 			TopLevelAccelerationStructure = rayTracingSceneResources?.TopLevelAccelerationStructure,
 			FullResolution = resources.SceneFramebufferSize,
 			OutputResolution = new(output.Descriptor.Width, output.Descriptor.Height),
@@ -159,21 +169,6 @@ public sealed class AmbientOcclusionPass
 			throw new InvalidOperationException("Ray traced ambient occlusion requires a valid top-level acceleration structure.");
 		}
 
-		if (config.RayTracingSyncRoot is not null)
-		{
-			lock (config.RayTracingSyncRoot)
-			{
-				RecordRayTracedLocked(context, in config, sceneData);
-			}
-
-			return;
-		}
-
-		RecordRayTracedLocked(context, in config, sceneData);
-	}
-
-	private void RecordRayTracedLocked(RenderGraphContext context, in AmbientOcclusionPassConfig config, SceneDrawData sceneData)
-	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.Pipeline);
 
@@ -183,6 +178,8 @@ public sealed class AmbientOcclusionPass
 		bindlessWriter.SetUInt("depthHandle", config.DepthHandle.Value);
 		bindlessWriter.SetUInt("normalHandle", config.NormalHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
+		bindlessWriter.SetUInt("hitMaskHandle", config.RayTracingHitMaskHandle.Value);
+		bindlessWriter.SetUInt("hitDistanceHandle", config.RayTracingHitDistanceHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _rayTracedCameraWriter
@@ -209,7 +206,9 @@ public sealed class AmbientOcclusionPass
 		settingsWriter.SetFloat("bias", config.Bias);
 		settingsWriter.SetFloat("strength", config.Strength);
 		settingsWriter.SetUInt("frameIndex", config.FrameIndex);
+		settingsWriter.SetUInt("debugOutputsEnabled", config.RayTracingHitMaskHandle.IsValid && config.RayTracingHitDistanceHandle.IsValid ? 1u : 0u);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
+		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
 		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
 
 		var threadGroupSize = _rayTracedThreadGroupSize
