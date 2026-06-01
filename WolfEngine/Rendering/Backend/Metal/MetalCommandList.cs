@@ -482,6 +482,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		descriptorSpan.Clear();
 
 		var nativeAccelerationStructures = new IntPtr[instanceCount];
+		tlas.ReferencedBottomLevelAccelerationStructures.Clear();
 		for (var i = 0; i < instanceCount; i++)
 		{
 			var instance = instances[i];
@@ -491,11 +492,17 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			}
 
 			nativeAccelerationStructures[i] = (IntPtr)blas.AccelerationStructure;
+			tlas.ReferencedBottomLevelAccelerationStructures.Add(blas.AccelerationStructure);
 			descriptorSpan[i] = CreateInstanceDescriptor(instance, (uint)i);
 		}
 
 		tlas.MetalDescriptor.InstanceCount = instanceCount;
-		tlas.MetalDescriptor.InstancedAccelerationStructures = CreateNativeArray(nativeAccelerationStructures);
+		if (tlas.InstancedAccelerationStructures.NativePtr != IntPtr.Zero)
+		{
+			tlas.InstancedAccelerationStructures.Dispose();
+		}
+		tlas.InstancedAccelerationStructures = CreateNativeArray(nativeAccelerationStructures);
+		tlas.MetalDescriptor.InstancedAccelerationStructures = tlas.InstancedAccelerationStructures;
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
@@ -518,6 +525,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EnsureComputeEncoder();
 		_computeEncoder.SetAccelerationStructure(tlas.AccelerationStructure, slot);
+		_computeEncoder.UseResource(tlas.AccelerationStructure, MTLResourceUsage.Read);
+		for (var i = 0; i < tlas.ReferencedBottomLevelAccelerationStructures.Count; i++)
+		{
+			_computeEncoder.UseResource(tlas.ReferencedBottomLevelAccelerationStructures[i], MTLResourceUsage.Read);
+		}
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)

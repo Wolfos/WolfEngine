@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
 
@@ -74,6 +76,8 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerationStructure, IDisposable
 {
 	public MTLInstanceAccelerationStructureDescriptor MetalDescriptor;
+	public NSArray InstancedAccelerationStructures;
+	public readonly List<MTLAccelerationStructure> ReferencedBottomLevelAccelerationStructures = new();
 
 	public MetalTopLevelAccelerationStructure(
 		string name,
@@ -111,6 +115,11 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 		if (InstanceDescriptorBuffer.NativePtr != IntPtr.Zero)
 		{
 			InstanceDescriptorBuffer.Dispose();
+		}
+
+		if (InstancedAccelerationStructures.NativePtr != IntPtr.Zero)
+		{
+			InstancedAccelerationStructures.Dispose();
 		}
 
 		if (AccelerationStructure.NativePtr != IntPtr.Zero)
