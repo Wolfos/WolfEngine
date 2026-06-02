@@ -85,7 +85,7 @@ struct GpuMeshData
     uint indexCount;
     uint indexFormat;
     uint baseVertex;
-    uint pad0;
+    uint startIndex;
     uint pad1;
     uint pad2;
 };
@@ -135,7 +135,7 @@ struct GpuDrawMeshUpdateData
     uint32_t indexCount;
     uint32_t indexFormat;
     int32_t baseVertex;
-    uint32_t pad0;
+    uint32_t startIndex;
     uint32_t pad1;
 };
 

@@ -382,6 +382,8 @@ public sealed class RayTracingSceneResourcesTests
 		public void Render(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle finalColor) => throw new NotSupportedException();
 		public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) => throw new NotSupportedException();
 		public void ReleaseMeshResources(Mesh mesh) { }
+		public IGfxBuffer GetPackedMeshVertexBuffer() => _vertexBuffer;
+		public IGfxBuffer GetPackedMeshIndexBuffer() => _indexBuffer;
 		public bool SupportsGpuCapture => false;
 		public bool IsGpuCaptureActive => false;
 		public string LastGpuCapturePath => string.Empty;

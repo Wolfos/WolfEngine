@@ -99,10 +99,10 @@ float3 DdgiProbePosition(uint3 probeCoord)
 
 float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic, uint samplerHandle)
 {
-    if (ddgiEnabled == 0u || ddgiProbeCount == 0u)
-    {
-        return 0.0f.xxx;
-    }
+    // if (ddgiEnabled == 0u || ddgiProbeCount == 0u)
+    // {
+    //     return 0.0f.xxx;
+    // }
 
     float3 biasedPos = worldPos + normal * ddgiViewBias;
     float3 grid = (biasedPos - ddgiOrigin) / max(ddgiProbeSpacing, 0.001f);
@@ -138,12 +138,17 @@ float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic
                 float weight = tri.x * tri.y * tri.z * nWeight;
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, DDGI_VISIBILITY_TILE_INTERIOR_SIZE);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
-                float meanDistance = moments.x * ddgiMaxRayDistance;
-                float visibility = distanceToProbe <= meanDistance + ddgiProbeSpacing ? 1.0f : 0.15f;
+                float normalizedDistance = saturate(distanceToProbe / max(ddgiMaxRayDistance, 0.001f));
+                float meanDistance = moments.x;
+                float meanDistanceSquared = moments.y;
+                float variance = max(meanDistanceSquared - meanDistance * meanDistance, 0.0004f);
+                float distanceDelta = max(normalizedDistance - meanDistance, 0.0f);
+                float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
+                float visibility = normalizedDistance <= meanDistance ? 1.0f : saturate(chebyshevVisibility);
                 float2 irradianceUv = DdgiProbeAtlasUv(probeIndex, normal, DDGI_IRRADIANCE_TILE_INTERIOR_SIZE);
                 float3 irradiance = irradianceTex.SampleLevel(linearSampler, irradianceUv, 0.0f).rgb;
                 result += irradiance * weight * visibility;
-                weightSum += weight;
+                weightSum += weight * visibility;
             }
         }
     }
@@ -254,18 +259,22 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
     }
 
-    color += EvaluateImageBasedLighting(
-        surface,
-        viewDir,
-        irradianceHandle,
-        prefilteredHandle,
-        brdfLutHandle,
-        samplerHandle,
-        IBL_EXPOSURE);
-    float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle) * albedo;
-    color += ddgiContribution;
-    if (ddgiEnabled != 0u)
+    if (ddgiEnabled == 0u || ddgiProbeCount == 0u) 
     {
+        // Skybox sampling when DDGI is disabled
+        color += EvaluateImageBasedLighting(
+            surface,
+            viewDir,
+            irradianceHandle,
+            prefilteredHandle,
+            brdfLutHandle,
+            samplerHandle,
+            IBL_EXPOSURE);
+    }
+    else
+    {
+        float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle) * albedo;
+        color += ddgiContribution;
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
         ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution, 1.0f);
     }

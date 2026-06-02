@@ -37,6 +37,7 @@ public sealed class DdgiPass
 		RenderGraphContext context,
 		RenderGraphFrameResources resources,
 		IGfxDevice device,
+		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
 		IRayTracingSceneResources rayTracingSceneResources,
 		SceneDrawData sceneData,
@@ -44,6 +45,7 @@ public sealed class DdgiPass
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
+		ArgumentNullException.ThrowIfNull(renderer);
 		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 		ArgumentNullException.ThrowIfNull(rayTracingSceneResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
@@ -97,6 +99,8 @@ public sealed class DdgiPass
 			MaterialBuffer = gpuDrawResources.MaterialBuffer ?? throw new InvalidOperationException("GpuDraw material buffer missing."),
 			MeshBuffer = gpuDrawResources.MeshBuffer ?? throw new InvalidOperationException("GpuDraw mesh buffer missing."),
 			InstanceIndexToInstanceHandleBuffer = rayTracingSceneResources.InstanceIndexToInstanceHandleBuffer,
+			PackedMeshVertexBuffer = renderer.GetPackedMeshVertexBuffer() ?? throw new InvalidOperationException("Packed mesh vertex buffer missing."),
+			PackedMeshIndexBuffer = renderer.GetPackedMeshIndexBuffer() ?? throw new InvalidOperationException("Packed mesh index buffer missing."),
 			IrradianceAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.IrradianceTileInteriorSize),
 			VisibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize),
 			GridShape = gridShape,
@@ -127,6 +131,8 @@ public sealed class DdgiPass
 		commandList.SetComputeBuffer(5, config.MaterialBuffer);
 		commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
 		commandList.SetComputeBuffer(7, config.MeshBuffer);
+		commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
+		commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
 		var threadGroupSize = _traceThreadGroupSize ?? throw new InvalidOperationException("DDGI trace threadgroup size was not initialized.");
 		var width = Math.Max(config.VisibilityAtlasSize.X, config.IrradianceAtlasSize.X);
 		var height = Math.Max(config.VisibilityAtlasSize.Y, config.IrradianceAtlasSize.Y);

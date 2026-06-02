@@ -180,14 +180,14 @@ public readonly struct GpuTerrainLayerData
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuMeshData
 {
-	public GpuMeshData(uint vertexBufferHandle, uint indexBufferHandle, uint indexCount, uint indexFormat, uint baseVertex)
+	public GpuMeshData(uint vertexBufferHandle, uint indexBufferHandle, uint indexCount, uint indexFormat, uint baseVertex, uint startIndex)
 	{
 		VertexBufferHandle = vertexBufferHandle;
 		IndexBufferHandle = indexBufferHandle;
 		IndexCount = indexCount;
 		IndexFormat = indexFormat;
 		BaseVertex = baseVertex;
-		_pad0 = 0;
+		StartIndex = startIndex;
 		_pad1 = 0;
 		_pad2 = 0;
 	}
@@ -197,7 +197,7 @@ public readonly struct GpuMeshData
 	public readonly uint IndexCount;
 	public readonly uint IndexFormat;
 	public readonly uint BaseVertex;
-	private readonly uint _pad0;
+	public readonly uint StartIndex;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
 }
@@ -280,7 +280,8 @@ public readonly struct GpuDrawMeshUpdateData
 		uint indexBufferHandle,
 		uint indexCount,
 		uint indexFormat,
-		int baseVertex)
+		int baseVertex,
+		uint startIndex)
 	{
 		MeshHandle = meshHandle;
 		VertexBufferHandle = vertexBufferHandle;
@@ -288,7 +289,7 @@ public readonly struct GpuDrawMeshUpdateData
 		IndexCount = indexCount;
 		IndexFormat = indexFormat;
 		BaseVertex = baseVertex;
-		_pad0 = 0;
+		StartIndex = startIndex;
 		_pad1 = 0;
 	}
 
@@ -298,7 +299,7 @@ public readonly struct GpuDrawMeshUpdateData
 	public readonly uint IndexCount;
 	public readonly uint IndexFormat;
 	public readonly int BaseVertex;
-	private readonly uint _pad0;
+	public readonly uint StartIndex;
 	private readonly uint _pad1;
 }
 

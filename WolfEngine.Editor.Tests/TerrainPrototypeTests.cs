@@ -632,6 +632,10 @@ public sealed class TerrainPrototypeTests
 			ReleasedMeshes.Add(mesh);
 		}
 
+		public IGfxBuffer GetPackedMeshVertexBuffer() => null!;
+
+		public IGfxBuffer GetPackedMeshIndexBuffer() => null!;
+
 		public bool SupportsGpuCapture => false;
 		public bool IsGpuCaptureActive => false;
 		public string LastGpuCapturePath => string.Empty;

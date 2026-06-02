@@ -252,6 +252,7 @@ public sealed class GpuDrawPass
 			uint indexHandle = _bindlessRegistry.ErrorBufferHandle.Value;
 			uint indexCount = 0;
 			uint indexFormat = 0;
+			uint startIndex = 0;
 			int baseVertex = 0;
 
 			if (GpuDrawClassification.SupportsMeshBackedGeometry(drawKind) &&
@@ -267,6 +268,7 @@ public sealed class GpuDrawPass
 					indexHandle = registeredIndexHandle;
 					indexCount = mesh.IndexCount;
 					indexFormat = 0;
+					startIndex = checked((uint)(mesh.PackedIndexOffsetBytes / sizeof(uint)));
 					baseVertex = mesh.PackedBaseVertex;
 				}
 				else
@@ -447,7 +449,8 @@ public sealed class GpuDrawPass
 					indexHandle,
 					indexCount,
 					indexFormat,
-					baseVertex));
+					baseVertex,
+					startIndex));
 			}
 
 			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMaterial)
@@ -1662,6 +1665,7 @@ public sealed class GpuDrawPass
 		var fallbackMeshData = new GpuMeshData(
 			_bindlessRegistry.ErrorBufferHandle.Value,
 			_bindlessRegistry.ErrorBufferHandle.Value,
+			0,
 			0,
 			0,
 			0);

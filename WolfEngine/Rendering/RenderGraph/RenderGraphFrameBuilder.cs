@@ -1372,6 +1372,7 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_frameResources,
 			_renderer.GetGfxDevice(),
+			_renderer,
 			_gpuDrawResources,
 			_rayTracingSceneResources,
 			context.SceneData!,

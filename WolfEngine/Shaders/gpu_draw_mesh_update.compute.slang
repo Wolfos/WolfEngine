@@ -48,6 +48,7 @@ void CSUpdateMesh(uint3 dispatchThreadId : SV_DispatchThreadID)
     meshData.indexCount = update.indexCount;
     meshData.indexFormat = update.indexFormat;
     meshData.baseVertex = update.baseVertex;
+    meshData.startIndex = update.startIndex;
     g_MeshTable[meshIndex] = meshData;
     g_MeshGenerations[meshIndex] = meshGeneration;
 }

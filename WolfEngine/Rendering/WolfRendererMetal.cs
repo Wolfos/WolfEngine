@@ -1148,6 +1148,10 @@ internal unsafe class WolfRendererMetal : IRenderer
         _needsPackedGeometryReencode = true;
     }
 
+    public IGfxBuffer GetPackedMeshVertexBuffer() => _packedVertexBuffer!;
+
+    public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
+
     public bool SupportsGpuCapture => true;
 
     public bool IsGpuCaptureActive => _isGpuCaptureActive;

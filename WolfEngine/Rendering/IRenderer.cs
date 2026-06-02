@@ -20,6 +20,8 @@ public interface IRenderer
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	void ReleaseMeshResources(Mesh mesh);
+	IGfxBuffer GetPackedMeshVertexBuffer();
+	IGfxBuffer GetPackedMeshIndexBuffer();
 	bool SupportsGpuCapture { get; }
 	bool IsGpuCaptureActive { get; }
 	string LastGpuCapturePath { get; }

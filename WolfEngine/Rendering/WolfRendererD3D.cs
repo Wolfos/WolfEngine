@@ -1419,6 +1419,10 @@ private sealed class MeshResources
 		mesh.PackedBaseVertex = 0;
 	}
 
+	public IGfxBuffer GetPackedMeshVertexBuffer() => null!;
+
+	public IGfxBuffer GetPackedMeshIndexBuffer() => null!;
+
 	public bool SupportsGpuCapture => false;
 
 	public bool IsGpuCaptureActive => false;

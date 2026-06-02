@@ -22,6 +22,8 @@ public readonly struct DdgiPassConfig
 	public required IGfxBuffer MaterialBuffer { get; init; }
 	public required IGfxBuffer MeshBuffer { get; init; }
 	public required IGfxBuffer InstanceIndexToInstanceHandleBuffer { get; init; }
+	public required IGfxBuffer PackedMeshVertexBuffer { get; init; }
+	public required IGfxBuffer PackedMeshIndexBuffer { get; init; }
 	public required Int2 IrradianceAtlasSize { get; init; }
 	public required Int2 VisibilityAtlasSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
