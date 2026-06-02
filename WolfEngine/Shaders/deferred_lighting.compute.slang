@@ -1,4 +1,5 @@
 import "common.slang";
+import "constants.slang";
 import "common_bindless.slang";
 import "common_lighting.slang";
 
@@ -274,7 +275,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     else
     {
         float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle) * albedo;
-        color += ddgiContribution;
+        color += ddgiContribution * occlusion;
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
         ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution, 1.0f);
     }
