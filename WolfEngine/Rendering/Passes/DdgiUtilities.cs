@@ -41,6 +41,48 @@ public static class DdgiUtilities
 
 		return Math.Max(config.ProbeSpacing, 0.001f) * 3.0f;
 	}
+
+	public static int GetProbeUpdateFrames(DiffuseGlobalIlluminationConfig config)
+	{
+		return Math.Max(config.ProbeUpdateFrames, 1);
+	}
+
+	public static int GetProbeUpdateFrameIndex(uint frameIndex, int probeUpdateFrames)
+	{
+		var clampedFrames = Math.Max(probeUpdateFrames, 1);
+		return (int)(frameIndex % (uint)clampedFrames);
+	}
+
+	public static bool IsProbeActive(int probeIndex, int probeUpdateFrames, int probeUpdateFrameIndex, bool forceFullUpdate)
+	{
+		var clampedFrames = Math.Max(probeUpdateFrames, 1);
+		if (forceFullUpdate || clampedFrames == 1)
+		{
+			return true;
+		}
+
+		var clampedFrameIndex = Math.Clamp(probeUpdateFrameIndex, 0, clampedFrames - 1);
+		return probeIndex >= 0 && probeIndex % clampedFrames == clampedFrameIndex;
+	}
+
+	public static int GetActiveProbeCount(int totalProbeCount, int probeUpdateFrames, int probeUpdateFrameIndex, bool forceFullUpdate)
+	{
+		if (totalProbeCount <= 0)
+		{
+			return 0;
+		}
+
+		var clampedFrames = Math.Max(probeUpdateFrames, 1);
+		if (forceFullUpdate || clampedFrames == 1)
+		{
+			return totalProbeCount;
+		}
+
+		var clampedFrameIndex = Math.Clamp(probeUpdateFrameIndex, 0, clampedFrames - 1);
+		var fullCycles = totalProbeCount / clampedFrames;
+		var remainder = totalProbeCount % clampedFrames;
+		return fullCycles + (clampedFrameIndex < remainder ? 1 : 0);
+	}
 }
 
 public readonly record struct DdgiGridShape(

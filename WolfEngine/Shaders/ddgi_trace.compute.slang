@@ -220,6 +220,11 @@ void TraceIrradianceSample(uint2 pixel)
         target[pixel] = 0.0f.xxxx;
         return;
     }
+    if (!DdgiIsProbeActive(info.probeIndex))
+    {
+        target[pixel] = 0.0f.xxxx;
+        return;
+    }
 
     uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, irradianceTileInteriorSize);
     uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
@@ -239,6 +244,11 @@ void TraceVisibilitySample(uint2 pixel)
     DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
     RWTexture2D<float4> target = GetRWTexture(traceVisibilityHandle);
     if (!info.valid)
+    {
+        target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
+        return;
+    }
+    if (!DdgiIsProbeActive(info.probeIndex))
     {
         target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
         return;

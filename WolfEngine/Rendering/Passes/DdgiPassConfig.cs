@@ -30,6 +30,9 @@ public readonly struct DdgiPassConfig
 	public required Vector3 Origin { get; init; }
 	public required float ProbeSpacing { get; init; }
 	public required int RaysPerProbe { get; init; }
+	public required int ProbeUpdateFrames { get; init; }
+	public required int ProbeUpdateFrameIndex { get; init; }
+	public required int ActiveProbeCount { get; init; }
 	public required float MaxRayDistance { get; init; }
 	public required float NormalBias { get; init; }
 	public required float ViewBias { get; init; }
@@ -38,5 +41,6 @@ public readonly struct DdgiPassConfig
 	public required Vector3 DirectLightColorIntensity { get; init; }
 	public required uint FrameIndex { get; init; }
 	public required bool HistoryValid { get; init; }
+	public required bool ForceFullProbeUpdate { get; init; }
 	public required bool SidecarHitShadingAvailable { get; init; }
 }

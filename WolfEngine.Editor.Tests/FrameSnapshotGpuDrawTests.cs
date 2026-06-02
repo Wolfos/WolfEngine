@@ -27,6 +27,7 @@ public sealed class FrameSnapshotGpuDrawTests
 				ProbeCounts = new DdgiProbeCounts { X = 3, Y = 4, Z = 5 },
 				ProbeSpacing = 1.5f,
 				RaysPerProbe = 32,
+				ProbeUpdateFrames = 4,
 				MaxRayDistance = 9.0f,
 				NormalBias = 0.1f,
 				ViewBias = 0.25f,
@@ -48,6 +49,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(copied.ProbeCounts.Z, Is.EqualTo(5));
 		Assert.That(copied.ProbeSpacing, Is.EqualTo(1.5f));
 		Assert.That(copied.RaysPerProbe, Is.EqualTo(32));
+		Assert.That(copied.ProbeUpdateFrames, Is.EqualTo(4));
 		Assert.That(copied.MaxRayDistance, Is.EqualTo(9.0f));
 		Assert.That(copied.NormalBias, Is.EqualTo(0.1f));
 		Assert.That(copied.ViewBias, Is.EqualTo(0.25f));

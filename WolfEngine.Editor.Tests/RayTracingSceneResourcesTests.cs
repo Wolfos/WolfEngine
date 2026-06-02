@@ -91,6 +91,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.ProbeCounts.Z, Is.EqualTo(16));
 		Assert.That(ddgi.ProbeSpacing, Is.EqualTo(2.0f));
 		Assert.That(ddgi.RaysPerProbe, Is.EqualTo(64));
+		Assert.That(ddgi.ProbeUpdateFrames, Is.EqualTo(8));
 		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.05f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.2f));
@@ -117,6 +118,7 @@ public sealed class RayTracingSceneResourcesTests
 				ProbeCounts = new DdgiProbeCounts { X = 4, Y = 5, Z = 6 },
 				ProbeSpacing = 3.5f,
 				RaysPerProbe = 32,
+				ProbeUpdateFrames = 4,
 				MaxRayDistance = 12.0f,
 				NormalBias = 0.1f,
 				ViewBias = 0.4f,
@@ -138,12 +140,68 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.ProbeCounts.Z, Is.EqualTo(6));
 		Assert.That(ddgi.ProbeSpacing, Is.EqualTo(3.5f));
 		Assert.That(ddgi.RaysPerProbe, Is.EqualTo(32));
+		Assert.That(ddgi.ProbeUpdateFrames, Is.EqualTo(4));
 		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(12.0f));
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.1f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.4f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.True);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.3f));
+	}
+
+	[Test]
+	public void DdgiProbeUpdateFramesClampToAtLeastOne()
+	{
+		var config = new DiffuseGlobalIlluminationConfig
+		{
+			ProbeUpdateFrames = 0
+		};
+
+		Assert.That(DdgiUtilities.GetProbeUpdateFrames(config), Is.EqualTo(1));
+		Assert.That(DdgiUtilities.GetProbeUpdateFrameIndex(5, 0), Is.EqualTo(0));
+		Assert.That(DdgiUtilities.IsProbeActive(3, 0, 0, forceFullUpdate: false), Is.True);
+		Assert.That(DdgiUtilities.GetActiveProbeCount(17, 0, 0, forceFullUpdate: false), Is.EqualTo(17));
+	}
+
+	[Test]
+	public void DdgiProbeBatchingUpdatesEveryProbeOncePerCycle()
+	{
+		const int probeCount = 10;
+		const int updateFrames = 4;
+		var updateCounts = new int[probeCount];
+
+		for (uint frameIndex = 0; frameIndex < updateFrames; frameIndex++)
+		{
+			var frameSlot = DdgiUtilities.GetProbeUpdateFrameIndex(frameIndex, updateFrames);
+			var activeCount = 0;
+			for (var probeIndex = 0; probeIndex < probeCount; probeIndex++)
+			{
+				if (DdgiUtilities.IsProbeActive(probeIndex, updateFrames, frameSlot, forceFullUpdate: false) == false)
+				{
+					continue;
+				}
+
+				updateCounts[probeIndex]++;
+				activeCount++;
+			}
+
+			Assert.That(activeCount, Is.EqualTo(DdgiUtilities.GetActiveProbeCount(probeCount, updateFrames, frameSlot, forceFullUpdate: false)));
+		}
+
+		Assert.That(updateCounts, Is.All.EqualTo(1));
+	}
+
+	[Test]
+	public void DdgiProbeBatchingForceFullUpdateMarksAllProbesActive()
+	{
+		const int probeCount = 10;
+		const int updateFrames = 4;
+
+		Assert.That(DdgiUtilities.GetActiveProbeCount(probeCount, updateFrames, 2, forceFullUpdate: true), Is.EqualTo(probeCount));
+		for (var probeIndex = 0; probeIndex < probeCount; probeIndex++)
+		{
+			Assert.That(DdgiUtilities.IsProbeActive(probeIndex, updateFrames, 2, forceFullUpdate: true), Is.True);
+		}
 	}
 
 	[Test]

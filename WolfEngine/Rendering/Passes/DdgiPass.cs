@@ -27,6 +27,8 @@ public sealed class DdgiPass
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private uint _frameIndex;
 
+	public DdgiPassStats LastStats { get; private set; }
+
 	public DdgiPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
@@ -79,6 +81,23 @@ public sealed class DdgiPass
 		var config = resources.Config.DiffuseGlobalIllumination;
 		var gridShape = DdgiUtilities.GetGridShape(config);
 		var directLight = GetPrimaryDirectionalLight(sceneData);
+		var frameIndex = _frameIndex++;
+		var probeUpdateFrames = DdgiUtilities.GetProbeUpdateFrames(config);
+		var probeUpdateFrameIndex = DdgiUtilities.GetProbeUpdateFrameIndex(frameIndex, probeUpdateFrames);
+		var forceFullProbeUpdate = historyValid == false;
+		var activeProbeCount = DdgiUtilities.GetActiveProbeCount(
+			gridShape.ProbeCount,
+			probeUpdateFrames,
+			probeUpdateFrameIndex,
+			forceFullProbeUpdate);
+		var raysPerProbe = Math.Max(config.RaysPerProbe, 1);
+		LastStats = new DdgiPassStats(
+			probeUpdateFrames,
+			activeProbeCount,
+			gridShape.ProbeCount,
+			raysPerProbe,
+			activeProbeCount * raysPerProbe,
+			forceFullProbeUpdate);
 		return new DdgiPassConfig
 		{
 			TracePipeline = _tracePipeline!,
@@ -106,15 +125,19 @@ public sealed class DdgiPass
 			GridShape = gridShape,
 			Origin = config.Origin,
 			ProbeSpacing = Math.Max(config.ProbeSpacing, 0.001f),
-			RaysPerProbe = Math.Max(config.RaysPerProbe, 1),
+			RaysPerProbe = raysPerProbe,
+			ProbeUpdateFrames = probeUpdateFrames,
+			ProbeUpdateFrameIndex = probeUpdateFrameIndex,
+			ActiveProbeCount = activeProbeCount,
 			MaxRayDistance = DdgiUtilities.GetMaxRayDistance(config),
 			NormalBias = Math.Max(config.NormalBias, 0.0f),
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
 			Hysteresis = Math.Clamp(config.Hysteresis, 0.0f, 0.9999f),
 			DirectLightDirection = directLight.Direction,
 			DirectLightColorIntensity = directLight.ColorIntensity,
-			FrameIndex = _frameIndex++,
+			FrameIndex = frameIndex,
 			HistoryValid = historyValid,
+			ForceFullProbeUpdate = forceFullProbeUpdate,
 			SidecarHitShadingAvailable = rayTracingSceneResources.LastStats.SidecarHitShadingAvailable
 		};
 	}
@@ -201,6 +224,9 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt("visibilityTileInteriorSize", (uint)DdgiUtilities.VisibilityTileInteriorSize);
 		settingsWriter.SetUInt("tileBorderSize", (uint)DdgiUtilities.TileBorderSize);
 		settingsWriter.SetUInt("raysPerProbe", (uint)config.RaysPerProbe);
+		settingsWriter.SetUInt("probeUpdateFrames", (uint)config.ProbeUpdateFrames);
+		settingsWriter.SetUInt("probeUpdateFrameIndex", (uint)config.ProbeUpdateFrameIndex);
+		settingsWriter.SetUInt("forceFullProbeUpdate", config.ForceFullProbeUpdate ? 1u : 0u);
 		settingsWriter.SetFloat("maxRayDistance", config.MaxRayDistance);
 		settingsWriter.SetFloat("normalBias", config.NormalBias);
 		settingsWriter.SetFloat("viewBias", config.ViewBias);
@@ -298,3 +324,11 @@ public sealed class DdgiPass
 			new ShaderBytecodeSet(compute: shader, computeThreadGroupSize: threadGroupSize));
 	}
 }
+
+public readonly record struct DdgiPassStats(
+	int ProbeUpdateFrames,
+	int ActiveProbeCount,
+	int TotalProbeCount,
+	int RaysPerActiveProbe,
+	int EstimatedProbeRaysThisFrame,
+	bool ForceFullProbeUpdate);

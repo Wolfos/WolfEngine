@@ -43,6 +43,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public DdgiProbeCounts ProbeCounts { get; set; } = new();
 	public float ProbeSpacing { get; set; } = 2.0f;
 	public int RaysPerProbe { get; set; } = 64;
+	public int ProbeUpdateFrames { get; set; } = 8;
 	public float MaxRayDistance { get; set; } = 6.0f;
 	public float NormalBias { get; set; } = 0.05f;
 	public float ViewBias { get; set; } = 0.2f;

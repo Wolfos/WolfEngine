@@ -37,6 +37,10 @@ cbuffer DdgiSettings : register(b1)
     uint visibilityTileInteriorSize;
     uint tileBorderSize;
     uint raysPerProbe;
+    uint probeUpdateFrames;
+    uint probeUpdateFrameIndex;
+    uint forceFullProbeUpdate;
+    uint schedulingPad0;
     float maxRayDistance;
     float normalBias;
     float viewBias;
@@ -78,6 +82,15 @@ uint2 DdgiProbeTileOrigin(uint probeIndex, uint interiorSize)
 uint DdgiRaySampleCount(uint interiorSize)
 {
     return min(max(raysPerProbe, 1u), interiorSize * interiorSize);
+}
+
+bool DdgiIsProbeActive(uint probeIndex)
+{
+    uint updateFrames = max(probeUpdateFrames, 1u);
+    return forceFullProbeUpdate != 0u ||
+        historyValid == 0u ||
+        updateFrames == 1u ||
+        (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
 }
 
 uint DdgiRaySampleIndex(uint2 interiorPixel, uint interiorSize)

@@ -8,6 +8,11 @@ float4 IntegrateIrradianceTexel(uint2 pixel)
     {
         return 0.0f.xxxx;
     }
+    if (!DdgiIsProbeActive(info.probeIndex))
+    {
+        Texture2D<float4> historyTex = GetTexture(irradianceHistoryReadHandle);
+        return historyTex.Load(int3(pixel, 0));
+    }
 
     float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, irradianceTileInteriorSize));
     uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
@@ -44,6 +49,11 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
     if (!info.valid)
     {
         return float4(1.0f, 1.0f, 0.0f, 1.0f);
+    }
+    if (!DdgiIsProbeActive(info.probeIndex))
+    {
+        Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
+        return historyTex.Load(int3(pixel, 0));
     }
 
     float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, visibilityTileInteriorSize));
