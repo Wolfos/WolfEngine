@@ -18,6 +18,7 @@ public interface IRenderPipeline
 
 public class RenderPipeline : IRenderPipeline
 {
+	private const int DdgiDebugProbeEntityBaseIndex = -2_000_000_000;
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
@@ -172,12 +173,58 @@ public class RenderPipeline : IRenderPipeline
 				}
 			}
 
+			using (FrameProfiler.Instance.Measure("Gather DDGI probe debug primitives"))
+			{
+				CollectDdgiProbeDebugPrimitives(config, gpuDrawDatabase, _debugPrimitiveMeshFactory);
+			}
 
 			gpuDrawDatabase.EndSync();
 			_renderGraph.PublishSnapshot();
 
 
 			_stressFrame++;
+		}
+	}
+
+	internal static void CollectDdgiProbeDebugPrimitives(
+		RenderConfig config,
+		GpuDrawDatabase gpuDrawDatabase,
+		DebugPrimitiveMeshFactory debugPrimitiveMeshFactory)
+	{
+		ArgumentNullException.ThrowIfNull(config);
+		ArgumentNullException.ThrowIfNull(gpuDrawDatabase);
+		ArgumentNullException.ThrowIfNull(debugPrimitiveMeshFactory);
+
+		var ddgi = config.DiffuseGlobalIllumination;
+		if (DdgiUtilities.IsRayTracedDdgiEnabled(config) == false ||
+		    ddgi.DebugProbeSpheres == false)
+		{
+			return;
+		}
+
+		var shape = DdgiUtilities.GetGridShape(ddgi);
+		var sphereMesh = debugPrimitiveMeshFactory.GetMesh(DebugPrimitiveType.Sphere);
+		var radius = MathF.Max(ddgi.DebugProbeSphereRadius, 0.01f);
+		var diameter = radius * 2.0f;
+		var spacing = MathF.Max(ddgi.ProbeSpacing, 0.001f);
+		var probeIndex = 0;
+		for (var z = 0; z < shape.CountZ; z++)
+		{
+			for (var y = 0; y < shape.CountY; y++)
+			{
+				for (var x = 0; x < shape.CountX; x++)
+				{
+					var position = ddgi.Origin + new Vector3(x * spacing, y * spacing, z * spacing);
+					var transform = Matrix4x4.CreateScale(diameter) * Matrix4x4.CreateTranslation(position);
+					gpuDrawDatabase.TouchDebugPrimitive(
+						new Entity(DdgiDebugProbeEntityBaseIndex + probeIndex, 1),
+						sphereMesh,
+						ColorRGBA.White,
+						AlphaMode.AlphaBlend,
+						transform);
+					probeIndex++;
+				}
+			}
 		}
 	}
 

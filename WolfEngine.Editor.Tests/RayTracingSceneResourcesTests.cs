@@ -95,6 +95,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.05f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.2f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.95f));
+		Assert.That(ddgi.DebugProbeSpheres, Is.False);
+		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.15f));
 
 		var shape = DdgiUtilities.GetGridShape(ddgi);
 		Assert.That(shape.ProbeCount, Is.EqualTo(2048));
@@ -118,7 +120,9 @@ public sealed class RayTracingSceneResourcesTests
 				MaxRayDistance = 12.0f,
 				NormalBias = 0.1f,
 				ViewBias = 0.4f,
-				Hysteresis = 0.8f
+				Hysteresis = 0.8f,
+				DebugProbeSpheres = true,
+				DebugProbeSphereRadius = 0.3f
 			}
 		};
 
@@ -138,6 +142,40 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.1f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.4f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
+		Assert.That(ddgi.DebugProbeSpheres, Is.True);
+		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.3f));
+	}
+
+	[Test]
+	public void RenderPipeline_DdgiProbeDebugToggleInjectsAlphaBlendedSpherePrimitives()
+	{
+		var config = new RenderConfig
+		{
+			DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+			{
+				Enabled = true,
+				Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+				ProbeCounts = new DdgiProbeCounts { X = 2, Y = 1, Z = 2 },
+				ProbeSpacing = 3.0f,
+				DebugProbeSpheres = true,
+				DebugProbeSphereRadius = 0.25f
+			}
+		};
+		var database = new GpuDrawDatabase();
+		var meshFactory = new DebugPrimitiveMeshFactory();
+
+		database.BeginSync();
+		RenderPipeline.CollectDdgiProbeDebugPrimitives(config, database, meshFactory);
+		database.EndSync();
+
+		var entries = new List<GpuDrawEntry>();
+		database.CollectDrawEntries(entries);
+
+		Assert.That(entries, Has.Count.EqualTo(4));
+		Assert.That(entries.Select(entry => entry.DrawKind), Is.All.EqualTo(GpuDrawKind.DebugPrimitive));
+		Assert.That(entries.Select(entry => entry.Material.AlphaMode), Is.All.EqualTo(AlphaMode.AlphaBlend));
+		Assert.That(entries.Select(entry => entry.Material.Color), Is.All.EqualTo(ColorRGBA.White));
+		Assert.That(entries.Select(entry => entry.World.M11), Is.All.EqualTo(0.5f).Within(0.0001f));
 	}
 
 	[Test]

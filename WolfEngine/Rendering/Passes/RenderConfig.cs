@@ -50,6 +50,8 @@ public struct DiffuseGlobalIlluminationConfig
 	public bool DebugIrradianceAtlas { get; set; }
 	public bool DebugVisibilityAtlas { get; set; }
 	public bool DebugFinalContribution { get; set; }
+	public bool DebugProbeSpheres { get; set; }
+	public float DebugProbeSphereRadius { get; set; } = 0.15f;
 }
 
 public enum AmbientOcclusionMode
