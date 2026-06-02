@@ -10,6 +10,9 @@ public static class SceneDebugViewIds
 	public const string AmbientOcclusion = "ambient-occlusion";
 	public const string RayTracingHitMask = "ray-tracing-hit-mask";
 	public const string RayTracingHitDistance = "ray-tracing-hit-distance";
+	public const string DdgiIrradiance = "ddgi-irradiance";
+	public const string DdgiVisibility = "ddgi-visibility";
+	public const string DdgiFinalContribution = "ddgi-final-contribution";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string GBufferNormal = "gbuffer-normal";
 	public const string MotionVectors = "motion-vectors";

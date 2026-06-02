@@ -17,6 +17,9 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle GBufferEmissive { get; init; }
 	public required DescriptorHandle GBufferDepth { get; init; }
 	public required DescriptorHandle AmbientOcclusion { get; init; }
+	public required DescriptorHandle DdgiIrradiance { get; init; }
+	public required DescriptorHandle DdgiVisibility { get; init; }
+	public required DescriptorHandle DdgiFinalContribution { get; init; }
 	public required DescriptorHandle ShadowMapDepth0 { get; init; }
 	public required DescriptorHandle ShadowMapDepth1 { get; init; }
 	public required DescriptorHandle ShadowMapDepth2 { get; init; }
@@ -46,6 +49,17 @@ public struct DeferredLightingPassConfig
 	public required float ShadowTexelSizeX { get; init; }
 	public required float ShadowTexelSizeY { get; init; }
 	public required bool AoEnabled { get; init; }
+	public required bool DdgiEnabled { get; init; }
+	public required Vector3 DdgiOrigin { get; init; }
+	public required float DdgiProbeSpacing { get; init; }
+	public required int DdgiProbeCountX { get; init; }
+	public required int DdgiProbeCountY { get; init; }
+	public required int DdgiProbeCountZ { get; init; }
+	public required int DdgiProbeCount { get; init; }
+	public required int DdgiAtlasColumns { get; init; }
+	public required int DdgiAtlasRows { get; init; }
+	public required float DdgiMaxRayDistance { get; init; }
+	public required float DdgiViewBias { get; init; }
 	public required int ClusterCountX { get; init; }
 	public required int ClusterCountY { get; init; }
 	public required int ClusterCountZ { get; init; }

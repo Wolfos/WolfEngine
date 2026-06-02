@@ -6,12 +6,57 @@ using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor.Tests;
 
 [TestFixture]
 public sealed class FrameSnapshotGpuDrawTests
 {
+	[Test]
+	public void FrameSnapshot_SetConfig_CopiesDiffuseGlobalIllumination()
+	{
+		var snapshot = new FrameSnapshot();
+		var config = new RenderConfig
+		{
+			DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+			{
+				Enabled = true,
+				Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+				Origin = new Vector3(4.0f, 5.0f, 6.0f),
+				ProbeCounts = new DdgiProbeCounts { X = 3, Y = 4, Z = 5 },
+				ProbeSpacing = 1.5f,
+				RaysPerProbe = 32,
+				MaxRayDistance = 9.0f,
+				NormalBias = 0.1f,
+				ViewBias = 0.25f,
+				Hysteresis = 0.8f,
+				DebugIrradianceAtlas = true,
+				DebugVisibilityAtlas = true,
+				DebugFinalContribution = true
+			}
+		};
+
+		snapshot.SetConfig(config);
+
+		var copied = snapshot.Config.DiffuseGlobalIllumination;
+		Assert.That(copied.Enabled, Is.True);
+		Assert.That(copied.Mode, Is.EqualTo(DiffuseGlobalIlluminationMode.RayTracedDdgi));
+		Assert.That(copied.Origin, Is.EqualTo(new Vector3(4.0f, 5.0f, 6.0f)));
+		Assert.That(copied.ProbeCounts.X, Is.EqualTo(3));
+		Assert.That(copied.ProbeCounts.Y, Is.EqualTo(4));
+		Assert.That(copied.ProbeCounts.Z, Is.EqualTo(5));
+		Assert.That(copied.ProbeSpacing, Is.EqualTo(1.5f));
+		Assert.That(copied.RaysPerProbe, Is.EqualTo(32));
+		Assert.That(copied.MaxRayDistance, Is.EqualTo(9.0f));
+		Assert.That(copied.NormalBias, Is.EqualTo(0.1f));
+		Assert.That(copied.ViewBias, Is.EqualTo(0.25f));
+		Assert.That(copied.Hysteresis, Is.EqualTo(0.8f));
+		Assert.That(copied.DebugIrradianceAtlas, Is.True);
+		Assert.That(copied.DebugVisibilityAtlas, Is.True);
+		Assert.That(copied.DebugFinalContribution, Is.True);
+	}
+
 	[Test]
 	public void FrameSnapshotBuffer_PublishedSnapshotRetainsIndependentGpuDrawDatabase()
 	{

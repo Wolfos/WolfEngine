@@ -23,6 +23,7 @@ internal sealed class RenderGraphPassSet
 		AmbientOcclusionPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionBlurPass = new(shaderCompiler, bindlessResourceRegistry);
 		AmbientOcclusionUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
+		DdgiPass = new(shaderCompiler, bindlessResourceRegistry);
 		ClusteredLightingPass = new(shaderCompiler);
 		GBufferDecalSeedPass = new(shaderCompiler, bindlessResourceRegistry);
 		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
@@ -47,6 +48,7 @@ internal sealed class RenderGraphPassSet
 	public AmbientOcclusionPass AmbientOcclusionPass { get; }
 	public AmbientOcclusionBlurPass AmbientOcclusionBlurPass { get; }
 	public AmbientOcclusionUpsamplePass AmbientOcclusionUpsamplePass { get; }
+	public DdgiPass DdgiPass { get; }
 	public ClusteredLightingPass ClusteredLightingPass { get; }
 	public GBufferDecalSeedPass GBufferDecalSeedPass { get; }
 	public ScreenSpaceDecalPass ScreenSpaceDecalPass { get; }

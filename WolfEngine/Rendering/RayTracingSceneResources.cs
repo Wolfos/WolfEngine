@@ -10,6 +10,7 @@ namespace WolfEngine.Rendering;
 public interface IRayTracingSceneResources
 {
 	IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; }
+	IGfxBuffer? InstanceIndexToInstanceHandleBuffer { get; }
 	RayTracingSceneStats LastStats { get; }
 }
 
@@ -33,7 +34,8 @@ public readonly struct RayTracingSceneStats
 		int topLevelRebuildCount,
 		RayTracingSceneRebuildReason topLevelRebuildReason,
 		int skippedTerrainCount,
-		int skippedTransparentOrAlphaCount)
+		int skippedTransparentOrAlphaCount,
+		bool sidecarHitShadingAvailable)
 	{
 		BottomLevelAccelerationStructureCount = bottomLevelAccelerationStructureCount;
 		TopLevelInstanceCount = topLevelInstanceCount;
@@ -42,6 +44,7 @@ public readonly struct RayTracingSceneStats
 		TopLevelRebuildReason = topLevelRebuildReason;
 		SkippedTerrainCount = skippedTerrainCount;
 		SkippedTransparentOrAlphaCount = skippedTransparentOrAlphaCount;
+		SidecarHitShadingAvailable = sidecarHitShadingAvailable;
 	}
 
 	public int BottomLevelAccelerationStructureCount { get; }
@@ -51,6 +54,7 @@ public readonly struct RayTracingSceneStats
 	public RayTracingSceneRebuildReason TopLevelRebuildReason { get; }
 	public int SkippedTerrainCount { get; }
 	public int SkippedTransparentOrAlphaCount { get; }
+	public bool SidecarHitShadingAvailable { get; }
 }
 
 public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDisposable
@@ -58,14 +62,19 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<uint, InstanceRecord> _instances = new();
 	private readonly List<RayTracingInstanceDescription> _instanceDescriptions = new();
+	private readonly uint[] _instanceIndexToInstanceHandle = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
+	private IGfxBuffer? _instanceIndexToInstanceHandleBuffer;
+	private IGfxDevice? _sidecarDevice;
 	private RayTracingSceneStats _lastStats;
 	private bool _bootstrapPending = true;
 	private bool _tlasDirty;
 
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
+
+	public IGfxBuffer? InstanceIndexToInstanceHandleBuffer => _instanceIndexToInstanceHandleBuffer;
 
 	public RayTracingSceneStats LastStats => _lastStats;
 
@@ -84,6 +93,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			return;
 		}
 
+		EnsureSidecarResources(device);
 		_topLevelAccelerationStructure ??= device.CreateTopLevelAccelerationStructure(
 			new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
 
@@ -129,7 +139,27 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			tlasRebuildCount,
 			tlasRebuildCount > 0 ? statsBuilder.TopLevelRebuildReason : RayTracingSceneRebuildReason.None,
 			statsBuilder.SkippedTerrainCount,
-			statsBuilder.SkippedTransparentOrAlphaCount);
+			statsBuilder.SkippedTransparentOrAlphaCount,
+			_instanceIndexToInstanceHandleBuffer is not null);
+	}
+
+	private void EnsureSidecarResources(IGfxDevice device)
+	{
+		if (ReferenceEquals(_sidecarDevice, device) && _instanceIndexToInstanceHandleBuffer is not null)
+		{
+			return;
+		}
+
+		if (_instanceIndexToInstanceHandleBuffer is IDisposable disposableBuffer)
+		{
+			disposableBuffer.Dispose();
+		}
+
+		_instanceIndexToInstanceHandleBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(GpuDrawResources.MaxInstanceCount * sizeof(uint)),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource));
+		_sidecarDevice = device;
 	}
 
 	private void RebuildFromCurrentDrawEntries(
@@ -294,12 +324,23 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private void BuildInstanceDescriptions()
 	{
 		_instanceDescriptions.Clear();
+		Array.Clear(_instanceIndexToInstanceHandle);
 		foreach (var record in _instances.Values)
 		{
+			var instanceIndex = (uint)_instanceDescriptions.Count;
 			_instanceDescriptions.Add(new RayTracingInstanceDescription(
-				(uint)_instanceDescriptions.Count,
+				instanceIndex,
 				record.AccelerationStructure,
 				record.World));
+			if (instanceIndex < _instanceIndexToInstanceHandle.Length)
+			{
+				_instanceIndexToInstanceHandle[instanceIndex] = record.InstanceHandle;
+			}
+		}
+
+		if (_instanceIndexToInstanceHandleBuffer is IWritableGpuBuffer writableBuffer)
+		{
+			writableBuffer.Write<uint>(_instanceIndexToInstanceHandle);
 		}
 	}
 
@@ -347,6 +388,13 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			tlasDisposable.Dispose();
 		}
 		_topLevelAccelerationStructure = null;
+
+		if (_instanceIndexToInstanceHandleBuffer is IDisposable sidecarDisposable)
+		{
+			sidecarDisposable.Dispose();
+		}
+		_instanceIndexToInstanceHandleBuffer = null;
+		_sidecarDevice = null;
 	}
 
 	private struct RayTracingSceneStatsBuilder

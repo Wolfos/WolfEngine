@@ -1,9 +1,12 @@
 using System.Numerics;
+using System.Text.Json;
 using WolfEngine;
+using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -27,6 +30,114 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8));
 		Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8));
+	}
+
+	[Test]
+	public void DdgiShadersCompileForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		foreach (var shader in new[]
+		         {
+			         "ddgi_trace.compute.slang",
+			         "ddgi_integrate.compute.slang",
+			         "ddgi_border_update.compute.slang"
+		         })
+		{
+			var compiled = shaderCompiler.GetComputeShaderWithReflection(
+				shader,
+				"CSMain",
+				GraphicsBackendKind.Metal);
+
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader);
+			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8), shader);
+			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8), shader);
+		}
+	}
+
+	[Test]
+	public void DeferredLightingShaderCompilesForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		var compiled = shaderCompiler.GetComputeShaderWithReflection(
+			"deferred_lighting.compute.slang",
+			"CSMain",
+			GraphicsBackendKind.Metal);
+
+		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
+		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8));
+		Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8));
+	}
+
+	[Test]
+	public void DdgiDefaultsAndAtlasSizingMatchMilestoneDefaults()
+	{
+		var config = new RenderConfig();
+		var ddgi = config.DiffuseGlobalIllumination;
+
+		Assert.That(ddgi.Enabled, Is.False);
+		Assert.That(ddgi.Mode, Is.EqualTo(DiffuseGlobalIlluminationMode.RayTracedDdgi));
+		Assert.That(ddgi.ProbeCounts.X, Is.EqualTo(16));
+		Assert.That(ddgi.ProbeCounts.Y, Is.EqualTo(8));
+		Assert.That(ddgi.ProbeCounts.Z, Is.EqualTo(16));
+		Assert.That(ddgi.ProbeSpacing, Is.EqualTo(2.0f));
+		Assert.That(ddgi.RaysPerProbe, Is.EqualTo(64));
+		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(6.0f));
+		Assert.That(ddgi.NormalBias, Is.EqualTo(0.05f));
+		Assert.That(ddgi.ViewBias, Is.EqualTo(0.2f));
+		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.95f));
+
+		var shape = DdgiUtilities.GetGridShape(ddgi);
+		Assert.That(shape.ProbeCount, Is.EqualTo(2048));
+		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.IrradianceTileInteriorSize), Is.EqualTo(new Int2(460, 450)));
+		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.VisibilityTileInteriorSize), Is.EqualTo(new Int2(828, 810)));
+	}
+
+	[Test]
+	public void RenderConfig_DdgiSettingsRoundTripThroughAssetJson()
+	{
+		var config = new RenderConfig
+		{
+			DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+			{
+				Enabled = true,
+				Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+				Origin = new Vector3(1.0f, 2.0f, 3.0f),
+				ProbeCounts = new DdgiProbeCounts { X = 4, Y = 5, Z = 6 },
+				ProbeSpacing = 3.5f,
+				RaysPerProbe = 32,
+				MaxRayDistance = 12.0f,
+				NormalBias = 0.1f,
+				ViewBias = 0.4f,
+				Hysteresis = 0.8f
+			}
+		};
+
+		var json = JsonSerializer.Serialize(config, AssetJson.SerializerOptions);
+		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(json, AssetJson.SerializerOptions)!;
+		var ddgi = roundTripped.DiffuseGlobalIllumination;
+
+		Assert.That(ddgi.Enabled, Is.True);
+		Assert.That(ddgi.Mode, Is.EqualTo(DiffuseGlobalIlluminationMode.RayTracedDdgi));
+		Assert.That(ddgi.Origin, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
+		Assert.That(ddgi.ProbeCounts.X, Is.EqualTo(4));
+		Assert.That(ddgi.ProbeCounts.Y, Is.EqualTo(5));
+		Assert.That(ddgi.ProbeCounts.Z, Is.EqualTo(6));
+		Assert.That(ddgi.ProbeSpacing, Is.EqualTo(3.5f));
+		Assert.That(ddgi.RaysPerProbe, Is.EqualTo(32));
+		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(12.0f));
+		Assert.That(ddgi.NormalBias, Is.EqualTo(0.1f));
+		Assert.That(ddgi.ViewBias, Is.EqualTo(0.4f));
+		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
 	}
 
 	[Test]
@@ -67,6 +178,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.Bootstrap));
 		Assert.That(resources.LastStats.SkippedTerrainCount, Is.EqualTo(1));
 		Assert.That(resources.LastStats.SkippedTransparentOrAlphaCount, Is.EqualTo(1));
+		Assert.That(resources.LastStats.SidecarHitShadingAvailable, Is.True);
+		Assert.That(resources.InstanceIndexToInstanceHandleBuffer, Is.Not.Null);
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
 	}

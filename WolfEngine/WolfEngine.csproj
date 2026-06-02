@@ -106,6 +106,18 @@
         <None Update="Shaders\ao_rtao.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\ddgi_common.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ddgi_trace.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ddgi_integrate.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <None Update="Shaders\ddgi_border_update.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\ao_blur.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

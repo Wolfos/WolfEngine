@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Rendering.Passes;
@@ -6,10 +7,49 @@ namespace WolfEngine.Rendering.Passes;
 public class RenderConfig: IDataAsset
 {
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
+	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+}
+
+public enum DiffuseGlobalIlluminationMode
+{
+	None,
+	RayTracedDdgi
+}
+
+public struct DdgiProbeCounts
+{
+	public DdgiProbeCounts()
+	{
+	}
+
+	public int X { get; set; } = 16;
+	public int Y { get; set; } = 8;
+	public int Z { get; set; } = 16;
+}
+
+public struct DiffuseGlobalIlluminationConfig
+{
+	public DiffuseGlobalIlluminationConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = false;
+	public DiffuseGlobalIlluminationMode Mode { get; set; } = DiffuseGlobalIlluminationMode.RayTracedDdgi;
+	public Vector3 Origin { get; set; } = Vector3.Zero;
+	public DdgiProbeCounts ProbeCounts { get; set; } = new();
+	public float ProbeSpacing { get; set; } = 2.0f;
+	public int RaysPerProbe { get; set; } = 64;
+	public float MaxRayDistance { get; set; } = 6.0f;
+	public float NormalBias { get; set; } = 0.05f;
+	public float ViewBias { get; set; } = 0.2f;
+	public float Hysteresis { get; set; } = 0.95f;
+	public bool DebugIrradianceAtlas { get; set; }
+	public bool DebugVisibilityAtlas { get; set; }
+	public bool DebugFinalContribution { get; set; }
 }
 
 public enum AmbientOcclusionMode
