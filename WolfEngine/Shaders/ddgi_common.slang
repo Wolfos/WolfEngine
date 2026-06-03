@@ -181,5 +181,5 @@ float3 DdgiJitterDirection(float3 direction, uint2 pixel, uint probeIndex)
 
 float3 DdgiSampleSky(float3 direction)
 {
-    return SampleEnvironment(environmentHandle, samplerHandle, direction);
+    return SampleEnvironment(environmentHandle, samplerHandle, direction) * IBL_EXPOSURE;
 }

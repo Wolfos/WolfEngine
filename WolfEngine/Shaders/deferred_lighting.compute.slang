@@ -114,7 +114,7 @@ float DdgiGridInfluence(float3 worldPos)
     return 1.0f - smoothstep(0.0f, spacing, length(distanceOutsideGrid));
 }
 
-float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic, uint samplerHandle, float gridInfluence)
+float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float gridInfluence)
 {
     if (gridInfluence <= 0.0f)
     {
@@ -175,7 +175,7 @@ float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic
         return 0.0f.xxx;
     }
 
-    return result / weightSum * (1.0f - metallic);
+    return result / weightSum;
 }
 
 float3 ReconstructCameraRelativeWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
@@ -276,17 +276,23 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
     }
 
-    float3 skyContribution = EvaluateImageBasedLighting(
+    float3 skyDiffuseContribution = EvaluateDiffuseImageBasedLighting(
+        surface,
+        irradianceHandle,
+        samplerHandle,
+        IBL_EXPOSURE);
+    float3 skySpecularContribution = EvaluateSpecularImageBasedLighting(
         surface,
         viewDir,
-        irradianceHandle,
         prefilteredHandle,
         brdfLutHandle,
         samplerHandle,
         IBL_EXPOSURE);
     float ddgiGridInfluence = DdgiGridInfluence(absoluteWorldPos);
-    float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle, ddgiGridInfluence) * albedo * occlusion;
-    color += lerp(skyContribution, ddgiContribution, ddgiGridInfluence);
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float3 diffuseEnergy = (1.0f - metallic) * (1.0f - F0);
+    float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, samplerHandle, ddgiGridInfluence) * diffuseEnergy * albedo * occlusion;
+    color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + skySpecularContribution;
     if (ddgiEnabled != 0u && ddgiProbeCount != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);

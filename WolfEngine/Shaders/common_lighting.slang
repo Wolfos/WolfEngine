@@ -456,10 +456,28 @@ uint ComputeClusterIndex(uint2 pixel, uint2 framebufferSize, float viewDepth, fl
     return clusterX + (clusterY * clusterCountX) + (clusterZ * clusterCountX * clusterCountY);
 }
 
-float3 EvaluateImageBasedLighting(
+float3 EvaluateDiffuseImageBasedLighting(
+    SurfaceLightingInput surface,
+    uint irradianceHandle,
+    uint samplerHandle,
+    float iblExposure)
+{
+    float3 normal = normalize(surface.normal);
+    float3 albedo = surface.albedo;
+    float metallic = surface.metallic;
+    float occlusion = surface.occlusion;
+
+    SamplerState linearSampler = GetSampler(samplerHandle);
+    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
+    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb * iblExposure;
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float3 kD = (1.0f - metallic) * (1.0f - F0);
+    return envIrradiance * kD * albedo / PI * occlusion;
+}
+
+float3 EvaluateSpecularImageBasedLighting(
     SurfaceLightingInput surface,
     float3 viewDir,
-    uint irradianceHandle,
     uint prefilteredHandle,
     uint brdfLutHandle,
     uint samplerHandle,
@@ -470,23 +488,29 @@ float3 EvaluateImageBasedLighting(
     float metallic = surface.metallic;
     float roughness = surface.roughness;
     float occlusion = surface.occlusion;
-
-    SamplerState linearSampler = GetSampler(samplerHandle);
-    Texture2D<float4> irradianceTex = GetTexture(irradianceHandle);
-    float3 envIrradiance = irradianceTex.SampleLevel(linearSampler, DirToEnvUV(normal), 0.0f).rgb * iblExposure;
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-    float3 kD = (1.0f - metallic) * (1.0f - F0);
-    float3 color = envIrradiance * kD * albedo / PI * occlusion;
 
     float3 reflectionDir = reflect(-viewDir, normal);
     float3 envColor = SamplePrefiltered(prefilteredHandle, samplerHandle, reflectionDir, roughness) * iblExposure;
 
     float cosTheta = saturate(dot(normal, viewDir));
     float3 fresnel = FresnelSchlick(cosTheta, F0);
+    SamplerState linearSampler = GetSampler(samplerHandle);
     Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
     float3 specular = envColor * (fresnel * brdf.x + brdf.y);
-    color += specular * 0.5f * occlusion;
+    return specular * 0.5f * occlusion;
+}
 
-    return color;
+float3 EvaluateImageBasedLighting(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    uint irradianceHandle,
+    uint prefilteredHandle,
+    uint brdfLutHandle,
+    uint samplerHandle,
+    float iblExposure)
+{
+    return EvaluateDiffuseImageBasedLighting(surface, irradianceHandle, samplerHandle, iblExposure) +
+        EvaluateSpecularImageBasedLighting(surface, viewDir, prefilteredHandle, brdfLutHandle, samplerHandle, iblExposure);
 }
