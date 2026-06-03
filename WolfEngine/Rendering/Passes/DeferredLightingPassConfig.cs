@@ -60,6 +60,8 @@ public struct DeferredLightingPassConfig
 	public required int DdgiAtlasRows { get; init; }
 	public required float DdgiMaxRayDistance { get; init; }
 	public required float DdgiViewBias { get; init; }
+	public required float DdgiHorizontalBlendDistance { get; init; }
+	public required float DdgiVerticalBlendDistance { get; init; }
 	public required int ClusterCountX { get; init; }
 	public required int ClusterCountY { get; init; }
 	public required int ClusterCountZ { get; init; }

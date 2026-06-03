@@ -29,9 +29,11 @@ public sealed class FrameSnapshotGpuDrawTests
 				RaysPerProbe = 32,
 				ProbeUpdateFrames = 4,
 				MaxRayDistance = 9.0f,
-				NormalBias = 0.1f,
-				ViewBias = 0.25f,
-				Hysteresis = 0.8f,
+					NormalBias = 0.1f,
+					ViewBias = 0.25f,
+					HorizontalBlendDistance = 7.0f,
+					VerticalBlendDistance = 3.0f,
+					Hysteresis = 0.8f,
 				DebugIrradianceAtlas = true,
 				DebugVisibilityAtlas = true,
 				DebugFinalContribution = true
@@ -53,6 +55,8 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(copied.MaxRayDistance, Is.EqualTo(9.0f));
 		Assert.That(copied.NormalBias, Is.EqualTo(0.1f));
 		Assert.That(copied.ViewBias, Is.EqualTo(0.25f));
+		Assert.That(copied.HorizontalBlendDistance, Is.EqualTo(7.0f));
+		Assert.That(copied.VerticalBlendDistance, Is.EqualTo(3.0f));
 		Assert.That(copied.Hysteresis, Is.EqualTo(0.8f));
 		Assert.That(copied.DebugIrradianceAtlas, Is.True);
 		Assert.That(copied.DebugVisibilityAtlas, Is.True);

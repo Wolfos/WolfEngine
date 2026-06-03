@@ -95,6 +95,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.05f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.2f));
+		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(6.0f));
+		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.95f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.False);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.15f));
@@ -120,9 +122,11 @@ public sealed class RayTracingSceneResourcesTests
 				RaysPerProbe = 32,
 				ProbeUpdateFrames = 4,
 				MaxRayDistance = 12.0f,
-				NormalBias = 0.1f,
-				ViewBias = 0.4f,
-				Hysteresis = 0.8f,
+					NormalBias = 0.1f,
+					ViewBias = 0.4f,
+					HorizontalBlendDistance = 8.0f,
+					VerticalBlendDistance = 4.0f,
+					Hysteresis = 0.8f,
 				DebugProbeSpheres = true,
 				DebugProbeSphereRadius = 0.3f
 			}
@@ -144,6 +148,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.MaxRayDistance, Is.EqualTo(12.0f));
 		Assert.That(ddgi.NormalBias, Is.EqualTo(0.1f));
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.4f));
+		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(8.0f));
+		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(4.0f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.True);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.3f));

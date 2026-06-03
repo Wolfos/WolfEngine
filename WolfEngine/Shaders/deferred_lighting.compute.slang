@@ -55,6 +55,8 @@ cbuffer LightingParams : register(b2)
     uint ddgiAtlasRows;
     float ddgiMaxRayDistance;
     float ddgiViewBias;
+    float ddgiHorizontalBlendDistance;
+    float ddgiVerticalBlendDistance;
     float shadowMaxDistance;
     float nearPlane;
     float farPlane;
@@ -110,8 +112,17 @@ float DdgiGridInfluence(float3 worldPos)
         max(ddgiProbeCountX, 1u) - 1u,
         max(ddgiProbeCountY, 1u) - 1u,
         max(ddgiProbeCountZ, 1u) - 1u) * spacing;
-    float3 distanceOutsideGrid = max(max(ddgiOrigin - worldPos, worldPos - gridMax), 0.0f.xxx);
-    return 1.0f - smoothstep(0.0f, spacing, length(distanceOutsideGrid));
+    float3 distanceInsideGrid = min(worldPos - ddgiOrigin, gridMax - worldPos);
+    float horizontalDistanceToBoundary = min(distanceInsideGrid.x, distanceInsideGrid.z);
+    float horizontalInfluence = smoothstep(
+        0.0f,
+        max(ddgiHorizontalBlendDistance, 0.001f),
+        horizontalDistanceToBoundary);
+    float verticalInfluence = smoothstep(
+        0.0f,
+        max(ddgiVerticalBlendDistance, 0.001f),
+        distanceInsideGrid.y);
+    return min(horizontalInfluence, verticalInfluence);
 }
 
 float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float gridInfluence)
@@ -123,8 +134,13 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
 
     float3 biasedPos = worldPos + normal * ddgiViewBias;
     float3 grid = (biasedPos - ddgiOrigin) / max(ddgiProbeSpacing, 0.001f);
-    float3 baseFloat = floor(grid);
-    float3 fracPart = saturate(grid - baseFloat);
+    float3 gridMax = float3(
+        max(ddgiProbeCountX, 1u) - 1u,
+        max(ddgiProbeCountY, 1u) - 1u,
+        max(ddgiProbeCountZ, 1u) - 1u);
+    float3 sampleGrid = clamp(grid, 0.0f.xxx, gridMax);
+    float3 baseFloat = floor(sampleGrid);
+    float3 fracPart = saturate(sampleGrid - baseFloat);
     int3 baseCoord = int3(baseFloat);
     Texture2D<float4> irradianceTex = GetTexture(ddgiIrradianceHandle);
     Texture2D<float4> visibilityTex = GetTexture(ddgiVisibilityHandle);

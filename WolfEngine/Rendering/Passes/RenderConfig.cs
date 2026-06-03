@@ -47,6 +47,8 @@ public struct DiffuseGlobalIlluminationConfig
 	public float MaxRayDistance { get; set; } = 6.0f;
 	public float NormalBias { get; set; } = 0.05f;
 	public float ViewBias { get; set; } = 0.2f;
+	public float HorizontalBlendDistance { get; set; } = 6.0f;
+	public float VerticalBlendDistance { get; set; } = 6.0f;
 	public float Hysteresis { get; set; } = 0.95f;
 	public bool DebugIrradianceAtlas { get; set; }
 	public bool DebugVisibilityAtlas { get; set; }

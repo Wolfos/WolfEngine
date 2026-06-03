@@ -147,9 +147,11 @@ public sealed class DeferredLightingPass
 			DdgiProbeCount = ddgiGridShape.ProbeCount,
 			DdgiAtlasColumns = ddgiGridShape.AtlasColumns,
 			DdgiAtlasRows = ddgiGridShape.AtlasRows,
-			DdgiMaxRayDistance = DdgiUtilities.GetMaxRayDistance(resources.Config.DiffuseGlobalIllumination),
-			DdgiViewBias = Math.Max(resources.Config.DiffuseGlobalIllumination.ViewBias, 0.0f),
-			ClusterCountX = gpuDrawResources.ClusteredLightingLayout.Grid.X,
+				DdgiMaxRayDistance = DdgiUtilities.GetMaxRayDistance(resources.Config.DiffuseGlobalIllumination),
+				DdgiViewBias = Math.Max(resources.Config.DiffuseGlobalIllumination.ViewBias, 0.0f),
+				DdgiHorizontalBlendDistance = Math.Max(resources.Config.DiffuseGlobalIllumination.HorizontalBlendDistance, 0.001f),
+				DdgiVerticalBlendDistance = Math.Max(resources.Config.DiffuseGlobalIllumination.VerticalBlendDistance, 0.001f),
+				ClusterCountX = gpuDrawResources.ClusteredLightingLayout.Grid.X,
 			ClusterCountY = gpuDrawResources.ClusteredLightingLayout.Grid.Y,
 			ClusterCountZ = gpuDrawResources.ClusteredLightingLayout.Grid.Z,
 			NearPlane = sceneData.NearPlane,
@@ -266,9 +268,11 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("ddgiProbeCount", (uint)config.DdgiProbeCount);
 		lightingWriter.SetUInt("ddgiAtlasColumns", (uint)config.DdgiAtlasColumns);
 		lightingWriter.SetUInt("ddgiAtlasRows", (uint)config.DdgiAtlasRows);
-		lightingWriter.SetFloat("ddgiMaxRayDistance", config.DdgiMaxRayDistance);
-		lightingWriter.SetFloat("ddgiViewBias", config.DdgiViewBias);
-		lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
+			lightingWriter.SetFloat("ddgiMaxRayDistance", config.DdgiMaxRayDistance);
+			lightingWriter.SetFloat("ddgiViewBias", config.DdgiViewBias);
+			lightingWriter.SetFloat("ddgiHorizontalBlendDistance", config.DdgiHorizontalBlendDistance);
+			lightingWriter.SetFloat("ddgiVerticalBlendDistance", config.DdgiVerticalBlendDistance);
+			lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
 		lightingWriter.SetFloat("nearPlane", config.NearPlane);
 		lightingWriter.SetFloat("farPlane", config.FarPlane);
 		lightingWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.DispatchSize.X, 1));
