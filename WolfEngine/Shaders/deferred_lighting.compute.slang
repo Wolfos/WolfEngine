@@ -98,12 +98,28 @@ float3 DdgiProbePosition(uint3 probeCoord)
     return ddgiOrigin + float3(probeCoord) * ddgiProbeSpacing;
 }
 
-float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic, uint samplerHandle)
+float DdgiGridInfluence(float3 worldPos)
 {
-    // if (ddgiEnabled == 0u || ddgiProbeCount == 0u)
-    // {
-    //     return 0.0f.xxx;
-    // }
+    if (ddgiEnabled == 0u || ddgiProbeCount == 0u)
+    {
+        return 0.0f;
+    }
+
+    float spacing = max(ddgiProbeSpacing, 0.001f);
+    float3 gridMax = ddgiOrigin + float3(
+        max(ddgiProbeCountX, 1u) - 1u,
+        max(ddgiProbeCountY, 1u) - 1u,
+        max(ddgiProbeCountZ, 1u) - 1u) * spacing;
+    float3 distanceOutsideGrid = max(max(ddgiOrigin - worldPos, worldPos - gridMax), 0.0f.xxx);
+    return 1.0f - smoothstep(0.0f, spacing, length(distanceOutsideGrid));
+}
+
+float3 SampleDdgi(float3 worldPos, float3 normal, float3 viewDir, float metallic, uint samplerHandle, float gridInfluence)
+{
+    if (gridInfluence <= 0.0f)
+    {
+        return 0.0f.xxx;
+    }
 
     float3 biasedPos = worldPos + normal * ddgiViewBias;
     float3 grid = (biasedPos - ddgiOrigin) / max(ddgiProbeSpacing, 0.001f);
@@ -260,24 +276,21 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
     }
 
-    if (ddgiEnabled == 0u || ddgiProbeCount == 0u) 
+    float3 skyContribution = EvaluateImageBasedLighting(
+        surface,
+        viewDir,
+        irradianceHandle,
+        prefilteredHandle,
+        brdfLutHandle,
+        samplerHandle,
+        IBL_EXPOSURE);
+    float ddgiGridInfluence = DdgiGridInfluence(absoluteWorldPos);
+    float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle, ddgiGridInfluence) * albedo * occlusion;
+    color += lerp(skyContribution, ddgiContribution, ddgiGridInfluence);
+    if (ddgiEnabled != 0u && ddgiProbeCount != 0u)
     {
-        // Skybox sampling when DDGI is disabled
-        color += EvaluateImageBasedLighting(
-            surface,
-            viewDir,
-            irradianceHandle,
-            prefilteredHandle,
-            brdfLutHandle,
-            samplerHandle,
-            IBL_EXPOSURE);
-    }
-    else
-    {
-        float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, viewDir, metallic, samplerHandle) * albedo;
-        color += ddgiContribution * occlusion;
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
-        ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution, 1.0f);
+        ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution * ddgiGridInfluence, 1.0f);
     }
     color += surface.emissive;
 
