@@ -19,6 +19,7 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle AmbientOcclusion { get; init; }
 	public required DescriptorHandle DdgiIrradiance { get; init; }
 	public required DescriptorHandle DdgiVisibility { get; init; }
+	public required DescriptorHandle DdgiProbeState { get; init; }
 	public required DescriptorHandle DdgiFinalContribution { get; init; }
 	public required DescriptorHandle ShadowMapDepth0 { get; init; }
 	public required DescriptorHandle ShadowMapDepth1 { get; init; }
@@ -62,6 +63,7 @@ public struct DeferredLightingPassConfig
 	public required float DdgiViewBias { get; init; }
 	public required float DdgiHorizontalBlendDistance { get; init; }
 	public required float DdgiVerticalBlendDistance { get; init; }
+	public required bool DdgiProbeRelocationEnabled { get; init; }
 	public required int ClusterCountX { get; init; }
 	public required int ClusterCountY { get; init; }
 	public required int ClusterCountZ { get; init; }

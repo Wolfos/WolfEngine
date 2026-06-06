@@ -11,10 +11,14 @@ cbuffer BindlessHandles : register(b0)
 {
     uint traceIrradianceHandle;
     uint traceVisibilityHandle;
+    uint traceIrradianceReadHandle;
+    uint traceVisibilityReadHandle;
     uint irradianceHistoryReadHandle;
     uint visibilityHistoryReadHandle;
     uint irradianceHistoryWriteHandle;
     uint visibilityHistoryWriteHandle;
+    uint probeStateReadHandle;
+    uint probeStateWriteHandle;
     uint environmentHandle;
     uint samplerHandle;
 };
@@ -45,6 +49,13 @@ cbuffer DdgiSettings : register(b1)
     float normalBias;
     float viewBias;
     float hysteresis;
+    uint probeRelocationEnabled;
+    float probeMinFrontfaceDistance;
+    float probeBackfaceThreshold;
+    float probeMaxRelocationDistance;
+    float probeSettingsPad0;
+    float probeSettingsPad1;
+    float probeSettingsPad2;
     float3 directLightDirection;
     float directLightPad0;
     float3 directLightColorIntensity;
@@ -69,6 +80,27 @@ float3 DdgiProbePosition(uint probeIndex)
     uint y = yz % probeCountY;
     uint z = yz / probeCountY;
     return origin + float3(float(x), float(y), float(z)) * probeSpacing;
+}
+
+uint2 DdgiProbeStatePixel(uint probeIndex)
+{
+    return uint2(probeIndex % atlasColumns, probeIndex / atlasColumns);
+}
+
+float4 DdgiLoadProbeState(uint handle, uint probeIndex)
+{
+    Texture2D<float4> stateTex = GetTexture(handle);
+    return stateTex.Load(int3(DdgiProbeStatePixel(probeIndex), 0));
+}
+
+float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle)
+{
+    if (historyValid == 0u || probeRelocationEnabled == 0u)
+    {
+        return DdgiProbePosition(probeIndex);
+    }
+
+    return DdgiProbePosition(probeIndex) + DdgiLoadProbeState(stateHandle, probeIndex).xyz;
 }
 
 uint2 DdgiProbeTileOrigin(uint probeIndex, uint interiorSize)

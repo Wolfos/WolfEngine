@@ -69,6 +69,9 @@ public sealed class DeferredLightingPass
 		var ddgiVisibility = resources.DdgiVisibilityHistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiVisibilityHistoryWrite)
 			: null;
+		var ddgiProbeState = resources.DdgiProbeStateRead.IsValid
+			? context.GetTexture(resources.DdgiProbeStateRead)
+			: null;
 		var ddgiFinalContribution = resources.DdgiFinalContribution.IsValid
 			? context.GetTexture(resources.DdgiFinalContribution)
 			: null;
@@ -94,7 +97,8 @@ public sealed class DeferredLightingPass
 		var ambientOcclusionHandle = _bindlessRegistry.GetTextureHandle(ambientOcclusion);
 		var ddgiEnabled = DdgiUtilities.IsRayTracedDdgiEnabled(resources.Config) &&
 		                  ddgiIrradiance is not null &&
-		                  ddgiVisibility is not null;
+		                  ddgiVisibility is not null &&
+		                  ddgiProbeState is not null;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
 
 		return new DeferredLightingPassConfig
@@ -108,6 +112,7 @@ public sealed class DeferredLightingPass
 			AmbientOcclusion = ambientOcclusionHandle,
 			DdgiIrradiance = _bindlessRegistry.GetTextureHandle(ddgiIrradiance),
 			DdgiVisibility = _bindlessRegistry.GetTextureHandle(ddgiVisibility),
+			DdgiProbeState = _bindlessRegistry.GetTextureHandle(ddgiProbeState),
 			DdgiFinalContribution = ddgiFinalContribution is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiFinalContribution)
 				: DescriptorHandle.Invalid,
@@ -151,6 +156,7 @@ public sealed class DeferredLightingPass
 				DdgiViewBias = Math.Max(resources.Config.DiffuseGlobalIllumination.ViewBias, 0.0f),
 				DdgiHorizontalBlendDistance = Math.Max(resources.Config.DiffuseGlobalIllumination.HorizontalBlendDistance, 0.001f),
 				DdgiVerticalBlendDistance = Math.Max(resources.Config.DiffuseGlobalIllumination.VerticalBlendDistance, 0.001f),
+				DdgiProbeRelocationEnabled = resources.Config.DiffuseGlobalIllumination.ProbeRelocationEnabled,
 				ClusterCountX = gpuDrawResources.ClusteredLightingLayout.Grid.X,
 			ClusterCountY = gpuDrawResources.ClusteredLightingLayout.Grid.Y,
 			ClusterCountZ = gpuDrawResources.ClusteredLightingLayout.Grid.Z,
@@ -180,6 +186,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ambientOcclusionHandle", config.AmbientOcclusion.Value);
 		bindlessWriter.SetUInt("ddgiIrradianceHandle", config.DdgiIrradiance.Value);
 		bindlessWriter.SetUInt("ddgiVisibilityHandle", config.DdgiVisibility.Value);
+		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		bindlessWriter.SetUInt("ddgiFinalContributionHandle", config.DdgiFinalContribution.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
 		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
@@ -272,6 +279,7 @@ public sealed class DeferredLightingPass
 			lightingWriter.SetFloat("ddgiViewBias", config.DdgiViewBias);
 			lightingWriter.SetFloat("ddgiHorizontalBlendDistance", config.DdgiHorizontalBlendDistance);
 			lightingWriter.SetFloat("ddgiVerticalBlendDistance", config.DdgiVerticalBlendDistance);
+			lightingWriter.SetUInt("ddgiProbeRelocationEnabled", config.DdgiProbeRelocationEnabled ? 1u : 0u);
 			lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
 		lightingWriter.SetFloat("nearPlane", config.NearPlane);
 		lightingWriter.SetFloat("farPlane", config.FarPlane);

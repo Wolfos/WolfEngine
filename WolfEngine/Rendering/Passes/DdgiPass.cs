@@ -9,17 +9,22 @@ public sealed class DdgiPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _tracePipeline;
+	private IGfxPipeline? _relocatePipeline;
 	private IGfxPipeline? _integratePipeline;
 	private IGfxPipeline? _borderUpdatePipeline;
 	private ReadOnlyMemory<byte> _traceShader;
+	private ReadOnlyMemory<byte> _relocateShader;
 	private ReadOnlyMemory<byte> _integrateShader;
 	private ReadOnlyMemory<byte> _borderUpdateShader;
 	private ComputeThreadGroupSize? _traceThreadGroupSize;
+	private ComputeThreadGroupSize? _relocateThreadGroupSize;
 	private ComputeThreadGroupSize? _integrateThreadGroupSize;
 	private ComputeThreadGroupSize? _borderUpdateThreadGroupSize;
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _traceBindlessWriter;
 	private ShaderPropertyWriter? _traceSettingsWriter;
+	private ShaderPropertyWriter? _relocateBindlessWriter;
+	private ShaderPropertyWriter? _relocateSettingsWriter;
 	private ShaderPropertyWriter? _integrateBindlessWriter;
 	private ShaderPropertyWriter? _integrateSettingsWriter;
 	private ShaderPropertyWriter? _borderBindlessWriter;
@@ -101,15 +106,20 @@ public sealed class DdgiPass
 		return new DdgiPassConfig
 		{
 			TracePipeline = _tracePipeline!,
+			RelocatePipeline = _relocatePipeline!,
 			IntegratePipeline = _integratePipeline!,
 			BorderUpdatePipeline = _borderUpdatePipeline!,
 			TopLevelAccelerationStructure = rayTracingSceneResources.TopLevelAccelerationStructure,
 			TraceIrradianceHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiTraceIrradiance)),
 			TraceVisibilityHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiTraceVisibility)),
+			TraceIrradianceReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiTraceIrradiance)),
+			TraceVisibilityReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiTraceVisibility)),
 			IrradianceHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceHistoryRead)),
 			VisibilityHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiVisibilityHistoryRead)),
 			IrradianceHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceHistoryWrite)),
 			VisibilityHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiVisibilityHistoryWrite)),
+			ProbeStateReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateRead)),
+			ProbeStateWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateWrite)),
 			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
 				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
@@ -133,6 +143,10 @@ public sealed class DdgiPass
 			NormalBias = Math.Max(config.NormalBias, 0.0f),
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
 			Hysteresis = Math.Clamp(config.Hysteresis, 0.0f, 0.9999f),
+			ProbeRelocationEnabled = config.ProbeRelocationEnabled,
+			ProbeMinFrontfaceDistance = Math.Max(config.ProbeMinFrontfaceDistance, 0.0f),
+			ProbeBackfaceThreshold = Math.Clamp(config.ProbeBackfaceThreshold, 0.0f, 1.0f),
+			ProbeMaxRelocationDistance = Math.Max(config.ProbeSpacing, 0.001f) * Math.Clamp(config.ProbeMaxRelocationDistanceFactor, 0.0f, 0.5f),
 			DirectLightDirection = directLight.Direction,
 			DirectLightColorIntensity = directLight.ColorIntensity,
 			FrameIndex = frameIndex,
@@ -176,6 +190,17 @@ public sealed class DdgiPass
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
+	public void RecordRelocate(RenderGraphContext context, in DdgiPassConfig config)
+	{
+		var commandList = context.CommandList;
+		commandList.BindPipeline(config.RelocatePipeline);
+		WriteBindlessConstants(_relocateBindlessWriter, commandList, config);
+		WriteSettingsConstants(_relocateSettingsWriter, commandList, config);
+		var threadGroupSize = _relocateThreadGroupSize ?? throw new InvalidOperationException("DDGI relocation threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)config.GridShape.AtlasColumns, (uint)config.GridShape.AtlasRows);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
+	}
+
 	public void RecordBorderUpdate(RenderGraphContext context, in DdgiPassConfig config)
 	{
 		var commandList = context.CommandList;
@@ -195,10 +220,14 @@ public sealed class DdgiPass
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("traceIrradianceHandle", config.TraceIrradianceHandle.Value);
 		bindlessWriter.SetUInt("traceVisibilityHandle", config.TraceVisibilityHandle.Value);
+		bindlessWriter.SetUInt("traceIrradianceReadHandle", config.TraceIrradianceReadHandle.Value);
+		bindlessWriter.SetUInt("traceVisibilityReadHandle", config.TraceVisibilityReadHandle.Value);
 		bindlessWriter.SetUInt("irradianceHistoryReadHandle", config.IrradianceHistoryReadHandle.Value);
 		bindlessWriter.SetUInt("visibilityHistoryReadHandle", config.VisibilityHistoryReadHandle.Value);
 		bindlessWriter.SetUInt("irradianceHistoryWriteHandle", config.IrradianceHistoryWriteHandle.Value);
 		bindlessWriter.SetUInt("visibilityHistoryWriteHandle", config.VisibilityHistoryWriteHandle.Value);
+		bindlessWriter.SetUInt("probeStateReadHandle", config.ProbeStateReadHandle.Value);
+		bindlessWriter.SetUInt("probeStateWriteHandle", config.ProbeStateWriteHandle.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.EnvironmentHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
@@ -231,6 +260,10 @@ public sealed class DdgiPass
 		settingsWriter.SetFloat("normalBias", config.NormalBias);
 		settingsWriter.SetFloat("viewBias", config.ViewBias);
 		settingsWriter.SetFloat("hysteresis", config.Hysteresis);
+		settingsWriter.SetUInt("probeRelocationEnabled", config.ProbeRelocationEnabled ? 1u : 0u);
+		settingsWriter.SetFloat("probeMinFrontfaceDistance", config.ProbeMinFrontfaceDistance);
+		settingsWriter.SetFloat("probeBackfaceThreshold", config.ProbeBackfaceThreshold);
+		settingsWriter.SetFloat("probeMaxRelocationDistance", config.ProbeMaxRelocationDistance);
 		settingsWriter.SetVector3("directLightDirection", config.DirectLightDirection);
 		settingsWriter.SetVector3("directLightColorIntensity", config.DirectLightColorIntensity);
 		settingsWriter.SetUInt("frameIndex", config.FrameIndex);
@@ -267,6 +300,7 @@ public sealed class DdgiPass
 	private void EnsurePipelines(IGfxDevice device)
 	{
 		if (_tracePipeline is not null &&
+		    _relocatePipeline is not null &&
 		    _integratePipeline is not null &&
 		    _borderUpdatePipeline is not null)
 		{
@@ -284,21 +318,27 @@ public sealed class DdgiPass
 		}
 
 		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSMain", device.BackendKind);
+		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "CSMain", device.BackendKind);
 		var integrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "CSMain", device.BackendKind);
 		var border = _shaderCompiler.GetComputeShaderWithReflection("ddgi_border_update.compute.slang", "CSMain", device.BackendKind);
 		_traceShader = trace.Bytecode;
+		_relocateShader = relocate.Bytecode;
 		_integrateShader = integrate.Bytecode;
 		_borderUpdateShader = border.Bytecode;
 		_traceThreadGroupSize = trace.ThreadGroupSize;
+		_relocateThreadGroupSize = relocate.ThreadGroupSize;
 		_integrateThreadGroupSize = integrate.ThreadGroupSize;
 		_borderUpdateThreadGroupSize = border.ThreadGroupSize;
 		_traceBindlessWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_traceSettingsWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_relocateBindlessWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_relocateSettingsWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_integrateBindlessWriter = new ShaderPropertyWriter(integrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_integrateSettingsWriter = new ShaderPropertyWriter(integrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_borderBindlessWriter = new ShaderPropertyWriter(border.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_borderSettingsWriter = new ShaderPropertyWriter(border.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_tracePipeline = CreatePipeline(device, "ddgi_trace.compute.slang", _traceShader, _traceThreadGroupSize);
+		_relocatePipeline = CreatePipeline(device, "ddgi_relocate.compute.slang", _relocateShader, _relocateThreadGroupSize);
 		_integratePipeline = CreatePipeline(device, "ddgi_integrate.compute.slang", _integrateShader, _integrateThreadGroupSize);
 		_borderUpdatePipeline = CreatePipeline(device, "ddgi_border_update.compute.slang", _borderUpdateShader, _borderUpdateThreadGroupSize);
 		_compiledBackendKind = device.BackendKind;

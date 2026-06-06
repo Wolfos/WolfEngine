@@ -25,6 +25,8 @@ struct DdgiTraceResult
 {
     float3 radiance;
     float hitDistance;
+    bool hitGeometry;
+    bool backfaceHit;
 };
 
 struct DdgiHitSurface
@@ -32,6 +34,7 @@ struct DdgiHitSurface
     bool valid;
     float3 worldPosition;
     float3 worldNormal;
+    float3 worldGeometricNormal;
     float3 albedo;
     float3 emissive;
 };
@@ -103,8 +106,14 @@ bool DdgiTryResolveHitSurface(
                 v1.position.xyz * b1 +
                 v2.position.xyz * b2;
             float3 localNormal = normalize(v0.normal * b0 + v1.normal * b1 + v2.normal * b2);
+            float3 worldPosition0 = mul(v0.position, instanceData.world).xyz;
+            float3 worldPosition1 = mul(v1.position, instanceData.world).xyz;
+            float3 worldPosition2 = mul(v2.position, instanceData.world).xyz;
             surface.worldPosition = mul(float4(localPosition, 1.0f), instanceData.world).xyz;
             surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+            surface.worldGeometricNormal = normalize(cross(
+                worldPosition1 - worldPosition0,
+                worldPosition2 - worldPosition0));
         }
     }
 
@@ -112,6 +121,10 @@ bool DdgiTryResolveHitSurface(
     {
         surface.worldPosition = rayOrigin + rayDirection * fallbackRayT;
         surface.worldNormal = -rayDirection;
+    }
+    if (length(surface.worldGeometricNormal) <= 1e-4f)
+    {
+        surface.worldGeometricNormal = surface.worldNormal;
     }
 
     uint materialHandle = instanceData.materialHandle;
@@ -168,9 +181,16 @@ float3 DdgiShadeHitSurface(DdgiHitSurface surface)
     return surface.albedo * (directRadiance + ambientRadiance) + surface.emissive;
 }
 
-DdgiTraceResult DdgiTraceRay(float3 originPosition, float3 direction, uint2 pixel, uint probeIndex)
+DdgiTraceResult DdgiTraceRay(
+    float3 originPosition,
+    float3 direction,
+    uint2 pixel,
+    uint probeIndex,
+    bool jitterDirection)
 {
-    float3 rayDirection = DdgiJitterDirection(direction, pixel, probeIndex);
+    float3 rayDirection = jitterDirection
+        ? DdgiJitterDirection(direction, pixel, probeIndex)
+        : direction;
     RayDesc ray;
     ray.Origin = originPosition + rayDirection * normalBias;
     ray.Direction = rayDirection;
@@ -182,8 +202,11 @@ DdgiTraceResult DdgiTraceRay(float3 originPosition, float3 direction, uint2 pixe
     query.Proceed();
 
     DdgiTraceResult result;
+    result.hitGeometry = false;
+    result.backfaceHit = false;
     if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
+        result.hitGeometry = true;
         result.hitDistance = query.CommittedRayT();
         DdgiHitSurface surface;
         if (DdgiTryResolveHitSurface(
@@ -195,6 +218,7 @@ DdgiTraceResult DdgiTraceRay(float3 originPosition, float3 direction, uint2 pixe
             rayDirection,
             surface))
         {
+            result.backfaceHit = dot(surface.worldGeometricNormal, rayDirection) > 0.0f;
             result.radiance = DdgiShadeHitSurface(surface);
         }
         else
@@ -235,7 +259,12 @@ void TraceIrradianceSample(uint2 pixel)
     }
 
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-    DdgiTraceResult result = DdgiTraceRay(DdgiProbePosition(info.probeIndex), direction, pixel, info.probeIndex);
+    DdgiTraceResult result = DdgiTraceRay(
+        DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
+        direction,
+        pixel,
+        info.probeIndex,
+        true);
     target[pixel] = float4(result.radiance, 1.0f);
 }
 
@@ -263,9 +292,18 @@ void TraceVisibilitySample(uint2 pixel)
     }
 
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-    DdgiTraceResult result = DdgiTraceRay(DdgiProbePosition(info.probeIndex), direction, pixel, info.probeIndex);
+    DdgiTraceResult result = DdgiTraceRay(
+        DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
+        direction,
+        pixel,
+        info.probeIndex,
+        false);
     float normalizedDistance = saturate(result.hitDistance / max(maxRayDistance, 0.001f));
-    target[pixel] = float4(normalizedDistance, normalizedDistance * normalizedDistance, 0.0f, 1.0f);
+    target[pixel] = float4(
+        normalizedDistance,
+        normalizedDistance * normalizedDistance,
+        result.hitGeometry ? 1.0f : 0.0f,
+        result.backfaceHit ? 1.0f : 0.0f);
 }
 
 [numthreads(8, 8, 1)]

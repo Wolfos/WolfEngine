@@ -43,8 +43,9 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		         {
-			         "ddgi_trace.compute.slang",
-			         "ddgi_integrate.compute.slang",
+				         "ddgi_trace.compute.slang",
+				         "ddgi_relocate.compute.slang",
+				         "ddgi_integrate.compute.slang",
 			         "ddgi_border_update.compute.slang"
 		         })
 		{
@@ -98,6 +99,10 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.95f));
+		Assert.That(ddgi.ProbeRelocationEnabled, Is.True);
+		Assert.That(ddgi.ProbeMinFrontfaceDistance, Is.EqualTo(0.2f));
+		Assert.That(ddgi.ProbeBackfaceThreshold, Is.EqualTo(0.25f));
+		Assert.That(ddgi.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.45f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.False);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.15f));
 
@@ -127,6 +132,10 @@ public sealed class RayTracingSceneResourcesTests
 					HorizontalBlendDistance = 8.0f,
 					VerticalBlendDistance = 4.0f,
 					Hysteresis = 0.8f,
+					ProbeRelocationEnabled = false,
+					ProbeMinFrontfaceDistance = 0.3f,
+					ProbeBackfaceThreshold = 0.4f,
+					ProbeMaxRelocationDistanceFactor = 0.35f,
 				DebugProbeSpheres = true,
 				DebugProbeSphereRadius = 0.3f
 			}
@@ -151,6 +160,10 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(8.0f));
 		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(4.0f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
+		Assert.That(ddgi.ProbeRelocationEnabled, Is.False);
+		Assert.That(ddgi.ProbeMinFrontfaceDistance, Is.EqualTo(0.3f));
+		Assert.That(ddgi.ProbeBackfaceThreshold, Is.EqualTo(0.4f));
+		Assert.That(ddgi.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.35f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.True);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.3f));
 	}

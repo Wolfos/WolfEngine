@@ -34,6 +34,10 @@ public sealed class FrameSnapshotGpuDrawTests
 					HorizontalBlendDistance = 7.0f,
 					VerticalBlendDistance = 3.0f,
 					Hysteresis = 0.8f,
+					ProbeRelocationEnabled = false,
+					ProbeMinFrontfaceDistance = 0.3f,
+					ProbeBackfaceThreshold = 0.4f,
+					ProbeMaxRelocationDistanceFactor = 0.35f,
 				DebugIrradianceAtlas = true,
 				DebugVisibilityAtlas = true,
 				DebugFinalContribution = true
@@ -58,6 +62,10 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(copied.HorizontalBlendDistance, Is.EqualTo(7.0f));
 		Assert.That(copied.VerticalBlendDistance, Is.EqualTo(3.0f));
 		Assert.That(copied.Hysteresis, Is.EqualTo(0.8f));
+		Assert.That(copied.ProbeRelocationEnabled, Is.False);
+		Assert.That(copied.ProbeMinFrontfaceDistance, Is.EqualTo(0.3f));
+		Assert.That(copied.ProbeBackfaceThreshold, Is.EqualTo(0.4f));
+		Assert.That(copied.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.35f));
 		Assert.That(copied.DebugIrradianceAtlas, Is.True);
 		Assert.That(copied.DebugVisibilityAtlas, Is.True);
 		Assert.That(copied.DebugFinalContribution, Is.True);

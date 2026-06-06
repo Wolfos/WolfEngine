@@ -40,6 +40,8 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle DdgiIrradianceHistoryWrite { get; init; }
 	public RenderGraphResourceHandle DdgiVisibilityHistoryRead { get; init; }
 	public RenderGraphResourceHandle DdgiVisibilityHistoryWrite { get; init; }
+	public RenderGraphResourceHandle DdgiProbeStateRead { get; init; }
+	public RenderGraphResourceHandle DdgiProbeStateWrite { get; init; }
 	public RenderGraphResourceHandle DdgiFinalContribution { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth0 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
@@ -137,8 +139,10 @@ internal sealed class RenderGraphFrameBuilder
 	private int _ddgiHistoryReadIndex;
 	private readonly IGfxTexture?[] _ddgiIrradianceTextures = new IGfxTexture?[2];
 	private readonly IGfxTexture?[] _ddgiVisibilityTextures = new IGfxTexture?[2];
+	private readonly IGfxTexture?[] _ddgiProbeStateTextures = new IGfxTexture?[2];
 	private readonly ResourceState[] _ddgiIrradianceStates = new ResourceState[2];
 	private readonly ResourceState[] _ddgiVisibilityStates = new ResourceState[2];
+	private readonly ResourceState[] _ddgiProbeStateStates = new ResourceState[2];
 	private DdgiPassConfig _currentDdgiConfig;
 	private bool _currentDdgiConfigValid;
 	
@@ -148,6 +152,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ambientOcclusionBlurVerticalExecute;
 	private readonly Action<RenderGraphContext> _ambientOcclusionUpsampleExecute;
 	private readonly Action<RenderGraphContext> _ddgiTraceExecute;
+	private readonly Action<RenderGraphContext> _ddgiRelocateExecute;
 	private readonly Action<RenderGraphContext> _ddgiIntegrateExecute;
 	private readonly Action<RenderGraphContext> _ddgiBorderUpdateExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
@@ -211,6 +216,7 @@ internal sealed class RenderGraphFrameBuilder
 		_ambientOcclusionBlurVerticalExecute = ExecuteAmbientOcclusionBlurVertical;
 		_ambientOcclusionUpsampleExecute = ExecuteAmbientOcclusionUpsample;
 		_ddgiTraceExecute = ExecuteDdgiTrace;
+		_ddgiRelocateExecute = ExecuteDdgiRelocate;
 		_ddgiIntegrateExecute = ExecuteDdgiIntegrate;
 		_ddgiBorderUpdateExecute = ExecuteDdgiBorderUpdate;
 		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
@@ -322,6 +328,8 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiIrradianceWriteHandle = default(RenderGraphResourceHandle);
 		var ddgiVisibilityReadHandle = default(RenderGraphResourceHandle);
 		var ddgiVisibilityWriteHandle = default(RenderGraphResourceHandle);
+		var ddgiProbeStateReadHandle = default(RenderGraphResourceHandle);
+		var ddgiProbeStateWriteHandle = default(RenderGraphResourceHandle);
 		var ddgiFinalContributionHandle = default(RenderGraphResourceHandle);
 		var resolvedSceneColorHandle = default(RenderGraphResourceHandle);
 		var historyColorReadHandle = default(RenderGraphResourceHandle);
@@ -515,7 +523,9 @@ internal sealed class RenderGraphFrameBuilder
 				if (_ddgiIrradianceTextures[_ddgiHistoryReadIndex] is IGfxTexture ddgiIrradianceRead &&
 				    _ddgiIrradianceTextures[ddgiWriteIndex] is IGfxTexture ddgiIrradianceWrite &&
 				    _ddgiVisibilityTextures[_ddgiHistoryReadIndex] is IGfxTexture ddgiVisibilityRead &&
-				    _ddgiVisibilityTextures[ddgiWriteIndex] is IGfxTexture ddgiVisibilityWrite)
+				    _ddgiVisibilityTextures[ddgiWriteIndex] is IGfxTexture ddgiVisibilityWrite &&
+				    _ddgiProbeStateTextures[_ddgiHistoryReadIndex] is IGfxTexture ddgiProbeStateRead &&
+				    _ddgiProbeStateTextures[ddgiWriteIndex] is IGfxTexture ddgiProbeStateWrite)
 				{
 					ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 						irradianceAtlasSize.X,
@@ -545,6 +555,14 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiVisibilityWrite,
 						takeOwnership: false,
 						initialState: _ddgiVisibilityStates[ddgiWriteIndex]);
+					ddgiProbeStateReadHandle = _resources.ImportTexture(
+						ddgiProbeStateRead,
+						takeOwnership: false,
+						initialState: _ddgiProbeStateStates[_ddgiHistoryReadIndex]);
+					ddgiProbeStateWriteHandle = _resources.ImportTexture(
+						ddgiProbeStateWrite,
+						takeOwnership: false,
+						initialState: _ddgiProbeStateStates[ddgiWriteIndex]);
 					ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 						sceneFramebufferSize.X,
 						sceneFramebufferSize.Y,
@@ -611,6 +629,8 @@ internal sealed class RenderGraphFrameBuilder
 			DdgiIrradianceHistoryWrite = ddgiIrradianceWriteHandle,
 			DdgiVisibilityHistoryRead = ddgiVisibilityReadHandle,
 			DdgiVisibilityHistoryWrite = ddgiVisibilityWriteHandle,
+			DdgiProbeStateRead = ddgiProbeStateReadHandle,
+			DdgiProbeStateWrite = ddgiProbeStateWriteHandle,
 			DdgiFinalContribution = ddgiFinalContributionHandle,
 			ShadowMapDepth0 = shadowMapHandle0,
 			ShadowMapDepth1 = shadowMapHandle1,
@@ -798,11 +818,14 @@ internal sealed class RenderGraphFrameBuilder
 			if (_frameResources.DdgiTraceIrradiance.IsValid &&
 			    _frameResources.DdgiTraceVisibility.IsValid &&
 			    _frameResources.DdgiIrradianceHistoryRead.IsValid &&
-			    _frameResources.DdgiIrradianceHistoryWrite.IsValid &&
-			    _frameResources.DdgiVisibilityHistoryRead.IsValid &&
-			    _frameResources.DdgiVisibilityHistoryWrite.IsValid)
+				    _frameResources.DdgiIrradianceHistoryWrite.IsValid &&
+				    _frameResources.DdgiVisibilityHistoryRead.IsValid &&
+				    _frameResources.DdgiVisibilityHistoryWrite.IsValid &&
+				    _frameResources.DdgiProbeStateRead.IsValid &&
+				    _frameResources.DdgiProbeStateWrite.IsValid)
 			{
 				var ddgiTraceBuilder = graph.AddPass("DDGI Probe Trace", PassKind.Compute)
+					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
 					.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
 				if (_frameResources.SkyboxEnvironment.IsValid)
@@ -810,6 +833,12 @@ internal sealed class RenderGraphFrameBuilder
 					ddgiTraceBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
 				}
 				ddgiTraceBuilder.SetExecute(_ddgiTraceExecute);
+
+				graph.AddPass("DDGI Probe Relocate", PassKind.Compute)
+					.ReadTexture(_frameResources.DdgiTraceVisibility, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.DdgiProbeStateWrite, ResourceState.UnorderedAccess)
+					.SetExecute(_ddgiRelocateExecute);
 
 				graph.AddPass("DDGI Probe Integrate", PassKind.Compute)
 					.ReadTexture(_frameResources.DdgiTraceIrradiance, ResourceState.ShaderResource)
@@ -853,11 +882,13 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			if (_frameResources.DdgiIrradianceHistoryWrite.IsValid &&
 			    _frameResources.DdgiVisibilityHistoryWrite.IsValid &&
+			    _frameResources.DdgiProbeStateRead.IsValid &&
 			    _frameResources.DdgiFinalContribution.IsValid)
 			{
 				deferredLightingBuilder
 					.ReadTexture(_frameResources.DdgiIrradianceHistoryWrite, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.DdgiVisibilityHistoryWrite, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiFinalContribution, ResourceState.UnorderedAccess);
 			}
 			
@@ -898,7 +929,6 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.ResolvedSceneColor, ResourceState.RenderTarget);
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
-			
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
 			graph.AddPass("Tonemapping", PassKind.Compute)
@@ -1391,6 +1421,16 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiPass.RecordIntegrate(context, in _currentDdgiConfig);
 	}
 
+	private void ExecuteDdgiRelocate(RenderGraphContext context)
+	{
+		if (_currentDdgiConfigValid == false)
+		{
+			throw new InvalidOperationException("DDGI relocation executed before DDGI trace config was built.");
+		}
+
+		_ddgiPass.RecordRelocate(context, in _currentDdgiConfig);
+	}
+
 	private void ExecuteDdgiBorderUpdate(RenderGraphContext context)
 	{
 		if (_currentDdgiConfigValid == false)
@@ -1524,7 +1564,8 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		if (_frameResources.DdgiIrradianceHistoryWrite.IsValid == false ||
-		    _frameResources.DdgiVisibilityHistoryWrite.IsValid == false)
+		    _frameResources.DdgiVisibilityHistoryWrite.IsValid == false ||
+		    _frameResources.DdgiProbeStateWrite.IsValid == false)
 		{
 			_ddgiHistoryValid = false;
 			return;
@@ -1540,9 +1581,15 @@ internal sealed class RenderGraphFrameBuilder
 			_ddgiVisibilityStates[_ddgiHistoryReadIndex] = _resources.GetResourceState(_frameResources.DdgiVisibilityHistoryRead);
 		}
 
+		if (_frameResources.DdgiProbeStateRead.IsValid)
+		{
+			_ddgiProbeStateStates[_ddgiHistoryReadIndex] = _resources.GetResourceState(_frameResources.DdgiProbeStateRead);
+		}
+
 		var ddgiWriteIndex = 1 - _ddgiHistoryReadIndex;
 		_ddgiIrradianceStates[ddgiWriteIndex] = _resources.GetResourceState(_frameResources.DdgiIrradianceHistoryWrite);
 		_ddgiVisibilityStates[ddgiWriteIndex] = _resources.GetResourceState(_frameResources.DdgiVisibilityHistoryWrite);
+		_ddgiProbeStateStates[ddgiWriteIndex] = _resources.GetResourceState(_frameResources.DdgiProbeStateWrite);
 		_ddgiHistoryReadIndex = ddgiWriteIndex;
 		_ddgiHistoryValid = true;
 	}
@@ -1631,7 +1678,9 @@ internal sealed class RenderGraphFrameBuilder
 		if (_ddgiIrradianceTextures[0] is not null &&
 		    _ddgiIrradianceTextures[1] is not null &&
 		    _ddgiVisibilityTextures[0] is not null &&
-		    _ddgiVisibilityTextures[1] is not null)
+		    _ddgiVisibilityTextures[1] is not null &&
+		    _ddgiProbeStateTextures[0] is not null &&
+		    _ddgiProbeStateTextures[1] is not null)
 		{
 			return;
 		}
@@ -1652,8 +1701,15 @@ internal sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f)));
+			_ddgiProbeStateTextures[i] = device.CreateTexture(new TextureDescriptor(
+				gridShape.AtlasColumns,
+				gridShape.AtlasRows,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 			_ddgiIrradianceStates[i] = ResourceState.UnorderedAccess;
 			_ddgiVisibilityStates[i] = ResourceState.UnorderedAccess;
+			_ddgiProbeStateStates[i] = ResourceState.UnorderedAccess;
 		}
 
 		_ddgiHistoryDevice = device;
@@ -1677,10 +1733,17 @@ internal sealed class RenderGraphFrameBuilder
 				EnqueueTemporalRelease(_ddgiHistoryDevice, visibilityTexture, _ddgiVisibilityStates[i]);
 			}
 
+			if (_ddgiProbeStateTextures[i] is IGfxTexture probeStateTexture)
+			{
+				EnqueueTemporalRelease(_ddgiHistoryDevice, probeStateTexture, _ddgiProbeStateStates[i]);
+			}
+
 			_ddgiIrradianceTextures[i] = null;
 			_ddgiVisibilityTextures[i] = null;
+			_ddgiProbeStateTextures[i] = null;
 			_ddgiIrradianceStates[i] = ResourceState.Common;
 			_ddgiVisibilityStates[i] = ResourceState.Common;
+			_ddgiProbeStateStates[i] = ResourceState.Common;
 		}
 
 		_ddgiHistoryBackendKind = null;

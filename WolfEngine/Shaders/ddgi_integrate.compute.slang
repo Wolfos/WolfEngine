@@ -16,7 +16,7 @@ float4 IntegrateIrradianceTexel(uint2 pixel)
 
     float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, irradianceTileInteriorSize));
     uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
-    RWTexture2D<float4> traceTex = GetRWTexture(traceIrradianceHandle);
+    Texture2D<float4> traceTex = GetTexture(traceIrradianceReadHandle);
 
     float3 irradiance = 0.0f.xxx;
     float weightSum = 0.0f;
@@ -30,7 +30,7 @@ float4 IntegrateIrradianceTexel(uint2 pixel)
         }
 
         uint2 samplePixel = DdgiRaySamplePixel(info.probeIndex, rayIndex, irradianceTileInteriorSize);
-        float3 radiance = traceTex.Load(int2(samplePixel)).rgb;
+        float3 radiance = traceTex.Load(int3(samplePixel, 0)).rgb;
         irradiance += radiance * weight;
         weightSum += weight;
     }
@@ -58,7 +58,7 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
 
     float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, visibilityTileInteriorSize));
     uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
-    RWTexture2D<float4> traceTex = GetRWTexture(traceVisibilityHandle);
+    Texture2D<float4> traceTex = GetTexture(traceVisibilityReadHandle);
 
     float2 moments = 0.0f.xx;
     float weightSum = 0.0f;
@@ -72,7 +72,7 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
         }
 
         uint2 samplePixel = DdgiRaySamplePixel(info.probeIndex, rayIndex, visibilityTileInteriorSize);
-        moments += traceTex.Load(int2(samplePixel)).rg * weight;
+        moments += traceTex.Load(int3(samplePixel, 0)).rg * weight;
         weightSum += weight;
     }
 

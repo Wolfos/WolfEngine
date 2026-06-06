@@ -13,6 +13,7 @@ cbuffer BindlessHandles : register(b0)
     uint ambientOcclusionHandle;
     uint ddgiIrradianceHandle;
     uint ddgiVisibilityHandle;
+    uint ddgiProbeStateHandle;
     uint ddgiFinalContributionHandle;
     uint environmentHandle;
     uint irradianceHandle;
@@ -57,6 +58,7 @@ cbuffer LightingParams : register(b2)
     float ddgiViewBias;
     float ddgiHorizontalBlendDistance;
     float ddgiVerticalBlendDistance;
+    uint ddgiProbeRelocationEnabled;
     float shadowMaxDistance;
     float nearPlane;
     float farPlane;
@@ -108,20 +110,29 @@ float DdgiGridInfluence(float3 worldPos)
     }
 
     float spacing = max(ddgiProbeSpacing, 0.001f);
-    float3 gridMax = ddgiOrigin + float3(
+    float3 probeMin = ddgiOrigin;
+    float3 probeMax = ddgiOrigin + float3(
         max(ddgiProbeCountX, 1u) - 1u,
         max(ddgiProbeCountY, 1u) - 1u,
         max(ddgiProbeCountZ, 1u) - 1u) * spacing;
-    float3 distanceInsideGrid = min(worldPos - ddgiOrigin, gridMax - worldPos);
+    float3 volumeMin = probeMin - 0.5f.xxx * spacing;
+    float3 volumeMax = probeMax + 0.5f.xxx * spacing;
+    float3 distanceInsideGrid = min(worldPos - volumeMin, volumeMax - worldPos);
+    if (any(distanceInsideGrid < 0.0f.xxx))
+    {
+        return 0.0f;
+    }
+
     float horizontalDistanceToBoundary = min(distanceInsideGrid.x, distanceInsideGrid.z);
     float horizontalInfluence = smoothstep(
         0.0f,
         max(ddgiHorizontalBlendDistance, 0.001f),
         horizontalDistanceToBoundary);
+    float verticalDistanceToTopBoundary = volumeMax.y - worldPos.y;
     float verticalInfluence = smoothstep(
         0.0f,
         max(ddgiVerticalBlendDistance, 0.001f),
-        distanceInsideGrid.y);
+        verticalDistanceToTopBoundary);
     return min(horizontalInfluence, verticalInfluence);
 }
 
@@ -144,6 +155,7 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
     int3 baseCoord = int3(baseFloat);
     Texture2D<float4> irradianceTex = GetTexture(ddgiIrradianceHandle);
     Texture2D<float4> visibilityTex = GetTexture(ddgiVisibilityHandle);
+    Texture2D<float4> probeStateTex = GetTexture(ddgiProbeStateHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
     float3 result = 0.0f.xxx;
@@ -162,13 +174,16 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
                 }
 
                 uint probeIndex = uint(coord.x) + uint(coord.y) * ddgiProbeCountX + uint(coord.z) * ddgiProbeCountX * ddgiProbeCountY;
-                float3 probePosition = DdgiProbePosition(uint3(coord));
+                float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
+                float trilinearWeight = tri.x * tri.y * tri.z;
+                float4 probeState = probeStateTex.Load(int3(uint2(probeIndex % ddgiAtlasColumns, probeIndex / ddgiAtlasColumns), 0));
+                float3 relocationOffset = ddgiProbeRelocationEnabled != 0u ? probeState.xyz : 0.0f.xxx;
+                float3 probePosition = DdgiProbePosition(uint3(coord)) + relocationOffset;
                 float3 toSurface = biasedPos - probePosition;
                 float distanceToProbe = length(toSurface);
                 float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
                 float nWeight = saturate(dot(normal, -direction)) * 0.9f + 0.1f;
-                float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
-                float weight = tri.x * tri.y * tri.z * nWeight;
+                float weight = trilinearWeight * nWeight;
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, DDGI_VISIBILITY_TILE_INTERIOR_SIZE);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
                 float normalizedDistance = saturate(distanceToProbe / max(ddgiMaxRayDistance, 0.001f));

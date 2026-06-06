@@ -7,15 +7,20 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct DdgiPassConfig
 {
 	public required IGfxPipeline TracePipeline { get; init; }
+	public required IGfxPipeline RelocatePipeline { get; init; }
 	public required IGfxPipeline IntegratePipeline { get; init; }
 	public required IGfxPipeline BorderUpdatePipeline { get; init; }
 	public required IGfxTopLevelAccelerationStructure TopLevelAccelerationStructure { get; init; }
 	public required DescriptorHandle TraceIrradianceHandle { get; init; }
 	public required DescriptorHandle TraceVisibilityHandle { get; init; }
+	public required DescriptorHandle TraceIrradianceReadHandle { get; init; }
+	public required DescriptorHandle TraceVisibilityReadHandle { get; init; }
 	public required DescriptorHandle IrradianceHistoryReadHandle { get; init; }
 	public required DescriptorHandle VisibilityHistoryReadHandle { get; init; }
 	public required DescriptorHandle IrradianceHistoryWriteHandle { get; init; }
 	public required DescriptorHandle VisibilityHistoryWriteHandle { get; init; }
+	public required DescriptorHandle ProbeStateReadHandle { get; init; }
+	public required DescriptorHandle ProbeStateWriteHandle { get; init; }
 	public required DescriptorHandle EnvironmentHandle { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }
@@ -37,6 +42,10 @@ public readonly struct DdgiPassConfig
 	public required float NormalBias { get; init; }
 	public required float ViewBias { get; init; }
 	public required float Hysteresis { get; init; }
+	public required bool ProbeRelocationEnabled { get; init; }
+	public required float ProbeMinFrontfaceDistance { get; init; }
+	public required float ProbeBackfaceThreshold { get; init; }
+	public required float ProbeMaxRelocationDistance { get; init; }
 	public required Vector3 DirectLightDirection { get; init; }
 	public required Vector3 DirectLightColorIntensity { get; init; }
 	public required uint FrameIndex { get; init; }
