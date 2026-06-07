@@ -15,9 +15,15 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle TraceVisibilityHandle { get; init; }
 	public required DescriptorHandle TraceIrradianceReadHandle { get; init; }
 	public required DescriptorHandle TraceVisibilityReadHandle { get; init; }
-	public required DescriptorHandle IrradianceHistoryReadHandle { get; init; }
+	public required DescriptorHandle IrradianceL0HistoryReadHandle { get; init; }
+	public required DescriptorHandle IrradianceLyHistoryReadHandle { get; init; }
+	public required DescriptorHandle IrradianceLzHistoryReadHandle { get; init; }
+	public required DescriptorHandle IrradianceLxHistoryReadHandle { get; init; }
 	public required DescriptorHandle VisibilityHistoryReadHandle { get; init; }
-	public required DescriptorHandle IrradianceHistoryWriteHandle { get; init; }
+	public required DescriptorHandle IrradianceL0HistoryWriteHandle { get; init; }
+	public required DescriptorHandle IrradianceLyHistoryWriteHandle { get; init; }
+	public required DescriptorHandle IrradianceLzHistoryWriteHandle { get; init; }
+	public required DescriptorHandle IrradianceLxHistoryWriteHandle { get; init; }
 	public required DescriptorHandle VisibilityHistoryWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateReadHandle { get; init; }
 	public required DescriptorHandle ProbeStateWriteHandle { get; init; }

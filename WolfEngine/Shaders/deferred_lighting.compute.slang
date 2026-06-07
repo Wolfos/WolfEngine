@@ -11,7 +11,10 @@ cbuffer BindlessHandles : register(b0)
     uint gbufferEmissiveHandle;
     uint gbufferDepthHandle;
     uint ambientOcclusionHandle;
-    uint ddgiIrradianceHandle;
+    uint ddgiIrradianceL0Handle;
+    uint ddgiIrradianceLyHandle;
+    uint ddgiIrradianceLzHandle;
+    uint ddgiIrradianceLxHandle;
     uint ddgiVisibilityHandle;
     uint ddgiProbeStateHandle;
     uint ddgiFinalContributionHandle;
@@ -70,9 +73,10 @@ RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
 RWStructuredBuffer<ClusterHeader> g_ClusterHeaders : register(u4);
 RWStructuredBuffer<uint> g_ClusterLightIndices : register(u5);
 
-static const uint DDGI_IRRADIANCE_TILE_INTERIOR_SIZE = 8u;
 static const uint DDGI_VISIBILITY_TILE_INTERIOR_SIZE = 16u;
 static const uint DDGI_TILE_BORDER_SIZE = 1u;
+static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
+static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
 
 float2 DdgiOctEncode(float3 n)
 {
@@ -153,12 +157,18 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
     float3 baseFloat = floor(sampleGrid);
     float3 fracPart = saturate(sampleGrid - baseFloat);
     int3 baseCoord = int3(baseFloat);
-    Texture2D<float4> irradianceTex = GetTexture(ddgiIrradianceHandle);
+    Texture2D<float4> irradianceL0Tex = GetTexture(ddgiIrradianceL0Handle);
+    Texture2D<float4> irradianceLyTex = GetTexture(ddgiIrradianceLyHandle);
+    Texture2D<float4> irradianceLzTex = GetTexture(ddgiIrradianceLzHandle);
+    Texture2D<float4> irradianceLxTex = GetTexture(ddgiIrradianceLxHandle);
     Texture2D<float4> visibilityTex = GetTexture(ddgiVisibilityHandle);
     Texture2D<float4> probeStateTex = GetTexture(ddgiProbeStateHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
-    float3 result = 0.0f.xxx;
+    float3 coefficientL0 = 0.0f.xxx;
+    float3 coefficientLy = 0.0f.xxx;
+    float3 coefficientLz = 0.0f.xxx;
+    float3 coefficientLx = 0.0f.xxx;
     float weightSum = 0.0f;
     for (uint z = 0u; z <= 1u; z++)
     {
@@ -193,10 +203,13 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
                 float distanceDelta = max(normalizedDistance - meanDistance, 0.0f);
                 float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
                 float visibility = normalizedDistance <= meanDistance ? 1.0f : saturate(chebyshevVisibility);
-                float2 irradianceUv = DdgiProbeAtlasUv(probeIndex, normal, DDGI_IRRADIANCE_TILE_INTERIOR_SIZE);
-                float3 irradiance = irradianceTex.SampleLevel(linearSampler, irradianceUv, 0.0f).rgb;
-                result += irradiance * weight * visibility;
-                weightSum += weight * visibility;
+                float probeWeight = weight * visibility;
+                uint2 coefficientPixel = uint2(probeIndex % ddgiAtlasColumns, probeIndex / ddgiAtlasColumns);
+                coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLy += irradianceLyTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLz += irradianceLzTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLx += irradianceLxTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                weightSum += probeWeight;
             }
         }
     }
@@ -206,7 +219,19 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
         return 0.0f.xxx;
     }
 
-    return result / weightSum;
+    float inverseWeight = rcp(weightSum);
+    coefficientL0 *= inverseWeight;
+    coefficientLy *= inverseWeight;
+    coefficientLz *= inverseWeight;
+    coefficientLx *= inverseWeight;
+
+    // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
+    float3 irradiance = coefficientL0 * DDGI_SH_BASIS_L0;
+    irradiance += (2.0f / 3.0f) * DDGI_SH_BASIS_L1 * (
+        coefficientLy * normal.y +
+        coefficientLz * normal.z +
+        coefficientLx * normal.x);
+    return max(irradiance, 0.0f.xxx);
 }
 
 float3 ReconstructCameraRelativeWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)

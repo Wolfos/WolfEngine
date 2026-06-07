@@ -42,11 +42,6 @@ void UpdateBorder(uint2 pixel, uint width, uint height, uint interiorSize, uint 
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
-    if (pixel.x < irradianceAtlasWidth && pixel.y < irradianceAtlasHeight)
-    {
-        UpdateBorder(pixel, irradianceAtlasWidth, irradianceAtlasHeight, irradianceTileInteriorSize, irradianceHistoryWriteHandle);
-    }
-
     if (pixel.x < visibilityAtlasWidth && pixel.y < visibilityAtlasHeight)
     {
         UpdateBorder(pixel, visibilityAtlasWidth, visibilityAtlasHeight, visibilityTileInteriorSize, visibilityHistoryWriteHandle);

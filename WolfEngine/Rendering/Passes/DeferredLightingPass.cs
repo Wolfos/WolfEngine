@@ -63,8 +63,17 @@ public sealed class DeferredLightingPass
 		var ambientOcclusion = resources.AmbientOcclusionFinal.IsValid
 			? context.GetTexture(resources.AmbientOcclusionFinal)
 			: null;
-		var ddgiIrradiance = resources.DdgiIrradianceHistoryWrite.IsValid
-			? context.GetTexture(resources.DdgiIrradianceHistoryWrite)
+		var ddgiIrradianceL0 = resources.DdgiIrradianceL0HistoryWrite.IsValid
+			? context.GetTexture(resources.DdgiIrradianceL0HistoryWrite)
+			: null;
+		var ddgiIrradianceLy = resources.DdgiIrradianceLyHistoryWrite.IsValid
+			? context.GetTexture(resources.DdgiIrradianceLyHistoryWrite)
+			: null;
+		var ddgiIrradianceLz = resources.DdgiIrradianceLzHistoryWrite.IsValid
+			? context.GetTexture(resources.DdgiIrradianceLzHistoryWrite)
+			: null;
+		var ddgiIrradianceLx = resources.DdgiIrradianceLxHistoryWrite.IsValid
+			? context.GetTexture(resources.DdgiIrradianceLxHistoryWrite)
 			: null;
 		var ddgiVisibility = resources.DdgiVisibilityHistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiVisibilityHistoryWrite)
@@ -96,7 +105,10 @@ public sealed class DeferredLightingPass
 		var shadowResolution = Math.Max(1, shadowData.MapResolution);
 		var ambientOcclusionHandle = _bindlessRegistry.GetTextureHandle(ambientOcclusion);
 		var ddgiEnabled = DdgiUtilities.IsRayTracedDdgiEnabled(resources.Config) &&
-		                  ddgiIrradiance is not null &&
+		                  ddgiIrradianceL0 is not null &&
+		                  ddgiIrradianceLy is not null &&
+		                  ddgiIrradianceLz is not null &&
+		                  ddgiIrradianceLx is not null &&
 		                  ddgiVisibility is not null &&
 		                  ddgiProbeState is not null;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
@@ -110,7 +122,10 @@ public sealed class DeferredLightingPass
 			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
 			AmbientOcclusion = ambientOcclusionHandle,
-			DdgiIrradiance = _bindlessRegistry.GetTextureHandle(ddgiIrradiance),
+			DdgiIrradianceL0 = _bindlessRegistry.GetTextureHandle(ddgiIrradianceL0),
+			DdgiIrradianceLy = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLy),
+			DdgiIrradianceLz = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLz),
+			DdgiIrradianceLx = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLx),
 			DdgiVisibility = _bindlessRegistry.GetTextureHandle(ddgiVisibility),
 			DdgiProbeState = _bindlessRegistry.GetTextureHandle(ddgiProbeState),
 			DdgiFinalContribution = ddgiFinalContribution is not null
@@ -184,7 +199,10 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("gbufferEmissiveHandle", config.GBufferEmissive.Value);
 		bindlessWriter.SetUInt("gbufferDepthHandle", config.GBufferDepth.Value);
 		bindlessWriter.SetUInt("ambientOcclusionHandle", config.AmbientOcclusion.Value);
-		bindlessWriter.SetUInt("ddgiIrradianceHandle", config.DdgiIrradiance.Value);
+		bindlessWriter.SetUInt("ddgiIrradianceL0Handle", config.DdgiIrradianceL0.Value);
+		bindlessWriter.SetUInt("ddgiIrradianceLyHandle", config.DdgiIrradianceLy.Value);
+		bindlessWriter.SetUInt("ddgiIrradianceLzHandle", config.DdgiIrradianceLz.Value);
+		bindlessWriter.SetUInt("ddgiIrradianceLxHandle", config.DdgiIrradianceLx.Value);
 		bindlessWriter.SetUInt("ddgiVisibilityHandle", config.DdgiVisibility.Value);
 		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		bindlessWriter.SetUInt("ddgiFinalContributionHandle", config.DdgiFinalContribution.Value);

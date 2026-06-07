@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.Passes;
@@ -8,6 +9,9 @@ public static class DdgiUtilities
 	public const int IrradianceTileInteriorSize = 8;
 	public const int VisibilityTileInteriorSize = 16;
 	public const int TileBorderSize = 1;
+	public const int ShCoefficientCount = 4;
+	private const float ShBasisL0 = 0.28209479177f;
+	private const float ShBasisL1 = 0.48860251190f;
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
 	{
@@ -30,6 +34,30 @@ public static class DdgiUtilities
 	{
 		var tileSize = tileInteriorSize + TileBorderSize * 2;
 		return new Int2(shape.AtlasColumns * tileSize, shape.AtlasRows * tileSize);
+	}
+
+	public static Int2 GetShCoefficientTextureSize(DdgiGridShape shape)
+	{
+		return new Int2(shape.AtlasColumns, shape.AtlasRows);
+	}
+
+	public static DdgiL1Sh ProjectRadiance(Vector3 direction, Vector3 radiance, float solidAngle)
+	{
+		direction = direction == Vector3.Zero ? Vector3.UnitZ : Vector3.Normalize(direction);
+		return new DdgiL1Sh(
+			radiance * (ShBasisL0 * solidAngle),
+			radiance * (ShBasisL1 * direction.Y * solidAngle),
+			radiance * (ShBasisL1 * direction.Z * solidAngle),
+			radiance * (ShBasisL1 * direction.X * solidAngle));
+	}
+
+	public static Vector3 EvaluateDiffuse(in DdgiL1Sh sh, Vector3 normal)
+	{
+		normal = normal == Vector3.Zero ? Vector3.UnitZ : Vector3.Normalize(normal);
+		var irradiance = sh.L0 * ShBasisL0;
+		irradiance += (sh.Ly * normal.Y + sh.Lz * normal.Z + sh.Lx * normal.X) *
+		              (2.0f / 3.0f * ShBasisL1);
+		return Vector3.Max(irradiance, Vector3.Zero);
 	}
 
 	public static float GetMaxRayDistance(DiffuseGlobalIlluminationConfig config)
@@ -92,3 +120,19 @@ public readonly record struct DdgiGridShape(
 	int ProbeCount,
 	int AtlasColumns,
 	int AtlasRows);
+
+public readonly record struct DdgiL1Sh(
+	Vector3 L0,
+	Vector3 Ly,
+	Vector3 Lz,
+	Vector3 Lx)
+{
+	public static DdgiL1Sh operator +(DdgiL1Sh left, DdgiL1Sh right)
+	{
+		return new DdgiL1Sh(
+			left.L0 + right.L0,
+			left.Ly + right.Ly,
+			left.Lz + right.Lz,
+			left.Lx + right.Lx);
+	}
+}

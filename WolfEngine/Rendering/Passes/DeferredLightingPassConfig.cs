@@ -17,7 +17,10 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle GBufferEmissive { get; init; }
 	public required DescriptorHandle GBufferDepth { get; init; }
 	public required DescriptorHandle AmbientOcclusion { get; init; }
-	public required DescriptorHandle DdgiIrradiance { get; init; }
+	public required DescriptorHandle DdgiIrradianceL0 { get; init; }
+	public required DescriptorHandle DdgiIrradianceLy { get; init; }
+	public required DescriptorHandle DdgiIrradianceLz { get; init; }
+	public required DescriptorHandle DdgiIrradianceLx { get; init; }
 	public required DescriptorHandle DdgiVisibility { get; init; }
 	public required DescriptorHandle DdgiProbeState { get; init; }
 	public required DescriptorHandle DdgiFinalContribution { get; init; }

@@ -13,9 +13,15 @@ cbuffer BindlessHandles : register(b0)
     uint traceVisibilityHandle;
     uint traceIrradianceReadHandle;
     uint traceVisibilityReadHandle;
-    uint irradianceHistoryReadHandle;
+    uint irradianceL0HistoryReadHandle;
+    uint irradianceLyHistoryReadHandle;
+    uint irradianceLzHistoryReadHandle;
+    uint irradianceLxHistoryReadHandle;
     uint visibilityHistoryReadHandle;
-    uint irradianceHistoryWriteHandle;
+    uint irradianceL0HistoryWriteHandle;
+    uint irradianceLyHistoryWriteHandle;
+    uint irradianceLzHistoryWriteHandle;
+    uint irradianceLxHistoryWriteHandle;
     uint visibilityHistoryWriteHandle;
     uint probeStateReadHandle;
     uint probeStateWriteHandle;

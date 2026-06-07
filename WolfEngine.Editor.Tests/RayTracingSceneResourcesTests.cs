@@ -224,6 +224,67 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiShCoefficientTexturesUseOneTexelPerProbe()
+	{
+		var shape = DdgiUtilities.GetGridShape(new DiffuseGlobalIlluminationConfig
+		{
+			ProbeCounts = new DdgiProbeCounts { X = 4, Y = 3, Z = 2 }
+		});
+
+		var size = DdgiUtilities.GetShCoefficientTextureSize(shape);
+
+		Assert.That(DdgiUtilities.ShCoefficientCount, Is.EqualTo(4));
+		Assert.That(size.X, Is.EqualTo(shape.AtlasColumns));
+		Assert.That(size.Y, Is.EqualTo(shape.AtlasRows));
+	}
+
+	[Test]
+	public void DdgiL1ShReconstructsConstantRadianceForEveryNormal()
+	{
+		const int sampleCount = 4096;
+		var radiance = new Vector3(1.5f, 0.75f, 0.25f);
+		var sh = default(DdgiL1Sh);
+		var solidAngle = 4.0f * MathF.PI / sampleCount;
+		for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+		{
+			sh += DdgiUtilities.ProjectRadiance(SphericalFibonacci(sampleIndex, sampleCount), radiance, solidAngle);
+		}
+
+		foreach (var normal in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ, Vector3.Normalize(Vector3.One) })
+		{
+			var evaluated = DdgiUtilities.EvaluateDiffuse(sh, normal);
+			Assert.That(evaluated.X, Is.EqualTo(radiance.X).Within(0.002f));
+			Assert.That(evaluated.Y, Is.EqualTo(radiance.Y).Within(0.002f));
+			Assert.That(evaluated.Z, Is.EqualTo(radiance.Z).Within(0.002f));
+		}
+	}
+
+	[Test]
+	public void DdgiL1ShDirectionalCoefficientsFollowAxisAndEvaluateSmoothly()
+	{
+		var radiance = Vector3.One;
+		var xSh = DdgiUtilities.ProjectRadiance(Vector3.UnitX, radiance, 1.0f);
+		var ySh = DdgiUtilities.ProjectRadiance(Vector3.UnitY, radiance, 1.0f);
+		var zSh = DdgiUtilities.ProjectRadiance(Vector3.UnitZ, radiance, 1.0f);
+
+		Assert.That(xSh.Lx.X, Is.GreaterThan(0.0f));
+		Assert.That(xSh.Ly, Is.EqualTo(Vector3.Zero));
+		Assert.That(xSh.Lz, Is.EqualTo(Vector3.Zero));
+		Assert.That(ySh.Ly.X, Is.GreaterThan(0.0f));
+		Assert.That(ySh.Lx, Is.EqualTo(Vector3.Zero));
+		Assert.That(ySh.Lz, Is.EqualTo(Vector3.Zero));
+		Assert.That(zSh.Lz.X, Is.GreaterThan(0.0f));
+		Assert.That(zSh.Lx, Is.EqualTo(Vector3.Zero));
+		Assert.That(zSh.Ly, Is.EqualTo(Vector3.Zero));
+
+		var facing = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.UnitX).X;
+		var perpendicular = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.UnitY).X;
+		var halfway = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.Normalize(Vector3.UnitX + Vector3.UnitY)).X;
+		Assert.That(halfway, Is.GreaterThan(perpendicular));
+		Assert.That(halfway, Is.LessThan(facing));
+	}
+
+	[Test]
 	public void RenderPipeline_DdgiProbeDebugToggleInjectsAlphaBlendedSpherePrimitives()
 	{
 		var config = new RenderConfig
@@ -436,6 +497,16 @@ public sealed class RayTracingSceneResourcesTests
 		return new TerrainChunkInstanceData(
 			new Vector4(0.0f, 0.0f, 8.0f, 8.0f),
 			new Vector4(0.25f, 0.25f, 0.0f, 0.0f));
+	}
+
+	private static Vector3 SphericalFibonacci(int sampleIndex, int sampleCount)
+	{
+		const float goldenAngle = 2.39996322973f;
+		var sample = sampleIndex + 0.5f;
+		var cosTheta = 1.0f - 2.0f * sample / sampleCount;
+		var sinTheta = MathF.Sqrt(MathF.Max(0.0f, 1.0f - cosTheta * cosTheta));
+		var phi = sampleIndex * goldenAngle;
+		return new Vector3(MathF.Cos(phi) * sinTheta, cosTheta, MathF.Sin(phi) * sinTheta);
 	}
 
 	private sealed class TestRenderer : IRenderer

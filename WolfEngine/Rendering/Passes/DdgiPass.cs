@@ -114,9 +114,15 @@ public sealed class DdgiPass
 			TraceVisibilityHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiTraceVisibility)),
 			TraceIrradianceReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiTraceIrradiance)),
 			TraceVisibilityReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiTraceVisibility)),
-			IrradianceHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceHistoryRead)),
+			IrradianceL0HistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceL0HistoryRead)),
+			IrradianceLyHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceLyHistoryRead)),
+			IrradianceLzHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceLzHistoryRead)),
+			IrradianceLxHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiIrradianceLxHistoryRead)),
 			VisibilityHistoryReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiVisibilityHistoryRead)),
-			IrradianceHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceHistoryWrite)),
+			IrradianceL0HistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceL0HistoryWrite)),
+			IrradianceLyHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceLyHistoryWrite)),
+			IrradianceLzHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceLzHistoryWrite)),
+			IrradianceLxHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceLxHistoryWrite)),
 			VisibilityHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiVisibilityHistoryWrite)),
 			ProbeStateReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateRead)),
 			ProbeStateWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateWrite)),
@@ -184,9 +190,9 @@ public sealed class DdgiPass
 		WriteBindlessConstants(_integrateBindlessWriter, commandList, config);
 		WriteSettingsConstants(_integrateSettingsWriter, commandList, config);
 		var threadGroupSize = _integrateThreadGroupSize ?? throw new InvalidOperationException("DDGI integrate threadgroup size was not initialized.");
-		var width = Math.Max(config.VisibilityAtlasSize.X, config.IrradianceAtlasSize.X);
-		var height = Math.Max(config.VisibilityAtlasSize.Y, config.IrradianceAtlasSize.Y);
-		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)width, (uint)height);
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)config.VisibilityAtlasSize.X,
+			(uint)config.VisibilityAtlasSize.Y);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
@@ -208,9 +214,9 @@ public sealed class DdgiPass
 		WriteBindlessConstants(_borderBindlessWriter, commandList, config);
 		WriteSettingsConstants(_borderSettingsWriter, commandList, config);
 		var threadGroupSize = _borderUpdateThreadGroupSize ?? throw new InvalidOperationException("DDGI border-update threadgroup size was not initialized.");
-		var width = Math.Max(config.VisibilityAtlasSize.X, config.IrradianceAtlasSize.X);
-		var height = Math.Max(config.VisibilityAtlasSize.Y, config.IrradianceAtlasSize.Y);
-		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)width, (uint)height);
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)config.VisibilityAtlasSize.X,
+			(uint)config.VisibilityAtlasSize.Y);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
@@ -222,9 +228,15 @@ public sealed class DdgiPass
 		bindlessWriter.SetUInt("traceVisibilityHandle", config.TraceVisibilityHandle.Value);
 		bindlessWriter.SetUInt("traceIrradianceReadHandle", config.TraceIrradianceReadHandle.Value);
 		bindlessWriter.SetUInt("traceVisibilityReadHandle", config.TraceVisibilityReadHandle.Value);
-		bindlessWriter.SetUInt("irradianceHistoryReadHandle", config.IrradianceHistoryReadHandle.Value);
+		bindlessWriter.SetUInt("irradianceL0HistoryReadHandle", config.IrradianceL0HistoryReadHandle.Value);
+		bindlessWriter.SetUInt("irradianceLyHistoryReadHandle", config.IrradianceLyHistoryReadHandle.Value);
+		bindlessWriter.SetUInt("irradianceLzHistoryReadHandle", config.IrradianceLzHistoryReadHandle.Value);
+		bindlessWriter.SetUInt("irradianceLxHistoryReadHandle", config.IrradianceLxHistoryReadHandle.Value);
 		bindlessWriter.SetUInt("visibilityHistoryReadHandle", config.VisibilityHistoryReadHandle.Value);
-		bindlessWriter.SetUInt("irradianceHistoryWriteHandle", config.IrradianceHistoryWriteHandle.Value);
+		bindlessWriter.SetUInt("irradianceL0HistoryWriteHandle", config.IrradianceL0HistoryWriteHandle.Value);
+		bindlessWriter.SetUInt("irradianceLyHistoryWriteHandle", config.IrradianceLyHistoryWriteHandle.Value);
+		bindlessWriter.SetUInt("irradianceLzHistoryWriteHandle", config.IrradianceLzHistoryWriteHandle.Value);
+		bindlessWriter.SetUInt("irradianceLxHistoryWriteHandle", config.IrradianceLxHistoryWriteHandle.Value);
 		bindlessWriter.SetUInt("visibilityHistoryWriteHandle", config.VisibilityHistoryWriteHandle.Value);
 		bindlessWriter.SetUInt("probeStateReadHandle", config.ProbeStateReadHandle.Value);
 		bindlessWriter.SetUInt("probeStateWriteHandle", config.ProbeStateWriteHandle.Value);
