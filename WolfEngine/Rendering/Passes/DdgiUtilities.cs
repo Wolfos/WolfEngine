@@ -12,6 +12,7 @@ public static class DdgiUtilities
 	public const int ShCoefficientCount = 4;
 	private const float ShBasisL0 = 0.28209479177f;
 	private const float ShBasisL1 = 0.48860251190f;
+	private const float ShDirectionalLimit = 0.95f;
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
 	{
@@ -54,10 +55,30 @@ public static class DdgiUtilities
 	public static Vector3 EvaluateDiffuse(in DdgiL1Sh sh, Vector3 normal)
 	{
 		normal = normal == Vector3.Zero ? Vector3.UnitZ : Vector3.Normalize(normal);
-		var irradiance = sh.L0 * ShBasisL0;
-		irradiance += (sh.Ly * normal.Y + sh.Lz * normal.Z + sh.Lx * normal.X) *
-		              (2.0f / 3.0f * ShBasisL1);
+		var dc = Vector3.Max(sh.L0 * ShBasisL0, Vector3.Zero);
+		var directionalScale = 2.0f / 3.0f * ShBasisL1;
+		var directionalX = sh.Lx * directionalScale;
+		var directionalY = sh.Ly * directionalScale;
+		var directionalZ = sh.Lz * directionalScale;
+		var directionalAmplitude = Vector3.SquareRoot(
+			directionalX * directionalX +
+			directionalY * directionalY +
+			directionalZ * directionalZ);
+		var channelScale = new Vector3(
+			GetShDirectionalChannelScale(dc.X, directionalAmplitude.X),
+			GetShDirectionalChannelScale(dc.Y, directionalAmplitude.Y),
+			GetShDirectionalChannelScale(dc.Z, directionalAmplitude.Z));
+		var lobeScale = MathF.Min(1.0f, MathF.Min(channelScale.X, MathF.Min(channelScale.Y, channelScale.Z)));
+		var irradiance = dc + lobeScale *
+			(directionalY * normal.Y + directionalZ * normal.Z + directionalX * normal.X);
 		return Vector3.Max(irradiance, Vector3.Zero);
+	}
+
+	private static float GetShDirectionalChannelScale(float dc, float directionalAmplitude)
+	{
+		return directionalAmplitude > 1e-5f
+			? dc * ShDirectionalLimit / directionalAmplitude
+			: 1.0f;
 	}
 
 	public static float GetMaxRayDistance(DiffuseGlobalIlluminationConfig config)

@@ -280,8 +280,14 @@ public sealed class RayTracingSceneResourcesTests
 		var facing = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.UnitX).X;
 		var perpendicular = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.UnitY).X;
 		var halfway = DdgiUtilities.EvaluateDiffuse(xSh, Vector3.Normalize(Vector3.UnitX + Vector3.UnitY)).X;
+		var opposite = DdgiUtilities.EvaluateDiffuse(xSh, -Vector3.UnitX);
 		Assert.That(halfway, Is.GreaterThan(perpendicular));
 		Assert.That(halfway, Is.LessThan(facing));
+		Assert.That(opposite.X, Is.GreaterThan(0.0f));
+		Assert.That(opposite.Y, Is.GreaterThan(0.0f));
+		Assert.That(opposite.Z, Is.GreaterThan(0.0f));
+		Assert.That(opposite.X, Is.EqualTo(opposite.Y).Within(1e-6f));
+		Assert.That(opposite.Y, Is.EqualTo(opposite.Z).Within(1e-6f));
 	}
 
 	[Test]

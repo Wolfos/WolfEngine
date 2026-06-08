@@ -77,6 +77,7 @@ static const uint DDGI_VISIBILITY_TILE_INTERIOR_SIZE = 16u;
 static const uint DDGI_TILE_BORDER_SIZE = 1u;
 static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
 static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
+static const float DDGI_SH_DIRECTIONAL_LIMIT = 0.95f;
 
 float2 DdgiOctEncode(float3 n)
 {
@@ -226,11 +227,26 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
     coefficientLx *= inverseWeight;
 
     // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
-    float3 irradiance = coefficientL0 * DDGI_SH_BASIS_L0;
-    irradiance += (2.0f / 3.0f) * DDGI_SH_BASIS_L1 * (
-        coefficientLy * normal.y +
-        coefficientLz * normal.z +
-        coefficientLx * normal.x);
+    // Limit the directional lobe before evaluation so truncated L1 ringing cannot
+    // drive individual color channels negative and create black or tinted bands.
+    float3 dc = max(coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
+    float directionalScale = (2.0f / 3.0f) * DDGI_SH_BASIS_L1;
+    float3 directionalX = coefficientLx * directionalScale;
+    float3 directionalY = coefficientLy * directionalScale;
+    float3 directionalZ = coefficientLz * directionalScale;
+    float3 directionalAmplitude = sqrt(
+        directionalX * directionalX +
+        directionalY * directionalY +
+        directionalZ * directionalZ);
+    float3 channelScale = select(
+        directionalAmplitude > 1e-5f.xxx,
+        dc * DDGI_SH_DIRECTIONAL_LIMIT / max(directionalAmplitude, 1e-5f.xxx),
+        1.0f.xxx);
+    float lobeScale = min(1.0f, min(channelScale.x, min(channelScale.y, channelScale.z)));
+    float3 irradiance = dc + lobeScale * (
+        directionalY * normal.y +
+        directionalZ * normal.z +
+        directionalX * normal.x);
     return max(irradiance, 0.0f.xxx);
 }
 
