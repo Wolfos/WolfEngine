@@ -82,6 +82,15 @@ static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
 static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
 static const float DDGI_SH_DIRECTIONAL_LIMIT = 0.95f;
 
+struct DdgiShSample
+{
+    float3 coefficientL0;
+    float3 coefficientLy;
+    float3 coefficientLz;
+    float3 coefficientLx;
+    uint valid;
+};
+
 float2 DdgiOctEncode(float3 n)
 {
     n /= (abs(n.x) + abs(n.y) + abs(n.z));
@@ -144,7 +153,7 @@ float DdgiGridInfluence(float3 worldPos)
     return min(horizontalInfluence, verticalInfluence);
 }
 
-float3 SampleDdgi(
+DdgiShSample SampleDdgiSh(
     float3 worldPos,
     float3 normal,
     uint samplerHandle,
@@ -153,12 +162,13 @@ float3 SampleDdgi(
     out float debugWeightedVisibility,
     out float3 debugDominantProbe)
 {
+    DdgiShSample result = (DdgiShSample)0;
     debugBaseWeight = 0.0f;
     debugWeightedVisibility = 0.0f;
     debugDominantProbe = 0.0f.xxx;
     if (gridInfluence <= 0.0f)
     {
-        return 0.0f.xxx;
+        return result;
     }
 
     float3 biasedPos = worldPos + normal * ddgiViewBias;
@@ -241,7 +251,7 @@ float3 SampleDdgi(
     if (weightSum <= 1e-5f)
     {
         debugBaseWeight = saturate(baseWeightSum);
-        return 0.0f.xxx;
+        return result;
     }
 
     debugBaseWeight = saturate(baseWeightSum);
@@ -257,19 +267,16 @@ float3 SampleDdgi(
     debugDominantProbe = probeColor * saturate(dominantProbeWeight / weightSum);
 
     float inverseWeight = rcp(weightSum);
-    coefficientL0 *= inverseWeight;
-    coefficientLy *= inverseWeight;
-    coefficientLz *= inverseWeight;
-    coefficientLx *= inverseWeight;
+    result.coefficientL0 = coefficientL0 * inverseWeight;
+    result.coefficientLy = coefficientLy * inverseWeight;
+    result.coefficientLz = coefficientLz * inverseWeight;
+    result.coefficientLx = coefficientLx * inverseWeight;
+    result.valid = 1u;
+    return result;
+}
 
-    // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
-    // Limit the directional lobe before evaluation so truncated L1 ringing cannot
-    // drive individual color channels negative and create black or tinted bands.
-    float3 dc = max(coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
-    float directionalScale = (2.0f / 3.0f) * DDGI_SH_BASIS_L1;
-    float3 directionalX = coefficientLx * directionalScale;
-    float3 directionalY = coefficientLy * directionalScale;
-    float3 directionalZ = coefficientLz * directionalScale;
+float DdgiShLobeScale(float3 dc, float3 directionalX, float3 directionalY, float3 directionalZ)
+{
     float3 directionalAmplitude = sqrt(
         directionalX * directionalX +
         directionalY * directionalY +
@@ -278,13 +285,41 @@ float3 SampleDdgi(
         directionalAmplitude > 1e-5f.xxx,
         dc * DDGI_SH_DIRECTIONAL_LIMIT / max(directionalAmplitude, 1e-5f.xxx),
         1.0f.xxx);
-    float lobeScale = min(1.0f, min(channelScale.x, min(channelScale.y, channelScale.z)));
+    return min(1.0f, min(channelScale.x, min(channelScale.y, channelScale.z)));
+}
+
+float3 EvaluateDdgiDiffuse(DdgiShSample sample, float3 normal)
+{
+    // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
+    // Limit the directional lobe before evaluation so truncated L1 ringing cannot
+    // drive individual color channels negative and create black or tinted bands.
+    float3 dc = max(sample.coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
+    float directionalScale = (2.0f / 3.0f) * DDGI_SH_BASIS_L1;
+    float3 directionalX = sample.coefficientLx * directionalScale;
+    float3 directionalY = sample.coefficientLy * directionalScale;
+    float3 directionalZ = sample.coefficientLz * directionalScale;
+    float lobeScale = DdgiShLobeScale(dc, directionalX, directionalY, directionalZ);
     float3 signedDirectional = lobeScale * (
         directionalY * normal.y +
         directionalZ * normal.z +
         directionalX * normal.x);
     float3 irradiance = dc + signedDirectional;
     return max(irradiance, 0.0f.xxx);
+}
+
+float3 EvaluateDdgiRadiance(DdgiShSample sample, float3 direction)
+{
+    direction = length(direction) > 1e-5f ? normalize(direction) : float3(0.0f, 0.0f, 1.0f);
+    float3 dc = max(sample.coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
+    float3 directionalX = sample.coefficientLx * DDGI_SH_BASIS_L1;
+    float3 directionalY = sample.coefficientLy * DDGI_SH_BASIS_L1;
+    float3 directionalZ = sample.coefficientLz * DDGI_SH_BASIS_L1;
+    float lobeScale = DdgiShLobeScale(dc, directionalX, directionalY, directionalZ);
+    float3 signedDirectional = lobeScale * (
+        directionalY * direction.y +
+        directionalZ * direction.z +
+        directionalX * direction.x);
+    return max(dc + signedDirectional, 0.0f.xxx);
 }
 
 float3 ReconstructCameraRelativeWorldPosition(uint2 pixel, uint2 size, float depth, float4x4 invViewProjection)
@@ -409,15 +444,32 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float ddgiBaseWeightDebug;
     float ddgiWeightedVisibilityDebug;
     float3 ddgiDominantProbeDebug;
-    float3 ddgiContribution = SampleDdgi(
+    DdgiShSample ddgiSample = SampleDdgiSh(
         absoluteWorldPos,
         normal,
         samplerHandle,
         ddgiGridInfluence,
         ddgiBaseWeightDebug,
         ddgiWeightedVisibilityDebug,
-        ddgiDominantProbeDebug) * diffuseEnergy * albedo * occlusion;
-    color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + skySpecularContribution;
+        ddgiDominantProbeDebug);
+    float3 ddgiContribution =
+        EvaluateDdgiDiffuse(ddgiSample, normal) * diffuseEnergy * albedo * occlusion;
+    float3 reflectionDirection = reflect(-viewDir, normal);
+    float3 ddgiSpecularRadiance = EvaluateDdgiRadiance(ddgiSample, reflectionDirection);
+    float3 ddgiSpecularContribution = EvaluateSpecularImageBasedLightingFromRadiance(
+        surface,
+        viewDir,
+        ddgiSpecularRadiance,
+        brdfLutHandle,
+        samplerHandle);
+    float ddgiSpecularBlend = ddgiSample.valid != 0u
+        ? ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness)
+        : 0.0f;
+    float3 specularContribution = lerp(
+        skySpecularContribution,
+        ddgiSpecularContribution,
+        ddgiSpecularBlend);
+    color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + specularContribution;
     if (ddgiEnabled != 0u && ddgiProbeCount != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);

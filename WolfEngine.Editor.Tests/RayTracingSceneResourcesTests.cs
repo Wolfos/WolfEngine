@@ -414,6 +414,63 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiL1ShReconstructsConstantRawRadianceForEveryDirection()
+	{
+		const int sampleCount = 4096;
+		var radiance = new Vector3(1.5f, 0.75f, 0.25f);
+		var sh = default(DdgiL1Sh);
+		var solidAngle = 4.0f * MathF.PI / sampleCount;
+		for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+		{
+			sh += DdgiUtilities.ProjectRadiance(SphericalFibonacci(sampleIndex, sampleCount), radiance, solidAngle);
+		}
+
+		foreach (var direction in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ, Vector3.Normalize(Vector3.One) })
+		{
+			AssertVector3(DdgiUtilities.EvaluateRadiance(sh, direction), radiance, 0.002f);
+		}
+	}
+
+	[Test]
+	public void DdgiRawRadianceFollowsDirectionalCoefficientAxis()
+	{
+		var sh = DdgiUtilities.ProjectRadiance(Vector3.UnitX, Vector3.One, 1.0f);
+
+		var facing = DdgiUtilities.EvaluateRadiance(sh, Vector3.UnitX).X;
+		var perpendicular = DdgiUtilities.EvaluateRadiance(sh, Vector3.UnitY).X;
+		var opposite = DdgiUtilities.EvaluateRadiance(sh, -Vector3.UnitX).X;
+
+		Assert.That(facing, Is.GreaterThan(perpendicular));
+		Assert.That(perpendicular, Is.GreaterThan(opposite));
+	}
+
+	[Test]
+	public void DdgiRawRadianceClampsDirectionalLobeBeforeItBecomesNegative()
+	{
+		var sh = new DdgiL1Sh(
+			new Vector3(1.0f),
+			Vector3.Zero,
+			Vector3.Zero,
+			new Vector3(100.0f));
+
+		var opposite = DdgiUtilities.EvaluateRadiance(sh, -Vector3.UnitX);
+
+		Assert.That(opposite.X, Is.GreaterThan(0.0f));
+		Assert.That(opposite.Y, Is.GreaterThan(0.0f));
+		Assert.That(opposite.Z, Is.GreaterThan(0.0f));
+	}
+
+	[Test]
+	public void DdgiRoughSpecularBlendUsesRoughnessVolumeAndSampleValidity()
+	{
+		Assert.That(DdgiUtilities.GetRoughSpecularBlend(1.0f, 0.25f, true), Is.EqualTo(0.0f));
+		Assert.That(DdgiUtilities.GetRoughSpecularBlend(1.0f, 0.6f, true), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetRoughSpecularBlend(0.4f, 0.6f, true), Is.EqualTo(0.4f).Within(1e-6f));
+		Assert.That(DdgiUtilities.GetRoughSpecularBlend(1.0f, 1.0f, false), Is.EqualTo(0.0f));
+		Assert.That(DdgiUtilities.GetRoughSpecularBlend(0.0f, 1.0f, true), Is.EqualTo(0.0f));
+	}
+
+	[Test]
 	public void DdgiVisibilityMomentsRemainDirectional()
 	{
 		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(1.0f), Is.EqualTo(1.0f));

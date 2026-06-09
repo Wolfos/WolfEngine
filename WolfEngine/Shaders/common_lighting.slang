@@ -475,6 +475,29 @@ float3 EvaluateDiffuseImageBasedLighting(
     return envIrradiance * kD * albedo / PI * occlusion;
 }
 
+float3 EvaluateSpecularImageBasedLightingFromRadiance(
+    SurfaceLightingInput surface,
+    float3 viewDir,
+    float3 environmentRadiance,
+    uint brdfLutHandle,
+    uint samplerHandle)
+{
+    float3 normal = normalize(surface.normal);
+    float3 albedo = surface.albedo;
+    float metallic = surface.metallic;
+    float roughness = surface.roughness;
+    float occlusion = surface.occlusion;
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+
+    float cosTheta = saturate(dot(normal, viewDir));
+    float3 fresnel = FresnelSchlick(cosTheta, F0);
+    SamplerState linearSampler = GetSampler(samplerHandle);
+    Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
+    float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
+    float3 specular = environmentRadiance * (fresnel * brdf.x + brdf.y);
+    return specular * 0.5f * occlusion;
+}
+
 float3 EvaluateSpecularImageBasedLighting(
     SurfaceLightingInput surface,
     float3 viewDir,
@@ -484,22 +507,15 @@ float3 EvaluateSpecularImageBasedLighting(
     float iblExposure)
 {
     float3 normal = normalize(surface.normal);
-    float3 albedo = surface.albedo;
-    float metallic = surface.metallic;
-    float roughness = surface.roughness;
-    float occlusion = surface.occlusion;
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
-
     float3 reflectionDir = reflect(-viewDir, normal);
-    float3 envColor = SamplePrefiltered(prefilteredHandle, samplerHandle, reflectionDir, roughness) * iblExposure;
-
-    float cosTheta = saturate(dot(normal, viewDir));
-    float3 fresnel = FresnelSchlick(cosTheta, F0);
-    SamplerState linearSampler = GetSampler(samplerHandle);
-    Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
-    float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
-    float3 specular = envColor * (fresnel * brdf.x + brdf.y);
-    return specular * 0.5f * occlusion;
+    float3 environmentRadiance =
+        SamplePrefiltered(prefilteredHandle, samplerHandle, reflectionDir, surface.roughness) * iblExposure;
+    return EvaluateSpecularImageBasedLightingFromRadiance(
+        surface,
+        viewDir,
+        environmentRadiance,
+        brdfLutHandle,
+        samplerHandle);
 }
 
 float3 EvaluateImageBasedLighting(

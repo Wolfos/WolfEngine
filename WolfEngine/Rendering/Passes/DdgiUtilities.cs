@@ -169,6 +169,39 @@ public static class DdgiUtilities
 		return Vector3.Max(irradiance, Vector3.Zero);
 	}
 
+	public static Vector3 EvaluateRadiance(in DdgiL1Sh sh, Vector3 direction)
+	{
+		direction = direction == Vector3.Zero ? Vector3.UnitZ : Vector3.Normalize(direction);
+		var dc = Vector3.Max(sh.L0 * ShBasisL0, Vector3.Zero);
+		var directionalX = sh.Lx * ShBasisL1;
+		var directionalY = sh.Ly * ShBasisL1;
+		var directionalZ = sh.Lz * ShBasisL1;
+		var directionalAmplitude = Vector3.SquareRoot(
+			directionalX * directionalX +
+			directionalY * directionalY +
+			directionalZ * directionalZ);
+		var channelScale = new Vector3(
+			GetShDirectionalChannelScale(dc.X, directionalAmplitude.X),
+			GetShDirectionalChannelScale(dc.Y, directionalAmplitude.Y),
+			GetShDirectionalChannelScale(dc.Z, directionalAmplitude.Z));
+		var lobeScale = MathF.Min(1.0f, MathF.Min(channelScale.X, MathF.Min(channelScale.Y, channelScale.Z)));
+		var radiance = dc + lobeScale *
+			(directionalY * direction.Y + directionalZ * direction.Z + directionalX * direction.X);
+		return Vector3.Max(radiance, Vector3.Zero);
+	}
+
+	public static float GetRoughSpecularBlend(float gridInfluence, float roughness, bool hasValidProbeSample)
+	{
+		if (hasValidProbeSample == false)
+		{
+			return 0.0f;
+		}
+
+		var t = Math.Clamp((roughness - 0.25f) / (0.6f - 0.25f), 0.0f, 1.0f);
+		var roughnessBlend = t * t * (3.0f - 2.0f * t);
+		return Math.Clamp(gridInfluence, 0.0f, 1.0f) * roughnessBlend;
+	}
+
 	private static float GetShDirectionalChannelScale(float dc, float directionalAmplitude)
 	{
 		return directionalAmplitude > 1e-5f
