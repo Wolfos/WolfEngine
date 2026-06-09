@@ -478,8 +478,9 @@ public sealed class RayTracingSceneResourcesTests
 			emissive: Vector3.Zero,
 			historyValid: true);
 
-		Assert.That(shaded.X, Is.EqualTo(1.95f).Within(1e-6f));
-		Assert.That(shaded.Y, Is.EqualTo(0.4875f).Within(1e-6f));
+		var expectedX = 1.0f + 0.95f / MathF.PI;
+		Assert.That(shaded.X, Is.EqualTo(expectedX).Within(1e-6f));
+		Assert.That(shaded.Y, Is.EqualTo(expectedX * 0.25f).Within(1e-6f));
 		Assert.That(shaded.Z, Is.EqualTo(0.0f).Within(1e-6f));
 	}
 
@@ -515,7 +516,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiDiffuseHitCapsRecursiveBounceEnergyAtNinetyFivePercent()
+	public void DdgiDiffuseHitAppliesRecursiveEnergyAndLambertianNormalization()
 	{
 		var shaded = DdgiUtilities.ShadeDiffuseHit(
 			Vector3.One,
@@ -526,7 +527,7 @@ public sealed class RayTracingSceneResourcesTests
 			emissive: Vector3.Zero,
 			historyValid: true);
 
-		AssertVector3(shaded, new Vector3(0.95f));
+		AssertVector3(shaded, new Vector3(0.95f / MathF.PI));
 	}
 
 	[Test]

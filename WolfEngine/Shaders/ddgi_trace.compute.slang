@@ -189,7 +189,9 @@ float3 DdgiShadeHitSurface(DdgiHitSurface surface)
     float directWeight = saturate(dot(surface.worldNormal, lightDirection));
     float visibility = directWeight > 0.0f ? DdgiTraceDirectionalLightVisibility(surface.worldPosition, surface.worldNormal, lightDirection) : 0.0f;
     float3 directRadiance = directLightColorIntensity * directWeight * visibility / WOLF_PI;
-    float3 recursiveRadiance = DdgiSampleHistory(surface.worldPosition, surface.worldNormal) * DDGI_RECURSIVE_ENERGY;
+    float3 recursiveRadiance =
+        DdgiSampleHistory(surface.worldPosition, surface.worldNormal) *
+        (DDGI_RECURSIVE_ENERGY / WOLF_PI);
     return surface.albedo * (directRadiance + recursiveRadiance) + surface.emissive;
 }
 
