@@ -35,6 +35,7 @@ struct DdgiHitSurface
     float3 worldPosition;
     float3 worldNormal;
     float3 worldGeometricNormal;
+    float2 uv;
     float3 albedo;
     float3 emissive;
 };
@@ -106,6 +107,10 @@ bool DdgiTryResolveHitSurface(
                 v1.position.xyz * b1 +
                 v2.position.xyz * b2;
             float3 localNormal = normalize(v0.normal * b0 + v1.normal * b1 + v2.normal * b2);
+            surface.uv =
+                v0.uv * b0 +
+                v1.uv * b1 +
+                v2.uv * b2;
             float3 worldPosition0 = mul(v0.position, instanceData.world).xyz;
             float3 worldPosition1 = mul(v1.position, instanceData.world).xyz;
             float3 worldPosition2 = mul(v2.position, instanceData.world).xyz;
@@ -146,8 +151,14 @@ bool DdgiTryResolveHitSurface(
     }
 
     GpuMaterialData material = g_MaterialTable[materialIndex];
-    surface.albedo = max(material.baseColor.rgb, 0.02f.xxx);
-    surface.emissive = material.emissiveFactorIntensity.rgb * material.emissiveFactorIntensity.a;
+    SamplerState materialSampler = GetSampler(material.samplerHandle);
+    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
+    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
+    surface.albedo = max(material.baseColor.rgb * albedoSample, 0.0f.xxx);
+    surface.emissive =
+        emissiveSample *
+        material.emissiveFactorIntensity.rgb *
+        material.emissiveFactorIntensity.a;
     surface.valid = true;
     return true;
 }
@@ -173,11 +184,13 @@ float DdgiTraceDirectionalLightVisibility(float3 worldPosition, float3 worldNorm
 
 float3 DdgiShadeHitSurface(DdgiHitSurface surface)
 {
+    static const float DDGI_RECURSIVE_ENERGY = 0.95f;
     float3 lightDirection = length(directLightDirection) > 1e-5f ? -normalize(directLightDirection) : 0.0f.xxx;
     float directWeight = saturate(dot(surface.worldNormal, lightDirection));
     float visibility = directWeight > 0.0f ? DdgiTraceDirectionalLightVisibility(surface.worldPosition, surface.worldNormal, lightDirection) : 0.0f;
-    float3 directRadiance = directLightColorIntensity * directWeight * visibility;
-    return surface.albedo * directRadiance + surface.emissive;
+    float3 directRadiance = directLightColorIntensity * directWeight * visibility / WOLF_PI;
+    float3 recursiveRadiance = DdgiSampleHistory(surface.worldPosition, surface.worldNormal) * DDGI_RECURSIVE_ENERGY;
+    return surface.albedo * (directRadiance + recursiveRadiance) + surface.emissive;
 }
 
 DdgiTraceResult DdgiTraceRay(

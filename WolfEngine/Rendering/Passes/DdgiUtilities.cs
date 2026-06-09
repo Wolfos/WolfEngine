@@ -19,6 +19,7 @@ public static class DdgiUtilities
 	private const float VisibilityVarianceFloor = 0.0004f;
 	private const float MaxIrradianceMeanBlend = 0.02f;
 	private const float ProbeRelocationBlend = 0.01f;
+	private const float RecursiveBounceEnergy = 0.95f;
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
 	{
@@ -240,6 +241,26 @@ public static class DdgiUtilities
 	{
 		var maxOffset = Math.Max(maxRelocationDistance, 0.0f);
 		return Vector3.Clamp(offset, new Vector3(-maxOffset), new Vector3(maxOffset));
+	}
+
+	public static Vector3 ShadeDiffuseHit(
+		Vector3 albedo,
+		Vector3 directLightRadiance,
+		float normalDotLight,
+		float visibility,
+		Vector3 previousDdgi,
+		Vector3 emissive,
+		bool historyValid)
+	{
+		albedo = Vector3.Max(albedo, Vector3.Zero);
+		var direct = directLightRadiance *
+		             Math.Clamp(normalDotLight, 0.0f, 1.0f) *
+		             Math.Clamp(visibility, 0.0f, 1.0f) /
+		             MathF.PI;
+		var recursive = historyValid
+			? Vector3.Max(previousDdgi, Vector3.Zero) * RecursiveBounceEnergy
+			: Vector3.Zero;
+		return albedo * (direct + recursive) + emissive;
 	}
 
 	public static float GetMaxRayDistance(DiffuseGlobalIlluminationConfig config)

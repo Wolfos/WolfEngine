@@ -436,6 +436,100 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiDiffuseHitUsesLambertianDirectNormalization()
+	{
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			Vector3.One,
+			new Vector3(MathF.PI),
+			normalDotLight: 1.0f,
+			visibility: 1.0f,
+			previousDdgi: Vector3.Zero,
+			emissive: Vector3.Zero,
+			historyValid: false);
+
+		AssertVector3(shaded, Vector3.One);
+	}
+
+	[Test]
+	public void DdgiDiffuseHitPreservesWhiteSurfaceColorRatios()
+	{
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			Vector3.One,
+			new Vector3(1.0f, 2.0f, 4.0f),
+			normalDotLight: 1.0f,
+			visibility: 1.0f,
+			previousDdgi: Vector3.Zero,
+			emissive: Vector3.Zero,
+			historyValid: false);
+
+		Assert.That(shaded.Y / shaded.X, Is.EqualTo(2.0f).Within(1e-6f));
+		Assert.That(shaded.Z / shaded.X, Is.EqualTo(4.0f).Within(1e-6f));
+	}
+
+	[Test]
+	public void DdgiDiffuseHitAlbedoTintsDirectAndRecursiveRadiance()
+	{
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			new Vector3(1.0f, 0.25f, 0.0f),
+			new Vector3(MathF.PI),
+			normalDotLight: 1.0f,
+			visibility: 1.0f,
+			previousDdgi: Vector3.One,
+			emissive: Vector3.Zero,
+			historyValid: true);
+
+		Assert.That(shaded.X, Is.EqualTo(1.95f).Within(1e-6f));
+		Assert.That(shaded.Y, Is.EqualTo(0.4875f).Within(1e-6f));
+		Assert.That(shaded.Z, Is.EqualTo(0.0f).Within(1e-6f));
+	}
+
+	[Test]
+	public void DdgiDiffuseHitAddsEmissiveIndependentlyOfAlbedo()
+	{
+		var emissive = new Vector3(3.0f, 1.0f, 0.5f);
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			Vector3.Zero,
+			new Vector3(100.0f),
+			normalDotLight: 1.0f,
+			visibility: 1.0f,
+			previousDdgi: new Vector3(100.0f),
+			emissive,
+			historyValid: true);
+
+		AssertVector3(shaded, emissive);
+	}
+
+	[Test]
+	public void DdgiDiffuseHitIgnoresRecursiveRadianceWithoutHistory()
+	{
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			Vector3.One,
+			Vector3.Zero,
+			normalDotLight: 0.0f,
+			visibility: 0.0f,
+			previousDdgi: new Vector3(10.0f),
+			emissive: Vector3.Zero,
+			historyValid: false);
+
+		AssertVector3(shaded, Vector3.Zero);
+	}
+
+	[Test]
+	public void DdgiDiffuseHitCapsRecursiveBounceEnergyAtNinetyFivePercent()
+	{
+		var shaded = DdgiUtilities.ShadeDiffuseHit(
+			Vector3.One,
+			Vector3.Zero,
+			normalDotLight: 0.0f,
+			visibility: 0.0f,
+			previousDdgi: Vector3.One,
+			emissive: Vector3.Zero,
+			historyValid: true);
+
+		AssertVector3(shaded, new Vector3(0.95f));
+	}
+
+	[Test]
 	public void DdgiRelocationNoNearbyHitsReturnsTowardRestPosition()
 	{
 		var target = DdgiUtilities.ComputeProbeRelocationTarget(

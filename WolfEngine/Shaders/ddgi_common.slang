@@ -6,6 +6,9 @@ import "draw_data.slang";
 #define WOLF_MAX_MATERIAL_COUNT 65535
 
 static const float WOLF_PI = 3.14159265359f;
+static const float DDGI_HISTORY_SH_BASIS_L0 = 0.28209479177f;
+static const float DDGI_HISTORY_SH_BASIS_L1 = 0.48860251190f;
+static const float DDGI_HISTORY_SH_DIRECTIONAL_LIMIT = 0.95f;
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -187,6 +190,136 @@ float3 DdgiOctDecode(float2 f)
     float t = saturate(-n.z);
     n.xy += select(n.xy >= 0.0f, -t.xx, t.xx);
     return normalize(n);
+}
+
+float2 DdgiOctEncode(float3 n)
+{
+    n /= abs(n.x) + abs(n.y) + abs(n.z);
+    float2 enc = n.xy;
+    if (n.z < 0.0f)
+    {
+        enc = (1.0f - abs(enc.yx)) * select(enc.xy >= 0.0f, 1.0f.xx, -1.0f.xx);
+    }
+    return enc;
+}
+
+float2 DdgiProbeAtlasUv(uint probeIndex, float3 direction, uint interiorSize)
+{
+    uint tileSize = interiorSize + tileBorderSize * 2u;
+    uint tileX = probeIndex % atlasColumns;
+    uint tileY = probeIndex / atlasColumns;
+    float2 interiorUv = DdgiOctEncode(normalize(direction)) * 0.5f + 0.5f;
+    float2 atlasPixel = float2(tileX * tileSize + tileBorderSize, tileY * tileSize + tileBorderSize) +
+        interiorUv * float(interiorSize - 1u) + 0.5f.xx;
+    return atlasPixel / float2(atlasColumns * tileSize, atlasRows * tileSize);
+}
+
+float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
+{
+    if (historyValid == 0u || probeCount == 0u)
+    {
+        return 0.0f.xxx;
+    }
+
+    float spacing = max(probeSpacing, 0.001f);
+    normal = length(normal) > 1e-5f ? normalize(normal) : float3(0.0f, 1.0f, 0.0f);
+    float3 biasedPosition = worldPosition + normal * viewBias;
+    float3 gridMax = float3(
+        max(probeCountX, 1u) - 1u,
+        max(probeCountY, 1u) - 1u,
+        max(probeCountZ, 1u) - 1u);
+    float3 gridPosition = (biasedPosition - origin) / spacing;
+    if (any(gridPosition < -0.5f.xxx) || any(gridPosition > gridMax + 0.5f.xxx))
+    {
+        return 0.0f.xxx;
+    }
+
+    float3 sampleGrid = clamp(gridPosition, 0.0f.xxx, gridMax);
+    float3 baseFloat = floor(sampleGrid);
+    float3 fracPart = saturate(sampleGrid - baseFloat);
+    int3 baseCoord = int3(baseFloat);
+    Texture2D<float4> irradianceL0Tex = GetTexture(irradianceL0HistoryReadHandle);
+    Texture2D<float4> irradianceLyTex = GetTexture(irradianceLyHistoryReadHandle);
+    Texture2D<float4> irradianceLzTex = GetTexture(irradianceLzHistoryReadHandle);
+    Texture2D<float4> irradianceLxTex = GetTexture(irradianceLxHistoryReadHandle);
+    Texture2D<float4> visibilityTex = GetTexture(visibilityHistoryReadHandle);
+    SamplerState linearSampler = GetSampler(samplerHandle);
+
+    float3 coefficientL0 = 0.0f.xxx;
+    float3 coefficientLy = 0.0f.xxx;
+    float3 coefficientLz = 0.0f.xxx;
+    float3 coefficientLx = 0.0f.xxx;
+    float weightSum = 0.0f;
+    for (uint z = 0u; z <= 1u; z++)
+    {
+        for (uint y = 0u; y <= 1u; y++)
+        {
+            for (uint x = 0u; x <= 1u; x++)
+            {
+                int3 coord = baseCoord + int3(x, y, z);
+                if (coord.x < 0 || coord.y < 0 || coord.z < 0 ||
+                    coord.x >= int(probeCountX) || coord.y >= int(probeCountY) || coord.z >= int(probeCountZ))
+                {
+                    continue;
+                }
+
+                uint probeIndex = uint(coord.x) + uint(coord.y) * probeCountX + uint(coord.z) * probeCountX * probeCountY;
+                float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
+                float trilinearWeight = tri.x * tri.y * tri.z;
+                float3 probePosition = DdgiRelocatedProbePosition(probeIndex, probeStateReadHandle);
+                float3 toSurface = biasedPosition - probePosition;
+                float distanceToProbe = length(toSurface);
+                float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
+                float normalWeight = saturate(dot(normal, -direction)) * 0.9f + 0.1f;
+                float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, visibilityTileInteriorSize);
+                float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
+                float normalizedDistance = saturate(distanceToProbe / max(maxRayDistance, 0.001f));
+                float variance = max(moments.y - moments.x * moments.x, 0.0004f);
+                float distanceDelta = max(normalizedDistance - moments.x, 0.0f);
+                float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
+                chebyshevVisibility = chebyshevVisibility * chebyshevVisibility * chebyshevVisibility;
+                float visibility = normalizedDistance <= moments.x ? 1.0f : saturate(chebyshevVisibility);
+                float probeWeight = trilinearWeight * normalWeight * visibility;
+                uint2 coefficientPixel = DdgiProbeStatePixel(probeIndex);
+                coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLy += irradianceLyTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLz += irradianceLzTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                coefficientLx += irradianceLxTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
+                weightSum += probeWeight;
+            }
+        }
+    }
+
+    if (weightSum <= 1e-5f)
+    {
+        return 0.0f.xxx;
+    }
+
+    float inverseWeight = rcp(weightSum);
+    coefficientL0 *= inverseWeight;
+    coefficientLy *= inverseWeight;
+    coefficientLz *= inverseWeight;
+    coefficientLx *= inverseWeight;
+
+    float3 dc = max(coefficientL0 * DDGI_HISTORY_SH_BASIS_L0, 0.0f.xxx);
+    float directionalScale = (2.0f / 3.0f) * DDGI_HISTORY_SH_BASIS_L1;
+    float3 directionalX = coefficientLx * directionalScale;
+    float3 directionalY = coefficientLy * directionalScale;
+    float3 directionalZ = coefficientLz * directionalScale;
+    float3 directionalAmplitude = sqrt(
+        directionalX * directionalX +
+        directionalY * directionalY +
+        directionalZ * directionalZ);
+    float3 channelScale = select(
+        directionalAmplitude > 1e-5f.xxx,
+        dc * DDGI_HISTORY_SH_DIRECTIONAL_LIMIT / max(directionalAmplitude, 1e-5f.xxx),
+        1.0f.xxx);
+    float lobeScale = min(1.0f, min(channelScale.x, min(channelScale.y, channelScale.z)));
+    float3 directional = lobeScale * (
+        directionalY * normal.y +
+        directionalZ * normal.z +
+        directionalX * normal.x);
+    return max(dc + directional, 0.0f.xxx);
 }
 
 uint DdgiHash(uint3 v)

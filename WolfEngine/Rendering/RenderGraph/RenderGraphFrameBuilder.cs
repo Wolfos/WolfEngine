@@ -917,6 +917,11 @@ internal sealed class RenderGraphFrameBuilder
 			{
 				var ddgiTraceBuilder = graph.AddPass("DDGI Probe Trace", PassKind.Compute)
 					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiIrradianceL0HistoryRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiIrradianceLyHistoryRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiIrradianceLzHistoryRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiIrradianceLxHistoryRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
 					.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
 				if (_frameResources.SkyboxEnvironment.IsValid)
