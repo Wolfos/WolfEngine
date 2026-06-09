@@ -11,6 +11,9 @@ public static class SceneDebugViewIds
 	public const string RayTracingHitMask = "ray-tracing-hit-mask";
 	public const string RayTracingHitDistance = "ray-tracing-hit-distance";
 	public const string DdgiIrradiance = "ddgi-irradiance";
+	public const string DdgiProbeBaseWeight = "ddgi-probe-base-weight";
+	public const string DdgiWeightedVisibility = "ddgi-weighted-visibility";
+	public const string DdgiDominantProbe = "ddgi-dominant-probe";
 	public const string DdgiVisibility = "ddgi-visibility";
 	public const string DdgiFinalContribution = "ddgi-final-contribution";
 	public const string GBufferAlbedo = "gbuffer-albedo";

@@ -49,6 +49,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public float ViewBias { get; set; } = 0.2f;
 	public float HorizontalBlendDistance { get; set; } = 6.0f;
 	public float VerticalBlendDistance { get; set; } = 6.0f;
+	public float IrradianceTemporalBlendSpeed { get; set; } = 0.08f;
 	public float Hysteresis { get; set; } = 0.95f;
 	public bool ProbeRelocationEnabled { get; set; } = true;
 	public float ProbeMinFrontfaceDistance { get; set; } = 0.2f;

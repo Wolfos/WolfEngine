@@ -84,6 +84,15 @@ public sealed class DeferredLightingPass
 		var ddgiFinalContribution = resources.DdgiFinalContribution.IsValid
 			? context.GetTexture(resources.DdgiFinalContribution)
 			: null;
+		var ddgiProbeBaseWeightDebug = resources.DdgiProbeBaseWeightDebug.IsValid
+			? context.GetTexture(resources.DdgiProbeBaseWeightDebug)
+			: null;
+		var ddgiWeightedVisibilityDebug = resources.DdgiWeightedVisibilityDebug.IsValid
+			? context.GetTexture(resources.DdgiWeightedVisibilityDebug)
+			: null;
+		var ddgiDominantProbeDebug = resources.DdgiDominantProbeDebug.IsValid
+			? context.GetTexture(resources.DdgiDominantProbeDebug)
+			: null;
 		var shadowMapDepth0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMapDepth1 = context.GetTexture(resources.ShadowMapDepth1);
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
@@ -130,6 +139,15 @@ public sealed class DeferredLightingPass
 			DdgiProbeState = _bindlessRegistry.GetTextureHandle(ddgiProbeState),
 			DdgiFinalContribution = ddgiFinalContribution is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiFinalContribution)
+				: DescriptorHandle.Invalid,
+			DdgiProbeBaseWeightDebug = ddgiProbeBaseWeightDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiProbeBaseWeightDebug)
+				: DescriptorHandle.Invalid,
+			DdgiWeightedVisibilityDebug = ddgiWeightedVisibilityDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiWeightedVisibilityDebug)
+				: DescriptorHandle.Invalid,
+			DdgiDominantProbeDebug = ddgiDominantProbeDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiDominantProbeDebug)
 				: DescriptorHandle.Invalid,
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
@@ -206,6 +224,9 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ddgiVisibilityHandle", config.DdgiVisibility.Value);
 		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		bindlessWriter.SetUInt("ddgiFinalContributionHandle", config.DdgiFinalContribution.Value);
+		bindlessWriter.SetUInt("ddgiProbeBaseWeightDebugHandle", config.DdgiProbeBaseWeightDebug.Value);
+		bindlessWriter.SetUInt("ddgiWeightedVisibilityDebugHandle", config.DdgiWeightedVisibilityDebug.Value);
+		bindlessWriter.SetUInt("ddgiDominantProbeDebugHandle", config.DdgiDominantProbeDebug.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
 		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		bindlessWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);

@@ -54,6 +54,7 @@ cbuffer DdgiSettings : register(b1)
     float maxRayDistance;
     float normalBias;
     float viewBias;
+    float irradianceTemporalBlendSpeed;
     float hysteresis;
     uint probeRelocationEnabled;
     float probeMinFrontfaceDistance;
@@ -61,7 +62,6 @@ cbuffer DdgiSettings : register(b1)
     float probeMaxRelocationDistance;
     float probeSettingsPad0;
     float probeSettingsPad1;
-    float probeSettingsPad2;
     float3 directLightDirection;
     float directLightPad0;
     float3 directLightColorIntensity;
@@ -189,16 +189,6 @@ float3 DdgiOctDecode(float2 f)
     return normalize(n);
 }
 
-float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
-{
-    float sample = float(rayIndex) + 0.5f;
-    float count = max(float(rayCount), 1.0f);
-    float cosTheta = 1.0f - 2.0f * sample / count;
-    float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
-    float phi = (float(rayIndex) * 2.39996322973f) + frac(float(probeIndex) * 0.61803398875f) * 2.0f * WOLF_PI;
-    return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
-}
-
 uint DdgiHash(uint3 v)
 {
     uint h = v.x * 747796405u + v.y * 2891336453u + v.z * 277803737u + frameIndex * 1597334677u;
@@ -206,15 +196,42 @@ uint DdgiHash(uint3 v)
     return (h >> 22u) ^ h;
 }
 
-float3 DdgiJitterDirection(float3 direction, uint2 pixel, uint probeIndex)
+float DdgiHashFloat(uint probeIndex, uint salt)
 {
-    uint h = DdgiHash(uint3(pixel, probeIndex));
-    float a = (float(h & 0xFFFFu) / 65535.0f) * 6.28318530718f;
-    float r = (float((h >> 16u) & 0xFFFFu) / 65535.0f) * 0.08f;
-    float3 helper = abs(direction.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
-    float3 tangent = normalize(cross(helper, direction));
-    float3 bitangent = cross(direction, tangent);
-    return normalize(direction + (cos(a) * tangent + sin(a) * bitangent) * r);
+    return (float(DdgiHash(uint3(probeIndex, salt, frameIndex))) + 0.5f) / 4294967296.0f;
+}
+
+float4 DdgiRayRotation(uint probeIndex)
+{
+    float u1 = DdgiHashFloat(probeIndex, 0x68bc21ebu);
+    float u2 = DdgiHashFloat(probeIndex, 0x02e5be93u);
+    float u3 = DdgiHashFloat(probeIndex, 0x967a889bu);
+    float sqrtOneMinusU1 = sqrt(saturate(1.0f - u1));
+    float sqrtU1 = sqrt(saturate(u1));
+    float angle2 = 2.0f * WOLF_PI * u2;
+    float angle3 = 2.0f * WOLF_PI * u3;
+    return float4(
+        sqrtOneMinusU1 * sin(angle2),
+        sqrtOneMinusU1 * cos(angle2),
+        sqrtU1 * sin(angle3),
+        sqrtU1 * cos(angle3));
+}
+
+float3 DdgiRotateDirection(float3 direction, float4 rotation)
+{
+    return direction +
+        2.0f * cross(rotation.xyz, cross(rotation.xyz, direction) + rotation.w * direction);
+}
+
+float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
+{
+    float sample = float(rayIndex) + 0.5f;
+    float count = max(float(rayCount), 1.0f);
+    float cosTheta = 1.0f - 2.0f * sample / count;
+    float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
+    float phi = float(rayIndex) * 2.39996322973f;
+    float3 baseDirection = float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+    return normalize(DdgiRotateDirection(baseDirection, DdgiRayRotation(probeIndex)));
 }
 
 float3 DdgiSampleSky(float3 direction)

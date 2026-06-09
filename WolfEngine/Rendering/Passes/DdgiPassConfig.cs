@@ -8,7 +8,8 @@ public readonly struct DdgiPassConfig
 {
 	public required IGfxPipeline TracePipeline { get; init; }
 	public required IGfxPipeline RelocatePipeline { get; init; }
-	public required IGfxPipeline IntegratePipeline { get; init; }
+	public required IGfxPipeline IrradianceIntegratePipeline { get; init; }
+	public required IGfxPipeline VisibilityIntegratePipeline { get; init; }
 	public required IGfxPipeline BorderUpdatePipeline { get; init; }
 	public required IGfxTopLevelAccelerationStructure TopLevelAccelerationStructure { get; init; }
 	public required DescriptorHandle TraceIrradianceHandle { get; init; }
@@ -35,6 +36,7 @@ public readonly struct DdgiPassConfig
 	public required IGfxBuffer InstanceIndexToInstanceHandleBuffer { get; init; }
 	public required IGfxBuffer PackedMeshVertexBuffer { get; init; }
 	public required IGfxBuffer PackedMeshIndexBuffer { get; init; }
+	public required IGfxBuffer IrradianceEstimatorBuffer { get; init; }
 	public required Int2 IrradianceAtlasSize { get; init; }
 	public required Int2 VisibilityAtlasSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
@@ -47,6 +49,7 @@ public readonly struct DdgiPassConfig
 	public required float MaxRayDistance { get; init; }
 	public required float NormalBias { get; init; }
 	public required float ViewBias { get; init; }
+	public required float IrradianceTemporalBlendSpeed { get; init; }
 	public required float Hysteresis { get; init; }
 	public required bool ProbeRelocationEnabled { get; init; }
 	public required float ProbeMinFrontfaceDistance { get; init; }

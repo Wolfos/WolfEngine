@@ -45,6 +45,7 @@ public sealed class RayTracingSceneResourcesTests
 		         {
 				         "ddgi_trace.compute.slang",
 				         "ddgi_relocate.compute.slang",
+				         "ddgi_irradiance_integrate.compute.slang",
 				         "ddgi_integrate.compute.slang",
 			         "ddgi_border_update.compute.slang"
 		         })
@@ -98,6 +99,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.2f));
 		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(6.0f));
 		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(6.0f));
+		Assert.That(ddgi.IrradianceTemporalBlendSpeed, Is.EqualTo(0.08f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.95f));
 		Assert.That(ddgi.ProbeRelocationEnabled, Is.True);
 		Assert.That(ddgi.ProbeMinFrontfaceDistance, Is.EqualTo(0.2f));
@@ -131,6 +133,7 @@ public sealed class RayTracingSceneResourcesTests
 					ViewBias = 0.4f,
 					HorizontalBlendDistance = 8.0f,
 					VerticalBlendDistance = 4.0f,
+					IrradianceTemporalBlendSpeed = 0.12f,
 					Hysteresis = 0.8f,
 					ProbeRelocationEnabled = false,
 					ProbeMinFrontfaceDistance = 0.3f,
@@ -159,6 +162,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.ViewBias, Is.EqualTo(0.4f));
 		Assert.That(ddgi.HorizontalBlendDistance, Is.EqualTo(8.0f));
 		Assert.That(ddgi.VerticalBlendDistance, Is.EqualTo(4.0f));
+		Assert.That(ddgi.IrradianceTemporalBlendSpeed, Is.EqualTo(0.12f));
 		Assert.That(ddgi.Hysteresis, Is.EqualTo(0.8f));
 		Assert.That(ddgi.ProbeRelocationEnabled, Is.False);
 		Assert.That(ddgi.ProbeMinFrontfaceDistance, Is.EqualTo(0.3f));
@@ -180,6 +184,20 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(DdgiUtilities.GetProbeUpdateFrameIndex(5, 0), Is.EqualTo(0));
 		Assert.That(DdgiUtilities.IsProbeActive(3, 0, 0, forceFullUpdate: false), Is.True);
 		Assert.That(DdgiUtilities.GetActiveProbeCount(17, 0, 0, forceFullUpdate: false), Is.EqualTo(17));
+	}
+
+	[TestCase(0, DdgiUtilities.IrradianceTileInteriorSize, 1)]
+	[TestCase(32, DdgiUtilities.IrradianceTileInteriorSize, 32)]
+	[TestCase(1024, DdgiUtilities.IrradianceTileInteriorSize, 64)]
+	[TestCase(1024, DdgiUtilities.VisibilityTileInteriorSize, 256)]
+	public void DdgiRaySampleCountDoesNotExceedTemporaryTileCapacity(
+		int requestedRayCount,
+		int tileInteriorSize,
+		int expectedRayCount)
+	{
+		Assert.That(
+			DdgiUtilities.GetRaySampleCount(requestedRayCount, tileInteriorSize),
+			Is.EqualTo(expectedRayCount));
 	}
 
 	[Test]
@@ -239,6 +257,111 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiIrradianceEstimatorUsesPackedDirectionStatePerProbe()
+	{
+		var shape = DdgiUtilities.GetGridShape(new DiffuseGlobalIlluminationConfig
+		{
+			ProbeCounts = new DdgiProbeCounts { X = 8, Y = 8, Z = 8 }
+		});
+
+		Assert.That(DdgiUtilities.IrradianceEstimatorDirectionCount, Is.EqualTo(64));
+		Assert.That(DdgiUtilities.IrradianceEstimatorStride, Is.EqualTo(16));
+		Assert.That(
+			DdgiUtilities.GetIrradianceEstimatorBufferSize(shape),
+			Is.EqualTo((ulong)shape.ProbeCount * 64UL * 16UL));
+	}
+
+	[Test]
+	public void RenderGraphRegistryMaterializesImportedBuffersAsGenericResources()
+	{
+		var registry = new RenderGraphResourceRegistry();
+		var buffer = new TestBuffer(BufferUsage.Structured);
+		var handle = registry.ImportBuffer(buffer, initialState: ResourceState.UnorderedAccess);
+
+		Assert.That(registry.GetResource(handle), Is.SameAs(buffer));
+		Assert.That(registry.GetResourceState(handle), Is.EqualTo(ResourceState.UnorderedAccess));
+	}
+
+	[TestCase(0.0f, 0.0f, 0.0f)]
+	[TestCase(1.0f, 0.25f, 8.0f)]
+	[TestCase(120.0f, 4.0f, 0.5f)]
+	public void DdgiEstimatorPackingRoundTripsHdrValues(float r, float g, float b)
+	{
+		var value = new Vector3(r, g, b);
+		var unpacked = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(value));
+		var tolerance = MathF.Max(0.002f, MathF.Max(r, MathF.Max(g, b)) / 256.0f);
+
+		Assert.That(unpacked.X, Is.EqualTo(r).Within(tolerance));
+		Assert.That(unpacked.Y, Is.EqualTo(g).Within(tolerance));
+		Assert.That(unpacked.Z, Is.EqualTo(b).Within(tolerance));
+
+		var halfValues = new Vector2(0.03125f + r * 0.001f, 1.0f + g * 0.001f);
+		var unpackedHalf = DdgiUtilities.UnpackHalf2(DdgiUtilities.PackHalf2(halfValues));
+		Assert.That(unpackedHalf.X, Is.EqualTo(halfValues.X).Within(0.002f));
+		Assert.That(unpackedHalf.Y, Is.EqualTo(halfValues.Y).Within(0.002f));
+	}
+
+	[Test]
+	public void DdgiEstimatorSuppressesSingleFireflyAndConvergesAfterLightingChange()
+	{
+		var stable = new Vector3(1.0f);
+		var state = new DdgiVarianceData(stable, stable, 0.0f, Vector3.Zero, 1.0f);
+		state = DdgiUtilities.UpdateVarianceEstimator(stable, state, 0.08f);
+		var beforeFirefly = state.Mean;
+		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(1000.0f), state, 0.08f);
+		Assert.That(state.Mean.X - beforeFirefly.X, Is.LessThan(0.1f));
+
+		for (var i = 0; i < 96; i++)
+		{
+			state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(4.0f), state, 0.08f);
+		}
+
+		Assert.That(state.Mean.X, Is.GreaterThan(2.5f));
+		Assert.That(state.Mean.X, Is.LessThanOrEqualTo(4.0f));
+	}
+
+	[Test]
+	public void DdgiEstimatorCapsAdaptiveCatchUpAtTwoPercentPerUpdate()
+	{
+		var state = new DdgiVarianceData(
+			Vector3.Zero,
+			new Vector3(10.0f),
+			1.0f,
+			new Vector3(100.0f),
+			10.0f);
+
+		var updated = DdgiUtilities.UpdateVarianceEstimator(new Vector3(10.0f), state, 0.08f);
+
+		Assert.That(updated.Mean.X, Is.EqualTo(0.2f).Within(1e-5f));
+		Assert.That(updated.Mean.Y, Is.EqualTo(0.2f).Within(1e-5f));
+		Assert.That(updated.Mean.Z, Is.EqualTo(0.2f).Within(1e-5f));
+	}
+
+	[Test]
+	public void DdgiEstimatorAlternatingNoiseCannotCauseLargeMeanJumps()
+	{
+		var state = new DdgiVarianceData(
+			new Vector3(5.0f),
+			new Vector3(5.0f),
+			1.0f,
+			new Vector3(25.0f),
+			10.0f);
+
+		for (var updateIndex = 0; updateIndex < 32; updateIndex++)
+		{
+			var sample = new Vector3(updateIndex % 2 == 0 ? 0.0f : 10.0f);
+			var previousMean = state.Mean;
+			state = DdgiUtilities.UpdateVarianceEstimator(sample, state, 0.08f);
+
+			var maximumAllowedMovement = Vector3.Abs(sample - previousMean) * 0.02f;
+			var actualMovement = Vector3.Abs(state.Mean - previousMean);
+			Assert.That(actualMovement.X, Is.LessThanOrEqualTo(maximumAllowedMovement.X + 1e-5f));
+			Assert.That(actualMovement.Y, Is.LessThanOrEqualTo(maximumAllowedMovement.Y + 1e-5f));
+			Assert.That(actualMovement.Z, Is.LessThanOrEqualTo(maximumAllowedMovement.Z + 1e-5f));
+		}
+	}
+
+	[Test]
 	public void DdgiL1ShReconstructsConstantRadianceForEveryNormal()
 	{
 		const int sampleCount = 4096;
@@ -288,6 +411,131 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(opposite.Z, Is.GreaterThan(0.0f));
 		Assert.That(opposite.X, Is.EqualTo(opposite.Y).Within(1e-6f));
 		Assert.That(opposite.Y, Is.EqualTo(opposite.Z).Within(1e-6f));
+	}
+
+	[Test]
+	public void DdgiVisibilityMomentsRemainDirectional()
+	{
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f), Is.LessThan(0.002f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.5f), Is.LessThan(1e-12f));
+	}
+
+	[Test]
+	public void DdgiVisibilityStronglyRejectsSamplesBehindOccluders()
+	{
+		const float meanDistance = 0.25f;
+		const float meanDistanceSquared = 0.065f;
+
+		Assert.That(
+			DdgiUtilities.EvaluateVisibility(meanDistance, meanDistanceSquared, 0.2f),
+			Is.EqualTo(1.0f));
+		Assert.That(
+			DdgiUtilities.EvaluateVisibility(meanDistance, meanDistanceSquared, 0.5f),
+			Is.LessThan(0.001f));
+	}
+
+	[Test]
+	public void DdgiRelocationNoNearbyHitsReturnsTowardRestPosition()
+	{
+		var target = DdgiUtilities.ComputeProbeRelocationTarget(
+			[new DdgiRelocationHit(Vector3.UnitX, 0.5f)],
+			keepDistance: 0.2f,
+			maxRelocationDistance: 0.9f);
+		var updated = DdgiUtilities.UpdateProbeRelocation(
+			new Vector3(0.5f, -0.25f, 0.1f),
+			target,
+			maxRelocationDistance: 0.9f,
+			active: true);
+
+		Assert.That(target, Is.EqualTo(Vector3.Zero));
+		AssertVector3(updated, new Vector3(0.495f, -0.2475f, 0.099f));
+	}
+
+	[Test]
+	public void DdgiRelocationCombinesAllNearbyHitsIntoFreshTarget()
+	{
+		var target = DdgiUtilities.ComputeProbeRelocationTarget(
+			[
+				new DdgiRelocationHit(Vector3.UnitX, 0.1f),
+				new DdgiRelocationHit(Vector3.UnitY, 0.05f),
+				new DdgiRelocationHit(Vector3.UnitZ, 0.3f),
+				new DdgiRelocationHit(-Vector3.UnitX, 0.0f, Valid: false)
+			],
+			keepDistance: 0.2f,
+			maxRelocationDistance: 0.9f);
+
+		AssertVector3(target, new Vector3(-0.1f, -0.15f, 0.0f));
+	}
+
+	[Test]
+	public void DdgiRelocationRepeatedBatchConvergesWithoutCumulativeDrift()
+	{
+		var target = DdgiUtilities.ComputeProbeRelocationTarget(
+			[new DdgiRelocationHit(Vector3.UnitX, 0.0f)],
+			keepDistance: 0.2f,
+			maxRelocationDistance: 0.9f);
+		var offset = Vector3.Zero;
+
+		for (var update = 0; update < 1000; update++)
+		{
+			offset = DdgiUtilities.UpdateProbeRelocation(offset, target, 0.9f, active: true);
+		}
+
+		AssertVector3(offset, new Vector3(-0.2f, 0.0f, 0.0f), 1e-4f);
+	}
+
+	[Test]
+	public void DdgiRelocationAlternatingTargetsCannotCauseLargeJumps()
+	{
+		var offset = Vector3.Zero;
+		var positiveTarget = new Vector3(0.9f, 0.0f, 0.0f);
+		var negativeTarget = -positiveTarget;
+
+		for (var update = 0; update < 64; update++)
+		{
+			var previous = offset;
+			var target = update % 2 == 0 ? positiveTarget : negativeTarget;
+			offset = DdgiUtilities.UpdateProbeRelocation(previous, target, 0.9f, active: true);
+
+			Assert.That(Vector3.Distance(previous, offset), Is.LessThanOrEqualTo(0.0091f));
+		}
+	}
+
+	[Test]
+	public void DdgiRelocationClampsTargetAndPersistentOffset()
+	{
+		var target = DdgiUtilities.ComputeProbeRelocationTarget(
+			[
+				new DdgiRelocationHit(-Vector3.UnitX, 0.0f),
+				new DdgiRelocationHit(-Vector3.UnitX, 0.0f),
+				new DdgiRelocationHit(-Vector3.UnitY, 0.0f)
+			],
+			keepDistance: 1.0f,
+			maxRelocationDistance: 0.25f);
+		var updated = DdgiUtilities.UpdateProbeRelocation(
+			new Vector3(10.0f, -10.0f, 10.0f),
+			target,
+			maxRelocationDistance: 0.25f,
+			active: true);
+
+		AssertVector3(target, new Vector3(0.25f, 0.25f, 0.0f));
+		Assert.That(updated.X, Is.InRange(-0.25f, 0.25f));
+		Assert.That(updated.Y, Is.InRange(-0.25f, 0.25f));
+		Assert.That(updated.Z, Is.InRange(-0.25f, 0.25f));
+	}
+
+	[Test]
+	public void DdgiRelocationInactiveProbePreservesPreviousOffset()
+	{
+		var previous = new Vector3(0.2f, -0.1f, 0.05f);
+		var updated = DdgiUtilities.UpdateProbeRelocation(
+			previous,
+			new Vector3(-0.9f),
+			maxRelocationDistance: 0.9f,
+			active: false);
+
+		Assert.That(updated, Is.EqualTo(previous));
 	}
 
 	[Test]
@@ -513,6 +761,13 @@ public sealed class RayTracingSceneResourcesTests
 		var sinTheta = MathF.Sqrt(MathF.Max(0.0f, 1.0f - cosTheta * cosTheta));
 		var phi = sampleIndex * goldenAngle;
 		return new Vector3(MathF.Cos(phi) * sinTheta, cosTheta, MathF.Sin(phi) * sinTheta);
+	}
+
+	private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 1e-6f)
+	{
+		Assert.That(actual.X, Is.EqualTo(expected.X).Within(tolerance));
+		Assert.That(actual.Y, Is.EqualTo(expected.Y).Within(tolerance));
+		Assert.That(actual.Z, Is.EqualTo(expected.Z).Within(tolerance));
 	}
 
 	private sealed class TestRenderer : IRenderer

@@ -177,20 +177,13 @@ float3 DdgiShadeHitSurface(DdgiHitSurface surface)
     float directWeight = saturate(dot(surface.worldNormal, lightDirection));
     float visibility = directWeight > 0.0f ? DdgiTraceDirectionalLightVisibility(surface.worldPosition, surface.worldNormal, lightDirection) : 0.0f;
     float3 directRadiance = directLightColorIntensity * directWeight * visibility;
-    float3 ambientRadiance = DdgiSampleSky(surface.worldNormal) * 0.08f;
-    return surface.albedo * (directRadiance + ambientRadiance) + surface.emissive;
+    return surface.albedo * directRadiance + surface.emissive;
 }
 
 DdgiTraceResult DdgiTraceRay(
     float3 originPosition,
-    float3 direction,
-    uint2 pixel,
-    uint probeIndex,
-    bool jitterDirection)
+    float3 rayDirection)
 {
-    float3 rayDirection = jitterDirection
-        ? DdgiJitterDirection(direction, pixel, probeIndex)
-        : direction;
     RayDesc ray;
     ray.Origin = originPosition + rayDirection * normalBias;
     ray.Direction = rayDirection;
@@ -261,10 +254,7 @@ void TraceIrradianceSample(uint2 pixel)
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
     DdgiTraceResult result = DdgiTraceRay(
         DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
-        direction,
-        pixel,
-        info.probeIndex,
-        true);
+        direction);
     target[pixel] = float4(result.radiance, 1.0f);
 }
 
@@ -294,10 +284,7 @@ void TraceVisibilitySample(uint2 pixel)
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
     DdgiTraceResult result = DdgiTraceRay(
         DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
-        direction,
-        pixel,
-        info.probeIndex,
-        false);
+        direction);
     float normalizedDistance = saturate(result.hitDistance / max(maxRayDistance, 0.001f));
     target[pixel] = float4(
         normalizedDistance,

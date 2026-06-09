@@ -10,23 +10,28 @@ public sealed class DdgiPass
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _tracePipeline;
 	private IGfxPipeline? _relocatePipeline;
-	private IGfxPipeline? _integratePipeline;
+	private IGfxPipeline? _irradianceIntegratePipeline;
+	private IGfxPipeline? _visibilityIntegratePipeline;
 	private IGfxPipeline? _borderUpdatePipeline;
 	private ReadOnlyMemory<byte> _traceShader;
 	private ReadOnlyMemory<byte> _relocateShader;
-	private ReadOnlyMemory<byte> _integrateShader;
+	private ReadOnlyMemory<byte> _irradianceIntegrateShader;
+	private ReadOnlyMemory<byte> _visibilityIntegrateShader;
 	private ReadOnlyMemory<byte> _borderUpdateShader;
 	private ComputeThreadGroupSize? _traceThreadGroupSize;
 	private ComputeThreadGroupSize? _relocateThreadGroupSize;
-	private ComputeThreadGroupSize? _integrateThreadGroupSize;
+	private ComputeThreadGroupSize? _irradianceIntegrateThreadGroupSize;
+	private ComputeThreadGroupSize? _visibilityIntegrateThreadGroupSize;
 	private ComputeThreadGroupSize? _borderUpdateThreadGroupSize;
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _traceBindlessWriter;
 	private ShaderPropertyWriter? _traceSettingsWriter;
 	private ShaderPropertyWriter? _relocateBindlessWriter;
 	private ShaderPropertyWriter? _relocateSettingsWriter;
-	private ShaderPropertyWriter? _integrateBindlessWriter;
-	private ShaderPropertyWriter? _integrateSettingsWriter;
+	private ShaderPropertyWriter? _irradianceIntegrateBindlessWriter;
+	private ShaderPropertyWriter? _irradianceIntegrateSettingsWriter;
+	private ShaderPropertyWriter? _visibilityIntegrateBindlessWriter;
+	private ShaderPropertyWriter? _visibilityIntegrateSettingsWriter;
 	private ShaderPropertyWriter? _borderBindlessWriter;
 	private ShaderPropertyWriter? _borderSettingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
@@ -95,7 +100,7 @@ public sealed class DdgiPass
 			probeUpdateFrames,
 			probeUpdateFrameIndex,
 			forceFullProbeUpdate);
-		var raysPerProbe = Math.Max(config.RaysPerProbe, 1);
+		var raysPerProbe = Math.Clamp(config.RaysPerProbe, 1, DdgiUtilities.MaxRaySamplesPerProbe);
 		LastStats = new DdgiPassStats(
 			probeUpdateFrames,
 			activeProbeCount,
@@ -107,7 +112,8 @@ public sealed class DdgiPass
 		{
 			TracePipeline = _tracePipeline!,
 			RelocatePipeline = _relocatePipeline!,
-			IntegratePipeline = _integratePipeline!,
+			IrradianceIntegratePipeline = _irradianceIntegratePipeline!,
+			VisibilityIntegratePipeline = _visibilityIntegratePipeline!,
 			BorderUpdatePipeline = _borderUpdatePipeline!,
 			TopLevelAccelerationStructure = rayTracingSceneResources.TopLevelAccelerationStructure,
 			TraceIrradianceHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiTraceIrradiance)),
@@ -136,6 +142,7 @@ public sealed class DdgiPass
 			InstanceIndexToInstanceHandleBuffer = rayTracingSceneResources.InstanceIndexToInstanceHandleBuffer,
 			PackedMeshVertexBuffer = renderer.GetPackedMeshVertexBuffer() ?? throw new InvalidOperationException("Packed mesh vertex buffer missing."),
 			PackedMeshIndexBuffer = renderer.GetPackedMeshIndexBuffer() ?? throw new InvalidOperationException("Packed mesh index buffer missing."),
+			IrradianceEstimatorBuffer = context.GetBuffer(resources.DdgiIrradianceEstimator),
 			IrradianceAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.IrradianceTileInteriorSize),
 			VisibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize),
 			GridShape = gridShape,
@@ -148,6 +155,7 @@ public sealed class DdgiPass
 			MaxRayDistance = DdgiUtilities.GetMaxRayDistance(config),
 			NormalBias = Math.Max(config.NormalBias, 0.0f),
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
+			IrradianceTemporalBlendSpeed = Math.Clamp(config.IrradianceTemporalBlendSpeed, 1.0f / 256.0f, 1.0f),
 			Hysteresis = Math.Clamp(config.Hysteresis, 0.0f, 0.9999f),
 			ProbeRelocationEnabled = config.ProbeRelocationEnabled,
 			ProbeMinFrontfaceDistance = Math.Max(config.ProbeMinFrontfaceDistance, 0.0f),
@@ -183,13 +191,23 @@ public sealed class DdgiPass
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
-	public void RecordIntegrate(RenderGraphContext context, in DdgiPassConfig config)
+	public void RecordIrradianceIntegrate(RenderGraphContext context, in DdgiPassConfig config)
 	{
 		var commandList = context.CommandList;
-		commandList.BindPipeline(config.IntegratePipeline);
-		WriteBindlessConstants(_integrateBindlessWriter, commandList, config);
-		WriteSettingsConstants(_integrateSettingsWriter, commandList, config);
-		var threadGroupSize = _integrateThreadGroupSize ?? throw new InvalidOperationException("DDGI integrate threadgroup size was not initialized.");
+		commandList.BindPipeline(config.IrradianceIntegratePipeline);
+		WriteBindlessConstants(_irradianceIntegrateBindlessWriter, commandList, config);
+		WriteSettingsConstants(_irradianceIntegrateSettingsWriter, commandList, config);
+		commandList.SetComputeBuffer(2, config.IrradianceEstimatorBuffer);
+		commandList.Dispatch((uint)config.GridShape.ProbeCount, 1, 1);
+	}
+
+	public void RecordVisibilityIntegrate(RenderGraphContext context, in DdgiPassConfig config)
+	{
+		var commandList = context.CommandList;
+		commandList.BindPipeline(config.VisibilityIntegratePipeline);
+		WriteBindlessConstants(_visibilityIntegrateBindlessWriter, commandList, config);
+		WriteSettingsConstants(_visibilityIntegrateSettingsWriter, commandList, config);
+		var threadGroupSize = _visibilityIntegrateThreadGroupSize ?? throw new InvalidOperationException("DDGI visibility integrate threadgroup size was not initialized.");
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)config.VisibilityAtlasSize.X,
 			(uint)config.VisibilityAtlasSize.Y);
@@ -271,6 +289,7 @@ public sealed class DdgiPass
 		settingsWriter.SetFloat("maxRayDistance", config.MaxRayDistance);
 		settingsWriter.SetFloat("normalBias", config.NormalBias);
 		settingsWriter.SetFloat("viewBias", config.ViewBias);
+		settingsWriter.SetFloat("irradianceTemporalBlendSpeed", config.IrradianceTemporalBlendSpeed);
 		settingsWriter.SetFloat("hysteresis", config.Hysteresis);
 		settingsWriter.SetUInt("probeRelocationEnabled", config.ProbeRelocationEnabled ? 1u : 0u);
 		settingsWriter.SetFloat("probeMinFrontfaceDistance", config.ProbeMinFrontfaceDistance);
@@ -313,7 +332,8 @@ public sealed class DdgiPass
 	{
 		if (_tracePipeline is not null &&
 		    _relocatePipeline is not null &&
-		    _integratePipeline is not null &&
+		    _irradianceIntegratePipeline is not null &&
+		    _visibilityIntegratePipeline is not null &&
 		    _borderUpdatePipeline is not null)
 		{
 			if (_compiledBackendKind.HasValue && _compiledBackendKind.Value != device.BackendKind)
@@ -331,27 +351,33 @@ public sealed class DdgiPass
 
 		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSMain", device.BackendKind);
 		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "CSMain", device.BackendKind);
-		var integrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "CSMain", device.BackendKind);
+		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_irradiance_integrate.compute.slang", "CSMain", device.BackendKind);
+		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "CSMain", device.BackendKind);
 		var border = _shaderCompiler.GetComputeShaderWithReflection("ddgi_border_update.compute.slang", "CSMain", device.BackendKind);
 		_traceShader = trace.Bytecode;
 		_relocateShader = relocate.Bytecode;
-		_integrateShader = integrate.Bytecode;
+		_irradianceIntegrateShader = irradianceIntegrate.Bytecode;
+		_visibilityIntegrateShader = visibilityIntegrate.Bytecode;
 		_borderUpdateShader = border.Bytecode;
 		_traceThreadGroupSize = trace.ThreadGroupSize;
 		_relocateThreadGroupSize = relocate.ThreadGroupSize;
-		_integrateThreadGroupSize = integrate.ThreadGroupSize;
+		_irradianceIntegrateThreadGroupSize = irradianceIntegrate.ThreadGroupSize;
+		_visibilityIntegrateThreadGroupSize = visibilityIntegrate.ThreadGroupSize;
 		_borderUpdateThreadGroupSize = border.ThreadGroupSize;
 		_traceBindlessWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_traceSettingsWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_relocateBindlessWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_relocateSettingsWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
-		_integrateBindlessWriter = new ShaderPropertyWriter(integrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
-		_integrateSettingsWriter = new ShaderPropertyWriter(integrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_irradianceIntegrateBindlessWriter = new ShaderPropertyWriter(irradianceIntegrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_irradianceIntegrateSettingsWriter = new ShaderPropertyWriter(irradianceIntegrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_visibilityIntegrateBindlessWriter = new ShaderPropertyWriter(visibilityIntegrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_visibilityIntegrateSettingsWriter = new ShaderPropertyWriter(visibilityIntegrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_borderBindlessWriter = new ShaderPropertyWriter(border.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_borderSettingsWriter = new ShaderPropertyWriter(border.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_tracePipeline = CreatePipeline(device, "ddgi_trace.compute.slang", _traceShader, _traceThreadGroupSize);
 		_relocatePipeline = CreatePipeline(device, "ddgi_relocate.compute.slang", _relocateShader, _relocateThreadGroupSize);
-		_integratePipeline = CreatePipeline(device, "ddgi_integrate.compute.slang", _integrateShader, _integrateThreadGroupSize);
+		_irradianceIntegratePipeline = CreatePipeline(device, "ddgi_irradiance_integrate.compute.slang", _irradianceIntegrateShader, _irradianceIntegrateThreadGroupSize);
+		_visibilityIntegratePipeline = CreatePipeline(device, "ddgi_integrate.compute.slang", _visibilityIntegrateShader, _visibilityIntegrateThreadGroupSize);
 		_borderUpdatePipeline = CreatePipeline(device, "ddgi_border_update.compute.slang", _borderUpdateShader, _borderUpdateThreadGroupSize);
 		_compiledBackendKind = device.BackendKind;
 	}

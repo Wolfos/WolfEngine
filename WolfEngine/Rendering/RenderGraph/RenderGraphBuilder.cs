@@ -30,6 +30,18 @@ public sealed class RenderGraphBuilder
 		return this;
 	}
 
+	public RenderGraphBuilder ReadBuffer(RenderGraphResourceHandle handle, ResourceState state = ResourceState.ShaderResource)
+	{
+		_pass.AddRead(handle, state);
+		return this;
+	}
+
+	public RenderGraphBuilder WriteBuffer(RenderGraphResourceHandle handle, ResourceState state = ResourceState.UnorderedAccess)
+	{
+		_pass.AddWrite(handle, state);
+		return this;
+	}
+
 	public void SetExecute(Action<RenderGraphContext> execute)
 	{
 		_pass.SetExecute(execute);

@@ -196,16 +196,16 @@ public sealed class RenderGraph
 		{
 			using (FrameProfiler.Instance.Measure($"Pass: {pass.Name}"))
 			{
-				// Materialize resources used by this pass
-				for (var i = 0; i < pass.Reads.Count; i++)
-				{
-					_resourceRegistry.GetTexture(pass.Reads[i]);
-				}
+					// Materialize resources used by this pass
+					for (var i = 0; i < pass.Reads.Count; i++)
+					{
+						_resourceRegistry.GetResource(pass.Reads[i]);
+					}
 
-				for (var i = 0; i < pass.Writes.Count; i++)
-				{
-					_resourceRegistry.GetTexture(pass.Writes[i]);
-				}
+					for (var i = 0; i < pass.Writes.Count; i++)
+					{
+						_resourceRegistry.GetResource(pass.Writes[i]);
+					}
 
 				// Create command list for this pass based on its kind
 				var commandList = pass.Kind == PassKind.Graphics

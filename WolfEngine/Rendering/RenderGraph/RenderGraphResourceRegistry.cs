@@ -264,6 +264,23 @@ public sealed class RenderGraphResourceRegistry
 		return handle;
 	}
 
+	public RenderGraphResourceHandle ImportBuffer(
+		IGfxBuffer buffer,
+		bool takeOwnership = false,
+		ResourceState initialState = ResourceState.Common)
+	{
+		if (buffer is null)
+		{
+			throw new ArgumentNullException(nameof(buffer));
+		}
+
+		var handle = new RenderGraphResourceHandle(_nextHandleId++);
+		var record = _bufferRecordPool.Count > 0 ? _bufferRecordPool.Pop() : new BufferRecord();
+		record.Initialize(buffer.Descriptor, takeOwnership, buffer, initialState);
+		_buffers[handle.Id] = record;
+		return handle;
+	}
+
 	internal void AssignTransientTextureSlots(IReadOnlyDictionary<int, int> handleToSlotAssignments)
 	{
 		var slotCompatibility = new Dictionary<int, TexturePoolKey>();

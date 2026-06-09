@@ -18,6 +18,9 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiVisibilityHandle;
     uint ddgiProbeStateHandle;
     uint ddgiFinalContributionHandle;
+    uint ddgiProbeBaseWeightDebugHandle;
+    uint ddgiWeightedVisibilityDebugHandle;
+    uint ddgiDominantProbeDebugHandle;
     uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
@@ -141,8 +144,18 @@ float DdgiGridInfluence(float3 worldPos)
     return min(horizontalInfluence, verticalInfluence);
 }
 
-float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float gridInfluence)
+float3 SampleDdgi(
+    float3 worldPos,
+    float3 normal,
+    uint samplerHandle,
+    float gridInfluence,
+    out float debugBaseWeight,
+    out float debugWeightedVisibility,
+    out float3 debugDominantProbe)
 {
+    debugBaseWeight = 0.0f;
+    debugWeightedVisibility = 0.0f;
+    debugDominantProbe = 0.0f.xxx;
     if (gridInfluence <= 0.0f)
     {
         return 0.0f.xxx;
@@ -170,7 +183,10 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
     float3 coefficientLy = 0.0f.xxx;
     float3 coefficientLz = 0.0f.xxx;
     float3 coefficientLx = 0.0f.xxx;
+    float baseWeightSum = 0.0f;
     float weightSum = 0.0f;
+    float dominantProbeWeight = 0.0f;
+    uint dominantProbeIndex = 0u;
     for (uint z = 0u; z <= 1u; z++)
     {
         for (uint y = 0u; y <= 1u; y++)
@@ -203,8 +219,15 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
                 float variance = max(meanDistanceSquared - meanDistance * meanDistance, 0.0004f);
                 float distanceDelta = max(normalizedDistance - meanDistance, 0.0f);
                 float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
+                chebyshevVisibility = chebyshevVisibility * chebyshevVisibility * chebyshevVisibility;
                 float visibility = normalizedDistance <= meanDistance ? 1.0f : saturate(chebyshevVisibility);
                 float probeWeight = weight * visibility;
+                baseWeightSum += weight;
+                if (probeWeight > dominantProbeWeight)
+                {
+                    dominantProbeWeight = probeWeight;
+                    dominantProbeIndex = probeIndex;
+                }
                 uint2 coefficientPixel = uint2(probeIndex % ddgiAtlasColumns, probeIndex / ddgiAtlasColumns);
                 coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
                 coefficientLy += irradianceLyTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
@@ -217,8 +240,21 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
 
     if (weightSum <= 1e-5f)
     {
+        debugBaseWeight = saturate(baseWeightSum);
         return 0.0f.xxx;
     }
+
+    debugBaseWeight = saturate(baseWeightSum);
+    debugWeightedVisibility = saturate(weightSum / max(baseWeightSum, 1e-5f));
+    uint probeHash = dominantProbeIndex * 747796405u + 2891336453u;
+    probeHash = ((probeHash >> ((probeHash >> 28u) + 4u)) ^ probeHash) * 277803737u;
+    probeHash = (probeHash >> 22u) ^ probeHash;
+    float3 probeColor = float3(
+        float(probeHash & 0xffu),
+        float((probeHash >> 8u) & 0xffu),
+        float((probeHash >> 16u) & 0xffu)) / 255.0f;
+    probeColor = 0.25f.xxx + 0.75f * probeColor;
+    debugDominantProbe = probeColor * saturate(dominantProbeWeight / weightSum);
 
     float inverseWeight = rcp(weightSum);
     coefficientL0 *= inverseWeight;
@@ -243,10 +279,11 @@ float3 SampleDdgi(float3 worldPos, float3 normal, uint samplerHandle, float grid
         dc * DDGI_SH_DIRECTIONAL_LIMIT / max(directionalAmplitude, 1e-5f.xxx),
         1.0f.xxx);
     float lobeScale = min(1.0f, min(channelScale.x, min(channelScale.y, channelScale.z)));
-    float3 irradiance = dc + lobeScale * (
+    float3 signedDirectional = lobeScale * (
         directionalY * normal.y +
         directionalZ * normal.z +
         directionalX * normal.x);
+    float3 irradiance = dc + signedDirectional;
     return max(irradiance, 0.0f.xxx);
 }
 
@@ -301,6 +338,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
         float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
+        if (ddgiEnabled != 0u)
+        {
+            GetRWTexture(ddgiProbeBaseWeightDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            GetRWTexture(ddgiWeightedVisibilityDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            GetRWTexture(ddgiDominantProbeDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        }
         lightingTarget[dispatchThreadId.xy] = float4(skyColor, 1.0f);
         return;
     }
@@ -363,12 +406,28 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float ddgiGridInfluence = DdgiGridInfluence(absoluteWorldPos);
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
     float3 diffuseEnergy = (1.0f - metallic) * (1.0f - F0);
-    float3 ddgiContribution = SampleDdgi(absoluteWorldPos, normal, samplerHandle, ddgiGridInfluence) * diffuseEnergy * albedo * occlusion;
+    float ddgiBaseWeightDebug;
+    float ddgiWeightedVisibilityDebug;
+    float3 ddgiDominantProbeDebug;
+    float3 ddgiContribution = SampleDdgi(
+        absoluteWorldPos,
+        normal,
+        samplerHandle,
+        ddgiGridInfluence,
+        ddgiBaseWeightDebug,
+        ddgiWeightedVisibilityDebug,
+        ddgiDominantProbeDebug) * diffuseEnergy * albedo * occlusion;
     color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + skySpecularContribution;
     if (ddgiEnabled != 0u && ddgiProbeCount != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
         ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution * ddgiGridInfluence, 1.0f);
+        GetRWTexture(ddgiProbeBaseWeightDebugHandle)[dispatchThreadId.xy] =
+            float4(ddgiBaseWeightDebug.xxx, 1.0f);
+        GetRWTexture(ddgiWeightedVisibilityDebugHandle)[dispatchThreadId.xy] =
+            float4(ddgiWeightedVisibilityDebug.xxx, 1.0f);
+        GetRWTexture(ddgiDominantProbeDebugHandle)[dispatchThreadId.xy] =
+            float4(ddgiDominantProbeDebug, 1.0f);
     }
     color += surface.emissive;
 

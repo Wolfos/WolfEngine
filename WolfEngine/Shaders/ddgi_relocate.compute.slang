@@ -1,6 +1,8 @@
 import "common_bindless.slang";
 import "ddgi_common.slang";
 
+static const float DDGI_RELOCATION_BLEND = 0.01f;
+
 float3 DdgiClampProbeOffset(float3 offset)
 {
     float maxOffset = max(probeMaxRelocationDistance, 0.0f);
@@ -38,11 +40,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     Texture2D<float4> traceVisibilityTex = GetTexture(traceVisibilityReadHandle);
     uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
-    uint backfaceHitCount = 0u;
-    float closestFrontfaceDistance = maxRayDistance;
-    float closestBackfaceDistance = maxRayDistance;
-    float3 closestFrontfaceDirection = 0.0f.xxx;
-    float3 closestBackfaceDirection = 0.0f.xxx;
+    float keepDistance = max(probeMinFrontfaceDistance, 0.0f);
+    float3 targetOffset = 0.0f.xxx;
 
     for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
     {
@@ -54,34 +53,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         float distance = sampleValue.x * max(maxRayDistance, 0.001f);
-        float3 direction = DdgiRayDirection(rayIndex, rayCount, probeIndex);
-        if (sampleValue.w >= 0.5f)
+        if (distance < keepDistance)
         {
-            backfaceHitCount++;
-            if (distance < closestBackfaceDistance)
-            {
-                closestBackfaceDistance = distance;
-                closestBackfaceDirection = direction;
-            }
-        }
-        else if (distance < closestFrontfaceDistance)
-        {
-            closestFrontfaceDistance = distance;
-            closestFrontfaceDirection = direction;
+            float3 direction = DdgiRayDirection(rayIndex, rayCount, probeIndex);
+            targetOffset -= direction * (keepDistance - distance);
         }
     }
 
-    float3 requestedOffset = previousOffset;
-    float backfaceRatio = float(backfaceHitCount) / float(max(rayCount, 1u));
-    bool insideGeometry = backfaceRatio > probeBackfaceThreshold;
-    if (insideGeometry && closestBackfaceDistance < maxRayDistance)
-    {
-        requestedOffset += closestBackfaceDirection * (closestBackfaceDistance + probeMinFrontfaceDistance);
-    }
-    else if (closestFrontfaceDistance < probeMinFrontfaceDistance)
-    {
-        requestedOffset -= closestFrontfaceDirection * (probeMinFrontfaceDistance - closestFrontfaceDistance);
-    }
-
-    stateWriteTex[statePixel] = float4(DdgiClampProbeOffset(requestedOffset), 0.0f);
+    targetOffset = DdgiClampProbeOffset(targetOffset);
+    float3 smoothedOffset = lerp(previousOffset, targetOffset, DDGI_RELOCATION_BLEND);
+    stateWriteTex[statePixel] = float4(DdgiClampProbeOffset(smoothedOffset), 0.0f);
 }
