@@ -149,7 +149,7 @@ void CSMain(
         return;
     }
 
-    if (!DdgiIsProbeActive(probeIndex))
+    if (!DdgiIsProbeUpdateActive(probeIndex))
     {
         if (groupIndex == 0u)
         {
@@ -163,7 +163,7 @@ void CSMain(
     float3 currentRadiance = IntegrateDirection(probeIndex, direction);
     uint estimatorIndex = DdgiPhysicalProbeIndex(probeIndex) * DDGI_DIRECTION_COUNT + groupIndex;
     DdgiVarianceData varianceData;
-    if (!DdgiProbeHasHistory(probeIndex))
+    if (!DdgiProbeHasUsableHistory(probeIndex))
     {
         varianceData = (DdgiVarianceData)0;
         varianceData.mean = currentRadiance;

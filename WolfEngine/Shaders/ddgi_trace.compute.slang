@@ -252,7 +252,7 @@ void TraceIrradianceSample(uint2 pixel)
         target[pixel] = 0.0f.xxxx;
         return;
     }
-    if (!DdgiIsProbeActive(info.probeIndex))
+    if (!DdgiIsProbeUpdateActive(info.probeIndex))
     {
         target[pixel] = 0.0f.xxxx;
         return;
@@ -282,7 +282,7 @@ void TraceVisibilitySample(uint2 pixel)
         target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
         return;
     }
-    if (!DdgiIsProbeActive(info.probeIndex))
+    if (!DdgiIsProbeUpdateActive(info.probeIndex))
     {
         target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
         return;

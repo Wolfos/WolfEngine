@@ -28,6 +28,8 @@ cbuffer BindlessHandles : register(b0)
     uint visibilityHistoryWriteHandle;
     uint probeStateReadHandle;
     uint probeStateWriteHandle;
+    uint probeActivityReadHandle;
+    uint probeActivityWriteHandle;
     uint environmentHandle;
     uint samplerHandle;
 };
@@ -80,7 +82,7 @@ cbuffer DdgiSettings : register(b1)
     uint frameIndex;
     uint historyValid;
     uint sidecarHitShadingAvailable;
-    uint settingsPad0;
+    uint activeDrawCommandUpperBound;
 };
 
 struct DdgiTexelInfo
@@ -169,6 +171,23 @@ float4 DdgiLoadProbeState(uint handle, uint probeIndex)
     return stateTex.Load(int3(DdgiProbeStatePixel(probeIndex), 0));
 }
 
+bool DdgiIsProbeEnabled(uint logicalProbeIndex)
+{
+    Texture2D<float4> activityTex = GetTexture(probeActivityReadHandle);
+    return activityTex.Load(int3(DdgiProbeStatePixel(logicalProbeIndex), 0)).x > 0.5f;
+}
+
+bool DdgiWasProbeEnabled(uint logicalProbeIndex)
+{
+    return DdgiProbeHasHistory(logicalProbeIndex) &&
+        DdgiLoadProbeState(probeStateReadHandle, logicalProbeIndex).w > 0.5f;
+}
+
+bool DdgiProbeHasUsableHistory(uint logicalProbeIndex)
+{
+    return DdgiWasProbeEnabled(logicalProbeIndex);
+}
+
 float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle)
 {
     if (!DdgiProbeHasHistory(probeIndex) || probeRelocationEnabled == 0u)
@@ -193,12 +212,18 @@ uint DdgiRaySampleCount(uint interiorSize)
     return min(max(raysPerProbe, 1u), interiorSize * interiorSize);
 }
 
-bool DdgiIsProbeActive(uint probeIndex)
+bool DdgiIsProbeUpdateActive(uint probeIndex)
 {
+    if (!DdgiIsProbeEnabled(probeIndex))
+    {
+        return false;
+    }
+
     uint updateFrames = max(probeUpdateFrames, 1u);
     return forceFullProbeUpdate != 0u ||
         historyValid == 0u ||
         !DdgiProbeHasHistory(probeIndex) ||
+        !DdgiWasProbeEnabled(probeIndex) ||
         updateFrames == 1u ||
         (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
 }
@@ -334,7 +359,7 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 }
 
                 uint probeIndex = uint(coord.x) + uint(coord.y) * probeCountX + uint(coord.z) * probeCountX * probeCountY;
-                if (!DdgiProbeHasHistory(probeIndex))
+                if (!DdgiProbeHasUsableHistory(probeIndex) || !DdgiIsProbeEnabled(probeIndex))
                 {
                     continue;
                 }

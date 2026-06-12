@@ -81,6 +81,9 @@ public sealed class DeferredLightingPass
 		var ddgiProbeState = resources.DdgiProbeStateRead.IsValid
 			? context.GetTexture(resources.DdgiProbeStateRead)
 			: null;
+		var ddgiProbeActivity = resources.DdgiProbeActivity.IsValid
+			? context.GetTexture(resources.DdgiProbeActivity)
+			: null;
 		var ddgiFinalContribution = resources.DdgiFinalContribution.IsValid
 			? context.GetTexture(resources.DdgiFinalContribution)
 			: null;
@@ -119,7 +122,8 @@ public sealed class DeferredLightingPass
 		                  ddgiIrradianceLz is not null &&
 		                  ddgiIrradianceLx is not null &&
 		                  ddgiVisibility is not null &&
-		                  ddgiProbeState is not null;
+		                  ddgiProbeState is not null &&
+		                  ddgiProbeActivity is not null;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
 
 		return new DeferredLightingPassConfig
@@ -137,6 +141,7 @@ public sealed class DeferredLightingPass
 			DdgiIrradianceLx = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLx),
 			DdgiVisibility = _bindlessRegistry.GetTextureHandle(ddgiVisibility),
 			DdgiProbeState = _bindlessRegistry.GetTextureHandle(ddgiProbeState),
+			DdgiProbeActivity = _bindlessRegistry.GetTextureHandle(ddgiProbeActivity),
 			DdgiFinalContribution = ddgiFinalContribution is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiFinalContribution)
 				: DescriptorHandle.Invalid,
@@ -225,6 +230,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ddgiIrradianceLxHandle", config.DdgiIrradianceLx.Value);
 		bindlessWriter.SetUInt("ddgiVisibilityHandle", config.DdgiVisibility.Value);
 		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
+		bindlessWriter.SetUInt("ddgiProbeActivityHandle", config.DdgiProbeActivity.Value);
 		bindlessWriter.SetUInt("ddgiFinalContributionHandle", config.DdgiFinalContribution.Value);
 		bindlessWriter.SetUInt("ddgiProbeBaseWeightDebugHandle", config.DdgiProbeBaseWeightDebug.Value);
 		bindlessWriter.SetUInt("ddgiWeightedVisibilityDebugHandle", config.DdgiWeightedVisibilityDebug.Value);

@@ -8,7 +8,7 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
     {
         return float4(1.0f, 1.0f, 0.0f, 1.0f);
     }
-    if (!DdgiIsProbeActive(info.probeIndex))
+    if (!DdgiIsProbeUpdateActive(info.probeIndex))
     {
         Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
         return historyTex.Load(int3(pixel, 0));
@@ -55,7 +55,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
         float4 traceValue = IntegrateVisibilityTexel(pixel);
         float4 historyValue = historyTex.Load(int3(pixel, 0));
-        float historyWeight = info.valid && DdgiProbeHasHistory(info.probeIndex) ? hysteresis : 0.0f;
+        float historyWeight = info.valid && DdgiProbeHasUsableHistory(info.probeIndex) ? hysteresis : 0.0f;
         outputTex[pixel] = lerp(traceValue, historyValue, historyWeight);
     }
 }

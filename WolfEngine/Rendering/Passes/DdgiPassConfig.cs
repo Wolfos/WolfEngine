@@ -7,6 +7,7 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct DdgiPassConfig
 {
 	public required IGfxPipeline TracePipeline { get; init; }
+	public required IGfxPipeline ClassifyPipeline { get; init; }
 	public required IGfxPipeline RelocatePipeline { get; init; }
 	public required IGfxPipeline IrradianceIntegratePipeline { get; init; }
 	public required IGfxPipeline VisibilityIntegratePipeline { get; init; }
@@ -28,9 +29,12 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle VisibilityHistoryWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateReadHandle { get; init; }
 	public required DescriptorHandle ProbeStateWriteHandle { get; init; }
+	public required DescriptorHandle ProbeActivityReadHandle { get; init; }
+	public required DescriptorHandle ProbeActivityWriteHandle { get; init; }
 	public required DescriptorHandle EnvironmentHandle { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }
+	public required IGfxBuffer DrawCommandBuffer { get; init; }
 	public required IGfxBuffer MaterialBuffer { get; init; }
 	public required IGfxBuffer MeshBuffer { get; init; }
 	public required IGfxBuffer InstanceIndexToInstanceHandleBuffer { get; init; }
@@ -48,6 +52,7 @@ public readonly struct DdgiPassConfig
 	public required int ProbeUpdateFrames { get; init; }
 	public required int ProbeUpdateFrameIndex { get; init; }
 	public required int ActiveProbeCount { get; init; }
+	public required uint ActiveDrawCommandUpperBound { get; init; }
 	public required float MaxRayDistance { get; init; }
 	public required float NormalBias { get; init; }
 	public required float ViewBias { get; init; }

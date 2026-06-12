@@ -43,6 +43,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		         {
+				         "ddgi_classify.compute.slang",
 				         "ddgi_trace.compute.slang",
 				         "ddgi_relocate.compute.slang",
 				         "ddgi_irradiance_integrate.compute.slang",
@@ -66,6 +67,71 @@ public sealed class RayTracingSceneResourcesTests
 				Is.EqualTo(ShaderConstantFieldValueKind.Int),
 				shader);
 		}
+	}
+
+	[TestCase(0.0f, 0.0f, 0.25f, true)]
+	[TestCase(2.0f, 0.0f, 0.25f, false)]
+	[TestCase(1.25f, 0.0f, 0.25f, true)]
+	[TestCase(3.0f, 0.0f, 2.0f, true)]
+	[TestCase(1.15f, 1.2f, 0.26f, true)]
+	public void DdgiProbeInfluenceUsesConservativeSphereAabbIntersection(
+		float sphereCenterX,
+		float sphereCenterY,
+		float sphereRadius,
+		bool expected)
+	{
+		Assert.That(
+			DdgiUtilities.SphereIntersectsProbeInfluence(
+				new Vector3(sphereCenterX, sphereCenterY, 0.0f),
+				sphereRadius,
+				Vector3.Zero,
+				influenceHalfExtent: 1.0f),
+			Is.EqualTo(expected));
+	}
+
+	[Test]
+	public void DdgiProbeInfluenceExpandsByViewBias()
+	{
+		Assert.That(DdgiUtilities.GetProbeInfluenceHalfExtent(2.0f, 0.25f), Is.EqualTo(2.25f));
+		Assert.That(DdgiUtilities.GetProbeInfluenceHalfExtent(0.0f, -1.0f), Is.EqualTo(0.001f));
+		Assert.That(
+			DdgiUtilities.SphereIntersectsProbeInfluence(
+				new Vector3(2.2f, 0.0f, 0.0f),
+				0.01f,
+				Vector3.Zero,
+				DdgiUtilities.GetProbeInfluenceHalfExtent(2.0f, 0.0f)),
+			Is.False);
+		Assert.That(
+			DdgiUtilities.SphereIntersectsProbeInfluence(
+				new Vector3(2.2f, 0.0f, 0.0f),
+				0.01f,
+				Vector3.Zero,
+				DdgiUtilities.GetProbeInfluenceHalfExtent(2.0f, 0.25f)),
+			Is.True);
+	}
+
+	[TestCase(false, false, true, 1, false)]
+	[TestCase(true, false, true, 1, true)]
+	[TestCase(true, true, false, 1, true)]
+	[TestCase(true, true, true, 1, false)]
+	[TestCase(true, true, true, 2, true)]
+	public void DdgiGeometryAwareSchedulingHandlesEnableTransitions(
+		bool enabled,
+		bool previouslyEnabled,
+		bool hasHistory,
+		int frameSlot,
+		bool expected)
+	{
+		Assert.That(
+			DdgiUtilities.IsProbeUpdateActive(
+				probeIndex: 2,
+				probeUpdateFrames: 4,
+				probeUpdateFrameIndex: frameSlot,
+				forceFullUpdate: false,
+				enabled: enabled,
+				previouslyEnabled: previouslyEnabled,
+				hasHistory: hasHistory),
+			Is.EqualTo(expected));
 	}
 
 	[Test]

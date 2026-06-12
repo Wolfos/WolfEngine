@@ -109,6 +109,9 @@
         <None Update="Shaders\ddgi_common.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\ddgi_classify.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\ddgi_trace.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

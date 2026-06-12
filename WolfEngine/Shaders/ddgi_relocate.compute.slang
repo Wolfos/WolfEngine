@@ -26,6 +26,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
     uint probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
+    bool enabled = DdgiIsProbeEnabled(probeIndex);
 
     float3 previousOffset = DdgiProbeHasHistory(probeIndex)
         ? DdgiLoadProbeState(probeStateReadHandle, probeIndex).xyz
@@ -33,9 +34,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     previousOffset = probeRelocationEnabled != 0u
         ? DdgiClampProbeOffset(previousOffset)
         : 0.0f.xxx;
-    if (!DdgiIsProbeActive(probeIndex) || probeRelocationEnabled == 0u)
+    if (!DdgiIsProbeUpdateActive(probeIndex) || probeRelocationEnabled == 0u)
     {
-        stateWriteTex[statePixel] = float4(previousOffset, 0.0f);
+        stateWriteTex[statePixel] = float4(previousOffset, enabled ? 1.0f : 0.0f);
         return;
     }
 
@@ -63,5 +64,5 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     targetOffset = DdgiClampProbeOffset(targetOffset);
     float3 smoothedOffset = lerp(previousOffset, targetOffset, DDGI_RELOCATION_BLEND);
-    stateWriteTex[statePixel] = float4(DdgiClampProbeOffset(smoothedOffset), 0.0f);
+    stateWriteTex[statePixel] = float4(DdgiClampProbeOffset(smoothedOffset), enabled ? 1.0f : 0.0f);
 }

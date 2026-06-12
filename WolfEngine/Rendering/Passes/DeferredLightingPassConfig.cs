@@ -23,6 +23,7 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle DdgiIrradianceLx { get; init; }
 	public required DescriptorHandle DdgiVisibility { get; init; }
 	public required DescriptorHandle DdgiProbeState { get; init; }
+	public required DescriptorHandle DdgiProbeActivity { get; init; }
 	public required DescriptorHandle DdgiFinalContribution { get; init; }
 	public required DescriptorHandle DdgiProbeBaseWeightDebug { get; init; }
 	public required DescriptorHandle DdgiWeightedVisibilityDebug { get; init; }

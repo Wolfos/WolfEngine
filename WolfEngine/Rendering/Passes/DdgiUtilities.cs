@@ -412,6 +412,40 @@ public static class DdgiUtilities
 		return (int)(frameIndex % (uint)clampedFrames);
 	}
 
+	public static float GetProbeInfluenceHalfExtent(float probeSpacing, float viewBias)
+	{
+		return Math.Max(probeSpacing, 0.001f) + Math.Max(viewBias, 0.0f);
+	}
+
+	public static bool SphereIntersectsProbeInfluence(
+		Vector3 sphereCenter,
+		float sphereRadius,
+		Vector3 probePosition,
+		float influenceHalfExtent)
+	{
+		var halfExtent = Math.Max(influenceHalfExtent, 0.0f);
+		var delta = Vector3.Abs(sphereCenter - probePosition) - new Vector3(halfExtent);
+		var outside = Vector3.Max(delta, Vector3.Zero);
+		var radius = Math.Max(sphereRadius, 0.0f);
+		return outside.LengthSquared() <= radius * radius;
+	}
+
+	public static bool IsProbeUpdateActive(
+		int probeIndex,
+		int probeUpdateFrames,
+		int probeUpdateFrameIndex,
+		bool forceFullUpdate,
+		bool enabled,
+		bool previouslyEnabled,
+		bool hasHistory)
+	{
+		return enabled &&
+		       (forceFullUpdate ||
+		        hasHistory == false ||
+		        previouslyEnabled == false ||
+		        IsProbeActive(probeIndex, probeUpdateFrames, probeUpdateFrameIndex, forceFullUpdate: false));
+	}
+
 	public static bool IsProbeActive(int probeIndex, int probeUpdateFrames, int probeUpdateFrameIndex, bool forceFullUpdate)
 	{
 		var clampedFrames = Math.Max(probeUpdateFrames, 1);

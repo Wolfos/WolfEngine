@@ -17,6 +17,7 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiIrradianceLxHandle;
     uint ddgiVisibilityHandle;
     uint ddgiProbeStateHandle;
+    uint ddgiProbeActivityHandle;
     uint ddgiFinalContributionHandle;
     uint ddgiProbeBaseWeightDebugHandle;
     uint ddgiWeightedVisibilityDebugHandle;
@@ -230,6 +231,7 @@ DdgiShSample SampleDdgiSh(
     Texture2D<float4> irradianceLxTex = GetTexture(ddgiIrradianceLxHandle);
     Texture2D<float4> visibilityTex = GetTexture(ddgiVisibilityHandle);
     Texture2D<float4> probeStateTex = GetTexture(ddgiProbeStateHandle);
+    Texture2D<float4> probeActivityTex = GetTexture(ddgiProbeActivityHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
     float3 coefficientL0 = 0.0f.xxx;
@@ -257,6 +259,12 @@ DdgiShSample SampleDdgiSh(
                 float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
                 float trilinearWeight = tri.x * tri.y * tri.z;
                 uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+                if (probeActivityTex.Load(int3(uint2(
+                    physicalProbeIndex % ddgiAtlasColumns,
+                    physicalProbeIndex / ddgiAtlasColumns), 0)).x <= 0.5f)
+                {
+                    continue;
+                }
                 float4 probeState = probeStateTex.Load(int3(uint2(
                     physicalProbeIndex % ddgiAtlasColumns,
                     physicalProbeIndex / ddgiAtlasColumns), 0));
