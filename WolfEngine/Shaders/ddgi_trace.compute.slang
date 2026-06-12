@@ -191,7 +191,7 @@ float3 DdgiShadeHitSurface(DdgiHitSurface surface)
     float3 directRadiance = directLightColorIntensity * directWeight * visibility / WOLF_PI;
     float3 recursiveRadiance =
         DdgiSampleHistory(surface.worldPosition, surface.worldNormal) *
-        (DDGI_RECURSIVE_ENERGY / WOLF_PI);
+        DDGI_RECURSIVE_ENERGY;
     return surface.albedo * (directRadiance + recursiveRadiance) + surface.emissive;
 }
 

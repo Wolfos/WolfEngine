@@ -386,7 +386,7 @@ public static class DdgiUtilities
 		             Math.Clamp(visibility, 0.0f, 1.0f) /
 		             MathF.PI;
 		var recursive = historyValid
-			? Vector3.Max(previousDdgi, Vector3.Zero) * (RecursiveBounceEnergy / MathF.PI)
+			? Vector3.Max(previousDdgi, Vector3.Zero) * RecursiveBounceEnergy
 			: Vector3.Zero;
 		return albedo * (direct + recursive) + emissive;
 	}
