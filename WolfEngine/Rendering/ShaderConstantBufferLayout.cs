@@ -9,6 +9,7 @@ public enum ShaderConstantFieldValueKind
 {
 	Unsupported = 0,
 	UInt,
+	Int,
 	Float,
 	Vector2,
 	Vector3,

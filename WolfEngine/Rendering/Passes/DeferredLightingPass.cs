@@ -177,7 +177,9 @@ public sealed class DeferredLightingPass
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
 			DdgiEnabled = ddgiEnabled,
-			DdgiOrigin = resources.Config.DiffuseGlobalIllumination.Origin,
+			DdgiOrigin = resources.DdgiRuntimeOrigin,
+			DdgiStorageOffset = resources.DdgiStorageOffset,
+			DdgiScrollDelta = resources.DdgiScrollDelta,
 			DdgiProbeSpacing = Math.Max(resources.Config.DiffuseGlobalIllumination.ProbeSpacing, 0.001f),
 			DdgiProbeCountX = ddgiGridShape.CountX,
 			DdgiProbeCountY = ddgiGridShape.CountY,
@@ -308,6 +310,12 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetVector3("ddgiOrigin", config.DdgiOrigin);
 		lightingWriter.SetFloat("ddgiProbeSpacing", config.DdgiProbeSpacing);
+		lightingWriter.SetInt("ddgiStorageOffsetX", config.DdgiStorageOffset.X);
+		lightingWriter.SetInt("ddgiStorageOffsetY", config.DdgiStorageOffset.Y);
+		lightingWriter.SetInt("ddgiStorageOffsetZ", config.DdgiStorageOffset.Z);
+		lightingWriter.SetInt("ddgiScrollDeltaX", config.DdgiScrollDelta.X);
+		lightingWriter.SetInt("ddgiScrollDeltaY", config.DdgiScrollDelta.Y);
+		lightingWriter.SetInt("ddgiScrollDeltaZ", config.DdgiScrollDelta.Z);
 		lightingWriter.SetUInt("ddgiProbeCountX", (uint)config.DdgiProbeCountX);
 		lightingWriter.SetUInt("ddgiProbeCountY", (uint)config.DdgiProbeCountY);
 		lightingWriter.SetUInt("ddgiProbeCountZ", (uint)config.DdgiProbeCountZ);

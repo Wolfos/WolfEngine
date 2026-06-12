@@ -35,6 +35,18 @@ internal sealed class ShaderPropertyWriter
 		Write(field, value);
 	}
 
+	public void SetInt(string path, int value)
+	{
+		var field = GetFieldOrThrow(path, ShaderConstantFieldValueKind.Int);
+		Write(field, value);
+	}
+
+	public void SetInt(in ShaderConstantFieldLayout field, int value)
+	{
+		ValidateFieldKind(field, ShaderConstantFieldValueKind.Int);
+		Write(field, value);
+	}
+
 	public void SetFloat(string path, float value)
 	{
 		var field = GetFieldOrThrow(path, ShaderConstantFieldValueKind.Float);

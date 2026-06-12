@@ -41,6 +41,8 @@ public readonly struct DdgiPassConfig
 	public required Int2 VisibilityAtlasSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
 	public required Vector3 Origin { get; init; }
+	public required Int3 StorageOffset { get; init; }
+	public required Int3 ScrollDelta { get; init; }
 	public required float ProbeSpacing { get; init; }
 	public required int RaysPerProbe { get; init; }
 	public required int ProbeUpdateFrames { get; init; }

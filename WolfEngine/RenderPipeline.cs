@@ -175,7 +175,11 @@ public class RenderPipeline : IRenderPipeline
 
 			using (FrameProfiler.Instance.Measure("Gather DDGI probe debug primitives"))
 			{
-				CollectDdgiProbeDebugPrimitives(config, gpuDrawDatabase, _debugPrimitiveMeshFactory);
+				CollectDdgiProbeDebugPrimitives(
+					config,
+					cameraOrigin,
+					gpuDrawDatabase,
+					_debugPrimitiveMeshFactory);
 			}
 
 			gpuDrawDatabase.EndSync();
@@ -188,6 +192,7 @@ public class RenderPipeline : IRenderPipeline
 
 	internal static void CollectDdgiProbeDebugPrimitives(
 		RenderConfig config,
+		Vector3 cameraPosition,
 		GpuDrawDatabase gpuDrawDatabase,
 		DebugPrimitiveMeshFactory debugPrimitiveMeshFactory)
 	{
@@ -207,6 +212,11 @@ public class RenderPipeline : IRenderPipeline
 		var radius = MathF.Max(ddgi.DebugProbeSphereRadius, 0.01f);
 		var diameter = radius * 2.0f;
 		var spacing = MathF.Max(ddgi.ProbeSpacing, 0.001f);
+		var runtimeOrigin = DdgiUtilities.GetRuntimeOrigin(
+			ddgi.Origin,
+			shape,
+			spacing,
+			cameraPosition);
 		var probeIndex = 0;
 		for (var z = 0; z < shape.CountZ; z++)
 		{
@@ -214,7 +224,7 @@ public class RenderPipeline : IRenderPipeline
 			{
 				for (var x = 0; x < shape.CountX; x++)
 				{
-					var position = ddgi.Origin + new Vector3(x * spacing, y * spacing, z * spacing);
+					var position = runtimeOrigin + new Vector3(x * spacing, y * spacing, z * spacing);
 					var transform = Matrix4x4.CreateScale(diameter) * Matrix4x4.CreateTranslation(position);
 					gpuDrawDatabase.TouchDebugPrimitive(
 						new Entity(DdgiDebugProbeEntityBaseIndex + probeIndex, 1),

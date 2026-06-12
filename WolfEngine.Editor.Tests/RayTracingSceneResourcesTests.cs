@@ -58,6 +58,13 @@ public sealed class RayTracingSceneResourcesTests
 			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader);
 			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8), shader);
 			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8), shader);
+			Assert.That(
+				compiled.ReflectionLayout
+					.GetConstantBuffer("DdgiSettings")
+					.GetFieldOrThrow("scrollDeltaX")
+					.ValueKind,
+				Is.EqualTo(ShaderConstantFieldValueKind.Int),
+				shader);
 		}
 	}
 
@@ -78,6 +85,16 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8));
 		Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8));
+
+		var lightingLayout = compiled.ReflectionLayout.GetConstantBuffer("LightingParams");
+		var scrollDeltaField = lightingLayout.GetFieldOrThrow("ddgiScrollDeltaX");
+		Assert.That(scrollDeltaField.ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Int));
+
+		var writer = new ShaderPropertyWriter(lightingLayout);
+		writer.SetInt(scrollDeltaField, -7);
+		Assert.That(
+			BitConverter.ToInt32(writer.AsBytes().Slice(scrollDeltaField.Offset, sizeof(int))),
+			Is.EqualTo(-7));
 	}
 
 	[Test]
@@ -254,6 +271,104 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(DdgiUtilities.ShCoefficientCount, Is.EqualTo(4));
 		Assert.That(size.X, Is.EqualTo(shape.AtlasColumns));
 		Assert.That(size.Y, Is.EqualTo(shape.AtlasRows));
+	}
+
+	[Test]
+	public void DdgiRuntimeOriginSnapsOnlyAfterCameraCrossesHalfSpacing()
+	{
+		var shape = new DdgiGridShape(4, 2, 4, 32, 6, 6);
+		var anchor = new Vector3(1.0f, 2.0f, 3.0f);
+		const float spacing = 2.0f;
+		var initialCenter = anchor + new Vector3(3.0f, 1.0f, 3.0f);
+
+		AssertVector3(
+			DdgiUtilities.GetRuntimeOrigin(anchor, shape, spacing, initialCenter + new Vector3(0.99f, 0.0f, 0.0f)),
+			anchor);
+		AssertVector3(
+			DdgiUtilities.GetRuntimeOrigin(anchor, shape, spacing, initialCenter + new Vector3(1.01f, 0.0f, 0.0f)),
+			anchor + new Vector3(spacing, 0.0f, 0.0f));
+	}
+
+	[Test]
+	public void DdgiRuntimeOriginSnapsOnPositiveNegativeAndMultipleAxes()
+	{
+		var shape = new DdgiGridShape(3, 3, 3, 27, 6, 5);
+		var anchor = new Vector3(10.0f, -2.0f, 4.0f);
+		const float spacing = 2.0f;
+		var initialCenter = anchor + new Vector3(spacing);
+		var camera = initialCenter + new Vector3(4.1f, -2.1f, 1.1f);
+
+		var origin = DdgiUtilities.GetRuntimeOrigin(anchor, shape, spacing, camera);
+
+		AssertVector3(origin, anchor + new Vector3(4.0f, -2.0f, 2.0f));
+	}
+
+	[Test]
+	public void DdgiCircularStoragePreservesWorldProbeAcrossScroll()
+	{
+		var shape = new DdgiGridShape(4, 3, 5, 60, 8, 8);
+		var previousOffset = new Int3(3, 1, 4);
+		var scrollDelta = new Int3(1, -1, 2);
+		var currentOffset = DdgiUtilities.AdvanceStorageOffset(previousOffset, scrollDelta, shape);
+		var currentLogicalIndex = 1 + shape.CountX + shape.CountX * shape.CountY;
+		var previousLogicalIndex = 2 + 3 * shape.CountX * shape.CountY;
+
+		Assert.That(
+			DdgiUtilities.GetPhysicalProbeIndex(currentLogicalIndex, currentOffset, shape),
+			Is.EqualTo(DdgiUtilities.GetPhysicalProbeIndex(previousLogicalIndex, previousOffset, shape)));
+	}
+
+	[Test]
+	public void DdgiCircularStorageWrapsNegativeOffsets()
+	{
+		var shape = new DdgiGridShape(4, 3, 2, 24, 5, 5);
+
+		var offset = DdgiUtilities.AdvanceStorageOffset(
+			new Int3(0, 0, 0),
+			new Int3(-1, -4, -3),
+			shape);
+
+		Assert.That(offset, Is.EqualTo(new Int3(3, 2, 1)));
+	}
+
+	[Test]
+	public void DdgiNewlyExposedProbeClassificationMatchesScrolledSlab()
+	{
+		var shape = new DdgiGridShape(4, 3, 2, 24, 5, 5);
+		var delta = new Int3(1, 0, 0);
+
+		Assert.That(DdgiUtilities.GetNewlyExposedProbeCount(delta, shape), Is.EqualTo(6));
+		for (var probeIndex = 0; probeIndex < shape.ProbeCount; probeIndex++)
+		{
+			var coord = DdgiUtilities.GetLogicalProbeCoord(probeIndex, shape);
+			Assert.That(DdgiUtilities.IsProbeNewlyExposed(probeIndex, delta, shape), Is.EqualTo(coord.X == 3));
+		}
+	}
+
+	[Test]
+	public void DdgiTeleportBeyondVolumeExposesEveryProbe()
+	{
+		var shape = new DdgiGridShape(4, 3, 2, 24, 5, 5);
+
+		Assert.That(
+			DdgiUtilities.GetNewlyExposedProbeCount(new Int3(-4, 0, 0), shape),
+			Is.EqualTo(shape.ProbeCount));
+	}
+
+	[Test]
+	public void DdgiActiveProbeCountIncludesExposedProbesWithoutDoubleCounting()
+	{
+		var shape = new DdgiGridShape(4, 2, 2, 16, 4, 4);
+
+		var count = DdgiUtilities.GetActiveProbeCount(
+			shape,
+			probeUpdateFrames: 4,
+			probeUpdateFrameIndex: 3,
+			forceFullUpdate: false,
+			scrollDelta: new Int3(1, 0, 0),
+			historyValid: true);
+
+		Assert.That(count, Is.EqualTo(4));
 	}
 
 	[Test]
@@ -707,9 +822,10 @@ public sealed class RayTracingSceneResourcesTests
 		};
 		var database = new GpuDrawDatabase();
 		var meshFactory = new DebugPrimitiveMeshFactory();
+		var cameraPosition = new Vector3(4.6f, 0.0f, 1.5f);
 
 		database.BeginSync();
-		RenderPipeline.CollectDdgiProbeDebugPrimitives(config, database, meshFactory);
+		RenderPipeline.CollectDdgiProbeDebugPrimitives(config, cameraPosition, database, meshFactory);
 		database.EndSync();
 
 		var entries = new List<GpuDrawEntry>();
@@ -720,6 +836,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(entries.Select(entry => entry.Material.AlphaMode), Is.All.EqualTo(AlphaMode.AlphaBlend));
 		Assert.That(entries.Select(entry => entry.Material.Color), Is.All.EqualTo(ColorRGBA.White));
 		Assert.That(entries.Select(entry => entry.World.M11), Is.All.EqualTo(0.5f).Within(0.0001f));
+		Assert.That(entries.Select(entry => entry.World.M41).Distinct(), Is.EquivalentTo(new[] { 3.0f, 6.0f }));
+		Assert.That(entries.Select(entry => entry.World.M43).Distinct(), Is.EquivalentTo(new[] { 0.0f, 3.0f }));
 	}
 
 	[Test]

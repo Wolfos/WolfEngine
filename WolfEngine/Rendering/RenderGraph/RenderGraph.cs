@@ -376,6 +376,14 @@ public sealed class RenderGraph
 						initialState: _sceneRenderTargetManager.CurrentState);
 				}
 				
+				if (!Matrix4x4.Decompose(
+						snapshot.CameraWorldTransform.LocalToWorld,
+						out _,
+						out _,
+						out var frameCameraPosition))
+				{
+					frameCameraPosition = snapshot.Config.DiffuseGlobalIllumination.Origin;
+				}
 				_frameBuilder.BeginFrame(
 					frameBufferSize,
 					sceneRenderSize,
@@ -384,7 +392,8 @@ public sealed class RenderGraph
 					snapshot.DecalPackets.Count > 0,
 					snapshot.SunDirection,
 					snapshot.SunIntensityScale,
-					snapshot.Config);
+					snapshot.Config,
+					frameCameraPosition);
 				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.SetUiFrame(uiFrame);
 

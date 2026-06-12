@@ -54,6 +54,14 @@ cbuffer LightingParams : register(b2)
     float4 shadowDepthBiases;
     float3 ddgiOrigin;
     float ddgiProbeSpacing;
+    int ddgiStorageOffsetX;
+    int ddgiStorageOffsetY;
+    int ddgiStorageOffsetZ;
+    int ddgiScrollDeltaX;
+    int ddgiScrollDeltaY;
+    int ddgiScrollDeltaZ;
+    uint ddgiScrollingPad0;
+    uint ddgiScrollingPad1;
     uint ddgiProbeCountX;
     uint ddgiProbeCountY;
     uint ddgiProbeCountZ;
@@ -91,6 +99,40 @@ struct DdgiShSample
     uint valid;
 };
 
+int DdgiPositiveModulo(int value, int modulus)
+{
+    int remainder = value % max(modulus, 1);
+    return remainder < 0 ? remainder + modulus : remainder;
+}
+
+uint DdgiPhysicalProbeIndex(uint logicalProbeIndex)
+{
+    uint x = logicalProbeIndex % ddgiProbeCountX;
+    uint yz = logicalProbeIndex / ddgiProbeCountX;
+    uint y = yz % ddgiProbeCountY;
+    uint z = yz / ddgiProbeCountY;
+    uint3 physical = uint3(
+        DdgiPositiveModulo(int(x) + ddgiStorageOffsetX, int(ddgiProbeCountX)),
+        DdgiPositiveModulo(int(y) + ddgiStorageOffsetY, int(ddgiProbeCountY)),
+        DdgiPositiveModulo(int(z) + ddgiStorageOffsetZ, int(ddgiProbeCountZ)));
+    return physical.x +
+        physical.y * ddgiProbeCountX +
+        physical.z * ddgiProbeCountX * ddgiProbeCountY;
+}
+
+bool DdgiProbeHasHistory(uint logicalProbeIndex)
+{
+    uint x = logicalProbeIndex % ddgiProbeCountX;
+    uint yz = logicalProbeIndex / ddgiProbeCountX;
+    uint y = yz % ddgiProbeCountY;
+    uint z = yz / ddgiProbeCountY;
+    int3 previous = int3(x, y, z) +
+        int3(ddgiScrollDeltaX, ddgiScrollDeltaY, ddgiScrollDeltaZ);
+    return previous.x >= 0 && previous.x < int(ddgiProbeCountX) &&
+        previous.y >= 0 && previous.y < int(ddgiProbeCountY) &&
+        previous.z >= 0 && previous.z < int(ddgiProbeCountZ);
+}
+
 float2 DdgiOctEncode(float3 n)
 {
     n /= (abs(n.x) + abs(n.y) + abs(n.z));
@@ -105,8 +147,9 @@ float2 DdgiOctEncode(float3 n)
 float2 DdgiProbeAtlasUv(uint probeIndex, float3 direction, uint tileInteriorSize)
 {
     uint tileSize = tileInteriorSize + DDGI_TILE_BORDER_SIZE * 2u;
-    uint tileX = probeIndex % ddgiAtlasColumns;
-    uint tileY = probeIndex / ddgiAtlasColumns;
+    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+    uint tileX = physicalProbeIndex % ddgiAtlasColumns;
+    uint tileY = physicalProbeIndex / ddgiAtlasColumns;
     float2 oct = DdgiOctEncode(normalize(direction));
     float2 interiorUv = oct * 0.5f + 0.5f;
     float2 atlasPixel = float2(tileX * tileSize + DDGI_TILE_BORDER_SIZE, tileY * tileSize + DDGI_TILE_BORDER_SIZE) +
@@ -213,8 +256,14 @@ DdgiShSample SampleDdgiSh(
                 uint probeIndex = uint(coord.x) + uint(coord.y) * ddgiProbeCountX + uint(coord.z) * ddgiProbeCountX * ddgiProbeCountY;
                 float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
                 float trilinearWeight = tri.x * tri.y * tri.z;
-                float4 probeState = probeStateTex.Load(int3(uint2(probeIndex % ddgiAtlasColumns, probeIndex / ddgiAtlasColumns), 0));
-                float3 relocationOffset = ddgiProbeRelocationEnabled != 0u ? probeState.xyz : 0.0f.xxx;
+                uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+                float4 probeState = probeStateTex.Load(int3(uint2(
+                    physicalProbeIndex % ddgiAtlasColumns,
+                    physicalProbeIndex / ddgiAtlasColumns), 0));
+                float3 relocationOffset =
+                    ddgiProbeRelocationEnabled != 0u && DdgiProbeHasHistory(probeIndex)
+                    ? probeState.xyz
+                    : 0.0f.xxx;
                 float3 probePosition = DdgiProbePosition(uint3(coord)) + relocationOffset;
                 float3 toSurface = biasedPos - probePosition;
                 float distanceToProbe = length(toSurface);
@@ -236,9 +285,11 @@ DdgiShSample SampleDdgiSh(
                 if (probeWeight > dominantProbeWeight)
                 {
                     dominantProbeWeight = probeWeight;
-                    dominantProbeIndex = probeIndex;
+                    dominantProbeIndex = physicalProbeIndex;
                 }
-                uint2 coefficientPixel = uint2(probeIndex % ddgiAtlasColumns, probeIndex / ddgiAtlasColumns);
+                uint2 coefficientPixel = uint2(
+                    physicalProbeIndex % ddgiAtlasColumns,
+                    physicalProbeIndex / ddgiAtlasColumns);
                 coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
                 coefficientLy += irradianceLyTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
                 coefficientLz += irradianceLzTex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;

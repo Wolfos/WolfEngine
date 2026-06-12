@@ -95,11 +95,17 @@ public sealed class DdgiPass
 		var probeUpdateFrames = DdgiUtilities.GetProbeUpdateFrames(config);
 		var probeUpdateFrameIndex = DdgiUtilities.GetProbeUpdateFrameIndex(frameIndex, probeUpdateFrames);
 		var forceFullProbeUpdate = historyValid == false;
+		var newlyExposedProbeCount = DdgiUtilities.GetNewlyExposedProbeCount(
+			resources.DdgiScrollDelta,
+			gridShape,
+			historyValid);
 		var activeProbeCount = DdgiUtilities.GetActiveProbeCount(
-			gridShape.ProbeCount,
+			gridShape,
 			probeUpdateFrames,
 			probeUpdateFrameIndex,
-			forceFullProbeUpdate);
+			forceFullProbeUpdate,
+			resources.DdgiScrollDelta,
+			historyValid);
 		var raysPerProbe = Math.Clamp(config.RaysPerProbe, 1, DdgiUtilities.MaxRaySamplesPerProbe);
 		LastStats = new DdgiPassStats(
 			probeUpdateFrames,
@@ -107,7 +113,8 @@ public sealed class DdgiPass
 			gridShape.ProbeCount,
 			raysPerProbe,
 			activeProbeCount * raysPerProbe,
-			forceFullProbeUpdate);
+			forceFullProbeUpdate,
+			newlyExposedProbeCount);
 		return new DdgiPassConfig
 		{
 			TracePipeline = _tracePipeline!,
@@ -146,7 +153,9 @@ public sealed class DdgiPass
 			IrradianceAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.IrradianceTileInteriorSize),
 			VisibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize),
 			GridShape = gridShape,
-			Origin = config.Origin,
+			Origin = resources.DdgiRuntimeOrigin,
+			StorageOffset = resources.DdgiStorageOffset,
+			ScrollDelta = resources.DdgiScrollDelta,
 			ProbeSpacing = Math.Max(config.ProbeSpacing, 0.001f),
 			RaysPerProbe = raysPerProbe,
 			ProbeUpdateFrames = probeUpdateFrames,
@@ -269,6 +278,12 @@ public sealed class DdgiPass
 		settingsWriter.Clear();
 		settingsWriter.SetVector3("origin", config.Origin);
 		settingsWriter.SetFloat("probeSpacing", config.ProbeSpacing);
+		settingsWriter.SetInt("storageOffsetX", config.StorageOffset.X);
+		settingsWriter.SetInt("storageOffsetY", config.StorageOffset.Y);
+		settingsWriter.SetInt("storageOffsetZ", config.StorageOffset.Z);
+		settingsWriter.SetInt("scrollDeltaX", config.ScrollDelta.X);
+		settingsWriter.SetInt("scrollDeltaY", config.ScrollDelta.Y);
+		settingsWriter.SetInt("scrollDeltaZ", config.ScrollDelta.Z);
 		settingsWriter.SetUInt("probeCountX", (uint)config.GridShape.CountX);
 		settingsWriter.SetUInt("probeCountY", (uint)config.GridShape.CountY);
 		settingsWriter.SetUInt("probeCountZ", (uint)config.GridShape.CountZ);
@@ -409,4 +424,5 @@ public readonly record struct DdgiPassStats(
 	int TotalProbeCount,
 	int RaysPerActiveProbe,
 	int EstimatedProbeRaysThisFrame,
-	bool ForceFullProbeUpdate);
+	bool ForceFullProbeUpdate,
+	int NewlyExposedProbeCount);

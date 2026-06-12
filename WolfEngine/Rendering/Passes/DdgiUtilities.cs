@@ -54,6 +54,101 @@ public static class DdgiUtilities
 		return checked((ulong)shape.ProbeCount * IrradianceEstimatorDirectionCount * IrradianceEstimatorStride);
 	}
 
+	public static Vector3 GetRuntimeOrigin(
+		Vector3 latticeAnchor,
+		DdgiGridShape shape,
+		float probeSpacing,
+		Vector3 cameraPosition)
+	{
+		probeSpacing = Math.Max(probeSpacing, 0.001f);
+		var initialGridCenter = latticeAnchor + new Vector3(
+			(shape.CountX - 1) * 0.5f * probeSpacing,
+			(shape.CountY - 1) * 0.5f * probeSpacing,
+			(shape.CountZ - 1) * 0.5f * probeSpacing);
+		var latticeOffset = (cameraPosition - initialGridCenter) / probeSpacing;
+		return latticeAnchor + new Vector3(
+			MathF.Round(latticeOffset.X, MidpointRounding.AwayFromZero),
+			MathF.Round(latticeOffset.Y, MidpointRounding.AwayFromZero),
+			MathF.Round(latticeOffset.Z, MidpointRounding.AwayFromZero)) * probeSpacing;
+	}
+
+	public static Int3 GetScrollDelta(Vector3 previousOrigin, Vector3 currentOrigin, float probeSpacing)
+	{
+		probeSpacing = Math.Max(probeSpacing, 0.001f);
+		var delta = (currentOrigin - previousOrigin) / probeSpacing;
+		return new Int3(
+			(int)MathF.Round(delta.X, MidpointRounding.AwayFromZero),
+			(int)MathF.Round(delta.Y, MidpointRounding.AwayFromZero),
+			(int)MathF.Round(delta.Z, MidpointRounding.AwayFromZero));
+	}
+
+	public static Int3 AdvanceStorageOffset(Int3 previousOffset, Int3 scrollDelta, DdgiGridShape shape)
+	{
+		return new Int3(
+			PositiveModulo(previousOffset.X + scrollDelta.X, shape.CountX),
+			PositiveModulo(previousOffset.Y + scrollDelta.Y, shape.CountY),
+			PositiveModulo(previousOffset.Z + scrollDelta.Z, shape.CountZ));
+	}
+
+	public static Int3 GetLogicalProbeCoord(int probeIndex, DdgiGridShape shape)
+	{
+		var x = probeIndex % shape.CountX;
+		var yz = probeIndex / shape.CountX;
+		return new Int3(x, yz % shape.CountY, yz / shape.CountY);
+	}
+
+	public static int GetPhysicalProbeIndex(int logicalProbeIndex, Int3 storageOffset, DdgiGridShape shape)
+	{
+		var logical = GetLogicalProbeCoord(logicalProbeIndex, shape);
+		var physical = new Int3(
+			PositiveModulo(logical.X + storageOffset.X, shape.CountX),
+			PositiveModulo(logical.Y + storageOffset.Y, shape.CountY),
+			PositiveModulo(logical.Z + storageOffset.Z, shape.CountZ));
+		return physical.X + physical.Y * shape.CountX + physical.Z * shape.CountX * shape.CountY;
+	}
+
+	public static bool IsProbeNewlyExposed(
+		int logicalProbeIndex,
+		Int3 scrollDelta,
+		DdgiGridShape shape,
+		bool historyValid = true)
+	{
+		if (historyValid == false)
+		{
+			return true;
+		}
+
+		var logical = GetLogicalProbeCoord(logicalProbeIndex, shape);
+		var previous = new Int3(
+			logical.X + scrollDelta.X,
+			logical.Y + scrollDelta.Y,
+			logical.Z + scrollDelta.Z);
+		return previous.X < 0 || previous.X >= shape.CountX ||
+		       previous.Y < 0 || previous.Y >= shape.CountY ||
+		       previous.Z < 0 || previous.Z >= shape.CountZ;
+	}
+
+	public static int GetNewlyExposedProbeCount(Int3 scrollDelta, DdgiGridShape shape, bool historyValid = true)
+	{
+		var count = 0;
+		for (var probeIndex = 0; probeIndex < shape.ProbeCount; probeIndex++)
+		{
+			if (IsProbeNewlyExposed(probeIndex, scrollDelta, shape, historyValid))
+			{
+				count++;
+			}
+		}
+
+		return count;
+	}
+
+	private static int PositiveModulo(int value, int modulus)
+	{
+		var positiveModulus = Math.Max(modulus, 1);
+		var remainder = value % positiveModulus;
+		return remainder < 0 ? remainder + positiveModulus : remainder;
+	}
+
 	public static int GetRaySampleCount(int requestedRayCount, int tileInteriorSize)
 	{
 		var tileCapacity = checked(tileInteriorSize * tileInteriorSize);
@@ -346,6 +441,27 @@ public static class DdgiUtilities
 		var fullCycles = totalProbeCount / clampedFrames;
 		var remainder = totalProbeCount % clampedFrames;
 		return fullCycles + (clampedFrameIndex < remainder ? 1 : 0);
+	}
+
+	public static int GetActiveProbeCount(
+		DdgiGridShape shape,
+		int probeUpdateFrames,
+		int probeUpdateFrameIndex,
+		bool forceFullUpdate,
+		Int3 scrollDelta,
+		bool historyValid)
+	{
+		var count = 0;
+		for (var probeIndex = 0; probeIndex < shape.ProbeCount; probeIndex++)
+		{
+			if (IsProbeActive(probeIndex, probeUpdateFrames, probeUpdateFrameIndex, forceFullUpdate) ||
+			    IsProbeNewlyExposed(probeIndex, scrollDelta, shape, historyValid))
+			{
+				count++;
+			}
+		}
+
+		return count;
 	}
 }
 

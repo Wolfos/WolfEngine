@@ -273,6 +273,11 @@ internal static class ShaderReflectionLayoutBuilder
 				return ShaderConstantFieldValueKind.UInt;
 			}
 
+			if (IsIntScalar(scalarTypeName))
+			{
+				return ShaderConstantFieldValueKind.Int;
+			}
+
 			return IsFloatScalar(scalarTypeName)
 				? ShaderConstantFieldValueKind.Float
 				: ShaderConstantFieldValueKind.Unsupported;
@@ -379,6 +384,12 @@ internal static class ShaderReflectionLayoutBuilder
 	private static bool IsUIntScalar(string scalarTypeName)
 	{
 		return scalarTypeName.Contains("UInt", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsIntScalar(string scalarTypeName)
+	{
+		return scalarTypeName.Contains("Int", StringComparison.OrdinalIgnoreCase) &&
+		       IsUIntScalar(scalarTypeName) == false;
 	}
 
 	private static bool IsFloatScalar(string scalarTypeName)

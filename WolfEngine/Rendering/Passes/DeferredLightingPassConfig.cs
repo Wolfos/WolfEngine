@@ -58,6 +58,8 @@ public struct DeferredLightingPassConfig
 	public required bool AoEnabled { get; init; }
 	public required bool DdgiEnabled { get; init; }
 	public required Vector3 DdgiOrigin { get; init; }
+	public required Int3 DdgiStorageOffset { get; init; }
+	public required Int3 DdgiScrollDelta { get; init; }
 	public required float DdgiProbeSpacing { get; init; }
 	public required int DdgiProbeCountX { get; init; }
 	public required int DdgiProbeCountY { get; init; }

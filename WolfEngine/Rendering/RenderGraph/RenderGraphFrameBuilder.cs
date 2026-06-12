@@ -49,6 +49,9 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle DdgiVisibilityHistoryWrite { get; init; }
 	public RenderGraphResourceHandle DdgiProbeStateRead { get; init; }
 	public RenderGraphResourceHandle DdgiProbeStateWrite { get; init; }
+	public Vector3 DdgiRuntimeOrigin { get; init; }
+	public Int3 DdgiStorageOffset { get; init; }
+	public Int3 DdgiScrollDelta { get; init; }
 	public RenderGraphResourceHandle DdgiFinalContribution { get; init; }
 	public RenderGraphResourceHandle DdgiProbeBaseWeightDebug { get; init; }
 	public RenderGraphResourceHandle DdgiWeightedVisibilityDebug { get; init; }
@@ -161,6 +164,11 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ResourceState[] _ddgiVisibilityStates = new ResourceState[2];
 	private readonly ResourceState[] _ddgiProbeStateStates = new ResourceState[2];
 	private ResourceState _ddgiIrradianceEstimatorState = ResourceState.Common;
+	private Vector3 _ddgiHistoryLatticeAnchor;
+	private float _ddgiHistoryProbeSpacing;
+	private Vector3 _ddgiCommittedRuntimeOrigin;
+	private Int3 _ddgiCommittedStorageOffset;
+	private bool _ddgiCommittedPlacementValid;
 	private DdgiPassConfig _currentDdgiConfig;
 	private bool _currentDdgiConfigValid;
 	
@@ -274,7 +282,8 @@ internal sealed class RenderGraphFrameBuilder
 		bool hasActiveDecals,
 		Vector3 sunDirection,
 		float sunIntensityScale,
-		RenderConfig config)
+		RenderConfig config,
+		Vector3 cameraPosition)
 	{
 		var taaEnabled = config.TemporalAntiAliasing.Enabled;
 		var frameShapeChanged = _hasPreviousFrameShape == false ||
@@ -357,6 +366,9 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiVisibilityWriteHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeStateReadHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeStateWriteHandle = default(RenderGraphResourceHandle);
+		var ddgiRuntimeOrigin = config.DiffuseGlobalIllumination.Origin;
+		var ddgiStorageOffset = default(Int3);
+		var ddgiScrollDelta = default(Int3);
 		var ddgiFinalContributionHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeBaseWeightDebugHandle = default(RenderGraphResourceHandle);
 		var ddgiWeightedVisibilityDebugHandle = default(RenderGraphResourceHandle);
@@ -545,10 +557,32 @@ internal sealed class RenderGraphFrameBuilder
 
 			if (HasRayTracedDdgi(config))
 			{
-				var ddgiGridShape = DdgiUtilities.GetGridShape(config.DiffuseGlobalIllumination);
+				var ddgiConfig = config.DiffuseGlobalIllumination;
+				var ddgiGridShape = DdgiUtilities.GetGridShape(ddgiConfig);
+				var ddgiProbeSpacing = Math.Max(ddgiConfig.ProbeSpacing, 0.001f);
 				var irradianceAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, DdgiUtilities.IrradianceTileInteriorSize);
 				var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, DdgiUtilities.VisibilityTileInteriorSize);
-				EnsureDdgiHistoryResources(_renderer.GetGfxDevice(), ddgiGridShape);
+				EnsureDdgiHistoryResources(
+					_renderer.GetGfxDevice(),
+					ddgiGridShape,
+					ddgiConfig.Origin,
+					ddgiProbeSpacing);
+				ddgiRuntimeOrigin = DdgiUtilities.GetRuntimeOrigin(
+					ddgiConfig.Origin,
+					ddgiGridShape,
+					ddgiProbeSpacing,
+					cameraPosition);
+				if (_ddgiHistoryValid && _ddgiCommittedPlacementValid)
+				{
+					ddgiScrollDelta = DdgiUtilities.GetScrollDelta(
+						_ddgiCommittedRuntimeOrigin,
+						ddgiRuntimeOrigin,
+						ddgiProbeSpacing);
+					ddgiStorageOffset = DdgiUtilities.AdvanceStorageOffset(
+						_ddgiCommittedStorageOffset,
+						ddgiScrollDelta,
+						ddgiGridShape);
+				}
 				var ddgiWriteIndex = 1 - _ddgiHistoryReadIndex;
 				if (_ddgiIrradianceTextures[0, _ddgiHistoryReadIndex] is IGfxTexture ddgiIrradianceL0Read &&
 				    _ddgiIrradianceTextures[0, ddgiWriteIndex] is IGfxTexture ddgiIrradianceL0Write &&
@@ -706,6 +740,9 @@ internal sealed class RenderGraphFrameBuilder
 			DdgiVisibilityHistoryWrite = ddgiVisibilityWriteHandle,
 			DdgiProbeStateRead = ddgiProbeStateReadHandle,
 			DdgiProbeStateWrite = ddgiProbeStateWriteHandle,
+			DdgiRuntimeOrigin = ddgiRuntimeOrigin,
+			DdgiStorageOffset = ddgiStorageOffset,
+			DdgiScrollDelta = ddgiScrollDelta,
 			DdgiFinalContribution = ddgiFinalContributionHandle,
 			DdgiProbeBaseWeightDebug = ddgiProbeBaseWeightDebugHandle,
 			DdgiWeightedVisibilityDebug = ddgiWeightedVisibilityDebugHandle,
@@ -1737,6 +1774,9 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiIrradianceEstimatorState = _resources.GetResourceState(_frameResources.DdgiIrradianceEstimator);
 		_ddgiHistoryReadIndex = ddgiWriteIndex;
 		_ddgiHistoryValid = true;
+		_ddgiCommittedRuntimeOrigin = _frameResources.DdgiRuntimeOrigin;
+		_ddgiCommittedStorageOffset = _frameResources.DdgiStorageOffset;
+		_ddgiCommittedPlacementValid = true;
 	}
 
 	private void UpdateDdgiIrradianceState(int coefficientIndex, RenderGraphResourceHandle handle, int historyIndex)
@@ -1818,12 +1858,19 @@ internal sealed class RenderGraphFrameBuilder
 		_historyValid = false;
 	}
 
-	private void EnsureDdgiHistoryResources(IGfxDevice device, DdgiGridShape gridShape)
+	private void EnsureDdgiHistoryResources(
+		IGfxDevice device,
+		DdgiGridShape gridShape,
+		Vector3 latticeAnchor,
+		float probeSpacing)
 	{
 		var deviceChanged = _ddgiHistoryDevice is not null && ReferenceEquals(_ddgiHistoryDevice, device) == false;
 		var backendChanged = _ddgiHistoryBackendKind.HasValue && _ddgiHistoryBackendKind.Value != device.BackendKind;
 		var shapeChanged = _ddgiHistoryGridShape.Equals(gridShape) == false;
-		if (deviceChanged || backendChanged || shapeChanged)
+		var latticeAnchorChanged = _ddgiHistoryDevice is not null && _ddgiHistoryLatticeAnchor != latticeAnchor;
+		var probeSpacingChanged = _ddgiHistoryDevice is not null &&
+		                          MathF.Abs(_ddgiHistoryProbeSpacing - probeSpacing) > 1e-6f;
+		if (deviceChanged || backendChanged || shapeChanged || latticeAnchorChanged || probeSpacingChanged)
 		{
 			ReleaseDdgiHistoryResources();
 		}
@@ -1883,6 +1930,8 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiHistoryDevice = device;
 		_ddgiHistoryBackendKind = device.BackendKind;
 		_ddgiHistoryGridShape = gridShape;
+		_ddgiHistoryLatticeAnchor = latticeAnchor;
+		_ddgiHistoryProbeSpacing = probeSpacing;
 		_ddgiHistoryReadIndex = 0;
 		_ddgiHistoryValid = false;
 	}
@@ -1930,8 +1979,13 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiHistoryBackendKind = null;
 		_ddgiHistoryDevice = null;
 		_ddgiHistoryGridShape = default;
+		_ddgiHistoryLatticeAnchor = Vector3.Zero;
+		_ddgiHistoryProbeSpacing = 0.0f;
 		_ddgiHistoryReadIndex = 0;
 		_ddgiHistoryValid = false;
+		_ddgiCommittedRuntimeOrigin = Vector3.Zero;
+		_ddgiCommittedStorageOffset = default;
+		_ddgiCommittedPlacementValid = false;
 	}
 
 	private void EnqueueTemporalRelease(IGfxDevice? device, IGfxTexture texture, ResourceState lastKnownState)

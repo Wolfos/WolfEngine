@@ -52,9 +52,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
         RWTexture2D<float4> outputTex = GetRWTexture(visibilityHistoryWriteHandle);
+        DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
         float4 traceValue = IntegrateVisibilityTexel(pixel);
         float4 historyValue = historyTex.Load(int3(pixel, 0));
-        float historyWeight = historyValid != 0u ? hysteresis : 0.0f;
+        float historyWeight = info.valid && DdgiProbeHasHistory(info.probeIndex) ? hysteresis : 0.0f;
         outputTex[pixel] = lerp(traceValue, historyValue, historyWeight);
     }
 }

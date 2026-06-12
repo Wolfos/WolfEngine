@@ -18,15 +18,16 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    uint probeIndex = statePixel.y * atlasColumns + statePixel.x;
+    uint physicalProbeIndex = statePixel.y * atlasColumns + statePixel.x;
     RWTexture2D<float4> stateWriteTex = GetRWTexture(probeStateWriteHandle);
-    if (probeIndex >= probeCount)
+    if (physicalProbeIndex >= probeCount)
     {
         stateWriteTex[statePixel] = 0.0f.xxxx;
         return;
     }
+    uint probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
 
-    float3 previousOffset = historyValid != 0u
+    float3 previousOffset = DdgiProbeHasHistory(probeIndex)
         ? DdgiLoadProbeState(probeStateReadHandle, probeIndex).xyz
         : 0.0f.xxx;
     previousOffset = probeRelocationEnabled != 0u

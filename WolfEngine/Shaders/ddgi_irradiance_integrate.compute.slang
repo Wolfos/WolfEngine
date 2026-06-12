@@ -161,9 +161,9 @@ void CSMain(
     float2 octUv = ((float2(groupThreadId.xy) + 0.5f) / float(DDGI_DIRECTION_RESOLUTION)) * 2.0f - 1.0f;
     float3 direction = DdgiOctDecode(octUv);
     float3 currentRadiance = IntegrateDirection(probeIndex, direction);
-    uint estimatorIndex = probeIndex * DDGI_DIRECTION_COUNT + groupIndex;
+    uint estimatorIndex = DdgiPhysicalProbeIndex(probeIndex) * DDGI_DIRECTION_COUNT + groupIndex;
     DdgiVarianceData varianceData;
-    if (historyValid == 0u)
+    if (!DdgiProbeHasHistory(probeIndex))
     {
         varianceData = (DdgiVarianceData)0;
         varianceData.mean = currentRadiance;

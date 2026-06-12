@@ -36,6 +36,14 @@ cbuffer DdgiSettings : register(b1)
 {
     float3 origin;
     float probeSpacing;
+    int storageOffsetX;
+    int storageOffsetY;
+    int storageOffsetZ;
+    int scrollDeltaX;
+    int scrollDeltaY;
+    int scrollDeltaZ;
+    uint scrollingPad0;
+    uint scrollingPad1;
     uint probeCountX;
     uint probeCountY;
     uint probeCountZ;
@@ -91,9 +99,68 @@ float3 DdgiProbePosition(uint probeIndex)
     return origin + float3(float(x), float(y), float(z)) * probeSpacing;
 }
 
+int DdgiPositiveModulo(int value, int modulus)
+{
+    int remainder = value % max(modulus, 1);
+    return remainder < 0 ? remainder + modulus : remainder;
+}
+
+uint3 DdgiLogicalProbeCoord(uint probeIndex)
+{
+    uint x = probeIndex % probeCountX;
+    uint yz = probeIndex / probeCountX;
+    return uint3(x, yz % probeCountY, yz / probeCountY);
+}
+
+uint DdgiLogicalProbeIndex(uint3 coord)
+{
+    return coord.x + coord.y * probeCountX + coord.z * probeCountX * probeCountY;
+}
+
+uint3 DdgiPhysicalProbeCoord(uint logicalProbeIndex)
+{
+    uint3 logical = DdgiLogicalProbeCoord(logicalProbeIndex);
+    return uint3(
+        DdgiPositiveModulo(int(logical.x) + storageOffsetX, int(probeCountX)),
+        DdgiPositiveModulo(int(logical.y) + storageOffsetY, int(probeCountY)),
+        DdgiPositiveModulo(int(logical.z) + storageOffsetZ, int(probeCountZ)));
+}
+
+uint DdgiPhysicalProbeIndex(uint logicalProbeIndex)
+{
+    uint3 physical = DdgiPhysicalProbeCoord(logicalProbeIndex);
+    return physical.x + physical.y * probeCountX + physical.z * probeCountX * probeCountY;
+}
+
+uint DdgiLogicalProbeIndexFromPhysical(uint physicalProbeIndex)
+{
+    uint x = physicalProbeIndex % probeCountX;
+    uint yz = physicalProbeIndex / probeCountX;
+    uint3 logical = uint3(
+        DdgiPositiveModulo(int(x) - storageOffsetX, int(probeCountX)),
+        DdgiPositiveModulo(int(yz % probeCountY) - storageOffsetY, int(probeCountY)),
+        DdgiPositiveModulo(int(yz / probeCountY) - storageOffsetZ, int(probeCountZ)));
+    return DdgiLogicalProbeIndex(logical);
+}
+
+bool DdgiProbeHasHistory(uint logicalProbeIndex)
+{
+    if (historyValid == 0u)
+    {
+        return false;
+    }
+
+    uint3 logical = DdgiLogicalProbeCoord(logicalProbeIndex);
+    int3 previous = int3(logical) + int3(scrollDeltaX, scrollDeltaY, scrollDeltaZ);
+    return previous.x >= 0 && previous.x < int(probeCountX) &&
+        previous.y >= 0 && previous.y < int(probeCountY) &&
+        previous.z >= 0 && previous.z < int(probeCountZ);
+}
+
 uint2 DdgiProbeStatePixel(uint probeIndex)
 {
-    return uint2(probeIndex % atlasColumns, probeIndex / atlasColumns);
+    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+    return uint2(physicalProbeIndex % atlasColumns, physicalProbeIndex / atlasColumns);
 }
 
 float4 DdgiLoadProbeState(uint handle, uint probeIndex)
@@ -104,7 +171,7 @@ float4 DdgiLoadProbeState(uint handle, uint probeIndex)
 
 float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle)
 {
-    if (historyValid == 0u || probeRelocationEnabled == 0u)
+    if (!DdgiProbeHasHistory(probeIndex) || probeRelocationEnabled == 0u)
     {
         return DdgiProbePosition(probeIndex);
     }
@@ -115,8 +182,9 @@ float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle)
 uint2 DdgiProbeTileOrigin(uint probeIndex, uint interiorSize)
 {
     uint tileSize = interiorSize + tileBorderSize * 2u;
-    uint tileX = probeIndex % atlasColumns;
-    uint tileY = probeIndex / atlasColumns;
+    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+    uint tileX = physicalProbeIndex % atlasColumns;
+    uint tileY = physicalProbeIndex / atlasColumns;
     return uint2(tileX, tileY) * tileSize;
 }
 
@@ -130,6 +198,7 @@ bool DdgiIsProbeActive(uint probeIndex)
     uint updateFrames = max(probeUpdateFrames, 1u);
     return forceFullProbeUpdate != 0u ||
         historyValid == 0u ||
+        !DdgiProbeHasHistory(probeIndex) ||
         updateFrames == 1u ||
         (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
 }
@@ -167,14 +236,14 @@ DdgiTexelInfo DdgiDecodeAtlasTexel(uint2 pixel, uint interiorSize)
         return info;
     }
 
-    uint probeIndex = tile.y * atlasColumns + tile.x;
-    if (probeIndex >= probeCount)
+    uint physicalProbeIndex = tile.y * atlasColumns + tile.x;
+    if (physicalProbeIndex >= probeCount)
     {
         return info;
     }
 
     info.valid = true;
-    info.probeIndex = probeIndex;
+    info.probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
     info.interiorPixel = local - tileBorderSize;
     return info;
 }
@@ -206,8 +275,9 @@ float2 DdgiOctEncode(float3 n)
 float2 DdgiProbeAtlasUv(uint probeIndex, float3 direction, uint interiorSize)
 {
     uint tileSize = interiorSize + tileBorderSize * 2u;
-    uint tileX = probeIndex % atlasColumns;
-    uint tileY = probeIndex / atlasColumns;
+    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+    uint tileX = physicalProbeIndex % atlasColumns;
+    uint tileY = physicalProbeIndex / atlasColumns;
     float2 interiorUv = DdgiOctEncode(normalize(direction)) * 0.5f + 0.5f;
     float2 atlasPixel = float2(tileX * tileSize + tileBorderSize, tileY * tileSize + tileBorderSize) +
         interiorUv * float(interiorSize - 1u) + 0.5f.xx;
@@ -264,6 +334,10 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 }
 
                 uint probeIndex = uint(coord.x) + uint(coord.y) * probeCountX + uint(coord.z) * probeCountX * probeCountY;
+                if (!DdgiProbeHasHistory(probeIndex))
+                {
+                    continue;
+                }
                 float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
                 float trilinearWeight = tri.x * tri.y * tri.z;
                 float3 probePosition = DdgiRelocatedProbePosition(probeIndex, probeStateReadHandle);
@@ -336,9 +410,10 @@ float DdgiHashFloat(uint probeIndex, uint salt)
 
 float4 DdgiRayRotation(uint probeIndex)
 {
-    float u1 = DdgiHashFloat(probeIndex, 0x68bc21ebu);
-    float u2 = DdgiHashFloat(probeIndex, 0x02e5be93u);
-    float u3 = DdgiHashFloat(probeIndex, 0x967a889bu);
+    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+    float u1 = DdgiHashFloat(physicalProbeIndex, 0x68bc21ebu);
+    float u2 = DdgiHashFloat(physicalProbeIndex, 0x02e5be93u);
+    float u3 = DdgiHashFloat(physicalProbeIndex, 0x967a889bu);
     float sqrtOneMinusU1 = sqrt(saturate(1.0f - u1));
     float sqrtU1 = sqrt(saturate(u1));
     float angle2 = 2.0f * WOLF_PI * u2;
