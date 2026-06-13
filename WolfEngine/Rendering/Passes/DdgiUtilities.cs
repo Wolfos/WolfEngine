@@ -306,7 +306,23 @@ public static class DdgiUtilities
 
 	public static float GetVisibilityDirectionalWeight(float directionDot)
 	{
-		return MathF.Pow(Math.Clamp(directionDot, 0.0f, 1.0f), 64.0f);
+		return GetVisibilityDirectionalWeight(directionDot, MaxRaySamplesPerProbe);
+	}
+
+	public static float GetVisibilityDirectionalWeight(float directionDot, int rayCount)
+	{
+		var exponent = Math.Clamp(rayCount / 6.0f - 1.0f, 8.0f, 32.0f);
+		return MathF.Pow(Math.Clamp(directionDot, 0.0f, 1.0f), exponent);
+	}
+
+	public static float GetOctahedralSolidAngleWeight(Vector2 octUv)
+	{
+		var unnormalizedDirection = new Vector3(
+			octUv.X,
+			octUv.Y,
+			1.0f - MathF.Abs(octUv.X) - MathF.Abs(octUv.Y));
+		var length = unnormalizedDirection.Length();
+		return 1.0f / MathF.Max(unnormalizedDirection.LengthSquared() * length, 1e-5f);
 	}
 
 	public static float EvaluateVisibility(float meanDistance, float meanDistanceSquared, float distance)
@@ -327,13 +343,18 @@ public static class DdgiUtilities
 	public static Vector3 ComputeProbeRelocationTarget(
 		ReadOnlySpan<DdgiRelocationHit> hits,
 		float keepDistance,
-		float maxRelocationDistance)
+		float maxRelocationDistance,
+		Vector3 previousOffset = default,
+		float backfaceThreshold = 1.0f)
 	{
 		keepDistance = Math.Max(keepDistance, 0.0f);
 		var targetOffset = Vector3.Zero;
+		var backfaceHitCount = 0;
+		var closestBackfaceDistance = float.MaxValue;
+		var closestBackfaceDirection = Vector3.Zero;
 		foreach (var hit in hits)
 		{
-			if (hit.Valid == false || hit.Distance >= keepDistance)
+			if (hit.Valid == false)
 			{
 				continue;
 			}
@@ -341,10 +362,57 @@ public static class DdgiUtilities
 			var direction = hit.Direction == Vector3.Zero
 				? Vector3.UnitZ
 				: Vector3.Normalize(hit.Direction);
+			if (hit.Backface)
+			{
+				backfaceHitCount++;
+				if (hit.Distance < closestBackfaceDistance)
+				{
+					closestBackfaceDistance = Math.Max(hit.Distance, 0.0f);
+					closestBackfaceDirection = direction;
+				}
+
+				continue;
+			}
+
+			if (hit.Distance >= keepDistance)
+			{
+				continue;
+			}
+
 			targetOffset -= direction * (keepDistance - Math.Max(hit.Distance, 0.0f));
 		}
 
+		var backfaceRatio = backfaceHitCount / (float)Math.Max(hits.Length, 1);
+		if (backfaceHitCount > 0 && backfaceRatio > Math.Clamp(backfaceThreshold, 0.0f, 1.0f))
+		{
+			targetOffset = previousOffset +
+				closestBackfaceDirection * (closestBackfaceDistance + keepDistance);
+		}
+
 		return ClampProbeRelocationOffset(targetOffset, maxRelocationDistance);
+	}
+
+	public static bool IsProbeInsideGeometry(
+		ReadOnlySpan<DdgiRelocationHit> hits,
+		float backfaceThreshold)
+	{
+		var backfaceHitCount = 0;
+		foreach (var hit in hits)
+		{
+			if (hit.Valid == false)
+			{
+				continue;
+			}
+
+			if (hit.Backface)
+			{
+				backfaceHitCount++;
+			}
+		}
+
+		return backfaceHitCount > 0 &&
+		       backfaceHitCount / (float)Math.Max(hits.Length, 1) >
+		       Math.Clamp(backfaceThreshold, 0.0f, 1.0f);
 	}
 
 	public static Vector3 UpdateProbeRelocation(
@@ -533,4 +601,5 @@ public record struct DdgiVarianceData(
 public readonly record struct DdgiRelocationHit(
 	Vector3 Direction,
 	float Distance,
-	bool Valid = true);
+	bool Valid = true,
+	bool Backface = false);

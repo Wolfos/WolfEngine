@@ -16,6 +16,7 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
 
     float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, visibilityTileInteriorSize));
     uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
+    float filterExponent = clamp(float(rayCount) / 6.0f - 1.0f, 8.0f, 32.0f);
     Texture2D<float4> traceTex = GetTexture(traceVisibilityReadHandle);
 
     float2 moments = 0.0f.xx;
@@ -23,9 +24,9 @@ float4 IntegrateVisibilityTexel(uint2 pixel)
     for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
     {
         float3 rayDirection = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-        // Keep directional depth moments local. Broad lobes blend occluder
-        // distances across unrelated directions and cause light leaks.
-        float weight = pow(saturate(dot(texelDirection, rayDirection)), 64.0f);
+        // Keep roughly three rays in each directional estimate. A fixed dot^64
+        // kernel is undersampled at 64 rays and leaves angular holes in the atlas.
+        float weight = pow(saturate(dot(texelDirection, rayDirection)), filterExponent);
         if (weight <= 1e-5f)
         {
             continue;

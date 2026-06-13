@@ -175,9 +175,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		_instances.Clear();
 
 		drawDatabase.CollectDrawEntries(_drawEntries);
-		for (var i = 0; i < _drawEntries.Count; i++)
+		foreach (var entry in _drawEntries)
 		{
-			var entry = _drawEntries[i];
 			if (IsRayTraceable(entry.DrawKind, entry.Material, ref statsBuilder) == false)
 			{
 				continue;
@@ -352,7 +351,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			return false;
 		}
 
-		if (drawKind is not (GpuDrawKind.Mesh or GpuDrawKind.DebugPrimitive))
+		if (drawKind is not GpuDrawKind.Mesh)
 		{
 			return false;
 		}

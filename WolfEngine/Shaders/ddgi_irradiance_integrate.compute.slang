@@ -188,19 +188,29 @@ void CSMain(
     float3 coefficientLy = 0.0f.xxx;
     float3 coefficientLz = 0.0f.xxx;
     float3 coefficientLx = 0.0f.xxx;
+    float solidAngleWeightSum = 0.0f;
     for (uint sampleIndex = 0u; sampleIndex < DDGI_DIRECTION_COUNT; sampleIndex++)
     {
         uint2 sampleCoord = uint2(sampleIndex % DDGI_DIRECTION_RESOLUTION, sampleIndex / DDGI_DIRECTION_RESOLUTION);
         float2 sampleUv = ((float2(sampleCoord) + 0.5f) / float(DDGI_DIRECTION_RESOLUTION)) * 2.0f - 1.0f;
         float3 sampleDirection = DdgiOctDecode(sampleUv);
         float3 sampleRadiance = UnpackRgbe(g_FilteredRadiance[sampleIndex]);
-        coefficientL0 += sampleRadiance * DDGI_SH_BASIS_L0;
-        coefficientLy += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.y);
-        coefficientLz += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.z);
-        coefficientLx += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.x);
+        float3 unnormalizedDirection = float3(
+            sampleUv.x,
+            sampleUv.y,
+            1.0f - abs(sampleUv.x) - abs(sampleUv.y));
+        float solidAngleWeight = rcp(max(
+            dot(unnormalizedDirection, unnormalizedDirection) *
+            length(unnormalizedDirection),
+            1e-5f));
+        coefficientL0 += sampleRadiance * (DDGI_SH_BASIS_L0 * solidAngleWeight);
+        coefficientLy += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.y * solidAngleWeight);
+        coefficientLz += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.z * solidAngleWeight);
+        coefficientLx += sampleRadiance * (DDGI_SH_BASIS_L1 * sampleDirection.x * solidAngleWeight);
+        solidAngleWeightSum += solidAngleWeight;
     }
 
-    float projectionScale = 4.0f * WOLF_PI / float(DDGI_DIRECTION_COUNT);
+    float projectionScale = 4.0f * WOLF_PI / max(solidAngleWeightSum, 1e-5f);
     uint2 outputPixel = DdgiProbeStatePixel(probeIndex);
     RWTexture2D<float4> outputL0 = GetRWTexture(irradianceL0HistoryWriteHandle);
     RWTexture2D<float4> outputLy = GetRWTexture(irradianceLyHistoryWriteHandle);

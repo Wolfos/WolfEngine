@@ -227,7 +227,12 @@ DdgiTraceResult DdgiTraceRay(
             surface))
         {
             result.backfaceHit = dot(surface.worldGeometricNormal, rayDirection) > 0.0f;
-            result.radiance = DdgiShadeHitSurface(surface);
+            // A backface hit means the probe ray originated inside closed geometry.
+            // Do not let interior-facing surfaces inject energy while relocation
+            // moves the probe back into usable space.
+            result.radiance = result.backfaceHit
+                ? 0.0f.xxx
+                : DdgiShadeHitSurface(surface);
         }
         else
         {

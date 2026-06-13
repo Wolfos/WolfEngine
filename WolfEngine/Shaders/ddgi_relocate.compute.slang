@@ -44,6 +44,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
     float keepDistance = max(probeMinFrontfaceDistance, 0.0f);
     float3 targetOffset = 0.0f.xxx;
+    uint backfaceHitCount = 0u;
+    float closestBackfaceDistance = maxRayDistance;
+    float3 closestBackfaceDirection = 0.0f.xxx;
 
     for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
     {
@@ -55,14 +58,37 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         float distance = sampleValue.x * max(maxRayDistance, 0.001f);
+        float3 direction = DdgiRayDirection(rayIndex, rayCount, probeIndex);
+        if (sampleValue.w >= 0.5f)
+        {
+            backfaceHitCount++;
+            if (distance < closestBackfaceDistance)
+            {
+                closestBackfaceDistance = distance;
+                closestBackfaceDirection = direction;
+            }
+            continue;
+        }
+
         if (distance < keepDistance)
         {
-            float3 direction = DdgiRayDirection(rayIndex, rayCount, probeIndex);
             targetOffset -= direction * (keepDistance - distance);
         }
     }
 
+    float backfaceRatio = float(backfaceHitCount) / float(max(rayCount, 1u));
+    bool insideGeometry =
+        backfaceHitCount > 0u &&
+        backfaceRatio > saturate(probeBackfaceThreshold);
+    if (insideGeometry)
+    {
+        targetOffset = previousOffset +
+            closestBackfaceDirection * (closestBackfaceDistance + keepDistance);
+    }
+
     targetOffset = DdgiClampProbeOffset(targetOffset);
     float3 smoothedOffset = lerp(previousOffset, targetOffset, DDGI_RELOCATION_BLEND);
-    stateWriteTex[statePixel] = float4(DdgiClampProbeOffset(smoothedOffset), enabled ? 1.0f : 0.0f);
+    stateWriteTex[statePixel] = float4(
+        DdgiClampProbeOffset(smoothedOffset),
+        enabled ? 1.0f : 0.0f);
 }

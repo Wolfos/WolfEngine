@@ -655,8 +655,19 @@ public sealed class RayTracingSceneResourcesTests
 	public void DdgiVisibilityMomentsRemainDirectional()
 	{
 		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(1.0f), Is.EqualTo(1.0f));
-		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f), Is.LessThan(0.002f));
-		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.5f), Is.LessThan(1e-12f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f), Is.LessThan(0.04f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.5f), Is.LessThan(1e-8f));
+		Assert.That(DdgiUtilities.GetVisibilityDirectionalWeight(0.9f, 64), Is.GreaterThan(0.3f));
+	}
+
+	[Test]
+	public void DdgiOctahedralProjectionWeightsDistortedDirectionsBySolidAngle()
+	{
+		var centerWeight = DdgiUtilities.GetOctahedralSolidAngleWeight(Vector2.Zero);
+		var diagonalWeight = DdgiUtilities.GetOctahedralSolidAngleWeight(new Vector2(0.5f, 0.5f));
+
+		Assert.That(centerWeight, Is.EqualTo(1.0f).Within(1e-6f));
+		Assert.That(diagonalWeight, Is.GreaterThan(centerWeight));
 	}
 
 	[Test]
@@ -799,6 +810,39 @@ public sealed class RayTracingSceneResourcesTests
 			maxRelocationDistance: 0.9f);
 
 		AssertVector3(target, new Vector3(-0.1f, -0.15f, 0.0f));
+	}
+
+	[Test]
+	public void DdgiRelocationMovesInsideProbeTowardClosestBackfaceExit()
+	{
+		var hits = new[]
+		{
+			new DdgiRelocationHit(Vector3.UnitX, 0.15f, Backface: true),
+			new DdgiRelocationHit(Vector3.UnitY, 0.4f, Backface: true),
+			new DdgiRelocationHit(-Vector3.UnitX, 0.1f)
+		};
+
+		var target = DdgiUtilities.ComputeProbeRelocationTarget(
+			hits,
+			keepDistance: 0.2f,
+			maxRelocationDistance: 0.9f,
+			previousOffset: new Vector3(0.1f, 0.0f, 0.0f),
+			backfaceThreshold: 0.5f);
+
+		Assert.That(DdgiUtilities.IsProbeInsideGeometry(hits, 0.5f), Is.True);
+		AssertVector3(target, new Vector3(0.45f, 0.0f, 0.0f));
+	}
+
+	[Test]
+	public void DdgiRelocationDoesNotInvalidateProbeAtBackfaceThreshold()
+	{
+		var hits = new[]
+		{
+			new DdgiRelocationHit(Vector3.UnitX, 0.1f, Backface: true),
+			new DdgiRelocationHit(-Vector3.UnitX, 0.1f)
+		};
+
+		Assert.That(DdgiUtilities.IsProbeInsideGeometry(hits, 0.5f), Is.False);
 	}
 
 	[Test]
