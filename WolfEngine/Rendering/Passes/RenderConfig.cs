@@ -55,9 +55,6 @@ public struct DiffuseGlobalIlluminationConfig
 	public float ProbeMinFrontfaceDistance { get; set; } = 0.2f;
 	public float ProbeBackfaceThreshold { get; set; } = 0.25f;
 	public float ProbeMaxRelocationDistanceFactor { get; set; } = 0.45f;
-	public bool DebugIrradianceAtlas { get; set; }
-	public bool DebugVisibilityAtlas { get; set; }
-	public bool DebugFinalContribution { get; set; }
 	public bool DebugProbeSpheres { get; set; }
 	public float DebugProbeSphereRadius { get; set; } = 0.15f;
 }

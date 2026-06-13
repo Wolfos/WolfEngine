@@ -230,7 +230,7 @@ public class RenderPipeline : IRenderPipeline
 						new Entity(DdgiDebugProbeEntityBaseIndex + probeIndex, 1),
 						sphereMesh,
 						ColorRGBA.White,
-						AlphaMode.AlphaBlend,
+						AlphaMode.Opaque,
 						transform);
 					probeIndex++;
 				}
