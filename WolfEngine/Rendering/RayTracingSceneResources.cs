@@ -69,6 +69,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly uint[] _instanceIndexToTerrainRayTracingResolution = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
+	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly ShaderCompiler _shaderCompiler = new();
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
@@ -128,6 +129,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			}
 		}
 
+		RetryPendingTerrainVertexUpdates(ref statsBuilder);
 		var pendingBlasBuildCount = _pendingBlasBuilds.Count;
 		var commandList = context.CommandList;
 		DispatchPendingTerrainVertexUpdates(commandList, device);
@@ -147,8 +149,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		_lastStats = new RayTracingSceneStats(
-			_meshRecords.Count + _terrainInstances.Count,
-			_instances.Count + _terrainInstances.Count,
+			_meshRecords.Count + CountValidTerrainInstances(),
+			_instances.Count + CountValidTerrainInstances(),
 			pendingBlasBuildCount,
 			tlasRebuildCount,
 			tlasRebuildCount > 0 ? statsBuilder.TopLevelRebuildReason : RayTracingSceneRebuildReason.None,
@@ -354,10 +356,13 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			if (TryAcquireTerrain(update, device, out var newRecord))
 			{
 				_terrainInstances[update.InstanceHandle.Value] = newRecord;
-				_tlasDirty = true;
-				statsBuilder.TopLevelRebuildReason |= hasExistingRecord
-					? RayTracingSceneRebuildReason.Mesh
-					: RayTracingSceneRebuildReason.Add;
+				if (newRecord.HasValidGeometry || hasExistingRecord)
+				{
+					_tlasDirty = true;
+					statsBuilder.TopLevelRebuildReason |= hasExistingRecord
+						? RayTracingSceneRebuildReason.Mesh
+						: RayTracingSceneRebuildReason.Add;
+				}
 			}
 
 			return;
@@ -373,8 +378,18 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		if (oldRecord.RayTracingChunk.GeometryRevision != update.TerrainRayTracingChunk.GeometryRevision ||
 		    !ReferenceEquals(oldRecord.TerrainSurface.Heightmap, update.TerrainSurface.Value.Heightmap))
 		{
-			QueueTerrainVertexUpdate(updatedRecord, device);
-			_pendingBlasBuilds.Add(updatedRecord.AccelerationStructure);
+			updatedRecord = QueueTerrainVertexUpdate(updatedRecord)
+				? updatedRecord with { HasValidGeometry = true, VertexUpdatePending = false }
+				: updatedRecord with { VertexUpdatePending = true };
+			if (updatedRecord.VertexUpdatePending == false)
+			{
+				_pendingBlasBuilds.Add(updatedRecord.AccelerationStructure);
+				if (oldRecord.HasValidGeometry == false)
+				{
+					_tlasDirty = true;
+					statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Add;
+				}
+			}
 		}
 
 		_terrainInstances[update.InstanceHandle.Value] = updatedRecord;
@@ -451,9 +466,15 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			surface,
 			vertexBuffer,
 			indexRecord.IndexBuffer,
-			accelerationStructure);
-		QueueTerrainVertexUpdate(record, device);
-		_pendingBlasBuilds.Add(accelerationStructure);
+			accelerationStructure,
+			false,
+			true);
+		if (QueueTerrainVertexUpdate(record))
+		{
+			record = record with { HasValidGeometry = true, VertexUpdatePending = false };
+			_pendingBlasBuilds.Add(accelerationStructure);
+		}
+
 		return true;
 	}
 
@@ -504,12 +525,12 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		return indices;
 	}
 
-	private void QueueTerrainVertexUpdate(in TerrainInstanceRecord record, IGfxDevice device)
+	private bool QueueTerrainVertexUpdate(in TerrainInstanceRecord record)
 	{
 		if (record.TerrainSurface.Heightmap is not { } heightmap ||
 		    heightmap.Resources?.ShaderResourceView.IsValid != true)
 		{
-			return;
+			return false;
 		}
 
 		_pendingTerrainVertexUpdates.Add(new TerrainVertexUpdateRecord(
@@ -519,6 +540,48 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			record.TerrainSurface.HeightScale,
 			heightmap.Width,
 			heightmap.Height));
+		return true;
+	}
+
+	private void RetryPendingTerrainVertexUpdates(
+		ref RayTracingSceneStatsBuilder statsBuilder)
+	{
+		_pendingTerrainRetryHandles.Clear();
+		foreach (var (instanceHandle, record) in _terrainInstances)
+		{
+			if (record.VertexUpdatePending)
+			{
+				_pendingTerrainRetryHandles.Add(instanceHandle);
+			}
+		}
+
+		for (var i = 0; i < _pendingTerrainRetryHandles.Count; i++)
+		{
+			var instanceHandle = _pendingTerrainRetryHandles[i];
+			if (_terrainInstances.TryGetValue(instanceHandle, out var record) == false)
+			{
+				continue;
+			}
+
+			if (QueueTerrainVertexUpdate(record) == false)
+			{
+				continue;
+			}
+
+			_terrainInstances[instanceHandle] = record with
+			{
+				HasValidGeometry = true,
+				VertexUpdatePending = false
+			};
+			_pendingBlasBuilds.Add(record.AccelerationStructure);
+			if (record.HasValidGeometry == false)
+			{
+				_tlasDirty = true;
+				statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Add;
+			}
+		}
+
+		_pendingTerrainRetryHandles.Clear();
 	}
 
 	private void DispatchPendingTerrainVertexUpdates(IGfxCommandList commandList, IGfxDevice device)
@@ -694,6 +757,11 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 		foreach (var record in _terrainInstances.Values)
 		{
+			if (record.HasValidGeometry == false)
+			{
+				continue;
+			}
+
 			var instanceIndex = (uint)_instanceDescriptions.Count;
 			_instanceDescriptions.Add(new RayTracingInstanceDescription(
 				instanceIndex,
@@ -715,6 +783,20 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			writableTerrainBuffer.Write<uint>(_instanceIndexToTerrainRayTracingResolution);
 		}
+	}
+
+	private int CountValidTerrainInstances()
+	{
+		var count = 0;
+		foreach (var record in _terrainInstances.Values)
+		{
+			if (record.HasValidGeometry)
+			{
+				count++;
+			}
+		}
+
+		return count;
 	}
 
 	private static bool IsRayTraceable(GpuDrawKind drawKind, Material material, ref RayTracingSceneStatsBuilder statsBuilder)
@@ -748,6 +830,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				disposable.Dispose();
 			}
 		}
+
 		_meshRecords.Clear();
 		ReleaseAllTerrainInstances();
 		foreach (var record in _terrainIndexBuffers.Values)
@@ -799,7 +882,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		TerrainDrawSurface TerrainSurface,
 		IGfxBuffer VertexBuffer,
 		IGfxBuffer IndexBuffer,
-		IGfxBottomLevelAccelerationStructure AccelerationStructure);
+		IGfxBottomLevelAccelerationStructure AccelerationStructure,
+		bool HasValidGeometry,
+		bool VertexUpdatePending);
 
 	private readonly record struct TerrainIndexBufferRecord(IGfxBuffer IndexBuffer, uint IndexCount);
 

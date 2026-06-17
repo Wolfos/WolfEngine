@@ -1338,12 +1338,11 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
 		context.GpuDrawDatabase.CopyUpdates(_frameGpuDrawUpdates);
+		_gpuDrawPass.RecordUpdate(context);
 		if (RequiresRayTracingScene(_frameResources.Config))
 		{
 			_rayTracingSceneResources.RecordUpdate(context, _renderer, _frameGpuDrawUpdates);
 		}
-
-		_gpuDrawPass.RecordUpdate(context);
 	}
 
 	private void ExecuteGpuDrawCullShadow(RenderGraphContext context)
