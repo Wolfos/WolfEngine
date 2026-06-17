@@ -184,6 +184,7 @@ public sealed class ScenePersistenceTests
 			ChunkSizeMeters = 96.0f,
 			LodCount = 4,
 			Lod0ResolutionInQuads = 32,
+			RayTracingResolutionInQuads = 24,
 			LodDistancesMeters = [100.0f, 240.0f, 520.0f]
 		});
 
@@ -199,6 +200,7 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedTerrain.ChunkSizeMeters, Is.EqualTo(96.0f));
 		Assert.That(loadedTerrain.LodCount, Is.EqualTo(4));
 		Assert.That(loadedTerrain.Lod0ResolutionInQuads, Is.EqualTo(32));
+		Assert.That(loadedTerrain.RayTracingResolutionInQuads, Is.EqualTo(24));
 		Assert.That(loadedTerrain.LodDistancesMeters, Is.EqualTo(new[] { 100.0f, 240.0f, 520.0f }));
 	}
 

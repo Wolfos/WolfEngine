@@ -18,6 +18,7 @@ public struct TerrainComponent : IEntityComponent
 	public float ChunkSizeMeters;
 	public int LodCount;
 	public int Lod0ResolutionInQuads;
+	public int RayTracingResolutionInQuads;
 	public float[] LodDistancesMeters;
 	[HideFromEditor]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -67,6 +68,7 @@ public struct TerrainComponent : IEntityComponent
 		ChunkSizeMeters = 64.0f;
 		LodCount = 3;
 		Lod0ResolutionInQuads = 32;
+		RayTracingResolutionInQuads = 16;
 		LodDistancesMeters = [120.0f, 320.0f];
 		ChunkSizeInQuads = 0;
 		PhysicsCacheValid = false;
@@ -129,6 +131,17 @@ public struct TerrainComponent : IEntityComponent
 		}
 
 		return Math.Clamp(resolution, 2, 1024);
+	}
+
+	public int GetResolvedRayTracingResolutionInQuads()
+	{
+		var resolution = RayTracingResolutionInQuads;
+		if (resolution < 1)
+		{
+			resolution = 16;
+		}
+
+		return Math.Clamp(resolution, 1, 256);
 	}
 
 	public float[] GetResolvedLodDistancesMeters()

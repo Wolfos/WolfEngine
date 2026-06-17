@@ -10,6 +10,7 @@ public sealed class TerrainRuntimeData
 {
 	private const int MaxChunkTileCount = 10_000;
 	private readonly List<TerrainChunkRuntime> _chunks = new();
+	private readonly List<TerrainRayTracingChunkRuntime> _rayTracingChunks = new();
 	private readonly List<Mesh> _pendingReleasedMeshes = new();
 	private Mesh[] _sharedLodMeshes = Array.Empty<Mesh>();
 	private TerrainAsset? _resolvedTerrainAsset;
@@ -26,6 +27,7 @@ public sealed class TerrainRuntimeData
 	private float _resolvedChunkSizeMeters;
 	private int _resolvedLodCount;
 	private int _resolvedLod0Resolution;
+	private int _resolvedRayTracingResolution;
 	private float[] _resolvedLodDistances = Array.Empty<float>();
 	private Guid _terrainAssetNodeId;
 	private Guid _layerSetNodeId;
@@ -42,13 +44,16 @@ public sealed class TerrainRuntimeData
 	private float _lastLayoutChunkSizeMeters;
 	private int _lastLayoutLodCount;
 	private int _lastLayoutLod0Resolution;
+	private int _lastLayoutRayTracingResolution;
 	private float[] _lastLayoutLodDistances = Array.Empty<float>();
+	private TerrainHeightmapDirtyRegion? _pendingRayTracingDirtyRegion;
 	private bool _hasLayoutState;
 	private bool _built;
 	private float[]? _heightSamples;
 	private Vector3[]? _normals;
 
 	public IReadOnlyList<TerrainChunkRuntime> Chunks => _chunks;
+	public IReadOnlyList<TerrainRayTracingChunkRuntime> RayTracingChunks => _rayTracingChunks;
 	public IReadOnlyList<Mesh> SharedLodMeshes => _sharedLodMeshes;
 	public int HeightSampleWidth { get; private set; }
 	public int HeightSampleHeight { get; private set; }
@@ -74,8 +79,21 @@ public sealed class TerrainRuntimeData
 			RebuildRenderLayout();
 		}
 
+		ApplyPendingRayTracingDirtyRegion();
 		_built = _sharedLodMeshes.Length > 0 && _chunks.Count > 0;
 		return _built;
+	}
+
+	public void MarkHeightmapEdited(in TerrainHeightmapDirtyRegion dirtyRegion)
+	{
+		if (dirtyRegion.IsEmpty)
+		{
+			return;
+		}
+
+		_pendingRayTracingDirtyRegion = _pendingRayTracingDirtyRegion.HasValue
+			? TerrainHeightmapDirtyRegion.Union(_pendingRayTracingDirtyRegion.Value, dirtyRegion)
+			: dirtyRegion;
 	}
 
 	public void ReleasePendingMeshResources(RenderGraph renderGraph)
@@ -142,7 +160,8 @@ public sealed class TerrainRuntimeData
 					_resolvedHeightScale,
 					layerCount,
 					heightBlendSharpness,
-					layers)));
+					layers),
+				_rayTracingChunks[i].CreateData(i)));
 		}
 	}
 
@@ -266,6 +285,7 @@ public sealed class TerrainRuntimeData
 		_resolvedHeightScale = component.GetResolvedHeightScale();
 		_resolvedLodCount = component.GetResolvedLodCount();
 		_resolvedLod0Resolution = component.GetResolvedLod0ResolutionInQuads();
+		_resolvedRayTracingResolution = component.GetResolvedRayTracingResolutionInQuads();
 		_resolvedLodDistances = component.GetResolvedLodDistancesMeters();
 		_resolvedChunkSizeMeters = ResolveChunkSizeMeters(component);
 	}
@@ -411,7 +431,8 @@ public sealed class TerrainRuntimeData
 		    Math.Abs(_lastLayoutHeightScale - _resolvedHeightScale) > 0.0001f ||
 		    Math.Abs(_lastLayoutChunkSizeMeters - _resolvedChunkSizeMeters) > 0.0001f ||
 		    _lastLayoutLodCount != _resolvedLodCount ||
-		    _lastLayoutLod0Resolution != _resolvedLod0Resolution)
+		    _lastLayoutLod0Resolution != _resolvedLod0Resolution ||
+		    _lastLayoutRayTracingResolution != _resolvedRayTracingResolution)
 		{
 			return true;
 		}
@@ -440,6 +461,7 @@ public sealed class TerrainRuntimeData
 		_lastLayoutChunkSizeMeters = _resolvedChunkSizeMeters;
 		_lastLayoutLodCount = _resolvedLodCount;
 		_lastLayoutLod0Resolution = _resolvedLod0Resolution;
+		_lastLayoutRayTracingResolution = _resolvedRayTracingResolution;
 		_lastLayoutLodDistances = (float[])_resolvedLodDistances.Clone();
 	}
 
@@ -447,6 +469,7 @@ public sealed class TerrainRuntimeData
 	{
 		CaptureReleasedSharedMeshes();
 		_chunks.Clear();
+		_rayTracingChunks.Clear();
 		_sharedLodMeshes = Array.Empty<Mesh>();
 		if (ExceedsChunkTileLimit(_resolvedWorldSize, _resolvedChunkSizeMeters, out var chunkTileCount))
 		{
@@ -466,6 +489,7 @@ public sealed class TerrainRuntimeData
 	{
 		CaptureReleasedSharedMeshes();
 		_chunks.Clear();
+		_rayTracingChunks.Clear();
 		_sharedLodMeshes = Array.Empty<Mesh>();
 		_hasLayoutState = false;
 	}
@@ -674,8 +698,57 @@ public sealed class TerrainRuntimeData
 					new Vector4(originX, originZ, sizeX, sizeZ),
 					new Vector4(uvScaleX, uvScaleZ, uvOffsetX, uvOffsetZ));
 				_chunks.Add(new TerrainChunkRuntime(chunkX, chunkY, bounds, instanceData));
+				_rayTracingChunks.Add(new TerrainRayTracingChunkRuntime(
+					chunkX,
+					chunkY,
+					_resolvedRayTracingResolution,
+					instanceData,
+					geometryRevision: 1));
 			}
 		}
+	}
+
+	private void ApplyPendingRayTracingDirtyRegion()
+	{
+		if (_pendingRayTracingDirtyRegion.HasValue == false || _rayTracingChunks.Count == 0)
+		{
+			return;
+		}
+
+		var dirtyRegion = _pendingRayTracingDirtyRegion.Value;
+		_pendingRayTracingDirtyRegion = null;
+		if (dirtyRegion.IsEmpty || dirtyRegion.TextureWidth <= 0 || dirtyRegion.TextureHeight <= 0)
+		{
+			return;
+		}
+
+		for (var i = 0; i < _rayTracingChunks.Count; i++)
+		{
+			var chunk = _rayTracingChunks[i];
+			if (DirtyRegionIntersectsChunk(dirtyRegion, chunk.InstanceData))
+			{
+				chunk.IncrementGeometryRevision();
+			}
+		}
+	}
+
+	private static bool DirtyRegionIntersectsChunk(in TerrainHeightmapDirtyRegion dirtyRegion, in TerrainChunkInstanceData instanceData)
+	{
+		var textureMaxX = Math.Max(dirtyRegion.TextureWidth - 1, 1);
+		var textureMaxY = Math.Max(dirtyRegion.TextureHeight - 1, 1);
+		var dirtyMinU = dirtyRegion.X / (float)textureMaxX;
+		var dirtyMinV = dirtyRegion.Y / (float)textureMaxY;
+		var dirtyMaxU = (dirtyRegion.X + dirtyRegion.Width - 1) / (float)textureMaxX;
+		var dirtyMaxV = (dirtyRegion.Y + dirtyRegion.Height - 1) / (float)textureMaxY;
+		var uv = instanceData.HeightmapUvScaleOffset;
+		var chunkMinU = uv.Z;
+		var chunkMinV = uv.W;
+		var chunkMaxU = uv.Z + uv.X;
+		var chunkMaxV = uv.W + uv.Y;
+		return dirtyMaxU >= chunkMinU &&
+		       dirtyMinU <= chunkMaxU &&
+		       dirtyMaxV >= chunkMinV &&
+		       dirtyMinV <= chunkMaxV;
 	}
 
 	private static BoundingSphere CreateChunkBounds(float originX, float originZ, float sizeX, float sizeZ, float heightScale)
@@ -1201,4 +1274,97 @@ public sealed class TerrainChunkRuntime
 	public int ChunkY { get; }
 	public BoundingSphere LocalBounds { get; }
 	public TerrainChunkInstanceData InstanceData { get; }
+}
+
+public sealed class TerrainRayTracingChunkRuntime
+{
+	public TerrainRayTracingChunkRuntime(
+		int chunkX,
+		int chunkY,
+		int resolutionInQuads,
+		TerrainChunkInstanceData instanceData,
+		int geometryRevision)
+	{
+		ChunkX = chunkX;
+		ChunkY = chunkY;
+		ResolutionInQuads = resolutionInQuads;
+		InstanceData = instanceData;
+		GeometryRevision = Math.Max(geometryRevision, 1);
+	}
+
+	public int ChunkX { get; }
+	public int ChunkY { get; }
+	public int ResolutionInQuads { get; }
+	public TerrainChunkInstanceData InstanceData { get; }
+	public int GeometryRevision { get; private set; }
+
+	public void IncrementGeometryRevision()
+	{
+		GeometryRevision = GeometryRevision == int.MaxValue ? 1 : GeometryRevision + 1;
+	}
+
+	public TerrainRayTracingChunkData CreateData(int chunkIndex)
+	{
+		return new TerrainRayTracingChunkData(
+			chunkIndex,
+			ResolutionInQuads,
+			GeometryRevision,
+			InstanceData.ChunkOriginSize,
+			InstanceData.HeightmapUvScaleOffset);
+	}
+}
+
+public readonly struct TerrainHeightmapDirtyRegion
+{
+	public TerrainHeightmapDirtyRegion(int x, int y, int width, int height, int textureWidth, int textureHeight)
+	{
+		TextureWidth = Math.Max(textureWidth, 0);
+		TextureHeight = Math.Max(textureHeight, 0);
+		if (TextureWidth == 0 || TextureHeight == 0 || width <= 0 || height <= 0)
+		{
+			X = 0;
+			Y = 0;
+			Width = 0;
+			Height = 0;
+			return;
+		}
+
+		var minX = Math.Clamp(x, 0, TextureWidth - 1);
+		var minY = Math.Clamp(y, 0, TextureHeight - 1);
+		var maxX = Math.Clamp(x + width - 1, 0, TextureWidth - 1);
+		var maxY = Math.Clamp(y + height - 1, 0, TextureHeight - 1);
+		X = Math.Min(minX, maxX);
+		Y = Math.Min(minY, maxY);
+		Width = Math.Max(0, Math.Max(minX, maxX) - X + 1);
+		Height = Math.Max(0, Math.Max(minY, maxY) - Y + 1);
+	}
+
+	public int X { get; }
+	public int Y { get; }
+	public int Width { get; }
+	public int Height { get; }
+	public int TextureWidth { get; }
+	public int TextureHeight { get; }
+	public bool IsEmpty => Width <= 0 || Height <= 0 || TextureWidth <= 0 || TextureHeight <= 0;
+
+	public static TerrainHeightmapDirtyRegion Union(in TerrainHeightmapDirtyRegion left, in TerrainHeightmapDirtyRegion right)
+	{
+		if (left.IsEmpty)
+		{
+			return right;
+		}
+
+		if (right.IsEmpty)
+		{
+			return left;
+		}
+
+		var textureWidth = Math.Max(left.TextureWidth, right.TextureWidth);
+		var textureHeight = Math.Max(left.TextureHeight, right.TextureHeight);
+		var minX = Math.Min(left.X, right.X);
+		var minY = Math.Min(left.Y, right.Y);
+		var maxX = Math.Max(left.X + left.Width - 1, right.X + right.Width - 1);
+		var maxY = Math.Max(left.Y + left.Height - 1, right.Y + right.Height - 1);
+		return new TerrainHeightmapDirtyRegion(minX, minY, maxX - minX + 1, maxY - minY + 1, textureWidth, textureHeight);
+	}
 }

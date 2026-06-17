@@ -77,6 +77,62 @@ public sealed class TerrainAuthoringServiceTests
 	}
 
 	[Test]
+	public void EndStroke_MarksHeightmapDirtyForTerrainRayTracingRuntime()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 10);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var terrainEntity = GetTerrainEntity(scene);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			terrainEntity,
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.Heightmap,
+				TerrainBrushOperation.RaiseLower,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 0, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.EndStroke();
+
+		var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(scene.World, terrainEntity);
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(terrainEntity);
+		Assert.That(runtime.EnsureBuilt(terrain), Is.True);
+		Assert.That(runtime.RayTracingChunks, Has.Count.EqualTo(1));
+		Assert.That(runtime.RayTracingChunks[0].GeometryRevision, Is.EqualTo(2));
+	}
+
+	[Test]
+	public void CancelStroke_DoesNotMarkHeightmapDirtyForTerrainRayTracingRuntime()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 10);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var terrainEntity = GetTerrainEntity(scene);
+		var service = CreateService(out _, out _);
+
+		service.BeginStroke(
+			scene,
+			terrainEntity,
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.Heightmap,
+				TerrainBrushOperation.RaiseLower,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 0, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.CancelStroke();
+
+		var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(scene.World, terrainEntity);
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(terrainEntity);
+		Assert.That(runtime.EnsureBuilt(terrain), Is.True);
+		Assert.That(runtime.RayTracingChunks, Has.Count.EqualTo(1));
+		Assert.That(runtime.RayTracingChunks[0].GeometryRevision, Is.EqualTo(1));
+	}
+
+	[Test]
 	public void EndStroke_PaintsRequestedLayerIntoIndexAndWeightMaps()
 	{
 		using var registry = new TestAssetRegistry();

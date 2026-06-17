@@ -28,6 +28,27 @@ internal static class TerrainRuntimeRegistry
 		}
 	}
 
+	public static void MarkHeightmapEdited(World world, Entity entity, in TerrainHeightmapDirtyRegion dirtyRegion)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		if (dirtyRegion.IsEmpty)
+		{
+			return;
+		}
+
+		lock (SyncRoot)
+		{
+			var key = new TerrainRuntimeKey(world, entity);
+			if (RuntimeByKey.TryGetValue(key, out var runtime) == false)
+			{
+				runtime = new TerrainRuntimeData();
+				RuntimeByKey.Add(key, runtime);
+			}
+
+			runtime.MarkHeightmapEdited(dirtyRegion);
+		}
+	}
+
 	public static void RemoveWorld(World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);

@@ -125,6 +125,29 @@ public sealed class GpuDrawDatabase
 		in TerrainDrawSurface surface,
 		in Matrix4x4 worldTransform)
 	{
+		TouchTerrainChunk(
+			entity,
+			chunkIndex,
+			mesh,
+			material,
+			localBounds,
+			instanceData,
+			surface,
+			new TerrainRayTracingChunkData(chunkIndex, 16, 1, instanceData.ChunkOriginSize, instanceData.HeightmapUvScaleOffset),
+			worldTransform);
+	}
+
+	public void TouchTerrainChunk(
+		Entity entity,
+		int chunkIndex,
+		Mesh mesh,
+		Material material,
+		in BoundingSphere localBounds,
+		in TerrainChunkInstanceData instanceData,
+		in TerrainDrawSurface surface,
+		in TerrainRayTracingChunkData rayTracingChunk,
+		in Matrix4x4 worldTransform)
+	{
 		var key = new DrawRecordKey(entity, chunkIndex + 1);
 		if (_records.TryGetValue(key, out var record))
 		{
@@ -134,13 +157,14 @@ public sealed class GpuDrawDatabase
 					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.Terrain}.");
 			}
 
-			ApplyTerrainChanges(record, mesh, material, localBounds, instanceData, surface, worldTransform);
+			ApplyTerrainChanges(record, mesh, material, localBounds, instanceData, surface, rayTracingChunk, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
 		var newRecord = CreateRecord(key, GpuDrawKind.Terrain, mesh, material, worldTransform, localBounds, instanceData);
 		newRecord.TerrainSurface = surface;
+		newRecord.TerrainRayTracingChunk = rayTracingChunk;
 		_records.Add(key, newRecord);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
@@ -159,7 +183,8 @@ public sealed class GpuDrawDatabase
 			mesh,
 			material,
 			newRecord.TerrainInstanceData,
-			surface));
+			surface,
+			rayTracingChunk));
 	}
 
 	public void EndSync()
@@ -230,6 +255,7 @@ public sealed class GpuDrawDatabase
 				record.Material,
 				record.TerrainInstanceData,
 				record.TerrainSurface,
+				record.TerrainRayTracingChunk,
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius));
@@ -499,6 +525,7 @@ public sealed class GpuDrawDatabase
 		in BoundingSphere localBounds,
 		in TerrainChunkInstanceData instanceData,
 		in TerrainDrawSurface surface,
+		in TerrainRayTracingChunkData rayTracingChunk,
 		in Matrix4x4 worldTransform)
 	{
 		var transformChanged = record.World.Equals(worldTransform) == false;
@@ -508,9 +535,10 @@ public sealed class GpuDrawDatabase
 		var terrainInstanceChanged = TerrainInstanceEquals(record.TerrainInstanceData, instanceData) == false;
 		var boundsChanged = record.HasBoundsOverride == false || record.LocalBoundsOverride.Equals(localBounds) == false;
 		var surfaceChanged = record.TerrainSurface.HasValue == false || TerrainSurfaceEquals(record.TerrainSurface.Value, surface) == false;
+		var rayTracingChunkChanged = TerrainRayTracingChunkEquals(record.TerrainRayTracingChunk, rayTracingChunk) == false;
 		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || terrainInstanceChanged || boundsChanged || surfaceChanged || settlePreviousTransform) == false)
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || terrainInstanceChanged || boundsChanged || surfaceChanged || rayTracingChunkChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
@@ -539,6 +567,11 @@ public sealed class GpuDrawDatabase
 		if (surfaceChanged)
 		{
 			record.TerrainSurface = surface;
+		}
+
+		if (rayTracingChunkChanged)
+		{
+			record.TerrainRayTracingChunk = rayTracingChunk;
 		}
 
 		if (terrainInstanceChanged)
@@ -571,10 +604,11 @@ public sealed class GpuDrawDatabase
 				record.BoundsCenterRadius,
 				record.Mesh,
 				record.TerrainInstanceData,
-				record.TerrainSurface));
+				record.TerrainSurface,
+				record.TerrainRayTracingChunk));
 		}
 
-		if (materialChanged || materialResourceChanged || surfaceChanged)
+		if (materialChanged || materialResourceChanged || surfaceChanged || rayTracingChunkChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
@@ -588,7 +622,8 @@ public sealed class GpuDrawDatabase
 				record.Mesh,
 				record.Material,
 				record.TerrainInstanceData,
-				record.TerrainSurface));
+				record.TerrainSurface,
+				record.TerrainRayTracingChunk));
 		}
 
 		if (transformChanged || terrainInstanceChanged || boundsChanged)
@@ -788,6 +823,15 @@ public sealed class GpuDrawDatabase
 		       left.HeightmapUvScaleOffset.Equals(right.HeightmapUvScaleOffset);
 	}
 
+	private static bool TerrainRayTracingChunkEquals(in TerrainRayTracingChunkData left, in TerrainRayTracingChunkData right)
+	{
+		return left.ChunkIndex == right.ChunkIndex &&
+		       left.ResolutionInQuads == right.ResolutionInQuads &&
+		       left.GeometryRevision == right.GeometryRevision &&
+		       left.ChunkOriginSize.Equals(right.ChunkOriginSize) &&
+		       left.HeightmapUvScaleOffset.Equals(right.HeightmapUvScaleOffset);
+	}
+
 	private static bool TerrainLayerEquals(in TerrainResolvedLayer left, in TerrainResolvedLayer right)
 	{
 		return ReferenceEquals(left.Albedo, right.Albedo) &&
@@ -814,6 +858,7 @@ public sealed class GpuDrawDatabase
 		public int MaterialResourceRevision;
 		public TerrainDrawSurface? TerrainSurface;
 		public TerrainChunkInstanceData TerrainInstanceData;
+		public TerrainRayTracingChunkData TerrainRayTracingChunk;
 		public bool HasBoundsOverride;
 		public BoundingSphere LocalBoundsOverride;
 		public Matrix4x4 PreviousWorld;
@@ -864,6 +909,7 @@ public readonly struct GpuDrawEntry
 		Material material,
 		TerrainChunkInstanceData terrainInstanceData,
 		TerrainDrawSurface? terrainSurface,
+		TerrainRayTracingChunkData terrainRayTracingChunk,
 		Matrix4x4 previousWorld,
 		Matrix4x4 world,
 		Vector4 boundsCenterRadius)
@@ -877,6 +923,7 @@ public readonly struct GpuDrawEntry
 		Material = material;
 		TerrainInstanceData = terrainInstanceData;
 		TerrainSurface = terrainSurface;
+		TerrainRayTracingChunk = terrainRayTracingChunk;
 		PreviousWorld = previousWorld;
 		World = world;
 		BoundsCenterRadius = boundsCenterRadius;
@@ -891,6 +938,7 @@ public readonly struct GpuDrawEntry
 	public Material Material { get; }
 	public TerrainChunkInstanceData TerrainInstanceData { get; }
 	public TerrainDrawSurface? TerrainSurface { get; }
+	public TerrainRayTracingChunkData TerrainRayTracingChunk { get; }
 	public Matrix4x4 PreviousWorld { get; }
 	public Matrix4x4 World { get; }
 	public Vector4 BoundsCenterRadius { get; }
@@ -916,7 +964,8 @@ public readonly struct GpuDrawUpdate
 		Mesh? mesh,
 		Material? material,
 		TerrainChunkInstanceData terrainInstanceData,
-		TerrainDrawSurface? terrainSurface)
+		TerrainDrawSurface? terrainSurface,
+		TerrainRayTracingChunkData terrainRayTracingChunk)
 	{
 		Type = type;
 		DrawKind = drawKind;
@@ -931,6 +980,7 @@ public readonly struct GpuDrawUpdate
 		Material = material;
 		TerrainInstanceData = terrainInstanceData;
 		TerrainSurface = terrainSurface;
+		TerrainRayTracingChunk = terrainRayTracingChunk;
 	}
 
 	public GpuDrawUpdateType Type { get; }
@@ -946,6 +996,7 @@ public readonly struct GpuDrawUpdate
 	public Material? Material { get; }
 	public TerrainChunkInstanceData TerrainInstanceData { get; }
 	public TerrainDrawSurface? TerrainSurface { get; }
+	public TerrainRayTracingChunkData TerrainRayTracingChunk { get; }
 
 	public int DrawIndex => DrawHandle.Index;
 	public int InstanceIndex => InstanceHandle.Index;
@@ -964,7 +1015,8 @@ public readonly struct GpuDrawUpdate
 		Mesh mesh,
 		Material material,
 		TerrainChunkInstanceData terrainInstanceData = default,
-		TerrainDrawSurface? terrainSurface = null)
+		TerrainDrawSurface? terrainSurface = null,
+		TerrainRayTracingChunkData terrainRayTracingChunk = default)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.Add,
@@ -979,7 +1031,8 @@ public readonly struct GpuDrawUpdate
 			mesh,
 			material,
 			terrainInstanceData,
-			terrainSurface);
+			terrainSurface,
+			terrainRayTracingChunk);
 	}
 
 	public static GpuDrawUpdate CreateRemove(GpuDrawKind drawKind, GpuDrawHandle drawHandle, GpuDrawHandle instanceHandle)
@@ -997,7 +1050,8 @@ public readonly struct GpuDrawUpdate
 			null,
 			null,
 			default,
-			null);
+			null,
+			default);
 	}
 
 	public static GpuDrawUpdate CreateTransformUpdate(
@@ -1024,7 +1078,8 @@ public readonly struct GpuDrawUpdate
 			null,
 			null,
 			terrainInstanceData,
-			null);
+			null,
+			default);
 	}
 
 	public static GpuDrawUpdate CreateMaterialUpdate(
@@ -1039,7 +1094,8 @@ public readonly struct GpuDrawUpdate
 		Mesh mesh,
 		Material material,
 		TerrainChunkInstanceData terrainInstanceData = default,
-		TerrainDrawSurface? terrainSurface = null)
+		TerrainDrawSurface? terrainSurface = null,
+		TerrainRayTracingChunkData terrainRayTracingChunk = default)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMaterial,
@@ -1054,7 +1110,8 @@ public readonly struct GpuDrawUpdate
 			mesh,
 			material,
 			terrainInstanceData,
-			terrainSurface);
+			terrainSurface,
+			terrainRayTracingChunk);
 	}
 
 	public static GpuDrawUpdate CreateMeshUpdate(
@@ -1068,7 +1125,8 @@ public readonly struct GpuDrawUpdate
 		Vector4 boundsCenterRadius,
 		Mesh mesh,
 		TerrainChunkInstanceData terrainInstanceData = default,
-		TerrainDrawSurface? terrainSurface = null)
+		TerrainDrawSurface? terrainSurface = null,
+		TerrainRayTracingChunkData terrainRayTracingChunk = default)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateMesh,
@@ -1083,7 +1141,8 @@ public readonly struct GpuDrawUpdate
 			mesh,
 			null,
 			terrainInstanceData,
-			terrainSurface);
+			terrainSurface,
+			terrainRayTracingChunk);
 	}
 }
 

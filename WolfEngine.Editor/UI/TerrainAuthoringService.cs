@@ -182,6 +182,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			stroke.FlattenHeightNormalized = SampleHeight(stroke.TerrainAsset.Heightmap, (int)MathF.Round(placement.CenterPixels.X), (int)MathF.Round(placement.CenterPixels.Y));
 		}
 
+		stroke.AccumulateHeightDirtyRegion(CreateDirtyRegion(placement, targetTexture.Width, targetTexture.Height));
 		_terrainBrushGpuExecutor.ApplyStamp(new TerrainGpuBrushDispatch(
 			stroke.Request,
 			modifiers,
@@ -223,6 +224,10 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 			stroke.TerrainAsset.Heightmap.ApplyTextureData(previewTexture.Width, previewTexture.Height, false, TextureFormat.R16Unorm, [topMip]);
 			_terrainBrushGpuExecutor.SynchronizePreviewTexture(previewTexture, stroke.TerrainAsset.Heightmap, stroke.Request.SurfaceTarget);
 			terrain.AuthoringPreviewHeightmap = previewTexture;
+			if (stroke.HeightDirtyRegion.HasValue)
+			{
+				TerrainRuntimeRegistry.MarkHeightmapEdited(world, stroke.TerrainEntity, stroke.HeightDirtyRegion.Value);
+			}
 		}
 		else
 		{
@@ -472,6 +477,15 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		return (mip.Data[offset] | (mip.Data[offset + 1] << 8)) / 65535.0f;
 	}
 
+	private static TerrainHeightmapDirtyRegion CreateDirtyRegion(BrushPlacement placement, int textureWidth, int textureHeight)
+	{
+		var minX = (int)MathF.Floor(placement.CenterPixels.X - placement.RadiusPixels.X) - 1;
+		var minY = (int)MathF.Floor(placement.CenterPixels.Y - placement.RadiusPixels.Y) - 1;
+		var maxX = (int)MathF.Ceiling(placement.CenterPixels.X + placement.RadiusPixels.X) + 1;
+		var maxY = (int)MathF.Ceiling(placement.CenterPixels.Y + placement.RadiusPixels.Y) + 1;
+		return new TerrainHeightmapDirtyRegion(minX, minY, maxX - minX + 1, maxY - minY + 1, textureWidth, textureHeight);
+	}
+
 	private static byte[] ConvertHeightReadbackToR16(byte[] source, TextureFormat sourceFormat, int width, int height)
 	{
 		var expectedByteCount = TextureFormatUtilities.GetMipDataSize(sourceFormat, width, height);
@@ -524,6 +538,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		public Texture? CurrentPreviewTexture { get; private set; }
 		public Texture? ScratchPreviewTexture { get; private set; }
 		public float? FlattenHeightNormalized { get; set; }
+		public TerrainHeightmapDirtyRegion? HeightDirtyRegion { get; private set; }
 
 		public static StrokeState ForHeight(EditorScene scene, Entity terrainEntity, TerrainBrushStrokeRequest request, TerrainAsset terrainAsset, Guid terrainAssetId, TerrainAssetSnapshot beforeSnapshot, Texture currentPreview, Texture scratchPreview)
 		{
@@ -542,6 +557,18 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		public void SwapHeightPreviewTextures()
 		{
 			(CurrentPreviewTexture, ScratchPreviewTexture) = (ScratchPreviewTexture, CurrentPreviewTexture);
+		}
+
+		public void AccumulateHeightDirtyRegion(in TerrainHeightmapDirtyRegion dirtyRegion)
+		{
+			if (dirtyRegion.IsEmpty)
+			{
+				return;
+			}
+
+			HeightDirtyRegion = HeightDirtyRegion.HasValue
+				? TerrainHeightmapDirtyRegion.Union(HeightDirtyRegion.Value, dirtyRegion)
+				: dirtyRegion;
 		}
 	}
 

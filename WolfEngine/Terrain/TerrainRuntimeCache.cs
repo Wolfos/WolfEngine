@@ -42,6 +42,7 @@ internal sealed class TerrainRuntimeCache
 				record.LocalBounds,
 				record.InstanceData,
 				record.Surface,
+				record.RayTracingChunk,
 				record.WorldTransform);
 		}
 	}

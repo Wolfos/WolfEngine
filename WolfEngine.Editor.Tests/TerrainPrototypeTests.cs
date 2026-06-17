@@ -141,6 +141,84 @@ public sealed class TerrainPrototypeTests
 	}
 
 	[Test]
+	public void TerrainComponent_RayTracingResolutionDefaultsAndClamps()
+	{
+		var component = new TerrainComponent();
+
+		Assert.That(component.GetResolvedRayTracingResolutionInQuads(), Is.EqualTo(16));
+
+		component.RayTracingResolutionInQuads = -4;
+		Assert.That(component.GetResolvedRayTracingResolutionInQuads(), Is.EqualTo(16));
+
+		component.RayTracingResolutionInQuads = 0;
+		Assert.That(component.GetResolvedRayTracingResolutionInQuads(), Is.EqualTo(16));
+
+		component.RayTracingResolutionInQuads = 512;
+		Assert.That(component.GetResolvedRayTracingResolutionInQuads(), Is.EqualTo(256));
+
+		component.RayTracingResolutionInQuads = 12;
+		Assert.That(component.GetResolvedRayTracingResolutionInQuads(), Is.EqualTo(12));
+	}
+
+	[Test]
+	public void EnsureBuilt_CreatesRayTracingChunksWithConfiguredResolution()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-5x5", 5, 5));
+
+		var component = new TerrainComponent
+		{
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(128.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeMeters = 64.0f,
+			LodCount = 2,
+			Lod0ResolutionInQuads = 4,
+			RayTracingResolutionInQuads = 12,
+			LodDistancesMeters = [120.0f]
+		};
+		var runtime = new TerrainRuntimeData();
+
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		Assert.That(runtime.Chunks, Has.Count.EqualTo(2));
+		Assert.That(runtime.RayTracingChunks, Has.Count.EqualTo(2));
+		Assert.That(runtime.RayTracingChunks.Select(chunk => chunk.ResolutionInQuads), Is.All.EqualTo(12));
+		Assert.That(runtime.RayTracingChunks[0].InstanceData.ChunkOriginSize, Is.EqualTo(runtime.Chunks[0].InstanceData.ChunkOriginSize));
+		Assert.That(runtime.RayTracingChunks[1].InstanceData.HeightmapUvScaleOffset, Is.EqualTo(runtime.Chunks[1].InstanceData.HeightmapUvScaleOffset));
+	}
+
+	[Test]
+	public void MarkHeightmapEdited_IncrementsOnlyIntersectingRayTracingChunkRevision()
+	{
+		using var registry = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		registry.Register(heightmapId, CreateHeightTexture("height-9x5", 9, 5));
+
+		var component = new TerrainComponent
+		{
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(128.0f, 64.0f),
+			HeightScaleMeters = 16.0f,
+			ChunkSizeMeters = 64.0f,
+			LodCount = 1,
+			Lod0ResolutionInQuads = 4,
+			RayTracingResolutionInQuads = 8,
+			LodDistancesMeters = []
+		};
+		var runtime = new TerrainRuntimeData();
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		var leftRevision = runtime.RayTracingChunks[0].GeometryRevision;
+		var rightRevision = runtime.RayTracingChunks[1].GeometryRevision;
+
+		runtime.MarkHeightmapEdited(new TerrainHeightmapDirtyRegion(0, 0, 2, 5, 9, 5));
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+
+		Assert.That(runtime.RayTracingChunks[0].GeometryRevision, Is.EqualTo(leftRevision + 1));
+		Assert.That(runtime.RayTracingChunks[1].GeometryRevision, Is.EqualTo(rightRevision));
+	}
+
+	[Test]
 	public void CollectChunkDrawRecords_SelectsLodsByDistanceWithoutCpuFrustumCulling()
 	{
 		using var registry = new TestAssetRegistry();

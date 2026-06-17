@@ -62,7 +62,8 @@ public readonly struct TerrainChunkDrawRecord
 		Matrix4x4 worldTransform,
 		BoundingSphere localBounds,
 		TerrainChunkInstanceData instanceData,
-		TerrainDrawSurface surface)
+		TerrainDrawSurface surface,
+		TerrainRayTracingChunkData rayTracingChunk)
 	{
 		ChunkIndex = chunkIndex;
 		Mesh = mesh;
@@ -71,6 +72,7 @@ public readonly struct TerrainChunkDrawRecord
 		LocalBounds = localBounds;
 		InstanceData = instanceData;
 		Surface = surface;
+		RayTracingChunk = rayTracingChunk;
 	}
 
 	public int ChunkIndex { get; }
@@ -80,6 +82,30 @@ public readonly struct TerrainChunkDrawRecord
 	public BoundingSphere LocalBounds { get; }
 	public TerrainChunkInstanceData InstanceData { get; }
 	public TerrainDrawSurface Surface { get; }
+	public TerrainRayTracingChunkData RayTracingChunk { get; }
+}
+
+public readonly struct TerrainRayTracingChunkData
+{
+	public TerrainRayTracingChunkData(
+		int chunkIndex,
+		int resolutionInQuads,
+		int geometryRevision,
+		Vector4 chunkOriginSize,
+		Vector4 heightmapUvScaleOffset)
+	{
+		ChunkIndex = chunkIndex;
+		ResolutionInQuads = resolutionInQuads;
+		GeometryRevision = geometryRevision;
+		ChunkOriginSize = chunkOriginSize;
+		HeightmapUvScaleOffset = heightmapUvScaleOffset;
+	}
+
+	public int ChunkIndex { get; }
+	public int ResolutionInQuads { get; }
+	public int GeometryRevision { get; }
+	public Vector4 ChunkOriginSize { get; }
+	public Vector4 HeightmapUvScaleOffset { get; }
 }
 
 public readonly struct TerrainResolvedLayer

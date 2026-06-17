@@ -33,6 +33,25 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void TerrainRayTracingVertexUpdateShaderCompilesForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		var compiled = shaderCompiler.GetComputeShaderWithReflection(
+			"terrain_rt_vertex_update.compute.slang",
+			"CSMain",
+			GraphicsBackendKind.Metal);
+
+		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
+		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(64));
+		Assert.That(compiled.ReflectionLayout.GetConstantBuffer("TerrainRtVertexUpdateParams"), Is.Not.Null);
+	}
+
+	[Test]
 	public void DdgiShadersCompileForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
@@ -951,7 +970,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void RecordUpdate_BootstrapBuildsOpaqueMeshSceneAndReportsSkippedDraws()
+	public void RecordUpdate_BootstrapBuildsOpaqueMeshAndTerrainSceneAndReportsSkippedDraws()
 	{
 		var database = new GpuDrawDatabase();
 		var opaqueMesh = CreateTestMesh();
@@ -981,16 +1000,16 @@ public sealed class RayTracingSceneResourcesTests
 
 		resources.RecordUpdate(context, new TestRenderer(new TestDevice()), updates);
 
-		Assert.That(resources.LastStats.BottomLevelAccelerationStructureCount, Is.EqualTo(1));
-		Assert.That(resources.LastStats.TopLevelInstanceCount, Is.EqualTo(1));
-		Assert.That(resources.LastStats.PendingBottomLevelBuildCount, Is.EqualTo(1));
+		Assert.That(resources.LastStats.BottomLevelAccelerationStructureCount, Is.EqualTo(2));
+		Assert.That(resources.LastStats.TopLevelInstanceCount, Is.EqualTo(2));
+		Assert.That(resources.LastStats.PendingBottomLevelBuildCount, Is.EqualTo(2));
 		Assert.That(resources.LastStats.TopLevelRebuildCount, Is.EqualTo(1));
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.Bootstrap));
-		Assert.That(resources.LastStats.SkippedTerrainCount, Is.EqualTo(1));
+		Assert.That(resources.LastStats.SkippedTerrainCount, Is.EqualTo(0));
 		Assert.That(resources.LastStats.SkippedTransparentOrAlphaCount, Is.EqualTo(1));
 		Assert.That(resources.LastStats.SidecarHitShadingAvailable, Is.True);
 		Assert.That(resources.InstanceIndexToInstanceHandleBuffer, Is.Not.Null);
-		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(1));
+		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(2));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
 	}
 
@@ -1026,6 +1045,60 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.TopLevelRebuildCount, Is.EqualTo(0));
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.None));
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(0));
+		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(0));
+	}
+
+	[Test]
+	public void RecordUpdate_TerrainGeometryRevisionRebuildsBlasWithoutRebuildingTlas()
+	{
+		var database = new GpuDrawDatabase();
+		var terrainMesh = CreateTestMesh();
+		var terrainMaterial = new Material("__terrain__");
+		var entity = new Entity(1, 1);
+		var commandList = new TestCommandList();
+		var context = CreateContext(database, commandList);
+		var resources = new RayTracingSceneResources();
+		var renderer = new TestRenderer(new TestDevice());
+		var instanceData = CreateTerrainInstanceData();
+		var surface = CreateTerrainSurface();
+
+		database.BeginSync();
+		database.TouchTerrainChunk(
+			entity,
+			0,
+			terrainMesh,
+			terrainMaterial,
+			terrainMesh.BoundingSphere,
+			instanceData,
+			surface,
+			new TerrainRayTracingChunkData(0, 16, 1, instanceData.ChunkOriginSize, instanceData.HeightmapUvScaleOffset),
+			Matrix4x4.Identity);
+		database.EndSync();
+		var updates = new List<GpuDrawUpdate>();
+		database.CopyUpdates(updates);
+		resources.RecordUpdate(context, renderer, updates);
+		database.ConsumeUpdates(updates);
+
+		database.BeginSync();
+		database.TouchTerrainChunk(
+			entity,
+			0,
+			terrainMesh,
+			terrainMaterial,
+			terrainMesh.BoundingSphere,
+			instanceData,
+			surface,
+			new TerrainRayTracingChunkData(0, 16, 2, instanceData.ChunkOriginSize, instanceData.HeightmapUvScaleOffset),
+			Matrix4x4.Identity);
+		database.EndSync();
+		database.CopyUpdates(updates);
+		commandList.ResetCounts();
+
+		resources.RecordUpdate(context, renderer, updates);
+
+		Assert.That(resources.LastStats.PendingBottomLevelBuildCount, Is.EqualTo(1));
+		Assert.That(resources.LastStats.TopLevelRebuildCount, Is.EqualTo(0));
+		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(0));
 	}
 
