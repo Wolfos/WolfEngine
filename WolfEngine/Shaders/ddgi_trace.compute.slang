@@ -4,6 +4,7 @@ import "ddgi_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
+#define WOLF_DRAW_KIND_TERRAIN 2u
 
 struct DdgiPackedVertex
 {
@@ -20,6 +21,9 @@ StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
 StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
 StructuredBuffer<DdgiPackedVertex> g_PackedVertices : register(t8);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
+StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t10);
+StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t11);
+StructuredBuffer<uint> g_InstanceIndexToTerrainRtResolution : register(t12);
 
 struct DdgiTraceResult
 {
@@ -39,6 +43,317 @@ struct DdgiHitSurface
     float3 albedo;
     float3 emissive;
 };
+
+struct DdgiTerrainLayerBlend
+{
+    uint4 indices;
+    float4 weights;
+};
+
+struct DdgiTerrainLayerSample
+{
+    float4 albedo;
+    float height;
+};
+
+uint DdgiResolveMaterialIndex(uint materialHandle)
+{
+    if (!IsPackedHandleValid(materialHandle))
+    {
+        return 0u;
+    }
+
+    uint materialIndex = GetHandleIndex(materialHandle);
+    return materialIndex > 0u && materialIndex < WOLF_MAX_MATERIAL_COUNT ? materialIndex : 0u;
+}
+
+float DdgiTerrainCubicHermite(float a, float b, float c, float d, float t)
+{
+    float t2 = t * t;
+    float t3 = t2 * t;
+    return b + 0.5f * t * (c - a + t * (2.0f * a - 5.0f * b + 4.0f * c - d + t * (3.0f * (b - c) + d - a)));
+}
+
+float DdgiSampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
+{
+    Texture2D<float4> heightmap = GetTexture(terrainData.heightmapHandle);
+    uint width = 1;
+    uint height = 1;
+    heightmap.GetDimensions(width, height);
+    if (width <= 1 || height <= 1)
+    {
+        return heightmap.Load(int3(0, 0, 0)).r * terrainData.heightScale;
+    }
+
+    float2 samplePosition = saturate(uv) * float2(width - 1, height - 1);
+    int2 baseTexel = int2(floor(samplePosition));
+    float2 fraction = samplePosition - float2(baseTexel);
+    float rows[4];
+    [unroll]
+    for (int row = 0; row < 4; row++)
+    {
+        int y = clamp(baseTexel.y + row - 1, 0, int(height) - 1);
+        float samples[4];
+        [unroll]
+        for (int column = 0; column < 4; column++)
+        {
+            int x = clamp(baseTexel.x + column - 1, 0, int(width) - 1);
+            samples[column] = heightmap.Load(int3(x, y, 0)).r;
+        }
+
+        rows[row] = DdgiTerrainCubicHermite(samples[0], samples[1], samples[2], samples[3], fraction.x);
+    }
+
+    return saturate(DdgiTerrainCubicHermite(rows[0], rows[1], rows[2], rows[3], fraction.y)) * terrainData.heightScale;
+}
+
+float2 DdgiGetTerrainWorldSize(GpuInstanceData instanceData)
+{
+    float sizeX = abs(instanceData.terrainHeightmapUvScaleOffset.x) > 1e-5f
+        ? instanceData.terrainChunkOriginSize.z / instanceData.terrainHeightmapUvScaleOffset.x
+        : instanceData.terrainChunkOriginSize.z;
+    float sizeZ = abs(instanceData.terrainHeightmapUvScaleOffset.y) > 1e-5f
+        ? instanceData.terrainChunkOriginSize.w / instanceData.terrainHeightmapUvScaleOffset.y
+        : instanceData.terrainChunkOriginSize.w;
+    return float2(max(sizeX, 0.001f), max(sizeZ, 0.001f));
+}
+
+float3 DdgiComputeTerrainLocalNormal(float2 uv, GpuInstanceData instanceData, GpuTerrainMaterialData terrainData)
+{
+    Texture2D<float4> heightmap = GetTexture(terrainData.heightmapHandle);
+    uint width = 1;
+    uint height = 1;
+    heightmap.GetDimensions(width, height);
+    float2 texel = float2(
+        width > 1 ? 1.0f / (width - 1) : 0.0f,
+        height > 1 ? 1.0f / (height - 1) : 0.0f);
+    float left = DdgiSampleTerrainHeight(uv - float2(texel.x, 0.0f), terrainData);
+    float right = DdgiSampleTerrainHeight(uv + float2(texel.x, 0.0f), terrainData);
+    float down = DdgiSampleTerrainHeight(uv - float2(0.0f, texel.y), terrainData);
+    float up = DdgiSampleTerrainHeight(uv + float2(0.0f, texel.y), terrainData);
+    float2 terrainWorldSize = DdgiGetTerrainWorldSize(instanceData);
+    float spacingX = terrainWorldSize.x / max(width - 1, 1);
+    float spacingZ = terrainWorldSize.y / max(height - 1, 1);
+    float3 tangentX = float3(max(spacingX * 2.0f, 0.001f), right - left, 0.0f);
+    float3 tangentZ = float3(0.0f, up - down, max(spacingZ * 2.0f, 0.001f));
+    return normalize(cross(tangentZ, tangentX));
+}
+
+void DdgiAddTerrainLayerContribution(inout uint4 indices, inout float4 weights, uint layerIndex, float contribution)
+{
+    if (contribution <= 0.0f)
+    {
+        return;
+    }
+
+    [unroll]
+    for (uint slot = 0u; slot < 4u; slot++)
+    {
+        if (weights[slot] > 0.0f && indices[slot] == layerIndex)
+        {
+            weights[slot] += contribution;
+            return;
+        }
+    }
+
+    uint minSlot = 0u;
+    float minWeight = weights.x;
+    [unroll]
+    for (uint slot = 0u; slot < 4u; slot++)
+    {
+        if (weights[slot] <= 0.0f)
+        {
+            indices[slot] = layerIndex;
+            weights[slot] = contribution;
+            return;
+        }
+        if (weights[slot] < minWeight)
+        {
+            minWeight = weights[slot];
+            minSlot = slot;
+        }
+    }
+
+    if (contribution > minWeight)
+    {
+        indices[minSlot] = layerIndex;
+        weights[minSlot] = contribution;
+    }
+}
+
+void DdgiAccumulateTerrainLayerMapTexel(
+    Texture2D<float4> indexMap,
+    Texture2D<float4> weightMap,
+    uint2 texel,
+    float bilinearWeight,
+    inout uint4 indices,
+    inout float4 weights)
+{
+    float4 indexSample = indexMap.Load(int3(texel, 0));
+    float4 weightSample = saturate(weightMap.Load(int3(texel, 0))) * bilinearWeight;
+    uint4 texelIndices = uint4(round(saturate(indexSample) * 255.0f));
+    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.x, weightSample.x);
+    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.y, weightSample.y);
+    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.z, weightSample.z);
+    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.w, weightSample.w);
+}
+
+DdgiTerrainLayerBlend DdgiSampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terrainData)
+{
+    DdgiTerrainLayerBlend blend;
+    blend.indices = uint4(0, 0, 0, 0);
+    blend.weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
+    if (terrainData.hasLayerMaps == 0)
+    {
+        return blend;
+    }
+
+    Texture2D<float4> indexMap = GetTexture(terrainData.layerIndexMapHandle);
+    uint indexWidth = 1;
+    uint indexHeight = 1;
+    indexMap.GetDimensions(indexWidth, indexHeight);
+    float2 samplePosition = saturate(uv) * float2(indexWidth, indexHeight) - 0.5f;
+    float2 basePosition = floor(samplePosition);
+    float2 fraction = saturate(samplePosition - basePosition);
+    int2 maxTexel = int2(max(indexWidth, 1u) - 1u, max(indexHeight, 1u) - 1u);
+    int2 texel00 = clamp(int2(basePosition), int2(0, 0), maxTexel);
+    int2 texel10 = clamp(texel00 + int2(1, 0), int2(0, 0), maxTexel);
+    int2 texel01 = clamp(texel00 + int2(0, 1), int2(0, 0), maxTexel);
+    int2 texel11 = clamp(texel00 + int2(1, 1), int2(0, 0), maxTexel);
+
+    blend.indices = uint4(0, 0, 0, 0);
+    blend.weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    Texture2D<float4> weightMap = GetTexture(terrainData.layerWeightMapHandle);
+    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), blend.indices, blend.weights);
+    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), blend.indices, blend.weights);
+    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, blend.indices, blend.weights);
+    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, blend.indices, blend.weights);
+    return blend;
+}
+
+float4 DdgiNormalizeTerrainWeights(float4 weights)
+{
+    float sum = weights.x + weights.y + weights.z + weights.w;
+    return sum > 1e-5f ? weights / sum : float4(1.0f, 0.0f, 0.0f, 0.0f);
+}
+
+float3 DdgiGetTriplanarWeights(float3 worldNormal)
+{
+    float3 weights = pow(abs(normalize(worldNormal)), 4.0f);
+    float sum = weights.x + weights.y + weights.z;
+    return sum > 1e-5f ? weights / sum : float3(0.0f, 1.0f, 0.0f);
+}
+
+float4 DdgiSampleTriplanarFloat4(uint textureHandle, SamplerState samplerState, float3 worldPosition, float3 worldNormal, float layerScale)
+{
+    float3 weights = DdgiGetTriplanarWeights(worldNormal);
+    float safeScale = max(layerScale, 0.001f);
+    float4 sampleX = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.zy / safeScale, 0.0f);
+    float4 sampleY = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.xz / safeScale, 0.0f);
+    float4 sampleZ = GetTexture(textureHandle).SampleLevel(samplerState, worldPosition.xy / safeScale, 0.0f);
+    return sampleX * weights.x + sampleY * weights.y + sampleZ * weights.z;
+}
+
+DdgiTerrainLayerSample DdgiSampleTerrainLayer(
+    float3 worldPosition,
+    float3 worldNormal,
+    GpuTerrainLayerData layerData,
+    GpuTerrainMaterialData terrainData)
+{
+    SamplerState samplerState = GetSampler(terrainData.layerSamplerHandle);
+    DdgiTerrainLayerSample sample;
+    sample.albedo = DdgiSampleTriplanarFloat4(layerData.albedoHandle, samplerState, worldPosition, worldNormal, layerData.scale);
+    sample.height = layerData.hasHeight != 0u
+        ? saturate(DdgiSampleTriplanarFloat4(layerData.heightHandle, samplerState, worldPosition, worldNormal, layerData.scale).r)
+        : 0.5f;
+    return sample;
+}
+
+float3 DdgiSampleTerrainAlbedo(float2 uv, float3 worldPosition, float3 worldNormal, GpuTerrainMaterialData terrainData)
+{
+    DdgiTerrainLayerBlend blend = DdgiSampleTerrainLayerBlend(uv, terrainData);
+    if (terrainData.layerCount < 4u) blend.weights.w = 0.0f;
+    if (terrainData.layerCount < 3u) blend.weights.z = 0.0f;
+    if (terrainData.layerCount < 2u) blend.weights.y = 0.0f;
+
+    DdgiTerrainLayerSample layerSamples[4];
+    [unroll]
+    for (uint i = 0u; i < 4u; i++)
+    {
+        layerSamples[i].albedo = float4(0.0f, 0.0f, 0.0f, 1.0f);
+        layerSamples[i].height = 0.5f;
+        uint layerIndex = min(blend.indices[i], max(terrainData.layerCount, 1u) - 1u);
+        if (blend.weights[i] <= 0.0f || layerIndex >= terrainData.layerCount)
+        {
+            continue;
+        }
+
+        GpuTerrainLayerData layerData = g_TerrainLayerTable[terrainData.layerStart + layerIndex];
+        layerSamples[i] = DdgiSampleTerrainLayer(worldPosition, worldNormal, layerData, terrainData);
+    }
+
+    float4 biased = blend.weights;
+    biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
+    float4 weights = DdgiNormalizeTerrainWeights(biased);
+
+    float4 albedo = layerSamples[0].albedo * weights.x +
+        layerSamples[1].albedo * weights.y +
+        layerSamples[2].albedo * weights.z +
+        layerSamples[3].albedo * weights.w;
+    return max(albedo.rgb, 0.0f.xxx);
+}
+
+bool DdgiTryResolveTerrainHitSurface(
+    uint instanceIndex,
+    uint primitiveIndex,
+    float2 barycentrics,
+    float fallbackRayT,
+    float3 rayOrigin,
+    float3 rayDirection,
+    GpuInstanceData instanceData,
+    out DdgiHitSurface surface)
+{
+    surface = (DdgiHitSurface)0;
+    uint resolution = instanceIndex < WOLF_MAX_INSTANCE_COUNT ? g_InstanceIndexToTerrainRtResolution[instanceIndex] : 0u;
+    if (resolution == 0u)
+    {
+        return false;
+    }
+
+    uint quadIndex = primitiveIndex / 2u;
+    if (quadIndex >= resolution * resolution)
+    {
+        return false;
+    }
+
+    uint quadX = quadIndex % resolution;
+    uint quadZ = quadIndex / resolution;
+    float2 uv00 = float2(float(quadX), float(quadZ)) / float(resolution);
+    float2 uv10 = float2(float(quadX + 1u), float(quadZ)) / float(resolution);
+    float2 uv01 = float2(float(quadX), float(quadZ + 1u)) / float(resolution);
+    float2 uv11 = float2(float(quadX + 1u), float(quadZ + 1u)) / float(resolution);
+    float b1 = barycentrics.x;
+    float b2 = barycentrics.y;
+    float b0 = 1.0f - b1 - b2;
+    float2 baseUv = (primitiveIndex & 1u) == 0u
+        ? uv00 * b0 + uv01 * b1 + uv10 * b2
+        : uv10 * b0 + uv01 * b1 + uv11 * b2;
+    surface.uv = instanceData.terrainHeightmapUvScaleOffset.zw + baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
+
+    uint materialIndex = DdgiResolveMaterialIndex(instanceData.materialHandle);
+    GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
+    float3 localNormal = DdgiComputeTerrainLocalNormal(surface.uv, instanceData, terrainData);
+    surface.worldPosition = rayOrigin + rayDirection * fallbackRayT;
+    surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+    surface.worldGeometricNormal = surface.worldNormal;
+    surface.albedo = DdgiSampleTerrainAlbedo(surface.uv, surface.worldPosition, surface.worldNormal, terrainData);
+    surface.emissive = 0.0f.xxx;
+    surface.valid = true;
+    return true;
+}
 
 bool DdgiTryResolveInstance(uint instanceIndex, out GpuInstanceData instanceData)
 {
@@ -79,6 +394,19 @@ bool DdgiTryResolveHitSurface(
     if (!DdgiTryResolveInstance(instanceIndex, instanceData))
     {
         return false;
+    }
+
+    if (instanceData.drawKind == WOLF_DRAW_KIND_TERRAIN)
+    {
+        return DdgiTryResolveTerrainHitSurface(
+            instanceIndex,
+            primitiveIndex,
+            barycentrics,
+            fallbackRayT,
+            rayOrigin,
+            rayDirection,
+            instanceData,
+            surface);
     }
 
     if (IsPackedHandleValid(instanceData.meshHandle))
@@ -132,23 +460,7 @@ bool DdgiTryResolveHitSurface(
         surface.worldGeometricNormal = surface.worldNormal;
     }
 
-    uint materialHandle = instanceData.materialHandle;
-    if (!IsPackedHandleValid(materialHandle))
-    {
-        surface.albedo = 0.8f.xxx;
-        surface.emissive = 0.0f.xxx;
-        surface.valid = true;
-        return true;
-    }
-
-    uint materialIndex = GetHandleIndex(materialHandle);
-    if (materialIndex == 0u || materialIndex >= WOLF_MAX_MATERIAL_COUNT)
-    {
-        surface.albedo = 0.8f.xxx;
-        surface.emissive = 0.0f.xxx;
-        surface.valid = true;
-        return true;
-    }
+    uint materialIndex = DdgiResolveMaterialIndex(instanceData.materialHandle);
 
     GpuMaterialData material = g_MaterialTable[materialIndex];
     SamplerState materialSampler = GetSampler(material.samplerHandle);

@@ -11,6 +11,7 @@ public interface IRayTracingSceneResources
 {
 	IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; }
 	IGfxBuffer? InstanceIndexToInstanceHandleBuffer { get; }
+	IGfxBuffer? InstanceIndexToTerrainRayTracingResolutionBuffer { get; }
 	RayTracingSceneStats LastStats { get; }
 }
 
@@ -65,12 +66,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly Dictionary<int, TerrainIndexBufferRecord> _terrainIndexBuffers = new();
 	private readonly List<RayTracingInstanceDescription> _instanceDescriptions = new();
 	private readonly uint[] _instanceIndexToInstanceHandle = new uint[GpuDrawResources.MaxInstanceCount];
+	private readonly uint[] _instanceIndexToTerrainRayTracingResolution = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly ShaderCompiler _shaderCompiler = new();
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
 	private IGfxBuffer? _instanceIndexToInstanceHandleBuffer;
+	private IGfxBuffer? _instanceIndexToTerrainRayTracingResolutionBuffer;
 	private IGfxDevice? _sidecarDevice;
 	private IGfxPipeline? _terrainVertexUpdatePipeline;
 	private ShaderPropertyWriter? _terrainVertexUpdateParamsWriter;
@@ -83,6 +86,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
 
 	public IGfxBuffer? InstanceIndexToInstanceHandleBuffer => _instanceIndexToInstanceHandleBuffer;
+
+	public IGfxBuffer? InstanceIndexToTerrainRayTracingResolutionBuffer => _instanceIndexToTerrainRayTracingResolutionBuffer;
 
 	public RayTracingSceneStats LastStats => _lastStats;
 
@@ -154,7 +159,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 	private void EnsureSidecarResources(IGfxDevice device)
 	{
-		if (ReferenceEquals(_sidecarDevice, device) && _instanceIndexToInstanceHandleBuffer is not null)
+		if (ReferenceEquals(_sidecarDevice, device) &&
+		    _instanceIndexToInstanceHandleBuffer is not null &&
+		    _instanceIndexToTerrainRayTracingResolutionBuffer is not null)
 		{
 			return;
 		}
@@ -163,8 +170,16 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			disposableBuffer.Dispose();
 		}
+		if (_instanceIndexToTerrainRayTracingResolutionBuffer is IDisposable disposableTerrainBuffer)
+		{
+			disposableTerrainBuffer.Dispose();
+		}
 
 		_instanceIndexToInstanceHandleBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)(GpuDrawResources.MaxInstanceCount * sizeof(uint)),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource));
+		_instanceIndexToTerrainRayTracingResolutionBuffer = device.CreateBuffer(new BufferDescriptor(
 			(ulong)(GpuDrawResources.MaxInstanceCount * sizeof(uint)),
 			BufferUsage.Structured,
 			BufferFlags.AllowShaderResource));
@@ -663,6 +678,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	{
 		_instanceDescriptions.Clear();
 		Array.Clear(_instanceIndexToInstanceHandle);
+		Array.Clear(_instanceIndexToTerrainRayTracingResolution);
 		foreach (var record in _instances.Values)
 		{
 			var instanceIndex = (uint)_instanceDescriptions.Count;
@@ -686,12 +702,18 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			if (instanceIndex < _instanceIndexToInstanceHandle.Length)
 			{
 				_instanceIndexToInstanceHandle[instanceIndex] = record.InstanceHandle;
+				_instanceIndexToTerrainRayTracingResolution[instanceIndex] =
+					(uint)Math.Max(record.RayTracingChunk.ResolutionInQuads, 0);
 			}
 		}
 
 		if (_instanceIndexToInstanceHandleBuffer is IWritableGpuBuffer writableBuffer)
 		{
 			writableBuffer.Write<uint>(_instanceIndexToInstanceHandle);
+		}
+		if (_instanceIndexToTerrainRayTracingResolutionBuffer is IWritableGpuBuffer writableTerrainBuffer)
+		{
+			writableTerrainBuffer.Write<uint>(_instanceIndexToTerrainRayTracingResolution);
 		}
 	}
 
@@ -748,6 +770,11 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			sidecarDisposable.Dispose();
 		}
 		_instanceIndexToInstanceHandleBuffer = null;
+		if (_instanceIndexToTerrainRayTracingResolutionBuffer is IDisposable terrainSidecarDisposable)
+		{
+			terrainSidecarDisposable.Dispose();
+		}
+		_instanceIndexToTerrainRayTracingResolutionBuffer = null;
 		_sidecarDevice = null;
 	}
 

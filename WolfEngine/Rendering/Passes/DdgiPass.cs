@@ -81,6 +81,10 @@ public sealed class DdgiPass
 		{
 			throw new InvalidOperationException("Ray traced DDGI requires RTAS instance sidecar resources.");
 		}
+		if (rayTracingSceneResources.InstanceIndexToTerrainRayTracingResolutionBuffer is null)
+		{
+			throw new InvalidOperationException("Ray traced DDGI requires RTAS terrain sidecar resources.");
+		}
 
 		EnsurePipelines(device);
 		_bindlessRegistry.EnsureInitialized(device);
@@ -150,15 +154,18 @@ public sealed class DdgiPass
 			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
 				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
-			SamplerHandle = _linearSampler,
-			InstanceBuffer = gpuDrawResources.InstanceBuffer ?? throw new InvalidOperationException("GpuDraw instance buffer missing."),
-			DrawCommandBuffer = gpuDrawResources.DrawCommandBuffer ?? throw new InvalidOperationException("GpuDraw draw-command buffer missing."),
-			MaterialBuffer = gpuDrawResources.MaterialBuffer ?? throw new InvalidOperationException("GpuDraw material buffer missing."),
-			MeshBuffer = gpuDrawResources.MeshBuffer ?? throw new InvalidOperationException("GpuDraw mesh buffer missing."),
-			InstanceIndexToInstanceHandleBuffer = rayTracingSceneResources.InstanceIndexToInstanceHandleBuffer,
-			PackedMeshVertexBuffer = renderer.GetPackedMeshVertexBuffer() ?? throw new InvalidOperationException("Packed mesh vertex buffer missing."),
-			PackedMeshIndexBuffer = renderer.GetPackedMeshIndexBuffer() ?? throw new InvalidOperationException("Packed mesh index buffer missing."),
-			IrradianceEstimatorBuffer = context.GetBuffer(resources.DdgiIrradianceEstimator),
+				SamplerHandle = _linearSampler,
+				InstanceBuffer = gpuDrawResources.InstanceBuffer ?? throw new InvalidOperationException("GpuDraw instance buffer missing."),
+				DrawCommandBuffer = gpuDrawResources.DrawCommandBuffer ?? throw new InvalidOperationException("GpuDraw draw-command buffer missing."),
+				MaterialBuffer = gpuDrawResources.MaterialBuffer ?? throw new InvalidOperationException("GpuDraw material buffer missing."),
+				MeshBuffer = gpuDrawResources.MeshBuffer ?? throw new InvalidOperationException("GpuDraw mesh buffer missing."),
+				InstanceIndexToInstanceHandleBuffer = rayTracingSceneResources.InstanceIndexToInstanceHandleBuffer,
+				InstanceIndexToTerrainRayTracingResolutionBuffer = rayTracingSceneResources.InstanceIndexToTerrainRayTracingResolutionBuffer,
+				PackedMeshVertexBuffer = renderer.GetPackedMeshVertexBuffer() ?? throw new InvalidOperationException("Packed mesh vertex buffer missing."),
+				PackedMeshIndexBuffer = renderer.GetPackedMeshIndexBuffer() ?? throw new InvalidOperationException("Packed mesh index buffer missing."),
+				TerrainMaterialBuffer = gpuDrawResources.TerrainMaterialBuffer ?? throw new InvalidOperationException("GpuDraw terrain material buffer missing."),
+				TerrainLayerBuffer = gpuDrawResources.TerrainLayerBuffer ?? throw new InvalidOperationException("GpuDraw terrain layer buffer missing."),
+				IrradianceEstimatorBuffer = context.GetBuffer(resources.DdgiIrradianceEstimator),
 			IrradianceAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.IrradianceTileInteriorSize),
 			VisibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize),
 			GridShape = gridShape,
@@ -212,13 +219,16 @@ public sealed class DdgiPass
 		WriteSettingsConstants(_traceSettingsWriter, commandList, config);
 		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
 		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
-		commandList.SetComputeBuffer(4, config.InstanceBuffer);
-		commandList.SetComputeBuffer(5, config.MaterialBuffer);
-		commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
-		commandList.SetComputeBuffer(7, config.MeshBuffer);
-		commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
-		commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
-		var threadGroupSize = _traceThreadGroupSize ?? throw new InvalidOperationException("DDGI trace threadgroup size was not initialized.");
+			commandList.SetComputeBuffer(4, config.InstanceBuffer);
+			commandList.SetComputeBuffer(5, config.MaterialBuffer);
+			commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
+			commandList.SetComputeBuffer(7, config.MeshBuffer);
+			commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
+			commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
+			commandList.SetComputeBuffer(10, config.TerrainMaterialBuffer);
+			commandList.SetComputeBuffer(11, config.TerrainLayerBuffer);
+			commandList.SetComputeBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
+			var threadGroupSize = _traceThreadGroupSize ?? throw new InvalidOperationException("DDGI trace threadgroup size was not initialized.");
 		var width = Math.Max(config.VisibilityAtlasSize.X, config.IrradianceAtlasSize.X);
 		var height = Math.Max(config.VisibilityAtlasSize.Y, config.IrradianceAtlasSize.Y);
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)width, (uint)height);
