@@ -1,12 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
-using WolfEngine.Utility;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Rendering;
@@ -27,10 +22,10 @@ public interface IProjectAssetPipelineService
 	AssetDatabase LoadDatabase(string projectRootPath);
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
 	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
-		AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
-		void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
-		void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
-	}
+	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
+	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
+	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
+}
 
 public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 {
@@ -76,7 +71,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_threeDFileImporter = threeDFileImporter ?? throw new ArgumentNullException(nameof(threeDFileImporter));
-		_textureGpuCompressionService = textureGpuCompressionService ?? throw new ArgumentNullException(nameof(textureGpuCompressionService));
+		_textureGpuCompressionService = textureGpuCompressionService ??
+		                                throw new ArgumentNullException(nameof(textureGpuCompressionService));
 		_importers = CreateImporters();
 	}
 
@@ -179,7 +175,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		var normalizedFolderPath = NormalizeRelativePath(relativeFolderPath).TrimEnd('/');
 		var sourcesToDelete = _index.GetSources(projectRootPath)
-			.Where(source => source.RelativeSourcePath.StartsWith(normalizedFolderPath + "/", StringComparison.OrdinalIgnoreCase))
+			.Where(source =>
+				source.RelativeSourcePath.StartsWith(normalizedFolderPath + "/", StringComparison.OrdinalIgnoreCase))
 			.ToList();
 
 		for (var i = 0; i < sourcesToDelete.Count; i++)
@@ -240,7 +237,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return true;
 	}
 
-	public bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId)
+	public bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath,
+		out Guid nodeId)
 	{
 		nodeId = Guid.Empty;
 		if (_index.TryGetSourceByRelativePath(projectRootPath, relativeSourcePath, out var source) == false)
@@ -252,7 +250,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			.Where(candidate => candidate.SourceId == source.SourceId)
 			.OrderBy(candidate => candidate.NodeKey, StringComparer.Ordinal)
 			.ToList();
-		var primary = nodes.FirstOrDefault(candidate => string.Equals(candidate.NodeKey, "main", StringComparison.Ordinal))
+		var primary =
+			nodes.FirstOrDefault(candidate => string.Equals(candidate.NodeKey, "main", StringComparison.Ordinal))
 			?? nodes.FirstOrDefault(candidate => string.Equals(candidate.NodeKey, "scene", StringComparison.Ordinal))
 			?? nodes.FirstOrDefault();
 		if (primary is null)
@@ -282,7 +281,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		if (TryGetPrimaryNodeIdForRelativeSourcePath(projectRootPath, relativePath, out var nodeId))
 		{
 			var source = _index.GetSources(projectRootPath)
-				.First(record => string.Equals(record.RelativeSourcePath, relativePath, StringComparison.OrdinalIgnoreCase));
+				.First(record =>
+					string.Equals(record.RelativeSourcePath, relativePath, StringComparison.OrdinalIgnoreCase));
 			return new AssetImportResult
 			{
 				PrimaryNodeId = nodeId,
@@ -293,23 +293,24 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return new AssetImportResult();
 	}
 
-		public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+	public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentNullException.ThrowIfNull(world);
+		if (_index.TryGetNode(projectRootPath, modelNodeId, out var modelNode) == false)
 		{
-			ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
-			ArgumentNullException.ThrowIfNull(world);
-			if (_index.TryGetNode(projectRootPath, modelNodeId, out var modelNode) == false)
-			{
-				throw new InvalidOperationException($"3D model node '{modelNodeId}' was not found.");
-			}
+			throw new InvalidOperationException($"3D model node '{modelNodeId}' was not found.");
+		}
 
-			if (modelNode.Type != AssetType.Model3D)
-			{
-				throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
+		if (modelNode.Type != AssetType.Model3D)
+		{
+			throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
 		}
 
 		var summary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(modelNode.SummaryJson);
 		var absoluteModelPath = GetAbsolutePath(projectRootPath, summary.RelativeImportedModelPath);
-		var modelFile = AssetPipelineSerialization.Deserialize<ImportedModelAssetFile>(File.ReadAllText(absoluteModelPath));
+		var modelFile =
+			AssetPipelineSerialization.Deserialize<ImportedModelAssetFile>(File.ReadAllText(absoluteModelPath));
 		if (modelFile.RootNodes.Count == 0)
 		{
 			return;
@@ -321,44 +322,46 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return;
 		}
 
-		var wrapper = world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
+		var wrapper =
+			world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
 		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
-			foreach (var rootNode in modelFile.RootNodes)
-			{
-				CreateModelNodeEntity(rootNode, world, wrapper);
-			}
-		}
-
-		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+		foreach (var rootNode in modelFile.RootNodes)
 		{
-			ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
-			ArgumentNullException.ThrowIfNull(scene);
-			ArgumentNullException.ThrowIfNull(scene.World);
-			if (_index.TryGetNode(projectRootPath, prefabNodeId, out var prefabNode) == false)
-			{
-				throw new InvalidOperationException($"Prefab node '{prefabNodeId}' was not found.");
-			}
-
-			if (prefabNode.Type != AssetType.Prefab)
-			{
-				throw new InvalidOperationException($"Asset node '{prefabNodeId}' is not a prefab.");
-			}
-
-			var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
-			if (prefabFile.RootEntityId == Guid.Empty)
-			{
-				return;
-			}
-
-			var entitiesById = prefabFile.Entities.ToDictionary(entity => entity.EntityId);
-			var childrenByParent = BuildPrefabChildrenMap(prefabFile.Entities);
-			if (entitiesById.TryGetValue(prefabFile.RootEntityId, out var rootEntity) == false)
-			{
-				throw new InvalidOperationException($"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
-			}
-
-			InstantiatePrefabEntities(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
+			CreateModelNodeEntity(rootNode, world, wrapper);
 		}
+	}
+
+	public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(scene.World);
+		if (_index.TryGetNode(projectRootPath, prefabNodeId, out var prefabNode) == false)
+		{
+			throw new InvalidOperationException($"Prefab node '{prefabNodeId}' was not found.");
+		}
+
+		if (prefabNode.Type != AssetType.Prefab)
+		{
+			throw new InvalidOperationException($"Asset node '{prefabNodeId}' is not a prefab.");
+		}
+
+		var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
+		if (prefabFile.RootEntityId == Guid.Empty)
+		{
+			return;
+		}
+
+		var entitiesById = prefabFile.Entities.ToDictionary(entity => entity.EntityId);
+		var childrenByParent = BuildPrefabChildrenMap(prefabFile.Entities);
+		if (entitiesById.TryGetValue(prefabFile.RootEntityId, out var rootEntity) == false)
+		{
+			throw new InvalidOperationException(
+				$"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
+		}
+
+		InstantiatePrefabEntities(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
+	}
 
 	private void CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
 	{
@@ -401,7 +404,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath, AssetSourceRecord? existingSource)
+	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath,
+		AssetSourceRecord? existingSource)
 	{
 		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
@@ -426,20 +430,24 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		if (TryGetImporterById(metadata.ImporterId, out var importer) == false)
 		{
-			throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.");
+			throw new InvalidOperationException(
+				$"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.");
 		}
 
-		var importGraph = importer.Import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata);
+		var importGraph = importer.Import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath,
+			metadata);
 		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
 		metadata.SubAssets = metadata.SubAssets
 			.Where(entry => activeKeys.Contains(entry.Key))
 			.ToList();
 
 		_metadataStore.Save(absoluteMetaPath, metadata);
-		_index.UpsertSourceGraph(projectRootPath, sourceRecord, importGraph.Nodes, importGraph.Artifacts, importGraph.Dependencies);
+		_index.UpsertSourceGraph(projectRootPath, sourceRecord, importGraph.Nodes, importGraph.Artifacts,
+			importGraph.Dependencies);
 	}
 
-	private void ApplyIndexedIdentity(string projectRootPath, AssetSourceRecord? existingSource, AssetSourceMetaFile metadata)
+	private void ApplyIndexedIdentity(string projectRootPath, AssetSourceRecord? existingSource,
+		AssetSourceMetaFile metadata)
 	{
 		if (existingSource is null)
 		{
@@ -483,7 +491,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var importSettings = metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
 		var semantic = importSettings.TextureSemantic;
 		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
-		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D,
+			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
 			AssetPipelinePaths.LibraryFolderName,
 			AssetPipelinePaths.ImportedFolderName,
@@ -534,7 +543,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		AssetSourceMetaFile metadata)
 	{
 		var materialAsset = _materialAssetStore.LoadAsset(absoluteSourcePath);
-		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Material, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Material,
+			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var summary = new MaterialAssetSummary
 		{
 			MaterialType = materialAsset.MaterialType
@@ -578,10 +588,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		AssetSourceMetaFile metadata)
 	{
 		var loadResult = _dataAssetStore.LoadAsset(absoluteSourcePath);
-		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.DataAsset, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.DataAsset,
+			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var summary = new DataAssetSummary
 		{
-			DataAssetType = loadResult.DataAssetType.AssemblyQualifiedName ?? loadResult.DataAssetType.FullName ?? loadResult.DataAssetType.Name,
+			DataAssetType = loadResult.DataAssetType.AssemblyQualifiedName ??
+			                loadResult.DataAssetType.FullName ?? loadResult.DataAssetType.Name,
 			DataAssetTypeId = loadResult.DataAssetTypeId,
 			DisplayName = loadResult.DataAssetType.Name
 		};
@@ -615,8 +627,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeMetaPath,
 		AssetSourceMetaFile metadata)
 	{
-		var terrainAsset = TerrainAssetSerializer.Read(absoluteSourcePath, Path.GetFileNameWithoutExtension(relativeSourcePath));
-		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Terrain, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var terrainAsset =
+			TerrainAssetSerializer.Read(absoluteSourcePath, Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Terrain,
+			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var summary = new TerrainAssetSummary
 		{
 			HeightmapWidth = terrainAsset.HeightmapWidth,
@@ -666,7 +680,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			var importedTexture = importedScene.Textures[i];
 			var nodeKey = $"texture:{i}";
-			var name = string.IsNullOrWhiteSpace(importedTexture.NameOrPath) ? $"Texture {i}" : Path.GetFileNameWithoutExtension(importedTexture.NameOrPath);
+			var name = string.IsNullOrWhiteSpace(importedTexture.NameOrPath)
+				? $"Texture {i}"
+				: Path.GetFileNameWithoutExtension(importedTexture.NameOrPath);
 			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Texture2D, name);
 			textureNodeIds.Add(nodeId);
 
@@ -676,7 +692,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				metadata.SourceId.ToString("D"),
 				"textures",
 				$"{nodeKey.Replace(':', '_')}.bin"));
-			var runtimeArtifacts = WriteTextureArtifacts(projectRootPath, nodeId, relativeImportedPath, importedTexture);
+			var runtimeArtifacts =
+				WriteTextureArtifacts(projectRootPath, nodeId, relativeImportedPath, importedTexture);
 
 			nodes.Add(new AssetNodeRecord
 			{
@@ -847,7 +864,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		textures.Add(ormTexture);
 
 		var nodeKey = $"texture:orm:{materialIndex}";
-		var name = string.IsNullOrWhiteSpace(ormTexture.NameOrPath) ? $"ORM {materialIndex}" : Path.GetFileNameWithoutExtension(ormTexture.NameOrPath);
+		var name = string.IsNullOrWhiteSpace(ormTexture.NameOrPath)
+			? $"ORM {materialIndex}"
+			: Path.GetFileNameWithoutExtension(ormTexture.NameOrPath);
 		var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Texture2D, name);
 		textureNodeIds.Add(nodeId);
 
@@ -886,7 +905,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return ormTextureIndex;
 	}
 
-		private ImportGraph ImportEditorSceneSource(
+	private ImportGraph ImportEditorSceneSource(
 		string absoluteSourcePath,
 		string relativeSourcePath,
 		string relativeMetaPath,
@@ -1000,8 +1019,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
-			for (var i = 0; i < node.Children.Count; i++)
-			{
+		for (var i = 0; i < node.Children.Count; i++)
+		{
 			var childKey = $"{hierarchyKey}/child-{i}-{SanitizeKey(node.Children[i].Name)}";
 			modelNode.Children.Add(CreateModelNode(
 				projectRootPath,
@@ -1015,46 +1034,46 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				dependencies));
 		}
 
-			return modelNode;
-		}
+		return modelNode;
+	}
 
-		private ImportGraph ImportPrefabSource(
-			string absoluteSourcePath,
-			string relativeSourcePath,
-			string relativeMetaPath,
-			AssetSourceMetaFile metadata)
+	private ImportGraph ImportPrefabSource(
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var prefabAsset = PrefabAssetFile.Load(absoluteSourcePath);
+		var assetName = string.IsNullOrWhiteSpace(prefabAsset.Name)
+			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
+			: prefabAsset.Name;
+
+		return new ImportGraph
 		{
-			var prefabAsset = PrefabAssetFile.Load(absoluteSourcePath);
-			var assetName = string.IsNullOrWhiteSpace(prefabAsset.Name)
-				? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
-				: prefabAsset.Name;
-
-			return new ImportGraph
-			{
-				Nodes =
-				[
-					new AssetNodeRecord
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = GetOrCreateNodeId(metadata, "main", AssetType.Prefab, assetName),
+					SourceId = metadata.SourceId,
+					Type = AssetType.Prefab,
+					NodeKey = "main",
+					Name = assetName,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(new PrefabAssetSummary
 					{
-						NodeId = GetOrCreateNodeId(metadata, "main", AssetType.Prefab, assetName),
-						SourceId = metadata.SourceId,
-						Type = AssetType.Prefab,
-						NodeKey = "main",
-						Name = assetName,
-						IsGenerated = false,
-						RelativeSourcePath = relativeSourcePath,
-						RelativeAssetPath = relativeSourcePath,
-						RelativeMetaPath = relativeMetaPath,
-						SummaryJson = AssetPipelineSerialization.Serialize(new PrefabAssetSummary
-						{
-							RootEntityId = prefabAsset.RootEntityId,
-							EntityCount = prefabAsset.Entities.Count
-						})
-					}
-				],
-				Artifacts = [],
-				Dependencies = []
-			};
-		}
+						RootEntityId = prefabAsset.RootEntityId,
+						EntityCount = prefabAsset.Entities.Count
+					})
+				}
+			],
+			Artifacts = [],
+			Dependencies = []
+		};
+	}
 
 	private static void AddModelDependencies(
 		Guid modelNodeId,
@@ -1106,7 +1125,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeSourcePath,
 		AssetSourceRecord existingSource)
 	{
-		if (TryLoadUsableMetadata(AssetFileExtensions.GetMetaPath(absoluteSourcePath), relativeSourcePath, out var metadata) == false)
+		if (TryLoadUsableMetadata(AssetFileExtensions.GetMetaPath(absoluteSourcePath), relativeSourcePath,
+			    out var metadata) == false)
 		{
 			return false;
 		}
@@ -1115,8 +1135,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var sourceInfo = new FileInfo(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
 		var importerVersionChanged = metadata.ImporterVersion != existingSource.ImporterVersion;
-		var importerChanged = string.Equals(metadata.ImporterId, existingSource.ImporterId, StringComparison.Ordinal) == false;
-		var importSettingsChanged = string.Equals(importSettingsJson, existingSource.ImportSettingsJson, StringComparison.Ordinal) == false;
+		var importerChanged = string.Equals(metadata.ImporterId, existingSource.ImporterId, StringComparison.Ordinal) ==
+		                      false;
+		var importSettingsChanged =
+			string.Equals(importSettingsJson, existingSource.ImportSettingsJson, StringComparison.Ordinal) == false;
 		var fileSizeChanged = sourceInfo.Length != existingSource.SourceFileSize;
 		var lastWriteChanged = sourceInfo.LastWriteTimeUtc.Ticks != existingSource.SourceLastWriteTimeUtcTicks;
 
@@ -1159,7 +1181,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return CreateDefaultMetadata(relativeSourcePath);
 	}
 
-	private bool TryLoadUsableMetadata(string absoluteMetaPath, string relativeSourcePath, out AssetSourceMetaFile metadata)
+	private bool TryLoadUsableMetadata(string absoluteMetaPath, string relativeSourcePath,
+		out AssetSourceMetaFile metadata)
 	{
 		metadata = null!;
 		if (File.Exists(absoluteMetaPath) == false)
@@ -1201,7 +1224,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		InitializeProject(projectRootPath);
 		var assetsPath = AssetPipelinePaths.GetAssetsPath(projectRootPath);
 		var existingSources = loadExistingSources ? _index.GetSources(projectRootPath) : [];
-		var indexedSourcesByPath = existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
+		var indexedSourcesByPath =
+			existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
 		var sourceFiles = EnumerateSupportedSourceFiles(assetsPath);
 
 		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1395,7 +1419,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	private Guid GetOrCreateNodeId(AssetSourceMetaFile metadata, string key, AssetType type, string name)
 	{
-		var existing = metadata.SubAssets.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.Ordinal));
+		var existing =
+			metadata.SubAssets.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.Ordinal));
 		if (existing is not null)
 		{
 			existing.Type = type;
@@ -1512,18 +1537,20 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			ormPixels[pixelOffset + 0] = occlusionPixels is not null && pixelOffset < occlusionPixels.Length
 				? occlusionPixels[pixelOffset + 0]
 				: (byte)255;
-			ormPixels[pixelOffset + 1] = metallicRoughnessPixels is not null && pixelOffset + 1 < metallicRoughnessPixels.Length
-				? metallicRoughnessPixels[pixelOffset + 1]
-				: (byte)255;
-			ormPixels[pixelOffset + 2] = metallicRoughnessPixels is not null && pixelOffset + 2 < metallicRoughnessPixels.Length
-				? metallicRoughnessPixels[pixelOffset + 2]
-				: (byte)255;
+			ormPixels[pixelOffset + 1] =
+				metallicRoughnessPixels is not null && pixelOffset + 1 < metallicRoughnessPixels.Length
+					? metallicRoughnessPixels[pixelOffset + 1]
+					: (byte)255;
+			ormPixels[pixelOffset + 2] =
+				metallicRoughnessPixels is not null && pixelOffset + 2 < metallicRoughnessPixels.Length
+					? metallicRoughnessPixels[pixelOffset + 2]
+					: (byte)255;
 			ormPixels[pixelOffset + 3] = 255;
 		}
 
 		var name = metallicRoughnessTexture?.NameOrPath
-			?? occlusionTexture?.NameOrPath
-			?? $"Material_{materialIndex}_ORM";
+		           ?? occlusionTexture?.NameOrPath
+		           ?? $"Material_{materialIndex}_ORM";
 		return new ImportedTexture(
 			$"{Path.GetFileNameWithoutExtension(name)}_ORM.png",
 			width,
@@ -1658,7 +1685,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private void DeleteSourceArtifacts(string projectRootPath, Guid sourceId)
 	{
 		var nodes = _index.GetNodes(projectRootPath).Where(node => node.SourceId == sourceId).ToList();
-		var importedDirectory = Path.Combine(AssetPipelinePaths.GetImportedRoot(projectRootPath), sourceId.ToString("D"));
+		var importedDirectory =
+			Path.Combine(AssetPipelinePaths.GetImportedRoot(projectRootPath), sourceId.ToString("D"));
 		if (Directory.Exists(importedDirectory))
 		{
 			Directory.Delete(importedDirectory, recursive: true);
@@ -1666,7 +1694,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		for (var i = 0; i < nodes.Count; i++)
 		{
-			var artifactDirectory = Path.Combine(AssetPipelinePaths.GetArtifactsRoot(projectRootPath), nodes[i].NodeId.ToString("D"));
+			var artifactDirectory = Path.Combine(AssetPipelinePaths.GetArtifactsRoot(projectRootPath),
+				nodes[i].NodeId.ToString("D"));
 			if (Directory.Exists(artifactDirectory))
 			{
 				Directory.Delete(artifactDirectory, recursive: true);
@@ -1691,255 +1720,265 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return relativePath.Replace(Path.DirectorySeparatorChar, '/');
 	}
 
-		private static string GetAbsolutePath(string projectRootPath, string relativePath)
+	private static string GetAbsolutePath(string projectRootPath, string relativePath)
+	{
+		var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+		return Path.GetFullPath(Path.Combine(projectRootPath, normalized));
+	}
+
+	private static Dictionary<Guid, List<SavedEntity>> BuildPrefabChildrenMap(List<SavedEntity> entities)
+	{
+		var childrenByParent = new Dictionary<Guid, List<SavedEntity>>();
+		for (var i = 0; i < entities.Count; i++)
 		{
-			var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
-			return Path.GetFullPath(Path.Combine(projectRootPath, normalized));
+			if (entities[i].ParentEntityId is not { } parentEntityId)
+			{
+				continue;
+			}
+
+			if (childrenByParent.TryGetValue(parentEntityId, out var children) == false)
+			{
+				children = [];
+				childrenByParent[parentEntityId] = children;
+			}
+
+			children.Add(entities[i]);
 		}
 
-		private static Dictionary<Guid, List<SavedEntity>> BuildPrefabChildrenMap(List<SavedEntity> entities)
+		return childrenByParent;
+	}
+
+	private void InstantiatePrefabEntities(
+		EditorScene scene,
+		string projectRootPath,
+		Guid prefabNodeId,
+		SavedEntity rootEntity,
+		Dictionary<Guid, SavedEntity> entitiesById,
+		Dictionary<Guid, List<SavedEntity>> childrenByParent)
+	{
+		var resolvedEntitiesById =
+			ResolvePrefabEntitiesForInstantiation(projectRootPath, rootEntity.EntityId, entitiesById, childrenByParent);
+		var instantiatedEntitiesBySourceId = new Dictionary<Guid, Entity>(resolvedEntitiesById.Count);
+		CreateInstantiatedPrefabEntities(scene, prefabNodeId, rootEntity.EntityId, resolvedEntitiesById,
+			childrenByParent, instantiatedEntitiesBySourceId, parent: null);
+		ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId);
+	}
+
+	private Dictionary<Guid, SavedEntity> ResolvePrefabEntitiesForInstantiation(
+		string projectRootPath,
+		Guid rootEntityId,
+		IReadOnlyDictionary<Guid, SavedEntity> entitiesById,
+		IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent)
+	{
+		var resolvedEntitiesById = new Dictionary<Guid, SavedEntity>();
+		var pendingEntityIds = new Stack<Guid>();
+		pendingEntityIds.Push(rootEntityId);
+		while (pendingEntityIds.Count > 0)
 		{
-			var childrenByParent = new Dictionary<Guid, List<SavedEntity>>();
-			for (var i = 0; i < entities.Count; i++)
+			var entityId = pendingEntityIds.Pop();
+			if (entitiesById.TryGetValue(entityId, out var sourceEntity) == false ||
+			    resolvedEntitiesById.ContainsKey(entityId))
 			{
-				if (entities[i].ParentEntityId is not { } parentEntityId)
-				{
-					continue;
-				}
-
-				if (childrenByParent.TryGetValue(parentEntityId, out var children) == false)
-				{
-					children = [];
-					childrenByParent[parentEntityId] = children;
-				}
-
-				children.Add(entities[i]);
+				continue;
 			}
 
-			return childrenByParent;
-		}
-
-		private void InstantiatePrefabEntities(
-			EditorScene scene,
-			string projectRootPath,
-			Guid prefabNodeId,
-			SavedEntity rootEntity,
-			Dictionary<Guid, SavedEntity> entitiesById,
-			Dictionary<Guid, List<SavedEntity>> childrenByParent)
-		{
-			var resolvedEntitiesById = ResolvePrefabEntitiesForInstantiation(projectRootPath, rootEntity.EntityId, entitiesById, childrenByParent);
-			var instantiatedEntitiesBySourceId = new Dictionary<Guid, Entity>(resolvedEntitiesById.Count);
-			CreateInstantiatedPrefabEntities(scene, prefabNodeId, rootEntity.EntityId, resolvedEntitiesById, childrenByParent, instantiatedEntitiesBySourceId, parent: null);
-			ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId);
-		}
-
-		private Dictionary<Guid, SavedEntity> ResolvePrefabEntitiesForInstantiation(
-			string projectRootPath,
-			Guid rootEntityId,
-			IReadOnlyDictionary<Guid, SavedEntity> entitiesById,
-			IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent)
-		{
-			var resolvedEntitiesById = new Dictionary<Guid, SavedEntity>();
-			var pendingEntityIds = new Stack<Guid>();
-			pendingEntityIds.Push(rootEntityId);
-			while (pendingEntityIds.Count > 0)
+			resolvedEntitiesById[entityId] = ResolvePrefabEntityForInstantiation(projectRootPath, sourceEntity);
+			if (childrenByParent.TryGetValue(entityId, out var children) == false)
 			{
-				var entityId = pendingEntityIds.Pop();
-				if (entitiesById.TryGetValue(entityId, out var sourceEntity) == false || resolvedEntitiesById.ContainsKey(entityId))
-				{
-					continue;
-				}
-
-				resolvedEntitiesById[entityId] = ResolvePrefabEntityForInstantiation(projectRootPath, sourceEntity);
-				if (childrenByParent.TryGetValue(entityId, out var children) == false)
-				{
-					continue;
-				}
-
-				for (var i = 0; i < children.Count; i++)
-				{
-					pendingEntityIds.Push(children[i].EntityId);
-				}
-			}
-
-			return resolvedEntitiesById;
-		}
-
-		private void CreateInstantiatedPrefabEntities(
-			EditorScene scene,
-			Guid prefabNodeId,
-			Guid sourceEntityId,
-			IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
-			IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent,
-			Dictionary<Guid, Entity> instantiatedEntitiesBySourceId,
-			Entity? parent)
-		{
-			if (resolvedEntitiesById.TryGetValue(sourceEntityId, out var sourceEntity) == false)
-			{
-				return;
-			}
-
-			var world = scene.World;
-			var entity = CreateEntity(world, sourceEntity);
-			instantiatedEntitiesBySourceId[sourceEntityId] = entity;
-			scene.EntityIds[entity] = Guid.NewGuid();
-			scene.EntityCellKeys[entity] = SceneCellKey.Global;
-			scene.EntityPrefabSourcePaths[entity] = CreateInstantiatedPrefabSourcePath(prefabNodeId, sourceEntity);
-			if (string.IsNullOrWhiteSpace(sourceEntity.Icon) == false)
-			{
-				scene.EntityIcons[entity] = sourceEntity.Icon;
-			}
-
-			if (parent is { } parentEntity)
-			{
-				world.SetParent(entity, parentEntity);
-			}
-
-			if (childrenByParent.TryGetValue(sourceEntityId, out var children) == false)
-			{
-				return;
+				continue;
 			}
 
 			for (var i = 0; i < children.Count; i++)
 			{
-				CreateInstantiatedPrefabEntities(scene, prefabNodeId, children[i].EntityId, resolvedEntitiesById, childrenByParent, instantiatedEntitiesBySourceId, entity);
+				pendingEntityIds.Push(children[i].EntityId);
 			}
 		}
 
-		private static void ApplyInstantiatedPrefabEntityState(
-			EditorScene scene,
-			IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
-			IReadOnlyDictionary<Guid, Entity> instantiatedEntitiesBySourceId)
+		return resolvedEntitiesById;
+	}
+
+	private void CreateInstantiatedPrefabEntities(
+		EditorScene scene,
+		Guid prefabNodeId,
+		Guid sourceEntityId,
+		IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
+		IReadOnlyDictionary<Guid, List<SavedEntity>> childrenByParent,
+		Dictionary<Guid, Entity> instantiatedEntitiesBySourceId,
+		Entity? parent)
+	{
+		if (resolvedEntitiesById.TryGetValue(sourceEntityId, out var sourceEntity) == false)
 		{
-			foreach (var entry in instantiatedEntitiesBySourceId)
-			{
-				var sourceEntity = resolvedEntitiesById[entry.Key];
-				var entity = entry.Value;
-				scene.World.SetEnabled(entity, sourceEntity.Enabled);
-				for (var i = 0; i < sourceEntity.Components.Count; i++)
-				{
-					ApplySavedComponent(scene, instantiatedEntitiesBySourceId, entity, sourceEntity.Components[i]);
-				}
-			}
+			return;
 		}
 
-		private SavedEntity ResolvePrefabEntityForInstantiation(string projectRootPath, SavedEntity sourceEntity)
+		var world = scene.World;
+		var entity = CreateEntity(world, sourceEntity);
+		instantiatedEntitiesBySourceId[sourceEntityId] = entity;
+		scene.EntityIds[entity] = Guid.NewGuid();
+		scene.EntityCellKeys[entity] = SceneCellKey.Global;
+		scene.EntityPrefabSourcePaths[entity] = CreateInstantiatedPrefabSourcePath(prefabNodeId, sourceEntity);
+		if (string.IsNullOrWhiteSpace(sourceEntity.Icon) == false)
 		{
-			var resolvedEntity = EditorPrefabUtility.CloneEntity(sourceEntity);
-			if (resolvedEntity.PrefabSourcePath.Count == 0)
-			{
-				return resolvedEntity;
-			}
+			scene.EntityIcons[entity] = sourceEntity.Icon;
+		}
 
-			if (TryResolveNestedPrefabSourceEntity(projectRootPath, resolvedEntity.PrefabSourcePath[0], new HashSet<Guid>(), out var nestedSourceEntity))
-			{
-				resolvedEntity = EditorPrefabUtility.MergePrefabSourceEntity(resolvedEntity, nestedSourceEntity);
-			}
+		if (parent is { } parentEntity)
+		{
+			world.SetParent(entity, parentEntity);
+		}
 
+		if (childrenByParent.TryGetValue(sourceEntityId, out var children) == false)
+		{
+			return;
+		}
+
+		for (var i = 0; i < children.Count; i++)
+		{
+			CreateInstantiatedPrefabEntities(scene, prefabNodeId, children[i].EntityId, resolvedEntitiesById,
+				childrenByParent, instantiatedEntitiesBySourceId, entity);
+		}
+	}
+
+	private static void ApplyInstantiatedPrefabEntityState(
+		EditorScene scene,
+		IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
+		IReadOnlyDictionary<Guid, Entity> instantiatedEntitiesBySourceId)
+	{
+		foreach (var entry in instantiatedEntitiesBySourceId)
+		{
+			var sourceEntity = resolvedEntitiesById[entry.Key];
+			var entity = entry.Value;
+			scene.World.SetEnabled(entity, sourceEntity.Enabled);
+			for (var i = 0; i < sourceEntity.Components.Count; i++)
+			{
+				ApplySavedComponent(scene, instantiatedEntitiesBySourceId, entity, sourceEntity.Components[i]);
+			}
+		}
+	}
+
+	private SavedEntity ResolvePrefabEntityForInstantiation(string projectRootPath, SavedEntity sourceEntity)
+	{
+		var resolvedEntity = EditorPrefabUtility.CloneEntity(sourceEntity);
+		if (resolvedEntity.PrefabSourcePath.Count == 0)
+		{
 			return resolvedEntity;
 		}
 
-		private bool TryResolveNestedPrefabSourceEntity(
-			string projectRootPath,
-			SavedPrefabLink sourceLink,
-			HashSet<Guid> prefabAssetStack,
-			out SavedEntity sourceEntity)
+		if (TryResolveNestedPrefabSourceEntity(projectRootPath, resolvedEntity.PrefabSourcePath[0], new HashSet<Guid>(),
+			    out var nestedSourceEntity))
 		{
-			sourceEntity = null!;
-			if (sourceLink.PrefabAssetId == Guid.Empty || sourceLink.PrefabEntityId == Guid.Empty)
-			{
-				return false;
-			}
+			resolvedEntity = EditorPrefabUtility.MergePrefabSourceEntity(resolvedEntity, nestedSourceEntity);
+		}
 
-			if (prefabAssetStack.Add(sourceLink.PrefabAssetId) == false)
-			{
-				throw new InvalidOperationException($"Cyclic prefab nesting detected while resolving prefab '{sourceLink.PrefabAssetId}'.");
-			}
+		return resolvedEntity;
+	}
 
-			if (_index.TryGetNode(projectRootPath, sourceLink.PrefabAssetId, out var prefabNode) == false ||
-			    prefabNode.Type != AssetType.Prefab)
-			{
-				prefabAssetStack.Remove(sourceLink.PrefabAssetId);
-				return false;
-			}
+	private bool TryResolveNestedPrefabSourceEntity(
+		string projectRootPath,
+		SavedPrefabLink sourceLink,
+		HashSet<Guid> prefabAssetStack,
+		out SavedEntity sourceEntity)
+	{
+		sourceEntity = null!;
+		if (sourceLink.PrefabAssetId == Guid.Empty || sourceLink.PrefabEntityId == Guid.Empty)
+		{
+			return false;
+		}
 
-			var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
-			var nestedSource = prefabFile.Entities.FirstOrDefault(entity => entity.EntityId == sourceLink.PrefabEntityId);
-			if (nestedSource is null)
-			{
-				prefabAssetStack.Remove(sourceLink.PrefabAssetId);
-				return false;
-			}
+		if (prefabAssetStack.Add(sourceLink.PrefabAssetId) == false)
+		{
+			throw new InvalidOperationException(
+				$"Cyclic prefab nesting detected while resolving prefab '{sourceLink.PrefabAssetId}'.");
+		}
 
-			sourceEntity = EditorPrefabUtility.CloneEntity(nestedSource);
-			if (sourceEntity.PrefabSourcePath.Count > 0 &&
-			    TryResolveNestedPrefabSourceEntity(projectRootPath, sourceEntity.PrefabSourcePath[0], prefabAssetStack, out var deepSourceEntity))
-			{
-				sourceEntity = EditorPrefabUtility.MergePrefabSourceEntity(sourceEntity, deepSourceEntity);
-			}
-
+		if (_index.TryGetNode(projectRootPath, sourceLink.PrefabAssetId, out var prefabNode) == false ||
+		    prefabNode.Type != AssetType.Prefab)
+		{
 			prefabAssetStack.Remove(sourceLink.PrefabAssetId);
-			return true;
+			return false;
 		}
 
-		private static List<SavedPrefabLink> CreateInstantiatedPrefabSourcePath(Guid prefabNodeId, SavedEntity sourceEntity)
+		var prefabFile = PrefabAssetFile.Load(GetAbsolutePath(projectRootPath, prefabNode.RelativeAssetPath));
+		var nestedSource = prefabFile.Entities.FirstOrDefault(entity => entity.EntityId == sourceLink.PrefabEntityId);
+		if (nestedSource is null)
 		{
-			var sourcePath = new List<SavedPrefabLink>(1 + sourceEntity.PrefabSourcePath.Count)
-			{
-				new()
-				{
-					PrefabAssetId = prefabNodeId,
-					PrefabEntityId = sourceEntity.EntityId
-				}
-			};
-			sourcePath.AddRange(EditorPrefabUtility.ClonePrefabSourcePath(sourceEntity.PrefabSourcePath));
-			return sourcePath;
+			prefabAssetStack.Remove(sourceLink.PrefabAssetId);
+			return false;
 		}
 
-		private static Entity CreateEntity(World world, SavedEntity savedEntity)
+		sourceEntity = EditorPrefabUtility.CloneEntity(nestedSource);
+		if (sourceEntity.PrefabSourcePath.Count > 0 &&
+		    TryResolveNestedPrefabSourceEntity(projectRootPath, sourceEntity.PrefabSourcePath[0], prefabAssetStack,
+			    out var deepSourceEntity))
 		{
-			if (savedEntity.HasName && savedEntity.LocalTransform is { } transformWithName)
-			{
-				return world.CreateEntity(savedEntity.Name, transformWithName);
-			}
-
-			if (savedEntity.HasName)
-			{
-				return world.CreateEntity(savedEntity.Name);
-			}
-
-			var entity = world.CreateEntity();
-			if (savedEntity.LocalTransform is { } transform)
-			{
-				world.AddTransform(entity, transform);
-			}
-
-			return entity;
+			sourceEntity = EditorPrefabUtility.MergePrefabSourceEntity(sourceEntity, deepSourceEntity);
 		}
 
-		private static void ApplySavedComponent(EditorScene scene, IReadOnlyDictionary<Guid, Entity>? sourceEntitiesById, Entity entity, SavedComponent component)
+		prefabAssetStack.Remove(sourceLink.PrefabAssetId);
+		return true;
+	}
+
+	private static List<SavedPrefabLink> CreateInstantiatedPrefabSourcePath(Guid prefabNodeId, SavedEntity sourceEntity)
+	{
+		var sourcePath = new List<SavedPrefabLink>(1 + sourceEntity.PrefabSourcePath.Count)
 		{
-			if ((ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out var componentType) == false &&
-			     ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType) == false) ||
-			    componentType == typeof(NameComponent) ||
-			    componentType.IsValueType == false ||
-			    typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+			new()
 			{
-				return;
+				PrefabAssetId = prefabNodeId,
+				PrefabEntityId = sourceEntity.EntityId
 			}
+		};
+		sourcePath.AddRange(EditorPrefabUtility.ClonePrefabSourcePath(sourceEntity.PrefabSourcePath));
+		return sourcePath;
+	}
 
-			var deserialized = sourceEntitiesById is null
-				? EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
-				: EditorEntityReferenceUtility.DeserializeValue(component.Data, componentType, entityId =>
-				{
-					return sourceEntitiesById.TryGetValue(entityId, out var resolvedEntity)
-						? resolvedEntity
-						: null;
-				});
-			RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType, deserialized ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType));
+	private static Entity CreateEntity(World world, SavedEntity savedEntity)
+	{
+		if (savedEntity.HasName && savedEntity.LocalTransform is { } transformWithName)
+		{
+			return world.CreateEntity(savedEntity.Name, transformWithName);
 		}
 
-		private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)
+		if (savedEntity.HasName)
+		{
+			return world.CreateEntity(savedEntity.Name);
+		}
+
+		var entity = world.CreateEntity();
+		if (savedEntity.LocalTransform is { } transform)
+		{
+			world.AddTransform(entity, transform);
+		}
+
+		return entity;
+	}
+
+	private static void ApplySavedComponent(EditorScene scene, IReadOnlyDictionary<Guid, Entity>? sourceEntitiesById,
+		Entity entity, SavedComponent component)
+	{
+		if ((ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out var componentType) ==
+		     false &&
+		     ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType) == false) ||
+		    componentType == typeof(NameComponent) ||
+		    componentType.IsValueType == false ||
+		    typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+		{
+			return;
+		}
+
+		var deserialized = sourceEntitiesById is null
+			? EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
+			: EditorEntityReferenceUtility.DeserializeValue(component.Data, componentType, entityId =>
+			{
+				return sourceEntitiesById.TryGetValue(entityId, out var resolvedEntity)
+					? resolvedEntity
+					: null;
+			});
+		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType,
+			deserialized ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType));
+	}
+
+	private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)
 	{
 		var index = 0;
 		while (true)
@@ -2011,7 +2050,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			Id = id;
 			Version = version;
 			_canImport = canImport ?? throw new ArgumentNullException(nameof(canImport));
-			_createDefaultSettingsJson = createDefaultSettingsJson ?? throw new ArgumentNullException(nameof(createDefaultSettingsJson));
+			_createDefaultSettingsJson = createDefaultSettingsJson ??
+			                             throw new ArgumentNullException(nameof(createDefaultSettingsJson));
 			_import = import ?? throw new ArgumentNullException(nameof(import));
 		}
 

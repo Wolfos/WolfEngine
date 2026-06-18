@@ -1,7 +1,5 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using System.Text.Json;
 using WolfEngine.Importing;
@@ -52,7 +50,8 @@ public sealed class AssetDatabase
 		}
 
 		var instanceRegistry = _instanceRegistry
-			?? throw new InvalidOperationException("No asset instance registry has been configured.");
+		                       ?? throw new InvalidOperationException(
+			                       "No asset instance registry has been configured.");
 		var instance = instanceRegistry.GetInstance(nodeId, typeof(T));
 		if (instance is null)
 		{
