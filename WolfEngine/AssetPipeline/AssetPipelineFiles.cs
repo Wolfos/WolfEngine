@@ -38,6 +38,7 @@ public sealed class AssetMetadataStore : IAssetMetadataStore
 		}
 
 		metadata.SubAssets ??= new List<AssetSubAssetManifestEntry>();
+		NormalizeLegacyImportSettings(metadata);
 		return metadata;
 	}
 
@@ -51,7 +52,25 @@ public sealed class AssetMetadataStore : IAssetMetadataStore
 		ArgumentNullException.ThrowIfNull(metadata);
 		metadata.Version = AssetSourceMetaFile.CurrentVersion;
 		metadata.SubAssets ??= new List<AssetSubAssetManifestEntry>();
+		NormalizeLegacyImportSettings(metadata);
+		metadata.ExtensionData = null;
 		WriteJsonAtomically(absoluteMetaPath, metadata);
+	}
+
+	private static void NormalizeLegacyImportSettings(AssetSourceMetaFile metadata)
+	{
+		if (string.Equals(metadata.ImporterId, AssetImporterIds.Texture, StringComparison.Ordinal) &&
+		    metadata.ExtensionData is not null &&
+		    metadata.ExtensionData.TryGetValue("TextureImportSettings", out var legacySettingsJson) &&
+		    (string.IsNullOrWhiteSpace(metadata.ImportSettingsJson) ||
+		     string.Equals(metadata.ImportSettingsJson, "{}", StringComparison.Ordinal)))
+		{
+			var legacySettings = legacySettingsJson.Deserialize<TextureImportSettings>(AssetJson.SerializerOptions);
+			if (legacySettings is not null)
+			{
+				metadata.SetImportSettings(legacySettings);
+			}
+		}
 	}
 
 	private static void WriteJsonAtomically<T>(string path, T value)

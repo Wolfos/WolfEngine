@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Text.Json;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
@@ -81,18 +82,47 @@ public sealed class AssetDatabaseEntry
 	public string RelativeStatePath { get; set; } = string.Empty;
 	public string RelativeMetaPath { get; set; } = string.Empty;
 	public List<AssetArtifactRecord> Artifacts { get; set; } = new();
-	public TextureAssetSummary? TextureSummary { get; set; }
-	public MaterialAssetSummary? MaterialSummary { get; set; }
-	public DataAssetSummary? DataAssetSummary { get; set; }
-	public TerrainAssetSummary? TerrainSummary { get; set; }
-	public MeshAssetSummary? MeshSummary { get; set; }
-	public Model3DAssetSummary? ModelSummary { get; set; }
-	public SceneAssetSummary? SceneSummary { get; set; }
-	public PrefabAssetSummary? PrefabSummary { get; set; }
+	public string SummaryJson { get; set; } = "{}";
 
 	public string GetEffectiveRelativeStatePath()
 	{
 		return string.IsNullOrWhiteSpace(RelativeStatePath) ? RelativeMetaPath : RelativeStatePath;
+	}
+
+	public bool TryGetSummary<T>(out T summary)
+	{
+		if (string.IsNullOrWhiteSpace(SummaryJson) || string.Equals(SummaryJson, "{}", StringComparison.Ordinal))
+		{
+			summary = default!;
+			return false;
+		}
+
+		try
+		{
+			summary = AssetPipelineSerialization.Deserialize<T>(SummaryJson);
+			return summary is not null;
+		}
+		catch (JsonException)
+		{
+			summary = default!;
+			return false;
+		}
+	}
+
+	public T GetRequiredSummary<T>()
+	{
+		if (TryGetSummary<T>(out var summary))
+		{
+			return summary;
+		}
+
+		throw new InvalidOperationException($"Asset node '{Id}' is missing a '{typeof(T).FullName}' summary.");
+	}
+
+	public void SetSummary<T>(T summary)
+	{
+		ArgumentNullException.ThrowIfNull(summary);
+		SummaryJson = AssetPipelineSerialization.Serialize(summary);
 	}
 }
 

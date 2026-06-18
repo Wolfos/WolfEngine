@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -39,11 +40,49 @@ public sealed class AssetSourceMetaFile
 	public Guid SourceId { get; set; }
 	public string ImporterId { get; set; } = string.Empty;
 	public int ImporterVersion { get; set; } = 1;
-	public TextureImportSettings? TextureImportSettings { get; set; }
-	public string SourceContentHash { get; set; } = string.Empty;
-	public long SourceFileSize { get; set; }
-	public long SourceLastWriteTimeUtcTicks { get; set; }
+	public string ImportSettingsJson { get; set; } = "{}";
 	public List<AssetSubAssetManifestEntry> SubAssets { get; set; } = new();
+	[JsonExtensionData]
+	public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+	public bool TryGetImportSettings<T>(out T settings)
+	{
+		if (string.IsNullOrWhiteSpace(ImportSettingsJson) || string.Equals(ImportSettingsJson, "{}", StringComparison.Ordinal))
+		{
+			settings = default!;
+			return false;
+		}
+
+		try
+		{
+			settings = AssetPipelineSerialization.Deserialize<T>(ImportSettingsJson);
+			return settings is not null;
+		}
+		catch (JsonException)
+		{
+			settings = default!;
+			return false;
+		}
+	}
+
+	public T GetImportSettingsOrDefault<T>(Func<T> createDefault)
+	{
+		ArgumentNullException.ThrowIfNull(createDefault);
+		if (TryGetImportSettings<T>(out var settings))
+		{
+			return settings;
+		}
+
+		settings = createDefault();
+		SetImportSettings(settings);
+		return settings;
+	}
+
+	public void SetImportSettings<T>(T settings)
+	{
+		ArgumentNullException.ThrowIfNull(settings);
+		ImportSettingsJson = AssetPipelineSerialization.Serialize(settings);
+	}
 }
 
 public sealed class AssetSubAssetManifestEntry

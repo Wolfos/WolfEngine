@@ -1,4 +1,5 @@
 using NSubstitute;
+using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Importing;
@@ -79,13 +80,13 @@ public sealed class TextureArtifactPipelineTests
 			Id = Guid.NewGuid(),
 			Name = "test",
 			Type = AssetType.Texture2D,
-			TextureSummary = new TextureAssetSummary(),
 			Artifacts =
 			[
 				new AssetArtifactRecord { ArtifactKey = "runtime-d3d12", Kind = "RuntimeTexture", Target = "d3d12", RelativePath = Path.GetFileName(d3dPath) },
 				new AssetArtifactRecord { ArtifactKey = "runtime-metal", Kind = "RuntimeTexture", Target = "metal", RelativePath = Path.GetFileName(metalPath) }
 			]
 		};
+		asset.SetSummary(new TextureAssetSummary());
 
 		var resolved = (Texture)resolver.Resolve(new RuntimeAssetResolveContext(
 			asset.Id,
@@ -106,21 +107,49 @@ public sealed class TextureArtifactPipelineTests
 		var metadata = new AssetSourceMetaFile
 		{
 			SourceId = Guid.NewGuid(),
-			ImporterId = AssetImporterIds.Texture,
-			TextureImportSettings = new TextureImportSettings
-			{
-				TextureSemantic = TextureSemantic.BaseColorTransparent,
-				MaxResolution = 2048
-			}
+			ImporterId = AssetImporterIds.Texture
 		};
+		metadata.SetImportSettings(new TextureImportSettings
+		{
+			TextureSemantic = TextureSemantic.BaseColorTransparent,
+			MaxResolution = 2048
+		});
 
 		var store = new AssetMetadataStore();
 		store.Save(metadataPath, metadata);
 		var loaded = store.Load(metadataPath);
 
-		Assert.That(loaded.TextureImportSettings, Is.Not.Null);
-		Assert.That(loaded.TextureImportSettings!.TextureSemantic, Is.EqualTo(TextureSemantic.BaseColorTransparent));
-		Assert.That(loaded.TextureImportSettings.MaxResolution, Is.EqualTo(2048));
+		Assert.That(loaded.TryGetImportSettings<TextureImportSettings>(out var loadedSettings), Is.True);
+		Assert.That(loadedSettings.TextureSemantic, Is.EqualTo(TextureSemantic.BaseColorTransparent));
+		Assert.That(loadedSettings.MaxResolution, Is.EqualTo(2048));
+		Assert.That(loaded.ExtensionData, Is.Null);
+	}
+
+	[Test]
+	public void TextureImportSettings_LoadsLegacyTextureMetadata()
+	{
+		using var tempDirectory = new TempDirectory();
+		var metadataPath = Path.Combine(tempDirectory.Path, "texture.png.meta");
+		var legacyMetadata = new
+		{
+			Version = AssetSourceMetaFile.CurrentVersion,
+			SourceId = Guid.NewGuid(),
+			ImporterId = AssetImporterIds.Texture,
+			ImporterVersion = 1,
+			TextureImportSettings = new TextureImportSettings
+			{
+				TextureSemantic = TextureSemantic.BaseColorTransparent,
+				MaxResolution = 2048
+			},
+			SubAssets = Array.Empty<AssetSubAssetManifestEntry>()
+		};
+		File.WriteAllText(metadataPath, JsonSerializer.Serialize(legacyMetadata, AssetJson.SerializerOptions));
+
+		var loaded = new AssetMetadataStore().Load(metadataPath);
+
+		Assert.That(loaded.TryGetImportSettings<TextureImportSettings>(out var loadedSettings), Is.True);
+		Assert.That(loadedSettings.TextureSemantic, Is.EqualTo(TextureSemantic.BaseColorTransparent));
+		Assert.That(loadedSettings.MaxResolution, Is.EqualTo(2048));
 	}
 
 	[TestCase(TextureSemantic.Unknown, false, TextureFormat.Unknown)]

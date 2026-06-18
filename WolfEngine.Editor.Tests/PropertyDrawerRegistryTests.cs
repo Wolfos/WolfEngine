@@ -214,17 +214,18 @@ public sealed class PropertyDrawerRegistryTests
 
 	private static AssetDatabaseEntry CreateDataAsset(string name, string dataAssetType, string dataAssetTypeId)
 	{
-		return new AssetDatabaseEntry
+		var asset = new AssetDatabaseEntry
 		{
 			Id = Guid.NewGuid(),
 			SourceId = Guid.NewGuid(),
 			Name = name,
-			Type = AssetType.DataAsset,
-			DataAssetSummary = new DataAssetSummary
-			{
-				DataAssetType = dataAssetType,
-				DataAssetTypeId = dataAssetTypeId
-			}
+			Type = AssetType.DataAsset
 		};
+		asset.SetSummary(new DataAssetSummary
+		{
+			DataAssetType = dataAssetType,
+			DataAssetTypeId = dataAssetTypeId
+		});
+		return asset;
 	}
 }

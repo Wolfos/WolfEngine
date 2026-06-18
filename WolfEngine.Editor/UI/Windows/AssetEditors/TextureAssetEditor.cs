@@ -29,17 +29,17 @@ public sealed class TextureAssetEditor
 
 	public void Draw(AssetDatabaseEntry asset)
 	{
-		if (asset.TextureSummary is null)
+		if (asset.TryGetSummary<TextureAssetSummary>(out var textureSummary) == false)
 		{
 			ImGui.TextUnformatted("Texture summary is unavailable.");
 			return;
 		}
 
 		var metadata = asset.IsGenerated ? null : EnsureMetadataLoaded(asset);
-		var previewIsSrgb = metadata?.TextureImportSettings is { } importSettings
+		var previewIsSrgb = metadata?.TryGetImportSettings<TextureImportSettings>(out var importSettings) == true
 			? StbImageLoader.IsSrgb(importSettings.TextureSemantic)
-			: StbImageLoader.IsSrgb(asset.TextureSummary.Semantic);
-		var previewRelativePath = asset.IsGenerated ? string.Empty : asset.TextureSummary.RelativeSourceAssetPath;
+			: StbImageLoader.IsSrgb(textureSummary.Semantic);
+		var previewRelativePath = asset.IsGenerated ? string.Empty : textureSummary.RelativeSourceAssetPath;
 		if (string.IsNullOrWhiteSpace(previewRelativePath) == false &&
 		    _imageLoader.TryGetImGuiTextureId(_projectService.GetAbsolutePath(previewRelativePath), out var textureId, previewIsSrgb))
 		{
@@ -53,8 +53,8 @@ public sealed class TextureAssetEditor
 		}
 
 		ImGui.Spacing();
-		ImGui.TextUnformatted($"Imported: {asset.TextureSummary.Width}x{asset.TextureSummary.Height}, {asset.TextureSummary.Channels} channel(s)");
-		ImGui.TextUnformatted($"Color Space: {(StbImageLoader.IsSrgb(asset.TextureSummary.Semantic) ? "sRGB" : "Linear")}");
+		ImGui.TextUnformatted($"Imported: {textureSummary.Width}x{textureSummary.Height}, {textureSummary.Channels} channel(s)");
+		ImGui.TextUnformatted($"Color Space: {(StbImageLoader.IsSrgb(textureSummary.Semantic) ? "sRGB" : "Linear")}");
 
 		if (asset.IsGenerated)
 		{
@@ -68,9 +68,9 @@ public sealed class TextureAssetEditor
 			return;
 		}
 
-		metadata.TextureImportSettings ??= new TextureImportSettings();
-		var currentSemantic = metadata.TextureImportSettings.TextureSemantic;
-		var currentResolution = metadata.TextureImportSettings.MaxResolution;
+		var textureImportSettings = metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
+		var currentSemantic = textureImportSettings.TextureSemantic;
+		var currentResolution = textureImportSettings.MaxResolution;
 		var selectedIndex = Array.IndexOf(ResolutionOptions, currentResolution);
 		if (selectedIndex < 0)
 		{
@@ -84,7 +84,8 @@ public sealed class TextureAssetEditor
 				var isSelected = semantic == currentSemantic;
 				if (ImGui.Selectable(FormatSemanticLabel(semantic), isSelected))
 				{
-					metadata.TextureImportSettings.TextureSemantic = semantic;
+					textureImportSettings.TextureSemantic = semantic;
+					metadata.SetImportSettings(textureImportSettings);
 					SaveTextureMetadata(asset, metadata);
 				}
 
@@ -103,7 +104,8 @@ public sealed class TextureAssetEditor
 				var isSelected = resolution == currentResolution;
 				if (ImGui.Selectable(FormatResolutionLabel(resolution), isSelected))
 				{
-					metadata.TextureImportSettings.MaxResolution = resolution;
+					textureImportSettings.MaxResolution = resolution;
+					metadata.SetImportSettings(textureImportSettings);
 					SaveTextureMetadata(asset, metadata);
 				}
 

@@ -34,16 +34,6 @@ public interface IProjectAssetPipelineService
 
 public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 {
-	private static readonly string[] TextureExtensions =
-	[
-		".jpg", ".jpeg", ".png", ".bmp", ".tga", ".psd", ".gif", ".hdr"
-	];
-
-	private static readonly string[] ThreeDExtensions =
-	[
-		".gltf", ".glb", ".fbx"
-	];
-
 	private readonly IAssetPipelineIndex _index;
 	private readonly IAssetMetadataStore _metadataStore;
 	private readonly ImportImageLoader _imageLoader;
@@ -51,6 +41,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IThreeDFileImporter _threeDFileImporter;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
+	private readonly IReadOnlyList<AssetImporterDescriptor> _importers;
 
 	public ProjectAssetPipelineService(
 		IAssetPipelineIndex index,
@@ -86,6 +77,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_threeDFileImporter = threeDFileImporter ?? throw new ArgumentNullException(nameof(threeDFileImporter));
 		_textureGpuCompressionService = textureGpuCompressionService ?? throw new ArgumentNullException(nameof(textureGpuCompressionService));
+		_importers = CreateImporters();
 	}
 
 	public void InitializeProject(string projectRootPath)
@@ -217,7 +209,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return;
 		}
 
-		if (IsSupportedSourcePath(absoluteSourcePath) == false)
+		if (TryGetImporterForPath(normalizedRelativePath, out _) == false)
 		{
 			throw new InvalidOperationException($"Unsupported asset source '{normalizedRelativePath}'.");
 		}
@@ -416,10 +408,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var metadata = LoadOrCreateMetadata(absoluteMetaPath, relativeSourcePath);
 		ApplyIndexedIdentity(projectRootPath, existingSource, metadata);
 
-		metadata.SourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
+		var sourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
-		metadata.SourceFileSize = sourceInfo.Length;
-		metadata.SourceLastWriteTimeUtcTicks = sourceInfo.LastWriteTimeUtc.Ticks;
 
 		var sourceRecord = new AssetSourceRecord
 		{
@@ -428,23 +418,18 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			RelativeMetaPath = relativeMetaPath,
 			ImporterId = metadata.ImporterId,
 			ImporterVersion = metadata.ImporterVersion,
-			SourceContentHash = metadata.SourceContentHash,
-			SourceFileSize = metadata.SourceFileSize,
-			SourceLastWriteTimeUtcTicks = metadata.SourceLastWriteTimeUtcTicks,
-			ImportSettingsJson = SerializeImportSettings(metadata)
+			SourceContentHash = sourceContentHash,
+			SourceFileSize = sourceInfo.Length,
+			SourceLastWriteTimeUtcTicks = sourceInfo.LastWriteTimeUtc.Ticks,
+			ImportSettingsJson = NormalizeImportSettingsJson(metadata)
 		};
 
-		var importGraph = metadata.ImporterId switch
+		if (TryGetImporterById(metadata.ImporterId, out var importer) == false)
 		{
-			AssetImporterIds.Texture => ImportTextureSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.Material => ImportMaterialSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.DataAsset => ImportDataAssetSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.Terrain => ImportTerrainSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-			AssetImporterIds.ThreeDScene => ImportThreeDSource(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-				AssetImporterIds.EditorScene => ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-				AssetImporterIds.EditorPrefab => ImportPrefabSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata),
-				_ => throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.")
-			};
+			throw new InvalidOperationException($"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.");
+		}
+
+		var importGraph = importer.Import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata);
 		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
 		metadata.SubAssets = metadata.SubAssets
 			.Where(entry => activeKeys.Contains(entry.Key))
@@ -495,8 +480,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeMetaPath,
 		AssetSourceMetaFile metadata)
 	{
-		metadata.TextureImportSettings ??= new TextureImportSettings();
-		var semantic = metadata.TextureImportSettings.TextureSemantic;
+		var importSettings = metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
+		var semantic = importSettings.TextureSemantic;
 		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
 		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D, Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
@@ -1105,14 +1090,14 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private static string SerializeImportSettings(AssetSourceMetaFile metadata)
+	private static string NormalizeImportSettingsJson(AssetSourceMetaFile metadata)
 	{
-		if (metadata.TextureImportSettings is not null)
+		if (string.Equals(metadata.ImporterId, AssetImporterIds.Texture, StringComparison.Ordinal))
 		{
-			return AssetPipelineSerialization.Serialize(metadata.TextureImportSettings);
+			metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
 		}
 
-		return "{}";
+		return string.IsNullOrWhiteSpace(metadata.ImportSettingsJson) ? "{}" : metadata.ImportSettingsJson;
 	}
 
 	private bool TryRefreshSourceScanState(
@@ -1126,7 +1111,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return false;
 		}
 
-		var importSettingsJson = SerializeImportSettings(metadata);
+		var importSettingsJson = NormalizeImportSettingsJson(metadata);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
 		var importerVersionChanged = metadata.ImporterVersion != existingSource.ImporterVersion;
@@ -1185,20 +1170,20 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		try
 		{
 			var loadedMetadata = _metadataStore.Load(absoluteMetaPath);
-			var expectedImporterId = GetImporterId(relativeSourcePath);
+			if (TryGetImporterForPath(relativeSourcePath, out var expectedImporter) == false)
+			{
+				return false;
+			}
+
 			if (loadedMetadata.SourceId == Guid.Empty
 			    || string.IsNullOrWhiteSpace(loadedMetadata.ImporterId)
-			    || string.Equals(loadedMetadata.ImporterId, expectedImporterId, StringComparison.Ordinal) == false
+			    || string.Equals(loadedMetadata.ImporterId, expectedImporter.Id, StringComparison.Ordinal) == false
 			    || loadedMetadata.ImporterVersion <= 0)
 			{
 				return false;
 			}
 
-			if (string.Equals(loadedMetadata.ImporterId, AssetImporterIds.Texture, StringComparison.Ordinal)
-			    && loadedMetadata.TextureImportSettings is null)
-			{
-				return false;
-			}
+			NormalizeImportSettingsJson(loadedMetadata);
 
 			loadedMetadata.SubAssets ??= new List<AssetSubAssetManifestEntry>();
 			metadata = loadedMetadata;
@@ -1258,7 +1243,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return LoadDatabase(projectRootPath);
 	}
 
-	private static List<string> EnumerateSupportedSourceFiles(string assetsPath)
+	private List<string> EnumerateSupportedSourceFiles(string assetsPath)
 	{
 		if (Directory.Exists(assetsPath) == false)
 		{
@@ -1267,7 +1252,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		return Directory.EnumerateFiles(assetsPath, "*", SearchOption.AllDirectories)
 			.Where(path => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) == false)
-			.Where(IsSupportedSourcePath)
+			.Where(path => TryGetImporterForPath(path, out _))
 			.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
 			.ToList();
 	}
@@ -1293,69 +1278,119 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private static bool IsSupportedSourcePath(string absolutePath)
+	private AssetSourceMetaFile CreateDefaultMetadata(string relativeSourcePath)
 	{
-		var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
-			return TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
-			       || ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase)
-			       || absolutePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
-			       || absolutePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
-			       || absolutePath.EndsWith(TerrainAsset.FileExtension, StringComparison.OrdinalIgnoreCase)
-			       || absolutePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase)
-			       || absolutePath.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase);
-	}
+		if (TryGetImporterForPath(relativeSourcePath, out var importer) == false)
+		{
+			throw new InvalidOperationException($"Unsupported asset source '{relativeSourcePath}'.");
+		}
 
-	private static AssetSourceMetaFile CreateDefaultMetadata(string relativeSourcePath)
-	{
-		var importerId = GetImporterId(relativeSourcePath);
 		return new AssetSourceMetaFile
 		{
 			SourceId = Guid.NewGuid(),
-			ImporterId = importerId,
-			ImporterVersion = 1,
-			TextureImportSettings = importerId == AssetImporterIds.Texture ? new TextureImportSettings() : null
+			ImporterId = importer.Id,
+			ImporterVersion = importer.Version,
+			ImportSettingsJson = importer.CreateDefaultSettingsJson()
 		};
 	}
 
-	private static string GetImporterId(string relativeSourcePath)
+	private bool TryGetImporterForPath(string relativeSourcePath, out AssetImporterDescriptor importer)
 	{
-		if (relativeSourcePath.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase))
+		for (var i = 0; i < _importers.Count; i++)
 		{
-			return AssetImporterIds.Material;
-		}
-
-		if (relativeSourcePath.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
-		{
-			return AssetImporterIds.DataAsset;
-		}
-
-		if (relativeSourcePath.EndsWith(TerrainAsset.FileExtension, StringComparison.OrdinalIgnoreCase))
-		{
-			return AssetImporterIds.Terrain;
-		}
-
-			if (relativeSourcePath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+			if (_importers[i].CanImport(relativeSourcePath))
 			{
-				return AssetImporterIds.EditorScene;
+				importer = _importers[i];
+				return true;
 			}
+		}
 
-			if (relativeSourcePath.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+		importer = null!;
+		return false;
+	}
+
+	private bool TryGetImporterById(string importerId, out AssetImporterDescriptor importer)
+	{
+		for (var i = 0; i < _importers.Count; i++)
+		{
+			if (string.Equals(_importers[i].Id, importerId, StringComparison.Ordinal))
 			{
-				return AssetImporterIds.EditorPrefab;
+				importer = _importers[i];
+				return true;
 			}
-
-		var extension = Path.GetExtension(relativeSourcePath).ToLowerInvariant();
-		if (TextureExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-		{
-			return AssetImporterIds.Texture;
 		}
 
-		if (ThreeDExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-		{
-			return AssetImporterIds.ThreeDScene;
-		}
+		importer = null!;
+		return false;
+	}
 
-		throw new InvalidOperationException($"Unsupported asset source '{relativeSourcePath}'.");
+	private IReadOnlyList<AssetImporterDescriptor> CreateImporters()
+	{
+		return
+		[
+			new AssetImporterDescriptor(
+				AssetImporterIds.Material,
+				1,
+				path => path.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				ImportMaterialSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.DataAsset,
+				1,
+				path => path.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				ImportDataAssetSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.Terrain,
+				1,
+				path => path.EndsWith(TerrainAsset.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata) =>
+					ImportTerrainSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata)),
+			new AssetImporterDescriptor(
+				AssetImporterIds.EditorScene,
+				1,
+				path => path.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata) =>
+					ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata)),
+			new AssetImporterDescriptor(
+				AssetImporterIds.EditorPrefab,
+				1,
+				path => path.EndsWith(PrefabAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata) =>
+					ImportPrefabSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata)),
+			new AssetImporterDescriptor(
+				AssetImporterIds.Texture,
+				1,
+				path =>
+				{
+					var extension = Path.GetExtension(path);
+					return string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".bmp", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".tga", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".psd", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".hdr", StringComparison.OrdinalIgnoreCase);
+				},
+				() => AssetPipelineSerialization.Serialize(new TextureImportSettings()),
+				ImportTextureSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.ThreeDScene,
+				1,
+				path =>
+				{
+					var extension = Path.GetExtension(path);
+					return string.Equals(extension, ".gltf", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".fbx", StringComparison.OrdinalIgnoreCase);
+				},
+				() => "{}",
+				ImportThreeDSource)
+		];
 	}
 
 	private Guid GetOrCreateNodeId(AssetSourceMetaFile metadata, string key, AssetType type, string name)
@@ -1613,36 +1648,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			RelativeAssetPath = node.RelativeAssetPath,
 			RelativeStatePath = node.RelativeMetaPath,
 			RelativeMetaPath = node.RelativeMetaPath,
-			Artifacts = _index.GetArtifactsForNode(projectRootPath, node.NodeId).ToList()
+			Artifacts = _index.GetArtifactsForNode(projectRootPath, node.NodeId).ToList(),
+			SummaryJson = string.IsNullOrWhiteSpace(node.SummaryJson) ? "{}" : node.SummaryJson
 		};
-
-		switch (node.Type)
-		{
-			case AssetType.Texture2D:
-				entry.TextureSummary = AssetPipelineSerialization.Deserialize<TextureAssetSummary>(node.SummaryJson);
-				break;
-			case AssetType.Material:
-				entry.MaterialSummary = AssetPipelineSerialization.Deserialize<MaterialAssetSummary>(node.SummaryJson);
-				break;
-			case AssetType.DataAsset:
-				entry.DataAssetSummary = AssetPipelineSerialization.Deserialize<DataAssetSummary>(node.SummaryJson);
-				break;
-			case AssetType.Terrain:
-				entry.TerrainSummary = AssetPipelineSerialization.Deserialize<TerrainAssetSummary>(node.SummaryJson);
-				break;
-			case AssetType.Mesh:
-				entry.MeshSummary = AssetPipelineSerialization.Deserialize<MeshAssetSummary>(node.SummaryJson);
-				break;
-			case AssetType.Model3D:
-				entry.ModelSummary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(node.SummaryJson);
-				break;
-				case AssetType.Scene:
-					entry.SceneSummary = AssetPipelineSerialization.Deserialize<SceneAssetSummary>(node.SummaryJson);
-					break;
-				case AssetType.Prefab:
-					entry.PrefabSummary = AssetPipelineSerialization.Deserialize<PrefabAssetSummary>(node.SummaryJson);
-					break;
-			}
 
 		return entry;
 	}
@@ -1979,4 +1987,48 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	}
 
 	private readonly record struct MaterialDependency(Guid TargetNodeId, string Kind);
+
+	private delegate ImportGraph ImportSourceDelegate(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata);
+
+	private sealed class AssetImporterDescriptor
+	{
+		private readonly Func<string, bool> _canImport;
+		private readonly Func<string> _createDefaultSettingsJson;
+		private readonly ImportSourceDelegate _import;
+
+		public AssetImporterDescriptor(
+			string id,
+			int version,
+			Func<string, bool> canImport,
+			Func<string> createDefaultSettingsJson,
+			ImportSourceDelegate import)
+		{
+			Id = id;
+			Version = version;
+			_canImport = canImport ?? throw new ArgumentNullException(nameof(canImport));
+			_createDefaultSettingsJson = createDefaultSettingsJson ?? throw new ArgumentNullException(nameof(createDefaultSettingsJson));
+			_import = import ?? throw new ArgumentNullException(nameof(import));
+		}
+
+		public string Id { get; }
+		public int Version { get; }
+
+		public bool CanImport(string relativePath) => _canImport(relativePath);
+		public string CreateDefaultSettingsJson() => _createDefaultSettingsJson();
+
+		public ImportGraph Import(
+			string projectRootPath,
+			string absoluteSourcePath,
+			string relativeSourcePath,
+			string relativeMetaPath,
+			AssetSourceMetaFile metadata)
+		{
+			return _import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata);
+		}
+	}
 }

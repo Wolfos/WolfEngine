@@ -412,84 +412,8 @@ public sealed class EditorProjectService : IEditorProjectService
 		       string.Equals(left.RelativeAssetPath, right.RelativeAssetPath, StringComparison.Ordinal) &&
 		       string.Equals(left.RelativeStatePath, right.RelativeStatePath, StringComparison.Ordinal) &&
 		       string.Equals(left.RelativeMetaPath, right.RelativeMetaPath, StringComparison.Ordinal) &&
-		       TextureSummariesEqual(left.TextureSummary, right.TextureSummary) &&
-		       MaterialSummariesEqual(left.MaterialSummary, right.MaterialSummary) &&
-		       DataAssetSummariesEqual(left.DataAssetSummary, right.DataAssetSummary) &&
-		       MeshSummariesEqual(left.MeshSummary, right.MeshSummary) &&
-		       ModelSummariesEqual(left.ModelSummary, right.ModelSummary) &&
-		       SceneSummariesEqual(left.SceneSummary, right.SceneSummary) &&
-		       PrefabSummariesEqual(left.PrefabSummary, right.PrefabSummary) &&
+		       string.Equals(left.SummaryJson, right.SummaryJson, StringComparison.Ordinal) &&
 		       ArtifactListsEqual(left.Artifacts, right.Artifacts);
-	}
-
-	private static bool TextureSummariesEqual(TextureAssetSummary? left, TextureAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       string.Equals(left.RelativeSourceAssetPath, right.RelativeSourceAssetPath, StringComparison.Ordinal) &&
-		       string.Equals(left.RelativeImportedPath, right.RelativeImportedPath, StringComparison.Ordinal) &&
-		       string.Equals(left.RelativeRuntimeArtifactPath, right.RelativeRuntimeArtifactPath, StringComparison.Ordinal) &&
-		       left.Width == right.Width &&
-		       left.Height == right.Height &&
-		       left.Channels == right.Channels &&
-		       left.Semantic == right.Semantic &&
-		       string.Equals(left.SourceExtension, right.SourceExtension, StringComparison.Ordinal);
-	}
-
-	private static bool MaterialSummariesEqual(MaterialAssetSummary? left, MaterialAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       left.MaterialType == right.MaterialType;
-	}
-
-	private static bool DataAssetSummariesEqual(DataAssetSummary? left, DataAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       string.Equals(left.DataAssetType, right.DataAssetType, StringComparison.Ordinal) &&
-		       string.Equals(left.DataAssetTypeId, right.DataAssetTypeId, StringComparison.Ordinal) &&
-		       string.Equals(left.DisplayName, right.DisplayName, StringComparison.Ordinal);
-	}
-
-	private static bool MeshSummariesEqual(MeshAssetSummary? left, MeshAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       string.Equals(left.RelativeImportedMeshPath, right.RelativeImportedMeshPath, StringComparison.Ordinal) &&
-		       left.VertexCount == right.VertexCount &&
-		       left.IndexCount == right.IndexCount;
-	}
-
-	private static bool ModelSummariesEqual(Model3DAssetSummary? left, Model3DAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       string.Equals(left.RelativeImportedModelPath, right.RelativeImportedModelPath, StringComparison.Ordinal) &&
-		       left.RootNodeCount == right.RootNodeCount;
-	}
-
-	private static bool SceneSummariesEqual(SceneAssetSummary? left, SceneAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       string.Equals(left.GlobalCellPath, right.GlobalCellPath, StringComparison.Ordinal) &&
-		       left.SpatialCellCount == right.SpatialCellCount;
-	}
-
-	private static bool PrefabSummariesEqual(PrefabAssetSummary? left, PrefabAssetSummary? right)
-	{
-		return left is null && right is null ||
-		       left is not null &&
-		       right is not null &&
-		       left.RootEntityId == right.RootEntityId &&
-		       left.EntityCount == right.EntityCount;
 	}
 
 	private static bool ArtifactListsEqual(IReadOnlyList<AssetArtifactRecord> left, IReadOnlyList<AssetArtifactRecord> right)
@@ -583,6 +507,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			RelativeAssetPath = asset.RelativeAssetPath,
 			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
+			SummaryJson = asset.SummaryJson,
 			Artifacts = asset.Artifacts.Select(artifact => new AssetArtifactRecord
 			{
 				NodeId = artifact.NodeId,
@@ -596,63 +521,7 @@ public sealed class EditorProjectService : IEditorProjectService
 				ChunkCount = artifact.ChunkCount,
 				StreamGroup = artifact.StreamGroup,
 				MetadataJson = artifact.MetadataJson
-			}).ToList(),
-			TextureSummary = asset.TextureSummary is null
-				? null
-				: new TextureAssetSummary
-				{
-					RelativeSourceAssetPath = asset.TextureSummary.RelativeSourceAssetPath,
-					RelativeImportedPath = asset.TextureSummary.RelativeImportedPath,
-					RelativeRuntimeArtifactPath = asset.TextureSummary.RelativeRuntimeArtifactPath,
-					Width = asset.TextureSummary.Width,
-					Height = asset.TextureSummary.Height,
-					Channels = asset.TextureSummary.Channels,
-					Semantic = asset.TextureSummary.Semantic,
-					SourceExtension = asset.TextureSummary.SourceExtension
-				},
-			MaterialSummary = asset.MaterialSummary is null
-				? null
-				: new MaterialAssetSummary
-				{
-					MaterialType = asset.MaterialSummary.MaterialType
-				},
-			DataAssetSummary = asset.DataAssetSummary is null
-				? null
-				: new DataAssetSummary
-				{
-					DataAssetType = asset.DataAssetSummary.DataAssetType,
-					DataAssetTypeId = asset.DataAssetSummary.DataAssetTypeId,
-					DisplayName = asset.DataAssetSummary.DisplayName
-				},
-			MeshSummary = asset.MeshSummary is null
-				? null
-				: new MeshAssetSummary
-				{
-					RelativeImportedMeshPath = asset.MeshSummary.RelativeImportedMeshPath,
-					VertexCount = asset.MeshSummary.VertexCount,
-					IndexCount = asset.MeshSummary.IndexCount
-				},
-			ModelSummary = asset.ModelSummary is null
-				? null
-				: new Model3DAssetSummary
-				{
-					RelativeImportedModelPath = asset.ModelSummary.RelativeImportedModelPath,
-					RootNodeCount = asset.ModelSummary.RootNodeCount
-				},
-				SceneSummary = asset.SceneSummary is null
-					? null
-					: new SceneAssetSummary
-					{
-						GlobalCellPath = asset.SceneSummary.GlobalCellPath,
-						SpatialCellCount = asset.SceneSummary.SpatialCellCount
-					},
-				PrefabSummary = asset.PrefabSummary is null
-					? null
-					: new PrefabAssetSummary
-					{
-						RootEntityId = asset.PrefabSummary.RootEntityId,
-						EntityCount = asset.PrefabSummary.EntityCount
-					}
+			}).ToList()
 			};
 		}
 

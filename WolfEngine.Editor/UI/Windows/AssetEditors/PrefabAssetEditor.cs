@@ -7,13 +7,13 @@ public sealed class PrefabAssetEditor
 {
 	public void Draw(AssetDatabaseEntry asset)
 	{
-		if (asset.PrefabSummary is null)
+		if (asset.TryGetSummary<PrefabAssetSummary>(out var summary) == false)
 		{
 			ImGui.TextUnformatted("Prefab");
 			return;
 		}
 
-		ImGui.TextUnformatted($"Root Entity: {asset.PrefabSummary.RootEntityId}");
-		ImGui.TextUnformatted($"Entities: {asset.PrefabSummary.EntityCount}");
+		ImGui.TextUnformatted($"Root Entity: {summary.RootEntityId}");
+		ImGui.TextUnformatted($"Entities: {summary.EntityCount}");
 	}
 }

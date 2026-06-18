@@ -72,9 +72,9 @@ public sealed class TextureEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.TextureSummary is null
+		return asset.TryGetSummary<TextureAssetSummary>(out var summary) == false
 			? "Texture"
-			: $"Texture | {asset.TextureSummary.Width}x{asset.TextureSummary.Height} | {asset.TextureSummary.SourceExtension}";
+			: $"Texture | {summary.Width}x{summary.Height} | {summary.SourceExtension}";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
@@ -102,9 +102,9 @@ public sealed class MaterialEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.MaterialSummary is null
+		return asset.TryGetSummary<MaterialAssetSummary>(out var summary) == false
 			? "Material"
-			: $"Material | {asset.MaterialSummary.MaterialType}";
+			: $"Material | {summary.MaterialType}";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems()
@@ -147,9 +147,9 @@ public sealed class DataEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.DataAssetSummary is null
+		return asset.TryGetSummary<DataAssetSummary>(out var summary) == false
 			? "Data Asset"
-			: $"Data Asset | {asset.DataAssetSummary.DisplayName}";
+			: $"Data Asset | {summary.DisplayName}";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems()
@@ -193,9 +193,9 @@ public sealed class TerrainEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.TerrainSummary is null
+		return asset.TryGetSummary<TerrainAssetSummary>(out var summary) == false
 			? "Terrain"
-			: $"Terrain | H {asset.TerrainSummary.HeightmapWidth}x{asset.TerrainSummary.HeightmapHeight} | L {asset.TerrainSummary.LayerMapWidth}x{asset.TerrainSummary.LayerMapHeight}";
+			: $"Terrain | H {summary.HeightmapWidth}x{summary.HeightmapHeight} | L {summary.LayerMapWidth}x{summary.LayerMapHeight}";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems()
@@ -231,9 +231,9 @@ public sealed class SceneEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.SceneSummary is null
+		return asset.TryGetSummary<SceneAssetSummary>(out var summary) == false
 			? "Scene"
-			: $"Scene | {asset.SceneSummary.SpatialCellCount} spatial cells";
+			: $"Scene | {summary.SpatialCellCount} spatial cells";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
@@ -259,9 +259,9 @@ public sealed class PrefabEditorAssetHandler : IEditorAssetHandler
 
 	public string GetSubtitle(AssetDatabaseEntry asset)
 	{
-		return asset.PrefabSummary is null
+		return asset.TryGetSummary<PrefabAssetSummary>(out var summary) == false
 			? "Prefab"
-			: $"Prefab | {asset.PrefabSummary.EntityCount} entities";
+			: $"Prefab | {summary.EntityCount} entities";
 	}
 
 	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];

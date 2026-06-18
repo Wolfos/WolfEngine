@@ -199,6 +199,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			RelativeAssetPath = asset.RelativeAssetPath,
 			RelativeStatePath = asset.RelativeStatePath,
 			RelativeMetaPath = asset.RelativeMetaPath,
+			SummaryJson = asset.SummaryJson,
 			Artifacts = asset.Artifacts.Select(artifact => new AssetArtifactRecord
 			{
 				NodeId = artifact.NodeId,
@@ -212,13 +213,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 				ChunkCount = artifact.ChunkCount,
 				StreamGroup = artifact.StreamGroup,
 				MetadataJson = artifact.MetadataJson
-			}).ToList(),
-			TextureSummary = asset.TextureSummary,
-			MaterialSummary = asset.MaterialSummary,
-			DataAssetSummary = asset.DataAssetSummary,
-			MeshSummary = asset.MeshSummary,
-			ModelSummary = asset.ModelSummary,
-			SceneSummary = asset.SceneSummary
+			}).ToList()
 		};
 	}
 }

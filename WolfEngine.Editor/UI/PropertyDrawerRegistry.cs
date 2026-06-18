@@ -727,8 +727,13 @@ internal static class AssetLinkPickerLogic
 			return false;
 		}
 
-		return descriptor.AssetType != AssetType.DataAsset ||
-		       string.Equals(asset.DataAssetSummary?.DataAssetTypeId, authoringTypeId, StringComparison.Ordinal) ||
-		       string.Equals(asset.DataAssetSummary?.DataAssetType, authoringTypeName, StringComparison.Ordinal);
+		if (descriptor.AssetType != AssetType.DataAsset)
+		{
+			return true;
+		}
+
+		return asset.TryGetSummary<DataAssetSummary>(out var summary) &&
+		       (string.Equals(summary.DataAssetTypeId, authoringTypeId, StringComparison.Ordinal) ||
+		        string.Equals(summary.DataAssetType, authoringTypeName, StringComparison.Ordinal));
 	}
 }

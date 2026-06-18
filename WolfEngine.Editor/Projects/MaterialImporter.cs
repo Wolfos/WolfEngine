@@ -288,10 +288,10 @@ public sealed class MaterialImporter : IMaterialImporter
 	private static AssetSourceMetaFile CreateTextureMetadata(string name, Guid nodeId, TextureSemantic semantic)
 	{
 		var metadata = CreateMetadata(AssetImporterIds.Texture, AssetType.Texture2D, name, nodeId);
-		metadata.TextureImportSettings = new TextureImportSettings
+		metadata.SetImportSettings(new TextureImportSettings
 		{
 			TextureSemantic = semantic
-		};
+		});
 		return metadata;
 	}
 

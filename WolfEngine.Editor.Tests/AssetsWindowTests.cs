@@ -531,7 +531,7 @@ public sealed class AssetsWindowTests
 		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
 
 		Assert.That(environment.ProjectService.TryGetAsset(firstResult.AssetId.Value, out var refreshedChangedAsset), Is.True);
-		Assert.That(refreshedChangedAsset.MaterialSummary?.MaterialType, Is.EqualTo(MaterialAssetType.AlphaBlend));
+		Assert.That(refreshedChangedAsset.GetRequiredSummary<MaterialAssetSummary>().MaterialType, Is.EqualTo(MaterialAssetType.AlphaBlend));
 		Assert.That(File.GetLastWriteTimeUtc(changedMetaPath), Is.GreaterThan(previousChangedMetaWriteTime));
 		Assert.That(File.GetLastWriteTimeUtc(unchangedMetaPath), Is.EqualTo(unchangedMetaWriteTime));
 	}
@@ -563,7 +563,7 @@ public sealed class AssetsWindowTests
 		environment.ProjectService.ReloadAssetDatabase();
 
 		Assert.That(environment.ProjectService.TryGetAsset(changedResult.AssetId.Value, out var refreshedChangedAsset), Is.True);
-		Assert.That(refreshedChangedAsset.MaterialSummary?.MaterialType, Is.EqualTo(MaterialAssetType.AlphaTest));
+		Assert.That(refreshedChangedAsset.GetRequiredSummary<MaterialAssetSummary>().MaterialType, Is.EqualTo(MaterialAssetType.AlphaTest));
 		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(asset => asset.RelativeSourcePath == deletedAsset.RelativeSourcePath), Is.False);
 		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(asset => asset.RelativeSourcePath == "Assets/Materials/Externally Added.mat.json"), Is.True);
 		Assert.That(File.Exists(newSourcePath + ".meta"), Is.True);

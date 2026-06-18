@@ -88,8 +88,8 @@ public sealed class MaterialImporterTests
 	private static void AssertTextureSemantic(AssetMetadataStore metadataStore, string metaPath, TextureSemantic expectedSemantic)
 	{
 		var metadata = metadataStore.Load(metaPath);
-		Assert.That(metadata.TextureImportSettings, Is.Not.Null);
-		Assert.That(metadata.TextureImportSettings!.TextureSemantic, Is.EqualTo(expectedSemantic));
+		Assert.That(metadata.TryGetImportSettings<TextureImportSettings>(out var settings), Is.True);
+		Assert.That(settings.TextureSemantic, Is.EqualTo(expectedSemantic));
 	}
 
 	private static string CreateTexture(string directory, string fileName, Rgba32 color)

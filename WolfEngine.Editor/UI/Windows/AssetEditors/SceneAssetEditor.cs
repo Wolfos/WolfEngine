@@ -7,7 +7,7 @@ public sealed class SceneAssetEditor
 {
 	public void Draw(AssetDatabaseEntry asset)
 	{
-		if (asset.SceneSummary is null)
+		if (asset.TryGetSummary<SceneAssetSummary>(out var summary) == false)
 		{
 			ImGui.TextUnformatted("Scene summary unavailable.");
 			return;
@@ -15,7 +15,7 @@ public sealed class SceneAssetEditor
 
 		ImGui.TextUnformatted("Editor Scene");
 		ImGui.Separator();
-		ImGui.TextUnformatted($"Global Cell: {asset.SceneSummary.GlobalCellPath}");
-		ImGui.TextUnformatted($"Spatial Cells: {asset.SceneSummary.SpatialCellCount}");
+		ImGui.TextUnformatted($"Global Cell: {summary.GlobalCellPath}");
+		ImGui.TextUnformatted($"Spatial Cells: {summary.SpatialCellCount}");
 	}
 }

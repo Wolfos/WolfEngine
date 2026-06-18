@@ -101,8 +101,7 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 
 	public object Resolve(RuntimeAssetResolveContext context)
 	{
-		var summary = context.Asset.TextureSummary
-		              ?? throw new InvalidOperationException($"Texture node '{context.AssetId}' is missing its texture summary.");
+		var summary = context.Asset.GetRequiredSummary<TextureAssetSummary>();
 		var runtimeTextureName = GetRuntimeTextureName(context.AssetId, context.Asset.Name);
 
 		var targetArtifact = context.Asset.Artifacts
@@ -155,8 +154,7 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 {
 	public object Resolve(RuntimeAssetResolveContext context)
 	{
-		var summary = context.Asset.MeshSummary
-		              ?? throw new InvalidOperationException($"Mesh node '{context.AssetId}' is missing its mesh summary.");
+		var summary = context.Asset.GetRequiredSummary<MeshAssetSummary>();
 		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
 		var meshFile = ImportedMeshSerializer.Read(absoluteMeshPath);
 		return new Mesh(

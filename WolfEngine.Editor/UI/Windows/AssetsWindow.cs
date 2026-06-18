@@ -818,12 +818,13 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
 	{
-		if (asset.Type == AssetType.Texture2D && asset.TextureSummary is not null &&
-		    string.IsNullOrWhiteSpace(asset.TextureSummary.RelativeSourceAssetPath) == false)
+		if (asset.Type == AssetType.Texture2D &&
+		    asset.TryGetSummary<TextureAssetSummary>(out var textureSummary) &&
+		    string.IsNullOrWhiteSpace(textureSummary.RelativeSourceAssetPath) == false)
 		{
-			var assetAbsolutePath = _projectService.GetAbsolutePath(asset.TextureSummary.RelativeSourceAssetPath);
+			var assetAbsolutePath = _projectService.GetAbsolutePath(textureSummary.RelativeSourceAssetPath);
 			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId,
-				    StbImageLoader.IsSrgb(asset.TextureSummary.Semantic)))
+				    StbImageLoader.IsSrgb(textureSummary.Semantic)))
 			{
 				drawList.AddImage(textureId, min, max);
 				return;
