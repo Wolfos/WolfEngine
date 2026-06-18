@@ -29,6 +29,7 @@ public static class AssetImporterIds
 	public const string Terrain = "terrain";
 	public const string ThreeDScene = "three-d-scene";
 	public const string EditorScene = "editor-scene";
+	public const string SceneCell = "scene-cell";
 	public const string EditorPrefab = "editor-prefab";
 }
 

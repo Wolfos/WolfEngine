@@ -4,6 +4,7 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Editor.Tests;
@@ -59,6 +60,50 @@ public sealed class AssetsWindowTests
 		Assert.That(audioFolder.Sources[0].DisplayName, Is.EqualTo("birds.glb"));
 		Assert.That(audioFolder.Sources[0].PrimaryAsset.Id, Is.EqualTo(primaryAssetId));
 		Assert.That(audioFolder.Sources[0].SubAssets.Select(asset => asset.Id), Is.EqualTo(new[] { subAssetId }));
+	}
+
+	[Test]
+	public void BrowserModelBuild_HidesSceneCellAssets()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+
+		var sourceId = Guid.NewGuid();
+		var sceneAssetId = Guid.NewGuid();
+		var cellAssetId = Guid.NewGuid();
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				new AssetDatabaseEntry
+				{
+					Id = sceneAssetId,
+					SourceId = sourceId,
+					Type = AssetType.Scene,
+					Name = "Scene",
+					NodeKey = "main",
+					RelativeSourcePath = "Assets/Scene.scene.json",
+					RelativeAssetPath = "Assets/Scene.scene.json"
+				},
+				new AssetDatabaseEntry
+				{
+					Id = cellAssetId,
+					SourceId = sourceId,
+					Type = AssetType.SceneCell,
+					Name = "Scene Global Cell",
+					NodeKey = EditorSceneAssetFile.GlobalCellNodeKey,
+					IsGenerated = true,
+					RelativeSourcePath = "Assets/Scene.scene.json",
+					RelativeAssetPath = "Assets/global.cell.json"
+				}
+			]
+		};
+
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+
+		var assetsFolder = browserModel.FoldersByPath["Assets"];
+		Assert.That(assetsFolder.Sources, Has.Count.EqualTo(1));
+		Assert.That(assetsFolder.Sources[0].PrimaryAsset.Id, Is.EqualTo(sceneAssetId));
+		Assert.That(assetsFolder.Sources[0].SubAssets, Is.Empty);
 	}
 
 	[Test]
@@ -787,6 +832,15 @@ public sealed class AssetsWindowTests
 		{
 			nodeId = Guid.Empty;
 			return false;
+		}
+
+		public void AssignSceneCellAssetIds(
+			string projectRootPath,
+			string relativeScenePath,
+			EditorSceneAssetFile sceneAsset,
+			string globalCellPath,
+			IReadOnlyDictionary<Int2, string> spatialCellPaths)
+		{
 		}
 
 		public AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath)

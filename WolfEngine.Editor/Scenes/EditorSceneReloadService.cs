@@ -16,7 +16,9 @@ public sealed class EditorSceneReloadSnapshot
 	public required Guid AssetId { get; init; }
 	public required string Name { get; init; }
 	public required string RelativeAssetPath { get; init; }
+	public required Guid GlobalCellId { get; init; }
 	public required Cell GlobalCell { get; init; }
+	public required Dictionary<Int2, Guid> SpatialCellIds { get; init; }
 	public required Dictionary<Int2, Cell> SpatialCells { get; init; }
 }
 
@@ -57,14 +59,12 @@ public interface IEditorSceneReloadService
 
 		var serializedGlobalCell = new Cell
 		{
-			RelativePath = scene.GlobalCell.RelativePath,
 			Entities = []
 		};
 		var serializedSpatialCells = scene.SpatialCells.ToDictionary(
 			entry => entry.Key,
 			entry => new Cell
 			{
-				RelativePath = entry.Value.RelativePath,
 				Entities = []
 			});
 
@@ -102,7 +102,9 @@ public interface IEditorSceneReloadService
 			AssetId = scene.AssetId,
 			Name = scene.Name,
 			RelativeAssetPath = scene.RelativeAssetPath,
+			GlobalCellId = scene.GlobalCellId,
 			GlobalCell = serializedGlobalCell,
+			SpatialCellIds = new Dictionary<Int2, Guid>(scene.SpatialCellIds),
 			SpatialCells = serializedSpatialCells
 		};
 	}
@@ -118,7 +120,9 @@ public interface IEditorSceneReloadService
 			RelativeAssetPath = snapshot.RelativeAssetPath,
 			World = new World(worldTag),
 				EntityIcons = new Dictionary<Entity, string>(),
+				GlobalCellId = snapshot.GlobalCellId,
 				GlobalCell = CloneCell(snapshot.GlobalCell),
+				SpatialCellIds = new Dictionary<Int2, Guid>(snapshot.SpatialCellIds),
 				SpatialCells = snapshot.SpatialCells.ToDictionary(entry => entry.Key, entry => CloneCell(entry.Value)),
 				EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
 				EntityIds = new Dictionary<Entity, Guid>(),
@@ -468,7 +472,6 @@ public interface IEditorSceneReloadService
 	{
 		return new Cell
 		{
-			RelativePath = source.RelativePath,
 			Entities = source.Entities.Select(CloneEntity).ToList()
 		};
 	}

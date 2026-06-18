@@ -4,6 +4,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 
@@ -22,6 +23,12 @@ public interface IProjectAssetPipelineService
 	AssetDatabase LoadDatabase(string projectRootPath);
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
 	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
+	void AssignSceneCellAssetIds(
+		string projectRootPath,
+		string relativeScenePath,
+		EditorSceneAssetFile sceneAsset,
+		string globalCellPath,
+		IReadOnlyDictionary<Int2, string> spatialCellPaths);
 	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
 	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
 	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
@@ -261,6 +268,60 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		nodeId = primary.NodeId;
 		return true;
+	}
+
+	public void AssignSceneCellAssetIds(
+		string projectRootPath,
+		string relativeScenePath,
+		EditorSceneAssetFile sceneAsset,
+		string globalCellPath,
+		IReadOnlyDictionary<Int2, string> spatialCellPaths)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeScenePath);
+		ArgumentNullException.ThrowIfNull(sceneAsset);
+		ArgumentException.ThrowIfNullOrWhiteSpace(globalCellPath);
+		ArgumentNullException.ThrowIfNull(spatialCellPaths);
+
+		var sceneName = string.IsNullOrWhiteSpace(sceneAsset.Name)
+			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeScenePath))
+			: sceneAsset.Name;
+		sceneAsset.GlobalCellId = AssignSceneCellAssetId(
+			projectRootPath,
+			globalCellPath,
+			EditorSceneAssetFile.GetGlobalCellAssetName(sceneName));
+
+		for (var i = 0; i < sceneAsset.SpatialCells.Count; i++)
+		{
+			var spatialCell = sceneAsset.SpatialCells[i];
+			var coordinates = spatialCell.ToCoordinates();
+			if (spatialCellPaths.TryGetValue(coordinates, out var spatialCellPath) == false)
+			{
+				throw new InvalidOperationException($"Missing save path for scene cell '{coordinates.X}, {coordinates.Y}'.");
+			}
+
+			spatialCell.CellId = AssignSceneCellAssetId(
+				projectRootPath,
+				spatialCellPath,
+				EditorSceneAssetFile.GetSpatialCellAssetName(sceneName, coordinates));
+		}
+	}
+
+	private Guid AssignSceneCellAssetId(string projectRootPath, string relativeCellPath, string assetName)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativeCellPath);
+
+		InitializeProject(projectRootPath);
+		var absoluteCellPath = GetAbsolutePath(projectRootPath, relativeCellPath);
+		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteCellPath);
+		var metadata = LoadOrCreateMetadata(absoluteMetaPath, relativeCellPath);
+		metadata.ImporterId = AssetImporterIds.SceneCell;
+		metadata.ImporterVersion = 1;
+		metadata.ImportSettingsJson = "{}";
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.SceneCell, assetName);
+
+		_metadataStore.Save(absoluteMetaPath, metadata);
+		return nodeId;
 	}
 
 	public AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath)
@@ -915,26 +976,89 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var assetName = string.IsNullOrWhiteSpace(sceneAsset.Name)
 			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
 			: sceneAsset.Name;
+		var sceneNodeId = GetOrCreateNodeId(metadata, "main", AssetType.Scene, assetName);
 
+		var nodes = new List<AssetNodeRecord>
+		{
+			new()
+			{
+				NodeId = sceneNodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.Scene,
+				NodeKey = "main",
+				Name = assetName,
+				IsGenerated = false,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = relativeSourcePath,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new SceneAssetSummary
+				{
+					GlobalCellId = sceneAsset.GlobalCellId,
+					SpatialCellCount = sceneAsset.SpatialCells.Count
+				})
+			}
+		};
+		var dependencies = new List<AssetDependencyRecord>();
+		AddSceneCellDependency(sceneAsset.GlobalCellId);
+		for (var i = 0; i < sceneAsset.SpatialCells.Count; i++)
+		{
+			AddSceneCellDependency(sceneAsset.SpatialCells[i].CellId);
+		}
+
+		return new ImportGraph
+		{
+			Nodes = nodes,
+			Artifacts = [],
+			Dependencies = dependencies
+		};
+
+		void AddSceneCellDependency(Guid cellId)
+		{
+			if (cellId == Guid.Empty)
+			{
+				return;
+			}
+
+			dependencies.Add(new AssetDependencyRecord
+			{
+				FromNodeId = sceneNodeId,
+				ToNodeId = cellId,
+				Kind = "scene-cell",
+				IsHard = true
+			});
+		}
+	}
+
+	private ImportGraph ImportSceneCellSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		_ = projectRootPath;
+		_ = absoluteSourcePath;
+		var assetName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.SceneCell, assetName);
 		return new ImportGraph
 		{
 			Nodes =
 			[
 				new AssetNodeRecord
 				{
-					NodeId = GetOrCreateNodeId(metadata, "main", AssetType.Scene, assetName),
+					NodeId = nodeId,
 					SourceId = metadata.SourceId,
-					Type = AssetType.Scene,
+					Type = AssetType.SceneCell,
 					NodeKey = "main",
 					Name = assetName,
 					IsGenerated = false,
 					RelativeSourcePath = relativeSourcePath,
 					RelativeAssetPath = relativeSourcePath,
 					RelativeMetaPath = relativeMetaPath,
-					SummaryJson = AssetPipelineSerialization.Serialize(new SceneAssetSummary
+					SummaryJson = AssetPipelineSerialization.Serialize(new SceneCellAssetSummary
 					{
-						GlobalCellPath = sceneAsset.GlobalCellPath,
-						SpatialCellCount = sceneAsset.SpatialCells.Count
+						RelativeCellPath = relativeSourcePath,
+						IsGlobal = string.Equals(Path.GetFileName(relativeSourcePath), $"global{Cell.FileExtension}", StringComparison.OrdinalIgnoreCase)
 					})
 				}
 			],
@@ -1378,6 +1502,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				() => "{}",
 				(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata) =>
 					ImportEditorSceneSource(absoluteSourcePath, relativeSourcePath, relativeMetaPath, metadata)),
+			new AssetImporterDescriptor(
+				AssetImporterIds.SceneCell,
+				1,
+				path => path.EndsWith(Cell.FileExtension, StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				ImportSceneCellSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.EditorPrefab,
 				1,

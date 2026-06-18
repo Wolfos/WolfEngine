@@ -12,7 +12,6 @@ public sealed class Cell
 	public const string FileExtension = ".cell.json";
 
 	public int Version { get; set; } = CurrentVersion;
-	public string RelativePath { get; set; } = string.Empty;
 	public List<SavedEntity> Entities { get; set; } = [];
 }
 

@@ -13,8 +13,23 @@ public sealed class EditorSceneAssetFile
 
 	public int Version { get; set; } = CurrentVersion;
 	public string Name { get; set; } = string.Empty;
-	public string GlobalCellPath { get; set; } = string.Empty;
+	public Guid GlobalCellId { get; set; }
 	public List<SceneSpatialCellFileEntry> SpatialCells { get; set; } = [];
+
+	public static string GlobalCellNodeKey => "cell:global";
+
+	public static string GetSpatialCellNodeKey(Int2 coordinates) => $"cell:spatial:{coordinates.X}:{coordinates.Y}";
+
+	public static string GetGlobalCellAssetName(string sceneName)
+	{
+		return $"{(string.IsNullOrWhiteSpace(sceneName) ? "Scene" : sceneName)} Global Cell";
+	}
+
+	public static string GetSpatialCellAssetName(string sceneName, Int2 coordinates)
+	{
+		var prefix = string.IsNullOrWhiteSpace(sceneName) ? "Scene" : sceneName;
+		return $"{prefix} Cell {coordinates.X}, {coordinates.Y}";
+	}
 
 	public static EditorSceneAssetFile Load(string path)
 	{
@@ -40,7 +55,7 @@ public sealed class SceneSpatialCellFileEntry
 {
 	public int X { get; set; }
 	public int Y { get; set; }
-	public string Path { get; set; } = string.Empty;
+	public Guid CellId { get; set; }
 
 	public Int2 ToCoordinates() => new(X, Y);
 }

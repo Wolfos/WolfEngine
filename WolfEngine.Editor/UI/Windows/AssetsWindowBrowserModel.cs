@@ -55,7 +55,7 @@ internal static class AssetsWindowBrowserModelBuilder
 		}
 
 		var sourcesBySourceId = new Dictionary<Guid, AssetsWindowSourceItem>();
-		foreach (var group in assets.GroupBy(asset => asset.SourceId))
+		foreach (var group in assets.Where(IsVisibleAsset).GroupBy(asset => asset.SourceId))
 		{
 			var sourceItem = CreateSourceItem(group);
 			EnsureFolder(sourceItem.FolderPath, foldersByPath).Sources.Add(sourceItem);
@@ -167,19 +167,24 @@ internal static class AssetsWindowBrowserModelBuilder
 		}
 	}
 
+	private static bool IsVisibleAsset(AssetDatabaseEntry asset)
+	{
+		return asset.Type != AssetType.SceneCell;
+	}
+
 	private static int GetAssetTypeSortOrder(AssetDatabaseEntry asset)
 	{
-			return asset.Type switch
-			{
-				AssetType.Scene => 0,
-				AssetType.Prefab => 1,
-				AssetType.Model3D => 2,
-				AssetType.Mesh => 3,
-				AssetType.Material => 4,
-				AssetType.Terrain => 5,
-				AssetType.Texture2D => 6,
-				AssetType.DataAsset => 7,
-				_ => 10
-			};
-		}
+		return asset.Type switch
+		{
+			AssetType.Scene => 0,
+			AssetType.Prefab => 1,
+			AssetType.Model3D => 2,
+			AssetType.Mesh => 3,
+			AssetType.Material => 4,
+			AssetType.Terrain => 5,
+			AssetType.Texture2D => 6,
+			AssetType.DataAsset => 7,
+			_ => 10
+		};
 	}
+}

@@ -29,10 +29,17 @@ public sealed class ScenePersistenceTests
 		Assert.That(environment.ProjectService.TryGetAsset(scene.AssetId, out var savedAsset), Is.True);
 		Assert.That(savedAsset.Type, Is.EqualTo(AssetType.Scene));
 
+		var savedManifest = EditorSceneAssetFile.Load(environment.ProjectService.GetAbsolutePath(savedAsset.RelativeAssetPath));
+		Assert.That(savedManifest.GlobalCellId, Is.Not.EqualTo(Guid.Empty));
+		Assert.That(environment.ProjectService.TryGetAsset(savedManifest.GlobalCellId, out var globalCellAsset), Is.True);
+		Assert.That(globalCellAsset.Type, Is.EqualTo(AssetType.SceneCell));
+		Assert.That(globalCellAsset.IsGenerated, Is.False);
+		Assert.That(globalCellAsset.RelativeAssetPath, Is.EqualTo("Assets/Scenes/Empty Scene/global.cell.json"));
+
 		var loadedScene = environment.Factory.Load(scene.AssetId);
 
 		Assert.That(loadedScene.Name, Is.EqualTo("Empty Scene"));
-		Assert.That(loadedScene.GlobalCell.RelativePath, Is.EqualTo("Assets/Scenes/Empty Scene/global.cell.json"));
+		Assert.That(loadedScene.GlobalCellId, Is.EqualTo(savedManifest.GlobalCellId));
 		Assert.That(loadedScene.SpatialCells, Is.Empty);
 		Assert.That(GetAllEntities(loadedScene.World), Is.Empty);
 	}
@@ -269,7 +276,8 @@ public sealed class ScenePersistenceTests
 
 		environment.Factory.Save(scene);
 
-		var globalCellPath = Path.Combine(environment.ProjectService.ProjectRootPath!, scene.GlobalCell.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+		Assert.That(environment.ProjectService.TryGetAsset(scene.GlobalCellId, out var globalCellAsset), Is.True);
+		var globalCellPath = Path.Combine(environment.ProjectService.ProjectRootPath!, globalCellAsset.RelativeAssetPath.Replace('/', Path.DirectorySeparatorChar));
 		var cell = JsonSerializer.Deserialize<Cell>(File.ReadAllText(globalCellPath), AssetJson.SerializerOptions)!;
 		cell.Entities.RemoveAll(candidate => string.Equals(candidate.Name, "Target", StringComparison.Ordinal));
 		File.WriteAllText(globalCellPath, JsonSerializer.Serialize(cell, AssetJson.SerializerOptions));
@@ -358,10 +366,20 @@ public sealed class ScenePersistenceTests
 		scene.EntityCellKeys[spatialChild] = SceneCellKey.Spatial(spatialCoordinates);
 
 		environment.Factory.Save(scene);
+		Assert.That(environment.ProjectService.TryGetAsset(scene.AssetId, out var savedAsset), Is.True);
+		var savedManifest = EditorSceneAssetFile.Load(environment.ProjectService.GetAbsolutePath(savedAsset.RelativeAssetPath));
+		var spatialCellEntry = savedManifest.SpatialCells.Single();
+		Assert.That(savedManifest.GlobalCellId, Is.Not.EqualTo(Guid.Empty));
+		Assert.That(spatialCellEntry.CellId, Is.Not.EqualTo(Guid.Empty));
+		Assert.That(environment.ProjectService.TryGetAsset(spatialCellEntry.CellId, out var spatialCellAsset), Is.True);
+		Assert.That(spatialCellAsset.Type, Is.EqualTo(AssetType.SceneCell));
+		Assert.That(spatialCellAsset.RelativeAssetPath, Is.EqualTo("Assets/Scenes/Spatial Scene/cells/4_-2.cell.json"));
+
 		var loadedScene = environment.Factory.Load(scene.AssetId);
 		var loadedSpatialChild = FindEntityByName(loadedScene.World, "Spatial Child");
 
 		Assert.That(loadedScene.SpatialCells.ContainsKey(spatialCoordinates), Is.True);
+		Assert.That(loadedScene.SpatialCellIds[spatialCoordinates], Is.EqualTo(spatialCellEntry.CellId));
 		Assert.That(loadedScene.EntityCellKeys[loadedSpatialChild], Is.EqualTo(SceneCellKey.Spatial(spatialCoordinates)));
 		Assert.That(GetAllEntities(loadedScene.World), Has.Count.EqualTo(2));
 		Assert.That(loadedScene.World.HasComponent<Parent>(loadedSpatialChild), Is.True);

@@ -42,7 +42,9 @@ public class EditorSceneFactory : IEditorSceneFactory
 			Name = "Untitled Scene",
 			World = new World(WorldTag.Authoring),
 			EntityIcons = new Dictionary<Entity, string>(),
+			GlobalCellId = Guid.Empty,
 			GlobalCell = new Cell(),
+			SpatialCellIds = new Dictionary<Int2, Guid>(),
 			SpatialCells = new Dictionary<Int2, Cell>(),
 			EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
 			EntityIds = new Dictionary<Entity, Guid>(),
@@ -71,7 +73,9 @@ public class EditorSceneFactory : IEditorSceneFactory
 			RelativeAssetPath = asset.RelativeAssetPath,
 			World = new World(WorldTag.Authoring),
 			EntityIcons = new Dictionary<Entity, string>(),
-			GlobalCell = LoadCell(sceneAsset.GlobalCellPath),
+			GlobalCellId = sceneAsset.GlobalCellId,
+			GlobalCell = LoadCell(sceneAsset.GlobalCellId),
+			SpatialCellIds = new Dictionary<Int2, Guid>(),
 			SpatialCells = new Dictionary<Int2, Cell>(),
 			EntityCellKeys = new Dictionary<Entity, SceneCellKey>(),
 			EntityIds = new Dictionary<Entity, Guid>(),
@@ -86,7 +90,8 @@ public class EditorSceneFactory : IEditorSceneFactory
 		{
 			var spatialCellEntry = sceneAsset.SpatialCells[i];
 			var coordinates = spatialCellEntry.ToCoordinates();
-			var cell = LoadCell(spatialCellEntry.Path);
+			var cell = LoadCell(spatialCellEntry.CellId);
+			scene.SpatialCellIds[coordinates] = spatialCellEntry.CellId;
 			scene.SpatialCells[coordinates] = cell;
 			loadedCells.Add((SceneCellKey.Spatial(coordinates), cell));
 		}
@@ -118,21 +123,29 @@ public class EditorSceneFactory : IEditorSceneFactory
 			? EditorSceneAssetFile.Load(absoluteScenePath)
 			: null;
 
+		var globalCellPath = ResolveCellSavePath(
+			scene.GlobalCellId,
+			previousManifest?.GlobalCellId ?? Guid.Empty,
+			GetDefaultGlobalCellPath(sceneFolderRelativePath));
 		var serializedGlobalCell = new Cell
 		{
-			RelativePath = string.IsNullOrWhiteSpace(scene.GlobalCell.RelativePath)
-				? NormalizeRelativePath(Path.Combine(sceneFolderRelativePath, $"global{Cell.FileExtension}"))
-				: NormalizeRelativePath(scene.GlobalCell.RelativePath),
 			Entities = []
 		};
 		var serializedSpatialCells = scene.SpatialCells.ToDictionary(
 			entry => entry.Key,
 			entry => new Cell
 			{
-				RelativePath = string.IsNullOrWhiteSpace(entry.Value.RelativePath)
-					? GetDefaultSpatialCellPath(sceneFolderRelativePath, entry.Key)
-					: NormalizeRelativePath(entry.Value.RelativePath),
 				Entities = []
+			});
+		var spatialCellPaths = scene.SpatialCells.ToDictionary(
+			entry => entry.Key,
+			entry =>
+			{
+				scene.SpatialCellIds.TryGetValue(entry.Key, out var currentCellId);
+				return ResolveCellSavePath(
+					currentCellId,
+					GetPreviousSpatialCellId(previousManifest, entry.Key),
+					GetDefaultSpatialCellPath(sceneFolderRelativePath, entry.Key));
 			});
 
 		var entities = new List<Entity>();
@@ -177,27 +190,40 @@ public class EditorSceneFactory : IEditorSceneFactory
 		var manifest = new EditorSceneAssetFile
 		{
 			Name = scene.Name,
-			GlobalCellPath = serializedGlobalCell.RelativePath,
 			SpatialCells = serializedSpatialCells
 				.OrderBy(entry => entry.Key.X)
 				.ThenBy(entry => entry.Key.Y)
 				.Select(entry => new SceneSpatialCellFileEntry
 				{
 					X = entry.Key.X,
-					Y = entry.Key.Y,
-					Path = entry.Value.RelativePath
+					Y = entry.Key.Y
 				})
 				.ToList()
 		};
 
-		WriteJsonAtomicallyIfChanged(_projectService.GetAbsolutePath(serializedGlobalCell.RelativePath), serializedGlobalCell);
-		foreach (var spatialCell in serializedSpatialCells.Values)
+		_assetPipelineService.AssignSceneCellAssetIds(
+			_projectService.ProjectRootPath!,
+			relativeScenePath,
+			manifest,
+			globalCellPath,
+			spatialCellPaths);
+		scene.GlobalCellId = manifest.GlobalCellId;
+		scene.SpatialCellIds = manifest.SpatialCells.ToDictionary(entry => entry.ToCoordinates(), entry => entry.CellId);
+
+		WriteJsonAtomicallyIfChanged(_projectService.GetAbsolutePath(globalCellPath), serializedGlobalCell);
+		foreach (var spatialCell in serializedSpatialCells)
 		{
-			WriteJsonAtomicallyIfChanged(_projectService.GetAbsolutePath(spatialCell.RelativePath), spatialCell);
+			WriteJsonAtomicallyIfChanged(_projectService.GetAbsolutePath(spatialCellPaths[spatialCell.Key]), spatialCell.Value);
 		}
 
 		WriteJsonAtomicallyIfChanged(absoluteScenePath, manifest);
 		DeleteStaleCellFiles(previousManifest, manifest);
+
+		_projectService.RefreshAssetSource(globalCellPath);
+		foreach (var spatialCellPath in spatialCellPaths.Values)
+		{
+			_projectService.RefreshAssetSource(spatialCellPath);
+		}
 
 		_projectService.RefreshAssetSource(relativeScenePath);
 		scene.RelativeAssetPath = relativeScenePath;
@@ -398,12 +424,9 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return entity;
 	}
 
-	private Cell LoadCell(string relativePath)
+	private Cell LoadCell(Guid cellId)
 	{
-		if (string.IsNullOrWhiteSpace(relativePath))
-		{
-			throw new InvalidOperationException("Scene cell path cannot be empty.");
-		}
+		var relativePath = ResolveCellRelativePath(cellId);
 
 		var absolutePath = _projectService.GetAbsolutePath(relativePath);
 		if (File.Exists(absolutePath) == false)
@@ -419,9 +442,23 @@ public class EditorSceneFactory : IEditorSceneFactory
 			throw new InvalidOperationException($"Unsupported scene cell version {cell.Version}. Expected {Cell.CurrentVersion}.");
 		}
 
-		cell.RelativePath = NormalizeRelativePath(relativePath);
 		cell.Entities ??= [];
 		return cell;
+	}
+
+	private string ResolveCellRelativePath(Guid cellId)
+	{
+		if (TryGetCellAssetPath(cellId, out var relativePath))
+		{
+			return relativePath;
+		}
+
+		if (cellId == Guid.Empty)
+		{
+			throw new InvalidOperationException("Scene cell asset id cannot be empty.");
+		}
+
+		throw new InvalidOperationException($"Scene cell asset '{cellId}' was not found.");
 	}
 
 	private void DeleteStaleCellFiles(EditorSceneAssetFile? previousManifest, EditorSceneAssetFile currentManifest)
@@ -431,27 +468,32 @@ public class EditorSceneFactory : IEditorSceneFactory
 			return;
 		}
 
-		var currentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		var currentCellIds = new HashSet<Guid>
 		{
-			NormalizeRelativePath(currentManifest.GlobalCellPath)
+			currentManifest.GlobalCellId
 		};
 		for (var i = 0; i < currentManifest.SpatialCells.Count; i++)
 		{
-			currentPaths.Add(NormalizeRelativePath(currentManifest.SpatialCells[i].Path));
+			currentCellIds.Add(currentManifest.SpatialCells[i].CellId);
 		}
 
-		var previousPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		var previousCellIds = new HashSet<Guid>
 		{
-			NormalizeRelativePath(previousManifest.GlobalCellPath)
+			previousManifest.GlobalCellId
 		};
 		for (var i = 0; i < previousManifest.SpatialCells.Count; i++)
 		{
-			previousPaths.Add(NormalizeRelativePath(previousManifest.SpatialCells[i].Path));
+			previousCellIds.Add(previousManifest.SpatialCells[i].CellId);
 		}
 
-		foreach (var previousPath in previousPaths)
+		foreach (var previousCellId in previousCellIds)
 		{
-			if (currentPaths.Contains(previousPath))
+			if (previousCellId == Guid.Empty || currentCellIds.Contains(previousCellId))
+			{
+				continue;
+			}
+
+			if (TryGetCellAssetPath(previousCellId, out var previousPath) == false)
 			{
 				continue;
 			}
@@ -461,7 +503,56 @@ public class EditorSceneFactory : IEditorSceneFactory
 			{
 				File.Delete(absolutePath);
 			}
+
+			var absoluteMetaPath = absolutePath + ".meta";
+			if (File.Exists(absoluteMetaPath))
+			{
+				File.Delete(absoluteMetaPath);
+			}
+
+			_assetPipelineService.RemoveDeletedSource(_projectService.ProjectRootPath!, previousPath);
 		}
+	}
+
+	private string ResolveCellSavePath(Guid currentCellId, Guid previousCellId, string defaultPath)
+	{
+		if (TryGetCellAssetPath(currentCellId, out var currentPath))
+		{
+			return currentPath;
+		}
+
+		if (TryGetCellAssetPath(previousCellId, out var previousPath))
+		{
+			return previousPath;
+		}
+
+		return NormalizeRelativePath(defaultPath);
+	}
+
+	private bool TryGetCellAssetPath(Guid cellId, out string relativePath)
+	{
+		relativePath = string.Empty;
+		if (cellId == Guid.Empty ||
+		    _projectService.TryGetAsset(cellId, out var cellAsset) == false ||
+		    cellAsset.Type != AssetType.SceneCell)
+		{
+			return false;
+		}
+
+		if (string.IsNullOrWhiteSpace(cellAsset.RelativeAssetPath) == false)
+		{
+			relativePath = NormalizeRelativePath(cellAsset.RelativeAssetPath);
+			return true;
+		}
+
+		if (cellAsset.TryGetSummary<SceneCellAssetSummary>(out var summary) &&
+		    string.IsNullOrWhiteSpace(summary.RelativeCellPath) == false)
+		{
+			relativePath = NormalizeRelativePath(summary.RelativeCellPath);
+			return true;
+		}
+
+		return false;
 	}
 
 	private static void WriteJsonAtomicallyIfChanged<T>(string absolutePath, T value)
@@ -501,12 +592,36 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return NormalizeRelativePath(Path.Combine("Assets", "Scenes", safeSceneName, $"{safeSceneName}{EditorSceneAssetFile.FileExtension}"));
 	}
 
+	private static string GetDefaultGlobalCellPath(string sceneFolderRelativePath)
+	{
+		return NormalizeRelativePath(Path.Combine(sceneFolderRelativePath, $"global{Cell.FileExtension}"));
+	}
+
 	private static string GetDefaultSpatialCellPath(string sceneFolderRelativePath, Int2 coordinates)
 	{
 		return NormalizeRelativePath(Path.Combine(
 			sceneFolderRelativePath,
 			"cells",
 			$"{coordinates.X}_{coordinates.Y}{Cell.FileExtension}"));
+	}
+
+	private static Guid GetPreviousSpatialCellId(EditorSceneAssetFile? previousManifest, Int2 coordinates)
+	{
+		if (previousManifest is null)
+		{
+			return Guid.Empty;
+		}
+
+		for (var i = 0; i < previousManifest.SpatialCells.Count; i++)
+		{
+			var entry = previousManifest.SpatialCells[i];
+			if (entry.X == coordinates.X && entry.Y == coordinates.Y)
+			{
+				return entry.CellId;
+			}
+		}
+
+		return Guid.Empty;
 	}
 
 	private static string SanitizePathSegment(string value)

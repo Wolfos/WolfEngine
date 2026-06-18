@@ -601,7 +601,8 @@ public sealed class GameplayComponentSupportTests
 		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, descriptor.Type, component);
 		environment.Factory.Save(scene);
 
-		var globalCellPath = Path.Combine(environment.ProjectRootPath, scene.GlobalCell.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+		Assert.That(environment.ProjectService.TryGetAsset(scene.GlobalCellId, out var globalCellAsset), Is.True);
+		var globalCellPath = Path.Combine(environment.ProjectRootPath, globalCellAsset.RelativeAssetPath.Replace('/', Path.DirectorySeparatorChar));
 		var cell = JsonSerializer.Deserialize<Cell>(File.ReadAllText(globalCellPath), AssetJson.SerializerOptions)!;
 		cell.Entities.Single().Components.Single().TypeId = string.Empty;
 		File.WriteAllText(globalCellPath, JsonSerializer.Serialize(cell, AssetJson.SerializerOptions));
@@ -835,6 +836,7 @@ public sealed class GameplayComponentSupportTests
 		public DataAssetStore DataAssetStore { get; }
 		public IEditorSceneFactory Factory { get; }
 		public IEditorSceneReloadService SceneReloadService { get; }
+		public IEditorProjectService ProjectService => _projectService;
 		public GameplayAssemblyHost Host => _gameplayAssemblyHost;
 		public TestAssetInstanceRegistry AssetInstanceRegistry => _registry;
 

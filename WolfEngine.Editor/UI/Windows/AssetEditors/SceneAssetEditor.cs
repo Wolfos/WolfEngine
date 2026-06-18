@@ -1,3 +1,4 @@
+using System;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 
@@ -15,7 +16,7 @@ public sealed class SceneAssetEditor
 
 		ImGui.TextUnformatted("Editor Scene");
 		ImGui.Separator();
-		ImGui.TextUnformatted($"Global Cell: {summary.GlobalCellPath}");
+		ImGui.TextUnformatted($"Global Cell: {summary.GlobalCellId}");
 		ImGui.TextUnformatted($"Spatial Cells: {summary.SpatialCellCount}");
 	}
 }

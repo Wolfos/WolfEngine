@@ -16,6 +16,7 @@ public enum AssetType
 	Mesh,
 	Model3D,
 	Scene,
+	SceneCell,
 	Prefab
 }
 
@@ -173,8 +174,16 @@ public sealed class Model3DAssetSummary
 
 public sealed class SceneAssetSummary
 {
-	public string GlobalCellPath { get; set; } = string.Empty;
+	public Guid GlobalCellId { get; set; }
 	public int SpatialCellCount { get; set; }
+}
+
+public sealed class SceneCellAssetSummary
+{
+	public string RelativeCellPath { get; set; } = string.Empty;
+	public bool IsGlobal { get; set; }
+	public int X { get; set; }
+	public int Y { get; set; }
 }
 
 public sealed class PrefabAssetSummary
