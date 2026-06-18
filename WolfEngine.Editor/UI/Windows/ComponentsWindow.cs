@@ -37,6 +37,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly IEditorInteractionState _interactionState;
     private readonly IEditorSceneSnapshotService _sceneSnapshotService;
     private readonly IEditorUndoRedoService _undoRedoService;
+    private readonly IEditorAssetRefreshService _assetRefreshService;
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
@@ -54,7 +55,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         RenderGraph renderGraph,
         IEditorInteractionState interactionState,
         IEditorSceneSnapshotService sceneSnapshotService,
-        IEditorUndoRedoService undoRedoService)
+        IEditorUndoRedoService undoRedoService,
+        IEditorAssetRefreshService assetRefreshService)
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
@@ -64,6 +66,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         _interactionState = interactionState;
         _sceneSnapshotService = sceneSnapshotService;
         _undoRedoService = undoRedoService;
+        _assetRefreshService = assetRefreshService ?? throw new ArgumentNullException(nameof(assetRefreshService));
     }
 
     public override string Name => "Components";
@@ -906,6 +909,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
+        var refreshSnapshot = _assetRefreshService.CaptureOpenSceneAssets();
         var currentEntity = SerializeEntity(scene, entity, sourceEntity.EntityId);
         sourceEntity.HasName = currentEntity.HasName;
         sourceEntity.Name = currentEntity.Name;
@@ -926,6 +930,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         var json = JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions);
         File.WriteAllText(prefabPath, json);
         _projectService.RefreshAssetSource(prefabAsset.RelativeSourcePath);
+        _assetRefreshService.RefreshOpenSceneAssets(refreshSnapshot);
     }
 
     private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)

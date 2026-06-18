@@ -490,6 +490,55 @@ public sealed class ScenePersistenceTests
 	}
 
 	[Test]
+	public void RefreshOpenSceneAssets_WithSnapshotCapturedBeforePrefabSave_UpdatesLivePrefabDefaults()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAuthoringScene = environment.Factory.New();
+		prefabAuthoringScene.Name = "Prefab Authoring";
+
+		var sourceRoot = prefabAuthoringScene.World.CreateEntity("Source Root");
+		prefabAuthoringScene.World.AddTransform(sourceRoot, Matrix4x4.CreateTranslation(new Vector3(1.0f, 2.0f, 3.0f)));
+		var sourceChild = prefabAuthoringScene.World.CreateEntity("Source Child");
+		prefabAuthoringScene.World.AddTransform(sourceChild, Matrix4x4.CreateTranslation(new Vector3(4.0f, 5.0f, 6.0f)));
+		prefabAuthoringScene.World.SetParent(sourceChild, sourceRoot);
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(prefabAuthoringScene, sourceRoot, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+		Assert.That(prefabCreationResult.AssetId.HasValue, Is.True);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId!.Value, scene);
+
+		var instanceChild = FindEntityByName(scene.World, "Source Child");
+		scene.World.SetLocalPosition(instanceChild, new Vector3(9.0f, 8.0f, 7.0f));
+
+		var worldManager = new WorldManager();
+		var workspace = new EditorSceneWorkspace(environment.Factory, worldManager);
+		var reloadService = new EditorSceneReloadService(environment.TypeResolver, environment.ProjectService);
+		var refreshService = new EditorAssetRefreshService(environment.ProjectService, workspace, reloadService);
+		workspace.Initialize(scene);
+		var refreshSnapshot = refreshService.CaptureOpenSceneAssets();
+
+		Assert.That(environment.ProjectService.TryGetAsset(prefabCreationResult.AssetId.Value, out var prefabAsset), Is.True);
+		var prefabAbsolutePath = environment.ProjectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+		var prefabFile = PrefabAssetFile.Load(prefabAbsolutePath);
+		var prefabRoot = prefabFile.Entities.Single(entity => entity.EntityId == prefabFile.RootEntityId);
+		prefabRoot.LocalTransform = Matrix4x4.CreateTranslation(new Vector3(21.0f, 22.0f, 23.0f));
+		var prefabChild = prefabFile.Entities.Single(entity => entity.ParentEntityId == prefabFile.RootEntityId);
+		prefabChild.LocalTransform = Matrix4x4.CreateTranslation(new Vector3(11.0f, 12.0f, 13.0f));
+		File.WriteAllText(prefabAbsolutePath, JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions));
+		environment.ProjectService.RefreshAssetSource(prefabAsset.RelativeAssetPath);
+
+		refreshService.RefreshOpenSceneAssets(refreshSnapshot);
+
+		var refreshedRoot = FindEntityByName(workspace.CurrentScene.World, "Source Root");
+		var refreshedChild = FindEntityByName(workspace.CurrentScene.World, "Source Child");
+		Assert.That(workspace.CurrentScene.World.GetComponent<LocalTransform>(refreshedRoot).LocalPosition, Is.EqualTo(new Vector3(21.0f, 22.0f, 23.0f)));
+		Assert.That(workspace.CurrentScene.World.GetComponent<LocalTransform>(refreshedChild).LocalPosition, Is.EqualTo(new Vector3(9.0f, 8.0f, 7.0f)));
+	}
+
+	[Test]
 	public void SaveEntityAsPrefab_InstantiateScene_PreservesEntityReferenceWithinPrefab()
 	{
 		using var environment = new TestEnvironment();
