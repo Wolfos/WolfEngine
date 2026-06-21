@@ -1366,7 +1366,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				continue;
 			}
 
-			ImportSource(
+			TryImportSourceDuringRefresh(
 				projectRootPath,
 				absoluteSourcePath,
 				relativeSourcePath,
@@ -1389,6 +1389,25 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		return LoadDatabase(projectRootPath);
+	}
+
+	private bool TryImportSourceDuringRefresh(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		AssetSourceRecord? existingSource)
+	{
+		try
+		{
+			ImportSource(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource);
+			return true;
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine(
+				$"Failed to import asset source '{relativeSourcePath}'. The source will be skipped during this refresh. {ex.GetType().Name}: {ex.Message}");
+			return false;
+		}
 	}
 
 	private List<string> EnumerateSupportedSourceFiles(string assetsPath)

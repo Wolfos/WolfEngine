@@ -615,6 +615,45 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void ReopenProject_WithInvalidAddedSource_StillOpensAndKeepsValidAssets()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var validAsset), Is.True);
+
+		var invalidSourcePath = environment.ProjectService.GetAbsolutePath("Assets/Materials/Broken.mat.json");
+		Directory.CreateDirectory(Path.GetDirectoryName(invalidSourcePath)!);
+		File.WriteAllText(invalidSourcePath, "{ invalid json");
+
+		environment.ProjectService.CloseProject();
+		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
+
+		Assert.That(environment.ProjectService.TryGetAsset(validAsset.Id, out _), Is.True);
+		Assert.That(environment.ProjectService.CurrentAssetDatabase.Assets.Any(asset => asset.RelativeSourcePath == "Assets/Materials/Broken.mat.json"), Is.False);
+	}
+
+	[Test]
+	public void ReopenProject_WithExistingSourceThatNowFailsImport_KeepsPreviousIndexedAsset()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var sourcePath = environment.ProjectService.GetAbsolutePath(originalAsset.RelativeSourcePath);
+		WaitForTimestampTick();
+		File.WriteAllText(sourcePath, "{ invalid json");
+
+		environment.ProjectService.CloseProject();
+		Assert.That(environment.ProjectService.OpenProject(environment.ProjectRootPath, out var errorMessage), Is.True, errorMessage);
+
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var refreshedAsset), Is.True);
+		Assert.That(refreshedAsset.SourceId, Is.EqualTo(originalAsset.SourceId));
+		Assert.That(refreshedAsset.RelativeSourcePath, Is.EqualTo(originalAsset.RelativeSourcePath));
+	}
+
+	[Test]
 	public void ReloadAssetDatabase_RecreatesMissingMetaFile()
 	{
 		using var environment = new EditorProjectTestEnvironment();

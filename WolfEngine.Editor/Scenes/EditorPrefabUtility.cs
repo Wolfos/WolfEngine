@@ -26,6 +26,11 @@ internal static class EditorPrefabUtility
 		return parent.IsValid && scene.World.IsAlive(parent) && IsPrefabEntity(scene, parent);
 	}
 
+	public static bool IsPrefabInstanceRoot(EditorScene scene, Entity entity)
+	{
+		return IsPrefabEntity(scene, entity) && IsNestedPrefabEntity(scene, entity) == false;
+	}
+
 	public static Guid GetPrefabRootAssetId(EditorScene scene, Entity entity)
 	{
 		return scene.EntityPrefabSourcePaths.TryGetValue(entity, out var sourcePath) && sourcePath.Count > 0

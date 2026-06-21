@@ -878,6 +878,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
+        if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity) &&
+            scene.World.HasComponent<LocalTransform>(entity))
+        {
+            sourceEntity = EditorPrefabUtility.CloneEntity(sourceEntity);
+            sourceEntity.LocalTransform = scene.World.GetComponent<LocalTransform>(entity).GetTransform();
+        }
+
         ApplySavedEntityToScene(scene, entity, sourceEntity);
         _interactionState.MarkSceneDirty();
     }
@@ -915,7 +922,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         sourceEntity.Name = currentEntity.Name;
         sourceEntity.Enabled = currentEntity.Enabled;
         sourceEntity.Icon = currentEntity.Icon;
-        sourceEntity.LocalTransform = currentEntity.LocalTransform;
+        if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity) == false)
+        {
+            sourceEntity.LocalTransform = currentEntity.LocalTransform;
+        }
         sourceEntity.Components = currentEntity.Components.Select(EditorPrefabUtility.CloneComponent).ToList();
         if (sourceEntity.PrefabSourcePath.Count > 0 &&
             EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, sourceEntity, out var nestedSourceEntity))

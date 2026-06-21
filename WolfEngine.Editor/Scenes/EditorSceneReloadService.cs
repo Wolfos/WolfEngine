@@ -268,6 +268,10 @@ public interface IEditorSceneReloadService
 			    EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
 			{
 				savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
+				if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity))
+				{
+					savedEntity.PrefabOverrides.LocalTransform = true;
+				}
 			}
 
 			return savedEntity;

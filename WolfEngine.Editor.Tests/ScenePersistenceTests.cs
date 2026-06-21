@@ -485,7 +485,7 @@ public sealed class ScenePersistenceTests
 
 		Assert.That(loadedScene.EntityPrefabSourcePaths.ContainsKey(loadedRoot), Is.True);
 		Assert.That(loadedScene.World.GetComponent<NameComponent>(loadedRoot).Name, Is.EqualTo("Scene Override Root"));
-		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedRoot).LocalPosition, Is.EqualTo(new Vector3(21.0f, 22.0f, 23.0f)));
+		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedRoot).LocalPosition, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
 		Assert.That(loadedScene.World.GetComponent<LocalTransform>(loadedChild).LocalPosition, Is.EqualTo(new Vector3(9.0f, 8.0f, 7.0f)));
 	}
 
@@ -534,8 +534,59 @@ public sealed class ScenePersistenceTests
 
 		var refreshedRoot = FindEntityByName(workspace.CurrentScene.World, "Source Root");
 		var refreshedChild = FindEntityByName(workspace.CurrentScene.World, "Source Child");
-		Assert.That(workspace.CurrentScene.World.GetComponent<LocalTransform>(refreshedRoot).LocalPosition, Is.EqualTo(new Vector3(21.0f, 22.0f, 23.0f)));
+		Assert.That(workspace.CurrentScene.World.GetComponent<LocalTransform>(refreshedRoot).LocalPosition, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
 		Assert.That(workspace.CurrentScene.World.GetComponent<LocalTransform>(refreshedChild).LocalPosition, Is.EqualTo(new Vector3(9.0f, 8.0f, 7.0f)));
+	}
+
+	[Test]
+	public void RefreshOpenSceneAssets_PreservesPrefabInstanceRootPlacements()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAuthoringScene = environment.Factory.New();
+		prefabAuthoringScene.Name = "Prefab Authoring";
+
+		var sourceRoot = prefabAuthoringScene.World.CreateEntity("Source Root");
+		prefabAuthoringScene.World.AddTransform(sourceRoot, Matrix4x4.CreateTranslation(new Vector3(1.0f, 2.0f, 3.0f)));
+		var sourceChild = prefabAuthoringScene.World.CreateEntity("Source Child");
+		prefabAuthoringScene.World.AddTransform(sourceChild, Matrix4x4.CreateTranslation(new Vector3(4.0f, 5.0f, 6.0f)));
+		prefabAuthoringScene.World.SetParent(sourceChild, sourceRoot);
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(prefabAuthoringScene, sourceRoot, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+		Assert.That(prefabCreationResult.AssetId.HasValue, Is.True);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId!.Value, scene);
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId.Value, scene);
+
+		var instanceRoots = FindEntitiesByName(scene.World, "Source Root");
+		Assert.That(instanceRoots, Has.Count.EqualTo(2));
+		scene.World.SetLocalPosition(instanceRoots[0], new Vector3(31.0f, 32.0f, 33.0f));
+		scene.World.SetLocalPosition(instanceRoots[1], new Vector3(41.0f, 42.0f, 43.0f));
+
+		var worldManager = new WorldManager();
+		var workspace = new EditorSceneWorkspace(environment.Factory, worldManager);
+		var reloadService = new EditorSceneReloadService(environment.TypeResolver, environment.ProjectService);
+		var refreshService = new EditorAssetRefreshService(environment.ProjectService, workspace, reloadService);
+		workspace.Initialize(scene);
+		var refreshSnapshot = refreshService.CaptureOpenSceneAssets();
+
+		Assert.That(environment.ProjectService.TryGetAsset(prefabCreationResult.AssetId.Value, out var prefabAsset), Is.True);
+		var prefabAbsolutePath = environment.ProjectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+		var prefabFile = PrefabAssetFile.Load(prefabAbsolutePath);
+		var prefabRoot = prefabFile.Entities.Single(entity => entity.EntityId == prefabFile.RootEntityId);
+		prefabRoot.LocalTransform = Matrix4x4.CreateTranslation(new Vector3(21.0f, 22.0f, 23.0f));
+		File.WriteAllText(prefabAbsolutePath, JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions));
+		environment.ProjectService.RefreshAssetSource(prefabAsset.RelativeAssetPath);
+
+		refreshService.RefreshOpenSceneAssets(refreshSnapshot);
+
+		var refreshedRootPositions = FindEntitiesByName(workspace.CurrentScene.World, "Source Root")
+			.Select(entity => workspace.CurrentScene.World.GetComponent<LocalTransform>(entity).LocalPosition)
+			.ToList();
+		Assert.That(refreshedRootPositions, Does.Contain(new Vector3(31.0f, 32.0f, 33.0f)));
+		Assert.That(refreshedRootPositions, Does.Contain(new Vector3(41.0f, 42.0f, 43.0f)));
 	}
 
 	[Test]
@@ -591,6 +642,15 @@ public sealed class ScenePersistenceTests
 		}
 
 		throw new AssertionException($"Entity '{name}' was not found.");
+	}
+
+	private static List<Entity> FindEntitiesByName(World world, string name)
+	{
+		return GetAllEntities(world)
+			.Where(entity =>
+				world.HasComponent<NameComponent>(entity) &&
+				string.Equals(world.GetComponent<NameComponent>(entity).Name, name, StringComparison.Ordinal))
+			.ToList();
 	}
 
 	private static Mesh CreateTriangleMesh()
