@@ -14,14 +14,15 @@ namespace WolfEngine.Editor.UI;
 
 public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 {
-	private static readonly Vector2 ThumbnailSize = new(46.0f, 46.0f);
+	private static readonly Vector2 ThumbnailSize = new(42.0f, 42.0f);
 	private const float FolderTreeWidth = 220.0f;
 	private const float FolderTreeIconSize = 15.5f;
-	private const float FolderCardHeight = 116.0f;
-	private const float SourceCardHeaderHeight = 116.0f;
+	private const float FolderCardHeight = 88.0f;
+	private const float SourceCardHeaderHeight = 104.0f;
 	private const float SourceCardToggleHeight = 26.0f;
 	private const float SubAssetRowHeight = 24.0f;
-	private const float GridMinItemWidth = 210.0f;
+	private const float GridMinItemWidth = 132.0f;
+	private const float PaneSeparatorThickness = 2.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
 	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
@@ -102,7 +103,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var selectedFolder = browserModel.FoldersByPath[_selectedFolderPath];
 
 		DrawFolderTree(browserModel);
-		ImGui.SameLine();
+		ImGui.SameLine(0.0f, 0.0f);
+		DrawVerticalPaneSeparator();
+		ImGui.SameLine(0.0f, 0.0f);
 		DrawContentArea(selectedFolder, scene);
 		DrawDeletePopup();
 		DrawErrorPopup();
@@ -112,7 +115,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawFolderTree(AssetsWindowBrowserModel browserModel)
 	{
 		PushPaneStyle();
-		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.Borders);
+		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.None);
 		DrawFolderTreeNode(browserModel.RootFolder);
 		_folderTreeRevealPath = null;
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
@@ -130,10 +133,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		ImGui.BeginGroup();
 		DrawBreadcrumbs(selectedFolder.RelativePath);
-		ImGui.Separator();
+		DrawHorizontalPaneSeparator();
 
 		PushPaneStyle();
-		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.Borders);
+		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
 		DrawCurrentFolderContents(selectedFolder, scene);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
@@ -296,7 +299,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawFolderCard(AssetsWindowFolderNode folder)
 	{
 		ImGui.PushID(folder.RelativePath);
-		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.Borders,
+		ImGui.BeginChild("FolderCard", new Vector2(0.0f, FolderCardHeight), ImGuiChildFlags.None,
 			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 		var buttonSize = new Vector2(ImGui.GetContentRegionAvail().X, FolderCardHeight - 6.0f);
 		ImGui.InvisibleButton("FolderCardButton", buttonSize);
@@ -334,11 +337,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var itemMin = ImGui.GetItemRectMin();
 		var itemMax = ImGui.GetItemRectMax();
 		var drawList = ImGui.GetWindowDrawList();
-		var backgroundColor = ImGui.IsItemHovered()
-			? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
-			: ImGui.GetColorU32(ImGuiCol.Button);
-		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
-		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
+		if (ImGui.IsItemHovered())
+		{
+			drawList.AddRectFilled(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderHovered), 4.0f);
+		}
 
 		var thumbnailMin =
 			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
@@ -349,7 +351,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 		else
 		{
-			drawList.AddRect(thumbnailMin, thumbnailMax, ImGui.GetColorU32(ImGuiCol.Border));
+			drawList.AddRect(thumbnailMin, thumbnailMax, GetAssetBrowserSeparatorColor());
 		}
 
 		DrawCardTextBlock(
@@ -368,7 +370,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var totalHeight = SourceCardHeaderHeight + toggleHeight +
 		                  (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
 		ImGui.PushID(source.SourceId.ToString());
-		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.Borders,
+		ImGui.BeginChild("SourceCard", new Vector2(0.0f, totalHeight), ImGuiChildFlags.None,
 			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
 		ImGui.InvisibleButton("SourceHeaderButton",
@@ -442,9 +444,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			? ImGui.GetColorU32(ImGuiCol.HeaderActive)
 			: ImGui.IsItemHovered()
 				? ImGui.GetColorU32(ImGuiCol.HeaderHovered)
-				: ImGui.GetColorU32(ImGuiCol.Button);
-		drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
-		drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.Border), 4.0f);
+				: 0u;
+		if (backgroundColor != 0)
+		{
+			drawList.AddRectFilled(itemMin, itemMax, backgroundColor, 4.0f);
+		}
 
 		var thumbnailMin =
 			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
@@ -844,7 +848,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			}
 		}
 
-		drawList.AddRect(min, max, ImGui.GetColorU32(ImGuiCol.Border));
+		drawList.AddRect(min, max, GetAssetBrowserSeparatorColor());
 		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
 			? handler.ThumbnailLabel
 			: GetFallbackThumbnailLabel(asset.Type);
@@ -896,9 +900,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		string title, string? subtitle)
 	{
 		var textInset = 8.0f;
-		var titleMin = new Vector2(itemMin.X + textInset, startY);
-		var titleMax = new Vector2(itemMax.X - textInset, startY + ImGui.GetTextLineHeight());
-		drawList.AddText(titleMin, ImGui.GetColorU32(ImGuiCol.Text), ClipTextToWidth(title, titleMax.X - titleMin.X));
+		var textMinX = itemMin.X + textInset;
+		var textMaxX = itemMax.X - textInset;
+		var titleText = ClipTextToWidth(title, textMaxX - textMinX);
+		DrawCenteredText(drawList, titleText, textMinX, textMaxX, startY, ImGui.GetColorU32(ImGuiCol.Text));
 
 		if (string.IsNullOrWhiteSpace(subtitle))
 		{
@@ -906,10 +911,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 
 		var subtitleY = startY + ImGui.GetTextLineHeightWithSpacing();
-		var subtitleMin = new Vector2(itemMin.X + textInset, subtitleY);
-		var subtitleMax = new Vector2(itemMax.X - textInset, subtitleY + ImGui.GetTextLineHeight());
-		drawList.AddText(subtitleMin, ImGui.GetColorU32(ImGuiCol.TextDisabled),
-			ClipTextToWidth(subtitle, subtitleMax.X - subtitleMin.X));
+		var subtitleText = ClipTextToWidth(subtitle, textMaxX - textMinX);
+		DrawCenteredText(
+			drawList,
+			subtitleText,
+			textMinX,
+			textMaxX,
+			subtitleY,
+			ImGui.GetColorU32(ImGuiCol.TextDisabled));
 	}
 
 	private static string ClipTextToWidth(string text, float maxWidth)
@@ -937,10 +946,44 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		return ellipsis;
 	}
 
+	private static void DrawHorizontalPaneSeparator()
+	{
+		var cursorPosition = ImGui.GetCursorScreenPos();
+		var windowPosition = ImGui.GetWindowPos();
+		var windowSize = ImGui.GetWindowSize();
+		var separatorSize = new Vector2(
+			MathF.Max(windowPosition.X + windowSize.X - cursorPosition.X, 1.0f),
+			PaneSeparatorThickness);
+		ImGui.GetWindowDrawList().AddLine(
+			cursorPosition,
+			new Vector2(cursorPosition.X + separatorSize.X, cursorPosition.Y),
+			GetAssetBrowserSeparatorColor(),
+			PaneSeparatorThickness);
+		ImGui.Dummy(separatorSize);
+	}
+
+	private static void DrawVerticalPaneSeparator()
+	{
+		var cursorPosition = ImGui.GetCursorScreenPos();
+		var windowPosition = ImGui.GetWindowPos();
+		var windowSize = ImGui.GetWindowSize();
+		ImGui.GetWindowDrawList().AddLine(
+			new Vector2(cursorPosition.X, windowPosition.Y),
+			new Vector2(cursorPosition.X, windowPosition.Y + windowSize.Y),
+			GetAssetBrowserSeparatorColor(),
+			PaneSeparatorThickness);
+		ImGui.Dummy(new Vector2(PaneSeparatorThickness, MathF.Max(ImGui.GetContentRegionAvail().Y, 1.0f)));
+	}
+
+	private static uint GetAssetBrowserSeparatorColor()
+	{
+		return ImGui.GetColorU32(ImGuiCol.TitleBg);
+	}
+
 	private static void PushPaneStyle()
 	{
 		ImGui.PushStyleColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.WindowBg));
-		ImGui.PushStyleColor(ImGuiCol.Border, ImGui.GetColorU32(ImGuiCol.Separator));
+		ImGui.PushStyleColor(ImGuiCol.Border, GetAssetBrowserSeparatorColor());
 	}
 
 	private static void AdvanceTable(ref int columnIndex, int columnCount)
