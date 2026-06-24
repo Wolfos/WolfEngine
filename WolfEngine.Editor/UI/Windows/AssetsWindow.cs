@@ -38,6 +38,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
 	private string _selectedFolderPath = AssetPipelinePaths.AssetsFolderName;
+	private string? _folderTreeRevealPath;
 	private Guid? _expandedSourceId;
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
@@ -113,6 +114,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		PushPaneStyle();
 		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.Borders);
 		DrawFolderTreeNode(browserModel.RootFolder);
+		_folderTreeRevealPath = null;
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
@@ -150,8 +152,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.PushID(folder.RelativePath);
 
 		var isSelected = string.Equals(_selectedFolderPath, folder.RelativePath, StringComparison.OrdinalIgnoreCase);
-		var containsSelectedDescendant =
-			ProjectPathUtility.IsSameOrDescendant(_selectedFolderPath, folder.RelativePath);
+		var containsRevealTarget = _folderTreeRevealPath is not null &&
+		                           ProjectPathUtility.IsSameOrDescendant(_folderTreeRevealPath, folder.RelativePath);
 		var hasChildren = folder.Children.Count > 0;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (hasChildren == false)
@@ -165,7 +167,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			PushSelectedHeaderColors();
 		}
 
-		if (containsSelectedDescendant && hasChildren)
+		if (containsRevealTarget && hasChildren)
 		{
 			ImGui.SetNextItemOpen(true, ImGuiCond.Always);
 		}
@@ -585,7 +587,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			if (_projectService.TryGetAsset(result.AssetId.Value, out var createdAsset))
 			{
-				_selectedFolderPath = ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath);
+				SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath));
 			}
 
 			_expandedSourceId = null;
@@ -716,14 +718,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void SelectFolder(string relativeFolderPath)
 	{
-		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		SetSelectedFolderPath(relativeFolderPath);
 		_expandedSourceId = null;
 		_assetSelectionService.Clear();
 	}
 
 	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true)
 	{
-		_selectedFolderPath = ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath);
+		SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
 		_assetSelectionService.Select(asset.Id, requestFocus);
 	}
 
@@ -739,8 +741,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void PruneState(AssetsWindowBrowserModel browserModel)
 	{
-		_selectedFolderPath =
-			AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath);
+		SetSelectedFolderPath(
+			AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath));
 		if (_expandedSourceId.HasValue && browserModel.SourcesBySourceId.ContainsKey(_expandedSourceId.Value) == false)
 		{
 			_expandedSourceId = null;
@@ -749,12 +751,23 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
-			_selectedFolderPath = ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath);
+			SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
 		}
 		else if (_assetSelectionService.SelectedAssetId.HasValue)
 		{
 			_assetSelectionService.Clear();
 		}
+	}
+
+	private void SetSelectedFolderPath(string relativeFolderPath)
+	{
+		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		if (string.Equals(_selectedFolderPath, normalizedFolderPath, StringComparison.OrdinalIgnoreCase) == false)
+		{
+			_folderTreeRevealPath = normalizedFolderPath;
+		}
+
+		_selectedFolderPath = normalizedFolderPath;
 	}
 
 	private void ValidateSelectionAfterProjectMutation()
@@ -767,7 +780,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		if (_projectService.HasOpenProject)
 		{
-			_selectedFolderPath = GetNearestExistingFolderPath(_selectedFolderPath);
+			SetSelectedFolderPath(GetNearestExistingFolderPath(_selectedFolderPath));
 		}
 
 		if (_expandedSourceId.HasValue &&
