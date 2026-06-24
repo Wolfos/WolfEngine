@@ -193,7 +193,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (rightClicked)
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectFolder(folder.RelativePath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
 
@@ -347,7 +346,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (rightClicked)
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectFolder(folder.RelativePath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
 
