@@ -7,7 +7,6 @@ using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Importing;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -32,7 +31,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private readonly IEditorProjectService _projectService;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
-	private readonly IImageLoader _imageLoader;
+	private readonly IAssetThumbnailLoader _assetThumbnailLoader;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorAssetHandlerRegistry _assetHandlerRegistry;
 	private readonly IIconManager _icons;
@@ -50,7 +49,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	public AssetsWindow(
 		IEditorProjectService projectService,
 		IProjectAssetPipelineService assetPipelineService,
-		IImageLoader imageLoader,
+		IAssetThumbnailLoader assetThumbnailLoader,
 		IAssetSelectionService assetSelectionService,
 		IEditorAssetHandlerRegistry assetHandlerRegistry,
 		IIconManager icons,
@@ -59,7 +58,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
-		_imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
+		_assetThumbnailLoader = assetThumbnailLoader ?? throw new ArgumentNullException(nameof(assetThumbnailLoader));
 		_assetSelectionService =
 			assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 		_assetHandlerRegistry = assetHandlerRegistry ?? throw new ArgumentNullException(nameof(assetHandlerRegistry));
@@ -866,17 +865,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
 	{
-		if (asset.Type == AssetType.Texture2D &&
-		    asset.TryGetSummary<TextureAssetSummary>(out var textureSummary) &&
-		    string.IsNullOrWhiteSpace(textureSummary.RelativeSourceAssetPath) == false)
+		if (asset.Type == AssetType.Texture2D && _assetThumbnailLoader.TryGetTextureThumbnailId(asset, out var textureId))
 		{
-			var assetAbsolutePath = _projectService.GetAbsolutePath(textureSummary.RelativeSourceAssetPath);
-			if (_imageLoader.TryGetImGuiTextureId(assetAbsolutePath, out var textureId,
-				    StbImageLoader.IsSrgb(textureSummary.Semantic)))
-			{
-				drawList.AddImage(textureId, min, max);
-				return;
-			}
+			drawList.AddImage(textureId, min, max);
+			return;
 		}
 
 		drawList.AddRect(min, max, GetAssetBrowserSeparatorColor());

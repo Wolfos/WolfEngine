@@ -265,7 +265,7 @@ public sealed class EditorCommandServiceTests
 		var window = new AssetsWindow(
 			projectService,
 			Substitute.For<IProjectAssetPipelineService>(),
-			Substitute.For<IImageLoader>(),
+			Substitute.For<IAssetThumbnailLoader>(),
 			selectionService,
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
@@ -285,7 +285,7 @@ public sealed class EditorCommandServiceTests
 		var window = new AssetsWindow(
 			Substitute.For<IEditorProjectService>(),
 			Substitute.For<IProjectAssetPipelineService>(),
-			Substitute.For<IImageLoader>(),
+			Substitute.For<IAssetThumbnailLoader>(),
 			new AssetSelectionService(),
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),

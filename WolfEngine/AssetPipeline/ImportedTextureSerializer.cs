@@ -85,4 +85,86 @@ public static class ImportedTextureSerializer
 
 		return new ImportedTexture(name, width, height, isSrgb, semantic, mips);
 	}
+
+	public static bool TryReadMip(string path, int targetMaxDimension, out ImportedTextureMipPreview preview)
+	{
+		preview = default;
+		if (string.IsNullOrWhiteSpace(path) || targetMaxDimension <= 0 || File.Exists(path) == false)
+		{
+			return false;
+		}
+
+		try
+		{
+			using var stream = File.OpenRead(path);
+			using var reader = new BinaryReader(stream);
+			var magic = reader.ReadBytes(Magic.Length);
+			if (magic.AsSpan().SequenceEqual(Magic) == false)
+			{
+				return false;
+			}
+
+			var version = reader.ReadInt32();
+			if (version != CurrentVersion)
+			{
+				return false;
+			}
+
+			_ = reader.ReadInt32();
+			_ = reader.ReadInt32();
+			var isSrgb = reader.ReadByte() != 0;
+			var semantic = (TextureSemantic)reader.ReadInt32();
+			var mipCount = reader.ReadInt32();
+			if (mipCount <= 0)
+			{
+				return false;
+			}
+
+			for (var i = 0; i < mipCount; i++)
+			{
+				var mipWidth = reader.ReadInt32();
+				var mipHeight = reader.ReadInt32();
+				var length = reader.ReadInt32();
+				if (mipWidth <= 0 || mipHeight <= 0 || length != mipWidth * mipHeight * 4)
+				{
+					return false;
+				}
+
+				var maxDimension = Math.Max(mipWidth, mipHeight);
+				var selected = maxDimension <= targetMaxDimension || i == mipCount - 1;
+				if (selected)
+				{
+					var data = reader.ReadBytes(length);
+					if (data.Length != length)
+					{
+						return false;
+					}
+
+					preview = new ImportedTextureMipPreview(mipWidth, mipHeight, isSrgb, semantic, data);
+					return true;
+				}
+
+				if (stream.CanSeek == false || stream.Position + length > stream.Length)
+				{
+					return false;
+				}
+
+				stream.Seek(length, SeekOrigin.Current);
+			}
+
+			return false;
+		}
+		catch
+		{
+			preview = default;
+			return false;
+		}
+	}
 }
+
+public readonly record struct ImportedTextureMipPreview(
+	int Width,
+	int Height,
+	bool IsSrgb,
+	TextureSemantic Semantic,
+	byte[] Data);

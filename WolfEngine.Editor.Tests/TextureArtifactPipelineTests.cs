@@ -2,9 +2,11 @@ using NSubstitute;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -50,6 +52,132 @@ public sealed class TextureArtifactPipelineTests
 		Assert.That(loaded.Format, Is.EqualTo(texture.Format));
 		Assert.That(loaded.MipCount, Is.EqualTo(texture.MipCount));
 		Assert.That(loaded.MipLevels.Select(m => m.Data.Length), Is.EqualTo(texture.MipLevels.Select(m => m.Data.Length)));
+	}
+
+	[Test]
+	public void ImportedTextureSerializer_TryReadMip_SelectsFirstMipAtOrBelowTargetSize()
+	{
+		using var tempDirectory = new TempDirectory();
+		var path = Path.Combine(tempDirectory.Path, "texture.bin");
+		var expectedData = CreateFilledBytes(32 * 32 * 4, 32);
+		ImportedTextureSerializer.Write(
+			path,
+			new ImportedTexture(
+				"texture",
+				256,
+				256,
+				true,
+				TextureSemantic.BaseColor,
+				[
+					new TextureMipData(256, 256, CreateFilledBytes(256 * 256 * 4, 255)),
+					new TextureMipData(128, 128, CreateFilledBytes(128 * 128 * 4, 128)),
+					new TextureMipData(64, 64, CreateFilledBytes(64 * 64 * 4, 64)),
+					new TextureMipData(32, 32, expectedData)
+				]));
+
+		var read = ImportedTextureSerializer.TryReadMip(path, 64, out var preview);
+
+		Assert.That(read, Is.True);
+		Assert.That(preview.Width, Is.EqualTo(64));
+		Assert.That(preview.Height, Is.EqualTo(64));
+		Assert.That(preview.IsSrgb, Is.True);
+		Assert.That(preview.Semantic, Is.EqualTo(TextureSemantic.BaseColor));
+		Assert.That(preview.Data, Is.EqualTo(CreateFilledBytes(64 * 64 * 4, 64)));
+	}
+
+	[Test]
+	public void ImportedTextureSerializer_TryReadMip_FallsBackToSmallestMip()
+	{
+		using var tempDirectory = new TempDirectory();
+		var path = Path.Combine(tempDirectory.Path, "texture.bin");
+		ImportedTextureSerializer.Write(
+			path,
+			new ImportedTexture(
+				"texture",
+				256,
+				256,
+				false,
+				TextureSemantic.Unknown,
+				[
+					new TextureMipData(256, 256, CreateFilledBytes(256 * 256 * 4, 255)),
+					new TextureMipData(128, 128, CreateFilledBytes(128 * 128 * 4, 128))
+				]));
+
+		var read = ImportedTextureSerializer.TryReadMip(path, 64, out var preview);
+
+		Assert.That(read, Is.True);
+		Assert.That(preview.Width, Is.EqualTo(128));
+		Assert.That(preview.Height, Is.EqualTo(128));
+		Assert.That(preview.Data, Is.EqualTo(CreateFilledBytes(128 * 128 * 4, 128)));
+	}
+
+	[Test]
+	public void ImportedTextureSerializer_TryReadMip_RejectsInvalidOrMissingArtifacts()
+	{
+		using var tempDirectory = new TempDirectory();
+		var invalidPath = Path.Combine(tempDirectory.Path, "invalid.bin");
+		File.WriteAllText(invalidPath, "not a texture");
+
+		Assert.That(ImportedTextureSerializer.TryReadMip(Path.Combine(tempDirectory.Path, "missing.bin"), 64, out _), Is.False);
+		Assert.That(ImportedTextureSerializer.TryReadMip(invalidPath, 64, out _), Is.False);
+	}
+
+	[Test]
+	public void AssetThumbnailLoader_UsesImportedTextureArtifactMip()
+	{
+		using var tempDirectory = new TempDirectory();
+		var importedRelativePath = "Library/Imported/source/texture.bin";
+		var importedPath = Path.Combine(tempDirectory.Path, importedRelativePath);
+		ImportedTextureSerializer.Write(
+			importedPath,
+			new ImportedTexture(
+				"texture",
+				128,
+				128,
+				true,
+				TextureSemantic.BaseColor,
+				[
+					new TextureMipData(128, 128, CreateFilledBytes(128 * 128 * 4, 128)),
+					new TextureMipData(64, 64, CreateFilledBytes(64 * 64 * 4, 64))
+				]));
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.HasOpenProject.Returns(true);
+		projectService.GetAbsolutePath(importedRelativePath).Returns(importedPath);
+		var resources = new TestTextureResources();
+		var renderer = Substitute.For<IRenderer>();
+		Texture? uploadedTexture = null;
+		renderer.CreateTextureResources(Arg.Do<Texture>(texture => uploadedTexture = texture)).Returns(resources);
+		var loader = new AssetThumbnailLoader(projectService, renderer, new ImmediateMainThreadDispatcher());
+		var asset = CreateTextureAsset(importedRelativePath);
+
+		var loaded = loader.TryGetTextureThumbnailId(asset, out var textureId);
+
+		Assert.That(loaded, Is.True);
+		Assert.That(textureId, Is.EqualTo(resources.ShaderResourceView.Value));
+		Assert.That(uploadedTexture, Is.Not.Null);
+		Assert.That(uploadedTexture!.Width, Is.EqualTo(64));
+		Assert.That(uploadedTexture.Height, Is.EqualTo(64));
+		Assert.That(uploadedTexture.MipCount, Is.EqualTo(1));
+		Assert.That(uploadedTexture.MipLevels[0].Data, Is.EqualTo(CreateFilledBytes(64 * 64 * 4, 64)));
+	}
+
+	[Test]
+	public void AssetThumbnailLoader_MissingImportedArtifactReturnsFalse()
+	{
+		using var tempDirectory = new TempDirectory();
+		var importedRelativePath = "Library/Imported/source/missing.bin";
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.HasOpenProject.Returns(true);
+		projectService.GetAbsolutePath(importedRelativePath).Returns(Path.Combine(tempDirectory.Path, importedRelativePath));
+		var renderer = Substitute.For<IRenderer>();
+		var loader = new AssetThumbnailLoader(projectService, renderer, new ImmediateMainThreadDispatcher());
+		var asset = CreateTextureAsset(importedRelativePath);
+
+		var loaded = loader.TryGetTextureThumbnailId(asset, out var textureId);
+
+		Assert.That(loaded, Is.False);
+		Assert.That(textureId, Is.Zero);
+		renderer.DidNotReceiveWithAnyArgs().CreateTextureResources(default!);
 	}
 
 	[Test]
@@ -169,6 +297,49 @@ public sealed class TextureArtifactPipelineTests
 	{
 		public IGfxTexture Texture { get; } = Substitute.For<IGfxTexture>();
 		public DescriptorHandle ShaderResourceView { get; } = new(DescriptorKind.ShaderResourceView, 42);
+	}
+
+	private static AssetDatabaseEntry CreateTextureAsset(string relativeImportedPath)
+	{
+		var asset = new AssetDatabaseEntry
+		{
+			Id = Guid.NewGuid(),
+			Name = "texture",
+			Type = AssetType.Texture2D,
+			RelativeSourcePath = "Assets/texture.png"
+		};
+		asset.SetSummary(new TextureAssetSummary
+		{
+			RelativeSourceAssetPath = "Assets/texture.png",
+			RelativeImportedPath = relativeImportedPath,
+			Semantic = TextureSemantic.BaseColor
+		});
+		return asset;
+	}
+
+	private static byte[] CreateFilledBytes(int length, byte value)
+	{
+		var data = new byte[length];
+		Array.Fill(data, value);
+		return data;
+	}
+
+	private sealed class ImmediateMainThreadDispatcher : IMainThreadDispatcher
+	{
+		public bool IsMainThread => true;
+		public void ExecutePending()
+		{
+		}
+
+		public void Invoke(Action action)
+		{
+			action();
+		}
+
+		public T Invoke<T>(Func<T> action)
+		{
+			return action();
+		}
 	}
 
 	private sealed class TempDirectory : IDisposable

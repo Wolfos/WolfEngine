@@ -114,6 +114,7 @@ public static class Program
 		services.AddSingleton<IEditorModeState, EditorModeState>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
+		services.AddSingleton<IAssetThumbnailLoader, AssetThumbnailLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<IGizmoLineRenderer, GizmoLineRenderer>();
 		services.AddSingleton<TerrainToolSettingsOverlay>();
