@@ -379,6 +379,113 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void RenameAssetSource_MovesFileMetaAndPreservesIds()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var originalSourcePath = originalAsset.RelativeSourcePath;
+		var originalAbsoluteSourcePath = environment.ProjectService.GetAbsolutePath(originalSourcePath);
+		var originalAbsoluteMetaPath = originalAbsoluteSourcePath + ".meta";
+
+		var renamedPath = environment.ProjectService.RenameAssetSource(originalSourcePath, "Renamed");
+
+		Assert.That(renamedPath, Is.EqualTo("Assets/Materials/Renamed.mat.json"));
+		Assert.That(File.Exists(originalAbsoluteSourcePath), Is.False);
+		Assert.That(File.Exists(originalAbsoluteMetaPath), Is.False);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedPath)), Is.True);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedPath) + ".meta"), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var renamedAsset), Is.True);
+		Assert.That(renamedAsset.SourceId, Is.EqualTo(originalAsset.SourceId));
+		Assert.That(renamedAsset.RelativeSourcePath, Is.EqualTo(renamedPath));
+		Assert.That(renamedAsset.Name, Is.EqualTo("Renamed.mat"));
+	}
+
+	[Test]
+	public void RenameAssetSource_PreservesCompoundExtension()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var renamedPath = environment.ProjectService.RenameAssetSource(originalAsset.RelativeSourcePath, "Gameplay Config");
+
+		Assert.That(renamedPath, Is.EqualTo("Assets/Data/Gameplay Config.data.json"));
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedPath)), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var renamedAsset), Is.True);
+		Assert.That(renamedAsset.RelativeSourcePath, Is.EqualTo(renamedPath));
+	}
+
+	[Test]
+	public void RenameFolder_MovesNestedAssetsAndPreservesIds()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data/Nested");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var renamedFolderPath = environment.ProjectService.RenameFolder("Assets/Data", "Configs");
+
+		Assert.That(renamedFolderPath, Is.EqualTo("Assets/Configs"));
+		Assert.That(Directory.Exists(environment.ProjectService.GetAbsolutePath("Assets/Data")), Is.False);
+		Assert.That(Directory.Exists(environment.ProjectService.GetAbsolutePath("Assets/Configs")), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var renamedAsset), Is.True);
+		Assert.That(renamedAsset.SourceId, Is.EqualTo(originalAsset.SourceId));
+		Assert.That(renamedAsset.RelativeSourcePath, Is.EqualTo("Assets/Configs/Nested/New RenderConfig.data.json"));
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedAsset.RelativeSourcePath)), Is.True);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedAsset.RelativeSourcePath) + ".meta"), Is.True);
+	}
+
+	[Test]
+	public void RenameOperations_RejectInvalidNamesAndCollisions()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var first = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		var second = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(first.Success, Is.True);
+		Assert.That(second.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(first.AssetId!.Value, out var firstAsset), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(second.AssetId!.Value, out var secondAsset), Is.True);
+
+		Assert.That(
+			() => environment.ProjectService.RenameAssetSource(firstAsset.RelativeSourcePath, string.Empty),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.RenameAssetSource(firstAsset.RelativeSourcePath, "../Bad"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.RenameAssetSource(firstAsset.RelativeSourcePath,
+				Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(
+					Path.GetFileName(secondAsset.RelativeSourcePath)))),
+			Throws.TypeOf<IOException>());
+		Assert.That(
+			() => environment.ProjectService.RenameFolder("Assets", "Renamed"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.RenameFolder("Assets/Materials", "."),
+			Throws.TypeOf<InvalidOperationException>());
+	}
+
+	[Test]
+	public void RenameAssetSource_AllowsCaseOnlyRename()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var renamedPath = environment.ProjectService.RenameAssetSource(originalAsset.RelativeSourcePath, "new material");
+
+		Assert.That(renamedPath, Is.EqualTo("Assets/Materials/new material.mat.json"));
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var renamedAsset), Is.True);
+		Assert.That(renamedAsset.RelativeSourcePath, Is.EqualTo(renamedPath));
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(renamedPath)), Is.True);
+	}
+
+	[Test]
 	public void DeleteAssetSource_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteAssetSourceTests", Guid.NewGuid().ToString("N"));

@@ -26,6 +26,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private const float SearchInputMinWidth = 96.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
+	private const string RenamePopupId = "AssetsWindowRename";
 	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
 	private const string LocalItemContextMenuId = "ItemContextMenu";
 
@@ -44,6 +45,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private Guid? _expandedSourceId;
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
+	private PendingRenameTarget? _pendingRenameTarget;
+	private bool _openRenamePopup;
+	private string _renameName = string.Empty;
+	private string _renameErrorMessage = string.Empty;
 	private string _assetSearchText = string.Empty;
 
 	public AssetsWindow(
@@ -69,6 +74,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	internal string? PendingDeleteKindForTesting => _pendingDeleteTarget?.Kind.ToString();
 	internal string? PendingDeleteRelativePathForTesting => _pendingDeleteTarget?.RelativePath;
+	internal string? PendingRenameKindForTesting => _pendingRenameTarget?.Kind.ToString();
+	internal string? PendingRenameRelativePathForTesting => _pendingRenameTarget?.RelativePath;
 
 	internal void SetSelectedFolderForTesting(string relativeFolderPath)
 	{
@@ -85,6 +92,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
+			HandleRenameShortcut();
 		}
 
 		if (_projectService.HasOpenProject == false || string.IsNullOrWhiteSpace(_projectService.AssetsPath))
@@ -93,6 +101,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			ImGui.TextUnformatted("No project open.");
 			ImGui.EndDisabled();
 			DrawDeletePopup();
+			DrawRenamePopup();
 			DrawErrorPopup();
 			ImGui.End();
 			return;
@@ -110,6 +119,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.SameLine(0.0f, 0.0f);
 		DrawContentArea(selectedFolder, scene);
 		DrawDeletePopup();
+		DrawRenamePopup();
 		DrawErrorPopup();
 		ImGui.End();
 	}
@@ -438,6 +448,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 				scene,
 				source,
 				BrowserContextTarget.ForSource(source.RelativeSourcePath, source.SourceId, source.PrimaryAsset.Id),
+				renameLabel: "Rename",
 				deleteLabel: "Delete");
 			ImGui.EndPopup();
 		}
@@ -521,6 +532,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 				scene,
 				source,
 				BrowserContextTarget.ForSubAsset(source.RelativeSourcePath, source.SourceId, subAsset.Id),
+				renameLabel: "Rename Source Asset",
 				deleteLabel: "Delete Source Asset");
 			ImGui.EndPopup();
 		}
@@ -538,6 +550,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		var canDelete =
 			string.Equals(folderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false;
+		if (canDelete && ImGui.MenuItem("Rename"))
+		{
+			RequestRename(PendingRenameTarget.ForFolder(folderPath));
+		}
+
 		if (canDelete && ImGui.MenuItem("Delete Folder"))
 		{
 			RequestDelete(PendingDeleteTarget.ForFolder(folderPath));
@@ -545,7 +562,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	}
 
 	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem,
-		BrowserContextTarget contextTarget, string deleteLabel)
+		BrowserContextTarget contextTarget, string renameLabel, string deleteLabel)
 	{
 		var asset = ResolveTargetAsset(contextTarget);
 		if (asset is not null && asset.Type == AssetType.Model3D && ImGui.MenuItem("Add to Scene"))
@@ -582,6 +599,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 				_expandedSourceId =
 					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, sourceItem.SourceId);
 			}
+		}
+
+		if (ImGui.MenuItem(renameLabel))
+		{
+			RequestRename(PendingRenameTarget.ForSource(contextTarget.RelativeSourcePath!));
 		}
 
 		if (ImGui.MenuItem(deleteLabel))
@@ -667,6 +689,70 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.EndPopup();
 	}
 
+	private void DrawRenamePopup()
+	{
+		if (_openRenamePopup)
+		{
+			ImGui.OpenPopup(RenamePopupId);
+			_openRenamePopup = false;
+		}
+
+		var isOpen = true;
+		ImGui.SetNextWindowSize(new Vector2(420.0f, 0.0f), ImGuiCond.Appearing);
+		if (ImGui.BeginPopupModal(RenamePopupId, ref isOpen, ImGuiWindowFlags.AlwaysAutoResize) == false)
+		{
+			return;
+		}
+
+		if (_pendingRenameTarget is not null)
+		{
+			ImGui.TextUnformatted(_pendingRenameTarget.Title);
+			ImGui.Spacing();
+			ImGui.SetNextItemWidth(280.0f);
+			if (_pendingRenameTarget.FocusInput)
+			{
+				ImGui.SetKeyboardFocusHere();
+				_pendingRenameTarget = _pendingRenameTarget with { FocusInput = false };
+			}
+
+			var submitted = ImGui.InputText(
+				"##RenameName",
+				ref _renameName,
+				256,
+				ImGuiInputTextFlags.EnterReturnsTrue);
+			if (string.IsNullOrEmpty(_pendingRenameTarget.Suffix) == false)
+			{
+				ImGui.SameLine();
+				ImGui.TextDisabled(_pendingRenameTarget.Suffix);
+			}
+
+			if (string.IsNullOrWhiteSpace(_renameErrorMessage) == false)
+			{
+				ImGui.Spacing();
+				ImGui.TextWrapped(_renameErrorMessage);
+			}
+
+			ImGui.Spacing();
+			if (submitted || ImGui.Button("Rename", new Vector2(100.0f, 0.0f)))
+			{
+				if (ExecutePendingRename())
+				{
+					ImGui.CloseCurrentPopup();
+				}
+			}
+
+			ImGui.SameLine();
+			if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)) || ImGui.IsKeyPressed(ImGuiKey.Escape))
+			{
+				_pendingRenameTarget = null;
+				_renameErrorMessage = string.Empty;
+				ImGui.CloseCurrentPopup();
+			}
+		}
+
+		ImGui.EndPopup();
+	}
+
 	private void DrawErrorPopup()
 	{
 		if (_openErrorPopup)
@@ -724,10 +810,83 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
+	private bool ExecutePendingRename()
+	{
+		if (_pendingRenameTarget is null)
+		{
+			return true;
+		}
+
+		try
+		{
+			switch (_pendingRenameTarget.Kind)
+			{
+				case RenameTargetKind.Source:
+					_projectService.RenameAssetSource(_pendingRenameTarget.RelativePath, _renameName);
+					if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+					    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+					{
+						SelectAsset(selectedAsset, requestFocus: false);
+					}
+					break;
+				case RenameTargetKind.Folder:
+					var newFolderPath = _projectService.RenameFolder(_pendingRenameTarget.RelativePath, _renameName);
+					UpdateSelectedFolderAfterRename(_pendingRenameTarget.RelativePath, newFolderPath);
+					break;
+			}
+
+			ValidateSelectionAfterProjectMutation();
+			_pendingRenameTarget = null;
+			_renameErrorMessage = string.Empty;
+			return true;
+		}
+		catch (Exception ex)
+		{
+			_renameErrorMessage = ex.Message;
+			return false;
+		}
+	}
+
 	private void RequestDelete(PendingDeleteTarget deleteTarget)
 	{
 		_pendingDeleteTarget = deleteTarget;
 		_openDeletePopup = true;
+	}
+
+	private void RequestRename(PendingRenameTarget renameTarget)
+	{
+		_pendingRenameTarget = renameTarget;
+		_renameName = renameTarget.EditableName;
+		_renameErrorMessage = string.Empty;
+		_openRenamePopup = true;
+	}
+
+	public bool RequestRenameSelectedItem()
+	{
+		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+		{
+			RequestRename(PendingRenameTarget.ForSource(selectedAsset.RelativeSourcePath));
+			return true;
+		}
+
+		if (string.Equals(_selectedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		RequestRename(PendingRenameTarget.ForFolder(_selectedFolderPath));
+		return true;
+	}
+
+	private void HandleRenameShortcut()
+	{
+		if (ImGui.GetIO().WantTextInput || ImGui.IsKeyPressed(ImGuiKey.F2) == false)
+		{
+			return;
+		}
+
+		RequestRenameSelectedItem();
 	}
 
 	public bool RequestDeleteSelectedItem()
@@ -820,6 +979,24 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		    false)
 		{
 			_expandedSourceId = null;
+		}
+	}
+
+	private void UpdateSelectedFolderAfterRename(string oldFolderPath, string newFolderPath)
+	{
+		var normalizedOldPath = ProjectPathUtility.NormalizeAssetsFolderPath(oldFolderPath);
+		var normalizedNewPath = ProjectPathUtility.NormalizeAssetsFolderPath(newFolderPath);
+		if (string.Equals(_selectedFolderPath, normalizedOldPath, StringComparison.OrdinalIgnoreCase))
+		{
+			SetSelectedFolderPath(normalizedNewPath);
+			return;
+		}
+
+		var oldPrefix = normalizedOldPath + "/";
+		if (_selectedFolderPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+		{
+			SetSelectedFolderPath(ProjectPathUtility.NormalizeRelativePath(
+				normalizedNewPath + "/" + _selectedFolderPath[oldPrefix.Length..]));
 		}
 	}
 
@@ -1081,7 +1258,67 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
+	private sealed record PendingRenameTarget(
+		RenameTargetKind Kind,
+		string RelativePath,
+		string EditableName,
+		string Suffix,
+		string Title,
+		bool FocusInput = true)
+	{
+		public static PendingRenameTarget ForSource(string relativeSourcePath)
+		{
+			var fileName = Path.GetFileName(relativeSourcePath);
+			var suffix = GetAssetSourceSuffix(fileName);
+			var editableName = suffix.Length == 0 ? fileName : fileName[..^suffix.Length];
+			return new PendingRenameTarget(
+				RenameTargetKind.Source,
+				relativeSourcePath,
+				editableName,
+				suffix,
+				"Rename Asset");
+		}
+
+		public static PendingRenameTarget ForFolder(string relativeFolderPath)
+		{
+			var folderName = Path.GetFileName(relativeFolderPath);
+			return new PendingRenameTarget(
+				RenameTargetKind.Folder,
+				relativeFolderPath,
+				folderName,
+				string.Empty,
+				"Rename Folder");
+		}
+
+		private static string GetAssetSourceSuffix(string fileName)
+		{
+			string[] compoundSuffixes =
+			[
+				MaterialAsset.FileExtension,
+				DataAssetFile.FileExtension,
+				EditorSceneAssetFile.FileExtension,
+				PrefabAssetFile.FileExtension
+			];
+
+			for (var i = 0; i < compoundSuffixes.Length; i++)
+			{
+				if (fileName.EndsWith(compoundSuffixes[i], StringComparison.OrdinalIgnoreCase))
+				{
+					return fileName[^compoundSuffixes[i].Length..];
+				}
+			}
+
+			return Path.GetExtension(fileName);
+		}
+	}
+
 	private enum DeleteTargetKind
+	{
+		Source,
+		Folder
+	}
+
+	private enum RenameTargetKind
 	{
 		Source,
 		Folder

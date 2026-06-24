@@ -139,6 +139,8 @@ public sealed class MaterialImporterTests
 		public string GetAbsolutePath(string relativePath) => Path.Combine(_projectRootPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
 		public void DeleteAssetSource(string relativeSourcePath) => throw new NotSupportedException();
 		public void DeleteFolder(string relativeFolderPath) => throw new NotSupportedException();
+		public string RenameAssetSource(string relativeSourcePath, string newName) => throw new NotSupportedException();
+		public string RenameFolder(string relativeFolderPath, string newName) => throw new NotSupportedException();
 	}
 
 	private sealed class TempDirectory : IDisposable

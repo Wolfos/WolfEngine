@@ -300,6 +300,59 @@ public sealed class EditorCommandServiceTests
 		Assert.That(window.PendingDeleteRelativePathForTesting, Is.EqualTo("Assets/Data"));
 	}
 
+	[Test]
+	public void AssetsWindow_RequestRenameSelectedItem_TargetsSelectedAssetBeforeFolder()
+	{
+		var projectService = new AssetLookupProjectService();
+		var selectionService = new AssetSelectionService();
+		var selectedAssetId = Guid.NewGuid();
+		var asset = new AssetDatabaseEntry
+		{
+			Id = selectedAssetId,
+			RelativeSourcePath = "Assets/Materials/Test.mat.json"
+		};
+		projectService.Register(asset);
+		selectionService.Select(selectedAssetId);
+
+		var window = new AssetsWindow(
+			projectService,
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			selectionService,
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>());
+		window.SetSelectedFolderForTesting("Assets/Data");
+
+		var requested = window.RequestRenameSelectedItem();
+
+		Assert.That(requested, Is.True);
+		Assert.That(window.PendingRenameKindForTesting, Is.EqualTo("Source"));
+		Assert.That(window.PendingRenameRelativePathForTesting, Is.EqualTo("Assets/Materials/Test.mat.json"));
+	}
+
+	[Test]
+	public void AssetsWindow_RequestRenameSelectedItem_FallsBackToSelectedFolder()
+	{
+		var window = new AssetsWindow(
+			Substitute.For<IEditorProjectService>(),
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			new AssetSelectionService(),
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>());
+		window.SetSelectedFolderForTesting("Assets/Data");
+
+		var requested = window.RequestRenameSelectedItem();
+
+		Assert.That(requested, Is.True);
+		Assert.That(window.PendingRenameKindForTesting, Is.EqualTo("Folder"));
+		Assert.That(window.PendingRenameRelativePathForTesting, Is.EqualTo("Assets/Data"));
+	}
+
 	private static CommandFixture CreateCommandFixture()
 	{
 		var sceneWorkspace = Substitute.For<IEditorSceneWorkspace>();
@@ -411,5 +464,7 @@ public sealed class EditorCommandServiceTests
 		public string GetAbsolutePath(string relativePath) => throw new NotSupportedException();
 		public void DeleteAssetSource(string relativeSourcePath) => throw new NotSupportedException();
 		public void DeleteFolder(string relativeFolderPath) => throw new NotSupportedException();
+		public string RenameAssetSource(string relativeSourcePath, string newName) => throw new NotSupportedException();
+		public string RenameFolder(string relativeFolderPath, string newName) => throw new NotSupportedException();
 	}
 }
