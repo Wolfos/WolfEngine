@@ -22,6 +22,13 @@ internal sealed class AssetsWindowFolderNode
 	public List<AssetsWindowSourceItem> Sources { get; } = [];
 }
 
+internal sealed class AssetsWindowFolderContents
+{
+	public required bool IsSearchActive { get; init; }
+	public required IReadOnlyList<AssetsWindowFolderNode> Folders { get; init; }
+	public required IReadOnlyList<AssetsWindowSourceItem> Sources { get; init; }
+}
+
 internal sealed class AssetsWindowSourceItem
 {
 	public required Guid SourceId { get; init; }
@@ -90,6 +97,32 @@ internal static class AssetsWindowBrowserModelBuilder
 	public static Guid? ToggleExpandedSource(Guid? expandedSourceId, Guid clickedSourceId)
 	{
 		return expandedSourceId == clickedSourceId ? null : clickedSourceId;
+	}
+
+	public static AssetsWindowFolderContents GetFolderContents(AssetsWindowFolderNode folder, string? searchText)
+	{
+		ArgumentNullException.ThrowIfNull(folder);
+
+		var normalizedSearchText = searchText?.Trim();
+		if (string.IsNullOrWhiteSpace(normalizedSearchText))
+		{
+			return new AssetsWindowFolderContents
+			{
+				IsSearchActive = false,
+				Folders = folder.Children,
+				Sources = folder.Sources
+			};
+		}
+
+		var matchingFolders = new List<AssetsWindowFolderNode>();
+		var matchingSources = new List<AssetsWindowSourceItem>();
+		CollectMatchingContents(folder, normalizedSearchText, includeFolder: false, matchingFolders, matchingSources);
+		return new AssetsWindowFolderContents
+		{
+			IsSearchActive = true,
+			Folders = matchingFolders,
+			Sources = matchingSources
+		};
 	}
 
 	private static AssetsWindowSourceItem CreateSourceItem(IGrouping<Guid, AssetDatabaseEntry> group)
@@ -170,6 +203,39 @@ internal static class AssetsWindowBrowserModelBuilder
 	private static bool IsVisibleAsset(AssetDatabaseEntry asset)
 	{
 		return asset.Type != AssetType.SceneCell;
+	}
+
+	private static void CollectMatchingContents(
+		AssetsWindowFolderNode folder,
+		string searchText,
+		bool includeFolder,
+		List<AssetsWindowFolderNode> matchingFolders,
+		List<AssetsWindowSourceItem> matchingSources)
+	{
+		if (includeFolder && MatchesSearch(folder.Name, searchText))
+		{
+			matchingFolders.Add(folder);
+		}
+
+		for (var i = 0; i < folder.Sources.Count; i++)
+		{
+			var source = folder.Sources[i];
+			if (MatchesSearch(source.DisplayName, searchText) ||
+			    MatchesSearch(source.PrimaryAsset.Name, searchText))
+			{
+				matchingSources.Add(source);
+			}
+		}
+
+		for (var i = 0; i < folder.Children.Count; i++)
+		{
+			CollectMatchingContents(folder.Children[i], searchText, includeFolder: true, matchingFolders, matchingSources);
+		}
+	}
+
+	private static bool MatchesSearch(string value, string searchText)
+	{
+		return value.Contains(searchText, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static int GetAssetTypeSortOrder(AssetDatabaseEntry asset)

@@ -123,6 +123,140 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void GetFolderContents_BlankSearch_ReturnsDirectFolderContents()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Materials"));
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Textures"));
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				CreateAsset("Assets/root.mat.json", "RootMaterial", AssetType.Material),
+				CreateAsset("Assets/Materials/nested.mat.json", "NestedMaterial", AssetType.Material)
+			]
+		};
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+		var assetsFolder = browserModel.FoldersByPath["Assets"];
+
+		var contents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "   ");
+
+		Assert.That(contents.IsSearchActive, Is.False);
+		Assert.That(contents.Folders, Is.SameAs(assetsFolder.Children));
+		Assert.That(contents.Sources, Is.SameAs(assetsFolder.Sources));
+		Assert.That(contents.Folders.Select(folder => folder.RelativePath), Is.EquivalentTo(new[] { "Assets/Materials", "Assets/Textures" }));
+		Assert.That(contents.Sources.Select(source => source.PrimaryAsset.Name), Is.EqualTo(new[] { "RootMaterial" }));
+	}
+
+	[Test]
+	public void GetFolderContents_SearchActive_IncludesMatchesFromSelectedSubtree()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Materials", "Stone"));
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Textures"));
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				CreateAsset("Assets/Materials/Stone/granite.mat.json", "GraniteMaterial", AssetType.Material),
+				CreateAsset("Assets/Textures/granite_albedo.png", "GraniteAlbedo", AssetType.Texture2D),
+				CreateAsset("Assets/root.mat.json", "RootMaterial", AssetType.Material)
+			]
+		};
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+		var materialsFolder = browserModel.FoldersByPath["Assets/Materials"];
+
+		var contents = AssetsWindowBrowserModelBuilder.GetFolderContents(materialsFolder, "granite");
+
+		Assert.That(contents.IsSearchActive, Is.True);
+		Assert.That(contents.Sources.Select(source => source.PrimaryAsset.Name), Is.EqualTo(new[] { "GraniteMaterial" }));
+	}
+
+	[Test]
+	public void GetFolderContents_SearchActive_TrimsWhitespaceAndIgnoresCase()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				CreateAsset("Assets/roughStone.mat.json", "RoughStone", AssetType.Material)
+			]
+		};
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+		var assetsFolder = browserModel.FoldersByPath["Assets"];
+
+		var contents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "  roughstone  ");
+
+		Assert.That(contents.IsSearchActive, Is.True);
+		Assert.That(contents.Sources.Select(source => source.PrimaryAsset.Name), Is.EqualTo(new[] { "RoughStone" }));
+	}
+
+	[Test]
+	public void GetFolderContents_SearchActive_MatchesFolderDisplayNameAndSourceNames()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Environment"));
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				CreateAsset("Assets/Environment/oak.prefab.json", "OakPrefab", AssetType.Prefab),
+				CreateAsset("Assets/stone.mat.json", "StoneMaterial", AssetType.Material)
+			]
+		};
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+		var assetsFolder = browserModel.FoldersByPath["Assets"];
+
+		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "environment");
+		var sourceDisplayNameContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "oak.prefab");
+		var primaryNameContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "StoneMaterial");
+
+		Assert.That(folderContents.Folders.Select(folder => folder.RelativePath), Is.EqualTo(new[] { "Assets/Environment" }));
+		Assert.That(sourceDisplayNameContents.Sources.Select(source => source.DisplayName), Is.EqualTo(new[] { "oak.prefab.json" }));
+		Assert.That(primaryNameContents.Sources.Select(source => source.PrimaryAsset.Name), Is.EqualTo(new[] { "StoneMaterial" }));
+	}
+
+	[Test]
+	public void GetFolderContents_SearchActive_DoesNotMatchPathsTypesOrSubAssetNames()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "PathOnly"));
+		var sourceId = Guid.NewGuid();
+		var database = new AssetDatabase
+		{
+			Assets =
+			[
+				CreateAsset("Assets/PathOnly/rock.png", "Rock", AssetType.Texture2D, sourceId),
+				new AssetDatabaseEntry
+				{
+					Id = Guid.NewGuid(),
+					SourceId = sourceId,
+					Type = AssetType.Material,
+					Name = "GeneratedSubAssetOnly",
+					NodeKey = "generated-material",
+					IsGenerated = true,
+					RelativeSourcePath = "Assets/PathOnly/rock.png",
+					RelativeAssetPath = "Assets/GeneratedSubAssetOnly.mat.json"
+				}
+			]
+		};
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(database.Assets, assetsRoot.AssetsPath);
+		var assetsFolder = browserModel.FoldersByPath["Assets"];
+
+		var pathContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "Assets/PathOnly");
+		var typeContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "Texture2D");
+		var subAssetContents = AssetsWindowBrowserModelBuilder.GetFolderContents(assetsFolder, "GeneratedSubAssetOnly");
+
+		Assert.That(pathContents.Folders, Is.Empty);
+		Assert.That(pathContents.Sources, Is.Empty);
+		Assert.That(typeContents.Folders, Is.Empty);
+		Assert.That(typeContents.Sources, Is.Empty);
+		Assert.That(subAssetContents.Folders, Is.Empty);
+		Assert.That(subAssetContents.Sources, Is.Empty);
+	}
+
+	[Test]
 	public void MaterialCreator_CreatesAssetInsideTargetFolder()
 	{
 		using var environment = new EditorProjectTestEnvironment();
@@ -690,6 +824,24 @@ public sealed class AssetsWindowTests
 				Directory.Delete(projectRoot, recursive: true);
 			}
 		}
+	}
+
+	private static AssetDatabaseEntry CreateAsset(
+		string relativeSourcePath,
+		string name,
+		AssetType assetType,
+		Guid? sourceId = null)
+	{
+		return new AssetDatabaseEntry
+		{
+			Id = Guid.NewGuid(),
+			SourceId = sourceId ?? Guid.NewGuid(),
+			Type = assetType,
+			Name = name,
+			NodeKey = "main",
+			RelativeSourcePath = relativeSourcePath,
+			RelativeAssetPath = relativeSourcePath
+		};
 	}
 
 	private sealed class EditorProjectTestEnvironment : IDisposable

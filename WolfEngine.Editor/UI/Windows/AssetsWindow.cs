@@ -23,6 +23,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private const float SubAssetRowHeight = 24.0f;
 	private const float GridMinItemWidth = 132.0f;
 	private const float PaneSeparatorThickness = 2.0f;
+	private const float SearchInputWidth = 220.0f;
+	private const float SearchInputMinWidth = 96.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
 	private const string CurrentFolderContextMenuId = "AssetsWindowCurrentFolderContextMenu";
@@ -43,6 +45,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private Guid? _expandedSourceId;
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
+	private string _assetSearchText = string.Empty;
 
 	public AssetsWindow(
 		IEditorProjectService projectService,
@@ -132,12 +135,13 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private void DrawContentArea(AssetsWindowFolderNode selectedFolder, EditorScene scene)
 	{
 		ImGui.BeginGroup();
-		DrawBreadcrumbs(selectedFolder.RelativePath);
+		DrawBreadcrumbRow(selectedFolder.RelativePath);
 		DrawHorizontalPaneSeparator();
 
 		PushPaneStyle();
 		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
-		DrawCurrentFolderContents(selectedFolder, scene);
+		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(selectedFolder, _assetSearchText);
+		DrawCurrentFolderContents(folderContents, scene);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
@@ -243,6 +247,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), folder.Name);
 	}
 
+	private void DrawBreadcrumbRow(string relativeFolderPath)
+	{
+		DrawBreadcrumbs(relativeFolderPath);
+		DrawSearchInput();
+	}
+
 	private void DrawBreadcrumbs(string relativeFolderPath)
 	{
 		var parts = relativeFolderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -264,11 +274,32 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
-	private void DrawCurrentFolderContents(AssetsWindowFolderNode folder, EditorScene scene)
+	private void DrawSearchInput()
 	{
-		if (folder.Children.Count == 0 && folder.Sources.Count == 0)
+		var style = ImGui.GetStyle();
+		var label = "Search";
+		var labelWidth = ImGui.CalcTextSize(label).X;
+		var currentX = ImGui.GetCursorPosX();
+		var contentMaxX = currentX + ImGui.GetContentRegionAvail().X;
+		var idealTotalWidth = labelWidth + style.ItemInnerSpacing.X + SearchInputWidth;
+		var searchStartX = MathF.Max(currentX + style.ItemSpacing.X, contentMaxX - idealTotalWidth);
+		var inputWidth = MathF.Min(
+			SearchInputWidth,
+			MathF.Max(SearchInputMinWidth, contentMaxX - searchStartX - labelWidth - style.ItemInnerSpacing.X));
+
+		ImGui.SameLine(0.0f, style.ItemSpacing.X);
+		ImGui.SetCursorPosX(searchStartX);
+		ImGui.TextDisabled(label);
+		ImGui.SameLine(0.0f, style.ItemInnerSpacing.X);
+		ImGui.SetNextItemWidth(inputWidth);
+		ImGui.InputText("##AssetsSearch", ref _assetSearchText, 256);
+	}
+
+	private void DrawCurrentFolderContents(AssetsWindowFolderContents contents, EditorScene scene)
+	{
+		if (contents.Folders.Count == 0 && contents.Sources.Count == 0)
 		{
-			ImGui.TextDisabled("This folder is empty.");
+			ImGui.TextDisabled(contents.IsSearchActive ? "No assets match the search." : "This folder is empty.");
 			return;
 		}
 
@@ -281,16 +312,16 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 
 		var columnIndex = 0;
-		for (var i = 0; i < folder.Children.Count; i++)
+		for (var i = 0; i < contents.Folders.Count; i++)
 		{
 			AdvanceTable(ref columnIndex, columnCount);
-			DrawFolderCard(folder.Children[i]);
+			DrawFolderCard(contents.Folders[i]);
 		}
 
-		for (var i = 0; i < folder.Sources.Count; i++)
+		for (var i = 0; i < contents.Sources.Count; i++)
 		{
 			AdvanceTable(ref columnIndex, columnCount);
-			DrawSourceCard(folder.Sources[i], scene);
+			DrawSourceCard(contents.Sources[i], scene);
 		}
 
 		ImGui.EndTable();
