@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.Data.Sqlite;
@@ -35,6 +36,8 @@ public interface IEditorProjectService
 	void DeleteFolder(string relativeFolderPath);
 	string RenameAssetSource(string relativeSourcePath, string newName);
 	string RenameFolder(string relativeFolderPath, string newName);
+	string MoveAssetSourceToFolder(string relativeSourcePath, string targetFolderPath);
+	string MoveFolderToFolder(string relativeFolderPath, string targetFolderPath);
 }
 
 public readonly record struct AssetDatabaseRefreshResult(IReadOnlyCollection<Guid> InvalidatedAssetIds)
@@ -475,6 +478,133 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		ReloadAssetDatabaseFromIndex();
 		return newRelativePath;
+	}
+
+	public string MoveAssetSourceToFolder(string relativeSourcePath, string targetFolderPath)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		var normalizedRelativePath = ProjectPathUtility.NormalizeRelativePath(relativeSourcePath);
+		if (ProjectPathUtility.IsAssetsPathOrDescendant(normalizedRelativePath) == false)
+		{
+			throw new InvalidOperationException($"Path '{relativeSourcePath}' must be inside the Assets folder.");
+		}
+
+		var normalizedTargetFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(targetFolderPath);
+		var absoluteTargetFolderPath = GetAbsolutePath(normalizedTargetFolderPath);
+		if (Directory.Exists(absoluteTargetFolderPath) == false)
+		{
+			throw new DirectoryNotFoundException($"Folder '{normalizedTargetFolderPath}' was not found.");
+		}
+
+		var sourceName = Path.GetFileName(normalizedRelativePath);
+		if (string.IsNullOrWhiteSpace(sourceName))
+		{
+			throw new InvalidOperationException($"Asset source '{normalizedRelativePath}' was not found.");
+		}
+
+		var currentFolderPath = ProjectPathUtility.GetFolderPath(normalizedRelativePath);
+		if (string.Equals(currentFolderPath, normalizedTargetFolderPath, StringComparison.OrdinalIgnoreCase))
+		{
+			return normalizedRelativePath;
+		}
+
+		var absoluteSourcePath = GetAbsolutePath(normalizedRelativePath);
+		var absoluteMetaPath = AssetFileExtensions.GetMetaPath(absoluteSourcePath);
+		if (File.Exists(absoluteSourcePath) == false)
+		{
+			throw new FileNotFoundException($"Asset source '{normalizedRelativePath}' was not found.");
+		}
+
+		var newRelativePath = ProjectPathUtility.NormalizeRelativePath($"{normalizedTargetFolderPath}/{sourceName}");
+		EnsureAssetsDescendantTarget(newRelativePath);
+		var targetSourcePath = GetAbsolutePath(newRelativePath);
+		var targetMetaPath = AssetFileExtensions.GetMetaPath(targetSourcePath);
+		if (File.Exists(targetMetaPath) &&
+		    string.Equals(absoluteMetaPath, targetMetaPath, StringComparison.OrdinalIgnoreCase) == false)
+		{
+			throw new IOException($"Asset metadata '{targetMetaPath}' already exists.");
+		}
+
+		MoveFileNoOverwrite(absoluteSourcePath, targetSourcePath);
+		if (File.Exists(absoluteMetaPath))
+		{
+			MoveFileNoOverwrite(absoluteMetaPath, targetMetaPath);
+		}
+
+		_assetPipelineService.RemoveDeletedSource(_projectRootPath!, normalizedRelativePath);
+		_assetPipelineService.ReimportSource(_projectRootPath!, newRelativePath);
+		ReloadAssetDatabaseFromIndex();
+		return newRelativePath;
+	}
+
+	public string MoveFolderToFolder(string relativeFolderPath, string targetFolderPath)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		var normalizedRelativePath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		if (string.Equals(normalizedRelativePath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		{
+			throw new InvalidOperationException("Cannot move the root Assets folder.");
+		}
+
+		var normalizedTargetFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(targetFolderPath);
+		if (ProjectPathUtility.IsSameOrDescendant(normalizedTargetFolderPath, normalizedRelativePath))
+		{
+			throw new InvalidOperationException("Cannot move a folder into itself or one of its descendants.");
+		}
+
+		var absoluteFolderPath = GetAbsolutePath(normalizedRelativePath);
+		if (Directory.Exists(absoluteFolderPath) == false)
+		{
+			throw new DirectoryNotFoundException($"Folder '{normalizedRelativePath}' was not found.");
+		}
+
+		var absoluteTargetFolderPath = GetAbsolutePath(normalizedTargetFolderPath);
+		if (Directory.Exists(absoluteTargetFolderPath) == false)
+		{
+			throw new DirectoryNotFoundException($"Folder '{normalizedTargetFolderPath}' was not found.");
+		}
+
+		var currentParentPath = ProjectPathUtility.GetParentFolderPath(normalizedRelativePath);
+		if (string.Equals(currentParentPath, normalizedTargetFolderPath, StringComparison.OrdinalIgnoreCase))
+		{
+			return normalizedRelativePath;
+		}
+
+		var folderName = Path.GetFileName(normalizedRelativePath);
+		var newRelativePath = ProjectPathUtility.NormalizeRelativePath($"{normalizedTargetFolderPath}/{folderName}");
+		EnsureAssetsDescendantTarget(newRelativePath);
+
+		var movedSources = CollectMovedSources(normalizedRelativePath, newRelativePath);
+		MoveDirectoryNoOverwrite(absoluteFolderPath, GetAbsolutePath(newRelativePath));
+		for (var i = 0; i < movedSources.Count; i++)
+		{
+			_assetPipelineService.RemoveDeletedSource(_projectRootPath!, movedSources[i].OldPath);
+			_assetPipelineService.ReimportSource(_projectRootPath!, movedSources[i].NewPath);
+		}
+
+		ReloadAssetDatabaseFromIndex();
+		return newRelativePath;
+	}
+
+	private List<(string OldPath, string NewPath)> CollectMovedSources(string oldFolderPath, string newFolderPath)
+	{
+		var oldPrefix = oldFolderPath + "/";
+		return _currentAssetDatabase.Assets
+			.Select(asset => asset.RelativeSourcePath)
+			.Where(path => path.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.Select(path => (
+				OldPath: path,
+				NewPath: ProjectPathUtility.NormalizeRelativePath(newFolderPath + "/" + path[oldPrefix.Length..])))
+			.ToList();
 	}
 
 	private static string GetAssetSourceSuffix(string fileName)

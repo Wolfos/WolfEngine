@@ -486,6 +486,111 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void MoveAssetSourceToFolder_MovesFileMetaAndPreservesIds()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		Directory.CreateDirectory(environment.ProjectService.GetAbsolutePath("Assets/Config"));
+		var result = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var originalSourcePath = originalAsset.RelativeSourcePath;
+		var originalAbsoluteSourcePath = environment.ProjectService.GetAbsolutePath(originalSourcePath);
+		var originalAbsoluteMetaPath = originalAbsoluteSourcePath + ".meta";
+
+		var movedPath = environment.ProjectService.MoveAssetSourceToFolder(originalSourcePath, "Assets/Config");
+
+		Assert.That(movedPath, Is.EqualTo("Assets/Config/New Material.mat.json"));
+		Assert.That(File.Exists(originalAbsoluteSourcePath), Is.False);
+		Assert.That(File.Exists(originalAbsoluteMetaPath), Is.False);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(movedPath)), Is.True);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(movedPath) + ".meta"), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var movedAsset), Is.True);
+		Assert.That(movedAsset.SourceId, Is.EqualTo(originalAsset.SourceId));
+		Assert.That(movedAsset.RelativeSourcePath, Is.EqualTo(movedPath));
+	}
+
+	[Test]
+	public void MoveFolderToFolder_MovesNestedAssetsAndPreservesIds()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		Directory.CreateDirectory(environment.ProjectService.GetAbsolutePath("Assets/Config"));
+		var result = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data/Nested");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var originalAsset), Is.True);
+
+		var movedFolderPath = environment.ProjectService.MoveFolderToFolder("Assets/Data", "Assets/Config");
+
+		Assert.That(movedFolderPath, Is.EqualTo("Assets/Config/Data"));
+		Assert.That(Directory.Exists(environment.ProjectService.GetAbsolutePath("Assets/Data")), Is.False);
+		Assert.That(Directory.Exists(environment.ProjectService.GetAbsolutePath("Assets/Config/Data")), Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(originalAsset.Id, out var movedAsset), Is.True);
+		Assert.That(movedAsset.SourceId, Is.EqualTo(originalAsset.SourceId));
+		Assert.That(movedAsset.RelativeSourcePath, Is.EqualTo("Assets/Config/Data/Nested/New RenderConfig.data.json"));
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(movedAsset.RelativeSourcePath)), Is.True);
+		Assert.That(File.Exists(environment.ProjectService.GetAbsolutePath(movedAsset.RelativeSourcePath) + ".meta"), Is.True);
+	}
+
+	[Test]
+	public void MoveOperations_RejectInvalidTargetsAndCollisions()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var first = environment.MaterialCreator.CreateMaterial("Assets/Materials");
+		var second = environment.MaterialCreator.CreateMaterial("Assets/Textures");
+		var dataAsset = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data/Nested");
+		Assert.That(first.Success, Is.True);
+		Assert.That(second.Success, Is.True);
+		Assert.That(dataAsset.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(first.AssetId!.Value, out var firstAsset), Is.True);
+
+		Assert.That(
+			() => environment.ProjectService.MoveAssetSourceToFolder("../outside.txt", "Assets"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.MoveAssetSourceToFolder(firstAsset.RelativeSourcePath, "Assets/../Library"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.MoveFolderToFolder("Assets", "Assets/Data"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.MoveFolderToFolder("Library", "Assets"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.MoveFolderToFolder("Assets/Data", "Assets/Data/Nested"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.MoveAssetSourceToFolder(firstAsset.RelativeSourcePath, "Assets/Textures"),
+			Throws.TypeOf<IOException>());
+	}
+
+	[Test]
+	public void AssetsWindow_MoveDragTarget_DispatchesToProjectMoveApi()
+	{
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.MoveAssetSourceToFolder("Assets/Models/Car.glb", "Assets/Vehicles")
+			.Returns("Assets/Vehicles/Car.glb");
+		projectService.MoveFolderToFolder("Assets/Models", "Assets/Vehicles")
+			.Returns("Assets/Vehicles/Models");
+		var window = new AssetsWindow(
+			projectService,
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			new AssetSelectionService(),
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>());
+
+		var movedSourcePath = window.MoveDragTargetForTesting("Source", "Assets/Models/Car.glb", "Assets/Vehicles");
+		var movedFolderPath = window.MoveDragTargetForTesting("Folder", "Assets/Models", "Assets/Vehicles");
+
+		Assert.That(movedSourcePath, Is.EqualTo("Assets/Vehicles/Car.glb"));
+		Assert.That(movedFolderPath, Is.EqualTo("Assets/Vehicles/Models"));
+		projectService.Received(1).MoveAssetSourceToFolder("Assets/Models/Car.glb", "Assets/Vehicles");
+		projectService.Received(1).MoveFolderToFolder("Assets/Models", "Assets/Vehicles");
+	}
+
+	[Test]
 	public void DeleteAssetSource_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
 	{
 		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineDeleteAssetSourceTests", Guid.NewGuid().ToString("N"));
@@ -547,6 +652,89 @@ public sealed class AssetsWindowTests
 			Assert.That(pipeline.RemoveDeletedSourcesUnderFolderCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
 			Assert.That(pipeline.LastRemovedFolderPath, Is.EqualTo("Assets/Data"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void MoveAssetSourceToFolder_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineMoveAssetSourceTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "MoveAssetSourceTests");
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Target"));
+
+		var sourcePath = Path.Combine(projectRoot, "Assets", "file.mat.json");
+		File.WriteAllText(sourcePath, "{}");
+		File.WriteAllText(sourcePath + ".meta", "{}");
+
+		var pipeline = new TrackingProjectAssetPipelineService();
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.ResetCounters();
+			projectService.MoveAssetSourceToFolder("Assets/file.mat.json", "Assets/Target");
+
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RemoveDeletedSourceCalls, Is.EqualTo(1));
+			Assert.That(pipeline.ReimportSourceCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LastRemovedSourcePath, Is.EqualTo("Assets/file.mat.json"));
+			Assert.That(pipeline.LastReimportedSourcePath, Is.EqualTo("Assets/Target/file.mat.json"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void MoveFolderToFolder_UsesTargetedIndexRefreshInsteadOfFullProjectRefresh()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineMoveFolderTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "MoveFolderTests");
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Data"));
+		Directory.CreateDirectory(Path.Combine(projectRoot, "Assets", "Target"));
+
+		var sourcePath = Path.Combine(projectRoot, "Assets", "Data", "file.data.json");
+		File.WriteAllText(sourcePath, "{}");
+		File.WriteAllText(sourcePath + ".meta", "{}");
+
+		var pipeline = new TrackingProjectAssetPipelineService
+		{
+			NextRefreshProjectIncrementalResult = CreateAssetDatabase(
+				CreateAssetEntry(Guid.NewGuid(), "hash", "Assets/Data/file.data.json"))
+		};
+		var projectService = new EditorProjectService(pipeline, new TestAssetInstanceRegistry());
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+
+			pipeline.ResetCounters();
+			projectService.MoveFolderToFolder("Assets/Data", "Assets/Target");
+
+			Assert.That(pipeline.RefreshProjectCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RefreshProjectIncrementalCalls, Is.EqualTo(0));
+			Assert.That(pipeline.RemoveDeletedSourceCalls, Is.EqualTo(1));
+			Assert.That(pipeline.ReimportSourceCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LoadDatabaseCalls, Is.EqualTo(1));
+			Assert.That(pipeline.LastRemovedSourcePath, Is.EqualTo("Assets/Data/file.data.json"));
+			Assert.That(pipeline.LastReimportedSourcePath, Is.EqualTo("Assets/Target/Data/file.data.json"));
 		}
 		finally
 		{
@@ -1048,9 +1236,11 @@ public sealed class AssetsWindowTests
 		public int RefreshProjectIncrementalCalls { get; private set; }
 		public int RemoveDeletedSourceCalls { get; private set; }
 		public int RemoveDeletedSourcesUnderFolderCalls { get; private set; }
+		public int ReimportSourceCalls { get; private set; }
 		public int LoadDatabaseCalls { get; private set; }
 		public string? LastRemovedSourcePath { get; private set; }
 		public string? LastRemovedFolderPath { get; private set; }
+		public string? LastReimportedSourcePath { get; private set; }
 
 		public void InitializeProject(string projectRootPath)
 		{
@@ -1112,6 +1302,8 @@ public sealed class AssetsWindowTests
 
 		public void ReimportSource(string projectRootPath, string relativeSourcePath)
 		{
+			ReimportSourceCalls++;
+			LastReimportedSourcePath = relativeSourcePath;
 		}
 
 		public AssetDatabase LoadDatabase(string projectRootPath)
@@ -1161,9 +1353,11 @@ public sealed class AssetsWindowTests
 			RefreshProjectIncrementalCalls = 0;
 			RemoveDeletedSourceCalls = 0;
 			RemoveDeletedSourcesUnderFolderCalls = 0;
+			ReimportSourceCalls = 0;
 			LoadDatabaseCalls = 0;
 			LastRemovedSourcePath = null;
 			LastRemovedFolderPath = null;
+			LastReimportedSourcePath = null;
 		}
 
 		public AssetDatabase? NextRefreshProjectIncrementalResult { get; set; }
@@ -1183,8 +1377,9 @@ public sealed class AssetsWindowTests
 		};
 	}
 
-	private static AssetDatabaseEntry CreateAssetEntry(Guid assetId, string contentHash)
+	private static AssetDatabaseEntry CreateAssetEntry(Guid assetId, string contentHash, string? relativeSourcePath = null)
 	{
+		relativeSourcePath ??= $"Assets/{assetId:N}.glb";
 		return new AssetDatabaseEntry
 		{
 			Id = assetId,
@@ -1192,9 +1387,9 @@ public sealed class AssetsWindowTests
 			Type = AssetType.Mesh,
 			Name = assetId.ToString("N"),
 			NodeKey = "main",
-			RelativeSourcePath = $"Assets/{assetId:N}.glb",
-			RelativeAssetPath = $"Assets/{assetId:N}.glb",
-			RelativeMetaPath = $"Assets/{assetId:N}.glb.meta",
+			RelativeSourcePath = relativeSourcePath,
+			RelativeAssetPath = relativeSourcePath,
+			RelativeMetaPath = $"{relativeSourcePath}.meta",
 			Artifacts =
 			[
 				new AssetArtifactRecord

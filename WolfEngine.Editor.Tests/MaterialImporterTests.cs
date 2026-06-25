@@ -141,6 +141,8 @@ public sealed class MaterialImporterTests
 		public void DeleteFolder(string relativeFolderPath) => throw new NotSupportedException();
 		public string RenameAssetSource(string relativeSourcePath, string newName) => throw new NotSupportedException();
 		public string RenameFolder(string relativeFolderPath, string newName) => throw new NotSupportedException();
+		public string MoveAssetSourceToFolder(string relativeSourcePath, string targetFolderPath) => throw new NotSupportedException();
+		public string MoveFolderToFolder(string relativeFolderPath, string targetFolderPath) => throw new NotSupportedException();
 	}
 
 	private sealed class TempDirectory : IDisposable

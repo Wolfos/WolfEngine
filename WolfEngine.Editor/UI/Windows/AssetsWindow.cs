@@ -24,6 +24,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private const float PaneSeparatorThickness = 2.0f;
 	private const float SearchInputWidth = 220.0f;
 	private const float SearchInputMinWidth = 96.0f;
+	private const float DragPreviewRounding = 4.0f;
 	private const string ErrorPopupId = "AssetsWindowError";
 	private const string DeletePopupId = "AssetsWindowDelete";
 	private const string RenamePopupId = "AssetsWindowRename";
@@ -50,6 +51,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private string _renameName = string.Empty;
 	private string _renameErrorMessage = string.Empty;
 	private string _assetSearchText = string.Empty;
+	private AssetBrowserDragTarget? _pressedDragTarget;
+	private AssetBrowserDragTarget? _activeDragTarget;
+	private string? _hoveredDropFolderPath;
 
 	public AssetsWindow(
 		IEditorProjectService projectService,
@@ -80,6 +84,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	internal void SetSelectedFolderForTesting(string relativeFolderPath)
 	{
 		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+	}
+
+	internal string? MoveDragTargetForTesting(string kind, string relativePath, string targetFolderPath)
+	{
+		var dragTarget = string.Equals(kind, DragTargetKind.Source.ToString(), StringComparison.Ordinal)
+			? AssetBrowserDragTarget.ForSource(relativePath)
+			: AssetBrowserDragTarget.ForFolder(relativePath);
+		return MoveDragTarget(dragTarget, targetFolderPath);
 	}
 
 	public override string Name => "Assets";
@@ -113,11 +125,13 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		PruneState(browserModel);
 		var selectedFolder = browserModel.FoldersByPath[_selectedFolderPath];
 
+		_hoveredDropFolderPath = null;
 		DrawFolderTree(browserModel);
 		ImGui.SameLine(0.0f, 0.0f);
 		DrawVerticalPaneSeparator();
 		ImGui.SameLine(0.0f, 0.0f);
 		DrawContentArea(selectedFolder, scene);
+		CompleteDragDrop();
 		DrawDeletePopup();
 		DrawRenamePopup();
 		DrawErrorPopup();
@@ -151,6 +165,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
 		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(selectedFolder, _assetSearchText);
 		DrawCurrentFolderContents(folderContents, scene);
+		RegisterContentPaneDropTarget();
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
@@ -192,6 +207,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var open = ImGui.TreeNodeEx("##FolderNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
+		RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderTreeLabel(folder, nodeCursorX);
 
 		if (leftClicked)
@@ -253,6 +269,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), folder.Name);
+		if (IsActiveDropTarget(folder.RelativePath))
+		{
+			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 2.0f, ImDrawFlags.None, 2.0f);
+		}
 	}
 
 	private void DrawBreadcrumbRow(string relativeFolderPath)
@@ -345,6 +365,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
+		if (leftClicked)
+		{
+			_pressedDragTarget = AssetBrowserDragTarget.ForFolder(folder.RelativePath);
+		}
+
+		RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderCardContents(folder);
 
 		if (doubleClicked)
@@ -392,6 +418,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			drawList.AddRect(thumbnailMin, thumbnailMax, GetAssetBrowserSeparatorColor());
 		}
 
+		if (IsActiveDropTarget(folder.RelativePath))
+		{
+			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 4.0f, ImDrawFlags.None, 2.0f);
+		}
+
 		DrawCardTextBlock(
 			drawList,
 			itemMin,
@@ -420,6 +451,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		if (headerLeftClicked)
 		{
+			_pressedDragTarget = AssetBrowserDragTarget.ForSource(source.RelativeSourcePath);
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
 			SelectAsset(source.PrimaryAsset);
@@ -538,6 +570,152 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 
 		ImGui.PopID();
+	}
+
+	private void RegisterFolderDropTarget(string folderPath)
+	{
+		if (_activeDragTarget is null || CanDropOnFolder(_activeDragTarget, folderPath) == false)
+		{
+			return;
+		}
+
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup))
+		{
+			_hoveredDropFolderPath = folderPath;
+		}
+	}
+
+	private void RegisterContentPaneDropTarget()
+	{
+		if (_activeDragTarget is null || ImGui.IsAnyItemHovered())
+		{
+			return;
+		}
+
+		if (CanDropOnFolder(_activeDragTarget, _selectedFolderPath) &&
+		    ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup))
+		{
+			_hoveredDropFolderPath = _selectedFolderPath;
+		}
+	}
+
+	private static bool CanDropOnFolder(AssetBrowserDragTarget dragTarget, string targetFolderPath)
+	{
+		return dragTarget.Kind != DragTargetKind.Folder ||
+		       ProjectPathUtility.IsSameOrDescendant(targetFolderPath, dragTarget.RelativePath) == false;
+	}
+
+	private bool IsActiveDropTarget(string folderPath)
+	{
+		return _activeDragTarget is not null &&
+		       _hoveredDropFolderPath is not null &&
+		       string.Equals(_hoveredDropFolderPath, folderPath, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private void CompleteDragDrop()
+	{
+		if (_pressedDragTarget is not null && _activeDragTarget is null && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+		{
+			_activeDragTarget = _pressedDragTarget;
+		}
+
+		if (_activeDragTarget is null)
+		{
+			if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false)
+			{
+				_pressedDragTarget = null;
+			}
+
+			return;
+		}
+
+		if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+		{
+			ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+			DrawDragPreview(_activeDragTarget);
+			return;
+		}
+
+		var dragTarget = _activeDragTarget;
+		var dropFolderPath = _hoveredDropFolderPath;
+		_pressedDragTarget = null;
+		_activeDragTarget = null;
+		_hoveredDropFolderPath = null;
+
+		if (dropFolderPath is null)
+		{
+			return;
+		}
+
+		try
+		{
+			var movedPath = MoveDragTarget(dragTarget, dropFolderPath);
+			if (movedPath is not null)
+			{
+				CompleteSuccessfulMove(dragTarget, movedPath);
+			}
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to move '{Path.GetFileName(dragTarget.RelativePath)}': {ex.Message}");
+		}
+	}
+
+	private string? MoveDragTarget(AssetBrowserDragTarget dragTarget, string targetFolderPath)
+	{
+		return dragTarget.Kind switch
+		{
+			DragTargetKind.Source => _projectService.MoveAssetSourceToFolder(dragTarget.RelativePath, targetFolderPath),
+			DragTargetKind.Folder => _projectService.MoveFolderToFolder(dragTarget.RelativePath, targetFolderPath),
+			_ => null
+		};
+	}
+
+	private void CompleteSuccessfulMove(AssetBrowserDragTarget dragTarget, string movedPath)
+	{
+		switch (dragTarget.Kind)
+		{
+			case DragTargetKind.Source:
+				if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
+				    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
+				{
+					SelectAsset(selectedAsset, requestFocus: false);
+				}
+				else
+				{
+					SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(movedPath));
+				}
+
+				break;
+			case DragTargetKind.Folder:
+				UpdateSelectedFolderAfterMove(dragTarget.RelativePath, movedPath);
+				_folderTreeRevealPath = movedPath;
+				break;
+		}
+
+		_expandedSourceId = null;
+		ValidateSelectionAfterProjectMutation();
+	}
+
+	private static void DrawDragPreview(AssetBrowserDragTarget dragTarget)
+	{
+		var label = Path.GetFileName(dragTarget.RelativePath);
+		if (string.IsNullOrWhiteSpace(label))
+		{
+			label = dragTarget.RelativePath;
+		}
+
+		var style = ImGui.GetStyle();
+		var mousePosition = ImGui.GetIO().MousePos;
+		var padding = new Vector2(style.FramePadding.X + 4.0f, style.FramePadding.Y + 2.0f);
+		var previewMin = mousePosition + new Vector2(16.0f, 18.0f);
+		var previewSize = ImGui.CalcTextSize(label) + (padding * 2.0f);
+		var previewMax = previewMin + previewSize;
+		var drawList = ImGui.GetForegroundDrawList();
+
+		drawList.AddRectFilled(previewMin, previewMax, ImGui.GetColorU32(ImGuiCol.PopupBg), DragPreviewRounding);
+		drawList.AddRect(previewMin, previewMax, ImGui.GetColorU32(ImGuiCol.Border), DragPreviewRounding);
+		drawList.AddText(previewMin + padding, ImGui.GetColorU32(ImGuiCol.Text), label);
 	}
 
 	private void DrawFolderScopedContextMenu(string folderPath)
@@ -1000,6 +1178,24 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
+	private void UpdateSelectedFolderAfterMove(string oldFolderPath, string newFolderPath)
+	{
+		var normalizedOldPath = ProjectPathUtility.NormalizeAssetsFolderPath(oldFolderPath);
+		var normalizedNewPath = ProjectPathUtility.NormalizeAssetsFolderPath(newFolderPath);
+		if (string.Equals(_selectedFolderPath, normalizedOldPath, StringComparison.OrdinalIgnoreCase))
+		{
+			SetSelectedFolderPath(normalizedNewPath);
+			return;
+		}
+
+		var oldPrefix = normalizedOldPath + "/";
+		if (_selectedFolderPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+		{
+			SetSelectedFolderPath(ProjectPathUtility.NormalizeRelativePath(
+				normalizedNewPath + "/" + _selectedFolderPath[oldPrefix.Length..]));
+		}
+	}
+
 	private string GetNearestExistingFolderPath(string relativeFolderPath)
 	{
 		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
@@ -1229,6 +1425,21 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		Folder,
 		Source,
 		SubAsset
+	}
+
+	private sealed record AssetBrowserDragTarget(DragTargetKind Kind, string RelativePath)
+	{
+		public static AssetBrowserDragTarget ForSource(string relativeSourcePath) =>
+			new(DragTargetKind.Source, relativeSourcePath);
+
+		public static AssetBrowserDragTarget ForFolder(string relativeFolderPath) =>
+			new(DragTargetKind.Folder, relativeFolderPath);
+	}
+
+	private enum DragTargetKind
+	{
+		Source,
+		Folder
 	}
 
 	private sealed record PendingDeleteTarget(

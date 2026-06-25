@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
@@ -34,6 +35,13 @@ internal static class ProjectPathUtility
 	public static bool IsAssetsPathOrDescendant(string relativePath)
 	{
 		var normalized = NormalizeRelativePath(relativePath).TrimEnd('/');
+		var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		if (segments.Any(segment => string.Equals(segment, ".", StringComparison.Ordinal) ||
+		                            string.Equals(segment, "..", StringComparison.Ordinal)))
+		{
+			return false;
+		}
+
 		return string.Equals(normalized, AssetPipelinePaths.AssetsFolderName, PathComparison)
 		       || normalized.StartsWith(AssetPipelinePaths.AssetsFolderName + "/", PathComparison);
 	}
