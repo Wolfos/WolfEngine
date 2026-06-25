@@ -37,10 +37,7 @@ public sealed class FrameSnapshotGpuDrawTests
 					ProbeRelocationEnabled = false,
 					ProbeMinFrontfaceDistance = 0.3f,
 					ProbeBackfaceThreshold = 0.4f,
-					ProbeMaxRelocationDistanceFactor = 0.35f,
-				DebugIrradianceAtlas = true,
-				DebugVisibilityAtlas = true,
-				DebugFinalContribution = true
+					ProbeMaxRelocationDistanceFactor = 0.35f
 			}
 		};
 
@@ -66,9 +63,6 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(copied.ProbeMinFrontfaceDistance, Is.EqualTo(0.3f));
 		Assert.That(copied.ProbeBackfaceThreshold, Is.EqualTo(0.4f));
 		Assert.That(copied.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.35f));
-		Assert.That(copied.DebugIrradianceAtlas, Is.True);
-		Assert.That(copied.DebugVisibilityAtlas, Is.True);
-		Assert.That(copied.DebugFinalContribution, Is.True);
 	}
 
 	[Test]
@@ -297,7 +291,7 @@ public sealed class FrameSnapshotGpuDrawTests
 			entity,
 			boxMesh,
 			new ColorRGBA(1.0f, 0.2f, 0.1f, 0.5f),
-			AlphaMode.AlphaBlend,
+			AlphaMode.Opaque,
 			Matrix4x4.CreateTranslation(3.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);
@@ -306,7 +300,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(updates.All(update => update.DrawKind == GpuDrawKind.DebugPrimitive), Is.True);
 		var materialUpdate = updates.Single(update => update.Type == GpuDrawUpdateType.UpdateMaterial);
 		Assert.That(materialUpdate.Material, Is.Not.Null);
-		Assert.That(materialUpdate.Material!.AlphaMode, Is.EqualTo(AlphaMode.AlphaBlend));
+		Assert.That(materialUpdate.Material!.AlphaMode, Is.EqualTo(AlphaMode.Opaque));
 		Assert.That(materialUpdate.Material.Color.R, Is.EqualTo(1.0f).Within(0.0001f));
 		Assert.That(materialUpdate.Material.Color.A, Is.EqualTo(0.5f).Within(0.0001f));
 
@@ -315,7 +309,7 @@ public sealed class FrameSnapshotGpuDrawTests
 			entity,
 			sphereMesh,
 			new ColorRGBA(1.0f, 0.2f, 0.1f, 0.5f),
-			AlphaMode.AlphaBlend,
+			AlphaMode.Opaque,
 			Matrix4x4.CreateTranslation(3.0f, 0.0f, 0.0f));
 		database.EndSync();
 		database.ConsumeUpdates(updates);

@@ -76,7 +76,6 @@ internal static class ProjectGameplayScaffolder
 			$$"""
 			  using WolfEngine.ECS;
 			  using WolfEngine.Gameplay;
-			  using WolfEngineGame.Gameplay.Systems;
 			  
 			  namespace {{rootNamespace}};
 			  
@@ -92,7 +91,7 @@ internal static class ProjectGameplayScaffolder
 			  {
 			  	public IEnumerable<ISystem> CreateSystems()
 			  	{
-			  		yield return new RotateSystem();
+			  		yield break;
 			  	}
 			  
 			  	public void OnLoaded(World world)

@@ -273,7 +273,23 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			{
 				if (_terrainInstances.TryGetValue(update.InstanceHandle.Value, out var terrainRecord))
 				{
-					_terrainInstances[update.InstanceHandle.Value] = terrainRecord with { World = update.World };
+					var updatedRecord = terrainRecord with
+					{
+						World = update.World,
+						RayTracingChunk = update.TerrainRayTracingChunk
+					};
+					if (TerrainRayTracingVertexDataChanged(terrainRecord.RayTracingChunk, update.TerrainRayTracingChunk))
+					{
+						updatedRecord = QueueTerrainVertexUpdate(updatedRecord)
+							? updatedRecord with { HasValidGeometry = true, VertexUpdatePending = false }
+							: updatedRecord with { VertexUpdatePending = true };
+						if (updatedRecord.VertexUpdatePending == false)
+						{
+							_pendingBlasBuilds.Add(updatedRecord.AccelerationStructure);
+						}
+					}
+
+					_terrainInstances[update.InstanceHandle.Value] = updatedRecord;
 					_tlasDirty = true;
 					statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Transform;
 				}
@@ -813,6 +829,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		return true;
+	}
+
+	private static bool TerrainRayTracingVertexDataChanged(
+		in TerrainRayTracingChunkData left,
+		in TerrainRayTracingChunkData right)
+	{
+		return left.ChunkOriginSize.Equals(right.ChunkOriginSize) == false ||
+		       left.HeightmapUvScaleOffset.Equals(right.HeightmapUvScaleOffset) == false;
 	}
 
 	private static ReadOnlySpan<RayTracingInstanceDescription> CollectionsMarshalAsSpan(

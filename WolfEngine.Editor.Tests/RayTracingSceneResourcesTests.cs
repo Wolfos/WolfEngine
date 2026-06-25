@@ -935,7 +935,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void RenderPipeline_DdgiProbeDebugToggleInjectsAlphaBlendedSpherePrimitives()
+	public void RenderPipeline_DdgiProbeDebugToggleInjectsSpherePrimitives()
 	{
 		var config = new RenderConfig
 		{
@@ -962,7 +962,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		Assert.That(entries, Has.Count.EqualTo(4));
 		Assert.That(entries.Select(entry => entry.DrawKind), Is.All.EqualTo(GpuDrawKind.DebugPrimitive));
-		Assert.That(entries.Select(entry => entry.Material.AlphaMode), Is.All.EqualTo(AlphaMode.AlphaBlend));
+		Assert.That(entries.Select(entry => entry.Material.AlphaMode), Is.All.EqualTo(AlphaMode.Opaque));
 		Assert.That(entries.Select(entry => entry.Material.Color), Is.All.EqualTo(ColorRGBA.White));
 		Assert.That(entries.Select(entry => entry.World.M11), Is.All.EqualTo(0.5f).Within(0.0001f));
 		Assert.That(entries.Select(entry => entry.World.M41).Distinct(), Is.EquivalentTo(new[] { 3.0f, 6.0f }));
@@ -1186,8 +1186,16 @@ public sealed class RayTracingSceneResourcesTests
 
 	private static TerrainDrawSurface CreateTerrainSurface()
 	{
+		var heightmap = new Texture(
+			"terrain-height",
+			2,
+			2,
+			false,
+			TextureFormat.Rgba8Unorm,
+			[new TextureMipData(2, 2, new byte[16])]);
+		heightmap.MarkGpuResourcesCreated(new TestTextureResources());
 		return new TerrainDrawSurface(
-			heightmap: null,
+			heightmap,
 			layerIndexMap: null,
 			layerWeightMap: null,
 			heightScale: 16.0f,
@@ -1282,7 +1290,7 @@ public sealed class RayTracingSceneResourcesTests
 		public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor) => throw new NotSupportedException();
 		public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(in BottomLevelAccelerationStructureDescriptor descriptor) => new TestBottomLevelAccelerationStructure(descriptor);
 		public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(in TopLevelAccelerationStructureDescriptor descriptor) => new TestTopLevelAccelerationStructure(descriptor);
-		public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders) => throw new NotSupportedException();
+		public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders) => new TestPipeline(key);
 		public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder() => throw new NotSupportedException();
 	}
 
@@ -1302,7 +1310,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure) { }
 		public void BeginPass(in PassTargets targets, in Viewport viewport) => throw new NotSupportedException();
 		public void EndPass() => throw new NotSupportedException();
-		public void BindPipeline(IGfxPipeline pipeline) => throw new NotSupportedException();
+		public void BindPipeline(IGfxPipeline pipeline) { }
 		public void SetPrimitiveTopology(PrimitiveTopology topology) => throw new NotSupportedException();
 		public void SetScissorRect(in RectInt rect) => throw new NotSupportedException();
 		public void ClearColorAttachment(uint index, ColorRGBA color) => throw new NotSupportedException();
@@ -1312,8 +1320,8 @@ public sealed class RayTracingSceneResourcesTests
 		public void SetBindlessTable(IGfxDescriptorTable table) => throw new NotSupportedException();
 		public void BindConstantBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0) => throw new NotSupportedException();
 		public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data) => throw new NotSupportedException();
-		public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data) => throw new NotSupportedException();
-		public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0) => throw new NotSupportedException();
+		public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data) { }
+		public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0) { }
 		public void PushConstants<T>(in T data) where T : unmanaged => throw new NotSupportedException();
 		public void SetVertexBuffer(in VertexBufferView vertexBuffer) => throw new NotSupportedException();
 		public void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers) => throw new NotSupportedException();
@@ -1323,9 +1331,9 @@ public sealed class RayTracingSceneResourcesTests
 		public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount) => throw new NotSupportedException();
 		public void ExecuteIndirectCommandBufferIndexed(IGfxIndirectCommandBuffer commandBuffer, IGfxBuffer commandIndicesBuffer, ulong indicesOffsetBytes, IGfxBuffer commandCountBuffer, ulong commandCountOffsetBytes) => throw new NotSupportedException();
 		public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure) => throw new NotSupportedException();
-		public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ) => throw new NotSupportedException();
+		public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ) { }
 		public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes) => throw new NotSupportedException();
-		public void Barrier(in ResourceBarrierDescription barrier) => throw new NotSupportedException();
+		public void Barrier(in ResourceBarrierDescription barrier) { }
 	}
 
 	private sealed class TestBottomLevelAccelerationStructure : IGfxBottomLevelAccelerationStructure
@@ -1350,6 +1358,12 @@ public sealed class RayTracingSceneResourcesTests
 		public TopLevelAccelerationStructureDescriptor Descriptor { get; }
 	}
 
+	private sealed class TestPipeline(PipelineKey key) : IGfxPipeline
+	{
+		public string? Name => null;
+		public PipelineKey Key { get; } = key;
+	}
+
 	private sealed class TestBuffer : IGfxBuffer
 	{
 		public TestBuffer(BufferUsage usage)
@@ -1359,6 +1373,21 @@ public sealed class RayTracingSceneResourcesTests
 
 		public string? Name => null;
 		public BufferDescriptor Descriptor { get; }
+	}
+
+	private sealed class TestTextureResources : ITextureResources
+	{
+		public IGfxTexture Texture { get; } = new TestTexture();
+		public DescriptorHandle ShaderResourceView { get; } = new(DescriptorKind.ShaderResourceView, 42);
+	}
+
+	private sealed class TestTexture : IGfxTexture
+	{
+		public string? Name => null;
+		public TextureDescriptor Descriptor { get; } = new(2, 2, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource);
+		public DescriptorHandle ShaderResourceView { get; } = new(DescriptorKind.ShaderResourceView, 42);
+		public DescriptorHandle DepthShaderResourceView => DescriptorHandle.Invalid;
+		public DescriptorHandle UnorderedAccessView => DescriptorHandle.Invalid;
 	}
 
 	private sealed class TestDescriptorTable : IGfxDescriptorTable

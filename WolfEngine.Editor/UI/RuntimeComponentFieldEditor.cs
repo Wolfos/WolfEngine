@@ -150,15 +150,15 @@ public static class RuntimeComponentFieldEditor
 
 	private static void RenderStructGroup(FieldInfo field, Action draw)
 	{
+		if (ImGuiNET.ImGui.GetCurrentContext() == IntPtr.Zero)
+		{
+			draw();
+			return;
+		}
+
 		ImGuiNET.ImGui.PushID(field.Name);
 		try
 		{
-			if (ImGuiNET.ImGui.GetCurrentContext() == IntPtr.Zero)
-			{
-				draw();
-				return;
-			}
-
 			if (EditorUIUtility.CollapsingHeader(field.Name, isOpenByDefault: true) == false)
 			{
 				return;

@@ -153,7 +153,7 @@ public sealed class TextureArtifactPipelineTests
 		var loaded = loader.TryGetTextureThumbnailId(asset, out var textureId);
 
 		Assert.That(loaded, Is.True);
-		Assert.That(textureId, Is.EqualTo(resources.ShaderResourceView.Value));
+		Assert.That(textureId, Is.EqualTo((nint)resources.ShaderResourceView.Value));
 		Assert.That(uploadedTexture, Is.Not.Null);
 		Assert.That(uploadedTexture!.Width, Is.EqualTo(64));
 		Assert.That(uploadedTexture.Height, Is.EqualTo(64));
@@ -176,7 +176,7 @@ public sealed class TextureArtifactPipelineTests
 		var loaded = loader.TryGetTextureThumbnailId(asset, out var textureId);
 
 		Assert.That(loaded, Is.False);
-		Assert.That(textureId, Is.Zero);
+		Assert.That(textureId, Is.EqualTo(nint.Zero));
 		renderer.DidNotReceiveWithAnyArgs().CreateTextureResources(default!);
 	}
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Text.Json.Serialization;
 using WolfEngine.ECS;
 
@@ -25,6 +26,12 @@ public static class RuntimeComponentAccessor
 	{
 		ArgumentNullException.ThrowIfNull(world);
 		ValidateComponentType(componentType);
+		if (IsCollectibleComponentType(componentType))
+		{
+			AddDefaultGenericMethod.MakeGenericMethod(componentType).Invoke(null, [world, entity]);
+			return;
+		}
+
 		AddDefaultDelegates.GetOrAdd(componentType, CreateAddDefaultDelegate)(world, entity);
 	}
 
@@ -32,6 +39,12 @@ public static class RuntimeComponentAccessor
 	{
 		ArgumentNullException.ThrowIfNull(world);
 		ValidateComponentType(componentType);
+		if (IsCollectibleComponentType(componentType))
+		{
+			return ReadBoxedGenericMethod.MakeGenericMethod(componentType).Invoke(null, [world, entity])
+			       ?? throw new InvalidOperationException($"Failed to read component '{componentType.FullName}'.");
+		}
+
 		return ReadBoxedDelegates.GetOrAdd(componentType, CreateReadBoxedDelegate)(world, entity);
 	}
 
@@ -40,6 +53,12 @@ public static class RuntimeComponentAccessor
 		ArgumentNullException.ThrowIfNull(world);
 		ArgumentNullException.ThrowIfNull(componentValue);
 		ValidateComponentType(componentType);
+		if (IsCollectibleComponentType(componentType))
+		{
+			WriteBoxedGenericMethod.MakeGenericMethod(componentType).Invoke(null, [world, entity, componentValue]);
+			return;
+		}
+
 		WriteBoxedDelegates.GetOrAdd(componentType, CreateWriteBoxedDelegate)(world, entity, componentValue);
 	}
 
@@ -47,6 +66,12 @@ public static class RuntimeComponentAccessor
 	{
 		ArgumentNullException.ThrowIfNull(world);
 		ValidateComponentType(componentType);
+		if (IsCollectibleComponentType(componentType))
+		{
+			RemoveGenericMethod.MakeGenericMethod(componentType).Invoke(null, [world, entity]);
+			return;
+		}
+
 		RemoveDelegates.GetOrAdd(componentType, CreateRemoveDelegate)(world, entity);
 	}
 
@@ -74,6 +99,11 @@ public static class RuntimeComponentAccessor
 		return (Action<World, Entity>)Delegate.CreateDelegate(typeof(Action<World, Entity>), method);
 	}
 
+	private static bool IsCollectibleComponentType(Type componentType)
+	{
+		return AssemblyLoadContext.GetLoadContext(componentType.Assembly)?.IsCollectible == true;
+	}
+
 	private static Func<World, Entity, object> CreateReadBoxedDelegate(Type componentType)
 	{
 		var method = ReadBoxedGenericMethod.MakeGenericMethod(componentType);
@@ -95,7 +125,21 @@ public static class RuntimeComponentAccessor
 	private static void AddDefaultGeneric<T>(World world, Entity entity) where T : struct, IEntityComponent
 	{
 		var component = default(T);
-		component.ApplyDefaultValues(world, entity);
+		var parameterlessDefaultMethod = typeof(T).GetMethod(
+			nameof(IEntityComponent.ApplyDefaultValues),
+			BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+			Type.EmptyTypes);
+		if (parameterlessDefaultMethod is not null)
+		{
+			var boxedComponent = (object)component;
+			parameterlessDefaultMethod.Invoke(boxedComponent, null);
+			component = (T)boxedComponent;
+		}
+		else
+		{
+			component.ApplyDefaultValues(world, entity);
+		}
+
 		world.AddComponent(entity, component);
 	}
 

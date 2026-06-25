@@ -180,7 +180,7 @@ public sealed class ScreenSpaceDecalPassTests
 		var gbufferIndex = Array.IndexOf(passNames, "GBuffer");
 		var seedIndex = Array.IndexOf(passNames, "GBuffer Decal Seed");
 		var decalIndex = Array.IndexOf(passNames, "ScreenSpaceDecal");
-		var aoIndex = Array.IndexOf(passNames, "VBAO Evaluate");
+		var aoIndex = Array.IndexOf(passNames, "Ambient Occlusion Evaluate");
 		var deferredIndex = Array.IndexOf(passNames, "Deferred Lighting");
 
 		Assert.That(gbufferIndex, Is.GreaterThanOrEqualTo(0));

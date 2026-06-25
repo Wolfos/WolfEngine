@@ -245,7 +245,7 @@ public sealed class GameplayAssemblyHost : IGameplayAssemblyHost
 		try
 		{
 			var configuration = GetCurrentBuildConfiguration();
-			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" --configuration {configuration}")
+			var startInfo = new ProcessStartInfo("dotnet", $"build \"{gameplayProjectPath}\" --configuration {configuration} /m:1")
 			{
 				WorkingDirectory = projectRootPath,
 				RedirectStandardOutput = true,
