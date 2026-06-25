@@ -972,6 +972,11 @@ public sealed class RayTracingSceneResourcesTests
 	[Test]
 	public void RecordUpdate_BootstrapBuildsOpaqueMeshAndTerrainSceneAndReportsSkippedDraws()
 	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Terrain ray tracing BLAS tests only run on macOS.");
+		}
+
 		var database = new GpuDrawDatabase();
 		var opaqueMesh = CreateTestMesh();
 		var alphaMesh = CreateTestMesh();
@@ -1051,6 +1056,11 @@ public sealed class RayTracingSceneResourcesTests
 	[Test]
 	public void RecordUpdate_TerrainGeometryRevisionRebuildsBlasWithoutRebuildingTlas()
 	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Terrain ray tracing BLAS tests only run on macOS.");
+		}
+
 		var database = new GpuDrawDatabase();
 		var terrainMesh = CreateTestMesh();
 		var terrainMaterial = new Material("__terrain__");
