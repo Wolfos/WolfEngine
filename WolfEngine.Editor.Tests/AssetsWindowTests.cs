@@ -123,6 +123,45 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void SelectionState_UpdateSelectedFolderAfterRelocation_UpdatesSelectedDescendant()
+	{
+		var selection = new AssetsWindowSelectionState();
+		selection.SetSelectedFolderPath("Assets/Old/Nested");
+
+		selection.UpdateSelectedFolderAfterRelocation("Assets/Old", "Assets/New/Old");
+
+		Assert.That(selection.SelectedFolderPath, Is.EqualTo("Assets/New/Old/Nested"));
+		Assert.That(selection.FolderTreeRevealPath, Is.EqualTo("Assets/New/Old/Nested"));
+	}
+
+	[Test]
+	public void SelectionState_ValidateAfterProjectMutation_FallsBackToNearestExistingFolder()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "Existing"));
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.HasOpenProject.Returns(true);
+		projectService.CurrentAssetDatabase.Returns(new AssetDatabase());
+		projectService.GetAbsolutePath(Arg.Any<string>())
+			.Returns(call =>
+			{
+				var relativePath = (string)call[0];
+				return Path.Combine(
+					Directory.GetParent(assetsRoot.AssetsPath)!.FullName,
+					relativePath.Replace('/', Path.DirectorySeparatorChar));
+			});
+		var assetSelectionService = new AssetSelectionService();
+		assetSelectionService.Select(Guid.NewGuid());
+		var selection = new AssetsWindowSelectionState();
+		selection.SetSelectedFolderPath("Assets/Existing/Missing/Nested");
+
+		selection.ValidateAfterProjectMutation(projectService, assetSelectionService);
+
+		Assert.That(selection.SelectedFolderPath, Is.EqualTo("Assets/Existing"));
+		Assert.That(assetSelectionService.SelectedAssetId, Is.Null);
+	}
+
+	[Test]
 	public void GetFolderContents_BlankSearch_ReturnsDirectFolderContents()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();

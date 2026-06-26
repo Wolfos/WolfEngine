@@ -33,11 +33,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private readonly IIconManager _icons;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly AssetsWindowDragDropState _dragDrop = new(DragPreviewRounding);
+	private readonly AssetsWindowSelectionState _selection = new();
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
-	private string _selectedFolderPath = AssetPipelinePaths.AssetsFolderName;
-	private string? _folderTreeRevealPath;
-	private Guid? _expandedSourceId;
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
 	private PendingRenameTarget? _pendingRenameTarget;
@@ -47,9 +46,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private string _renameName = string.Empty;
 	private string _renameErrorMessage = string.Empty;
 	private string _assetSearchText = string.Empty;
-	private AssetBrowserDragTarget? _pressedDragTarget;
-	private AssetBrowserDragTarget? _activeDragTarget;
-	private string? _hoveredDropFolderPath;
 
 	public AssetsWindow(
 		IEditorProjectService projectService,
@@ -79,7 +75,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	internal void SetSelectedFolderForTesting(string relativeFolderPath)
 	{
-		_selectedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		_selection.SetSelectedFolderPath(relativeFolderPath);
 	}
 
 	internal string? MoveDragTargetForTesting(string kind, string relativePath, string targetFolderPath)
@@ -87,7 +83,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var dragTarget = string.Equals(kind, DragTargetKind.Source.ToString(), StringComparison.Ordinal)
 			? AssetBrowserDragTarget.ForSource(relativePath)
 			: AssetBrowserDragTarget.ForFolder(relativePath);
-		return MoveDragTarget(dragTarget, targetFolderPath);
+		return AssetsWindowDragDropState.MoveDragTarget(_projectService, dragTarget, targetFolderPath);
 	}
 
 	internal void HandleCreationResultForTesting(EditorAssetCreationResult result)
@@ -128,16 +124,16 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var browserModel =
 			AssetsWindowBrowserModelBuilder.Build(_projectService.CurrentAssetDatabase.Assets,
 				_projectService.AssetsPath);
-		PruneState(browserModel);
-		var selectedFolder = browserModel.FoldersByPath[_selectedFolderPath];
+		_selection.Prune(browserModel, _projectService, _assetSelectionService);
+		var selectedFolder = browserModel.FoldersByPath[_selection.SelectedFolderPath];
 
-		_hoveredDropFolderPath = null;
+		_dragDrop.BeginFrame();
 		DrawFolderTree(browserModel);
 		ImGui.SameLine(0.0f, 0.0f);
-		DrawVerticalPaneSeparator();
+		AssetsWindowDrawing.DrawVerticalPaneSeparator(PaneSeparatorThickness);
 		ImGui.SameLine(0.0f, 0.0f);
 		DrawContentArea(selectedFolder, scene);
-		CompleteDragDrop();
+		_dragDrop.Complete(_projectService, CompleteSuccessfulMove, ShowError);
 		ProcessScheduledRename();
 		DrawDeletePopup();
 		DrawRenamePopup();
@@ -147,14 +143,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawFolderTree(AssetsWindowBrowserModel browserModel)
 	{
-		PushPaneStyle();
+		AssetsWindowDrawing.PushPaneStyle();
 		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.None);
 		DrawFolderTreeNode(browserModel.RootFolder);
-		_folderTreeRevealPath = null;
+		_selection.ClearFolderRevealPath();
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
-			DrawFolderScopedContextMenu(_selectedFolderPath);
+			DrawFolderScopedContextMenu(_selection.SelectedFolderPath);
 			ImGui.EndPopup();
 		}
 
@@ -166,17 +162,17 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		ImGui.BeginGroup();
 		DrawBreadcrumbRow(selectedFolder.RelativePath);
-		DrawHorizontalPaneSeparator();
+		AssetsWindowDrawing.DrawHorizontalPaneSeparator(PaneSeparatorThickness);
 
-		PushPaneStyle();
+		AssetsWindowDrawing.PushPaneStyle();
 		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
 		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(selectedFolder, _assetSearchText);
 		DrawCurrentFolderContents(folderContents, scene);
-		RegisterContentPaneDropTarget();
+		_dragDrop.RegisterContentPaneDropTarget(_selection.SelectedFolderPath);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
-			DrawFolderScopedContextMenu(_selectedFolderPath);
+			DrawFolderScopedContextMenu(_selection.SelectedFolderPath);
 			ImGui.EndPopup();
 		}
 
@@ -189,9 +185,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		ImGui.PushID(folder.RelativePath);
 
-		var isSelected = string.Equals(_selectedFolderPath, folder.RelativePath, StringComparison.OrdinalIgnoreCase);
-		var containsRevealTarget = _folderTreeRevealPath is not null &&
-		                           ProjectPathUtility.IsSameOrDescendant(_folderTreeRevealPath, folder.RelativePath);
+		var isSelected = string.Equals(
+			_selection.SelectedFolderPath,
+			folder.RelativePath,
+			StringComparison.OrdinalIgnoreCase);
+		var containsRevealTarget = _selection.FolderTreeRevealPath is not null &&
+		                           ProjectPathUtility.IsSameOrDescendant(
+			                           _selection.FolderTreeRevealPath,
+			                           folder.RelativePath);
 		var hasChildren = folder.Children.Count > 0;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (hasChildren == false)
@@ -214,7 +215,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var open = ImGui.TreeNodeEx("##FolderNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		RegisterFolderDropTarget(folder.RelativePath);
+		_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderTreeLabel(folder, nodeCursorX);
 
 		if (leftClicked)
@@ -276,7 +277,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), folder.Name);
-		if (IsActiveDropTarget(folder.RelativePath))
+		if (_dragDrop.IsActiveDropTarget(folder.RelativePath))
 		{
 			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 2.0f, ImDrawFlags.None, 2.0f);
 		}
@@ -349,13 +350,13 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var columnIndex = 0;
 		for (var i = 0; i < contents.Folders.Count; i++)
 		{
-			AdvanceTable(ref columnIndex, columnCount);
+			AssetsWindowDrawing.AdvanceTable(ref columnIndex, columnCount);
 			DrawFolderCard(contents.Folders[i]);
 		}
 
 		for (var i = 0; i < contents.Sources.Count; i++)
 		{
-			AdvanceTable(ref columnIndex, columnCount);
+			AssetsWindowDrawing.AdvanceTable(ref columnIndex, columnCount);
 			DrawSourceCard(contents.Sources[i], scene);
 		}
 
@@ -374,10 +375,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 		if (leftClicked)
 		{
-			_pressedDragTarget = AssetBrowserDragTarget.ForFolder(folder.RelativePath);
+			_dragDrop.Press(AssetBrowserDragTarget.ForFolder(folder.RelativePath));
 		}
 
-		RegisterFolderDropTarget(folder.RelativePath);
+		_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderCardContents(folder);
 
 		if (doubleClicked)
@@ -422,15 +423,15 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 		else
 		{
-			drawList.AddRect(thumbnailMin, thumbnailMax, GetAssetBrowserSeparatorColor());
+			drawList.AddRect(thumbnailMin, thumbnailMax, AssetsWindowDrawing.SeparatorColor());
 		}
 
-		if (IsActiveDropTarget(folder.RelativePath))
+		if (_dragDrop.IsActiveDropTarget(folder.RelativePath))
 		{
 			drawList.AddRect(itemMin, itemMax, ImGui.GetColorU32(ImGuiCol.HeaderActive), 4.0f, ImDrawFlags.None, 2.0f);
 		}
 
-		DrawCardTextBlock(
+		AssetsWindowDrawing.DrawCardTextBlock(
 			drawList,
 			itemMin,
 			itemMax,
@@ -441,7 +442,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawSourceCard(AssetsWindowSourceItem source, EditorScene scene)
 	{
-		var isExpanded = _expandedSourceId == source.SourceId;
+		var isExpanded = _selection.ExpandedSourceId == source.SourceId;
 		var toggleHeight = source.SubAssets.Count > 0 ? SourceCardToggleHeight : 0.0f;
 		var totalHeight = SourceCardHeaderHeight + toggleHeight +
 		                  (isExpanded ? source.SubAssets.Count * SubAssetRowHeight : 0.0f);
@@ -458,7 +459,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		if (headerLeftClicked)
 		{
-			_pressedDragTarget = AssetBrowserDragTarget.ForSource(source.RelativeSourcePath);
+			_dragDrop.Press(AssetBrowserDragTarget.ForSource(source.RelativeSourcePath));
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
 			SelectAsset(source.PrimaryAsset);
@@ -468,8 +469,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			}
 			else if (wasPrimarySelected && source.SubAssets.Count > 0)
 			{
-				_expandedSourceId =
-					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
+				_selection.ExpandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_selection.ExpandedSourceId, source.SourceId);
 			}
 		}
 
@@ -497,8 +498,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2.0f);
 			if (ImGui.SmallButton(isExpanded ? "Hide Sub-assets" : $"Show Sub-assets ({source.SubAssets.Count})"))
 			{
-				_expandedSourceId =
-					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, source.SourceId);
+				_selection.ExpandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_selection.ExpandedSourceId, source.SourceId);
 			}
 		}
 
@@ -532,7 +533,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			new Vector2(itemMin.X + ((itemMax.X - itemMin.X) - ThumbnailSize.X) * 0.5f, itemMin.Y + 12.0f);
 		var thumbnailMax = thumbnailMin + ThumbnailSize;
 		DrawAssetThumbnail(drawList, thumbnailMin, thumbnailMax, source.PrimaryAsset);
-		DrawCardTextBlock(
+		AssetsWindowDrawing.DrawCardTextBlock(
 			drawList,
 			itemMin,
 			itemMax,
@@ -579,105 +580,6 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.PopID();
 	}
 
-	private void RegisterFolderDropTarget(string folderPath)
-	{
-		if (_activeDragTarget is null || CanDropOnFolder(_activeDragTarget, folderPath) == false)
-		{
-			return;
-		}
-
-		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup))
-		{
-			_hoveredDropFolderPath = folderPath;
-		}
-	}
-
-	private void RegisterContentPaneDropTarget()
-	{
-		if (_activeDragTarget is null || ImGui.IsAnyItemHovered())
-		{
-			return;
-		}
-
-		if (CanDropOnFolder(_activeDragTarget, _selectedFolderPath) &&
-		    ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup))
-		{
-			_hoveredDropFolderPath = _selectedFolderPath;
-		}
-	}
-
-	private static bool CanDropOnFolder(AssetBrowserDragTarget dragTarget, string targetFolderPath)
-	{
-		return dragTarget.Kind != DragTargetKind.Folder ||
-		       ProjectPathUtility.IsSameOrDescendant(targetFolderPath, dragTarget.RelativePath) == false;
-	}
-
-	private bool IsActiveDropTarget(string folderPath)
-	{
-		return _activeDragTarget is not null &&
-		       _hoveredDropFolderPath is not null &&
-		       string.Equals(_hoveredDropFolderPath, folderPath, StringComparison.OrdinalIgnoreCase);
-	}
-
-	private void CompleteDragDrop()
-	{
-		if (_pressedDragTarget is not null && _activeDragTarget is null && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
-		{
-			_activeDragTarget = _pressedDragTarget;
-		}
-
-		if (_activeDragTarget is null)
-		{
-			if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false)
-			{
-				_pressedDragTarget = null;
-			}
-
-			return;
-		}
-
-		if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
-		{
-			ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-			DrawDragPreview(_activeDragTarget);
-			return;
-		}
-
-		var dragTarget = _activeDragTarget;
-		var dropFolderPath = _hoveredDropFolderPath;
-		_pressedDragTarget = null;
-		_activeDragTarget = null;
-		_hoveredDropFolderPath = null;
-
-		if (dropFolderPath is null)
-		{
-			return;
-		}
-
-		try
-		{
-			var movedPath = MoveDragTarget(dragTarget, dropFolderPath);
-			if (movedPath is not null)
-			{
-				CompleteSuccessfulMove(dragTarget, movedPath);
-			}
-		}
-		catch (Exception ex)
-		{
-			ShowError($"Failed to move '{Path.GetFileName(dragTarget.RelativePath)}': {ex.Message}");
-		}
-	}
-
-	private string? MoveDragTarget(AssetBrowserDragTarget dragTarget, string targetFolderPath)
-	{
-		return dragTarget.Kind switch
-		{
-			DragTargetKind.Source => _projectService.MoveAssetSourceToFolder(dragTarget.RelativePath, targetFolderPath),
-			DragTargetKind.Folder => _projectService.MoveFolderToFolder(dragTarget.RelativePath, targetFolderPath),
-			_ => null
-		};
-	}
-
 	private void CompleteSuccessfulMove(AssetBrowserDragTarget dragTarget, string movedPath)
 	{
 		switch (dragTarget.Kind)
@@ -690,39 +592,18 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 				}
 				else
 				{
-					SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(movedPath));
+					_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(movedPath));
 				}
 
 				break;
 			case DragTargetKind.Folder:
-				UpdateSelectedFolderAfterMove(dragTarget.RelativePath, movedPath);
-				_folderTreeRevealPath = movedPath;
+				_selection.UpdateSelectedFolderAfterRelocation(dragTarget.RelativePath, movedPath);
+				_selection.RevealFolderPath(movedPath);
 				break;
 		}
 
-		_expandedSourceId = null;
+		_selection.ExpandedSourceId = null;
 		ValidateSelectionAfterProjectMutation();
-	}
-
-	private static void DrawDragPreview(AssetBrowserDragTarget dragTarget)
-	{
-		var label = Path.GetFileName(dragTarget.RelativePath);
-		if (string.IsNullOrWhiteSpace(label))
-		{
-			label = dragTarget.RelativePath;
-		}
-
-		var style = ImGui.GetStyle();
-		var mousePosition = ImGui.GetIO().MousePos;
-		var padding = new Vector2(style.FramePadding.X + 4.0f, style.FramePadding.Y + 2.0f);
-		var previewMin = mousePosition + new Vector2(16.0f, 18.0f);
-		var previewSize = ImGui.CalcTextSize(label) + (padding * 2.0f);
-		var previewMax = previewMin + previewSize;
-		var drawList = ImGui.GetForegroundDrawList();
-
-		drawList.AddRectFilled(previewMin, previewMax, ImGui.GetColorU32(ImGuiCol.PopupBg), DragPreviewRounding);
-		drawList.AddRect(previewMin, previewMax, ImGui.GetColorU32(ImGuiCol.Border), DragPreviewRounding);
-		drawList.AddText(previewMin + padding, ImGui.GetColorU32(ImGuiCol.Text), label);
 	}
 
 	private void DrawFolderScopedContextMenu(string folderPath)
@@ -757,8 +638,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		try
 		{
 			var folderPath = _projectService.CreateFolder(parentFolderPath, GetNewFolderName(parentFolderPath));
-			_folderTreeRevealPath = folderPath;
-			_expandedSourceId = null;
+			_selection.RevealFolderPath(folderPath);
+			_selection.ExpandedSourceId = null;
 			ScheduleRename(PendingRenameTarget.ForFolder(folderPath));
 		}
 		catch (Exception ex)
@@ -817,11 +698,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		if (sourceItem.SubAssets.Count > 0 && contextTarget.Kind == BrowserContextKind.Source)
 		{
-			var isExpanded = _expandedSourceId == sourceItem.SourceId;
+			var isExpanded = _selection.ExpandedSourceId == sourceItem.SourceId;
 			if (ImGui.MenuItem(isExpanded ? "Hide Sub-assets" : "Show Sub-assets"))
 			{
-				_expandedSourceId =
-					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_expandedSourceId, sourceItem.SourceId);
+				_selection.ExpandedSourceId =
+					AssetsWindowBrowserModelBuilder.ToggleExpandedSource(_selection.ExpandedSourceId,
+						sourceItem.SourceId);
 			}
 		}
 
@@ -865,11 +747,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			if (_projectService.TryGetAsset(result.AssetId.Value, out var createdAsset))
 			{
-				SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath));
+				_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath));
 				ScheduleRename(PendingRenameTarget.ForSource(createdAsset.RelativeSourcePath));
 			}
 
-			_expandedSourceId = null;
+			_selection.ExpandedSourceId = null;
 			_assetSelectionService.Select(result.AssetId.Value);
 		}
 		else if (string.IsNullOrWhiteSpace(result.ErrorMessage) == false)
@@ -1056,7 +938,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 					break;
 				case RenameTargetKind.Folder:
 					var newFolderPath = _projectService.RenameFolder(_pendingRenameTarget.RelativePath, _renameName);
-					UpdateSelectedFolderAfterRename(_pendingRenameTarget.RelativePath, newFolderPath);
+					_selection.UpdateSelectedFolderAfterRelocation(_pendingRenameTarget.RelativePath, newFolderPath);
 					break;
 			}
 
@@ -1118,12 +1000,13 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return true;
 		}
 
-		if (string.Equals(_selectedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		if (string.Equals(_selection.SelectedFolderPath, AssetPipelinePaths.AssetsFolderName,
+			    StringComparison.OrdinalIgnoreCase))
 		{
 			return false;
 		}
 
-		RequestRename(PendingRenameTarget.ForFolder(_selectedFolderPath));
+		RequestRename(PendingRenameTarget.ForFolder(_selection.SelectedFolderPath));
 		return true;
 	}
 
@@ -1146,25 +1029,26 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return true;
 		}
 
-		if (string.Equals(_selectedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+		if (string.Equals(_selection.SelectedFolderPath, AssetPipelinePaths.AssetsFolderName,
+			    StringComparison.OrdinalIgnoreCase))
 		{
 			return false;
 		}
 
-		RequestDelete(PendingDeleteTarget.ForFolder(_selectedFolderPath));
+		RequestDelete(PendingDeleteTarget.ForFolder(_selection.SelectedFolderPath));
 		return true;
 	}
 
 	private void SelectFolder(string relativeFolderPath)
 	{
-		SetSelectedFolderPath(relativeFolderPath);
-		_expandedSourceId = null;
+		_selection.SetSelectedFolderPath(relativeFolderPath);
+		_selection.ExpandedSourceId = null;
 		_assetSelectionService.Clear();
 	}
 
 	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true)
 	{
-		SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
+		_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
 		_assetSelectionService.Select(asset.Id, requestFocus);
 	}
 
@@ -1178,110 +1062,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_commandService.RequestLoadScene(asset.Id);
 	}
 
-	private void PruneState(AssetsWindowBrowserModel browserModel)
-	{
-		SetSelectedFolderPath(
-			AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, _selectedFolderPath));
-		if (_expandedSourceId.HasValue && browserModel.SourcesBySourceId.ContainsKey(_expandedSourceId.Value) == false)
-		{
-			_expandedSourceId = null;
-		}
-
-		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
-		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
-		{
-			SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
-		}
-		else if (_assetSelectionService.SelectedAssetId.HasValue)
-		{
-			_assetSelectionService.Clear();
-		}
-	}
-
-	private void SetSelectedFolderPath(string relativeFolderPath)
-	{
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
-		if (string.Equals(_selectedFolderPath, normalizedFolderPath, StringComparison.OrdinalIgnoreCase) == false)
-		{
-			_folderTreeRevealPath = normalizedFolderPath;
-		}
-
-		_selectedFolderPath = normalizedFolderPath;
-	}
-
 	private void ValidateSelectionAfterProjectMutation()
 	{
-		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
-		    _projectService.TryGetAsset(selectedAssetId, out _) == false)
-		{
-			_assetSelectionService.Clear();
-		}
-
-		if (_projectService.HasOpenProject)
-		{
-			SetSelectedFolderPath(GetNearestExistingFolderPath(_selectedFolderPath));
-		}
-
-		if (_expandedSourceId.HasValue &&
-		    _projectService.CurrentAssetDatabase.Assets.Any(asset => asset.SourceId == _expandedSourceId.Value) ==
-		    false)
-		{
-			_expandedSourceId = null;
-		}
-	}
-
-	private void UpdateSelectedFolderAfterRename(string oldFolderPath, string newFolderPath)
-	{
-		var normalizedOldPath = ProjectPathUtility.NormalizeAssetsFolderPath(oldFolderPath);
-		var normalizedNewPath = ProjectPathUtility.NormalizeAssetsFolderPath(newFolderPath);
-		if (string.Equals(_selectedFolderPath, normalizedOldPath, StringComparison.OrdinalIgnoreCase))
-		{
-			SetSelectedFolderPath(normalizedNewPath);
-			return;
-		}
-
-		var oldPrefix = normalizedOldPath + "/";
-		if (_selectedFolderPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
-		{
-			SetSelectedFolderPath(ProjectPathUtility.NormalizeRelativePath(
-				normalizedNewPath + "/" + _selectedFolderPath[oldPrefix.Length..]));
-		}
-	}
-
-	private void UpdateSelectedFolderAfterMove(string oldFolderPath, string newFolderPath)
-	{
-		var normalizedOldPath = ProjectPathUtility.NormalizeAssetsFolderPath(oldFolderPath);
-		var normalizedNewPath = ProjectPathUtility.NormalizeAssetsFolderPath(newFolderPath);
-		if (string.Equals(_selectedFolderPath, normalizedOldPath, StringComparison.OrdinalIgnoreCase))
-		{
-			SetSelectedFolderPath(normalizedNewPath);
-			return;
-		}
-
-		var oldPrefix = normalizedOldPath + "/";
-		if (_selectedFolderPath.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
-		{
-			SetSelectedFolderPath(ProjectPathUtility.NormalizeRelativePath(
-				normalizedNewPath + "/" + _selectedFolderPath[oldPrefix.Length..]));
-		}
-	}
-
-	private string GetNearestExistingFolderPath(string relativeFolderPath)
-	{
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
-		while (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName,
-			       StringComparison.OrdinalIgnoreCase) == false)
-		{
-			var absoluteFolderPath = _projectService.GetAbsolutePath(normalizedFolderPath);
-			if (Directory.Exists(absoluteFolderPath))
-			{
-				return normalizedFolderPath;
-			}
-
-			normalizedFolderPath = ProjectPathUtility.GetParentFolderPath(normalizedFolderPath);
-		}
-
-		return AssetPipelinePaths.AssetsFolderName;
+		_selection.ValidateAfterProjectMutation(_projectService, _assetSelectionService);
 	}
 
 	private AssetDatabaseEntry? ResolveTargetAsset(BrowserContextTarget contextTarget)
@@ -1312,7 +1095,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return;
 		}
 
-		drawList.AddRect(min, max, GetAssetBrowserSeparatorColor());
+		drawList.AddRect(min, max, AssetsWindowDrawing.SeparatorColor());
 		var label = _assetHandlerRegistry.TryGetHandler(asset.Type, out var handler)
 			? handler.ThumbnailLabel
 			: GetFallbackThumbnailLabel(asset.Type);
@@ -1351,257 +1134,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		};
 	}
 
-	private static void DrawCenteredText(ImDrawListPtr drawList, string text, float minX, float maxX, float y,
-		uint color)
-	{
-		var textSize = ImGui.CalcTextSize(text);
-		var availableWidth = maxX - minX;
-		var textX = minX + MathF.Max((availableWidth - textSize.X) * 0.5f, 0.0f);
-		drawList.AddText(new Vector2(textX, y), color, text);
-	}
-
-	private static void DrawCardTextBlock(ImDrawListPtr drawList, Vector2 itemMin, Vector2 itemMax, float startY,
-		string title, string? subtitle)
-	{
-		var textInset = 8.0f;
-		var textMinX = itemMin.X + textInset;
-		var textMaxX = itemMax.X - textInset;
-		var titleText = ClipTextToWidth(title, textMaxX - textMinX);
-		DrawCenteredText(drawList, titleText, textMinX, textMaxX, startY, ImGui.GetColorU32(ImGuiCol.Text));
-
-		if (string.IsNullOrWhiteSpace(subtitle))
-		{
-			return;
-		}
-
-		var subtitleY = startY + ImGui.GetTextLineHeightWithSpacing();
-		var subtitleText = ClipTextToWidth(subtitle, textMaxX - textMinX);
-		DrawCenteredText(
-			drawList,
-			subtitleText,
-			textMinX,
-			textMaxX,
-			subtitleY,
-			ImGui.GetColorU32(ImGuiCol.TextDisabled));
-	}
-
-	private static string ClipTextToWidth(string text, float maxWidth)
-	{
-		if (string.IsNullOrWhiteSpace(text))
-		{
-			return string.Empty;
-		}
-
-		if (ImGui.CalcTextSize(text).X <= maxWidth)
-		{
-			return text;
-		}
-
-		const string ellipsis = "...";
-		for (var length = text.Length - 1; length > 0; length--)
-		{
-			var candidate = text[..length] + ellipsis;
-			if (ImGui.CalcTextSize(candidate).X <= maxWidth)
-			{
-				return candidate;
-			}
-		}
-
-		return ellipsis;
-	}
-
-	private static void DrawHorizontalPaneSeparator()
-	{
-		var cursorPosition = ImGui.GetCursorScreenPos();
-		var windowPosition = ImGui.GetWindowPos();
-		var windowSize = ImGui.GetWindowSize();
-		var separatorSize = new Vector2(
-			MathF.Max(windowPosition.X + windowSize.X - cursorPosition.X, 1.0f),
-			PaneSeparatorThickness);
-		ImGui.GetWindowDrawList().AddLine(
-			cursorPosition,
-			new Vector2(cursorPosition.X + separatorSize.X, cursorPosition.Y),
-			GetAssetBrowserSeparatorColor(),
-			PaneSeparatorThickness);
-		ImGui.Dummy(separatorSize);
-	}
-
-	private static void DrawVerticalPaneSeparator()
-	{
-		var cursorPosition = ImGui.GetCursorScreenPos();
-		var windowPosition = ImGui.GetWindowPos();
-		var windowSize = ImGui.GetWindowSize();
-		ImGui.GetWindowDrawList().AddLine(
-			new Vector2(cursorPosition.X, windowPosition.Y),
-			new Vector2(cursorPosition.X, windowPosition.Y + windowSize.Y),
-			GetAssetBrowserSeparatorColor(),
-			PaneSeparatorThickness);
-		ImGui.Dummy(new Vector2(PaneSeparatorThickness, MathF.Max(ImGui.GetContentRegionAvail().Y, 1.0f)));
-	}
-
-	private static uint GetAssetBrowserSeparatorColor()
-	{
-		return ImGui.GetColorU32(ImGuiCol.TitleBg);
-	}
-
-	private static void PushPaneStyle()
-	{
-		ImGui.PushStyleColor(ImGuiCol.ChildBg, ImGui.GetColorU32(ImGuiCol.WindowBg));
-		ImGui.PushStyleColor(ImGuiCol.Border, GetAssetBrowserSeparatorColor());
-	}
-
-	private static void AdvanceTable(ref int columnIndex, int columnCount)
-	{
-		if (columnIndex == 0)
-		{
-			ImGui.TableNextRow();
-		}
-
-		ImGui.TableSetColumnIndex(columnIndex);
-		columnIndex = (columnIndex + 1) % columnCount;
-	}
-
 	private void ShowError(string errorMessage)
 	{
 		_errorMessage = errorMessage;
 		_openErrorPopup = true;
 	}
 
-	private sealed record BrowserContextTarget(
-		BrowserContextKind Kind,
-		string FolderPath,
-		string? RelativeSourcePath,
-		Guid? SourceId,
-		Guid? AssetId)
-	{
-		public static BrowserContextTarget ForCurrentFolder(string folderPath) =>
-			new(BrowserContextKind.CurrentFolder, folderPath, null, null, null);
-
-		public static BrowserContextTarget ForFolder(string folderPath) =>
-			new(BrowserContextKind.Folder, folderPath, null, null, null);
-
-		public static BrowserContextTarget ForSource(string relativeSourcePath, Guid sourceId, Guid assetId) =>
-			new(BrowserContextKind.Source, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath,
-				sourceId, assetId);
-
-		public static BrowserContextTarget ForSubAsset(string relativeSourcePath, Guid sourceId, Guid assetId) =>
-			new(BrowserContextKind.SubAsset, ProjectPathUtility.GetFolderPath(relativeSourcePath), relativeSourcePath,
-				sourceId, assetId);
-	}
-
-	private enum BrowserContextKind
-	{
-		CurrentFolder,
-		Folder,
-		Source,
-		SubAsset
-	}
-
-	private sealed record AssetBrowserDragTarget(DragTargetKind Kind, string RelativePath)
-	{
-		public static AssetBrowserDragTarget ForSource(string relativeSourcePath) =>
-			new(DragTargetKind.Source, relativeSourcePath);
-
-		public static AssetBrowserDragTarget ForFolder(string relativeFolderPath) =>
-			new(DragTargetKind.Folder, relativeFolderPath);
-	}
-
-	private enum DragTargetKind
-	{
-		Source,
-		Folder
-	}
-
-	private sealed record PendingDeleteTarget(
-		DeleteTargetKind Kind,
-		string RelativePath,
-		string DisplayName,
-		string ConfirmationText)
-	{
-		public static PendingDeleteTarget ForSource(string relativeSourcePath)
-		{
-			var displayName = Path.GetFileName(relativeSourcePath);
-			return new PendingDeleteTarget(
-				DeleteTargetKind.Source,
-				relativeSourcePath,
-				displayName,
-				$"Delete '{displayName}' and all derived assets? This permanently removes the source file and its .meta file.");
-		}
-
-		public static PendingDeleteTarget ForFolder(string relativeFolderPath)
-		{
-			var displayName = Path.GetFileName(relativeFolderPath);
-			return new PendingDeleteTarget(
-				DeleteTargetKind.Folder,
-				relativeFolderPath,
-				displayName,
-				$"Delete folder '{displayName}' and everything inside it? This permanently removes all files and derived assets under that folder.");
-		}
-	}
-
-	private sealed record PendingRenameTarget(
-		RenameTargetKind Kind,
-		string RelativePath,
-		string EditableName,
-		string Suffix,
-		string Title,
-		bool FocusInput = true)
-	{
-		public static PendingRenameTarget ForSource(string relativeSourcePath)
-		{
-			var fileName = Path.GetFileName(relativeSourcePath);
-			var suffix = GetAssetSourceSuffix(fileName);
-			var editableName = suffix.Length == 0 ? fileName : fileName[..^suffix.Length];
-			return new PendingRenameTarget(
-				RenameTargetKind.Source,
-				relativeSourcePath,
-				editableName,
-				suffix,
-				"Rename Asset");
-		}
-
-		public static PendingRenameTarget ForFolder(string relativeFolderPath)
-		{
-			var folderName = Path.GetFileName(relativeFolderPath);
-			return new PendingRenameTarget(
-				RenameTargetKind.Folder,
-				relativeFolderPath,
-				folderName,
-				string.Empty,
-				"Rename Folder");
-		}
-
-		private static string GetAssetSourceSuffix(string fileName)
-		{
-			string[] compoundSuffixes =
-			[
-				MaterialAsset.FileExtension,
-				DataAssetFile.FileExtension,
-				EditorSceneAssetFile.FileExtension,
-				PrefabAssetFile.FileExtension
-			];
-
-			for (var i = 0; i < compoundSuffixes.Length; i++)
-			{
-				if (fileName.EndsWith(compoundSuffixes[i], StringComparison.OrdinalIgnoreCase))
-				{
-					return fileName[^compoundSuffixes[i].Length..];
-				}
-			}
-
-			return Path.GetExtension(fileName);
-		}
-	}
-
-	private enum DeleteTargetKind
-	{
-		Source,
-		Folder
-	}
-
-	private enum RenameTargetKind
-	{
-		Source,
-		Folder
-	}
 }
