@@ -38,6 +38,7 @@ public interface IEditorProjectService
 	string RenameFolder(string relativeFolderPath, string newName);
 	string MoveAssetSourceToFolder(string relativeSourcePath, string targetFolderPath);
 	string MoveFolderToFolder(string relativeFolderPath, string targetFolderPath);
+	string CreateFolder(string parentFolderPath, string folderName);
 }
 
 public readonly record struct AssetDatabaseRefreshResult(IReadOnlyCollection<Guid> InvalidatedAssetIds)
@@ -592,6 +593,38 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		ReloadAssetDatabaseFromIndex();
 		return newRelativePath;
+	}
+
+	public string CreateFolder(string parentFolderPath, string folderName)
+	{
+		if (HasOpenProject == false)
+		{
+			throw new InvalidOperationException("No project is currently open.");
+		}
+
+		var normalizedParentPath = ProjectPathUtility.NormalizeAssetsFolderPath(parentFolderPath);
+		var absoluteParentPath = GetAbsolutePath(normalizedParentPath);
+		if (Directory.Exists(absoluteParentPath) == false)
+		{
+			throw new DirectoryNotFoundException($"Folder '{normalizedParentPath}' was not found.");
+		}
+
+		var validatedName = ValidateNewFileSystemName(folderName, "Folder name");
+		var relativeFolderPath = ProjectPathUtility.NormalizeRelativePath($"{normalizedParentPath}/{validatedName}");
+		EnsureAssetsDescendantTarget(relativeFolderPath);
+		var absoluteFolderPath = GetAbsolutePath(relativeFolderPath);
+		if (File.Exists(absoluteFolderPath))
+		{
+			throw new IOException($"File '{absoluteFolderPath}' already exists.");
+		}
+
+		if (Directory.Exists(absoluteFolderPath))
+		{
+			throw new IOException($"Folder '{absoluteFolderPath}' already exists.");
+		}
+
+		Directory.CreateDirectory(absoluteFolderPath);
+		return relativeFolderPath;
 	}
 
 	private List<(string OldPath, string NewPath)> CollectMovedSources(string oldFolderPath, string newFolderPath)

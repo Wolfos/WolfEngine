@@ -1,13 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
-using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
@@ -47,6 +41,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private PendingDeleteTarget? _pendingDeleteTarget;
 	private bool _openDeletePopup;
 	private PendingRenameTarget? _pendingRenameTarget;
+	private PendingRenameTarget? _scheduledRenameTarget;
+	private int _scheduledRenameDelayFrames;
 	private bool _openRenamePopup;
 	private string _renameName = string.Empty;
 	private string _renameErrorMessage = string.Empty;
@@ -94,6 +90,16 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		return MoveDragTarget(dragTarget, targetFolderPath);
 	}
 
+	internal void HandleCreationResultForTesting(EditorAssetCreationResult result)
+	{
+		HandleCreationResult(result);
+	}
+
+	internal void ProcessDeferredRenameForTesting()
+	{
+		ProcessScheduledRename();
+	}
+
 	public override string Name => "Assets";
 
 	public override void Draw(EditorScene scene)
@@ -132,6 +138,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.SameLine(0.0f, 0.0f);
 		DrawContentArea(selectedFolder, scene);
 		CompleteDragDrop();
+		ProcessScheduledRename();
 		DrawDeletePopup();
 		DrawRenamePopup();
 		DrawErrorPopup();
@@ -722,6 +729,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		if (ImGui.BeginMenu("Create"))
 		{
+			if (ImGui.MenuItem("Folder"))
+			{
+				CreateFolder(folderPath);
+			}
+
+			ImGui.Separator();
 			DrawCreateMenuItems(_assetHandlerRegistry.GetCreateMenuItems(), folderPath);
 			ImGui.EndMenu();
 		}
@@ -737,6 +750,39 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			RequestDelete(PendingDeleteTarget.ForFolder(folderPath));
 		}
+	}
+
+	private void CreateFolder(string parentFolderPath)
+	{
+		try
+		{
+			var folderPath = _projectService.CreateFolder(parentFolderPath, GetNewFolderName(parentFolderPath));
+			_folderTreeRevealPath = folderPath;
+			_expandedSourceId = null;
+			ScheduleRename(PendingRenameTarget.ForFolder(folderPath));
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to create folder: {ex.Message}");
+		}
+	}
+
+	private string GetNewFolderName(string parentFolderPath)
+	{
+		const string baseName = "New Folder";
+		var normalizedParentPath = ProjectPathUtility.NormalizeAssetsFolderPath(parentFolderPath);
+		var candidateName = baseName;
+		var index = 1;
+		while (Directory.Exists(_projectService.GetAbsolutePath(
+			       ProjectPathUtility.NormalizeRelativePath($"{normalizedParentPath}/{candidateName}"))) ||
+		       File.Exists(_projectService.GetAbsolutePath(
+			       ProjectPathUtility.NormalizeRelativePath($"{normalizedParentPath}/{candidateName}"))))
+		{
+			candidateName = $"{baseName} {index}";
+			index++;
+		}
+
+		return candidateName;
 	}
 
 	private void DrawSourceContextMenu(EditorScene scene, AssetsWindowSourceItem sourceItem,
@@ -820,6 +866,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			if (_projectService.TryGetAsset(result.AssetId.Value, out var createdAsset))
 			{
 				SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath));
+				ScheduleRename(PendingRenameTarget.ForSource(createdAsset.RelativeSourcePath));
 			}
 
 			_expandedSourceId = null;
@@ -1037,6 +1084,29 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_renameName = renameTarget.EditableName;
 		_renameErrorMessage = string.Empty;
 		_openRenamePopup = true;
+	}
+
+	private void ScheduleRename(PendingRenameTarget renameTarget)
+	{
+		_scheduledRenameTarget = renameTarget;
+		_scheduledRenameDelayFrames = 1;
+	}
+
+	private void ProcessScheduledRename()
+	{
+		if (_scheduledRenameTarget is not { } renameTarget)
+		{
+			return;
+		}
+
+		if (_scheduledRenameDelayFrames > 0)
+		{
+			_scheduledRenameDelayFrames--;
+			return;
+		}
+
+		_scheduledRenameTarget = null;
+		RequestRename(renameTarget);
 	}
 
 	public bool RequestRenameSelectedItem()

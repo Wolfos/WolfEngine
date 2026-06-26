@@ -379,6 +379,42 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void CreateFolder_CreatesFolderInsideAssets()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+
+		var folderPath = environment.ProjectService.CreateFolder("Assets", "New Folder");
+
+		Assert.That(folderPath, Is.EqualTo("Assets/New Folder"));
+		Assert.That(Directory.Exists(environment.ProjectService.GetAbsolutePath(folderPath)), Is.True);
+	}
+
+	[Test]
+	public void CreateFolder_RejectsInvalidPathsNamesAndCollisions()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		environment.ProjectService.CreateFolder("Assets", "Existing");
+		var filePath = environment.ProjectService.GetAbsolutePath("Assets/FileCollision");
+		File.WriteAllText(filePath, string.Empty);
+
+		Assert.That(
+			() => environment.ProjectService.CreateFolder("Library", "Folder"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.CreateFolder("Assets/../Library", "Folder"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.CreateFolder("Assets", "../Bad"),
+			Throws.TypeOf<InvalidOperationException>());
+		Assert.That(
+			() => environment.ProjectService.CreateFolder("Assets", "Existing"),
+			Throws.TypeOf<IOException>());
+		Assert.That(
+			() => environment.ProjectService.CreateFolder("Assets", "FileCollision"),
+			Throws.TypeOf<IOException>());
+	}
+
+	[Test]
 	public void RenameAssetSource_MovesFileMetaAndPreservesIds()
 	{
 		using var environment = new EditorProjectTestEnvironment();
@@ -588,6 +624,44 @@ public sealed class AssetsWindowTests
 		Assert.That(movedFolderPath, Is.EqualTo("Assets/Vehicles/Models"));
 		projectService.Received(1).MoveAssetSourceToFolder("Assets/Models/Car.glb", "Assets/Vehicles");
 		projectService.Received(1).MoveFolderToFolder("Assets/Models", "Assets/Vehicles");
+	}
+
+	[Test]
+	public void AssetsWindow_HandleCreationResult_RequestsRenameForCreatedAsset()
+	{
+		var projectService = Substitute.For<IEditorProjectService>();
+		var assetId = Guid.NewGuid();
+		var asset = new AssetDatabaseEntry
+		{
+			Id = assetId,
+			SourceId = Guid.NewGuid(),
+			RelativeSourcePath = "Assets/Materials/New Material.mat.json"
+		};
+		projectService.TryGetAsset(assetId, out Arg.Any<AssetDatabaseEntry>())
+			.Returns(call =>
+			{
+				call[1] = asset;
+				return true;
+			});
+		var window = new AssetsWindow(
+			projectService,
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			new AssetSelectionService(),
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>());
+
+		window.HandleCreationResultForTesting(EditorAssetCreationResult.Succeeded(assetId));
+
+		window.ProcessDeferredRenameForTesting();
+		Assert.That(window.PendingRenameKindForTesting, Is.Null);
+
+		window.ProcessDeferredRenameForTesting();
+
+		Assert.That(window.PendingRenameKindForTesting, Is.EqualTo("Source"));
+		Assert.That(window.PendingRenameRelativePathForTesting, Is.EqualTo("Assets/Materials/New Material.mat.json"));
 	}
 
 	[Test]
