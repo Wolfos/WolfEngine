@@ -14,8 +14,8 @@ public sealed class ShadowMapPass
 	public const int CascadeResolution = 2048;
 	public const float MaxShadowDistance = 150.0f;
 
-	private const float DefaultDepthBiasWorld = 0.2f;
-	private const float DefaultDepthBiasTexelScale = 10.0f;
+	private const float DefaultDepthBiasWorld = 0.05f;
+	private const float DefaultDepthBiasTexelScale = 1.0f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
