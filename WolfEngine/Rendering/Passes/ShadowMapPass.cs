@@ -10,22 +10,22 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class ShadowMapPass
 {
-	public const int CascadeCount = 3;
-	public const int CascadeResolution = 2048;
-	public const float MaxShadowDistance = 150.0f;
+	public const int MaxCascadeCount = 3;
+	public const int DefaultCascadeResolution = 2048;
+	public const float DefaultMaxShadowDistance = 150.0f;
+	public const float DefaultDepthBias = 0.05f;
+	public const float DefaultCascadeBlendDistance = 2.0f;
 
-	private const float DefaultDepthBiasWorld = 0.05f;
 	private const float DefaultDepthBiasTexelScale = 1.0f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
-	private const float DefaultCascadeBlendDistance = 2.0f;
 
 	private static readonly List<float> CascadeSplitDistances =
 	[
 		6.0f,
 		30.0f,
-		MaxShadowDistance
+		DefaultMaxShadowDistance
 	];
 
 	private readonly IShaderCompiler _shaderCompiler;
@@ -46,29 +46,32 @@ public sealed class ShadowMapPass
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}
 
-	public void PrepareFrame(SceneDrawData sceneData)
+	public void PrepareFrame(SceneDrawData sceneData, in ShadowMapConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		if (TryBuildShadowCascades(sceneData, out var matrices, out var splits, out var shadowedLightIndex))
+		var resolvedConfig = ResolvedShadowMapConfig.From(config);
+		if (TryBuildShadowCascades(sceneData, resolvedConfig, out var matrices, out var splits, out var shadowedLightIndex))
 		{
 			_currentFrameData = new ShadowFrameData(
 				enabled: true,
+				cascadeCount: resolvedConfig.CascadeCount,
 				cascadeViewProjection0: matrices[0],
 				cascadeViewProjection1: matrices[1],
 				cascadeViewProjection2: matrices[2],
 				cascadeSplit0: splits[0],
 				cascadeSplit1: splits[1],
 				cascadeSplit2: splits[2],
-				cascadeBlendDistance: DefaultCascadeBlendDistance,
+				cascadeBlendDistance: resolvedConfig.CascadeBlendDistance,
+				maxDistance: resolvedConfig.MaxDistance,
 				shadowedDirectionalLightIndex: shadowedLightIndex,
-				depthBiases: ComputeCascadeDepthBiases(splits),
+				depthBiases: ComputeCascadeDepthBiases(splits, resolvedConfig),
 				strength: DefaultStrength,
-				mapResolution: CascadeResolution);
+				mapResolution: resolvedConfig.CascadeResolution);
 			return;
 		}
 
-		_currentFrameData = CreateDisabledFrameData();
+		_currentFrameData = CreateDisabledFrameData(resolvedConfig);
 	}
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
@@ -324,41 +327,46 @@ public sealed class ShadowMapPass
 
 	private static void ValidateCascadeIndex(int cascadeIndex)
 	{
-		if (cascadeIndex < 0 || cascadeIndex >= CascadeCount)
+		if (cascadeIndex < 0 || cascadeIndex >= MaxCascadeCount)
 		{
 			throw new ArgumentOutOfRangeException(nameof(cascadeIndex), cascadeIndex, "Cascade index is out of range.");
 		}
 	}
 
-	private static ShadowFrameData CreateDisabledFrameData() => new(
+	private static ShadowFrameData CreateDisabledFrameData() => CreateDisabledFrameData(ResolvedShadowMapConfig.Default);
+
+	private static ShadowFrameData CreateDisabledFrameData(in ResolvedShadowMapConfig config) => new(
 		enabled: false,
+		cascadeCount: config.CascadeCount,
 		cascadeViewProjection0: Matrix4x4.Identity,
 		cascadeViewProjection1: Matrix4x4.Identity,
 		cascadeViewProjection2: Matrix4x4.Identity,
 		cascadeSplit0: CascadeSplitDistances[0],
 		cascadeSplit1: CascadeSplitDistances[1],
-		cascadeSplit2: CascadeSplitDistances[2],
-		cascadeBlendDistance: DefaultCascadeBlendDistance,
+		cascadeSplit2: config.MaxDistance,
+		cascadeBlendDistance: config.CascadeBlendDistance,
+		maxDistance: config.MaxDistance,
 		shadowedDirectionalLightIndex: -1,
-		depthBiases: ComputeDefaultCascadeDepthBiases(),
+		depthBiases: ComputeDefaultCascadeDepthBiases(config),
 		strength: DefaultStrength,
-		mapResolution: CascadeResolution);
+		mapResolution: config.CascadeResolution);
 
-	private static Vector3 ComputeDefaultCascadeDepthBiases()
+	private static Vector3 ComputeDefaultCascadeDepthBiases(in ResolvedShadowMapConfig config)
 	{
-		Span<float> splits = stackalloc float[CascadeCount];
-		BuildConfiguredCascadeSplits(splits);
-		return ComputeCascadeDepthBiases(splits);
+		Span<float> splits = stackalloc float[MaxCascadeCount];
+		BuildConfiguredCascadeSplits(splits, config);
+		return ComputeCascadeDepthBiases(splits, config);
 	}
 
 	private static bool TryBuildShadowCascades(
 		SceneDrawData sceneData,
+		in ResolvedShadowMapConfig config,
 		out Matrix4x4[] cascadeMatrices,
 		out float[] cascadeSplits,
 		out int shadowedLightIndex)
 	{
-		cascadeMatrices = new Matrix4x4[CascadeCount];
-		cascadeSplits = new float[CascadeCount];
+		cascadeMatrices = new Matrix4x4[MaxCascadeCount];
+		cascadeSplits = new float[MaxCascadeCount];
 		shadowedLightIndex = -1;
 
 		if (TryGetShadowedDirectionalLight(sceneData, out var lightDirection, out shadowedLightIndex) == false)
@@ -366,10 +374,15 @@ public sealed class ShadowMapPass
 			return false;
 		}
 
-		BuildConfiguredCascadeSplits(cascadeSplits);
-		for (var i = 0; i < CascadeCount; i++)
+		BuildConfiguredCascadeSplits(cascadeSplits, config);
+		for (var i = 0; i < config.CascadeCount; i++)
 		{
-			cascadeMatrices[i] = BuildCascadeViewProjection(sceneData, lightDirection, cascadeSplits[i]);
+			cascadeMatrices[i] = BuildCascadeViewProjection(sceneData, lightDirection, cascadeSplits[i], config);
+		}
+
+		for (var i = config.CascadeCount; i < MaxCascadeCount; i++)
+		{
+			cascadeMatrices[i] = cascadeMatrices[config.CascadeCount - 1];
 		}
 
 		return true;
@@ -410,29 +423,35 @@ public sealed class ShadowMapPass
 		return false;
 	}
 
-	private static void BuildConfiguredCascadeSplits(Span<float> destination)
+	private static void BuildConfiguredCascadeSplits(Span<float> destination, in ResolvedShadowMapConfig config)
 	{
-		if (destination.Length < CascadeCount)
+		if (destination.Length < MaxCascadeCount)
 		{
 			throw new ArgumentException("Destination span must contain all cascade splits.", nameof(destination));
 		}
 
-		if (CascadeSplitDistances.Count != CascadeCount)
+		if (CascadeSplitDistances.Count != MaxCascadeCount)
 		{
 			throw new InvalidOperationException(
-				$"Cascade split list must contain exactly {CascadeCount} elements.");
+				$"Cascade split list must contain exactly {MaxCascadeCount} elements.");
 		}
 
 		var previous = 0.01f;
-		for (var i = 0; i < CascadeCount; i++)
+		for (var i = 0; i < MaxCascadeCount; i++)
 		{
-			var split = CascadeSplitDistances[i];
-			destination[i] = Math.Clamp(split, previous, MaxShadowDistance);
+			var split = i >= config.CascadeCount - 1
+				? config.MaxDistance
+				: CascadeSplitDistances[i];
+			destination[i] = Math.Clamp(split, previous, config.MaxDistance);
 			previous = destination[i];
 		}
 	}
 
-	private static Matrix4x4 BuildCascadeViewProjection(SceneDrawData sceneData, Vector3 lightDirection, float receiverRadius)
+	private static Matrix4x4 BuildCascadeViewProjection(
+		SceneDrawData sceneData,
+		Vector3 lightDirection,
+		float receiverRadius,
+		in ResolvedShadowMapConfig config)
 	{
 		// Keep the shadow volume anchored to the camera origin in camera-relative space.
 		var frustumCenter = Vector3.Zero;
@@ -446,7 +465,7 @@ public sealed class ShadowMapPass
 		var centerLs = Vector3.Transform(frustumCenter, lightView);
 
 		// Snap the projection center to shadow texels for camera-motion stability.
-		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / CascadeResolution, 1e-6f);
+		var worldUnitsPerTexel = MathF.Max((halfExtent * 2.0f) / config.CascadeResolution, 1e-6f);
 		var lightAxisX = new Vector3(lightView.M11, lightView.M21, lightView.M31);
 		var lightAxisY = new Vector3(lightView.M12, lightView.M22, lightView.M32);
 		var cameraLsX = Vector3.Dot(sceneData.CameraOrigin, lightAxisX);
@@ -474,26 +493,64 @@ public sealed class ShadowMapPass
 		return lightView * lightProjection;
 	}
 
-	private static Vector3 ComputeCascadeDepthBiases(ReadOnlySpan<float> cascadeSplits)
+	private static Vector3 ComputeCascadeDepthBiases(ReadOnlySpan<float> cascadeSplits, in ResolvedShadowMapConfig config)
 	{
-		if (cascadeSplits.Length < CascadeCount)
+		if (cascadeSplits.Length < MaxCascadeCount)
 		{
 			throw new ArgumentException("Cascade split span must contain all cascade splits.", nameof(cascadeSplits));
 		}
 
 		return new Vector3(
-			ComputeCascadeDepthBias(cascadeSplits[0]),
-			ComputeCascadeDepthBias(cascadeSplits[1]),
-			ComputeCascadeDepthBias(cascadeSplits[2]));
+			ComputeCascadeDepthBias(cascadeSplits[0], config),
+			ComputeCascadeDepthBias(cascadeSplits[1], config),
+			ComputeCascadeDepthBias(cascadeSplits[2], config));
 	}
 
-	private static float ComputeCascadeDepthBias(float receiverRadius)
+	private static float ComputeCascadeDepthBias(float receiverRadius, in ResolvedShadowMapConfig config)
 	{
-		var worldUnitsPerTexel = MathF.Max((receiverRadius * 2.0f) / CascadeResolution, 1e-6f);
-		var worldBias = DefaultDepthBiasWorld + (worldUnitsPerTexel * DefaultDepthBiasTexelScale);
+		var worldUnitsPerTexel = MathF.Max((receiverRadius * 2.0f) / config.CascadeResolution, 1e-6f);
+		var worldBias = config.DepthBias + (worldUnitsPerTexel * DefaultDepthBiasTexelScale);
 		return worldBias / ComputeCascadeDepthSpan(receiverRadius);
 	}
 
 	private static float ComputeCascadeDepthSpan(float receiverRadius) =>
 		MathF.Max((receiverRadius * 2.0f) + CasterPaddingNear + CasterPaddingFar, 1.0f);
+
+	private readonly struct ResolvedShadowMapConfig
+	{
+		public static readonly ResolvedShadowMapConfig Default = From(new ShadowMapConfig());
+
+		private ResolvedShadowMapConfig(
+			int cascadeCount,
+			int cascadeResolution,
+			float cascadeBlendDistance,
+			float maxDistance,
+			float depthBias)
+		{
+			CascadeCount = cascadeCount;
+			CascadeResolution = cascadeResolution;
+			CascadeBlendDistance = cascadeBlendDistance;
+			MaxDistance = maxDistance;
+			DepthBias = depthBias;
+		}
+
+		public int CascadeCount { get; }
+		public int CascadeResolution { get; }
+		public float CascadeBlendDistance { get; }
+		public float MaxDistance { get; }
+		public float DepthBias { get; }
+
+		public static ResolvedShadowMapConfig From(in ShadowMapConfig config)
+		{
+			var cascadeCount = Math.Clamp(config.CascadeCount, 1, MaxCascadeCount);
+			var cascadeResolution = Math.Max(1, config.CascadeResolution);
+			var maxDistance = Math.Max(0.01f, config.MaxDistance);
+			return new ResolvedShadowMapConfig(
+				cascadeCount,
+				cascadeResolution,
+				Math.Max(0.0f, config.CascadeBlendDistance),
+				maxDistance,
+				Math.Max(0.0f, config.DepthBias));
+		}
+	}
 }

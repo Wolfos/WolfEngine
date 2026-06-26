@@ -178,6 +178,7 @@ public sealed class DeferredLightingPass
 			ShadowDepthBiases = shadowData.DepthBiases,
 			ShadowStrength = shadowData.Strength,
 			ShadowsEnabled = shadowData.Enabled,
+			ShadowMaxDistance = shadowData.MaxDistance,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
@@ -333,7 +334,7 @@ public sealed class DeferredLightingPass
 			lightingWriter.SetFloat("ddgiHorizontalBlendDistance", config.DdgiHorizontalBlendDistance);
 			lightingWriter.SetFloat("ddgiVerticalBlendDistance", config.DdgiVerticalBlendDistance);
 			lightingWriter.SetUInt("ddgiProbeRelocationEnabled", config.DdgiProbeRelocationEnabled ? 1u : 0u);
-			lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
+			lightingWriter.SetFloat("shadowMaxDistance", config.ShadowMaxDistance);
 		lightingWriter.SetFloat("nearPlane", config.NearPlane);
 		lightingWriter.SetFloat("farPlane", config.FarPlane);
 		lightingWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.DispatchSize.X, 1));

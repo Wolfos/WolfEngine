@@ -137,6 +137,7 @@ internal sealed class RenderGraphFrameBuilder
 	private bool _hasPreviousFrameShape;
 	private Int2 _previousFramebufferSize;
 	private Int2 _previousSceneFramebufferSize;
+	private int _previousShadowMapResolution;
 	private bool _previousSceneEnabled;
 	private bool _previousTaaEnabled;
 	private bool _historyValid;
@@ -295,7 +296,8 @@ internal sealed class RenderGraphFrameBuilder
 		                        _previousSceneFramebufferSize.X != sceneFramebufferSize.X ||
 		                        _previousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
 		                        _previousSceneEnabled != sceneEnabled;
-		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, sceneEnabled);
+		var shadowMapResolution = Math.Max(1, config.ShadowMaps.CascadeResolution);
+		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, shadowMapResolution, sceneEnabled);
 		_sceneDebugViews.Clear();
 		_sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 		_resolvedSceneViewportState = SceneViewportRenderState.Empty;
@@ -453,22 +455,22 @@ internal sealed class RenderGraphFrameBuilder
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			}
 			shadowMapHandle0 = _resources.CreateTransientTexture(new TextureDescriptor(
-				ShadowMapPass.CascadeResolution,
-				ShadowMapPass.CascadeResolution,
+				shadowMapResolution,
+				shadowMapResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				default(ColorRGBA),
 				1.0f));
 			shadowMapHandle1 = _resources.CreateTransientTexture(new TextureDescriptor(
-				ShadowMapPass.CascadeResolution,
-				ShadowMapPass.CascadeResolution,
+				shadowMapResolution,
+				shadowMapResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				default(ColorRGBA),
 				1.0f));
 			shadowMapHandle2 = _resources.CreateTransientTexture(new TextureDescriptor(
-				ShadowMapPass.CascadeResolution,
-				ShadowMapPass.CascadeResolution,
+				shadowMapResolution,
+				shadowMapResolution,
 				TextureFormat.D32Float,
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				default(ColorRGBA),
@@ -1348,7 +1350,7 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawCullShadow(RenderGraphContext context)
 	{
 		var sceneData = context.SceneData!;
-		_shadowMapPass.PrepareFrame(sceneData);
+		_shadowMapPass.PrepareFrame(sceneData, _frameResources.Config.ShadowMaps);
 		var shadowData = _shadowMapPass.GetCurrentFrameData();
 		if (shadowData.Enabled == false)
 		{
@@ -1357,7 +1359,7 @@ internal sealed class RenderGraphFrameBuilder
 
 		_gpuDrawPass.RecordCullForView(
 			context,
-			shadowData.GetCascadeViewProjection(ShadowMapPass.CascadeCount - 1),
+			shadowData.GetCascadeViewProjection(shadowData.CascadeCount - 1),
 			sceneData.CameraOrigin,
 			useShadowBuffers: true);
 	}
@@ -1365,7 +1367,8 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteShadowMap(RenderGraphContext context)
 	{
 		var device = _renderer.GetGfxDevice();
-		for (var cascadeIndex = 0; cascadeIndex < ShadowMapPass.CascadeCount; cascadeIndex++)
+		var cascadeCount = _shadowMapPass.GetCurrentFrameData().CascadeCount;
+		for (var cascadeIndex = 0; cascadeIndex < cascadeCount; cascadeIndex++)
 		{
 			var shadowMapHandle = GetShadowMapHandle(_frameResources, cascadeIndex);
 			var depthTexture = context.GetTexture(shadowMapHandle);
@@ -1712,13 +1715,18 @@ internal sealed class RenderGraphFrameBuilder
 		};
 	}
 
-	private void InvalidateTransientPoolIfFrameShapeChanged(Int2 framebufferSize, Int2 sceneFramebufferSize, bool sceneEnabled)
+	private void InvalidateTransientPoolIfFrameShapeChanged(
+		Int2 framebufferSize,
+		Int2 sceneFramebufferSize,
+		int shadowMapResolution,
+		bool sceneEnabled)
 	{
 		var changed = _hasPreviousFrameShape == false ||
 		              _previousFramebufferSize.X != framebufferSize.X ||
 		              _previousFramebufferSize.Y != framebufferSize.Y ||
 		              _previousSceneFramebufferSize.X != sceneFramebufferSize.X ||
 		              _previousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
+		              _previousShadowMapResolution != shadowMapResolution ||
 		              _previousSceneEnabled != sceneEnabled;
 		if (changed == false)
 		{
@@ -1728,6 +1736,7 @@ internal sealed class RenderGraphFrameBuilder
 		_resources.InvalidateTransientTexturePool();
 		_previousFramebufferSize = framebufferSize;
 		_previousSceneFramebufferSize = sceneFramebufferSize;
+		_previousShadowMapResolution = shadowMapResolution;
 		_previousSceneEnabled = sceneEnabled;
 		_hasPreviousFrameShape = true;
 	}

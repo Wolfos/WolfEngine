@@ -8,10 +8,24 @@ public class RenderConfig: IDataAsset
 {
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
+	public ShadowMapConfig ShadowMaps { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+}
+
+public struct ShadowMapConfig
+{
+	public ShadowMapConfig()
+	{
+	}
+
+	public int CascadeCount { get; set; } = ShadowMapPass.MaxCascadeCount;
+	public int CascadeResolution { get; set; } = ShadowMapPass.DefaultCascadeResolution;
+	public float CascadeBlendDistance { get; set; } = ShadowMapPass.DefaultCascadeBlendDistance;
+	public float MaxDistance { get; set; } = ShadowMapPass.DefaultMaxShadowDistance;
+	public float DepthBias { get; set; } = ShadowMapPass.DefaultDepthBias;
 }
 
 public enum DiffuseGlobalIlluminationMode

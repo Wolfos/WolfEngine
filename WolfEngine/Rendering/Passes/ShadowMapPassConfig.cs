@@ -39,6 +39,7 @@ public readonly struct ShadowFrameData
 {
 	public ShadowFrameData(
 		bool enabled,
+		int cascadeCount,
 		Matrix4x4 cascadeViewProjection0,
 		Matrix4x4 cascadeViewProjection1,
 		Matrix4x4 cascadeViewProjection2,
@@ -46,12 +47,14 @@ public readonly struct ShadowFrameData
 		float cascadeSplit1,
 		float cascadeSplit2,
 		float cascadeBlendDistance,
+		float maxDistance,
 		int shadowedDirectionalLightIndex,
 		Vector3 depthBiases,
 		float strength,
 		int mapResolution)
 	{
 		Enabled = enabled;
+		CascadeCount = cascadeCount;
 		CascadeViewProjection0 = cascadeViewProjection0;
 		CascadeViewProjection1 = cascadeViewProjection1;
 		CascadeViewProjection2 = cascadeViewProjection2;
@@ -59,6 +62,7 @@ public readonly struct ShadowFrameData
 		CascadeSplit1 = cascadeSplit1;
 		CascadeSplit2 = cascadeSplit2;
 		CascadeBlendDistance = cascadeBlendDistance;
+		MaxDistance = maxDistance;
 		ShadowedDirectionalLightIndex = shadowedDirectionalLightIndex;
 		DepthBiases = depthBiases;
 		Strength = strength;
@@ -66,6 +70,7 @@ public readonly struct ShadowFrameData
 	}
 
 	public bool Enabled { get; }
+	public int CascadeCount { get; }
 	public Matrix4x4 CascadeViewProjection0 { get; }
 	public Matrix4x4 CascadeViewProjection1 { get; }
 	public Matrix4x4 CascadeViewProjection2 { get; }
@@ -73,6 +78,7 @@ public readonly struct ShadowFrameData
 	public float CascadeSplit1 { get; }
 	public float CascadeSplit2 { get; }
 	public float CascadeBlendDistance { get; }
+	public float MaxDistance { get; }
 	public int ShadowedDirectionalLightIndex { get; }
 	public Vector3 DepthBiases { get; }
 	public float Strength { get; }

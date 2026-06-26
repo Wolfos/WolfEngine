@@ -68,6 +68,7 @@ public struct TransparentForwardPassConfig
 	public required Vector3 ShadowDepthBiases { get; init; }
 	public required float ShadowStrength { get; init; }
 	public required bool ShadowsEnabled { get; init; }
+	public required float ShadowMaxDistance { get; init; }
 	public required float ShadowTexelSizeX { get; init; }
 	public required float ShadowTexelSizeY { get; init; }
 	public required float NearPlane { get; init; }

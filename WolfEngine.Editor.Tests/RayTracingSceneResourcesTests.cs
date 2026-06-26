@@ -243,6 +243,14 @@ public sealed class RayTracingSceneResourcesTests
 					ProbeMaxRelocationDistanceFactor = 0.35f,
 				DebugProbeSpheres = true,
 				DebugProbeSphereRadius = 0.3f
+			},
+			ShadowMaps = new ShadowMapConfig
+			{
+				CascadeCount = 2,
+				CascadeResolution = 1024,
+				CascadeBlendDistance = 3.5f,
+				MaxDistance = 96.0f,
+				DepthBias = 0.08f
 			}
 		};
 
@@ -272,6 +280,11 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(ddgi.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.35f));
 		Assert.That(ddgi.DebugProbeSpheres, Is.True);
 		Assert.That(ddgi.DebugProbeSphereRadius, Is.EqualTo(0.3f));
+		Assert.That(roundTripped.ShadowMaps.CascadeCount, Is.EqualTo(2));
+		Assert.That(roundTripped.ShadowMaps.CascadeResolution, Is.EqualTo(1024));
+		Assert.That(roundTripped.ShadowMaps.CascadeBlendDistance, Is.EqualTo(3.5f));
+		Assert.That(roundTripped.ShadowMaps.MaxDistance, Is.EqualTo(96.0f));
+		Assert.That(roundTripped.ShadowMaps.DepthBias, Is.EqualTo(0.08f));
 	}
 
 	[Test]

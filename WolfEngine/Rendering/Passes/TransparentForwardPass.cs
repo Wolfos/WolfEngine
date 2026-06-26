@@ -112,6 +112,7 @@ public sealed class TransparentForwardPass
 			ShadowDepthBiases = shadowData.DepthBiases,
 			ShadowStrength = shadowData.Strength,
 			ShadowsEnabled = shadowData.Enabled,
+			ShadowMaxDistance = shadowData.MaxDistance,
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			NearPlane = sceneData.NearPlane,
@@ -218,7 +219,7 @@ public sealed class TransparentForwardPass
 			"shadowLightIndex",
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
 		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
-		lightingWriter.SetFloat("shadowMaxDistance", ShadowMapPass.MaxShadowDistance);
+		lightingWriter.SetFloat("shadowMaxDistance", config.ShadowMaxDistance);
 		
 		if (config.TransparentEnvironmentBuffer is not IWritableGpuBuffer writableEnvironmentBuffer ||
 		    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer)
