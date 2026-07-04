@@ -74,7 +74,8 @@ public sealed class GpuDrawDatabase
 		Mesh primitiveMesh,
 		ColorRGBA tint,
 		AlphaMode alphaMode,
-		in Matrix4x4 worldTransform)
+		in Matrix4x4 worldTransform,
+		TerrainChunkInstanceData instanceData = default)
 	{
 		var key = new DrawRecordKey(entity, 0);
 		var resolvedAlphaMode = alphaMode == AlphaMode.AlphaBlend
@@ -89,13 +90,25 @@ public sealed class GpuDrawDatabase
 					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.DebugPrimitive}.");
 			}
 
-			ApplyDebugPrimitiveChanges(record, primitiveMesh, tint, resolvedAlphaMode, worldTransform);
+			ApplyDebugPrimitiveChanges(
+				record,
+				primitiveMesh,
+				tint,
+				resolvedAlphaMode,
+				worldTransform,
+				instanceData);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
 
 		var material = CreateDebugPrimitiveMaterial(tint, resolvedAlphaMode);
-		var newRecord = CreateRecord(key, GpuDrawKind.DebugPrimitive, primitiveMesh, material, worldTransform);
+		var newRecord = CreateRecord(
+			key,
+			GpuDrawKind.DebugPrimitive,
+			primitiveMesh,
+			material,
+			worldTransform,
+			terrainInstanceData: instanceData);
 		_records.Add(key, newRecord);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
@@ -112,7 +125,8 @@ public sealed class GpuDrawDatabase
 			newRecord.World,
 			newRecord.BoundsCenterRadius,
 			primitiveMesh,
-			material));
+			material,
+			newRecord.TerrainInstanceData));
 	}
 
 	public void TouchTerrainChunk(
@@ -429,16 +443,18 @@ public sealed class GpuDrawDatabase
 		Mesh primitiveMesh,
 		ColorRGBA tint,
 		AlphaMode alphaMode,
-		in Matrix4x4 worldTransform)
+		in Matrix4x4 worldTransform,
+		in TerrainChunkInstanceData instanceData)
 	{
 		var material = record.Material;
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, primitiveMesh) == false;
 		var tintChanged = material.Color.Equals(tint) == false;
 		var alphaModeChanged = material.AlphaMode != alphaMode;
+		var instanceDataChanged = TerrainInstanceEquals(record.TerrainInstanceData, instanceData) == false;
 		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
 
-		if ((transformChanged || meshChanged || tintChanged || alphaModeChanged || settlePreviousTransform) == false)
+		if ((transformChanged || meshChanged || tintChanged || alphaModeChanged || instanceDataChanged || settlePreviousTransform) == false)
 		{
 			return;
 		}
@@ -457,6 +473,7 @@ public sealed class GpuDrawDatabase
 			record.World = worldTransform;
 			ComputeBounds(record, primitiveMesh);
 		}
+		record.TerrainInstanceData = instanceData;
 
 		if (meshChanged)
 		{
@@ -469,7 +486,8 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.World,
 				record.BoundsCenterRadius,
-				record.Mesh));
+				record.Mesh,
+				record.TerrainInstanceData));
 		}
 
 		if (tintChanged || alphaModeChanged)
@@ -486,10 +504,11 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
-				record.Material));
+				record.Material,
+				record.TerrainInstanceData));
 		}
 
-		if (transformChanged)
+		if (transformChanged || instanceDataChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -499,7 +518,8 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				uploadPreviousWorld,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				record.TerrainInstanceData));
 			record.PreviousWorld = uploadPreviousWorld;
 		}
 
@@ -513,7 +533,8 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				record.World,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				record.TerrainInstanceData));
 			record.PreviousWorld = record.World;
 		}
 	}

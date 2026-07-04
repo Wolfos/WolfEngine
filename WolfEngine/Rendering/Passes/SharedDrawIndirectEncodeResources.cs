@@ -12,6 +12,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		IGfxBuffer? shadowCameraBuffer,
 		IGfxBuffer? transparentEnvironmentBuffer,
 		IGfxBuffer? transparentLightingBuffer,
+		IGfxBuffer? ddgiDebugBuffer,
 		IGfxBuffer? instanceBuffer,
 		IGfxBuffer? materialBuffer,
 		IGfxBuffer? terrainMaterialBuffer,
@@ -23,6 +24,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		ShadowCameraBuffer = shadowCameraBuffer;
 		TransparentEnvironmentBuffer = transparentEnvironmentBuffer;
 		TransparentLightingBuffer = transparentLightingBuffer;
+		DdgiDebugBuffer = ddgiDebugBuffer;
 		InstanceBuffer = instanceBuffer;
 		MaterialBuffer = materialBuffer;
 		TerrainMaterialBuffer = terrainMaterialBuffer;
@@ -35,6 +37,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 	public IGfxBuffer? ShadowCameraBuffer { get; }
 	public IGfxBuffer? TransparentEnvironmentBuffer { get; }
 	public IGfxBuffer? TransparentLightingBuffer { get; }
+	public IGfxBuffer? DdgiDebugBuffer { get; }
 	public IGfxBuffer? InstanceBuffer { get; }
 	public IGfxBuffer? MaterialBuffer { get; }
 	public IGfxBuffer? TerrainMaterialBuffer { get; }
@@ -52,6 +55,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 			resources.ShadowCameraBuffer,
 			resources.TransparentEnvironmentBuffer,
 			resources.TransparentLightingBuffer,
+			resources.DdgiDebugBuffer,
 			resources.InstanceBuffer,
 			resources.MaterialBuffer,
 			resources.TerrainMaterialBuffer,
@@ -60,4 +64,3 @@ public readonly struct SharedDrawIndirectEncodeResources
 			resources.MaterialGenerationBuffer);
 	}
 }
-

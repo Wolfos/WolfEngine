@@ -14,6 +14,9 @@ public static class SceneDebugViewIds
 	public const string DdgiProbeBaseWeight = "ddgi-probe-base-weight";
 	public const string DdgiWeightedVisibility = "ddgi-weighted-visibility";
 	public const string DdgiDominantProbe = "ddgi-dominant-probe";
+	public const string DdgiDominantProbeCoord = "ddgi-dominant-probe-coord";
+	public const string DdgiProbeRelocation = "ddgi-probe-relocation";
+	public const string DdgiProbeRelocationDecision = "ddgi-probe-relocation-decision";
 	public const string DdgiVisibility = "ddgi-visibility";
 	public const string DdgiFinalContribution = "ddgi-final-contribution";
 	public const string GBufferAlbedo = "gbuffer-albedo";

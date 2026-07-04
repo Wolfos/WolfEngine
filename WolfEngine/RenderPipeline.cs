@@ -19,6 +19,7 @@ public interface IRenderPipeline
 public class RenderPipeline : IRenderPipeline
 {
 	private const int DdgiDebugProbeEntityBaseIndex = -2_000_000_000;
+	private const float DdgiDebugProbeInstanceMarker = 1.0f;
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
@@ -230,8 +231,11 @@ public class RenderPipeline : IRenderPipeline
 						new Entity(DdgiDebugProbeEntityBaseIndex + probeIndex, 1),
 						sphereMesh,
 						ColorRGBA.White,
-						AlphaMode.Opaque,
-						transform);
+						AlphaMode.AlphaBlend,
+						transform,
+						new TerrainChunkInstanceData(
+							new Vector4(probeIndex, DdgiDebugProbeInstanceMarker, 0.0f, 0.0f),
+							Vector4.Zero));
 					probeIndex++;
 				}
 			}

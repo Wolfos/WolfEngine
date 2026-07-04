@@ -1,6 +1,7 @@
 using System;
 using WolfEngine.Rendering.Abstraction;
 using System.Numerics;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -56,6 +57,11 @@ public struct TransparentForwardPassConfig
 	public required DescriptorHandle ShadowMapHandle1 { get; init; }
 	public required DescriptorHandle ShadowMapHandle2 { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
+	public required DescriptorHandle DdgiProbeState { get; init; }
+	public required bool DdgiProbeStateAvailable { get; init; }
+	public required bool DdgiProbeRelocationEnabled { get; init; }
+	public required DdgiGridShape DdgiGridShape { get; init; }
+	public required Int3 DdgiStorageOffset { get; init; }
 
 	public required Matrix4x4 ShadowViewProjection0 { get; init; }
 	public required Matrix4x4 ShadowViewProjection1 { get; init; }
@@ -80,6 +86,7 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? TransparentEnvironmentBuffer { get; init; }
 	public required IGfxBuffer? TransparentLightingBuffer { get; init; }
+	public required IGfxBuffer? DdgiDebugBuffer { get; init; }
 	public required IGfxBuffer? PointLightBuffer { get; init; }
 	public required IGfxBuffer? ClusterHeaderBuffer { get; init; }
 	public required IGfxBuffer? ClusterLightIndexBuffer { get; init; }

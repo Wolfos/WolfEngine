@@ -41,6 +41,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MTLBuffer terrainMaterialBuffer,
 			MTLBuffer terrainLayerBuffer,
 			MTLBuffer drawArgsBuffer,
+			MTLBuffer ddgiDebugBuffer,
 			MTLBuffer bindlessCountBuffer,
 			MTLBuffer bindlessTextureBuffer,
 			MTLBuffer bindlessRwTextureBuffer,
@@ -55,6 +56,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			TerrainMaterialBuffer = terrainMaterialBuffer;
 			TerrainLayerBuffer = terrainLayerBuffer;
 			DrawArgsBuffer = drawArgsBuffer;
+			DdgiDebugBuffer = ddgiDebugBuffer;
 			BindlessCountBuffer = bindlessCountBuffer;
 			BindlessTextureBuffer = bindlessTextureBuffer;
 			BindlessRwTextureBuffer = bindlessRwTextureBuffer;
@@ -70,6 +72,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MTLBuffer TerrainMaterialBuffer { get; }
 		public MTLBuffer TerrainLayerBuffer { get; }
 		public MTLBuffer DrawArgsBuffer { get; }
+		public MTLBuffer DdgiDebugBuffer { get; }
 		public MTLBuffer BindlessCountBuffer { get; }
 		public MTLBuffer BindlessTextureBuffer { get; }
 		public MTLBuffer BindlessRwTextureBuffer { get; }
@@ -117,6 +120,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		MetalBuffer terrainMaterialBuffer,
 		MetalBuffer terrainLayerBuffer,
 		MetalBuffer drawArgsBuffer,
+		MetalBuffer? ddgiDebugBuffer,
 		in SharedDrawGraphicsBufferBindings bindings,
 		MTLBuffer bindlessCountBuffer,
 		MTLBuffer bindlessTextureBuffer,
@@ -162,6 +166,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		}
 
 		command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
+		var ddgiDebugNativeBuffer = default(MTLBuffer);
+		if (ddgiDebugBuffer is not null && bindings.DdgiDebugRegisterIndex is { } ddgiDebugRegisterIndex)
+		{
+			ddgiDebugNativeBuffer = ddgiDebugBuffer.Buffer;
+			command.SetVertexBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
+			command.SetFragmentBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
+		}
 
 		if (bindlessCountBuffer.NativePtr != IntPtr.Zero)
 		{
@@ -209,6 +220,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			terrainMaterialBuffer.Buffer,
 			terrainLayerBuffer.Buffer,
 			drawArgsBuffer.Buffer,
+			ddgiDebugNativeBuffer,
 			bindlessCountBuffer,
 			bindlessTextureBuffer,
 			bindlessRwTextureBuffer,
@@ -248,6 +260,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			AddBuffer(refs.TerrainMaterialBuffer, destination, seenPointers);
 			AddBuffer(refs.TerrainLayerBuffer, destination, seenPointers);
 			AddBuffer(refs.DrawArgsBuffer, destination, seenPointers);
+			AddBuffer(refs.DdgiDebugBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessCountBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessTextureBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessRwTextureBuffer, destination, seenPointers);
@@ -298,6 +311,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		AddBufferRef(refs.TerrainMaterialBuffer);
 		AddBufferRef(refs.TerrainLayerBuffer);
 		AddBufferRef(refs.DrawArgsBuffer);
+		AddBufferRef(refs.DdgiDebugBuffer);
 		AddBufferRef(refs.BindlessCountBuffer);
 		AddBufferRef(refs.BindlessTextureBuffer);
 		AddBufferRef(refs.BindlessRwTextureBuffer);
@@ -315,6 +329,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		RemoveBufferRef(refs.TerrainMaterialBuffer);
 		RemoveBufferRef(refs.TerrainLayerBuffer);
 		RemoveBufferRef(refs.DrawArgsBuffer);
+		RemoveBufferRef(refs.DdgiDebugBuffer);
 		RemoveBufferRef(refs.BindlessCountBuffer);
 		RemoveBufferRef(refs.BindlessTextureBuffer);
 		RemoveBufferRef(refs.BindlessRwTextureBuffer);

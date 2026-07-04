@@ -7,6 +7,7 @@ namespace WolfEngine.Rendering.Passes;
 public readonly struct DdgiPassConfig
 {
 	public required IGfxPipeline TracePipeline { get; init; }
+	public required IGfxPipeline RelocationTracePipeline { get; init; }
 	public required IGfxPipeline ClassifyPipeline { get; init; }
 	public required IGfxPipeline RelocatePipeline { get; init; }
 	public required IGfxPipeline IrradianceIntegratePipeline { get; init; }
@@ -28,9 +29,13 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle IrradianceLxHistoryWriteHandle { get; init; }
 	public required DescriptorHandle VisibilityHistoryWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateReadHandle { get; init; }
+	public required DescriptorHandle ProbeStateCurrentHandle { get; init; }
+	public required DescriptorHandle ProbeStateScratchReadHandle { get; init; }
+	public required DescriptorHandle ProbeStateScratchWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateWriteHandle { get; init; }
 	public required DescriptorHandle ProbeActivityReadHandle { get; init; }
 	public required DescriptorHandle ProbeActivityWriteHandle { get; init; }
+	public required DescriptorHandle ProbeRelocationDecisionHandle { get; init; }
 	public required DescriptorHandle EnvironmentHandle { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }
@@ -44,6 +49,8 @@ public readonly struct DdgiPassConfig
 	public required IGfxBuffer TerrainMaterialBuffer { get; init; }
 	public required IGfxBuffer TerrainLayerBuffer { get; init; }
 	public required IGfxBuffer IrradianceEstimatorBuffer { get; init; }
+	public required IGfxBuffer FirstProbeRelocationDiagnosticBuffer { get; init; }
+	public required IGfxBuffer FirstProbeRelocationReadbackBuffer { get; init; }
 	public required Int2 IrradianceAtlasSize { get; init; }
 	public required Int2 VisibilityAtlasSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
@@ -61,7 +68,9 @@ public readonly struct DdgiPassConfig
 	public required float ViewBias { get; init; }
 	public required float IrradianceTemporalBlendSpeed { get; init; }
 	public required float Hysteresis { get; init; }
+	public required float RecursiveBounceEnergy { get; init; }
 	public required bool ProbeRelocationEnabled { get; init; }
+	public required bool DebugFirstProbeRelocationReadback { get; init; }
 	public required float ProbeMinFrontfaceDistance { get; init; }
 	public required float ProbeBackfaceThreshold { get; init; }
 	public required float ProbeMaxRelocationDistance { get; init; }

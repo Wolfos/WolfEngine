@@ -1,6 +1,7 @@
 import "common_bindless.slang";
 import "common_lighting.slang";
 import "draw_data.slang";
+import "ddgi_visibility.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -27,9 +28,12 @@ cbuffer BindlessHandles : register(b0)
     uint irradianceLxHistoryWriteHandle;
     uint visibilityHistoryWriteHandle;
     uint probeStateReadHandle;
+    uint probeStateCurrentHandle;
+    uint probeRelocationStateReadHandle;
     uint probeStateWriteHandle;
     uint probeActivityReadHandle;
     uint probeActivityWriteHandle;
+    uint probeRelocationDecisionHandle;
     uint environmentHandle;
     uint samplerHandle;
 };
@@ -73,7 +77,7 @@ cbuffer DdgiSettings : register(b1)
     float probeMinFrontfaceDistance;
     float probeBackfaceThreshold;
     float probeMaxRelocationDistance;
-    float probeSettingsPad0;
+    float recursiveBounceEnergy;
     float probeSettingsPad1;
     float3 directLightDirection;
     float directLightPad0;
@@ -83,7 +87,17 @@ cbuffer DdgiSettings : register(b1)
     uint historyValid;
     uint sidecarHitShadingAvailable;
     uint activeDrawCommandUpperBound;
+    uint debugFirstProbeRelocationReadback;
+    uint relocationIteration;
+    uint2 probeSettingsPad2;
 };
+
+static const uint DDGI_PROBE_STATE_DISABLED = 0u;
+static const uint DDGI_PROBE_STATE_STABLE = 1u;
+static const uint DDGI_PROBE_STATE_RELOCATING = 2u;
+static const uint DDGI_PROBE_STATE_BLOCKED = 3u;
+static const uint DDGI_RELOCATION_RAY_COUNT = 16u;
+static const uint DDGI_RELOCATION_ITERATION_COUNT = 4u;
 
 struct DdgiTexelInfo
 {
@@ -171,6 +185,16 @@ float4 DdgiLoadProbeState(uint handle, uint probeIndex)
     return stateTex.Load(int3(DdgiProbeStatePixel(probeIndex), 0));
 }
 
+uint DdgiDecodeProbeState(float encodedState)
+{
+    return uint(round(max(encodedState, 0.0f)));
+}
+
+bool DdgiIsStableProbeState(float4 state)
+{
+    return DdgiDecodeProbeState(state.w) == DDGI_PROBE_STATE_STABLE;
+}
+
 bool DdgiIsProbeEnabled(uint logicalProbeIndex)
 {
     Texture2D<float4> activityTex = GetTexture(probeActivityReadHandle);
@@ -180,22 +204,37 @@ bool DdgiIsProbeEnabled(uint logicalProbeIndex)
 bool DdgiWasProbeEnabled(uint logicalProbeIndex)
 {
     return DdgiProbeHasHistory(logicalProbeIndex) &&
-        DdgiLoadProbeState(probeStateReadHandle, logicalProbeIndex).w > 0.5f;
+        DdgiDecodeProbeState(DdgiLoadProbeState(probeStateReadHandle, logicalProbeIndex).w) !=
+            DDGI_PROBE_STATE_DISABLED;
 }
 
 bool DdgiProbeHasUsableHistory(uint logicalProbeIndex)
 {
-    return DdgiWasProbeEnabled(logicalProbeIndex);
+    return DdgiProbeHasHistory(logicalProbeIndex) &&
+        DdgiIsStableProbeState(DdgiLoadProbeState(probeStateReadHandle, logicalProbeIndex));
 }
 
-float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle)
+float3 DdgiRelocatedProbePosition(uint probeIndex, uint stateHandle, bool stateAvailable)
 {
-    if (!DdgiProbeHasHistory(probeIndex) || probeRelocationEnabled == 0u)
+    if (!stateAvailable || probeRelocationEnabled == 0u)
     {
         return DdgiProbePosition(probeIndex);
     }
 
     return DdgiProbePosition(probeIndex) + DdgiLoadProbeState(stateHandle, probeIndex).xyz;
+}
+
+float3 DdgiHistoryProbePosition(uint probeIndex)
+{
+    return DdgiRelocatedProbePosition(
+        probeIndex,
+        probeStateReadHandle,
+        DdgiProbeHasHistory(probeIndex));
+}
+
+float3 DdgiCurrentProbePosition(uint probeIndex)
+{
+    return DdgiRelocatedProbePosition(probeIndex, probeStateCurrentHandle, true);
 }
 
 uint2 DdgiProbeTileOrigin(uint probeIndex, uint interiorSize)
@@ -212,6 +251,14 @@ uint DdgiRaySampleCount(uint interiorSize)
     return min(max(raysPerProbe, 1u), interiorSize * interiorSize);
 }
 
+bool DdgiIsProbeScheduled(uint probeIndex)
+{
+    uint updateFrames = max(probeUpdateFrames, 1u);
+    return forceFullProbeUpdate != 0u ||
+        updateFrames == 1u ||
+        (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
+}
+
 bool DdgiIsProbeUpdateActive(uint probeIndex)
 {
     if (!DdgiIsProbeEnabled(probeIndex))
@@ -219,13 +266,36 @@ bool DdgiIsProbeUpdateActive(uint probeIndex)
         return false;
     }
 
-    uint updateFrames = max(probeUpdateFrames, 1u);
-    return forceFullProbeUpdate != 0u ||
+    if (!DdgiIsStableProbeState(DdgiLoadProbeState(probeStateCurrentHandle, probeIndex)))
+    {
+        return false;
+    }
+
+    return
         historyValid == 0u ||
         !DdgiProbeHasHistory(probeIndex) ||
+        !DdgiProbeHasUsableHistory(probeIndex) ||
+        DdgiIsProbeScheduled(probeIndex);
+}
+
+bool DdgiIsProbeRelocationActive(uint probeIndex, float4 sourceState)
+{
+    if (probeRelocationEnabled == 0u || !DdgiIsProbeEnabled(probeIndex))
+    {
+        return false;
+    }
+
+    uint sourceStatus = DdgiDecodeProbeState(sourceState.w);
+    if (relocationIteration > 0u)
+    {
+        return sourceStatus == DDGI_PROBE_STATE_RELOCATING;
+    }
+
+    return historyValid == 0u ||
+        !DdgiProbeHasHistory(probeIndex) ||
+        sourceStatus == DDGI_PROBE_STATE_RELOCATING ||
         !DdgiWasProbeEnabled(probeIndex) ||
-        updateFrames == 1u ||
-        (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
+        DdgiIsProbeScheduled(probeIndex);
 }
 
 uint DdgiRaySampleIndex(uint2 interiorPixel, uint interiorSize)
@@ -365,7 +435,7 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 }
                 float3 tri = lerp(1.0f.xxx - fracPart, fracPart, float3(x, y, z));
                 float trilinearWeight = tri.x * tri.y * tri.z;
-                float3 probePosition = DdgiRelocatedProbePosition(probeIndex, probeStateReadHandle);
+                float3 probePosition = DdgiHistoryProbePosition(probeIndex);
                 float3 toSurface = biasedPosition - probePosition;
                 float distanceToProbe = length(toSurface);
                 float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
@@ -373,11 +443,7 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, visibilityTileInteriorSize);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
                 float normalizedDistance = saturate(distanceToProbe / max(maxRayDistance, 0.001f));
-                float variance = max(moments.y - moments.x * moments.x, 0.0004f);
-                float distanceDelta = max(normalizedDistance - moments.x, 0.0f);
-                float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
-                chebyshevVisibility = chebyshevVisibility * chebyshevVisibility * chebyshevVisibility;
-                float visibility = normalizedDistance <= moments.x ? 1.0f : saturate(chebyshevVisibility);
+                float visibility = DdgiEvaluateVisibility(moments.x, moments.y, normalizedDistance);
                 float probeWeight = trilinearWeight * normalWeight * visibility;
                 uint2 coefficientPixel = DdgiProbeStatePixel(probeIndex);
                 coefficientL0 += irradianceL0Tex.Load(int3(coefficientPixel, 0)).rgb * probeWeight;
@@ -465,6 +531,16 @@ float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
     float phi = float(rayIndex) * 2.39996322973f;
     float3 baseDirection = float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
     return normalize(DdgiRotateDirection(baseDirection, DdgiRayRotation(probeIndex)));
+}
+
+float3 DdgiRelocationRayDirection(uint rayIndex)
+{
+    const float goldenAngle = 2.39996322973f;
+    float sampleIndex = float(min(rayIndex, DDGI_RELOCATION_RAY_COUNT - 1u)) + 0.5f;
+    float y = 1.0f - 2.0f * sampleIndex / float(DDGI_RELOCATION_RAY_COUNT);
+    float radius = sqrt(max(0.0f, 1.0f - y * y));
+    float azimuth = goldenAngle * sampleIndex;
+    return float3(cos(azimuth) * radius, y, sin(azimuth) * radius);
 }
 
 float3 DdgiSampleSky(float3 direction)

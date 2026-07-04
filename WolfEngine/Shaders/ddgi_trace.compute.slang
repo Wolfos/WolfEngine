@@ -379,6 +379,81 @@ bool DdgiTryResolveInstance(uint instanceIndex, out GpuInstanceData instanceData
     return true;
 }
 
+bool DdgiTryResolveGeometricNormal(
+    uint instanceIndex,
+    uint primitiveIndex,
+    float2 barycentrics,
+    out float3 worldGeometricNormal)
+{
+    worldGeometricNormal = 0.0f.xxx;
+    GpuInstanceData instanceData;
+    if (!DdgiTryResolveInstance(instanceIndex, instanceData))
+    {
+        return false;
+    }
+
+    if (instanceData.drawKind == WOLF_DRAW_KIND_TERRAIN)
+    {
+        uint resolution = instanceIndex < WOLF_MAX_INSTANCE_COUNT
+            ? g_InstanceIndexToTerrainRtResolution[instanceIndex]
+            : 0u;
+        uint quadIndex = primitiveIndex / 2u;
+        if (resolution == 0u || quadIndex >= resolution * resolution)
+        {
+            return false;
+        }
+
+        uint quadX = quadIndex % resolution;
+        uint quadZ = quadIndex / resolution;
+        float2 uv00 = float2(float(quadX), float(quadZ)) / float(resolution);
+        float2 uv10 = float2(float(quadX + 1u), float(quadZ)) / float(resolution);
+        float2 uv01 = float2(float(quadX), float(quadZ + 1u)) / float(resolution);
+        float2 uv11 = float2(float(quadX + 1u), float(quadZ + 1u)) / float(resolution);
+        float b1 = barycentrics.x;
+        float b2 = barycentrics.y;
+        float b0 = 1.0f - b1 - b2;
+        float2 baseUv = (primitiveIndex & 1u) == 0u
+            ? uv00 * b0 + uv01 * b1 + uv10 * b2
+            : uv10 * b0 + uv01 * b1 + uv11 * b2;
+        float2 uv = instanceData.terrainHeightmapUvScaleOffset.zw +
+            baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
+        uint materialIndex = DdgiResolveMaterialIndex(instanceData.materialHandle);
+        GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
+        float3 localNormal = DdgiComputeTerrainLocalNormal(uv, instanceData, terrainData);
+        worldGeometricNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+        return length(worldGeometricNormal) > 1e-4f;
+    }
+
+    if (!IsPackedHandleValid(instanceData.meshHandle))
+    {
+        return false;
+    }
+
+    uint meshIndex = GetHandleIndex(instanceData.meshHandle);
+    if (meshIndex == 0u)
+    {
+        return false;
+    }
+
+    GpuMeshData meshData = g_MeshTable[meshIndex];
+    uint firstIndex = primitiveIndex * 3u;
+    if (meshData.indexCount == 0u || firstIndex + 2u >= meshData.indexCount)
+    {
+        return false;
+    }
+
+    uint i0 = g_PackedIndices[meshData.startIndex + firstIndex + 0u] + meshData.baseVertex;
+    uint i1 = g_PackedIndices[meshData.startIndex + firstIndex + 1u] + meshData.baseVertex;
+    uint i2 = g_PackedIndices[meshData.startIndex + firstIndex + 2u] + meshData.baseVertex;
+    float3 worldPosition0 = mul(g_PackedVertices[i0].position, instanceData.world).xyz;
+    float3 worldPosition1 = mul(g_PackedVertices[i1].position, instanceData.world).xyz;
+    float3 worldPosition2 = mul(g_PackedVertices[i2].position, instanceData.world).xyz;
+    worldGeometricNormal = normalize(cross(
+        worldPosition1 - worldPosition0,
+        worldPosition2 - worldPosition0));
+    return length(worldGeometricNormal) > 1e-4f;
+}
+
 bool DdgiTryResolveHitSurface(
     uint instanceIndex,
     uint primitiveIndex,
@@ -496,14 +571,13 @@ float DdgiTraceDirectionalLightVisibility(float3 worldPosition, float3 worldNorm
 
 float3 DdgiShadeHitSurface(DdgiHitSurface surface)
 {
-    static const float DDGI_RECURSIVE_ENERGY = 0.95f;
     float3 lightDirection = length(directLightDirection) > 1e-5f ? -normalize(directLightDirection) : 0.0f.xxx;
     float directWeight = saturate(dot(surface.worldNormal, lightDirection));
     float visibility = directWeight > 0.0f ? DdgiTraceDirectionalLightVisibility(surface.worldPosition, surface.worldNormal, lightDirection) : 0.0f;
     float3 directRadiance = directLightColorIntensity * directWeight * visibility / WOLF_PI;
     float3 recursiveRadiance =
         DdgiSampleHistory(surface.worldPosition, surface.worldNormal) *
-        DDGI_RECURSIVE_ENERGY;
+        saturate(recursiveBounceEnergy);
     return surface.albedo * (directRadiance + recursiveRadiance) + surface.emissive;
 }
 
@@ -539,9 +613,8 @@ DdgiTraceResult DdgiTraceRay(
             surface))
         {
             result.backfaceHit = dot(surface.worldGeometricNormal, rayDirection) > 0.0f;
-            // A backface hit means the probe ray originated inside closed geometry.
-            // Do not let interior-facing surfaces inject energy while relocation
-            // moves the probe back into usable space.
+            // Relocation must use geometric facing,
+            // not material or interpolated normals used for lighting.
             result.radiance = result.backfaceHit
                 ? 0.0f.xxx
                 : DdgiShadeHitSurface(surface);
@@ -557,6 +630,43 @@ DdgiTraceResult DdgiTraceRay(
         result.radiance = DdgiSampleSky(rayDirection);
     }
 
+    return result;
+}
+
+DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
+{
+    RayDesc ray;
+    ray.Origin = originPosition + rayDirection * normalBias;
+    ray.Direction = rayDirection;
+    ray.TMin = 0.001f;
+    ray.TMax = maxRayDistance;
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
+    query.TraceRayInline(
+        sceneTlas,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+        0xFF,
+        ray);
+    query.Proceed();
+
+    DdgiTraceResult result = (DdgiTraceResult)0;
+    result.hitDistance = maxRayDistance;
+    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    {
+        return result;
+    }
+
+    result.hitGeometry = true;
+    result.hitDistance = query.CommittedRayT();
+    float3 worldGeometricNormal;
+    if (DdgiTryResolveGeometricNormal(
+        query.CommittedInstanceIndex(),
+        query.CommittedPrimitiveIndex(),
+        query.CommittedTriangleBarycentrics(),
+        worldGeometricNormal))
+    {
+        result.backfaceHit = dot(worldGeometricNormal, rayDirection) > 0.0f;
+    }
     return result;
 }
 
@@ -585,7 +695,7 @@ void TraceIrradianceSample(uint2 pixel)
 
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
     DdgiTraceResult result = DdgiTraceRay(
-        DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
+        DdgiCurrentProbePosition(info.probeIndex),
         direction);
     target[pixel] = float4(result.radiance, 1.0f);
 }
@@ -615,12 +725,57 @@ void TraceVisibilitySample(uint2 pixel)
 
     float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
     DdgiTraceResult result = DdgiTraceRay(
-        DdgiRelocatedProbePosition(info.probeIndex, probeStateReadHandle),
+        DdgiCurrentProbePosition(info.probeIndex),
         direction);
-    float normalizedDistance = saturate(result.hitDistance / max(maxRayDistance, 0.001f));
+    float visibilityDistance = result.backfaceHit
+        ? result.hitDistance * 0.9f
+        : result.hitDistance;
+    float normalizedDistance = saturate(visibilityDistance / max(maxRayDistance, 0.001f));
     target[pixel] = float4(
         normalizedDistance,
         normalizedDistance * normalizedDistance,
+        result.hitGeometry ? 1.0f : 0.0f,
+        result.backfaceHit ? 1.0f : 0.0f);
+}
+
+[numthreads(8, 8, 1)]
+void CSRelocation(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixel = dispatchThreadId.xy;
+    RWTexture2D<float4> target = GetRWTexture(traceVisibilityHandle);
+    if (pixel.x >= visibilityAtlasWidth || pixel.y >= visibilityAtlasHeight)
+    {
+        return;
+    }
+
+    DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
+    if (!info.valid)
+    {
+        target[pixel] = 0.0f.xxxx;
+        return;
+    }
+
+    uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, visibilityTileInteriorSize);
+    bool sourceAvailable = relocationIteration > 0u || DdgiProbeHasHistory(info.probeIndex);
+    float4 sourceState = sourceAvailable
+        ? DdgiLoadProbeState(probeRelocationStateReadHandle, info.probeIndex)
+        : float4(0.0f.xxx, float(DDGI_PROBE_STATE_DISABLED));
+    if (rayIndex >= DDGI_RELOCATION_RAY_COUNT ||
+        !DdgiIsProbeRelocationActive(info.probeIndex, sourceState))
+    {
+        target[pixel] = 0.0f.xxxx;
+        return;
+    }
+
+    float3 direction = DdgiRelocationRayDirection(rayIndex);
+    float3 probePosition = DdgiRelocatedProbePosition(
+        info.probeIndex,
+        probeRelocationStateReadHandle,
+        sourceAvailable);
+    DdgiTraceResult result = DdgiTraceGeometryRay(probePosition, direction);
+    target[pixel] = float4(
+        result.hitDistance,
+        0.0f,
         result.hitGeometry ? 1.0f : 0.0f,
         result.backfaceHit ? 1.0f : 0.0f);
 }

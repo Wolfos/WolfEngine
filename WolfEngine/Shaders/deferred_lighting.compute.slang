@@ -2,6 +2,7 @@ import "common.slang";
 import "constants.slang";
 import "common_bindless.slang";
 import "common_lighting.slang";
+import "ddgi_visibility.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -18,10 +19,14 @@ cbuffer BindlessHandles : register(b0)
     uint ddgiVisibilityHandle;
     uint ddgiProbeStateHandle;
     uint ddgiProbeActivityHandle;
+    uint ddgiProbeRelocationDecisionHandle;
     uint ddgiFinalContributionHandle;
     uint ddgiProbeBaseWeightDebugHandle;
     uint ddgiWeightedVisibilityDebugHandle;
     uint ddgiDominantProbeDebugHandle;
+    uint ddgiDominantProbeCoordDebugHandle;
+    uint ddgiProbeRelocationDebugHandle;
+    uint ddgiProbeRelocationDecisionDebugHandle;
     uint environmentHandle;
     uint irradianceHandle;
     uint prefilteredHandle;
@@ -204,12 +209,18 @@ DdgiShSample SampleDdgiSh(
     float gridInfluence,
     out float debugBaseWeight,
     out float debugWeightedVisibility,
-    out float3 debugDominantProbe)
+    out float3 debugDominantProbe,
+    out float3 debugDominantProbeCoord,
+    out float3 debugProbeRelocation,
+    out float3 debugProbeRelocationDecision)
 {
     DdgiShSample result = (DdgiShSample)0;
     debugBaseWeight = 0.0f;
     debugWeightedVisibility = 0.0f;
     debugDominantProbe = 0.0f.xxx;
+    debugDominantProbeCoord = 0.0f.xxx;
+    debugProbeRelocation = 0.0f.xxx;
+    debugProbeRelocationDecision = 0.0f.xxx;
     if (gridInfluence <= 0.0f)
     {
         return result;
@@ -232,6 +243,7 @@ DdgiShSample SampleDdgiSh(
     Texture2D<float4> visibilityTex = GetTexture(ddgiVisibilityHandle);
     Texture2D<float4> probeStateTex = GetTexture(ddgiProbeStateHandle);
     Texture2D<float4> probeActivityTex = GetTexture(ddgiProbeActivityHandle);
+    Texture2D<float4> relocationDecisionTex = GetTexture(ddgiProbeRelocationDecisionHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
     float3 coefficientL0 = 0.0f.xxx;
@@ -242,6 +254,9 @@ DdgiShSample SampleDdgiSh(
     float weightSum = 0.0f;
     float dominantProbeWeight = 0.0f;
     uint dominantProbeIndex = 0u;
+    float3 dominantProbeCoord = 0.0f.xxx;
+    float3 relocationDebugSum = 0.0f.xxx;
+    float3 relocationDecisionDebugSum = 0.0f.xxx;
     for (uint z = 0u; z <= 1u; z++)
     {
         for (uint y = 0u; y <= 1u; y++)
@@ -268,8 +283,12 @@ DdgiShSample SampleDdgiSh(
                 float4 probeState = probeStateTex.Load(int3(uint2(
                     physicalProbeIndex % ddgiAtlasColumns,
                     physicalProbeIndex / ddgiAtlasColumns), 0));
+                if (uint(round(max(probeState.w, 0.0f))) != 1u)
+                {
+                    continue;
+                }
                 float3 relocationOffset =
-                    ddgiProbeRelocationEnabled != 0u && DdgiProbeHasHistory(probeIndex)
+                    ddgiProbeRelocationEnabled != 0u
                     ? probeState.xyz
                     : 0.0f.xxx;
                 float3 probePosition = DdgiProbePosition(uint3(coord)) + relocationOffset;
@@ -283,18 +302,19 @@ DdgiShSample SampleDdgiSh(
                 float normalizedDistance = saturate(distanceToProbe / max(ddgiMaxRayDistance, 0.001f));
                 float meanDistance = moments.x;
                 float meanDistanceSquared = moments.y;
-                float variance = max(meanDistanceSquared - meanDistance * meanDistance, 0.0004f);
-                float distanceDelta = max(normalizedDistance - meanDistance, 0.0f);
-                float chebyshevVisibility = variance / (variance + distanceDelta * distanceDelta);
-                chebyshevVisibility = chebyshevVisibility * chebyshevVisibility * chebyshevVisibility;
-                float visibility = normalizedDistance <= meanDistance ? 1.0f : saturate(chebyshevVisibility);
+                float visibility = DdgiEvaluateVisibility(meanDistance, meanDistanceSquared, normalizedDistance);
                 float probeWeight = weight * visibility;
                 baseWeightSum += weight;
                 if (probeWeight > dominantProbeWeight)
                 {
                     dominantProbeWeight = probeWeight;
                     dominantProbeIndex = physicalProbeIndex;
+                    dominantProbeCoord = float3(coord.x, coord.y, coord.z);
                 }
+                relocationDebugSum += relocationOffset * probeWeight;
+                relocationDecisionDebugSum += relocationDecisionTex.Load(int3(uint2(
+                    physicalProbeIndex % ddgiAtlasColumns,
+                    physicalProbeIndex / ddgiAtlasColumns), 0)).rgb * probeWeight;
                 uint2 coefficientPixel = uint2(
                     physicalProbeIndex % ddgiAtlasColumns,
                     physicalProbeIndex / ddgiAtlasColumns);
@@ -324,8 +344,18 @@ DdgiShSample SampleDdgiSh(
         float((probeHash >> 16u) & 0xffu)) / 255.0f;
     probeColor = 0.25f.xxx + 0.75f * probeColor;
     debugDominantProbe = probeColor * saturate(dominantProbeWeight / weightSum);
+    float3 probeCoordMax = max(float3(
+        ddgiProbeCountX,
+        ddgiProbeCountY,
+        ddgiProbeCountZ) - 1.0f.xxx, 1.0f.xxx);
+    debugDominantProbeCoord = saturate(dominantProbeCoord / probeCoordMax);
 
     float inverseWeight = rcp(weightSum);
+    float3 averageRelocationOffset = relocationDebugSum * inverseWeight;
+    float signedVerticalRelocation =
+        averageRelocationOffset.y / max(ddgiProbeSpacing, 0.001f) * 0.5f + 0.5f;
+    debugProbeRelocation = float3(0.5f, signedVerticalRelocation, 0.5f);
+    debugProbeRelocationDecision = relocationDecisionDebugSum * inverseWeight;
     result.coefficientL0 = coefficientL0 * inverseWeight;
     result.coefficientLy = coefficientLy * inverseWeight;
     result.coefficientLz = coefficientLz * inverseWeight;
@@ -434,9 +464,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
         if (ddgiEnabled != 0u)
         {
+            GetRWTexture(ddgiFinalContributionHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
             GetRWTexture(ddgiProbeBaseWeightDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
             GetRWTexture(ddgiWeightedVisibilityDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
             GetRWTexture(ddgiDominantProbeDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            GetRWTexture(ddgiDominantProbeCoordDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            GetRWTexture(ddgiProbeRelocationDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            GetRWTexture(ddgiProbeRelocationDecisionDebugHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
         }
         lightingTarget[dispatchThreadId.xy] = float4(skyColor, 1.0f);
         return;
@@ -503,6 +537,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float ddgiBaseWeightDebug;
     float ddgiWeightedVisibilityDebug;
     float3 ddgiDominantProbeDebug;
+    float3 ddgiDominantProbeCoordDebug;
+    float3 ddgiProbeRelocationDebug;
+    float3 ddgiProbeRelocationDecisionDebug;
     DdgiShSample ddgiSample = SampleDdgiSh(
         absoluteWorldPos,
         normal,
@@ -510,9 +547,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         ddgiGridInfluence,
         ddgiBaseWeightDebug,
         ddgiWeightedVisibilityDebug,
-        ddgiDominantProbeDebug);
+        ddgiDominantProbeDebug,
+        ddgiDominantProbeCoordDebug,
+        ddgiProbeRelocationDebug,
+        ddgiProbeRelocationDecisionDebug);
+    float3 ddgiDiffuseIrradiance = EvaluateDdgiDiffuse(ddgiSample, normal);
     float3 ddgiContribution =
-        EvaluateDdgiDiffuse(ddgiSample, normal) * diffuseEnergy * albedo * occlusion;
+        ddgiDiffuseIrradiance * diffuseEnergy * albedo * occlusion;
     float3 reflectionDirection = reflect(-viewDir, normal);
     float3 ddgiSpecularRadiance = EvaluateDdgiRadiance(ddgiSample, reflectionDirection);
     float3 ddgiSpecularContribution = EvaluateSpecularImageBasedLightingFromRadiance(
@@ -532,13 +573,19 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (ddgiEnabled != 0u && ddgiProbeCount != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
-        ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiContribution * ddgiGridInfluence, 1.0f);
+        ddgiFinalContribution[dispatchThreadId.xy] = float4(ddgiDiffuseIrradiance * ddgiGridInfluence, 1.0f);
         GetRWTexture(ddgiProbeBaseWeightDebugHandle)[dispatchThreadId.xy] =
             float4(ddgiBaseWeightDebug.xxx, 1.0f);
         GetRWTexture(ddgiWeightedVisibilityDebugHandle)[dispatchThreadId.xy] =
             float4(ddgiWeightedVisibilityDebug.xxx, 1.0f);
         GetRWTexture(ddgiDominantProbeDebugHandle)[dispatchThreadId.xy] =
             float4(ddgiDominantProbeDebug, 1.0f);
+        GetRWTexture(ddgiDominantProbeCoordDebugHandle)[dispatchThreadId.xy] =
+            float4(ddgiDominantProbeCoordDebug, 1.0f);
+        GetRWTexture(ddgiProbeRelocationDebugHandle)[dispatchThreadId.xy] =
+            float4(saturate(ddgiProbeRelocationDebug), 1.0f);
+        GetRWTexture(ddgiProbeRelocationDecisionDebugHandle)[dispatchThreadId.xy] =
+            float4(saturate(ddgiProbeRelocationDecisionDebug), 1.0f);
     }
     color += surface.emissive;
 

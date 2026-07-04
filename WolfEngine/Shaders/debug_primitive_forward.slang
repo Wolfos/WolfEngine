@@ -28,6 +28,61 @@ cbuffer CameraParams : register(b2)
     float2 _cameraPadding;
 };
 
+cbuffer DdgiDebugParams : register(b4)
+{
+    uint ddgiProbeStateHandle;
+    uint ddgiProbeStateAvailable;
+    uint ddgiProbeRelocationEnabled;
+    uint ddgiAtlasColumns;
+    uint ddgiProbeCountX;
+    uint ddgiProbeCountY;
+    uint ddgiProbeCountZ;
+    int ddgiStorageOffsetX;
+    int ddgiStorageOffsetY;
+    int ddgiStorageOffsetZ;
+    uint ddgiDebugPadding0;
+    uint ddgiDebugPadding1;
+};
+
+int DdgiDebugPositiveModulo(int value, int modulus)
+{
+    int remainder = value % max(modulus, 1);
+    return remainder < 0 ? remainder + modulus : remainder;
+}
+
+float3 DdgiDebugProbeOffset(GpuInstanceData instanceData)
+{
+    if (ddgiProbeStateAvailable == 0u ||
+        ddgiProbeRelocationEnabled == 0u ||
+        instanceData.terrainChunkOriginSize.y < 0.5f)
+    {
+        return 0.0f.xxx;
+    }
+
+    uint probeIndex = uint(round(max(instanceData.terrainChunkOriginSize.x, 0.0f)));
+    uint probeCount = ddgiProbeCountX * ddgiProbeCountY * ddgiProbeCountZ;
+    if (probeIndex >= probeCount)
+    {
+        return 0.0f.xxx;
+    }
+
+    uint x = probeIndex % ddgiProbeCountX;
+    uint yz = probeIndex / ddgiProbeCountX;
+    uint3 physical = uint3(
+        DdgiDebugPositiveModulo(int(x) + ddgiStorageOffsetX, int(ddgiProbeCountX)),
+        DdgiDebugPositiveModulo(int(yz % ddgiProbeCountY) + ddgiStorageOffsetY, int(ddgiProbeCountY)),
+        DdgiDebugPositiveModulo(int(yz / ddgiProbeCountY) + ddgiStorageOffsetZ, int(ddgiProbeCountZ)));
+    uint physicalProbeIndex =
+        physical.x +
+        physical.y * ddgiProbeCountX +
+        physical.z * ddgiProbeCountX * ddgiProbeCountY;
+    uint2 statePixel = uint2(
+        physicalProbeIndex % max(ddgiAtlasColumns, 1u),
+        physicalProbeIndex / max(ddgiAtlasColumns, 1u));
+    Texture2D<float4> stateTexture = GetTexture(ddgiProbeStateHandle);
+    return stateTexture.Load(int3(statePixel, 0)).xyz;
+}
+
 struct VSInput
 {
     float4 position : POSITION;
@@ -57,6 +112,7 @@ VSOutput vertexShader(VSInput input)
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(input.position, instanceData.world);
+    worldPosition.xyz += DdgiDebugProbeOffset(instanceData);
     worldPosition.xyz -= cameraPosition;
 
     output.position = mul(worldPosition, viewProjection);

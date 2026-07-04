@@ -86,6 +86,11 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		{
 			return false;
 		}
+		var ddgiDebugBuffer = resources.DdgiDebugBuffer as MetalBuffer;
+		if (bindings.DdgiDebugRegisterIndex.HasValue && ddgiDebugBuffer is null)
+		{
+			return false;
+		}
 
 		if (_descriptorTable.CountBuffer.NativePtr == IntPtr.Zero ||
 		    _descriptorTable.TextureArgumentBuffer.NativePtr == IntPtr.Zero ||
@@ -111,6 +116,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			terrainMaterialBuffer,
 			terrainLayerBuffer,
 			drawArgsBuffer,
+			ddgiDebugBuffer,
 			bindings,
 			_descriptorTable.CountBuffer,
 			_descriptorTable.TextureArgumentBuffer,

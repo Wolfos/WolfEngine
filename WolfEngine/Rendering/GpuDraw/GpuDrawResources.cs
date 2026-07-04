@@ -42,6 +42,7 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _shadowCameraBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentEnvironmentBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _transparentLightingBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _ddgiDebugBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterPointLightBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterAabbBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterHeaderBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -65,6 +66,7 @@ public sealed class GpuDrawResources : IDisposable
 	private int _shadowCameraBufferSizeInBytes;
 	private int _transparentEnvironmentBufferSizeInBytes;
 	private int _transparentLightingBufferSizeInBytes;
+	private int _ddgiDebugBufferSizeInBytes;
 	private int _decalProjectorCapacity;
 	private ClusteredLightingFrameLayout _clusteredLightingLayout;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
@@ -119,6 +121,8 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? TransparentEnvironmentBuffer => _transparentEnvironmentBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? TransparentLightingBuffer => _transparentLightingBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? DdgiDebugBuffer => _ddgiDebugBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DecalProjectorBuffer => _decalProjectorBuffers[_activeFrameSlot];
 
@@ -257,6 +261,12 @@ public sealed class GpuDrawResources : IDisposable
 				_transparentLightingBuffers[i],
 				_transparentLightingBufferSizeInBytes,
 				$"TransparentLightingBuffer[{i}]");
+
+			_ddgiDebugBuffers[i] = EnsureConstantBufferCapacity(
+				device,
+				_ddgiDebugBuffers[i],
+				_ddgiDebugBufferSizeInBytes,
+				$"DdgiDebugBuffer[{i}]");
 
 			_drawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
@@ -407,6 +417,7 @@ public sealed class GpuDrawResources : IDisposable
 			(_shadowCameraBuffers[i] as IDisposable)?.Dispose();
 			(_transparentEnvironmentBuffers[i] as IDisposable)?.Dispose();
 			(_transparentLightingBuffers[i] as IDisposable)?.Dispose();
+			(_ddgiDebugBuffers[i] as IDisposable)?.Dispose();
 			(_decalProjectorBuffers[i] as IDisposable)?.Dispose();
 			(_clusterPointLightBuffers[i] as IDisposable)?.Dispose();
 			(_clusterAabbBuffers[i] as IDisposable)?.Dispose();
@@ -431,6 +442,7 @@ public sealed class GpuDrawResources : IDisposable
 			_shadowCameraBuffers[i] = null;
 			_transparentEnvironmentBuffers[i] = null;
 			_transparentLightingBuffers[i] = null;
+			_ddgiDebugBuffers[i] = null;
 			_decalProjectorBuffers[i] = null;
 			_clusterPointLightBuffers[i] = null;
 			_clusterAabbBuffers[i] = null;
@@ -488,6 +500,14 @@ public sealed class GpuDrawResources : IDisposable
 			backendKind);
 		_transparentEnvironmentBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("TransparentEnvironmentParams").SizeInBytes;
 		_transparentLightingBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
+
+		var debugPrimitive = _shaderCompiler.GetGraphicsShaderWithReflection(
+			"debug_primitive_forward.slang",
+			"vertexShader",
+			"fragmentShader",
+			backendKind);
+		_ddgiDebugBufferSizeInBytes =
+			debugPrimitive.ReflectionLayout.GetConstantBuffer("DdgiDebugParams").SizeInBytes;
 
 		_constantBufferLayoutBackend = backendKind;
 	}

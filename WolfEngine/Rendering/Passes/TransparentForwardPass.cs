@@ -21,6 +21,7 @@ public sealed class TransparentForwardPass
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _environmentWriter;
 	private ShaderPropertyWriter? _lightingWriter;
+	private ShaderPropertyWriter? _ddgiDebugWriter;
 	private uint _cameraRegisterIndex = 2;
 
 	public TransparentForwardPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
@@ -80,6 +81,11 @@ public sealed class TransparentForwardPass
 		var shadowMap1 = context.GetTexture(resources.ShadowMapDepth1);
 		var shadowMap2 = context.GetTexture(resources.ShadowMapDepth2);
 		var shadowResolution = Math.Max(1, shadowData.MapResolution);
+		var ddgiProbeStateAvailable = resources.DdgiProbeStateWrite.IsValid;
+		var ddgiProbeState = ddgiProbeStateAvailable
+			? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateWrite))
+			: _bindlessRegistry.ErrorTextureHandle;
+		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
 
 		var buckets = BuildBuckets(device, gpuDrawResources);
 
@@ -101,6 +107,12 @@ public sealed class TransparentForwardPass
 			ShadowMapHandle1 = _bindlessRegistry.RegisterTexture(shadowMap1),
 			ShadowMapHandle2 = _bindlessRegistry.RegisterTexture(shadowMap2),
 			ShadowSampler = _shadowSampler,
+			DdgiProbeState = ddgiProbeState,
+			DdgiProbeStateAvailable = ddgiProbeStateAvailable,
+			DdgiProbeRelocationEnabled =
+				resources.Config.DiffuseGlobalIllumination.ProbeRelocationEnabled,
+			DdgiGridShape = ddgiGridShape,
+			DdgiStorageOffset = resources.DdgiStorageOffset,
 			ShadowViewProjection0 = shadowData.CascadeViewProjection0,
 			ShadowViewProjection1 = shadowData.CascadeViewProjection1,
 			ShadowViewProjection2 = shadowData.CascadeViewProjection2,
@@ -123,6 +135,7 @@ public sealed class TransparentForwardPass
 			CameraBuffer = gpuDrawResources.CameraBuffer,
 			TransparentEnvironmentBuffer = gpuDrawResources.TransparentEnvironmentBuffer,
 			TransparentLightingBuffer = gpuDrawResources.TransparentLightingBuffer,
+			DdgiDebugBuffer = gpuDrawResources.DdgiDebugBuffer,
 			PointLightBuffer = gpuDrawResources.ClusterPointLightBuffer,
 			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer,
 			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer,
@@ -222,7 +235,8 @@ public sealed class TransparentForwardPass
 		lightingWriter.SetFloat("shadowMaxDistance", config.ShadowMaxDistance);
 		
 		if (config.TransparentEnvironmentBuffer is not IWritableGpuBuffer writableEnvironmentBuffer ||
-		    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer)
+		    config.TransparentLightingBuffer is not IWritableGpuBuffer writableLightingBuffer ||
+		    config.DdgiDebugBuffer is not IWritableGpuBuffer writableDdgiDebugBuffer)
 		{
 			commandList.EndPass();
 			return;
@@ -231,6 +245,20 @@ public sealed class TransparentForwardPass
 		writableEnvironmentBuffer.Write<byte>(environmentWriter.AsBytes());
 		writableLightingBuffer.Write<byte>(lightingWriter.AsBytes());
 
+		var ddgiDebugWriter = _ddgiDebugWriter
+			?? throw new InvalidOperationException("DDGI debug primitive writer was not initialized.");
+		ddgiDebugWriter.Clear();
+		ddgiDebugWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
+		ddgiDebugWriter.SetUInt("ddgiProbeStateAvailable", config.DdgiProbeStateAvailable ? 1u : 0u);
+		ddgiDebugWriter.SetUInt("ddgiProbeRelocationEnabled", config.DdgiProbeRelocationEnabled ? 1u : 0u);
+		ddgiDebugWriter.SetUInt("ddgiAtlasColumns", (uint)config.DdgiGridShape.AtlasColumns);
+		ddgiDebugWriter.SetUInt("ddgiProbeCountX", (uint)config.DdgiGridShape.CountX);
+		ddgiDebugWriter.SetUInt("ddgiProbeCountY", (uint)config.DdgiGridShape.CountY);
+		ddgiDebugWriter.SetUInt("ddgiProbeCountZ", (uint)config.DdgiGridShape.CountZ);
+		ddgiDebugWriter.SetInt("ddgiStorageOffsetX", config.DdgiStorageOffset.X);
+		ddgiDebugWriter.SetInt("ddgiStorageOffsetY", config.DdgiStorageOffset.Y);
+		ddgiDebugWriter.SetInt("ddgiStorageOffsetZ", config.DdgiStorageOffset.Z);
+		writableDdgiDebugBuffer.Write<byte>(ddgiDebugWriter.AsBytes());
 
 		var buckets = config.Buckets.Span;
 		if (buckets.Length == 0)
@@ -250,6 +278,12 @@ public sealed class TransparentForwardPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
+				if (bucket.DrawKind == GpuDrawKind.DebugPrimitive)
+				{
+					commandList.SetGraphicsConstants(
+						ddgiDebugWriter.RegisterIndex,
+						ddgiDebugWriter.AsBytes());
+				}
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
@@ -369,7 +403,8 @@ public sealed class TransparentForwardPass
 		if (_reflectionBackendKind.HasValue &&
 		    _reflectionBackendKind.Value == backendKind &&
 		    _environmentWriter is not null &&
-		    _lightingWriter is not null)
+		    _lightingWriter is not null &&
+		    _ddgiDebugWriter is not null)
 		{
 			return;
 		}
@@ -385,6 +420,14 @@ public sealed class TransparentForwardPass
 		var cameraLayout = reflection.GetConstantBuffer("CameraParams");
 		_cameraRegisterIndex = cameraLayout.RegisterIndex;
 		_lightingWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("LightingParams"));
+		var debugCompiled = GraphicsShaderCompiler.CompileWithReflection(
+			_shaderCompiler,
+			backendKind,
+			"debug_primitive_forward.slang",
+			"vertexShader",
+			"fragmentShader");
+		_ddgiDebugWriter = new ShaderPropertyWriter(
+			debugCompiled.ReflectionLayout.GetConstantBuffer("DdgiDebugParams"));
 		_reflectionBackendKind = backendKind;
 	}
 

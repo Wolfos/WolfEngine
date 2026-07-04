@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 
@@ -6,22 +7,30 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class DdgiPass
 {
+	private const int FirstProbeRelocationDiagnosticFloatCount =
+		36 * DdgiUtilities.RelocationIterationCount;
+	private const int FirstProbeRelocationDiagnosticBufferSize =
+		FirstProbeRelocationDiagnosticFloatCount * sizeof(float);
+
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _classifyPipeline;
 	private IGfxPipeline? _tracePipeline;
+	private IGfxPipeline? _relocationTracePipeline;
 	private IGfxPipeline? _relocatePipeline;
 	private IGfxPipeline? _irradianceIntegratePipeline;
 	private IGfxPipeline? _visibilityIntegratePipeline;
 	private IGfxPipeline? _borderUpdatePipeline;
 	private ReadOnlyMemory<byte> _classifyShader;
 	private ReadOnlyMemory<byte> _traceShader;
+	private ReadOnlyMemory<byte> _relocationTraceShader;
 	private ReadOnlyMemory<byte> _relocateShader;
 	private ReadOnlyMemory<byte> _irradianceIntegrateShader;
 	private ReadOnlyMemory<byte> _visibilityIntegrateShader;
 	private ReadOnlyMemory<byte> _borderUpdateShader;
 	private ComputeThreadGroupSize? _classifyThreadGroupSize;
 	private ComputeThreadGroupSize? _traceThreadGroupSize;
+	private ComputeThreadGroupSize? _relocationTraceThreadGroupSize;
 	private ComputeThreadGroupSize? _relocateThreadGroupSize;
 	private ComputeThreadGroupSize? _irradianceIntegrateThreadGroupSize;
 	private ComputeThreadGroupSize? _visibilityIntegrateThreadGroupSize;
@@ -31,6 +40,8 @@ public sealed class DdgiPass
 	private ShaderPropertyWriter? _classifySettingsWriter;
 	private ShaderPropertyWriter? _traceBindlessWriter;
 	private ShaderPropertyWriter? _traceSettingsWriter;
+	private ShaderPropertyWriter? _relocationTraceBindlessWriter;
+	private ShaderPropertyWriter? _relocationTraceSettingsWriter;
 	private ShaderPropertyWriter? _relocateBindlessWriter;
 	private ShaderPropertyWriter? _relocateSettingsWriter;
 	private ShaderPropertyWriter? _irradianceIntegrateBindlessWriter;
@@ -40,9 +51,16 @@ public sealed class DdgiPass
 	private ShaderPropertyWriter? _borderBindlessWriter;
 	private ShaderPropertyWriter? _borderSettingsWriter;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
+	private IGfxDevice? _firstProbeRelocationDiagnosticDevice;
+	private IGfxBuffer? _firstProbeRelocationDiagnosticBuffer;
+	private IGfxBuffer? _firstProbeRelocationReadbackBuffer;
+	private bool _firstProbeRelocationReadbackPending;
 	private uint _frameIndex;
 
 	public DdgiPassStats LastStats { get; private set; }
+	public DdgiFirstProbeRelocationDiagnostic? LastFirstProbeRelocationDiagnostic { get; private set; }
+	public IReadOnlyList<DdgiFirstProbeRelocationDiagnostic> LastFirstProbeRelocationDiagnostics { get; private set; } =
+		Array.Empty<DdgiFirstProbeRelocationDiagnostic>();
 
 	public DdgiPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -98,6 +116,8 @@ public sealed class DdgiPass
 		}
 
 		var config = resources.Config.DiffuseGlobalIllumination;
+		ReadPendingFirstProbeRelocationDiagnostic(device);
+		EnsureFirstProbeRelocationDiagnosticResources(device);
 		var gridShape = DdgiUtilities.GetGridShape(config);
 		var directLight = GetPrimaryDirectionalLight(sceneData);
 		var frameIndex = _frameIndex++;
@@ -123,11 +143,15 @@ public sealed class DdgiPass
 			raysPerProbe,
 			activeProbeCount * raysPerProbe,
 			forceFullProbeUpdate,
-			newlyExposedProbeCount);
+			newlyExposedProbeCount,
+			activeProbeCount,
+			activeProbeCount * DdgiUtilities.RelocationRayCount,
+			activeProbeCount * DdgiUtilities.RelocationRayCount * DdgiUtilities.RelocationIterationCount);
 		return new DdgiPassConfig
 		{
 			ClassifyPipeline = _classifyPipeline!,
 			TracePipeline = _tracePipeline!,
+			RelocationTracePipeline = _relocationTracePipeline!,
 			RelocatePipeline = _relocatePipeline!,
 			IrradianceIntegratePipeline = _irradianceIntegratePipeline!,
 			VisibilityIntegratePipeline = _visibilityIntegratePipeline!,
@@ -148,9 +172,13 @@ public sealed class DdgiPass
 			IrradianceLxHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiIrradianceLxHistoryWrite)),
 			VisibilityHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiVisibilityHistoryWrite)),
 			ProbeStateReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateRead)),
+			ProbeStateCurrentHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateWrite)),
+			ProbeStateScratchReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateScratch)),
+			ProbeStateScratchWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateScratch)),
 			ProbeStateWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateWrite)),
 			ProbeActivityReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeActivity)),
 			ProbeActivityWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivity)),
+			ProbeRelocationDecisionHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeRelocationDecision)),
 			EnvironmentHandle = resources.SkyboxEnvironment.IsValid
 				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
@@ -166,6 +194,8 @@ public sealed class DdgiPass
 				TerrainMaterialBuffer = gpuDrawResources.TerrainMaterialBuffer ?? throw new InvalidOperationException("GpuDraw terrain material buffer missing."),
 				TerrainLayerBuffer = gpuDrawResources.TerrainLayerBuffer ?? throw new InvalidOperationException("GpuDraw terrain layer buffer missing."),
 				IrradianceEstimatorBuffer = context.GetBuffer(resources.DdgiIrradianceEstimator),
+				FirstProbeRelocationDiagnosticBuffer = _firstProbeRelocationDiagnosticBuffer!,
+				FirstProbeRelocationReadbackBuffer = _firstProbeRelocationReadbackBuffer!,
 			IrradianceAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.IrradianceTileInteriorSize),
 			VisibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize),
 			GridShape = gridShape,
@@ -183,10 +213,12 @@ public sealed class DdgiPass
 			ViewBias = Math.Max(config.ViewBias, 0.0f),
 			IrradianceTemporalBlendSpeed = Math.Clamp(config.IrradianceTemporalBlendSpeed, 1.0f / 256.0f, 1.0f),
 			Hysteresis = Math.Clamp(config.Hysteresis, 0.0f, 0.9999f),
-			ProbeRelocationEnabled = config.ProbeRelocationEnabled,
-			ProbeMinFrontfaceDistance = Math.Max(config.ProbeMinFrontfaceDistance, 0.0f),
+				RecursiveBounceEnergy = DdgiUtilities.GetRecursiveBounceEnergy(config),
+				ProbeRelocationEnabled = config.ProbeRelocationEnabled,
+				DebugFirstProbeRelocationReadback = config.DebugFirstProbeRelocationReadback,
+				ProbeMinFrontfaceDistance = Math.Max(config.ProbeMinFrontfaceDistance, 0.0f),
 			ProbeBackfaceThreshold = Math.Clamp(config.ProbeBackfaceThreshold, 0.0f, 1.0f),
-			ProbeMaxRelocationDistance = Math.Max(config.ProbeSpacing, 0.001f) * Math.Clamp(config.ProbeMaxRelocationDistanceFactor, 0.0f, 0.5f),
+			ProbeMaxRelocationDistance = DdgiUtilities.GetProbeMaxRelocationDistance(config),
 			DirectLightDirection = directLight.Direction,
 			DirectLightColorIntensity = directLight.ColorIntensity,
 			FrameIndex = frameIndex,
@@ -217,22 +249,46 @@ public sealed class DdgiPass
 		commandList.BindPipeline(config.TracePipeline);
 		WriteBindlessConstants(_traceBindlessWriter, commandList, config);
 		WriteSettingsConstants(_traceSettingsWriter, commandList, config);
-		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
-		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
-			commandList.SetComputeBuffer(4, config.InstanceBuffer);
-			commandList.SetComputeBuffer(5, config.MaterialBuffer);
-			commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
-			commandList.SetComputeBuffer(7, config.MeshBuffer);
-			commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
-			commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
-			commandList.SetComputeBuffer(10, config.TerrainMaterialBuffer);
-			commandList.SetComputeBuffer(11, config.TerrainLayerBuffer);
-			commandList.SetComputeBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
-			var threadGroupSize = _traceThreadGroupSize ?? throw new InvalidOperationException("DDGI trace threadgroup size was not initialized.");
+		BindTraceResources(commandList, config);
+		var threadGroupSize = _traceThreadGroupSize ?? throw new InvalidOperationException("DDGI trace threadgroup size was not initialized.");
 		var width = Math.Max(config.VisibilityAtlasSize.X, config.IrradianceAtlasSize.X);
 		var height = Math.Max(config.VisibilityAtlasSize.Y, config.IrradianceAtlasSize.Y);
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)width, (uint)height);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
+	}
+
+	public void RecordRelocationTrace(RenderGraphContext context, in DdgiPassConfig config, int iteration)
+	{
+		var commandList = context.CommandList;
+		commandList.BindPipeline(config.RelocationTracePipeline);
+		WriteBindlessConstants(
+			_relocationTraceBindlessWriter,
+			commandList,
+			config,
+			GetRelocationSourceHandle(config, iteration));
+		WriteSettingsConstants(_relocationTraceSettingsWriter, commandList, config, iteration);
+		BindTraceResources(commandList, config);
+		var threadGroupSize = _relocationTraceThreadGroupSize ??
+			throw new InvalidOperationException("DDGI relocation trace threadgroup size was not initialized.");
+		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
+			(uint)config.VisibilityAtlasSize.X,
+			(uint)config.VisibilityAtlasSize.Y);
+		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
+	}
+
+	private static void BindTraceResources(IGfxCommandList commandList, in DdgiPassConfig config)
+	{
+		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
+		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
+		commandList.SetComputeBuffer(4, config.InstanceBuffer);
+		commandList.SetComputeBuffer(5, config.MaterialBuffer);
+		commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
+		commandList.SetComputeBuffer(7, config.MeshBuffer);
+		commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
+		commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
+		commandList.SetComputeBuffer(10, config.TerrainMaterialBuffer);
+		commandList.SetComputeBuffer(11, config.TerrainLayerBuffer);
+		commandList.SetComputeBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
 	}
 
 	public void RecordIrradianceIntegrate(RenderGraphContext context, in DdgiPassConfig config)
@@ -258,15 +314,53 @@ public sealed class DdgiPass
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
-	public void RecordRelocate(RenderGraphContext context, in DdgiPassConfig config)
+	public void RecordRelocate(RenderGraphContext context, in DdgiPassConfig config, int iteration)
 	{
 		var commandList = context.CommandList;
 		commandList.BindPipeline(config.RelocatePipeline);
-		WriteBindlessConstants(_relocateBindlessWriter, commandList, config);
-		WriteSettingsConstants(_relocateSettingsWriter, commandList, config);
+		WriteBindlessConstants(
+			_relocateBindlessWriter,
+			commandList,
+			config,
+			GetRelocationSourceHandle(config, iteration),
+			GetRelocationDestinationHandle(config, iteration));
+		WriteSettingsConstants(_relocateSettingsWriter, commandList, config, iteration);
+		commandList.SetComputeBuffer(2, config.FirstProbeRelocationDiagnosticBuffer);
 		var threadGroupSize = _relocateThreadGroupSize ?? throw new InvalidOperationException("DDGI relocation threadgroup size was not initialized.");
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount((uint)config.GridShape.AtlasColumns, (uint)config.GridShape.AtlasRows);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
+		if (config.DebugFirstProbeRelocationReadback &&
+		    iteration == DdgiUtilities.RelocationIterationCount - 1)
+		{
+			commandList.CopyBuffer(
+				config.FirstProbeRelocationDiagnosticBuffer,
+				0,
+				config.FirstProbeRelocationReadbackBuffer,
+				0,
+				(ulong)FirstProbeRelocationDiagnosticBufferSize);
+			_firstProbeRelocationReadbackPending = true;
+		}
+	}
+
+	private static DescriptorHandle GetRelocationSourceHandle(in DdgiPassConfig config, int iteration)
+	{
+		return DdgiUtilities.GetRelocationSourceStateTexture(iteration) switch
+		{
+			DdgiRelocationStateTexture.History => config.ProbeStateReadHandle,
+			DdgiRelocationStateTexture.Scratch => config.ProbeStateScratchReadHandle,
+			DdgiRelocationStateTexture.Current => config.ProbeStateCurrentHandle,
+			_ => throw new InvalidOperationException()
+		};
+	}
+
+	private static DescriptorHandle GetRelocationDestinationHandle(in DdgiPassConfig config, int iteration)
+	{
+		return DdgiUtilities.GetRelocationDestinationStateTexture(iteration) switch
+		{
+			DdgiRelocationStateTexture.Scratch => config.ProbeStateScratchWriteHandle,
+			DdgiRelocationStateTexture.Current => config.ProbeStateWriteHandle,
+			_ => throw new InvalidOperationException()
+		};
 	}
 
 	public void RecordBorderUpdate(RenderGraphContext context, in DdgiPassConfig config)
@@ -283,6 +377,16 @@ public sealed class DdgiPass
 	}
 
 	private static void WriteBindlessConstants(ShaderPropertyWriter? writer, IGfxCommandList commandList, in DdgiPassConfig config)
+	{
+		WriteBindlessConstants(writer, commandList, config, config.ProbeStateReadHandle, config.ProbeStateWriteHandle);
+	}
+
+	private static void WriteBindlessConstants(
+		ShaderPropertyWriter? writer,
+		IGfxCommandList commandList,
+		in DdgiPassConfig config,
+		DescriptorHandle relocationStateReadHandle,
+		DescriptorHandle? stateWriteHandle = null)
 	{
 		var bindlessWriter = writer ?? throw new InvalidOperationException("DDGI bindless reflection writer was not initialized.");
 		bindlessWriter.Clear();
@@ -301,15 +405,22 @@ public sealed class DdgiPass
 		bindlessWriter.SetUInt("irradianceLxHistoryWriteHandle", config.IrradianceLxHistoryWriteHandle.Value);
 		bindlessWriter.SetUInt("visibilityHistoryWriteHandle", config.VisibilityHistoryWriteHandle.Value);
 		bindlessWriter.SetUInt("probeStateReadHandle", config.ProbeStateReadHandle.Value);
-		bindlessWriter.SetUInt("probeStateWriteHandle", config.ProbeStateWriteHandle.Value);
+		bindlessWriter.SetUInt("probeStateCurrentHandle", config.ProbeStateCurrentHandle.Value);
+		bindlessWriter.SetUInt("probeRelocationStateReadHandle", relocationStateReadHandle.Value);
+		bindlessWriter.SetUInt("probeStateWriteHandle", (stateWriteHandle ?? config.ProbeStateWriteHandle).Value);
 		bindlessWriter.SetUInt("probeActivityReadHandle", config.ProbeActivityReadHandle.Value);
 		bindlessWriter.SetUInt("probeActivityWriteHandle", config.ProbeActivityWriteHandle.Value);
+		bindlessWriter.SetUInt("probeRelocationDecisionHandle", config.ProbeRelocationDecisionHandle.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.EnvironmentHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 	}
 
-	private static void WriteSettingsConstants(ShaderPropertyWriter? writer, IGfxCommandList commandList, in DdgiPassConfig config)
+	private static void WriteSettingsConstants(
+		ShaderPropertyWriter? writer,
+		IGfxCommandList commandList,
+		in DdgiPassConfig config,
+		int relocationIteration = 0)
 	{
 		var settingsWriter = writer ?? throw new InvalidOperationException("DDGI settings reflection writer was not initialized.");
 		settingsWriter.Clear();
@@ -343,6 +454,7 @@ public sealed class DdgiPass
 		settingsWriter.SetFloat("viewBias", config.ViewBias);
 		settingsWriter.SetFloat("irradianceTemporalBlendSpeed", config.IrradianceTemporalBlendSpeed);
 		settingsWriter.SetFloat("hysteresis", config.Hysteresis);
+		settingsWriter.SetFloat("recursiveBounceEnergy", config.RecursiveBounceEnergy);
 		settingsWriter.SetUInt("probeRelocationEnabled", config.ProbeRelocationEnabled ? 1u : 0u);
 		settingsWriter.SetFloat("probeMinFrontfaceDistance", config.ProbeMinFrontfaceDistance);
 		settingsWriter.SetFloat("probeBackfaceThreshold", config.ProbeBackfaceThreshold);
@@ -353,7 +465,87 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt("historyValid", config.HistoryValid ? 1u : 0u);
 		settingsWriter.SetUInt("sidecarHitShadingAvailable", config.SidecarHitShadingAvailable ? 1u : 0u);
 		settingsWriter.SetUInt("activeDrawCommandUpperBound", config.ActiveDrawCommandUpperBound);
+		settingsWriter.SetUInt(
+			"debugFirstProbeRelocationReadback",
+			config.DebugFirstProbeRelocationReadback ? 1u : 0u);
+		settingsWriter.SetUInt("relocationIteration", (uint)relocationIteration);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
+	}
+
+	private void EnsureFirstProbeRelocationDiagnosticResources(IGfxDevice device)
+	{
+		if (_firstProbeRelocationDiagnosticBuffer is not null &&
+		    _firstProbeRelocationReadbackBuffer is not null &&
+		    ReferenceEquals(_firstProbeRelocationDiagnosticDevice, device))
+		{
+			return;
+		}
+
+		(_firstProbeRelocationDiagnosticBuffer as IDisposable)?.Dispose();
+		(_firstProbeRelocationReadbackBuffer as IDisposable)?.Dispose();
+		_firstProbeRelocationDiagnosticBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)FirstProbeRelocationDiagnosticBufferSize,
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess));
+		_firstProbeRelocationReadbackBuffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)FirstProbeRelocationDiagnosticBufferSize,
+			BufferUsage.Staging));
+		_firstProbeRelocationDiagnosticDevice = device;
+		_firstProbeRelocationReadbackPending = false;
+		LastFirstProbeRelocationDiagnostic = null;
+		LastFirstProbeRelocationDiagnostics = Array.Empty<DdgiFirstProbeRelocationDiagnostic>();
+	}
+
+	private void ReadPendingFirstProbeRelocationDiagnostic(IGfxDevice device)
+	{
+		if (!_firstProbeRelocationReadbackPending ||
+		    !ReferenceEquals(_firstProbeRelocationDiagnosticDevice, device) ||
+		    _firstProbeRelocationReadbackBuffer is not IReadableGpuBuffer readableBuffer)
+		{
+			return;
+		}
+
+		device.WaitForIdle();
+		var bytes = new byte[FirstProbeRelocationDiagnosticBufferSize];
+		readableBuffer.Read(bytes);
+		var values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes);
+		var diagnostics = new DdgiFirstProbeRelocationDiagnostic[DdgiUtilities.RelocationIterationCount];
+		for (var iteration = 0; iteration < diagnostics.Length; iteration++)
+		{
+			var offset = iteration * 36;
+			var sourceState = (DdgiProbeState)(uint)values[offset + 33];
+			diagnostics[iteration] = new DdgiFirstProbeRelocationDiagnostic(
+				PreviousOffset: ReadVector3(values, offset),
+				LogicalProbeIndex: (uint)values[offset + 3],
+				BasePosition: ReadVector3(values, offset + 4),
+				PhysicalProbeIndex: (uint)values[offset + 7],
+				ClosestBackfaceDirection: ReadVector3(values, offset + 8),
+				ClosestBackfaceDistance: values[offset + 11],
+				FrontfacePush: ReadVector3(values, offset + 12),
+				BackfaceHitCount: (uint)values[offset + 32],
+				TargetOffset: ReadVector3(values, offset + 16),
+				Decision: (DdgiProbeRelocationDecision)(uint)values[offset + 19],
+				SmoothedOffset: ReadVector3(values, offset + 20),
+				FrameIndex: (uint)values[offset + 23],
+				TraceOrigin: ReadVector3(values, offset + 24),
+				HasUsableHistory: sourceState == DdgiProbeState.Stable,
+				StatePixelX: (uint)values[offset + 28],
+				StatePixelY: (uint)values[offset + 29],
+				Enabled: values[offset + 30] > 0.5f,
+				HasFrontfacePush: ReadVector3(values, offset + 12).LengthSquared() > 0.0f,
+				Iteration: (uint)iteration,
+				ClosestFrontfaceDistance: values[offset + 15],
+				SourceState: sourceState,
+				ResultState: (DdgiProbeState)(uint)values[offset + 31]);
+		}
+		LastFirstProbeRelocationDiagnostics = diagnostics;
+		LastFirstProbeRelocationDiagnostic = diagnostics[^1];
+		_firstProbeRelocationReadbackPending = false;
+	}
+
+	private static Vector3 ReadVector3(ReadOnlySpan<float> values, int offset)
+	{
+		return new Vector3(values[offset], values[offset + 1], values[offset + 2]);
 	}
 
 	private static (Vector3 Direction, Vector3 ColorIntensity) GetPrimaryDirectionalLight(SceneDrawData sceneData)
@@ -385,6 +577,7 @@ public sealed class DdgiPass
 	{
 		if (_classifyPipeline is not null &&
 		    _tracePipeline is not null &&
+		    _relocationTracePipeline is not null &&
 		    _relocatePipeline is not null &&
 		    _irradianceIntegratePipeline is not null &&
 		    _visibilityIntegratePipeline is not null &&
@@ -405,18 +598,21 @@ public sealed class DdgiPass
 
 		var classify = _shaderCompiler.GetComputeShaderWithReflection("ddgi_classify.compute.slang", "CSMain", device.BackendKind);
 		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSMain", device.BackendKind);
+		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSRelocation", device.BackendKind);
 		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "CSMain", device.BackendKind);
 		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_irradiance_integrate.compute.slang", "CSMain", device.BackendKind);
 		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "CSMain", device.BackendKind);
 		var border = _shaderCompiler.GetComputeShaderWithReflection("ddgi_border_update.compute.slang", "CSMain", device.BackendKind);
 		_classifyShader = classify.Bytecode;
 		_traceShader = trace.Bytecode;
+		_relocationTraceShader = relocationTrace.Bytecode;
 		_relocateShader = relocate.Bytecode;
 		_irradianceIntegrateShader = irradianceIntegrate.Bytecode;
 		_visibilityIntegrateShader = visibilityIntegrate.Bytecode;
 		_borderUpdateShader = border.Bytecode;
 		_classifyThreadGroupSize = classify.ThreadGroupSize;
 		_traceThreadGroupSize = trace.ThreadGroupSize;
+		_relocationTraceThreadGroupSize = relocationTrace.ThreadGroupSize;
 		_relocateThreadGroupSize = relocate.ThreadGroupSize;
 		_irradianceIntegrateThreadGroupSize = irradianceIntegrate.ThreadGroupSize;
 		_visibilityIntegrateThreadGroupSize = visibilityIntegrate.ThreadGroupSize;
@@ -425,6 +621,8 @@ public sealed class DdgiPass
 		_classifySettingsWriter = new ShaderPropertyWriter(classify.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_traceBindlessWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_traceSettingsWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_relocationTraceBindlessWriter = new ShaderPropertyWriter(relocationTrace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_relocationTraceSettingsWriter = new ShaderPropertyWriter(relocationTrace.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_relocateBindlessWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_relocateSettingsWriter = new ShaderPropertyWriter(relocate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_irradianceIntegrateBindlessWriter = new ShaderPropertyWriter(irradianceIntegrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
@@ -435,6 +633,12 @@ public sealed class DdgiPass
 		_borderSettingsWriter = new ShaderPropertyWriter(border.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_classifyPipeline = CreatePipeline(device, "ddgi_classify.compute.slang", _classifyShader, _classifyThreadGroupSize);
 		_tracePipeline = CreatePipeline(device, "ddgi_trace.compute.slang", _traceShader, _traceThreadGroupSize);
+		_relocationTracePipeline = CreatePipeline(
+			device,
+			"ddgi_trace.compute.slang:relocation",
+			_relocationTraceShader,
+			_relocationTraceThreadGroupSize,
+			"CSRelocation");
 		_relocatePipeline = CreatePipeline(device, "ddgi_relocate.compute.slang", _relocateShader, _relocateThreadGroupSize);
 		_irradianceIntegratePipeline = CreatePipeline(device, "ddgi_irradiance_integrate.compute.slang", _irradianceIntegrateShader, _irradianceIntegrateThreadGroupSize);
 		_visibilityIntegratePipeline = CreatePipeline(device, "ddgi_integrate.compute.slang", _visibilityIntegrateShader, _visibilityIntegrateThreadGroupSize);
@@ -446,13 +650,14 @@ public sealed class DdgiPass
 		IGfxDevice device,
 		string shaderVariant,
 		ReadOnlyMemory<byte> shader,
-		ComputeThreadGroupSize? threadGroupSize)
+		ComputeThreadGroupSize? threadGroupSize,
+		string entryPoint = "CSMain")
 	{
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: entryPoint,
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -470,4 +675,40 @@ public readonly record struct DdgiPassStats(
 	int RaysPerActiveProbe,
 	int EstimatedProbeRaysThisFrame,
 	bool ForceFullProbeUpdate,
-	int NewlyExposedProbeCount);
+	int NewlyExposedProbeCount,
+	int RelocationProbeCount,
+	int EstimatedRelocationRaysThisFrame,
+	int MaximumRelocationRaysThisFrame);
+
+public enum DdgiProbeRelocationDecision : uint
+{
+	None,
+	BackfaceEscape,
+	FrontfaceSeparation,
+	ReturnToLattice,
+	Blocked
+}
+
+public readonly record struct DdgiFirstProbeRelocationDiagnostic(
+	Vector3 PreviousOffset,
+	uint LogicalProbeIndex,
+	Vector3 BasePosition,
+	uint PhysicalProbeIndex,
+	Vector3 ClosestBackfaceDirection,
+	float ClosestBackfaceDistance,
+	Vector3 FrontfacePush,
+	uint BackfaceHitCount,
+	Vector3 TargetOffset,
+	DdgiProbeRelocationDecision Decision,
+	Vector3 SmoothedOffset,
+	uint FrameIndex,
+	Vector3 TraceOrigin,
+	bool HasUsableHistory,
+	uint StatePixelX,
+	uint StatePixelY,
+	bool Enabled,
+	bool HasFrontfacePush,
+	uint Iteration,
+	float ClosestFrontfaceDistance,
+	DdgiProbeState SourceState,
+	DdgiProbeState ResultState);

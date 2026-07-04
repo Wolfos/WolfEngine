@@ -78,11 +78,14 @@ public sealed class DeferredLightingPass
 		var ddgiVisibility = resources.DdgiVisibilityHistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiVisibilityHistoryWrite)
 			: null;
-		var ddgiProbeState = resources.DdgiProbeStateRead.IsValid
-			? context.GetTexture(resources.DdgiProbeStateRead)
+		var ddgiProbeState = resources.DdgiProbeStateWrite.IsValid
+			? context.GetTexture(resources.DdgiProbeStateWrite)
 			: null;
 		var ddgiProbeActivity = resources.DdgiProbeActivity.IsValid
 			? context.GetTexture(resources.DdgiProbeActivity)
+			: null;
+		var ddgiProbeRelocationDecision = resources.DdgiProbeRelocationDecision.IsValid
+			? context.GetTexture(resources.DdgiProbeRelocationDecision)
 			: null;
 		var ddgiFinalContribution = resources.DdgiFinalContribution.IsValid
 			? context.GetTexture(resources.DdgiFinalContribution)
@@ -95,6 +98,15 @@ public sealed class DeferredLightingPass
 			: null;
 		var ddgiDominantProbeDebug = resources.DdgiDominantProbeDebug.IsValid
 			? context.GetTexture(resources.DdgiDominantProbeDebug)
+			: null;
+		var ddgiDominantProbeCoordDebug = resources.DdgiDominantProbeCoordDebug.IsValid
+			? context.GetTexture(resources.DdgiDominantProbeCoordDebug)
+			: null;
+		var ddgiProbeRelocationDebug = resources.DdgiProbeRelocationDebug.IsValid
+			? context.GetTexture(resources.DdgiProbeRelocationDebug)
+			: null;
+		var ddgiProbeRelocationDecisionDebug = resources.DdgiProbeRelocationDecisionDebug.IsValid
+			? context.GetTexture(resources.DdgiProbeRelocationDecisionDebug)
 			: null;
 		var shadowMapDepth0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMapDepth1 = context.GetTexture(resources.ShadowMapDepth1);
@@ -123,7 +135,8 @@ public sealed class DeferredLightingPass
 		                  ddgiIrradianceLx is not null &&
 		                  ddgiVisibility is not null &&
 		                  ddgiProbeState is not null &&
-		                  ddgiProbeActivity is not null;
+		                  ddgiProbeActivity is not null &&
+		                  ddgiProbeRelocationDecision is not null;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
 
 		return new DeferredLightingPassConfig
@@ -142,6 +155,7 @@ public sealed class DeferredLightingPass
 			DdgiVisibility = _bindlessRegistry.GetTextureHandle(ddgiVisibility),
 			DdgiProbeState = _bindlessRegistry.GetTextureHandle(ddgiProbeState),
 			DdgiProbeActivity = _bindlessRegistry.GetTextureHandle(ddgiProbeActivity),
+			DdgiProbeRelocationDecision = _bindlessRegistry.GetTextureHandle(ddgiProbeRelocationDecision),
 			DdgiFinalContribution = ddgiFinalContribution is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiFinalContribution)
 				: DescriptorHandle.Invalid,
@@ -153,6 +167,15 @@ public sealed class DeferredLightingPass
 				: DescriptorHandle.Invalid,
 			DdgiDominantProbeDebug = ddgiDominantProbeDebug is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiDominantProbeDebug)
+				: DescriptorHandle.Invalid,
+			DdgiDominantProbeCoordDebug = ddgiDominantProbeCoordDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiDominantProbeCoordDebug)
+				: DescriptorHandle.Invalid,
+			DdgiProbeRelocationDebug = ddgiProbeRelocationDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiProbeRelocationDebug)
+				: DescriptorHandle.Invalid,
+			DdgiProbeRelocationDecisionDebug = ddgiProbeRelocationDecisionDebug is not null
+				? _bindlessRegistry.RegisterRwTexture(ddgiProbeRelocationDecisionDebug)
 				: DescriptorHandle.Invalid,
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
@@ -232,10 +255,14 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("ddgiVisibilityHandle", config.DdgiVisibility.Value);
 		bindlessWriter.SetUInt("ddgiProbeStateHandle", config.DdgiProbeState.Value);
 		bindlessWriter.SetUInt("ddgiProbeActivityHandle", config.DdgiProbeActivity.Value);
+		bindlessWriter.SetUInt("ddgiProbeRelocationDecisionHandle", config.DdgiProbeRelocationDecision.Value);
 		bindlessWriter.SetUInt("ddgiFinalContributionHandle", config.DdgiFinalContribution.Value);
 		bindlessWriter.SetUInt("ddgiProbeBaseWeightDebugHandle", config.DdgiProbeBaseWeightDebug.Value);
 		bindlessWriter.SetUInt("ddgiWeightedVisibilityDebugHandle", config.DdgiWeightedVisibilityDebug.Value);
 		bindlessWriter.SetUInt("ddgiDominantProbeDebugHandle", config.DdgiDominantProbeDebug.Value);
+		bindlessWriter.SetUInt("ddgiDominantProbeCoordDebugHandle", config.DdgiDominantProbeCoordDebug.Value);
+		bindlessWriter.SetUInt("ddgiProbeRelocationDebugHandle", config.DdgiProbeRelocationDebug.Value);
+		bindlessWriter.SetUInt("ddgiProbeRelocationDecisionDebugHandle", config.DdgiProbeRelocationDecisionDebug.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.SkyboxEnvironment.Value);
 		bindlessWriter.SetUInt("irradianceHandle", config.SkyboxIrradiance.Value);
 		bindlessWriter.SetUInt("prefilteredHandle", config.SkyboxPrefilter.Value);

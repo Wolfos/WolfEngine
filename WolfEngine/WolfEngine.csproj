@@ -214,6 +214,9 @@
         <None Update="Shaders\gbuffer_decal_seed.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\ddgi_visibility.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

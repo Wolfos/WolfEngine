@@ -65,12 +65,14 @@ public struct DiffuseGlobalIlluminationConfig
 	public float VerticalBlendDistance { get; set; } = 6.0f;
 	public float IrradianceTemporalBlendSpeed { get; set; } = 0.08f;
 	public float Hysteresis { get; set; } = 0.95f;
+	public float RecursiveBounceEnergy { get; set; } = DdgiUtilities.DefaultRecursiveBounceEnergy;
 	public bool ProbeRelocationEnabled { get; set; } = true;
 	public float ProbeMinFrontfaceDistance { get; set; } = 0.2f;
 	public float ProbeBackfaceThreshold { get; set; } = 0.25f;
 	public float ProbeMaxRelocationDistanceFactor { get; set; } = 0.45f;
 	public bool DebugProbeSpheres { get; set; }
 	public float DebugProbeSphereRadius { get; set; } = 0.15f;
+	public bool DebugFirstProbeRelocationReadback { get; set; }
 }
 
 public enum AmbientOcclusionMode

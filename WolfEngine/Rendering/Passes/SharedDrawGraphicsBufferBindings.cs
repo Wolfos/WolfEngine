@@ -16,7 +16,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		uint? terrainLayerRegisterIndex = null,
 		uint? pointLightRegisterIndex = null,
 		uint? clusterHeaderRegisterIndex = null,
-		uint? clusterLightIndexRegisterIndex = null)
+		uint? clusterLightIndexRegisterIndex = null,
+		uint? ddgiDebugRegisterIndex = null)
 	{
 		CameraRegisterIndex = cameraRegisterIndex;
 		InstanceRegisterIndex = instanceRegisterIndex;
@@ -28,6 +29,7 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		PointLightRegisterIndex = pointLightRegisterIndex;
 		ClusterHeaderRegisterIndex = clusterHeaderRegisterIndex;
 		ClusterLightIndexRegisterIndex = clusterLightIndexRegisterIndex;
+		DdgiDebugRegisterIndex = ddgiDebugRegisterIndex;
 	}
 
 	public uint CameraRegisterIndex { get; }
@@ -49,6 +51,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 	public uint? ClusterHeaderRegisterIndex { get; }
 
 	public uint? ClusterLightIndexRegisterIndex { get; }
+
+	public uint? DdgiDebugRegisterIndex { get; }
 
 	public static SharedDrawGraphicsBufferBindings FromGBufferReflection(ShaderReflectionLayout reflection)
 	{
@@ -74,7 +78,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 			reflection.GetResource("g_MaterialGenerations").RegisterIndex,
 			pointLightRegisterIndex: reflection.TryGetResource("g_PointLights", out var pointLights) ? pointLights.RegisterIndex : null,
 			clusterHeaderRegisterIndex: reflection.TryGetResource("g_ClusterHeaders", out var clusterHeaders) ? clusterHeaders.RegisterIndex : null,
-			clusterLightIndexRegisterIndex: reflection.TryGetResource("g_ClusterLightIndices", out var clusterLightIndices) ? clusterLightIndices.RegisterIndex : null);
+			clusterLightIndexRegisterIndex: reflection.TryGetResource("g_ClusterLightIndices", out var clusterLightIndices) ? clusterLightIndices.RegisterIndex : null,
+			ddgiDebugRegisterIndex: reflection.TryGetConstantBuffer("DdgiDebugParams", out var ddgiDebug) ? ddgiDebug.RegisterIndex : null);
 	}
 
 	public static SharedDrawGraphicsBufferBindings FromShadowReflection(ShaderReflectionLayout reflection)
