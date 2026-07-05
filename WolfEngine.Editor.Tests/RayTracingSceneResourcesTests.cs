@@ -14,6 +14,33 @@ namespace WolfEngine.Editor.Tests;
 public sealed class RayTracingSceneResourcesTests
 {
 	[Test]
+	public void GpuDrawCullShaderCompilesWithMultiViewLayoutForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		var compiled = shaderCompiler.GetComputeShaderWithReflection(
+			"gpu_draw_cull.compute.slang",
+			"CSCull",
+			GraphicsBackendKind.Metal);
+		var cullParams = compiled.ReflectionLayout.GetConstantBuffer("CullParams");
+
+		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
+		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(64));
+		Assert.That(cullParams.GetFieldOrThrow("planes[17]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Vector4));
+		Assert.That(cullParams.GetFieldOrThrow("viewCount").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
+		Assert.That(cullParams.GetFieldOrThrow("outputDrawArgsStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
+		Assert.That(cullParams.GetFieldOrThrow("outputLaneStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
+		Assert.That(cullParams.GetFieldOrThrow("participatingLaneMask").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
+		Assert.That(compiled.ReflectionLayout.GetResource("g_DrawArgs").RegisterIndex, Is.EqualTo(3u));
+		Assert.That(compiled.ReflectionLayout.GetResource("g_DrawExecutionRangePerBucket").RegisterIndex, Is.EqualTo(5u));
+		Assert.That(compiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex, Is.EqualTo(10u));
+	}
+
+	[Test]
 	public void RtaoShaderCompilesForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
@@ -1652,7 +1679,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void Draw(in DrawArguments arguments) => throw new NotSupportedException();
 		public void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset) => throw new NotSupportedException();
 		public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount) => throw new NotSupportedException();
-		public void ExecuteIndirectCommandBufferIndexed(IGfxIndirectCommandBuffer commandBuffer, IGfxBuffer commandIndicesBuffer, ulong indicesOffsetBytes, IGfxBuffer commandCountBuffer, ulong commandCountOffsetBytes) => throw new NotSupportedException();
+		public void ExecuteIndirectCommandBufferRange(IGfxIndirectCommandBuffer commandBuffer, IGfxBuffer commandRangeBuffer, ulong commandRangeOffsetBytes) => throw new NotSupportedException();
 		public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure) => throw new NotSupportedException();
 		public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ) { }
 		public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes) => throw new NotSupportedException();

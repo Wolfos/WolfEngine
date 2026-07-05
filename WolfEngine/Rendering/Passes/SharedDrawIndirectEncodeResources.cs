@@ -18,6 +18,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		IGfxBuffer? terrainMaterialBuffer,
 		IGfxBuffer? terrainLayerBuffer,
 		IGfxBuffer? drawArgsBuffer,
+		ulong drawArgsBaseOffsetBytes,
 		IGfxBuffer? materialGenerationBuffer)
 	{
 		CameraBuffer = cameraBuffer;
@@ -30,6 +31,7 @@ public readonly struct SharedDrawIndirectEncodeResources
 		TerrainMaterialBuffer = terrainMaterialBuffer;
 		TerrainLayerBuffer = terrainLayerBuffer;
 		DrawArgsBuffer = drawArgsBuffer;
+		DrawArgsBaseOffsetBytes = drawArgsBaseOffsetBytes;
 		MaterialGenerationBuffer = materialGenerationBuffer;
 	}
 
@@ -43,11 +45,14 @@ public readonly struct SharedDrawIndirectEncodeResources
 	public IGfxBuffer? TerrainMaterialBuffer { get; }
 	public IGfxBuffer? TerrainLayerBuffer { get; }
 	public IGfxBuffer? DrawArgsBuffer { get; }
+	public ulong DrawArgsBaseOffsetBytes { get; }
 	public IGfxBuffer? MaterialGenerationBuffer { get; }
 
 	public static SharedDrawIndirectEncodeResources FromGpuDrawResources(
 		GpuDrawResources resources,
-		IGfxBuffer? cameraBuffer)
+		IGfxBuffer? cameraBuffer,
+		IGfxBuffer? drawArgsBuffer = null,
+		ulong drawArgsBaseOffsetBytes = 0)
 	{
 		ArgumentNullException.ThrowIfNull(resources);
 		return new SharedDrawIndirectEncodeResources(
@@ -60,7 +65,8 @@ public readonly struct SharedDrawIndirectEncodeResources
 			resources.MaterialBuffer,
 			resources.TerrainMaterialBuffer,
 			resources.TerrainLayerBuffer,
-			resources.DrawArgsBuffer,
+			drawArgsBuffer ?? resources.DrawArgsBuffer,
+			drawArgsBaseOffsetBytes,
 			resources.MaterialGenerationBuffer);
 	}
 }

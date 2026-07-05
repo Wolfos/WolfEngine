@@ -18,6 +18,7 @@ public sealed class GpuDrawResources : IDisposable
 	public const int MaxMeshCount = 65535;
 	public const int MaxTerrainLayerCount = MaxMaterialCount * 16;
 	public const int HardeningCounterCount = 16;
+	public const int MaxShadowViewCount = ShadowMapPass.MaxCascadeCount;
 	private readonly IShaderCompiler _shaderCompiler;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
@@ -27,7 +28,7 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? MeshBuffer { get; private set; }
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
-	public IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; private set; }
+	public IGfxBuffer? ShadowDrawArgsBuffer { get; private set; }
 	public IGfxBuffer? DrawGenerationBuffer => _drawGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? InstanceGenerationBuffer => _instanceGenerationBuffers[_activeFrameSlot];
 	public IGfxBuffer? MaterialGenerationBuffer => _materialGenerationBuffers[_activeFrameSlot];
@@ -201,9 +202,9 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
-		VisibleDrawIdsPerExecutionLaneBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxDrawCount * GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
-			BufferUsage.Structured,
+		ShadowDrawArgsBuffer ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)(MaxShadowViewCount * MaxDrawCount * Marshal.SizeOf<GpuDrawArgs>()),
+			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
 		DiagnosticsCounterBuffer ??= device.CreateBuffer(new BufferDescriptor(
@@ -274,7 +275,7 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 			
 			_shadowDrawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
+				(ulong)(MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -284,7 +285,7 @@ public sealed class GpuDrawResources : IDisposable
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 			
 			_shadowDrawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
+				(ulong)(MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 
@@ -395,6 +396,32 @@ public sealed class GpuDrawResources : IDisposable
 		return _materialGenerationBuffers[frameSlot];
 	}
 
+	public static int GetShadowDrawArgsElementOffset(int cascadeIndex)
+	{
+		ValidateShadowCascadeIndex(cascadeIndex);
+		return cascadeIndex * MaxDrawCount;
+	}
+
+	public static ulong GetShadowDrawArgsOffsetBytes(int cascadeIndex) =>
+		(ulong)GetShadowDrawArgsElementOffset(cascadeIndex) * (ulong)Marshal.SizeOf<GpuDrawArgs>();
+
+	public static int GetShadowLaneElementOffset(int cascadeIndex, int executionLaneIndex)
+	{
+		ValidateShadowCascadeIndex(cascadeIndex);
+		if (executionLaneIndex < 0 || executionLaneIndex >= GpuDrawExecutionLanes.ExecutionLaneCount)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(executionLaneIndex),
+				executionLaneIndex,
+				"Execution lane index is out of range.");
+		}
+
+		return (cascadeIndex * GpuDrawExecutionLanes.ExecutionLaneCount) + executionLaneIndex;
+	}
+
+	public static ulong GetShadowExecutionRangeOffsetBytes(int cascadeIndex, int executionLaneIndex) =>
+		(ulong)(GetShadowLaneElementOffset(cascadeIndex, executionLaneIndex) * 2 * sizeof(uint));
+
 	public void Dispose()
 	{
 		(InstanceBuffer as IDisposable)?.Dispose();
@@ -404,7 +431,7 @@ public sealed class GpuDrawResources : IDisposable
 		(MeshBuffer as IDisposable)?.Dispose();
 		(DrawCommandBuffer as IDisposable)?.Dispose();
 		(DrawArgsBuffer as IDisposable)?.Dispose();
-		(VisibleDrawIdsPerExecutionLaneBuffer as IDisposable)?.Dispose();
+		(ShadowDrawArgsBuffer as IDisposable)?.Dispose();
 		(DiagnosticsCounterBuffer as IDisposable)?.Dispose();
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
@@ -461,6 +488,7 @@ public sealed class GpuDrawResources : IDisposable
 		}
 		TerrainMaterialBuffer = null;
 		TerrainLayerBuffer = null;
+		ShadowDrawArgsBuffer = null;
 	}
 
 	private static void ValidateFrameSlot(int frameSlot)
@@ -468,6 +496,17 @@ public sealed class GpuDrawResources : IDisposable
 		if (frameSlot < 0 || frameSlot >= MaxFramesInFlight)
 		{
 			throw new ArgumentOutOfRangeException(nameof(frameSlot), frameSlot, "Frame slot is out of range.");
+		}
+	}
+
+	private static void ValidateShadowCascadeIndex(int cascadeIndex)
+	{
+		if (cascadeIndex < 0 || cascadeIndex >= MaxShadowViewCount)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(cascadeIndex),
+				cascadeIndex,
+				"Shadow cascade index is out of range.");
 		}
 	}
 

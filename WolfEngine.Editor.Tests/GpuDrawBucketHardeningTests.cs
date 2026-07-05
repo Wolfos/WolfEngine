@@ -8,6 +8,49 @@ namespace WolfEngine.Editor.Tests;
 public sealed class GpuDrawBucketHardeningTests
 {
 	[Test]
+	public void ShadowResourceOffsets_AreDisjointAcrossAllCascadesAndLanes()
+	{
+		var drawArgsStride = GpuDrawResources.GetShadowDrawArgsOffsetBytes(1)
+		                     - GpuDrawResources.GetShadowDrawArgsOffsetBytes(0);
+		Assert.That(drawArgsStride, Is.GreaterThan(0));
+
+		for (var cascadeIndex = 0; cascadeIndex < GpuDrawResources.MaxShadowViewCount; cascadeIndex++)
+		{
+			Assert.That(
+				GpuDrawResources.GetShadowDrawArgsElementOffset(cascadeIndex),
+				Is.EqualTo(cascadeIndex * GpuDrawResources.MaxDrawCount));
+			Assert.That(
+				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				Is.EqualTo((ulong)cascadeIndex * drawArgsStride));
+
+			for (var laneIndex = 0; laneIndex < GpuDrawExecutionLanes.ExecutionLaneCount; laneIndex++)
+			{
+				var expectedLaneIndex =
+					(cascadeIndex * GpuDrawExecutionLanes.ExecutionLaneCount) + laneIndex;
+				Assert.That(
+					GpuDrawResources.GetShadowLaneElementOffset(cascadeIndex, laneIndex),
+					Is.EqualTo(expectedLaneIndex));
+				Assert.That(
+					GpuDrawResources.GetShadowExecutionRangeOffsetBytes(cascadeIndex, laneIndex),
+					Is.EqualTo((ulong)(expectedLaneIndex * 2 * sizeof(uint))));
+			}
+		}
+	}
+
+	[Test]
+	public void ShadowResourceOffsets_RejectOutOfRangeIndices()
+	{
+		Assert.Throws<ArgumentOutOfRangeException>(
+			() => GpuDrawResources.GetShadowDrawArgsElementOffset(-1));
+		Assert.Throws<ArgumentOutOfRangeException>(
+			() => GpuDrawResources.GetShadowDrawArgsElementOffset(GpuDrawResources.MaxShadowViewCount));
+		Assert.Throws<ArgumentOutOfRangeException>(
+			() => GpuDrawResources.GetShadowLaneElementOffset(0, -1));
+		Assert.Throws<ArgumentOutOfRangeException>(
+			() => GpuDrawResources.GetShadowLaneElementOffset(0, GpuDrawExecutionLanes.ExecutionLaneCount));
+	}
+
+	[Test]
 	public void Registry_DefaultBucketsExposeStableIdsAndAlphaModeMappings()
 	{
 		var definitions = GBufferDrawBuckets.Definitions.ToArray();

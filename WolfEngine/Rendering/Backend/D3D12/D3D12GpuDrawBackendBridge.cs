@@ -74,7 +74,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			cameraBuffer,
 			shadowCameraBuffer,
 			transparentEnvironmentBuffer,
-			transparentLightingBuffer);
+			transparentLightingBuffer,
+			resources.DrawArgsBaseOffsetBytes);
 		return true;
 	}
 

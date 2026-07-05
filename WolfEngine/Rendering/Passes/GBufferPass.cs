@@ -103,15 +103,11 @@ public static class GBufferPass
 				}
 
 				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);
-				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&
-				    config.DrawExecutionRangePerBucketBuffer is not null)
+				if (config.DrawExecutionRangePerBucketBuffer is not null)
 				{
-					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
 					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
-					commandList.ExecuteIndirectCommandBufferIndexed(
+					commandList.ExecuteIndirectCommandBufferRange(
 						bucket.IndirectCommandBuffer,
-						config.VisibleDrawIdsPerExecutionLaneBuffer,
-						indicesOffsetBytes,
 						config.DrawExecutionRangePerBucketBuffer,
 						rangeOffsetBytes);
 				}

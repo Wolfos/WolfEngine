@@ -91,7 +91,6 @@ public struct TransparentForwardPassConfig
 	public required IGfxBuffer? ClusterHeaderBuffer { get; init; }
 	public required IGfxBuffer? ClusterLightIndexBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
-	public required IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }
 
 	public required ReadOnlyMemory<TransparentExecutionBucket> Buckets { get; init; }

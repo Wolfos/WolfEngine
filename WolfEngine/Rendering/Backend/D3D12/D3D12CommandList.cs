@@ -718,31 +718,26 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			0);
 	}
 
-	public void ExecuteIndirectCommandBufferIndexed(
+	public void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
-		IGfxBuffer commandIndicesBuffer,
-		ulong indicesOffsetBytes,
-		IGfxBuffer commandCountBuffer,
-		ulong commandCountOffsetBytes)
+		IGfxBuffer commandRangeBuffer,
+		ulong commandRangeOffsetBytes)
 	{
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
 		{
 			throw new InvalidOperationException("Indirect command buffer was not created by the Direct3D12 backend.");
 		}
 
-		if (commandCountBuffer is not D3D12Buffer countBuffer || countBuffer.Resource.Handle is null)
+		if (commandRangeBuffer is not D3D12Buffer countBuffer || countBuffer.Resource.Handle is null)
 		{
 			throw new InvalidOperationException("Command count/range buffer was not created by the Direct3D12 backend.");
 		}
-
-		_ = commandIndicesBuffer;
-		_ = indicesOffsetBytes;
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
 
 		// Range mode: consume {start,count} and execute from command 0 using the count value only.
-		var countOffset = commandCountOffsetBytes + sizeof(uint);
+		var countOffset = commandRangeOffsetBytes + sizeof(uint);
 		var previousState = countBuffer.CurrentState;
 		TransitionBufferIfNeeded(countBuffer, ResourceStates.IndirectArgument);
 		CommandList.ExecuteIndirect(

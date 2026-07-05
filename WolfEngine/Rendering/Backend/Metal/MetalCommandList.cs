@@ -534,12 +534,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			new NSRange { location = 0, length = maxAvailable });
 	}
 
-	public void ExecuteIndirectCommandBufferIndexed(
+	public void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
-		IGfxBuffer commandIndicesBuffer,
-		ulong indicesOffsetBytes,
-		IGfxBuffer commandCountBuffer,
-		ulong commandCountOffsetBytes)
+		IGfxBuffer commandRangeBuffer,
+		ulong commandRangeOffsetBytes)
 	{
 		ThrowIfDisposed();
 		if (commandBuffer is not MetalIndirectCommandBuffer metalCommandBuffer)
@@ -547,16 +545,10 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			throw new InvalidOperationException("Indirect command buffer was not created by the Metal backend.");
 		}
 
-		if (commandIndicesBuffer is not MetalBuffer metalIndicesBuffer)
-		{
-			throw new InvalidOperationException("Command indices buffer was not created by the Metal backend.");
-		}
-
-		if (commandCountBuffer is not MetalBuffer metalRangeBuffer)
+		if (commandRangeBuffer is not MetalBuffer metalRangeBuffer)
 		{
 			throw new InvalidOperationException("Command count/range buffer was not created by the Metal backend.");
 		}
-		_ = indicesOffsetBytes;
 
 		EnsureRenderEncoder();
 		var referenced = metalCommandBuffer.GetReferencedBuffers();
@@ -565,14 +557,12 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			_renderEncoder.UseResource(referenced[i], MTLResourceUsage.Read);
 		}
 
-		// SharpMetal currently exposes indirect-range execution (range buffer) rather than index-list execution.
 		// The caller provides a two-uint execution range buffer: { start, length }.
-		_renderEncoder.UseResource(metalIndicesBuffer.Buffer, MTLResourceUsage.Read);
 		_renderEncoder.UseResource(metalRangeBuffer.Buffer, MTLResourceUsage.Read);
 		_renderEncoder.ExecuteCommandsInBuffer(
 			metalCommandBuffer.Buffer,
 			metalRangeBuffer.Buffer,
-			(nuint)commandCountOffsetBytes);
+			(nuint)commandRangeOffsetBytes);
 	}
 
 	public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)

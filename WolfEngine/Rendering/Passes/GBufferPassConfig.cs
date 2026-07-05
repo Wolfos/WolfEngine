@@ -89,8 +89,6 @@ public struct GBufferPassConfig
 
 	public IGfxBuffer? MaterialGenerationBuffer { get; set; }
 
-	public IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; set; }
-
 	public IGfxBuffer? DrawCountPerBucketBuffer { get; set; }
 
 	public IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; set; }

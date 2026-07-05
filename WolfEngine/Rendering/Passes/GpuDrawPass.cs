@@ -524,15 +524,50 @@ public sealed class GpuDrawPass
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
 	{
 		ArgumentNullException.ThrowIfNull(sceneData);
-		RecordCullForView(context, sceneData.ViewProjection, sceneData.CameraOrigin, useShadowBuffers: false);
+		Span<Matrix4x4> viewProjections = stackalloc Matrix4x4[1];
+		viewProjections[0] = sceneData.ViewProjection;
+		RecordCullForViews(
+			context,
+			viewProjections,
+			sceneData.CameraOrigin,
+			useShadowBuffers: false,
+			DrawPassParticipation.None);
 	}
 
 	public void RecordCullForView(RenderGraphContext context, Matrix4x4 viewProjection, Vector3 cameraOrigin,
 		bool useShadowBuffers = false)
 	{
+		Span<Matrix4x4> viewProjections = stackalloc Matrix4x4[1];
+		viewProjections[0] = viewProjection;
+		RecordCullForViews(
+			context,
+			viewProjections,
+			cameraOrigin,
+			useShadowBuffers,
+			useShadowBuffers ? DrawPassParticipation.ShadowCaster : DrawPassParticipation.None);
+	}
+
+	public void RecordCullForViews(
+		RenderGraphContext context,
+		ReadOnlySpan<Matrix4x4> viewProjections,
+		Vector3 cameraOrigin,
+		bool useShadowBuffers,
+		DrawPassParticipation participation)
+	{
+		if (viewProjections.IsEmpty || viewProjections.Length > GpuDrawResources.MaxShadowViewCount)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(viewProjections),
+				viewProjections.Length,
+				$"Cull view count must be between 1 and {GpuDrawResources.MaxShadowViewCount}.");
+		}
+
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		_gpuDrawResources.EnsureCreated(device);
+		var drawArgsBuffer = useShadowBuffers
+			? _gpuDrawResources.ShadowDrawArgsBuffer
+			: _gpuDrawResources.DrawArgsBuffer;
 		var drawCountPerBucketBuffer = useShadowBuffers
 			? _gpuDrawResources.ShadowDrawCountPerBucketBuffer
 			: _gpuDrawResources.DrawCountPerBucketBuffer;
@@ -546,18 +581,23 @@ public sealed class GpuDrawPass
 			throw new InvalidOperationException(
 				$"Configured execution lane count {executionLaneCount} exceeds encoded bucket capacity {DrawFlagBucketMask + 1}.");
 		}
+		if (executionLaneCount > 32)
+		{
+			throw new InvalidOperationException(
+				$"Configured execution lane count {executionLaneCount} exceeds the culling participation-mask capacity of 32.");
+		}
 
-		Span<uint> resetCounts = stackalloc uint[executionLaneCount];
+		var outputViewCount = viewProjections.Length;
+		Span<uint> resetCounts =
+			stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+		resetCounts = resetCounts[..(outputViewCount * executionLaneCount)];
 		resetCounts.Clear();
 		WriteBuffer<uint>(drawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
 
-		Span<uint> resetRanges = stackalloc uint[executionLaneCount * 2];
-		for (var i = 0; i < executionLaneCount; i++)
-		{
-			resetRanges[(i * 2) + 0] = 0;
-			resetRanges[(i * 2) + 1] = 0;
-		}
-
+		Span<uint> resetRanges =
+			stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2];
+		resetRanges = resetRanges[..(outputViewCount * executionLaneCount * 2)];
+		resetRanges.Clear();
 		WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
 
 		var pipeline = EnsureCullPipeline(device);
@@ -567,14 +607,18 @@ public sealed class GpuDrawPass
 			commandList.BindPipeline(pipeline);
 
 			Span<Vector4> planes = stackalloc Vector4[6];
-			ExtractFrustumPlanes(viewProjection, planes);
 			var cullParamsWriter = _cullParamsWriter
 			                       ?? throw new InvalidOperationException(
 				                       "GpuDraw cull reflection writer was not initialized.");
 			cullParamsWriter.Clear();
-			for (var i = 0; i < planes.Length; i++)
+			for (var viewIndex = 0; viewIndex < outputViewCount; viewIndex++)
 			{
-				cullParamsWriter.SetVector4($"planes[{i}]", planes[i]);
+				ExtractFrustumPlanes(viewProjections[viewIndex], planes);
+				for (var planeIndex = 0; planeIndex < planes.Length; planeIndex++)
+				{
+					var flattenedPlaneIndex = (viewIndex * planes.Length) + planeIndex;
+					cullParamsWriter.SetVector4($"planes[{flattenedPlaneIndex}]", planes[planeIndex]);
+				}
 			}
 
 			cullParamsWriter.SetVector4(
@@ -582,23 +626,26 @@ public sealed class GpuDrawPass
 				new Vector4(
 					cameraOrigin,
 					_gpuDrawResources.ActiveDrawCommandUpperBound));
+			cullParamsWriter.SetUInt("viewCount", (uint)outputViewCount);
 			cullParamsWriter.SetUInt("bucketCount", (uint)executionLaneCount);
 			cullParamsWriter.SetUInt("maxVisiblePerBucket", GpuDrawResources.MaxDrawCount);
 			cullParamsWriter.SetUInt("fallbackMeshHandle", context.GpuDrawDatabase.FallbackMeshHandle.Value);
+			cullParamsWriter.SetUInt("outputDrawArgsStride", GpuDrawResources.MaxDrawCount);
+			cullParamsWriter.SetUInt("outputLaneStride", (uint)executionLaneCount);
+			cullParamsWriter.SetUInt("participatingLaneMask", BuildParticipatingLaneMask(participation));
 			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
 
 			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 			commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
-			commandList.SetComputeBuffer(3, _gpuDrawResources.DrawArgsBuffer!);
+			commandList.SetComputeBuffer(3, drawArgsBuffer!);
 			commandList.SetComputeBuffer(4, drawCountPerBucketBuffer!);
-			commandList.SetComputeBuffer(5, _gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer!);
-			commandList.SetComputeBuffer(6, drawExecutionRangePerBucketBuffer!);
-			commandList.SetComputeBuffer(7, _gpuDrawResources.DrawGenerationBuffer!);
-			commandList.SetComputeBuffer(8, _gpuDrawResources.InstanceGenerationBuffer!);
-			commandList.SetComputeBuffer(9, _gpuDrawResources.MeshGenerationBuffer!);
-			commandList.SetComputeBuffer(10, _gpuDrawResources.MaterialGenerationBuffer!);
-			commandList.SetComputeBuffer(11, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			commandList.SetComputeBuffer(5, drawExecutionRangePerBucketBuffer!);
+			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawGenerationBuffer!);
+			commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
+			commandList.SetComputeBuffer(8, _gpuDrawResources.MeshGenerationBuffer!);
+			commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
+			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
 
 			var threadGroupSize = _cullThreadGroupSize
 			                      ?? throw new InvalidOperationException(
@@ -607,6 +654,30 @@ public sealed class GpuDrawPass
 				_gpuDrawResources.ActiveDrawCommandUpperBound);
 			commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
 		}
+	}
+
+	private static uint BuildParticipatingLaneMask(DrawPassParticipation participation)
+	{
+		if (participation == DrawPassParticipation.None)
+		{
+			return uint.MaxValue;
+		}
+
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(participation);
+		var mask = 0u;
+		for (var i = 0; i < laneDefinitions.Length; i++)
+		{
+			var executionIndex = laneDefinitions[i].ExecutionIndex;
+			if ((uint)executionIndex >= 32)
+			{
+				throw new InvalidOperationException(
+					$"Execution lane {executionIndex} cannot be represented by the culling participation mask.");
+			}
+
+			mask |= 1u << executionIndex;
+		}
+
+		return mask;
 	}
 
 	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(uint materialHandle, uint requiredLayerCount, bool forceReallocate)

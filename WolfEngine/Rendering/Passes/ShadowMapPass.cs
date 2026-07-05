@@ -153,11 +153,11 @@ public sealed class ShadowMapPass
 			MaterialBuffer = gpuDrawResources.MaterialBuffer,
 			TerrainMaterialBuffer = gpuDrawResources.TerrainMaterialBuffer,
 			TerrainLayerBuffer = gpuDrawResources.TerrainLayerBuffer,
-			DrawArgsBuffer = gpuDrawResources.DrawArgsBuffer,
+			DrawArgsBuffer = gpuDrawResources.ShadowDrawArgsBuffer,
 			CameraBuffer = gpuDrawResources.ShadowCameraBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
-			VisibleDrawIdsPerExecutionLaneBuffer = gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer,
+			DrawArgsBaseOffsetBytes = GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
 		};
@@ -204,7 +204,10 @@ public sealed class ShadowMapPass
 				commandList.BindPipeline(bucket.Pipeline);
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
-				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
+				commandList.BindConstantBuffer(
+					bucket.BufferBindings.DrawArgsRegisterIndex,
+					config.DrawArgsBuffer,
+					config.DrawArgsBaseOffsetBytes);
 				if (config.MaterialGenerationBuffer is not null)
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
@@ -223,15 +226,12 @@ public sealed class ShadowMapPass
 				commandList.BindConstantBuffer(
 					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
 					config.CameraBuffer);
-				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&
-				    config.DrawExecutionRangePerBucketBuffer is not null)
+				if (config.DrawExecutionRangePerBucketBuffer is not null)
 				{
-					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
-					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
-					commandList.ExecuteIndirectCommandBufferIndexed(
+					var rangeOffsetBytes =
+						GpuDrawResources.GetShadowExecutionRangeOffsetBytes(config.CascadeIndex, bucket.ExecutionIndex);
+					commandList.ExecuteIndirectCommandBufferRange(
 						bucket.IndirectCommandBuffer,
-						config.VisibleDrawIdsPerExecutionLaneBuffer,
-						indicesOffsetBytes,
 						config.DrawExecutionRangePerBucketBuffer,
 						rangeOffsetBytes);
 				}

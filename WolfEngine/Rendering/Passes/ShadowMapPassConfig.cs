@@ -114,8 +114,8 @@ public struct ShadowMapPassConfig
 	public required IGfxBuffer? DrawArgsBuffer { get; init; }
 	public required IGfxBuffer? CameraBuffer { get; init; }
 	public required IGfxBuffer? MaterialGenerationBuffer { get; init; }
-	public required IGfxBuffer? VisibleDrawIdsPerExecutionLaneBuffer { get; init; }
 	public required IGfxBuffer? DrawExecutionRangePerBucketBuffer { get; init; }
+	public required ulong DrawArgsBaseOffsetBytes { get; init; }
 	public required ReadOnlyMemory<ShadowMapExecutionBucket> Buckets { get; init; }
 	public required uint FallbackMaxCommandCount { get; init; }
 }

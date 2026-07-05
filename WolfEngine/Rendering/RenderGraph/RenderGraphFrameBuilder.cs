@@ -1405,11 +1405,18 @@ internal sealed class RenderGraphFrameBuilder
 			return;
 		}
 
-		_gpuDrawPass.RecordCullForView(
+		Span<Matrix4x4> cascadeViewProjections = stackalloc Matrix4x4[ShadowMapPass.MaxCascadeCount];
+		for (var cascadeIndex = 0; cascadeIndex < shadowData.CascadeCount; cascadeIndex++)
+		{
+			cascadeViewProjections[cascadeIndex] = shadowData.GetCascadeViewProjection(cascadeIndex);
+		}
+
+		_gpuDrawPass.RecordCullForViews(
 			context,
-			shadowData.GetCascadeViewProjection(shadowData.CascadeCount - 1),
+			cascadeViewProjections[..shadowData.CascadeCount],
 			sceneData.CameraOrigin,
-			useShadowBuffers: true);
+			useShadowBuffers: true,
+			DrawPassParticipation.ShadowCaster);
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -1425,7 +1432,11 @@ internal sealed class RenderGraphFrameBuilder
 				context.GpuDrawDatabase,
 				_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
 				DrawPassParticipation.ShadowCaster,
-				SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources, _gpuDrawResources.ShadowCameraBuffer),
+				SharedDrawIndirectEncodeResources.FromGpuDrawResources(
+					_gpuDrawResources,
+					_gpuDrawResources.ShadowCameraBuffer,
+					_gpuDrawResources.ShadowDrawArgsBuffer,
+					GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex)),
 				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
 				lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane));
 			var config = _shadowMapPass.BuildConfig(
@@ -1506,7 +1517,6 @@ internal sealed class RenderGraphFrameBuilder
 			TerrainMaterialBuffer = _gpuDrawResources.TerrainMaterialBuffer,
 			TerrainLayerBuffer = _gpuDrawResources.TerrainLayerBuffer,
 			DrawArgsBuffer = _gpuDrawResources.DrawArgsBuffer,
-			VisibleDrawIdsPerExecutionLaneBuffer = _gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawCountPerBucketBuffer = _gpuDrawResources.DrawCountPerBucketBuffer,
 			DrawExecutionRangePerBucketBuffer = _gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,

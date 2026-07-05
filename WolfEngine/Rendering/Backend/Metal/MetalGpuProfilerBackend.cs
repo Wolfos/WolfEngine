@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Runtime.Versioning;
-using System.Threading;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Profiling;

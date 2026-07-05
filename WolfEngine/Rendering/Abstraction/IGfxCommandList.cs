@@ -65,12 +65,10 @@ public interface IGfxCommandList
 
 	void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount);
 
-	void ExecuteIndirectCommandBufferIndexed(
+	void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
-		IGfxBuffer commandIndicesBuffer,
-		ulong indicesOffsetBytes,
-		IGfxBuffer commandCountBuffer,
-		ulong commandCountOffsetBytes);
+		IGfxBuffer commandRangeBuffer,
+		ulong commandRangeOffsetBytes);
 
 	void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure);
 

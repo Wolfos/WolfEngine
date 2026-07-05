@@ -108,7 +108,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			mesh.IndexCount,
 			mesh.PackedIndexOffsetBytes,
 			0,
-			commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>(),
+			resources.DrawArgsBaseOffsetBytes + (commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			cameraBuffer,
 			instanceBuffer,
 			materialBuffer,

@@ -140,7 +140,6 @@ public sealed class TransparentForwardPass
 			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer,
 			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer,
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
-			VisibleDrawIdsPerExecutionLaneBuffer = gpuDrawResources.VisibleDrawIdsPerExecutionLaneBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			Buckets = buckets.ToArray(),
 			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
@@ -308,15 +307,11 @@ public sealed class TransparentForwardPass
 				}
 
 				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);
-				if (config.VisibleDrawIdsPerExecutionLaneBuffer is not null &&
-				    config.DrawExecutionRangePerBucketBuffer is not null)
+				if (config.DrawExecutionRangePerBucketBuffer is not null)
 				{
-					var indicesOffsetBytes = (ulong)(bucket.ExecutionIndex * GpuDrawResources.MaxDrawCount * sizeof(uint));
 					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
-					commandList.ExecuteIndirectCommandBufferIndexed(
+					commandList.ExecuteIndirectCommandBufferRange(
 						bucket.IndirectCommandBuffer,
-						config.VisibleDrawIdsPerExecutionLaneBuffer,
-						indicesOffsetBytes,
 						config.DrawExecutionRangePerBucketBuffer,
 						rangeOffsetBytes);
 				}
