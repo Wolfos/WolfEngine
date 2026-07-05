@@ -19,7 +19,7 @@ using Fence = Silk.NET.Direct3D12.ID3D12Fence;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IDisposable
+public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IGpuProfilerDevice, IDisposable
 {
 	private const ulong DefaultConstantUploadPageSize = 256UL * 1024UL;
 	private const ulong ConstantUploadAlignment = 256UL;
@@ -30,6 +30,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	private readonly D3D12Api _d3d12 = D3D12Api.GetApi();
 
 	private readonly D3D12DescriptorTable _globalTable;
+	private readonly D3D12GpuProfilerBackend _gpuProfilerBackend;
 
 	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
@@ -129,9 +130,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		_globalTable = new D3D12DescriptorTable(_device);
 		SilkMarshal.ThrowHResult(_device.CreateFence(0, FenceFlags.None, out _submissionFence));
 		_submissionFenceValue = 0;
+		_gpuProfilerBackend = new D3D12GpuProfilerBackend(this, _device, _graphicsQueue);
 	}
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.D3D12;
+	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;
 
 	public ulong LastSubmittedId => _submissionFenceValue;
 
@@ -685,6 +688,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			if (_inFlightCommandLists[i].FenceValue <= completedFence)
 			{
 				var completed = _inFlightCommandLists[i].CommandList;
+				completed.CompleteGpuProfiling();
 				completed.RecycleConstantUploadPages();
 				if (_commandListPool.TryGetValue(completed.Type, out var pool) == false)
 				{
@@ -845,6 +849,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		}
 
 		_globalTable.Dispose();
+		_gpuProfilerBackend.Dispose();
 
 		if (_submissionFence.Handle is not null)
 		{

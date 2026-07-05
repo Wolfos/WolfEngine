@@ -10,6 +10,12 @@ namespace WolfEngine.Editor.UI;
 public class ProfilerWindow: EditorWindow
 {
 	private static bool _isOpen;
+	private readonly GpuProfiler _gpuProfiler;
+
+	public ProfilerWindow(GpuProfiler gpuProfiler)
+	{
+		_gpuProfiler = gpuProfiler;
+	}
 
 	public static void Open()
 	{
@@ -31,6 +37,25 @@ public class ProfilerWindow: EditorWindow
 		}
 
 		Begin(ref _isOpen);
+		if (ImGui.BeginTabBar("profiler-tabs"))
+		{
+			if (ImGui.BeginTabItem("CPU"))
+			{
+				DrawCpuProfiler();
+				ImGui.EndTabItem();
+			}
+			if (ImGui.BeginTabItem("GPU"))
+			{
+				DrawGpuProfiler();
+				ImGui.EndTabItem();
+			}
+			ImGui.EndTabBar();
+		}
+		ImGui.End();
+	}
+
+	private static void DrawCpuProfiler()
+	{
 		var vsyncEnabled = Screen.VSyncEnabled;
 		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
 		{
@@ -42,7 +67,6 @@ public class ProfilerWindow: EditorWindow
 		if (frames.Count == 0)
 		{
 			ImGui.TextUnformatted("No profiler data available.");
-			ImGui.End();
 			return;
 		}
 
@@ -65,7 +89,98 @@ public class ProfilerWindow: EditorWindow
 				DrawNodes(ProfilerWindowModelBuilder.AggregateChildren(frame.Root), frameMs, $"profiler-{frame.ThreadId}");
 			}
 		}
-		ImGui.End();
+	}
+
+	private void DrawGpuProfiler()
+	{
+		var unsupportedReason = _gpuProfiler.UnsupportedReason;
+		var enabled = _gpuProfiler.Enabled;
+		if (unsupportedReason is not null)
+		{
+			ImGui.BeginDisabled();
+		}
+		if (ImGui.Checkbox("Enable GPU profiling", ref enabled))
+		{
+			_gpuProfiler.Enabled = enabled;
+		}
+		if (unsupportedReason is not null)
+		{
+			ImGui.EndDisabled();
+		}
+
+		ImGui.TextWrapped("GPU profiling inserts timestamp samples into shader stages and pipeline scopes and has significant overhead.");
+		ImGui.Separator();
+
+		if (unsupportedReason is not null)
+		{
+			ImGui.TextWrapped(unsupportedReason);
+			return;
+		}
+
+		var frame = _gpuProfiler.LatestFrame;
+		if (frame is null)
+		{
+			ImGui.TextUnformatted(enabled
+				? "Waiting for the first completed GPU profile frame..."
+				: "GPU profiling is disabled.");
+			return;
+		}
+
+		ImGui.Text($"Frame: {frame.FrameIndex}");
+		ImGui.SameLine();
+		ImGui.Text($"Total shader time: {frame.DurationMs:0.00} ms");
+		if (!enabled)
+		{
+			ImGui.TextUnformatted("Showing the last captured frame.");
+		}
+		ImGui.Separator();
+
+		if (ImGui.BeginTable(
+			    "gpu-profiler",
+			    2,
+			    ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg |
+			    ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+		{
+			ImGui.TableSetupColumn("Pass / Shader", ImGuiTableColumnFlags.WidthStretch, 2.4f);
+			ImGui.TableSetupColumn("GPU Time", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+			ImGui.TableHeadersRow();
+			for (var i = 0; i < frame.Passes.Count; i++)
+			{
+				DrawGpuPass(frame.Passes[i], frame.DurationMs, i);
+			}
+			ImGui.EndTable();
+		}
+	}
+
+	private static void DrawGpuPass(GpuProfilePass pass, double frameMs, int index)
+	{
+		ImGui.PushID(index);
+		ImGui.TableNextRow();
+		ImGui.TableSetColumnIndex(0);
+		var open = ImGui.TreeNodeEx(
+			pass.Name,
+			ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.SpanFullWidth);
+		ImGui.TableSetColumnIndex(1);
+		ImGui.TextUnformatted(ProfilerWindowModelBuilder.FormatGpuTime(pass.DurationMs, frameMs));
+		if (open)
+		{
+			for (var i = 0; i < pass.Scopes.Count; i++)
+			{
+				var scope = pass.Scopes[i];
+				ImGui.PushID(i);
+				ImGui.TableNextRow();
+				ImGui.TableSetColumnIndex(0);
+				ImGui.TreeNodeEx(
+					scope.Name,
+					ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen |
+					ImGuiTreeNodeFlags.SpanFullWidth);
+				ImGui.TableSetColumnIndex(1);
+				ImGui.TextUnformatted(ProfilerWindowModelBuilder.FormatGpuTime(scope.DurationMs, frameMs));
+				ImGui.PopID();
+			}
+			ImGui.TreePop();
+		}
+		ImGui.PopID();
 	}
 
 	private static void DrawNodes(IReadOnlyList<ProfilerDisplayNode> nodes, double frameMs, string tableId)
@@ -167,6 +282,12 @@ internal static class ProfilerWindowModelBuilder
 		}
 
 		return $"{bytes} B";
+	}
+
+	public static string FormatGpuTime(double durationMs, double frameMs)
+	{
+		var percentage = frameMs > 0.0 ? durationMs / frameMs * 100.0 : 0.0;
+		return string.Create(CultureInfo.InvariantCulture, $"{durationMs:0.00} ms ({percentage:0.0}%)");
 	}
 }
 

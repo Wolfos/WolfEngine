@@ -1,5 +1,6 @@
 using WolfEngine.Editor.UI;
 using WolfEngine.Profiling;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -85,6 +86,108 @@ public sealed class ProfilerWindowTests
 		Assert.That(ProfilerWindowModelBuilder.FormatAllocatedBytes(0), Is.EqualTo("0 B"));
 		Assert.That(ProfilerWindowModelBuilder.FormatAllocatedBytes(1536), Is.EqualTo("1.50 KB"));
 		Assert.That(ProfilerWindowModelBuilder.FormatAllocatedBytes(2 * 1024 * 1024), Is.EqualTo("2.00 MB"));
+	}
+
+	[Test]
+	public void GpuProfiler_DefaultsToDisabled()
+	{
+		var profiler = new GpuProfiler();
+		profiler.SetBackendAvailability(true, null);
+
+		Assert.That(profiler.Enabled, Is.False);
+		Assert.That(profiler.BeginFrame(1), Is.Null);
+	}
+
+	[Test]
+	public void GpuProfiler_PublishesCompleteFrameInSubmissionOrder()
+	{
+		var profiler = new GpuProfiler { Enabled = true };
+		profiler.SetBackendAvailability(true, null);
+		var frame = profiler.BeginFrame(42)!;
+		var first = frame.AddPass("First");
+		var second = frame.AddPass("Second");
+		frame.Seal();
+
+		second.Complete(new[] { new GpuProfileScope("CSSecond", 2.0) });
+		Assert.That(profiler.LatestFrame, Is.Null);
+
+		first.Complete(new[]
+		{
+			new GpuProfileScope("VS + PS", 1.0),
+			new GpuProfileScope("Variant", 0.5)
+		});
+
+		var result = profiler.LatestFrame;
+		Assert.That(result, Is.Not.Null);
+		Assert.That(result!.FrameIndex, Is.EqualTo(42));
+		Assert.That(result.DurationMs, Is.EqualTo(3.5));
+		Assert.That(result.Passes.Select(pass => pass.Name), Is.EqualTo(new[] { "First", "Second" }));
+		Assert.That(result.Passes[0].DurationMs, Is.EqualTo(1.5));
+	}
+
+	[Test]
+	public void GpuProfiler_DisablingPreservesLatestFrame()
+	{
+		var profiler = new GpuProfiler { Enabled = true };
+		profiler.SetBackendAvailability(true, null);
+		var frame = profiler.BeginFrame(7)!;
+		frame.AddPass("Pass").Complete(new[] { new GpuProfileScope("Shader", 1.25) });
+		frame.Seal();
+		var captured = profiler.LatestFrame;
+
+		profiler.Enabled = false;
+
+		Assert.That(profiler.LatestFrame, Is.SameAs(captured));
+		Assert.That(profiler.BeginFrame(8), Is.Null);
+	}
+
+	[Test]
+	public void GpuProfiler_LateOlderFrameDoesNotReplaceNewerFrame()
+	{
+		var profiler = new GpuProfiler { Enabled = true };
+		profiler.SetBackendAvailability(true, null);
+		var older = profiler.BeginFrame(10)!;
+		var olderPass = older.AddPass("Older");
+		older.Seal();
+		var newer = profiler.BeginFrame(11)!;
+		newer.AddPass("Newer").Complete(new[] { new GpuProfileScope("Shader", 1.0) });
+		newer.Seal();
+
+		olderPass.Complete(new[] { new GpuProfileScope("Shader", 2.0) });
+
+		Assert.That(profiler.LatestFrame!.FrameIndex, Is.EqualTo(11));
+	}
+
+	[Test]
+	public void GpuProfiler_UnsupportedBackendDisablesCapture()
+	{
+		var profiler = new GpuProfiler { Enabled = true };
+
+		profiler.SetBackendAvailability(false, "Unsupported");
+
+		Assert.That(profiler.Enabled, Is.False);
+		Assert.That(profiler.UnsupportedReason, Is.EqualTo("Unsupported"));
+		Assert.That(profiler.BeginFrame(1), Is.Null);
+	}
+
+	[Test]
+	public void GpuProfileNames_UseVariantThenStageEntries()
+	{
+		var variant = new PipelineKey(
+			PassKind.Compute, null, null, "CSMain", default, default, default,
+			shaderVariant: "clustered_lighting.compute.slang");
+		var compute = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
+		var graphics = new PipelineKey(PassKind.Graphics, "VSMain", "PSMain", null, default, default, default);
+
+		Assert.That(GpuProfileNames.FromPipeline(variant), Is.EqualTo("clustered_lighting.compute.slang"));
+		Assert.That(GpuProfileNames.FromPipeline(compute), Is.EqualTo("CSCull"));
+		Assert.That(GpuProfileNames.FromPipeline(graphics), Is.EqualTo("VSMain + PSMain"));
+	}
+
+	[Test]
+	public void FormatGpuTime_UsesFramePercentage()
+	{
+		Assert.That(ProfilerWindowModelBuilder.FormatGpuTime(2.5, 10.0), Is.EqualTo("2.50 ms (25.0%)"));
 	}
 
 	private static FrameProfiler.ProfileNode CreateNode(string name, long durationTicks, long allocatedBytes, params FrameProfiler.ProfileNode[] children)

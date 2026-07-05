@@ -8,6 +8,7 @@ using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Profiling;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
@@ -41,6 +42,12 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly HashSet<nint> _indirectReferencedPointers = new();
 	private bool _disposed;
 	private bool _committed;
+	private MetalGpuProfilerBackend? _gpuProfiler;
+	private GpuProfilePassCapture? _gpuPassCapture;
+	private readonly List<MetalGpuProfilerBackend.TimestampBlock> _gpuTimestampBlocks = new();
+	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
+	private bool _gpuProfilingFailed;
+	private ulong _gpuFrameIndex;
 
 	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
 	{
@@ -139,6 +146,128 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		ApplyBindlessToRenderEncoder();
 	}
+
+	internal void AttachGpuProfiler(MetalGpuProfilerBackend profiler, GpuProfilePassCapture passCapture)
+	{
+		_gpuProfiler = profiler;
+		_gpuPassCapture = passCapture;
+		_gpuFrameIndex = passCapture.FrameIndex;
+	}
+
+	internal void CompleteGpuProfiling()
+	{
+		if (_gpuProfiler is null || _gpuPassCapture is null)
+		{
+			return;
+		}
+
+		try
+		{
+			if (_gpuProfilingFailed)
+			{
+				_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+			}
+			else
+			{
+				var scopes = new List<GpuProfileScope>(_gpuTimestampScopes.Count);
+				for (var i = 0; i < _gpuTimestampScopes.Count; i++)
+				{
+					var scope = _gpuTimestampScopes[i];
+					var values = scope.Block.ReadPair(scope.StartIndex, scope.EndIndex);
+					scopes.Add(new GpuProfileScope(
+						scope.Name,
+						MetalGpuProfilerBackend.TicksToMilliseconds(values.Start, values.End)));
+				}
+				_gpuPassCapture.Complete(scopes);
+			}
+		}
+		catch (Exception exception)
+		{
+			_gpuProfiler.ReportFailure(exception);
+			_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+		}
+		finally
+		{
+			_gpuProfiler.ReleaseBlocks(_gpuTimestampBlocks);
+			_gpuTimestampScopes.Clear();
+			_gpuPassCapture = null;
+			_gpuProfiler = null;
+		}
+	}
+
+	private void ConfigureRenderStageProfiling(MTLRenderPassDescriptor descriptor)
+	{
+		if (_gpuProfiler is null || _gpuProfilingFailed)
+		{
+			return;
+		}
+
+		try
+		{
+			var reservation = ReserveGpuTimestampSamples(4);
+			var block = reservation.Block;
+			var vertexStart = reservation.StartIndex;
+			var vertexEnd = vertexStart + 1;
+			var fragmentStart = vertexStart + 2;
+			var fragmentEnd = vertexStart + 3;
+			var attachment = descriptor.SampleBufferAttachments.Object(0);
+			attachment.SampleBuffer = block.SampleBuffer;
+			attachment.StartOfVertexSampleIndex = vertexStart;
+			attachment.EndOfVertexSampleIndex = vertexEnd;
+			attachment.StartOfFragmentSampleIndex = fragmentStart;
+			attachment.EndOfFragmentSampleIndex = fragmentEnd;
+			_gpuTimestampScopes.Add(new GpuTimestampScope("Vertex stage", block, vertexStart, vertexEnd));
+			_gpuTimestampScopes.Add(new GpuTimestampScope("Fragment stage", block, fragmentStart, fragmentEnd));
+		}
+		catch (Exception exception)
+		{
+			_gpuProfiler.ReportFailure(exception);
+			_gpuProfilingFailed = true;
+		}
+	}
+
+	private void ConfigureComputeStageProfiling(MTLComputePassDescriptor descriptor)
+	{
+		if (_gpuProfiler is null || _gpuProfilingFailed)
+		{
+			return;
+		}
+
+		try
+		{
+			var reservation = ReserveGpuTimestampSamples(2);
+			var block = reservation.Block;
+			var start = reservation.StartIndex;
+			var end = start + 1;
+			var attachment = descriptor.SampleBufferAttachments.Object(0);
+			attachment.SampleBuffer = block.SampleBuffer;
+			attachment.StartOfEncoderSampleIndex = start;
+			attachment.EndOfEncoderSampleIndex = end;
+			_gpuTimestampScopes.Add(new GpuTimestampScope("Compute stage", block, start, end));
+		}
+		catch (Exception exception)
+		{
+			_gpuProfiler.ReportFailure(exception);
+			_gpuProfilingFailed = true;
+		}
+	}
+
+	private MetalGpuProfilerBackend.SampleReservation ReserveGpuTimestampSamples(ulong requiredSamples)
+	{
+		var reservation = _gpuProfiler!.ReserveSamples(_gpuFrameIndex, requiredSamples);
+		if (!_gpuTimestampBlocks.Contains(reservation.Block))
+		{
+			_gpuProfiler.RetainBlock(reservation.Block);
+			_gpuTimestampBlocks.Add(reservation.Block);
+		}
+		return reservation;
+	}
+
+	private readonly record struct GpuTimestampScope(
+		string Name,
+		MetalGpuProfilerBackend.TimestampBlock Block,
+		ulong StartIndex,
+		ulong EndIndex);
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
 	{
@@ -816,6 +945,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			}
 		}
 
+		ConfigureRenderStageProfiling(descriptor);
 		_renderEncoder = _commandBuffer.RenderCommandEncoder(descriptor);
 		_currentGraphicsPipeline = null;
 		_bindlessBuffersSetRender = false;
@@ -842,7 +972,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		_computeEncoder = _commandBuffer.ComputeCommandEncoder();
+		using var descriptor = new MTLComputePassDescriptor();
+		ConfigureComputeStageProfiling(descriptor);
+		_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
 		_currentComputePipeline = null;
 		_bindlessBuffersSetCompute = false;
 		_lastBindlessVersionCompute = uint.MaxValue;

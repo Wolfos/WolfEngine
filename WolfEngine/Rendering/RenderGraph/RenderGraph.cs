@@ -31,6 +31,7 @@ public sealed class RenderGraph
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
+	private readonly GpuProfiler _gpuProfiler;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
@@ -59,6 +60,7 @@ public sealed class RenderGraph
 		IArenaAllocator arenaAllocator,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats,
+		GpuProfiler gpuProfiler,
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
@@ -86,6 +88,7 @@ public sealed class RenderGraph
 			imGuiRenderer);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
+		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
@@ -110,6 +113,7 @@ public sealed class RenderGraph
 		_frameBuilder.PrepareSceneViewport();
 
 		var device = _renderer.GetGfxDevice();
+		var profilerBackend = (device as IGpuProfilerDevice)?.GpuProfilerBackend;
 
 		var snapshot = _activeSnapshot;
 		if (snapshot is null)
@@ -192,6 +196,7 @@ public sealed class RenderGraph
 			return;
 		}
 
+		var gpuFrameCapture = _gpuProfiler.BeginFrame((ulong)_frameIndex);
 		foreach (var pass in _passes)
 		{
 			using (FrameProfiler.Instance.Measure($"Pass: {pass.Name}"))
@@ -211,6 +216,10 @@ public sealed class RenderGraph
 				var commandList = pass.Kind == PassKind.Graphics
 					? device.BeginGraphics()
 					: device.BeginCompute();
+				if (gpuFrameCapture is not null && profilerBackend is IGpuProfilerCaptureBackend captureBackend)
+				{
+					captureBackend.Attach(commandList, gpuFrameCapture.AddPass(pass.Name));
+				}
 
 				commandList.SetBindlessTable(device.GlobalTable);
 
@@ -234,6 +243,7 @@ public sealed class RenderGraph
 				device.Submit(commandList);
 			}
 		}
+		gpuFrameCapture?.Seal();
 
 		ReleasePasses();
 	}
@@ -287,6 +297,10 @@ public sealed class RenderGraph
 		{
 			submissionTimeline.PumpCompleted();
 		}
+		var gpuProfilerBackend = (_renderer.GetGfxDevice() as IGpuProfilerDevice)?.GpuProfilerBackend;
+		_gpuProfiler.SetBackendAvailability(
+			gpuProfilerBackend?.IsSupported == true,
+			gpuProfilerBackend?.UnsupportedReason ?? "The active graphics backend does not support GPU profiling.");
 		ReleaseRetiredTextureResources();
 
 		using (FrameProfiler.Instance.Measure("Upload resources"))

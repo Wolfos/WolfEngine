@@ -4,6 +4,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Input;
 using WolfEngine.Platform;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Backend.D3D12;
 using WolfEngine.Rendering.Backend.Metal;
@@ -36,6 +37,7 @@ public static class WolfEngine
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<GpuDrawResources>();
 		services.AddSingleton<GpuDrawHardeningStats>();
+		services.AddSingleton<GpuProfiler>();
 		services.AddSingleton<BindlessResourceRegistry>();
 		services.AddSingleton<RenderGraphResourceRegistry>();
 		services.AddSingleton<RenderGraph>();

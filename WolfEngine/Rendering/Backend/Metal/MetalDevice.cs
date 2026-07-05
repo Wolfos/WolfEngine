@@ -13,7 +13,7 @@ using WolfEngine.Platform;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
-internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline
+internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IGpuProfilerDevice
 {
 	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * 16;
 	private const int MaxPooledTextures = 256;
@@ -54,6 +54,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private MTLDevice _device;
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
+	private readonly MetalGpuProfilerBackend _gpuProfilerBackend;
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
 	private readonly string _metallibCacheDirectory;
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
@@ -84,6 +85,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			throw new InvalidOperationException("Failed to create Metal command queue.");
 		}
 		_descriptorTable = new MetalDescriptorTable(_device);
+		_gpuProfilerBackend = new MetalGpuProfilerBackend(_device);
 		_metallibCacheDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine", "metallib-cache");
 		Directory.CreateDirectory(_metallibCacheDirectory);
 	}
@@ -91,6 +93,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
+	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;
 
 	public ulong LastSubmittedId
 	{
@@ -195,6 +198,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			{
 				commandList.WaitUntilCompleted();
 			}
+			commandList.CompleteGpuProfiling();
 		}
 		catch (NullReferenceException)
 		{

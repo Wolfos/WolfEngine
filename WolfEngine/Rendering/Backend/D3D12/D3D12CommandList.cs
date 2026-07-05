@@ -7,6 +7,7 @@ using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using Silk.NET.Maths;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Profiling;
 
 using AbstractionViewport = WolfEngine.Rendering.Abstraction.Viewport;
 using AbstractionVertexBufferView = WolfEngine.Rendering.Abstraction.VertexBufferView;
@@ -29,6 +30,14 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	private ulong _currentConstantUploadOffset;
 	private bool _isClosed;
 	private bool _bindlessHeapsDirty = true;
+	private D3D12GpuProfilerBackend? _gpuProfiler;
+	private GpuProfilePassCapture? _gpuPassCapture;
+	private readonly List<D3D12GpuProfilerBackend.TimestampBlock> _gpuTimestampBlocks = new();
+	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
+	private D3D12GpuProfilerBackend.TimestampBlock? _activeGpuBlock;
+	private uint _activeGpuStartIndex;
+	private string? _activeGpuScopeName;
+	private bool _gpuProfilingFailed;
 
 	public D3D12CommandList(
 		D3D12Device owner,
@@ -59,6 +68,21 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
+		CloseGpuScope();
+		for (var i = 0; i < _gpuTimestampBlocks.Count; i++)
+		{
+			var block = _gpuTimestampBlocks[i];
+			if (block.UsedSamples > 0)
+			{
+				CommandList.ResolveQueryData(
+					block.Heap,
+					QueryType.Timestamp,
+					0,
+					block.UsedSamples,
+					block.Readback.Resource,
+					0);
+			}
+		}
 		SilkMarshal.ThrowHResult(CommandList.Close());
 		_isClosed = true;
 	}
@@ -81,6 +105,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		_bindlessHeapsDirty = true;
 		_currentConstantUploadPage = null;
 		_currentConstantUploadOffset = 0;
+		_gpuProfiler = null;
+		_gpuPassCapture = null;
+		_gpuTimestampScopes.Clear();
+		_gpuTimestampBlocks.Clear();
+		_activeGpuBlock = null;
+		_activeGpuScopeName = null;
+		_gpuProfilingFailed = false;
 	}
 
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
@@ -162,6 +193,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void BindPipeline(IGfxPipeline pipeline)
 	{
+		BeginGpuScope(pipeline.Key);
 		if (pipeline is not D3D12Pipeline nativePipeline)
 		{
 			throw new InvalidOperationException("Pipeline was not created by the Direct3D12 backend.");
@@ -182,6 +214,115 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
 	}
+
+	internal void AttachGpuProfiler(D3D12GpuProfilerBackend profiler, GpuProfilePassCapture passCapture)
+	{
+		_gpuProfiler = profiler;
+		_gpuPassCapture = passCapture;
+	}
+
+	internal void CompleteGpuProfiling()
+	{
+		if (_gpuProfiler is null || _gpuPassCapture is null)
+		{
+			return;
+		}
+
+		try
+		{
+			if (_gpuProfilingFailed)
+			{
+				_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+			}
+			else
+			{
+				var blockResults = new Dictionary<D3D12GpuProfilerBackend.TimestampBlock, ulong[]>(_gpuTimestampBlocks.Count);
+				for (var i = 0; i < _gpuTimestampBlocks.Count; i++)
+				{
+					blockResults[_gpuTimestampBlocks[i]] = _gpuTimestampBlocks[i].ReadResults();
+				}
+				var scopes = new List<GpuProfileScope>(_gpuTimestampScopes.Count);
+				for (var i = 0; i < _gpuTimestampScopes.Count; i++)
+				{
+					var scope = _gpuTimestampScopes[i];
+					var values = blockResults[scope.Block];
+					scopes.Add(new GpuProfileScope(
+						scope.Name,
+						_gpuProfiler.TicksToMilliseconds(values[scope.StartIndex], values[scope.EndIndex])));
+				}
+				_gpuPassCapture.Complete(scopes);
+			}
+		}
+		catch (Exception exception)
+		{
+			_gpuProfiler.ReportFailure(exception);
+			_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+		}
+		finally
+		{
+			_gpuProfiler.ReturnBlocks(_gpuTimestampBlocks);
+			_gpuTimestampScopes.Clear();
+			_gpuPassCapture = null;
+			_gpuProfiler = null;
+		}
+	}
+
+	private void BeginGpuScope(in PipelineKey key)
+	{
+		if (_gpuProfiler is null || _gpuProfilingFailed)
+		{
+			return;
+		}
+		CloseGpuScope();
+		D3D12GpuProfilerBackend.TimestampBlock block;
+		try
+		{
+			block = GetGpuTimestampBlock();
+		}
+		catch (Exception exception)
+		{
+			_gpuProfiler.ReportFailure(exception);
+			_gpuProfilingFailed = true;
+			return;
+		}
+		_activeGpuStartIndex = block.UsedSamples++;
+		CommandList.EndQuery(block.Heap, QueryType.Timestamp, _activeGpuStartIndex);
+		_activeGpuBlock = block;
+		_activeGpuScopeName = GpuProfileNames.FromPipeline(key);
+	}
+
+	private void CloseGpuScope()
+	{
+		if (_activeGpuBlock is null || _activeGpuScopeName is null)
+		{
+			return;
+		}
+		var endIndex = _activeGpuBlock.UsedSamples++;
+		CommandList.EndQuery(_activeGpuBlock.Heap, QueryType.Timestamp, endIndex);
+		_gpuTimestampScopes.Add(new GpuTimestampScope(
+			_activeGpuScopeName,
+			_activeGpuBlock,
+			_activeGpuStartIndex,
+			endIndex));
+		_activeGpuBlock = null;
+		_activeGpuScopeName = null;
+	}
+
+	private D3D12GpuProfilerBackend.TimestampBlock GetGpuTimestampBlock()
+	{
+		if (_gpuTimestampBlocks.Count == 0 ||
+		    _gpuTimestampBlocks[^1].UsedSamples + 2 > D3D12GpuProfilerBackend.SamplesPerBlock)
+		{
+			_gpuTimestampBlocks.Add(_gpuProfiler!.RentBlock());
+		}
+		return _gpuTimestampBlocks[^1];
+	}
+
+	private readonly record struct GpuTimestampScope(
+		string Name,
+		D3D12GpuProfilerBackend.TimestampBlock Block,
+		uint StartIndex,
+		uint EndIndex);
 
 	public void SetBindlessTable(IGfxDescriptorTable table)
 	{
