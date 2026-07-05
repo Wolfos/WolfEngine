@@ -165,10 +165,12 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly IGfxTexture?[,] _ddgiIrradianceTextures = new IGfxTexture?[DdgiShCoefficientCount, 2];
 	private readonly IGfxTexture?[] _ddgiVisibilityTextures = new IGfxTexture?[2];
 	private readonly IGfxTexture?[] _ddgiProbeStateTextures = new IGfxTexture?[2];
+	private IGfxTexture? _ddgiProbeActivityTexture;
 	private IGfxBuffer? _ddgiIrradianceEstimatorBuffer;
 	private readonly ResourceState[,] _ddgiIrradianceStates = new ResourceState[DdgiShCoefficientCount, 2];
 	private readonly ResourceState[] _ddgiVisibilityStates = new ResourceState[2];
 	private readonly ResourceState[] _ddgiProbeStateStates = new ResourceState[2];
+	private ResourceState _ddgiProbeActivityState = ResourceState.Common;
 	private ResourceState _ddgiIrradianceEstimatorState = ResourceState.Common;
 	private Vector3 _ddgiHistoryLatticeAnchor;
 	private float _ddgiHistoryProbeSpacing;
@@ -187,7 +189,6 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _ddgiTraceExecute;
 	private readonly Action<RenderGraphContext> _ddgiIrradianceIntegrateExecute;
 	private readonly Action<RenderGraphContext> _ddgiVisibilityIntegrateExecute;
-	private readonly Action<RenderGraphContext> _ddgiBorderUpdateExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingBuildExecute;
 	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
 	private readonly Action<RenderGraphContext> _gBufferDecalSeedExecute;
@@ -252,7 +253,6 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiTraceExecute = ExecuteDdgiTrace;
 		_ddgiIrradianceIntegrateExecute = ExecuteDdgiIrradianceIntegrate;
 		_ddgiVisibilityIntegrateExecute = ExecuteDdgiVisibilityIntegrate;
-		_ddgiBorderUpdateExecute = ExecuteDdgiBorderUpdate;
 		_clusteredLightingBuildExecute = ExecuteClusteredLightingBuild;
 		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
 		_gBufferDecalSeedExecute = ExecuteGBufferDecalSeed;
@@ -608,6 +608,7 @@ internal sealed class RenderGraphFrameBuilder
 				    _ddgiVisibilityTextures[ddgiWriteIndex] is IGfxTexture ddgiVisibilityWrite &&
 				    _ddgiProbeStateTextures[_ddgiHistoryReadIndex] is IGfxTexture ddgiProbeStateRead &&
 				    _ddgiProbeStateTextures[ddgiWriteIndex] is IGfxTexture ddgiProbeStateWrite &&
+				    _ddgiProbeActivityTexture is IGfxTexture ddgiProbeActivity &&
 				    _ddgiIrradianceEstimatorBuffer is IGfxBuffer ddgiIrradianceEstimator)
 				{
 					ddgiTraceIrradianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -674,12 +675,10 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiProbeStateWrite,
 						takeOwnership: false,
 						initialState: _ddgiProbeStateStates[ddgiWriteIndex]);
-					ddgiProbeActivityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+					ddgiProbeActivityHandle = _resources.ImportTexture(
+						ddgiProbeActivity,
+						takeOwnership: false,
+						initialState: _ddgiProbeActivityState);
 					ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 						sceneFramebufferSize.X,
 						sceneFramebufferSize.Y,
@@ -992,19 +991,27 @@ internal sealed class RenderGraphFrameBuilder
 					.WriteTexture(_frameResources.DdgiProbeActivity, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiClassifyExecute);
 
-				graph.AddPass("DDGI Relocation Trace", PassKind.Compute)
-					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
-					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess)
-					.SetExecute(context => ExecuteDdgiRelocationTrace(context, 0));
+				if (DdgiUtilities.IsRelocationTraceEnabled(_frameResources.Config))
+				{
+					graph.AddPass("DDGI Relocation Trace", PassKind.Compute)
+						.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
+						.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess)
+						.SetExecute(context => ExecuteDdgiRelocationTrace(context, 0));
+				}
 
-				graph.AddPass("DDGI Relocation Solve", PassKind.Compute)
+				var relocationSolveBuilder = graph.AddPass("DDGI Relocation Solve", PassKind.Compute)
 					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
-					.ReadTexture(_frameResources.DdgiTraceVisibility, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiProbeStateWrite, ResourceState.UnorderedAccess)
-					.WriteTexture(_frameResources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess)
-					.SetExecute(context => ExecuteDdgiRelocate(context, 0));
+					.WriteTexture(_frameResources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess);
+				if (DdgiUtilities.IsRelocationTraceEnabled(_frameResources.Config))
+				{
+					relocationSolveBuilder.ReadTexture(
+						_frameResources.DdgiTraceVisibility,
+						ResourceState.ShaderResource);
+				}
+				relocationSolveBuilder.SetExecute(context => ExecuteDdgiRelocate(context, 0));
 
 				var ddgiTraceBuilder = graph.AddPass("DDGI Probe Trace", PassKind.Compute)
 					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
@@ -1047,10 +1054,6 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_frameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiVisibilityIntegrateExecute);
-
-				graph.AddPass("DDGI Border Update", PassKind.Compute)
-					.WriteTexture(_frameResources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
-					.SetExecute(_ddgiBorderUpdateExecute);
 			}
 
 			if (_useProceduralSkybox && _recordProceduralSkyBrdf)
@@ -1707,16 +1710,6 @@ internal sealed class RenderGraphFrameBuilder
 		_ddgiPass.RecordRelocate(context, in _currentDdgiConfig, iteration);
 	}
 
-	private void ExecuteDdgiBorderUpdate(RenderGraphContext context)
-	{
-		if (_currentDdgiConfigValid == false)
-		{
-			throw new InvalidOperationException("DDGI border update executed before DDGI trace config was built.");
-		}
-
-		_ddgiPass.RecordBorderUpdate(context, in _currentDdgiConfig);
-	}
-
 	private void ExecuteTransparentForward(RenderGraphContext context)
 	{
 		var device = _renderer.GetGfxDevice();
@@ -1871,6 +1864,10 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			_ddgiProbeStateStates[_ddgiHistoryReadIndex] = _resources.GetResourceState(_frameResources.DdgiProbeStateRead);
 		}
+		if (_frameResources.DdgiProbeActivity.IsValid)
+		{
+			_ddgiProbeActivityState = _resources.GetResourceState(_frameResources.DdgiProbeActivity);
+		}
 
 		var ddgiWriteIndex = 1 - _ddgiHistoryReadIndex;
 		UpdateDdgiIrradianceState(0, _frameResources.DdgiIrradianceL0HistoryWrite, ddgiWriteIndex);
@@ -1995,6 +1992,7 @@ internal sealed class RenderGraphFrameBuilder
 		    _ddgiVisibilityTextures[1] is not null &&
 		    _ddgiProbeStateTextures[0] is not null &&
 		    _ddgiProbeStateTextures[1] is not null &&
+		    _ddgiProbeActivityTexture is not null &&
 		    _ddgiIrradianceEstimatorBuffer is not null)
 		{
 			return;
@@ -2029,6 +2027,13 @@ internal sealed class RenderGraphFrameBuilder
 			_ddgiVisibilityStates[i] = ResourceState.UnorderedAccess;
 			_ddgiProbeStateStates[i] = ResourceState.UnorderedAccess;
 		}
+		_ddgiProbeActivityTexture = device.CreateTexture(new TextureDescriptor(
+			shCoefficientTextureSize.X,
+			shCoefficientTextureSize.Y,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+		_ddgiProbeActivityState = ResourceState.UnorderedAccess;
 		_ddgiIrradianceEstimatorBuffer = device.CreateBuffer(new BufferDescriptor(
 			DdgiUtilities.GetIrradianceEstimatorBufferSize(gridShape),
 			BufferUsage.Structured,
@@ -2076,6 +2081,13 @@ internal sealed class RenderGraphFrameBuilder
 			_ddgiVisibilityStates[i] = ResourceState.Common;
 			_ddgiProbeStateStates[i] = ResourceState.Common;
 		}
+
+		if (_ddgiProbeActivityTexture is IGfxTexture activityTexture)
+		{
+			EnqueueTemporalRelease(_ddgiHistoryDevice, activityTexture, _ddgiProbeActivityState);
+		}
+		_ddgiProbeActivityTexture = null;
+		_ddgiProbeActivityState = ResourceState.Common;
 
 		if (_ddgiIrradianceEstimatorBuffer is IGfxBuffer estimatorBuffer)
 		{

@@ -1,62 +1,124 @@
 import "common_bindless.slang";
 import "ddgi_common.slang";
 
-float4 IntegrateVisibilityTexel(uint2 pixel)
+static const uint DDGI_VISIBILITY_RESOLUTION = 16u;
+static const uint DDGI_VISIBILITY_TEXEL_COUNT =
+    DDGI_VISIBILITY_RESOLUTION * DDGI_VISIBILITY_RESOLUTION;
+
+groupshared float2 g_RayMoments[DDGI_VISIBILITY_TEXEL_COUNT];
+groupshared float3 g_RayDirections[DDGI_VISIBILITY_TEXEL_COUNT];
+groupshared float4 g_FinalVisibility[DDGI_VISIBILITY_TEXEL_COUNT];
+groupshared uint g_UpdateActive;
+groupshared uint g_UsableHistory;
+
+uint2 DdgiVisibilityBorderLocalPixel(uint borderIndex)
 {
-    DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
-    if (!info.valid)
+    uint tileSize = visibilityTileInteriorSize + tileBorderSize * 2u;
+    uint horizontalBorderCount = tileSize * 2u;
+    if (borderIndex < tileSize)
     {
-        return float4(1.0f, 1.0f, 0.0f, 1.0f);
+        return uint2(borderIndex, 0u);
     }
-    if (!DdgiIsProbeUpdateActive(info.probeIndex))
+    if (borderIndex < horizontalBorderCount)
     {
-        Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
-        return historyTex.Load(int3(pixel, 0));
-    }
-
-    float3 texelDirection = DdgiOctDecode(DdgiInteriorUv(info.interiorPixel, visibilityTileInteriorSize));
-    uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
-    float filterExponent = clamp(float(rayCount) / 6.0f - 1.0f, 8.0f, 32.0f);
-    Texture2D<float4> traceTex = GetTexture(traceVisibilityReadHandle);
-
-    float2 moments = 0.0f.xx;
-    float weightSum = 0.0f;
-    for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
-    {
-        float3 rayDirection = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-        // Keep roughly three rays in each directional estimate. A fixed dot^64
-        // kernel is undersampled at 64 rays and leaves angular holes in the atlas.
-        float weight = pow(saturate(dot(texelDirection, rayDirection)), filterExponent);
-        if (weight <= 1e-5f)
-        {
-            continue;
-        }
-
-        uint2 samplePixel = DdgiRaySamplePixel(info.probeIndex, rayIndex, visibilityTileInteriorSize);
-        moments += traceTex.Load(int3(samplePixel, 0)).rg * weight;
-        weightSum += weight;
+        return uint2(borderIndex - tileSize, tileSize - 1u);
     }
 
-    if (weightSum <= 1e-5f)
+    uint verticalIndex = borderIndex - horizontalBorderCount;
+    if (verticalIndex < visibilityTileInteriorSize)
     {
-        return float4(1.0f, 1.0f, 0.0f, 1.0f);
+        return uint2(0u, tileBorderSize + verticalIndex);
     }
-
-    return float4(moments / weightSum, 0.0f, 1.0f);
+    return uint2(
+        tileSize - 1u,
+        tileBorderSize + verticalIndex - visibilityTileInteriorSize);
 }
 
-[numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(16, 16, 1)]
+void CSMain(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint groupIndex : SV_GroupIndex)
 {
-    uint2 pixel = dispatchThreadId.xy;
-    if (pixel.x < visibilityAtlasWidth && pixel.y < visibilityAtlasHeight)
+    uint probeIndex = groupId.x;
+    if (probeIndex >= probeCount)
     {
-        Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
-        RWTexture2D<float4> outputTex = GetRWTexture(visibilityHistoryWriteHandle);
-        DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
-        float4 traceValue = IntegrateVisibilityTexel(pixel);
-        float4 historyValue = historyTex.Load(int3(pixel, 0));
-        float historyWeight = info.valid && DdgiProbeHasUsableHistory(info.probeIndex) ? hysteresis : 0.0f;
-        outputTex[pixel] = lerp(traceValue, historyValue, historyWeight);
+        return;
+    }
+
+    if (groupIndex == 0u)
+    {
+        g_UpdateActive = DdgiIsProbeUpdateActive(probeIndex) ? 1u : 0u;
+        g_UsableHistory = DdgiProbeHasUsableHistory(probeIndex) ? 1u : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 tileOrigin = DdgiProbeTileOrigin(probeIndex, visibilityTileInteriorSize);
+    uint2 interiorPixel = groupThreadId.xy;
+    uint2 outputPixel = tileOrigin + tileBorderSize.xx + interiorPixel;
+    Texture2D<float4> historyTex = GetTexture(visibilityHistoryReadHandle);
+    RWTexture2D<float4> outputTex = GetRWTexture(visibilityHistoryWriteHandle);
+    float4 historyValue = historyTex.Load(int3(outputPixel, 0));
+    float4 finalValue = historyValue;
+
+    if (g_UpdateActive != 0u)
+    {
+        uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
+        if (groupIndex < rayCount)
+        {
+            uint2 samplePixel = DdgiRaySamplePixel(
+                probeIndex,
+                groupIndex,
+                visibilityTileInteriorSize);
+            g_RayMoments[groupIndex] =
+                GetTexture(traceVisibilityReadHandle).Load(int3(samplePixel, 0)).rg;
+            g_RayDirections[groupIndex] =
+                DdgiRayDirection(groupIndex, rayCount, probeIndex);
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        float3 texelDirection = DdgiOctDecode(
+            DdgiInteriorUv(interiorPixel, visibilityTileInteriorSize));
+        float filterExponent = clamp(float(rayCount) / 6.0f - 1.0f, 8.0f, 32.0f);
+        float2 moments = 0.0f.xx;
+        float weightSum = 0.0f;
+        for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
+        {
+            float weight = pow(
+                saturate(dot(texelDirection, g_RayDirections[rayIndex])),
+                filterExponent);
+            if (weight <= 1e-5f)
+            {
+                continue;
+            }
+
+            moments += g_RayMoments[rayIndex] * weight;
+            weightSum += weight;
+        }
+
+        float4 traceValue = weightSum > 1e-5f
+            ? float4(moments / weightSum, 0.0f, 1.0f)
+            : float4(1.0f, 1.0f, 0.0f, 1.0f);
+        float historyWeight = g_UsableHistory != 0u ? hysteresis : 0.0f;
+        finalValue = lerp(traceValue, historyValue, historyWeight);
+    }
+
+    g_FinalVisibility[groupIndex] = finalValue;
+    outputTex[outputPixel] = finalValue;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint tileSize = visibilityTileInteriorSize + tileBorderSize * 2u;
+    uint borderTexelCount = tileSize * 2u + visibilityTileInteriorSize * 2u;
+    if (groupIndex < borderTexelCount)
+    {
+        uint2 borderLocalPixel = DdgiVisibilityBorderLocalPixel(groupIndex);
+        int2 sourceInteriorPixel = clamp(
+            int2(borderLocalPixel) - int2(tileBorderSize, tileBorderSize),
+            int2(0, 0),
+            int2(visibilityTileInteriorSize - 1u, visibilityTileInteriorSize - 1u));
+        uint sourceIndex =
+            uint(sourceInteriorPixel.y) * visibilityTileInteriorSize +
+            uint(sourceInteriorPixel.x);
+        outputTex[tileOrigin + borderLocalPixel] = g_FinalVisibility[sourceIndex];
     }
 }

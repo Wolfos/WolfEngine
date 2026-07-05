@@ -672,106 +672,41 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
     return result;
 }
 
-void TraceIrradianceSample(uint2 pixel)
+groupshared uint g_ProbeActive;
+
+[numthreads(16, 1, 1)]
+void CSRelocation(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint groupIndex : SV_GroupIndex)
 {
-    DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, irradianceTileInteriorSize);
-    RWTexture2D<float4> target = GetRWTexture(traceIrradianceHandle);
-    if (!info.valid)
-    {
-        target[pixel] = 0.0f.xxxx;
-        return;
-    }
-    if (!DdgiIsProbeUpdateActive(info.probeIndex))
-    {
-        target[pixel] = 0.0f.xxxx;
-        return;
-    }
-
-    uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, irradianceTileInteriorSize);
-    uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
-    if (rayIndex >= rayCount)
-    {
-        target[pixel] = 0.0f.xxxx;
-        return;
-    }
-
-    float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-    DdgiTraceResult result = DdgiTraceRay(
-        DdgiCurrentProbePosition(info.probeIndex),
-        direction);
-    target[pixel] = float4(result.radiance, 1.0f);
-}
-
-void TraceVisibilitySample(uint2 pixel)
-{
-    DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
-    RWTexture2D<float4> target = GetRWTexture(traceVisibilityHandle);
-    if (!info.valid)
-    {
-        target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
-        return;
-    }
-    if (!DdgiIsProbeUpdateActive(info.probeIndex))
-    {
-        target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
-        return;
-    }
-
-    uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, visibilityTileInteriorSize);
-    uint rayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
-    if (rayIndex >= rayCount)
-    {
-        target[pixel] = float4(1.0f, 1.0f, 0.0f, 1.0f);
-        return;
-    }
-
-    float3 direction = DdgiRayDirection(rayIndex, rayCount, info.probeIndex);
-    DdgiTraceResult result = DdgiTraceRay(
-        DdgiCurrentProbePosition(info.probeIndex),
-        direction);
-    float visibilityDistance = result.backfaceHit
-        ? result.hitDistance * 0.9f
-        : result.hitDistance;
-    float normalizedDistance = saturate(visibilityDistance / max(maxRayDistance, 0.001f));
-    target[pixel] = float4(
-        normalizedDistance,
-        normalizedDistance * normalizedDistance,
-        result.hitGeometry ? 1.0f : 0.0f,
-        result.backfaceHit ? 1.0f : 0.0f);
-}
-
-[numthreads(8, 8, 1)]
-void CSRelocation(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    uint2 pixel = dispatchThreadId.xy;
-    RWTexture2D<float4> target = GetRWTexture(traceVisibilityHandle);
-    if (pixel.x >= visibilityAtlasWidth || pixel.y >= visibilityAtlasHeight)
+    uint probeIndex = groupId.x;
+    if (probeIndex >= probeCount)
     {
         return;
     }
 
-    DdgiTexelInfo info = DdgiDecodeAtlasTexel(pixel, visibilityTileInteriorSize);
-    if (!info.valid)
+    if (groupIndex == 0u)
     {
-        target[pixel] = 0.0f.xxxx;
+        g_ProbeActive = DdgiIsProbeRelocationActive(probeIndex) ? 1u : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (g_ProbeActive == 0u)
+    {
         return;
     }
 
-    uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, visibilityTileInteriorSize);
-    bool sourceAvailable = DdgiProbeHasHistory(info.probeIndex);
-    if (rayIndex >= DDGI_RELOCATION_RAY_COUNT ||
-        !DdgiIsProbeRelocationActive(info.probeIndex))
-    {
-        target[pixel] = 0.0f.xxxx;
-        return;
-    }
-
+    uint rayIndex = groupThreadId.x;
+    bool sourceAvailable = DdgiProbeHasHistory(probeIndex);
     float3 direction = DdgiRelocationRayDirection(rayIndex);
     float3 probePosition = DdgiRelocatedProbePosition(
-        info.probeIndex,
+        probeIndex,
         probeRelocationStateReadHandle,
         sourceAvailable);
     DdgiTraceResult result = DdgiTraceGeometryRay(probePosition, direction);
+    uint2 pixel = DdgiRaySamplePixel(probeIndex, rayIndex, visibilityTileInteriorSize);
+    RWTexture2D<float4> target = GetRWTexture(traceVisibilityHandle);
     target[pixel] = float4(
         result.hitDistance,
         0.0f,
@@ -779,17 +714,72 @@ void CSRelocation(uint3 dispatchThreadId : SV_DispatchThreadID)
         result.backfaceHit ? 1.0f : 0.0f);
 }
 
-[numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(64, 1, 1)]
+void CSMain(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint groupIndex : SV_GroupIndex)
 {
-    uint2 pixel = dispatchThreadId.xy;
-    if (pixel.x < irradianceAtlasWidth && pixel.y < irradianceAtlasHeight)
+    uint probeIndex = groupId.x;
+    if (probeIndex >= probeCount)
     {
-        TraceIrradianceSample(pixel);
+        return;
     }
 
-    if (pixel.x < visibilityAtlasWidth && pixel.y < visibilityAtlasHeight)
+    if (groupIndex == 0u)
     {
-        TraceVisibilitySample(pixel);
+        g_ProbeActive = DdgiIsProbeUpdateActive(probeIndex) ? 1u : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (g_ProbeActive == 0u)
+    {
+        return;
+    }
+
+    uint visibilityRayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
+    uint irradianceRayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
+    bool sharedRaySet = visibilityRayCount == irradianceRayCount;
+    float3 probePosition = DdgiCurrentProbePosition(probeIndex);
+    RWTexture2D<float4> visibilityTarget = GetRWTexture(traceVisibilityHandle);
+    RWTexture2D<float4> irradianceTarget = GetRWTexture(traceIrradianceHandle);
+
+    for (uint rayIndex = groupThreadId.x; rayIndex < visibilityRayCount; rayIndex += 64u)
+    {
+        float3 direction = DdgiRayDirection(rayIndex, visibilityRayCount, probeIndex);
+        DdgiTraceResult result = DdgiTraceRay(probePosition, direction);
+        float visibilityDistance = result.backfaceHit
+            ? result.hitDistance * 0.9f
+            : result.hitDistance;
+        float normalizedDistance = saturate(visibilityDistance / max(maxRayDistance, 0.001f));
+        uint2 visibilityPixel = DdgiRaySamplePixel(
+            probeIndex,
+            rayIndex,
+            visibilityTileInteriorSize);
+        visibilityTarget[visibilityPixel] = float4(
+            normalizedDistance,
+            normalizedDistance * normalizedDistance,
+            result.hitGeometry ? 1.0f : 0.0f,
+            result.backfaceHit ? 1.0f : 0.0f);
+
+        if (sharedRaySet)
+        {
+            uint2 irradiancePixel = DdgiRaySamplePixel(
+                probeIndex,
+                rayIndex,
+                irradianceTileInteriorSize);
+            irradianceTarget[irradiancePixel] = float4(result.radiance, 1.0f);
+        }
+    }
+
+    if (!sharedRaySet && groupThreadId.x < irradianceRayCount)
+    {
+        uint rayIndex = groupThreadId.x;
+        float3 direction = DdgiRayDirection(rayIndex, irradianceRayCount, probeIndex);
+        DdgiTraceResult result = DdgiTraceRay(probePosition, direction);
+        uint2 irradiancePixel = DdgiRaySamplePixel(
+            probeIndex,
+            rayIndex,
+            irradianceTileInteriorSize);
+        irradianceTarget[irradiancePixel] = float4(result.radiance, 1.0f);
     }
 }

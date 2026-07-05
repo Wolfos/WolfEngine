@@ -18,6 +18,8 @@ struct DdgiVarianceData
 
 RWStructuredBuffer<uint4> g_IrradianceEstimator : register(u2);
 groupshared uint g_FilteredRadiance[DDGI_DIRECTION_COUNT];
+groupshared float3 g_TraceRadiance[DDGI_DIRECTION_COUNT];
+groupshared float3 g_TraceDirections[DDGI_DIRECTION_COUNT];
 
 uint PackHalf2(float2 value)
 {
@@ -103,18 +105,14 @@ void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
     data.mean = lerp(data.mean, sampleValue, min(saturate(catchUpBlend), DDGI_MAX_MEAN_BLEND));
 }
 
-float3 IntegrateDirection(uint probeIndex, float3 direction)
+float3 IntegrateDirection(float3 direction, uint rayCount)
 {
-    Texture2D<float4> traceTex = GetTexture(traceIrradianceReadHandle);
-    uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
     float3 radiance = 0.0f.xxx;
     float weightSum = 0.0f;
     for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
     {
-        uint2 samplePixel = DdgiRaySamplePixel(probeIndex, rayIndex, irradianceTileInteriorSize);
-        float3 rayDirection = DdgiRayDirection(rayIndex, rayCount, probeIndex);
-        float weight = saturate(dot(direction, rayDirection));
-        radiance += traceTex.Load(int3(samplePixel, 0)).rgb * weight;
+        float weight = saturate(dot(direction, g_TraceDirections[rayIndex]));
+        radiance += g_TraceRadiance[rayIndex] * weight;
         weightSum += weight;
     }
     return weightSum > 1e-5f ? radiance / weightSum : 0.0f.xxx;
@@ -158,9 +156,23 @@ void CSMain(
         return;
     }
 
+    uint rayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
+    if (groupIndex < rayCount)
+    {
+        uint2 samplePixel = DdgiRaySamplePixel(
+            probeIndex,
+            groupIndex,
+            irradianceTileInteriorSize);
+        g_TraceRadiance[groupIndex] =
+            GetTexture(traceIrradianceReadHandle).Load(int3(samplePixel, 0)).rgb;
+        g_TraceDirections[groupIndex] =
+            DdgiRayDirection(groupIndex, rayCount, probeIndex);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
     float2 octUv = ((float2(groupThreadId.xy) + 0.5f) / float(DDGI_DIRECTION_RESOLUTION)) * 2.0f - 1.0f;
     float3 direction = DdgiOctDecode(octUv);
-    float3 currentRadiance = IntegrateDirection(probeIndex, direction);
+    float3 currentRadiance = IntegrateDirection(direction, rayCount);
     uint estimatorIndex = DdgiPhysicalProbeIndex(probeIndex) * DDGI_DIRECTION_COUNT + groupIndex;
     DdgiVarianceData varianceData;
     if (!DdgiProbeHasUsableHistory(probeIndex))

@@ -12,7 +12,6 @@ public readonly struct DdgiPassConfig
 	public required IGfxPipeline RelocatePipeline { get; init; }
 	public required IGfxPipeline IrradianceIntegratePipeline { get; init; }
 	public required IGfxPipeline VisibilityIntegratePipeline { get; init; }
-	public required IGfxPipeline BorderUpdatePipeline { get; init; }
 	public required IGfxTopLevelAccelerationStructure TopLevelAccelerationStructure { get; init; }
 	public required DescriptorHandle TraceIrradianceHandle { get; init; }
 	public required DescriptorHandle TraceVisibilityHandle { get; init; }

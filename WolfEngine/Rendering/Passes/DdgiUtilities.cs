@@ -158,6 +158,21 @@ public static class DdgiUtilities
 		return Math.Clamp(requestedRayCount, 1, tileCapacity);
 	}
 
+	internal static int GetProbeTraceInvocationCount(int requestedRayCount)
+	{
+		var visibilityRayCount = GetRaySampleCount(requestedRayCount, VisibilityTileInteriorSize);
+		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
+		return visibilityRayCount == irradianceRayCount
+			? visibilityRayCount
+			: checked(visibilityRayCount + irradianceRayCount);
+	}
+
+	internal static bool IsRelocationTraceEnabled(RenderConfig config)
+	{
+		return IsRayTracedDdgiEnabled(config) &&
+		       config.DiffuseGlobalIllumination.ProbeRelocationEnabled;
+	}
+
 	public static uint PackRgbe(Vector3 rgb)
 	{
 		const float maxValue = 65408.0f;

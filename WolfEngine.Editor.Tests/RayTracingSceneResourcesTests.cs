@@ -89,45 +89,37 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			"ddgi_classify.compute.slang",
-			"ddgi_trace.compute.slang",
-			"ddgi_relocate.compute.slang",
-			"ddgi_irradiance_integrate.compute.slang",
-			"ddgi_integrate.compute.slang",
-			"ddgi_border_update.compute.slang"
+			(Name: "ddgi_classify.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSMain", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSRelocation", ThreadsX: 16u, ThreadsY: 1u),
+			(Name: "ddgi_relocate.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_integrate.compute.slang", EntryPoint: "CSMain", ThreadsX: 16u, ThreadsY: 16u)
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
-				shader,
-				"CSMain",
+				shader.Name,
+				shader.EntryPoint,
 				GraphicsBackendKind.Metal);
 
-			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader);
-			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8), shader);
-			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8), shader);
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(shader.ThreadsX), shader.Name);
+			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(shader.ThreadsY), shader.Name);
 			Assert.That(
 				compiled.ReflectionLayout
 					.GetConstantBuffer("DdgiSettings")
 					.GetFieldOrThrow("scrollDeltaX")
 					.ValueKind,
 				Is.EqualTo(ShaderConstantFieldValueKind.Int),
-				shader);
+				shader.Name);
 			Assert.That(
 				compiled.ReflectionLayout
 					.GetConstantBuffer("DdgiSettings")
 					.GetFieldOrThrow("debugProbeRelocationReadbackIndex")
 					.ValueKind,
 				Is.EqualTo(ShaderConstantFieldValueKind.UInt),
-				shader);
+				shader.Name);
 		}
-
-		var relocationTrace = shaderCompiler.GetComputeShaderWithReflection(
-			"ddgi_trace.compute.slang",
-			"CSRelocation",
-			GraphicsBackendKind.Metal);
-		Assert.That(relocationTrace.Bytecode.IsEmpty, Is.False);
-		Assert.That(relocationTrace.ThreadGroupSize.X, Is.EqualTo(8));
-		Assert.That(relocationTrace.ThreadGroupSize.Y, Is.EqualTo(8));
 	}
 
 	[Test]
@@ -394,6 +386,48 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(
 			DdgiUtilities.GetRaySampleCount(requestedRayCount, tileInteriorSize),
 			Is.EqualTo(expectedRayCount));
+	}
+
+	[TestCase(1, 1)]
+	[TestCase(64, 64)]
+	[TestCase(256, 320)]
+	public void DdgiProbeTraceInvocationCountMergesOnlyIdenticalRaySets(
+		int requestedRayCount,
+		int expectedInvocationCount)
+	{
+		Assert.That(
+			DdgiUtilities.GetProbeTraceInvocationCount(requestedRayCount),
+			Is.EqualTo(expectedInvocationCount));
+	}
+
+	[Test]
+	public void DdgiRelocationTraceRequiresEnabledDdgiAndRelocation()
+	{
+		var config = new RenderConfig
+		{
+			DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+			{
+				Enabled = true,
+				Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+				ProbeRelocationEnabled = false
+			}
+		};
+
+		Assert.That(DdgiUtilities.IsRelocationTraceEnabled(config), Is.False);
+		config.DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+		{
+			Enabled = true,
+			Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+			ProbeRelocationEnabled = true
+		};
+		Assert.That(DdgiUtilities.IsRelocationTraceEnabled(config), Is.True);
+		config.DiffuseGlobalIllumination = new DiffuseGlobalIlluminationConfig
+		{
+			Enabled = false,
+			Mode = DiffuseGlobalIlluminationMode.RayTracedDdgi,
+			ProbeRelocationEnabled = true
+		};
+		Assert.That(DdgiUtilities.IsRelocationTraceEnabled(config), Is.False);
 	}
 
 	[Test]

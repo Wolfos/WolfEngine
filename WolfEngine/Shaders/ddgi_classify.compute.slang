@@ -37,6 +37,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
+    if (historyValid != 0u &&
+        DdgiProbeHasHistory(probeIndex) &&
+        !DdgiIsProbeScheduled(probeIndex))
+    {
+        return;
+    }
+
     float3 probePosition = DdgiProbePosition(probeIndex);
     float influenceHalfExtent = max(probeSpacing, 0.001f) + max(viewBias, 0.0f);
     bool enabled = false;
