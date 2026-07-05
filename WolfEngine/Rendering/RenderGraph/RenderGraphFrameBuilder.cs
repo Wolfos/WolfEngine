@@ -49,7 +49,6 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle DdgiVisibilityHistoryWrite { get; init; }
 	public RenderGraphResourceHandle DdgiProbeStateRead { get; init; }
 	public RenderGraphResourceHandle DdgiProbeStateWrite { get; init; }
-	public RenderGraphResourceHandle DdgiProbeStateScratch { get; init; }
 	public RenderGraphResourceHandle DdgiProbeActivity { get; init; }
 	public Vector3 DdgiRuntimeOrigin { get; init; }
 	public Int3 DdgiStorageOffset { get; init; }
@@ -374,7 +373,6 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiVisibilityWriteHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeStateReadHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeStateWriteHandle = default(RenderGraphResourceHandle);
-		var ddgiProbeStateScratchHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeActivityHandle = default(RenderGraphResourceHandle);
 		var ddgiRuntimeOrigin = config.DiffuseGlobalIllumination.Origin;
 		var ddgiStorageOffset = default(Int3);
@@ -676,12 +674,6 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiProbeStateWrite,
 						takeOwnership: false,
 						initialState: _ddgiProbeStateStates[ddgiWriteIndex]);
-					ddgiProbeStateScratchHandle = _resources.CreateTransientTexture(new TextureDescriptor(
-						ddgiGridShape.AtlasColumns,
-						ddgiGridShape.AtlasRows,
-						TextureFormat.Rgba16Float,
-						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-						new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 					ddgiProbeActivityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 						ddgiGridShape.AtlasColumns,
 						ddgiGridShape.AtlasRows,
@@ -775,7 +767,6 @@ internal sealed class RenderGraphFrameBuilder
 			DdgiVisibilityHistoryWrite = ddgiVisibilityWriteHandle,
 			DdgiProbeStateRead = ddgiProbeStateReadHandle,
 			DdgiProbeStateWrite = ddgiProbeStateWriteHandle,
-			DdgiProbeStateScratch = ddgiProbeStateScratchHandle,
 			DdgiProbeActivity = ddgiProbeActivityHandle,
 			DdgiRuntimeOrigin = ddgiRuntimeOrigin,
 			DdgiStorageOffset = ddgiStorageOffset,
@@ -995,53 +986,25 @@ internal sealed class RenderGraphFrameBuilder
 				    _frameResources.DdgiVisibilityHistoryWrite.IsValid &&
 				    _frameResources.DdgiProbeStateRead.IsValid &&
 				    _frameResources.DdgiProbeStateWrite.IsValid &&
-				    _frameResources.DdgiProbeStateScratch.IsValid &&
 				    _frameResources.DdgiProbeActivity.IsValid)
 			{
 				graph.AddPass("DDGI Probe Classify", PassKind.Compute)
 					.WriteTexture(_frameResources.DdgiProbeActivity, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiClassifyExecute);
 
-				for (var iteration = 0; iteration < DdgiUtilities.RelocationIterationCount; iteration++)
-				{
-					var relocationIteration = iteration;
-					var sourceState = DdgiUtilities.GetRelocationSourceStateTexture(iteration) switch
-					{
-						DdgiRelocationStateTexture.History => _frameResources.DdgiProbeStateRead,
-						DdgiRelocationStateTexture.Scratch => _frameResources.DdgiProbeStateScratch,
-						DdgiRelocationStateTexture.Current => _frameResources.DdgiProbeStateWrite,
-						_ => throw new InvalidOperationException()
-					};
-					var destinationState =
-						DdgiUtilities.GetRelocationDestinationStateTexture(iteration) ==
-						DdgiRelocationStateTexture.Scratch
-							? _frameResources.DdgiProbeStateScratch
-							: _frameResources.DdgiProbeStateWrite;
+				graph.AddPass("DDGI Relocation Trace", PassKind.Compute)
+					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess)
+					.SetExecute(context => ExecuteDdgiRelocationTrace(context, 0));
 
-					var relocationTraceBuilder = graph.AddPass($"DDGI Relocation Trace {iteration + 1}", PassKind.Compute)
-						.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
-						.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
-						.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
-					if (iteration != 0)
-					{
-						relocationTraceBuilder.ReadTexture(sourceState, ResourceState.ShaderResource);
-					}
-					relocationTraceBuilder.SetExecute(
-						context => ExecuteDdgiRelocationTrace(context, relocationIteration));
-
-					var relocationSolveBuilder = graph.AddPass($"DDGI Relocation Solve {iteration + 1}", PassKind.Compute)
-						.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
-						.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
-						.ReadTexture(_frameResources.DdgiTraceVisibility, ResourceState.ShaderResource)
-						.WriteTexture(destinationState, ResourceState.UnorderedAccess)
-						.WriteTexture(_frameResources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess);
-					if (iteration != 0)
-					{
-						relocationSolveBuilder.ReadTexture(sourceState, ResourceState.ShaderResource);
-					}
-					relocationSolveBuilder.SetExecute(
-						context => ExecuteDdgiRelocate(context, relocationIteration));
-				}
+				graph.AddPass("DDGI Relocation Solve", PassKind.Compute)
+					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiProbeStateRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.DdgiTraceVisibility, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.DdgiProbeStateWrite, ResourceState.UnorderedAccess)
+					.WriteTexture(_frameResources.DdgiProbeRelocationDecision, ResourceState.UnorderedAccess)
+					.SetExecute(context => ExecuteDdgiRelocate(context, 0));
 
 				var ddgiTraceBuilder = graph.AddPass("DDGI Probe Trace", PassKind.Compute)
 					.ReadTexture(_frameResources.DdgiProbeActivity, ResourceState.ShaderResource)

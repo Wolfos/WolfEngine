@@ -73,6 +73,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public bool DebugProbeSpheres { get; set; }
 	public float DebugProbeSphereRadius { get; set; } = 0.15f;
 	public bool DebugFirstProbeRelocationReadback { get; set; }
+	public int DebugProbeRelocationReadbackIndex { get; set; }
 }
 
 public enum AmbientOcclusionMode

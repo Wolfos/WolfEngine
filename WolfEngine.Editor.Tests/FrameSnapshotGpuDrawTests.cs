@@ -39,7 +39,8 @@ public sealed class FrameSnapshotGpuDrawTests
 					ProbeMinFrontfaceDistance = 0.3f,
 					ProbeBackfaceThreshold = 0.4f,
 					ProbeMaxRelocationDistanceFactor = 0.35f,
-					DebugFirstProbeRelocationReadback = true
+					DebugFirstProbeRelocationReadback = true,
+					DebugProbeRelocationReadbackIndex = 23
 			}
 		};
 
@@ -67,6 +68,7 @@ public sealed class FrameSnapshotGpuDrawTests
 			Assert.That(copied.ProbeBackfaceThreshold, Is.EqualTo(0.4f));
 			Assert.That(copied.ProbeMaxRelocationDistanceFactor, Is.EqualTo(0.35f));
 			Assert.That(copied.DebugFirstProbeRelocationReadback, Is.True);
+			Assert.That(copied.DebugProbeRelocationReadbackIndex, Is.EqualTo(23));
 	}
 
 	[Test]

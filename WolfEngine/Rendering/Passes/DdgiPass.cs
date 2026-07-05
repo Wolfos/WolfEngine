@@ -61,6 +61,10 @@ public sealed class DdgiPass
 	public DdgiFirstProbeRelocationDiagnostic? LastFirstProbeRelocationDiagnostic { get; private set; }
 	public IReadOnlyList<DdgiFirstProbeRelocationDiagnostic> LastFirstProbeRelocationDiagnostics { get; private set; } =
 		Array.Empty<DdgiFirstProbeRelocationDiagnostic>();
+	public DdgiFirstProbeRelocationDiagnostic? LastProbeRelocationDiagnostic =>
+		LastFirstProbeRelocationDiagnostic;
+	public IReadOnlyList<DdgiFirstProbeRelocationDiagnostic> LastProbeRelocationDiagnostics =>
+		LastFirstProbeRelocationDiagnostics;
 
 	public DdgiPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
@@ -173,8 +177,6 @@ public sealed class DdgiPass
 			VisibilityHistoryWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiVisibilityHistoryWrite)),
 			ProbeStateReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateRead)),
 			ProbeStateCurrentHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateWrite)),
-			ProbeStateScratchReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateScratch)),
-			ProbeStateScratchWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateScratch)),
 			ProbeStateWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateWrite)),
 			ProbeActivityReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeActivity)),
 			ProbeActivityWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivity)),
@@ -216,6 +218,10 @@ public sealed class DdgiPass
 				RecursiveBounceEnergy = DdgiUtilities.GetRecursiveBounceEnergy(config),
 				ProbeRelocationEnabled = config.ProbeRelocationEnabled,
 				DebugFirstProbeRelocationReadback = config.DebugFirstProbeRelocationReadback,
+				DebugProbeRelocationReadbackIndex = Math.Clamp(
+					config.DebugProbeRelocationReadbackIndex,
+					0,
+					Math.Max(gridShape.ProbeCount - 1, 0)),
 				ProbeMinFrontfaceDistance = Math.Max(config.ProbeMinFrontfaceDistance, 0.0f),
 			ProbeBackfaceThreshold = Math.Clamp(config.ProbeBackfaceThreshold, 0.0f, 1.0f),
 			ProbeMaxRelocationDistance = DdgiUtilities.GetProbeMaxRelocationDistance(config),
@@ -265,7 +271,7 @@ public sealed class DdgiPass
 			_relocationTraceBindlessWriter,
 			commandList,
 			config,
-			GetRelocationSourceHandle(config, iteration));
+			config.ProbeStateReadHandle);
 		WriteSettingsConstants(_relocationTraceSettingsWriter, commandList, config, iteration);
 		BindTraceResources(commandList, config);
 		var threadGroupSize = _relocationTraceThreadGroupSize ??
@@ -322,8 +328,8 @@ public sealed class DdgiPass
 			_relocateBindlessWriter,
 			commandList,
 			config,
-			GetRelocationSourceHandle(config, iteration),
-			GetRelocationDestinationHandle(config, iteration));
+			config.ProbeStateReadHandle,
+			config.ProbeStateWriteHandle);
 		WriteSettingsConstants(_relocateSettingsWriter, commandList, config, iteration);
 		commandList.SetComputeBuffer(2, config.FirstProbeRelocationDiagnosticBuffer);
 		var threadGroupSize = _relocateThreadGroupSize ?? throw new InvalidOperationException("DDGI relocation threadgroup size was not initialized.");
@@ -340,27 +346,6 @@ public sealed class DdgiPass
 				(ulong)FirstProbeRelocationDiagnosticBufferSize);
 			_firstProbeRelocationReadbackPending = true;
 		}
-	}
-
-	private static DescriptorHandle GetRelocationSourceHandle(in DdgiPassConfig config, int iteration)
-	{
-		return DdgiUtilities.GetRelocationSourceStateTexture(iteration) switch
-		{
-			DdgiRelocationStateTexture.History => config.ProbeStateReadHandle,
-			DdgiRelocationStateTexture.Scratch => config.ProbeStateScratchReadHandle,
-			DdgiRelocationStateTexture.Current => config.ProbeStateCurrentHandle,
-			_ => throw new InvalidOperationException()
-		};
-	}
-
-	private static DescriptorHandle GetRelocationDestinationHandle(in DdgiPassConfig config, int iteration)
-	{
-		return DdgiUtilities.GetRelocationDestinationStateTexture(iteration) switch
-		{
-			DdgiRelocationStateTexture.Scratch => config.ProbeStateScratchWriteHandle,
-			DdgiRelocationStateTexture.Current => config.ProbeStateWriteHandle,
-			_ => throw new InvalidOperationException()
-		};
 	}
 
 	public void RecordBorderUpdate(RenderGraphContext context, in DdgiPassConfig config)
@@ -468,6 +453,9 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt(
 			"debugFirstProbeRelocationReadback",
 			config.DebugFirstProbeRelocationReadback ? 1u : 0u);
+		settingsWriter.SetUInt(
+			"debugProbeRelocationReadbackIndex",
+			(uint)config.DebugProbeRelocationReadbackIndex);
 		settingsWriter.SetUInt("relocationIteration", (uint)relocationIteration);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 	}
@@ -685,8 +673,7 @@ public enum DdgiProbeRelocationDecision : uint
 	None,
 	BackfaceEscape,
 	FrontfaceSeparation,
-	ReturnToLattice,
-	Blocked
+	ReturnToLattice
 }
 
 public readonly record struct DdgiFirstProbeRelocationDiagnostic(

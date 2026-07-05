@@ -14,14 +14,14 @@ public static class DdgiUtilities
 	public const int IrradianceEstimatorDirectionCount = IrradianceTileInteriorSize * IrradianceTileInteriorSize;
 	public const int IrradianceEstimatorStride = 16;
 	public const int RelocationRayCount = 16;
-	public const int RelocationIterationCount = 4;
+	public const int RelocationIterationCount = 1;
 	public const float DefaultRecursiveBounceEnergy = 0.5f;
 	private const float ShBasisL0 = 0.28209479177f;
 	private const float ShBasisL1 = 0.48860251190f;
 	private const float ShDirectionalLimit = 0.95f;
 	private const float VisibilityVarianceFloor = 0.000001f;
 	private const float MaxIrradianceMeanBlend = 0.02f;
-	private const float MaxProbeRelocationDistanceFactor = 1.0f;
+	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
 
 	public static bool IsRayTracedDdgiEnabled(RenderConfig config)
@@ -348,8 +348,7 @@ public static class DdgiUtilities
 		float keepDistance,
 		float maxRelocationDistance,
 		Vector3 previousOffset = default,
-		float backfaceThreshold = 0.25f,
-		float rayOriginBias = 0.0f)
+		float backfaceThreshold = 0.25f)
 	{
 		return SolveProbeRelocation(
 			hits,
@@ -357,8 +356,7 @@ public static class DdgiUtilities
 			maxRelocationDistance,
 			maxRelocationDistance + Math.Max(keepDistance, 0.0f),
 			previousOffset: previousOffset,
-			backfaceThreshold: backfaceThreshold,
-			rayOriginBias: rayOriginBias).Offset;
+			backfaceThreshold: backfaceThreshold).Offset;
 	}
 
 	public static DdgiRelocationResult SolveProbeRelocation(
@@ -367,9 +365,7 @@ public static class DdgiUtilities
 		float maxRelocationDistance,
 		float maxRayDistance,
 		Vector3 previousOffset = default,
-		DdgiProbeState previousState = DdgiProbeState.Stable,
-		float backfaceThreshold = 0.25f,
-		float rayOriginBias = 0.0f)
+		float backfaceThreshold = 0.25f)
 	{
 		keepDistance = Math.Max(keepDistance, 0.0f);
 		maxRayDistance = Math.Max(maxRayDistance, 0.001f);
@@ -383,17 +379,16 @@ public static class DdgiUtilities
 		var closestBackfaceDirection = Vector3.Zero;
 		var closestFrontfaceDistance = maxRayDistance;
 		var closestFrontfaceDirection = Vector3.Zero;
+		var farthestFrontfaceDistance = 0.0f;
+		var farthestFrontfaceDirection = Vector3.Zero;
 		for (var index = 0; index < hits.Length; index++)
 		{
 			var hit = hits[index];
-			if (hit.Valid == false)
-			{
-				continue;
-			}
-
 			var direction = NormalizeRelocationDirection(hit.Direction);
-			var distance = Math.Clamp(hit.Distance, 0.0f, maxRayDistance);
-			if (hit.Backface)
+			var distance = hit.Valid
+				? Math.Clamp(hit.Distance, 0.0f, maxRayDistance)
+				: maxRayDistance;
+			if (hit.Valid && hit.Backface)
 			{
 				backfaceCount++;
 				if (distance < closestBackfaceDistance)
@@ -402,86 +397,63 @@ public static class DdgiUtilities
 					closestBackfaceDirection = direction;
 				}
 			}
-			else if (distance < closestFrontfaceDistance)
+			else
 			{
-				closestFrontfaceDistance = distance;
-				closestFrontfaceDirection = direction;
+				if (distance < closestFrontfaceDistance)
+				{
+					closestFrontfaceDistance = distance;
+					closestFrontfaceDirection = direction;
+				}
+				if (distance > farthestFrontfaceDistance)
+				{
+					farthestFrontfaceDistance = distance;
+					farthestFrontfaceDirection = direction;
+				}
 			}
 		}
 
 		var target = previousOffset;
 		var decision = DdgiProbeRelocationDecision.None;
-		var correctionRequired = false;
+		var hasCandidate = false;
 		var inside = backfaceCount / (float)Math.Max(hits.Length, 1) >
 			Math.Clamp(backfaceThreshold, 0.0f, 1.0f);
 		if (inside)
 		{
 			target += closestBackfaceDirection *
-				(closestBackfaceDistance + Math.Max(rayOriginBias, 0.001f) + keepDistance);
+				(closestBackfaceDistance + keepDistance * 0.5f);
 			decision = DdgiProbeRelocationDecision.BackfaceEscape;
-			correctionRequired = true;
+			hasCandidate = true;
 		}
 		else if (closestFrontfaceDistance + relocationTolerance < keepDistance)
 		{
-			var openDistance = -1.0f;
-			var openDirection = Vector3.Zero;
-			for (var index = 0; index < hits.Length; index++)
+			if (Vector3.Dot(closestFrontfaceDirection, farthestFrontfaceDirection) <= 0.0f)
 			{
-				var hit = hits[index];
-				var direction = NormalizeRelocationDirection(hit.Direction);
-				var distance = hit.Valid
-					? Math.Clamp(hit.Distance, 0.0f, maxRayDistance)
-					: maxRayDistance;
-				if (Vector3.Dot(direction, closestFrontfaceDirection) <= 0.0f &&
-				    distance > openDistance)
-				{
-					openDistance = distance;
-					openDirection = direction;
-				}
-			}
-
-			var requiredSeparation = keepDistance - closestFrontfaceDistance;
-			var availableClearance = Math.Max(openDistance - keepDistance, 0.0f);
-			var movement = Math.Min(requiredSeparation, availableClearance);
-			if (movement > relocationTolerance)
-			{
-				target += openDirection * movement;
+				target += farthestFrontfaceDirection * Math.Min(farthestFrontfaceDistance, 1.0f);
 				decision = DdgiProbeRelocationDecision.FrontfaceSeparation;
+				hasCandidate = true;
 			}
-			else
-			{
-				decision = DdgiProbeRelocationDecision.Blocked;
-			}
-			correctionRequired = true;
 		}
-		target = ClampProbeRelocationOffset(target, maxRelocationDistance);
-		var progress = Vector3.Distance(target, previousOffset);
-		var state = correctionRequired
-			? progress > relocationTolerance
-				? DdgiProbeState.Relocating
-				: DdgiProbeState.Blocked
-			: DdgiProbeState.Stable;
-		return new DdgiRelocationResult(target, state, decision, backfaceCount);
-	}
-
-	public static DdgiRelocationResult FinalizeProbeRelocationIteration(
-		DdgiRelocationResult result,
-		Vector3 frameStartOffset,
-		float maxRelocationDistance,
-		int iteration)
-	{
-		if (iteration != RelocationIterationCount - 1 ||
-		    result.State != DdgiProbeState.Relocating)
+		else if (closestFrontfaceDistance > keepDistance &&
+		         previousOffset.LengthSquared() > relocationTolerance * relocationTolerance)
 		{
-			return result;
+			var moveBackMargin = Math.Min(
+				closestFrontfaceDistance - keepDistance,
+				previousOffset.Length());
+			target += Vector3.Normalize(-previousOffset) * moveBackMargin;
+			decision = DdgiProbeRelocationDecision.ReturnToLattice;
+			hasCandidate = true;
 		}
 
-		return result with
+		var acceptanceRadius = Math.Max(maxRelocationDistance, 0.0f);
+		if (!hasCandidate || target.LengthSquared() >= acceptanceRadius * acceptanceRadius)
 		{
-			Offset = ClampProbeRelocationOffset(frameStartOffset, maxRelocationDistance),
-			State = DdgiProbeState.Blocked,
-			Decision = DdgiProbeRelocationDecision.Blocked
-		};
+			target = previousOffset;
+		}
+		return new DdgiRelocationResult(
+			target,
+			DdgiProbeState.Stable,
+			decision,
+			backfaceCount);
 	}
 
 	public static Vector3 GetRelocationRayDirection(int rayIndex)
@@ -495,8 +467,6 @@ public static class DdgiUtilities
 	}
 
 	public static bool IsProbeRelocationUpdateActive(
-		DdgiProbeState state,
-		int iteration,
 		bool enabled,
 		bool hasHistory,
 		bool scheduled)
@@ -506,41 +476,13 @@ public static class DdgiUtilities
 			return false;
 		}
 
-		if (iteration > 0)
-		{
-			return state == DdgiProbeState.Relocating;
-		}
-
 		return hasHistory == false ||
-		       state == DdgiProbeState.Disabled ||
-		       state == DdgiProbeState.Relocating ||
 		       scheduled;
 	}
 
 	public static bool CanProbeContribute(DdgiProbeState state, bool enabled)
 	{
 		return enabled && state == DdgiProbeState.Stable;
-	}
-
-	public static DdgiRelocationStateTexture GetRelocationSourceStateTexture(int iteration)
-	{
-		return iteration switch
-		{
-			0 => DdgiRelocationStateTexture.History,
-			1 or 3 => DdgiRelocationStateTexture.Scratch,
-			2 => DdgiRelocationStateTexture.Current,
-			_ => throw new ArgumentOutOfRangeException(nameof(iteration))
-		};
-	}
-
-	public static DdgiRelocationStateTexture GetRelocationDestinationStateTexture(int iteration)
-	{
-		return iteration switch
-		{
-			0 or 2 => DdgiRelocationStateTexture.Scratch,
-			1 or 3 => DdgiRelocationStateTexture.Current,
-			_ => throw new ArgumentOutOfRangeException(nameof(iteration))
-		};
 	}
 
 	private static Vector3 NormalizeRelocationDirection(Vector3 direction)
@@ -788,16 +730,7 @@ public readonly record struct DdgiRelocationHit(
 public enum DdgiProbeState : uint
 {
 	Disabled,
-	Stable,
-	Relocating,
-	Blocked
-}
-
-public enum DdgiRelocationStateTexture
-{
-	History,
-	Scratch,
-	Current
+	Stable
 }
 
 public readonly record struct DdgiRelocationResult(

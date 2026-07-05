@@ -50,20 +50,31 @@ int DdgiDebugPositiveModulo(int value, int modulus)
     return remainder < 0 ? remainder + modulus : remainder;
 }
 
-float3 DdgiDebugProbeOffset(GpuInstanceData instanceData)
+bool DdgiIsDebugProbe(GpuInstanceData instanceData)
 {
-    if (ddgiProbeStateAvailable == 0u ||
-        ddgiProbeRelocationEnabled == 0u ||
-        instanceData.terrainChunkOriginSize.y < 0.5f)
+    return instanceData.terrainChunkOriginSize.y >= 0.5f;
+}
+
+float4 DdgiDebugProbeState(GpuInstanceData instanceData)
+{
+    if (!DdgiIsDebugProbe(instanceData))
     {
-        return 0.0f.xxx;
+        return float4(0.0f.xxx, 0.0f);
+    }
+    if (ddgiProbeStateAvailable == 0u)
+    {
+        return float4(0.0f.xxx, 0.0f);
+    }
+    if (ddgiProbeRelocationEnabled == 0u)
+    {
+        return float4(0.0f.xxx, 1.0f);
     }
 
     uint probeIndex = uint(round(max(instanceData.terrainChunkOriginSize.x, 0.0f)));
     uint probeCount = ddgiProbeCountX * ddgiProbeCountY * ddgiProbeCountZ;
     if (probeIndex >= probeCount)
     {
-        return 0.0f.xxx;
+        return float4(0.0f.xxx, 0.0f);
     }
 
     uint x = probeIndex % ddgiProbeCountX;
@@ -80,7 +91,7 @@ float3 DdgiDebugProbeOffset(GpuInstanceData instanceData)
         physicalProbeIndex % max(ddgiAtlasColumns, 1u),
         physicalProbeIndex / max(ddgiAtlasColumns, 1u));
     Texture2D<float4> stateTexture = GetTexture(ddgiProbeStateHandle);
-    return stateTexture.Load(int3(statePixel, 0)).xyz;
+    return stateTexture.Load(int3(statePixel, 0));
 }
 
 struct VSInput
@@ -96,6 +107,8 @@ struct VSOutput
 {
     float4 position : SV_Position;
     uint instanceId : TEXCOORD0;
+    uint ddgiProbeState : TEXCOORD1;
+    uint isDdgiProbe : TEXCOORD2;
 };
 
 VSOutput vertexShader(VSInput input)
@@ -106,17 +119,22 @@ VSOutput vertexShader(VSInput input)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
         output.instanceId = 0u;
+        output.ddgiProbeState = 0u;
+        output.isDdgiProbe = 0u;
         return output;
     }
 
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
+    float4 ddgiProbeState = DdgiDebugProbeState(instanceData);
     float4 worldPosition = mul(input.position, instanceData.world);
-    worldPosition.xyz += DdgiDebugProbeOffset(instanceData);
+    worldPosition.xyz += ddgiProbeState.xyz;
     worldPosition.xyz -= cameraPosition;
 
     output.position = mul(worldPosition, viewProjection);
     output.instanceId = instanceId;
+    output.ddgiProbeState = uint(round(max(ddgiProbeState.w, 0.0f)));
+    output.isDdgiProbe = DdgiIsDebugProbe(instanceData) ? 1u : 0u;
     return output;
 }
 
@@ -141,5 +159,16 @@ float4 fragmentShader(VSOutput input) : SV_Target0
         }
     }
 
-    return g_MaterialTable[materialIndex].baseColor;
+    float4 baseColor = g_MaterialTable[materialIndex].baseColor;
+    if (input.isDdgiProbe == 0u)
+    {
+        return baseColor;
+    }
+
+    float3 stateColor =
+        input.ddgiProbeState == 1u ? float3(0.15f, 1.0f, 0.25f) :
+        input.ddgiProbeState == 2u ? float3(1.0f, 0.75f, 0.1f) :
+        input.ddgiProbeState == 3u ? float3(1.0f, 0.1f, 0.1f) :
+        float3(0.35f, 0.35f, 0.35f);
+    return float4(baseColor.rgb * stateColor, baseColor.a);
 }

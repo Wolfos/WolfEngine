@@ -88,14 +88,13 @@ cbuffer DdgiSettings : register(b1)
     uint sidecarHitShadingAvailable;
     uint activeDrawCommandUpperBound;
     uint debugFirstProbeRelocationReadback;
+    uint debugProbeRelocationReadbackIndex;
     uint relocationIteration;
-    uint2 probeSettingsPad2;
+    uint probeSettingsPad2;
 };
 
 static const uint DDGI_PROBE_STATE_DISABLED = 0u;
 static const uint DDGI_PROBE_STATE_STABLE = 1u;
-static const uint DDGI_PROBE_STATE_RELOCATING = 2u;
-static const uint DDGI_PROBE_STATE_BLOCKED = 3u;
 static const uint DDGI_RELOCATION_RAY_COUNT = 16u;
 static const uint DDGI_RELOCATION_ITERATION_COUNT = 4u;
 
@@ -278,22 +277,15 @@ bool DdgiIsProbeUpdateActive(uint probeIndex)
         DdgiIsProbeScheduled(probeIndex);
 }
 
-bool DdgiIsProbeRelocationActive(uint probeIndex, float4 sourceState)
+bool DdgiIsProbeRelocationActive(uint probeIndex)
 {
     if (probeRelocationEnabled == 0u || !DdgiIsProbeEnabled(probeIndex))
     {
         return false;
     }
 
-    uint sourceStatus = DdgiDecodeProbeState(sourceState.w);
-    if (relocationIteration > 0u)
-    {
-        return sourceStatus == DDGI_PROBE_STATE_RELOCATING;
-    }
-
     return historyValid == 0u ||
         !DdgiProbeHasHistory(probeIndex) ||
-        sourceStatus == DDGI_PROBE_STATE_RELOCATING ||
         !DdgiWasProbeEnabled(probeIndex) ||
         DdgiIsProbeScheduled(probeIndex);
 }

@@ -30,8 +30,6 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle VisibilityHistoryWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateReadHandle { get; init; }
 	public required DescriptorHandle ProbeStateCurrentHandle { get; init; }
-	public required DescriptorHandle ProbeStateScratchReadHandle { get; init; }
-	public required DescriptorHandle ProbeStateScratchWriteHandle { get; init; }
 	public required DescriptorHandle ProbeStateWriteHandle { get; init; }
 	public required DescriptorHandle ProbeActivityReadHandle { get; init; }
 	public required DescriptorHandle ProbeActivityWriteHandle { get; init; }
@@ -71,6 +69,7 @@ public readonly struct DdgiPassConfig
 	public required float RecursiveBounceEnergy { get; init; }
 	public required bool ProbeRelocationEnabled { get; init; }
 	public required bool DebugFirstProbeRelocationReadback { get; init; }
+	public required int DebugProbeRelocationReadbackIndex { get; init; }
 	public required float ProbeMinFrontfaceDistance { get; init; }
 	public required float ProbeBackfaceThreshold { get; init; }
 	public required float ProbeMaxRelocationDistance { get; init; }

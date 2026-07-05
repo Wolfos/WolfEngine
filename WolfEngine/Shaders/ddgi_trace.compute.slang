@@ -636,7 +636,9 @@ DdgiTraceResult DdgiTraceRay(
 DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
 {
     RayDesc ray;
-    ray.Origin = originPosition + rayDirection * normalBias;
+    // Relocation distances are measured from the probe center. Applying the
+    // surface ray bias here can move the origin across nearby thin geometry.
+    ray.Origin = originPosition;
     ray.Direction = rayDirection;
     ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
@@ -756,12 +758,9 @@ void CSRelocation(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint rayIndex = DdgiRaySampleIndex(info.interiorPixel, visibilityTileInteriorSize);
-    bool sourceAvailable = relocationIteration > 0u || DdgiProbeHasHistory(info.probeIndex);
-    float4 sourceState = sourceAvailable
-        ? DdgiLoadProbeState(probeRelocationStateReadHandle, info.probeIndex)
-        : float4(0.0f.xxx, float(DDGI_PROBE_STATE_DISABLED));
+    bool sourceAvailable = DdgiProbeHasHistory(info.probeIndex);
     if (rayIndex >= DDGI_RELOCATION_RAY_COUNT ||
-        !DdgiIsProbeRelocationActive(info.probeIndex, sourceState))
+        !DdgiIsProbeRelocationActive(info.probeIndex))
     {
         target[pixel] = 0.0f.xxxx;
         return;

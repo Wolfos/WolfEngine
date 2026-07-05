@@ -40,7 +40,8 @@ void DdgiWriteRelocationDiagnostic(
     uint resultStatus,
     bool enabled)
 {
-    if (debugFirstProbeRelocationReadback == 0u || probeIndex != 0u)
+    if (debugFirstProbeRelocationReadback == 0u ||
+        probeIndex != debugProbeRelocationReadbackIndex)
     {
         return;
     }
@@ -87,16 +88,16 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
-    bool sourceAvailable = relocationIteration > 0u || DdgiProbeHasHistory(probeIndex);
+    bool sourceAvailable = DdgiProbeHasHistory(probeIndex);
     float4 sourceState = sourceAvailable
         ? DdgiLoadProbeState(probeRelocationStateReadHandle, probeIndex)
-        : float4(0.0f.xxx, float(DDGI_PROBE_STATE_DISABLED));
+        : float4(0.0f.xxx, float(DDGI_PROBE_STATE_STABLE));
     float3 previousOffset = probeRelocationEnabled != 0u
         ? DdgiClampProbeOffsetRadial(sourceState.xyz)
         : 0.0f.xxx;
     uint sourceStatus = sourceAvailable
         ? DdgiDecodeProbeState(sourceState.w)
-        : DDGI_PROBE_STATE_DISABLED;
+        : DDGI_PROBE_STATE_STABLE;
     bool enabled = DdgiIsProbeEnabled(probeIndex);
 
     if (!enabled)
@@ -121,7 +122,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    if (!DdgiIsProbeRelocationActive(probeIndex, sourceState))
+    if (!DdgiIsProbeRelocationActive(probeIndex))
     {
         stateWriteTex[statePixel] = float4(previousOffset, float(sourceStatus));
         decisionWriteTex[statePixel] = float4(0.0f, 0.0f, 1.0f, 1.0f);
@@ -133,12 +134,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     Texture2D<float4> traceVisibilityTex = GetTexture(traceVisibilityReadHandle);
-    float distances[DDGI_RELOCATION_RAY_COUNT];
     uint backfaceHitCount = 0u;
     float closestBackfaceDistance = maxRayDistance;
     float3 closestBackfaceDirection = 0.0f.xxx;
     float closestFrontfaceDistance = maxRayDistance;
     float3 closestFrontfaceDirection = 0.0f.xxx;
+    float farthestFrontfaceDistance = 0.0f;
+    float3 farthestFrontfaceDirection = 0.0f.xxx;
 
     [unroll]
     for (uint rayIndex = 0u; rayIndex < DDGI_RELOCATION_RAY_COUNT; rayIndex++)
@@ -149,8 +151,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         bool backface = hit && sampleValue.w >= 0.5f;
         float distance = hit ? max(sampleValue.x, 0.0f) : maxRayDistance;
         float3 direction = DdgiRelocationRayDirection(rayIndex);
-        distances[rayIndex] = distance;
-
         if (backface)
         {
             backfaceHitCount++;
@@ -160,10 +160,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 closestBackfaceDirection = direction;
             }
         }
-        else if (hit && distance < closestFrontfaceDistance)
+        else
         {
-            closestFrontfaceDistance = distance;
-            closestFrontfaceDirection = direction;
+            if (distance < closestFrontfaceDistance)
+            {
+                closestFrontfaceDistance = distance;
+                closestFrontfaceDirection = direction;
+            }
+            if (distance > farthestFrontfaceDistance)
+            {
+                farthestFrontfaceDistance = distance;
+                farthestFrontfaceDirection = direction;
+            }
         }
     }
 
@@ -174,77 +182,50 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         saturate(probeBackfaceThreshold);
     float3 targetOffset = previousOffset;
     uint decision = 0u;
-    bool correctionRequired = false;
+    bool hasCandidate = false;
 
     if (insideGeometry)
     {
         targetOffset += closestBackfaceDirection *
-            (closestBackfaceDistance + max(normalBias, 0.001f) + keepDistance);
+            (closestBackfaceDistance + keepDistance * 0.5f);
         decision = 1u;
-        correctionRequired = true;
+        hasCandidate = true;
     }
     else if (closestFrontfaceDistance + relocationTolerance < keepDistance)
     {
-        float openDistance = -1.0f;
-        float3 openDirection = 0.0f.xxx;
-        [unroll]
-        for (uint rayIndex = 0u; rayIndex < DDGI_RELOCATION_RAY_COUNT; rayIndex++)
+        if (dot(closestFrontfaceDirection, farthestFrontfaceDirection) <= 0.0f)
         {
-            float3 direction = DdgiRelocationRayDirection(rayIndex);
-            if (dot(direction, closestFrontfaceDirection) <= 0.0f &&
-                distances[rayIndex] > openDistance)
-            {
-                openDistance = distances[rayIndex];
-                openDirection = direction;
-            }
-        }
-
-        float requiredSeparation = keepDistance - closestFrontfaceDistance;
-        float availableClearance = max(openDistance - keepDistance, 0.0f);
-        float movement = min(requiredSeparation, availableClearance);
-        if (movement > relocationTolerance)
-        {
-            targetOffset += openDirection * movement;
+            targetOffset += farthestFrontfaceDirection *
+                min(farthestFrontfaceDistance, 1.0f);
             decision = 2u;
+            hasCandidate = true;
         }
-        else
-        {
-            decision = 4u;
-        }
-        correctionRequired = true;
     }
-    targetOffset = DdgiClampProbeOffsetRadial(targetOffset);
-    float progress = length(targetOffset - previousOffset);
-    uint resultStatus;
-    if (correctionRequired)
+    else if (closestFrontfaceDistance > keepDistance &&
+        dot(previousOffset, previousOffset) > relocationTolerance * relocationTolerance)
     {
-        resultStatus = progress > relocationTolerance
-            ? DDGI_PROBE_STATE_RELOCATING
-            : DDGI_PROBE_STATE_BLOCKED;
-    }
-    else
-    {
-        resultStatus = DDGI_PROBE_STATE_STABLE;
+        float moveBackMargin = min(
+            closestFrontfaceDistance - keepDistance,
+            length(previousOffset));
+        targetOffset += normalize(-previousOffset) * moveBackMargin;
+        decision = 3u;
+        hasCandidate = true;
     }
 
-    if (relocationIteration == DDGI_RELOCATION_ITERATION_COUNT - 1u &&
-        resultStatus == DDGI_PROBE_STATE_RELOCATING)
+    float acceptanceRadius = min(
+        max(probeMaxRelocationDistance, 0.0f),
+        max(probeSpacing, 0.001f) * 0.45f);
+    if (!hasCandidate ||
+        dot(targetOffset, targetOffset) >= acceptanceRadius * acceptanceRadius)
     {
-        float3 frameStartOffset = DdgiProbeHasHistory(probeIndex)
-            ? DdgiClampProbeOffsetRadial(
-                DdgiLoadProbeState(probeStateReadHandle, probeIndex).xyz)
-            : 0.0f.xxx;
-        targetOffset = frameStartOffset;
-        resultStatus = DDGI_PROBE_STATE_BLOCKED;
-        decision = 4u;
+        targetOffset = previousOffset;
     }
-
+    uint resultStatus = DDGI_PROBE_STATE_STABLE;
     stateWriteTex[statePixel] = float4(targetOffset, float(resultStatus));
     float3 decisionColor =
         decision == 1u ? float3(1.0f, 0.0f, 0.0f) :
         decision == 2u ? float3(0.0f, 1.0f, 0.0f) :
         decision == 3u ? float3(0.0f, 0.5f, 1.0f) :
-        decision == 4u ? float3(1.0f, 0.5f, 0.0f) :
         float3(0.0f, 0.0f, 1.0f);
     decisionWriteTex[statePixel] = float4(decisionColor, 1.0f);
     DdgiWriteRelocationDiagnostic(
