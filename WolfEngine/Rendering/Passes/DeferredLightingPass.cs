@@ -177,6 +177,8 @@ public sealed class DeferredLightingPass
 			DdgiProbeRelocationDecisionDebug = ddgiProbeRelocationDecisionDebug is not null
 				? _bindlessRegistry.RegisterRwTexture(ddgiProbeRelocationDecisionDebug)
 				: DescriptorHandle.Invalid,
+			DdgiFinalContributionDebugEnabled = resources.WriteDdgiFinalContributionDebug,
+			DdgiProbeDebugEnabled = resources.WriteDdgiProbeDebug,
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
@@ -342,6 +344,8 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("aoEnabled", config.AoEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);
 		lightingWriter.SetVector3("ddgiOrigin", config.DdgiOrigin);
 		lightingWriter.SetFloat("ddgiProbeSpacing", config.DdgiProbeSpacing);
 		lightingWriter.SetInt("ddgiStorageOffsetX", config.DdgiStorageOffset.X);

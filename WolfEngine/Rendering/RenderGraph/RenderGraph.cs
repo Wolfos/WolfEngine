@@ -398,6 +398,7 @@ public sealed class RenderGraph
 				{
 					frameCameraPosition = snapshot.Config.DiffuseGlobalIllumination.Origin;
 				}
+				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.BeginFrame(
 					frameBufferSize,
 					sceneRenderSize,
@@ -408,7 +409,6 @@ public sealed class RenderGraph
 					snapshot.SunIntensityScale,
 					snapshot.Config,
 					frameCameraPosition);
-				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.SetUiFrame(uiFrame);
 
 				_frameBuilder.Build(this);

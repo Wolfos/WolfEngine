@@ -32,6 +32,8 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle DdgiDominantProbeCoordDebug { get; init; }
 	public required DescriptorHandle DdgiProbeRelocationDebug { get; init; }
 	public required DescriptorHandle DdgiProbeRelocationDecisionDebug { get; init; }
+	public required bool DdgiFinalContributionDebugEnabled { get; init; }
+	public required bool DdgiProbeDebugEnabled { get; init; }
 	public required DescriptorHandle ShadowMapDepth0 { get; init; }
 	public required DescriptorHandle ShadowMapDepth1 { get; init; }
 	public required DescriptorHandle ShadowMapDepth2 { get; init; }
