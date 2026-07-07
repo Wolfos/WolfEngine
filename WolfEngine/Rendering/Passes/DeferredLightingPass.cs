@@ -400,7 +400,7 @@ public sealed class DeferredLightingPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "DeferredLightingCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -426,7 +426,7 @@ public sealed class DeferredLightingPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"deferred_lighting.compute.slang",
-			"CSMain",
+			"DeferredLightingCS",
 			backendKind);
 
 		_computeShader = compiled.Bytecode;

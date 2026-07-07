@@ -567,12 +567,12 @@ public sealed class DdgiPass
 			throw new NotImplementedException("Ray traced DDGI is currently implemented for Metal only.");
 		}
 
-		var classify = _shaderCompiler.GetComputeShaderWithReflection("ddgi_classify.compute.slang", "CSMain", device.BackendKind);
-		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSMain", device.BackendKind);
-		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "CSRelocation", device.BackendKind);
-		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "CSMain", device.BackendKind);
-		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_irradiance_integrate.compute.slang", "CSMain", device.BackendKind);
-		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "CSMain", device.BackendKind);
+		var classify = _shaderCompiler.GetComputeShaderWithReflection("ddgi_classify.compute.slang", "DdgiProbeClassifyCS", device.BackendKind);
+		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "DdgiProbeTraceCS", device.BackendKind);
+		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "DdgiRelocationTraceCS", device.BackendKind);
+		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "DdgiRelocationSolveCS", device.BackendKind);
+		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_irradiance_integrate.compute.slang", "DdgiIrradianceIntegrateCS", device.BackendKind);
+		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "DdgiVisibilityIntegrateCS", device.BackendKind);
 		_classifyShader = classify.Bytecode;
 		_traceShader = trace.Bytecode;
 		_relocationTraceShader = relocationTrace.Bytecode;
@@ -597,17 +597,42 @@ public sealed class DdgiPass
 		_irradianceIntegrateSettingsWriter = new ShaderPropertyWriter(irradianceIntegrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_visibilityIntegrateBindlessWriter = new ShaderPropertyWriter(visibilityIntegrate.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_visibilityIntegrateSettingsWriter = new ShaderPropertyWriter(visibilityIntegrate.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
-		_classifyPipeline = CreatePipeline(device, "ddgi_classify.compute.slang", _classifyShader, _classifyThreadGroupSize);
-		_tracePipeline = CreatePipeline(device, "ddgi_trace.compute.slang", _traceShader, _traceThreadGroupSize);
+		_classifyPipeline = CreatePipeline(
+			device,
+			"ddgi_classify.compute.slang",
+			_classifyShader,
+			_classifyThreadGroupSize,
+			"DdgiProbeClassifyCS");
+		_tracePipeline = CreatePipeline(
+			device,
+			"ddgi_trace.compute.slang",
+			_traceShader,
+			_traceThreadGroupSize,
+			"DdgiProbeTraceCS");
 		_relocationTracePipeline = CreatePipeline(
 			device,
 			"ddgi_trace.compute.slang:relocation",
 			_relocationTraceShader,
 			_relocationTraceThreadGroupSize,
-			"CSRelocation");
-		_relocatePipeline = CreatePipeline(device, "ddgi_relocate.compute.slang", _relocateShader, _relocateThreadGroupSize);
-		_irradianceIntegratePipeline = CreatePipeline(device, "ddgi_irradiance_integrate.compute.slang", _irradianceIntegrateShader, _irradianceIntegrateThreadGroupSize);
-		_visibilityIntegratePipeline = CreatePipeline(device, "ddgi_integrate.compute.slang", _visibilityIntegrateShader, _visibilityIntegrateThreadGroupSize);
+			"DdgiRelocationTraceCS");
+		_relocatePipeline = CreatePipeline(
+			device,
+			"ddgi_relocate.compute.slang",
+			_relocateShader,
+			_relocateThreadGroupSize,
+			"DdgiRelocationSolveCS");
+		_irradianceIntegratePipeline = CreatePipeline(
+			device,
+			"ddgi_irradiance_integrate.compute.slang",
+			_irradianceIntegrateShader,
+			_irradianceIntegrateThreadGroupSize,
+			"DdgiIrradianceIntegrateCS");
+		_visibilityIntegratePipeline = CreatePipeline(
+			device,
+			"ddgi_integrate.compute.slang",
+			_visibilityIntegrateShader,
+			_visibilityIntegrateThreadGroupSize,
+			"DdgiVisibilityIntegrateCS");
 		_compiledBackendKind = device.BackendKind;
 	}
 
@@ -616,7 +641,7 @@ public sealed class DdgiPass
 		string shaderVariant,
 		ReadOnlyMemory<byte> shader,
 		ComputeThreadGroupSize? threadGroupSize,
-		string entryPoint = "CSMain")
+		string entryPoint)
 	{
 		var pipelineKey = new PipelineKey(
 			PassKind.Compute,

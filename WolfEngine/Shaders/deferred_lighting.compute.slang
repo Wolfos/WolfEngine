@@ -423,7 +423,7 @@ float3 ReconstructCameraRelativeWorldPosition(uint2 pixel, uint2 size, float dep
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint width, height;
     RWTexture2D<float4> lightingTarget = GetRWTexture(lightingTargetHandle);

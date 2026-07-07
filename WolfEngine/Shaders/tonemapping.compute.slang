@@ -26,7 +26,7 @@ float3 AcesFitted(float3 color)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void TonemappingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
     {

@@ -107,7 +107,7 @@ public sealed class GBufferDecalSeedPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "GBufferDecalSeedCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -132,7 +132,7 @@ public sealed class GBufferDecalSeedPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"gbuffer_decal_seed.compute.slang",
-			"CSMain",
+			"GBufferDecalSeedCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

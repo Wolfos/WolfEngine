@@ -89,7 +89,7 @@ float4 SampleCatmullRom(Texture2D<float4> texture, SamplerState samplerState, fl
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void TaaResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
     {

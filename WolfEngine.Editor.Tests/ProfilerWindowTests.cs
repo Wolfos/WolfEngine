@@ -174,7 +174,7 @@ public sealed class ProfilerWindowTests
 	public void GpuProfileNames_UseVariantThenStageEntries()
 	{
 		var variant = new PipelineKey(
-			PassKind.Compute, null, null, "CSMain", default, default, default,
+			PassKind.Compute, null, null, "ProfilerWindowTestCS", default, default, default,
 			shaderVariant: "clustered_lighting.compute.slang");
 		var compute = new PipelineKey(PassKind.Compute, null, null, "CSCull", default, default, default);
 		var graphics = new PipelineKey(PassKind.Graphics, "VSMain", "PSMain", null, default, default, default);

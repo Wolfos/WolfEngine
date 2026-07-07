@@ -89,7 +89,7 @@ public sealed class CopyToFinalPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "CopyToFinalCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -114,7 +114,7 @@ public sealed class CopyToFinalPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"copy_to_final.compute.slang",
-			"CSMain",
+			"CopyToFinalCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

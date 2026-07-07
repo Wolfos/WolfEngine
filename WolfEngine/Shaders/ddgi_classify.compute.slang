@@ -20,7 +20,7 @@ bool DdgiSphereIntersectsProbeInfluence(
 }
 
 [numthreads(64, 1, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void DdgiProbeClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint dispatchIndex = dispatchThreadId.x;
     RWTexture2D<float4> activityTex = GetRWTexture(probeActivityWriteHandle);

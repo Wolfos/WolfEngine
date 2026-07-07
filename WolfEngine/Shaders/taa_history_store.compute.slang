@@ -17,7 +17,7 @@ cbuffer CopySettings : register(b1)
 };
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void TaaHistoryStoreCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
     {

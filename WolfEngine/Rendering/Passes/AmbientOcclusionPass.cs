@@ -238,7 +238,7 @@ public sealed class AmbientOcclusionPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "AmbientOcclusionVisibilityBitmaskCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -273,7 +273,7 @@ public sealed class AmbientOcclusionPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "AmbientOcclusionRayTracedCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -299,7 +299,7 @@ public sealed class AmbientOcclusionPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"ao_vbao.compute.slang",
-			"CSMain",
+			"AmbientOcclusionVisibilityBitmaskCS",
 			backendKind);
 
 		_visibilityBitmaskComputeShader = compiled.Bytecode;
@@ -326,7 +326,7 @@ public sealed class AmbientOcclusionPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"ao_rtao.compute.slang",
-			"CSMain",
+			"AmbientOcclusionRayTracedCS",
 			backendKind);
 
 		_rayTracedComputeShader = compiled.Bytecode;

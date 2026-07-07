@@ -35,7 +35,7 @@ uint2 DdgiVisibilityBorderLocalPixel(uint borderIndex)
 }
 
 [numthreads(16, 16, 1)]
-void CSMain(
+void DdgiVisibilityIntegrateCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID,
     uint groupIndex : SV_GroupIndex)

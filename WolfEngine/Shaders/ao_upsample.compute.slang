@@ -60,7 +60,7 @@ float ReconstructViewDepth(float depth)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void AmbientOcclusionUpsampleCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 fullSize = uint2(fullResolutionX, fullResolutionY);
     if (dispatchThreadId.x >= fullSize.x || dispatchThreadId.y >= fullSize.y)

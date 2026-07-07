@@ -91,7 +91,7 @@ void WriteDebugOutputs(uint2 pixel, bool hit, float committedRayT)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void AmbientOcclusionRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
     uint2 outputSize = uint2(outputResolutionX, outputResolutionY);

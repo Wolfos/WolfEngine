@@ -136,7 +136,7 @@ void CopyHistory(uint probeIndex)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(
+void DdgiIrradianceIntegrateCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID,
     uint groupIndex : SV_GroupIndex)

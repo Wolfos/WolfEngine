@@ -68,7 +68,7 @@ float3 CasFilterNoScaling(Texture2D<float4> texture, int2 pixel, uint2 size, uin
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void CasSharpenCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
     {

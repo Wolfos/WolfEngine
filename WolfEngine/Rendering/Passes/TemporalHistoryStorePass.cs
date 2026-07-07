@@ -96,7 +96,7 @@ public sealed class TemporalHistoryStorePass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "TaaHistoryStoreCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -121,7 +121,7 @@ public sealed class TemporalHistoryStorePass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"taa_history_store.compute.slang",
-			"CSMain",
+			"TaaHistoryStoreCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

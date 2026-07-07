@@ -116,7 +116,7 @@ uint IntervalMask01(float2 interval01)
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void AmbientOcclusionVisibilityBitmaskCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 outputSize = uint2(outputResolutionX, outputResolutionY);
     if (dispatchThreadId.x >= outputSize.x || dispatchThreadId.y >= outputSize.y)

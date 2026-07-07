@@ -103,7 +103,7 @@ public sealed class TonemappingPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "TonemappingCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -128,7 +128,7 @@ public sealed class TonemappingPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"tonemapping.compute.slang",
-			"CSMain",
+			"TonemappingCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

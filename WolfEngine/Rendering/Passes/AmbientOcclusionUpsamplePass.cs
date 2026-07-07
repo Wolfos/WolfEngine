@@ -113,7 +113,7 @@ public sealed class AmbientOcclusionUpsamplePass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "AmbientOcclusionUpsampleCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -138,7 +138,7 @@ public sealed class AmbientOcclusionUpsamplePass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"ao_upsample.compute.slang",
-			"CSMain",
+			"AmbientOcclusionUpsampleCS",
 			backendKind);
 
 		_computeShader = compiled.Bytecode;

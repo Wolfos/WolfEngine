@@ -104,7 +104,7 @@ public sealed class CasSharpenPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "CasSharpenCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -129,7 +129,7 @@ public sealed class CasSharpenPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"cas_sharpen.compute.slang",
-			"CSMain",
+			"CasSharpenCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

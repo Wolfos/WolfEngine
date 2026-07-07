@@ -675,7 +675,7 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
 groupshared uint g_ProbeActive;
 
 [numthreads(16, 1, 1)]
-void CSRelocation(
+void DdgiRelocationTraceCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID,
     uint groupIndex : SV_GroupIndex)
@@ -715,7 +715,7 @@ void CSRelocation(
 }
 
 [numthreads(64, 1, 1)]
-void CSMain(
+void DdgiProbeTraceCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID,
     uint groupIndex : SV_GroupIndex)

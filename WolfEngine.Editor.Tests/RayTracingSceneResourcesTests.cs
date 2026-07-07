@@ -51,7 +51,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
 			"ao_rtao.compute.slang",
-			"CSMain",
+			"AmbientOcclusionRayTracedCS",
 			GraphicsBackendKind.Metal);
 
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
@@ -70,12 +70,48 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
 			"terrain_rt_vertex_update.compute.slang",
-			"CSMain",
+			"TerrainRayTracingVertexUpdateCS",
 			GraphicsBackendKind.Metal);
 
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(64));
 		Assert.That(compiled.ReflectionLayout.GetConstantBuffer("TerrainRtVertexUpdateParams"), Is.Not.Null);
+	}
+
+	[Test]
+	public void NamedComputeShadersCompileForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		foreach (var shader in new[]
+		{
+			(Name: "ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ao_vbao.compute.slang", EntryPoint: "AmbientOcclusionVisibilityBitmaskCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ao_blur.compute.slang", EntryPoint: "AmbientOcclusionBlurCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ao_upsample.compute.slang", EntryPoint: "AmbientOcclusionUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "cas_sharpen.compute.slang", EntryPoint: "CasSharpenCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "deferred_lighting.compute.slang", EntryPoint: "DeferredLightingCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "gbuffer_decal_seed.compute.slang", EntryPoint: "GBufferDecalSeedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "taa_history_store.compute.slang", EntryPoint: "TaaHistoryStoreCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "taa_resolve.compute.slang", EntryPoint: "TaaResolveCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "terrain_rt_vertex_update.compute.slang", EntryPoint: "TerrainRayTracingVertexUpdateCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "tonemapping.compute.slang", EntryPoint: "TonemappingCS", ThreadsX: 8u, ThreadsY: 8u)
+		})
+		{
+			var compiled = shaderCompiler.GetComputeShaderWithReflection(
+				shader.Name,
+				shader.EntryPoint,
+				GraphicsBackendKind.Metal);
+
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(shader.ThreadsX), shader.Name);
+			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(shader.ThreadsY), shader.Name);
+		}
 	}
 
 	[Test]
@@ -89,12 +125,12 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "ddgi_classify.compute.slang", EntryPoint: "CSMain", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSMain", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSRelocation", ThreadsX: 16u, ThreadsY: 1u),
-			(Name: "ddgi_relocate.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ddgi_integrate.compute.slang", EntryPoint: "CSMain", ThreadsX: 16u, ThreadsY: 16u)
+			(Name: "ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS", ThreadsX: 16u, ThreadsY: 1u),
+			(Name: "ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS", ThreadsX: 16u, ThreadsY: 16u)
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -228,7 +264,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
 			"deferred_lighting.compute.slang",
-			"CSMain",
+			"DeferredLightingCS",
 			GraphicsBackendKind.Metal);
 
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);

@@ -121,7 +121,7 @@ public sealed class AmbientOcclusionBlurPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "AmbientOcclusionBlurCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -146,7 +146,7 @@ public sealed class AmbientOcclusionBlurPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"ao_blur.compute.slang",
-			"CSMain",
+			"AmbientOcclusionBlurCS",
 			backendKind);
 
 		_computeShader = compiled.Bytecode;

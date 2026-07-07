@@ -69,7 +69,7 @@ void DdgiWriteRelocationDiagnostic(
 }
 
 [numthreads(8, 8, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void DdgiRelocationSolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 statePixel = dispatchThreadId.xy;
     if (statePixel.x >= atlasColumns || statePixel.y >= atlasRows)

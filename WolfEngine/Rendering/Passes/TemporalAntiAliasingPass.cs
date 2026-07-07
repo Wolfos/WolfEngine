@@ -137,7 +137,7 @@ public sealed class TemporalAntiAliasingPass
 			PassKind.Compute,
 			vertexEntryPoint: null,
 			pixelEntryPoint: null,
-			computeEntryPoint: "CSMain",
+			computeEntryPoint: "TaaResolveCS",
 			renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: default,
@@ -162,7 +162,7 @@ public sealed class TemporalAntiAliasingPass
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"taa_resolve.compute.slang",
-			"CSMain",
+			"TaaResolveCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;
 		_threadGroupSize = compiled.ThreadGroupSize;

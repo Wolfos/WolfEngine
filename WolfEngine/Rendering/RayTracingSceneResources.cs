@@ -645,12 +645,20 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
 			"terrain_rt_vertex_update.compute.slang",
-			"CSMain",
+			"TerrainRayTracingVertexUpdateCS",
 			device.BackendKind);
 		_terrainVertexUpdateShaderBytecode = compiled.Bytecode;
 		_terrainVertexUpdateThreadGroupSize = compiled.ThreadGroupSize;
 		_terrainVertexUpdateParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("TerrainRtVertexUpdateParams"));
-		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSMain", default, default, default, shaderVariant: "terrain_rt_vertex_update.compute.slang");
+		var pipelineKey = new PipelineKey(
+			PassKind.Compute,
+			null,
+			null,
+			"TerrainRayTracingVertexUpdateCS",
+			default,
+			default,
+			default,
+			shaderVariant: "terrain_rt_vertex_update.compute.slang");
 		_terrainVertexUpdatePipeline = device.GetOrCreatePipeline(
 			pipelineKey,
 			new ShaderBytecodeSet(compute: _terrainVertexUpdateShaderBytecode, computeThreadGroupSize: _terrainVertexUpdateThreadGroupSize));

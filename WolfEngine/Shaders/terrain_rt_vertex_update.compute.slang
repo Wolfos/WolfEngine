@@ -32,7 +32,7 @@ float SampleTerrainHeight(float2 uv)
 }
 
 [numthreads(64, 1, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void TerrainRayTracingVertexUpdateCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint vertsPerAxis = resolutionInQuads + 1u;
     uint vertexCount = vertsPerAxis * vertsPerAxis;
