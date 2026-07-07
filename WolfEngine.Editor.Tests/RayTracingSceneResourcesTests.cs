@@ -89,7 +89,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "ddgi_classify.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ddgi_classify.compute.slang", EntryPoint: "CSMain", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSMain", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "ddgi_trace.compute.slang", EntryPoint: "CSRelocation", ThreadsX: 16u, ThreadsY: 1u),
 			(Name: "ddgi_relocate.compute.slang", EntryPoint: "CSMain", ThreadsX: 8u, ThreadsY: 8u),

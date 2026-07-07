@@ -77,5 +77,6 @@ public readonly struct DdgiPassConfig
 	public required uint FrameIndex { get; init; }
 	public required bool HistoryValid { get; init; }
 	public required bool ForceFullProbeUpdate { get; init; }
+	public required bool CompactProbeClassificationDispatch { get; init; }
 	public required bool SidecarHitShadingAvailable { get; init; }
 }

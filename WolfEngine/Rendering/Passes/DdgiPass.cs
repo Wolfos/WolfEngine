@@ -123,6 +123,11 @@ public sealed class DdgiPass
 		var probeUpdateFrames = DdgiUtilities.GetProbeUpdateFrames(config);
 		var probeUpdateFrameIndex = DdgiUtilities.GetProbeUpdateFrameIndex(frameIndex, probeUpdateFrames);
 		var forceFullProbeUpdate = historyValid == false;
+		var compactProbeClassificationDispatch =
+			historyValid &&
+			resources.DdgiScrollDelta.X == 0 &&
+			resources.DdgiScrollDelta.Y == 0 &&
+			resources.DdgiScrollDelta.Z == 0;
 		var newlyExposedProbeCount = DdgiUtilities.GetNewlyExposedProbeCount(
 			resources.DdgiScrollDelta,
 			gridShape,
@@ -226,6 +231,7 @@ public sealed class DdgiPass
 			FrameIndex = frameIndex,
 			HistoryValid = historyValid,
 			ForceFullProbeUpdate = forceFullProbeUpdate,
+			CompactProbeClassificationDispatch = compactProbeClassificationDispatch,
 			SidecarHitShadingAvailable = rayTracingSceneResources.LastStats.SidecarHitShadingAvailable
 		};
 	}
@@ -239,9 +245,16 @@ public sealed class DdgiPass
 		commandList.SetComputeBuffer(2, config.DrawCommandBuffer);
 		commandList.SetComputeBuffer(3, config.InstanceBuffer);
 		var threadGroupSize = _classifyThreadGroupSize ?? throw new InvalidOperationException("DDGI classify threadgroup size was not initialized.");
+		var classifyProbeCount = config.CompactProbeClassificationDispatch
+			? DdgiUtilities.GetActiveProbeCount(
+				config.GridShape.ProbeCount,
+				config.ProbeUpdateFrames,
+				config.ProbeUpdateFrameIndex,
+				forceFullUpdate: false)
+			: config.GridShape.ProbeCount;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
-			(uint)config.GridShape.AtlasColumns,
-			(uint)config.GridShape.AtlasRows);
+			(uint)classifyProbeCount,
+			1u);
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 
@@ -404,6 +417,7 @@ public sealed class DdgiPass
 		settingsWriter.SetUInt("probeUpdateFrames", (uint)config.ProbeUpdateFrames);
 		settingsWriter.SetUInt("probeUpdateFrameIndex", (uint)config.ProbeUpdateFrameIndex);
 		settingsWriter.SetUInt("forceFullProbeUpdate", config.ForceFullProbeUpdate ? 1u : 0u);
+		settingsWriter.SetUInt("classifyCompactDispatch", config.CompactProbeClassificationDispatch ? 1u : 0u);
 		settingsWriter.SetFloat("maxRayDistance", config.MaxRayDistance);
 		settingsWriter.SetFloat("normalBias", config.NormalBias);
 		settingsWriter.SetFloat("viewBias", config.ViewBias);

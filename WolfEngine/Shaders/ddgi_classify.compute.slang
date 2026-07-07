@@ -19,29 +19,49 @@ bool DdgiSphereIntersectsProbeInfluence(
     return dot(outside, outside) <= sphereRadius * sphereRadius;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint2 statePixel = dispatchThreadId.xy;
-    if (statePixel.x >= atlasColumns || statePixel.y >= atlasRows)
-    {
-        return;
-    }
-
-    uint physicalProbeIndex = statePixel.y * atlasColumns + statePixel.x;
+    uint dispatchIndex = dispatchThreadId.x;
     RWTexture2D<float4> activityTex = GetRWTexture(probeActivityWriteHandle);
-    if (physicalProbeIndex >= probeCount)
-    {
-        activityTex[statePixel] = 0.0f.xxxx;
-        return;
-    }
 
-    uint probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
-    if (historyValid != 0u &&
-        DdgiProbeHasHistory(probeIndex) &&
-        !DdgiIsProbeScheduled(probeIndex))
+    uint physicalProbeIndex;
+    uint probeIndex;
+    uint2 statePixel;
+    if (classifyCompactDispatch != 0u)
     {
-        return;
+        uint updateFrames = max(probeUpdateFrames, 1u);
+        probeIndex = min(probeUpdateFrameIndex, updateFrames - 1u) + dispatchIndex * updateFrames;
+        if (probeIndex >= probeCount)
+        {
+            return;
+        }
+
+        physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
+        statePixel = uint2(physicalProbeIndex % atlasColumns, physicalProbeIndex / atlasColumns);
+    }
+    else
+    {
+        physicalProbeIndex = dispatchIndex;
+        if (physicalProbeIndex >= atlasColumns * atlasRows)
+        {
+            return;
+        }
+
+        statePixel = uint2(physicalProbeIndex % atlasColumns, physicalProbeIndex / atlasColumns);
+        if (physicalProbeIndex >= probeCount)
+        {
+            activityTex[statePixel] = 0.0f.xxxx;
+            return;
+        }
+
+        probeIndex = DdgiLogicalProbeIndexFromPhysical(physicalProbeIndex);
+        if (historyValid != 0u &&
+            DdgiProbeHasHistory(probeIndex) &&
+            !DdgiIsProbeScheduled(probeIndex))
+        {
+            return;
+        }
     }
 
     float3 probePosition = DdgiProbePosition(probeIndex);

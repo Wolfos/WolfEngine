@@ -67,7 +67,7 @@ cbuffer DdgiSettings : register(b1)
     uint probeUpdateFrames;
     uint probeUpdateFrameIndex;
     uint forceFullProbeUpdate;
-    uint schedulingPad0;
+    uint classifyCompactDispatch;
     float maxRayDistance;
     float normalBias;
     float viewBias;
