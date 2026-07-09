@@ -1232,14 +1232,15 @@ public sealed class GpuDrawPass
 		commandSet.EnsureCreated(device);
 		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
 		var frameSlot = _gpuDrawResources.ActiveFrameSlot;
-		var commands = commandSet.GetSlotCommands(activeSlot);
 		if (commandSet.RequiresFullReencode(activeSlot, frameSlot, _bindlessEpoch))
 		{
 			using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
 			{
 				ReencodeAllIndirectCommands(
 					drawDatabase,
-					commands,
+					commandSet,
+					activeSlot,
+					device,
 					participation,
 					resources,
 					laneAvailable,
@@ -1257,7 +1258,7 @@ public sealed class GpuDrawPass
 				drawDatabase,
 				commandSet,
 				activeSlot,
-				commands,
+				device,
 				participation,
 				resources,
 				laneAvailable,
@@ -1288,7 +1289,7 @@ public sealed class GpuDrawPass
 				laneDefinition.DebugName,
 				bufferBindings.Value,
 				pipeline,
-				_gbufferIndirectCommandSet.GetCommandBuffer(activeIndirectSlot, laneDefinition)));
+				_gbufferIndirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return buckets;
@@ -1298,7 +1299,7 @@ public sealed class GpuDrawPass
 		GpuDrawDatabase drawDatabase,
 		SharedDrawIndirectCommandSet commandSet,
 		int slotIndex,
-		ReadOnlySpan<IGfxIndirectCommandBuffer> indirectCommands,
+		IGfxDevice device,
 		DrawPassParticipation participation,
 		in SharedDrawIndirectEncodeResources resources,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
@@ -1321,7 +1322,9 @@ public sealed class GpuDrawPass
 			ApplyStructuralRecord(
 				drawDatabase,
 				record,
-				indirectCommands,
+				commandSet,
+				slotIndex,
+				device,
 				participation,
 				resources,
 				laneAvailable,
@@ -1334,7 +1337,9 @@ public sealed class GpuDrawPass
 	private void ApplyStructuralRecord(
 		GpuDrawDatabase drawDatabase,
 		in StructuralCommandRecord record,
-		ReadOnlySpan<IGfxIndirectCommandBuffer> indirectCommands,
+		SharedDrawIndirectCommandSet commandSet,
+		int slotIndex,
+		IGfxDevice device,
 		DrawPassParticipation participation,
 		in SharedDrawIndirectEncodeResources resources,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
@@ -1355,7 +1360,7 @@ public sealed class GpuDrawPass
 		    GpuDrawClassification.SupportsMeshBackedGeometry(record.DrawKind) == false ||
 		    record.Mesh is null)
 		{
-			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
+			ResetCommandAcrossBuckets(commandSet, slotIndex, commandIndex);
 			return;
 		}
 
@@ -1365,7 +1370,9 @@ public sealed class GpuDrawPass
 			record.DrawKind,
 			record.BucketId,
 			record.Mesh,
-			indirectCommands,
+			commandSet,
+			slotIndex,
+			device,
 			participation,
 			resources,
 			laneAvailable,
@@ -1383,17 +1390,24 @@ public sealed class GpuDrawPass
 	}
 
 	private void ReencodeAllIndirectCommands(GpuDrawDatabase drawDatabase,
-		ReadOnlySpan<IGfxIndirectCommandBuffer> indirectCommands,
+		SharedDrawIndirectCommandSet commandSet,
+		int slotIndex,
+		IGfxDevice device,
 		DrawPassParticipation participation,
 		in SharedDrawIndirectEncodeResources resources,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
 		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver)
 	{
-		for (var bucketIndex = 0; bucketIndex < indirectCommands.Length; bucketIndex++)
+		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
 		{
-			for (var i = 1u; i < GpuDrawResources.MaxDrawCount; i++)
+			var pages = commandSet.GetAllocatedPages(slotIndex, executionIndex);
+			for (var pageIndex = 0; pageIndex < pages.Length; pageIndex++)
 			{
-				_backendBridge.ResetCommand(indirectCommands[bucketIndex], i);
+				var page = pages[pageIndex];
+				for (var commandIndex = 0u; commandIndex < page.PageCommandCapacity; commandIndex++)
+				{
+					_backendBridge.ResetCommand(page.CommandBuffer, commandIndex);
+				}
 			}
 		}
 
@@ -1419,7 +1433,9 @@ public sealed class GpuDrawPass
 				entry.DrawKind,
 				bucketId,
 				entry.Mesh,
-				indirectCommands,
+				commandSet,
+				slotIndex,
+				device,
 				participation,
 				resources,
 				laneAvailable,
@@ -1481,11 +1497,22 @@ public sealed class GpuDrawPass
 		}
 	}
 
-	private void ResetCommandAcrossBuckets(uint commandIndex, ReadOnlySpan<IGfxIndirectCommandBuffer> indirectCommands)
+	private void ResetCommandAcrossBuckets(
+		SharedDrawIndirectCommandSet commandSet,
+		int slotIndex,
+		uint commandIndex)
 	{
-		for (var i = 0; i < indirectCommands.Length; i++)
+		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
 		{
-			_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
+			if (commandSet.TryGetPageForCommand(
+				    slotIndex,
+				    executionIndex,
+				    commandIndex,
+				    out var commandBuffer,
+				    out var pageCommandIndex))
+			{
+				_backendBridge.ResetCommand(commandBuffer, pageCommandIndex);
+			}
 		}
 	}
 
@@ -1494,7 +1521,9 @@ public sealed class GpuDrawPass
 		GpuDrawKind drawKind,
 		GpuDrawBucketId bucketId,
 		Mesh mesh,
-		ReadOnlySpan<IGfxIndirectCommandBuffer> indirectCommands,
+		SharedDrawIndirectCommandSet commandSet,
+		int slotIndex,
+		IGfxDevice device,
 		DrawPassParticipation participation,
 		in SharedDrawIndirectEncodeResources resources,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable,
@@ -1504,25 +1533,39 @@ public sealed class GpuDrawPass
 		    targetLane.SupportsPass(participation) == false ||
 		    laneAvailable(targetLane) == false)
 		{
-			ResetCommandAcrossBuckets(commandIndex, indirectCommands);
+			ResetCommandAcrossBuckets(commandSet, slotIndex, commandIndex);
 			return;
 		}
 
-		for (var i = 0; i < indirectCommands.Length; i++)
+		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
 		{
-			if (i == targetLane.ExecutionIndex)
+			if (executionIndex == targetLane.ExecutionIndex)
 			{
 				var bindings = bindingResolver(targetLane)
 				               ?? throw new InvalidOperationException(
 					               $"Missing reflected shared-draw buffer bindings for execution lane '{targetLane.DebugName}'.");
-				if (_backendBridge.TryEncodeIndexedDrawCommand(indirectCommands[i], commandIndex, mesh, resources, bindings) == false)
+				var commandBuffer = commandSet.EnsurePageForCommand(
+					device,
+					slotIndex,
+					executionIndex,
+					commandIndex,
+					out var pageCommandIndex);
+				if (_backendBridge.TryEncodeIndexedDrawCommand(commandBuffer, pageCommandIndex, commandIndex, mesh, resources, bindings) == false)
 				{
-					_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
+					_backendBridge.ResetCommand(commandBuffer, pageCommandIndex);
 				}
 				continue;
 			}
 
-			_backendBridge.ResetCommand(indirectCommands[i], commandIndex);
+			if (commandSet.TryGetPageForCommand(
+				    slotIndex,
+				    executionIndex,
+				    commandIndex,
+				    out var staleCommandBuffer,
+				    out var stalePageCommandIndex))
+			{
+				_backendBridge.ResetCommand(staleCommandBuffer, stalePageCommandIndex);
+			}
 		}
 	}
 

@@ -68,6 +68,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 	public bool TryEncodeIndexedDrawCommand(
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
+		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
 		in SharedDrawGraphicsBufferBindings bindings)
@@ -108,7 +109,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			mesh.IndexCount,
 			mesh.PackedIndexOffsetBytes,
 			0,
-			resources.DrawArgsBaseOffsetBytes + (commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
+			resources.DrawArgsBaseOffsetBytes + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			cameraBuffer,
 			instanceBuffer,
 			materialBuffer,

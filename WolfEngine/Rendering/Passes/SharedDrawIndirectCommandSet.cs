@@ -1,15 +1,37 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Passes;
 
+public readonly struct SharedDrawIndirectCommandPage
+{
+	public SharedDrawIndirectCommandPage(
+		uint pageIndex,
+		uint pageStartCommandIndex,
+		uint pageCommandCapacity,
+		IGfxIndirectCommandBuffer commandBuffer)
+	{
+		PageIndex = pageIndex;
+		PageStartCommandIndex = pageStartCommandIndex;
+		PageCommandCapacity = pageCommandCapacity;
+		CommandBuffer = commandBuffer ?? throw new ArgumentNullException(nameof(commandBuffer));
+	}
+
+	public uint PageIndex { get; }
+	public uint PageStartCommandIndex { get; }
+	public uint PageCommandCapacity { get; }
+	public IGfxIndirectCommandBuffer CommandBuffer { get; }
+}
+
 public sealed class SharedDrawIndirectCommandSet : IDisposable
 {
-	private readonly IGfxIndirectCommandBuffer?[] _commandBuffers =
-		new IGfxIndirectCommandBuffer?[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly IGfxIndirectCommandBuffer[] _slotScratch = new IGfxIndirectCommandBuffer[GpuDrawExecutionLanes.ExecutionLaneCount];
+	public const uint IndirectCommandPageCapacity = 2048;
+
+	private readonly SortedDictionary<uint, IGfxIndirectCommandBuffer>[] _commandPages =
+		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
@@ -17,45 +39,99 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	public SharedDrawIndirectCommandSet()
 	{
 		Array.Fill(_frameBindings, -1);
+		for (var i = 0; i < _commandPages.Length; i++)
+		{
+			_commandPages[i] = new SortedDictionary<uint, IGfxIndirectCommandBuffer>();
+		}
 	}
 
 	public void EnsureCreated(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
-
-		for (var slotIndex = 0; slotIndex < GpuDrawResources.IndirectCommandBufferSlotCount; slotIndex++)
-		{
-			for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
-			{
-				var index = FlattenSlotLaneIndex(slotIndex, executionIndex);
-				_commandBuffers[index] ??= device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
-					PassKind.Graphics,
-					(uint)GpuDrawResources.MaxDrawCount,
-					supportsIndexedExecution: true));
-			}
-		}
 	}
 
-	public IGfxIndirectCommandBuffer GetCommandBuffer(int slotIndex, int executionLaneIndex)
+	public IGfxIndirectCommandBuffer EnsurePage(
+		IGfxDevice device,
+		int slotIndex,
+		int executionLaneIndex,
+		uint pageIndex)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		ValidateSlot(slotIndex);
+		ValidateLane(executionLaneIndex);
+		ValidatePage(pageIndex);
+
+		var pages = _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)];
+		if (pages.TryGetValue(pageIndex, out var commandBuffer))
+		{
+			return commandBuffer;
+		}
+
+		commandBuffer = device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
+			PassKind.Graphics,
+			IndirectCommandPageCapacity,
+			supportsIndexedExecution: true));
+		pages.Add(pageIndex, commandBuffer);
+		return commandBuffer;
+	}
+
+	public IGfxIndirectCommandBuffer EnsurePageForCommand(
+		IGfxDevice device,
+		int slotIndex,
+		int executionLaneIndex,
+		uint commandIndex,
+		out uint pageCommandIndex)
+	{
+		pageCommandIndex = GetPageCommandIndex(commandIndex);
+		return EnsurePage(device, slotIndex, executionLaneIndex, GetPageIndex(commandIndex));
+	}
+
+	public bool TryGetPage(
+		int slotIndex,
+		int executionLaneIndex,
+		uint pageIndex,
+		out IGfxIndirectCommandBuffer commandBuffer)
 	{
 		ValidateSlot(slotIndex);
 		ValidateLane(executionLaneIndex);
-		return _commandBuffers[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)]
-		       ?? throw new InvalidOperationException("Shared draw indirect command set has not been created.");
+		ValidatePage(pageIndex);
+		return _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)].TryGetValue(pageIndex, out commandBuffer!);
 	}
 
-	public IGfxIndirectCommandBuffer GetCommandBuffer(int slotIndex, GpuDrawExecutionLaneDefinition lane) =>
-		GetCommandBuffer(slotIndex, lane.ExecutionIndex);
+	public bool TryGetPageForCommand(
+		int slotIndex,
+		int executionLaneIndex,
+		uint commandIndex,
+		out IGfxIndirectCommandBuffer commandBuffer,
+		out uint pageCommandIndex)
+	{
+		pageCommandIndex = GetPageCommandIndex(commandIndex);
+		return TryGetPage(slotIndex, executionLaneIndex, GetPageIndex(commandIndex), out commandBuffer);
+	}
 
-	public ReadOnlySpan<IGfxIndirectCommandBuffer> GetSlotCommands(int slotIndex)
+	public SharedDrawIndirectCommandPage[] GetAllocatedPages(int slotIndex, int executionLaneIndex)
 	{
 		ValidateSlot(slotIndex);
-		for (var executionIndex = 0; executionIndex < GpuDrawExecutionLanes.ExecutionLaneCount; executionIndex++)
+		ValidateLane(executionLaneIndex);
+
+		var pages = _commandPages[FlattenSlotLaneIndex(slotIndex, executionLaneIndex)];
+		if (pages.Count == 0)
 		{
-			_slotScratch[executionIndex] = GetCommandBuffer(slotIndex, executionIndex);
+			return Array.Empty<SharedDrawIndirectCommandPage>();
 		}
 
-		return _slotScratch;
+		var result = new SharedDrawIndirectCommandPage[pages.Count];
+		var i = 0;
+		foreach (var page in pages)
+		{
+			result[i++] = new SharedDrawIndirectCommandPage(
+				page.Key,
+				page.Key * IndirectCommandPageCapacity,
+				IndirectCommandPageCapacity,
+				page.Value);
+		}
+
+		return result;
 	}
 
 	public ulong GetAppliedStructuralVersion(int slotIndex)
@@ -86,12 +162,20 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 
 	public void Dispose()
 	{
-		for (var i = 0; i < _commandBuffers.Length; i++)
+		for (var i = 0; i < _commandPages.Length; i++)
 		{
-			(_commandBuffers[i] as IDisposable)?.Dispose();
-			_commandBuffers[i] = null;
+			foreach (var commandBuffer in _commandPages[i].Values)
+			{
+				(commandBuffer as IDisposable)?.Dispose();
+			}
+
+			_commandPages[i].Clear();
 		}
 	}
+
+	public static uint GetPageIndex(uint commandIndex) => commandIndex / IndirectCommandPageCapacity;
+
+	public static uint GetPageCommandIndex(uint commandIndex) => commandIndex % IndirectCommandPageCapacity;
 
 	private static int FlattenSlotLaneIndex(int slotIndex, int executionLaneIndex) =>
 		(slotIndex * GpuDrawExecutionLanes.ExecutionLaneCount) + executionLaneIndex;
@@ -111,5 +195,13 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 			throw new ArgumentOutOfRangeException(nameof(executionLaneIndex), executionLaneIndex, "Shared draw execution lane index is out of range.");
 		}
 	}
-}
 
+	private static void ValidatePage(uint pageIndex)
+	{
+		var maxPageIndex = (uint)((GpuDrawResources.MaxDrawCount - 1) / IndirectCommandPageCapacity);
+		if (pageIndex > maxPageIndex)
+		{
+			throw new ArgumentOutOfRangeException(nameof(pageIndex), pageIndex, "Indirect command page index is out of range.");
+		}
+	}
+}

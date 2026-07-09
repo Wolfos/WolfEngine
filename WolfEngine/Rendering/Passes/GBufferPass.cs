@@ -103,22 +103,34 @@ public static class GBufferPass
 				}
 
 				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);
-				if (config.DrawExecutionRangePerBucketBuffer is not null)
-				{
-					var rangeOffsetBytes = (ulong)(bucket.ExecutionIndex * 2 * sizeof(uint));
-					commandList.ExecuteIndirectCommandBufferRange(
-						bucket.IndirectCommandBuffer,
-						config.DrawExecutionRangePerBucketBuffer,
-						rangeOffsetBytes);
-				}
-				else
-				{
-					commandList.ExecuteIndirectCommandBuffer(bucket.IndirectCommandBuffer, (uint)GpuDrawResources.MaxDrawCount);
-				}
+				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, config.FallbackMaxCommandCount);
 			}
 		}
 
 		commandList.EndPass();
+	}
+
+	private static void ExecuteIndirectPages(
+		IGfxCommandList commandList,
+		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
+		uint commandUpperBound)
+	{
+		for (var i = 0; i < pages.Length; i++)
+		{
+			var page = pages[i];
+			if (commandUpperBound <= page.PageStartCommandIndex)
+			{
+				continue;
+			}
+
+			var pageEnd = page.PageStartCommandIndex + page.PageCommandCapacity;
+			var pageUpperBound = Math.Min(commandUpperBound, pageEnd);
+			var localCount = pageUpperBound - page.PageStartCommandIndex;
+			if (localCount > 0)
+			{
+				commandList.ExecuteIndirectCommandBuffer(page.CommandBuffer, localCount);
+			}
+		}
 	}
 
 	private static void UploadCameraConstants(

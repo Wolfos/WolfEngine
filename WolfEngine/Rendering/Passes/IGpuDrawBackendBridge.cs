@@ -30,6 +30,7 @@ public interface IGpuDrawBackendBridge
 	bool TryEncodeIndexedDrawCommand(
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
+		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
 		in SharedDrawGraphicsBufferBindings bindings);

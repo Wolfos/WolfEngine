@@ -109,7 +109,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		D3D12Buffer shadowCameraBuffer,
 		D3D12Buffer transparentEnvironmentBuffer,
 		D3D12Buffer transparentLightingBuffer,
-		ulong drawArgsBaseOffsetBytes)
+		ulong drawArgsBaseOffsetBytes,
+		uint drawArgsCommandIndex)
 	{
 		ValidateCommandIndex(commandIndex);
 
@@ -164,7 +165,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			SrvT11Address = materialBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT12Address = drawArgsBuffer.Resource.Handle->GetGPUVirtualAddress()
 			                 + drawArgsBaseOffsetBytes
-			                 + (commandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
+			                 + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			SrvT13Address = materialGenerationBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT14Address = terrainMaterialBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT15Address = terrainLayerBuffer.Resource.Handle->GetGPUVirtualAddress(),

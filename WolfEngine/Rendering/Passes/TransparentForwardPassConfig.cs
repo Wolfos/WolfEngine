@@ -14,7 +14,7 @@ public readonly struct TransparentExecutionBucket
 		string debugName,
 		SharedDrawGraphicsBufferBindings bufferBindings,
 		IGfxPipeline pipeline,
-		IGfxIndirectCommandBuffer indirectCommandBuffer)
+		ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -22,7 +22,7 @@ public readonly struct TransparentExecutionBucket
 		DebugName = debugName;
 		BufferBindings = bufferBindings;
 		Pipeline = pipeline;
-		IndirectCommandBuffer = indirectCommandBuffer;
+		IndirectCommandPages = indirectCommandPages;
 	}
 
 	public GpuDrawKind DrawKind { get; }
@@ -31,7 +31,7 @@ public readonly struct TransparentExecutionBucket
 	public string DebugName { get; }
 	public SharedDrawGraphicsBufferBindings BufferBindings { get; }
 	public IGfxPipeline Pipeline { get; }
-	public IGfxIndirectCommandBuffer IndirectCommandBuffer { get; }
+	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
 }
 
 /// <summary>

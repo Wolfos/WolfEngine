@@ -42,6 +42,7 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 	public bool TryEncodeIndexedDrawCommand(
 		IGfxIndirectCommandBuffer commandBuffer,
 		uint commandIndex,
+		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
 		in SharedDrawGraphicsBufferBindings bindings)
@@ -75,7 +76,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			shadowCameraBuffer,
 			transparentEnvironmentBuffer,
 			transparentLightingBuffer,
-			resources.DrawArgsBaseOffsetBytes);
+			resources.DrawArgsBaseOffsetBytes,
+			drawArgsCommandIndex);
 		return true;
 	}
 

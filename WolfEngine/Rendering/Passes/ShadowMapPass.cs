@@ -140,7 +140,7 @@ public sealed class ShadowMapPass
 				laneDefinition.DebugName,
 				_bufferBindingsByCascadeExecutionKey[(cascadeIndex, laneDefinition.Key)],
 				pipeline,
-				commandSet.GetCommandBuffer(activeIndirectSlot, laneDefinition)));
+				commandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return new ShadowMapPassConfig
@@ -226,19 +226,34 @@ public sealed class ShadowMapPass
 				commandList.BindConstantBuffer(
 					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
 					config.CameraBuffer);
-				if (config.DrawExecutionRangePerBucketBuffer is not null)
-				{
-					var rangeOffsetBytes =
-						GpuDrawResources.GetShadowExecutionRangeOffsetBytes(config.CascadeIndex, bucket.ExecutionIndex);
-					commandList.ExecuteIndirectCommandBufferRange(
-						bucket.IndirectCommandBuffer,
-						config.DrawExecutionRangePerBucketBuffer,
-						rangeOffsetBytes);
-				}
+				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, config.FallbackMaxCommandCount);
 			}
 		}
 
 		commandList.EndPass();
+	}
+
+	private static void ExecuteIndirectPages(
+		IGfxCommandList commandList,
+		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
+		uint commandUpperBound)
+	{
+		for (var i = 0; i < pages.Length; i++)
+		{
+			var page = pages[i];
+			if (commandUpperBound <= page.PageStartCommandIndex)
+			{
+				continue;
+			}
+
+			var pageEnd = page.PageStartCommandIndex + page.PageCommandCapacity;
+			var pageUpperBound = Math.Min(commandUpperBound, pageEnd);
+			var localCount = pageUpperBound - page.PageStartCommandIndex;
+			if (localCount > 0)
+			{
+				commandList.ExecuteIndirectCommandBuffer(page.CommandBuffer, localCount);
+			}
+		}
 	}
 
 	private IGfxPipeline EnsurePipeline(
