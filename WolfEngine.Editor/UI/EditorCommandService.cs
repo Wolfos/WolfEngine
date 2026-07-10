@@ -253,6 +253,9 @@ public sealed class EditorCommandService : IEditorCommandService
 			case EditorShortcutCommand.DuplicateFocusedSelection:
 				DuplicateFocusedSelection();
 				break;
+			case EditorShortcutCommand.ClearEntitySelection:
+				EditorGui.ClearEntitySelection();
+				break;
 			case EditorShortcutCommand.DeleteFocusedSelection:
 				DeleteFocusedSelection();
 				break;

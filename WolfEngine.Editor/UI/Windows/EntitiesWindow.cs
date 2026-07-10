@@ -79,6 +79,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			DrawEntityNode(entity, world, scene);
 		}
 
+		ClearSelectionOnBackgroundClick();
 		ApplyPendingSelectionClick(world);
 
 		CompleteDragDrop(scene);
@@ -186,6 +187,17 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		}
 
 		ImGui.PopID();
+	}
+
+	private void ClearSelectionOnBackgroundClick()
+	{
+		if (_hoveredEntity is null &&
+		    ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows) &&
+		    ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+		{
+			EditorGui.ClearEntitySelection();
+			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		}
 	}
 
 	private void ApplyPendingSelectionClick(World world)

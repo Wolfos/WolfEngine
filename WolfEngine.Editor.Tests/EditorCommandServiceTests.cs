@@ -100,6 +100,12 @@ public sealed class EditorCommandServiceTests
 
 		Assert.That(
 			EditorShortcutCommandResolver.Resolve(
+				new EditorShortcutSnapshot(false, true, false, false, false, false, false, true, false, false, false, false),
+				EditorFocusedWindow.Entities),
+			Is.EqualTo(EditorShortcutCommand.ClearEntitySelection));
+
+		Assert.That(
+			EditorShortcutCommandResolver.Resolve(
 				new EditorShortcutSnapshot(false, false, false, false, false, false, false, false, true, false, false, false),
 				EditorFocusedWindow.Entities),
 			Is.EqualTo(EditorShortcutCommand.DeleteFocusedSelection));

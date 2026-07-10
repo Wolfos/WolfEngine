@@ -9,6 +9,7 @@ internal enum EditorShortcutCommand
 	SaveScene,
 	RefreshAssetDatabase,
 	DuplicateFocusedSelection,
+	ClearEntitySelection,
 	DeleteFocusedSelection
 }
 
@@ -68,6 +69,11 @@ internal static class EditorShortcutCommandResolver
 			{
 				return EditorShortcutCommand.DuplicateFocusedSelection;
 			}
+		}
+
+		if (snapshot.ShiftDown && snapshot.DuplicatePressed)
+		{
+			return EditorShortcutCommand.ClearEntitySelection;
 		}
 
 		var deletePressed = snapshot.DeletePressed || (snapshot.IsMacOS && snapshot.PrimaryModifierDown && snapshot.BackspacePressed);
