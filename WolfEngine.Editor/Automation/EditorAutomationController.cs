@@ -3,6 +3,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
@@ -45,6 +46,7 @@ public sealed class EditorAutomationController
 	public int ExitCode { get; private set; }
 	public float DeltaTime => FixedDeltaTime;
 	public bool IsEnabled => true;
+	public Int2 Resolution => _options.Resolution;
 
 	public void Initialize()
 	{

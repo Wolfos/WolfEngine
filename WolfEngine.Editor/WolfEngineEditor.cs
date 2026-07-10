@@ -59,6 +59,7 @@ public class WolfEngineEditor
 	private World? _boundGameplayWorld;
 	private IGameplayModule? _boundGameplayModule;
 	private EditorAutomationController? _automationController;
+	private EditorRemoteAutomationController? _remoteAutomationController;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -111,12 +112,18 @@ public class WolfEngineEditor
 		_running = true;
 		CreateWorlds();
 		_automationController?.Initialize();
+		_remoteAutomationController?.Initialize();
 		EditorLoop();
 	}
 
 	public void SetAutomationController(EditorAutomationController automationController)
 	{
 		_automationController = automationController ?? throw new ArgumentNullException(nameof(automationController));
+	}
+
+	public void SetRemoteAutomationController(EditorRemoteAutomationController automationController)
+	{
+		_remoteAutomationController = automationController ?? throw new ArgumentNullException(nameof(automationController));
 	}
 
 	public void Stop()
@@ -164,6 +171,13 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
+			_remoteAutomationController?.ProcessPendingCommands();
+			if (_remoteAutomationController?.ShouldStop == true)
+			{
+				Stop();
+				continue;
+			}
+
 			var frameStart = stopwatch.Elapsed;
 			FrameProfiler.Instance.BeginFrame("Editor Frame");
 

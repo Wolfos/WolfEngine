@@ -20,62 +20,13 @@ public static class Program
 			return;
 		}
 
-		var services = new ServiceCollection();
-		WolfEngine.ConfigureServices(services);
-		ConfigureServices(services);
-		
-		var provider = services.BuildServiceProvider();
-
-		var worldManager = provider.GetRequiredService<IWorldManager>();
-		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
-		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
-		
-		AssetDatabase.SetInstanceRegistry(provider.GetRequiredService<IAssetInstanceRegistry>());
-		provider.GetRequiredService<IUiFrameProvider>();
-		provider.GetRequiredService<IIconManager>();
-		string? lastProjectPath = null;
-		if (automationOptions is null)
-		{
-			EditorPreferences.Load();
-			lastProjectPath = EditorPreferences.GetLastProjectPath();
-		}
-		
-		var editor = provider.GetRequiredService<WolfEngineEditor>();
-		EditorAutomationController? automationController = null;
-		if (automationOptions is not null)
-		{
-			provider.GetRequiredService<IRenderer>().SetWindowSize(automationOptions.Resolution);
-			automationController = ActivatorUtilities.CreateInstance<EditorAutomationController>(provider, automationOptions);
-			editor.SetAutomationController(automationController);
-		}
-		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };
-		editorThread.Start();
-		
-		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
-		renderPipeline.Run(() =>
-		{
-			if (automationOptions is not null || string.IsNullOrWhiteSpace(lastProjectPath))
-			{
-				return;
-			}
-
-			var projectService = provider.GetRequiredService<IEditorProjectService>();
-			projectService.OpenProject(lastProjectPath, out _);
-
-			var gameplayAssemblyHost = provider.GetRequiredService<IGameplayAssemblyHost>();
-			gameplayAssemblyHost.EnsureLoaded();
-		});
-		
-		editor.Stop();
-		editorThread.Join();
-		AssetDatabase.ClearInstanceRegistry();
-		if (automationController is not null)
-		{
-			Environment.ExitCode = automationController.ExitCode;
-		}
+		using var application = EditorApplication.Create();
+		var captureController = automationOptions is null ? null : application.CreateCaptureController(automationOptions);
+		application.Run(captureController);
+		if (captureController is not null) Environment.ExitCode = captureController.ExitCode;
 	}
 
-	private static void ConfigureServices(IServiceCollection services)
+	internal static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<RigidbodySystem>();
