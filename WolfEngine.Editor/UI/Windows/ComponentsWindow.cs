@@ -43,6 +43,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<TerrainEditKey, TerrainComponent> _pendingTerrainEdits = new();
+    private readonly List<Entity> _componentTargets = new();
     private Type? _pendingRemovedComponentType;
     private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
     private static readonly Vector2 PickerIconSize = Vector2.One * 22.0f;
@@ -155,6 +156,11 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         if (typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
             return;
 
+        if (TryGetComponentTargets(scene.World, componentType, out var sourceEntity) == false)
+            return;
+
+        entity = sourceEntity;
+
         if (componentType == typeof(TerrainComponent))
         {
             DrawTerrainComponentEditor(scene, scene.World, entity, _propertyDrawerRegistry, _interactionState);
@@ -248,12 +254,19 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             DrawIconPickerModal(scene, entity, iconPickerPopupId, icons, interactionState);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+            var hasMixedName = IsMixed(scene, typeof(NameComponent), [nameof(NameComponent.Name)]);
             if (ImGui.InputText("##value", ref value, 256))
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(NameComponent));
-                name.Name = value;
-                PushComponentEdit("Edit Name", before, CaptureSingleComponentSnapshot(scene, entity, typeof(NameComponent)));
-                interactionState.MarkSceneDirty();
+                ApplyComponentEdit(scene, typeof(NameComponent), "Edit Name", target =>
+                {
+                    ref var targetName = ref world.GetComponent<NameComponent>(target);
+                    targetName.Name = value;
+                });
+            }
+
+            if (hasMixedName && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Multiple values");
             }
 
             ImGui.Separator();
@@ -266,31 +279,23 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             ref var local = ref Unsafe.As<T, LocalTransform>(ref component);
 
             var position = local.LocalPosition;
-            if (EditorUIUtility.InputVector3("LocalPosition", ref position))
+            if (DrawWithMixedValue(IsTransformMixed(scene, transform => transform.LocalPosition), () => EditorUIUtility.InputVector3("LocalPosition", ref position)))
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
-                world.SetLocalPosition(entity, position);
-                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
-                interactionState.MarkSceneDirty();
+                ApplyTransformEdit(scene, target => world.SetLocalPosition(target, position));
             }
 
             var rotation = local.LocalRotation;
             var eulerDegrees = QuaternionToEulerDegrees(rotation);
-            if (EditorUIUtility.InputVector3("Rotation (deg)", ref eulerDegrees))
+            if (DrawWithMixedValue(IsTransformMixed(scene, transform => transform.LocalRotation), () => EditorUIUtility.InputVector3("Rotation (deg)", ref eulerDegrees)))
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
-                world.SetLocalRotation(entity, EulerDegreesToQuaternion(eulerDegrees));
-                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
-                interactionState.MarkSceneDirty();
+                var nextRotation = EulerDegreesToQuaternion(eulerDegrees);
+                ApplyTransformEdit(scene, target => world.SetLocalRotation(target, nextRotation));
             }
 
             var scale = local.LocalScale;
-            if (EditorUIUtility.InputVector3("LocalScale", ref scale))
+            if (DrawWithMixedValue(IsTransformMixed(scene, transform => transform.LocalScale), () => EditorUIUtility.InputVector3("LocalScale", ref scale)))
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform));
-                world.SetLocalScale(entity, scale);
-                PushComponentEdit("Edit Transform", before, CaptureSingleComponentSnapshot(scene, entity, typeof(LocalTransform)));
-                interactionState.MarkSceneDirty();
+                ApplyTransformEdit(scene, target => world.SetLocalScale(target, scale));
             }
 
             ImGui.Separator();
@@ -321,13 +326,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 meshRenderer.MeshAsset,
                 scene,
                 entity,
-                AssetLinkSelectionButton: CreateAssetLinkSelectionButton()));
+                AssetLinkSelectionButton: CreateAssetLinkSelectionButton(),
+                IsMixedValue: IsMixed(scene, typeof(MeshRenderer), [nameof(MeshRenderer.MeshAsset)])));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Mesh> meshAsset)
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
-                meshRenderer.AssignMeshAsset(meshAsset);
-                PushComponentEdit("Edit Mesh Renderer", before, CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer)));
-                interactionState.MarkSceneDirty();
+                ApplyMeshRendererEdit(scene, target =>
+                {
+                    ref var targetRenderer = ref world.GetComponent<MeshRenderer>(target);
+                    targetRenderer.AssignMeshAsset(meshAsset);
+                });
             }
 
             drawResult = propertyDrawerRegistry.Draw(new PropertyDrawerContext(
@@ -336,13 +343,15 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 meshRenderer.MaterialAsset,
                 scene,
                 entity,
-                AssetLinkSelectionButton: CreateAssetLinkSelectionButton()));
+                AssetLinkSelectionButton: CreateAssetLinkSelectionButton(),
+                IsMixedValue: IsMixed(scene, typeof(MeshRenderer), [nameof(MeshRenderer.MaterialAsset)])));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
-                var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
-                meshRenderer.AssignMaterialAsset(materialAsset, renderGraph);
-                PushComponentEdit("Edit Mesh Renderer", before, CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer)));
-                interactionState.MarkSceneDirty();
+                ApplyMeshRendererEdit(scene, target =>
+                {
+                    ref var targetRenderer = ref world.GetComponent<MeshRenderer>(target);
+                    targetRenderer.AssignMaterialAsset(materialAsset, renderGraph);
+                });
             }
 
             ImGui.Separator();
@@ -367,46 +376,57 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             }
 
             ref var light = ref Unsafe.As<T, Light>(ref component);
-            var before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
-            if (EditorUIUtility.EnumCombo(nameof(Light.Type), ref light.Type))
+            var lightValue = light;
+            if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.Type)]), () => EditorUIUtility.EnumCombo(nameof(Light.Type), ref lightValue.Type)))
             {
-                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
-                interactionState.MarkSceneDirty();
-            }
-
-            before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
-            if (EditorUIUtility.InputFloat(nameof(Light.Intensity), ref light.Intensity))
-            {
-                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
-                interactionState.MarkSceneDirty();
-            }
-
-            if (light.Type == LightType.Point)
-            {
-                before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
-                if (EditorUIUtility.InputFloat(nameof(Light.Range), ref light.Range))
+                ApplyLightEdit(scene, target =>
                 {
-                    PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
-                    interactionState.MarkSceneDirty();
+                    ref var targetLight = ref world.GetComponent<Light>(target);
+                    targetLight.Type = lightValue.Type;
+                });
+            }
+
+            if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.Intensity)]), () => EditorUIUtility.InputFloat(nameof(Light.Intensity), ref lightValue.Intensity)))
+            {
+                ApplyLightEdit(scene, target =>
+                {
+                    ref var targetLight = ref world.GetComponent<Light>(target);
+                    targetLight.Intensity = lightValue.Intensity;
+                });
+            }
+
+            if (lightValue.Type == LightType.Point)
+            {
+                if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.Range)]), () => EditorUIUtility.InputFloat(nameof(Light.Range), ref lightValue.Range)))
+                {
+                    ApplyLightEdit(scene, target =>
+                    {
+                        ref var targetLight = ref world.GetComponent<Light>(target);
+                        targetLight.Range = lightValue.Range;
+                    });
                 }
             }
 
-            var color = light.Color.ToVector4();
-            before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
-            if (EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color))
+            var color = lightValue.Color.ToVector4();
+            if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.Color)]), () => EditorUIUtility.ColorEdit4(nameof(Light.Color), ref color)))
             {
-                light.Color = ColorRGBA.FromVector4(color);
-                PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
-                interactionState.MarkSceneDirty();
+                var nextColor = ColorRGBA.FromVector4(color);
+                ApplyLightEdit(scene, target =>
+                {
+                    ref var targetLight = ref world.GetComponent<Light>(target);
+                    targetLight.Color = nextColor;
+                });
             }
 
-            if (light.Type == LightType.Directional)
+            if (lightValue.Type == LightType.Directional)
             {
-                before = CaptureSingleComponentSnapshot(scene, entity, typeof(Light));
-                if (EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref light.HorizonFade))
+                if (DrawWithMixedValue(IsMixed(scene, typeof(Light), [nameof(Light.HorizonFade)]), () => EditorUIUtility.Checkbox(nameof(Light.HorizonFade), ref lightValue.HorizonFade)))
                 {
-                    PushComponentEdit("Edit Light", before, CaptureSingleComponentSnapshot(scene, entity, typeof(Light)));
-                    interactionState.MarkSceneDirty();
+                    ApplyLightEdit(scene, target =>
+                    {
+                        ref var targetLight = ref world.GetComponent<Light>(target);
+                        targetLight.HorizonFade = lightValue.HorizonFade;
+                    });
                 }
             }
 
@@ -445,12 +465,18 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
-        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue, scene, entity, CreateAssetLinkSelectionButton()))
+        var edits = new List<RuntimeComponentFieldEditor.FieldEdit>();
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(
+                componentType,
+                propertyDrawerRegistry,
+                ref componentValue,
+                scene,
+                entity,
+                CreateAssetLinkSelectionButton(),
+                edits,
+                path => IsMixed(scene, componentType, path)))
         {
-            RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
-            PushComponentEdit($"Edit {componentType.Name}", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
-            interactionState.MarkSceneDirty();
+            ApplyGenericComponentEdits(scene, componentType, edits);
         }
 
         ImGui.Separator();
@@ -561,6 +587,170 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return _sceneSnapshotService.CaptureComponent(scene, entity, componentType);
     }
 
+    private bool TryGetComponentTargets(World world, Type componentType, out Entity sourceEntity)
+    {
+        _componentTargets.Clear();
+        for (var i = 0; i < EditorGui.SelectedEntities.Count; i++)
+        {
+            var candidate = EditorGui.SelectedEntities[i];
+            if (world.IsAlive(candidate) && world.HasComponent(candidate, componentType))
+            {
+                _componentTargets.Add(candidate);
+            }
+        }
+
+        sourceEntity = _componentTargets.Count > 0 ? _componentTargets[0] : default;
+        return _componentTargets.Count > 0;
+    }
+
+    private void ApplyTransformEdit(EditorScene scene, Action<Entity> apply)
+    {
+        ApplyComponentEdit(scene, typeof(LocalTransform), "Edit Transform", apply);
+    }
+
+    private void ApplyLightEdit(EditorScene scene, Action<Entity> apply)
+    {
+        ApplyComponentEdit(scene, typeof(Light), "Edit Light", apply);
+    }
+
+    private void ApplyMeshRendererEdit(EditorScene scene, Action<Entity> apply)
+    {
+        ApplyComponentEdit(scene, typeof(MeshRenderer), "Edit Mesh Renderer", apply);
+    }
+
+    private void ApplyComponentEdit(EditorScene scene, Type componentType, string description, Action<Entity> apply)
+    {
+        if (TryGetComponentTargets(scene.World, componentType, out _) == false)
+        {
+            return;
+        }
+
+        var before = CaptureComponentSnapshots(scene, componentType);
+        for (var i = 0; i < _componentTargets.Count; i++)
+        {
+            apply(_componentTargets[i]);
+        }
+
+        PushComponentEdit(description, before, CaptureComponentSnapshots(scene, componentType));
+    }
+
+    private void ApplyGenericComponentEdits(EditorScene scene, Type componentType, IReadOnlyList<RuntimeComponentFieldEditor.FieldEdit> edits)
+    {
+        if (edits.Count == 0 || TryGetComponentTargets(scene.World, componentType, out _) == false)
+        {
+            return;
+        }
+
+        var before = CaptureComponentSnapshots(scene, componentType);
+        for (var i = 0; i < _componentTargets.Count; i++)
+        {
+            var target = _componentTargets[i];
+            var targetValue = RuntimeComponentAccessor.ReadBoxed(scene.World, target, componentType);
+            var changed = false;
+            for (var editIndex = 0; editIndex < edits.Count; editIndex++)
+            {
+                var edit = edits[editIndex];
+                if (Equals(GetFieldValue(targetValue, edit.Path), edit.Value))
+                {
+                    continue;
+                }
+
+                RuntimeComponentFieldEditor.ApplyFieldEdit(targetValue, edit);
+                changed = true;
+            }
+
+            if (changed)
+            {
+                RuntimeComponentAccessor.WriteBoxed(scene.World, target, componentType, targetValue);
+            }
+        }
+
+        PushComponentEdit($"Edit {componentType.Name}", before, CaptureComponentSnapshots(scene, componentType));
+    }
+
+    private List<SceneComponentSnapshot> CaptureComponentSnapshots(EditorScene scene, Type componentType)
+    {
+        var snapshots = new List<SceneComponentSnapshot>(_componentTargets.Count);
+        for (var i = 0; i < _componentTargets.Count; i++)
+        {
+            snapshots.Add(CaptureSingleComponentSnapshot(scene, _componentTargets[i], componentType));
+        }
+
+        return snapshots;
+    }
+
+    private bool IsMixed(EditorScene scene, Type componentType, IReadOnlyList<string> fieldNames)
+    {
+        var fields = new FieldInfo[fieldNames.Count];
+        for (var i = 0; i < fieldNames.Count; i++)
+        {
+            fields[i] = componentType.GetField(fieldNames[i], BindingFlags.Instance | BindingFlags.Public)
+                ?? throw new InvalidOperationException($"Could not find field '{fieldNames[i]}' on '{componentType.FullName}'.");
+        }
+
+        return IsMixed(scene, componentType, fields);
+    }
+
+    private bool IsTransformMixed<TValue>(EditorScene scene, Func<LocalTransform, TValue> selectValue)
+    {
+        if (TryGetComponentTargets(scene.World, typeof(LocalTransform), out _) == false)
+        {
+            return false;
+        }
+
+        var firstValue = selectValue(scene.World.GetComponent<LocalTransform>(_componentTargets[0]));
+        for (var i = 1; i < _componentTargets.Count; i++)
+        {
+            if (EqualityComparer<TValue>.Default.Equals(firstValue, selectValue(scene.World.GetComponent<LocalTransform>(_componentTargets[i]))) == false)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsMixed(EditorScene scene, Type componentType, IReadOnlyList<FieldInfo> path)
+    {
+        if (TryGetComponentTargets(scene.World, componentType, out _) == false)
+        {
+            return false;
+        }
+
+        var firstValue = GetFieldValue(RuntimeComponentAccessor.ReadBoxed(scene.World, _componentTargets[0], componentType), path);
+        for (var i = 1; i < _componentTargets.Count; i++)
+        {
+            var value = GetFieldValue(RuntimeComponentAccessor.ReadBoxed(scene.World, _componentTargets[i], componentType), path);
+            if (Equals(firstValue, value) == false)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static object? GetFieldValue(object value, IReadOnlyList<FieldInfo> path)
+    {
+        object? current = value;
+        for (var i = 0; i < path.Count; i++)
+        {
+            current = current is null ? null : path[i].GetValue(current);
+        }
+
+        return current;
+    }
+
+    private static bool DrawWithMixedValue(bool isMixed, Func<bool> draw)
+    {
+        if (isMixed)
+        {
+            ImGui.TextDisabled("Multiple values");
+        }
+
+		return draw();
+    }
+
     private void PushComponentEdit(string description, SceneComponentSnapshot before, SceneComponentSnapshot after)
     {
         if (SnapshotsEqual(before, after))
@@ -570,6 +760,32 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         _undoRedoService.BeginCapture(description);
         _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, [before], [after]));
+    }
+
+    private void PushComponentEdit(string description, IReadOnlyList<SceneComponentSnapshot> before, IReadOnlyList<SceneComponentSnapshot> after)
+    {
+        var changedBefore = new List<SceneComponentSnapshot>();
+        var changedAfter = new List<SceneComponentSnapshot>();
+        var count = Math.Min(before.Count, after.Count);
+        for (var i = 0; i < count; i++)
+        {
+            if (SnapshotsEqual(before[i], after[i]))
+            {
+                continue;
+            }
+
+            changedBefore.Add(before[i]);
+            changedAfter.Add(after[i]);
+        }
+
+        if (changedBefore.Count == 0)
+        {
+            return;
+        }
+
+        _undoRedoService.BeginCapture(description);
+        _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, changedBefore, changedAfter));
+        _interactionState.MarkSceneDirty();
     }
 
     private static bool SnapshotsEqual(SceneComponentSnapshot left, SceneComponentSnapshot right)

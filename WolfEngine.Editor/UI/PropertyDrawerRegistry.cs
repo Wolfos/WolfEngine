@@ -20,7 +20,8 @@ public readonly record struct PropertyDrawerContext(
 	EditorScene? Scene = null,
 	Entity? OwnerEntity = null,
 	MemberInfo? Member = null,
-	AssetLinkSelectionButton? AssetLinkSelectionButton = null);
+	AssetLinkSelectionButton? AssetLinkSelectionButton = null,
+	bool IsMixedValue = false);
 
 public readonly record struct PropertyDrawerResult(bool Handled, bool Changed, object? Value);
 
@@ -50,6 +51,10 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 
 	public PropertyDrawerResult Draw(PropertyDrawerContext context)
 	{
+		if (context.IsMixedValue)
+		{
+			context = context with { Label = $"{context.Label} (mixed)" };
+		}
 		var valueType = context.ValueType;
 		var value = context.Value;
 

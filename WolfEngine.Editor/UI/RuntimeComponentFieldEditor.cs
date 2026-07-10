@@ -13,13 +13,17 @@ public static class RuntimeComponentFieldEditor
 {
 	private static readonly ConcurrentDictionary<Type, FieldInfo[]> EditableFields = new();
 
+	public readonly record struct FieldEdit(IReadOnlyList<FieldInfo> Path, object? Value);
+
 	public static bool ApplyPublicFields(
 		Type componentType,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
 		ref object componentValue,
 		EditorScene? scene = null,
 		Entity? ownerEntity = null,
-		AssetLinkSelectionButton? assetLinkSelectionButton = null)
+		AssetLinkSelectionButton? assetLinkSelectionButton = null,
+		ICollection<FieldEdit>? edits = null,
+		Func<IReadOnlyList<FieldInfo>, bool>? isMixed = null)
 	{
 		ArgumentNullException.ThrowIfNull(componentType);
 		ArgumentNullException.ThrowIfNull(propertyDrawerRegistry);
@@ -31,7 +35,16 @@ public static class RuntimeComponentFieldEditor
 			componentValue,
 			scene,
 			ownerEntity,
-			assetLinkSelectionButton);
+			assetLinkSelectionButton,
+			edits,
+			isMixed,
+			[]);
+	}
+
+	public static void ApplyFieldEdit(object value, FieldEdit edit)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		ApplyFieldEdit(value, edit.Path, 0, edit.Value);
 	}
 
 	public static void ClearCachedFields()
@@ -55,11 +68,15 @@ public static class RuntimeComponentFieldEditor
 		object value,
 		EditorScene? scene,
 		Entity? ownerEntity,
-		AssetLinkSelectionButton? assetLinkSelectionButton)
+		AssetLinkSelectionButton? assetLinkSelectionButton,
+		ICollection<FieldEdit>? edits,
+		Func<IReadOnlyList<FieldInfo>, bool>? isMixed,
+		IReadOnlyList<FieldInfo> parentPath)
 	{
 		var changed = false;
 		foreach (var field in EditableFields.GetOrAdd(valueType, GetEditableFields))
 		{
+			var path = parentPath.Concat([field]).ToArray();
 			var fieldValue = field.GetValue(value);
 			if (ShouldDrawAsStructGroup(field.FieldType) && HasDrawableFields(field.FieldType))
 			{
@@ -68,7 +85,7 @@ public static class RuntimeComponentFieldEditor
 					fieldValue ??= Activator.CreateInstance(field.FieldType);
 					var nestedValue = fieldValue;
 					if (nestedValue is not null &&
-					ApplyEditableFields(field.FieldType, propertyDrawerRegistry, nestedValue, scene, ownerEntity, assetLinkSelectionButton))
+					ApplyEditableFields(field.FieldType, propertyDrawerRegistry, nestedValue, scene, ownerEntity, assetLinkSelectionButton, edits, isMixed, path))
 					{
 						field.SetValue(value, nestedValue);
 						changed = true;
@@ -85,17 +102,34 @@ public static class RuntimeComponentFieldEditor
 				scene,
 				ownerEntity,
 				field,
-				assetLinkSelectionButton));
+				assetLinkSelectionButton,
+				isMixed?.Invoke(path) ?? false));
 			if (drawResult.Handled == false || drawResult.Changed == false)
 			{
 				continue;
 			}
 
 			field.SetValue(value, drawResult.Value);
+			edits?.Add(new FieldEdit(path, drawResult.Value));
 			changed = true;
 		}
 
 		return changed;
+	}
+
+	private static void ApplyFieldEdit(object value, IReadOnlyList<FieldInfo> path, int index, object? leafValue)
+	{
+		var field = path[index];
+		if (index == path.Count - 1)
+		{
+			field.SetValue(value, leafValue);
+			return;
+		}
+
+		var nestedValue = field.GetValue(value) ?? Activator.CreateInstance(field.FieldType)
+			?? throw new InvalidOperationException($"Unable to create '{field.FieldType.FullName}'.");
+		ApplyFieldEdit(nestedValue, path, index + 1, leafValue);
+		field.SetValue(value, nestedValue);
 	}
 
 	private static bool HasDrawableFields(Type valueType)

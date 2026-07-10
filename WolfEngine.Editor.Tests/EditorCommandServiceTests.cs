@@ -50,6 +50,28 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void EntitySelection_AggregatesComponentTypesAcrossSelectedEntitiesInSelectionOrder()
+	{
+		var world = new World(WorldTag.Authoring);
+		var first = world.CreateEntity("First");
+		var second = world.CreateEntity("Second");
+		var third = world.CreateEntity("Third");
+		world.AddComponent(first, new SelectionTestLight());
+		world.AddComponent(first, new SelectionTestSpinner());
+		world.AddComponent(second, new SelectionTestLight());
+		world.AddComponent(third, new SelectionTestSpinner());
+
+		EditorGui.ReplaceEntitySelection(first, world, requestFocus: false);
+		EditorGui.AddEntitySelection(second, world, requestFocus: false);
+		EditorGui.AddEntitySelection(third, world, requestFocus: false);
+
+		Assert.That(EditorGui.SelectedComponentTypes.Count(type => type == typeof(SelectionTestLight)), Is.EqualTo(1));
+		Assert.That(EditorGui.SelectedComponentTypes.Count(type => type == typeof(SelectionTestSpinner)), Is.EqualTo(1));
+		Assert.That(EditorGui.SelectedComponentTypes.IndexOf(typeof(SelectionTestLight)), Is.LessThan(EditorGui.SelectedComponentTypes.IndexOf(typeof(SelectionTestSpinner))));
+		EditorGui.ClearEntitySelection();
+	}
+
+	[Test]
 	public void ShortcutResolver_MapsSceneCommandsAndFocusedDelete()
 	{
 		Assert.That(
@@ -430,6 +452,9 @@ public sealed class EditorCommandServiceTests
 			UndoRedoService,
 			new InputSystem());
 	}
+
+	private struct SelectionTestLight : IEntityComponent;
+	private struct SelectionTestSpinner : IEntityComponent;
 
 	private sealed class TrackingEntityDeletionHandler : IEditorEntityDeletionHandler
 	{

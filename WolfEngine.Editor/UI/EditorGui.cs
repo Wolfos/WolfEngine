@@ -178,7 +178,20 @@ public class EditorGui
 
 		HasSelectedEntity = true;
 		SelectedEntity = SelectedEntities[0];
-		world.GetComponentTypes(SelectedEntity, SelectedComponentTypes);
+		SelectedComponentTypes.Clear();
+		var componentTypes = new List<Type>();
+		for (var i = 0; i < SelectedEntities.Count; i++)
+		{
+			world.GetComponentTypes(SelectedEntities[i], componentTypes);
+			for (var componentIndex = 0; componentIndex < componentTypes.Count; componentIndex++)
+			{
+				var componentType = componentTypes[componentIndex];
+				if (SelectedComponentTypes.Contains(componentType) == false)
+				{
+					SelectedComponentTypes.Add(componentType);
+				}
+			}
+		}
 		_componentsWindowFocusRequested = requestFocus;
 	}
 
