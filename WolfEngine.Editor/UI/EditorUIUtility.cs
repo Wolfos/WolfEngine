@@ -124,12 +124,20 @@ public class EditorUIUtility
 		return true;
 	}
 
-	public static bool PopupButton(string label, string previewValue, string popupId, Vector2 popupSize, Action drawPopupContents)
+	public static bool PopupButton(
+		string label,
+		string previewValue,
+		string popupId,
+		Vector2 popupSize,
+		Action drawPopupContents,
+		Action? drawTrailingControl = null)
 	{
 		BeginLabeledField(label);
 		try
 		{
-			var buttonSize = new Vector2(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X), 0.0f);
+			var trailingControlWidth = drawTrailingControl is null ? 0.0f : ImGui.GetFrameHeight();
+			var itemSpacing = drawTrailingControl is null ? 0.0f : ImGui.GetStyle().ItemSpacing.X;
+			var buttonSize = new Vector2(MathF.Max(1.0f, ImGui.GetContentRegionAvail().X - trailingControlWidth - itemSpacing), 0.0f);
 			ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0.0f, 0.5f));
 			try
 			{
@@ -141,6 +149,12 @@ public class EditorUIUtility
 			finally
 			{
 				ImGui.PopStyleVar();
+			}
+
+			if (drawTrailingControl is not null)
+			{
+				ImGui.SameLine(0.0f, itemSpacing);
+				drawTrailingControl();
 			}
 
 			ImGui.SetNextWindowSize(popupSize, ImGuiCond.Appearing);

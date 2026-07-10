@@ -19,9 +19,14 @@ public readonly record struct PropertyDrawerContext(
 	object? Value,
 	EditorScene? Scene = null,
 	Entity? OwnerEntity = null,
-	MemberInfo? Member = null);
+	MemberInfo? Member = null,
+	AssetLinkSelectionButton? AssetLinkSelectionButton = null);
 
 public readonly record struct PropertyDrawerResult(bool Handled, bool Changed, object? Value);
+
+public readonly record struct AssetLinkSelectionButton(
+	nint IconTextureId,
+	Action<Guid> SelectAsset);
 
 public interface IPropertyDrawerRegistry
 {
@@ -282,12 +287,44 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 			{
 				ImGui.EndChild();
 			}
-		});
+		},
+			context.AssetLinkSelectionButton is { } selectionButton
+				? () => DrawAssetLinkSelectionButton(selectionButton, currentId)
+				: null);
 
 		result = changed
 			? new PropertyDrawerResult(true, true, CreateAssetLinkValue(valueType, nextId))
 			: new PropertyDrawerResult(true, false, context.Value);
 		return true;
+	}
+
+	private static void DrawAssetLinkSelectionButton(AssetLinkSelectionButton selectionButton, Guid assetId)
+	{
+		var isEnabled = assetId != Guid.Empty;
+		if (isEnabled == false)
+		{
+			ImGui.BeginDisabled();
+		}
+
+		try
+		{
+			if (ImGui.ImageButton("##selectAsset", selectionButton.IconTextureId, Vector2.One * 15.5f) && isEnabled)
+			{
+				selectionButton.SelectAsset(assetId);
+			}
+		}
+		finally
+		{
+			if (isEnabled == false)
+			{
+				ImGui.EndDisabled();
+			}
+		}
+
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+		{
+			ImGui.SetTooltip(isEnabled ? "Select asset" : "No asset selected");
+		}
 	}
 
 	private bool TryDrawEntityLink(PropertyDrawerContext context, out PropertyDrawerResult result)

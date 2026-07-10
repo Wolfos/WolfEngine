@@ -31,6 +31,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
     private readonly IIconManager _icons;
     private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
+    private readonly IAssetSelectionService _assetSelectionService;
     private readonly IEditorProjectService _projectService;
     private readonly IProjectTypeCatalog _projectTypeCatalog;
     private readonly RenderGraph _renderGraph;
@@ -50,6 +51,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     public ComponentsWindow(
         IIconManager icons,
         IPropertyDrawerRegistry propertyDrawerRegistry,
+        IAssetSelectionService assetSelectionService,
         IEditorProjectService projectService,
         IProjectTypeCatalog projectTypeCatalog,
         RenderGraph renderGraph,
@@ -60,6 +62,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     {
         _icons = icons;
         _propertyDrawerRegistry = propertyDrawerRegistry;
+        _assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
         _projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
         _projectTypeCatalog = projectTypeCatalog;
         _renderGraph = renderGraph;
@@ -77,6 +80,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         _existingComponentTypes.Clear();
         _componentNameCounts.Clear();
         _pendingTerrainEdits.Clear();
+    }
+
+    private AssetLinkSelectionButton CreateAssetLinkSelectionButton()
+    {
+        return new AssetLinkSelectionButton(
+            _icons.Get("search"),
+            assetId => _assetSelectionService.Select(assetId));
     }
 
     public override void Draw(EditorScene scene)
@@ -310,7 +320,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 typeof(AssetRef<Mesh>),
                 meshRenderer.MeshAsset,
                 scene,
-                entity));
+                entity,
+                AssetLinkSelectionButton: CreateAssetLinkSelectionButton()));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Mesh> meshAsset)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
@@ -324,7 +335,8 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                 typeof(AssetRef<Material>),
                 meshRenderer.MaterialAsset,
                 scene,
-                entity));
+                entity,
+                AssetLinkSelectionButton: CreateAssetLinkSelectionButton()));
             if (drawResult.Handled && drawResult.Changed && drawResult.Value is AssetRef<Material> materialAsset)
             {
                 var before = CaptureSingleComponentSnapshot(scene, entity, typeof(MeshRenderer));
@@ -434,7 +446,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         }
 
         var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
-        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue, scene, entity))
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref componentValue, scene, entity, CreateAssetLinkSelectionButton()))
         {
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, componentValue);
             PushComponentEdit($"Edit {componentType.Name}", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
@@ -487,7 +499,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
-        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref stagedValue, scene, entity))
+        if (RuntimeComponentFieldEditor.ApplyPublicFields(componentType, propertyDrawerRegistry, ref stagedValue, scene, entity, CreateAssetLinkSelectionButton()))
         {
             stagedComponent = (TerrainComponent)stagedValue;
             _pendingTerrainEdits[key] = stagedComponent;

@@ -13,7 +13,13 @@ public static class RuntimeComponentFieldEditor
 {
 	private static readonly ConcurrentDictionary<Type, FieldInfo[]> EditableFields = new();
 
-	public static bool ApplyPublicFields(Type componentType, IPropertyDrawerRegistry propertyDrawerRegistry, ref object componentValue, EditorScene? scene = null, Entity? ownerEntity = null)
+	public static bool ApplyPublicFields(
+		Type componentType,
+		IPropertyDrawerRegistry propertyDrawerRegistry,
+		ref object componentValue,
+		EditorScene? scene = null,
+		Entity? ownerEntity = null,
+		AssetLinkSelectionButton? assetLinkSelectionButton = null)
 	{
 		ArgumentNullException.ThrowIfNull(componentType);
 		ArgumentNullException.ThrowIfNull(propertyDrawerRegistry);
@@ -24,7 +30,8 @@ public static class RuntimeComponentFieldEditor
 			propertyDrawerRegistry,
 			componentValue,
 			scene,
-			ownerEntity);
+			ownerEntity,
+			assetLinkSelectionButton);
 	}
 
 	public static void ClearCachedFields()
@@ -47,7 +54,8 @@ public static class RuntimeComponentFieldEditor
 		IPropertyDrawerRegistry propertyDrawerRegistry,
 		object value,
 		EditorScene? scene,
-		Entity? ownerEntity)
+		Entity? ownerEntity,
+		AssetLinkSelectionButton? assetLinkSelectionButton)
 	{
 		var changed = false;
 		foreach (var field in EditableFields.GetOrAdd(valueType, GetEditableFields))
@@ -60,7 +68,7 @@ public static class RuntimeComponentFieldEditor
 					fieldValue ??= Activator.CreateInstance(field.FieldType);
 					var nestedValue = fieldValue;
 					if (nestedValue is not null &&
-					    ApplyEditableFields(field.FieldType, propertyDrawerRegistry, nestedValue, scene, ownerEntity))
+					ApplyEditableFields(field.FieldType, propertyDrawerRegistry, nestedValue, scene, ownerEntity, assetLinkSelectionButton))
 					{
 						field.SetValue(value, nestedValue);
 						changed = true;
@@ -76,7 +84,8 @@ public static class RuntimeComponentFieldEditor
 				fieldValue,
 				scene,
 				ownerEntity,
-				field));
+				field,
+				assetLinkSelectionButton));
 			if (drawResult.Handled == false || drawResult.Changed == false)
 			{
 				continue;
