@@ -13,7 +13,7 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 
-namespace WolfEngine.Editor.Tests;
+namespace WolfEngine.Tests;
 
 [TestFixture]
 public sealed class ScreenSpaceDecalPassTests

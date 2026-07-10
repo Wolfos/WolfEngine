@@ -8,7 +8,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 
-namespace WolfEngine.Editor.Tests;
+namespace WolfEngine.Tests;
 
 [TestFixture]
 public sealed class FrameSnapshotGpuDrawTests

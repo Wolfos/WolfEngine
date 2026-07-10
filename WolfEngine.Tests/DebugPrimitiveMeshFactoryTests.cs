@@ -1,6 +1,6 @@
 using WolfEngine.Rendering;
 
-namespace WolfEngine.Editor.Tests;
+namespace WolfEngine.Tests;
 
 [TestFixture]
 public sealed class DebugPrimitiveMeshFactoryTests
