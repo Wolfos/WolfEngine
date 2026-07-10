@@ -1213,7 +1213,7 @@ internal sealed class RenderGraphFrameBuilder
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
-			if (_frameResources.BloomDownsampleLevels.Length > 0)
+			if (_frameResources.BloomDownsampleLevels?.Length > 0)
 			{
 				graph.AddPass("Bloom Prefilter", PassKind.Compute)
 					.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
