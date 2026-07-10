@@ -8,6 +8,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Editor;
 using WolfEngine.Editor.UI;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Editor.Projects;
 
@@ -52,6 +53,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private readonly IEditorNotificationService? _notificationService;
 	private readonly IServiceProvider? _serviceProvider;
+	private readonly IShaderProvider? _shaderProvider;
 	private AssetDatabase _currentAssetDatabase = new();
 	private string? _projectRootPath;
 	private EditorProjectManifest? _projectManifest;
@@ -60,12 +62,14 @@ public sealed class EditorProjectService : IEditorProjectService
 		IProjectAssetPipelineService assetPipelineService,
 		IAssetInstanceRegistry assetInstanceRegistry,
 		IEditorNotificationService? notificationService = null,
-		IServiceProvider? serviceProvider = null)
+		IServiceProvider? serviceProvider = null,
+		IShaderProvider? shaderProvider = null)
 	{
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_notificationService = notificationService;
 		_serviceProvider = serviceProvider;
+		_shaderProvider = shaderProvider;
 		_assetInstanceRegistry.Clear();
 	}
 
@@ -171,6 +175,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			ValidateManifest(fullProjectRoot, manifest);
 			var shouldRebuildAssetDatabase = Directory.Exists(libraryPath) == false;
 			_projectRootPath = fullProjectRoot;
+			_shaderProvider?.SetProjectRoot(_projectRootPath);
 			_projectManifest = manifest;
 			_assetInstanceRegistry.Clear();
 			ApplyDatabase(shouldRebuildAssetDatabase
@@ -187,6 +192,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		{
 			ReleaseAssetDatabaseConnections();
 			_projectRootPath = null;
+			_shaderProvider?.SetProjectRoot(null);
 			_projectManifest = null;
 			_currentAssetDatabase = new AssetDatabase();
 			_assetInstanceRegistry.Clear();
@@ -201,6 +207,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	{
 		ReleaseAssetDatabaseConnections();
 		_projectRootPath = null;
+		_shaderProvider?.SetProjectRoot(null);
 		_projectManifest = null;
 		_currentAssetDatabase = new AssetDatabase();
 		_assetInstanceRegistry.Clear();

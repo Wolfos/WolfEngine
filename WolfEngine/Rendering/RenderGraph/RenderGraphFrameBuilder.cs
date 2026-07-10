@@ -1,13 +1,12 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering;
 
@@ -84,6 +83,7 @@ public readonly struct RenderGraphFrameResources
 
 internal sealed class RenderGraphFrameBuilder
 {
+	private readonly RenderGraphPassSet _passSet;
 	private readonly record struct PendingTemporalTextureRelease(
 		IGfxTexture Texture,
 		ulong RetireSubmissionId,
@@ -133,7 +133,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
-	private readonly RayTracingSceneResources _rayTracingSceneResources = new();
+	private readonly RayTracingSceneResources _rayTracingSceneResources;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private SkyboxResources? _externalSkybox;
@@ -227,8 +227,11 @@ internal sealed class RenderGraphFrameBuilder
 		IRenderer renderer,
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
-		IImGuiRenderer imGuiRenderer)
+		IImGuiRenderer imGuiRenderer,
+		IShaderCompiler shaderCompiler)
 	{
+		_passSet = passSet;
+		_rayTracingSceneResources = new RayTracingSceneResources(shaderCompiler);
 		_resources = resources;
 		_renderer = renderer;
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
@@ -282,6 +285,12 @@ internal sealed class RenderGraphFrameBuilder
 		_skyboxIrradianceExecute = ExecuteSkyboxIrradiance;
 		_skyboxPrefilterExecute = ExecuteSkyboxPrefilter;
 		_skyboxBrdfExecute = ExecuteSkyboxBrdf;
+	}
+
+	public void InvalidateShaderPipelines()
+	{
+		_passSet.InvalidateShaderPipelines();
+		ShaderPipelineInvalidation.Invalidate(_rayTracingSceneResources);
 	}
 
 	public void SetSkybox(SkyboxResources skybox)

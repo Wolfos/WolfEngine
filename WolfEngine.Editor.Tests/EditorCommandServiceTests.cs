@@ -4,6 +4,8 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.Tests;
@@ -456,6 +458,8 @@ public sealed class EditorCommandServiceTests
 			InteractionState,
 			NotificationService,
 			UndoRedoService,
+			Substitute.For<IShaderProvider>(),
+			Substitute.For<IRenderer>(),
 			new InputSystem());
 	}
 

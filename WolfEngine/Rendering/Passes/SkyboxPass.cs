@@ -1,6 +1,6 @@
-using System;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -390,7 +390,7 @@ public sealed class SkyboxPass
 			return _proceduralSkyboxPipeline;
 		}
 
-		var compiled = CompileComputeWithReflection("procedural_skybox.compute.slang", "ProceduralSkyboxCSMain", gfxDevice.BackendKind);
+		var compiled = CompileComputeWithReflection(EngineShaderPrograms.ProceduralSkybox, "ProceduralSkyboxCSMain", gfxDevice.BackendKind);
 		_proceduralSkyboxThreadGroupSize = compiled.ThreadGroupSize;
 		_proceduralBindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_proceduralSkyParamsWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("SkyParams"));
@@ -416,7 +416,7 @@ public sealed class SkyboxPass
 			return _iblIrradiancePipeline;
 		}
 
-		var compiled = CompileComputeWithReflection("ibl_irradiance.compute.slang", "IblIrradianceCSMain", gfxDevice.BackendKind);
+		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblIrradiance, "IblIrradianceCSMain", gfxDevice.BackendKind);
 		_iblIrradianceThreadGroupSize = compiled.ThreadGroupSize;
 		_iblIrradianceWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblIrradianceThreadGroupSize);
@@ -441,7 +441,7 @@ public sealed class SkyboxPass
 			return _iblPrefilterPipeline;
 		}
 
-		var compiled = CompileComputeWithReflection("ibl_prefilter.compute.slang", "IblPrefilterCSMain", gfxDevice.BackendKind);
+		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblPrefilter, "IblPrefilterCSMain", gfxDevice.BackendKind);
 		_iblPrefilterThreadGroupSize = compiled.ThreadGroupSize;
 		_iblPrefilterWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblPrefilterThreadGroupSize);
@@ -466,7 +466,7 @@ public sealed class SkyboxPass
 			return _iblBrdfLutPipeline;
 		}
 
-		var compiled = CompileComputeWithReflection("ibl_brdf_lut.compute.slang", "IblBrdfCSMain", gfxDevice.BackendKind);
+		var compiled = CompileComputeWithReflection(EngineShaderPrograms.IblBrdfLut, "IblBrdfCSMain", gfxDevice.BackendKind);
 		_iblBrdfThreadGroupSize = compiled.ThreadGroupSize;
 		_iblBrdfWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		var shaders = new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: _iblBrdfThreadGroupSize);
@@ -496,7 +496,7 @@ public sealed class SkyboxPass
 	}
 
 	private CompiledComputeShaderWithReflection CompileComputeWithReflection(
-		string shaderFile,
+		ShaderProgramId shaderProgram,
 		string entryPoint,
 		GraphicsBackendKind backendKind)
 	{
@@ -507,6 +507,6 @@ public sealed class SkyboxPass
 		}
 
 		_reflectionBackendKind = backendKind;
-		return _shaderCompiler.GetComputeShaderWithReflection(shaderFile, entryPoint, backendKind);
+		return _shaderCompiler.GetComputeShaderWithReflection(shaderProgram, entryPoint, backendKind);
 	}
 }

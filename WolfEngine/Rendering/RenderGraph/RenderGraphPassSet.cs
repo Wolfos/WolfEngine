@@ -1,5 +1,6 @@
 using System;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering;
 
@@ -64,4 +65,12 @@ internal sealed class RenderGraphPassSet
 	public ShadowMapPass ShadowMapPass { get; }
 	public GpuDrawPass GpuDrawPass { get; }
 	public SkyboxPass SkyboxPass { get; }
+
+	public void InvalidateShaderPipelines()
+	{
+		foreach (var property in GetType().GetProperties())
+		{
+			if (property.GetValue(this) is { } pass) ShaderPipelineInvalidation.Invalidate(pass);
+		}
+	}
 }

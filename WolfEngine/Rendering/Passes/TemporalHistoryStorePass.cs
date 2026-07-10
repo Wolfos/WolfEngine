@@ -1,5 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -120,7 +120,7 @@ public sealed class TemporalHistoryStorePass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"taa_history_store.compute.slang",
+			EngineShaderPrograms.TaaHistoryStore,
 			"TaaHistoryStoreCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.Projects;
@@ -15,10 +16,10 @@ public interface ITextureGpuCompressionService
 
 internal sealed class TextureGpuCompressionService : ITextureGpuCompressionService
 {
-	private const string Bc1ShaderFile = "bc1_compress.compute.slang";
-	private const string Bc4ShaderFile = "bc4_compress.compute.slang";
-	private const string Bc3StitchShaderFile = "bc3_stitch.compute.slang";
-	private const string Bc5StitchShaderFile = "bc5_stitch.compute.slang";
+	private static readonly ShaderProgramId Bc1Shader = EngineShaderPrograms.Bc1Compress;
+	private static readonly ShaderProgramId Bc4Shader = EngineShaderPrograms.Bc4Compress;
+	private static readonly ShaderProgramId Bc3StitchShader = EngineShaderPrograms.Bc3Stitch;
+	private static readonly ShaderProgramId Bc5StitchShader = EngineShaderPrograms.Bc5Stitch;
 	private const string Bc1EntryPoint = "CompressBc1";
 	private const string Bc4EntryPoint = "CompressBc4";
 	private const string Bc3StitchEntryPoint = "StitchBc3";
@@ -31,6 +32,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	private readonly object _sync = new();
 
 	private GraphicsBackendKind? _cachedBackend;
+	private long _cachedShaderRevision = -1;
 	private IGfxPipeline? _bc1Pipeline;
 	private IGfxPipeline? _bc4Pipeline;
 	private IGfxPipeline? _bc3StitchPipeline;
@@ -303,6 +305,15 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	{
 		lock (_sync)
 		{
+			if (_cachedShaderRevision != _shaderCompiler.Revision)
+			{
+				_bc1Pipeline = null;
+				_bc4Pipeline = null;
+				_bc3StitchPipeline = null;
+				_bc5StitchPipeline = null;
+				_cachedBackend = null;
+			}
+
 			if (_cachedBackend == device.BackendKind &&
 			    _bc1Pipeline is not null &&
 			    _bc4Pipeline is not null &&
@@ -314,24 +325,25 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 				return;
 			}
 
-			(_bc1Pipeline, _bc1ThreadGroupSize) = CreatePipeline(device, Bc1ShaderFile, Bc1EntryPoint, "texture-import-bc1");
-			(_bc4Pipeline, _bc4ThreadGroupSize) = CreatePipeline(device, Bc4ShaderFile, Bc4EntryPoint, "texture-import-bc4");
-			(_bc3StitchPipeline, _bc3StitchThreadGroupSize) = CreatePipeline(device, Bc3StitchShaderFile, Bc3StitchEntryPoint, "texture-import-bc3-stitch");
-			(_bc5StitchPipeline, _bc5StitchThreadGroupSize) = CreatePipeline(device, Bc5StitchShaderFile, Bc5StitchEntryPoint, "texture-import-bc5-stitch");
+			(_bc1Pipeline, _bc1ThreadGroupSize) = CreatePipeline(device, Bc1Shader, Bc1EntryPoint, "texture-import-bc1");
+			(_bc4Pipeline, _bc4ThreadGroupSize) = CreatePipeline(device, Bc4Shader, Bc4EntryPoint, "texture-import-bc4");
+			(_bc3StitchPipeline, _bc3StitchThreadGroupSize) = CreatePipeline(device, Bc3StitchShader, Bc3StitchEntryPoint, "texture-import-bc3-stitch");
+			(_bc5StitchPipeline, _bc5StitchThreadGroupSize) = CreatePipeline(device, Bc5StitchShader, Bc5StitchEntryPoint, "texture-import-bc5-stitch");
 
 			_bc1Match5Buffer = CreateLookupBuffer(device, Match5TableBytes);
 			_bc1Match6Buffer = CreateLookupBuffer(device, Match6TableBytes);
 			_cachedBackend = device.BackendKind;
+			_cachedShaderRevision = _shaderCompiler.Revision;
 		}
 	}
 
 	private (IGfxPipeline Pipeline, ComputeThreadGroupSize ThreadGroupSize) CreatePipeline(
 		IGfxDevice device,
-		string shaderFile,
+		ShaderProgramId shaderProgram,
 		string entryPoint,
 		string variant)
 	{
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection(shaderFile, entryPoint, device.BackendKind);
+		var compiled = _shaderCompiler.GetComputeShaderWithReflection(shaderProgram, entryPoint, device.BackendKind);
 		var pipeline = device.GetOrCreatePipeline(
 			new PipelineKey(
 				PassKind.Compute,

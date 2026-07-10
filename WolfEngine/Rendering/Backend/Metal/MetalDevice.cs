@@ -581,6 +581,20 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 	}
 
+	public void ClearPipelineCache()
+	{
+		foreach (var pipeline in _pipelines.Values)
+		{
+			if (pipeline.RenderPipelineState.NativePtr != IntPtr.Zero) pipeline.RenderPipelineState.Dispose();
+			if (pipeline.ComputePipelineState.NativePtr != IntPtr.Zero) pipeline.ComputePipelineState.Dispose();
+			if (pipeline.DepthStencilState.NativePtr != IntPtr.Zero) pipeline.DepthStencilState.Dispose();
+			if (pipeline.TextureEncoder.NativePtr != IntPtr.Zero) pipeline.TextureEncoder.Dispose();
+			if (pipeline.RWTextureEncoder.NativePtr != IntPtr.Zero) pipeline.RWTextureEncoder.Dispose();
+			if (pipeline.SamplerEncoder.NativePtr != IntPtr.Zero) pipeline.SamplerEncoder.Dispose();
+		}
+		_pipelines.Clear();
+	}
+
 	public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder()
 	{
 		throw new NotSupportedException("Descriptor sets are not supported in the Metal backend.");

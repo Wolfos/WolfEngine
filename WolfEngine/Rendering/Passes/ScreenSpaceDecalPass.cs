@@ -1,10 +1,9 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -272,7 +271,7 @@ public sealed class ScreenSpaceDecalPass
 		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			device.BackendKind,
-			"screen_space_decal.slang",
+			EngineShaderPrograms.ScreenSpaceDecal,
 			"vertexShader",
 			"fragmentShader");
 		var renderState = new RenderStateDescriptor(

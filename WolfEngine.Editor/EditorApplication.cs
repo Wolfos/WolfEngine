@@ -6,6 +6,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.ECS;
 using WolfEngine.Physics;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Editor;
 
@@ -17,10 +18,11 @@ public sealed class EditorApplication : IDisposable
 
 	private EditorApplication(ServiceProvider services) => _services = services;
 
-	public static EditorApplication Create()
+	public static EditorApplication Create(string? engineContentRoot = null)
 	{
 		var services = new ServiceCollection();
-		WolfEngine.ConfigureServices(services);
+		engineContentRoot ??= Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
+		WolfEngine.ConfigureServices(services, new EngineShaderOptions { EngineContentRoot = engineContentRoot });
 		Program.ConfigureServices(services);
 		return new EditorApplication(services.BuildServiceProvider());
 	}

@@ -9,6 +9,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
 using WolfEngine.Rendering.Backend.Metal;
+using WolfEngine.Rendering.Shaders;
 using WolfEngine.Utility;
 
 using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
@@ -40,7 +41,7 @@ public interface ITerrainBrushGpuExecutor
 
 internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 {
-	private const string ShaderFile = "TerrainTools/terrain_authoring_brushes.compute.slang";
+	private static readonly ShaderProgramId ShaderProgram = EngineShaderPrograms.TerrainAuthoringBrushes;
 	private const string RaiseLowerEntryPoint = "ApplyHeightmapRaiseLowerBrush";
 	private const string FlattenEntryPoint = "ApplyHeightmapFlattenBrush";
 	private const string SmoothEntryPoint = "ApplyHeightmapSmoothBrush";
@@ -53,6 +54,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	private readonly object _sync = new();
 
 	private GraphicsBackendKind? _compiledBackendKind;
+	private long _compiledShaderRevision = -1;
 	private readonly System.Collections.Generic.Dictionary<TerrainBrushOperation, BrushPipelineState> _pipelineStates = new();
 
 	public TerrainBrushGpuExecutor(
@@ -312,7 +314,8 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	{
 		lock (_sync)
 		{
-			if (_compiledBackendKind.HasValue &&
+			if (_compiledShaderRevision != _shaderCompiler.Revision ||
+			    _compiledBackendKind.HasValue &&
 			    _compiledBackendKind.Value != device.BackendKind)
 			{
 				_pipelineStates.Clear();
@@ -325,7 +328,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 			}
 
 			var entryPoint = GetEntryPoint(operation);
-			var compiled = _shaderCompiler.GetComputeShaderWithReflection(ShaderFile, entryPoint, device.BackendKind);
+			var compiled = _shaderCompiler.GetComputeShaderWithReflection(ShaderProgram, entryPoint, device.BackendKind);
 			var reflection = compiled.ReflectionLayout;
 			var pipeline = device.GetOrCreatePipeline(
 				new PipelineKey(
@@ -336,7 +339,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 					renderTargets: new RenderTargetFormats(Array.Empty<TextureFormat>()),
 					depthStencil: new AbstractionDepthStencilFormat(TextureFormat.Unknown),
 					renderState: default,
-					shaderVariant: ShaderFile),
+					shaderVariant: ShaderProgram.Value),
 				new ShaderBytecodeSet(compute: compiled.Bytecode, computeThreadGroupSize: compiled.ThreadGroupSize));
 			var state = new BrushPipelineState(
 				pipeline,
@@ -345,6 +348,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 				new ShaderPropertyWriter(reflection.GetConstantBuffer("TerrainBrushParameters")));
 			_pipelineStates[operation] = state;
 			_compiledBackendKind = device.BackendKind;
+			_compiledShaderRevision = _shaderCompiler.Revision;
 			return state;
 		}
 	}

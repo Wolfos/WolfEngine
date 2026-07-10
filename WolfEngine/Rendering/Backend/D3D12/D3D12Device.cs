@@ -482,6 +482,19 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		}
 	}
 
+	public void ClearPipelineCache()
+	{
+		lock (_pipelineLock)
+		{
+			foreach (var pipeline in _pipelineCache.Values)
+			{
+				if (pipeline is D3D12Pipeline d3d12Pipeline)
+					d3d12Pipeline.PipelineState.Dispose();
+			}
+			_pipelineCache.Clear();
+		}
+	}
+
 	public IGfxDescriptorSetBuilder CreateDescriptorSetBuilder()
 	{
 		return new D3D12DescriptorSetBuilder(_device);

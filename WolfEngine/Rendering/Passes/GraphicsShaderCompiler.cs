@@ -1,7 +1,7 @@
 #nullable enable
 
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -10,28 +10,21 @@ internal static class GraphicsShaderCompiler
 	public static ShaderBytecodeSet Compile(
 		IShaderCompiler shaderCompiler,
 		GraphicsBackendKind backendKind,
-		string shaderPath,
+		ShaderProgramId shaderProgram,
 		string vertexEntryPoint,
 		string pixelEntryPoint,
 		params string[] defines)
 	{
 		ArgumentNullException.ThrowIfNull(shaderCompiler);
 
-		if (backendKind == GraphicsBackendKind.Metal)
-		{
-			var library = shaderCompiler.GetMetalLibrary(shaderPath, vertexEntryPoint, pixelEntryPoint, defines);
-			return new ShaderBytecodeSet(library, library);
-		}
-
-		var vertex = shaderCompiler.GetDxil(shaderPath, vertexEntryPoint, "vs_6_0", defines);
-		var pixel = shaderCompiler.GetDxil(shaderPath, pixelEntryPoint, "ps_6_0", defines);
-		return new ShaderBytecodeSet(vertex, pixel);
+		return shaderCompiler.GetGraphicsShaderWithReflection(shaderProgram, vertexEntryPoint, pixelEntryPoint,
+			backendKind, defines).Bytecode;
 	}
 
 	public static CompiledGraphicsShaderWithReflection CompileWithReflection(
 		IShaderCompiler shaderCompiler,
 		GraphicsBackendKind backendKind,
-		string shaderPath,
+		ShaderProgramId shaderProgram,
 		string vertexEntryPoint,
 		string pixelEntryPoint,
 		params string[] defines)
@@ -39,7 +32,7 @@ internal static class GraphicsShaderCompiler
 		ArgumentNullException.ThrowIfNull(shaderCompiler);
 
 		return shaderCompiler.GetGraphicsShaderWithReflection(
-			shaderPath,
+			shaderProgram,
 			vertexEntryPoint,
 			pixelEntryPoint,
 			backendKind,

@@ -2,6 +2,8 @@ using System;
 using ImGuiNET;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
+using WolfEngine.Rendering;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Editor.UI;
 
@@ -23,6 +25,7 @@ public interface IEditorCommandService
 	bool RequestLoadScene(Guid assetId);
 	bool SaveScene();
 	bool RefreshAssetDatabase();
+	bool ReloadEngineShaders();
 	bool Undo();
 	bool Redo();
 	bool DuplicateFocusedSelection();
@@ -57,6 +60,8 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IShaderProvider _shaderProvider;
+	private readonly IRenderer _renderer;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -85,6 +90,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		IEditorInteractionState interactionState,
 		IEditorNotificationService notificationService,
 		IEditorUndoRedoService undoRedoService,
+		IShaderProvider shaderProvider,
+		IRenderer renderer,
 		IInputSystem inputSystem)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
@@ -94,6 +101,8 @@ public sealed class EditorCommandService : IEditorCommandService
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
+		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		ArgumentNullException.ThrowIfNull(inputSystem);
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
@@ -182,6 +191,24 @@ public sealed class EditorCommandService : IEditorCommandService
 		catch (Exception ex)
 		{
 			_notificationService.ReportError($"Failed to refresh asset database: {ex.Message}");
+			return false;
+		}
+	}
+
+	public bool ReloadEngineShaders()
+	{
+		try
+		{
+			var result = _shaderProvider.Reload(_renderer.GetGfxDevice().BackendKind);
+			if (result.AppliedArtifactCount > 0)
+				_notificationService.ReportInfo($"Reloaded {result.AppliedArtifactCount} engine shader artifact(s).");
+			foreach (var failure in result.Failures)
+				_notificationService.ReportError($"Shader reload failed for {failure.Request.ProgramId}: {failure.Error}");
+			return result.AppliedArtifactCount > 0 && result.Succeeded;
+		}
+		catch (Exception ex)
+		{
+			_notificationService.ReportError($"Failed to reload engine shaders: {ex.Message}");
 			return false;
 		}
 	}

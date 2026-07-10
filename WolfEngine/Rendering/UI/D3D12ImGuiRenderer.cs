@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Numerics;
@@ -8,6 +7,7 @@ using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
+using WolfEngine.Rendering.Shaders;
 using D3DRange = Silk.NET.Direct3D12.Range;
 using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
 using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
@@ -70,6 +70,14 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			CreateSrv();
 			_fontUploaded = true;
 		}
+	}
+
+	public void InvalidateShaderPipeline()
+	{
+		if (_pipelineState.Handle is not null) _pipelineState.Dispose();
+		if (_rootSignature.Handle is not null) _rootSignature.Dispose();
+		_pipelineState = default;
+		_rootSignature = default;
 	}
 
 	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
@@ -518,7 +526,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		};
 
 		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"imgui.slang",
+			EngineShaderPrograms.ImGui,
 			"vertexShader",
 			"fragmentShader",
 			GraphicsBackendKind.D3D12);

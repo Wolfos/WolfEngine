@@ -23,7 +23,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_cull.compute.slang",
+			ShaderPath("gpu_draw_cull.compute.slang"),
 			"CSCull",
 			GraphicsBackendKind.Metal);
 		var cullParams = compiled.ReflectionLayout.GetConstantBuffer("CullParams");
@@ -50,7 +50,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			"ao_rtao.compute.slang",
+			ShaderPath("ao_rtao.compute.slang"),
 			"AmbientOcclusionRayTracedCS",
 			GraphicsBackendKind.Metal);
 
@@ -69,7 +69,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			"terrain_rt_vertex_update.compute.slang",
+			ShaderPath("terrain_rt_vertex_update.compute.slang"),
 			"TerrainRayTracingVertexUpdateCS",
 			GraphicsBackendKind.Metal);
 
@@ -108,7 +108,7 @@ public sealed class RayTracingSceneResourcesTests
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
-				shader.Name,
+				ShaderPath(shader.Name),
 				shader.EntryPoint,
 				GraphicsBackendKind.Metal);
 
@@ -138,7 +138,7 @@ public sealed class RayTracingSceneResourcesTests
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
-				shader.Name,
+				ShaderPath(shader.Name),
 				shader.EntryPoint,
 				GraphicsBackendKind.Metal);
 
@@ -172,7 +172,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetGraphicsShaderWithReflection(
-			"debug_primitive_forward.slang",
+			ShaderPath("debug_primitive_forward.slang"),
 			"vertexShader",
 			"fragmentShader",
 			GraphicsBackendKind.Metal);
@@ -267,7 +267,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			"deferred_lighting.compute.slang",
+			ShaderPath("deferred_lighting.compute.slang"),
 			"DeferredLightingCS",
 			GraphicsBackendKind.Metal);
 
@@ -313,6 +313,9 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(roundTripped.Bloom.Tint, Is.EqualTo(new Vector3(1.0f, 0.5f, 0.25f)));
 		Assert.That(roundTripped.Bloom.Quality, Is.EqualTo(BloomQuality.Low));
 	}
+
+	private static string ShaderPath(string relativePath) => Path.GetFullPath(Path.Combine(
+		TestContext.CurrentContext.TestDirectory, "..", "..", "..", "..", "WolfEngine", "Shaders", relativePath));
 
 	[Test]
 	public void DdgiDefaultsAndAtlasSizingMatchMilestoneDefaults()

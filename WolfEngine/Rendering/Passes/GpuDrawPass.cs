@@ -1,11 +1,10 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -1026,7 +1025,7 @@ public sealed class GpuDrawPass
 		}
 
 		var instanceUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_instance_update.compute.slang",
+			EngineShaderPrograms.GpuDrawInstanceUpdate,
 			"CSUpdateInstance",
 			backendKind);
 		_instanceUpdateShaderBytecode = instanceUpdateCompiled.Bytecode;
@@ -1035,7 +1034,7 @@ public sealed class GpuDrawPass
 			new ShaderPropertyWriter(instanceUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 
 		var meshUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_mesh_update.compute.slang",
+			EngineShaderPrograms.GpuDrawMeshUpdate,
 			"CSUpdateMesh",
 			backendKind);
 		_meshUpdateShaderBytecode = meshUpdateCompiled.Bytecode;
@@ -1044,7 +1043,7 @@ public sealed class GpuDrawPass
 			new ShaderPropertyWriter(meshUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 
 		var materialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_material_update.compute.slang",
+			EngineShaderPrograms.GpuDrawMaterialUpdate,
 			"CSUpdateMaterial",
 			backendKind);
 		_materialUpdateShaderBytecode = materialUpdateCompiled.Bytecode;
@@ -1053,7 +1052,7 @@ public sealed class GpuDrawPass
 			new ShaderPropertyWriter(materialUpdateCompiled.ReflectionLayout.GetConstantBuffer("UpdateParams"));
 
 		var terrainMaterialUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_terrain_material_update.compute.slang",
+			EngineShaderPrograms.GpuDrawTerrainMaterialUpdate,
 			"CSUpdateTerrainMaterial",
 			backendKind);
 		_terrainMaterialUpdateShaderBytecode = terrainMaterialUpdateCompiled.Bytecode;
@@ -1067,7 +1066,7 @@ public sealed class GpuDrawPass
 			terrainMaterialUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
 
 		var terrainLayerUpdateCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_terrain_layer_update.compute.slang",
+			EngineShaderPrograms.GpuDrawTerrainLayerUpdate,
 			"CSUpdateTerrainLayer",
 			backendKind);
 		_terrainLayerUpdateShaderBytecode = terrainLayerUpdateCompiled.Bytecode;
@@ -1081,7 +1080,7 @@ public sealed class GpuDrawPass
 			terrainLayerUpdateCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex);
 
 		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gpu_draw_cull.compute.slang",
+			EngineShaderPrograms.GpuDrawCull,
 			"CSCull",
 			backendKind);
 		_cullShaderBytecode = cullCompiled.Bytecode;
@@ -1766,11 +1765,11 @@ public sealed class GpuDrawPass
 
 	private static uint GetPackedHandleIndex(uint handle) => handle & 0xFFFFu;
 
-	private static string GetGBufferShaderPath(GpuDrawKind drawKind) => drawKind switch
+	private static ShaderProgramId GetGBufferShaderPath(GpuDrawKind drawKind) => drawKind switch
 	{
-		GpuDrawKind.Mesh => "gbuffer.slang",
-		GpuDrawKind.DebugPrimitive => "debug_primitive_gbuffer.slang",
-		GpuDrawKind.Terrain => "terrain_shared_gbuffer.slang",
+		GpuDrawKind.Mesh => EngineShaderPrograms.GBuffer,
+		GpuDrawKind.DebugPrimitive => EngineShaderPrograms.DebugPrimitiveGBuffer,
+		GpuDrawKind.Terrain => EngineShaderPrograms.TerrainSharedGBuffer,
 		_ => throw new NotSupportedException($"G-buffer shared draw kind '{drawKind}' does not define a shader.")
 	};
 

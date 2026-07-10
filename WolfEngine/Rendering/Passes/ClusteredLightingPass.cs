@@ -1,7 +1,7 @@
-using System;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -116,11 +116,11 @@ public sealed class ClusteredLightingPass
 		}
 
 		var build = _shaderCompiler.GetComputeShaderWithReflection(
-			"clustered_lighting.compute.slang",
+			EngineShaderPrograms.ClusteredLighting,
 			"CSBuildClusters",
 			backendKind);
 		var write = _shaderCompiler.GetComputeShaderWithReflection(
-			"clustered_lighting.compute.slang",
+			EngineShaderPrograms.ClusteredLighting,
 			"CSWriteLightIndices",
 			backendKind);
 		_buildClustersThreadGroupSize = build.ThreadGroupSize;

@@ -7,6 +7,7 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Utility;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering;
 
@@ -32,6 +33,9 @@ public sealed class RenderGraph
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly GpuProfiler _gpuProfiler;
+	private readonly IImGuiRenderer _imGuiRenderer;
+	private long _pendingShaderRevision;
+	private long _appliedShaderRevision;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
 	private FrameSnapshot _currentSnapshot;
@@ -67,6 +71,7 @@ public sealed class RenderGraph
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer,
 		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		IGpuDrawBackendBridge gpuDrawBackendBridge)
 	{
@@ -85,16 +90,19 @@ public sealed class RenderGraph
 			renderer,
 			passSet,
 			gpuDrawResources,
-			imGuiRenderer);
+			imGuiRenderer,
+			shaderCompiler);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
+		_imGuiRenderer = imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
+		shaderProvider.RevisionChanged += revision => Interlocked.Exchange(ref _pendingShaderRevision, revision);
 	}
 
 
@@ -108,6 +116,7 @@ public sealed class RenderGraph
 
 	public void Execute()
 	{
+		ApplyPendingShaderReload();
 		// Compile barriers before execution
 		_compiler.Compile(_passes);
 		_frameBuilder.PrepareSceneViewport();
@@ -246,6 +255,28 @@ public sealed class RenderGraph
 		gpuFrameCapture?.Seal();
 
 		ReleasePasses();
+	}
+
+	private void ApplyPendingShaderReload()
+	{
+		var revision = Interlocked.Read(ref _pendingShaderRevision);
+		if (revision == 0 || revision == _appliedShaderRevision) return;
+		var device = _renderer.GetGfxDevice();
+		device.WaitForIdle();
+		_frameBuilder.InvalidateShaderPipelines();
+		ShaderPipelineInvalidation.Invalidate(_gpuDrawResources);
+		ShaderPipelineInvalidation.Invalidate(_renderer);
+		_imGuiRenderer.InvalidateShaderPipeline();
+		device.ClearPipelineCache();
+		lock (_resourceSync)
+		{
+			foreach (var material in _trackedMaterials)
+			{
+				material.MarkGpuResourcesDirty();
+				_pendingMaterials.Add(material);
+			}
+		}
+		_appliedShaderRevision = revision;
 	}
 
 	private static bool TryCreatePreviousCameraState(

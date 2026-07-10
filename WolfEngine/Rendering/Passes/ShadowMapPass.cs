@@ -1,10 +1,9 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -289,7 +288,7 @@ public sealed class ShadowMapPass
 		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			device.BackendKind,
-			"shadow_map.slang",
+			EngineShaderPrograms.ShadowMap,
 			"vertexShader",
 			"fragmentShader",
 			lane.PreprocessorDefine,
@@ -333,7 +332,7 @@ public sealed class ShadowMapPass
 		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			backendKind,
-			"shadow_map.slang",
+			EngineShaderPrograms.ShadowMap,
 			"vertexShader",
 			"fragmentShader");
 		_cameraWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("CameraParams"));

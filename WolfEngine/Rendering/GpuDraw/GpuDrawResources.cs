@@ -1,10 +1,10 @@
 #nullable enable
 
-using System;
 using System.Runtime.InteropServices;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering;
 
@@ -84,7 +84,8 @@ public sealed class GpuDrawResources : IDisposable
 		{
 			if (value < 0 || value >= IndirectCommandBufferSlotCount)
 			{
-				throw new ArgumentOutOfRangeException(nameof(value), value, "Indirect command buffer slot is out of range.");
+				throw new ArgumentOutOfRangeException(nameof(value), value,
+					"Indirect command buffer slot is out of range.");
 			}
 
 			_activeIndirectCommandSlot = value;
@@ -116,7 +117,7 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? TerrainLayerUpdateBuffer => _terrainLayerUpdateBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? CameraBuffer => _cameraBuffers[_activeFrameSlot];
-	
+
 	public IGfxBuffer? ShadowCameraBuffer => _shadowCameraBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? TransparentEnvironmentBuffer => _transparentEnvironmentBuffers[_activeFrameSlot];
@@ -140,15 +141,17 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? ClusterOverflowBuffer => _clusterOverflowBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DrawCountPerBucketBuffer => _drawCountPerBucketBuffers[_activeFrameSlot];
-	
+
 	public IGfxBuffer? ShadowDrawCountPerBucketBuffer => _shadowDrawCountPerBucketBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DrawExecutionRangePerBucketBuffer => _drawExecutionRangePerBucketBuffers[_activeFrameSlot];
-	
-	public IGfxBuffer? ShadowDrawExecutionRangePerBucketBuffer => _shadowDrawExecutionRangePerBucketBuffers[_activeFrameSlot];
+
+	public IGfxBuffer? ShadowDrawExecutionRangePerBucketBuffer =>
+		_shadowDrawExecutionRangePerBucketBuffers[_activeFrameSlot];
 
 	public ShaderConstantBufferLayout GBufferCameraLayout => _gBufferCameraLayout
-		?? throw new InvalidOperationException("GpuDraw camera layout was not initialized.");
+	                                                         ?? throw new InvalidOperationException(
+		                                                         "GpuDraw camera layout was not initialized.");
 
 	public ClusteredLightingFrameLayout ClusteredLightingLayout => _clusteredLightingLayout;
 
@@ -244,7 +247,7 @@ public sealed class GpuDrawResources : IDisposable
 				_cameraBuffers[i],
 				_cameraBufferSizeInBytes,
 				$"CameraBuffer[{i}]");
-			
+
 			_shadowCameraBuffers[i] = EnsureConstantBufferCapacity(
 				device,
 				_shadowCameraBuffers[i],
@@ -273,7 +276,7 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-			
+
 			_shadowDrawCountPerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * sizeof(uint)),
 				BufferUsage.Indirect,
@@ -283,7 +286,7 @@ public sealed class GpuDrawResources : IDisposable
 				(ulong)(GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-			
+
 			_shadowDrawExecutionRangePerBucketBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)(MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2 * sizeof(uint)),
 				BufferUsage.Indirect,
@@ -309,7 +312,6 @@ public sealed class GpuDrawResources : IDisposable
 				BufferUsage.Structured,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		}
-
 	}
 
 	public void EnsureClusteredLightingCapacity(IGfxDevice device, Int2 sceneFramebufferSize)
@@ -319,7 +321,8 @@ public sealed class GpuDrawResources : IDisposable
 		var requiredGrid = ClusteredLightingShared.ComputeGrid(sceneFramebufferSize);
 		var requiredClusterCount = ClusteredLightingShared.ComputeClusterCount(sceneFramebufferSize);
 		var requiredLightIndexCapacity = ClusteredLightingShared.ComputeIndexCapacity(sceneFramebufferSize);
-		_clusteredLightingLayout = new ClusteredLightingFrameLayout(requiredGrid, requiredClusterCount, requiredLightIndexCapacity);
+		_clusteredLightingLayout =
+			new ClusteredLightingFrameLayout(requiredGrid, requiredClusterCount, requiredLightIndexCapacity);
 
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
@@ -486,6 +489,7 @@ public sealed class GpuDrawResources : IDisposable
 			_materialGenerationBuffers[i] = null;
 			_meshGenerationBuffers[i] = null;
 		}
+
 		TerrainMaterialBuffer = null;
 		TerrainLayerBuffer = null;
 		ShadowDrawArgsBuffer = null;
@@ -518,7 +522,7 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		var gbuffer = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"gbuffer.slang",
+			EngineShaderPrograms.GBuffer,
 			"vertexShader",
 			"fragmentShader",
 			backendKind);
@@ -526,22 +530,24 @@ public sealed class GpuDrawResources : IDisposable
 		_cameraBufferSizeInBytes = _gBufferCameraLayout.SizeInBytes;
 
 		var shadow = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"shadow_map.slang",
+			EngineShaderPrograms.ShadowMap,
 			"vertexShader",
 			"fragmentShader",
 			backendKind);
 		_shadowCameraBufferSizeInBytes = shadow.ReflectionLayout.GetConstantBuffer("CameraParams").SizeInBytes;
 
 		var transparent = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"transparent_forward.slang",
+			EngineShaderPrograms.TransparentForward,
 			"vertexShader",
 			"fragmentShader",
 			backendKind);
-		_transparentEnvironmentBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("TransparentEnvironmentParams").SizeInBytes;
-		_transparentLightingBufferSizeInBytes = transparent.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
+		_transparentEnvironmentBufferSizeInBytes = transparent.ReflectionLayout
+			.GetConstantBuffer("TransparentEnvironmentParams").SizeInBytes;
+		_transparentLightingBufferSizeInBytes =
+			transparent.ReflectionLayout.GetConstantBuffer("LightingParams").SizeInBytes;
 
 		var debugPrimitive = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"debug_primitive_forward.slang",
+			EngineShaderPrograms.DebugPrimitiveForward,
 			"vertexShader",
 			"fragmentShader",
 			backendKind);
@@ -599,5 +605,4 @@ public sealed class GpuDrawResources : IDisposable
 			BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 	}
-
 }

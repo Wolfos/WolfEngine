@@ -10,15 +10,20 @@ using WolfEngine.Rendering.Backend.D3D12;
 using WolfEngine.Rendering.Backend.Metal;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Rendering.Shaders;
 using WolfEngine.Utility;
 
 namespace WolfEngine;
 
 public static class WolfEngine
 {
-	public static void ConfigureServices(IServiceCollection services)
+	public static void ConfigureServices(IServiceCollection services, EngineShaderOptions shaderOptions)
 	{
-		services.AddSingleton<IShaderCompiler, ShaderCompiler>();
+		ArgumentNullException.ThrowIfNull(shaderOptions);
+		services.AddSingleton(shaderOptions);
+		services.AddSingleton<EngineShaderCatalog>();
+		services.AddSingleton<IShaderProvider, DevelopmentShaderProvider>();
+		services.AddSingleton<IShaderCompiler, LegacyShaderCompilerAdapter>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();
 		services.AddSingleton<IMaterialFactory, MaterialFactory>();

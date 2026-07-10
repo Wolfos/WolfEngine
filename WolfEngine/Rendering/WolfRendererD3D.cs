@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Numerics;
+﻿using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -19,6 +15,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Rendering.Shaders;
 using BackendD3D12Texture = WolfEngine.Backend.D3D12.D3D12Texture;
 using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
 using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
@@ -835,9 +832,6 @@ private sealed class MeshResources
 			throw new ArgumentNullException(nameof(material));
 		}
 
-		var vertexShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "vertexShader", "vs_6_0");
-		var pixelShaderBytes = _shaderCompiler.GetDxil(material.ShaderPath, "fragmentShader", "ps_6_0");
-
 		// Wrap in abstraction interfaces
 		var renderState = new RenderStateDescriptor(
 			AbstractionFillMode.Solid,
@@ -862,7 +856,8 @@ private sealed class MeshResources
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material);
 
-		var shaderSet = new ShaderBytecodeSet(vertexShaderBytes, pixelShaderBytes);
+		var shaderSet = _shaderCompiler.GetGraphicsShaderWithReflection(
+			EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader", GraphicsBackendKind.D3D12).Bytecode;
 		var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderSet);
 
 		var albedoResources = material.AlbedoTexture?.Resources

@@ -368,6 +368,11 @@ public sealed class MenuBar : IMenuBar
 			_commandService.RefreshAssetDatabase();
 		}
 
+		if (ImGui.MenuItem("Reload Engine Shaders"))
+		{
+			_commandService.ReloadEngineShaders();
+		}
+
 		if (hasOpenProject == false)
 		{
 			ImGui.EndDisabled();

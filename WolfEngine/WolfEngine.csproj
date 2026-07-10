@@ -1,22 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
-    </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
-
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    </PropertyGroup>
-
-<!--    <PropertyGroup>-->
-<!--        <PublishAot>true</PublishAot>-->
-<!--    </PropertyGroup>-->
 
     <ItemGroup>
         <PackageReference Include="ImGui.NET" Version="1.91.6.1"/>
@@ -35,16 +24,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="Shaders\gbuffer.slang">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\deferred_lighting.compute.slang">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\clustered_lighting.compute.slang">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
         <None Update="Assets\Monkey.obj">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Assets\Fonts\Inter-VariableFont_opsz,wght.ttf">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
         <None Update="Binaries\dxcompiler.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
@@ -55,176 +38,11 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <TargetPath>dxil.dll</TargetPath>
         </None>
-        <None Update="Shaders\common.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\imgui.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\procedural_skybox.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ibl_brdf_lut.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ibl_common.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ibl_irradiance.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ibl_prefilter.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\common_bindless.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Assets\Fonts\Inter-VariableFont_opsz,wght.ttf">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\constants.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_cull.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\draw_data.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\common_lighting.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\transparent_forward.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\shadow_map.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ao_vbao.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ao_rtao.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_common.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_classify.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_trace.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_relocate.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_irradiance_integrate.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_integrate.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ao_blur.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ao_upsample.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\taa_resolve.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\taa_history_store.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\tonemapping.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\bloom.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\cas_sharpen.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\copy_to_final.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\bc1_compress.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\bc4_compress.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\bc3_stitch.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\bc5_stitch.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\betsy\LICENSE.md">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\betsy\NOTICE.md">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ffx-cas\ffx_a.h">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ffx-cas\ffx_cas.h">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ffx-cas\LICENSE.txt">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\normal_decode.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\terrain_shared_gbuffer.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\debug_primitive_forward.slang">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\debug_primitive_gbuffer.slang">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_instance_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_material_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_mesh_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_terrain_layer_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gpu_draw_terrain_material_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\terrain_rt_vertex_update.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\TerrainTools\terrain_authoring_brushes.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\screen_space_decal.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\gbuffer_decal_seed.compute.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-        <None Update="Shaders\ddgi_visibility.slang">
-          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
-    </ItemGroup>
-
-    <ItemGroup>
         <Folder Include="Binaries\"/>
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
+        <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
     </ItemGroup>
 
 </Project>

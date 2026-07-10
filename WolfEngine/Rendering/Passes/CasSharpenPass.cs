@@ -1,5 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -128,7 +128,7 @@ public sealed class CasSharpenPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"cas_sharpen.compute.slang",
+			EngineShaderPrograms.CasSharpen,
 			"CasSharpenCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;

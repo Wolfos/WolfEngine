@@ -1,5 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -161,7 +161,7 @@ public sealed class TemporalAntiAliasingPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"taa_resolve.compute.slang",
+			EngineShaderPrograms.TaaResolve,
 			"TaaResolveCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;

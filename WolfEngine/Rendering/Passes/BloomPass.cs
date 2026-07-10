@@ -1,7 +1,7 @@
-using System;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -100,7 +100,7 @@ public sealed class BloomPass
 			Stage.Prefilter => "BloomPrefilterCS", Stage.Downsample => "BloomDownsampleCS",
 			Stage.Upsample => "BloomUpsampleCS", _ => "BloomCompositeCS"
 		};
-		var compiled = _shaderCompiler.GetComputeShaderWithReflection("bloom.compute.slang", entryPoint, device.BackendKind);
+		var compiled = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.Bloom, entryPoint, device.BackendKind);
 		_shaders[index] = compiled.Bytecode;
 		_threadGroupSizes[index] = compiled.ThreadGroupSize;
 		_bindlessWriters[index] = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("BindlessHandles"));

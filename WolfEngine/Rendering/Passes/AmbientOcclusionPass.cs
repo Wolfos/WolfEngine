@@ -1,6 +1,6 @@
-using System;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -298,7 +298,7 @@ public sealed class AmbientOcclusionPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"ao_vbao.compute.slang",
+			EngineShaderPrograms.AmbientOcclusionVbao,
 			"AmbientOcclusionVisibilityBitmaskCS",
 			backendKind);
 
@@ -325,7 +325,7 @@ public sealed class AmbientOcclusionPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"ao_rtao.compute.slang",
+			EngineShaderPrograms.AmbientOcclusionRayTraced,
 			"AmbientOcclusionRayTracedCS",
 			backendKind);
 

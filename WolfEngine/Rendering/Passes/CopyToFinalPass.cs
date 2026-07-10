@@ -1,5 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -50,21 +50,24 @@ public sealed class CopyToFinalPass
 		commandList.BindPipeline(config.Pipeline);
 
 		var bindlessWriter = _bindlessWriter
-			?? throw new InvalidOperationException("Copy-to-final bindless writer was not initialized.");
+		                     ?? throw new InvalidOperationException(
+			                     "Copy-to-final bindless writer was not initialized.");
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("inputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var settingsWriter = _settingsWriter
-			?? throw new InvalidOperationException("Copy-to-final settings writer was not initialized.");
+		                     ?? throw new InvalidOperationException(
+			                     "Copy-to-final settings writer was not initialized.");
 		settingsWriter.Clear();
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSize
-			?? throw new InvalidOperationException("Copy-to-final threadgroup size was not initialized.");
+		                      ?? throw new InvalidOperationException(
+			                      "Copy-to-final threadgroup size was not initialized.");
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
 			(uint)Math.Max(config.RenderSize.X, 1),
 			(uint)Math.Max(config.RenderSize.Y, 1));
@@ -113,7 +116,7 @@ public sealed class CopyToFinalPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"copy_to_final.compute.slang",
+			EngineShaderPrograms.CopyToFinal,
 			"CopyToFinalCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;

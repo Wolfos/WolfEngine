@@ -1,6 +1,6 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
 using System.Numerics;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -145,7 +145,7 @@ public sealed class AmbientOcclusionBlurPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"ao_blur.compute.slang",
+			EngineShaderPrograms.AmbientOcclusionBlur,
 			"AmbientOcclusionBlurCS",
 			backendKind);
 

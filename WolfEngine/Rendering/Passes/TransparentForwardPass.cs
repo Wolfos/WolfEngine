@@ -1,8 +1,7 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -398,10 +397,10 @@ public sealed class TransparentForwardPass
 		return pipeline;
 	}
 
-	private static string GetShaderPath(GpuDrawKind drawKind) => drawKind switch
+	private static ShaderProgramId GetShaderPath(GpuDrawKind drawKind) => drawKind switch
 	{
-		GpuDrawKind.Mesh => "transparent_forward.slang",
-		GpuDrawKind.DebugPrimitive => "debug_primitive_forward.slang",
+		GpuDrawKind.Mesh => EngineShaderPrograms.TransparentForward,
+		GpuDrawKind.DebugPrimitive => EngineShaderPrograms.DebugPrimitiveForward,
 		_ => throw new NotSupportedException($"Transparent shared draw kind '{drawKind}' does not define a shader.")
 	};
 
@@ -419,7 +418,7 @@ public sealed class TransparentForwardPass
 		var compiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			backendKind,
-			"transparent_forward.slang",
+			EngineShaderPrograms.TransparentForward,
 			"vertexShader",
 			"fragmentShader");
 		var reflection = compiled.ReflectionLayout;
@@ -430,7 +429,7 @@ public sealed class TransparentForwardPass
 		var debugCompiled = GraphicsShaderCompiler.CompileWithReflection(
 			_shaderCompiler,
 			backendKind,
-			"debug_primitive_forward.slang",
+			EngineShaderPrograms.DebugPrimitiveForward,
 			"vertexShader",
 			"fragmentShader");
 		_ddgiDebugWriter = new ShaderPropertyWriter(

@@ -1,6 +1,6 @@
-using System;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -137,7 +137,7 @@ public sealed class AmbientOcclusionUpsamplePass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"ao_upsample.compute.slang",
+			EngineShaderPrograms.AmbientOcclusionUpsample,
 			"AmbientOcclusionUpsampleCS",
 			backendKind);
 

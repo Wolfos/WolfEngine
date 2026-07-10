@@ -55,6 +55,9 @@ public interface IGfxDevice
 	/// </summary>
 	IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders);
 
+	/// <summary>Waits for the caller to establish a safe frame boundary, then releases cached pipeline states.</summary>
+	void ClearPipelineCache() { }
+
 	/// <summary>
 	/// Global bindless descriptor table shared across passes and command lists.
 	/// </summary>

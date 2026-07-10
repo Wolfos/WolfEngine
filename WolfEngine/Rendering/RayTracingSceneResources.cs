@@ -1,9 +1,8 @@
 #nullable enable
 
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering;
 
@@ -71,7 +70,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
-	private readonly ShaderCompiler _shaderCompiler = new();
+	private readonly IShaderCompiler _shaderCompiler;
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
 	private IGfxBuffer? _instanceIndexToInstanceHandleBuffer;
 	private IGfxBuffer? _instanceIndexToTerrainRayTracingResolutionBuffer;
@@ -83,6 +82,15 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private RayTracingSceneStats _lastStats;
 	private bool _bootstrapPending = true;
 	private bool _tlasDirty;
+
+	public RayTracingSceneResources(IShaderCompiler shaderCompiler)
+	{
+		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+	}
+
+	public RayTracingSceneResources() : this(new ShaderCompiler())
+	{
+	}
 
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
 
@@ -644,7 +652,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"terrain_rt_vertex_update.compute.slang",
+			EngineShaderPrograms.TerrainRayTracingVertexUpdate,
 			"TerrainRayTracingVertexUpdateCS",
 			device.BackendKind);
 		_terrainVertexUpdateShaderBytecode = compiled.Bytecode;

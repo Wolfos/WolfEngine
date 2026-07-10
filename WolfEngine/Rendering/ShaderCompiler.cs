@@ -4,35 +4,40 @@ using System.IO;
 using Slangc.NET;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine;
 
-public interface IShaderCompiler
-{
-	ReadOnlyMemory<byte> GetMetalLibrary(string filename);
-	ReadOnlyMemory<byte> GetMetalLibrary(string filename, string vertexEntryPoint, string pixelEntryPoint, params string[] defines);
-	ReadOnlyMemory<byte> GetMetalComputeLibrary(string filename, string entryPoint);
-	byte[] GetDxil(string filename, string entryPoint, string profile, params string[] defines);
-	ReadOnlyMemory<byte> GetComputeShader(string filename, string entryPoint);
-	CompiledComputeShaderWithReflection GetComputeShaderWithReflection(
-		string filename,
-		string entryPoint,
-		GraphicsBackendKind backendKind,
-		params string[] defines);
-	CompiledGraphicsShaderWithReflection GetGraphicsShaderWithReflection(
-		string filename,
-		string vertexEntryPoint,
-		string pixelEntryPoint,
-		GraphicsBackendKind backendKind,
-		params string[] defines);
-}
+public interface IShaderCompiler : IShaderProvider;
 
 public class ShaderCompiler : IShaderCompiler
 {
+	private DevelopmentShaderProvider? _provider;
 	private readonly Dictionary<string, ReadOnlyMemory<byte>> _cachedMetalLibraries = new();
 	private readonly Dictionary<(string file, string entry, string profile, string defines), byte[]> _cachedDxil = new();
 	private readonly Dictionary<(string file, string entry, string target, string profile, string stage, string defines), CompiledComputeShaderWithReflection> _cachedComputeWithReflection = new();
 	private readonly Dictionary<(string file, string vsEntry, string psEntry, string target, string vsProfile, string psProfile, string defines), CompiledGraphicsShaderWithReflection> _cachedGraphicsWithReflection = new();
+
+	public long Revision => EnsureProvider().Revision;
+	public event Action<long>? RevisionChanged
+	{
+		add => EnsureProvider().RevisionChanged += value;
+		remove => EnsureProvider().RevisionChanged -= value;
+	}
+	public CompiledShaderArtifact GetArtifact(ShaderRequest request) => EnsureProvider().GetArtifact(request);
+	public void SetProjectRoot(string? projectRootPath) => EnsureProvider().SetProjectRoot(projectRootPath);
+	public ShaderReloadResult Reload(GraphicsBackendKind backendKind) => EnsureProvider().Reload(backendKind);
+
+	private DevelopmentShaderProvider EnsureProvider()
+	{
+		if (_provider is not null) return _provider;
+		var configuredRoot = Environment.GetEnvironmentVariable("WOLF_ENGINE_CONTENT_ROOT");
+		var root = string.IsNullOrWhiteSpace(configuredRoot)
+			? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"))
+			: configuredRoot;
+		_provider = new DevelopmentShaderProvider(new EngineShaderOptions { EngineContentRoot = root }, new EngineShaderCatalog());
+		return _provider;
+	}
 
 	public ReadOnlyMemory<byte> GetMetalLibrary(string filename)
 	{
@@ -65,9 +70,7 @@ public class ShaderCompiler : IShaderCompiler
 			return cachedLibrary;
 		}
 
-		var shaderPath = Path.IsPathRooted(filename)
-			? filename
-			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+		var shaderPath = ResolveShaderPath(filename);
 
 		if (!File.Exists(shaderPath))
 		{
@@ -121,9 +124,7 @@ public class ShaderCompiler : IShaderCompiler
 			throw new ArgumentException("Entry point cannot be null or empty.", nameof(entryPoint));
 		}
 
-		var shaderPath = Path.IsPathRooted(filename)
-			? filename
-			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+		var shaderPath = ResolveShaderPath(filename);
 
 		if (!File.Exists(shaderPath))
 		{
@@ -164,7 +165,8 @@ public class ShaderCompiler : IShaderCompiler
 		}
 
 		var dumpBaseName = BuildMetalDumpBaseName(shaderPath, compileArgs);
-		var shaderOutputDirectory = Path.Combine(AppContext.BaseDirectory, "Shaders");
+		var shaderOutputDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine", "ShaderDumps");
+		Directory.CreateDirectory(shaderOutputDirectory);
 		if (shouldDumpMetallib)
 		{
 			var metallibPath = Path.Combine(shaderOutputDirectory, $"{dumpBaseName}.metallib");
@@ -270,9 +272,7 @@ public class ShaderCompiler : IShaderCompiler
 			return cached;
 		}
 
-		var shaderPath = Path.IsPathRooted(filename)
-			? filename
-			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+		var shaderPath = ResolveShaderPath(filename);
 
 		if (!File.Exists(shaderPath))
 		{
@@ -332,9 +332,7 @@ public class ShaderCompiler : IShaderCompiler
 			throw new ArgumentException("Entry point cannot be null or empty.", nameof(entryPoint));
 		}
 
-		var shaderPath = Path.IsPathRooted(filename)
-			? filename
-			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+		var shaderPath = ResolveShaderPath(filename);
 
 		if (!File.Exists(shaderPath))
 		{
@@ -426,9 +424,7 @@ public class ShaderCompiler : IShaderCompiler
 			throw new ArgumentException("Pixel entry point cannot be null or empty.", nameof(pixelEntryPoint));
 		}
 
-		var shaderPath = Path.IsPathRooted(filename)
-			? filename
-			: Path.Combine(AppContext.BaseDirectory, "Shaders", filename);
+		var shaderPath = ResolveShaderPath(filename);
 
 		if (!File.Exists(shaderPath))
 		{
@@ -594,5 +590,12 @@ public class ShaderCompiler : IShaderCompiler
 		return normalized.Count == 0
 			? string.Empty
 			: string.Join(";", normalized);
+	}
+
+	private static string ResolveShaderPath(string filename)
+	{
+		if (Path.IsPathRooted(filename) == false)
+			throw new ArgumentException("The low-level shader compiler requires an absolute source path.", nameof(filename));
+		return Path.GetFullPath(filename);
 	}
 }

@@ -1,7 +1,6 @@
-
-using System;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -429,7 +428,7 @@ public sealed class DeferredLightingPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"deferred_lighting.compute.slang",
+			EngineShaderPrograms.DeferredLighting,
 			"DeferredLightingCS",
 			backendKind);
 

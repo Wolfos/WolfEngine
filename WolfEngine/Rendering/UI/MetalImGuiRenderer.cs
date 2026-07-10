@@ -1,13 +1,12 @@
-using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
-using System.Collections.Generic;
 using ImGuiNET;
 using SharpMetal.Metal;
 using WolfEngine.Platform;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.UI;
 
@@ -56,6 +55,11 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			CreateFontTexture(device, frame.FontAtlas);
 			_fontUploaded = true;
 		}
+	}
+
+	public void InvalidateShaderPipeline()
+	{
+		_pipeline = null;
 	}
 
 	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
@@ -303,7 +307,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private IGfxPipeline CreatePipeline(IGfxDevice device)
 	{
 		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
-			"imgui.slang",
+			EngineShaderPrograms.ImGui,
 			"vertexShader",
 			"fragmentShader",
 			GraphicsBackendKind.Metal);

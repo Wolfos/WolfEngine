@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Threading;
-using System.Threading.Tasks;
 using ThreadingThread = System.Threading.Thread;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -20,6 +15,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.Metal;
+using WolfEngine.Rendering.Shaders;
 using AbstractionBlendMode = WolfEngine.Rendering.Abstraction.BlendMode;
 
 namespace WolfEngine;
@@ -566,8 +562,9 @@ internal unsafe class WolfRendererMetal : IRenderer
             renderState: renderState,
             layout: GraphicsLayoutKind.Material);
 
-        var shaderBytes = _shaderCompiler.GetMetalLibrary(material.ShaderPath);
-        var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
+        var shaderBytes = _shaderCompiler.GetGraphicsShaderWithReflection(
+            EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader", GraphicsBackendKind.Metal).Bytecode;
+        var pipeline = _gfxDevice.GetOrCreatePipeline(pipelineKey, shaderBytes);
 
         if (_linearSamplerHandle.IsValid == false)
         {

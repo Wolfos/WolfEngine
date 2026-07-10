@@ -1,5 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -131,7 +131,7 @@ public sealed class GBufferDecalSeedPass
 		}
 
 		var compiled = _shaderCompiler.GetComputeShaderWithReflection(
-			"gbuffer_decal_seed.compute.slang",
+			EngineShaderPrograms.GBufferDecalSeed,
 			"GBufferDecalSeedCS",
 			backendKind);
 		_computeShader = compiled.Bytecode;

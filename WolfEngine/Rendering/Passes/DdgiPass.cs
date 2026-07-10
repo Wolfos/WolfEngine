@@ -1,7 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
@@ -567,12 +566,12 @@ public sealed class DdgiPass
 			throw new NotImplementedException("Ray traced DDGI is currently implemented for Metal only.");
 		}
 
-		var classify = _shaderCompiler.GetComputeShaderWithReflection("ddgi_classify.compute.slang", "DdgiProbeClassifyCS", device.BackendKind);
-		var trace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "DdgiProbeTraceCS", device.BackendKind);
-		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection("ddgi_trace.compute.slang", "DdgiRelocationTraceCS", device.BackendKind);
-		var relocate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_relocate.compute.slang", "DdgiRelocationSolveCS", device.BackendKind);
-		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_irradiance_integrate.compute.slang", "DdgiIrradianceIntegrateCS", device.BackendKind);
-		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection("ddgi_integrate.compute.slang", "DdgiVisibilityIntegrateCS", device.BackendKind);
+		var classify = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiClassify, "DdgiProbeClassifyCS", device.BackendKind);
+		var trace = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiTrace, "DdgiProbeTraceCS", device.BackendKind);
+		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiTrace, "DdgiRelocationTraceCS", device.BackendKind);
+		var relocate = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiRelocate, "DdgiRelocationSolveCS", device.BackendKind);
+		var irradianceIntegrate = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiIrradianceIntegrate, "DdgiIrradianceIntegrateCS", device.BackendKind);
+		var visibilityIntegrate = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiIntegrate, "DdgiVisibilityIntegrateCS", device.BackendKind);
 		_classifyShader = classify.Bytecode;
 		_traceShader = trace.Bytecode;
 		_relocationTraceShader = relocationTrace.Bytecode;
