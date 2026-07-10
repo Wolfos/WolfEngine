@@ -45,6 +45,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private readonly IntPtr _context;
 	private readonly object _contextLock = new();
 	private readonly bool[] _mouseButtons = new bool[5];
+	private bool _leftShiftDown;
+	private bool _rightShiftDown;
+	private bool _leftCtrlDown;
+	private bool _rightCtrlDown;
+	private bool _leftSuperDown;
+	private bool _rightSuperDown;
 	private Vector2 _mousePosition = new(-1, -1);
 	private Vector2 _mouseWheel = Vector2.Zero;
 	private ImGuiFontAtlas _fontAtlas;
@@ -97,6 +103,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			while (_pendingKeys.TryDequeue(out var keyEvent))
 			{
 				io.AddKeyEvent(keyEvent.key, keyEvent.down);
+				UpdateModifierState(io, keyEvent.key, keyEvent.down);
 			}
 
 			while (_pendingChars.TryDequeue(out var character))
@@ -110,6 +117,19 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			_mouseWheel = Vector2.Zero;
 
 			ImGui.NewFrame();
+		}
+	}
+
+	private void UpdateModifierState(ImGuiIOPtr io, ImGuiKey key, bool down)
+	{
+		switch (key)
+		{
+			case ImGuiKey.LeftShift: _leftShiftDown = down; io.AddKeyEvent(ImGuiKey.ModShift, _leftShiftDown || _rightShiftDown); break;
+			case ImGuiKey.RightShift: _rightShiftDown = down; io.AddKeyEvent(ImGuiKey.ModShift, _leftShiftDown || _rightShiftDown); break;
+			case ImGuiKey.LeftCtrl: _leftCtrlDown = down; io.AddKeyEvent(ImGuiKey.ModCtrl, _leftCtrlDown || _rightCtrlDown); break;
+			case ImGuiKey.RightCtrl: _rightCtrlDown = down; io.AddKeyEvent(ImGuiKey.ModCtrl, _leftCtrlDown || _rightCtrlDown); break;
+			case ImGuiKey.LeftSuper: _leftSuperDown = down; io.AddKeyEvent(ImGuiKey.ModSuper, _leftSuperDown || _rightSuperDown); break;
+			case ImGuiKey.RightSuper: _rightSuperDown = down; io.AddKeyEvent(ImGuiKey.ModSuper, _leftSuperDown || _rightSuperDown); break;
 		}
 	}
 

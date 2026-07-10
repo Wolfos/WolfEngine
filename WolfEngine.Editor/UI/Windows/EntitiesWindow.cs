@@ -8,10 +8,11 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
+public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 {
 	private static readonly List<Entity> AllEntities = new();
 	private static readonly List<Entity> RootEntities = new();
+	private static readonly List<Entity> VisibleEntities = new();
 	private static readonly List<Entity> PendingDeleteEntities = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 	private const string ContextMenuId = "EntitiesContextMenu";
@@ -27,6 +28,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 	private Entity? _pressedEntity;
 	private Entity? _draggedEntity;
 	private Entity? _hoveredEntity;
+	private EntitySelectionClick? _pendingSelectionClick;
 
 	public EntitiesWindow(
 		IIconManager iconManager,
@@ -66,6 +68,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		world.GetAllEntities(AllEntities);
 		BuildRootList(world);
 		_hoveredEntity = null;
+		VisibleEntities.Clear();
 
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
@@ -75,6 +78,8 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		{
 			DrawEntityNode(entity, world, scene);
 		}
+
+		ApplyPendingSelectionClick(world);
 
 		CompleteDragDrop(scene);
 		DrawContextMenu(scene);
@@ -105,9 +110,10 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 	{
 		ImGui.PushID(entity.Index);
 
-		var isSelected = EditorGui.HasSelectedEntity && EditorGui.SelectedEntity == entity;
+		VisibleEntities.Add(entity);
+		var isSelected = EditorGui.SelectedEntities.Contains(entity);
 		var hasChildren = world.HasComponent<Children>(entity)
-		                 && world.GetComponent<Children>(entity).First.IsValid;
+		                  && world.GetComponent<Children>(entity).First.IsValid;
 		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding;
 		if (!hasChildren)
 		{
@@ -123,11 +129,11 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			ImGui.PushStyleColor(ImGuiCol.HeaderActive, *selectedColor);
 		}
 
-			var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
-				? assignedIconName
-				: EditorPrefabUtility.IsPrefabEntity(scene, entity)
-					? "prefab"
-					: "object";
+		var iconName = scene.EntityIcons.TryGetValue(entity, out var assignedIconName)
+			? assignedIconName
+			: EditorPrefabUtility.IsPrefabEntity(scene, entity)
+				? "prefab"
+				: "object";
 		var iconTexture = ResolveIconTexture(_iconManager, iconName);
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
@@ -135,17 +141,23 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		var nodeCursorPosition = ImGui.GetCursorScreenPos();
 		var open = ImGui.TreeNodeEx("##EntityNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
-		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
+		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup |
+		                        ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
 		{
 			_hoveredEntity = entity;
 		}
+
 		DrawEntityLabelWithIcon(name, iconTexture, nodeCursorPosition.X);
 
 		if (leftClicked)
 		{
 			_pressedEntity = entity;
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
-			EditorGui.SelectEntity(entity, world);
+			var io = ImGui.GetIO();
+			_pendingSelectionClick = new EntitySelectionClick(
+				entity,
+				io.KeyShift,
+				io.KeyCtrl);
 		}
 
 		if (hasChildren && open)
@@ -176,9 +188,32 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		ImGui.PopID();
 	}
 
+	private void ApplyPendingSelectionClick(World world)
+	{
+		if (_pendingSelectionClick is not { } click)
+		{
+			return;
+		}
+
+		_pendingSelectionClick = null;
+		if (click.Shift)
+		{
+			EditorGui.AddEntitySelectionRange(VisibleEntities, click.Entity, world);
+		}
+		else if (click.Additive)
+		{
+			EditorGui.AddEntitySelection(click.Entity, world);
+		}
+		else
+		{
+			EditorGui.ReplaceEntitySelection(click.Entity, world);
+		}
+	}
+
 	private void CompleteDragDrop(EditorScene scene)
 	{
-		if (_pressedEntity is { } pressedEntity && _draggedEntity is null && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+		if (_pressedEntity is { } pressedEntity && _draggedEntity is null &&
+		    ImGui.IsMouseDragging(ImGuiMouseButton.Left))
 		{
 			_draggedEntity = pressedEntity;
 		}
@@ -251,6 +286,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 		drawList.AddText(textPosition, ImGui.GetColorU32(ImGuiCol.Text), label);
 	}
+
 	private void DrawContextMenu(EditorScene scene)
 	{
 		if (ImGui.BeginPopupContextWindow(ContextMenuId, ImGuiPopupFlags.MouseButtonRight) == false)
@@ -267,7 +303,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 				EditorGui.SelectEntity(hoveredEntity, scene.World, requestFocus: false);
 			}
 		}
-		
+
 		if (ImGui.BeginMenu("Create"))
 		{
 			if (ImGui.MenuItem("Entity"))
@@ -291,19 +327,18 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			if (ImGui.MenuItem("Save as Prefab"))
 			{
 				SaveEntityAsPrefab(scene, entity);
-					ImGui.CloseCurrentPopup();
-				}
+				ImGui.CloseCurrentPopup();
+			}
 
-				if (ImGui.MenuItem("Delete"))
-				{
-					DeleteEntity(entity, scene);
+			if (ImGui.MenuItem("Delete"))
+			{
+				DeleteEntity(entity, scene);
 				ImGui.CloseCurrentPopup();
 			}
 
 			ImGui.Separator();
 		}
 
-		
 
 		ImGui.EndPopup();
 	}
@@ -317,7 +352,8 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
 		{
-			_notificationService.ReportError("Cannot duplicate entities inside prefab instances. Duplicate the prefab root instance instead.");
+			_notificationService.ReportError(
+				"Cannot duplicate entities inside prefab instances. Duplicate the prefab root instance instead.");
 			return;
 		}
 
@@ -338,7 +374,8 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 
 		if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
 		{
-			_notificationService.ReportError("Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
+			_notificationService.ReportError(
+				"Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
 			return;
 		}
 
@@ -350,17 +387,69 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 		for (var i = 0; i < PendingDeleteEntities.Count; i++)
 		{
 			var deletedEntity = PendingDeleteEntities[i];
-				scene.EntityIcons.Remove(deletedEntity);
-				scene.EntityCellKeys.Remove(deletedEntity);
-				scene.EntityIds.Remove(deletedEntity);
-				scene.EntityPrefabSourcePaths.Remove(deletedEntity);
-			}
+			scene.EntityIcons.Remove(deletedEntity);
+			scene.EntityCellKeys.Remove(deletedEntity);
+			scene.EntityIds.Remove(deletedEntity);
+			scene.EntityPrefabSourcePaths.Remove(deletedEntity);
+		}
 
 		if (EditorGui.HasSelectedEntity && PendingDeleteEntities.Contains(EditorGui.SelectedEntity))
 		{
 			EditorGui.ClearEntitySelection();
 		}
 
+		if (deletedEntities.Count > 0)
+		{
+			_undoRedoService.BeginCapture("Delete Entity");
+			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
+		}
+
+		_interactionState.MarkSceneDirty();
+		PendingDeleteEntities.Clear();
+	}
+
+	private void DeleteSelectedEntities(EditorScene scene)
+	{
+		PendingDeleteEntities.Clear();
+		var roots = new List<Entity>();
+		foreach (var entity in EditorGui.SelectedEntities)
+		{
+			if (scene.World.IsAlive(entity) == false || IsDescendantOfSelectedEntity(entity, scene.World))
+			{
+				continue;
+			}
+
+			if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
+			{
+				_notificationService.ReportError(
+					"Cannot delete entities inside prefab instances. Delete the prefab root instance instead.");
+				return;
+			}
+
+			roots.Add(entity);
+			CollectEntitySubtree(entity, scene.World, PendingDeleteEntities);
+		}
+
+		if (roots.Count == 0)
+		{
+			return;
+		}
+
+		var deletedEntities = _sceneSnapshotService.CaptureDeletedEntities(scene, PendingDeleteEntities);
+		foreach (var root in roots)
+		{
+			scene.World.DestroyEntity(root);
+		}
+
+		foreach (var entity in PendingDeleteEntities)
+		{
+			scene.EntityIcons.Remove(entity);
+			scene.EntityCellKeys.Remove(entity);
+			scene.EntityIds.Remove(entity);
+			scene.EntityPrefabSourcePaths.Remove(entity);
+		}
+
+		EditorGui.ClearEntitySelection();
 		if (deletedEntities.Count > 0)
 		{
 			_undoRedoService.BeginCapture("Delete Entity");
@@ -378,7 +467,7 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			return false;
 		}
 
-		DeleteEntity(EditorGui.SelectedEntity, scene);
+		DeleteSelectedEntities(scene);
 		return true;
 	}
 
@@ -411,6 +500,30 @@ public class EntitiesWindow: EditorWindow, IEditorEntityDeletionHandler
 			child = next;
 		}
 	}
+
+	private static bool IsDescendantOfSelectedEntity(Entity entity, World world)
+	{
+		var current = entity;
+		while (world.HasComponent<Parent>(current))
+		{
+			var parent = world.GetComponent<Parent>(current).Value;
+			if (parent.IsValid == false)
+			{
+				return false;
+			}
+
+			if (EditorGui.SelectedEntities.Contains(parent))
+			{
+				return true;
+			}
+
+			current = parent;
+		}
+
+		return false;
+	}
+
+	private readonly record struct EntitySelectionClick(Entity Entity, bool Shift, bool Additive);
 
 	private void SaveEntityAsPrefab(EditorScene scene, Entity entity)
 	{

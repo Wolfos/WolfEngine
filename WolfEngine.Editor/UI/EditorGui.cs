@@ -12,8 +12,10 @@ public class EditorGui
 {
 	// TODO: Maybe not public?
 	public static readonly List<Type> SelectedComponentTypes = new();
+	public static readonly List<Entity> SelectedEntities = new();
 	public static Entity SelectedEntity;
 	public static bool HasSelectedEntity = false;
+	public static Entity? SelectionRangeAnchor;
 	private static bool _componentsWindowFocusRequested;
 
 	private readonly IMenuBar _menuBar;
@@ -98,10 +100,53 @@ public class EditorGui
 
 	public static void SelectEntity(Entity entity, World world, bool requestFocus = true)
 	{
-		HasSelectedEntity = true;
-		SelectedEntity = entity;
-		world.GetComponentTypes(entity, SelectedComponentTypes);
-		_componentsWindowFocusRequested = requestFocus;
+		ReplaceEntitySelection(entity, world, requestFocus);
+	}
+
+	public static void ReplaceEntitySelection(Entity entity, World world, bool requestFocus = true)
+	{
+		SelectedEntities.Clear();
+		SelectedEntities.Add(entity);
+		SelectionRangeAnchor = entity;
+		RefreshSelectedEntity(world, requestFocus);
+	}
+
+	public static void AddEntitySelection(Entity entity, World world, bool requestFocus = true)
+	{
+		if (SelectedEntities.Contains(entity) == false)
+		{
+			SelectedEntities.Add(entity);
+		}
+
+		SelectionRangeAnchor = entity;
+		RefreshSelectedEntity(world, requestFocus);
+	}
+
+	public static void AddEntitySelectionRange(IReadOnlyList<Entity> visibleEntities, Entity clickedEntity, World world, bool requestFocus = true)
+	{
+		var anchor = SelectionRangeAnchor is { } candidate && visibleEntities.Contains(candidate)
+			? candidate
+			: HasSelectedEntity ? SelectedEntity : clickedEntity;
+		var anchorIndex = IndexOf(visibleEntities, anchor);
+		var clickedIndex = IndexOf(visibleEntities, clickedEntity);
+		if (anchorIndex < 0 || clickedIndex < 0)
+		{
+			AddEntitySelection(clickedEntity, world, requestFocus);
+			return;
+		}
+
+		var start = Math.Min(anchorIndex, clickedIndex);
+		var end = Math.Max(anchorIndex, clickedIndex);
+		for (var i = start; i <= end; i++)
+		{
+			if (SelectedEntities.Contains(visibleEntities[i]) == false)
+			{
+				SelectedEntities.Add(visibleEntities[i]);
+			}
+		}
+
+		SelectionRangeAnchor = clickedEntity;
+		RefreshSelectedEntity(world, requestFocus);
 	}
 
 	public static bool ConsumeComponentsWindowFocusRequest()
@@ -117,26 +162,47 @@ public class EditorGui
 
 	public static void RefreshSelectedEntity(World world, bool requestFocus = false)
 	{
-		if (HasSelectedEntity == false)
+		for (var i = SelectedEntities.Count - 1; i >= 0; i--)
 		{
-			return;
+			if (world.IsAlive(SelectedEntities[i]) == false)
+			{
+				SelectedEntities.RemoveAt(i);
+			}
 		}
 
-		if (world.IsAlive(SelectedEntity) == false)
+		if (SelectedEntities.Count == 0)
 		{
 			ClearEntitySelection();
 			return;
 		}
 
-		SelectEntity(SelectedEntity, world, requestFocus);
+		HasSelectedEntity = true;
+		SelectedEntity = SelectedEntities[0];
+		world.GetComponentTypes(SelectedEntity, SelectedComponentTypes);
+		_componentsWindowFocusRequested = requestFocus;
 	}
 
 	public static void ClearEntitySelection()
 	{
 		HasSelectedEntity = false;
 		SelectedEntity = default;
+		SelectedEntities.Clear();
+		SelectionRangeAnchor = null;
 		SelectedComponentTypes.Clear();
 		_componentsWindowFocusRequested = false;
+	}
+
+	private static int IndexOf(IReadOnlyList<Entity> entities, Entity entity)
+	{
+		for (var i = 0; i < entities.Count; i++)
+		{
+			if (entities[i] == entity)
+			{
+				return i;
+			}
+		}
+
+		return -1;
 	}
 
 	private static void DrawWindow(EditorWindow window, EditorScene scene)

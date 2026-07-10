@@ -513,6 +513,46 @@ public class WorldTests
         AssertVector3(world.GetComponent<LocalTransform>(entity).LocalScale, scale);
     }
 
+    [Test]
+    public void ChainedWorldSetters_UsePendingLocalTransformInsteadOfStaleWorldTransform()
+    {
+        var world = new World(WorldTag.All);
+        var transformSystem = new TransformSystem();
+        var entity = CreateTransformEntity(world, "Entity", Vector3.Zero);
+        transformSystem.PreRender(0.0f, world);
+        var cachedWorldTransform = world.GetComponent<WorldTransform>(entity).LocalToWorld;
+        var position = new Vector3(4.0f, 5.0f, 6.0f);
+        var rotation = Quaternion.Normalize(Quaternion.CreateFromYawPitchRoll(0.3f, -0.2f, 0.1f));
+
+        world.SetWorldPosition(entity, position);
+        world.SetWorldRotation(entity, rotation);
+
+        AssertVector3(world.GetComponent<LocalTransform>(entity).LocalPosition, position);
+        AssertQuaternion(world.GetComponent<LocalTransform>(entity).LocalRotation, rotation);
+        Assert.That(world.GetComponent<WorldTransform>(entity).LocalToWorld, Is.EqualTo(cachedWorldTransform));
+
+        transformSystem.PreRender(0.0f, world);
+        Assert.That(Matrix4x4.Decompose(world.GetComponent<WorldTransform>(entity).LocalToWorld, out _, out var resolvedRotation, out var resolvedPosition), Is.True);
+        AssertVector3(resolvedPosition, position);
+        AssertQuaternion(resolvedRotation, rotation);
+    }
+
+    [Test]
+    public void SetWorldTransform_ResolvesDirtyParentFromLocalTransform()
+    {
+        var world = new World(WorldTag.All);
+        var transformSystem = new TransformSystem();
+        var parent = CreateTransformEntity(world, "Parent", Vector3.Zero);
+        var child = CreateTransformEntity(world, "Child", Vector3.Zero);
+        world.SetParent(child, parent);
+        transformSystem.PreRender(0.0f, world);
+        world.SetLocalPosition(parent, new Vector3(10.0f, 0.0f, 0.0f));
+
+        world.SetWorldTransform(child, position: new Vector3(13.0f, 0.0f, 0.0f));
+
+        AssertVector3(world.GetComponent<LocalTransform>(child).LocalPosition, new Vector3(3.0f, 0.0f, 0.0f));
+    }
+
     private static Entity CreateTransformEntity(World world, string name, Vector3 position)
     {
         return world.CreateEntity(

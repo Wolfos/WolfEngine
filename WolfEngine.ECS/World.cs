@@ -416,80 +416,87 @@ public class World
 
     public void SetWorldPosition(Entity e, Vector3 position)
     {
-        ref var localTransform = ref GetComponent<LocalTransform>(e);
-        var parentWorldToLocal = GetParentWorldToLocal(e);
-        localTransform.LocalPosition = Vector3.Transform(position, parentWorldToLocal);
-        MarkDirty(e);
+        SetWorldTransform(e, position: position);
     }
     
     public void SetWorldRotation(Entity e, Quaternion rotation)
     {
-        ref var localTransform = ref GetComponent<LocalTransform>(e);
-        ref var worldTransform = ref GetComponent<WorldTransform>(e);
-        if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out var worldScale, out _, out var worldPosition) == false)
-        {
-            return;
-        }
-
-        if (rotation.LengthSquared() > 0.0f)
-        {
-            rotation = Quaternion.Normalize(rotation);
-        }
-        else
-        {
-            rotation = Quaternion.Identity;
-        }
-
-        var worldMatrix = ComposeTrs(worldScale, rotation, worldPosition);
-        var localMatrix = worldMatrix * GetParentWorldToLocal(e);
-        if (Matrix4x4.Decompose(localMatrix, out var localScale, out var localRotation, out var localPosition) == false)
-        {
-            return;
-        }
-
-        localTransform.LocalPosition = localPosition;
-        localTransform.LocalRotation = localRotation.LengthSquared() > 0.0f ? Quaternion.Normalize(localRotation) : Quaternion.Identity;
-        localTransform.LocalScale = localScale;
-        MarkDirty(e);
+        SetWorldTransform(e, rotation: rotation);
     }
 
     public void SetWorldScale(Entity e, Vector3 scale)
     {
+        SetWorldTransform(e, scale: scale);
+    }
+
+    public void SetWorldTransform(Entity e, Vector3? position = null, Quaternion? rotation = null, Vector3? scale = null)
+    {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
-        ref var worldTransform = ref GetComponent<WorldTransform>(e);
-        if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out _, out var worldRotation, out var worldPosition) == false)
+        if (TryGetCurrentWorldMatrix(e, out var currentWorldMatrix) == false ||
+            Matrix4x4.Decompose(currentWorldMatrix, out var currentScale, out var currentRotation, out var currentPosition) == false ||
+            TryGetCurrentParentWorldToLocal(e, out var parentWorldToLocal) == false)
         {
             return;
         }
 
-        worldRotation = worldRotation.LengthSquared() > 0.0f ? Quaternion.Normalize(worldRotation) : Quaternion.Identity;
-        var worldMatrix = ComposeTrs(scale, worldRotation, worldPosition);
-        var localMatrix = worldMatrix * GetParentWorldToLocal(e);
+        var targetPosition = position ?? currentPosition;
+        var targetRotation = NormalizeOrIdentity(rotation ?? currentRotation);
+        var targetScale = scale ?? currentScale;
+        var worldMatrix = ComposeTrs(targetScale, targetRotation, targetPosition);
+        var localMatrix = worldMatrix * parentWorldToLocal;
         if (Matrix4x4.Decompose(localMatrix, out var localScale, out var localRotation, out var localPosition) == false)
         {
             return;
         }
 
         localTransform.LocalPosition = localPosition;
-        localTransform.LocalRotation = localRotation.LengthSquared() > 0.0f ? Quaternion.Normalize(localRotation) : Quaternion.Identity;
+        localTransform.LocalRotation = NormalizeOrIdentity(localRotation);
         localTransform.LocalScale = localScale;
         MarkDirty(e);
     }
 
-    private Matrix4x4 GetParentWorldToLocal(Entity entity)
+    private bool TryGetCurrentParentWorldToLocal(Entity entity, out Matrix4x4 parentWorldToLocal)
     {
+        parentWorldToLocal = Matrix4x4.Identity;
         if (HasComponent<Parent>(entity) == false)
         {
-            return Matrix4x4.Identity;
+            return true;
         }
 
         var parent = GetComponent<Parent>(entity).Value;
         if (parent.IsValid == false || HasComponent<WorldTransform>(parent) == false)
         {
-            return Matrix4x4.Identity;
+            return true;
         }
 
-        return GetComponent<WorldTransform>(parent).WorldToLocal;
+        return TryGetCurrentWorldMatrix(parent, out var parentWorld) && Matrix4x4.Invert(parentWorld, out parentWorldToLocal);
+    }
+
+    private bool TryGetCurrentWorldMatrix(Entity entity, out Matrix4x4 worldMatrix)
+    {
+        worldMatrix = Matrix4x4.Identity;
+        if (HasComponent<LocalTransform>(entity) == false || HasComponent<WorldTransform>(entity) == false)
+        {
+            return false;
+        }
+
+        var parentWorld = Matrix4x4.Identity;
+        if (HasComponent<Parent>(entity))
+        {
+            var parent = GetComponent<Parent>(entity).Value;
+            if (parent.IsValid && HasComponent<WorldTransform>(parent))
+            {
+                if (TryGetCurrentWorldMatrix(parent, out var resolvedParentWorld) == false)
+                {
+                    return false;
+                }
+
+                parentWorld = resolvedParentWorld;
+            }
+        }
+
+        worldMatrix = GetComponent<LocalTransform>(entity).GetTransform() * parentWorld;
+        return true;
     }
 
     internal bool TryGetWorldPoseAndScale(Entity entity, out Vector3 position, out Quaternion rotation, out Vector3 scale)
@@ -696,5 +703,10 @@ public class World
             Matrix4x4.CreateScale(scale) *
             Matrix4x4.CreateFromQuaternion(rotation) *
             Matrix4x4.CreateTranslation(position);
+    }
+
+    private static Quaternion NormalizeOrIdentity(Quaternion rotation)
+    {
+        return rotation.LengthSquared() > 0.0f ? Quaternion.Normalize(rotation) : Quaternion.Identity;
     }
 }

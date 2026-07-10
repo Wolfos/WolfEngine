@@ -12,6 +12,44 @@ namespace WolfEngine.Editor.Tests;
 public sealed class EditorCommandServiceTests
 {
 	[Test]
+	public void EntitySelection_PreservesInsertionOrderAndAddsVisibleRange()
+	{
+		var world = new World(WorldTag.Authoring);
+		var first = world.CreateEntity("First");
+		var second = world.CreateEntity("Second");
+		var third = world.CreateEntity("Third");
+		var fourth = world.CreateEntity("Fourth");
+		var visibleEntities = new[] { first, second, third, fourth };
+
+		EditorGui.ReplaceEntitySelection(second, world, requestFocus: false);
+		EditorGui.AddEntitySelection(fourth, world, requestFocus: false);
+		EditorGui.AddEntitySelection(fourth, world, requestFocus: false);
+		EditorGui.AddEntitySelectionRange(visibleEntities, first, world, requestFocus: false);
+
+		Assert.That(EditorGui.SelectedEntities, Is.EqualTo(new[] { second, fourth, first, third }));
+		Assert.That(EditorGui.SelectedEntity, Is.EqualTo(second));
+		Assert.That(EditorGui.SelectionRangeAnchor, Is.EqualTo(first));
+		EditorGui.ClearEntitySelection();
+	}
+
+	[Test]
+	public void EntitySelection_PrunesDestroyedEntitiesAndKeepsFirstLiveEntity()
+	{
+		var world = new World(WorldTag.Authoring);
+		var first = world.CreateEntity("First");
+		var second = world.CreateEntity("Second");
+		EditorGui.ReplaceEntitySelection(first, world, requestFocus: false);
+		EditorGui.AddEntitySelection(second, world, requestFocus: false);
+
+		world.DestroyEntity(first);
+		EditorGui.RefreshSelectedEntity(world, requestFocus: false);
+
+		Assert.That(EditorGui.SelectedEntities, Is.EqualTo(new[] { second }));
+		Assert.That(EditorGui.SelectedEntity, Is.EqualTo(second));
+		EditorGui.ClearEntitySelection();
+	}
+
+	[Test]
 	public void ShortcutResolver_MapsSceneCommandsAndFocusedDelete()
 	{
 		Assert.That(

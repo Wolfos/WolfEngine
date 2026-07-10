@@ -257,10 +257,10 @@ public class WolfEngineEditor
 			return;
 		}
 
-		var selectedEntityId = TryGetSelectedEntityId(_currentScene);
+		var selectedEntityIds = GetSelectedEntityIds(_currentScene);
 		_currentScene = nextScene;
 		RefreshRenderWorlds();
-		RestoreSelectedEntity(_currentScene, selectedEntityId);
+		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
 	private void UpdateGameplay(float deltaTime)
@@ -355,7 +355,7 @@ public class WolfEngineEditor
 	private void ApplyGameplayReload(GameplayBuildResult buildResult)
 	{
 		var previousState = _playSession.State;
-		var selectedEntityId = TryGetSelectedEntityId(_playSession.ActiveScene);
+		var selectedEntityIds = GetSelectedEntityIds(_playSession.ActiveScene);
 
 		var snapshot = _sceneReloadService.CaptureGameplayComponents(_playSession.AuthoringScene);
 
@@ -380,7 +380,7 @@ public class WolfEngineEditor
 		_currentScene = _playSession.ActiveScene;
 		RefreshAssetBackedComponents(_currentScene);
 		RefreshRenderWorlds();
-		RestoreSelectedEntity(_currentScene, selectedEntityId);
+		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
 	private void RefreshAssetBackedComponents(EditorScene scene)
@@ -394,34 +394,30 @@ public class WolfEngineEditor
 		}
 	}
 
-	private Guid? TryGetSelectedEntityId(EditorScene scene)
+	private IReadOnlyList<Guid> GetSelectedEntityIds(EditorScene scene)
 	{
-		return EditorGui.HasSelectedEntity &&
-			       scene.World.IsAlive(EditorGui.SelectedEntity) &&
-			       scene.EntityIds.TryGetValue(EditorGui.SelectedEntity, out var selectedEntityId) &&
-			       selectedEntityId != Guid.Empty
-			? selectedEntityId
-			: null;
+		var ids = new List<Guid>();
+		foreach (var entity in EditorGui.SelectedEntities)
+		{
+			if (scene.World.IsAlive(entity) && scene.EntityIds.TryGetValue(entity, out var id) && id != Guid.Empty) ids.Add(id);
+		}
+		return ids;
 	}
 
-	private void RestoreSelectedEntity(EditorScene scene, Guid? selectedEntityId)
+	private void RestoreSelectedEntities(EditorScene scene, IReadOnlyList<Guid> selectedEntityIds)
 	{
-		if (selectedEntityId is not { } entityId)
+		EditorGui.ClearEntitySelection();
+		foreach (var entityId in selectedEntityIds)
 		{
-			EditorGui.ClearEntitySelection();
-			return;
-		}
-
-		foreach (var entry in scene.EntityIds)
-		{
-			if (entry.Value == entityId)
+			foreach (var entry in scene.EntityIds)
 			{
-				EditorGui.SelectEntity(entry.Key, scene.World);
-				return;
+				if (entry.Value == entityId)
+				{
+					EditorGui.AddEntitySelection(entry.Key, scene.World);
+					break;
+				}
 			}
 		}
-
-		EditorGui.ClearEntitySelection();
 	}
 
 	private RenderConfig GetConfig()

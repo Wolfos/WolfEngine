@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine;
@@ -42,18 +43,14 @@ public sealed class TransformGizmoController
 	public void DrawAndHandle(
 		EditorScene scene,
 		World world,
-		Entity entity,
-		bool hasSelectedEntity,
+		IReadOnlyList<Entity> selectedEntities,
 		TransformGizmoMode mode,
 		TransformSpace space,
 		TransformPivotMode pivotMode)
 	{
 		var viewportState = _viewportStateBus.GetUiState();
 		if (IsViewportValid(viewportState) == false ||
-		    hasSelectedEntity == false ||
-		    entity.IsValid == false ||
-		    world.HasComponent<LocalTransform>(entity) == false ||
-		    world.HasComponent<WorldTransform>(entity) == false ||
+		    selectedEntities.Count == 0 ||
 		    _cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
 		    camera.ScreenResolution.X <= 0 ||
 		    camera.ScreenResolution.Y <= 0)
@@ -62,10 +59,20 @@ public sealed class TransformGizmoController
 			return;
 		}
 
+		var transformEntities = GetTransformEntities(world, selectedEntities);
+		if (transformEntities.Count == 0)
+		{
+			EndDrag();
+			return;
+		}
+
+		var entity = transformEntities[0];
 		ref var worldTransform = ref world.GetComponent<WorldTransform>(entity);
 		ref var localTransform = ref world.GetComponent<LocalTransform>(entity);
 		var entityWorldPosition = worldTransform.LocalToWorld.Translation;
-		var gizmoPivotWorld = ResolveGizmoPivotWorld(world, entity, worldTransform, pivotMode);
+		var gizmoPivotWorld = transformEntities.Count == 1
+			? ResolveGizmoPivotWorld(world, entity, worldTransform, pivotMode)
+			: GetAverageWorldPosition(world, transformEntities);
 		Quaternion objectWorldRotation;
 		if (Matrix4x4.Decompose(worldTransform.LocalToWorld, out _, out objectWorldRotation, out _) == false)
 		{
@@ -112,9 +119,9 @@ public sealed class TransformGizmoController
 		var leftClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
 		var leftReleased = ImGui.IsMouseReleased(ImGuiMouseButton.Left);
 
-		if (_dragState.Active && (_dragState.Entity != entity || leftDown == false || leftReleased))
+		if (_dragState.Active && (leftDown == false || leftReleased))
 		{
-			if (leftReleased && _dragState.Entity == entity)
+			if (leftReleased)
 			{
 				CommitDrag(scene);
 			}
@@ -142,7 +149,7 @@ public sealed class TransformGizmoController
 				TryBeginDrag(
 					scene,
 					world,
-					entity,
+					transformEntities,
 					mode,
 					space,
 					_hoveredAxis,
@@ -156,7 +163,8 @@ public sealed class TransformGizmoController
 					axisX,
 					axisY,
 					axisZ,
-					handleLength);
+					handleLength,
+					transformEntities.Count > 1 || pivotMode == TransformPivotMode.Center);
 			}
 		}
 
@@ -187,7 +195,7 @@ public sealed class TransformGizmoController
 	private void TryBeginDrag(
 		EditorScene scene,
 		World world,
-		Entity entity,
+		IReadOnlyList<Entity> entities,
 		TransformGizmoMode mode,
 		TransformSpace space,
 		GizmoAxis axis,
@@ -201,7 +209,8 @@ public sealed class TransformGizmoController
 		Vector3 axisX,
 		Vector3 axisY,
 		Vector3 axisZ,
-		float handleLength)
+		float handleLength,
+		bool rotateAroundPivot)
 	{
 		if (TryBuildMouseRay(mousePosition, inverseViewProjection, out var ray) == false)
 		{
@@ -215,8 +224,27 @@ public sealed class TransformGizmoController
 		}
 
 		_dragState.Active = true;
-		_dragState.Entity = entity;
-		_dragState.BeforeSnapshot = _sceneSnapshotService.CaptureComponent(scene, entity, typeof(LocalTransform));
+		_dragState.Targets.Clear();
+		_dragState.BeforeSnapshots.Clear();
+		foreach (var entity in entities)
+		{
+			if (world.IsAlive(entity) == false || world.HasComponent<LocalTransform>(entity) == false || world.HasComponent<WorldTransform>(entity) == false)
+			{
+				continue;
+			}
+
+			ref var targetWorldTransform = ref world.GetComponent<WorldTransform>(entity);
+			ref var targetLocalTransform = ref world.GetComponent<LocalTransform>(entity);
+			Matrix4x4.Decompose(targetWorldTransform.LocalToWorld, out _, out var targetWorldRotation, out _);
+			_dragState.Targets.Add(new TransformTargetState(entity, targetWorldTransform.LocalToWorld.Translation, NormalizeOrIdentity(targetWorldRotation), targetLocalTransform.LocalScale));
+			_dragState.BeforeSnapshots.Add(_sceneSnapshotService.CaptureComponent(scene, entity, typeof(LocalTransform)));
+		}
+
+		if (_dragState.Targets.Count == 0)
+		{
+			EndDrag();
+			return;
+		}
 		_dragState.Mode = mode;
 		_dragState.Space = space;
 		_dragState.Axis = axis;
@@ -225,6 +253,7 @@ public sealed class TransformGizmoController
 		_dragState.StartEntityWorldPosition = entityWorldPosition;
 		_dragState.StartWorldRotation = objectWorldRotation;
 		_dragState.StartLocalScale = objectLocalScale;
+		_dragState.RotateAroundPivot = rotateAroundPivot;
 		_dragState.HandleLength = MathF.Max(handleLength, MinHandleLength);
 
 		if (mode == TransformGizmoMode.Rotate)
@@ -275,8 +304,10 @@ public sealed class TransformGizmoController
 
 				var currentParameter = Vector3.Dot(hitPoint - _dragState.PivotWorld, _dragState.AxisWorld);
 				var delta = currentParameter - _dragState.StartAxisParameter;
-				var worldPosition = _dragState.StartEntityWorldPosition + (_dragState.AxisWorld * delta);
-				world.SetWorldPosition(_dragState.Entity, worldPosition);
+				foreach (var target in _dragState.Targets)
+				{
+					if (world.IsAlive(target.Entity)) world.SetWorldPosition(target.Entity, target.WorldPosition + (_dragState.AxisWorld * delta));
+				}
 				_interactionState.MarkSceneDirty();
 				break;
 			}
@@ -296,8 +327,16 @@ public sealed class TransformGizmoController
 				currentVector = Vector3.Normalize(currentVector);
 				var angle = SignedAngle(_dragState.StartPlaneVector, currentVector, _dragState.AxisWorld);
 				var deltaRotation = Quaternion.CreateFromAxisAngle(_dragState.AxisWorld, angle);
-				var targetWorldRotation = NormalizeOrIdentity(deltaRotation * _dragState.StartWorldRotation);
-				world.SetWorldRotation(_dragState.Entity, targetWorldRotation);
+				foreach (var target in _dragState.Targets)
+				{
+					if (world.IsAlive(target.Entity) == false) continue;
+					if (_dragState.RotateAroundPivot)
+					{
+						var relativePosition = target.WorldPosition - _dragState.PivotWorld;
+						world.SetWorldPosition(target.Entity, _dragState.PivotWorld + Vector3.Transform(relativePosition, deltaRotation));
+					}
+					world.SetWorldRotation(target.Entity, NormalizeOrIdentity(deltaRotation * target.WorldRotation));
+				}
 				_interactionState.MarkSceneDirty();
 				break;
 			}
@@ -311,21 +350,21 @@ public sealed class TransformGizmoController
 				var currentParameter = Vector3.Dot(hitPoint - _dragState.PivotWorld, _dragState.AxisWorld);
 				var delta = currentParameter - _dragState.StartAxisParameter;
 				var factor = MathF.Max(MinScaleComponent, 1.0f + (delta / _dragState.HandleLength));
-				var localScale = _dragState.StartLocalScale;
-				switch (_dragState.Axis)
+				foreach (var target in _dragState.Targets)
 				{
-					case GizmoAxis.X:
-						localScale.X = MathF.Max(MinScaleComponent, localScale.X * factor);
-						break;
-					case GizmoAxis.Y:
-						localScale.Y = MathF.Max(MinScaleComponent, localScale.Y * factor);
-						break;
-					case GizmoAxis.Z:
-						localScale.Z = MathF.Max(MinScaleComponent, localScale.Z * factor);
-						break;
+					if (world.IsAlive(target.Entity) == false) continue;
+					var localScale = target.LocalScale;
+					switch (_dragState.Axis)
+					{
+						case GizmoAxis.X: localScale.X = MathF.Max(MinScaleComponent, localScale.X * factor); break;
+						case GizmoAxis.Y: localScale.Y = MathF.Max(MinScaleComponent, localScale.Y * factor); break;
+						case GizmoAxis.Z: localScale.Z = MathF.Max(MinScaleComponent, localScale.Z * factor); break;
+					}
+					var relativePosition = target.WorldPosition - _dragState.PivotWorld;
+					var scaledPosition = _dragState.PivotWorld + relativePosition + (_dragState.AxisWorld * Vector3.Dot(relativePosition, _dragState.AxisWorld) * (factor - 1.0f));
+					world.SetWorldPosition(target.Entity, scaledPosition);
+					world.SetLocalScale(target.Entity, localScale);
 				}
-
-				world.SetLocalScale(_dragState.Entity, localScale);
 				_interactionState.MarkSceneDirty();
 				break;
 			}
@@ -778,6 +817,31 @@ public sealed class TransformGizmoController
 		return worldTransform.LocalToWorld.Translation;
 	}
 
+	private static List<Entity> GetTransformEntities(World world, IReadOnlyList<Entity> selectedEntities)
+	{
+		var entities = new List<Entity>(selectedEntities.Count);
+		foreach (var entity in selectedEntities)
+		{
+			if (world.IsAlive(entity) && world.HasComponent<LocalTransform>(entity) && world.HasComponent<WorldTransform>(entity))
+			{
+				entities.Add(entity);
+			}
+		}
+
+		return entities;
+	}
+
+	private static Vector3 GetAverageWorldPosition(World world, IReadOnlyList<Entity> entities)
+	{
+		var position = Vector3.Zero;
+		foreach (var entity in entities)
+		{
+			position += world.GetComponent<WorldTransform>(entity).LocalToWorld.Translation;
+		}
+
+		return position / entities.Count;
+	}
+
 	private static bool TryGetVisualCenterWorld(World world, Entity entity, out Vector3 visualCenter)
 	{
 		visualCenter = Vector3.Zero;
@@ -920,7 +984,6 @@ public sealed class TransformGizmoController
 	private void EndDrag()
 	{
 		_dragState.Active = false;
-		_dragState.Entity = default;
 		_dragState.Mode = TransformGizmoMode.Translate;
 		_dragState.Axis = GizmoAxis.None;
 		_dragState.Space = TransformSpace.Local;
@@ -931,7 +994,9 @@ public sealed class TransformGizmoController
 		_dragState.StartEntityWorldPosition = Vector3.Zero;
 		_dragState.StartWorldRotation = Quaternion.Identity;
 		_dragState.StartLocalScale = Vector3.One;
-		_dragState.BeforeSnapshot = default;
+		_dragState.RotateAroundPivot = false;
+		_dragState.Targets.Clear();
+		_dragState.BeforeSnapshots.Clear();
 		_dragState.StartAxisParameter = 0.0f;
 		_dragState.HandleLength = 1.0f;
 		_hoveredAxis = GizmoAxis.None;
@@ -961,8 +1026,8 @@ public sealed class TransformGizmoController
 	private sealed class GizmoDragState
 	{
 		public bool Active;
-		public Entity Entity;
-		public SceneComponentSnapshot BeforeSnapshot;
+		public readonly List<TransformTargetState> Targets = new();
+		public readonly List<SceneComponentSnapshot> BeforeSnapshots = new();
 		public TransformGizmoMode Mode;
 		public TransformSpace Space;
 		public GizmoAxis Axis;
@@ -973,30 +1038,48 @@ public sealed class TransformGizmoController
 		public Vector3 StartEntityWorldPosition;
 		public Quaternion StartWorldRotation = Quaternion.Identity;
 		public Vector3 StartLocalScale = Vector3.One;
+		public bool RotateAroundPivot;
 		public float StartAxisParameter;
 		public float HandleLength = 1.0f;
 	}
 
+	private readonly record struct TransformTargetState(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation, Vector3 LocalScale);
+
 	private void CommitDrag(EditorScene scene)
 	{
-		if (_dragState.Active == false || scene.World.IsAlive(_dragState.Entity) == false)
+		if (_dragState.Active == false)
 		{
 			return;
 		}
 
-		var afterSnapshot = _sceneSnapshotService.CaptureComponent(scene, _dragState.Entity, typeof(LocalTransform));
-		if (_dragState.BeforeSnapshot.EntityId == Guid.Empty)
+		var afterSnapshots = new List<SceneComponentSnapshot>(_dragState.Targets.Count);
+		foreach (var target in _dragState.Targets)
+		{
+			if (scene.World.IsAlive(target.Entity))
+			{
+				afterSnapshots.Add(_sceneSnapshotService.CaptureComponent(scene, target.Entity, typeof(LocalTransform)));
+			}
+		}
+
+		if (_dragState.BeforeSnapshots.Count == 0 || afterSnapshots.Count != _dragState.BeforeSnapshots.Count)
 		{
 			return;
 		}
 
-		if (_dragState.BeforeSnapshot.EntityId == afterSnapshot.EntityId &&
-		    string.Equals(_dragState.BeforeSnapshot.Data.GetRawText(), afterSnapshot.Data.GetRawText(), StringComparison.Ordinal))
+		var changed = false;
+		for (var i = 0; i < afterSnapshots.Count; i++)
 		{
-			return;
+			if (_dragState.BeforeSnapshots[i].EntityId != afterSnapshots[i].EntityId ||
+			    string.Equals(_dragState.BeforeSnapshots[i].Data.GetRawText(), afterSnapshots[i].Data.GetRawText(), StringComparison.Ordinal) == false)
+			{
+				changed = true;
+				break;
+			}
 		}
+
+		if (changed == false) return;
 
 		_undoRedoService.BeginCapture("Transform");
-		_undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry("Transform", [_dragState.BeforeSnapshot], [afterSnapshot]));
+		_undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry("Transform", _dragState.BeforeSnapshots.ToArray(), afterSnapshots));
 	}
 }

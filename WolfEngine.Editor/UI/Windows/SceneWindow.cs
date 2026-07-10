@@ -256,8 +256,7 @@ public class SceneWindow: EditorWindow
             _transformGizmoController.DrawAndHandle(
                 scene,
                 world,
-                EditorGui.SelectedEntity,
-                EditorGui.HasSelectedEntity,
+				EditorGui.SelectedEntities,
                 _gizmoMode,
                 _transformSpace,
                 _pivotMode);
