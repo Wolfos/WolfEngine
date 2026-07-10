@@ -4,6 +4,8 @@ using System.Numerics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Threading;
+using System.Threading.Tasks;
 using ThreadingThread = System.Threading.Thread;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
@@ -35,8 +37,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         "WOLF_MAX_PACKED_INDEX_BYTES",
         1UL * 1024UL * 1024UL * 1024UL);
 
-    private readonly int _width;
-    private readonly int _height;
+    private int _width;
+    private int _height;
     private readonly IShaderCompiler _shaderCompiler;
     private readonly IMacOSInputHandler _inputHandler;
     private readonly BindlessResourceRegistry _bindlessRegistry;
@@ -59,7 +61,9 @@ internal unsafe class WolfRendererMetal : IRenderer
     private CAMetalLayer _metalLayer;
     private IntPtr _nativeWindow = IntPtr.Zero;
     private bool _isRunning;
+    private volatile bool _shutdownRequested;
     private bool _hasDrawableSize;
+    private bool _hasRequestedDrawableSize;
     private double _drawableWidth;
     private double _drawableHeight;
     private bool _skipFrameAfterResize;
@@ -80,6 +84,8 @@ internal unsafe class WolfRendererMetal : IRenderer
     private Action _startupCallback = static () => { };
     private Action<float> _updateCallback = static deltaTime => { };
     private Action<float> _renderCallback = static deltaTime => { };
+    private readonly object _frameCaptureSync = new();
+    private TaskCompletionSource<FrameCapture>? _pendingFrameCapture;
 
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
@@ -171,7 +177,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         _startupCallback();
 
-        while (_isRunning)
+        while (_isRunning && _shutdownRequested == false)
         {
             PumpEvents(ref @event);
 
@@ -394,6 +400,12 @@ internal unsafe class WolfRendererMetal : IRenderer
         int drawableWidth = 0;
         int drawableHeight = 0;
         _sdl.MetalGetDrawableSize(_window, ref drawableWidth, ref drawableHeight);
+
+        if (_hasRequestedDrawableSize)
+        {
+            drawableWidth = _width;
+            drawableHeight = _height;
+        }
 
         if (drawableWidth <= 0 || drawableHeight <= 0)
         {
@@ -650,6 +662,50 @@ internal unsafe class WolfRendererMetal : IRenderer
         return new Int2(windowWidth, windowHeight);
     }
 
+    public void SetWindowSize(Int2 size)
+    {
+        if (size.X <= 0 || size.Y <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(size), "Window size must be positive.");
+        }
+
+        if (_window is not null)
+        {
+            throw new InvalidOperationException("Window size must be configured before the renderer starts.");
+        }
+
+        _width = size.X;
+        _height = size.Y;
+        _hasRequestedDrawableSize = true;
+    }
+
+    public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
+    {
+        var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_frameCaptureSync)
+        {
+            if (_pendingFrameCapture is not null)
+            {
+                throw new InvalidOperationException("A frame capture is already pending.");
+            }
+
+            _pendingFrameCapture = completion;
+        }
+
+        if (cancellationToken.CanBeCanceled)
+        {
+            cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+        }
+
+        return completion.Task;
+    }
+
+    public void RequestShutdown()
+    {
+        _shutdownRequested = true;
+        _isRunning = false;
+    }
+
     public void BeginFrame()
     {
         EnsureLayerPresentFlags();
@@ -747,6 +803,76 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         _presentFrameIndex++;
+    }
+
+    public void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor)
+    {
+        var texture = resourceRegistry.GetTexture(sceneColor) as MetalTexture;
+        if (texture is null || texture.Texture.NativePtr == IntPtr.Zero)
+        {
+            CompletePendingFrameCaptureFailure("The automation capture color target was unavailable.");
+            return;
+        }
+
+        CompletePendingFrameCapture(texture);
+    }
+
+    private void CompletePendingFrameCapture(MetalTexture texture)
+    {
+        TaskCompletionSource<FrameCapture>? completion;
+        lock (_frameCaptureSync)
+        {
+            completion = _pendingFrameCapture;
+            if (completion is null || completion.Task.IsCompleted)
+            {
+                return;
+            }
+
+            _pendingFrameCapture = null;
+        }
+
+        try
+        {
+            _gfxDevice.WaitForIdle();
+            var width = texture.Descriptor.Width;
+            var height = texture.Descriptor.Height;
+            var bytes = new byte[checked(width * height * 4)];
+            var region = new MTLRegion
+            {
+                origin = new MTLOrigin { x = 0, y = 0, z = 0 },
+                size = new MTLSize { width = (ulong)width, height = (ulong)height, depth = 1 }
+            };
+
+            fixed (byte* destination = bytes)
+            {
+                texture.Texture.GetBytes((nint)destination, (nuint)(width * 4), region, 0);
+            }
+
+            if (texture.Descriptor.Format == TextureFormat.Bgra8Unorm)
+            {
+                for (var index = 0; index < bytes.Length; index += 4)
+                {
+                    (bytes[index], bytes[index + 2]) = (bytes[index + 2], bytes[index]);
+                }
+            }
+
+            completion.TrySetResult(new FrameCapture(width, height, bytes));
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private void CompletePendingFrameCaptureFailure(string message)
+    {
+        TaskCompletionSource<FrameCapture>? completion;
+        lock (_frameCaptureSync)
+        {
+            completion = _pendingFrameCapture;
+            _pendingFrameCapture = null;
+        }
+        completion?.TrySetException(new InvalidOperationException(message));
     }
 
     private static bool SupportsUnorderedAccess(Texture texture)

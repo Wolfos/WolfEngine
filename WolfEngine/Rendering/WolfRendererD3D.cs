@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -84,8 +86,8 @@ private sealed class MeshResources
 		public Matrix4x4 Transform { get; }
 	}
 
-	private readonly int _width;
-	private readonly int _height;
+	private int _width;
+	private int _height;
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly IInputSystem _inputSystem;
@@ -172,6 +174,33 @@ private sealed class MeshResources
 		{
 			Dispose();
 		}
+	}
+
+	public void SetWindowSize(Int2 size)
+	{
+		if (size.X <= 0 || size.Y <= 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(size), "Window size must be positive.");
+		}
+
+		if (_isInitialized)
+		{
+			throw new InvalidOperationException("Window size must be configured before the renderer starts.");
+		}
+
+		_width = size.X;
+		_height = size.Y;
+	}
+
+	public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
+	{
+		return Task.FromException<FrameCapture>(new PlatformNotSupportedException(
+			"Automated frame capture is not implemented for the Direct3D renderer."));
+	}
+
+	public void RequestShutdown()
+	{
+		_window?.Close();
 	}
 
 

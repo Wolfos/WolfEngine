@@ -1325,6 +1325,7 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
+	public RenderGraphResourceHandle GetCaptureColorHandle() => _frameResources.TonemappedSceneColor;
 
 	private void RegisterSceneDebugView(
 		string id,

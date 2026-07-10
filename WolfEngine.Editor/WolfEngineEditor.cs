@@ -14,6 +14,7 @@ using WolfEngine.Rendering.Passes;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Physics;
+using WolfEngine.Editor.Automation;
 
 namespace WolfEngine.Editor;
 
@@ -57,6 +58,7 @@ public class WolfEngineEditor
 	private long _boundGameplayGeneration;
 	private World? _boundGameplayWorld;
 	private IGameplayModule? _boundGameplayModule;
+	private EditorAutomationController? _automationController;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -108,7 +110,13 @@ public class WolfEngineEditor
 	{
 		_running = true;
 		CreateWorlds();
+		_automationController?.Initialize();
 		EditorLoop();
+	}
+
+	public void SetAutomationController(EditorAutomationController automationController)
+	{
+		_automationController = automationController ?? throw new ArgumentNullException(nameof(automationController));
 	}
 
 	public void Stop()
@@ -159,7 +167,7 @@ public class WolfEngineEditor
 			var frameStart = stopwatch.Elapsed;
 			FrameProfiler.Instance.BeginFrame("Editor Frame");
 
-			var deltaTime = (float)(frameStart - last).TotalSeconds;
+			var deltaTime = _automationController?.DeltaTime ?? (float)(frameStart - last).TotalSeconds;
 			last = frameStart;
 
 			HandleGameplayBuildAndReload();
@@ -191,9 +199,18 @@ public class WolfEngineEditor
 				_uiFrameProvider.NewFrame(deltaTime, _renderer.GetWindowSize(), _renderGraph.GetFrameBufferSize());
 				_uiFrameProvider.RunGui(() =>
 				{
-					_editorGui.Draw(_currentScene);
+					if (_automationController is null)
+					{
+						_editorGui.Draw(_currentScene);
+					}
 				});
 				_editorFrameCoordinator.PublishCompletedFrame();
+			}
+
+			_automationController?.OnFrameCompleted();
+			if (_automationController?.IsComplete == true)
+			{
+				Stop();
 			}
 
 			FrameProfiler.Instance.EndFrame();

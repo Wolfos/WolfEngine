@@ -5,8 +5,9 @@ using WolfEngine.Rendering;
 
 namespace WolfEngine;
 
-public interface IRenderer
+public interface IRenderer : IFrameCaptureSource
 {
+	void SetWindowSize(Int2 size) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
 	void Run(Action startup, Action<float> update, Action<float> render);
 	IMaterialResources CreateMaterialResources(Material material);
 	ITextureResources CreateTextureResources(Texture texture);
@@ -17,6 +18,7 @@ public interface IRenderer
 	void Render(
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle finalColor);
+	void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor) { }
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	void ReleaseMeshResources(Mesh mesh);

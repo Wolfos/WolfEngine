@@ -5,13 +5,21 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Editor.UI;
 using WolfEngine.Physics;
+using WolfEngine.Editor.Automation;
 
 namespace WolfEngine.Editor;
 
 public static class Program
 {
-	public static void Main()
+	public static void Main(string[] args)
 	{
+		if (EditorAutomationOptions.TryParse(args, out var automationOptions, out var parseError) == false)
+		{
+			Console.Error.WriteLine($"capture failed: {parseError}");
+			Environment.ExitCode = 1;
+			return;
+		}
+
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
 		ConfigureServices(services);
@@ -25,17 +33,28 @@ public static class Program
 		AssetDatabase.SetInstanceRegistry(provider.GetRequiredService<IAssetInstanceRegistry>());
 		provider.GetRequiredService<IUiFrameProvider>();
 		provider.GetRequiredService<IIconManager>();
-		EditorPreferences.Load();
-		var lastProjectPath = EditorPreferences.GetLastProjectPath();
+		string? lastProjectPath = null;
+		if (automationOptions is null)
+		{
+			EditorPreferences.Load();
+			lastProjectPath = EditorPreferences.GetLastProjectPath();
+		}
 		
 		var editor = provider.GetRequiredService<WolfEngineEditor>();
+		EditorAutomationController? automationController = null;
+		if (automationOptions is not null)
+		{
+			provider.GetRequiredService<IRenderer>().SetWindowSize(automationOptions.Resolution);
+			automationController = ActivatorUtilities.CreateInstance<EditorAutomationController>(provider, automationOptions);
+			editor.SetAutomationController(automationController);
+		}
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };
 		editorThread.Start();
 		
 		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
 		renderPipeline.Run(() =>
 		{
-			if (string.IsNullOrWhiteSpace(lastProjectPath))
+			if (automationOptions is not null || string.IsNullOrWhiteSpace(lastProjectPath))
 			{
 				return;
 			}
@@ -50,6 +69,10 @@ public static class Program
 		editor.Stop();
 		editorThread.Join();
 		AssetDatabase.ClearInstanceRegistry();
+		if (automationController is not null)
+		{
+			Environment.ExitCode = automationController.ExitCode;
+		}
 	}
 
 	private static void ConfigureServices(IServiceCollection services)

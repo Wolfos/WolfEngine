@@ -413,6 +413,7 @@ public sealed class RenderGraph
 
 				_frameBuilder.Build(this);
 				Execute();
+				_renderer.CompletePendingFrameCapture(_resourceRegistry, _frameBuilder.GetCaptureColorHandle());
 				_frameBuilder.CompleteFrame();
 				if (sceneColorHandle.IsValid)
 				{
