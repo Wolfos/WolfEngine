@@ -139,6 +139,9 @@
         <None Update="Shaders\tonemapping.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Update="Shaders\bloom.compute.slang">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
         <None Update="Shaders\cas_sharpen.compute.slang">
           <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>

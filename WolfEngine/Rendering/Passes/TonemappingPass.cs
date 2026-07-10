@@ -40,7 +40,9 @@ public sealed class TonemappingPass
 				AddressMode.Clamp));
 		}
 
-		var input = context.GetTexture(resources.ResolvedSceneColor);
+		var input = context.GetTexture(resources.BloomCompositeSceneColor.IsValid
+			? resources.BloomCompositeSceneColor
+			: resources.ResolvedSceneColor);
 		var output = context.GetTexture(resources.TonemappedLinearSceneColor);
 
 		return new TonemappingPassConfig

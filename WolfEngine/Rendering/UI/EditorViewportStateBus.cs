@@ -22,6 +22,8 @@ public static class SceneDebugViewIds
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string GBufferNormal = "gbuffer-normal";
 	public const string MotionVectors = "motion-vectors";
+	public const string BloomPrefilter = "bloom-prefilter";
+	public const string BloomContribution = "bloom-contribution";
 }
 
 public enum SceneDebugViewKind

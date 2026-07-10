@@ -31,6 +31,7 @@ internal sealed class RenderGraphPassSet
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
 		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry);
+		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
 		TonemappingPass = new(shaderCompiler, bindlessResourceRegistry);
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -56,6 +57,7 @@ internal sealed class RenderGraphPassSet
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
 	public TransparentForwardPass TransparentForwardPass { get; }
+	public BloomPass BloomPass { get; }
 	public TonemappingPass TonemappingPass { get; }
 	public CasSharpenPass CasSharpenPass { get; }
 	public CopyToFinalPass CopyToFinalPass { get; }

@@ -94,6 +94,10 @@ public sealed class RayTracingSceneResourcesTests
 			(Name: "ao_blur.compute.slang", EntryPoint: "AmbientOcclusionBlurCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "ao_upsample.compute.slang", EntryPoint: "AmbientOcclusionUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "cas_sharpen.compute.slang", EntryPoint: "CasSharpenCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "bloom.compute.slang", EntryPoint: "BloomPrefilterCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "bloom.compute.slang", EntryPoint: "BloomDownsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "bloom.compute.slang", EntryPoint: "BloomUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "bloom.compute.slang", EntryPoint: "BloomCompositeCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "deferred_lighting.compute.slang", EntryPoint: "DeferredLightingCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "gbuffer_decal_seed.compute.slang", EntryPoint: "GBufferDecalSeedCS", ThreadsX: 8u, ThreadsY: 8u),
@@ -280,6 +284,34 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(
 			BitConverter.ToInt32(writer.AsBytes().Slice(scrollDeltaField.Offset, sizeof(int))),
 			Is.EqualTo(-7));
+	}
+
+	[Test]
+	public void BloomDefaultsAndSettingsRoundTripThroughAssetJson()
+	{
+		var defaults = new RenderConfig().Bloom;
+		Assert.That(defaults.Enabled, Is.True);
+		Assert.That(defaults.Threshold, Is.EqualTo(1.0f));
+		Assert.That(defaults.SoftKnee, Is.EqualTo(0.5f));
+		Assert.That(defaults.Intensity, Is.EqualTo(0.08f));
+		Assert.That(defaults.Scatter, Is.EqualTo(0.7f));
+		Assert.That(defaults.Tint, Is.EqualTo(Vector3.One));
+		Assert.That(defaults.Quality, Is.EqualTo(BloomQuality.High));
+
+		var config = new RenderConfig { Bloom = new BloomConfig
+		{
+			Enabled = false, Threshold = 2.5f, SoftKnee = 0.25f, Intensity = 0.15f,
+			Scatter = 0.4f, Tint = new Vector3(1.0f, 0.5f, 0.25f), Quality = BloomQuality.Low
+		}};
+		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
+			JsonSerializer.Serialize(config, AssetJson.SerializerOptions), AssetJson.SerializerOptions)!;
+		Assert.That(roundTripped.Bloom.Enabled, Is.False);
+		Assert.That(roundTripped.Bloom.Threshold, Is.EqualTo(2.5f));
+		Assert.That(roundTripped.Bloom.SoftKnee, Is.EqualTo(0.25f));
+		Assert.That(roundTripped.Bloom.Intensity, Is.EqualTo(0.15f));
+		Assert.That(roundTripped.Bloom.Scatter, Is.EqualTo(0.4f));
+		Assert.That(roundTripped.Bloom.Tint, Is.EqualTo(new Vector3(1.0f, 0.5f, 0.25f)));
+		Assert.That(roundTripped.Bloom.Quality, Is.EqualTo(BloomQuality.Low));
 	}
 
 	[Test]

@@ -93,6 +93,7 @@ public sealed class FrameSnapshot
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
+		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;
 	}
 

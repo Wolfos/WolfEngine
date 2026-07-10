@@ -14,6 +14,31 @@ namespace WolfEngine.Editor.Tests;
 public sealed class FrameSnapshotGpuDrawTests
 {
 	[Test]
+	public void FrameSnapshot_SetConfig_CopiesBloom()
+	{
+		var snapshot = new FrameSnapshot();
+		snapshot.SetConfig(new RenderConfig { Bloom = new BloomConfig
+		{
+			Enabled = false,
+			Threshold = 0.1f,
+			SoftKnee = 0.25f,
+			Intensity = 100.0f,
+			Scatter = 100.0f,
+			Tint = new Vector3(0.25f, 0.5f, 1.0f),
+			Quality = BloomQuality.Low
+		}});
+
+		var bloom = snapshot.Config.Bloom;
+		Assert.That(bloom.Enabled, Is.False);
+		Assert.That(bloom.Threshold, Is.EqualTo(0.1f));
+		Assert.That(bloom.SoftKnee, Is.EqualTo(0.25f));
+		Assert.That(bloom.Intensity, Is.EqualTo(100.0f));
+		Assert.That(bloom.Scatter, Is.EqualTo(100.0f));
+		Assert.That(bloom.Tint, Is.EqualTo(new Vector3(0.25f, 0.5f, 1.0f)));
+		Assert.That(bloom.Quality, Is.EqualTo(BloomQuality.Low));
+	}
+
+	[Test]
 	public void FrameSnapshot_SetConfig_CopiesDiffuseGlobalIllumination()
 	{
 		var snapshot = new FrameSnapshot();

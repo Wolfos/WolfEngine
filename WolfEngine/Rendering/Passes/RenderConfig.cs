@@ -12,6 +12,7 @@ public class RenderConfig: IDataAsset
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
+	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
 }
 
@@ -146,6 +147,28 @@ public struct TonemappingConfig
 	}
 
 	public float Exposure { get; set; } = 1.0f;
+}
+
+public enum BloomQuality
+{
+	Low,
+	Medium,
+	High
+}
+
+public struct BloomConfig
+{
+	public BloomConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = true;
+	public float Threshold { get; set; } = 1.0f;
+	public float SoftKnee { get; set; } = 0.5f;
+	public float Intensity { get; set; } = 0.08f;
+	public float Scatter { get; set; } = 0.7f;
+	public Vector3 Tint { get; set; } = Vector3.One;
+	public BloomQuality Quality { get; set; } = BloomQuality.High;
 }
 
 public struct TemporalAntiAliasingConfig

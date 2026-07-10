@@ -68,6 +68,9 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
 	public RenderGraphResourceHandle ResolvedSceneColor { get; init; }
+	public RenderGraphResourceHandle[] BloomDownsampleLevels { get; init; }
+	public RenderGraphResourceHandle[] BloomUpsampleLevels { get; init; }
+	public RenderGraphResourceHandle BloomCompositeSceneColor { get; init; }
 	public RenderGraphResourceHandle HistoryColorRead { get; init; }
 	public RenderGraphResourceHandle HistoryColorWrite { get; init; }
 	public RenderGraphResourceHandle HistoryDepthRead { get; init; }
@@ -123,6 +126,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
+	private readonly BloomPass _bloomPass;
 	private readonly TonemappingPass _tonemappingPass;
 	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
@@ -199,6 +203,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
+	private readonly Action<RenderGraphContext> _bloomCompositeExecute;
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
 	private readonly Action<RenderGraphContext> _copyToFinalExecute;
@@ -237,6 +242,7 @@ internal sealed class RenderGraphFrameBuilder
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
+		_bloomPass = passSet.BloomPass;
 		_tonemappingPass = passSet.TonemappingPass;
 		_casSharpenPass = passSet.CasSharpenPass;
 		_copyToFinalPass = passSet.CopyToFinalPass;
@@ -263,6 +269,7 @@ internal sealed class RenderGraphFrameBuilder
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
+		_bloomCompositeExecute = ExecuteBloomComposite;
 		_tonemappingExecute = ExecuteTonemapping;
 		_casSharpenExecute = ExecuteCasSharpen;
 		_copyToFinalExecute = ExecuteCopyToFinal;
@@ -392,6 +399,9 @@ internal sealed class RenderGraphFrameBuilder
 		var historyColorWriteHandle = default(RenderGraphResourceHandle);
 		var historyDepthReadHandle = default(RenderGraphResourceHandle);
 		var historyDepthWriteHandle = default(RenderGraphResourceHandle);
+		var bloomDownsampleLevels = Array.Empty<RenderGraphResourceHandle>();
+		var bloomUpsampleLevels = Array.Empty<RenderGraphResourceHandle>();
+		var bloomCompositeSceneColorHandle = default(RenderGraphResourceHandle);
 		if (sceneEnabled)
 		{
 			gbufferAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -707,6 +717,24 @@ internal sealed class RenderGraphFrameBuilder
 			}
 		}
 
+		if (sceneEnabled && config.Bloom.Enabled)
+		{
+			var levelCount = GetBloomLevelCount(sceneFramebufferSize, config.Bloom.Quality);
+			bloomDownsampleLevels = new RenderGraphResourceHandle[levelCount];
+			bloomUpsampleLevels = new RenderGraphResourceHandle[Math.Max(levelCount - 1, 0)];
+			var levelSize = new Int2(Math.Max(1, (sceneFramebufferSize.X + 1) / 2), Math.Max(1, (sceneFramebufferSize.Y + 1) / 2));
+			for (var level = 0; level < levelCount; level++)
+			{
+				bloomDownsampleLevels[level] = CreateBloomTexture(levelSize);
+				if (level < bloomUpsampleLevels.Length)
+				{
+					bloomUpsampleLevels[level] = CreateBloomTexture(levelSize);
+				}
+				levelSize = new Int2(Math.Max(1, (levelSize.X + 1) / 2), Math.Max(1, (levelSize.Y + 1) / 2));
+			}
+			bloomCompositeSceneColorHandle = CreateBloomTexture(sceneFramebufferSize);
+		}
+
 		var tonemappedLinearSceneColorHandle = sceneEnabled
 			? _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
@@ -800,6 +828,9 @@ internal sealed class RenderGraphFrameBuilder
 			HistoryColorWrite = historyColorWriteHandle,
 			HistoryDepthRead = historyDepthReadHandle,
 			HistoryDepthWrite = historyDepthWriteHandle,
+			BloomDownsampleLevels = bloomDownsampleLevels,
+			BloomUpsampleLevels = bloomUpsampleLevels,
+			BloomCompositeSceneColor = bloomCompositeSceneColorHandle,
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
@@ -810,6 +841,15 @@ internal sealed class RenderGraphFrameBuilder
 		if (sceneEnabled)
 		{
 			RegisterSceneDebugView(SceneDebugViewIds.FinalColor, "Final Color", _frameResources.TonemappedSceneColor, SceneDebugViewKind.Color);
+			if (bloomDownsampleLevels.Length > 0)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.BloomPrefilter, "Bloom Prefilter", bloomDownsampleLevels[0], SceneDebugViewKind.Color);
+				RegisterSceneDebugView(
+					SceneDebugViewIds.BloomContribution,
+					"Bloom Contribution",
+					bloomUpsampleLevels.Length > 0 ? bloomUpsampleLevels[0] : bloomDownsampleLevels[0],
+					SceneDebugViewKind.Color);
+			}
 			if (ambientOcclusionFinalHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
@@ -1173,8 +1213,50 @@ internal sealed class RenderGraphFrameBuilder
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
+			if (_frameResources.BloomDownsampleLevels.Length > 0)
+			{
+				graph.AddPass("Bloom Prefilter", PassKind.Compute)
+					.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.BloomDownsampleLevels[0], ResourceState.UnorderedAccess)
+					.SetExecute(context => ExecuteBloom(context, BloomPass.Stage.Prefilter,
+						_frameResources.ResolvedSceneColor, _frameResources.BloomDownsampleLevels[0], default));
+
+				for (var level = 1; level < _frameResources.BloomDownsampleLevels.Length; level++)
+				{
+					var source = _frameResources.BloomDownsampleLevels[level - 1];
+					var output = _frameResources.BloomDownsampleLevels[level];
+					graph.AddPass($"Bloom Downsample {level}", PassKind.Compute)
+						.ReadTexture(source, ResourceState.ShaderResource)
+						.WriteTexture(output, ResourceState.UnorderedAccess)
+						.SetExecute(context => ExecuteBloom(context, BloomPass.Stage.Downsample, source, output, default));
+				}
+
+				for (var level = _frameResources.BloomUpsampleLevels.Length - 1; level >= 0; level--)
+				{
+					var small = level == _frameResources.BloomUpsampleLevels.Length - 1
+						? _frameResources.BloomDownsampleLevels[level + 1]
+						: _frameResources.BloomUpsampleLevels[level + 1];
+					var large = _frameResources.BloomDownsampleLevels[level];
+					var output = _frameResources.BloomUpsampleLevels[level];
+					graph.AddPass($"Bloom Upsample {level}", PassKind.Compute)
+						.ReadTexture(small, ResourceState.ShaderResource)
+						.ReadTexture(large, ResourceState.ShaderResource)
+						.WriteTexture(output, ResourceState.UnorderedAccess)
+						.SetExecute(context => ExecuteBloom(context, BloomPass.Stage.Upsample, small, output, large));
+				}
+
+				var bloomResult = _frameResources.BloomUpsampleLevels.Length > 0
+					? _frameResources.BloomUpsampleLevels[0]
+					: _frameResources.BloomDownsampleLevels[0];
+				graph.AddPass("Bloom Composite", PassKind.Compute)
+					.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
+					.ReadTexture(bloomResult, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.BloomCompositeSceneColor, ResourceState.UnorderedAccess)
+					.SetExecute(_bloomCompositeExecute);
+			}
+
 			graph.AddPass("Tonemapping", PassKind.Compute)
-				.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.BloomCompositeSceneColor.IsValid ? _frameResources.BloomCompositeSceneColor : _frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
 
@@ -1271,6 +1353,25 @@ internal sealed class RenderGraphFrameBuilder
 			TextureFormat.Rgba16Float,
 			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+	}
+
+	private RenderGraphResourceHandle CreateBloomTexture(Int2 size) => _resources.CreateTransientTexture(new TextureDescriptor(
+		size.X, size.Y, TextureFormat.Rgba16Float,
+		TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+		new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+
+	private static int GetBloomLevelCount(Int2 size, BloomQuality quality)
+	{
+		var maximum = quality switch { BloomQuality.Low => 4, BloomQuality.Medium => 5, _ => 6 };
+		var count = 0;
+		var levelSize = new Int2(Math.Max(1, (size.X + 1) / 2), Math.Max(1, (size.Y + 1) / 2));
+		while (count < maximum)
+		{
+			count++;
+			if (levelSize.X == 1 && levelSize.Y == 1) break;
+			levelSize = new Int2(Math.Max(1, (levelSize.X + 1) / 2), Math.Max(1, (levelSize.Y + 1) / 2));
+		}
+		return count;
 	}
 
 	private SceneDebugViewOption[] BuildSceneDebugViewOptions()
@@ -1770,6 +1871,22 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice());
 		_tonemappingPass.Record(context, in config);
+	}
+
+	private void ExecuteBloom(RenderGraphContext context, BloomPass.Stage stage,
+		RenderGraphResourceHandle source, RenderGraphResourceHandle output, RenderGraphResourceHandle secondary)
+	{
+		var config = _bloomPass.BuildConfig(context, _renderer.GetGfxDevice(), stage, source, output, secondary, _frameResources.Config.Bloom);
+		_bloomPass.Record(context, stage, in config);
+	}
+
+	private void ExecuteBloomComposite(RenderGraphContext context)
+	{
+		var bloomResult = _frameResources.BloomUpsampleLevels.Length > 0
+			? _frameResources.BloomUpsampleLevels[0]
+			: _frameResources.BloomDownsampleLevels[0];
+		ExecuteBloom(context, BloomPass.Stage.Composite, _frameResources.ResolvedSceneColor,
+			_frameResources.BloomCompositeSceneColor, bloomResult);
 	}
 
 	private void ExecuteCasSharpen(RenderGraphContext context)
