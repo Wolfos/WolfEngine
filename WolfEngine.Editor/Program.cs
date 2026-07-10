@@ -100,6 +100,7 @@ public static class Program
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
+		services.AddSingleton<TerrainAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();

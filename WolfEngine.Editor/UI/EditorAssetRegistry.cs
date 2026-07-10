@@ -181,10 +181,12 @@ public sealed class DataEditorAssetHandler : IEditorAssetHandler
 public sealed class TerrainEditorAssetHandler : IEditorAssetHandler
 {
 	private readonly ITerrainAssetCreator _terrainAssetCreator;
+	private readonly TerrainAssetEditor _editor;
 
-	public TerrainEditorAssetHandler(ITerrainAssetCreator terrainAssetCreator)
+	public TerrainEditorAssetHandler(ITerrainAssetCreator terrainAssetCreator, TerrainAssetEditor editor)
 	{
 		_terrainAssetCreator = terrainAssetCreator ?? throw new ArgumentNullException(nameof(terrainAssetCreator));
+		_editor = editor ?? throw new ArgumentNullException(nameof(editor));
 	}
 
 	public AssetType AssetType => AssetType.Terrain;
@@ -212,7 +214,7 @@ public sealed class TerrainEditorAssetHandler : IEditorAssetHandler
 
 	public void DrawEditor(AssetDatabaseEntry asset)
 	{
-		_ = asset;
+		_editor.Draw(asset);
 	}
 }
 

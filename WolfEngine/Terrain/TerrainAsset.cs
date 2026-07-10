@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering;
 
@@ -57,6 +59,21 @@ public sealed class TerrainAsset
 			layerWeightMap.Format,
 			CloneMipLevels(layerWeightMap.MipLevels));
 		Validate();
+	}
+
+	public void ResizeMaps(int heightmapResolution, int layerMapResolution)
+	{
+		heightmapResolution = Math.Max(heightmapResolution, 2);
+		layerMapResolution = Math.Max(layerMapResolution, 1);
+		if (Heightmap.Width == heightmapResolution && Heightmap.Height == heightmapResolution &&
+		    LayerIndexMap.Width == layerMapResolution && LayerIndexMap.Height == layerMapResolution)
+		{
+			return;
+		}
+
+		var heightmap = CreateResampledHeightmap(Heightmap, heightmapResolution, heightmapResolution);
+		var (layerIndices, layerWeights) = CreateResampledLayerMaps(LayerIndexMap, LayerWeightMap, layerMapResolution, layerMapResolution);
+		ApplyMaps(heightmap, layerIndices, layerWeights);
 	}
 
 	public TerrainAssetSnapshot CaptureSnapshot(Guid assetId)
@@ -131,6 +148,148 @@ public sealed class TerrainAsset
 			source.Format,
 			CloneMipLevels(source.MipLevels));
 	}
+
+	private static Texture CreateResampledHeightmap(Texture source, int targetWidth, int targetHeight)
+	{
+		var sourceMip = source.MipLevels[0];
+		var data = new byte[targetWidth * targetHeight * 2];
+		for (var y = 0; y < targetHeight; y++)
+		{
+			var sourceY = GetResampleCoordinate(y, targetHeight, sourceMip.Height);
+			for (var x = 0; x < targetWidth; x++)
+			{
+				var sourceX = GetResampleCoordinate(x, targetWidth, sourceMip.Width);
+				var value = SampleR16Bilinear(sourceMip, sourceX, sourceY);
+				var offset = ((y * targetWidth) + x) * 2;
+				data[offset] = (byte)value;
+				data[offset + 1] = (byte)(value >> 8);
+			}
+		}
+
+		return new Texture(source.Name, targetWidth, targetHeight, false, TextureFormat.R16Unorm,
+			[new TextureMipData(targetWidth, targetHeight, data)]);
+	}
+
+	private static (Texture Indices, Texture Weights) CreateResampledLayerMaps(
+		Texture sourceIndices,
+		Texture sourceWeights,
+		int targetWidth,
+		int targetHeight)
+	{
+		var sourceIndexMip = sourceIndices.MipLevels[0];
+		var sourceWeightMip = sourceWeights.MipLevels[0];
+		var indices = new byte[targetWidth * targetHeight * 4];
+		var weights = new byte[targetWidth * targetHeight * 4];
+		for (var y = 0; y < targetHeight; y++)
+		{
+			var sourceY = GetResampleCoordinate(y, targetHeight, sourceIndexMip.Height);
+			for (var x = 0; x < targetWidth; x++)
+			{
+				var sourceX = GetResampleCoordinate(x, targetWidth, sourceIndexMip.Width);
+				ResampleLayerPixel(sourceIndexMip, sourceWeightMip, sourceX, sourceY, indices, weights, y * targetWidth + x);
+			}
+		}
+
+		var indexMip = new TextureMipData(targetWidth, targetHeight, indices);
+		var weightMip = new TextureMipData(targetWidth, targetHeight, weights);
+		var mips = TerrainLayerMapUtility.GenerateLayerMipChain(indexMip, weightMip);
+		return (
+			new Texture(sourceIndices.Name, targetWidth, targetHeight, false, TextureFormat.Rgba8Uint, mips.Indices),
+			new Texture(sourceWeights.Name, targetWidth, targetHeight, false, TextureFormat.Rgba8Unorm, mips.Weights));
+	}
+
+	private static void ResampleLayerPixel(
+		TextureMipData sourceIndices,
+		TextureMipData sourceWeights,
+		float sourceX,
+		float sourceY,
+		byte[] destinationIndices,
+		byte[] destinationWeights,
+		int destinationPixel)
+	{
+		var x0 = Math.Clamp((int)MathF.Floor(sourceX), 0, sourceIndices.Width - 1);
+		var y0 = Math.Clamp((int)MathF.Floor(sourceY), 0, sourceIndices.Height - 1);
+		var x1 = Math.Min(x0 + 1, sourceIndices.Width - 1);
+		var y1 = Math.Min(y0 + 1, sourceIndices.Height - 1);
+		var tx = sourceX - x0;
+		var ty = sourceY - y0;
+		var layerWeights = new Dictionary<byte, float>();
+		AccumulateLayerPixel(x0, y0, (1.0f - tx) * (1.0f - ty));
+		AccumulateLayerPixel(x1, y0, tx * (1.0f - ty));
+		AccumulateLayerPixel(x0, y1, (1.0f - tx) * ty);
+		AccumulateLayerPixel(x1, y1, tx * ty);
+
+		var offset = destinationPixel * 4;
+		var strongestLayers = layerWeights
+			.Where(pair => pair.Value > 0.0f)
+			.OrderByDescending(pair => pair.Value)
+			.ThenBy(pair => pair.Key)
+			.Take(4)
+			.ToArray();
+		if (strongestLayers.Length == 0)
+		{
+			destinationWeights[offset] = 255;
+			return;
+		}
+
+		var totalWeight = strongestLayers.Sum(pair => pair.Value);
+		var remaining = 255;
+		for (var i = 0; i < strongestLayers.Length; i++)
+		{
+			destinationIndices[offset + i] = strongestLayers[i].Key;
+			var weight = i == strongestLayers.Length - 1
+				? remaining
+				: Math.Clamp((int)MathF.Round(strongestLayers[i].Value / totalWeight * 255.0f), 0, remaining);
+			destinationWeights[offset + i] = (byte)weight;
+			remaining -= weight;
+		}
+
+		void AccumulateLayerPixel(int x, int y, float bilinearWeight)
+		{
+			var sourceOffset = ((y * sourceIndices.Width) + x) * 4;
+			for (var channel = 0; channel < 4; channel++)
+			{
+				var weight = sourceWeights.Data[sourceOffset + channel];
+				if (weight == 0)
+				{
+					continue;
+				}
+
+				var layer = sourceIndices.Data[sourceOffset + channel];
+				layerWeights[layer] = layerWeights.TryGetValue(layer, out var total)
+					? total + weight * bilinearWeight
+					: weight * bilinearWeight;
+			}
+		}
+	}
+
+	private static ushort SampleR16Bilinear(TextureMipData source, float sourceX, float sourceY)
+	{
+		var x0 = Math.Clamp((int)MathF.Floor(sourceX), 0, source.Width - 1);
+		var y0 = Math.Clamp((int)MathF.Floor(sourceY), 0, source.Height - 1);
+		var x1 = Math.Min(x0 + 1, source.Width - 1);
+		var y1 = Math.Min(y0 + 1, source.Height - 1);
+		var tx = sourceX - x0;
+		var ty = sourceY - y0;
+		var top = Lerp(ReadR16(source, x0, y0), ReadR16(source, x1, y0), tx);
+		var bottom = Lerp(ReadR16(source, x0, y1), ReadR16(source, x1, y1), tx);
+		return (ushort)Math.Clamp((int)MathF.Round(Lerp(top, bottom, ty)), 0, ushort.MaxValue);
+	}
+
+	private static ushort ReadR16(TextureMipData source, int x, int y)
+	{
+		var offset = ((y * source.Width) + x) * 2;
+		return (ushort)(source.Data[offset] | (source.Data[offset + 1] << 8));
+	}
+
+	private static float GetResampleCoordinate(int targetCoordinate, int targetSize, int sourceSize)
+	{
+		return targetSize <= 1 || sourceSize <= 1
+			? 0.0f
+			: targetCoordinate / (float)(targetSize - 1) * (sourceSize - 1);
+	}
+
+	private static float Lerp(float a, float b, float t) => a + (b - a) * t;
 
 	public static TextureMipData[] CloneMipLevels(TextureMipData[] mipLevels)
 	{
