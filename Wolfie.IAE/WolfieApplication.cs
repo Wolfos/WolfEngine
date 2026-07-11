@@ -33,7 +33,10 @@ public sealed class WolfieApplication : IDisposable
 		var engineRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
 		global::WolfEngine.WolfEngine.ConfigureServices(services, new EngineShaderOptions { EngineContentRoot = engineRoot });
 		services.AddSingleton<WolfieProjectService>();
+		services.AddSingleton<WolfiePreferences>();
 		services.AddSingleton<UnityAssetScanner>();
+		services.AddSingleton<IImageLoader, ImageLoader>();
+		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<WolfieGui>();
 		return new WolfieApplication(services.BuildServiceProvider());
 	}

@@ -1,0 +1,59 @@
+using System.Text.Json;
+
+namespace Wolfie.IAE.Projects;
+
+public sealed class WolfiePreferences
+{
+	private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+	private readonly string _preferencesFile;
+
+	public WolfiePreferences() : this(Path.Combine(
+		Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+		"Wolfie",
+		"WolfiePreferences.json"))
+	{
+	}
+
+	public WolfiePreferences(string preferencesFile)
+	{
+		_preferencesFile = WolfiePath.NormalizeAbsolute(preferencesFile);
+		Load();
+	}
+
+	public string? LastProjectPath { get; private set; }
+
+	public void SetLastProjectPath(string projectPath)
+	{
+		LastProjectPath = WolfiePath.NormalizeAbsolute(projectPath);
+		Save();
+	}
+
+	private void Load()
+	{
+		try
+		{
+			if (!File.Exists(_preferencesFile)) return;
+			var data = JsonSerializer.Deserialize<PreferenceData>(File.ReadAllText(_preferencesFile), JsonOptions);
+			LastProjectPath = string.IsNullOrWhiteSpace(data?.LastProjectPath)
+				? null
+				: WolfiePath.NormalizeAbsolute(data.LastProjectPath);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+		{
+			LastProjectPath = null;
+		}
+	}
+
+	private void Save()
+	{
+		var directory = Path.GetDirectoryName(_preferencesFile);
+		if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+		File.WriteAllText(_preferencesFile,
+			JsonSerializer.Serialize(new PreferenceData { LastProjectPath = LastProjectPath }, JsonOptions));
+	}
+
+	private sealed class PreferenceData
+	{
+		public string? LastProjectPath { get; init; }
+	}
+}

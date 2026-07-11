@@ -82,6 +82,18 @@ public sealed class WolfieProjectTests
 		});
 	}
 
+	[Test]
+	public void PreferencesPersistTheLastProjectPath()
+	{
+		var preferencesFile = Path.Combine(_root, "Preferences", "WolfiePreferences.json");
+		var projectFile = Path.Combine(_root, "Project", "Art.wolfieproject");
+		var preferences = new WolfiePreferences(preferencesFile);
+		preferences.SetLastProjectPath(projectFile);
+
+		Assert.That(new WolfiePreferences(preferencesFile).LastProjectPath,
+			Is.EqualTo(WolfiePath.NormalizeAbsolute(projectFile)));
+	}
+
 	private string CreateUnityProject()
 	{
 		var unity = Path.Combine(_root, "Unity");

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using ImGuiNET;
 using WolfEngine.Utility;
 using Wolfie.IAE.Projects;
@@ -9,8 +10,15 @@ namespace Wolfie.IAE.UI;
 public sealed class WolfieGui(
 	WolfieProjectService projectService,
 	UnityAssetScanner assetScanner,
-	IFileDialogService fileDialog)
+	IFileDialogService fileDialog,
+	IIconManager icons,
+	WolfiePreferences preferences)
 {
+	private const float MacTitlebarButtonInset = 70.0f;
+	private const float FolderTreeWidth = 220.0f;
+	private const float FolderTreeIconSize = 15.5f;
+	private const float GridMinItemWidth = 132.0f;
+	private const float CardHeight = 104.0f;
 	private WolfieProject? _project;
 	private string? _projectFile;
 	private UnityAssetScanResult? _assets;
@@ -18,10 +26,18 @@ public sealed class WolfieGui(
 	private string _parentLocation = string.Empty;
 	private string _projectName = string.Empty;
 	private string _selectedPath = string.Empty;
+	private string _selectedFolderPath = "Assets";
+	private string _searchText = string.Empty;
 	private string _error = string.Empty;
+	private bool _startupRestoreAttempted;
 
 	public void Draw()
 	{
+		if (!_startupRestoreAttempted)
+		{
+			_startupRestoreAttempted = true;
+			RestoreLastProject();
+		}
 		DrawDockSpace();
 		if (_project is null) DrawStartup();
 		else DrawWorkspace();
@@ -39,9 +55,10 @@ public sealed class WolfieGui(
 		ImGui.Spacing();
 		PathField("Unity project", ref _unityPath, "Select Unity Project");
 		PathField("Wolfie project location (parent folder)", ref _parentLocation, "Select Parent Folder for Wolfie Project");
+		ImGui.Text("Wolfie project name");
 		ImGui.SetNextItemWidth(-1);
 		ImGui.InputText("##WolfieName", ref _projectName, 256);
-		ImGui.TextDisabled("Wolfie project name (a new folder with this name will be created)");
+		ImGui.TextDisabled("A new folder with this name will be created.");
 		if (!string.IsNullOrWhiteSpace(_parentLocation) && !string.IsNullOrWhiteSpace(_projectName))
 			ImGui.TextDisabled($"Will create: {Path.Combine(_parentLocation, _projectName.Trim())}");
 		if (ImGui.Button("Create Project", new Vector2(-1, 38))) CreateProject();
@@ -51,6 +68,7 @@ public sealed class WolfieGui(
 
 	private void PathField(string label, ref string value, string dialogTitle)
 	{
+		ImGui.Text(label);
 		ImGui.SetNextItemWidth(-88);
 		ImGui.InputText("##" + label, ref value, 2048);
 		ImGui.SameLine();
@@ -59,13 +77,14 @@ public sealed class WolfieGui(
 			var selected = fileDialog.OpenFolder(new FileDialogOptions { Title = dialogTitle, InitialDirectory = value });
 			if (selected is not null) value = selected;
 		}
-		ImGui.TextDisabled(label);
 	}
 
 	private void DrawWorkspace()
 	{
 		if (ImGui.BeginMainMenuBar())
 		{
+			if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && ImGui.GetCursorPosX() < MacTitlebarButtonInset)
+				ImGui.SetCursorPosX(MacTitlebarButtonInset);
 			if (ImGui.BeginMenu("Project"))
 			{
 				if (ImGui.MenuItem("Open...")) OpenProject();
@@ -75,42 +94,163 @@ public sealed class WolfieGui(
 			ImGui.EndMainMenuBar();
 		}
 
-		ImGui.Begin("Unity Assets");
+		ImGui.Begin("Assets");
 		ImGui.Text($"Wolfie: {_project!.Name}");
 		ImGui.TextDisabled(_projectFile ?? string.Empty);
 		ImGui.Text($"Connected Unity project: {Path.GetFileName(_project.UnityProjectPath)}");
 		ImGui.TextDisabled(_project.UnityProjectPath);
-		if (ImGui.Button("Refresh")) Refresh();
+		if (DrawIconButton("refresh", "Refresh")) Refresh();
 		ImGui.SameLine();
 		ImGui.TextDisabled("Unity-only content (read-only)");
 		ImGui.Separator();
-		if (_assets is not null) DrawEntry(_assets.Root);
 		if (_assets is { Warnings.Count: > 0 })
 			ImGui.TextDisabled($"Scan completed with {_assets.Warnings.Count} inaccessible item(s).");
+		DrawError();
+		if (_assets is not null)
+		{
+			ImGui.BeginChild("AssetBrowserArea", new Vector2(0, -ImGui.GetFrameHeightWithSpacing()),
+				ImGuiChildFlags.None, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+			DrawAssetBrowser(_assets.Root);
+			ImGui.EndChild();
+		}
 		ImGui.Separator();
 		ImGui.Text("Selected path:");
 		ImGui.SameLine();
 		ImGui.TextDisabled(string.IsNullOrEmpty(_selectedPath) ? "None" : _selectedPath);
-		DrawError();
 		ImGui.End();
 	}
 
-	private void DrawEntry(UnityAssetEntry entry)
+	private void DrawAssetBrowser(UnityAssetEntry root)
 	{
-		var selected = string.Equals(_selectedPath, entry.RelativePath, StringComparison.Ordinal);
-		var flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.OpenOnArrow |
-		            (selected ? ImGuiTreeNodeFlags.Selected : 0);
-		if (entry.Type == UnityAssetEntryType.File) flags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
+		var selectedFolder = FindEntry(root, _selectedFolderPath) ?? root;
+		ImGui.BeginChild("UnityFolderTree", new Vector2(FolderTreeWidth, 0));
+		DrawFolderTreeNode(root);
+		ImGui.EndChild();
+		ImGui.SameLine(0, 0);
+		DrawVerticalSeparator();
+		ImGui.SameLine(0, 0);
+		ImGui.BeginGroup();
+		DrawBrowserHeader(selectedFolder.RelativePath);
+		ImGui.Separator();
+		ImGui.BeginChild("UnityAssetGrid");
+		DrawGrid(selectedFolder);
+		ImGui.EndChild();
+		ImGui.EndGroup();
+	}
+
+	private void DrawFolderTreeNode(UnityAssetEntry entry)
+	{
+		ImGui.PushID(entry.RelativePath);
+		var folderSelected = string.Equals(_selectedFolderPath, entry.RelativePath, StringComparison.Ordinal);
+		var folders = entry.Children.Where(child => child.Type == UnityAssetEntryType.Folder).ToArray();
+		var flags = ImGuiTreeNodeFlags.SpanFullWidth | ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.FramePadding |
+		            (folderSelected ? ImGuiTreeNodeFlags.Selected : 0);
+		if (folders.Length == 0) flags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
 		if (entry.RelativePath == "Assets") flags |= ImGuiTreeNodeFlags.DefaultOpen;
 		ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.62f, 0.65f, 0.69f, 1));
-		var open = ImGui.TreeNodeEx(entry.RelativePath + "##unity", flags, entry.Name);
+		var nodeCursorX = ImGui.GetCursorScreenPos().X;
+		var open = ImGui.TreeNodeEx("##FolderNode", flags);
 		ImGui.PopStyleColor();
-		if (ImGui.IsItemClicked()) _selectedPath = entry.RelativePath;
-		if (open && entry.Type == UnityAssetEntryType.Folder)
+		var itemMin = ImGui.GetItemRectMin();
+		var itemMax = ImGui.GetItemRectMax();
+		var rowHeight = itemMax.Y - itemMin.Y;
+		var labelStartX = nodeCursorX + ImGui.GetTreeNodeToLabelSpacing();
+		var iconSize = MathF.Min(FolderTreeIconSize, MathF.Max(1, rowHeight - 2));
+		var iconPosition = new Vector2(labelStartX, itemMin.Y + (rowHeight - iconSize) * .5f);
+		if (icons.TryGet("folder", out var treeIcon))
+			ImGui.GetWindowDrawList().AddImage(treeIcon, iconPosition, iconPosition + Vector2.One * iconSize);
+		var textSize = ImGui.CalcTextSize(entry.Name);
+		var textPosition = new Vector2(iconPosition.X + iconSize + 4, itemMin.Y + (rowHeight - textSize.Y) * .5f);
+		ImGui.GetWindowDrawList().AddText(textPosition, ImGui.GetColorU32(ImGuiCol.TextDisabled), entry.Name);
+		if (ImGui.IsItemClicked()) { _selectedFolderPath = entry.RelativePath; _selectedPath = entry.RelativePath; }
+		if (open && folders.Length > 0)
 		{
-			foreach (var child in entry.Children) DrawEntry(child);
+			foreach (var child in folders) DrawFolderTreeNode(child);
 			ImGui.TreePop();
 		}
+		ImGui.PopID();
+	}
+
+	private void DrawBrowserHeader(string relativePath)
+	{
+		var parts = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		var currentPath = string.Empty;
+		for (var i = 0; i < parts.Length; i++)
+		{
+			currentPath = i == 0 ? parts[i] : currentPath + "/" + parts[i];
+			if (i > 0) { ImGui.SameLine(0, 6); ImGui.TextDisabled(">"); ImGui.SameLine(0, 6); }
+			if (ImGui.SmallButton(parts[i])) { _selectedFolderPath = currentPath; _selectedPath = currentPath; }
+		}
+		var style = ImGui.GetStyle();
+		const float searchWidth = 220;
+		var labelWidth = ImGui.CalcTextSize("Search").X;
+		var currentX = ImGui.GetCursorPosX();
+		var contentMaxX = currentX + ImGui.GetContentRegionAvail().X;
+		var start = MathF.Max(currentX + style.ItemSpacing.X,
+			contentMaxX - searchWidth - labelWidth - style.ItemInnerSpacing.X);
+		ImGui.SameLine(); ImGui.SetCursorPosX(start); ImGui.TextDisabled("Search"); ImGui.SameLine();
+		ImGui.SetNextItemWidth(searchWidth); ImGui.InputText("##WolfieAssetSearch", ref _searchText, 256);
+	}
+
+	private void DrawGrid(UnityAssetEntry folder)
+	{
+		var items = folder.Children; // Search is intentionally visual-only in this milestone.
+		if (items.Count == 0) { ImGui.TextDisabled("This folder is empty."); return; }
+		var columns = Math.Max(1, (int)MathF.Floor(MathF.Max(ImGui.GetContentRegionAvail().X, GridMinItemWidth) / GridMinItemWidth));
+		if (!ImGui.BeginTable("WolfieAssetsGrid", columns, ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.PadOuterX)) return;
+		foreach (var entry in items)
+		{
+			ImGui.TableNextColumn();
+			DrawCard(entry);
+		}
+		ImGui.EndTable();
+	}
+
+	private void DrawCard(UnityAssetEntry entry)
+	{
+		ImGui.PushID(entry.RelativePath);
+		ImGui.BeginChild("AssetCard", new Vector2(0, CardHeight), ImGuiChildFlags.None,
+			ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+		ImGui.InvisibleButton("CardButton", new Vector2(ImGui.GetContentRegionAvail().X, CardHeight - 6));
+		var clicked = ImGui.IsItemClicked();
+		var doubleClicked = clicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
+		if (clicked) _selectedPath = entry.RelativePath;
+		if (doubleClicked && entry.Type == UnityAssetEntryType.Folder) _selectedFolderPath = entry.RelativePath;
+		var min = ImGui.GetItemRectMin(); var max = ImGui.GetItemRectMax(); var draw = ImGui.GetWindowDrawList();
+		if (string.Equals(_selectedPath, entry.RelativePath, StringComparison.Ordinal))
+			draw.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.HeaderActive), 4);
+		else if (ImGui.IsItemHovered()) draw.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.HeaderHovered), 4);
+		var iconSize = new Vector2(42, 34); var iconMin = new Vector2(min.X + ((max.X - min.X) - iconSize.X) * .5f, min.Y + 12); var iconMax = iconMin + iconSize;
+		var color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+		var iconName = entry.Type == UnityAssetEntryType.Folder ? "folder" : "object";
+		if (icons.TryGet(iconName, out var textureId)) draw.AddImage(textureId, iconMin, iconMax);
+		else draw.AddRect(iconMin, iconMax, color, 2);
+		var nameSize = ImGui.CalcTextSize(entry.Name); var nameX = min.X + MathF.Max(4, ((max.X - min.X) - nameSize.X) * .5f);
+		draw.AddText(new Vector2(nameX, iconMax.Y + 10), color, entry.Name);
+		ImGui.EndChild(); ImGui.PopID();
+	}
+
+	private bool DrawIconButton(string iconName, string tooltip)
+	{
+		if (!icons.TryGet(iconName, out var textureId)) return ImGui.Button(tooltip);
+		var clicked = ImGui.ImageButton("##" + tooltip, textureId, new Vector2(18, 18));
+		if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
+		return clicked;
+	}
+
+	private static UnityAssetEntry? FindEntry(UnityAssetEntry entry, string path)
+	{
+		if (string.Equals(entry.RelativePath, path, StringComparison.Ordinal)) return entry;
+		foreach (var child in entry.Children)
+			if (child.Type == UnityAssetEntryType.Folder && FindEntry(child, path) is { } found) return found;
+		return null;
+	}
+
+	private static void DrawVerticalSeparator()
+	{
+		var draw = ImGui.GetWindowDrawList(); var min = ImGui.GetCursorScreenPos();
+		draw.AddLine(min, new Vector2(min.X, min.Y + ImGui.GetContentRegionAvail().Y), ImGui.GetColorU32(ImGuiCol.Separator), 2);
+		ImGui.Dummy(new Vector2(2, ImGui.GetContentRegionAvail().Y));
 	}
 
 	private void CreateProject()
@@ -119,6 +259,7 @@ public sealed class WolfieGui(
 		{
 			_project = projectService.Create(_unityPath, _parentLocation, _projectName, out var projectFile);
 			_projectFile = projectFile;
+			preferences.SetLastProjectPath(projectFile);
 			_error = string.Empty;
 			Refresh();
 		}
@@ -134,15 +275,34 @@ public sealed class WolfieGui(
 		if (selected is null) return;
 		try
 		{
-			_project = projectService.Open(selected);
-			_projectFile = WolfiePath.NormalizeAbsolute(selected);
-			_error = string.Empty;
-			Refresh();
+			OpenProject(selected, persistPreference: true);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
 		{
 			_error = $"Could not open the Wolfie project: {exception.Message}";
 		}
+	}
+
+	private void RestoreLastProject()
+	{
+		if (string.IsNullOrWhiteSpace(preferences.LastProjectPath)) return;
+		try
+		{
+			OpenProject(preferences.LastProjectPath, persistPreference: false);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+		{
+			_error = $"The previous Wolfie project could not be reopened: {exception.Message}";
+		}
+	}
+
+	private void OpenProject(string projectFile, bool persistPreference)
+	{
+		_project = projectService.Open(projectFile);
+		_projectFile = WolfiePath.NormalizeAbsolute(projectFile);
+		if (persistPreference) preferences.SetLastProjectPath(_projectFile);
+		_error = string.Empty;
+		Refresh();
 	}
 
 	private void Refresh()
@@ -155,7 +315,7 @@ public sealed class WolfieGui(
 
 	private void CloseProject()
 	{
-		_project = null; _projectFile = null; _assets = null; _selectedPath = string.Empty; _error = string.Empty;
+		_project = null; _projectFile = null; _assets = null; _selectedPath = string.Empty; _selectedFolderPath = "Assets"; _error = string.Empty;
 	}
 
 	private void DrawError()
