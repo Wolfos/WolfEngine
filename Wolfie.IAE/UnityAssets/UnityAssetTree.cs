@@ -8,6 +8,9 @@ public sealed record UnityAssetEntry(
 	UnityAssetEntryType Type,
 	string Extension,
 	DateTime? LastModifiedUtc,
-	IReadOnlyList<UnityAssetEntry> Children);
+	IReadOnlyList<UnityAssetEntry> Children,
+	bool IsManaged = false,
+	Guid? ManagedAssetId = null,
+	string? UnityGuid = null);
 
 public sealed record UnityAssetScanResult(UnityAssetEntry Root, IReadOnlyList<string> Warnings);

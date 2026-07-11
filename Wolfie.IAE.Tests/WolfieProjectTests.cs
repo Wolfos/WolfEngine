@@ -1,5 +1,6 @@
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UnityAssets;
+using Wolfie.IAE.ManagedAssets;
 
 namespace Wolfie.IAE.Tests;
 
@@ -92,6 +93,89 @@ public sealed class WolfieProjectTests
 
 		Assert.That(new WolfiePreferences(preferencesFile).LastProjectPath,
 			Is.EqualTo(WolfiePath.NormalizeAbsolute(projectFile)));
+	}
+
+	[Test]
+	public void ManageTextureCopiesSourceAndPersistsStableOwnership()
+	{
+		var unity = CreateUnityProject();
+		var texture = Path.Combine(unity, "Assets", "Art", "Stone.png");
+		Directory.CreateDirectory(Path.GetDirectoryName(texture)!);
+		File.WriteAllText(texture, "pixels");
+		File.WriteAllText(texture + ".meta", "fileFormatVersion: 2\nguid: 0123456789abcdef0123456789abcdef\n");
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var service = new ManagedAssetService();
+
+		var first = service.ManageTexture(project, projectFile, "Assets/Art/Stone.png");
+		var second = service.ManageTexture(project, projectFile, "Assets/Art/Stone.png");
+		var wolfieTexture = Path.Combine(_root, "WolfieArt", "Assets", "Art", "Stone.png");
+		var reloaded = service.LoadAll(projectFile)["Assets/Art/Stone.png"];
+		var browserEntry = new UnityAssetScanner().Scan(project, projectFile, service).Root.Children
+			.Single(entry => entry.Name == "Art").Children.Single(entry => entry.Name == "Stone.png");
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(File.ReadAllText(wolfieTexture), Is.EqualTo("pixels"));
+			Assert.That(File.Exists(wolfieTexture + ".meta"), Is.True);
+			Assert.That(second.SourceId, Is.EqualTo(first.SourceId));
+			Assert.That(reloaded.SourceId, Is.EqualTo(first.SourceId));
+			Assert.That(reloaded.SourcePath, Is.EqualTo("Assets/Art/Stone.png"));
+			Assert.That(reloaded.Outputs.Single().Path, Is.EqualTo("Assets/Art/Stone.png"));
+			Assert.That(reloaded.Outputs.Single().UnityGuid, Is.EqualTo("0123456789abcdef0123456789abcdef"));
+			Assert.That(browserEntry.IsManaged, Is.True);
+			Assert.That(browserEntry.ManagedAssetId, Is.EqualTo(first.SourceId));
+			Assert.That(browserEntry.UnityGuid, Is.EqualTo("0123456789abcdef0123456789abcdef"));
+		});
+	}
+
+	[Test]
+	public void PublishingPreservesUnityMetaAndRejectsUnregisteredOutputs()
+	{
+		var unity = CreateUnityProject();
+		var texture = Path.Combine(unity, "Assets", "Stone.png");
+		File.WriteAllText(texture, "old");
+		File.WriteAllText(texture + ".meta", "guid: fedcba9876543210fedcba9876543210\n");
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var service = new ManagedAssetService();
+		var asset = service.ManageTexture(project, projectFile, "Assets/Stone.png");
+
+		using (var content = new MemoryStream("new"u8.ToArray()))
+			service.PublishOutput(project, asset, "Assets/Stone.png", content);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(File.ReadAllText(texture), Is.EqualTo("new"));
+			Assert.That(File.ReadAllText(texture + ".meta"), Does.Contain("fedcba9876543210fedcba9876543210"));
+			Assert.That(Directory.EnumerateFiles(Path.GetDirectoryName(texture)!, "*.tmp"), Is.Empty);
+		});
+		using var forbidden = new MemoryStream("bad"u8.ToArray());
+		Assert.That(() => service.PublishOutput(project, asset, "Assets/UserOwned.png", forbidden),
+			Throws.InvalidOperationException.With.Message.Contains("unregistered"));
+		Assert.That(File.Exists(Path.Combine(unity, "Assets", "UserOwned.png")), Is.False);
+	}
+
+	[Test]
+	public void UnmanageDeletesOnlyWolfieSourceAndEmptyFolders()
+	{
+		var unity = CreateUnityProject();
+		var texture = Path.Combine(unity, "Assets", "Nested", "Stone.png");
+		Directory.CreateDirectory(Path.GetDirectoryName(texture)!);
+		File.WriteAllText(texture, "unity remains");
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var service = new ManagedAssetService();
+		service.ManageTexture(project, projectFile, "Assets/Nested/Stone.png");
+
+		service.Unmanage(projectFile, "Assets/Nested/Stone.png");
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(File.Exists(texture), Is.True);
+			Assert.That(Directory.Exists(Path.Combine(_root, "WolfieArt", "Assets", "Nested")), Is.False);
+			Assert.That(service.LoadAll(projectFile), Is.Empty);
+		});
 	}
 
 	private string CreateUnityProject()

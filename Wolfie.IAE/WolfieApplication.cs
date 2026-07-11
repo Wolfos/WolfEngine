@@ -11,6 +11,7 @@ using WolfEngine.Rendering.UI;
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UI;
 using Wolfie.IAE.UnityAssets;
+using Wolfie.IAE.ManagedAssets;
 
 namespace Wolfie.IAE;
 
@@ -35,6 +36,7 @@ public sealed class WolfieApplication : IDisposable
 		services.AddSingleton<WolfieProjectService>();
 		services.AddSingleton<WolfiePreferences>();
 		services.AddSingleton<UnityAssetScanner>();
+		services.AddSingleton<ManagedAssetService>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<WolfieGui>();

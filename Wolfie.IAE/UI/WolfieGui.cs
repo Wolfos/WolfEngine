@@ -4,12 +4,14 @@ using ImGuiNET;
 using WolfEngine.Utility;
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UnityAssets;
+using Wolfie.IAE.ManagedAssets;
 
 namespace Wolfie.IAE.UI;
 
 public sealed class WolfieGui(
 	WolfieProjectService projectService,
 	UnityAssetScanner assetScanner,
+	ManagedAssetService managedAssets,
 	IFileDialogService fileDialog,
 	IIconManager icons,
 	WolfiePreferences preferences)
@@ -222,12 +224,49 @@ public sealed class WolfieGui(
 		else if (ImGui.IsItemHovered()) draw.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.HeaderHovered), 4);
 		var iconSize = new Vector2(42, 34); var iconMin = new Vector2(min.X + ((max.X - min.X) - iconSize.X) * .5f, min.Y + 12); var iconMax = iconMin + iconSize;
 		var color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+		var nameColor = entry.IsManaged ? ImGui.GetColorU32(ImGuiCol.Text) : color;
 		var iconName = entry.Type == UnityAssetEntryType.Folder ? "folder" : "object";
 		if (icons.TryGet(iconName, out var textureId)) draw.AddImage(textureId, iconMin, iconMax);
 		else draw.AddRect(iconMin, iconMax, color, 2);
 		var nameSize = ImGui.CalcTextSize(entry.Name); var nameX = min.X + MathF.Max(4, ((max.X - min.X) - nameSize.X) * .5f);
-		draw.AddText(new Vector2(nameX, iconMax.Y + 10), color, entry.Name);
+		draw.AddText(new Vector2(nameX, iconMax.Y + 10), nameColor, entry.Name);
+		if (entry.IsManaged && entry.Type == UnityAssetEntryType.File)
+			draw.AddText(new Vector2(min.X + 5, min.Y + 4), ImGui.GetColorU32(ImGuiCol.Text), "Managed");
+		if (ImGui.BeginPopupContextItem("AssetActions"))
+		{
+			if (entry.Type == UnityAssetEntryType.File && IsTexture(entry.Extension))
+			{
+				if (!entry.IsManaged && ImGui.MenuItem("Manage")) Manage(entry);
+				if (entry.IsManaged && ImGui.MenuItem("Unmanage")) Unmanage(entry);
+			}
+			ImGui.EndPopup();
+		}
 		ImGui.EndChild(); ImGui.PopID();
+	}
+
+	private static bool IsTexture(string extension) => extension.ToLowerInvariant() is
+		".png" or ".jpg" or ".jpeg" or ".tga" or ".tif" or ".tiff" or ".psd" or ".exr" or ".hdr";
+
+	private void Manage(UnityAssetEntry entry)
+	{
+		try
+		{
+			managedAssets.ManageTexture(_project!, _projectFile!, entry.RelativePath);
+			Refresh();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
+		{ _error = $"Could not manage the asset: {exception.Message}"; }
+	}
+
+	private void Unmanage(UnityAssetEntry entry)
+	{
+		try
+		{
+			managedAssets.Unmanage(_projectFile!, entry.RelativePath);
+			Refresh();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
+		{ _error = $"Could not unmanage the asset: {exception.Message}"; }
 	}
 
 	private bool DrawIconButton(string iconName, string tooltip)
@@ -308,7 +347,7 @@ public sealed class WolfieGui(
 	private void Refresh()
 	{
 		if (_project is null) return;
-		try { _assets = assetScanner.Scan(_project.UnityProjectPath); _error = string.Empty; }
+		try { _assets = assetScanner.Scan(_project, _projectFile!, managedAssets); _error = string.Empty; }
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{ _assets = null; _error = $"Could not scan Unity assets: {exception.Message}"; }
 	}

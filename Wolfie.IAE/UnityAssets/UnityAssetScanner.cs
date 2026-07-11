@@ -1,9 +1,17 @@
 using Wolfie.IAE.Projects;
+using Wolfie.IAE.ManagedAssets;
 
 namespace Wolfie.IAE.UnityAssets;
 
 public sealed class UnityAssetScanner
 {
+	public UnityAssetScanResult Scan(WolfieProject project, string projectFile, ManagedAssetService managedAssets)
+	{
+		var managed = managedAssets.LoadAll(projectFile);
+		var scan = Scan(project.UnityProjectPath);
+		return scan with { Root = ApplyOwnership(scan.Root, project.UnityProjectPath, managed) };
+	}
+
 	public UnityAssetScanResult Scan(string unityProjectPath)
 	{
 		var assetsRoot = Path.Combine(WolfiePath.NormalizeAbsolute(unityProjectPath), "Assets");
@@ -58,6 +66,21 @@ public sealed class UnityAssetScanner
 	{
 		try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return true; }
+	}
+
+	private static UnityAssetEntry ApplyOwnership(UnityAssetEntry entry, string unityRoot,
+		IReadOnlyDictionary<string, ManagedAssetRecord> managed)
+	{
+		var children = entry.Children.Select(child => ApplyOwnership(child, unityRoot, managed)).ToArray();
+		if (entry.Type == UnityAssetEntryType.File && managed.TryGetValue(entry.RelativePath, out var record))
+		{
+			var output = record.Outputs.FirstOrDefault(item =>
+				string.Equals(item.Path, entry.RelativePath, StringComparison.OrdinalIgnoreCase));
+			var guid = output?.UnityGuid ?? ManagedAssetService.ReadUnityGuid(
+				Path.Combine(unityRoot, entry.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+			return entry with { Children = children, IsManaged = true, ManagedAssetId = record.SourceId, UnityGuid = guid };
+		}
+		return entry with { Children = children, IsManaged = children.Any(child => child.IsManaged) };
 	}
 
 	private static string Relative(string path, string root)
