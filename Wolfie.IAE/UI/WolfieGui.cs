@@ -5,6 +5,7 @@ using WolfEngine.Utility;
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UnityAssets;
 using Wolfie.IAE.ManagedAssets;
+using Wolfie.IAE.ExternalTools;
 
 namespace Wolfie.IAE.UI;
 
@@ -12,6 +13,7 @@ public sealed class WolfieGui(
 	WolfieProjectService projectService,
 	UnityAssetScanner assetScanner,
 	ManagedAssetService managedAssets,
+	BlenderLauncher blenderLauncher,
 	IFileDialogService fileDialog,
 	IIconManager icons,
 	WolfiePreferences preferences)
@@ -32,6 +34,14 @@ public sealed class WolfieGui(
 	private string _searchText = string.Empty;
 	private string _error = string.Empty;
 	private bool _startupRestoreAttempted;
+	private WolfieTemplate? _pendingTemplate;
+	private string _newAssetName = string.Empty;
+	private string _creationError = string.Empty;
+	private bool _openCreatePopup;
+	private bool _focusCreateName;
+	private bool _openPreferencesPopup;
+	private string _blenderPath = string.Empty;
+	private string _preferencesError = string.Empty;
 
 	public void Draw()
 	{
@@ -41,6 +51,8 @@ public sealed class WolfieGui(
 			RestoreLastProject();
 		}
 		DrawDockSpace();
+		DrawMainMenu();
+		DrawPreferencesPopup();
 		if (_project is null) DrawStartup();
 		else DrawWorkspace();
 	}
@@ -83,19 +95,6 @@ public sealed class WolfieGui(
 
 	private void DrawWorkspace()
 	{
-		if (ImGui.BeginMainMenuBar())
-		{
-			if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && ImGui.GetCursorPosX() < MacTitlebarButtonInset)
-				ImGui.SetCursorPosX(MacTitlebarButtonInset);
-			if (ImGui.BeginMenu("Project"))
-			{
-				if (ImGui.MenuItem("Open...")) OpenProject();
-				if (ImGui.MenuItem("Close")) CloseProject();
-				ImGui.EndMenu();
-			}
-			ImGui.EndMainMenuBar();
-		}
-
 		ImGui.Begin("Assets");
 		ImGui.Text($"Wolfie: {_project!.Name}");
 		ImGui.TextDisabled(_projectFile ?? string.Empty);
@@ -122,11 +121,32 @@ public sealed class WolfieGui(
 		ImGui.End();
 	}
 
+	private void DrawMainMenu()
+	{
+		if (ImGui.BeginMainMenuBar())
+		{
+			if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && ImGui.GetCursorPosX() < MacTitlebarButtonInset)
+				ImGui.SetCursorPosX(MacTitlebarButtonInset);
+			if (ImGui.BeginMenu("Project"))
+			{
+				if (ImGui.MenuItem("Open...")) OpenProject();
+				if (ImGui.MenuItem("Close", string.Empty, false, _project is not null)) CloseProject();
+				ImGui.EndMenu();
+			}
+			if (ImGui.BeginMenu("Edit"))
+			{
+				if (ImGui.MenuItem("Preferences...")) OpenPreferences();
+				ImGui.EndMenu();
+			}
+			ImGui.EndMainMenuBar();
+		}
+	}
+
 	private void DrawAssetBrowser(UnityAssetEntry root)
 	{
-		var selectedFolder = FindEntry(root, _selectedFolderPath) ?? root;
+		var selectedFolder = FindEntry(root, _selectedFolderPath) ?? root.Children.First();
 		ImGui.BeginChild("UnityFolderTree", new Vector2(FolderTreeWidth, 0));
-		DrawFolderTreeNode(root);
+		foreach (var topLevel in root.Children) DrawFolderTreeNode(topLevel);
 		ImGui.EndChild();
 		ImGui.SameLine(0, 0);
 		DrawVerticalSeparator();
@@ -136,8 +156,10 @@ public sealed class WolfieGui(
 		ImGui.Separator();
 		ImGui.BeginChild("UnityAssetGrid");
 		DrawGrid(selectedFolder);
+		DrawCreateContextMenu(selectedFolder);
 		ImGui.EndChild();
 		ImGui.EndGroup();
+		DrawCreateAssetPopup();
 	}
 
 	private void DrawFolderTreeNode(UnityAssetEntry entry)
@@ -163,7 +185,8 @@ public sealed class WolfieGui(
 			ImGui.GetWindowDrawList().AddImage(treeIcon, iconPosition, iconPosition + Vector2.One * iconSize);
 		var textSize = ImGui.CalcTextSize(entry.Name);
 		var textPosition = new Vector2(iconPosition.X + iconSize + 4, itemMin.Y + (rowHeight - textSize.Y) * .5f);
-		ImGui.GetWindowDrawList().AddText(textPosition, ImGui.GetColorU32(ImGuiCol.TextDisabled), entry.Name);
+		var folderNameColor = entry.IsManaged ? ImGui.GetColorU32(ImGuiCol.Text) : ImGui.GetColorU32(ImGuiCol.TextDisabled);
+		ImGui.GetWindowDrawList().AddText(textPosition, folderNameColor, entry.Name);
 		if (ImGui.IsItemClicked()) { _selectedFolderPath = entry.RelativePath; _selectedPath = entry.RelativePath; }
 		if (open && folders.Length > 0)
 		{
@@ -208,6 +231,131 @@ public sealed class WolfieGui(
 		ImGui.EndTable();
 	}
 
+	private void DrawCreateContextMenu(UnityAssetEntry folder)
+	{
+		if (!folder.RelativePath.Equals("Assets", StringComparison.Ordinal) &&
+		    !folder.RelativePath.StartsWith("Assets/", StringComparison.Ordinal)) return;
+		if (!ImGui.BeginPopupContextWindow("AssetFolderActions",
+			ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems)) return;
+		if (ImGui.BeginMenu("Create"))
+		{
+			IReadOnlyList<WolfieTemplate> templates = [];
+			try { templates = managedAssets.GetTemplates(_projectFile!); }
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{ _error = $"Could not list templates: {exception.Message}"; }
+			if (templates.Count == 0) ImGui.TextDisabled("No templates");
+			foreach (var template in templates)
+			{
+				if (ImGui.MenuItem(template.Name + "##" + template.RelativePath))
+				{
+					_pendingTemplate = template;
+					_newAssetName = template.Name;
+					_creationError = string.Empty;
+					_focusCreateName = true;
+					_openCreatePopup = true;
+				}
+				if (ImGui.IsItemHovered()) ImGui.SetTooltip(template.RelativePath);
+			}
+			ImGui.EndMenu();
+		}
+		ImGui.EndPopup();
+	}
+
+	private void DrawCreateAssetPopup()
+	{
+		if (_openCreatePopup) { ImGui.OpenPopup("Create Managed Asset"); _openCreatePopup = false; }
+		var isOpen = true;
+		ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Appearing);
+		if (!ImGui.BeginPopupModal("Create Managed Asset", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize)) return;
+		if (_pendingTemplate is not null)
+		{
+			ImGui.TextUnformatted("Create from " + _pendingTemplate.Name);
+			ImGui.Spacing();
+			ImGui.SetNextItemWidth(280);
+			if (_focusCreateName) { ImGui.SetKeyboardFocusHere(); _focusCreateName = false; }
+			var submitted = ImGui.InputText("##NewManagedAssetName", ref _newAssetName, 256,
+				ImGuiInputTextFlags.EnterReturnsTrue);
+			ImGui.SameLine();
+			ImGui.TextDisabled(Path.GetExtension(_pendingTemplate.RelativePath));
+			if (!string.IsNullOrWhiteSpace(_creationError))
+			{
+				ImGui.Spacing();
+				ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, .35f, .3f, 1));
+				ImGui.TextWrapped(_creationError);
+				ImGui.PopStyleColor();
+			}
+			ImGui.Spacing();
+			if (submitted || ImGui.Button("Create", new Vector2(100, 0)))
+			{
+				try
+				{
+					managedAssets.CreateFromTemplate(_projectFile!, _selectedFolderPath,
+						_pendingTemplate.RelativePath, _newAssetName);
+					_pendingTemplate = null;
+					Refresh();
+					ImGui.CloseCurrentPopup();
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+					ArgumentException or InvalidOperationException)
+				{ _creationError = exception.Message; }
+			}
+			ImGui.SameLine();
+			if (ImGui.Button("Cancel", new Vector2(100, 0))) { _pendingTemplate = null; ImGui.CloseCurrentPopup(); }
+		}
+		ImGui.EndPopup();
+	}
+
+	private void OpenPreferences()
+	{
+		_blenderPath = preferences.BlenderPath ?? string.Empty;
+		_preferencesError = string.Empty;
+		_openPreferencesPopup = true;
+	}
+
+	private void DrawPreferencesPopup()
+	{
+		if (_openPreferencesPopup) { ImGui.OpenPopup("Wolfie Preferences"); _openPreferencesPopup = false; }
+		var isOpen = true;
+		ImGui.SetNextWindowSize(new Vector2(620, 0), ImGuiCond.Appearing);
+		if (!ImGui.BeginPopupModal("Wolfie Preferences", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize)) return;
+		ImGui.TextUnformatted("External tools");
+		ImGui.Separator();
+		ImGui.TextUnformatted("Blender");
+		ImGui.TextDisabled("Path to the Blender executable or application");
+		ImGui.SetNextItemWidth(500);
+		ImGui.InputText("##BlenderPath", ref _blenderPath, 2048);
+		ImGui.SameLine();
+		if (ImGui.Button("Browse..."))
+		{
+			var isApplicationBundle = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
+				string.Equals(Path.GetExtension(_blenderPath), ".app", StringComparison.OrdinalIgnoreCase);
+			var initial = string.IsNullOrWhiteSpace(_blenderPath) ? null :
+				(Directory.Exists(_blenderPath) && !isApplicationBundle ? _blenderPath : Path.GetDirectoryName(_blenderPath));
+			var selected = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+				? fileDialog.OpenFile(new FileDialogOptions
+					{ Title = "Select Blender Application", InitialDirectory = initial, AllowedExtensions = ["app"] })
+				: fileDialog.OpenFile(new FileDialogOptions { Title = "Select Blender Executable", InitialDirectory = initial });
+			if (selected is not null) _blenderPath = selected;
+		}
+		if (!string.IsNullOrWhiteSpace(_preferencesError))
+		{
+			ImGui.Spacing();
+			ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, .35f, .3f, 1));
+			ImGui.TextWrapped(_preferencesError);
+			ImGui.PopStyleColor();
+		}
+		ImGui.Spacing();
+		if (ImGui.Button("Save", new Vector2(100, 0)))
+		{
+			try { preferences.SetBlenderPath(_blenderPath); ImGui.CloseCurrentPopup(); }
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+			{ _preferencesError = exception.Message; }
+		}
+		ImGui.SameLine();
+		if (ImGui.Button("Cancel", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
+		ImGui.EndPopup();
+	}
+
 	private void DrawCard(UnityAssetEntry entry)
 	{
 		ImGui.PushID(entry.RelativePath);
@@ -218,6 +366,8 @@ public sealed class WolfieGui(
 		var doubleClicked = clicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 		if (clicked) _selectedPath = entry.RelativePath;
 		if (doubleClicked && entry.Type == UnityAssetEntryType.Folder) _selectedFolderPath = entry.RelativePath;
+		if (doubleClicked && entry.Type == UnityAssetEntryType.File && entry.ManagedAssetId.HasValue &&
+		    string.Equals(entry.Extension, ".blend", StringComparison.OrdinalIgnoreCase)) OpenInBlender(entry);
 		var min = ImGui.GetItemRectMin(); var max = ImGui.GetItemRectMax(); var draw = ImGui.GetWindowDrawList();
 		if (string.Equals(_selectedPath, entry.RelativePath, StringComparison.Ordinal))
 			draw.AddRectFilled(min, max, ImGui.GetColorU32(ImGuiCol.HeaderActive), 4);
@@ -230,11 +380,13 @@ public sealed class WolfieGui(
 		else draw.AddRect(iconMin, iconMax, color, 2);
 		var nameSize = ImGui.CalcTextSize(entry.Name); var nameX = min.X + MathF.Max(4, ((max.X - min.X) - nameSize.X) * .5f);
 		draw.AddText(new Vector2(nameX, iconMax.Y + 10), nameColor, entry.Name);
-		if (entry.IsManaged && entry.Type == UnityAssetEntryType.File)
+		if (entry.IsManaged && entry.Type == UnityAssetEntryType.File &&
+		    entry.RelativePath.StartsWith("Assets/", StringComparison.Ordinal))
 			draw.AddText(new Vector2(min.X + 5, min.Y + 4), ImGui.GetColorU32(ImGuiCol.Text), "Managed");
 		if (ImGui.BeginPopupContextItem("AssetActions"))
 		{
-			if (entry.Type == UnityAssetEntryType.File && IsTexture(entry.Extension))
+			if (entry.Type == UnityAssetEntryType.File &&
+			    entry.RelativePath.StartsWith("Assets/", StringComparison.Ordinal) && IsTexture(entry.Extension))
 			{
 				if (!entry.IsManaged && ImGui.MenuItem("Manage")) Manage(entry);
 				if (entry.IsManaged && ImGui.MenuItem("Unmanage")) Unmanage(entry);
@@ -246,6 +398,18 @@ public sealed class WolfieGui(
 
 	private static bool IsTexture(string extension) => extension.ToLowerInvariant() is
 		".png" or ".jpg" or ".jpeg" or ".tga" or ".tif" or ".tiff" or ".psd" or ".exr" or ".hdr";
+
+	private void OpenInBlender(UnityAssetEntry entry)
+	{
+		try
+		{
+			blenderLauncher.Open(_projectFile!, entry.RelativePath, preferences.BlenderPath);
+			_error = string.Empty;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or
+			ArgumentException or InvalidOperationException)
+		{ _error = $"Could not open the asset in Blender: {exception.Message}"; }
+	}
 
 	private void Manage(UnityAssetEntry entry)
 	{

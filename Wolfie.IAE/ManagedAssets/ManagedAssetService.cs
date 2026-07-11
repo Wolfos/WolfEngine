@@ -8,6 +8,66 @@ public sealed partial class ManagedAssetService
 {
 	private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+	public IReadOnlyList<WolfieTemplate> GetTemplates(string projectFile)
+	{
+		var root = Path.Combine(GetProjectRoot(projectFile), "Templates");
+		return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+			.Where(path => !IsTemporaryOrMetadata(path))
+			.Select(path => new WolfieTemplate(Path.GetFileNameWithoutExtension(path),
+				"Templates/" + Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/')))
+			.OrderBy(template => template.Name, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(template => template.RelativePath, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+	}
+
+	public ManagedAssetRecord CreateFromTemplate(string projectFile, string destinationFolder,
+		string templateRelativePath, string assetName)
+	{
+		var folder = NormalizeAssetFolder(destinationFolder);
+		var validatedName = ValidateAssetName(assetName);
+		var projectRoot = GetProjectRoot(projectFile);
+		var template = ResolveTemplate(projectRoot, templateRelativePath);
+		if (!File.Exists(template)) throw new FileNotFoundException("The selected template does not exist.", template);
+		var extension = Path.GetExtension(template);
+		var relativeSource = folder + "/" + validatedName + extension;
+		var source = ResolveWithinAssets(projectRoot, relativeSource);
+		var metadata = GetMetadataPath(source);
+		if (File.Exists(source) || File.Exists(metadata))
+			throw new InvalidOperationException($"An asset named '{validatedName + extension}' already exists.");
+
+		var record = new ManagedAssetRecord
+		{
+			SourceId = Guid.NewGuid(),
+			ImporterId = ImporterFor(extension),
+			SourcePath = relativeSource
+		};
+		var directory = Path.GetDirectoryName(source)!;
+		Directory.CreateDirectory(directory);
+		var sourceTemp = source + ".wolfie-" + Guid.NewGuid().ToString("N") + ".tmp";
+		var metadataTemp = metadata + ".wolfie-" + Guid.NewGuid().ToString("N") + ".tmp";
+		var sourceCommitted = false;
+		try
+		{
+			File.Copy(template, sourceTemp, false);
+			File.WriteAllText(metadataTemp, JsonSerializer.Serialize(record, JsonOptions));
+			File.Move(sourceTemp, source, false);
+			sourceCommitted = true;
+			File.Move(metadataTemp, metadata, false);
+			return record;
+		}
+		catch
+		{
+			if (sourceCommitted && File.Exists(source)) File.Delete(source);
+			throw;
+		}
+		finally
+		{
+			if (File.Exists(sourceTemp)) File.Delete(sourceTemp);
+			if (File.Exists(metadataTemp)) File.Delete(metadataTemp);
+			RemoveEmptyParents(directory, Path.Combine(projectRoot, "Assets"));
+		}
+	}
+
 	public ManagedAssetRecord ManageTexture(WolfieProject project, string projectFile, string unityRelativePath)
 	{
 		var relativePath = NormalizeAssetPath(unityRelativePath);
@@ -115,6 +175,50 @@ public sealed partial class ManagedAssetService
 		return "Assets/" + normalized[7..];
 	}
 
+	private static string NormalizeAssetFolder(string path)
+	{
+		var normalized = path.Replace('\\', '/').TrimEnd('/');
+		if (normalized != "Assets" && !normalized.StartsWith("Assets/", StringComparison.Ordinal))
+			throw new ArgumentException("New managed assets must be created beneath Assets.", nameof(path));
+		if (normalized.Split('/').Any(part => part is "." or ".." || string.IsNullOrWhiteSpace(part)))
+			throw new ArgumentException("The destination folder path is invalid.", nameof(path));
+		return normalized;
+	}
+
+	private static string ValidateAssetName(string name)
+	{
+		var trimmed = name.Trim();
+		if (trimmed.Length == 0) throw new ArgumentException("Enter an asset name.", nameof(name));
+		if (trimmed is "." or ".." || trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+		    trimmed.IndexOfAny(['<', '>', ':', '"', '|', '?', '*', '/', '\\']) >= 0 ||
+		    trimmed.Any(char.IsControl) || trimmed.EndsWith('.') || Path.HasExtension(trimmed))
+			throw new ArgumentException("Asset names cannot contain a path, extension, or invalid filename characters.", nameof(name));
+		return trimmed;
+	}
+
+	private static string ResolveTemplate(string projectRoot, string relativePath)
+	{
+		var normalized = relativePath.Replace('\\', '/').TrimStart('/');
+		if (!normalized.StartsWith("Templates/", StringComparison.Ordinal) || normalized.Contains("../", StringComparison.Ordinal))
+			throw new ArgumentException("The template path is invalid.", nameof(relativePath));
+		var root = Path.Combine(projectRoot, "Templates");
+		var result = WolfiePath.NormalizeAbsolute(Path.Combine(projectRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
+		if (!WolfiePath.IsWithin(result, root)) throw new ArgumentException("The template path escapes Templates.");
+		return result;
+	}
+
+	private static string ImporterFor(string extension) => extension.ToLowerInvariant() switch
+	{
+		".png" or ".jpg" or ".jpeg" or ".tga" or ".tif" or ".tiff" or ".exr" or ".hdr" => "texture",
+		".blend" => "blender",
+		".spp" => "substance-painter",
+		_ => "file"
+	};
+
+	private static bool IsTemporaryOrMetadata(string path) =>
+		path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) ||
+		path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+
 	private static string ResolveWithinAssets(string root, string relativePath)
 	{
 		var result = WolfiePath.NormalizeAbsolute(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
@@ -135,3 +239,5 @@ public sealed partial class ManagedAssetService
 	[GeneratedRegex(@"^\s*guid:\s*([0-9a-fA-F]{32})\s*$")]
 	private static partial Regex UnityGuidLine();
 }
+
+public sealed record WolfieTemplate(string Name, string RelativePath);

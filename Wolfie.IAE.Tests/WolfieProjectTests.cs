@@ -1,6 +1,7 @@
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UnityAssets;
 using Wolfie.IAE.ManagedAssets;
+using Wolfie.IAE.ExternalTools;
 
 namespace Wolfie.IAE.Tests;
 
@@ -44,6 +45,7 @@ public sealed class WolfieProjectTests
 			Assert.That(opened.Name, Is.EqualTo("Art Project"));
 			Assert.That(opened.UnityProjectPath, Is.EqualTo(WolfiePath.NormalizeAbsolute(unity)));
 			Assert.That(Directory.Exists(Path.Combine(destination, "Assets")), Is.True);
+			Assert.That(Directory.Exists(Path.Combine(destination, "Templates")), Is.True);
 			Assert.That(Directory.Exists(Path.Combine(destination, "Cache")), Is.True);
 		});
 	}
@@ -84,6 +86,117 @@ public sealed class WolfieProjectTests
 	}
 
 	[Test]
+	public void WorkspaceScannerExposesTemplatesAsWolfieOwnedTopLevelContent()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var templateFolder = Path.Combine(_root, "WolfieArt", "Templates", "Models");
+		Directory.CreateDirectory(templateFolder);
+		File.WriteAllText(Path.Combine(templateFolder, "Default.blend"), "template");
+
+		var result = new UnityAssetScanner().Scan(project, projectFile, new ManagedAssetService());
+		var templates = result.Root.Children.Single(entry => entry.RelativePath == "Templates");
+		var template = templates.Children.Single().Children.Single();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(result.Root.Children.Select(entry => entry.RelativePath), Is.EqualTo(new[] { "Assets", "Templates" }));
+			Assert.That(templates.IsManaged, Is.True);
+			Assert.That(template.RelativePath, Is.EqualTo("Templates/Models/Default.blend"));
+			Assert.That(template.IsManaged, Is.True);
+		});
+	}
+
+	[Test]
+	public void CreateFromTemplateCreatesManagedSourceMetadataAndBrowserEntry()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var template = Path.Combine(_root, "WolfieArt", "Templates", "Default.blend");
+		File.WriteAllText(template, "blend template");
+		var service = new ManagedAssetService();
+
+		var created = service.CreateFromTemplate(projectFile, "Assets/Characters",
+			"Templates/Default.blend", "Hero");
+		var source = Path.Combine(_root, "WolfieArt", "Assets", "Characters", "Hero.blend");
+		var loaded = service.LoadAll(projectFile)["Assets/Characters/Hero.blend"];
+		var browserFile = new UnityAssetScanner().Scan(project, projectFile, service).Root.Children
+			.Single(entry => entry.RelativePath == "Assets").Children.Single(entry => entry.Name == "Characters")
+			.Children.Single(entry => entry.Name == "Hero.blend");
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(File.ReadAllText(source), Is.EqualTo("blend template"));
+			Assert.That(File.Exists(source + ".meta"), Is.True);
+			Assert.That(loaded.SourceId, Is.EqualTo(created.SourceId));
+			Assert.That(loaded.ImporterId, Is.EqualTo("blender"));
+			Assert.That(browserFile.IsManaged, Is.True);
+			Assert.That(browserFile.ManagedAssetId, Is.EqualTo(created.SourceId));
+			Assert.That(File.Exists(Path.Combine(unity, "Assets", "Characters", "Hero.blend")), Is.False);
+		});
+	}
+
+	[Test]
+	public void CreateFromTemplateValidatesNamesAndLeavesNoPartialAsset()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		File.WriteAllText(Path.Combine(_root, "WolfieArt", "Templates", "Default.spp"), "template");
+		var service = new ManagedAssetService();
+
+		Assert.That(() => service.CreateFromTemplate(projectFile, "Assets/Materials",
+			"Templates/Default.spp", "../Invalid.spp"), Throws.ArgumentException);
+		Assert.That(() => service.CreateFromTemplate(projectFile, "Templates",
+			"Templates/Default.spp", "Valid"), Throws.ArgumentException);
+
+		var assets = Path.Combine(_root, "WolfieArt", "Assets");
+		Assert.Multiple(() =>
+		{
+			Assert.That(Directory.EnumerateFiles(assets, "*", SearchOption.AllDirectories), Is.Empty);
+			Assert.That(Directory.EnumerateDirectories(assets, "*", SearchOption.AllDirectories), Is.Empty);
+		});
+	}
+
+	[Test]
+	public void BlenderLauncherBuildsSafeArgumentListForConfiguredApplication()
+	{
+		var blender = OperatingSystem.IsMacOS() ? Path.Combine(_root, "Blender.app") : Path.Combine(_root, "blender");
+		if (OperatingSystem.IsMacOS()) Directory.CreateDirectory(blender); else File.WriteAllText(blender, string.Empty);
+		var source = Path.Combine(_root, "My Model.blend");
+
+		var startInfo = BlenderLauncher.CreateStartInfo(blender, source);
+
+		if (OperatingSystem.IsMacOS())
+		{
+			Assert.That(startInfo.FileName, Is.EqualTo("/usr/bin/open"));
+			Assert.That(startInfo.ArgumentList, Is.EqualTo(new[] { "-a", blender, source }));
+		}
+		else
+		{
+			Assert.That(startInfo.FileName, Is.EqualTo(blender));
+			Assert.That(startInfo.ArgumentList, Is.EqualTo(new[] { source }));
+		}
+		Assert.That(startInfo.UseShellExecute, Is.False);
+	}
+
+	[Test]
+	public void BlenderLauncherRequiresConfiguredBlenderBeforeStartingProcess()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		var source = Path.Combine(_root, "WolfieArt", "Assets", "Model.blend");
+		File.WriteAllText(source, "blend");
+		File.WriteAllText(source + ".meta", "{}");
+
+		Assert.That(() => new BlenderLauncher().Open(projectFile, "Assets/Model.blend", null),
+			Throws.InvalidOperationException.With.Message.Contains("Preferences"));
+	}
+
+	[Test]
 	public void PreferencesPersistTheLastProjectPath()
 	{
 		var preferencesFile = Path.Combine(_root, "Preferences", "WolfiePreferences.json");
@@ -93,6 +206,27 @@ public sealed class WolfieProjectTests
 
 		Assert.That(new WolfiePreferences(preferencesFile).LastProjectPath,
 			Is.EqualTo(WolfiePath.NormalizeAbsolute(projectFile)));
+	}
+
+	[Test]
+	public void PreferencesPersistAndValidateBlenderPath()
+	{
+		var preferencesFile = Path.Combine(_root, "Preferences", "WolfiePreferences.json");
+		var blender = Path.Combine(_root, OperatingSystem.IsWindows() ? "blender.exe" : "Blender.app");
+		if (OperatingSystem.IsWindows()) File.WriteAllText(blender, string.Empty);
+		else Directory.CreateDirectory(blender);
+		var preferences = new WolfiePreferences(preferencesFile);
+
+		preferences.SetBlenderPath(blender);
+
+		Assert.That(new WolfiePreferences(preferencesFile).BlenderPath,
+			Is.EqualTo(WolfiePath.NormalizeAbsolute(blender)));
+		Assert.That(() => preferences.SetBlenderPath(Path.Combine(_root, "MissingBlender")),
+			Throws.ArgumentException.With.Message.Contains("existing Blender"));
+		Assert.That(preferences.BlenderPath, Is.EqualTo(WolfiePath.NormalizeAbsolute(blender)));
+
+		preferences.SetBlenderPath(null);
+		Assert.That(new WolfiePreferences(preferencesFile).BlenderPath, Is.Null);
 	}
 
 	[Test]
@@ -111,7 +245,8 @@ public sealed class WolfieProjectTests
 		var second = service.ManageTexture(project, projectFile, "Assets/Art/Stone.png");
 		var wolfieTexture = Path.Combine(_root, "WolfieArt", "Assets", "Art", "Stone.png");
 		var reloaded = service.LoadAll(projectFile)["Assets/Art/Stone.png"];
-		var browserEntry = new UnityAssetScanner().Scan(project, projectFile, service).Root.Children
+		var browserRoot = new UnityAssetScanner().Scan(project, projectFile, service).Root;
+		var browserEntry = browserRoot.Children.Single(entry => entry.RelativePath == "Assets").Children
 			.Single(entry => entry.Name == "Art").Children.Single(entry => entry.Name == "Stone.png");
 
 		Assert.Multiple(() =>
@@ -126,6 +261,7 @@ public sealed class WolfieProjectTests
 			Assert.That(browserEntry.IsManaged, Is.True);
 			Assert.That(browserEntry.ManagedAssetId, Is.EqualTo(first.SourceId));
 			Assert.That(browserEntry.UnityGuid, Is.EqualTo("0123456789abcdef0123456789abcdef"));
+			Assert.That(browserRoot.Children.Select(entry => entry.RelativePath), Is.EqualTo(new[] { "Assets", "Templates" }));
 		});
 	}
 

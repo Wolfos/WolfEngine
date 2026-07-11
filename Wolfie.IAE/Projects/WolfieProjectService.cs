@@ -52,6 +52,7 @@ public sealed class WolfieProjectService
 
 		Directory.CreateDirectory(destinationRoot);
 		Directory.CreateDirectory(Path.Combine(destinationRoot, "Assets"));
+		Directory.CreateDirectory(Path.Combine(destinationRoot, "Templates"));
 		Directory.CreateDirectory(Path.Combine(destinationRoot, "Cache"));
 		projectFile = Path.Combine(destinationRoot, safeName + ".wolfieproject");
 
@@ -69,6 +70,10 @@ public sealed class WolfieProjectService
 			throw new InvalidDataException($"Unsupported Wolfie project format version {project.FormatVersion}.");
 		if (project.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(project.Name))
 			throw new InvalidDataException("The Wolfie project file is missing its identifier or name.");
+		var projectRoot = Path.GetDirectoryName(absoluteFile)!;
+		if (!Directory.Exists(Path.Combine(projectRoot, "Assets")) ||
+		    !Directory.Exists(Path.Combine(projectRoot, "Templates")))
+			throw new InvalidDataException("The Wolfie project is missing its Assets or Templates directory.");
 		if (!ValidateUnityProject(project.UnityProjectPath, out var error))
 			throw new InvalidDataException($"The connected Unity project is unavailable. {error}");
 		return project with { UnityProjectPath = WolfiePath.NormalizeAbsolute(project.UnityProjectPath) };
