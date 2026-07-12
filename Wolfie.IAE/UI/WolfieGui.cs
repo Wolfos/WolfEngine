@@ -14,6 +14,8 @@ public sealed class WolfieGui(
 	UnityAssetScanner assetScanner,
 	ManagedAssetService managedAssets,
 	BlenderLauncher blenderLauncher,
+	IBlenderModelPublisher modelPublisher,
+	ManagedSourceAutoPublisher autoPublisher,
 	IFileDialogService fileDialog,
 	IIconManager icons,
 	WolfiePreferences preferences)
@@ -42,6 +44,8 @@ public sealed class WolfieGui(
 	private bool _openPreferencesPopup;
 	private string _blenderPath = string.Empty;
 	private string _preferencesError = string.Empty;
+	private Task? _publishTask;
+	private string? _publishingPath;
 
 	public void Draw()
 	{
@@ -95,6 +99,8 @@ public sealed class WolfieGui(
 
 	private void DrawWorkspace()
 	{
+		CompletePublishIfReady();
+		DrainAutoPublishNotifications();
 		ImGui.Begin("Assets");
 		ImGui.Text($"Wolfie: {_project!.Name}");
 		ImGui.TextDisabled(_projectFile ?? string.Empty);
@@ -102,7 +108,8 @@ public sealed class WolfieGui(
 		ImGui.TextDisabled(_project.UnityProjectPath);
 		if (DrawIconButton("refresh", "Refresh")) Refresh();
 		ImGui.SameLine();
-		ImGui.TextDisabled("Unity-only content (read-only)");
+		ImGui.TextDisabled(_publishingPath is null ? "Unity-only content (read-only)" :
+			$"Publishing {Path.GetFileName(_publishingPath)}...");
 		ImGui.Separator();
 		if (_assets is { Warnings.Count: > 0 })
 			ImGui.TextDisabled($"Scan completed with {_assets.Warnings.Count} inaccessible item(s).");
@@ -385,6 +392,12 @@ public sealed class WolfieGui(
 			draw.AddText(new Vector2(min.X + 5, min.Y + 4), ImGui.GetColorU32(ImGuiCol.Text), "Managed");
 		if (ImGui.BeginPopupContextItem("AssetActions"))
 		{
+			if (entry.ManagedAssetId.HasValue && string.Equals(entry.Extension, ".blend", StringComparison.OrdinalIgnoreCase))
+			{
+				var canPublish = _publishTask is null;
+				if (ImGui.MenuItem("Publish Model", string.Empty, false, canPublish)) PublishModel(entry);
+				ImGui.Separator();
+			}
 			if (entry.Type == UnityAssetEntryType.File &&
 			    entry.RelativePath.StartsWith("Assets/", StringComparison.Ordinal) && IsTexture(entry.Extension))
 			{
@@ -409,6 +422,48 @@ public sealed class WolfieGui(
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or
 			ArgumentException or InvalidOperationException)
 		{ _error = $"Could not open the asset in Blender: {exception.Message}"; }
+	}
+
+	private void PublishModel(UnityAssetEntry entry)
+	{
+		if (_publishTask is not null) return;
+		_publishingPath = entry.RelativePath;
+		_error = string.Empty;
+		try
+		{
+			_publishTask = modelPublisher.PublishAsync(_project!, _projectFile!, entry.RelativePath,
+				preferences.BlenderPath);
+		}
+		catch (Exception exception)
+		{
+			_publishingPath = null;
+			_error = $"Could not publish the model: {exception.Message}";
+		}
+	}
+
+	private void CompletePublishIfReady()
+	{
+		if (_publishTask is null || !_publishTask.IsCompleted) return;
+		try
+		{
+			_publishTask.GetAwaiter().GetResult();
+			Refresh();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			System.ComponentModel.Win32Exception or ArgumentException or InvalidOperationException or TimeoutException)
+		{ _error = $"Could not publish the model: {exception.Message}"; }
+		finally { _publishTask = null; _publishingPath = null; }
+	}
+
+	private void DrainAutoPublishNotifications()
+	{
+		var refresh = false;
+		while (autoPublisher.TryDequeue(out var notification))
+		{
+			if (notification.Succeeded) refresh = true;
+			else _error = $"Could not automatically publish {Path.GetFileName(notification.RelativeSourcePath)}: {notification.Error}";
+		}
+		if (refresh) Refresh();
 	}
 
 	private void Manage(UnityAssetEntry entry)
@@ -465,6 +520,7 @@ public sealed class WolfieGui(
 			preferences.SetLastProjectPath(projectFile);
 			_error = string.Empty;
 			Refresh();
+			autoPublisher.Start(_project!, _projectFile!);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
 		{
@@ -506,6 +562,7 @@ public sealed class WolfieGui(
 		if (persistPreference) preferences.SetLastProjectPath(_projectFile);
 		_error = string.Empty;
 		Refresh();
+		autoPublisher.Start(_project!, _projectFile!);
 	}
 
 	private void Refresh()
@@ -518,6 +575,7 @@ public sealed class WolfieGui(
 
 	private void CloseProject()
 	{
+		autoPublisher.Stop();
 		_project = null; _projectFile = null; _assets = null; _selectedPath = string.Empty; _selectedFolderPath = "Assets"; _error = string.Empty;
 	}
 

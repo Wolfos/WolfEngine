@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UnityAssets;
 using Wolfie.IAE.ManagedAssets;
@@ -132,6 +133,7 @@ public sealed class WolfieProjectTests
 			Assert.That(File.Exists(source + ".meta"), Is.True);
 			Assert.That(loaded.SourceId, Is.EqualTo(created.SourceId));
 			Assert.That(loaded.ImporterId, Is.EqualTo("blender"));
+			Assert.That(loaded.Outputs.Single().Path, Is.EqualTo("Assets/Characters/Hero.fbx"));
 			Assert.That(browserFile.IsManaged, Is.True);
 			Assert.That(browserFile.ManagedAssetId, Is.EqualTo(created.SourceId));
 			Assert.That(File.Exists(Path.Combine(unity, "Assets", "Characters", "Hero.blend")), Is.False);
@@ -194,6 +196,82 @@ public sealed class WolfieProjectTests
 
 		Assert.That(() => new BlenderLauncher().Open(projectFile, "Assets/Model.blend", null),
 			Throws.InvalidOperationException.With.Message.Contains("Preferences"));
+	}
+
+	[Test]
+	public async Task ModelPublishAtomicallyReplacesRegisteredFbxAndPreservesUnityGuid()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		File.WriteAllText(Path.Combine(_root, "WolfieArt", "Templates", "Default.blend"), "blend");
+		var assets = new ManagedAssetService();
+		assets.CreateFromTemplate(projectFile, "Assets/Models", "Templates/Default.blend", "Boat");
+		var unityFolder = Path.Combine(unity, "Assets", "Models");
+		Directory.CreateDirectory(unityFolder);
+		var fbx = Path.Combine(unityFolder, "Boat.fbx");
+		File.WriteAllText(fbx, "previous valid fbx");
+		var meta = fbx + ".meta";
+		File.WriteAllText(meta, "guid: 1234567890abcdef1234567890abcdef\n");
+		var blender = Path.Combine(_root, "blender");
+		File.WriteAllText(blender, string.Empty);
+		var exported = new string('F', 128);
+		var publisher = new BlenderModelPublisher(assets, new FakeBlenderExportProcess(exported, 0));
+
+		await publisher.PublishAsync(project, projectFile, "Assets/Models/Boat.blend", blender);
+
+		var record = assets.Get(projectFile, "Assets/Models/Boat.blend");
+		Assert.Multiple(() =>
+		{
+			Assert.That(File.ReadAllText(fbx), Is.EqualTo(exported));
+			Assert.That(File.ReadAllText(meta), Is.EqualTo("guid: 1234567890abcdef1234567890abcdef\n"));
+			Assert.That(record.Outputs.Single().UnityGuid, Is.EqualTo("1234567890abcdef1234567890abcdef"));
+			Assert.That(Directory.EnumerateFiles(unityFolder, "*.tmp"), Is.Empty);
+		});
+	}
+
+	[Test]
+	public void FailedModelPublishLeavesPreviousUnityFbxIntact()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		File.WriteAllText(Path.Combine(_root, "WolfieArt", "Templates", "Default.blend"), "blend");
+		var assets = new ManagedAssetService();
+		assets.CreateFromTemplate(projectFile, "Assets/Models", "Templates/Default.blend", "Boat");
+		var unityFolder = Path.Combine(unity, "Assets", "Models");
+		Directory.CreateDirectory(unityFolder);
+		var fbx = Path.Combine(unityFolder, "Boat.fbx");
+		File.WriteAllText(fbx, "previous valid fbx");
+		var blender = Path.Combine(_root, "blender");
+		File.WriteAllText(blender, string.Empty);
+		var publisher = new BlenderModelPublisher(assets, new FakeBlenderExportProcess("partial", 1));
+
+		Assert.That(async () => await publisher.PublishAsync(project, projectFile,
+			"Assets/Models/Boat.blend", blender), Throws.InvalidOperationException.With.Message.Contains("exit code 1"));
+		Assert.That(File.ReadAllText(fbx), Is.EqualTo("previous valid fbx"));
+	}
+
+	[Test]
+	public async Task ManagedBlendCreationAndChangesAreAutomaticallyQueuedForPublishing()
+	{
+		var unity = CreateUnityProject();
+		var projects = new WolfieProjectService();
+		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
+		File.WriteAllText(Path.Combine(_root, "WolfieArt", "Templates", "Default.blend"), "template");
+		var recordingPublisher = new RecordingModelPublisher();
+		using var automatic = new ManagedSourceAutoPublisher(recordingPublisher,
+			new WolfiePreferences(Path.Combine(_root, "Preferences.json")));
+		automatic.Start(project, projectFile);
+		var assets = new ManagedAssetService();
+
+		assets.CreateFromTemplate(projectFile, "Assets/Models", "Templates/Default.blend", "Boat");
+		await WaitUntilAsync(() => recordingPublisher.Paths.Count >= 1);
+		var source = Path.Combine(_root, "WolfieArt", "Assets", "Models", "Boat.blend");
+		File.AppendAllText(source, " changed");
+		await WaitUntilAsync(() => recordingPublisher.Paths.Count >= 2);
+
+		Assert.That(recordingPublisher.Paths, Is.All.EqualTo("Assets/Models/Boat.blend"));
 	}
 
 	[Test]
@@ -320,5 +398,34 @@ public sealed class WolfieProjectTests
 		Directory.CreateDirectory(Path.Combine(unity, "Assets"));
 		Directory.CreateDirectory(Path.Combine(unity, "ProjectSettings"));
 		return unity;
+	}
+
+	private static async Task WaitUntilAsync(Func<bool> condition)
+	{
+		var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (!condition() && DateTime.UtcNow < timeout) await Task.Delay(50);
+		Assert.That(condition(), Is.True, "Timed out waiting for the automatic publish watcher.");
+	}
+
+	private sealed class FakeBlenderExportProcess(string output, int exitCode) : IBlenderExportProcess
+	{
+		public Task<BlenderExportResult> ExportAsync(string blenderExecutable, string sourcePath,
+			string outputPath, CancellationToken cancellationToken)
+		{
+			File.WriteAllText(outputPath, output);
+			return Task.FromResult(new BlenderExportResult(exitCode, "stdout", exitCode == 0 ? string.Empty : "export error"));
+		}
+	}
+
+	private sealed class RecordingModelPublisher : IBlenderModelPublisher
+	{
+		public ConcurrentQueue<string> Paths { get; } = new();
+
+		public Task PublishAsync(WolfieProject project, string projectFile, string relativeSourcePath,
+			string? configuredBlenderPath, CancellationToken cancellationToken = default)
+		{
+			Paths.Enqueue(relativeSourcePath);
+			return Task.CompletedTask;
+		}
 	}
 }

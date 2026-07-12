@@ -12,6 +12,9 @@
     </ItemGroup>
 
     <ItemGroup>
+	  <None Update="ExternalTools\Scripts\wolfie_export_fbx.py">
+		<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
       <None Update="Assets\Icons\box.png">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>

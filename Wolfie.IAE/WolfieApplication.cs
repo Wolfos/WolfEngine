@@ -39,6 +39,9 @@ public sealed class WolfieApplication : IDisposable
 		services.AddSingleton<UnityAssetScanner>();
 		services.AddSingleton<ManagedAssetService>();
 		services.AddSingleton<BlenderLauncher>();
+		services.AddSingleton<IBlenderExportProcess, BlenderExportProcess>();
+		services.AddSingleton<IBlenderModelPublisher, BlenderModelPublisher>();
+		services.AddSingleton<ManagedSourceAutoPublisher>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IIconManager, IconManager>();
 		services.AddSingleton<WolfieGui>();

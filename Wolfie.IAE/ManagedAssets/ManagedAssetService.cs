@@ -39,7 +39,10 @@ public sealed partial class ManagedAssetService
 		{
 			SourceId = Guid.NewGuid(),
 			ImporterId = ImporterFor(extension),
-			SourcePath = relativeSource
+			SourcePath = relativeSource,
+			Outputs = string.Equals(extension, ".blend", StringComparison.OrdinalIgnoreCase)
+				? [new ManagedOutputRecord { Path = Path.ChangeExtension(relativeSource, ".fbx").Replace('\\', '/') }]
+				: []
 		};
 		var directory = Path.GetDirectoryName(source)!;
 		Directory.CreateDirectory(directory);
@@ -127,6 +130,25 @@ public sealed partial class ManagedAssetService
 			File.Move(temporary, destination, true);
 		}
 		finally { if (File.Exists(temporary)) File.Delete(temporary); }
+	}
+
+	public ManagedAssetRecord Get(string projectFile, string relativeSourcePath)
+	{
+		var normalized = NormalizeAssetPath(relativeSourcePath);
+		return LoadAll(projectFile).TryGetValue(normalized, out var asset)
+			? asset
+			: throw new InvalidOperationException("The source file is not a managed Wolfie asset.");
+	}
+
+	public void RefreshUnityGuids(WolfieProject project, string projectFile, ManagedAssetRecord asset)
+	{
+		foreach (var output in asset.Outputs)
+		{
+			var path = ResolveWithinAssets(project.UnityProjectPath, NormalizeAssetPath(output.Path));
+			output.UnityGuid = ReadUnityGuid(path) ?? output.UnityGuid;
+		}
+		var source = ResolveWithinAssets(GetProjectRoot(projectFile), NormalizeAssetPath(asset.SourcePath));
+		SaveAtomically(GetMetadataPath(source), asset);
 	}
 
 	public static string? ReadUnityGuid(string unityAssetPath)
