@@ -26,7 +26,7 @@ public static class Program
 		if (captureController is not null) Environment.ExitCode = captureController.ExitCode;
 	}
 
-	internal static void ConfigureServices(IServiceCollection services)
+	public static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<WolfEngineEditor>();
 		services.AddSingleton<RigidbodySystem>();

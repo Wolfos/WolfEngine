@@ -58,11 +58,18 @@ public static class TextureArtifactSerializer
 		}
 
 		using var stream = File.OpenRead(path);
+		return Read(stream, name);
+	}
+
+	public static Texture Read(Stream stream, string name)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		ArgumentException.ThrowIfNullOrWhiteSpace(name);
 		using var reader = new BinaryReader(stream);
 		var magic = reader.ReadBytes(Magic.Length);
 		if (magic.AsSpan().SequenceEqual(Magic) == false)
 		{
-			throw new InvalidOperationException($"Texture artifact '{path}' has an invalid header.");
+			throw new InvalidOperationException("Texture artifact has an invalid header.");
 		}
 
 		var version = reader.ReadInt32();

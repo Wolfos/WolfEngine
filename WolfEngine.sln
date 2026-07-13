@@ -24,6 +24,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wolfie.IAE", "Wolfie.IAE\Wo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wolfie.IAE.Tests", "Wolfie.IAE.Tests\Wolfie.IAE.Tests.csproj", "{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Runtime", "WolfEngine.Runtime\WolfEngine.Runtime.csproj", "{C9D694A8-1A80-4F43-886A-58E028085DF4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Build", "WolfEngine.Build\WolfEngine.Build.csproj", "{7E530F5E-7B57-4B36-BC26-8C166F7495B0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -74,6 +78,14 @@ Global
 		{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C9D694A8-1A80-4F43-886A-58E028085DF4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C9D694A8-1A80-4F43-886A-58E028085DF4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C9D694A8-1A80-4F43-886A-58E028085DF4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C9D694A8-1A80-4F43-886A-58E028085DF4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -86,4 +98,3 @@ Global
 		{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C} = {3D935CEA-AEC9-4293-B608-60598098804E}
 	EndGlobalSection
 EndGlobal
-

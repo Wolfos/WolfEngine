@@ -40,11 +40,18 @@ public static class TerrainAssetSerializer
 		ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
 		using var stream = File.OpenRead(path);
+		return Read(stream, name);
+	}
+
+	public static TerrainAsset Read(Stream stream, string name)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		ArgumentException.ThrowIfNullOrWhiteSpace(name);
 		using var reader = new BinaryReader(stream);
 		var magic = reader.ReadBytes(Magic.Length);
 		if (magic.AsSpan().SequenceEqual(Magic) == false)
 		{
-			throw new InvalidOperationException($"Terrain asset '{path}' has an invalid header.");
+			throw new InvalidOperationException("Terrain asset has an invalid header.");
 		}
 
 		var version = reader.ReadInt32();

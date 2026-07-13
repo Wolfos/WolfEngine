@@ -28,6 +28,7 @@ public sealed class RenderGraph
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly RenderPresentationOptions _presentationOptions;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -73,7 +74,8 @@ public sealed class RenderGraph
 		IShaderCompiler shaderCompiler,
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
-		IGpuDrawBackendBridge gpuDrawBackendBridge)
+		IGpuDrawBackendBridge gpuDrawBackendBridge,
+		RenderPresentationOptions? presentationOptions = null)
 	{
 		_resourceRegistry = resourceRegistry;
 		_renderer = renderer;
@@ -98,7 +100,9 @@ public sealed class RenderGraph
 		_imGuiRenderer = imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer));
 		_uiFrameProvider = uiFrameProvider;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
-		_editorFrameCoordinator = editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
+		_presentationOptions = presentationOptions ?? new RenderPresentationOptions();
+		_editorFrameCoordinator =
+			editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
@@ -210,16 +214,16 @@ public sealed class RenderGraph
 		{
 			using (FrameProfiler.Instance.Measure($"Pass: {pass.Name}"))
 			{
-					// Materialize resources used by this pass
-					for (var i = 0; i < pass.Reads.Count; i++)
-					{
-						_resourceRegistry.GetResource(pass.Reads[i]);
-					}
+				// Materialize resources used by this pass
+				for (var i = 0; i < pass.Reads.Count; i++)
+				{
+					_resourceRegistry.GetResource(pass.Reads[i]);
+				}
 
-					for (var i = 0; i < pass.Writes.Count; i++)
-					{
-						_resourceRegistry.GetResource(pass.Writes[i]);
-					}
+				for (var i = 0; i < pass.Writes.Count; i++)
+				{
+					_resourceRegistry.GetResource(pass.Writes[i]);
+				}
 
 				// Create command list for this pass based on its kind
 				var commandList = pass.Kind == PassKind.Graphics
@@ -252,6 +256,7 @@ public sealed class RenderGraph
 				device.Submit(commandList);
 			}
 		}
+
 		gpuFrameCapture?.Seal();
 
 		ReleasePasses();
@@ -276,6 +281,7 @@ public sealed class RenderGraph
 				_pendingMaterials.Add(material);
 			}
 		}
+
 		_appliedShaderRevision = revision;
 	}
 
@@ -288,7 +294,8 @@ public sealed class RenderGraph
 	{
 		if (snapshot.HasPreviousCameraState == false ||
 		    Matrix4x4.Invert(snapshot.PreviousCameraWorldTransform.LocalToWorld, out var previousView) == false ||
-		    Matrix4x4.Decompose(snapshot.PreviousCameraWorldTransform.LocalToWorld, out _, out _, out previousCameraOrigin) == false)
+		    Matrix4x4.Decompose(snapshot.PreviousCameraWorldTransform.LocalToWorld, out _, out _,
+			    out previousCameraOrigin) == false)
 		{
 			previousViewProjection = fallbackViewProjection;
 			previousCameraOrigin = fallbackCameraOrigin;
@@ -328,6 +335,7 @@ public sealed class RenderGraph
 		{
 			submissionTimeline.PumpCompleted();
 		}
+
 		var gpuProfilerBackend = (_renderer.GetGfxDevice() as IGpuProfilerDevice)?.GpuProfilerBackend;
 		_gpuProfiler.SetBackendAvailability(
 			gpuProfilerBackend?.IsSupported == true,
@@ -402,7 +410,10 @@ public sealed class RenderGraph
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
-				var sceneEnabled = TryComputeSceneRenderSize(sceneViewportState, out var sceneRenderSize);
+				var renderSceneToWindow = _presentationOptions.OutputMode == RenderOutputMode.FullWindow;
+				var sceneEnabled = renderSceneToWindow
+					? TryComputeFullWindowSceneRenderSize(frameBufferSize, out var sceneRenderSize)
+					: TryComputeSceneRenderSize(sceneViewportState, out sceneRenderSize);
 				var currentResolution = sceneEnabled ? sceneRenderSize : frameBufferSize;
 				if (currentResolution.X > 0 && currentResolution.Y > 0)
 				{
@@ -410,7 +421,7 @@ public sealed class RenderGraph
 				}
 
 				_currentSceneRenderSize = sceneRenderSize;
-				var renderSceneToViewport = sceneEnabled;
+				var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
 				if (renderSceneToViewport)
 				{
@@ -420,21 +431,22 @@ public sealed class RenderGraph
 						takeOwnership: false,
 						initialState: _sceneRenderTargetManager.CurrentState);
 				}
-				
+
 				if (!Matrix4x4.Decompose(
-						snapshot.CameraWorldTransform.LocalToWorld,
-						out _,
-						out _,
-						out var frameCameraPosition))
+					    snapshot.CameraWorldTransform.LocalToWorld,
+					    out _,
+					    out _,
+					    out var frameCameraPosition))
 				{
 					frameCameraPosition = snapshot.Config.DiffuseGlobalIllumination.Origin;
 				}
+
 				_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 				_frameBuilder.BeginFrame(
 					frameBufferSize,
 					sceneRenderSize,
 					sceneColorHandle,
-					renderSceneToViewport,
+					renderSceneToViewport || renderSceneToWindow,
 					snapshot.DecalPackets.Count > 0,
 					snapshot.SunDirection,
 					snapshot.SunIntensityScale,
@@ -449,6 +461,7 @@ public sealed class RenderGraph
 				{
 					_renderer.CompletePendingFrameCapture(_resourceRegistry, captureColorHandle);
 				}
+
 				_frameBuilder.CompleteFrame();
 				if (sceneColorHandle.IsValid)
 				{
@@ -482,7 +495,7 @@ public sealed class RenderGraph
 		{
 			throw new ArgumentNullException(nameof(material));
 		}
-		
+
 		material.MarkResourceRequested();
 		lock (_resourceSync)
 		{
@@ -570,6 +583,12 @@ public sealed class RenderGraph
 		var height = Math.Max(1, (int)MathF.Round(state.ContentSizePixels.Y * scale));
 		sceneRenderSize = new Int2(width, height);
 		return true;
+	}
+
+	private static bool TryComputeFullWindowSceneRenderSize(Int2 framebufferSize, out Int2 sceneRenderSize)
+	{
+		sceneRenderSize = framebufferSize;
+		return framebufferSize.X > 0 && framebufferSize.Y > 0;
 	}
 
 	private static int ParsePositiveIntEnvironmentVariable(string name, int fallback)
@@ -688,6 +707,7 @@ public sealed class RenderGraph
 				{
 					_pendingMaterials.Add(material);
 				}
+
 				break;
 			}
 		}
@@ -719,6 +739,7 @@ public sealed class RenderGraph
 				{
 					_pendingMaterials.Add(material);
 				}
+
 				continue;
 			}
 

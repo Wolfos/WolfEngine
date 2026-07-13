@@ -2,7 +2,7 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.UI;
 
-internal sealed class NullImGuiRenderer : IImGuiRenderer
+public sealed class NullImGuiRenderer : IImGuiRenderer
 {
 	public static readonly NullImGuiRenderer Instance = new();
 

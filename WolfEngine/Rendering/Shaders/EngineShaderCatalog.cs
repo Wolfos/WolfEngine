@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Shaders;
 
@@ -185,6 +186,38 @@ public sealed class EngineShaderCatalog
 			if (fullPath.StartsWith(Path.GetFullPath(shaderSourceRoot), StringComparison.Ordinal) == false || File.Exists(fullPath) == false)
 				throw new FileNotFoundException($"Catalogued shader source '{descriptor.RelativeSourcePath}' was not found.", fullPath);
 		}
+	}
+
+	public IReadOnlyList<ShaderRequest> GetDeclaredRuntimeRequests(GraphicsBackendKind backendKind)
+	{
+		var requests = new List<ShaderRequest>();
+		foreach (var descriptor in _byId.Values.OrderBy(value => value.Id.Value, StringComparer.Ordinal))
+		{
+			if (descriptor.Id == EngineShaderPrograms.ImGui || descriptor.Id == EngineShaderPrograms.Bc1Compress ||
+			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
+			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
+				continue;
+			if (IsGraphicsProgram(descriptor.Id))
+			{
+				requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind));
+				if (SupportsAlphaClip(descriptor.Id))
+					requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_ALPHA_CLIP"));
+				if (descriptor.Id == EngineShaderPrograms.ShadowMap)
+					for (var cascade = 0; cascade < 3; cascade++)
+					{
+						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
+							$"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
+						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
+							"WOLF_ALPHA_CLIP", $"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
+					}
+			}
+			else
+			{
+				foreach (var entryPoint in GetComputeEntryPoints(descriptor.Id))
+					requests.Add(ShaderRequest.Compute(descriptor.Id, entryPoint, backendKind));
+			}
+		}
+		return requests;
 	}
 
 	private static EngineShaderProgramDescriptor D(ShaderProgramId id, string source) => new(id, source);

@@ -135,7 +135,7 @@ private sealed class MeshResources
 		IShaderCompiler shaderCompiler,
 		IArenaAllocator arenaAllocator,
 		IInputSystem inputSystem,
-		ImGuiUiSystem imguiSystem,
+		IImGuiInputSink imguiSystem,
 		WindowChromeController windowChromeController)
 	{
 		_width = 1600;

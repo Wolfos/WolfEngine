@@ -54,11 +54,17 @@ public static class ImportedMeshSerializer
 		}
 
 		using var stream = File.OpenRead(path);
+		return Read(stream);
+	}
+
+	public static ImportedMeshAssetFile Read(Stream stream)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
 		using var reader = new BinaryReader(stream);
 		var magic = reader.ReadBytes(Magic.Length);
 		if (magic.AsSpan().SequenceEqual(Magic) == false)
 		{
-			throw new InvalidOperationException($"Imported mesh artifact '{path}' has an invalid header.");
+			throw new InvalidOperationException("Imported mesh artifact has an invalid header.");
 		}
 
 		var version = reader.ReadInt32();
