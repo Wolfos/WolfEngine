@@ -30,6 +30,7 @@ public class EditorGui
 	private readonly ComponentsWindow _componentsWindow;
 	private readonly ProfilerWindow _profilerWindow;
 	private readonly SceneWindow _sceneWindow;
+	private readonly ProjectSettingsWindow _projectSettingsWindow;
 
 	public EditorGui(
 		IMenuBar menuBar,
@@ -50,6 +51,7 @@ public class EditorGui
 		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
 		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
 		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
+		_projectSettingsWindow = serviceProvider.GetRequiredService<ProjectSettingsWindow>();
 		_commandService.BindDeletionHandlers(_entitiesWindow, _assetsWindow);
 	}
 
@@ -90,6 +92,7 @@ public class EditorGui
 		{
 			EditorPreferencesMenu.Draw();
 		}
+		_projectSettingsWindow.Draw();
 	}
 
 	public void PrepareForGameplayReload()

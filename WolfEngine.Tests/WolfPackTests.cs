@@ -23,6 +23,33 @@ public sealed class WolfPackTests
 	}
 
 	[Test]
+	public void BuildConfig_SceneIdsAreDistinctAndFirstSceneIsInitial()
+	{
+		var first = Guid.NewGuid();
+		var second = Guid.NewGuid();
+		var config = new WolfEngineBuildConfig();
+
+		config.SetSceneIds([first, second, first, Guid.Empty]);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(config.Version, Is.EqualTo(WolfEngineBuildConfig.CurrentVersion));
+			Assert.That(config.SceneIds, Is.EqualTo(new[] { first, second }));
+			Assert.That(config.InitialSceneId, Is.EqualTo(first));
+			Assert.That(config.GetSceneIds(), Is.EqualTo(new[] { first, second }));
+		});
+	}
+
+	[Test]
+	public void BuildConfig_UsesLegacyInitialSceneWhenSceneListIsAbsent()
+	{
+		var initial = Guid.NewGuid();
+		var config = new WolfEngineBuildConfig { Version = 1, InitialSceneId = initial };
+
+		Assert.That(config.GetSceneIds(), Is.EqualTo(new[] { initial }));
+	}
+
+	[Test]
 	public void Writer_IsByteDeterministicAndCanonical()
 	{
 		var a = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");

@@ -40,6 +40,8 @@ public sealed class MenuBar : IMenuBar
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IEditorCommandService _commandService;
+	private readonly ProjectSettingsWindow _projectSettingsWindow;
+	private readonly IGameBuildService _gameBuildService;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -62,7 +64,9 @@ public sealed class MenuBar : IMenuBar
 		IEditorPlaySession playSession,
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorNotificationService notificationService,
-		IEditorCommandService commandService)
+		IEditorCommandService commandService,
+		ProjectSettingsWindow projectSettingsWindow,
+		IGameBuildService gameBuildService)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -78,6 +82,8 @@ public sealed class MenuBar : IMenuBar
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
+		_projectSettingsWindow = projectSettingsWindow ?? throw new ArgumentNullException(nameof(projectSettingsWindow));
+		_gameBuildService = gameBuildService ?? throw new ArgumentNullException(nameof(gameBuildService));
 	}
 
 	public void Draw(EditorScene scene)
@@ -373,6 +379,26 @@ public sealed class MenuBar : IMenuBar
 			_commandService.ReloadEngineShaders();
 		}
 
+		if (ImGui.MenuItem("Build..."))
+		{
+			var outputFolder = _fileDialogService.OpenFolder(new FileDialogOptions
+			{
+				Title = "Choose Build Output Folder"
+			});
+			if (string.IsNullOrWhiteSpace(outputFolder) == false)
+			{
+				try
+				{
+					var result = _gameBuildService.Build(outputFolder);
+					_notificationService.ReportInfo($"Built {result.CookedAssetCount} assets to '{result.OutputPath}'.");
+				}
+				catch (Exception exception)
+				{
+					ShowError($"Game build failed: {exception.Message}");
+				}
+			}
+		}
+
 		if (hasOpenProject == false)
 		{
 			ImGui.EndDisabled();
@@ -392,12 +418,16 @@ public sealed class MenuBar : IMenuBar
 		return menuRect;
 	}
 
-	private static WindowChromeRect DrawEditMenu()
+	private WindowChromeRect DrawEditMenu()
 	{
 		var isOpen = ImGui.BeginMenu("Edit");
 		var menuRect = GetLastItemRect();
 		if (isOpen)
 		{
+			if (ImGui.MenuItem("Project Settings..."))
+			{
+				_projectSettingsWindow.Open();
+			}
 			ImGui.EndMenu();
 		}
 

@@ -6,13 +6,30 @@ namespace WolfEngine.AssetPipeline;
 
 public sealed class WolfEngineBuildConfig
 {
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 	public int Version { get; set; } = CurrentVersion;
+	/// <summary>Scenes included in the game build. The first scene is launched by default.</summary>
+	public List<Guid> SceneIds { get; set; } = [];
+	// Retained for reading version 1 project settings and for the runtime bootstrap manifest.
 	public Guid InitialSceneId { get; set; }
 	public CookedRuntimeSettings RuntimeSettings { get; set; } = new();
 	public string Configuration { get; set; } = "Release";
 	public bool SelfContained { get; set; } = true;
 	public string Target { get; set; } = "current-host";
+
+	public IReadOnlyList<Guid> GetSceneIds()
+	{
+		return SceneIds.Count > 0
+			? SceneIds.Where(id => id != Guid.Empty).Distinct().ToArray()
+			: InitialSceneId == Guid.Empty ? [] : [InitialSceneId];
+	}
+
+	public void SetSceneIds(IEnumerable<Guid> sceneIds)
+	{
+		SceneIds = sceneIds.Where(id => id != Guid.Empty).Distinct().ToList();
+		InitialSceneId = SceneIds.FirstOrDefault();
+		Version = CurrentVersion;
+	}
 }
 
 public sealed class CookedRuntimeSettings

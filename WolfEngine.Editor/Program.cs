@@ -57,6 +57,7 @@ public static class Program
 		services.AddSingleton<IEditorSceneReloadService, EditorSceneReloadService>();
 		services.AddSingleton<IAssetInstanceRegistry, EditorAssetInstanceRegistry>();
 		services.AddSingleton<IEditorProjectService, EditorProjectService>();
+		services.AddSingleton<IGameBuildService, GameBuildService>();
 		services.AddSingleton<IAssetSelectionService, AssetSelectionService>();
 		services.AddSingleton<ITextureAssetStore, TextureAssetStore>();
 		services.AddSingleton<IMaterialAssetStore, MaterialAssetStore>();
@@ -101,6 +102,7 @@ public static class Program
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<EditorGui>();
+		services.AddSingleton<ProjectSettingsWindow>();
 		
 		ConfigureEditorWindows(services);
 	}

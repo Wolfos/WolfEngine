@@ -4,41 +4,41 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
-using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Build;
 
-public static class Program
+public sealed class GameBuildContext
+{
+	public required string ProjectRootPath { get; init; }
+	public required string GameplayProjectPath { get; init; }
+	public required AssetDatabase AssetDatabase { get; init; }
+}
+
+public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false);
+
+public readonly record struct GameBuildResult(string OutputPath, int CookedAssetCount);
+
+public static class GameBuilder
 {
 	private static readonly Guid GameplayAssemblyId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda4");
 	private static readonly Guid GameplaySymbolsId = new("ca55e2d4-f348-5e92-a173-00f3f1d2bda5");
 	private static readonly Guid RuntimeSettingsId = new("e1317bc4-b53c-59ea-982f-3b8170b61f10");
 
-	public static int Main(string[] args)
+	public static GameBuildResult Build(GameBuildContext context, GameBuildOptions options)
 	{
-		try
-		{
-			Build(Parse(args));
-			return 0;
-		}
-		catch (Exception exception)
-		{
-			Console.Error.WriteLine($"game build failed: {exception.Message}");
-			return 1;
-		}
-	}
-
-	private static void Build(Options options)
-	{
-		var projectRoot = Path.GetFullPath(options.Project);
-		var output = Path.GetFullPath(options.Output);
+		ArgumentNullException.ThrowIfNull(context);
+		var projectRoot = Path.GetFullPath(context.ProjectRootPath);
+		var output = Path.GetFullPath(options.OutputPath);
 		var configPath = Path.Combine(projectRoot, "WolfEngineBuild.json");
 		var config = JsonSerializer.Deserialize<WolfEngineBuildConfig>(File.ReadAllBytes(configPath), AssetJson.SerializerOptions)
 			?? throw new InvalidDataException("WolfEngineBuild.json is invalid.");
-		if (config.Version != WolfEngineBuildConfig.CurrentVersion || config.InitialSceneId == Guid.Empty)
-			throw new InvalidDataException("WolfEngineBuild.json version or initial scene is invalid.");
+		if (config.Version is < 1 or > WolfEngineBuildConfig.CurrentVersion)
+			throw new InvalidDataException("WolfEngineBuild.json version is invalid.");
+		var sceneIds = config.GetSceneIds();
+		if (sceneIds.Count == 0)
+			throw new InvalidDataException("WolfEngineBuild.json must contain at least one project scene.");
 		if (!string.Equals(config.Target, "current-host", StringComparison.Ordinal))
 			throw new InvalidDataException("The first build pipeline supports only target 'current-host'.");
 		var configuration = options.Debug ? "Debug" : config.Configuration;
@@ -49,16 +49,15 @@ public static class Program
 		global::WolfEngine.WolfEngine.ConfigureServices(
 			services,
 			new EngineShaderOptions { EngineContentRoot = Path.Combine(engineSolutionRoot, "WolfEngine") });
-		global::WolfEngine.Editor.Program.ConfigureServices(services);
 		using var provider = services.BuildServiceProvider();
-		var projectService = provider.GetRequiredService<IEditorProjectService>();
-		if (!projectService.OpenProject(projectRoot, out var error))
-			throw new InvalidOperationException(error);
-		if (!projectService.TryGetAsset(config.InitialSceneId, out var scene) || scene.Type != AssetType.Scene)
-			throw new InvalidOperationException($"Initial scene '{config.InitialSceneId}' was not found.");
+		var database = context.AssetDatabase.Assets.ToDictionary(asset => asset.Id);
+		foreach (var sceneId in sceneIds)
+		{
+			if (!database.TryGetValue(sceneId, out var scene) || scene.Type != AssetType.Scene)
+				throw new InvalidOperationException($"Project scene '{sceneId}' was not found.");
+		}
 
-		var gameplayProject = projectService.GameplayProjectPath
-			?? throw new InvalidOperationException("Gameplay project is not configured.");
+		var gameplayProject = context.GameplayProjectPath;
 		var gameplayBuildArgs = new List<string>
 		{
 			"build",
@@ -103,7 +102,6 @@ public static class Program
 		if (Directory.Exists(leakedEngineAssets))
 			Directory.Delete(leakedEngineAssets, true);
 
-		var database = projectService.CurrentAssetDatabase.Assets.ToDictionary(asset => asset.Id);
 		var graph = provider.GetRequiredService<IAssetPipelineIndex>().GetDependencies(projectRoot)
 			.GroupBy(edge => edge.FromNodeId)
 			.ToDictionary(
@@ -112,7 +110,7 @@ public static class Program
 		foreach (var asset in database.Values)
 			AddSerializedDependencies(projectRoot, asset, graph);
 
-		var closure = ComputeClosure(config.InitialSceneId, database, graph);
+		var closure = ComputeClosure(sceneIds, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
 		var groups = closure
@@ -142,7 +140,7 @@ public static class Program
 			Target = rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
-			InitialSceneId = config.InitialSceneId,
+			InitialSceneId = sceneIds[0],
 			GameplayAssemblyId = GameplayAssemblyId,
 			GameplaySymbolsId = options.Debug ? GameplaySymbolsId : Guid.Empty,
 			RuntimeSettingsId = RuntimeSettingsId
@@ -163,12 +161,12 @@ public static class Program
 		}
 		manifest.Roots =
 		[
-			new WolfManifestRoot
+			..sceneIds.Select((sceneId, index) => new WolfManifestRoot
 			{
-				Kind = "InitialScene",
-				Id = config.InitialSceneId,
-				Dependencies = closure.Where(id => id != config.InitialSceneId).Order().ToList()
-			},
+				Kind = index == 0 ? "InitialScene" : "Scene",
+				Id = sceneId,
+				Dependencies = ComputeClosure([sceneId], database, graph).Where(id => id != sceneId).Order().ToList()
+			}),
 			new WolfManifestRoot { Kind = "GameplayAssembly", Id = GameplayAssemblyId },
 			..(options.Debug
 				? new[] { new WolfManifestRoot { Kind = "GameplaySymbols", Id = GameplaySymbolsId } }
@@ -183,6 +181,7 @@ public static class Program
 
 		Directory.Move(staging, output);
 		Console.WriteLine($"Built {closure.Count} cooked assets to '{output}'.");
+		return new GameBuildResult(output, closure.Count);
 	}
 
 	private static WolfPackSource CreateSource(string projectRoot, AssetDatabaseEntry asset, IReadOnlyCollection<Guid> dependencies)
@@ -251,11 +250,12 @@ public static class Program
 		}
 	}
 
-	private static HashSet<Guid> ComputeClosure(Guid root, Dictionary<Guid, AssetDatabaseEntry> database, Dictionary<Guid, HashSet<Guid>> graph)
+	private static HashSet<Guid> ComputeClosure(IEnumerable<Guid> roots, Dictionary<Guid, AssetDatabaseEntry> database, Dictionary<Guid, HashSet<Guid>> graph)
 	{
 		var result = new HashSet<Guid>();
 		var pending = new Stack<Guid>();
-		pending.Push(root);
+		foreach (var root in roots)
+			pending.Push(root);
 		while (pending.TryPop(out var id))
 		{
 			if (!result.Add(id))
@@ -411,28 +411,4 @@ public static class Program
 		_ = projectRoot;
 	}
 
-	private static Options Parse(string[] args)
-	{
-		string? project = null;
-		string? output = null;
-		var debug = false;
-		for (var i = 0; i < args.Length; i++)
-		{
-			if (args[i] == "--project" && ++i < args.Length)
-				project = args[i];
-			else if (args[i] == "--output" && ++i < args.Length)
-				output = args[i];
-			else if (args[i] is "-debug" or "--debug")
-				debug = true;
-			else
-				throw new ArgumentException($"Unknown or incomplete argument '{args[i]}'.");
-		}
-
-		return new Options(
-			project ?? throw new ArgumentException("--project is required."),
-			output ?? throw new ArgumentException("--output is required."),
-			debug);
-	}
-
-	private readonly record struct Options(string Project, string Output, bool Debug);
 }
