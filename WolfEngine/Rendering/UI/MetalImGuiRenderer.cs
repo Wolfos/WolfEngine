@@ -50,7 +50,12 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			_pipeline = CreatePipeline(device);
 		}
 
-		if (frame.HasFontAtlas)
+		// A UI frame can be consumed before the renderer is ready to create its
+		// resources. Keep accepting atlas-bearing frames until we have a compatible
+		// texture rather than treating consumption as a successful upload.
+		if (frame.HasFontAtlas && (_fontTexture is null ||
+		                          _fontTexture.Descriptor.Width != (uint)frame.FontAtlas.Width ||
+		                          _fontTexture.Descriptor.Height != (uint)frame.FontAtlas.Height))
 		{
 			CreateFontTexture(device, frame.FontAtlas);
 			_fontUploaded = true;

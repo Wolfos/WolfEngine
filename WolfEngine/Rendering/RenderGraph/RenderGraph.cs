@@ -164,7 +164,7 @@ public sealed class RenderGraph
 				_renderLights.Add(new LightPacket(lightPacket.Light, lightTransform));
 			}
 
-			// Remove camera translation from the view matrix since objects are now camera-relative
+			// Remove camera translation from the view matrix since objects are camera-relative
 			view.Translation = Vector3.Zero;
 			var viewProjection = view * jitteredProjection;
 			var unjitteredViewProjection = view * snapshot.Camera.Perspective;
@@ -203,7 +203,8 @@ public sealed class RenderGraph
 			_previousTaaEnabled = taaEnabled;
 		}
 
-		if (sceneData is null)
+		if (sceneData is null &&
+		    _passes.Any(p => p.Name != "ImGui")) // filthy, but we want to let the ImGui pass through even if there is no scene
 		{
 			ReleasePasses();
 			return;

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
+using WolfEngine.Build;
 using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Platform;
@@ -42,6 +43,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly IEditorCommandService _commandService;
 	private readonly ProjectSettingsWindow _projectSettingsWindow;
 	private readonly IGameBuildService _gameBuildService;
+	private readonly IEditorOperationService _operationService;
 
 	private string _newProjectName = string.Empty;
 	private string _newProjectParentFolder = string.Empty;
@@ -66,7 +68,8 @@ public sealed class MenuBar : IMenuBar
 		IEditorNotificationService notificationService,
 		IEditorCommandService commandService,
 		ProjectSettingsWindow projectSettingsWindow,
-		IGameBuildService gameBuildService)
+		IGameBuildService gameBuildService,
+		IEditorOperationService operationService)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -84,6 +87,7 @@ public sealed class MenuBar : IMenuBar
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 		_projectSettingsWindow = projectSettingsWindow ?? throw new ArgumentNullException(nameof(projectSettingsWindow));
 		_gameBuildService = gameBuildService ?? throw new ArgumentNullException(nameof(gameBuildService));
+		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 	}
 
 	public void Draw(EditorScene scene)
@@ -342,14 +346,15 @@ public sealed class MenuBar : IMenuBar
 			});
 			if (string.IsNullOrWhiteSpace(selectedFolder) == false)
 			{
-				if (_projectService.OpenProject(selectedFolder, out var errorMessage))
-				{
-					PersistLastOpenedProject();
-				}
-				else
-				{
-					ShowError(errorMessage);
-				}
+				_operationService.TryStart(
+					"Opening project",
+					progress =>
+					{
+						progress.Report("Loading project assets...");
+						if (_projectService.OpenProject(selectedFolder, out var errorMessage) == false) throw new InvalidOperationException(errorMessage);
+					},
+					completed: PersistLastOpenedProject,
+					failed: exception => ShowError($"Failed to open project: {exception.Message}"));
 			}
 		}
 
@@ -387,15 +392,20 @@ public sealed class MenuBar : IMenuBar
 			});
 			if (string.IsNullOrWhiteSpace(outputFolder) == false)
 			{
-				try
-				{
-					var result = _gameBuildService.Build(outputFolder);
-					_notificationService.ReportInfo($"Built {result.CookedAssetCount} assets to '{result.OutputPath}'.");
-				}
-				catch (Exception exception)
-				{
-					ShowError($"Game build failed: {exception.Message}");
-				}
+				GameBuildResult? buildResult = null;
+				_operationService.TryStart(
+					"Building game",
+					progress =>
+					{
+						progress.Report("Cooking assets and compiling gameplay...");
+						buildResult = _gameBuildService.Build(outputFolder);
+					},
+					completed: () =>
+					{
+						if (buildResult is { } result)
+							_notificationService.ReportInfo($"Built {result.CookedAssetCount} assets to '{result.OutputPath}'.");
+					},
+					failed: exception => ShowError($"Game build failed: {exception.Message}"));
 			}
 		}
 

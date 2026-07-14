@@ -280,11 +280,6 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			return false;
 		}
 
-		if (frame.HasFontAtlas)
-		{
-			_fontAtlasDirty = false;
-		}
-
 		if (frame.VertexCount + frame.IndexCount == 0)
 		{
 			frame.Release();

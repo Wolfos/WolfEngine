@@ -34,6 +34,7 @@ public static class Program
 		services.AddSingleton<EditorCameraContext>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
+		services.AddSingleton<IEditorOperationService, EditorOperationService>();
 		services.AddSingleton<IEditorInteractionState, EditorInteractionState>();
 		services.AddSingleton<IEditorAssetRefreshService, EditorAssetRefreshService>();
 		services.AddSingleton<IEditorSceneSnapshotService, EditorSceneSnapshotService>();

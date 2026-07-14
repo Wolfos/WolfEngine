@@ -52,15 +52,34 @@ public sealed class EditorApplication : IDisposable
 		if (automationController is not null) editor.SetRemoteAutomationController(automationController);
 
 		var lastProjectPath = captureController is null && automationController is null ? LoadLastProjectPath() : null;
+		// Arm the loading state before the editor thread starts so its very first
+		// submitted frame is the loading screen. The worker waits until the renderer
+		// has created its graphics device because asset import may dispatch GPU work.
+		var rendererReady = new ManualResetEventSlim(false);
+		if (string.IsNullOrWhiteSpace(lastProjectPath) == false)
+		{
+			var projects = _services.GetRequiredService<IEditorProjectService>();
+			var gameplay = _services.GetRequiredService<IGameplayAssemblyHost>();
+			var notifications = _services.GetRequiredService<IEditorNotificationService>();
+			_services.GetRequiredService<IEditorOperationService>().TryStart(
+				"Opening project",
+				progress =>
+				{
+					rendererReady.Wait();
+					progress.Report("Loading project assets...");
+					if (projects.OpenProject(lastProjectPath, out var error) == false) throw new InvalidOperationException(error);
+					progress.Report("Loading gameplay assembly...");
+					gameplay.EnsureLoaded();
+				},
+				failed: exception => notifications.ReportError($"Failed to open project: {exception.Message}"));
+		}
 		var editorThread = new Thread(editor.Run) { IsBackground = true, Name = "EditorThread" };
 		editorThread.Start();
 		try
 		{
 			_services.GetRequiredService<IRenderPipeline>().Run(() =>
 			{
-				if (captureController is not null || automationController is not null || string.IsNullOrWhiteSpace(lastProjectPath)) return;
-				_services.GetRequiredService<IEditorProjectService>().OpenProject(lastProjectPath, out _);
-				_services.GetRequiredService<IGameplayAssemblyHost>().EnsureLoaded();
+				rendererReady.Set();
 			});
 		}
 		finally

@@ -43,6 +43,7 @@ public class WolfEngineEditor
 	private readonly IAssetInstanceRegistry _assetInstanceRegistry;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IEditorOperationService _operationService;
 	private readonly BoxColliderGizmoDrawer _boxColliderGizmoDrawer;
 	private readonly CapsuleColliderGizmoDrawer _capsuleColliderGizmoDrawer;
 	private readonly IProjectTypeCatalog _typeCatalog;
@@ -80,6 +81,7 @@ public class WolfEngineEditor
 		IAssetInstanceRegistry assetInstanceRegistry,
 		IEditorNotificationService notificationService,
 		IEditorUndoRedoService undoRedoService,
+		IEditorOperationService operationService,
 		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
 		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
 		IServiceProvider serviceProvider)
@@ -102,6 +104,7 @@ public class WolfEngineEditor
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
 		_serviceProvider = serviceProvider;
@@ -171,6 +174,7 @@ public class WolfEngineEditor
 
 		while (_running)
 		{
+			_operationService.Update();
 			_remoteAutomationController?.ProcessPendingCommands();
 			if (_remoteAutomationController?.ShouldStop == true)
 			{
@@ -184,23 +188,28 @@ public class WolfEngineEditor
 			var deltaTime = _automationController?.DeltaTime ?? (float)(frameStart - last).TotalSeconds;
 			last = frameStart;
 
-			HandleGameplayBuildAndReload();
-			SyncCurrentScene();
-			ValidateSelection();
-			EnsureGameplayModuleBound();
-
-			using (FrameProfiler.Instance.Measure("World Update"))
+			// A loading operation owns editor state. Keep publishing frames, but do not let
+			// input-driven systems mutate the scene while it is being rebuilt or cooked.
+			if (_operationService.Current.IsActive == false)
 			{
-				UpdatePhysics(deltaTime);
-				UpdateGameplay(deltaTime);
-				var (worldMask, groupMask) = GetExecutionMask();
-				_worldManager.Update(deltaTime, worldMask, groupMask);
-			}
+				HandleGameplayBuildAndReload();
+				SyncCurrentScene();
+				ValidateSelection();
+				EnsureGameplayModuleBound();
 
-			using (FrameProfiler.Instance.Measure("Pre-Render"))
-			{
-				var (worldMask, groupMask) = GetExecutionMask();
-				_worldManager.OnPreRender(deltaTime, worldMask, groupMask);
+				using (FrameProfiler.Instance.Measure("World Update"))
+				{
+					UpdatePhysics(deltaTime);
+					UpdateGameplay(deltaTime);
+					var (worldMask, groupMask) = GetExecutionMask();
+					_worldManager.Update(deltaTime, worldMask, groupMask);
+				}
+
+				using (FrameProfiler.Instance.Measure("Pre-Render"))
+				{
+					var (worldMask, groupMask) = GetExecutionMask();
+					_worldManager.OnPreRender(deltaTime, worldMask, groupMask);
+				}
 			}
 
 			using (FrameProfiler.Instance.Measure("Publish Snapshot"))

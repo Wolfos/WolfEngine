@@ -22,6 +22,7 @@ public class EditorGui
 	private readonly IEditorModeState _editorModeState;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly IEditorOperationService _operationService;
 
 	private readonly EntitiesWindow _entitiesWindow;
 	private readonly AssetsWindow _assetsWindow;
@@ -37,12 +38,14 @@ public class EditorGui
 		IEditorModeState editorModeState,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
+		IEditorOperationService operationService,
 		IServiceProvider serviceProvider)
 	{
 		_menuBar = menuBar;
 		_editorModeState = editorModeState;
 		_interactionState = interactionState;
 		_commandService = commandService;
+		_operationService = operationService;
 
 		_entitiesWindow = serviceProvider.GetRequiredService<EntitiesWindow>();
 		_assetsWindow = serviceProvider.GetRequiredService<AssetsWindow>();
@@ -57,6 +60,11 @@ public class EditorGui
 
 	public void Draw(EditorScene scene)
 	{
+		if (_operationService.Current is { IsActive: true } operation)
+		{
+			DrawLoadingScreen(operation);
+			return;
+		}
 		_interactionState.BeginFrame();
 		DockSpace();
 
@@ -93,6 +101,30 @@ public class EditorGui
 			EditorPreferencesMenu.Draw();
 		}
 		_projectSettingsWindow.Draw();
+	}
+
+	private static void DrawLoadingScreen(EditorOperationSnapshot operation)
+	{
+		var viewport = ImGui.GetMainViewport();
+		ImGui.SetNextWindowPos(viewport.WorkPos);
+		ImGui.SetNextWindowSize(viewport.WorkSize);
+		ImGui.SetNextWindowViewport(viewport.ID);
+		const ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
+			ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoBringToFrontOnFocus;
+		ImGui.Begin("Editor Loading", flags);
+		var textSize = ImGui.CalcTextSize(operation.Title);
+		ImGui.SetCursorPos(new Vector2(Math.Max(24.0f, (viewport.WorkSize.X - textSize.X) * 0.5f), viewport.WorkSize.Y * 0.42f));
+		ImGui.TextUnformatted(operation.Title);
+		ImGui.SetCursorPosX(Math.Max(24.0f, (viewport.WorkSize.X - 360.0f) * 0.5f));
+		ImGui.ProgressBar(-1.0f, new Vector2(360.0f, 0.0f));
+		ImGui.SetCursorPosX(Math.Max(24.0f, (viewport.WorkSize.X - 360.0f) * 0.5f));
+		ImGui.TextDisabled(operation.Detail);
+		if (operation.Elapsed >= TimeSpan.FromSeconds(2))
+		{
+			ImGui.SetCursorPosX(Math.Max(24.0f, (viewport.WorkSize.X - 360.0f) * 0.5f));
+			ImGui.TextDisabled($"{operation.Elapsed.TotalSeconds:F0}s elapsed");
+		}
+		ImGui.End();
 	}
 
 	public void PrepareForGameplayReload()
