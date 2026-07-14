@@ -726,6 +726,9 @@ public sealed class GpuDrawPass
 			uint heightHandle = 0;
 			uint hasHeight = 0;
 			float scale = 1.0f;
+			uint autoMaterial = 0;
+			uint useMinimumSlope = 0;
+			float minimumSlopeDegrees = 0.0f;
 			PopulateTerrainLayerHandles(
 				currentLayer,
 				ref albedoHandle,
@@ -733,7 +736,10 @@ public sealed class GpuDrawPass
 				ref ormHandle,
 				ref heightHandle,
 				ref hasHeight,
-				ref scale);
+				ref scale,
+				ref autoMaterial,
+				ref useMinimumSlope,
+				ref minimumSlopeDegrees);
 			_terrainLayerUpdateData.Add(new GpuTerrainLayerUpdateData(
 				materialHandle,
 				layerStart,
@@ -743,7 +749,10 @@ public sealed class GpuDrawPass
 				ormHandle,
 				heightHandle,
 				hasHeight,
-				scale));
+				scale,
+				autoMaterial,
+				useMinimumSlope,
+				minimumSlopeDegrees));
 		}
 	}
 
@@ -757,7 +766,10 @@ public sealed class GpuDrawPass
 		       left.OrmResourceRevision == right.OrmResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
 		       left.HeightResourceRevision == right.HeightResourceRevision &&
-		       Math.Abs(left.Scale - right.Scale) <= 0.0001f;
+		       Math.Abs(left.Scale - right.Scale) <= 0.0001f &&
+		       left.AutoMaterial == right.AutoMaterial &&
+		       left.UseMinimumSlope == right.UseMinimumSlope &&
+		       Math.Abs(left.MinimumSlopeDegrees - right.MinimumSlopeDegrees) <= 0.0001f;
 	}
 
 	private void DispatchInstanceUpdates(RenderGraphContext context, IGfxDevice device)
@@ -1743,7 +1755,10 @@ public sealed class GpuDrawPass
 		ref uint ormHandle,
 		ref uint heightHandle,
 		ref uint hasHeight,
-		ref float scale)
+		ref float scale,
+		ref uint autoMaterial,
+		ref uint useMinimumSlope,
+		ref float minimumSlopeDegrees)
 	{
 		albedoHandle = RegisterTerrainTexture(layer.Albedo);
 		normalHandle = RegisterTerrainTexture(layer.Normal);
@@ -1751,6 +1766,9 @@ public sealed class GpuDrawPass
 		heightHandle = RegisterTerrainTexture(layer.Height);
 		hasHeight = layer.Height is null ? 0u : 1u;
 		scale = Math.Max(layer.Scale, 0.001f);
+		autoMaterial = layer.AutoMaterial ? 1u : 0u;
+		useMinimumSlope = layer.UseMinimumSlope ? 1u : 0u;
+		minimumSlopeDegrees = Math.Clamp(layer.MinimumSlopeDegrees, 0.0f, 90.0f);
 	}
 
 	private uint RegisterTerrainTexture(Texture? texture)
@@ -1809,7 +1827,10 @@ public sealed class GpuDrawPass
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			0,
-			1.0f);
+			1.0f,
+			0,
+			0,
+			0.0f);
 		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
 		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");

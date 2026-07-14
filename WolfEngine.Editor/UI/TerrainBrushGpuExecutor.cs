@@ -152,7 +152,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 			pipelineState.SettingsWriter.Clear();
 			pipelineState.SettingsWriter.SetUInt("textureWidth", (uint)dispatch.InputTexture.Width);
 			pipelineState.SettingsWriter.SetUInt("textureHeight", (uint)dispatch.InputTexture.Height);
-			pipelineState.SettingsWriter.SetUInt("layerIndex", (uint)Math.Clamp(dispatch.Request.Settings.LayerIndex, 0, 3));
+			pipelineState.SettingsWriter.SetUInt("layerIndex", (uint)Math.Clamp(dispatch.Request.Settings.LayerIndex, 0, 255));
 			pipelineState.SettingsWriter.SetFloat("brushStrength", Math.Clamp(dispatch.Strength, 0.0f, 1.0f));
 			pipelineState.SettingsWriter.SetFloat("brushFalloff", MathF.Max(dispatch.Request.Settings.Falloff, 0.1f));
 			pipelineState.SettingsWriter.SetFloat("brushInvertSign", dispatch.Modifiers.Invert ? -1.0f : 1.0f);

@@ -95,6 +95,11 @@ public sealed class DataAssetEditor
 
 	private bool DrawObjectProperties(object target, Type targetType, bool includeHeader, string? headerLabel = null)
 	{
+		if (target is TerrainLayerSet terrainLayerSet)
+		{
+			return DrawTerrainLayerSetProperties(terrainLayerSet, includeHeader, headerLabel);
+		}
+
 		if (includeHeader && EditorUIUtility.CollapsingHeader(headerLabel ?? targetType.Name, true) == false)
 		{
 			return false;
@@ -131,6 +136,103 @@ public sealed class DataAssetEditor
 		}
 
 		return changed;
+	}
+
+	private bool DrawTerrainLayerSetProperties(TerrainLayerSet layerSet, bool includeHeader, string? headerLabel)
+	{
+		if (includeHeader && EditorUIUtility.CollapsingHeader(headerLabel ?? nameof(TerrainLayerSet), true) == false)
+		{
+			return false;
+		}
+
+		var changed = false;
+		var activeLayerCount = Math.Clamp(layerSet.ActiveLayerCount, 1, 4);
+		if (ImGui.SliderInt("Active Layer Count", ref activeLayerCount, 1, 4))
+		{
+			layerSet.ActiveLayerCount = activeLayerCount;
+			changed = true;
+		}
+
+		var heightBlendSharpness = layerSet.HeightBlendSharpness;
+		if (EditorUIUtility.InputFloat("Height Blend Sharpness", ref heightBlendSharpness))
+		{
+			layerSet.HeightBlendSharpness = heightBlendSharpness;
+			changed = true;
+		}
+
+		layerSet.EnsureLayerCapacity(activeLayerCount);
+		for (var layerIndex = 0; layerIndex < activeLayerCount; layerIndex++)
+		{
+			ImGui.PushID(layerIndex);
+			try
+			{
+				if (EditorUIUtility.CollapsingHeader($"Layer {layerIndex + 1}", true) == false)
+				{
+					continue;
+				}
+
+				var layer = layerSet.GetLayer(layerIndex);
+				var scale = layer.Scale;
+				if (EditorUIUtility.InputFloat("Scale", ref scale))
+				{
+					layer.Scale = scale;
+					changed = true;
+				}
+
+				var autoMaterial = layer.AutoMaterial;
+				if (EditorUIUtility.Checkbox("Auto Material", ref autoMaterial))
+				{
+					layer.AutoMaterial = autoMaterial;
+					changed = true;
+				}
+
+				if (autoMaterial)
+				{
+					var useMinimumSlope = layer.UseMinimumSlope;
+					if (EditorUIUtility.Checkbox("Use Minimum Slope", ref useMinimumSlope))
+					{
+						layer.UseMinimumSlope = useMinimumSlope;
+						changed = true;
+					}
+
+					if (useMinimumSlope)
+					{
+						var minimumSlopeDegrees = Math.Clamp(layer.MinimumSlopeDegrees, 0.0f, 90.0f);
+						if (ImGui.SliderFloat("Minimum Slope", ref minimumSlopeDegrees, 0.0f, 90.0f, "%.0f deg"))
+						{
+							layer.MinimumSlopeDegrees = minimumSlopeDegrees;
+							changed = true;
+						}
+					}
+				}
+
+				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Albedo));
+				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Normal));
+				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Orm));
+				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Height));
+			}
+			finally
+			{
+				ImGui.PopID();
+			}
+		}
+
+		return changed;
+	}
+
+	private bool DrawTerrainLayerAssetRef(TerrainLayerDefinition layer, string propertyName)
+	{
+		var property = typeof(TerrainLayerDefinition).GetProperty(propertyName)
+			?? throw new InvalidOperationException($"Missing terrain layer property '{propertyName}'.");
+		var value = property.GetValue(layer);
+		var result = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(propertyName, property.PropertyType, value));
+		if (result.Handled == false || result.Changed == false)
+		{
+			return false;
+		}
+
+		property.SetValue(layer, result.Value);
+		return true;
 	}
 
 	private bool TryDrawNestedProperty(object target, PropertyInfo property, object? value)

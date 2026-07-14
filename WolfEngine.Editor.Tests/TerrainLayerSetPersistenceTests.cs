@@ -21,12 +21,16 @@ public sealed class TerrainLayerSetPersistenceTests
 			Layer0 = new TerrainLayerDefinition
 			{
 				Scale = 12.0f,
+				AutoMaterial = true,
 				Albedo = new AssetRef<Texture> { NodeId = albedoId },
 				Normal = new AssetRef<Texture> { NodeId = normalId }
 			},
 			Layer1 = new TerrainLayerDefinition
 			{
 				Scale = 24.0f,
+				AutoMaterial = true,
+				UseMinimumSlope = true,
+				MinimumSlopeDegrees = 42.0f,
 				Height = new AssetRef<Texture> { NodeId = heightId }
 			}
 		};
@@ -40,6 +44,10 @@ public sealed class TerrainLayerSetPersistenceTests
 		Assert.That(loaded.HeightBlendSharpness, Is.EqualTo(6.5f).Within(0.0001f));
 		Assert.That(loaded.Layer0.Scale, Is.EqualTo(12.0f).Within(0.0001f));
 		Assert.That(loaded.Layer1.Scale, Is.EqualTo(24.0f).Within(0.0001f));
+		Assert.That(loaded.Layer0.AutoMaterial, Is.True);
+		Assert.That(loaded.Layer1.AutoMaterial, Is.True);
+		Assert.That(loaded.Layer1.UseMinimumSlope, Is.True);
+		Assert.That(loaded.Layer1.MinimumSlopeDegrees, Is.EqualTo(42.0f).Within(0.0001f));
 		Assert.That(loaded.Layer0.Albedo.NodeId, Is.EqualTo(albedoId));
 		Assert.That(loaded.Layer0.Normal.NodeId, Is.EqualTo(normalId));
 		Assert.That(loaded.Layer1.Height.NodeId, Is.EqualTo(heightId));

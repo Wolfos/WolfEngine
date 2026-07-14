@@ -97,6 +97,9 @@ public sealed class TerrainLayerSet : IDataAsset
 public sealed class TerrainLayerDefinition
 {
 	public float Scale { get; set; } = 8.0f;
+	public bool AutoMaterial { get; set; }
+	public bool UseMinimumSlope { get; set; }
+	public float MinimumSlopeDegrees { get; set; } = 45.0f;
 	public AssetRef<Texture> Albedo { get; set; }
 	public AssetRef<Texture> Normal { get; set; }
 	public AssetRef<Texture> Orm { get; set; }

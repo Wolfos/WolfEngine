@@ -155,7 +155,10 @@ public readonly struct GpuTerrainLayerData
 		uint ormHandle,
 		uint heightHandle,
 		uint hasHeight,
-		float scale)
+		float scale,
+		uint autoMaterial,
+		uint useMinimumSlope,
+		float minimumSlopeDegrees)
 	{
 		AlbedoHandle = albedoHandle;
 		NormalHandle = normalHandle;
@@ -163,6 +166,9 @@ public readonly struct GpuTerrainLayerData
 		HeightHandle = heightHandle;
 		HasHeight = hasHeight;
 		Scale = scale;
+		AutoMaterial = autoMaterial;
+		UseMinimumSlope = useMinimumSlope;
+		MinimumSlopeDegrees = minimumSlopeDegrees;
 		_pad0 = 0;
 		_pad1 = 0;
 	}
@@ -173,8 +179,12 @@ public readonly struct GpuTerrainLayerData
 	public readonly uint HeightHandle;
 	public readonly uint HasHeight;
 	public readonly float Scale;
+	public readonly uint AutoMaterial;
+	public readonly uint UseMinimumSlope;
+	public readonly float MinimumSlopeDegrees;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
+	private readonly uint _pad2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -467,7 +477,10 @@ public readonly struct GpuTerrainLayerUpdateData
 		uint ormHandle,
 		uint heightHandle,
 		uint hasHeight,
-		float scale)
+		float scale,
+		uint autoMaterial,
+		uint useMinimumSlope,
+		float minimumSlopeDegrees)
 	{
 		MaterialHandle = materialHandle;
 		LayerStart = layerStart;
@@ -478,6 +491,9 @@ public readonly struct GpuTerrainLayerUpdateData
 		HeightHandle = heightHandle;
 		HasHeight = hasHeight;
 		Scale = scale;
+		AutoMaterial = autoMaterial;
+		UseMinimumSlope = useMinimumSlope;
+		MinimumSlopeDegrees = minimumSlopeDegrees;
 		_pad0 = 0;
 		_pad1 = 0;
 		_pad2 = 0;
@@ -492,7 +508,11 @@ public readonly struct GpuTerrainLayerUpdateData
 	public readonly uint HeightHandle;
 	public readonly uint HasHeight;
 	public readonly float Scale;
+	public readonly uint AutoMaterial;
+	public readonly uint UseMinimumSlope;
+	public readonly float MinimumSlopeDegrees;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
+	private readonly uint _pad3;
 }

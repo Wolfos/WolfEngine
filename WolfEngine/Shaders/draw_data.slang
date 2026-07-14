@@ -74,8 +74,12 @@ struct GpuTerrainLayerData
     uint heightHandle;
     uint hasHeight;
     float scale;
+    uint autoMaterial;
+    uint useMinimumSlope;
+    float minimumSlopeDegrees;
     uint pad0;
     uint pad1;
+    uint pad2;
 };
 
 struct GpuMeshData
@@ -189,9 +193,13 @@ struct GpuTerrainLayerUpdateData
     uint32_t heightHandle;
     uint32_t hasHeight;
     float scale;
+    uint32_t autoMaterial;
+    uint32_t useMinimumSlope;
+    float minimumSlopeDegrees;
     uint32_t pad0;
     uint32_t pad1;
     uint32_t pad2;
+    uint32_t pad3;
 };
 
 struct GpuDecalProjectorData

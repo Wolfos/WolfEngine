@@ -62,5 +62,8 @@ void CSUpdateTerrainLayer(uint3 dispatchThreadId : SV_DispatchThreadID)
     layerData.heightHandle = update.heightHandle;
     layerData.hasHeight = update.hasHeight;
     layerData.scale = update.scale;
+    layerData.autoMaterial = update.autoMaterial;
+    layerData.useMinimumSlope = update.useMinimumSlope;
+    layerData.minimumSlopeDegrees = update.minimumSlopeDegrees;
     g_TerrainLayerTable[layerTableIndex] = layerData;
 }

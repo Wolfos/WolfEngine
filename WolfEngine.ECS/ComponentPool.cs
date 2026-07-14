@@ -66,6 +66,11 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 	{
 		if (TryGetSlot(e, out var slot) == false)
 		{
+			if (e.IsValid == false)
+			{
+				throw new InvalidOperationException("GetComponent used on invalid entity");
+			}
+			
 			throw new InvalidOperationException($"Component {typeof(T).Name} not found for entity {e.Index}:{e.Generation}.");
 		}
 

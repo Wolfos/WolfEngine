@@ -110,7 +110,15 @@ public readonly struct TerrainRayTracingChunkData
 
 public readonly struct TerrainResolvedLayer
 {
-	public TerrainResolvedLayer(Texture? albedo, Texture? normal, Texture? orm, Texture? height, float scale)
+	public TerrainResolvedLayer(
+		Texture? albedo,
+		Texture? normal,
+		Texture? orm,
+		Texture? height,
+		float scale,
+		bool autoMaterial = false,
+		bool useMinimumSlope = false,
+		float minimumSlopeDegrees = 45.0f)
 	{
 		Albedo = albedo;
 		AlbedoResourceRevision = albedo?.ResourceRevision ?? 0;
@@ -121,6 +129,9 @@ public readonly struct TerrainResolvedLayer
 		Height = height;
 		HeightResourceRevision = height?.ResourceRevision ?? 0;
 		Scale = scale;
+		AutoMaterial = autoMaterial;
+		UseMinimumSlope = useMinimumSlope;
+		MinimumSlopeDegrees = minimumSlopeDegrees;
 	}
 
 	public Texture? Albedo { get; }
@@ -132,4 +143,7 @@ public readonly struct TerrainResolvedLayer
 	public Texture? Height { get; }
 	public int HeightResourceRevision { get; }
 	public float Scale { get; }
+	public bool AutoMaterial { get; }
+	public bool UseMinimumSlope { get; }
+	public float MinimumSlopeDegrees { get; }
 }

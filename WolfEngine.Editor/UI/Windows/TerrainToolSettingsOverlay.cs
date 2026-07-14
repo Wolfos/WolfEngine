@@ -54,10 +54,10 @@ public sealed class TerrainToolSettingsOverlay
 			blocksPainting |= ImGui.IsItemActive();
 			if (terrainTool == TerrainTool.Brush)
 			{
-				var displayLayer = Math.Clamp(settings.LayerIndex + 1, 1, 4);
-				if (ImGui.SliderInt("Layer", ref displayLayer, 1, 4))
+				var displayLayer = Math.Clamp(settings.LayerIndex, 0, 4);
+				if (ImGui.SliderInt("Layer (0 = Auto)", ref displayLayer, 0, 4))
 				{
-					settings.LayerIndex = displayLayer - 1;
+					settings.LayerIndex = displayLayer;
 				}
 				blocksPainting |= ImGui.IsItemActive();
 			}

@@ -302,7 +302,7 @@ public sealed class TerrainAuthoringServiceTests
 		service.EndStroke();
 
 		var centerOffset = ((2 * 5) + 2) * 4;
-		var clampedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)1, centerOffset, 4);
+		var clampedSlot = Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)2, centerOffset, 4);
 		Assert.That(clampedSlot, Is.GreaterThanOrEqualTo(centerOffset));
 		Assert.That(terrainAsset.LayerWeightMap.MipLevels[0].Data[clampedSlot], Is.GreaterThan(0));
 		Assert.That(Array.IndexOf(terrainAsset.LayerIndexMap.MipLevels[0].Data, (byte)3, centerOffset, 4), Is.EqualTo(-1));

@@ -555,7 +555,10 @@ public sealed class TerrainRuntimeData
 				layer.Normal.Asset,
 				layer.Orm.Asset,
 				layer.Height.Asset,
-				layer.Scale);
+				layer.Scale,
+				layer.AutoMaterial,
+				layer.UseMinimumSlope,
+				layer.MinimumSlopeDegrees);
 		}
 
 		return layers;

@@ -863,7 +863,10 @@ public sealed class GpuDrawDatabase
 		       left.OrmResourceRevision == right.OrmResourceRevision &&
 		       ReferenceEquals(left.Height, right.Height) &&
 		       left.HeightResourceRevision == right.HeightResourceRevision &&
-		       MathF.Abs(left.Scale - right.Scale) <= 0.0001f;
+		       MathF.Abs(left.Scale - right.Scale) <= 0.0001f &&
+		       left.AutoMaterial == right.AutoMaterial &&
+		       left.UseMinimumSlope == right.UseMinimumSlope &&
+		       MathF.Abs(left.MinimumSlopeDegrees - right.MinimumSlopeDegrees) <= 0.0001f;
 	}
 
 	internal sealed class DrawRecord

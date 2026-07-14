@@ -343,19 +343,57 @@ void AccumulateLayerMapTexel(
     Texture2D<float4> weightMap,
     uint2 texel,
     float bilinearWeight,
+    float3 terrainNormal,
+    GpuTerrainMaterialData terrainData,
     inout uint4 indices,
     inout float4 weights)
 {
     float4 indexSample = indexMap.Load(int3(texel, 0));
     float4 weightSample = saturate(weightMap.Load(int3(texel, 0))) * bilinearWeight;
     uint4 texelIndices = uint4(round(saturate(indexSample) * 255.0f));
-    AddLayerContribution(indices, weights, texelIndices.x, weightSample.x);
-    AddLayerContribution(indices, weights, texelIndices.y, weightSample.y);
-    AddLayerContribution(indices, weights, texelIndices.z, weightSample.z);
-    AddLayerContribution(indices, weights, texelIndices.w, weightSample.w);
+    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.x, terrainNormal, terrainData), weightSample.x);
+    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.y, terrainNormal, terrainData), weightSample.y);
+    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.z, terrainNormal, terrainData), weightSample.z);
+    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.w, terrainNormal, terrainData), weightSample.w);
 }
 
-TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terrainData)
+uint ResolveTerrainLayerIndex(uint storedIndex, float3 terrainNormal, GpuTerrainMaterialData terrainData)
+{
+    uint layerCount = max(terrainData.layerCount, 1u);
+    if (storedIndex != 0u)
+    {
+        return min(storedIndex - 1u, layerCount - 1u);
+    }
+
+    float slopeDegrees = degrees(acos(saturate(normalize(terrainNormal).y)));
+    uint selectedLayer = 0u;
+    float selectedMinimumSlope = -1.0f;
+    [unroll]
+    for (uint layerIndex = 0u; layerIndex < 4u; layerIndex++)
+    {
+        if (layerIndex >= layerCount)
+        {
+            break;
+        }
+
+        GpuTerrainLayerData layer = g_TerrainLayerTable[terrainData.layerStart + layerIndex];
+        if (layer.autoMaterial == 0u)
+        {
+            continue;
+        }
+
+        float minimumSlope = layer.useMinimumSlope != 0u ? clamp(layer.minimumSlopeDegrees, 0.0f, 90.0f) : 0.0f;
+        if (slopeDegrees >= minimumSlope && minimumSlope > selectedMinimumSlope)
+        {
+            selectedLayer = layerIndex;
+            selectedMinimumSlope = minimumSlope;
+        }
+    }
+
+    return selectedLayer;
+}
+
+TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, float3 terrainNormal, GpuTerrainMaterialData terrainData)
 {
     TerrainLayerBlend blend;
     blend.indices = uint4(0, 0, 0, 0);
@@ -363,6 +401,7 @@ TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terr
 
     if (terrainData.hasLayerMaps == 0)
     {
+		blend.indices.x = ResolveTerrainLayerIndex(0u, terrainNormal, terrainData);
         return blend;
     }
 
@@ -382,10 +421,10 @@ TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terr
     blend.indices = uint4(0, 0, 0, 0);
     blend.weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
     Texture2D<float4> weightMap = GetTexture(terrainData.layerWeightMapHandle);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), terrainNormal, terrainData, blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), terrainNormal, terrainData, blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, terrainNormal, terrainData, blend.indices, blend.weights);
+    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, terrainNormal, terrainData, blend.indices, blend.weights);
     return blend;
 }
 
@@ -509,7 +548,7 @@ PSOutput fragmentShader(VSOutput input)
     uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
 
-    TerrainLayerBlend blend = SampleTerrainLayerBlend(input.uv, terrainData);
+    TerrainLayerBlend blend = SampleTerrainLayerBlend(input.uv, input.normal, terrainData);
     blend.weights = MaskInactiveLayers(blend.weights, terrainData.layerCount);
     LayerSample layerSamples[4];
     [unroll]
