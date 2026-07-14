@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using ImGuiNET;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.ECS;
@@ -17,6 +18,7 @@ public class EditorGui
 	public static bool HasSelectedEntity = false;
 	public static Entity? SelectionRangeAnchor;
 	private static bool _componentsWindowFocusRequested;
+	private static bool _defaultDockLayoutApplied;
 
 	private readonly IMenuBar _menuBar;
 	private readonly IEditorModeState _editorModeState;
@@ -303,7 +305,73 @@ public class EditorGui
 		ImGui.Begin("DockSpace", flags);
 		ImGui.PopStyleVar(3);
 
-		ImGui.DockSpace(ImGui.GetID("MainDockSpace"), Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
+		var dockspaceId = ImGui.GetID("MainDockSpace");
+		ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
+		ApplyDefaultDockLayout(dockspaceId);
 		ImGui.End();
+	}
+
+	private static void ApplyDefaultDockLayout(uint dockspaceId)
+	{
+		if (_defaultDockLayoutApplied || HasSavedDockLayout())
+		{
+			_defaultDockLayoutApplied = true;
+			return;
+		}
+
+		// ImGui.NET 1.91 does not expose DockBuilder even though the cimgui library
+		// bundled with the engine does. Build a layout once, then let ImGui persist
+		// all future user changes in its normal ini file.
+		NativeDockBuilder.RemoveNode(dockspaceId);
+		NativeDockBuilder.AddNode(dockspaceId, NativeDockBuilder.DockSpaceFlag);
+		NativeDockBuilder.SetNodeSize(dockspaceId, ImGui.GetWindowSize());
+
+		NativeDockBuilder.SplitNode(dockspaceId, ImGuiDir.Left, 0.18f, out var leftId, out var centerAndRightId);
+		NativeDockBuilder.SplitNode(centerAndRightId, ImGuiDir.Right, 0.20f, out var rightId, out var centerId);
+
+		NativeDockBuilder.DockWindow("Entities", leftId);
+		NativeDockBuilder.DockWindow("Scene", centerId);
+		NativeDockBuilder.DockWindow("Assets", centerId);
+		NativeDockBuilder.DockWindow("Components", rightId);
+		NativeDockBuilder.DockWindow("Asset Editor", rightId);
+		NativeDockBuilder.Finish(dockspaceId);
+		_defaultDockLayoutApplied = true;
+	}
+
+	private static bool HasSavedDockLayout()
+	{
+		var settings = ImGui.SaveIniSettingsToMemory();
+		return settings.Contains("DockNode", StringComparison.Ordinal);
+	}
+
+	private static class NativeDockBuilder
+	{
+		private const string CImGuiLibrary = "cimgui";
+		// DockSpace is an internal Dear ImGui flag (1 << 10) and is intentionally
+		// omitted from ImGui.NET's public ImGuiDockNodeFlags enum.
+		public const int DockSpaceFlag = 1 << 10;
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderRemoveNode")]
+		public static extern void RemoveNode(uint nodeId);
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderAddNode")]
+		public static extern void AddNode(uint nodeId, int flags);
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderSetNodeSize")]
+		public static extern void SetNodeSize(uint nodeId, Vector2 size);
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderSplitNode")]
+		public static extern void SplitNode(
+			uint nodeId,
+			ImGuiDir direction,
+			float sizeRatio,
+			out uint nodeAtDirection,
+			out uint nodeAtOppositeDirection);
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderDockWindow")]
+		public static extern void DockWindow([MarshalAs(UnmanagedType.LPUTF8Str)] string windowName, uint nodeId);
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderFinish")]
+		public static extern void Finish(uint nodeId);
 	}
 }
