@@ -115,8 +115,7 @@ public class EditorGui
 		var textSize = ImGui.CalcTextSize(operation.Title);
 		ImGui.SetCursorPos(new Vector2(Math.Max(24.0f, (viewport.WorkSize.X - textSize.X) * 0.5f), viewport.WorkSize.Y * 0.42f));
 		ImGui.TextUnformatted(operation.Title);
-		ImGui.SetCursorPosX(Math.Max(24.0f, (viewport.WorkSize.X - 360.0f) * 0.5f));
-		ImGui.ProgressBar(-1.0f, new Vector2(360.0f, 0.0f));
+		DrawLoadingSpinner(viewport);
 		ImGui.SetCursorPosX(Math.Max(24.0f, (viewport.WorkSize.X - 360.0f) * 0.5f));
 		ImGui.TextDisabled(operation.Detail);
 		if (operation.Elapsed >= TimeSpan.FromSeconds(2))
@@ -125,6 +124,26 @@ public class EditorGui
 			ImGui.TextDisabled($"{operation.Elapsed.TotalSeconds:F0}s elapsed");
 		}
 		ImGui.End();
+	}
+
+	private static void DrawLoadingSpinner(ImGuiViewportPtr viewport)
+	{
+		const int dotCount = 12;
+		const float radius = 12.0f;
+		const float dotRadius = 2.5f;
+		var center = new Vector2(viewport.WorkPos.X + viewport.WorkSize.X * 0.5f, viewport.WorkPos.Y + viewport.WorkSize.Y * 0.50f);
+		var drawList = ImGui.GetWindowDrawList();
+		var time = (float)ImGui.GetTime();
+		for (var i = 0; i < dotCount; i++)
+		{
+			var phase = (i / (float)dotCount + time * 1.5f) % 1.0f;
+			var alpha = 0.15f + 0.85f * phase;
+			var angle = phase * MathF.Tau;
+			var position = center + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius;
+			drawList.AddCircleFilled(position, dotRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(0.85f, 0.88f, 0.95f, alpha)));
+		}
+
+		ImGui.Dummy(new Vector2(0.0f, 32.0f));
 	}
 
 	public void PrepareForGameplayReload()
