@@ -69,7 +69,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 		var scene = new EditorScene
 		{
 			AssetId = node,
-			Name = string.IsNullOrWhiteSpace(sceneAsset.Name) ? asset.Name : sceneAsset.Name,
+			Name = asset.Name,
 			RelativeAssetPath = asset.RelativeAssetPath,
 			World = new World(WorldTag.Authoring),
 			EntityIcons = new Dictionary<Entity, string>(),
@@ -189,7 +189,6 @@ public class EditorSceneFactory : IEditorSceneFactory
 
 		var manifest = new EditorSceneAssetFile
 		{
-			Name = scene.Name,
 			SpatialCells = serializedSpatialCells
 				.OrderBy(entry => entry.Key.X)
 				.ThenBy(entry => entry.Key.Y)

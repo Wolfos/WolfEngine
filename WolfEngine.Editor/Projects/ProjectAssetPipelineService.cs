@@ -283,9 +283,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		ArgumentException.ThrowIfNullOrWhiteSpace(globalCellPath);
 		ArgumentNullException.ThrowIfNull(spatialCellPaths);
 
-		var sceneName = string.IsNullOrWhiteSpace(sceneAsset.Name)
-			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeScenePath))
-			: sceneAsset.Name;
+		var sceneName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeScenePath));
 		sceneAsset.GlobalCellId = AssignSceneCellAssetId(
 			projectRootPath,
 			globalCellPath,
@@ -973,9 +971,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		AssetSourceMetaFile metadata)
 	{
 		var sceneAsset = EditorSceneAssetFile.Load(absoluteSourcePath);
-		var assetName = string.IsNullOrWhiteSpace(sceneAsset.Name)
-			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
-			: sceneAsset.Name;
+		var assetName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var sceneNodeId = GetOrCreateNodeId(metadata, "main", AssetType.Scene, assetName);
 
 		var nodes = new List<AssetNodeRecord>
@@ -1168,9 +1164,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		AssetSourceMetaFile metadata)
 	{
 		var prefabAsset = PrefabAssetFile.Load(absoluteSourcePath);
-		var assetName = string.IsNullOrWhiteSpace(prefabAsset.Name)
-			? Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath))
-			: prefabAsset.Name;
+		var assetName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(relativeSourcePath));
 
 		return new ImportGraph
 		{

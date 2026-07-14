@@ -12,7 +12,6 @@ public sealed class EditorSceneAssetFile
 	public const string FileExtension = ".scene.json";
 
 	public int Version { get; set; } = CurrentVersion;
-	public string Name { get; set; } = string.Empty;
 	public Guid GlobalCellId { get; set; }
 	public List<SceneSpatialCellFileEntry> SpatialCells { get; set; } = [];
 

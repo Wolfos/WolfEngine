@@ -77,7 +77,7 @@ public sealed class ProjectSettingsWindow
 		{
 			foreach (var scene in scenes.Where(scene => !_config.SceneIds.Contains(scene.Id)))
 			{
-				if (ImGui.Selectable(scene.Name))
+				if (ImGui.Selectable($"{scene.Name}##{scene.Id:D}"))
 					_config.SceneIds.Add(scene.Id);
 			}
 			ImGui.EndCombo();
@@ -85,10 +85,16 @@ public sealed class ProjectSettingsWindow
 
 		ImGui.Spacing();
 		if (ImGui.Button("Save"))
+		{
 			Save();
+		}
+
 		ImGui.SameLine();
 		if (ImGui.Button("Reload"))
+		{
 			Load();
+		}
+
 		ImGui.End();
 	}
 

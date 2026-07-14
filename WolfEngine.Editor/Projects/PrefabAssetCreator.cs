@@ -70,7 +70,6 @@ public sealed class PrefabAssetCreator : IPrefabAssetCreator
 			CollectEntitySubtree(scene.World, rootEntity, entities);
 			var prefabFile = new PrefabAssetFile
 			{
-				Name = resolvedAssetName,
 				RootEntityId = rootEntityId,
 				Entities = []
 			};

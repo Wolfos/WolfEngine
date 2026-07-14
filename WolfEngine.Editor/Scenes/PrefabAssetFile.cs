@@ -12,7 +12,6 @@ public sealed class PrefabAssetFile
 	public const string FileExtension = ".prefab.json";
 
 	public int Version { get; set; } = CurrentVersion;
-	public string Name { get; set; } = string.Empty;
 	public Guid RootEntityId { get; set; }
 	public List<SavedEntity> Entities { get; set; } = [];
 
