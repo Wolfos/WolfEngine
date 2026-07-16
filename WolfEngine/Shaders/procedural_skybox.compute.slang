@@ -68,6 +68,7 @@ static const float kOzoneMul = 1.5f;
 static const float kOzoneLightMul = 5.0f;
 static const float3 kMieTint = float3(0.95f, 0.85f, 0.75f);
 static const float kNightLight = 2e-3f;
+static const float kInvPi = 0.31830988618f;
 
 static const float kObserverHeight = 1800.0f;
 static const float3 kLuminanceWeights = float3(0.2126f, 0.7152f, 0.0722f);
@@ -405,9 +406,27 @@ void ProceduralSkyboxCSMain(uint3 id : SV_DispatchThreadID)
     float planetHit = 1.0f - transmittance.w;
     float groundWeight = saturate(-dir.y);
     float groundBlend = saturate(planetHit * groundWeight * (1.0f + max(skyHorizon.w, 0.0f)));
-    float3 groundTint = lerp(skyHorizon.xyz, ground.xyz, saturate(sqrt(groundWeight)));
-    float3 groundColor = max(transmittance.xyz, float3(0.15f, 0.15f, 0.15f)) * groundTint;
-    color = lerp(color, groundColor, groundBlend);
+    float3 groundTint = max(ground.xyz, float3(0.0f, 0.0f, 0.0f));
+    if (groundBlend > 0.0f)
+    {
+        // The lower hemisphere is a diffuse ground proxy for IBL when DDGI is unavailable.
+        // Derive its radiance from the same sun and sky that illuminate the atmosphere instead
+        // of imposing a minimum brightness, so it naturally darkens at night.
+        float4 zenithTransmittance;
+        float3 zenithSkyRadiance = GetAtmosphere(
+            rayStart,
+            float3(0.0f, 1.0f, 0.0f),
+            kInfinity,
+            lightDir,
+            lightColor,
+            zenithTransmittance);
+        zenithSkyRadiance *= NormalizeTint(skyTop.xyz);
+
+        float3 directGroundIrradiance = lightColor * GetLightTransmittance(lightDir, 1.0f, kOzoneLightMul)
+            * saturate(lightDir.y);
+        float3 groundRadiance = (zenithSkyRadiance + directGroundIrradiance * kInvPi) * groundTint;
+        color = lerp(color, groundRadiance, groundBlend);
+    }
 
     environment[id.xy] = float4(max(color, float3(0.0f, 0.0f, 0.0f)), 1.0f);
 }

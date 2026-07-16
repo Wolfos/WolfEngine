@@ -57,7 +57,10 @@ public sealed class SkyboxPass
 	private float _lastGeneratedSunIntensityScale = 1.0f;
 	private Vector3 _currentSunDirection = Vector3.UnitY;
 	private Vector3 _lastGeneratedSunDirection = Vector3.UnitY;
+	private Config _currentConfig;
+	private Config _lastGeneratedConfig;
 	private bool _hasGeneratedSunDirection;
+	private bool _hasGeneratedConfig;
 	private bool _proceduralLightingValid;
 	private bool _proceduralBrdfValid;
 	private bool _hasGeneratedProceduralContent;
@@ -101,7 +104,7 @@ public sealed class SkyboxPass
 		};
 	}
 
-	public void PrepareFrame(IGfxDevice gfxDevice, Vector3 sunDirection, float sunIntensityScale)
+	public void PrepareFrame(IGfxDevice gfxDevice, Vector3 sunDirection, float sunIntensityScale, Config config)
 	{
 		ArgumentNullException.ThrowIfNull(gfxDevice);
 
@@ -111,12 +114,14 @@ public sealed class SkyboxPass
 			? Vector3.UnitY
 			: Vector3.Normalize(sunDirection);
 		_currentSunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
+		_currentConfig = config;
 
 		var sunChanged = _hasGeneratedSunDirection == false ||
 		                 Vector3.DistanceSquared(_lastGeneratedSunDirection, _currentSunDirection) > SunDirectionEpsilonSquared ||
 		                 MathF.Abs(_lastGeneratedSunIntensityScale - _currentSunIntensityScale) > SunIntensityScaleEpsilon;
+		var skyboxSettingsChanged = _hasGeneratedConfig == false || ConfigsDiffer(_lastGeneratedConfig, _currentConfig);
 
-		ShouldRecordProceduralLightingUpdate = createdResources || _proceduralLightingValid == false || sunChanged;
+		ShouldRecordProceduralLightingUpdate = createdResources || _proceduralLightingValid == false || sunChanged || skyboxSettingsChanged;
 		ShouldRecordBrdfLutUpdate = createdResources || _proceduralBrdfValid == false;
 
 		_proceduralSkybox = new SkyboxResources
@@ -191,6 +196,8 @@ public sealed class SkyboxPass
 		_lastGeneratedSunDirection = _currentSunDirection;
 		_lastGeneratedSunIntensityScale = _currentSunIntensityScale;
 		_hasGeneratedSunDirection = true;
+		_lastGeneratedConfig = _currentConfig;
+		_hasGeneratedConfig = true;
 	}
 
 	public void RecordBrdfLut(RenderGraphContext context)
@@ -366,9 +373,25 @@ public sealed class SkyboxPass
 			_proceduralBrdfValid = false;
 			_hasGeneratedProceduralContent = false;
 			_hasGeneratedSunDirection = false;
+			_hasGeneratedConfig = false;
 			_currentSunIntensityScale = 1.0f;
 			_lastGeneratedSunIntensityScale = 1.0f;
 		}
+	}
+
+	private static bool ConfigsDiffer(in Config left, in Config right)
+	{
+		return left.Intensity != right.Intensity ||
+		       left.SunColor != right.SunColor ||
+		       left.SunSharpness != right.SunSharpness ||
+		       ColorsDiffer(left.TopColor, right.TopColor) ||
+		       ColorsDiffer(left.HorizonColor, right.HorizonColor) ||
+		       ColorsDiffer(left.GroundColor, right.GroundColor);
+	}
+
+	private static bool ColorsDiffer(in ColorRGBA left, in ColorRGBA right)
+	{
+		return left.R != right.R || left.G != right.G || left.B != right.B || left.A != right.A;
 	}
 
 	private DescriptorHandle GetSkyboxSamplerHandle(IGfxDevice gfxDevice)
