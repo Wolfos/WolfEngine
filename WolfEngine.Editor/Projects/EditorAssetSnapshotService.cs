@@ -139,6 +139,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.Color = properties.BaseColor;
 		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
 		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
+		runtimeMaterial.NormalScale = properties.NormalScale;
 		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.OrmTexture = ResolveTexture(properties.Textures.Orm) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();

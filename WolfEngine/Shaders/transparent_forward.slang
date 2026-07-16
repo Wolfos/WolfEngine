@@ -155,7 +155,9 @@ float4 fragmentShader(VSOutput input) : SV_Target0
 
     float4 albedoSample = albedoTex.Sample(sampler, input.uv);
     float4 ormSample = ormTex.Sample(sampler, input.uv);
-    float3 tangentNormal = DecodeNormalMapSample(normalTex.Sample(sampler, input.uv));
+    float3 tangentNormal = ApplyNormalMapScale(
+        DecodeNormalMapSample(normalTex.Sample(sampler, input.uv)),
+        materialData.metallicRoughness.w);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
 

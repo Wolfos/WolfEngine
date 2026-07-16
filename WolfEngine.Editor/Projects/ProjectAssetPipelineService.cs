@@ -488,6 +488,14 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var metadata = LoadOrCreateMetadata(absoluteMetaPath, relativeSourcePath);
 		ApplyIndexedIdentity(projectRootPath, existingSource, metadata);
 
+		if (TryGetImporterById(metadata.ImporterId, out var importer) == false)
+		{
+			throw new InvalidOperationException(
+				$"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.");
+		}
+
+		metadata.ImporterVersion = importer.Version;
+
 		var sourceContentHash = AssetHashing.ComputeFileHash(absoluteSourcePath);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
 
@@ -503,12 +511,6 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			SourceLastWriteTimeUtcTicks = sourceInfo.LastWriteTimeUtc.Ticks,
 			ImportSettingsJson = NormalizeImportSettingsJson(metadata)
 		};
-
-		if (TryGetImporterById(metadata.ImporterId, out var importer) == false)
-		{
-			throw new InvalidOperationException(
-				$"Unsupported importer '{metadata.ImporterId}' for '{relativeSourcePath}'.");
-		}
 
 		var importGraph = importer.Import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath,
 			metadata);
@@ -1266,6 +1268,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			return false;
 		}
 
+		if (TryGetImporterForPath(relativeSourcePath, out var importer) == false
+		    || metadata.ImporterVersion != importer.Version)
+		{
+			return false;
+		}
+
 		var importSettingsJson = NormalizeImportSettingsJson(metadata);
 		var sourceInfo = new FileInfo(absoluteSourcePath);
 		var relativeMetaPath = AssetFileExtensions.GetRelativeMetaPath(relativeSourcePath);
@@ -1570,7 +1578,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportTextureSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				1,
+				3,
 				path =>
 				{
 					var extension = Path.GetExtension(path);
@@ -1646,6 +1654,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		properties.BaseColor = importedMaterial.BaseColor;
 		properties.MetallicFactor = importedMaterial.MetallicFactor;
 		properties.RoughnessFactor = importedMaterial.RoughnessFactor;
+		properties.NormalScale = importedMaterial.NormalScale;
 		properties.EmissiveFactor = importedMaterial.EmissiveFactor;
 		properties.EmissiveIntensity = importedMaterial.EmissiveIntensity;
 		properties.Textures.Albedo = CreateTextureRef(importedMaterial.BaseColorTextureIndex, textureNodeIds);

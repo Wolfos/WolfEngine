@@ -386,7 +386,7 @@ public sealed class GpuDrawPass
 				}
 
 				baseColor = material!.Color;
-				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, alphaCutoff, 0.0f);
+				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, alphaCutoff, material.NormalScale);
 				emissiveFactorIntensity = new Vector4(material.EmissiveFactor, material.EmissiveIntensity);
 			}
 			else if (material is not null && GpuDrawClassification.SupportsUnlitTintMaterialInterpretation(drawKind))

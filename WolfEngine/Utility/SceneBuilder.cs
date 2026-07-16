@@ -75,6 +75,7 @@ public class SceneBuilder : ISceneBuilder
 				importedMaterial.BaseColor,
 				importedMaterial.MetallicFactor,
 				importedMaterial.RoughnessFactor,
+				importedMaterial.NormalScale,
 				importedMaterial.EmissiveFactor,
 				importedMaterial.EmissiveIntensity,
 				albedoTexture,

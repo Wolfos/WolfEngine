@@ -73,6 +73,13 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
                 var metallicFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyMetallicFactor, 1.0f);
                 var roughnessFactor = GetMaterialFloat(assimp, material, Assimp.MatkeyRoughnessFactor, 1.0f);
+                var normalScale = GetMaterialScalar(
+                    assimp,
+                    material,
+                    "$tex.scale",
+                    1.0f,
+                    clampToUnitRange: false,
+                    type: (uint)TextureType.Normals);
                 var emissiveIntensity = GetMaterialScalar(assimp, material, Assimp.MatkeyEmissiveIntensity, 1.0f, clampToUnitRange: false);
 
                 var aMode = GetMaterialString(assimp, material, "$mat.gltf.alphaMode", "OPAQUE");
@@ -157,6 +164,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     baseColor,
                     MetallicFactor: metallicFactor,
                     RoughnessFactor: roughnessFactor,
+                    NormalScale: normalScale,
                     EmissiveFactor: emissiveFactor,
                     EmissiveIntensity: Math.Max(0.0f, emissiveIntensity),
                     BaseColorTextureIndex: baseColorTextureIndex,
@@ -285,11 +293,13 @@ public class ThreeDFileImporter : IThreeDFileImporter
         AssimpMaterial* material,
         string key,
         float defaultValue,
-        bool clampToUnitRange)
+        bool clampToUnitRange,
+        uint type = 0,
+        uint index = 0)
     {
         float value = defaultValue;
         uint max = 1;
-        var result = assimp.GetMaterialFloatArray(material, key, 0, 0, ref value, ref max);
+        var result = assimp.GetMaterialFloatArray(material, key, type, index, ref value, ref max);
         if (result != Return.Success || max == 0)
         {
             return defaultValue;

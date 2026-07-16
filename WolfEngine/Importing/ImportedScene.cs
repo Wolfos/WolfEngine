@@ -26,6 +26,7 @@ public record struct ImportedMaterial(
     ColorRGBA BaseColor,
     float MetallicFactor,
     float RoughnessFactor,
+    float NormalScale,
     Vector3 EmissiveFactor,
     float EmissiveIntensity,
     int? BaseColorTextureIndex,

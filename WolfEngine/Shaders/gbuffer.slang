@@ -151,7 +151,9 @@ PSOutput EvaluateFragment(VSOutput input)
 #ifdef WOLF_ALPHA_CLIP
     if(albedoSample.a < materialData.metallicRoughness.z) discard;
 #endif
-    float3 tangentNormal = DecodeNormalMapSample(normalTex.Sample(sampler, input.uv));
+    float3 tangentNormal = ApplyNormalMapScale(
+        DecodeNormalMapSample(normalTex.Sample(sampler, input.uv)),
+        materialData.metallicRoughness.w);
     float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;

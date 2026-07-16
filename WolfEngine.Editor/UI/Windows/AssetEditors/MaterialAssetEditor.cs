@@ -97,6 +97,12 @@ public sealed class MaterialAssetEditor
 			properties.RoughnessFactor = value;
 			_hasPendingChanges = true;
 		});
+		DrawFloatEditor("Normal Strength", properties.NormalScale, value =>
+		{
+			BeginPendingChange(asset);
+			properties.NormalScale = value;
+			_hasPendingChanges = true;
+		});
 		DrawEmissiveFactorEditor(asset, properties);
 		DrawFloatEditor("Emissive Intensity", properties.EmissiveIntensity, value =>
 		{

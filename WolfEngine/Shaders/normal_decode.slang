@@ -27,3 +27,9 @@ float3 DecodeNormalMapSample(float4 normalSample)
 
     return decoder.Decode(normalSample);
 }
+
+float3 ApplyNormalMapScale(float3 tangentNormal, float normalScale)
+{
+    tangentNormal.xy *= normalScale;
+    return normalize(tangentNormal);
+}

@@ -65,6 +65,7 @@ public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 			color: properties.BaseColor,
 			metallicFactor: properties.MetallicFactor,
 			roughnessFactor: properties.RoughnessFactor,
+			normalScale: properties.NormalScale,
 			emissiveFactor: properties.EmissiveFactor,
 			emissiveIntensity: properties.EmissiveIntensity,
 			albedoTexture: ResolveTexture(properties.Textures.Albedo),
