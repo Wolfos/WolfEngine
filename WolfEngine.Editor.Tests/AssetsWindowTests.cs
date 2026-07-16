@@ -1157,6 +1157,29 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void ReloadAssetDatabase_InvalidatesDataAssetWhenOnlySerializedPropertiesChange()
+	{
+		using var environment = new EditorProjectTestEnvironment();
+		var result = environment.DataAssetCreator.CreateDataAsset(typeof(RenderConfig), "Assets/Data");
+		Assert.That(result.Success, Is.True);
+		Assert.That(environment.ProjectService.TryGetAsset(result.AssetId!.Value, out var asset), Is.True);
+
+		environment.Registry.Register(asset.Id, new RenderConfig());
+		var sourcePath = environment.ProjectService.GetAbsolutePath(asset.RelativeSourcePath);
+		var config = new DataAssetStore().LoadAsset(sourcePath).Asset as RenderConfig;
+		Assert.That(config, Is.Not.Null);
+		config!.Bloom = new BloomConfig { Intensity = 2.0f };
+
+		WaitForTimestampTick();
+		new DataAssetStore().SaveAsset(sourcePath, typeof(RenderConfig), config);
+
+		var refreshResult = environment.ProjectService.ReloadAssetDatabase();
+
+		Assert.That(refreshResult.InvalidatedAssetIds, Does.Contain(asset.Id));
+		Assert.That(environment.Registry.GetInstance(asset.Id, typeof(RenderConfig)), Is.Null);
+	}
+
+	[Test]
 	public void ReopenProject_WithInvalidAddedSource_StillOpensAndKeepsValidAssets()
 	{
 		using var environment = new EditorProjectTestEnvironment();

@@ -22,6 +22,7 @@ public interface IEditorProjectService
 	string? GameplayProjectRelativePath { get; }
 	string? GameplayProjectPath { get; }
 	AssetDatabase CurrentAssetDatabase { get; }
+	long AssetDatabaseRevision => 0;
 
 	bool CreateProject(string parentFolder, string projectName, out string errorMessage);
 	bool OpenProject(string projectRoot, out string errorMessage);
@@ -55,6 +56,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	private readonly IServiceProvider? _serviceProvider;
 	private readonly IShaderProvider? _shaderProvider;
 	private AssetDatabase _currentAssetDatabase = new();
+	private long _assetDatabaseRevision;
 	private string? _projectRootPath;
 	private EditorProjectManifest? _projectManifest;
 
@@ -83,6 +85,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		? GetAbsolutePath(_projectManifest.GameplayProjectRelativePath)
 		: null;
 	public AssetDatabase CurrentAssetDatabase => _currentAssetDatabase;
+	public long AssetDatabaseRevision => _assetDatabaseRevision;
 
 	public bool CreateProject(string parentFolder, string projectName, out string errorMessage)
 	{
@@ -225,10 +228,12 @@ public sealed class EditorProjectService : IEditorProjectService
 		}
 
 		var previousDatabase = CloneCurrentAssetDatabase();
-		var refreshedDatabase = _assetPipelineService.RefreshProjectIncremental(_projectRootPath!);
+		var refresh = _assetPipelineService.RefreshProjectIncrementalWithChanges(_projectRootPath!);
+		var refreshedDatabase = refresh.Database;
 		ApplyDatabase(refreshedDatabase);
 
-		var changedNodeIds = CollectChangedNodeIds(previousDatabase, refreshedDatabase);
+		var changedNodeIds = CollectChangedNodeIds(previousDatabase, refreshedDatabase).ToHashSet();
+		changedNodeIds.UnionWith(refresh.ReimportedNodeIds);
 		var invalidatedNodeIds = _assetPipelineService.ExpandInvalidationClosure(_projectRootPath!, changedNodeIds);
 		_assetInstanceRegistry.InvalidateAssets(invalidatedNodeIds);
 		return new AssetDatabaseRefreshResult(invalidatedNodeIds);
@@ -782,6 +787,7 @@ public sealed class EditorProjectService : IEditorProjectService
 	{
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
+		_assetDatabaseRevision++;
 		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
 	}
 

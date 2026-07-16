@@ -19,6 +19,7 @@ public sealed class MaterialAssetEditor
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private MaterialAsset? _loadedMaterialAsset;
 	private Guid? _loadedMaterialAssetId;
+	private long _loadedAssetDatabaseRevision = -1;
 	private AssetDatabaseEntry? _loadedAssetEntry;
 	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
 	private bool _hasPendingChanges;
@@ -143,16 +144,21 @@ public sealed class MaterialAssetEditor
 
 	private MaterialAsset? EnsureMaterialAssetLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedMaterialAssetId == asset.Id && _loadedMaterialAsset is not null)
+		if (_loadedMaterialAssetId == asset.Id && _loadedMaterialAsset is not null &&
+		    _loadedAssetDatabaseRevision == _projectService.AssetDatabaseRevision)
 		{
+			_loadedAssetEntry = asset;
 			return _loadedMaterialAsset;
 		}
 
 		try
 		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
 			_loadedMaterialAssetId = asset.Id;
 			_loadedAssetEntry = asset;
 			_loadedMaterialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return _loadedMaterialAsset;
 		}
 		catch
@@ -160,6 +166,7 @@ public sealed class MaterialAssetEditor
 			_loadedMaterialAssetId = asset.Id;
 			_loadedAssetEntry = asset;
 			_loadedMaterialAsset = null;
+			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return null;
 		}
 	}

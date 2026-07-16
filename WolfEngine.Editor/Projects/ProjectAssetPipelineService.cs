@@ -16,6 +16,8 @@ public interface IProjectAssetPipelineService
 	AssetDatabase RefreshProject(string projectRootPath);
 	AssetDatabase RebuildProject(string projectRootPath);
 	AssetDatabase RefreshProjectIncremental(string projectRootPath);
+	AssetPipelineRefreshResult RefreshProjectIncrementalWithChanges(string projectRootPath) =>
+		new(RefreshProjectIncremental(projectRootPath), Array.Empty<Guid>());
 	IReadOnlyCollection<Guid> ExpandInvalidationClosure(string projectRootPath, IEnumerable<Guid> changedNodeIds);
 	void RemoveDeletedSource(string projectRootPath, string relativeSourcePath);
 	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
@@ -33,6 +35,10 @@ public interface IProjectAssetPipelineService
 	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
 	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
 }
+
+public readonly record struct AssetPipelineRefreshResult(
+	AssetDatabase Database,
+	IReadOnlyCollection<Guid> ReimportedNodeIds);
 
 public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 {
@@ -107,7 +113,18 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	public AssetDatabase RefreshProjectIncremental(string projectRootPath)
 	{
-		return ImportAllSupportedSources(projectRootPath, loadExistingSources: true);
+		return RefreshProjectIncrementalWithChanges(projectRootPath).Database;
+	}
+
+	public AssetPipelineRefreshResult RefreshProjectIncrementalWithChanges(string projectRootPath)
+	{
+		var reimportedSourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var database = ImportAllSupportedSources(projectRootPath, loadExistingSources: true, reimportedSourcePaths);
+		var reimportedNodeIds = database.Assets
+			.Where(asset => reimportedSourcePaths.Contains(asset.RelativeSourcePath))
+			.Select(asset => asset.Id)
+			.ToArray();
+		return new AssetPipelineRefreshResult(database, reimportedNodeIds);
 	}
 
 	public IReadOnlyCollection<Guid> ExpandInvalidationClosure(string projectRootPath, IEnumerable<Guid> changedNodeIds)
@@ -1336,7 +1353,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private AssetDatabase ImportAllSupportedSources(string projectRootPath, bool loadExistingSources)
+	private AssetDatabase ImportAllSupportedSources(
+		string projectRootPath,
+		bool loadExistingSources,
+		ISet<string>? reimportedSourcePaths = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
 		InitializeProject(projectRootPath);
@@ -1360,13 +1380,16 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				continue;
 			}
 
-			TryImportSourceDuringRefresh(
+			if (TryImportSourceDuringRefresh(
 				projectRootPath,
 				absoluteSourcePath,
 				relativeSourcePath,
 				loadExistingSources && indexedSourcesByPath.TryGetValue(relativeSourcePath, out existingSource)
 					? existingSource
-					: null);
+					: null))
+			{
+				reimportedSourcePaths?.Add(relativeSourcePath);
+			}
 		}
 
 		if (loadExistingSources)

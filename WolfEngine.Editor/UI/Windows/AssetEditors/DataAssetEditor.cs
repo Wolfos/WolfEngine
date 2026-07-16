@@ -19,6 +19,7 @@ public sealed class DataAssetEditor
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private DataAssetLoadResult? _loadedAsset;
 	private Guid? _loadedAssetId;
+	private long _loadedAssetDatabaseRevision = -1;
 	private AssetDatabaseEntry? _loadedAssetEntry;
 	private EditorAssetFileSnapshot? _pendingBeforeSnapshot;
 	private bool _hasPendingChanges;
@@ -72,16 +73,23 @@ public sealed class DataAssetEditor
 
 	private DataAssetLoadResult? EnsureLoaded(AssetDatabaseEntry asset)
 	{
-		if (_loadedAssetId == asset.Id && _loadedAsset is not null)
+		if (_loadedAssetId == asset.Id && _loadedAsset is not null &&
+		    _loadedAssetDatabaseRevision == _projectService.AssetDatabaseRevision)
 		{
+			// Asset IDs survive source renames, but the path used when saving must
+			// follow the latest database entry.
+			_loadedAssetEntry = asset;
 			return _loadedAsset;
 		}
 
 		try
 		{
+			_hasPendingChanges = false;
+			_pendingBeforeSnapshot = null;
 			_loadedAssetId = asset.Id;
 			_loadedAssetEntry = asset;
 			_loadedAsset = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return _loadedAsset;
 		}
 		catch
@@ -89,6 +97,7 @@ public sealed class DataAssetEditor
 			_loadedAssetId = asset.Id;
 			_loadedAssetEntry = asset;
 			_loadedAsset = null;
+			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return null;
 		}
 	}
