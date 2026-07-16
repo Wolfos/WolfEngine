@@ -109,6 +109,16 @@ float GeometrySmith(float NdotV, float NdotL, float alpha)
     return ggxV * ggxL;
 }
 
+float BurleyDiffuse(float NdotV, float NdotL, float LdotH, float roughness)
+{
+    // Disney's Burley diffuse model. Its retro-reflection term keeps rough,
+    // non-metallic surfaces from reading as perfectly Lambertian at grazing angles.
+    float f90 = 0.5f + 2.0f * roughness * LdotH * LdotH;
+    float lightScatter = 1.0f + (f90 - 1.0f) * pow(1.0f - NdotL, 5.0f);
+    float viewScatter = 1.0f + (f90 - 1.0f) * pow(1.0f - NdotV, 5.0f);
+    return lightScatter * viewScatter;
+}
+
 float ShadowCompare(Texture2D<float4> shadowMap, int2 texel, int2 shadowMapSize, float receiverDepth)
 {
     if (texel.x < 0 || texel.y < 0 || texel.x >= shadowMapSize.x || texel.y >= shadowMapSize.y)
@@ -345,6 +355,7 @@ float3 AccumulateLight(
     float NdotV = max(dot(normal, viewDir), 0.0f);
     float NdotH = max(dot(normal, H), 0.0f);
     float VdotH = max(dot(viewDir, H), 0.0f);
+    float LdotH = max(dot(lightDirection, H), 0.0f);
 
     float alpha = max(surface.roughness * surface.roughness, 0.04f);
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), surface.albedo, surface.metallic);
@@ -355,7 +366,7 @@ float3 AccumulateLight(
     float3 specular = (D * G * F) / max(4.0f * NdotV * NdotL, 1e-5f);
     float3 kS = F;
     float3 kD = (1.0f - kS) * (1.0f - surface.metallic);
-    float3 diffuse = kD * surface.albedo / PI;
+    float3 diffuse = kD * surface.albedo / PI * BurleyDiffuse(NdotV, NdotL, LdotH, surface.roughness);
     return (diffuse + specular) * lightColor * attenuation * NdotL * shadowFactor;
 }
 
