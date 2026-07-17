@@ -14,6 +14,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 	private static readonly Vector3 QueryShapeScale = Vector3.One;
 	private readonly PhysicsQueryBroadPhaseLayerFilter _broadPhaseLayerFilter = new();
 	private readonly PhysicsQueryShapeFilter _shapeFilter = new();
+	private readonly object _sensorCallbacksLock = new();
+	private readonly List<IPhysicsSensorCallbackRegistration> _sensorCallbacks = new();
 	private bool _disposed;
 
 	public RigidbodySystem()
@@ -44,7 +46,32 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 			SyncDynamicBodiesBackToWorld(world, state);
 			VehicleSystem.SyncVehicleVisuals(world, state);
+			DispatchSensorCallbacks(world, state);
 		}
+	}
+
+	/// <summary>
+	/// Registers a callback for contacts where an entity with <typeparamref name="TSensor"/> is a sensor
+	/// and the other entity has <typeparamref name="TOther"/>. The callback receives the sensor entity first.
+	/// </summary>
+	/// <remarks>
+	/// Callbacks are dispatched after Jolt has completed its simulation step and dynamic bodies have been
+	/// synchronized back to the world. Dispose the returned subscription to stop receiving contacts.
+	/// </remarks>
+	public IDisposable RegisterSensorCallback<TSensor, TOther>(Action<World, Entity, Entity, PhysicsContactEvent> callback)
+		where TSensor : struct, IEntityComponent
+		where TOther : struct, IEntityComponent
+	{
+		ArgumentNullException.ThrowIfNull(callback);
+
+		var registration = new PhysicsSensorCallbackRegistration<TSensor, TOther>(callback);
+		lock (_sensorCallbacksLock)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			_sensorCallbacks.Add(registration);
+		}
+
+		return new PhysicsSensorCallbackSubscription(this, registration);
 	}
 
 	public void OnWorldRemoved(World world)
@@ -362,8 +389,57 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 
 		_broadPhaseLayerFilter.Dispose();
 		_shapeFilter.Dispose();
+		lock (_sensorCallbacksLock)
+		{
+			_disposed = true;
+			_sensorCallbacks.Clear();
+		}
 		PhysicsWorldRegistry.ReleaseOwner();
-		_disposed = true;
+	}
+
+	private void DispatchSensorCallbacks(World world, PhysicsWorldState state)
+	{
+		IPhysicsSensorCallbackRegistration[] registrations;
+		lock (_sensorCallbacksLock)
+		{
+			if (_sensorCallbacks.Count == 0 || state.ContactEvents.Count == 0)
+			{
+				return;
+			}
+
+			registrations = _sensorCallbacks.ToArray();
+		}
+
+		foreach (var contactEvent in state.ContactEvents)
+		{
+			var entityAIsSensor = state.BodiesByEntity.TryGetValue(contactEvent.EntityA, out var bodyA) && bodyA.Definition.IsSensor;
+			var entityBIsSensor = state.BodiesByEntity.TryGetValue(contactEvent.EntityB, out var bodyB) && bodyB.Definition.IsSensor;
+			if (entityAIsSensor == false && entityBIsSensor == false)
+			{
+				continue;
+			}
+
+			foreach (var registration in registrations)
+			{
+				if (entityAIsSensor)
+				{
+					registration.TryDispatch(world, contactEvent.EntityA, contactEvent.EntityB, contactEvent);
+				}
+
+				if (entityBIsSensor)
+				{
+					registration.TryDispatch(world, contactEvent.EntityB, contactEvent.EntityA, contactEvent);
+				}
+			}
+		}
+	}
+
+	internal void UnregisterSensorCallback(IPhysicsSensorCallbackRegistration registration)
+	{
+		lock (_sensorCallbacksLock)
+		{
+			_sensorCallbacks.Remove(registration);
+		}
 	}
 
 	internal int GetTrackedWorldCount() => PhysicsWorldRegistry.TryGetWorldStateCount(out var count) ? count : 0;

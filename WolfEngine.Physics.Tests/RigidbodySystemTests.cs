@@ -777,6 +777,75 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_SensorCallbackFiltersEntitiesAndUsesSensorFirst()
+	{
+		var world = new World(WorldTag.Game);
+		var booster = world.CreateEntity("Booster", Matrix4x4.Identity);
+		world.AddComponent(booster, BoxCollider.CreateDefault());
+		world.AddComponent(booster, new Boosterpad());
+		var sensorBody = Rigidbody.CreateDefault();
+		sensorBody.BodyType = RigidbodyBodyType.Static;
+		sensorBody.IsSensor = true;
+		world.AddComponent(booster, sensorBody);
+
+		var car = world.CreateEntity("Car", Matrix4x4.Identity);
+		world.AddComponent(car, BoxCollider.CreateDefault());
+		world.AddComponent(car, new Car());
+		var carBody = Rigidbody.CreateDefault();
+		carBody.GravityFactor = 0.0f;
+		world.AddComponent(car, carBody);
+
+		using var system = new RigidbodySystem();
+		var callbacks = new List<PhysicsContactEvent>();
+		using var subscription = system.RegisterSensorCallback<Boosterpad, Car>((_, sensor, other, contactEvent) =>
+		{
+			Assert.That(sensor, Is.EqualTo(booster));
+			Assert.That(other, Is.EqualTo(car));
+			callbacks.Add(contactEvent);
+		});
+
+		for (var i = 0; i < 5 && callbacks.Count == 0; i++)
+		{
+			system.PhysicsUpdate(1.0f / 60.0f, world);
+		}
+
+		Assert.That(callbacks, Is.Not.Empty);
+		Assert.That(callbacks[0].EventType, Is.EqualTo(PhysicsContactEventType.Added));
+		Assert.That(callbacks[0].IsSensor, Is.True);
+	}
+
+	[Test]
+	public void SensorCallbackSubscription_DisposeStopsDispatch()
+	{
+		var world = new World(WorldTag.Game);
+		var booster = world.CreateEntity("Booster", Matrix4x4.Identity);
+		world.AddComponent(booster, BoxCollider.CreateDefault());
+		world.AddComponent(booster, new Boosterpad());
+		var sensorBody = Rigidbody.CreateDefault();
+		sensorBody.BodyType = RigidbodyBodyType.Static;
+		sensorBody.IsSensor = true;
+		world.AddComponent(booster, sensorBody);
+
+		var car = world.CreateEntity("Car", Matrix4x4.Identity);
+		world.AddComponent(car, BoxCollider.CreateDefault());
+		world.AddComponent(car, new Car());
+		var carBody = Rigidbody.CreateDefault();
+		carBody.GravityFactor = 0.0f;
+		world.AddComponent(car, carBody);
+
+		using var system = new RigidbodySystem();
+		var callbackCount = 0;
+		var subscription = system.RegisterSensorCallback<Boosterpad, Car>((_, _, _, _) => callbackCount++);
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(callbackCount, Is.GreaterThan(0));
+
+		subscription.Dispose();
+		var countAfterDispose = callbackCount;
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(callbackCount, Is.EqualTo(countAfterDispose));
+	}
+
+	[Test]
 	public void VehiclePhysicsUpdate_CreatesVehicleRuntimeAndSingleChassisBody()
 	{
 		var world = new World(WorldTag.Game);
@@ -1116,6 +1185,14 @@ public sealed class RigidbodySystemTests
 			vehicleSystem.PhysicsUpdate(1.0f / 60.0f, world);
 			rigidbodySystem.PhysicsUpdate(1.0f / 60.0f, world);
 		}
+	}
+
+	private struct Boosterpad : IEntityComponent
+	{
+	}
+
+	private struct Car : IEntityComponent
+	{
 	}
 
 	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable
