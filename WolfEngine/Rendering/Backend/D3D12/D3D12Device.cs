@@ -1397,7 +1397,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
-		var rootParameters = stackalloc RootParameter[16];
+		var rootParameters = stackalloc RootParameter[17];
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
@@ -1429,6 +1429,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.CbvB3].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[D3D12RootBindings.Graphics.CbvB3].Anonymous.Descriptor = new RootDescriptor(3, 0);
 		rootParameters[D3D12RootBindings.Graphics.CbvB3].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.CbvB4].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB4].Anonymous.Descriptor = new RootDescriptor(4, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB4].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.CbvB14].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[D3D12RootBindings.Graphics.CbvB14].Anonymous.Descriptor = new RootDescriptor(14, 0);
@@ -1468,7 +1472,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 16,
+			NumParameters = 17,
 			PParameters = rootParameters,
 			NumStaticSamplers = 0,
 			PStaticSamplers = null,

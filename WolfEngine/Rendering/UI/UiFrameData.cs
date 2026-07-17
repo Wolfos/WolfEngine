@@ -34,16 +34,29 @@ public sealed class UiFrameData
 	public ushort[] Indices { get; init; } = Array.Empty<ushort>();
 
 	private Action<UiFrameData>? _releaseAction;
+	private Action<ImGuiFontAtlas>? _fontAtlasUploadedAction;
 
 	internal void SetRelease(Action<UiFrameData>? releaseAction)
 	{
 		_releaseAction = releaseAction;
 	}
 
+	internal void SetFontAtlasUploaded(Action<ImGuiFontAtlas>? fontAtlasUploadedAction)
+	{
+		_fontAtlasUploadedAction = fontAtlasUploadedAction;
+	}
+
+	internal void MarkFontAtlasUploaded()
+	{
+		_fontAtlasUploadedAction?.Invoke(FontAtlas);
+		_fontAtlasUploadedAction = null;
+	}
+
 	public void Release()
 	{
 		var releaseAction = _releaseAction;
 		_releaseAction = null;
+		_fontAtlasUploadedAction = null;
 		releaseAction?.Invoke(this);
 	}
 }

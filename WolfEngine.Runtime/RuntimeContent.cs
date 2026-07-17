@@ -122,6 +122,7 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			properties.BaseColor,
 			properties.MetallicFactor,
 			properties.RoughnessFactor,
+			properties.NormalScale,
 			properties.EmissiveFactor,
 			properties.EmissiveIntensity,
 			Resolve(properties.Textures.Albedo),

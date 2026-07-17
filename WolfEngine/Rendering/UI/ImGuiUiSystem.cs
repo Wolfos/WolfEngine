@@ -239,6 +239,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			io.DisplaySize.X * io.DisplayFramebufferScale.X,
 			io.DisplaySize.Y * io.DisplayFramebufferScale.Y);
 
+		var hasFontAtlas = _fontAtlasDirty && _fontAtlas.PixelsRgba.Length > 0;
 		var frame = new UiFrameData
 		{
 			VertexCount = totalVtx,
@@ -251,10 +252,14 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			Vertices = verts,
 			Indices = indices,
 			Commands = commands,
-			HasFontAtlas = _fontAtlasDirty && _fontAtlas.PixelsRgba.Length > 0,
+			HasFontAtlas = hasFontAtlas,
 			FontAtlas = _fontAtlas
 		};
 		frame.SetRelease(ReturnPooledFrame);
+		if (hasFontAtlas)
+		{
+			frame.SetFontAtlasUploaded(MarkFontAtlasUploaded);
+		}
 
 		_pendingFrames.Enqueue(frame);
 		while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out var dropped))
@@ -358,6 +363,17 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		_fontAtlas = BuildFontAtlas(io);
 		io.Fonts.SetTexID(UiTextureIds.FontAtlas);
 		_fontAtlasDirty = true;
+	}
+
+	private void MarkFontAtlasUploaded(ImGuiFontAtlas atlas)
+	{
+		lock (_contextLock)
+		{
+			if (ReferenceEquals(_fontAtlas, atlas))
+			{
+				_fontAtlasDirty = false;
+			}
+		}
 	}
 
 	private static ImFontPtr TryLoadBoldFont(ImGuiIOPtr io, float dpiScale)

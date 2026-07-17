@@ -38,6 +38,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private ComPtr<ID3D12Resource> _indexBuffer;
 	private int _vertexBufferSize;
 	private int _indexBufferSize;
+	private int _fontTextureWidth;
+	private int _fontTextureHeight;
 	private bool _fontUploaded;
 
 	public D3D12ImGuiRenderer(IShaderCompiler shaderCompiler)
@@ -66,9 +68,22 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 		if (frame.HasFontAtlas)
 		{
-			CreateFontTexture(frame.FontAtlas);
-			CreateSrv();
-			_fontUploaded = true;
+			if (NeedsFontUpload(frame.FontAtlas))
+			{
+				DisposeFontResources();
+				CreateFontTexture(frame.FontAtlas);
+				if (_fontTexture.Handle is null)
+				{
+					return;
+				}
+
+				CreateSrv();
+				_fontTextureWidth = frame.FontAtlas.Width;
+				_fontTextureHeight = frame.FontAtlas.Height;
+				_fontUploaded = true;
+			}
+
+			frame.MarkFontAtlasUploaded();
 		}
 	}
 
@@ -298,6 +313,27 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			_indexBufferSize = (int) Math.Max(indexBytes, 65536);
 			CreateUploadBuffer(ref _indexBuffer, (ulong) _indexBufferSize);
 		}
+	}
+
+	private bool NeedsFontUpload(ImGuiFontAtlas atlas)
+	{
+		return _fontUploaded == false ||
+		       _fontTexture.Handle is null ||
+		       _srvHeap.Handle is null ||
+		       _fontTextureWidth != atlas.Width ||
+		       _fontTextureHeight != atlas.Height;
+	}
+
+	private void DisposeFontResources()
+	{
+		if (_srvHeap.Handle is not null) _srvHeap.Dispose();
+		if (_fontTexture.Handle is not null) _fontTexture.Dispose();
+		_srvHeap = default;
+		_srvGpuHandle = default;
+		_fontTexture = default;
+		_fontTextureWidth = 0;
+		_fontTextureHeight = 0;
+		_fontUploaded = false;
 	}
 
 	private void CreateUploadBuffer(ref ComPtr<ID3D12Resource> buffer, ulong size)

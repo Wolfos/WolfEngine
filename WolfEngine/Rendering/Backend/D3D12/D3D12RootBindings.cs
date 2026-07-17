@@ -13,15 +13,16 @@ internal static class D3D12RootBindings
 		internal const uint CbvB0 = 4;
 		internal const uint CbvB2 = 5;
 		internal const uint CbvB3 = 6;
-		internal const uint CbvB14 = 7;
-		internal const uint SrvT10 = 8;
-		internal const uint SrvT11 = 9;
-		internal const uint SrvT12 = 10;
-		internal const uint SrvT13 = 11;
-		internal const uint SrvT14 = 12;
-		internal const uint SrvT15 = 13;
-		internal const uint SrvT16 = 14;
-		internal const uint CbvB16 = 15;
+		internal const uint CbvB4 = 7;
+		internal const uint CbvB14 = 8;
+		internal const uint SrvT10 = 9;
+		internal const uint SrvT11 = 10;
+		internal const uint SrvT12 = 11;
+		internal const uint SrvT13 = 12;
+		internal const uint SrvT14 = 13;
+		internal const uint SrvT15 = 14;
+		internal const uint SrvT16 = 15;
+		internal const uint CbvB16 = 16;
 	}
 
 	internal static class Compute
@@ -50,6 +51,9 @@ internal static class D3D12RootBindings
 				return true;
 			case 3:
 				rootIndex = Graphics.CbvB3;
+				return true;
+			case 4:
+				rootIndex = Graphics.CbvB4;
 				return true;
 			case 14:
 				rootIndex = Graphics.CbvB14;

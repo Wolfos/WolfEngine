@@ -60,6 +60,11 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			CreateFontTexture(device, frame.FontAtlas);
 			_fontUploaded = true;
 		}
+
+		if (frame.HasFontAtlas && _fontUploaded)
+		{
+			frame.MarkFontAtlasUploaded();
+		}
 	}
 
 	public void InvalidateShaderPipeline()
