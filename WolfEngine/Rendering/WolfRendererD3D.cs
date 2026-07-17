@@ -128,6 +128,8 @@ private sealed class MeshResources
 	private readonly bool[] _imguiMouseButtons = new bool[5];
 	private Vector2 _imguiMousePosition;
 	private Vector2 _imguiMouseWheel;
+	private readonly object _frameCaptureSync = new();
+	private TaskCompletionSource<FrameCapture>? _pendingFrameCapture;
 	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
@@ -191,8 +193,126 @@ private sealed class MeshResources
 
 	public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
 	{
-		return Task.FromException<FrameCapture>(new PlatformNotSupportedException(
-			"Automated frame capture is not implemented for the Direct3D renderer."));
+		var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
+		lock (_frameCaptureSync)
+		{
+			if (_pendingFrameCapture is not null)
+			{
+				throw new InvalidOperationException("A frame capture is already pending.");
+			}
+
+			_pendingFrameCapture = completion;
+		}
+
+		if (cancellationToken.CanBeCanceled)
+		{
+			cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+		}
+
+		return completion.Task;
+	}
+
+	public void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor)
+	{
+		TaskCompletionSource<FrameCapture>? completion;
+		lock (_frameCaptureSync)
+		{
+			completion = _pendingFrameCapture;
+			if (completion is null || completion.Task.IsCompleted)
+			{
+				return;
+			}
+
+			_pendingFrameCapture = null;
+		}
+
+		try
+		{
+			var texture = resourceRegistry.GetTexture(sceneColor);
+			if (texture is not ID3D12BackendTexture d3dTexture)
+			{
+				throw new InvalidOperationException("The automation capture color target was not created by the Direct3D12 backend.");
+			}
+
+			var width = texture.Descriptor.Width;
+			var height = texture.Descriptor.Height;
+			if (width <= 0 || height <= 0)
+			{
+				throw new InvalidOperationException("The automation capture color target had an invalid size.");
+			}
+
+			if (texture.Descriptor.Format is not (TextureFormat.Rgba8Unorm or TextureFormat.Bgra8Unorm))
+			{
+				throw new InvalidOperationException($"Frame capture only supports RGBA8 or BGRA8 color targets, but got '{texture.Descriptor.Format}'.");
+			}
+
+			var rowPitch = Align((ulong)width * 4, D3D12.TextureDataPitchAlignment);
+			using var readbackBuffer = _gfxDevice.CreateBuffer(new BufferDescriptor(rowPitch * (ulong)height, BufferUsage.Staging)) as D3D12Buffer
+				?? throw new InvalidOperationException("Direct3D12 did not create a readable frame-capture buffer.");
+			var priorState = resourceRegistry.GetResourceState(sceneColor);
+			var commandList = _gfxDevice.BeginGraphics();
+			try
+			{
+				commandList.Barrier(new ResourceBarrierDescription(texture, priorState, ResourceState.CopySource));
+				if (commandList is not D3D12CommandList d3dCommandList)
+				{
+					throw new InvalidOperationException("Frame capture expected a Direct3D12 command list.");
+				}
+
+				var destination = new TextureCopyLocation
+				{
+					PResource = readbackBuffer.Resource.Handle,
+					Type = TextureCopyType.PlacedFootprint
+				};
+				destination.Anonymous.PlacedFootprint = new PlacedSubresourceFootprint
+				{
+					Offset = 0,
+					Footprint = new SubresourceFootprint
+					{
+						Format = texture.Descriptor.Format == TextureFormat.Bgra8Unorm ? Format.FormatB8G8R8A8Unorm : Format.FormatR8G8B8A8Unorm,
+						Width = (uint)width,
+						Height = (uint)height,
+						Depth = 1,
+						RowPitch = (uint)rowPitch
+					}
+				};
+				var source = new TextureCopyLocation
+				{
+					PResource = d3dTexture.Resource,
+					Type = TextureCopyType.SubresourceIndex
+				};
+				source.Anonymous.SubresourceIndex = 0;
+				d3dCommandList.NativeCommandList->CopyTextureRegion(&destination, 0, 0, 0, &source, (Box*)null);
+				commandList.Barrier(new ResourceBarrierDescription(texture, ResourceState.CopySource, priorState));
+			}
+			finally
+			{
+				_gfxDevice.Submit(commandList);
+				_gfxDevice.WaitForIdle();
+			}
+
+			var raw = new byte[checked((int)(rowPitch * (ulong)height))];
+			readbackBuffer.Read(raw);
+			var rgba8 = new byte[checked(width * height * 4)];
+			for (var y = 0; y < height; y++)
+			{
+				Buffer.BlockCopy(raw, checked((int)((ulong)y * rowPitch)), rgba8, y * width * 4, width * 4);
+			}
+
+			if (texture.Descriptor.Format == TextureFormat.Bgra8Unorm)
+			{
+				for (var index = 0; index < rgba8.Length; index += 4)
+				{
+					(rgba8[index], rgba8[index + 2]) = (rgba8[index + 2], rgba8[index]);
+				}
+			}
+
+			completion.TrySetResult(new FrameCapture(width, height, rgba8));
+		}
+		catch (Exception exception)
+		{
+			completion.TrySetException(exception);
+		}
 	}
 
 	public void RequestShutdown()

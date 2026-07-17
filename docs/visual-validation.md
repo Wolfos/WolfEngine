@@ -17,4 +17,4 @@ dotnet run --project WolfEngine.Editor/WolfEngine.Editor.csproj -- \
 
 For visual work, capture a `before.png` before making a change and an `after.png` after it. Keep both under an ignored artifact directory such as `Artifacts/visual/<task>/`; inspect them before reporting the task complete.
 
-The first implementation supports Metal on macOS. It opens a native window and needs the normal macOS application/display permissions for that environment. Direct3D reports capture as unsupported until its GPU readback path is implemented.
+The editor opens a native window and needs the normal operating-system display permissions for the environment. Frame capture is supported by the Metal and Direct3D12 renderers.
