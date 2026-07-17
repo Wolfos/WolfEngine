@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using WolfEngine.AssetPipeline;
@@ -50,6 +51,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IThreeDFileImporter _threeDFileImporter;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
 	private readonly IReadOnlyList<AssetImporterDescriptor> _importers;
+	private Stopwatch? _libraryBuildStopwatch;
 
 	public ProjectAssetPipelineService(
 		IAssetPipelineIndex index,
@@ -107,8 +109,25 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	public AssetDatabase RebuildProject(string projectRootPath)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
-		RecreateLibrary(projectRootPath);
-		return ImportAllSupportedSources(projectRootPath, loadExistingSources: false);
+		BeginLibraryBuildDiagnostics("Rebuild started.");
+		try
+		{
+			LogLibraryBuildStage("Recreating Library directory.");
+			RecreateLibrary(projectRootPath);
+			LogLibraryBuildStage("Library directory recreated; beginning source import.");
+			var database = ImportAllSupportedSources(projectRootPath, loadExistingSources: false);
+			LogLibraryBuildStage($"Rebuild completed with {database.Assets.Count} asset nodes.");
+			return database;
+		}
+		catch
+		{
+			LogLibraryBuildStage("Rebuild failed.");
+			throw;
+		}
+		finally
+		{
+			_libraryBuildStopwatch = null;
+		}
 	}
 
 	public AssetDatabase RefreshProjectIncremental(string projectRootPath)
@@ -512,6 +531,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			ImportSettingsJson = NormalizeImportSettingsJson(metadata)
 		};
 
+		LogLibraryBuildStage($"Importing '{relativeSourcePath}' with '{importer.Id}' ({sourceInfo.Length / (1024.0 * 1024.0):F1} MiB).");
 		var importGraph = importer.Import(projectRootPath, absoluteSourcePath, relativeSourcePath, relativeMetaPath,
 			metadata);
 		var activeKeys = importGraph.Nodes.Select(node => node.NodeKey).ToHashSet(StringComparer.Ordinal);
@@ -522,6 +542,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_metadataStore.Save(absoluteMetaPath, metadata);
 		_index.UpsertSourceGraph(projectRootPath, sourceRecord, importGraph.Nodes, importGraph.Artifacts,
 			importGraph.Dependencies);
+		LogLibraryBuildStage($"Finished '{relativeSourcePath}' ({importGraph.Nodes.Count} nodes, {importGraph.Artifacts.Count} artifacts).");
 	}
 
 	private void ApplyIndexedIdentity(string projectRootPath, AssetSourceRecord? existingSource,
@@ -568,7 +589,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		var importSettings = metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
 		var semantic = importSettings.TextureSemantic;
+		LogLibraryBuildStage($"Decoding texture '{relativeSourcePath}' ({semantic}).");
 		var importedTexture = _imageLoader.Load(absoluteSourcePath, semantic);
+		LogLibraryBuildStage($"Decoded texture '{relativeSourcePath}' ({importedTexture.Width}x{importedTexture.Height}).");
 		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Texture2D,
 			Path.GetFileNameWithoutExtension(relativeSourcePath));
 		var relativeImportedPath = NormalizeRelativePath(Path.Combine(
@@ -748,7 +771,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeMetaPath,
 		AssetSourceMetaFile metadata)
 	{
+		LogLibraryBuildStage($"Parsing 3D source '{relativeSourcePath}'.");
 		var importedScene = _threeDFileImporter.Import(absoluteSourcePath);
+		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.RootNodes.Count} root nodes).");
 		var nodes = new List<AssetNodeRecord>();
 		var artifacts = new List<AssetArtifactRecord>();
 		var dependencies = new List<AssetDependencyRecord>();
@@ -1373,6 +1398,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var indexedSourcesByPath =
 			existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
 		var sourceFiles = EnumerateSupportedSourceFiles(assetsPath);
+		LogLibraryBuildStage($"Enumerated {sourceFiles.Count} supported source files.");
 
 		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		for (var i = 0; i < sourceFiles.Count; i++)
@@ -1413,6 +1439,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
+		LogLibraryBuildStage("Loading completed asset database.");
 		return LoadDatabase(projectRootPath);
 	}
 
@@ -1741,6 +1768,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeImportedPath,
 		ImportedTexture importedTexture)
 	{
+		LogLibraryBuildStage($"Writing texture artifacts for '{importedTexture.NameOrPath}' ({importedTexture.Width}x{importedTexture.Height}, {importedTexture.Semantic}).");
 		ImportedTextureSerializer.Write(GetAbsolutePath(projectRootPath, relativeImportedPath), importedTexture);
 
 		var d3d12RelativePath = NormalizeRelativePath(Path.Combine(
@@ -1754,7 +1782,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			nodeId.ToString("D"),
 			"runtime-metal.bin"));
 		var artifacts = new List<(string ArtifactKey, string Target, string RelativePath, string AbsolutePath)>(1);
+		LogLibraryBuildStage($"Building runtime texture for '{importedTexture.NameOrPath}'.");
 		var texture = CreateRuntimeTexture(importedTexture);
+		LogLibraryBuildStage($"Built runtime texture for '{importedTexture.NameOrPath}' ({texture.MipCount} mips, {texture.Format}).");
 		var compressionFamily = TextureCompressionCompiler.TryGetBcRuntimeFormat(importedTexture.Semantic, out _)
 			? TextureCompressionFamily.Bc
 			: TextureCompressionFamily.None;
@@ -1796,6 +1826,28 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		return _textureGpuCompressionService.CompileBcTexture(importedTexture);
+	}
+
+	private void BeginLibraryBuildDiagnostics(string message)
+	{
+		_libraryBuildStopwatch = Stopwatch.StartNew();
+		LogLibraryBuildStage(message);
+	}
+
+	private void LogLibraryBuildStage(string message)
+	{
+		var stopwatch = _libraryBuildStopwatch;
+		if (stopwatch is null)
+		{
+			return;
+		}
+
+		using var process = Process.GetCurrentProcess();
+		var managedMiB = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
+		var workingSetMiB = process.WorkingSet64 / (1024.0 * 1024.0);
+		var privateBytesMiB = process.PrivateMemorySize64 / (1024.0 * 1024.0);
+		Console.Error.WriteLine(
+			$"[Library Build +{stopwatch.Elapsed.TotalSeconds:F1}s | managed {managedMiB:F0} MiB | working set {workingSetMiB:F0} MiB | private {privateBytesMiB:F0} MiB] {message}");
 	}
 
 	private sealed class UnsupportedTextureGpuCompressionService : ITextureGpuCompressionService

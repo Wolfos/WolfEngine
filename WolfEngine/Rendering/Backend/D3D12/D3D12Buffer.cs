@@ -6,7 +6,7 @@ using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
-internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffer
+internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	private readonly BufferDescriptor _descriptor;
 	private readonly bool _cpuWritableDirect;
@@ -15,6 +15,7 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 	private readonly Func<int>? _getDeviceRemovedReason;
 	private void* _writeMappedPtr;
 	private void* _readMappedPtr;
+	private bool _disposed;
 
 	public D3D12Buffer(
 		string? name,
@@ -46,7 +47,7 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 
 	public ComPtr<ID3D12Resource> Resource { get; private set; }
 
-	public ComPtr<ID3D12Resource> UploadResource { get; }
+	public ComPtr<ID3D12Resource> UploadResource { get; private set; }
 
 	public ulong SizeInBytes { get; }
 
@@ -79,6 +80,8 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 
 	public void Write<T>(ReadOnlySpan<T> source, ulong elementOffset = 0) where T : unmanaged
 	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+
 		if (source.IsEmpty)
 		{
 			return;
@@ -139,6 +142,8 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 
 	public void Read(Span<byte> destination, ulong sourceOffset = 0)
 	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+
 		if (destination.IsEmpty)
 		{
 			return;
@@ -177,5 +182,47 @@ internal sealed unsafe class D3D12Buffer : IWritableGpuBuffer, IReadableGpuBuffe
 	private static ulong AlignDown(ulong size, ulong alignment)
 	{
 		return size & ~(alignment - 1UL);
+	}
+
+	public void Dispose()
+	{
+		if (_disposed)
+		{
+			return;
+		}
+
+		_disposed = true;
+		if (_writeMappedPtr is not null)
+		{
+			var mappedResource = _cpuWritableDirect ? Resource : UploadResource;
+			if (mappedResource.Handle is not null)
+			{
+				mappedResource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+			}
+
+			_writeMappedPtr = null;
+		}
+
+		if (_readMappedPtr is not null)
+		{
+			if (Resource.Handle is not null)
+			{
+				Resource.Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+			}
+
+			_readMappedPtr = null;
+		}
+
+		if (UploadResource.Handle is not null)
+		{
+			UploadResource.Dispose();
+			UploadResource = default;
+		}
+
+		if (Resource.Handle is not null)
+		{
+			Resource.Dispose();
+			Resource = default;
+		}
 	}
 }
