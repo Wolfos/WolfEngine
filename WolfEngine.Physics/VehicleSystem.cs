@@ -64,6 +64,7 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 			}
 			else
 			{
+				ApplyRuntimeChanges(state, vehicleState, definition.Value);
 				ApplyRuntimeInput(world, vehicleState, fixedDeltaTime);
 			}
 		}
@@ -126,6 +127,21 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 	internal int GetTrackedVehicleCount(World world)
 	{
 		return PhysicsWorldRegistry.TryGetWorldState(world, out var state) ? state.VehiclesByEntity.Count : 0;
+	}
+
+	internal bool TryGetDriverInput(World world, Entity entity, out float throttle, out float brake)
+	{
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) &&
+		    state.VehiclesByEntity.TryGetValue(entity, out var vehicleState))
+		{
+			throttle = vehicleState.Controller.ForwardInput;
+			brake = vehicleState.Controller.BrakeInput;
+			return true;
+		}
+
+		throttle = 0.0f;
+		brake = 0.0f;
+		return false;
 	}
 
 	private static void CreateVehicle(
@@ -219,7 +235,7 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		var input = world.HasComponent<VehicleInput>(vehicleState.Entity)
 			? world.GetComponent<VehicleInput>(vehicleState.Entity)
 			: VehicleInput.CreateDefault();
-		var forwardInput = Math.Clamp(input.Throttle - input.Brake, -1.0f, 1.0f);
+		var forwardInput = Math.Clamp(input.Throttle, 0.0f, 1.0f);
 		var rightInput = Math.Clamp(input.Steer, -1.0f, 1.0f);
 		var brakeInput = Math.Clamp(input.Brake, 0.0f, 1.0f);
 		var handBrakeInput = Math.Clamp(input.HandBrake, 0.0f, 1.0f);
@@ -245,16 +261,9 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		       NearEqual(previous.BoxCenter, current.BoxCenter) == false ||
 		       NearEqual(previous.CenterOfMassOffset, current.CenterOfMassOffset) == false ||
 		       NearEqual(previous.Mass, current.Mass) == false ||
-		       NearEqual(previous.GravityFactor, current.GravityFactor) == false ||
-		       previous.StartActivated != current.StartActivated ||
 		       previous.AllowSleeping != current.AllowSleeping ||
-		       previous.UseManifoldReduction != current.UseManifoldReduction ||
-		       previous.IsSensor != current.IsSensor ||
-		       previous.Layer != current.Layer ||
-		       previous.CollidesWith != current.CollidesWith ||
 		       NearEqual(previous.Up, current.Up) == false ||
 		       NearEqual(previous.Forward, current.Forward) == false ||
-		       NearEqual(previous.MaxPitchRollAngle, current.MaxPitchRollAngle) == false ||
 		       NearEqual(previous.DifferentialLimitedSlipRatio, current.DifferentialLimitedSlipRatio) == false ||
 		       NearEqual(previous.DifferentialRatio, current.DifferentialRatio) == false ||
 		       NearEqual(previous.DifferentialLeftRightSplit, current.DifferentialLeftRightSplit) == false ||
@@ -273,6 +282,55 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		       NearEqual(previous.TransmissionForwardGearRatio, current.TransmissionForwardGearRatio) == false ||
 		       NearEqual(previous.TransmissionReverseGearRatio, current.TransmissionReverseGearRatio) == false ||
 		       WheelsEqual(previous.Wheels, current.Wheels) == false;
+	}
+
+	private static void ApplyRuntimeChanges(
+		PhysicsWorldState state,
+		PhysicsVehicleState vehicleState,
+		PhysicsVehicleDefinition current)
+	{
+		var previous = vehicleState.Definition;
+		var bodyId = vehicleState.BodyId;
+		if (NearEqual(previous.GravityFactor, current.GravityFactor) == false)
+		{
+			state.BodyInterface.SetGravityFactor(bodyId, current.GravityFactor);
+		}
+
+		if (previous.UseManifoldReduction != current.UseManifoldReduction)
+		{
+			state.BodyInterface.SetUseManifoldReduction(bodyId, current.UseManifoldReduction);
+		}
+
+		if (previous.IsSensor != current.IsSensor)
+		{
+			state.BodyInterface.SetIsSensor(bodyId, current.IsSensor);
+		}
+
+		if (previous.Layer != current.Layer)
+		{
+			state.BodyInterface.SetObjectLayer(bodyId, new ObjectLayer(current.Layer));
+			vehicleState.CollisionTester.objectLayer = new ObjectLayer(current.Layer);
+		}
+
+		if (NearEqual(previous.MaxPitchRollAngle, current.MaxPitchRollAngle) == false)
+		{
+			vehicleState.Constraint.SetMaxPitchRollAngle(current.MaxPitchRollAngle);
+		}
+
+		if (previous.StartActivated != current.StartActivated)
+		{
+			if (current.StartActivated)
+			{
+				state.BodyInterface.ActivateBody(bodyId);
+			}
+			else
+			{
+				state.BodyInterface.DeactivateBody(bodyId);
+			}
+		}
+
+		vehicleState.Definition = current;
+		vehicleState.BodyState.Definition = current.ToPhysicsBodyDefinition();
 	}
 
 	private static PhysicsVehicleDefinition? CreateDefinition(World world, Entity entity)
@@ -621,7 +679,7 @@ internal sealed class PhysicsVehicleState
 	public VehicleConstraint Constraint { get; }
 	public VehicleCollisionTester CollisionTester { get; }
 	public WheeledVehicleController Controller { get; }
-	public PhysicsVehicleDefinition Definition { get; }
+	public PhysicsVehicleDefinition Definition { get; set; }
 	public float LogTimer { get; set; }
 
 	public void Dispose(PhysicsWorldState state)
