@@ -8,6 +8,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using ImGuiNET;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Runtime;
 
@@ -80,6 +81,12 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			return cached;
 
 		var entry = _catalog.GetEntry(id);
+		if (entry.Kind == nameof(AssetType.AudioClip) && expectedType == typeof(AudioClip))
+		{
+			var clip = new AudioClip(id);
+			_cache[(id, expectedType)] = clip;
+			return clip;
+		}
 		var bytes = _catalog.Read(id);
 		using var stream = new MemoryStream(bytes, false);
 		var value = entry.Kind switch

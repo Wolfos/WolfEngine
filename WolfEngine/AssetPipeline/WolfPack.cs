@@ -84,8 +84,48 @@ public sealed class WolfPackEntry
 	public List<Guid> Dependencies { get; set; } = [];
 }
 
-public readonly record struct WolfPackSource(Guid Id, string Kind, ReadOnlyMemory<byte> Payload,
-	IReadOnlyCollection<Guid> Dependencies);
+public readonly record struct WolfPackSource
+{
+	public WolfPackSource(Guid id, string kind, ReadOnlyMemory<byte> payload, IReadOnlyCollection<Guid> dependencies)
+	{
+		Id = id;
+		Kind = kind;
+		Payload = payload;
+		Dependencies = dependencies;
+		FilePath = null;
+	}
+
+	private WolfPackSource(Guid id, string kind, string filePath, IReadOnlyCollection<Guid> dependencies)
+	{
+		Id = id;
+		Kind = kind;
+		Payload = default;
+		Dependencies = dependencies;
+		FilePath = Path.GetFullPath(filePath);
+	}
+
+	public Guid Id { get; }
+	public string Kind { get; }
+	public ReadOnlyMemory<byte> Payload { get; }
+	public IReadOnlyCollection<Guid> Dependencies { get; }
+	public string? FilePath { get; }
+	public long Length => FilePath is null ? Payload.Length : new FileInfo(FilePath).Length;
+	public static WolfPackSource FromFile(Guid id, string kind, string filePath, IReadOnlyCollection<Guid> dependencies)
+		=> new(id, kind, filePath, dependencies);
+
+	internal string ComputeSha256()
+	{
+		if (FilePath is null) return Convert.ToHexString(SHA256.HashData(Payload.Span));
+		using var stream = File.OpenRead(FilePath);
+		return Convert.ToHexString(SHA256.HashData(stream));
+	}
+
+	internal void CopyTo(Stream destination)
+	{
+		if (FilePath is null) destination.Write(Payload.Span);
+		else { using var stream = File.OpenRead(FilePath); stream.CopyTo(destination); }
+	}
+}
 
 public static class WolfPackFile
 {
@@ -104,8 +144,8 @@ public static class WolfPackFile
 		{
 			Id = source.Id,
 			Kind = source.Kind,
-			Length = source.Payload.Length,
-			Sha256 = Convert.ToHexString(SHA256.HashData(source.Payload.Span)),
+			Length = source.Length,
+			Sha256 = source.ComputeSha256(),
 			Dependencies = source.Dependencies.Where(id => id != Guid.Empty).Distinct().Order().ToList()
 		}).ToList();
 
@@ -140,7 +180,7 @@ public static class WolfPackFile
 		writer.Write((long)table.Length);
 		writer.Write(table);
 		foreach (var source in ordered)
-			writer.Write(source.Payload.Span);
+			source.CopyTo(stream);
 
 		return entries;
 	}
@@ -168,7 +208,7 @@ public static class WolfPackFile
 
 public sealed class WolfPackCatalog : IDisposable
 {
-	private readonly Dictionary<Guid, (FileStream Stream, WolfPackEntry Entry)> _entries = [];
+	private readonly Dictionary<Guid, (string Path, FileStream Stream, WolfPackEntry Entry)> _entries = [];
 	private readonly List<FileStream> _streams = [];
 
 	public WolfPackCatalog(string manifestPath)
@@ -182,14 +222,15 @@ public sealed class WolfPackCatalog : IDisposable
 		foreach (var pack in Manifest.Packs.OrderBy(pack => pack.Name, StringComparer.Ordinal))
 		{
 			var path = Path.Combine(root, pack.FileName);
-			var actualHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+			using var hashStream = File.OpenRead(path);
+			var actualHash = Convert.ToHexString(SHA256.HashData(hashStream));
 			if (!string.Equals(actualHash, pack.Sha256, StringComparison.Ordinal))
 				throw new InvalidDataException($"Pack '{pack.FileName}' failed SHA-256 validation.");
 			var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 			_streams.Add(stream);
 			var (_, entries) = WolfPackFile.ReadTable(stream);
 			foreach (var entry in entries)
-				if (!_entries.TryAdd(entry.Id, (stream, entry)))
+				if (!_entries.TryAdd(entry.Id, (path, stream, entry)))
 					throw new InvalidDataException($"Duplicate asset ID '{entry.Id}' across packs.");
 		}
 		foreach (var pair in _entries)
@@ -218,9 +259,67 @@ public sealed class WolfPackCatalog : IDisposable
 		return bytes;
 	}
 
+	public Stream OpenRead(Guid id)
+	{
+		if (!_entries.TryGetValue(id, out var value))
+			throw new KeyNotFoundException($"Cooked asset '{id}' was not found.");
+		var stream = new FileStream(value.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+		return new BoundedReadStream(stream, value.Entry.Offset, value.Entry.Length);
+	}
+
 	public void Dispose()
 	{
 		foreach (var stream in _streams)
 			stream.Dispose();
 	}
+}
+
+internal sealed class BoundedReadStream : Stream
+{
+	private readonly Stream _inner;
+	private readonly long _start;
+	private readonly long _length;
+	private long _position;
+
+	public BoundedReadStream(Stream inner, long start, long length)
+	{
+		_inner = inner ?? throw new ArgumentNullException(nameof(inner));
+		if (!inner.CanRead || !inner.CanSeek) throw new ArgumentException("The source stream must be readable and seekable.", nameof(inner));
+		if (start < 0 || length < 0 || start > inner.Length - length) throw new ArgumentOutOfRangeException(nameof(start));
+		_start = start;
+		_length = length;
+		inner.Position = start;
+	}
+
+	public override bool CanRead => true;
+	public override bool CanSeek => true;
+	public override bool CanWrite => false;
+	public override long Length => _length;
+	public override long Position { get => _position; set => Seek(value, SeekOrigin.Begin); }
+	public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+	public override int Read(Span<byte> buffer)
+	{
+		var count = (int)Math.Min(buffer.Length, _length - _position);
+		if (count <= 0) return 0;
+		var read = _inner.Read(buffer[..count]);
+		_position += read;
+		return read;
+	}
+	public override long Seek(long offset, SeekOrigin origin)
+	{
+		var next = origin switch
+		{
+			SeekOrigin.Begin => offset,
+			SeekOrigin.Current => _position + offset,
+			SeekOrigin.End => _length + offset,
+			_ => throw new ArgumentOutOfRangeException(nameof(origin))
+		};
+		if (next < 0 || next > _length) throw new IOException("Seek is outside the cooked entry.");
+		_inner.Position = _start + next;
+		return _position = next;
+	}
+	public override void Flush() { }
+	public override void SetLength(long value) => throw new NotSupportedException();
+	public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+	protected override void Dispose(bool disposing) { if (disposing) _inner.Dispose(); base.Dispose(disposing); }
 }

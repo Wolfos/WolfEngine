@@ -20,4 +20,10 @@
         <Using Include="NUnit.Framework"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
+        <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+        <PackageReference Include="Miniaudio-CS" Version="1.0.4" />
+    </ItemGroup>
+
 </Project>

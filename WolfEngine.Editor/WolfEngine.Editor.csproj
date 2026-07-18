@@ -20,6 +20,7 @@
       <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
       <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
       <ProjectReference Include="..\WolfEngine.Build\WolfEngine.Build.csproj" />
+      <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
     </ItemGroup>
 
     <ItemGroup>

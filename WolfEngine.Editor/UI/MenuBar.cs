@@ -9,6 +9,7 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Platform;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Editor.UI;
 
@@ -32,6 +33,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly FramerateTool _framerateTool;
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
+	private readonly IAudioAssetImporter _audioAssetImporter;
 	private readonly MaterialImporterWindow _materialImporterWindow;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
@@ -58,6 +60,7 @@ public sealed class MenuBar : IMenuBar
 		FramerateTool framerateTool,
 		IEditorProjectService projectService,
 		ITextureAssetImporter textureAssetImporter,
+		IAudioAssetImporter audioAssetImporter,
 		MaterialImporterWindow materialImporterWindow,
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
@@ -76,6 +79,7 @@ public sealed class MenuBar : IMenuBar
 		_framerateTool = framerateTool;
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
+		_audioAssetImporter = audioAssetImporter;
 		_materialImporterWindow = materialImporterWindow ?? throw new ArgumentNullException(nameof(materialImporterWindow));
 		_icons = icons;
 		_windowChromeController = windowChromeController;
@@ -486,6 +490,12 @@ public sealed class MenuBar : IMenuBar
 			{
 				ShowError(result.ErrorMessage ?? "Texture import failed.");
 			}
+		}
+
+		if (ImGui.MenuItem("Import Audio..."))
+		{
+			var result = _audioAssetImporter.ImportAudio();
+			if (!result.Success && !result.Cancelled) ShowError(result.ErrorMessage ?? "Audio import failed.");
 		}
 
 		if (ImGui.MenuItem("Material..."))

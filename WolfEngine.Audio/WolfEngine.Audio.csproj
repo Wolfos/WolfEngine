@@ -4,6 +4,24 @@
         <TargetFramework>netcoreapp10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Miniaudio-CS" Version="1.0.4" />
+    </ItemGroup>
+
+    <!-- The package's RID native assets are copied on publish; copy the active host binary for editor/debug runs too. -->
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+      <None Include="$(NuGetPackageRoot)miniaudio-cs/1.0.4/runtimes/$(NETCoreSdkRuntimeIdentifier)/native/libminiaudio.dylib" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <None Include="$(NuGetPackageRoot)miniaudio-cs/1.0.4/runtimes/win-x64/native/miniaudio.dll" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+    </ItemGroup>
 
 </Project>

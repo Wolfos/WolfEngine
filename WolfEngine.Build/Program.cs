@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Build;
 
@@ -150,13 +151,13 @@ public static class GameBuilder
 			var fileName = group.Key + ".wolfpack";
 			var path = Path.Combine(contentRoot, fileName);
 			WolfPackFile.Write(path, group.Value);
-			var bytes = File.ReadAllBytes(path);
+			using var packHashStream = File.OpenRead(path);
 			manifest.Packs.Add(new WolfManifestPack
 			{
 				Name = group.Key,
 				FileName = fileName,
-				Sha256 = Convert.ToHexString(SHA256.HashData(bytes)),
-				ByteSize = bytes.Length
+				Sha256 = Convert.ToHexString(SHA256.HashData(packHashStream)),
+				ByteSize = new FileInfo(path).Length
 			});
 		}
 		manifest.Roots =
@@ -193,6 +194,11 @@ public static class GameBuilder
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == "RuntimeTexture" && item.Target == target)?.RelativePath
 				?? throw new InvalidOperationException($"Texture '{asset.Id}' has no {target} runtime artifact.");
 		}
+		else if (asset.Type == AssetType.AudioClip)
+		{
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == AudioAssetConstants.RuntimeArtifactKind)?.RelativePath
+			       ?? throw new InvalidOperationException($"Audio clip '{asset.Id}' has no runtime artifact.");
+		}
 		else
 		{
 			path = asset.RelativeAssetPath;
@@ -202,7 +208,7 @@ public static class GameBuilder
 		if (!File.Exists(absolute))
 			throw new FileNotFoundException($"Cooked input for '{asset.Id}' is missing.", absolute);
 
-		return new WolfPackSource(asset.Id, asset.Type.ToString(), File.ReadAllBytes(absolute), dependencies);
+		return WolfPackSource.FromFile(asset.Id, asset.Type.ToString(), absolute, dependencies);
 	}
 
 	private static void AddSerializedDependencies(string root, AssetDatabaseEntry asset, Dictionary<Guid, HashSet<Guid>> graph)
@@ -292,6 +298,7 @@ public static class GameBuilder
 		AssetType.Mesh or AssetType.Model3D => "meshes-models",
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
+		AssetType.AudioClip => "audio",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 

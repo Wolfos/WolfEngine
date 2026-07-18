@@ -17,7 +17,8 @@ public enum AssetType
 	Model3D,
 	Scene,
 	SceneCell,
-	Prefab
+	Prefab,
+	AudioClip
 }
 
 public enum MaterialAssetType

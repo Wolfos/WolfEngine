@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Editor.UI;
 
@@ -272,4 +273,18 @@ public sealed class PrefabEditorAssetHandler : IEditorAssetHandler
 	{
 		_editor.Draw(asset);
 	}
+}
+
+public sealed class AudioEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly AudioAssetEditor _editor;
+	public AudioEditorAssetHandler(AudioAssetEditor editor) => _editor = editor;
+	public AssetType AssetType => AssetType.AudioClip;
+	public string DisplayName => "Audio Clip";
+	public string ThumbnailLabel => "AUD";
+	public string GetSubtitle(AssetDatabaseEntry asset) => asset.TryGetSummary<AudioClipSummary>(out var summary)
+		? $"Audio | {summary.DurationSeconds:F1}s | {summary.StorageMode}"
+		: "Audio";
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+	public void DrawEditor(AssetDatabaseEntry asset) => _editor.Draw(asset);
 }

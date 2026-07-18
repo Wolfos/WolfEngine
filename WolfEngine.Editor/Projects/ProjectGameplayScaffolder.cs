@@ -15,6 +15,7 @@ internal static class ProjectGameplayScaffolder
 	private const string EngineProjectReference = "../../WolfEngine/WolfEngine/WolfEngine.csproj";
 	private const string EcsProjectReference = "../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj";
 	private const string PhysicsProjectReference = "../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj";
+	private const string AudioProjectReference = "../../WolfEngine/WolfEngine.Audio/WolfEngine.Audio.csproj";
 	private const string EngineSolutionReference = @"..\WolfEngine\WolfEngine\WolfEngine.csproj";
 	private const string EcsSolutionReference = @"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj";
 	private const string PhysicsSolutionReference = @"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj";
@@ -75,6 +76,7 @@ internal static class ProjectGameplayScaffolder
 			     <ProjectReference Include="{EngineProjectReference}" />
 			     <ProjectReference Include="{EcsProjectReference}" />
 			     <ProjectReference Include="{PhysicsProjectReference}" />
+			     <ProjectReference Include="{AudioProjectReference}" />
 			   </ItemGroup>
 			 </Project>
 			 """;

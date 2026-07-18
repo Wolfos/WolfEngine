@@ -121,4 +121,35 @@ public sealed class WolfPackTests
 		File.WriteAllBytes(pack, packBytes);
 		Assert.Throws<InvalidDataException>(() => new WolfPackCatalog(manifestPath));
 	}
+
+	[Test]
+	public void Catalog_OpenReadIsBoundedSeekableAndSupportsFileBackedSources()
+	{
+		var id = Guid.NewGuid();
+		var payloadPath = Path.Combine(_root, "large.bin");
+		var payload = Enumerable.Range(0, 8192).Select(index => (byte)(index % 251)).ToArray();
+		File.WriteAllBytes(payloadPath, payload);
+		var packPath = Path.Combine(_root, "streaming.wolfpack");
+		WolfPackFile.Write(packPath, [WolfPackSource.FromFile(id, "AudioClip", payloadPath, [])]);
+		var packBytes = File.ReadAllBytes(packPath);
+		var manifest = new WolfBootstrapManifest
+		{
+			Target = "test",
+			Packs = [new WolfManifestPack
+			{
+				Name = "audio", FileName = "streaming.wolfpack", ByteSize = packBytes.Length,
+				Sha256 = Convert.ToHexString(SHA256.HashData(packBytes))
+			}]
+		};
+		var manifestPath = Path.Combine(_root, "streaming.wolfmanifest");
+		File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest, AssetJson.SerializerOptions));
+		using var catalog = new WolfPackCatalog(manifestPath);
+		using var first = catalog.OpenRead(id);
+		using var second = catalog.OpenRead(id);
+		Assert.That(first.Length, Is.EqualTo(payload.Length));
+		first.Seek(4000, SeekOrigin.Begin);
+		Assert.That(first.ReadByte(), Is.EqualTo(payload[4000]));
+		Assert.That(second.ReadByte(), Is.EqualTo(payload[0]));
+		Assert.Throws<IOException>(() => first.Seek(1, SeekOrigin.End));
+	}
 }

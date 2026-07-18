@@ -7,6 +7,7 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
+using WolfEngine.Audio;
 using ImportImageLoader = WolfEngine.Importing.IImageLoader;
 
 namespace WolfEngine.Editor.Projects;
@@ -632,6 +633,64 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				}
 			],
 			Artifacts = runtimeArtifacts,
+			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportAudioSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var settings = metadata.GetImportSettingsOrDefault(() => new AudioImportSettings());
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.AudioClip,
+			Path.GetFileNameWithoutExtension(relativeSourcePath));
+		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			"audio" + AudioAssetConstants.RuntimeArtifactExtension));
+		var absoluteArtifactPath = GetAbsolutePath(projectRootPath, relativeArtifactPath);
+		Directory.CreateDirectory(Path.GetDirectoryName(absoluteArtifactPath)!);
+		var result = AudioCooker.Cook(absoluteSourcePath, absoluteArtifactPath, settings);
+		var info = new FileInfo(absoluteArtifactPath);
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.AudioClip,
+					NodeKey = "main",
+					Name = Path.GetFileNameWithoutExtension(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(result.Summary)
+				}
+			],
+			Artifacts =
+			[
+				new AssetArtifactRecord
+				{
+					NodeId = nodeId,
+					ArtifactKey = "runtime-audio",
+					Kind = AudioAssetConstants.RuntimeArtifactKind,
+					Target = AudioAssetConstants.RuntimeArtifactTarget,
+					RelativePath = relativeArtifactPath,
+					ContentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath),
+					ByteSize = info.Length,
+					ChunkIndex = 0,
+					ChunkCount = 1,
+					StreamGroup = result.Summary.StorageMode == AudioStorageMode.Streaming ? "audio-streaming" : "audio-sfx",
+					MetadataJson = AssetPipelineSerialization.Serialize(result.Header)
+				}
+			],
 			Dependencies = []
 		};
 	}
@@ -1277,6 +1336,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
 		}
+		else if (string.Equals(metadata.ImporterId, AssetImporterIds.Audio, StringComparison.Ordinal))
+		{
+			metadata.GetImportSettingsOrDefault(() => new AudioImportSettings());
+		}
 
 		return string.IsNullOrWhiteSpace(metadata.ImportSettingsJson) ? "{}" : metadata.ImportSettingsJson;
 	}
@@ -1603,6 +1666,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				},
 				() => AssetPipelineSerialization.Serialize(new TextureImportSettings()),
 				ImportTextureSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.Audio,
+				1,
+				AudioAssetConstants.IsSupportedSource,
+				() => AssetPipelineSerialization.Serialize(new AudioImportSettings()),
+				ImportAudioSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
 				3,

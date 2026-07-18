@@ -12,6 +12,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Runtime;
 
@@ -66,6 +67,10 @@ public static class Program
 		services.AddSingleton<IImGuiInputSink>(nullUi);
 		services.AddSingleton<IImGuiRenderer>(NullImGuiRenderer.Instance);
 		services.AddSingleton(catalog);
+		services.AddSingleton<IAudioContentProvider>(new WolfPackAudioContentProvider(catalog));
+		services.AddSingleton<AudioService>();
+		services.AddSingleton<IAudioService>(provider => provider.GetRequiredService<AudioService>());
+		services.AddSingleton<IAudioRuntime>(provider => provider.GetRequiredService<AudioService>());
 		services.AddSingleton<IMaterialTypeRegistry, MaterialTypeRegistry>();
 		services.AddSingleton<RuntimeAssetStore>();
 		services.AddSingleton<IRuntimeAssetStore>(provider => provider.GetRequiredService<RuntimeAssetStore>());
@@ -143,6 +148,7 @@ public static class Program
 		var pipeline = services.GetRequiredService<IRenderPipeline>();
 		var renderer = services.GetRequiredService<IRenderer>();
 		var frameCoordinator = services.GetRequiredService<EditorFrameCoordinator>();
+		var audio = services.GetRequiredService<IAudioRuntime>();
 		var stopwatch = Stopwatch.StartNew();
 		var last = stopwatch.Elapsed;
 		var accumulator = 0f;
@@ -167,6 +173,7 @@ public static class Program
 
 			gameplay.Update(delta, world);
 			manager.Update(delta, WorldTag.Game, SystemExecutionGroup.All);
+			audio.Update(delta);
 			manager.OnPreRender(delta, WorldTag.Game, SystemExecutionGroup.All);
 			if (TryGetCamera(world, out var camera, out var transform) == false)
 			{

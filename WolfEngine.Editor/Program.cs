@@ -6,6 +6,7 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Editor.UI;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Editor;
 
@@ -68,6 +69,13 @@ public static class Program
 		services.AddSingleton<ITerrainAssetCreator, TerrainAssetCreator>();
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
+		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();
+		services.AddSingleton<EditorAudioContentProvider>();
+		services.AddSingleton<IAudioContentProvider>(provider => provider.GetRequiredService<EditorAudioContentProvider>());
+		services.AddSingleton<AudioService>();
+		services.AddSingleton<IAudioService>(provider => provider.GetRequiredService<AudioService>());
+		services.AddSingleton<IAudioRuntime>(provider => provider.GetRequiredService<AudioService>());
+		services.AddSingleton<IAudioClipRuntimeResolver, AudioClipRuntimeResolver>();
 		services.AddSingleton<IMaterialImporter, MaterialImporter>();
 		services.AddSingleton<IDataAssetRuntimeResolver, DataAssetRuntimeResolver>();
 		services.AddSingleton<ITerrainAssetRuntimeResolver, TerrainAssetRuntimeResolver>();
@@ -76,12 +84,14 @@ public static class Program
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
+		services.AddSingleton<AudioAssetEditor>();
 		services.AddSingleton<TerrainAssetEditor>();
 		services.AddSingleton<MaterialAssetEditor>();
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();

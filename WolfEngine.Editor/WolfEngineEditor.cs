@@ -15,6 +15,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
+using WolfEngine.Audio;
 
 namespace WolfEngine.Editor;
 
@@ -50,6 +51,8 @@ public class WolfEngineEditor
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
 	private readonly IServiceProvider _serviceProvider;
+	private readonly IAudioRuntime _audioRuntime;
+	private EditorPlayState _lastAudioPlayState = EditorPlayState.Edit;
 
 	private EditorScene _currentScene = null!;
 
@@ -84,6 +87,7 @@ public class WolfEngineEditor
 		IEditorOperationService operationService,
 		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
 		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
+		IAudioRuntime audioRuntime,
 		IServiceProvider serviceProvider)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
@@ -107,6 +111,7 @@ public class WolfEngineEditor
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
+		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_serviceProvider = serviceProvider;
 	}
 
@@ -187,6 +192,7 @@ public class WolfEngineEditor
 
 			var deltaTime = _automationController?.DeltaTime ?? (float)(frameStart - last).TotalSeconds;
 			last = frameStart;
+			UpdateAudioLifecycle(deltaTime);
 
 			// A loading operation owns editor state. Keep publishing frames, but do not let
 			// input-driven systems mutate the scene while it is being rebuilt or cooked.
@@ -313,6 +319,19 @@ public class WolfEngineEditor
 		}
 
 		_boundGameplayModule?.Update(deltaTime, runtimeScene.World);
+	}
+
+	private void UpdateAudioLifecycle(float deltaTime)
+	{
+		var state = _playSession.State;
+		if (state != _lastAudioPlayState)
+		{
+			if (state == EditorPlayState.Edit) _audioRuntime.StopAll();
+			else if (state == EditorPlayState.Paused) _audioRuntime.PauseAll();
+			else if (_lastAudioPlayState == EditorPlayState.Paused) _audioRuntime.ResumeAll();
+			_lastAudioPlayState = state;
+		}
+		_audioRuntime.Update(deltaTime);
 	}
 
 	private void UpdatePhysics(float deltaTime)
@@ -573,6 +592,7 @@ public class WolfEngineEditor
 		}
 
 		_boundGameplayModule?.OnUnloading(_boundGameplayWorld);
+		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{
 			_worldManager.RemoveSystem(_registeredGameplaySystems[index]);
