@@ -165,6 +165,11 @@ public sealed class RayTracingSceneResourcesTests
 	[Test]
 	public void RayTracingShadersCompileForD3D12()
 	{
+		if (OperatingSystem.IsWindows() == false)
+		{
+			Assert.Ignore("DirectX shader validation only runs on Windows.");
+		}
+		
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
