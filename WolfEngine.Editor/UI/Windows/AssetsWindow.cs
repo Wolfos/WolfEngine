@@ -1089,6 +1089,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawAssetThumbnail(ImDrawListPtr drawList, Vector2 min, Vector2 max, AssetDatabaseEntry asset)
 	{
+		if (asset.Type == AssetType.Scene && _commandService.LoadingSceneAssetId == asset.Id)
+		{
+			EditorGui.DrawLoadingSpinner(drawList, (min + max) * 0.5f);
+			return;
+		}
+
 		if (asset.Type == AssetType.Texture2D && _assetThumbnailLoader.TryGetTextureThumbnailId(asset, out var textureId))
 		{
 			drawList.AddImage(textureId, min, max);

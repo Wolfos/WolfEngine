@@ -62,7 +62,7 @@ public class EditorGui
 
 	public void Draw(EditorScene scene)
 	{
-		if (_operationService.Current is { IsActive: true } operation)
+		if (_operationService.Current is { IsActive: true } operation && _commandService.LoadingSceneAssetId.HasValue == false)
 		{
 			DrawLoadingScreen(operation);
 			return;
@@ -128,13 +128,18 @@ public class EditorGui
 		ImGui.End();
 	}
 
-	private static void DrawLoadingSpinner(ImGuiViewportPtr viewport)
+	public static void DrawLoadingSpinner(ImGuiViewportPtr viewport)
+	{
+		var center = new Vector2(viewport.WorkPos.X + viewport.WorkSize.X * 0.5f, viewport.WorkPos.Y + viewport.WorkSize.Y * 0.50f);
+		DrawLoadingSpinner(ImGui.GetWindowDrawList(), center);
+		ImGui.Dummy(new Vector2(0.0f, 32.0f));
+	}
+
+	public static void DrawLoadingSpinner(ImDrawListPtr drawList, Vector2 center)
 	{
 		const int dotCount = 12;
 		const float radius = 12.0f;
 		const float dotRadius = 2.5f;
-		var center = new Vector2(viewport.WorkPos.X + viewport.WorkSize.X * 0.5f, viewport.WorkPos.Y + viewport.WorkSize.Y * 0.50f);
-		var drawList = ImGui.GetWindowDrawList();
 		var time = (float)ImGui.GetTime();
 		for (var i = 0; i < dotCount; i++)
 		{
@@ -144,8 +149,6 @@ public class EditorGui
 			var position = center + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius;
 			drawList.AddCircleFilled(position, dotRadius, ImGui.ColorConvertFloat4ToU32(new Vector4(0.85f, 0.88f, 0.95f, alpha)));
 		}
-
-		ImGui.Dummy(new Vector2(0.0f, 32.0f));
 	}
 
 	public void PrepareForGameplayReload()

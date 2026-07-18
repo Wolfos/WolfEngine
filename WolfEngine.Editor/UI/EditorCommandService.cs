@@ -23,6 +23,7 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
 	bool RefreshAssetDatabase();
 	bool ReloadEngineShaders();
@@ -62,6 +63,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IShaderProvider _shaderProvider;
 	private readonly IRenderer _renderer;
+	private readonly IEditorOperationService _operationService;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -81,6 +83,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private IEditorAssetDeletionHandler? _assetDeletionHandler;
 	private PendingSceneReplacement? _pendingSceneReplacement;
 	private bool _openUnsavedScenePopup;
+	private Guid? _loadingSceneAssetId;
 
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
@@ -92,6 +95,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		IEditorUndoRedoService undoRedoService,
 		IShaderProvider shaderProvider,
 		IRenderer renderer,
+		IEditorOperationService operationService,
 		IInputSystem inputSystem)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
@@ -103,6 +107,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
@@ -123,6 +128,7 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	internal bool HasPendingSceneReplacement => _pendingSceneReplacement.HasValue;
 	internal PendingSceneReplacementKind? PendingSceneReplacementType => _pendingSceneReplacement?.Kind;
+	public Guid? LoadingSceneAssetId => _loadingSceneAssetId;
 
 	public void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler)
 	{
@@ -401,6 +407,12 @@ public sealed class EditorCommandService : IEditorCommandService
 	{
 		try
 		{
+			if (replacement.Kind == PendingSceneReplacementKind.LoadScene)
+			{
+				StartSceneLoad(replacement.AssetId);
+				return;
+			}
+
 			_undoRedoService.Clear();
 			switch (replacement.Kind)
 			{
@@ -418,11 +430,52 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 		catch (Exception ex)
 		{
+			_loadingSceneAssetId = null;
 			_notificationService.ReportError(replacement.Kind switch
 			{
 				PendingSceneReplacementKind.NewScene => $"Failed to create scene: {ex.Message}",
 				_ => $"Failed to load scene: {ex.Message}"
 			});
+		}
+	}
+
+	private void StartSceneLoad(Guid assetId)
+	{
+		EditorScene? loadedScene = null;
+		_loadingSceneAssetId = assetId;
+		if (_operationService.TryStart(
+				"Loading scene",
+				progress =>
+				{
+					progress.Report("Loading scene assets...");
+					loadedScene = _sceneWorkspace.LoadSceneAsset(assetId);
+				},
+				completed: () =>
+				{
+					try
+					{
+						_sceneWorkspace.ReplaceCurrentScene(loadedScene ?? throw new InvalidOperationException("Scene loading completed without a scene."));
+						_undoRedoService.Clear();
+						EditorGui.ClearEntitySelection();
+						_interactionState.ClearSceneDirty();
+					}
+					catch (Exception exception)
+					{
+						_notificationService.ReportError($"Failed to load scene: {exception.Message}");
+					}
+					finally
+					{
+						_loadingSceneAssetId = null;
+					}
+				},
+				failed: exception =>
+				{
+					_loadingSceneAssetId = null;
+					_notificationService.ReportError($"Failed to load scene: {exception.Message}");
+				}) == false)
+		{
+			_loadingSceneAssetId = null;
+			_notificationService.ReportError("Another editor operation is already in progress.");
 		}
 	}
 
