@@ -193,7 +193,8 @@ public sealed class EditorCommandServiceTests
 		var resolved = fixture.Service.ResolvePendingSceneReplacement(PendingSceneReplacementDecision.Discard);
 
 		Assert.That(resolved, Is.True);
-		fixture.SceneWorkspace.Received(1).LoadScene(sceneId);
+		fixture.SceneWorkspace.Received(1).LoadSceneAsset(sceneId);
+		fixture.SceneWorkspace.Received(1).ReplaceCurrentScene(Arg.Any<EditorScene>());
 		Assert.That(fixture.Service.HasPendingSceneReplacement, Is.False);
 		Assert.That(fixture.InteractionState.IsSceneDirty, Is.False);
 	}
@@ -425,11 +426,24 @@ public sealed class EditorCommandServiceTests
 	{
 		var sceneWorkspace = Substitute.For<IEditorSceneWorkspace>();
 		sceneWorkspace.CurrentScene.Returns(new EditorScene());
+		sceneWorkspace.LoadSceneAsset(Arg.Any<Guid>()).Returns(_ => new EditorScene());
 
 		var projectService = Substitute.For<IEditorProjectService>();
 		var assetRefreshService = Substitute.For<IEditorAssetRefreshService>();
 		var playSession = Substitute.For<IEditorPlaySession>();
 		playSession.IsActive.Returns(false);
+		var operationService = Substitute.For<IEditorOperationService>();
+		operationService.TryStart(
+			Arg.Any<string>(),
+			Arg.Any<Action<IProgress<string>>>(),
+			Arg.Any<Action?>(),
+			Arg.Any<Action<Exception>?>())
+			.Returns(callInfo =>
+			{
+				callInfo.Arg<Action<IProgress<string>>>()(new Progress<string>());
+				callInfo.Arg<Action?>()?.Invoke();
+				return true;
+			});
 
 		return new CommandFixture(
 			sceneWorkspace,
@@ -438,7 +452,8 @@ public sealed class EditorCommandServiceTests
 			playSession,
 			new EditorInteractionState(),
 			Substitute.For<IEditorNotificationService>(),
-			Substitute.For<IEditorUndoRedoService>());
+			Substitute.For<IEditorUndoRedoService>(),
+			operationService);
 	}
 
 	private sealed record CommandFixture(
@@ -448,7 +463,8 @@ public sealed class EditorCommandServiceTests
 		IEditorPlaySession PlaySession,
 		EditorInteractionState InteractionState,
 		IEditorNotificationService NotificationService,
-		IEditorUndoRedoService UndoRedoService)
+		IEditorUndoRedoService UndoRedoService,
+		IEditorOperationService OperationService)
 	{
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
@@ -460,6 +476,7 @@ public sealed class EditorCommandServiceTests
 			UndoRedoService,
 			Substitute.For<IShaderProvider>(),
 			Substitute.For<IRenderer>(),
+			OperationService,
 			new InputSystem());
 	}
 

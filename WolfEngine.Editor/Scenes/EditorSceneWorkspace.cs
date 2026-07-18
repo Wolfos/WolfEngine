@@ -12,6 +12,7 @@ public interface IEditorSceneWorkspace
 	void ReplaceCurrentScene(EditorScene scene);
 	void ResetToNewScene();
 	void SaveCurrentScene();
+	EditorScene LoadSceneAsset(Guid assetId);
 	void LoadScene(Guid assetId);
 }
 
@@ -67,9 +68,12 @@ public sealed class EditorSceneWorkspace : IEditorSceneWorkspace
 
 	public void LoadScene(Guid assetId)
 	{
-		var loadedScene = _sceneFactory.Load(assetId);
-		SwapWorld(loadedScene.World);
-		_currentScene = loadedScene;
+		ReplaceCurrentScene(LoadSceneAsset(assetId));
+	}
+
+	public EditorScene LoadSceneAsset(Guid assetId)
+	{
+		return _sceneFactory.Load(assetId);
 	}
 
 	private void SwapWorld(World nextWorld)
