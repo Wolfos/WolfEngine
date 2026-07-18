@@ -93,6 +93,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
+	public bool SupportsRayTracing => _device.SupportsRaytracing;
 	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;
 
 	public ulong LastSubmittedId
@@ -345,7 +346,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			VertexBuffer = vertexBuffer.Buffer,
 			VertexBufferOffset = descriptor.VertexBufferOffsetBytes,
 			VertexStride = descriptor.VertexStrideBytes,
-			VertexFormat = MTLAttributeFormat.Float4,
+			VertexFormat = MTLAttributeFormat.Float3,
 			IndexBuffer = indexBuffer.Buffer,
 			IndexBufferOffset = descriptor.IndexBufferOffsetBytes,
 			IndexType = MTLIndexType.UInt32,
@@ -835,31 +836,31 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			default:
 			{
 				var position = attributes.Object(0);
-				position.Format = MTLVertexFormat.Float4;
+				position.Format = MTLVertexFormat.Float3;
 				position.Offset = 0;
 				position.BufferIndex = 0;
 				attributes.SetObject(position, 0);
 
 				var normal = attributes.Object(1);
 				normal.Format = MTLVertexFormat.Float3;
-				normal.Offset = 16;
+				normal.Offset = 12;
 				normal.BufferIndex = 0;
 				attributes.SetObject(normal, 1);
 
 				var uv = attributes.Object(2);
 				uv.Format = MTLVertexFormat.Float2;
-				uv.Offset = 28;
+				uv.Offset = 24;
 				uv.BufferIndex = 0;
 				attributes.SetObject(uv, 2);
 
 				var tangent = attributes.Object(3);
 				tangent.Format = MTLVertexFormat.Float4;
-				tangent.Offset = 36;
+				tangent.Offset = 32;
 				tangent.BufferIndex = 0;
 				attributes.SetObject(tangent, 3);
 
 				var layoutDesc = layouts.Object(0);
-				layoutDesc.Stride = 52;
+				layoutDesc.Stride = 48;
 				layoutDesc.StepFunction = MTLVertexStepFunction.PerVertex;
 				layoutDesc.StepRate = 1;
 				layouts.SetObject(layoutDesc, 0);

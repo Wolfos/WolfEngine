@@ -110,7 +110,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		ArgumentNullException.ThrowIfNull(updates);
 
 		var device = renderer.GetGfxDevice();
-		if (device.BackendKind != GraphicsBackendKind.Metal)
+		if (device.SupportsRayTracing == false)
 		{
 			return;
 		}
@@ -470,14 +470,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 		var vertexCount = (uint)((resolution + 1) * (resolution + 1));
 		var vertexBuffer = device.CreateBuffer(new BufferDescriptor(
-			(ulong)vertexCount * 16UL,
+			(ulong)vertexCount * 12UL,
 			BufferUsage.Vertex | BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		var indexRecord = GetOrCreateTerrainIndexBuffer(device, resolution);
 		var descriptor = new BottomLevelAccelerationStructureDescriptor(
 			vertexBuffer,
 			0,
-			16,
+			12,
 			vertexCount,
 			indexRecord.IndexBuffer,
 			0,

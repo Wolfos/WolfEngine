@@ -127,6 +127,14 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			ResetCommand(commandIndex);
 			return;
 		}
+		var meshIndexBytes = checked((ulong)mesh.IndexCount * sizeof(uint));
+		if (mesh.PackedVertexOffsetBytes >= vertexBuffer.SizeInBytes ||
+		    mesh.PackedIndexOffsetBytes > indexBuffer.SizeInBytes ||
+		    meshIndexBytes > indexBuffer.SizeInBytes - mesh.PackedIndexOffsetBytes)
+		{
+			ResetCommand(commandIndex);
+			return;
+		}
 
 		if (instanceBuffer.Resource.Handle is null ||
 		    materialBuffer.Resource.Handle is null ||
@@ -147,13 +155,16 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		{
 			VertexBufferView = new Silk.NET.Direct3D12.VertexBufferView
 			{
-				BufferLocation = vertexResource->GetGPUVirtualAddress() + mesh.PackedVertexOffsetBytes,
+				// Keep the input-assembler views rooted at the packed streams.  The
+				// indexed draw and GpuMeshData both use the same global start/base
+				// offsets, which avoids mixing two addressing conventions.
+				BufferLocation = vertexResource->GetGPUVirtualAddress(),
 				StrideInBytes = mesh.StrideInBytes,
 				SizeInBytes = (uint)Math.Min(vertexBuffer.SizeInBytes, uint.MaxValue)
 			},
 			IndexBufferView = new Silk.NET.Direct3D12.IndexBufferView
 			{
-				BufferLocation = indexResource->GetGPUVirtualAddress() + mesh.PackedIndexOffsetBytes,
+				BufferLocation = indexResource->GetGPUVirtualAddress(),
 				SizeInBytes = (uint)Math.Min(indexBuffer.SizeInBytes, uint.MaxValue),
 				Format = Format.FormatR32Uint
 			},
@@ -173,7 +184,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			{
 				IndexCountPerInstance = mesh.IndexCount,
 				InstanceCount = 1,
-				StartIndexLocation = 0,
+				StartIndexLocation = checked((uint)(mesh.PackedIndexOffsetBytes / sizeof(uint))),
 				BaseVertexLocation = mesh.PackedBaseVertex,
 				StartInstanceLocation = 0
 			}

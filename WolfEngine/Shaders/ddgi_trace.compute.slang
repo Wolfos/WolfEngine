@@ -8,7 +8,7 @@ import "ddgi_common.slang";
 
 struct DdgiPackedVertex
 {
-    float4 position;
+    float3 position;
     float3 normal;
     float2 uv;
     float4 tangent;
@@ -445,9 +445,9 @@ bool DdgiTryResolveGeometricNormal(
     uint i0 = g_PackedIndices[meshData.startIndex + firstIndex + 0u] + meshData.baseVertex;
     uint i1 = g_PackedIndices[meshData.startIndex + firstIndex + 1u] + meshData.baseVertex;
     uint i2 = g_PackedIndices[meshData.startIndex + firstIndex + 2u] + meshData.baseVertex;
-    float3 worldPosition0 = mul(g_PackedVertices[i0].position, instanceData.world).xyz;
-    float3 worldPosition1 = mul(g_PackedVertices[i1].position, instanceData.world).xyz;
-    float3 worldPosition2 = mul(g_PackedVertices[i2].position, instanceData.world).xyz;
+    float3 worldPosition0 = mul(float4(g_PackedVertices[i0].position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition1 = mul(float4(g_PackedVertices[i1].position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition2 = mul(float4(g_PackedVertices[i2].position, 1.0f), instanceData.world).xyz;
     worldGeometricNormal = normalize(cross(
         worldPosition1 - worldPosition0,
         worldPosition2 - worldPosition0));
@@ -506,17 +506,17 @@ bool DdgiTryResolveHitSurface(
             float b2 = barycentrics.y;
             float b0 = 1.0f - b1 - b2;
             float3 localPosition =
-                v0.position.xyz * b0 +
-                v1.position.xyz * b1 +
-                v2.position.xyz * b2;
+                v0.position * b0 +
+                v1.position * b1 +
+                v2.position * b2;
             float3 localNormal = normalize(v0.normal * b0 + v1.normal * b1 + v2.normal * b2);
             surface.uv =
                 v0.uv * b0 +
                 v1.uv * b1 +
                 v2.uv * b2;
-            float3 worldPosition0 = mul(v0.position, instanceData.world).xyz;
-            float3 worldPosition1 = mul(v1.position, instanceData.world).xyz;
-            float3 worldPosition2 = mul(v2.position, instanceData.world).xyz;
+            float3 worldPosition0 = mul(float4(v0.position, 1.0f), instanceData.world).xyz;
+            float3 worldPosition1 = mul(float4(v1.position, 1.0f), instanceData.world).xyz;
+            float3 worldPosition2 = mul(float4(v2.position, 1.0f), instanceData.world).xyz;
             surface.worldPosition = mul(float4(localPosition, 1.0f), instanceData.world).xyz;
             surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
             surface.worldGeometricNormal = normalize(cross(

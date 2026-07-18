@@ -51,6 +51,11 @@ public interface IGfxCommandList
 
 	void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0);
 
+	/// <summary>
+	/// Binds a compute buffer as a read-only shader resource.
+	/// </summary>
+	void SetComputeReadOnlyBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0);
+
 	void PushConstants<T>(in T data) where T : unmanaged;
 
 	void SetVertexBuffer(in VertexBufferView vertexBuffer);

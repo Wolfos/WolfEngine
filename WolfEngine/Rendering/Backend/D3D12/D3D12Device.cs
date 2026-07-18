@@ -25,6 +25,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	private const ulong ConstantUploadAlignment = 256UL;
 
 	private readonly ComPtr<ID3D12Device> _device;
+	private readonly ComPtr<ID3D12Device5> _rayTracingDevice;
 	private readonly ComPtr<ID3D12CommandQueue> _graphicsQueue;
 	private readonly ComPtr<ID3D12CommandQueue> _computeQueue;
 	private readonly D3D12Api _d3d12 = D3D12Api.GetApi();
@@ -125,6 +126,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		ComPtr<ID3D12CommandQueue> graphicsQueue, ComPtr<ID3D12CommandQueue>? computeQueue = null)
 	{
 		_device = device;
+		var rayTracingDevice = _device.QueryInterface<ID3D12Device5>();
+		if (SupportsInlineRayTracing(_device) == false && rayTracingDevice.Handle is not null)
+		{
+			rayTracingDevice.Dispose();
+			rayTracingDevice = default;
+		}
+		_rayTracingDevice = rayTracingDevice;
 		_graphicsQueue = graphicsQueue;
 		_computeQueue = computeQueue ?? graphicsQueue;
 		_globalTable = new D3D12DescriptorTable(_device);
@@ -134,6 +142,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	}
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.D3D12;
+	public bool SupportsRayTracing => _rayTracingDevice.Handle is not null;
 	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;
 
 	public ulong LastSubmittedId => _submissionFenceValue;
@@ -372,7 +381,9 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		var cpuReadableDirect = isReadbackBuffer;
 		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
 		// Default-heap buffers are created in COMMON even when UAV-capable; the debug layer ignores UAV here.
-		var initialState = ResourceStates.Common;
+		var initialState = descriptor.Usage.HasFlag(BufferUsage.Vertex) || descriptor.Usage.HasFlag(BufferUsage.Index)
+			? ResourceStates.GenericRead
+			: ResourceStates.Common;
 
 		var resourceDesc = new ResourceDesc
 		{
@@ -452,13 +463,136 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(
 		in BottomLevelAccelerationStructureDescriptor descriptor)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (SupportsRayTracing == false)
+		{
+			throw new NotSupportedException("The current Direct3D12 device does not support DXR.");
+		}
+
+		if (descriptor.VertexBuffer is not D3D12Buffer || descriptor.IndexBuffer is not D3D12Buffer)
+		{
+			throw new InvalidOperationException("Acceleration structure geometry buffers were not created by the Direct3D12 backend.");
+		}
+		if (descriptor.VertexStrideBytes < sizeof(float) * 3 ||
+		    descriptor.VertexStrideBytes % (sizeof(float) * 3) != 0)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(descriptor),
+				"DXR ray-tracing geometry requires a float3 position format with a stride that is a multiple of 12 bytes (DXGI_FORMAT_R32G32B32_FLOAT).");
+		}
+
+		var geometry = CreateBottomLevelGeometry(descriptor);
+		var inputs = new BuildRaytracingAccelerationStructureInputs
+		{
+			Type = RaytracingAccelerationStructureType.BottomLevel,
+			Flags = RaytracingAccelerationStructureBuildFlags.PreferFastTrace,
+			NumDescs = 1,
+			DescsLayout = ElementsLayout.Array
+		};
+		RaytracingAccelerationStructurePrebuildInfo prebuildInfo = default;
+		var geometryPtr = &geometry;
+		inputs.Anonymous.PGeometryDescs = geometryPtr;
+		_rayTracingDevice.GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuildInfo);
+		var result = CreateRayTracingResource(prebuildInfo.ResultDataMaxSizeInBytes, ResourceStates.RaytracingAccelerationStructure);
+		var scratch = CreateRayTracingResource(prebuildInfo.ScratchDataSizeInBytes, ResourceStates.UnorderedAccess);
+		return new D3D12BottomLevelAccelerationStructure(descriptor, result, scratch);
 	}
 
 	public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(
 		in TopLevelAccelerationStructureDescriptor descriptor)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (SupportsRayTracing == false)
+		{
+			throw new NotSupportedException("The current Direct3D12 device does not support DXR.");
+		}
+
+		var inputs = new BuildRaytracingAccelerationStructureInputs
+		{
+			Type = RaytracingAccelerationStructureType.TopLevel,
+			Flags = RaytracingAccelerationStructureBuildFlags.PreferFastTrace,
+			NumDescs = descriptor.MaxInstanceCount,
+			DescsLayout = ElementsLayout.Array
+		};
+		RaytracingAccelerationStructurePrebuildInfo prebuildInfo = default;
+		_rayTracingDevice.GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuildInfo);
+		var result = CreateRayTracingResource(prebuildInfo.ResultDataMaxSizeInBytes, ResourceStates.RaytracingAccelerationStructure);
+		var scratch = CreateRayTracingResource(prebuildInfo.ScratchDataSizeInBytes, ResourceStates.UnorderedAccess);
+		var instanceDescriptions = CreateUploadBuffer((ulong)descriptor.MaxInstanceCount * 64UL);
+		return new D3D12TopLevelAccelerationStructure(descriptor, result, scratch, instanceDescriptions);
+	}
+
+	private RaytracingGeometryDesc CreateBottomLevelGeometry(
+		in BottomLevelAccelerationStructureDescriptor descriptor)
+	{
+		var vertexBuffer = (D3D12Buffer)descriptor.VertexBuffer;
+		var indexBuffer = (D3D12Buffer)descriptor.IndexBuffer;
+		var geometry = new RaytracingGeometryDesc
+		{
+			Type = RaytracingGeometryType.Triangles,
+			Flags = RaytracingGeometryFlags.Opaque
+		};
+		geometry.Anonymous.Triangles = new RaytracingGeometryTrianglesDesc
+		{
+			// DXR requires a stride compatible with the 12-byte float3 position format.
+			VertexFormat = Format.FormatR32G32B32Float,
+			VertexCount = descriptor.VertexCount,
+			VertexBuffer = new GpuVirtualAddressAndStride
+			{
+				StartAddress = vertexBuffer.Resource.Handle->GetGPUVirtualAddress() + descriptor.VertexBufferOffsetBytes,
+				StrideInBytes = descriptor.VertexStrideBytes
+			},
+			IndexFormat = Format.FormatR32Uint,
+			IndexCount = descriptor.IndexCount,
+			IndexBuffer = indexBuffer.Resource.Handle->GetGPUVirtualAddress() + descriptor.IndexBufferOffsetBytes
+		};
+
+		return geometry;
+	}
+
+	private ComPtr<ID3D12Resource> CreateRayTracingResource(ulong sizeInBytes, ResourceStates initialState)
+	{
+		var desc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = Align(Math.Max(sizeInBytes, 256UL), 256UL),
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.AllowUnorderedAccess
+		};
+		var heap = new HeapProperties(HeapType.Default);
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(&heap, HeapFlags.None, in desc, initialState, null, out ComPtr<ID3D12Resource> resource));
+		return resource;
+	}
+
+	private ComPtr<ID3D12Resource> CreateUploadBuffer(ulong sizeInBytes)
+	{
+		var desc = new ResourceDesc
+		{
+			Dimension = ResourceDimension.Buffer,
+			Alignment = 0,
+			Width = Align(Math.Max(sizeInBytes, 256UL), 256UL),
+			Height = 1,
+			DepthOrArraySize = 1,
+			MipLevels = 1,
+			Format = Format.FormatUnknown,
+			SampleDesc = new SampleDesc(1, 0),
+			Layout = TextureLayout.LayoutRowMajor,
+			Flags = ResourceFlags.None
+		};
+		var heap = new HeapProperties(HeapType.Upload);
+		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(&heap, HeapFlags.None, in desc, ResourceStates.GenericRead, null, out ComPtr<ID3D12Resource> resource));
+		return resource;
+	}
+
+	private static bool SupportsInlineRayTracing(ComPtr<ID3D12Device> device)
+	{
+		FeatureDataD3D12Options5 options = default;
+		var result = device.CheckFeatureSupport(Silk.NET.Direct3D12.Feature.D3D12Options5, &options, (uint)sizeof(FeatureDataD3D12Options5));
+		return result >= 0 && options.RaytracingTier >= RaytracingTier.Tier11;
 	}
 
 	public IGfxPipeline GetOrCreatePipeline(PipelineKey key, in ShaderBytecodeSet shaders)
@@ -874,6 +1008,11 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			CloseHandle(_submissionFenceEvent);
 			_submissionFenceEvent = nint.Zero;
 		}
+
+		if (_rayTracingDevice.Handle is not null)
+		{
+			_rayTracingDevice.Dispose();
+		}
 	}
 
 	private static ResourceStates ToBackendState(ResourceState state)
@@ -1229,7 +1368,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			inputElements[0] = default;
 			inputElements[0].SemanticName = positionPtr;
 			inputElements[0].SemanticIndex = 0;
-			inputElements[0].Format = Format.FormatR32G32B32A32Float;
+			inputElements[0].Format = Format.FormatR32G32B32Float;
 			inputElements[0].InputSlot = 0;
 			inputElements[0].AlignedByteOffset = 0;
 			inputElements[0].InputSlotClass = InputClassification.PerVertexData;
@@ -1240,7 +1379,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			inputElements[1].SemanticIndex = 0;
 			inputElements[1].Format = Format.FormatR32G32B32Float;
 			inputElements[1].InputSlot = 0;
-			inputElements[1].AlignedByteOffset = 16;
+			inputElements[1].AlignedByteOffset = 12;
 			inputElements[1].InputSlotClass = InputClassification.PerVertexData;
 			inputElements[1].InstanceDataStepRate = 0;
 
@@ -1249,7 +1388,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			inputElements[2].SemanticIndex = 0;
 			inputElements[2].Format = Format.FormatR32G32Float;
 			inputElements[2].InputSlot = 0;
-			inputElements[2].AlignedByteOffset = 32;
+			inputElements[2].AlignedByteOffset = 24;
 			inputElements[2].InputSlotClass = InputClassification.PerVertexData;
 			inputElements[2].InstanceDataStepRate = 0;
 
@@ -1258,7 +1397,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			inputElements[3].SemanticIndex = 0;
 			inputElements[3].Format = Format.FormatR32G32B32A32Float;
 			inputElements[3].InputSlot = 0;
-			inputElements[3].AlignedByteOffset = 40;
+			inputElements[3].AlignedByteOffset = 32;
 			inputElements[3].InputSlotClass = InputClassification.PerVertexData;
 			inputElements[3].InstanceDataStepRate = 0;
 
@@ -1548,7 +1687,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
-		var rootParameters = stackalloc RootParameter[21];
+		var rootParameters = stackalloc RootParameter[32];
 
 		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
@@ -1597,9 +1736,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			rootParameters[rootIndex].ShaderVisibility = ShaderVisibility.All;
 		}
 
+		for (var t = 2u; t <= 12u; t++)
+		{
+			var rootIndex = D3D12RootBindings.Compute.SrvT2 + t - 2;
+			rootParameters[rootIndex].ParameterType = RootParameterType.TypeSrv;
+			rootParameters[rootIndex].Anonymous.Descriptor = new RootDescriptor(t, 0);
+			rootParameters[rootIndex].ShaderVisibility = ShaderVisibility.All;
+		}
+
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 21,
+			NumParameters = 32,
 			PParameters = rootParameters,
 			NumStaticSamplers = 0,
 			PStaticSamplers = null,

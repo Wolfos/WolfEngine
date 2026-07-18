@@ -10,6 +10,11 @@ public interface IGfxDevice
 	GraphicsBackendKind BackendKind { get; }
 
 	/// <summary>
+	/// Indicates whether the device can execute the engine's inline ray-query workloads.
+	/// </summary>
+	bool SupportsRayTracing { get; }
+
+	/// <summary>
 	/// Begins recording a graphics command list targeting the primary graphics queue.
 	/// </summary>
 	IGfxCommandList BeginGraphics();

@@ -37,6 +37,7 @@ internal static class D3D12RootBindings
 		internal const uint CbvB11 = 7;
 		internal const uint CbvB12 = 8;
 		internal const uint UavU0 = 9;
+		internal const uint SrvT2 = 21;
 	}
 
 	internal static bool TryGetGraphicsCbvIndex(uint register, out uint rootIndex)
@@ -134,6 +135,18 @@ internal static class D3D12RootBindings
 		if (register <= 11)
 		{
 			rootIndex = Compute.UavU0 + register;
+			return true;
+		}
+
+		rootIndex = 0;
+		return false;
+	}
+
+	internal static bool TryGetComputeSrvIndex(uint register, out uint rootIndex)
+	{
+		if (register is >= 2 and <= 12)
+		{
+			rootIndex = Compute.SrvT2 + register - 2;
 			return true;
 		}
 

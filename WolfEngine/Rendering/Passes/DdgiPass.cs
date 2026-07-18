@@ -83,9 +83,9 @@ public sealed class DdgiPass
 		ArgumentNullException.ThrowIfNull(rayTracingSceneResources);
 		ArgumentNullException.ThrowIfNull(sceneData);
 
-		if (device.BackendKind != GraphicsBackendKind.Metal)
+		if (device.SupportsRayTracing == false)
 		{
-			throw new NotImplementedException("Ray traced DDGI is currently implemented for Metal only.");
+			throw new NotSupportedException("Ray traced DDGI requires a ray-tracing capable graphics device.");
 		}
 
 		if (rayTracingSceneResources.TopLevelAccelerationStructure is null)
@@ -241,8 +241,8 @@ public sealed class DdgiPass
 		commandList.BindPipeline(config.ClassifyPipeline);
 		WriteBindlessConstants(_classifyBindlessWriter, commandList, config);
 		WriteSettingsConstants(_classifySettingsWriter, commandList, config);
-		commandList.SetComputeBuffer(2, config.DrawCommandBuffer);
-		commandList.SetComputeBuffer(3, config.InstanceBuffer);
+		commandList.SetComputeReadOnlyBuffer(2, config.DrawCommandBuffer);
+		commandList.SetComputeReadOnlyBuffer(3, config.InstanceBuffer);
 		var threadGroupSize = _classifyThreadGroupSize ?? throw new InvalidOperationException("DDGI classify threadgroup size was not initialized.");
 		var classifyProbeCount = config.CompactProbeClassificationDispatch
 			? DdgiUtilities.GetActiveProbeCount(
@@ -285,15 +285,15 @@ public sealed class DdgiPass
 	{
 		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
 		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
-		commandList.SetComputeBuffer(4, config.InstanceBuffer);
-		commandList.SetComputeBuffer(5, config.MaterialBuffer);
-		commandList.SetComputeBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
-		commandList.SetComputeBuffer(7, config.MeshBuffer);
-		commandList.SetComputeBuffer(8, config.PackedMeshVertexBuffer);
-		commandList.SetComputeBuffer(9, config.PackedMeshIndexBuffer);
-		commandList.SetComputeBuffer(10, config.TerrainMaterialBuffer);
-		commandList.SetComputeBuffer(11, config.TerrainLayerBuffer);
-		commandList.SetComputeBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
+		commandList.SetComputeReadOnlyBuffer(4, config.InstanceBuffer);
+		commandList.SetComputeReadOnlyBuffer(5, config.MaterialBuffer);
+		commandList.SetComputeReadOnlyBuffer(6, config.InstanceIndexToInstanceHandleBuffer);
+		commandList.SetComputeReadOnlyBuffer(7, config.MeshBuffer);
+		commandList.SetComputeReadOnlyBuffer(8, config.PackedMeshVertexBuffer);
+		commandList.SetComputeReadOnlyBuffer(9, config.PackedMeshIndexBuffer);
+		commandList.SetComputeReadOnlyBuffer(10, config.TerrainMaterialBuffer);
+		commandList.SetComputeReadOnlyBuffer(11, config.TerrainLayerBuffer);
+		commandList.SetComputeReadOnlyBuffer(12, config.InstanceIndexToTerrainRayTracingResolutionBuffer);
 	}
 
 	public void RecordIrradianceIntegrate(RenderGraphContext context, in DdgiPassConfig config)
@@ -561,9 +561,9 @@ public sealed class DdgiPass
 			return;
 		}
 
-		if (device.BackendKind != GraphicsBackendKind.Metal)
+		if (device.SupportsRayTracing == false)
 		{
-			throw new NotImplementedException("Ray traced DDGI is currently implemented for Metal only.");
+			throw new NotSupportedException("Ray traced DDGI requires a ray-tracing capable graphics device.");
 		}
 
 		var classify = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiClassify, "DdgiProbeClassifyCS", device.BackendKind);

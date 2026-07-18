@@ -488,6 +488,27 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.SetComputeRootUnorderedAccessView(rootIndex, gpuAddress);
 	}
 
+	public void SetComputeReadOnlyBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
+	{
+		if (buffer is not D3D12Buffer d3d12Buffer || d3d12Buffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Buffer was not created by the Direct3D12 backend.");
+		}
+
+		if (D3D12RootBindings.TryGetComputeSrvIndex(slot, out var rootIndex) == false)
+		{
+			throw new NotSupportedException($"Compute read-only buffer slot {slot} is not supported by the D3D12 root signature.");
+		}
+
+		if (d3d12Buffer.IsCpuWritableDirect == false)
+		{
+			TransitionBufferIfNeeded(d3d12Buffer, ResourceStates.NonPixelShaderResource);
+		}
+
+		var gpuAddress = d3d12Buffer.Resource.Handle->GetGPUVirtualAddress() + offset;
+		CommandList.SetComputeRootShaderResourceView(rootIndex, gpuAddress);
+	}
+
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
 	{
 		var d3d12Topology = topology switch
@@ -752,24 +773,167 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (accelerationStructure is not D3D12BottomLevelAccelerationStructure blas)
+		{
+			throw new InvalidOperationException("Bottom-level acceleration structure was not created by the Direct3D12 backend.");
+		}
+
+		var descriptor = blas.Descriptor;
+		var vertexBuffer = descriptor.VertexBuffer as D3D12Buffer
+			?? throw new InvalidOperationException("BLAS vertex buffer was not created by the Direct3D12 backend.");
+		var indexBuffer = descriptor.IndexBuffer as D3D12Buffer
+			?? throw new InvalidOperationException("BLAS index buffer was not created by the Direct3D12 backend.");
+		TransitionBufferIfNeeded(vertexBuffer, ResourceStates.NonPixelShaderResource);
+		TransitionBufferIfNeeded(indexBuffer, ResourceStates.NonPixelShaderResource);
+
+		var geometry = CreateBottomLevelGeometry(descriptor, vertexBuffer, indexBuffer);
+		var geometryPtr = &geometry;
+		var inputs = new BuildRaytracingAccelerationStructureInputs
+		{
+			Type = RaytracingAccelerationStructureType.BottomLevel,
+			Flags = RaytracingAccelerationStructureBuildFlags.PreferFastTrace,
+			NumDescs = 1,
+			DescsLayout = ElementsLayout.Array
+		};
+		inputs.Anonymous.PGeometryDescs = geometryPtr;
+		BuildAccelerationStructure(inputs, blas.Result.Handle, blas.Scratch.Handle);
 	}
 
 	public void BuildTopLevelAccelerationStructure(
 		IGfxTopLevelAccelerationStructure accelerationStructure,
 		ReadOnlySpan<RayTracingInstanceDescription> instances)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (accelerationStructure is not D3D12TopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Direct3D12 backend.");
+		}
+
+		var count = Math.Min((uint)instances.Length, tlas.Descriptor.MaxInstanceCount);
+		WriteInstanceDescriptions(tlas, instances, count);
+		for (var i = 0; i < instances.Length; i++)
+		{
+			if (instances[i].AccelerationStructure is D3D12BottomLevelAccelerationStructure blas)
+			{
+				InsertUavBarrier(blas.Result.Handle);
+			}
+		}
+
+		var inputs = new BuildRaytracingAccelerationStructureInputs
+		{
+			Type = RaytracingAccelerationStructureType.TopLevel,
+			Flags = RaytracingAccelerationStructureBuildFlags.PreferFastTrace,
+			NumDescs = count,
+			DescsLayout = ElementsLayout.Array
+		};
+		inputs.Anonymous.InstanceDescs = tlas.InstanceDescriptions.Handle->GetGPUVirtualAddress();
+		BuildAccelerationStructure(inputs, tlas.Result.Handle, tlas.Scratch.Handle);
 	}
 
 	public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (accelerationStructure is not D3D12TopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Direct3D12 backend.");
+		}
+
+		InsertUavBarrier(tlas.Result.Handle);
 	}
 
 	public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure)
 	{
-		throw new NotImplementedException("DXR support is not implemented yet.");
+		if (accelerationStructure is not D3D12TopLevelAccelerationStructure tlas)
+		{
+			throw new InvalidOperationException("Top-level acceleration structure was not created by the Direct3D12 backend.");
+		}
+		if (D3D12RootBindings.TryGetComputeSrvIndex(slot, out var rootIndex) == false)
+		{
+			throw new NotSupportedException($"Compute acceleration structure slot {slot} is not supported by the D3D12 root signature.");
+		}
+
+		CommandList.SetComputeRootShaderResourceView(rootIndex, tlas.Result.Handle->GetGPUVirtualAddress());
+	}
+
+	private void BuildAccelerationStructure(
+		in BuildRaytracingAccelerationStructureInputs inputs,
+		ID3D12Resource* result,
+		ID3D12Resource* scratch)
+	{
+		var commandList4 = CommandList.QueryInterface<ID3D12GraphicsCommandList4>();
+		try
+		{
+			var build = new BuildRaytracingAccelerationStructureDesc
+			{
+				DestAccelerationStructureData = result->GetGPUVirtualAddress(),
+				ScratchAccelerationStructureData = scratch->GetGPUVirtualAddress(),
+				Inputs = inputs
+			};
+			commandList4.BuildRaytracingAccelerationStructure(in build, 0, null);
+			InsertUavBarrier(result);
+		}
+		finally
+		{
+			commandList4.Dispose();
+		}
+	}
+
+	private static RaytracingGeometryDesc CreateBottomLevelGeometry(
+		in BottomLevelAccelerationStructureDescriptor descriptor,
+		D3D12Buffer vertexBuffer,
+		D3D12Buffer indexBuffer)
+	{
+		var geometry = new RaytracingGeometryDesc
+		{
+			Type = RaytracingGeometryType.Triangles,
+			Flags = RaytracingGeometryFlags.Opaque
+		};
+		geometry.Anonymous.Triangles = new RaytracingGeometryTrianglesDesc
+		{
+			// DXR requires a stride compatible with the 12-byte float3 position format.
+			VertexFormat = Format.FormatR32G32B32Float,
+			VertexCount = descriptor.VertexCount,
+			VertexBuffer = new GpuVirtualAddressAndStride
+			{
+				StartAddress = vertexBuffer.Resource.Handle->GetGPUVirtualAddress() + descriptor.VertexBufferOffsetBytes,
+				StrideInBytes = descriptor.VertexStrideBytes
+			},
+			IndexFormat = Format.FormatR32Uint,
+			IndexCount = descriptor.IndexCount,
+			IndexBuffer = indexBuffer.Resource.Handle->GetGPUVirtualAddress() + descriptor.IndexBufferOffsetBytes
+		};
+		return geometry;
+	}
+
+	private static void WriteInstanceDescriptions(
+		D3D12TopLevelAccelerationStructure tlas,
+		ReadOnlySpan<RayTracingInstanceDescription> instances,
+		uint count)
+	{
+		void* mapped = null;
+		SilkMarshal.ThrowHResult(tlas.InstanceDescriptions.Handle->Map(0, (Silk.NET.Direct3D12.Range*)null, &mapped));
+		try
+		{
+			var destination = new Span<D3D12RayTracingInstanceData>(mapped, checked((int)tlas.Descriptor.MaxInstanceCount));
+			destination.Clear();
+			for (var i = 0; i < count; i++)
+			{
+				if (instances[i].AccelerationStructure is not D3D12BottomLevelAccelerationStructure blas)
+				{
+					throw new InvalidOperationException("TLAS instance references a BLAS not created by the Direct3D12 backend.");
+				}
+				destination[i] = D3D12RayTracingInstanceData.Create(instances[i], blas.Result.Handle->GetGPUVirtualAddress());
+			}
+		}
+		finally
+		{
+			tlas.InstanceDescriptions.Handle->Unmap(0, (Silk.NET.Direct3D12.Range*)null);
+		}
+	}
+
+	private void InsertUavBarrier(ID3D12Resource* resource)
+	{
+		var barrier = new ResourceBarrier { Type = ResourceBarrierType.Uav };
+		barrier.Anonymous.UAV = new ResourceUavBarrier { PResource = resource };
+		CommandList.ResourceBarrier(1, &barrier);
 	}
 
 	public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -930,7 +1094,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	private void TransitionBufferIfNeeded(D3D12Buffer buffer, ResourceStates targetState)
 	{
-		if (buffer.Resource.Handle is null || buffer.CurrentState == targetState)
+		if (buffer.Resource.Handle is null || (buffer.CurrentState & targetState) == targetState)
 		{
 			return;
 		}

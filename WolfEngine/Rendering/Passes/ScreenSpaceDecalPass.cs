@@ -30,7 +30,7 @@ public sealed class ScreenSpaceDecalPass
 	[StructLayout(LayoutKind.Sequential, Pack = 1)]
 	private struct VertexData
 	{
-		public Vector4 Position;
+		public Vector3 Position;
 		public Vector3 Normal;
 		public Vector2 UV;
 		public Vector4 Tangent;
@@ -227,7 +227,7 @@ public sealed class ScreenSpaceDecalPass
 		{
 			vertexData[i] = new VertexData
 			{
-				Position = mesh.Vertices[i],
+				Position = new Vector3(mesh.Vertices[i].X, mesh.Vertices[i].Y, mesh.Vertices[i].Z),
 				Normal = mesh.Normals[i],
 				UV = mesh.UVs[i],
 				Tangent = mesh.Tangents[i]

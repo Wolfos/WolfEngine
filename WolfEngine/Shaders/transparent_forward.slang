@@ -70,7 +70,7 @@ cbuffer LightingParams : register(b3)
 
 struct VSInput
 {
-    float4 position : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;
@@ -107,7 +107,7 @@ VSOutput vertexShader(VSInput input)
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
 
-    float4 worldPosition = mul(input.position, instanceData.world);
+    float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
     float4 viewPosition = mul(float4(worldPosition.xyz, 1.0f), viewMatrix);
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);

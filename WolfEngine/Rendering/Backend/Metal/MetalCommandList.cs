@@ -403,6 +403,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_computeEncoder.SetBuffer(metalBuffer.Buffer, (nuint)offset, slot);
 	}
 
+	public void SetComputeReadOnlyBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0)
+	{
+		SetComputeBuffer(slot, buffer, offset);
+	}
+
 	public void PushConstants<T>(in T data) where T : unmanaged
 	{
 		Span<T> payload = stackalloc T[1];

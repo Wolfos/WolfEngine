@@ -139,6 +139,7 @@ internal sealed class RenderGraphFrameBuilder
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
+	private bool _loggedUnsupportedRayTracing;
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
 	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
@@ -309,6 +310,18 @@ internal sealed class RenderGraphFrameBuilder
 		RenderConfig config,
 		Vector3 cameraPosition)
 	{
+		var device = _renderer.GetGfxDevice();
+		if (RequiresRayTracingScene(config) && device.SupportsRayTracing == false)
+		{
+			if (_loggedUnsupportedRayTracing == false)
+			{
+				Console.WriteLine("Ray tracing was requested but is not supported by the active graphics device; disabling RTAO and DDGI.");
+				_loggedUnsupportedRayTracing = true;
+			}
+
+			config = CreateRayTracingDisabledConfig(config);
+		}
+
 		var taaEnabled = config.TemporalAntiAliasing.Enabled;
 		var frameShapeChanged = _hasPreviousFrameShape == false ||
 		                        _previousFramebufferSize.X != framebufferSize.X ||
@@ -2351,6 +2364,25 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		return (config.AmbientOcclusion.Enabled && config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced) ||
 		       HasRayTracedDdgi(config);
+	}
+
+	private static RenderConfig CreateRayTracingDisabledConfig(RenderConfig source)
+	{
+		var ambientOcclusion = source.AmbientOcclusion;
+		ambientOcclusion.Enabled = false;
+		var diffuseGlobalIllumination = source.DiffuseGlobalIllumination;
+		diffuseGlobalIllumination.Enabled = false;
+		return new RenderConfig
+		{
+			AmbientOcclusion = ambientOcclusion,
+			DiffuseGlobalIllumination = diffuseGlobalIllumination,
+			ShadowMaps = source.ShadowMaps,
+			SkyboxConfig = source.SkyboxConfig,
+			TemporalAntiAliasing = source.TemporalAntiAliasing,
+			Tonemapping = source.Tonemapping,
+			Bloom = source.Bloom,
+			Decals = source.Decals
+		};
 	}
 
 	private static Int2 GetAmbientOcclusionInternalSize(

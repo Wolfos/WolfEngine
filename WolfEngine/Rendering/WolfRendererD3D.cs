@@ -21,8 +21,6 @@ using AbstractionFillMode = WolfEngine.Rendering.Abstraction.FillMode;
 using AbstractionCullMode = WolfEngine.Rendering.Abstraction.CullMode;
 using AbstractionDepthStencilFormat = WolfEngine.Rendering.Abstraction.DepthStencilFormat;
 using Box = Silk.NET.Direct3D12.Box;
-using D3DVertexBufferView = Silk.NET.Direct3D12.VertexBufferView;
-using D3DIndexBufferView = Silk.NET.Direct3D12.IndexBufferView;
 using Range = Silk.NET.Direct3D12.Range;
 
 namespace WolfEngine;
@@ -30,39 +28,37 @@ namespace WolfEngine;
 public unsafe class WolfRendererD3D : IRenderer
 {
 private const int FrameCount = 2;
+private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
+private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
-private sealed class MeshResources
-{
+	private sealed class MeshResources
+	{
 		public MeshResources(
-			ComPtr<ID3D12Resource> vertexBuffer,
-			ComPtr<ID3D12Resource> indexBuffer,
-			D3DVertexBufferView vertexView,
-			D3DIndexBufferView indexView,
+		ulong vertexOffsetBytes,
+		ulong indexOffsetBytes,
+		int baseVertex,
 			uint indexCount)
 		{
-			VertexBuffer = vertexBuffer;
-			IndexBuffer = indexBuffer;
-			VertexView = vertexView;
-			IndexView = indexView;
+			VertexOffsetBytes = vertexOffsetBytes;
+			IndexOffsetBytes = indexOffsetBytes;
+			BaseVertex = baseVertex;
 			IndexCount = indexCount;
 		}
 
-		public ComPtr<ID3D12Resource> VertexBuffer { get; }
+		public ulong VertexOffsetBytes { get; }
 
-		public ComPtr<ID3D12Resource> IndexBuffer { get; }
+		public ulong IndexOffsetBytes { get; }
 
-		public D3DVertexBufferView VertexView { get; }
-
-		public D3DIndexBufferView IndexView { get; }
+		public int BaseVertex { get; }
 
 		public uint IndexCount { get; }
 	}
 
+	[StructLayout(LayoutKind.Sequential, Pack = 1)]
 	private struct VertexData
 	{
-		public Vector4 Position;
+		public Vector3 Position;
 		public Vector3 Normal;
-		public float Padding;
 		public Vector2 TexCoord;
 		public Vector4 Tangent;
 	}
@@ -117,6 +113,10 @@ private sealed class MeshResources
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+	private IGfxBuffer? _packedVertexBuffer;
+	private IGfxBuffer? _packedIndexBuffer;
+	private ulong _packedVertexBufferUsedBytes;
+	private ulong _packedIndexBufferUsedBytes;
 
 	private uint _backbufferIndex;
 	private nint _windowHandle;
@@ -1311,214 +1311,73 @@ private sealed class MeshResources
 	}
 
 
+	private void EnsurePackedGeometryBuffers()
+	{
+		_packedVertexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
+			DefaultPackedVertexBufferBytes,
+			BufferUsage.Vertex | BufferUsage.Structured,
+			BufferFlags.AllowShaderResource));
+		_packedIndexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
+			DefaultPackedIndexBufferBytes,
+			BufferUsage.Index | BufferUsage.Structured,
+			BufferFlags.AllowShaderResource));
+	}
+
 	private MeshResources CreateMeshResources(Mesh mesh)
 	{
-		var vertexCount = mesh.Vertices.Length;
-		if (vertexCount == 0)
+		ArgumentNullException.ThrowIfNull(mesh);
+		if (mesh.Vertices.Length == 0 || mesh.Indices.Length == 0)
 		{
-			throw new InvalidOperationException("Mesh must contain vertex data.");
+			throw new InvalidOperationException("Mesh must contain vertex and index data.");
 		}
 
+		EnsurePackedGeometryBuffers();
+		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer was not created.");
+		var indexBuffer = _packedIndexBuffer ?? throw new InvalidOperationException("Packed mesh index buffer was not created.");
+		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer ||
+		    indexBuffer is not IWritableGpuBuffer writableIndexBuffer)
+		{
+			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
+		}
+
+		var vertexCount = mesh.Vertices.Length;
 		var vertices = new VertexData[vertexCount];
 		for (var i = 0; i < vertexCount; i++)
 		{
-			vertices[i].Position = mesh.Vertices[i];
+			vertices[i].Position = new Vector3(mesh.Vertices[i].X, mesh.Vertices[i].Y, mesh.Vertices[i].Z);
 			vertices[i].Normal = i < mesh.Normals.Length ? mesh.Normals[i] : Vector3.UnitY;
-			vertices[i].Padding = 0.0f;
 			vertices[i].TexCoord = i < mesh.UVs.Length ? mesh.UVs[i] : Vector2.Zero;
 			vertices[i].Tangent = i < mesh.Tangents.Length ? mesh.Tangents[i] : new Vector4(1, 0, 0, 1);
 		}
 
-		var vertexStride = (uint) Unsafe.SizeOf<VertexData>();
-		var vertexDataSize = (ulong)(vertexStride * (uint)vertexCount);
-		var vertexBufferSize = Align(vertexDataSize, D3D12.ConstantBufferDataPlacementAlignment);
-		var vertexBufferDesc = new ResourceDesc
+		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
+		var vertexDataSize = (ulong)vertexStride * (uint)vertexCount;
+		var indexDataSize = (ulong)sizeof(uint) * (uint)mesh.Indices.Length;
+		var vertexOffsetBytes = Align(_packedVertexBufferUsedBytes, vertexStride);
+		var indexOffsetBytes = Align(_packedIndexBufferUsedBytes, sizeof(uint));
+		if (vertexOffsetBytes + vertexDataSize > vertexBuffer.Descriptor.SizeInBytes ||
+		    indexOffsetBytes + indexDataSize > indexBuffer.Descriptor.SizeInBytes)
 		{
-			Dimension = ResourceDimension.Buffer,
-			Alignment = 0,
-			Width = vertexBufferSize,
-			Height = 1,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatUnknown,
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutRowMajor,
-			Flags = ResourceFlags.None
-		};
-
-		var defaultHeapProps = new HeapProperties(HeapType.Default);
-		var uploadHeapProps = new HeapProperties(HeapType.Upload);
-
-		ComPtr<ID3D12Resource> vertexBuffer;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&defaultHeapProps,
-				HeapFlags.None,
-				in vertexBufferDesc,
-				ResourceStates.Common,
-				null,
-				out vertexBuffer));
-
-		ComPtr<ID3D12Resource> vertexUpload;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&uploadHeapProps,
-				HeapFlags.None,
-				in vertexBufferDesc,
-				ResourceStates.GenericRead,
-				null,
-				out vertexUpload));
-
-		void* mappedVertices = null;
-		SilkMarshal.ThrowHResult(vertexUpload.Map(0, (Range*) null, &mappedVertices));
-		try
-		{
-			fixed (VertexData* srcVertices = vertices)
-			{
-				Buffer.MemoryCopy(srcVertices, mappedVertices, vertexDataSize, vertexDataSize);
-			}
-		}
-		finally
-		{
-			vertexUpload.Unmap(0, (Range*) null);
+			throw new InvalidOperationException(
+				$"Packed geometry capacity exceeded. requiredVertexBytes={vertexOffsetBytes + vertexDataSize}, " +
+				$"vertexCapacity={vertexBuffer.Descriptor.SizeInBytes}, requiredIndexBytes={indexOffsetBytes + indexDataSize}, " +
+				$"indexCapacity={indexBuffer.Descriptor.SizeInBytes}.");
 		}
 
-		var indices = mesh.Indices;
-		if (indices.Length == 0)
-		{
-			throw new InvalidOperationException("Mesh must contain index data.");
-		}
+		writableVertexBuffer.Write(vertices, vertexOffsetBytes / vertexStride);
+		writableIndexBuffer.Write(mesh.Indices, indexOffsetBytes / sizeof(uint));
 
-		var indexDataSize = (ulong)(sizeof(uint) * indices.Length);
-		var indexBufferSize = Align(indexDataSize, D3D12.ConstantBufferDataPlacementAlignment);
-		var indexBufferDesc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Buffer,
-			Alignment = 0,
-			Width = indexBufferSize,
-			Height = 1,
-			DepthOrArraySize = 1,
-			MipLevels = 1,
-			Format = Format.FormatUnknown,
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutRowMajor,
-			Flags = ResourceFlags.None
-		};
-
-		ComPtr<ID3D12Resource> indexBuffer;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&defaultHeapProps,
-				HeapFlags.None,
-				in indexBufferDesc,
-				ResourceStates.Common,
-				null,
-				out indexBuffer));
-
-		ComPtr<ID3D12Resource> indexUpload;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommittedResource(
-				&uploadHeapProps,
-				HeapFlags.None,
-				in indexBufferDesc,
-				ResourceStates.GenericRead,
-				null,
-				out indexUpload));
-
-		void* mappedIndices = null;
-		SilkMarshal.ThrowHResult(indexUpload.Map(0, (Range*) null, &mappedIndices));
-		try
-		{
-			fixed (uint* srcIndices = indices)
-			{
-				Buffer.MemoryCopy(srcIndices, mappedIndices, indexDataSize, indexDataSize);
-			}
-		}
-		finally
-		{
-			indexUpload.Unmap(0, (Range*) null);
-		}
-
-		// Create a temporary command list for uploading mesh data
-		SilkMarshal.ThrowHResult(_commandAllocators[0].Reset());
-
-		ComPtr<ID3D12GraphicsCommandList> uploadCommandList;
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
-				0,
-				CommandListType.Direct,
-				_commandAllocators[0],
-				default,
-				out uploadCommandList));
-
-		uploadCommandList.CopyBufferRegion(vertexBuffer.Handle, 0, vertexUpload.Handle, 0, vertexDataSize);
-		uploadCommandList.CopyBufferRegion(indexBuffer.Handle, 0, indexUpload.Handle, 0, indexDataSize);
-
-		var vertexBarrier = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		vertexBarrier.Anonymous.Transition = new()
-		{
-			PResource = vertexBuffer.Handle,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.CopyDest,
-			StateAfter = ResourceStates.VertexAndConstantBuffer
-		};
-		uploadCommandList.ResourceBarrier(1, &vertexBarrier);
-
-		var indexBarrier = new ResourceBarrier
-			{Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		indexBarrier.Anonymous.Transition = new()
-		{
-			PResource = indexBuffer.Handle,
-			Subresource = D3D12.ResourceBarrierAllSubresources,
-			StateBefore = ResourceStates.CopyDest,
-			StateAfter = ResourceStates.IndexBuffer
-		};
-		uploadCommandList.ResourceBarrier(1, &indexBarrier);
-
-		SilkMarshal.ThrowHResult(uploadCommandList.Close());
-		ID3D12CommandList* copyLists = (ID3D12CommandList*) uploadCommandList.Handle;
-		_commandQueue.ExecuteCommandLists(1, &copyLists);
-		SignalAndWait();
-
-		uploadCommandList.Dispose();
-
-		vertexUpload.Dispose();
-		indexUpload.Dispose();
-
-		var vertexView = new D3DVertexBufferView
-		{
-			BufferLocation = vertexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint)vertexDataSize,
-			StrideInBytes = vertexStride
-		};
-
-		var indexView = new D3DIndexBufferView
-		{
-			BufferLocation = indexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint)indexDataSize,
-			Format = Format.FormatR32Uint
-		};
-
-		// Wrap in abstraction and set on mesh
-		var vertexBufferAbstraction = new D3D12Buffer(
-			"MeshVertexBuffer",
-			new(vertexDataSize, BufferUsage.Vertex),
-			vertexBuffer,
-			vertexBufferSize);
-
-		var indexBufferAbstraction = new D3D12Buffer(
-			"MeshIndexBuffer",
-			new(indexDataSize, BufferUsage.Index),
-			indexBuffer,
-			indexBufferSize);
-
-		mesh.VertexBuffer = vertexBufferAbstraction;
-		mesh.IndexBuffer = indexBufferAbstraction;
+		mesh.VertexBuffer = vertexBuffer;
+		mesh.IndexBuffer = indexBuffer;
 		mesh.StrideInBytes = vertexStride;
-		mesh.IndexCount = (uint) indices.Length;
+		mesh.IndexCount = (uint)mesh.Indices.Length;
+		mesh.PackedVertexOffsetBytes = vertexOffsetBytes;
+		mesh.PackedIndexOffsetBytes = indexOffsetBytes;
+		mesh.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
+		_packedVertexBufferUsedBytes = vertexOffsetBytes + vertexDataSize;
+		_packedIndexBufferUsedBytes = indexOffsetBytes + indexDataSize;
 
-		return new(vertexBuffer, indexBuffer, vertexView, indexView, (uint) indices.Length);
+		return new MeshResources(vertexOffsetBytes, indexOffsetBytes, mesh.PackedBaseVertex, mesh.IndexCount);
 	}
 
 	public void EnsureMeshResources(Mesh mesh)
@@ -1536,22 +1395,9 @@ private sealed class MeshResources
 	public void ReleaseMeshResources(Mesh mesh)
 	{
 		ArgumentNullException.ThrowIfNull(mesh);
-		if (_meshResources.Remove(mesh, out var resources) == false)
+		if (_meshResources.Remove(mesh) == false)
 		{
 			return;
-		}
-
-		// Terrain authoring can hot-swap many chunk meshes; wait here so retired buffers are not
-		// destroyed while previous frames may still reference them.
-		WaitForGpu();
-		if (resources.VertexBuffer.Handle is not null)
-		{
-			resources.VertexBuffer.Dispose();
-		}
-
-		if (resources.IndexBuffer.Handle is not null)
-		{
-			resources.IndexBuffer.Dispose();
 		}
 
 		mesh.VertexBuffer = null!;
@@ -1563,9 +1409,11 @@ private sealed class MeshResources
 		mesh.PackedBaseVertex = 0;
 	}
 
-	public IGfxBuffer GetPackedMeshVertexBuffer() => null!;
+	public IGfxBuffer GetPackedMeshVertexBuffer() =>
+		_packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer has not been initialized.");
 
-	public IGfxBuffer GetPackedMeshIndexBuffer() => null!;
+	public IGfxBuffer GetPackedMeshIndexBuffer() =>
+		_packedIndexBuffer ?? throw new InvalidOperationException("Packed mesh index buffer has not been initialized.");
 
 	public bool SupportsGpuCapture => false;
 
@@ -1913,20 +1761,11 @@ private sealed class MeshResources
 		_swapchain.Dispose();
 		_commandQueue.Dispose();
 
-		foreach (var meshResources in _meshResources.Values)
-		{
-			if (meshResources.VertexBuffer.Handle is not null)
-			{
-				meshResources.VertexBuffer.Dispose();
-			}
-
-			if (meshResources.IndexBuffer.Handle is not null)
-			{
-				meshResources.IndexBuffer.Dispose();
-			}
-		}
-
 		_meshResources.Clear();
+		(_packedVertexBuffer as IDisposable)?.Dispose();
+		(_packedIndexBuffer as IDisposable)?.Dispose();
+		_packedVertexBuffer = null;
+		_packedIndexBuffer = null;
 
 		// TODO: material disposal should be handled by render graph
 

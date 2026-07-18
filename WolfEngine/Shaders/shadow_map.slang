@@ -26,7 +26,7 @@ cbuffer CameraParams : register(b16)
 
 struct VSInput
 {
-    float4 position : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;
@@ -117,7 +117,7 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
     float2 uv = input.uv;
-    float3 localPosition = input.position.xyz;
+    float3 localPosition = input.position;
     if (instanceData.drawKind == 2)
     {
         GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];

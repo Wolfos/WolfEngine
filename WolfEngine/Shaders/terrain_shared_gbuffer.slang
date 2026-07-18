@@ -33,7 +33,7 @@ cbuffer CameraParams : register(b2)
 
 struct VSInput
 {
-    float4 position : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;

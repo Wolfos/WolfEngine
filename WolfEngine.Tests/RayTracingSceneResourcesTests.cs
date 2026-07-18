@@ -163,6 +163,29 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void RayTracingShadersCompileForD3D12()
+	{
+		var shaderCompiler = new ShaderCompiler();
+		foreach (var shader in new[]
+		{
+			(Name: "ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS"),
+			(Name: "ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS"),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS"),
+			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS"),
+			(Name: "ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS"),
+			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS"),
+			(Name: "ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS")
+		})
+		{
+			var compiled = shaderCompiler.GetComputeShaderWithReflection(
+				ShaderPath(shader.Name),
+				shader.EntryPoint,
+				GraphicsBackendKind.D3D12);
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+		}
+	}
+
+	[Test]
 	public void DdgiProbeDebugShaderCompilesForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
@@ -1727,7 +1750,7 @@ public sealed class RayTracingSceneResourcesTests
 		{
 			mesh.VertexBuffer ??= _vertexBuffer;
 			mesh.IndexBuffer ??= _indexBuffer;
-			mesh.StrideInBytes = 16;
+			mesh.StrideInBytes = 48;
 			mesh.IndexCount = (uint)mesh.Indices.Length;
 		}
 	}
@@ -1735,6 +1758,7 @@ public sealed class RayTracingSceneResourcesTests
 	private sealed class TestDevice : IGfxDevice
 	{
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
+		public bool SupportsRayTracing => true;
 		public IGfxDescriptorTable GlobalTable { get; } = new TestDescriptorTable();
 		public IGfxCommandList BeginGraphics() => throw new NotSupportedException();
 		public IGfxCommandList BeginCompute() => throw new NotSupportedException();
@@ -1777,6 +1801,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data) => throw new NotSupportedException();
 		public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data) { }
 		public void SetComputeBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0) { }
+		public void SetComputeReadOnlyBuffer(uint slot, IGfxBuffer buffer, ulong offset = 0) { }
 		public void PushConstants<T>(in T data) where T : unmanaged => throw new NotSupportedException();
 		public void SetVertexBuffer(in VertexBufferView vertexBuffer) => throw new NotSupportedException();
 		public void SetVertexBuffers(ReadOnlySpan<VertexBufferView> vertexBuffers) => throw new NotSupportedException();

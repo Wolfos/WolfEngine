@@ -262,9 +262,9 @@ public sealed class AmbientOcclusionPass
 			return _rayTracedPipeline;
 		}
 
-		if (device.BackendKind != GraphicsBackendKind.Metal)
+		if (device.SupportsRayTracing == false)
 		{
-			throw new NotImplementedException("Ray traced ambient occlusion is currently implemented for Metal only.");
+			throw new NotSupportedException("Ray traced ambient occlusion requires a ray-tracing capable graphics device.");
 		}
 
 		EnsureRayTracedReflectionWriters(device.BackendKind);

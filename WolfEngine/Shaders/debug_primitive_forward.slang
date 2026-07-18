@@ -96,7 +96,7 @@ float4 DdgiDebugProbeState(GpuInstanceData instanceData)
 
 struct VSInput
 {
-    float4 position : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;
@@ -127,7 +127,7 @@ VSOutput vertexShader(VSInput input)
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 ddgiProbeState = DdgiDebugProbeState(instanceData);
-    float4 worldPosition = mul(input.position, instanceData.world);
+    float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz += ddgiProbeState.xyz;
     worldPosition.xyz -= cameraPosition;
 

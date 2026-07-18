@@ -117,7 +117,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct VertexData
     {
-        public Vector4 Position;
+        public Vector3 Position;
         public Vector3 Normal;
         public Vector2 UV;
         public Vector4 Tangent;
@@ -1169,7 +1169,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             var normal = mesh.Normals[i];
             vertexData[i] = new VertexData
             {
-                Position = mesh.Vertices[i],
+                Position = new Vector3(mesh.Vertices[i].X, mesh.Vertices[i].Y, mesh.Vertices[i].Z),
                 Normal = normal,
                 UV = mesh.UVs[i],
                 Tangent = mesh.Tangents[i]

@@ -37,7 +37,7 @@ cbuffer DrawParams : register(b19)
 
 struct VSInput
 {
-    float4 position : POSITION;
+    float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;
@@ -74,7 +74,7 @@ VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
     GpuDecalProjectorData decal = g_Decals[decalIndex];
-    float4 worldPosition = mul(input.position, decal.localToWorld);
+    float4 worldPosition = mul(float4(input.position, 1.0f), decal.localToWorld);
     output.position = mul(worldPosition, viewProjection);
     output.clipPosition = output.position;
     return output;
