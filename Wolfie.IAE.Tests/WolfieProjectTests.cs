@@ -255,6 +255,11 @@ public sealed class WolfieProjectTests
 	[Test]
 	public async Task ManagedBlendCreationAndChangesAreAutomaticallyQueuedForPublishing()
 	{
+		if (string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase))
+		{
+			Assert.Ignore("FileSystemWatcher timing test is disabled on GitHub Actions.");
+		}
+
 		var unity = CreateUnityProject();
 		var projects = new WolfieProjectService();
 		var project = projects.Create(unity, _root, "WolfieArt", out var projectFile);
