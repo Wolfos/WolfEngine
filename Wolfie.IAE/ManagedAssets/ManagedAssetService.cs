@@ -257,9 +257,12 @@ public sealed partial class ManagedAssetService
 			directory = Path.GetDirectoryName(directory)!;
 		}
 	}
+	
+	private static readonly Regex UnityGuidLineRegex = new(
+		@"^\s*guid:\s*([0-9a-fA-F]{32})\s*$",
+		RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-	[GeneratedRegex(@"^\s*guid:\s*([0-9a-fA-F]{32})\s*$")]
-	private static partial Regex UnityGuidLine();
+	private static Regex UnityGuidLine() => UnityGuidLineRegex;
 }
 
 public sealed record WolfieTemplate(string Name, string RelativePath);

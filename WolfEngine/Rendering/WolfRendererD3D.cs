@@ -1364,8 +1364,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				$"indexCapacity={indexBuffer.Descriptor.SizeInBytes}.");
 		}
 
-		writableVertexBuffer.Write(vertices, vertexOffsetBytes / vertexStride);
-		writableIndexBuffer.Write(mesh.Indices, indexOffsetBytes / sizeof(uint));
+		writableVertexBuffer.Write<VertexData>(vertices, vertexOffsetBytes / vertexStride);
+		writableIndexBuffer.Write<uint>(mesh.Indices, indexOffsetBytes / sizeof(uint));
 
 		mesh.VertexBuffer = vertexBuffer;
 		mesh.IndexBuffer = indexBuffer;
