@@ -361,6 +361,24 @@ public sealed class AssetsWindowTests
 			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj"));
 			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj"));
 			Assert.That(solutionFileContents, Does.Contain(@"..\WolfEngine\WolfEngine.Editor\WolfEngine.Editor.csproj"));
+			foreach (var engineProjectReference in new[]
+			{
+				@"..\WolfEngine\WolfEngine.ECS.Tests\WolfEngine.ECS.Tests.csproj",
+				@"..\WolfEngine\WolfEngine.Editor.Tests\WolfEngine.Editor.Tests.csproj",
+				@"..\WolfEngine\WolfEngine.Physics.Tests\WolfEngine.Physics.Tests.csproj",
+				@"..\WolfEngine\WolfEngine.Tests\WolfEngine.Tests.csproj",
+				@"..\WolfEngine\WolfEngine.Editor.Automation\WolfEngine.Editor.Automation.csproj",
+				@"..\WolfEngine\WolfEngine.Runtime\WolfEngine.Runtime.csproj",
+				@"..\WolfEngine\WolfEngine.Build\WolfEngine.Build.csproj",
+				@"..\WolfEngine\WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj",
+				@"..\WolfEngine\WolfEngine.Audio\WolfEngine.Audio.csproj"
+			})
+			{
+				Assert.That(solutionFileContents, Does.Contain(engineProjectReference));
+			}
+
+			Assert.That(solutionFileContents, Does.Contain(@"Project(""{2150E333-8FDC-42A3-9474-1A3956D46DE8}"") = ""Engine"", ""Engine"""));
+			Assert.That(solutionFileContents, Does.Contain(@"Project(""{2150E333-8FDC-42A3-9474-1A3956D46DE8}"") = ""Tests"", ""Tests"""));
 		}
 		finally
 		{

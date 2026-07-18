@@ -10,6 +10,7 @@ internal static class ProjectGameplayScaffolder
 	public const string GameplaySourceFileName = "GameplayBootstrap.cs";
 	public const string SolutionFileExtension = ".sln";
 	private const string CsProjectTypeGuid = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
+	private const string SolutionFolderTypeGuid = "{2150E333-8FDC-42A3-9474-1A3956D46DE8}";
 	private const string TargetFramework = "net10.0";
 	private const string EngineProjectReference = "../../WolfEngine/WolfEngine/WolfEngine.csproj";
 	private const string EcsProjectReference = "../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj";
@@ -18,6 +19,15 @@ internal static class ProjectGameplayScaffolder
 	private const string EcsSolutionReference = @"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj";
 	private const string PhysicsSolutionReference = @"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj";
 	private const string EditorSolutionReference = @"..\WolfEngine\WolfEngine.Editor\WolfEngine.Editor.csproj";
+	private const string EcsTestsSolutionReference = @"..\WolfEngine\WolfEngine.ECS.Tests\WolfEngine.ECS.Tests.csproj";
+	private const string EditorTestsSolutionReference = @"..\WolfEngine\WolfEngine.Editor.Tests\WolfEngine.Editor.Tests.csproj";
+	private const string PhysicsTestsSolutionReference = @"..\WolfEngine\WolfEngine.Physics.Tests\WolfEngine.Physics.Tests.csproj";
+	private const string EngineTestsSolutionReference = @"..\WolfEngine\WolfEngine.Tests\WolfEngine.Tests.csproj";
+	private const string EditorAutomationSolutionReference = @"..\WolfEngine\WolfEngine.Editor.Automation\WolfEngine.Editor.Automation.csproj";
+	private const string RuntimeSolutionReference = @"..\WolfEngine\WolfEngine.Runtime\WolfEngine.Runtime.csproj";
+	private const string BuildSolutionReference = @"..\WolfEngine\WolfEngine.Build\WolfEngine.Build.csproj";
+	private const string AudioTestsSolutionReference = @"..\WolfEngine\WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj";
+	private const string AudioSolutionReference = @"..\WolfEngine\WolfEngine.Audio\WolfEngine.Audio.csproj";
 
 	public static string GetGameplayProjectRelativePath(string projectName)
 	{
@@ -122,6 +132,17 @@ internal static class ProjectGameplayScaffolder
 		var ecsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var physicsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var editorProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var ecsTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var editorTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var physicsTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var engineTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var editorAutomationProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var runtimeProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var buildProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var audioTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var audioProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var engineFolderGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var testsFolderGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 
 		return
 			$$"""
@@ -135,6 +156,28 @@ internal static class ProjectGameplayScaffolder
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Physics", "{{PhysicsSolutionReference}}", "{{physicsProjectGuid}}"
 			  EndProject
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Editor", "{{EditorSolutionReference}}", "{{editorProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.ECS.Tests", "{{EcsTestsSolutionReference}}", "{{ecsTestsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Editor.Tests", "{{EditorTestsSolutionReference}}", "{{editorTestsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Physics.Tests", "{{PhysicsTestsSolutionReference}}", "{{physicsTestsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Tests", "{{EngineTestsSolutionReference}}", "{{engineTestsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Editor.Automation", "{{EditorAutomationSolutionReference}}", "{{editorAutomationProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Runtime", "{{RuntimeSolutionReference}}", "{{runtimeProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Build", "{{BuildSolutionReference}}", "{{buildProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Audio.Tests", "{{AudioTestsSolutionReference}}", "{{audioTestsProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Audio", "{{AudioSolutionReference}}", "{{audioProjectGuid}}"
+			  EndProject
+			  Project("{{SolutionFolderTypeGuid}}") = "Engine", "Engine", "{{engineFolderGuid}}"
+			  EndProject
+			  Project("{{SolutionFolderTypeGuid}}") = "Tests", "Tests", "{{testsFolderGuid}}"
 			  EndProject
 			  Global
 			  	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -162,7 +205,59 @@ internal static class ProjectGameplayScaffolder
 			  		{{editorProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
 			  		{{editorProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
 			  		{{editorProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
-			  	EndGlobalSection
+			  		{{ecsTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{ecsTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{ecsTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{ecsTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{editorTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{editorTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{editorTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{editorTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{physicsTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{physicsTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{physicsTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{physicsTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{engineTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{engineTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{engineTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{engineTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{editorAutomationProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{editorAutomationProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{editorAutomationProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{editorAutomationProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{runtimeProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{runtimeProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{runtimeProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{runtimeProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{buildProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{buildProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{buildProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{buildProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{audioTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{audioTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{audioTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{audioTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{audioProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{audioProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{audioProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{audioProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  EndGlobalSection
+			  GlobalSection(NestedProjects) = preSolution
+			  		{{engineProjectGuid}} = {{engineFolderGuid}}
+			  		{{ecsProjectGuid}} = {{engineFolderGuid}}
+			  		{{editorProjectGuid}} = {{engineFolderGuid}}
+			  		{{physicsProjectGuid}} = {{engineFolderGuid}}
+			  		{{editorAutomationProjectGuid}} = {{engineFolderGuid}}
+			  		{{runtimeProjectGuid}} = {{engineFolderGuid}}
+			  		{{buildProjectGuid}} = {{engineFolderGuid}}
+			  		{{audioProjectGuid}} = {{engineFolderGuid}}
+			  		{{testsFolderGuid}} = {{engineFolderGuid}}
+			  		{{ecsTestsProjectGuid}} = {{testsFolderGuid}}
+			  		{{editorTestsProjectGuid}} = {{testsFolderGuid}}
+			  		{{physicsTestsProjectGuid}} = {{testsFolderGuid}}
+			  		{{engineTestsProjectGuid}} = {{testsFolderGuid}}
+			  		{{audioTestsProjectGuid}} = {{testsFolderGuid}}
+			  EndGlobalSection
 			  EndGlobal
 			  """;
 	}

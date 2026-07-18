@@ -11,5 +11,7 @@
     <PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
   </ItemGroup>
   <ItemGroup><Using Include="NUnit.Framework" /></ItemGroup>
-  <ItemGroup><ProjectReference Include="..\Wolfie.IAE\Wolfie.IAE.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Wolfie.IAE\Wolfie.IAE.csproj" />
+  </ItemGroup>
 </Project>
