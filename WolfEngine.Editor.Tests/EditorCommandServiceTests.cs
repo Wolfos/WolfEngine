@@ -7,6 +7,7 @@ using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -294,6 +295,38 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void SaveNewScene_UsesDialogAndPlacesManifestInSceneFolder()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.ProjectService.ProjectRootPath.Returns("/project");
+		fixture.FileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Forest.scene.json");
+
+		var saved = fixture.Service.SaveScene();
+
+		Assert.That(saved, Is.True);
+		Assert.That(fixture.SceneWorkspace.CurrentScene.Name, Is.EqualTo("Forest"));
+		Assert.That(fixture.SceneWorkspace.CurrentScene.RelativeAssetPath, Is.EqualTo("Assets/Scenes/Forest/Forest.scene.json"));
+		fixture.FileDialogService.Received(1).SaveFile(Arg.Is<FileDialogOptions>(options =>
+			options.Title == "Save New Scene" &&
+			options.InitialDirectory == "/project/Assets/Scenes" &&
+			options.DefaultFileName == "Untitled Scene.scene.json"));
+		fixture.SceneWorkspace.Received(1).SaveCurrentScene();
+	}
+
+	[Test]
+	public void SaveNewScene_CancelledDialog_DoesNotSave()
+	{
+		var fixture = CreateCommandFixture();
+		fixture.ProjectService.HasOpenProject.Returns(true);
+		fixture.ProjectService.ProjectRootPath.Returns("/project");
+		fixture.FileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns((string?)null);
+
+		Assert.That(fixture.Service.SaveScene(), Is.False);
+		fixture.SceneWorkspace.DidNotReceive().SaveCurrentScene();
+	}
+
+	[Test]
 	public void EntitiesWindow_DeleteSelectedEntity_RemovesEntityAndMarksSceneDirty()
 	{
 		var interactionState = new EditorInteractionState();
@@ -429,10 +462,13 @@ public sealed class EditorCommandServiceTests
 		sceneWorkspace.LoadSceneAsset(Arg.Any<Guid>()).Returns(_ => new EditorScene());
 
 		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.ProjectRootPath.Returns("/project");
 		var assetRefreshService = Substitute.For<IEditorAssetRefreshService>();
 		var playSession = Substitute.For<IEditorPlaySession>();
 		playSession.IsActive.Returns(false);
 		var operationService = Substitute.For<IEditorOperationService>();
+		var fileDialogService = Substitute.For<IFileDialogService>();
+		fileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Untitled Scene.scene.json");
 		operationService.TryStart(
 			Arg.Any<string>(),
 			Arg.Any<Action<IProgress<string>>>(),
@@ -453,7 +489,8 @@ public sealed class EditorCommandServiceTests
 			new EditorInteractionState(),
 			Substitute.For<IEditorNotificationService>(),
 			Substitute.For<IEditorUndoRedoService>(),
-			operationService);
+			operationService,
+			fileDialogService);
 	}
 
 	private sealed record CommandFixture(
@@ -464,7 +501,8 @@ public sealed class EditorCommandServiceTests
 		EditorInteractionState InteractionState,
 		IEditorNotificationService NotificationService,
 		IEditorUndoRedoService UndoRedoService,
-		IEditorOperationService OperationService)
+		IEditorOperationService OperationService,
+		IFileDialogService FileDialogService)
 	{
 		public EditorCommandService Service { get; } = new(
 			SceneWorkspace,
@@ -477,6 +515,7 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IShaderProvider>(),
 			Substitute.For<IRenderer>(),
 			OperationService,
+			FileDialogService,
 			new InputSystem());
 	}
 

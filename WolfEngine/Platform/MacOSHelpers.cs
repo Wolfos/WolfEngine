@@ -264,6 +264,9 @@ internal static class ObjCNative
     public static extern long ObjcMsgSendLong(IntPtr receiver, IntPtr selector);
 
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
+    public static extern IntPtr ObjcMsgSendIntPtr(IntPtr receiver, IntPtr selector, IntPtr value);
+
+    [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
     public static extern ulong ObjcMsgSendULong(IntPtr receiver, IntPtr selector);
 
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]
@@ -441,8 +444,57 @@ internal static class MacOSFileDialog
         if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
         {
             var urlClass = new ObjectiveCClass("NSURL");
-            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", options.InitialDirectory);
+			var directoryPath = NSStringHelper.From(options.InitialDirectory);
+			var url = ObjCNative.ObjcMsgSendIntPtr(urlClass.NativePtr, new Selector("fileURLWithPath:").SelPtr, directoryPath.NativePtr);
             ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
+        }
+
+        if (options.AllowedExtensions is not null && options.AllowedExtensions.Length > 0)
+        {
+            var allowed = CreateAllowedFileTypes(options.AllowedExtensions);
+            if (allowed != IntPtr.Zero)
+            {
+                ObjectiveC.objc_msgSend(panel, "setAllowedFileTypes:", allowed);
+            }
+        }
+
+        var response = ObjCNative.ObjcMsgSendLong(panel, new Selector("runModal").SelPtr);
+        if (response != ModalResponseOk)
+        {
+            return null;
+        }
+
+        var urlPtr = ObjectiveC.IntPtr_objc_msgSend(panel, "URL");
+        if (urlPtr == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var pathPtr = ObjectiveC.IntPtr_objc_msgSend(urlPtr, "path");
+        return new NSString(pathPtr).ToManagedString();
+    }
+
+    public static string? SaveFile(FileDialogOptions options)
+    {
+        var panelClass = new ObjectiveCClass("NSSavePanel");
+        var panel = ObjectiveC.IntPtr_objc_msgSend(panelClass, "savePanel");
+
+        if (string.IsNullOrWhiteSpace(options.Title) == false)
+        {
+            ObjectiveC.objc_msgSend(panel, "setTitle:", NSStringHelper.From(options.Title));
+        }
+
+        if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
+        {
+            var urlClass = new ObjectiveCClass("NSURL");
+			var directoryPath = NSStringHelper.From(options.InitialDirectory);
+			var url = ObjCNative.ObjcMsgSendIntPtr(urlClass.NativePtr, new Selector("fileURLWithPath:").SelPtr, directoryPath.NativePtr);
+            ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.DefaultFileName) == false)
+        {
+            ObjectiveC.objc_msgSend(panel, "setNameFieldStringValue:", NSStringHelper.From(options.DefaultFileName));
         }
 
         if (options.AllowedExtensions is not null && options.AllowedExtensions.Length > 0)
@@ -488,7 +540,8 @@ internal static class MacOSFileDialog
         if (string.IsNullOrWhiteSpace(options.InitialDirectory) == false)
         {
             var urlClass = new ObjectiveCClass("NSURL");
-            var url = ObjectiveC.IntPtr_objc_msgSend(urlClass, "fileURLWithPath:", options.InitialDirectory);
+			var directoryPath = NSStringHelper.From(options.InitialDirectory);
+			var url = ObjCNative.ObjcMsgSendIntPtr(urlClass.NativePtr, new Selector("fileURLWithPath:").SelPtr, directoryPath.NativePtr);
             ObjectiveC.objc_msgSend(panel, "setDirectoryURL:", url);
         }
 

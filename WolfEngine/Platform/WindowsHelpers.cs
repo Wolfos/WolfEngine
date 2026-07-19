@@ -198,6 +198,43 @@ internal static class WindowsHelpers
 		}
 	}
 
+	public static string? SaveFile(FileDialogOptions options)
+	{
+		const int maxPathChars = 1024;
+		var filter = BuildFilterString(options.AllowedExtensions);
+		var fileBuffer = Marshal.AllocHGlobal(maxPathChars * sizeof(char));
+
+		try
+		{
+			Marshal.Copy((options.DefaultFileName ?? string.Empty).ToCharArray(), 0, fileBuffer, options.DefaultFileName?.Length ?? 0);
+			Marshal.WriteInt16(fileBuffer, (options.DefaultFileName?.Length ?? 0) * sizeof(char), 0);
+			var ofn = new OPENFILENAME
+			{
+				lStructSize = Marshal.SizeOf<OPENFILENAME>(),
+				hwndOwner = IntPtr.Zero,
+				lpstrFilter = filter,
+				lpstrFile = fileBuffer,
+				nMaxFile = maxPathChars,
+				lpstrTitle = options.Title,
+				lpstrInitialDir = options.InitialDirectory,
+				Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+				lpstrDefExt = GetDefaultExtension(options.AllowedExtensions)
+			};
+
+			if (GetSaveFileNameW(ref ofn) == false)
+			{
+				return null;
+			}
+
+			var result = Marshal.PtrToStringUni(fileBuffer);
+			return string.IsNullOrWhiteSpace(result) ? null : result;
+		}
+		finally
+		{
+			Marshal.FreeHGlobal(fileBuffer);
+		}
+	}
+
 	public static string? OpenFolder(FileDialogOptions options)
 	{
 		if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
@@ -627,6 +664,9 @@ internal static class WindowsHelpers
 
 	[DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 	private static extern bool GetOpenFileNameW(ref OPENFILENAME ofn);
+
+	[DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool GetSaveFileNameW(ref OPENFILENAME ofn);
 
 	[DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
 	private static extern nint GetWindowLongPtr(nint hWnd, int nIndex);

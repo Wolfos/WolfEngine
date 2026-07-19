@@ -1,9 +1,11 @@
 using System;
+using System.IO;
 using ImGuiNET;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.UI;
 
@@ -64,6 +66,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private readonly IShaderProvider _shaderProvider;
 	private readonly IRenderer _renderer;
 	private readonly IEditorOperationService _operationService;
+	private readonly IFileDialogService _fileDialogService;
 	private bool _leftCtrlDown;
 	private bool _rightCtrlDown;
 	private bool _leftShiftDown;
@@ -96,6 +99,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		IShaderProvider shaderProvider,
 		IRenderer renderer,
 		IEditorOperationService operationService,
+		IFileDialogService fileDialogService,
 		IInputSystem inputSystem)
 	{
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
@@ -108,6 +112,7 @@ public sealed class EditorCommandService : IEditorCommandService
 		_shaderProvider = shaderProvider ?? throw new ArgumentNullException(nameof(shaderProvider));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
+		_fileDialogService = fileDialogService ?? throw new ArgumentNullException(nameof(fileDialogService));
 		ArgumentNullException.ThrowIfNull(inputSystem);
 
 		RegisterTrackedButton(inputSystem, "ShortcutUndo", InputActionBinding.KeyZ, callback => _undoPressedThisFrame |= callback.Value);
@@ -171,6 +176,11 @@ public sealed class EditorCommandService : IEditorCommandService
 
 		try
 		{
+			if (TryChooseSavePathForNewScene() == false)
+			{
+				return false;
+			}
+
 			_sceneWorkspace.SaveCurrentScene();
 			_interactionState.ClearSceneDirty();
 			return true;
@@ -180,6 +190,62 @@ public sealed class EditorCommandService : IEditorCommandService
 			_notificationService.ReportError($"Failed to save scene: {ex.Message}");
 			return false;
 		}
+	}
+
+	private bool TryChooseSavePathForNewScene()
+	{
+		var scene = _sceneWorkspace.CurrentScene;
+		if (string.IsNullOrWhiteSpace(scene.RelativeAssetPath) == false)
+		{
+			return true;
+		}
+
+		var scenesDirectory = Path.Combine(_projectService.ProjectRootPath!, "Assets", "Scenes");
+		var selectedPath = _fileDialogService.SaveFile(new FileDialogOptions
+		{
+			Title = "Save New Scene",
+			InitialDirectory = scenesDirectory,
+			DefaultFileName = $"Untitled Scene{EditorSceneAssetFile.FileExtension}",
+			AllowedExtensions = ["scene.json"]
+		});
+		if (string.IsNullOrWhiteSpace(selectedPath))
+		{
+			return false;
+		}
+
+		if (selectedPath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase) == false)
+		{
+			selectedPath += EditorSceneAssetFile.FileExtension;
+		}
+
+		var projectRoot = Path.GetFullPath(_projectService.ProjectRootPath!);
+		var fullSelectedPath = Path.GetFullPath(selectedPath);
+		var relativeSelectedPath = Path.GetRelativePath(projectRoot, fullSelectedPath);
+		var normalizedRelativeSelectedPath = relativeSelectedPath.Replace('\\', '/');
+		if (Path.IsPathRooted(relativeSelectedPath) || relativeSelectedPath.StartsWith("..", StringComparison.Ordinal))
+		{
+			_notificationService.ReportError("Scenes must be saved inside the open project.");
+			return false;
+		}
+
+		if (normalizedRelativeSelectedPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) == false)
+		{
+			_notificationService.ReportError("Scenes must be saved inside the project's Assets folder.");
+			return false;
+		}
+
+		var sceneName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(fullSelectedPath));
+		if (string.IsNullOrWhiteSpace(sceneName))
+		{
+			_notificationService.ReportError("Choose a name for the new scene.");
+			return false;
+		}
+
+		// A scene owns additional cell files, so keep the manifest in a folder named after it.
+		var selectedDirectory = Path.GetDirectoryName(relativeSelectedPath) ?? "Assets/Scenes";
+		scene.RelativeAssetPath = Path.Combine(selectedDirectory, sceneName, $"{sceneName}{EditorSceneAssetFile.FileExtension}").Replace('\\', '/');
+		scene.Name = sceneName;
+		return true;
 	}
 
 	public bool RefreshAssetDatabase()
