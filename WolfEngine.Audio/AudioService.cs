@@ -669,7 +669,7 @@ internal sealed unsafe class MiniAudioVoice : IAudioBackendVoice
 		return memory.ToArray();
 	}
 
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static ma_result Read(ma_decoder* decoder, void* output, nuint bytesToRead, nuint* bytesRead)
 	{
 		try
@@ -696,7 +696,7 @@ internal sealed unsafe class MiniAudioVoice : IAudioBackendVoice
 		}
 	}
 
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static ma_result Seek(ma_decoder* decoder, long offset, ma_seek_origin origin)
 	{
 		try
