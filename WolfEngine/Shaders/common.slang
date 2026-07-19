@@ -1,10 +1,13 @@
 struct CameraParams
 {
-    float4x4 invProjection;
-    float4x4 invViewProjection;
+    // ShaderPropertyWriter uploads System.Numerics.Matrix4x4 values in
+    // row-major memory order. Keep the D3D12 constant-buffer interpretation
+    // explicit so position reconstruction does not transpose these matrices.
+    row_major float4x4 invProjection;
+    row_major float4x4 invViewProjection;
     float3 cameraOrigin; // world-space origin if needed
     float padding; // align to 16 bytes
-    float4x4 viewMatrix;
+    row_major float4x4 viewMatrix;
     float nearPlane;
     float farPlane;
     uint frameSizeX;

@@ -12,6 +12,13 @@ public readonly struct AmbientOcclusionPassConfig
 	public required DescriptorHandle OutputHandle { get; init; }
 	public DescriptorHandle RayTracingHitMaskHandle { get; init; }
 	public DescriptorHandle RayTracingHitDistanceHandle { get; init; }
+	public DescriptorHandle RayTracingAlbedoHandle { get; init; }
+	public IGfxBuffer? InstanceBuffer { get; init; }
+	public IGfxBuffer? MaterialBuffer { get; init; }
+	public IGfxBuffer? MeshBuffer { get; init; }
+	public IGfxBuffer? InstanceIndexToInstanceHandleBuffer { get; init; }
+	public IGfxBuffer? PackedMeshVertexBuffer { get; init; }
+	public IGfxBuffer? PackedMeshIndexBuffer { get; init; }
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; init; }
 	public required Int2 FullResolution { get; init; }
 	public required Int2 OutputResolution { get; init; }

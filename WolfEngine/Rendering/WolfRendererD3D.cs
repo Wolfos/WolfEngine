@@ -1435,7 +1435,16 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private static ulong Align(ulong size, ulong alignment)
 	{
-		return (size + alignment - 1) & ~(alignment - 1);
+		if (alignment == 0)
+		{
+			return size;
+		}
+
+		// The packed vertex stride is 48 bytes, which is not a power of two.
+		// Bit-mask alignment silently produced offsets such as 64 for a 48-byte
+		// stride. CPU uploads divided that offset by the stride, while DXR used
+		// the raw byte offset, making the BLAS read a different vertex range.
+		return checked(((size + alignment - 1) / alignment) * alignment);
 	}
 
 	private DescriptorHandle GetOrCreateDefaultMaterialSampler()

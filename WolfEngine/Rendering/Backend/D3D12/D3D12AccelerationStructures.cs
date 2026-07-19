@@ -40,10 +40,37 @@ internal struct D3D12RayTracingInstanceData
 			M11 = transform.M11, M12 = transform.M21, M13 = transform.M31, M14 = transform.M41,
 			M21 = transform.M12, M22 = transform.M22, M23 = transform.M32, M24 = transform.M42,
 			M31 = transform.M13, M32 = transform.M23, M33 = transform.M33, M34 = transform.M43,
-			InstanceIdAndMask = (instance.InstanceIndex & 0x00FF_FFFFu) | ((instance.Active ? instance.Mask : 0u) << 24),
+			InstanceIdAndMask = (instance.InstanceIndex & 0x00FF_FFFFu) |
+				((instance.Active ? instance.Mask : 0u) & 0xFFu) << 24,
 			InstanceContributionAndFlags = 0,
 			AccelerationStructure = accelerationStructureAddress
 		};
+	}
+}
+
+internal static class D3D12RayTracingGeometryValidation
+{
+	public static void Validate(
+		in BottomLevelAccelerationStructureDescriptor descriptor,
+		D3D12Buffer vertexBuffer,
+		D3D12Buffer indexBuffer)
+	{
+		var vertexBytes = checked((ulong)descriptor.VertexCount * descriptor.VertexStrideBytes);
+		var indexBytes = checked((ulong)descriptor.IndexCount * sizeof(uint));
+		if (descriptor.VertexBufferOffsetBytes > vertexBuffer.SizeInBytes ||
+			vertexBytes > vertexBuffer.SizeInBytes - descriptor.VertexBufferOffsetBytes)
+		{
+			throw new InvalidOperationException(
+				$"DXR BLAS vertex range is outside its buffer: offset={descriptor.VertexBufferOffsetBytes}, " +
+				$"bytes={vertexBytes}, bufferSize={vertexBuffer.SizeInBytes}.");
+		}
+		if (descriptor.IndexBufferOffsetBytes > indexBuffer.SizeInBytes ||
+			indexBytes > indexBuffer.SizeInBytes - descriptor.IndexBufferOffsetBytes)
+		{
+			throw new InvalidOperationException(
+				$"DXR BLAS index range is outside its buffer: offset={descriptor.IndexBufferOffsetBytes}, " +
+				$"bytes={indexBytes}, bufferSize={indexBuffer.SizeInBytes}.");
+		}
 	}
 }
 

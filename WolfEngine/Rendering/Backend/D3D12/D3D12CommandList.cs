@@ -783,6 +783,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			?? throw new InvalidOperationException("BLAS vertex buffer was not created by the Direct3D12 backend.");
 		var indexBuffer = descriptor.IndexBuffer as D3D12Buffer
 			?? throw new InvalidOperationException("BLAS index buffer was not created by the Direct3D12 backend.");
+		D3D12RayTracingGeometryValidation.Validate(in descriptor, vertexBuffer, indexBuffer);
 		TransitionBufferIfNeeded(vertexBuffer, ResourceStates.NonPixelShaderResource);
 		TransitionBufferIfNeeded(indexBuffer, ResourceStates.NonPixelShaderResource);
 
@@ -810,7 +811,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		var count = Math.Min((uint)instances.Length, tlas.Descriptor.MaxInstanceCount);
 		WriteInstanceDescriptions(tlas, instances, count);
-		for (var i = 0; i < instances.Length; i++)
+		for (var i = 0; i < count; i++)
 		{
 			if (instances[i].AccelerationStructure is D3D12BottomLevelAccelerationStructure blas)
 			{

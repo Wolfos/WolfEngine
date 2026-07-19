@@ -33,10 +33,14 @@ public sealed class AmbientOcclusionPass
 		RenderGraphContext context,
 		RenderGraphFrameResources resources,
 		IGfxDevice device,
+		IRenderer renderer,
+		GpuDrawResources gpuDrawResources,
 		IRayTracingSceneResources? rayTracingSceneResources)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(device);
+		ArgumentNullException.ThrowIfNull(renderer);
+		ArgumentNullException.ThrowIfNull(gpuDrawResources);
 
 		var settings = resources.Config.AmbientOcclusion;
 		var mode = settings.Mode;
@@ -53,17 +57,20 @@ public sealed class AmbientOcclusionPass
 		var output = context.GetTexture(resources.AmbientOcclusionRaw);
 		var vbaoSettings = settings.VisibilityBitmaskSettings;
 		var rayTracedSettings = settings.RayTracedSettings;
+		var isRayTraced = mode == AmbientOcclusionMode.RayTraced;
 		var depthHandle = _bindlessRegistry.RegisterDepthTexture(depth);
 		var normalHandle = _bindlessRegistry.GetTextureHandle(normal);
 		var outputHandle = _bindlessRegistry.RegisterRwTexture(output);
 		var hitMaskHandle = DescriptorHandle.Invalid;
 		var hitDistanceHandle = DescriptorHandle.Invalid;
+		var albedoHandle = DescriptorHandle.Invalid;
 		if (mode == AmbientOcclusionMode.RayTraced &&
 		    resources.RayTracingHitMask.IsValid &&
 		    resources.RayTracingHitDistance.IsValid)
 		{
 			hitMaskHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.RayTracingHitMask));
 			hitDistanceHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.RayTracingHitDistance));
+			albedoHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.RayTracingAlbedo));
 		}
 
 		return new AmbientOcclusionPassConfig
@@ -75,6 +82,13 @@ public sealed class AmbientOcclusionPass
 			OutputHandle = outputHandle,
 			RayTracingHitMaskHandle = hitMaskHandle,
 			RayTracingHitDistanceHandle = hitDistanceHandle,
+			RayTracingAlbedoHandle = albedoHandle,
+			InstanceBuffer = isRayTraced ? gpuDrawResources.InstanceBuffer : null,
+			MaterialBuffer = isRayTraced ? gpuDrawResources.MaterialBuffer : null,
+			MeshBuffer = isRayTraced ? gpuDrawResources.MeshBuffer : null,
+			InstanceIndexToInstanceHandleBuffer = isRayTraced ? rayTracingSceneResources?.InstanceIndexToInstanceHandleBuffer : null,
+			PackedMeshVertexBuffer = isRayTraced ? renderer.GetPackedMeshVertexBuffer() : null,
+			PackedMeshIndexBuffer = isRayTraced ? renderer.GetPackedMeshIndexBuffer() : null,
 			TopLevelAccelerationStructure = rayTracingSceneResources?.TopLevelAccelerationStructure,
 			FullResolution = resources.SceneFramebufferSize,
 			OutputResolution = new(output.Descriptor.Width, output.Descriptor.Height),
@@ -180,6 +194,7 @@ public sealed class AmbientOcclusionPass
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
 		bindlessWriter.SetUInt("hitMaskHandle", config.RayTracingHitMaskHandle.Value);
 		bindlessWriter.SetUInt("hitDistanceHandle", config.RayTracingHitDistanceHandle.Value);
+		bindlessWriter.SetUInt("albedoHandle", config.RayTracingAlbedoHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _rayTracedCameraWriter
@@ -210,12 +225,24 @@ public sealed class AmbientOcclusionPass
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 		commandList.SynchronizeAccelerationStructureBuildForComputeRead(config.TopLevelAccelerationStructure);
 		commandList.SetComputeAccelerationStructure(3, config.TopLevelAccelerationStructure);
+		commandList.SetComputeReadOnlyBuffer(4, config.InstanceBuffer ?? throw new InvalidOperationException("RTAS instance buffer missing."));
+		commandList.SetComputeReadOnlyBuffer(5, config.MaterialBuffer ?? throw new InvalidOperationException("RTAS material buffer missing."));
+		commandList.SetComputeReadOnlyBuffer(6, config.InstanceIndexToInstanceHandleBuffer ?? throw new InvalidOperationException("RTAS instance sidecar missing."));
+		commandList.SetComputeReadOnlyBuffer(7, config.MeshBuffer ?? throw new InvalidOperationException("RTAS mesh buffer missing."));
+		commandList.SetComputeReadOnlyBuffer(8, config.PackedMeshVertexBuffer ?? throw new InvalidOperationException("RTAS packed vertex buffer missing."));
+		commandList.SetComputeReadOnlyBuffer(9, config.PackedMeshIndexBuffer ?? throw new InvalidOperationException("RTAS packed index buffer missing."));
 
 		var threadGroupSize = _rayTracedThreadGroupSize
 			?? throw new InvalidOperationException("Ray traced ambient occlusion threadgroup size was not initialized.");
+		var dispatchWidth = config.RayTracingAlbedoHandle.IsValid
+			? Math.Max(config.OutputResolution.X, config.FullResolution.X)
+			: config.OutputResolution.X;
+		var dispatchHeight = config.RayTracingAlbedoHandle.IsValid
+			? Math.Max(config.OutputResolution.Y, config.FullResolution.Y)
+			: config.OutputResolution.Y;
 		var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(
-			(uint)Math.Max(config.OutputResolution.X, 1),
-			(uint)Math.Max(config.OutputResolution.Y, 1));
+			(uint)Math.Max(dispatchWidth, 1),
+			(uint)Math.Max(dispatchHeight, 1));
 		commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 	}
 

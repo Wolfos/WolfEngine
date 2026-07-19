@@ -479,6 +479,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				nameof(descriptor),
 				"DXR ray-tracing geometry requires a float3 position format with a stride that is a multiple of 12 bytes (DXGI_FORMAT_R32G32B32_FLOAT).");
 		}
+		D3D12RayTracingGeometryValidation.Validate(
+			in descriptor,
+			(D3D12Buffer)descriptor.VertexBuffer,
+			(D3D12Buffer)descriptor.IndexBuffer);
 
 		var geometry = CreateBottomLevelGeometry(descriptor);
 		var inputs = new BuildRaytracingAccelerationStructureInputs

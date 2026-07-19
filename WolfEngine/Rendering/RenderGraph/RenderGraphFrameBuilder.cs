@@ -33,6 +33,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle AmbientOcclusionFinal { get; init; }
 	public RenderGraphResourceHandle RayTracingHitMask { get; init; }
 	public RenderGraphResourceHandle RayTracingHitDistance { get; init; }
+	public RenderGraphResourceHandle RayTracingAlbedo { get; init; }
 	public RenderGraphResourceHandle DdgiTraceIrradiance { get; init; }
 	public RenderGraphResourceHandle DdgiTraceVisibility { get; init; }
 	public RenderGraphResourceHandle DdgiIrradianceEstimator { get; init; }
@@ -389,6 +390,7 @@ internal sealed class RenderGraphFrameBuilder
 		var ambientOcclusionFinalHandle = default(RenderGraphResourceHandle);
 		var rayTracingHitMaskHandle = default(RenderGraphResourceHandle);
 		var rayTracingHitDistanceHandle = default(RenderGraphResourceHandle);
+		var rayTracingAlbedoHandle = default(RenderGraphResourceHandle);
 		var ddgiTraceIrradianceHandle = default(RenderGraphResourceHandle);
 		var ddgiTraceVisibilityHandle = default(RenderGraphResourceHandle);
 		var ddgiIrradianceEstimatorHandle = default(RenderGraphResourceHandle);
@@ -598,6 +600,12 @@ internal sealed class RenderGraphFrameBuilder
 						TextureFormat.Rgba16Float,
 						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 						new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
+					rayTracingAlbedoHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+						sceneFramebufferSize.X,
+						sceneFramebufferSize.Y,
+						TextureFormat.Rgba16Float,
+						TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+						new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 				}
 			}
 
@@ -803,6 +811,7 @@ internal sealed class RenderGraphFrameBuilder
 			AmbientOcclusionFinal = ambientOcclusionFinalHandle,
 			RayTracingHitMask = rayTracingHitMaskHandle,
 			RayTracingHitDistance = rayTracingHitDistanceHandle,
+			RayTracingAlbedo = rayTracingAlbedoHandle,
 			DdgiTraceIrradiance = ddgiTraceIrradianceHandle,
 			DdgiTraceVisibility = ddgiTraceVisibilityHandle,
 			DdgiIrradianceEstimator = ddgiIrradianceEstimatorHandle,
@@ -883,6 +892,10 @@ internal sealed class RenderGraphFrameBuilder
 			if (rayTracingHitDistanceHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.RayTracingHitDistance, "Ray Tracing Hit Distance", rayTracingHitDistanceHandle, SceneDebugViewKind.Color);
+			}
+			if (rayTracingAlbedoHandle.IsValid)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.RayTracingAlbedo, "Ray Tracing Albedo", rayTracingAlbedoHandle, SceneDebugViewKind.Color);
 			}
 			if (ddgiIrradianceL0WriteHandle.IsValid)
 			{
@@ -993,6 +1006,10 @@ internal sealed class RenderGraphFrameBuilder
 				if (_frameResources.RayTracingHitDistance.IsValid)
 				{
 					ambientOcclusionEvaluateBuilder.WriteTexture(_frameResources.RayTracingHitDistance, ResourceState.UnorderedAccess);
+				}
+				if (_frameResources.RayTracingAlbedo.IsValid)
+				{
+					ambientOcclusionEvaluateBuilder.WriteTexture(_frameResources.RayTracingAlbedo, ResourceState.UnorderedAccess);
 				}
 				ambientOcclusionEvaluateBuilder.SetExecute(_ambientOcclusionExecute);
 
@@ -1766,6 +1783,8 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_frameResources,
 			_renderer.GetGfxDevice(),
+			_renderer,
+			_gpuDrawResources,
 			_frameResources.Config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced
 				? _rayTracingSceneResources
 				: null);
