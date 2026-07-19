@@ -24,6 +24,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private readonly IPrefabAssetCreator _prefabAssetCreator;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorNotificationService _notificationService;
+	private readonly EditorCameraSystem? _editorCameraSystem;
 	private Entity? _contextMenuEntity;
 	private Entity? _pressedEntity;
 	private Entity? _draggedEntity;
@@ -37,7 +38,8 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		IEditorUndoRedoService undoRedoService,
 		IPrefabAssetCreator prefabAssetCreator,
 		IAssetSelectionService assetSelectionService,
-		IEditorNotificationService notificationService)
+		IEditorNotificationService notificationService,
+		EditorCameraSystem? editorCameraSystem = null)
 	{
 		_iconManager = iconManager;
 		_interactionState = interactionState;
@@ -46,6 +48,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		_prefabAssetCreator = prefabAssetCreator;
 		_assetSelectionService = assetSelectionService;
 		_notificationService = notificationService;
+		_editorCameraSystem = editorCameraSystem;
 	}
 
 	public override string Name => "Entities";
@@ -320,7 +323,8 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		{
 			if (ImGui.MenuItem("Entity"))
 			{
-				var createdEntity = scene.World.CreateEntity("Entity", Matrix4x4.Identity);
+				var createdEntity = scene.World.CreateEntity(
+					"Entity", GetNewEntityPosition(), Quaternion.Identity, Vector3.One);
 				EditorGui.SelectEntity(createdEntity, scene.World);
 				_interactionState.MarkSceneDirty();
 			}
@@ -353,6 +357,17 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 
 		ImGui.EndPopup();
+	}
+
+	private Vector3 GetNewEntityPosition()
+	{
+		if (_editorCameraSystem is null ||
+		    _editorCameraSystem.TryGetCameraPose(out var position, out var forward) == false)
+		{
+			return Vector3.Zero;
+		}
+
+		return position + Vector3.Normalize(forward) * 5.0f;
 	}
 
 	private void DuplicateEntity(Entity entity, EditorScene scene)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using WolfEngine.AssetPipeline;
@@ -34,8 +35,8 @@ public interface IProjectAssetPipelineService
 		string globalCellPath,
 		IReadOnlyDictionary<Int2, string> spatialCellPaths);
 	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
-	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world);
-	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene);
+	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world, Vector3? spawnPosition = null);
+	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null);
 }
 
 public readonly record struct AssetPipelineRefreshResult(
@@ -389,7 +390,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return new AssetImportResult();
 	}
 
-	public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+	public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world, Vector3? spawnPosition = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
 		ArgumentNullException.ThrowIfNull(world);
@@ -414,7 +415,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		if (modelFile.RootNodes.Count == 1)
 		{
-			CreateModelNodeEntity(modelFile.RootNodes[0], world, parent: null);
+			var rootEntity = CreateModelNodeEntity(modelFile.RootNodes[0], world, parent: null);
+			ApplySpawnPosition(world, rootEntity, spawnPosition);
 			return;
 		}
 
@@ -425,9 +427,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			CreateModelNodeEntity(rootNode, world, wrapper);
 		}
+
+		ApplySpawnPosition(world, wrapper, spawnPosition);
 	}
 
-	public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+	public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
 		ArgumentNullException.ThrowIfNull(scene);
@@ -456,10 +460,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				$"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
 		}
 
-		InstantiatePrefabEntities(scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
+		var instantiatedRoot = InstantiatePrefabEntities(
+			scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
+		ApplySpawnPosition(scene.World, instantiatedRoot, spawnPosition);
 	}
 
-	private void CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
+	private Entity CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
 	{
 		var entity = world.CreateEntity(node.Name);
 		if (parent is { } parentEntity)
@@ -498,6 +504,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			CreateModelNodeEntity(node.Children[i], world, entity);
 		}
+
+		return entity;
 	}
 
 	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath,
@@ -2044,7 +2052,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return childrenByParent;
 	}
 
-	private void InstantiatePrefabEntities(
+	private Entity InstantiatePrefabEntities(
 		EditorScene scene,
 		string projectRootPath,
 		Guid prefabNodeId,
@@ -2058,6 +2066,23 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		CreateInstantiatedPrefabEntities(scene, prefabNodeId, rootEntity.EntityId, resolvedEntitiesById,
 			childrenByParent, instantiatedEntitiesBySourceId, parent: null);
 		ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId);
+		return instantiatedEntitiesBySourceId[rootEntity.EntityId];
+	}
+
+	private static void ApplySpawnPosition(World world, Entity rootEntity, Vector3? spawnPosition)
+	{
+		if (spawnPosition is not { } position)
+		{
+			return;
+		}
+
+		if (world.HasComponent<LocalTransform>(rootEntity))
+		{
+			world.SetLocalPosition(rootEntity, position);
+			return;
+		}
+
+		world.AddTransform(rootEntity, Matrix4x4.CreateTranslation(position));
 	}
 
 	private Dictionary<Guid, SavedEntity> ResolvePrefabEntitiesForInstantiation(

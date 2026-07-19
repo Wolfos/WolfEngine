@@ -1492,11 +1492,11 @@ public sealed class AssetsWindowTests
 			return new AssetImportResult();
 		}
 
-		public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world)
+		public void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world, Vector3? spawnPosition = null)
 		{
 		}
 
-		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene)
+		public void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
 		{
 		}
 

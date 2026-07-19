@@ -7,7 +7,7 @@ using WolfEngine.Rendering.UI;
 namespace WolfEngine.Editor;
 
 [EditorOnly]
-public struct CameraMover : IEntityComponent
+public struct EditorCameraMover : IEntityComponent
 {
 	public float MoveSpeed;
 	public float LookSensitivity;
@@ -16,7 +16,7 @@ public struct CameraMover : IEntityComponent
 	public bool Initialized;
 }
 
-public class CameraMoverSystem: IUpdate
+public class EditorCameraSystem: IUpdate
 {
 	private readonly IInputSystem _inputSystem;
 	private readonly EditorViewportStateBus _viewportStateBus;
@@ -30,8 +30,11 @@ public class CameraMoverSystem: IUpdate
 	private bool _isLooking;
 	private Vector2 _lookDelta;
 	private bool _hadViewportControl;
+	private Vector3 _position;
+	private Vector3 _forward = Vector3.UnitZ;
+	private bool _hasCameraPose;
 
-	public CameraMoverSystem(IInputSystem inputSystem, EditorViewportStateBus viewportStateBus)
+	public EditorCameraSystem(IInputSystem inputSystem, EditorViewportStateBus viewportStateBus)
 	{
 		_inputSystem = inputSystem;
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
@@ -109,7 +112,7 @@ public class CameraMoverSystem: IUpdate
 			_hadViewportControl = true;
 		}
 
-		foreach (var entry in world.View<LocalTransform, CameraMover>())
+		foreach (var entry in world.View<LocalTransform, EditorCameraMover>())
 		{
 			ref var transform = ref entry.First;
 			ref var mover = ref entry.Second;
@@ -136,9 +139,19 @@ public class CameraMoverSystem: IUpdate
 			var speed = mover.MoveSpeed * (_speedBoost ? 2.0f : 1.0f);
 			
 			world.Translate(entry.Entity, move * speed * deltaTime, true);
+			_position = transform.LocalPosition;
+			_forward = forward;
+			_hasCameraPose = true;
 		}
 
 		_lookDelta = Vector2.Zero;
+	}
+
+	public bool TryGetCameraPose(out Vector3 position, out Vector3 forward)
+	{
+		position = _position;
+		forward = _forward;
+		return _hasCameraPose;
 	}
 
 	public WorldTag GetTag() => WorldTag.Editor;
@@ -162,7 +175,7 @@ public class CameraMoverSystem: IUpdate
 		_speedBoost = false;
 	}
 
-	private static void EnsureDefaults(ref CameraMover mover)
+	private static void EnsureDefaults(ref EditorCameraMover mover)
 	{
 		if (mover.MoveSpeed <= 0.0f)
 		{
@@ -175,7 +188,7 @@ public class CameraMoverSystem: IUpdate
 		}
 	}
 
-	private static void EnsureOrientationFromTransform(ref CameraMover mover, LocalTransform localTransform)
+	private static void EnsureOrientationFromTransform(ref EditorCameraMover mover, LocalTransform localTransform)
 	{
 		if (mover.Initialized)
 		{

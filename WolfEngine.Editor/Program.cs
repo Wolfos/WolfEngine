@@ -33,6 +33,7 @@ public static class Program
 		services.AddSingleton<RigidbodySystem>();
 		services.AddSingleton<IEditorPlaySession, EditorPlaySession>();
 		services.AddSingleton<EditorCameraContext>();
+		services.AddSingleton<EditorCameraSystem>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
 		services.AddSingleton<IEditorOperationService, EditorOperationService>();

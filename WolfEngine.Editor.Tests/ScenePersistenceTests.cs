@@ -58,7 +58,7 @@ public sealed class ScenePersistenceTests
 		scene.World.SetParent(child, parent);
 		scene.World.SetEnabled(child, false);
 		scene.EntityIcons[child] = "light";
-		scene.World.AddComponent(child, new CameraMover { MoveSpeed = 7.0f, LookSensitivity = 0.01f });
+		scene.World.AddComponent(child, new EditorCameraMover { MoveSpeed = 7.0f, LookSensitivity = 0.01f });
 
 		environment.Factory.Save(scene);
 		var loadedScene = environment.Factory.Load(scene.AssetId);
@@ -69,7 +69,7 @@ public sealed class ScenePersistenceTests
 		Assert.That(loadedScene.World.GetComponent<Parent>(loadedChild).Value, Is.EqualTo(loadedParent));
 		Assert.That(loadedScene.World.IsEnabled(loadedChild), Is.False);
 		Assert.That(loadedScene.EntityIcons[loadedChild], Is.EqualTo("light"));
-		Assert.That(loadedScene.World.HasComponent<CameraMover>(loadedChild), Is.False);
+		Assert.That(loadedScene.World.HasComponent<EditorCameraMover>(loadedChild), Is.False);
 		Assert.That(loadedScene.World.HasComponent<WorldTransform>(loadedParent), Is.True);
 		Assert.That(loadedScene.World.HasComponent<WorldTransform>(loadedChild), Is.True);
 	}

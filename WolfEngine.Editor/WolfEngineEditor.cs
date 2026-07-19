@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.ECS;
 using WolfEngine.Gameplay;
 using WolfEngine.Editor.UI;
@@ -156,7 +157,7 @@ public class WolfEngineEditor
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
 		_worldManager.AddSystem<TransformSystem>();
-		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
+		_worldManager.AddSystem(_serviceProvider.GetRequiredService<EditorCameraSystem>());
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
 		_worldManager.AddSystem(_sphereColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
@@ -623,7 +624,7 @@ public class WolfEngineEditor
 
 		var entity = world.CreateEntity("Editor Camera", worldTransform);
 		world.AddComponent(entity, camera);
-		world.AddComponent(entity, new CameraMover());
+		world.AddComponent(entity, new EditorCameraMover());
 		return entity;
 	}
 

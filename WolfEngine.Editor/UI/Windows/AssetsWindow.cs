@@ -33,6 +33,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private readonly IIconManager _icons;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly EditorCameraSystem? _editorCameraSystem;
 	private readonly AssetsWindowDragDropState _dragDrop = new(DragPreviewRounding);
 	private readonly AssetsWindowSelectionState _selection = new();
 	private string _errorMessage = string.Empty;
@@ -55,7 +56,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		IEditorAssetHandlerRegistry assetHandlerRegistry,
 		IIconManager icons,
 		IEditorInteractionState interactionState,
-		IEditorCommandService commandService)
+		IEditorCommandService commandService,
+		EditorCameraSystem? editorCameraSystem = null)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
@@ -66,6 +68,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
+		_editorCameraSystem = editorCameraSystem;
 	}
 
 	internal string? PendingDeleteKindForTesting => _pendingDeleteTarget?.Kind.ToString();
@@ -674,7 +677,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			try
 			{
-				_assetPipelineService.InstantiateImportedModel(_projectService.ProjectRootPath!, asset.Id, scene.World);
+				_assetPipelineService.InstantiateImportedModel(
+					_projectService.ProjectRootPath!, asset.Id, scene.World, GetSceneSpawnPosition());
 				_interactionState.MarkSceneDirty();
 			}
 			catch (Exception ex)
@@ -687,7 +691,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			try
 			{
-				_assetPipelineService.InstantiatePrefab(_projectService.ProjectRootPath!, asset.Id, scene);
+				_assetPipelineService.InstantiatePrefab(
+					_projectService.ProjectRootPath!, asset.Id, scene, GetSceneSpawnPosition());
 				_interactionState.MarkSceneDirty();
 			}
 			catch (Exception ex)
@@ -716,6 +721,17 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			RequestDelete(PendingDeleteTarget.ForSource(contextTarget.RelativeSourcePath!));
 		}
+	}
+
+	private Vector3? GetSceneSpawnPosition()
+	{
+		if (_editorCameraSystem is null ||
+		    _editorCameraSystem.TryGetCameraPose(out var position, out var forward) == false)
+		{
+			return null;
+		}
+
+		return position + Vector3.Normalize(forward) * 5.0f;
 	}
 
 	private void DrawCreateMenuItems(IReadOnlyList<EditorAssetCreateMenuItem> items, string targetFolderPath)
