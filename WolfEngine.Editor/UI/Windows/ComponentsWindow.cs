@@ -25,6 +25,7 @@ public interface IComponentEditor
 public class ComponentsWindow : EditorWindow, IComponentEditor
 {
     private const string AddComponentPopupId = "AddComponentPopup";
+    private static readonly Vector2 AddComponentPopupSize = new(420.0f, 320.0f);
     private static readonly MethodInfo DrawComponentEditorGenericMethod = typeof(ComponentsWindow).GetMethod(
         nameof(DrawComponentEditorGeneric),
         BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -42,6 +43,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
     private readonly List<ProjectTypeDescriptor> _addableComponentTypes = new();
     private readonly List<Type> _existingComponentTypes = new();
     private readonly Dictionary<string, int> _componentNameCounts = new(StringComparer.Ordinal);
+    private string _addComponentSearchText = string.Empty;
     private readonly Dictionary<TerrainEditKey, TerrainComponent> _pendingTerrainEdits = new();
     private readonly List<Entity> _componentTargets = new();
     private Type? _pendingRemovedComponentType;
@@ -202,23 +204,61 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
+        ImGui.SetNextWindowSize(AddComponentPopupSize, ImGuiCond.Appearing);
         if (ImGui.BeginPopup(AddComponentPopupId) == false)
         {
             return;
         }
 
-        foreach (var descriptor in _addableComponentTypes)
+        if (ImGui.IsWindowAppearing())
         {
-            if (ImGui.MenuItem(GetAddComponentLabel(descriptor)) == false)
+            _addComponentSearchText = string.Empty;
+            ImGui.SetKeyboardFocusHere();
+        }
+
+        ImGui.InputText("##ComponentSearch", ref _addComponentSearchText, 256);
+        ImGui.Separator();
+        ImGui.BeginChild("AddComponentResults", new Vector2(0.0f, 240.0f), ImGuiChildFlags.Borders);
+        try
+        {
+            var matchingComponentCount = 0;
+            foreach (var descriptor in _addableComponentTypes)
             {
-                continue;
+                var label = GetAddComponentLabel(descriptor);
+                if (MatchesComponentSearch(descriptor, _addComponentSearchText) == false)
+                {
+                    continue;
+                }
+
+                matchingComponentCount++;
+                ImGui.PushID(descriptor.Type.FullName);
+                try
+                {
+                    if (ImGui.Selectable(label) == false)
+                    {
+                        continue;
+                    }
+
+                    RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
+                    EditorGui.SelectEntity(entity, scene.World);
+                    _interactionState.MarkSceneDirty();
+                    ImGui.CloseCurrentPopup();
+                    break;
+                }
+                finally
+                {
+                    ImGui.PopID();
+                }
             }
 
-            RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
-            EditorGui.SelectEntity(entity, scene.World);
-            _interactionState.MarkSceneDirty();
-            ImGui.CloseCurrentPopup();
-            break;
+            if (matchingComponentCount == 0)
+            {
+                ImGui.TextDisabled("No matching components.");
+            }
+        }
+        finally
+        {
+            ImGui.EndChild();
         }
 
         ImGui.EndPopup();
@@ -1060,6 +1100,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         return _componentNameCounts.TryGetValue(descriptor.DisplayName, out var count) && count > 1
             ? descriptor.QualifiedDisplayName
             : descriptor.DisplayName;
+    }
+
+    private static bool MatchesComponentSearch(ProjectTypeDescriptor descriptor, string searchText)
+    {
+        return string.IsNullOrWhiteSpace(searchText) ||
+               descriptor.DisplayName.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+               descriptor.QualifiedDisplayName.Contains(searchText, StringComparison.OrdinalIgnoreCase);
     }
 
     private void DrawPrefabControls(EditorScene scene, Entity entity)
