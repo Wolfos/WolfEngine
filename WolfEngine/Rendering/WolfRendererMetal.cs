@@ -556,7 +556,7 @@ internal unsafe class WolfRendererMetal : IRenderer
                 TextureFormat.Bgra8Unorm,
                 TextureFormat.Rgba16Float,
                 TextureFormat.Rgba8Unorm,
-                TextureFormat.Rgba8Unorm
+                TextureFormat.Rgba16Float
             }),
             depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
             renderState: renderState,

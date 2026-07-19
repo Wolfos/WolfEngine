@@ -449,7 +449,7 @@ internal sealed class RenderGraphFrameBuilder
 			gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
-				TextureFormat.Rgba8Unorm,
+				TextureFormat.Rgba16Float,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			gbufferVelocityHandle = _resources.CreateTransientTexture(new TextureDescriptor(
@@ -492,7 +492,7 @@ internal sealed class RenderGraphFrameBuilder
 				gbufferEmissiveHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 					sceneFramebufferSize.X,
 					sceneFramebufferSize.Y,
-					TextureFormat.Rgba8Unorm,
+					TextureFormat.Rgba16Float,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
 			}

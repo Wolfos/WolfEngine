@@ -970,7 +970,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				TextureFormat.Bgra8Unorm,     // Albedo
 				TextureFormat.Rgba16Float,    // Normal
 				TextureFormat.Rgba8Unorm,     // Material
-				TextureFormat.Rgba8Unorm      // Emissive
+				TextureFormat.Rgba16Float     // Emissive
 			}),
 			depthStencil: new AbstractionDepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
