@@ -46,6 +46,7 @@ public class WolfEngineEditor
 	private readonly IEditorUndoRedoService _undoRedoService;
 	private readonly IEditorOperationService _operationService;
 	private readonly BoxColliderGizmoDrawer _boxColliderGizmoDrawer;
+	private readonly SphereColliderGizmoDrawer _sphereColliderGizmoDrawer;
 	private readonly CapsuleColliderGizmoDrawer _capsuleColliderGizmoDrawer;
 	private readonly IProjectTypeCatalog _typeCatalog;
 	private readonly List<ISystem> _registeredGameplaySystems = new();
@@ -86,6 +87,7 @@ public class WolfEngineEditor
 		IEditorUndoRedoService undoRedoService,
 		IEditorOperationService operationService,
 		BoxColliderGizmoDrawer boxColliderGizmoDrawer,
+		SphereColliderGizmoDrawer sphereColliderGizmoDrawer,
 		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
 		IAudioRuntime audioRuntime,
 		IServiceProvider serviceProvider)
@@ -110,6 +112,7 @@ public class WolfEngineEditor
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 		_boxColliderGizmoDrawer = boxColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(boxColliderGizmoDrawer));
+		_sphereColliderGizmoDrawer = sphereColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(sphereColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_serviceProvider = serviceProvider;
@@ -155,6 +158,7 @@ public class WolfEngineEditor
 		_worldManager.AddSystem<TransformSystem>();
 		_worldManager.AddSystem(new CameraMoverSystem(_inputSystem, _viewportStateBus));
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
+		_worldManager.AddSystem(_sphereColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
 		
 		var sun = authoringWorld.CreateEntity("Sun");

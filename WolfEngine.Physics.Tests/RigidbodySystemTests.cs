@@ -230,6 +230,44 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_SphereColliderCreatesBodyAndRespondsToCenterOffset()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Offset Sphere", Matrix4x4.Identity);
+		var collider = SphereCollider.CreateDefault();
+		collider.Radius = 1.0f;
+		collider.Center = new Vector3(0.0f, 2.0f, 0.0f);
+		world.AddComponent(entity, collider);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		var hitSomething = system.TryRaycast(world, new Vector3(0.0f, 5.0f, 0.0f), new Vector3(0.0f, -10.0f, 0.0f), out var hit);
+
+		Assert.That(system.GetTrackedBodyCount(world), Is.EqualTo(1));
+		Assert.That(hitSomething, Is.True);
+		Assert.That(hit.Entity, Is.EqualTo(entity));
+		Assert.That(hit.Point.Y, Is.EqualTo(3.0f).Within(0.05f));
+	}
+
+	[Test]
+	public void PhysicsUpdate_SphereRadiusChangeRecreatesBody()
+	{
+		var world = new World(WorldTag.Game);
+		var entity = world.CreateEntity("Sphere", Matrix4x4.Identity);
+		world.AddComponent(entity, SphereCollider.CreateDefault());
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdBefore), Is.True);
+
+		ref var collider = ref world.GetComponent<SphereCollider>(entity);
+		collider.Radius = 1.0f;
+		system.PhysicsUpdate(1.0f / 60.0f, world);
+
+		Assert.That(system.TryGetTrackedBodyId(world, entity, out var bodyIdAfter), Is.True);
+		Assert.That(bodyIdAfter, Is.Not.EqualTo(bodyIdBefore));
+	}
+
+	[Test]
 	public void PhysicsUpdate_MeshColliderWithoutRigidbodyCreatesStaticBody()
 	{
 		var world = new World(WorldTag.Game);

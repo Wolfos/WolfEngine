@@ -482,6 +482,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			var changed = false;
 			var bodiesToRemove = new List<Entity>();
 			var totalColliderCount = world.GetComponentCount<BoxCollider>() +
+			                         world.GetComponentCount<SphereCollider>() +
 			                         world.GetComponentCount<CapsuleCollider>() +
 			                         world.GetComponentCount<MeshCollider>() +
 			                         world.GetComponentCount<TerrainComponent>();
@@ -532,6 +533,17 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				}
 
 				state.LastBoxColliderCount = world.GetComponentCount<BoxCollider>();
+			}
+
+			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateSphere"))
+			{
+				if (state.LastSphereColliderCount != world.GetComponentCount<SphereCollider>() ||
+				    state.BodiesByEntity.Count < totalColliderCount)
+				{
+					CreateBodiesForView(world, state, world.View<SphereCollider>(), ref changed);
+				}
+
+				state.LastSphereColliderCount = world.GetComponentCount<SphereCollider>();
 			}
 
 			using (FrameProfiler.Instance.Measure("Physics.SyncBodies.CreateCapsule"))
@@ -693,6 +705,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			ref var collider = ref world.GetComponent<CapsuleCollider>(entity);
 			UpdateCapsuleColliderCache(ref collider, worldScale, collisionFilter);
 			shapeDefinition = PhysicsShapeDefinition.CreateCapsule(collider.CachedScaledHalfHeight, collider.CachedScaledRadius, collider.CachedScaledCenter);
+			return true;
+		}
+
+		if (colliderKind == PhysicsColliderKind.Sphere)
+		{
+			ref var collider = ref world.GetComponent<SphereCollider>(entity);
+			UpdateSphereColliderCache(ref collider, worldScale, collisionFilter);
+			shapeDefinition = PhysicsShapeDefinition.CreateSphere(collider.CachedScaledRadius, collider.CachedScaledCenter);
 			return true;
 		}
 
@@ -1040,6 +1060,12 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			return true;
 		}
 
+		if (world.HasComponent<SphereCollider>(entity))
+		{
+			colliderKind = PhysicsColliderKind.Sphere;
+			return true;
+		}
+
 		if (world.HasComponent<CapsuleCollider>(entity))
 		{
 			colliderKind = PhysicsColliderKind.Capsule;
@@ -1094,6 +1120,14 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			       collider.CachedCenter != collider.Center;
 		}
 
+		if (colliderKind == PhysicsColliderKind.Sphere)
+		{
+			ref var collider = ref world.GetComponent<SphereCollider>(entity);
+			return collider.PhysicsCacheValid == false ||
+			       MathF.Abs(collider.CachedRadius - collider.Radius) > 0.0001f ||
+			       collider.CachedCenter != collider.Center;
+		}
+
 		if (colliderKind == PhysicsColliderKind.Mesh)
 		{
 			ref var collider = ref world.GetComponent<MeshCollider>(entity);
@@ -1119,6 +1153,7 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				definition.HeightfieldScale,
 				definition.HeightfieldSampleCount),
 			PhysicsColliderKind.Box => new BoxShape(definition.BoxHalfExtents),
+			PhysicsColliderKind.Sphere => new SphereShape(definition.SphereRadius),
 			PhysicsColliderKind.Capsule => new CapsuleShape(definition.CapsuleHalfHeight, definition.CapsuleRadius),
 			PhysicsColliderKind.Mesh => CreateMeshShape(definition.Mesh!, definition.MeshScale),
 			_ => throw new InvalidOperationException($"Unsupported physics shape kind '{definition.Kind}'.")
@@ -1168,6 +1203,9 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 			PhysicsColliderKind.Box => world.GetComponent<BoxCollider>(entity).PhysicsCacheValid == false ||
 			                           world.GetComponent<BoxCollider>(entity).CachedLayer != layer ||
 			                           world.GetComponent<BoxCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
+			PhysicsColliderKind.Sphere => world.GetComponent<SphereCollider>(entity).PhysicsCacheValid == false ||
+			                              world.GetComponent<SphereCollider>(entity).CachedLayer != layer ||
+			                              world.GetComponent<SphereCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
 			PhysicsColliderKind.Capsule => world.GetComponent<CapsuleCollider>(entity).PhysicsCacheValid == false ||
 			                               world.GetComponent<CapsuleCollider>(entity).CachedLayer != layer ||
 			                               world.GetComponent<CapsuleCollider>(entity).CachedCollidesWith != collisionFilter.CollidesWith,
@@ -1199,6 +1237,18 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		collider.CachedScaledHalfHeight = MathF.Max(0.001f, MathF.Abs(collider.HalfHeight * worldScale.Y));
 		var radiusScale = MathF.Max(MathF.Abs(worldScale.X), MathF.Abs(worldScale.Z));
 		collider.CachedScaledRadius = MathF.Max(0.001f, MathF.Abs(collider.Radius * radiusScale));
+		collider.CachedScaledCenter = Multiply(collider.Center, worldScale);
+		collider.CachedLayer = ClampLayer(collisionFilter.Layer);
+		collider.CachedCollidesWith = collisionFilter.CollidesWith;
+		collider.PhysicsCacheValid = true;
+	}
+
+	private static void UpdateSphereColliderCache(ref SphereCollider collider, Vector3 worldScale, CollisionFilter collisionFilter)
+	{
+		collider.CachedRadius = collider.Radius;
+		collider.CachedCenter = collider.Center;
+		var radiusScale = MathF.Max(MathF.Abs(worldScale.X), MathF.Max(MathF.Abs(worldScale.Y), MathF.Abs(worldScale.Z)));
+		collider.CachedScaledRadius = MathF.Max(0.001f, MathF.Abs(collider.Radius) * radiusScale);
 		collider.CachedScaledCenter = Multiply(collider.Center, worldScale);
 		collider.CachedLayer = ClampLayer(collisionFilter.Layer);
 		collider.CachedCollidesWith = collisionFilter.CollidesWith;

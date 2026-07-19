@@ -194,6 +194,7 @@ internal sealed class PhysicsWorldState : IDisposable
 	public Dictionary<Entity, PhysicsVehicleState> VehiclesByEntity { get; } = new();
 	public List<PhysicsContactEvent> ContactEvents { get; } = new();
 	public int LastBoxColliderCount { get; set; } = -1;
+	public int LastSphereColliderCount { get; set; } = -1;
 	public int LastCapsuleColliderCount { get; set; } = -1;
 	public int LastMeshColliderCount { get; set; } = -1;
 	public int LastTerrainColliderCount { get; set; } = -1;
@@ -394,6 +395,7 @@ internal readonly record struct PhysicsShapeDefinition(
 	Vector3 BoxHalfExtents,
 	float CapsuleHalfHeight,
 	float CapsuleRadius,
+	float SphereRadius,
 	Vector3 Center,
 	Mesh? Mesh,
 	Vector3 MeshScale,
@@ -404,17 +406,22 @@ internal readonly record struct PhysicsShapeDefinition(
 {
 	public static PhysicsShapeDefinition CreateBox(Vector3 halfExtents, Vector3 center)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Box, halfExtents, 0.0f, 0.0f, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Box, halfExtents, 0.0f, 0.0f, 0.0f, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
 	}
 
 	public static PhysicsShapeDefinition CreateCapsule(float halfHeight, float radius, Vector3 center)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Capsule, Vector3.Zero, halfHeight, radius, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Capsule, Vector3.Zero, halfHeight, radius, 0.0f, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
+	}
+
+	public static PhysicsShapeDefinition CreateSphere(float radius, Vector3 center)
+	{
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Sphere, Vector3.Zero, 0.0f, 0.0f, radius, center, null, Vector3.One, null, Vector3.Zero, Vector3.One, 0);
 	}
 
 	public static PhysicsShapeDefinition CreateMesh(Mesh mesh, Vector3 meshScale)
 	{
-		return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale, null, Vector3.Zero, Vector3.One, 0);
+		return new PhysicsShapeDefinition(PhysicsColliderKind.Mesh, Vector3.Zero, 0.0f, 0.0f, 0.0f, Vector3.Zero, mesh, meshScale, null, Vector3.Zero, Vector3.One, 0);
 	}
 
 	public static PhysicsShapeDefinition CreateTerrain(
@@ -426,6 +433,7 @@ internal readonly record struct PhysicsShapeDefinition(
 		return new PhysicsShapeDefinition(
 			PhysicsColliderKind.Terrain,
 			Vector3.Zero,
+			0.0f,
 			0.0f,
 			0.0f,
 			Vector3.Zero,
@@ -458,6 +466,7 @@ internal enum PhysicsColliderKind
 {
 	Terrain,
 	Box,
+	Sphere,
 	Capsule,
 	Mesh
 }

@@ -110,6 +110,7 @@ public static class Program
 		services.AddSingleton<ITerrainAuthoringService, TerrainAuthoringService>();
 		services.AddSingleton<TerrainToolController>();
 		services.AddSingleton<BoxColliderGizmoDrawer>();
+		services.AddSingleton<SphereColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<EditorGui>();
