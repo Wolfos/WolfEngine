@@ -25,14 +25,6 @@ cbuffer CasSettings : register(b1)
     uint casConst1W;
 };
 
-float3 LinearToSrgb(float3 color)
-{
-    float3 cutoff = step(color, 0.0031308f.xxx);
-    float3 lower = color * 12.92f;
-    float3 upper = 1.055f * pow(abs(color), 1.0f / 2.4f) - 0.055f;
-    return lerp(upper, lower, cutoff);
-}
-
 int2 ClampPixel(int2 pixel, uint2 size)
 {
     return clamp(pixel, int2(0, 0), int2(int(size.x) - 1, int(size.y) - 1));
@@ -85,6 +77,5 @@ void CasSharpenCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 linearColor = sharpenEnabled != 0u
         ? CasFilterNoScaling(inputTexture, pixel, renderSize, casConst1)
         : inputTexture.Load(int3(pixel, 0)).rgb;
-    float3 encoded = saturate(LinearToSrgb(saturate(linearColor)));
-    outputTexture[pixel] = float4(encoded, 1.0f);
+    outputTexture[pixel] = float4(linearColor, 1.0f);
 }

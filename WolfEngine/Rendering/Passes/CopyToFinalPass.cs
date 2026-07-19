@@ -30,14 +30,16 @@ public sealed class CopyToFinalPass
 
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
-		var input = context.GetTexture(resources.TonemappedSceneColor);
+		var input = context.GetTexture(resources.DisplayLinearSceneColor);
 		var output = context.GetTexture(resources.FinalColor);
+		var encodedSceneOutput = context.GetTexture(resources.EncodedSceneColor);
 
 		return new CopyToFinalPassConfig
 		{
 			Pipeline = pipeline,
 			InputHandle = _bindlessRegistry.GetTextureHandle(input),
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
+			EncodedSceneOutputHandle = _bindlessRegistry.RegisterRwTexture(encodedSceneOutput),
 			RenderSize = resources.FramebufferSize
 		};
 	}
@@ -55,6 +57,7 @@ public sealed class CopyToFinalPass
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("inputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
+		bindlessWriter.SetUInt("encodedSceneOutputHandle", config.EncodedSceneOutputHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var settingsWriter = _settingsWriter

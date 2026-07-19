@@ -14,6 +14,55 @@ namespace WolfEngine.Tests;
 public sealed class RayTracingSceneResourcesTests
 {
 	[Test]
+	public void Aces2SdrTonemappingAndPresentationShadersCompileForMetal()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+		{
+			Assert.Ignore("Metal shader validation only runs on macOS.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		var tonemapping = shaderCompiler.GetComputeShaderWithReflection(
+			ShaderPath("tonemapping.compute.slang"),
+			"TonemappingCS",
+			GraphicsBackendKind.Metal);
+		var presentation = shaderCompiler.GetComputeShaderWithReflection(
+			ShaderPath("copy_to_final.compute.slang"),
+			"CopyToFinalCS",
+			GraphicsBackendKind.Metal);
+
+		Assert.That(tonemapping.Bytecode.IsEmpty, Is.False);
+		Assert.That(presentation.Bytecode.IsEmpty, Is.False);
+		Assert.That(
+			presentation.ReflectionLayout.GetConstantBuffer("BindlessHandles")
+				.GetFieldOrThrow("encodedSceneOutputHandle").ValueKind,
+			Is.EqualTo(ShaderConstantFieldValueKind.UInt));
+	}
+
+	[Test]
+	public void Aces2SdrTonemappingAndPresentationShadersCompileForD3D12()
+	{
+		if (OperatingSystem.IsWindows() == false)
+		{
+			Assert.Ignore("DirectX shader validation only runs on Windows.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		foreach (var shader in new[]
+		{
+			(Name: "tonemapping.compute.slang", EntryPoint: "TonemappingCS"),
+			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS")
+		})
+		{
+			var compiled = shaderCompiler.GetComputeShaderWithReflection(
+				ShaderPath(shader.Name),
+				shader.EntryPoint,
+				GraphicsBackendKind.D3D12);
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+		}
+	}
+
+	[Test]
 	public void GpuDrawCullShaderCompilesWithMultiViewLayoutForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)

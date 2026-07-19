@@ -32,7 +32,7 @@ public sealed class CasSharpenPass
 		_bindlessRegistry.EnsureInitialized(device);
 
 		var input = context.GetTexture(resources.TonemappedLinearSceneColor);
-		var output = context.GetTexture(resources.TonemappedSceneColor);
+		var output = context.GetTexture(resources.DisplayLinearSceneColor);
 		var taa = resources.Config.TemporalAntiAliasing;
 
 		return new CasSharpenPassConfig

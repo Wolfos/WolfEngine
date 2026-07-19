@@ -146,7 +146,8 @@ public sealed class ScreenSpaceDecalPassTests
 			LightingBuffer = registry.CreateTransientTexture(textureDescriptor),
 			ResolvedSceneColor = registry.CreateTransientTexture(textureDescriptor),
 			TonemappedLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
-			TonemappedSceneColor = registry.CreateTransientTexture(textureDescriptor),
+			DisplayLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
+			EncodedSceneColor = registry.CreateTransientTexture(textureDescriptor),
 			FinalColor = registry.CreateTransientTexture(textureDescriptor),
 			Config = new RenderConfig
 			{

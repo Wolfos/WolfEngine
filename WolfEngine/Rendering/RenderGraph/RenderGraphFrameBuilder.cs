@@ -16,7 +16,8 @@ public readonly struct RenderGraphFrameResources
 	public Int2 SceneFramebufferSize { get; init; }
 	public bool SceneEnabled { get; init; }
 	public RenderGraphResourceHandle TonemappedLinearSceneColor { get; init; }
-	public RenderGraphResourceHandle TonemappedSceneColor { get; init; }
+	public RenderGraphResourceHandle DisplayLinearSceneColor { get; init; }
+	public RenderGraphResourceHandle EncodedSceneColor { get; init; }
 	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
@@ -774,7 +775,16 @@ internal sealed class RenderGraphFrameBuilder
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 
-		var tonemappedSceneColorHandle = sceneEnabled
+		var displayLinearSceneColorHandle = sceneEnabled
+			? _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
+			: default;
+
+		var encodedSceneColorHandle = sceneEnabled
 			? _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
@@ -789,7 +799,8 @@ internal sealed class RenderGraphFrameBuilder
 			SceneFramebufferSize = sceneFramebufferSize,
 			SceneEnabled = sceneEnabled,
 			TonemappedLinearSceneColor = tonemappedLinearSceneColorHandle,
-			TonemappedSceneColor = tonemappedSceneColorHandle,
+			DisplayLinearSceneColor = displayLinearSceneColorHandle,
+			EncodedSceneColor = encodedSceneColorHandle,
 			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
@@ -871,7 +882,7 @@ internal sealed class RenderGraphFrameBuilder
 
 		if (sceneEnabled)
 		{
-			RegisterSceneDebugView(SceneDebugViewIds.FinalColor, "Final Color", _frameResources.TonemappedSceneColor, SceneDebugViewKind.Color);
+			RegisterSceneDebugView(SceneDebugViewIds.FinalColor, "Final Color", _frameResources.EncodedSceneColor, SceneDebugViewKind.Color);
 			if (bloomDownsampleLevels.Length > 0)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.BloomPrefilter, "Bloom Prefilter", bloomDownsampleLevels[0], SceneDebugViewKind.Color);
@@ -1301,11 +1312,12 @@ internal sealed class RenderGraphFrameBuilder
 
 			graph.AddPass("CAS Sharpen", PassKind.Compute)
 				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
-				.WriteTexture(_frameResources.TonemappedSceneColor, ResourceState.UnorderedAccess)
+				.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_casSharpenExecute);
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
-				.ReadTexture(_frameResources.TonemappedSceneColor, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
+				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
 		}
@@ -1364,7 +1376,7 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
-	public RenderGraphResourceHandle GetCaptureColorHandle() => _frameResources.TonemappedSceneColor;
+	public RenderGraphResourceHandle GetCaptureColorHandle() => _frameResources.EncodedSceneColor;
 
 	private void RegisterSceneDebugView(
 		string id,
