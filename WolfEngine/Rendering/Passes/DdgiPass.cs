@@ -127,17 +127,19 @@ public sealed class DdgiPass
 			resources.DdgiScrollDelta.X == 0 &&
 			resources.DdgiScrollDelta.Y == 0 &&
 			resources.DdgiScrollDelta.Z == 0;
-		var newlyExposedProbeCount = DdgiUtilities.GetNewlyExposedProbeCount(
-			resources.DdgiScrollDelta,
-			gridShape,
-			historyValid);
-		var activeProbeCount = DdgiUtilities.GetActiveProbeCount(
-			gridShape,
-			probeUpdateFrames,
-			probeUpdateFrameIndex,
-			forceFullProbeUpdate,
-			resources.DdgiScrollDelta,
-			historyValid);
+		var collectProbeClassificationStats = config.DebugProbeClassificationStats;
+		var newlyExposedProbeCount = collectProbeClassificationStats
+			? DdgiUtilities.GetNewlyExposedProbeCount(resources.DdgiScrollDelta, gridShape, historyValid)
+			: 0;
+		var activeProbeCount = collectProbeClassificationStats
+			? DdgiUtilities.GetActiveProbeCount(
+				gridShape,
+				probeUpdateFrames,
+				probeUpdateFrameIndex,
+				forceFullProbeUpdate,
+				resources.DdgiScrollDelta,
+				historyValid)
+			: 0;
 		var raysPerProbe = Math.Clamp(config.RaysPerProbe, 1, DdgiUtilities.MaxRaySamplesPerProbe);
 		var traceInvocationsPerProbe = DdgiUtilities.GetProbeTraceInvocationCount(raysPerProbe);
 		var relocationProbeCount = config.ProbeRelocationEnabled ? activeProbeCount : 0;

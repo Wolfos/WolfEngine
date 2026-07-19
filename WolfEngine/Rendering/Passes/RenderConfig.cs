@@ -73,6 +73,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public float ProbeMaxRelocationDistanceFactor { get; set; } = 0.45f;
 	public bool DebugProbeSpheres { get; set; }
 	public float DebugProbeSphereRadius { get; set; } = 0.15f;
+	public bool DebugProbeClassificationStats { get; set; }
 	public bool DebugFirstProbeRelocationReadback { get; set; }
 	public int DebugProbeRelocationReadbackIndex { get; set; }
 }
