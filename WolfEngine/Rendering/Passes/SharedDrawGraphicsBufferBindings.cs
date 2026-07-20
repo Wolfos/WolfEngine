@@ -17,7 +17,9 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		uint? pointLightRegisterIndex = null,
 		uint? clusterHeaderRegisterIndex = null,
 		uint? clusterLightIndexRegisterIndex = null,
-		uint? ddgiDebugRegisterIndex = null)
+		uint? ddgiDebugRegisterIndex = null,
+		uint? transparentEnvironmentRegisterIndex = null,
+		uint? transparentLightingRegisterIndex = null)
 	{
 		CameraRegisterIndex = cameraRegisterIndex;
 		InstanceRegisterIndex = instanceRegisterIndex;
@@ -30,6 +32,8 @@ public readonly struct SharedDrawGraphicsBufferBindings
 		ClusterHeaderRegisterIndex = clusterHeaderRegisterIndex;
 		ClusterLightIndexRegisterIndex = clusterLightIndexRegisterIndex;
 		DdgiDebugRegisterIndex = ddgiDebugRegisterIndex;
+		TransparentEnvironmentRegisterIndex = transparentEnvironmentRegisterIndex;
+		TransparentLightingRegisterIndex = transparentLightingRegisterIndex;
 	}
 
 	public uint CameraRegisterIndex { get; }
@@ -53,6 +57,10 @@ public readonly struct SharedDrawGraphicsBufferBindings
 	public uint? ClusterLightIndexRegisterIndex { get; }
 
 	public uint? DdgiDebugRegisterIndex { get; }
+
+	public uint? TransparentEnvironmentRegisterIndex { get; }
+
+	public uint? TransparentLightingRegisterIndex { get; }
 
 	public static SharedDrawGraphicsBufferBindings FromGBufferReflection(ShaderReflectionLayout reflection)
 	{
@@ -79,7 +87,9 @@ public readonly struct SharedDrawGraphicsBufferBindings
 			pointLightRegisterIndex: reflection.TryGetResource("g_PointLights", out var pointLights) ? pointLights.RegisterIndex : null,
 			clusterHeaderRegisterIndex: reflection.TryGetResource("g_ClusterHeaders", out var clusterHeaders) ? clusterHeaders.RegisterIndex : null,
 			clusterLightIndexRegisterIndex: reflection.TryGetResource("g_ClusterLightIndices", out var clusterLightIndices) ? clusterLightIndices.RegisterIndex : null,
-			ddgiDebugRegisterIndex: reflection.TryGetConstantBuffer("DdgiDebugParams", out var ddgiDebug) ? ddgiDebug.RegisterIndex : null);
+			ddgiDebugRegisterIndex: reflection.TryGetConstantBuffer("DdgiDebugParams", out var ddgiDebug) ? ddgiDebug.RegisterIndex : null,
+			transparentEnvironmentRegisterIndex: reflection.TryGetConstantBuffer("TransparentEnvironmentParams", out var environment) ? environment.RegisterIndex : null,
+			transparentLightingRegisterIndex: reflection.TryGetConstantBuffer("LightingParams", out var lighting) ? lighting.RegisterIndex : null);
 	}
 
 	public static SharedDrawGraphicsBufferBindings FromShadowReflection(ShaderReflectionLayout reflection)

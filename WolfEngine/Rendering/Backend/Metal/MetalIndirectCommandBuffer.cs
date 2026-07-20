@@ -121,6 +121,8 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		MetalBuffer terrainLayerBuffer,
 		MetalBuffer drawArgsBuffer,
 		MetalBuffer? ddgiDebugBuffer,
+		MetalBuffer? transparentEnvironmentBuffer,
+		MetalBuffer? transparentLightingBuffer,
 		in SharedDrawGraphicsBufferBindings bindings,
 		MTLBuffer bindlessCountBuffer,
 		MTLBuffer bindlessTextureBuffer,
@@ -172,6 +174,16 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			ddgiDebugNativeBuffer = ddgiDebugBuffer.Buffer;
 			command.SetVertexBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
 			command.SetFragmentBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
+		}
+		if (transparentEnvironmentBuffer is not null &&
+		    bindings.TransparentEnvironmentRegisterIndex is { } transparentEnvironmentRegisterIndex)
+		{
+			command.SetFragmentBuffer(transparentEnvironmentBuffer.Buffer, 0, transparentEnvironmentRegisterIndex);
+		}
+		if (transparentLightingBuffer is not null &&
+		    bindings.TransparentLightingRegisterIndex is { } transparentLightingRegisterIndex)
+		{
+			command.SetFragmentBuffer(transparentLightingBuffer.Buffer, 0, transparentLightingRegisterIndex);
 		}
 
 		if (bindlessCountBuffer.NativePtr != IntPtr.Zero)

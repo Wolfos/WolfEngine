@@ -92,6 +92,13 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		{
 			return false;
 		}
+		var transparentEnvironmentBuffer = resources.TransparentEnvironmentBuffer as MetalBuffer;
+		var transparentLightingBuffer = resources.TransparentLightingBuffer as MetalBuffer;
+		if ((bindings.TransparentEnvironmentRegisterIndex.HasValue && transparentEnvironmentBuffer is null) ||
+		    (bindings.TransparentLightingRegisterIndex.HasValue && transparentLightingBuffer is null))
+		{
+			return false;
+		}
 
 		if (_descriptorTable.CountBuffer.NativePtr == IntPtr.Zero ||
 		    _descriptorTable.TextureArgumentBuffer.NativePtr == IntPtr.Zero ||
@@ -118,6 +125,8 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			terrainLayerBuffer,
 			drawArgsBuffer,
 			ddgiDebugBuffer,
+			transparentEnvironmentBuffer,
+			transparentLightingBuffer,
 			bindings,
 			_descriptorTable.CountBuffer,
 			_descriptorTable.TextureArgumentBuffer,
