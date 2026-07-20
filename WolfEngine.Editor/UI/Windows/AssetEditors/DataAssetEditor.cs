@@ -155,9 +155,10 @@ public sealed class DataAssetEditor
 		}
 
 		var changed = false;
-		var activeLayerCount = Math.Clamp(layerSet.ActiveLayerCount, 1, 4);
-		if (ImGui.SliderInt("Active Layer Count", ref activeLayerCount, 1, 4))
+		var activeLayerCount = Math.Clamp(layerSet.ActiveLayerCount, 1, TerrainLayerSet.MaxLayerCount);
+		if (EditorUIUtility.InputInt("Active Layer Count", ref activeLayerCount))
 		{
+			activeLayerCount = Math.Clamp(activeLayerCount, 1, TerrainLayerSet.MaxLayerCount);
 			layerSet.ActiveLayerCount = activeLayerCount;
 			changed = true;
 		}
@@ -181,6 +182,13 @@ public sealed class DataAssetEditor
 				}
 
 				var layer = layerSet.GetLayer(layerIndex);
+				var layerName = layer.Name;
+				if (EditorUIUtility.InputText("Name", ref layerName))
+				{
+					layer.Name = layerName;
+					changed = true;
+				}
+
 				var scale = layer.Scale;
 				if (EditorUIUtility.InputFloat("Scale", ref scale))
 				{

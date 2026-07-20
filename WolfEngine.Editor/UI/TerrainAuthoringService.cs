@@ -123,7 +123,7 @@ public sealed class TerrainAuthoringService : ITerrainAuthoringService
 		}
 
 		var layerCount = terrain.LayerSetAsset.Asset?.ResolvedLayerCount ?? 4;
-		var maxLayerIndex = Math.Clamp(layerCount, 0, 255);
+		var maxLayerIndex = Math.Clamp(layerCount, 0, TerrainLayerSet.MaxLayerCount);
 		var layerIndex = Math.Clamp(request.Settings.LayerIndex, 0, maxLayerIndex);
 		return request with
 		{

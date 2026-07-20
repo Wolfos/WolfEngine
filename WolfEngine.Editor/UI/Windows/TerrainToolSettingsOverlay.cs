@@ -1,5 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
+using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;
 
@@ -8,10 +10,22 @@ public sealed class TerrainToolSettingsOverlay
 	private static readonly Vector2 OverlaySizeNormal = new(240.0f, 148.0f);
 	private static readonly Vector2 OverlaySizeBrush = new(240.0f, 178.0f);
 	private static readonly Vector2 OverlayOffset = new(16.0f, 16.0f);
+	private static readonly Vector2 LayerThumbnailSize = new(24.0f, 24.0f);
+	private const float LayerSelectorWidth = 180.0f;
+	private readonly IEditorProjectService _projectService;
+	private readonly IAssetThumbnailLoader _assetThumbnailLoader;
+
+	public TerrainToolSettingsOverlay(
+		IEditorProjectService projectService,
+		IAssetThumbnailLoader assetThumbnailLoader)
+	{
+		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_assetThumbnailLoader = assetThumbnailLoader ?? throw new ArgumentNullException(nameof(assetThumbnailLoader));
+	}
 
 	public bool BlocksPainting { get; private set; }
 
-	internal void Draw(TerrainTool terrainTool, TerrainToolSettings settings, Vector2 viewportMin, Vector2 viewportMax)
+	internal void Draw(TerrainTool terrainTool, TerrainToolSettings settings, TerrainLayerSet? layerSet, Vector2 viewportMin, Vector2 viewportMax)
 	{
 		BlocksPainting = false;
 
@@ -54,11 +68,7 @@ public sealed class TerrainToolSettingsOverlay
 			blocksPainting |= ImGui.IsItemActive();
 			if (terrainTool == TerrainTool.Brush)
 			{
-				var displayLayer = Math.Clamp(settings.LayerIndex, 0, 4);
-				if (ImGui.SliderInt("Layer (0 = Auto)", ref displayLayer, 0, 4))
-				{
-					settings.LayerIndex = displayLayer;
-				}
+				DrawLayerSelector(settings, layerSet);
 				blocksPainting |= ImGui.IsItemActive();
 			}
 
@@ -68,5 +78,73 @@ public sealed class TerrainToolSettingsOverlay
 		ImGui.EndChild();
 		ImGui.PopStyleColor(2);
 		ImGui.PopStyleVar();
+	}
+
+	private void DrawLayerSelector(TerrainToolSettings settings, TerrainLayerSet? layerSet)
+	{
+		var layerCount = layerSet?.ResolvedLayerCount ?? 0;
+		settings.LayerIndex = Math.Clamp(settings.LayerIndex, 0, layerCount);
+		var preview = GetLayerLabel(settings.LayerIndex, layerSet);
+		ImGui.SetNextItemWidth(LayerSelectorWidth);
+		if (ImGui.BeginCombo("##Layer", preview))
+		{
+			DrawLayerOption(0, null, settings);
+			for (var layerIndex = 1; layerIndex <= layerCount; layerIndex++)
+			{
+				DrawLayerOption(layerIndex, layerSet!.GetLayer(layerIndex - 1), settings);
+			}
+
+			ImGui.EndCombo();
+		}
+	}
+
+	private void DrawLayerOption(int layerIndex, TerrainLayerDefinition? layer, TerrainToolSettings settings)
+	{
+		if (TryGetAlbedoThumbnail(layer, out var textureId))
+		{
+			ImGui.Image(textureId, LayerThumbnailSize);
+		}
+		else
+		{
+			ImGui.Dummy(LayerThumbnailSize);
+		}
+
+		ImGui.SameLine();
+		var selected = settings.LayerIndex == layerIndex;
+		if (ImGui.Selectable($"{GetLayerLabel(layerIndex, layer)}##{layerIndex}", selected))
+		{
+			settings.LayerIndex = layerIndex;
+		}
+
+		if (selected)
+		{
+			ImGui.SetItemDefaultFocus();
+		}
+	}
+
+	private bool TryGetAlbedoThumbnail(TerrainLayerDefinition? layer, out nint textureId)
+	{
+		textureId = 0;
+		return layer is not null &&
+		       layer.Albedo.IsValid &&
+		       _projectService.TryGetAsset(layer.Albedo.NodeId, out var asset) &&
+		       _assetThumbnailLoader.TryGetTextureThumbnailId(asset, out textureId);
+	}
+
+	private static string GetLayerLabel(int layerIndex, TerrainLayerSet? layerSet)
+	{
+		return layerIndex == 0
+			? "Auto material"
+			: GetLayerLabel(layerIndex, layerSet?.GetLayer(layerIndex - 1));
+	}
+
+	private static string GetLayerLabel(int layerIndex, TerrainLayerDefinition? layer)
+	{
+		if (layerIndex == 0)
+		{
+			return "Auto material";
+		}
+
+		return string.IsNullOrWhiteSpace(layer?.Name) ? $"Layer {layerIndex}" : layer.Name;
 	}
 }

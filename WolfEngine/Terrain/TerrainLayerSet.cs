@@ -8,11 +8,14 @@ namespace WolfEngine;
 [RuntimeAsset(AssetType.DataAsset, typeof(TerrainLayerSet), typeof(IDataAssetRuntimeResolver))]
 public sealed class TerrainLayerSet : IDataAsset
 {
+	// Layer index zero is reserved by terrain layer maps for automatic material selection.
+	public const int MaxLayerCount = byte.MaxValue;
+
 	public int ActiveLayerCount { get; set; } = 2;
 	public float HeightBlendSharpness { get; set; } = 4.0f;
 
 	[JsonInclude]
-	public List<TerrainLayerDefinition> Layers { get; private set; } =
+	public List<TerrainLayerDefinition> Layers { get; set; } =
 	[
 		new(),
 		new()
@@ -23,7 +26,7 @@ public sealed class TerrainLayerSet : IDataAsset
 	{
 		get
 		{
-			var requestedCount = Math.Max(ActiveLayerCount, 1);
+			var requestedCount = Math.Clamp(ActiveLayerCount, 1, MaxLayerCount);
 			EnsureLayerCapacity(requestedCount);
 			return requestedCount;
 		}
@@ -70,10 +73,7 @@ public sealed class TerrainLayerSet : IDataAsset
 
 	public void EnsureLayerCapacity(int count)
 	{
-		if (count <= 0)
-		{
-			count = 1;
-		}
+		count = Math.Clamp(count, 1, MaxLayerCount);
 
 		while (Layers.Count < count)
 		{
@@ -96,6 +96,7 @@ public sealed class TerrainLayerSet : IDataAsset
 
 public sealed class TerrainLayerDefinition
 {
+	public string Name { get; set; } = string.Empty;
 	public float Scale { get; set; } = 8.0f;
 	public bool AutoMaterial { get; set; }
 	public bool UseMinimumSlope { get; set; }

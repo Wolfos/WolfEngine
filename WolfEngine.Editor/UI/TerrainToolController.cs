@@ -168,7 +168,7 @@ public sealed class TerrainToolController
 			MathF.Max(Settings.RadiusMeters, 0.1f),
 			Math.Clamp(Settings.Strength, 0.0f, 1.0f),
 			MathF.Max(Settings.Falloff, 0.1f),
-			Math.Clamp(Settings.LayerIndex, 0, 4),
+			Math.Clamp(Settings.LayerIndex, 0, TerrainLayerSet.MaxLayerCount),
 			FlattenHeightNormalized: null);
 		return tool switch
 		{

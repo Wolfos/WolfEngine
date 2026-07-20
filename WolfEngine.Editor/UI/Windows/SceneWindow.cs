@@ -230,7 +230,15 @@ public class SceneWindow: EditorWindow
 
         if (_sceneToolMode == SceneToolMode.Terrain)
         {
-            _terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController.Settings, imageMin, imageMax);
+            TerrainLayerSet? layerSet = null;
+            if (EditorGui.HasSelectedEntity &&
+                world.IsAlive(EditorGui.SelectedEntity) &&
+                world.HasComponent<TerrainComponent>(EditorGui.SelectedEntity))
+            {
+                layerSet = world.GetComponent<TerrainComponent>(EditorGui.SelectedEntity).LayerSetAsset.Asset;
+            }
+
+            _terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController.Settings, layerSet, imageMin, imageMax);
         }
 
         _viewportStateBus.PublishUiState(new SceneViewportUiState(

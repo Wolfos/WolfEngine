@@ -16,10 +16,11 @@ public sealed class TerrainLayerSetPersistenceTests
 		var heightId = Guid.NewGuid();
 		var layerSet = new TerrainLayerSet
 		{
-			ActiveLayerCount = 2,
+			ActiveLayerCount = 5,
 			HeightBlendSharpness = 6.5f,
 			Layer0 = new TerrainLayerDefinition
 			{
+				Name = "Grass",
 				Scale = 12.0f,
 				AutoMaterial = true,
 				Albedo = new AssetRef<Texture> { NodeId = albedoId },
@@ -34,15 +35,23 @@ public sealed class TerrainLayerSetPersistenceTests
 				Height = new AssetRef<Texture> { NodeId = heightId }
 			}
 		};
+		layerSet.EnsureLayerCapacity(5);
+		layerSet.Layers[4] = new TerrainLayerDefinition
+		{
+			Name = "Snow",
+			AutoMaterial = true,
+			Albedo = new AssetRef<Texture> { NodeId = Guid.NewGuid() }
+		};
 
 		store.SaveAsset(assetPath, typeof(TerrainLayerSet), layerSet);
 		var loadResult = store.LoadAsset(assetPath);
 		var loaded = (TerrainLayerSet)loadResult.Asset;
 
 		Assert.That(loadResult.DataAssetType, Is.EqualTo(typeof(TerrainLayerSet)));
-		Assert.That(loaded.ActiveLayerCount, Is.EqualTo(2));
+		Assert.That(loaded.ActiveLayerCount, Is.EqualTo(5));
 		Assert.That(loaded.HeightBlendSharpness, Is.EqualTo(6.5f).Within(0.0001f));
 		Assert.That(loaded.Layer0.Scale, Is.EqualTo(12.0f).Within(0.0001f));
+		Assert.That(loaded.Layer0.Name, Is.EqualTo("Grass"));
 		Assert.That(loaded.Layer1.Scale, Is.EqualTo(24.0f).Within(0.0001f));
 		Assert.That(loaded.Layer0.AutoMaterial, Is.True);
 		Assert.That(loaded.Layer1.AutoMaterial, Is.True);
@@ -51,5 +60,8 @@ public sealed class TerrainLayerSetPersistenceTests
 		Assert.That(loaded.Layer0.Albedo.NodeId, Is.EqualTo(albedoId));
 		Assert.That(loaded.Layer0.Normal.NodeId, Is.EqualTo(normalId));
 		Assert.That(loaded.Layer1.Height.NodeId, Is.EqualTo(heightId));
+		Assert.That(loaded.GetLayer(4).Name, Is.EqualTo("Snow"));
+		Assert.That(loaded.GetLayer(4).AutoMaterial, Is.True);
+		Assert.That(loaded.GetLayer(4).Albedo.NodeId, Is.EqualTo(layerSet.Layers[4].Albedo.NodeId));
 	}
 }

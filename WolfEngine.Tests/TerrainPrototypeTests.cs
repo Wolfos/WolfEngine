@@ -29,13 +29,13 @@ public sealed class TerrainPrototypeTests
 	{
 		var layerSet = new TerrainLayerSet
 		{
-			ActiveLayerCount = 6
+			ActiveLayerCount = TerrainLayerSet.MaxLayerCount
 		};
-		layerSet.EnsureLayerCapacity(6);
-		layerSet.Layers[5].Scale = 48.0f;
+		layerSet.EnsureLayerCapacity(TerrainLayerSet.MaxLayerCount);
+		layerSet.Layers[TerrainLayerSet.MaxLayerCount - 1].Scale = 48.0f;
 
-		Assert.That(layerSet.ResolvedLayerCount, Is.EqualTo(6));
-		Assert.That(layerSet.GetLayer(5).Scale, Is.EqualTo(48.0f).Within(0.0001f));
+		Assert.That(layerSet.ResolvedLayerCount, Is.EqualTo(TerrainLayerSet.MaxLayerCount));
+		Assert.That(layerSet.GetLayer(TerrainLayerSet.MaxLayerCount - 1).Scale, Is.EqualTo(48.0f).Within(0.0001f));
 	}
 
 	[Test]
