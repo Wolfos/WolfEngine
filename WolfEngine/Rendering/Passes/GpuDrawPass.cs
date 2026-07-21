@@ -1313,7 +1313,8 @@ public sealed class GpuDrawPass
 			var laneDefinition = laneDefinitions[i];
 			var pipeline = GetGBufferPipeline(laneDefinition);
 			var bufferBindings = _gbufferBufferBindings[laneDefinition.ExecutionIndex];
-			if (pipeline is null || bufferBindings is null)
+			var passBindings = CreateGBufferPassBindingSet(laneDefinition);
+			if (pipeline is null || bufferBindings is null || passBindings is null)
 			{
 				continue;
 			}
@@ -1324,6 +1325,7 @@ public sealed class GpuDrawPass
 				laneDefinition.ExecutionIndex,
 				laneDefinition.DebugName,
 				bufferBindings.Value,
+				passBindings,
 				pipeline,
 				_gbufferIndirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}

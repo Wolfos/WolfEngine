@@ -14,6 +14,7 @@ public readonly struct GBufferExecutionBucket
 	int executionIndex,
 	string debugName,
 	SharedDrawGraphicsBufferBindings bufferBindings,
+	GraphicsPassBindingSet passBindings,
 	IGfxPipeline pipeline,
 	ReadOnlyMemory<SharedDrawIndirectCommandPage> indirectCommandPages)
     {
@@ -22,6 +23,7 @@ public readonly struct GBufferExecutionBucket
 		ExecutionIndex = executionIndex;
 		DebugName = debugName;
 		BufferBindings = bufferBindings;
+		PassBindings = passBindings ?? throw new ArgumentNullException(nameof(passBindings));
 		Pipeline = pipeline;
 		IndirectCommandPages = indirectCommandPages;
     }
@@ -31,6 +33,7 @@ public readonly struct GBufferExecutionBucket
     public int ExecutionIndex { get; }
     public string DebugName { get; }
     public SharedDrawGraphicsBufferBindings BufferBindings { get; }
+	public GraphicsPassBindingSet PassBindings { get; }
     public IGfxPipeline Pipeline { get; }
 	public ReadOnlyMemory<SharedDrawIndirectCommandPage> IndirectCommandPages { get; }
 }

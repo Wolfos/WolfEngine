@@ -84,6 +84,7 @@ public static class GBufferPass
 			using (FrameProfiler.Instance.Measure(bucket.DebugName))
 			{
 				commandList.BindPipeline(bucket.Pipeline);
+				BindPassBindings(commandList, bucket.PassBindings);
 				commandList.BindConstantBuffer(bucket.BufferBindings.InstanceRegisterIndex, config.InstanceBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.MaterialRegisterIndex, config.MaterialBuffer);
 				commandList.BindConstantBuffer(bucket.BufferBindings.DrawArgsRegisterIndex, config.DrawArgsBuffer);
@@ -91,23 +92,19 @@ public static class GBufferPass
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
-				if (config.TerrainMaterialBuffer is not null &&
-				    bucket.BufferBindings.TerrainMaterialRegisterIndex is { } terrainMaterialRegisterIndex)
-				{
-					commandList.BindConstantBuffer(terrainMaterialRegisterIndex, config.TerrainMaterialBuffer);
-				}
-				if (config.TerrainLayerBuffer is not null &&
-				    bucket.BufferBindings.TerrainLayerRegisterIndex is { } terrainLayerRegisterIndex)
-				{
-					commandList.BindConstantBuffer(terrainLayerRegisterIndex, config.TerrainLayerBuffer);
-				}
-
-				commandList.BindConstantBuffer(config.CameraLayout.RegisterIndex, config.CameraBuffer);
 				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, config.FallbackMaxCommandCount);
 			}
 		}
 
 		commandList.EndPass();
+	}
+
+	private static void BindPassBindings(IGfxCommandList commandList, GraphicsPassBindingSet passBindings)
+	{
+		foreach (var binding in passBindings.Bindings)
+		{
+			commandList.BindConstantBuffer(binding.RegisterIndex, binding.Resource);
+		}
 	}
 
 	private static void ExecuteIndirectPages(
