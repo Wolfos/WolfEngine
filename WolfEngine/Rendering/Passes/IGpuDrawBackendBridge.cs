@@ -33,7 +33,8 @@ public interface IGpuDrawBackendBridge
 		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
-		in SharedDrawGraphicsBufferBindings bindings);
+		GraphicsPassBindingSet passBindings,
+		in SharedDrawPerDrawBindings perDrawBindings);
 
 	void SampleVisibilityDiagnostics(
 		IGfxBuffer? drawCountPerBucketBuffer,

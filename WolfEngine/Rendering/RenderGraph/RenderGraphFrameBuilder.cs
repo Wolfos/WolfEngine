@@ -1622,11 +1622,11 @@ internal sealed class RenderGraphFrameBuilder
 				DrawPassParticipation.ShadowCaster,
 				SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 					_gpuDrawResources,
-					_gpuDrawResources.ShadowCameraBuffer,
 					_gpuDrawResources.ShadowDrawArgsBuffer,
 					GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex)),
 				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
-				lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane));
+				lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
+				lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));
 			var config = _shadowMapPass.BuildConfig(
 				context,
 				depthTexture,
@@ -1905,9 +1905,10 @@ internal sealed class RenderGraphFrameBuilder
 			context.GpuDrawDatabase,
 			_transparentForwardPass.IndirectCommandSet,
 			DrawPassParticipation.ForwardTransparent,
-			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources, _gpuDrawResources.CameraBuffer),
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
 			lane => _transparentForwardPass.HasIndirectLane(lane),
-			lane => _transparentForwardPass.GetBufferBindings(lane));
+			lane => _transparentForwardPass.GetBufferBindings(lane),
+			lane => _transparentForwardPass.GetPassBindingSet(lane, _gpuDrawResources));
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_frameResources,

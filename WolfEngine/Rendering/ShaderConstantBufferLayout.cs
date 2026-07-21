@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
 
@@ -59,7 +60,8 @@ public sealed class ShaderConstantBufferLayout
 		string name,
 		uint registerIndex,
 		int sizeInBytes,
-		IReadOnlyDictionary<string, ShaderConstantFieldLayout> fields)
+		IReadOnlyDictionary<string, ShaderConstantFieldLayout> fields,
+		ShaderStage visibility = ShaderStage.AllGraphics)
 	{
 		if (string.IsNullOrWhiteSpace(name))
 		{
@@ -76,6 +78,7 @@ public sealed class ShaderConstantBufferLayout
 		Name = name;
 		RegisterIndex = registerIndex;
 		SizeInBytes = sizeInBytes;
+		Visibility = visibility;
 		_fields = new Dictionary<string, ShaderConstantFieldLayout>(fields, StringComparer.Ordinal);
 	}
 
@@ -84,6 +87,8 @@ public sealed class ShaderConstantBufferLayout
 	public uint RegisterIndex { get; }
 
 	public int SizeInBytes { get; }
+
+	public ShaderStage Visibility { get; }
 
 	public IReadOnlyDictionary<string, ShaderConstantFieldLayout> Fields => _fields;
 

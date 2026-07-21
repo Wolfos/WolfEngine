@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
 
@@ -27,6 +28,9 @@ internal static class ShaderReflectionLayoutMerger
 				if (mergedByName.TryGetValue(candidate.Name, out var existingByName))
 				{
 					EnsureCompatible(existingByName, candidate);
+					var merged = WithVisibility(existingByName, candidate.Visibility);
+					mergedByName[candidate.Name] = merged;
+					mergedByRegister[candidate.RegisterIndex] = merged;
 					continue;
 				}
 
@@ -40,6 +44,9 @@ internal static class ShaderReflectionLayoutMerger
 					}
 
 					EnsureCompatible(existingByRegister, candidate);
+					var merged = WithVisibility(existingByRegister, candidate.Visibility);
+					mergedByName[candidate.Name] = merged;
+					mergedByRegister[candidate.RegisterIndex] = merged;
 					continue;
 				}
 
@@ -52,6 +59,7 @@ internal static class ShaderReflectionLayoutMerger
 				if (mergedResourcesByName.TryGetValue(candidate.Name, out var existing))
 				{
 					EnsureCompatible(existing, candidate);
+					mergedResourcesByName[candidate.Name] = WithVisibility(existing, candidate.Visibility);
 					continue;
 				}
 
@@ -108,4 +116,10 @@ internal static class ShaderReflectionLayoutMerger
 				$"Reflected shader resource '{expected.Name}' register mismatch: {expected.RegisterIndex} vs {actual.RegisterIndex}.");
 		}
 	}
+
+	private static ShaderConstantBufferLayout WithVisibility(ShaderConstantBufferLayout layout, ShaderStage visibility) =>
+		new(layout.Name, layout.RegisterIndex, layout.SizeInBytes, layout.Fields, layout.Visibility | visibility);
+
+	private static ShaderResourceBindingLayout WithVisibility(ShaderResourceBindingLayout layout, ShaderStage visibility) =>
+		new(layout.Name, layout.RegisterIndex, layout.Visibility | visibility);
 }

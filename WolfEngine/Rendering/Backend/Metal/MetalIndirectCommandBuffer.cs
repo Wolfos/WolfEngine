@@ -34,14 +34,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public CommandBufferReferences(
 			MTLBuffer vertexBuffer,
 			MTLBuffer indexBuffer,
-			MTLBuffer cameraBuffer,
 			MTLBuffer instanceBuffer,
 			MTLBuffer materialBuffer,
 			MTLBuffer materialGenerationBuffer,
-			MTLBuffer terrainMaterialBuffer,
-			MTLBuffer terrainLayerBuffer,
 			MTLBuffer drawArgsBuffer,
-			MTLBuffer ddgiDebugBuffer,
+			MTLBuffer[] passBuffers,
 			MTLBuffer bindlessCountBuffer,
 			MTLBuffer bindlessTextureBuffer,
 			MTLBuffer bindlessRwTextureBuffer,
@@ -49,14 +46,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		{
 			VertexBuffer = vertexBuffer;
 			IndexBuffer = indexBuffer;
-			CameraBuffer = cameraBuffer;
 			InstanceBuffer = instanceBuffer;
 			MaterialBuffer = materialBuffer;
 			MaterialGenerationBuffer = materialGenerationBuffer;
-			TerrainMaterialBuffer = terrainMaterialBuffer;
-			TerrainLayerBuffer = terrainLayerBuffer;
 			DrawArgsBuffer = drawArgsBuffer;
-			DdgiDebugBuffer = ddgiDebugBuffer;
+			PassBuffers = passBuffers;
 			BindlessCountBuffer = bindlessCountBuffer;
 			BindlessTextureBuffer = bindlessTextureBuffer;
 			BindlessRwTextureBuffer = bindlessRwTextureBuffer;
@@ -65,14 +59,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 		public MTLBuffer VertexBuffer { get; }
 		public MTLBuffer IndexBuffer { get; }
-		public MTLBuffer CameraBuffer { get; }
 		public MTLBuffer InstanceBuffer { get; }
 		public MTLBuffer MaterialBuffer { get; }
 		public MTLBuffer MaterialGenerationBuffer { get; }
-		public MTLBuffer TerrainMaterialBuffer { get; }
-		public MTLBuffer TerrainLayerBuffer { get; }
 		public MTLBuffer DrawArgsBuffer { get; }
-		public MTLBuffer DdgiDebugBuffer { get; }
+		public MTLBuffer[] PassBuffers { get; }
 		public MTLBuffer BindlessCountBuffer { get; }
 		public MTLBuffer BindlessTextureBuffer { get; }
 		public MTLBuffer BindlessRwTextureBuffer { get; }
@@ -113,17 +104,12 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		ulong indexBufferOffsetBytes,
 		int baseVertex,
 		ulong drawArgsOffsetBytes,
-		MetalBuffer cameraBuffer,
 		MetalBuffer instanceBuffer,
 		MetalBuffer materialBuffer,
 		MetalBuffer materialGenerationBuffer,
-		MetalBuffer terrainMaterialBuffer,
-		MetalBuffer terrainLayerBuffer,
 		MetalBuffer drawArgsBuffer,
-		MetalBuffer? ddgiDebugBuffer,
-		MetalBuffer? transparentEnvironmentBuffer,
-		MetalBuffer? transparentLightingBuffer,
-		in SharedDrawGraphicsBufferBindings bindings,
+		GraphicsPassBindingSet passBindings,
+		in SharedDrawPerDrawBindings perDrawBindings,
 		MTLBuffer bindlessCountBuffer,
 		MTLBuffer bindlessTextureBuffer,
 		MTLBuffer bindlessRwTextureBuffer,
@@ -138,52 +124,24 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		using var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
-		command.SetVertexBuffer(cameraBuffer.Buffer, 0, bindings.CameraRegisterIndex);
-		command.SetVertexBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
-		command.SetVertexBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
-		command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
-		if (bindings.TerrainMaterialRegisterIndex is { } terrainMaterialRegisterIndex)
+		command.SetVertexBuffer(instanceBuffer.Buffer, 0, perDrawBindings.InstanceRegisterIndex);
+		command.SetVertexBuffer(materialBuffer.Buffer, 0, perDrawBindings.MaterialRegisterIndex);
+		command.SetVertexBuffer(materialGenerationBuffer.Buffer, 0, perDrawBindings.MaterialGenerationRegisterIndex);
+		command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, perDrawBindings.DrawArgsRegisterIndex);
+		command.SetFragmentBuffer(instanceBuffer.Buffer, 0, perDrawBindings.InstanceRegisterIndex);
+		command.SetFragmentBuffer(materialBuffer.Buffer, 0, perDrawBindings.MaterialRegisterIndex);
+		command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, perDrawBindings.MaterialGenerationRegisterIndex);
+		command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, perDrawBindings.DrawArgsRegisterIndex);
+		var passBuffers = new MTLBuffer[passBindings.Bindings.Length];
+		for (var i = 0; i < passBindings.Bindings.Length; i++)
 		{
-			command.SetVertexBuffer(terrainMaterialBuffer.Buffer, 0, terrainMaterialRegisterIndex);
-		}
-
-		if (bindings.TerrainLayerRegisterIndex is { } terrainLayerRegisterIndex)
-		{
-			command.SetVertexBuffer(terrainLayerBuffer.Buffer, 0, terrainLayerRegisterIndex);
-		}
-
-		command.SetVertexBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
-		command.SetFragmentBuffer(cameraBuffer.Buffer, 0, bindings.CameraRegisterIndex);
-		command.SetFragmentBuffer(instanceBuffer.Buffer, 0, bindings.InstanceRegisterIndex);
-		command.SetFragmentBuffer(materialBuffer.Buffer, 0, bindings.MaterialRegisterIndex);
-		command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, bindings.MaterialGenerationRegisterIndex);
-		if (bindings.TerrainMaterialRegisterIndex is { } fragmentTerrainMaterialRegisterIndex)
-		{
-			command.SetFragmentBuffer(terrainMaterialBuffer.Buffer, 0, fragmentTerrainMaterialRegisterIndex);
-		}
-
-		if (bindings.TerrainLayerRegisterIndex is { } fragmentTerrainLayerRegisterIndex)
-		{
-			command.SetFragmentBuffer(terrainLayerBuffer.Buffer, 0, fragmentTerrainLayerRegisterIndex);
-		}
-
-		command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, bindings.DrawArgsRegisterIndex);
-		var ddgiDebugNativeBuffer = default(MTLBuffer);
-		if (ddgiDebugBuffer is not null && bindings.DdgiDebugRegisterIndex is { } ddgiDebugRegisterIndex)
-		{
-			ddgiDebugNativeBuffer = ddgiDebugBuffer.Buffer;
-			command.SetVertexBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
-			command.SetFragmentBuffer(ddgiDebugNativeBuffer, 0, ddgiDebugRegisterIndex);
-		}
-		if (transparentEnvironmentBuffer is not null &&
-		    bindings.TransparentEnvironmentRegisterIndex is { } transparentEnvironmentRegisterIndex)
-		{
-			command.SetFragmentBuffer(transparentEnvironmentBuffer.Buffer, 0, transparentEnvironmentRegisterIndex);
-		}
-		if (transparentLightingBuffer is not null &&
-		    bindings.TransparentLightingRegisterIndex is { } transparentLightingRegisterIndex)
-		{
-			command.SetFragmentBuffer(transparentLightingBuffer.Buffer, 0, transparentLightingRegisterIndex);
+			var binding = passBindings.Bindings[i];
+			var buffer = ((MetalBuffer)binding.Resource).Buffer;
+			passBuffers[i] = buffer;
+			if (binding.Visibility is GraphicsPassBindingVisibility.Vertex or GraphicsPassBindingVisibility.All)
+				command.SetVertexBuffer(buffer, 0, binding.RegisterIndex);
+			if (binding.Visibility is GraphicsPassBindingVisibility.Fragment or GraphicsPassBindingVisibility.All)
+				command.SetFragmentBuffer(buffer, 0, binding.RegisterIndex);
 		}
 
 		if (bindlessCountBuffer.NativePtr != IntPtr.Zero)
@@ -225,14 +183,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		_commandReferences[commandIndex] = new CommandBufferReferences(
 			vertexBuffer.Buffer,
 			indexBuffer.Buffer,
-			cameraBuffer.Buffer,
 			instanceBuffer.Buffer,
 			materialBuffer.Buffer,
 			materialGenerationBuffer.Buffer,
-			terrainMaterialBuffer.Buffer,
-			terrainLayerBuffer.Buffer,
 			drawArgsBuffer.Buffer,
-			ddgiDebugNativeBuffer,
+			passBuffers,
 			bindlessCountBuffer,
 			bindlessTextureBuffer,
 			bindlessRwTextureBuffer,
@@ -265,14 +220,12 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 			AddBuffer(refs.VertexBuffer, destination, seenPointers);
 			AddBuffer(refs.IndexBuffer, destination, seenPointers);
-			AddBuffer(refs.CameraBuffer, destination, seenPointers);
 			AddBuffer(refs.InstanceBuffer, destination, seenPointers);
 			AddBuffer(refs.MaterialBuffer, destination, seenPointers);
 			AddBuffer(refs.MaterialGenerationBuffer, destination, seenPointers);
-			AddBuffer(refs.TerrainMaterialBuffer, destination, seenPointers);
-			AddBuffer(refs.TerrainLayerBuffer, destination, seenPointers);
 			AddBuffer(refs.DrawArgsBuffer, destination, seenPointers);
-			AddBuffer(refs.DdgiDebugBuffer, destination, seenPointers);
+			foreach (var passBuffer in refs.PassBuffers)
+				AddBuffer(passBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessCountBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessTextureBuffer, destination, seenPointers);
 			AddBuffer(refs.BindlessRwTextureBuffer, destination, seenPointers);
@@ -316,14 +269,12 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		AddBufferRef(refs.VertexBuffer);
 		AddBufferRef(refs.IndexBuffer);
-		AddBufferRef(refs.CameraBuffer);
 		AddBufferRef(refs.InstanceBuffer);
 		AddBufferRef(refs.MaterialBuffer);
 		AddBufferRef(refs.MaterialGenerationBuffer);
-		AddBufferRef(refs.TerrainMaterialBuffer);
-		AddBufferRef(refs.TerrainLayerBuffer);
 		AddBufferRef(refs.DrawArgsBuffer);
-		AddBufferRef(refs.DdgiDebugBuffer);
+		foreach (var passBuffer in refs.PassBuffers)
+			AddBufferRef(passBuffer);
 		AddBufferRef(refs.BindlessCountBuffer);
 		AddBufferRef(refs.BindlessTextureBuffer);
 		AddBufferRef(refs.BindlessRwTextureBuffer);
@@ -334,14 +285,12 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	{
 		RemoveBufferRef(refs.VertexBuffer);
 		RemoveBufferRef(refs.IndexBuffer);
-		RemoveBufferRef(refs.CameraBuffer);
 		RemoveBufferRef(refs.InstanceBuffer);
 		RemoveBufferRef(refs.MaterialBuffer);
 		RemoveBufferRef(refs.MaterialGenerationBuffer);
-		RemoveBufferRef(refs.TerrainMaterialBuffer);
-		RemoveBufferRef(refs.TerrainLayerBuffer);
 		RemoveBufferRef(refs.DrawArgsBuffer);
-		RemoveBufferRef(refs.DdgiDebugBuffer);
+		foreach (var passBuffer in refs.PassBuffers)
+			RemoveBufferRef(passBuffer);
 		RemoveBufferRef(refs.BindlessCountBuffer);
 		RemoveBufferRef(refs.BindlessTextureBuffer);
 		RemoveBufferRef(refs.BindlessRwTextureBuffer);

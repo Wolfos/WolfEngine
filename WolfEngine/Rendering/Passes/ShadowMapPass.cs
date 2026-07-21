@@ -30,6 +30,7 @@ public sealed class ShadowMapPass
 	private readonly IShaderCompiler _shaderCompiler;
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
+	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShaderReflectionLayout> _reflectionByCascadeExecutionKey = new();
 	private readonly SharedDrawIndirectCommandSet[] _indirectCommandSets =
 	[
 		new(),
@@ -106,6 +107,25 @@ public sealed class ShadowMapPass
 		return _bufferBindingsByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var bindings)
 			? bindings
 			: null;
+	}
+
+	public GraphicsPassBindingSet? GetPassBindingSet(
+		int cascadeIndex,
+		GpuDrawExecutionLaneDefinition lane,
+		GpuDrawResources resources)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		ArgumentNullException.ThrowIfNull(resources);
+		if (_reflectionByCascadeExecutionKey.TryGetValue((cascadeIndex, lane.Key), out var reflection) == false)
+			return null;
+		return GraphicsPassBindingSet.FromReflection(reflection,
+			new Dictionary<string, IGfxBuffer?>(StringComparer.Ordinal)
+			{
+				["CameraParams"] = resources.ShadowCameraBuffer,
+				["g_TerrainMaterialTable"] = resources.TerrainMaterialBuffer,
+				["g_TerrainLayerTable"] = resources.TerrainLayerBuffer
+			},
+			SharedDrawPerDrawBindings.ResourceNames);
 	}
 
 	public ShadowMapPassConfig BuildConfig(
@@ -297,6 +317,7 @@ public sealed class ShadowMapPass
 		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;
 		_bufferBindingsByCascadeExecutionKey[pipelineKeyByCascadeBucket] =
 			SharedDrawGraphicsBufferBindings.FromShadowReflection(compiled.ReflectionLayout);
+		_reflectionByCascadeExecutionKey[pipelineKeyByCascadeBucket] = compiled.ReflectionLayout;
 		return pipeline;
 	}
 

@@ -45,22 +45,30 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
-		in SharedDrawGraphicsBufferBindings bindings)
+		GraphicsPassBindingSet passBindings,
+		in SharedDrawPerDrawBindings perDrawBindings)
 	{
-		_ = bindings;
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer ||
 		    resources.InstanceBuffer is not D3D12Buffer instanceBuffer ||
 		    resources.MaterialBuffer is not D3D12Buffer materialBuffer ||
 		    resources.DrawArgsBuffer is not D3D12Buffer drawArgsBuffer ||
-		    resources.MaterialGenerationBuffer is not D3D12Buffer materialGenerationBuffer ||
-		    resources.TerrainMaterialBuffer is not D3D12Buffer terrainMaterialBuffer ||
-		    resources.TerrainLayerBuffer is not D3D12Buffer terrainLayerBuffer ||
-		    resources.CameraBuffer is not D3D12Buffer cameraBuffer ||
-		    resources.ShadowCameraBuffer is not D3D12Buffer shadowCameraBuffer ||
-		    resources.TransparentEnvironmentBuffer is not D3D12Buffer transparentEnvironmentBuffer ||
-		    resources.TransparentLightingBuffer is not D3D12Buffer transparentLightingBuffer)
+		    resources.MaterialGenerationBuffer is not D3D12Buffer materialGenerationBuffer)
 		{
 			return false;
+		}
+		if (perDrawBindings.InstanceRegisterIndex != 10 || perDrawBindings.MaterialRegisterIndex != 11 ||
+			perDrawBindings.DrawArgsRegisterIndex != 12 || perDrawBindings.MaterialGenerationRegisterIndex != 13)
+		{
+			return false;
+		}
+		foreach (var binding in passBindings.Bindings)
+		{
+			if (binding.Resource is not D3D12Buffer ||
+				(binding.Kind == GraphicsPassBindingKind.ConstantBuffer && D3D12RootBindings.TryGetGraphicsCbvIndex(binding.RegisterIndex, out _) == false) ||
+				(binding.Kind == GraphicsPassBindingKind.StructuredBuffer && D3D12RootBindings.TryGetGraphicsSrvIndex(binding.RegisterIndex, out _) == false))
+			{
+				return false;
+			}
 		}
 
 		d3d12CommandBuffer.EncodeIndexedDrawCommand(
@@ -70,14 +78,9 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			materialBuffer,
 			drawArgsBuffer,
 			materialGenerationBuffer,
-			terrainMaterialBuffer,
-			terrainLayerBuffer,
-			cameraBuffer,
-			shadowCameraBuffer,
-			transparentEnvironmentBuffer,
-			transparentLightingBuffer,
 			resources.DrawArgsBaseOffsetBytes,
-			drawArgsCommandIndex);
+			drawArgsCommandIndex,
+			perDrawBindings);
 		return true;
 	}
 

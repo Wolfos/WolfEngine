@@ -447,7 +447,9 @@ public class ShaderCompiler : IShaderCompiler
 			var bytecode = GetMetalLibrary(filename, vertexEntryPoint, pixelEntryPoint, defines);
 			var vertexLayout = CompileGraphicsStageReflection(shaderPath, backendKind, vertexEntryPoint, "vertex", string.Empty, defines);
 			var pixelLayout = CompileGraphicsStageReflection(shaderPath, backendKind, pixelEntryPoint, "fragment", string.Empty, defines);
-			var mergedLayout = ShaderReflectionLayoutMerger.Merge(vertexLayout, pixelLayout);
+			var mergedLayout = ShaderReflectionLayoutMerger.Merge(
+				vertexLayout.WithVisibility(ShaderStage.Vertex),
+				pixelLayout.WithVisibility(ShaderStage.Pixel));
 			compiledWithReflection = new CompiledGraphicsShaderWithReflection(
 				new ShaderBytecodeSet(bytecode, bytecode),
 				mergedLayout);
@@ -456,7 +458,9 @@ public class ShaderCompiler : IShaderCompiler
 		{
 			var vertexResult = CompileGraphicsStageWithReflection(shaderPath, backendKind, vertexEntryPoint, "vs_6_0", defines);
 			var pixelResult = CompileGraphicsStageWithReflection(shaderPath, backendKind, pixelEntryPoint, "ps_6_0", defines);
-			var mergedLayout = ShaderReflectionLayoutMerger.Merge(vertexResult.ReflectionLayout, pixelResult.ReflectionLayout);
+			var mergedLayout = ShaderReflectionLayoutMerger.Merge(
+				vertexResult.ReflectionLayout.WithVisibility(ShaderStage.Vertex),
+				pixelResult.ReflectionLayout.WithVisibility(ShaderStage.Pixel));
 			compiledWithReflection = new CompiledGraphicsShaderWithReflection(
 				new ShaderBytecodeSet(vertexResult.Bytecode, pixelResult.Bytecode),
 				mergedLayout);

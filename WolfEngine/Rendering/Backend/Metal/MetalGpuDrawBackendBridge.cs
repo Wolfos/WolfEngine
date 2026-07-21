@@ -71,33 +71,24 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		uint drawArgsCommandIndex,
 		Mesh mesh,
 		in SharedDrawIndirectEncodeResources resources,
-		in SharedDrawGraphicsBufferBindings bindings)
+		GraphicsPassBindingSet passBindings,
+		in SharedDrawPerDrawBindings perDrawBindings)
 	{
 		if (_descriptorTable is null ||
 		    commandBuffer is not MetalIndirectCommandBuffer indirectCommands ||
 		    mesh.VertexBuffer is not MetalBuffer metalVertexBuffer ||
 		    mesh.IndexBuffer is not MetalBuffer metalIndexBuffer ||
-		    resources.CameraBuffer is not MetalBuffer cameraBuffer ||
 		    resources.InstanceBuffer is not MetalBuffer instanceBuffer ||
 		    resources.MaterialBuffer is not MetalBuffer materialBuffer ||
 		    resources.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
-		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer ||
-		    resources.TerrainMaterialBuffer is not MetalBuffer terrainMaterialBuffer ||
-		    resources.TerrainLayerBuffer is not MetalBuffer terrainLayerBuffer)
+		    resources.MaterialGenerationBuffer is not MetalBuffer materialGenerationBuffer)
 		{
 			return false;
 		}
-		var ddgiDebugBuffer = resources.DdgiDebugBuffer as MetalBuffer;
-		if (bindings.DdgiDebugRegisterIndex.HasValue && ddgiDebugBuffer is null)
+		foreach (var binding in passBindings.Bindings)
 		{
-			return false;
-		}
-		var transparentEnvironmentBuffer = resources.TransparentEnvironmentBuffer as MetalBuffer;
-		var transparentLightingBuffer = resources.TransparentLightingBuffer as MetalBuffer;
-		if ((bindings.TransparentEnvironmentRegisterIndex.HasValue && transparentEnvironmentBuffer is null) ||
-		    (bindings.TransparentLightingRegisterIndex.HasValue && transparentLightingBuffer is null))
-		{
-			return false;
+			if (binding.Resource is not MetalBuffer)
+				return false;
 		}
 
 		if (_descriptorTable.CountBuffer.NativePtr == IntPtr.Zero ||
@@ -117,17 +108,12 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			mesh.PackedIndexOffsetBytes,
 			0,
 			resources.DrawArgsBaseOffsetBytes + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
-			cameraBuffer,
 			instanceBuffer,
 			materialBuffer,
 			materialGenerationBuffer,
-			terrainMaterialBuffer,
-			terrainLayerBuffer,
 			drawArgsBuffer,
-			ddgiDebugBuffer,
-			transparentEnvironmentBuffer,
-			transparentLightingBuffer,
-			bindings,
+			passBindings,
+			perDrawBindings,
 			_descriptorTable.CountBuffer,
 			_descriptorTable.TextureArgumentBuffer,
 			_descriptorTable.RWTextureArgumentBuffer,

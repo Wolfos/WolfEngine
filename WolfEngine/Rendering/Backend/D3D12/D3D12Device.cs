@@ -1260,49 +1260,31 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return _graphicsExecuteIndirectSignature;
 		}
 
-		var argumentDescs = stackalloc IndirectArgumentDesc[13];
+		var argumentDescs = stackalloc IndirectArgumentDesc[7];
 
 		argumentDescs[0].Type = IndirectArgumentType.VertexBufferView;
 		argumentDescs[0].Anonymous.VertexBuffer.Slot = 0;
 
 		argumentDescs[1].Type = IndirectArgumentType.IndexBufferView;
 
-		argumentDescs[2].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[2].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB0;
+		argumentDescs[2].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[2].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
 
-		argumentDescs[3].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[3].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB2;
+		argumentDescs[3].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[3].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
 
-		argumentDescs[4].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[4].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB3;
+		argumentDescs[4].Type = IndirectArgumentType.ShaderResourceView;
+		argumentDescs[4].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
 
 		argumentDescs[5].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[5].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
+		argumentDescs[5].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
 
-		argumentDescs[6].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
-
-		argumentDescs[7].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[7].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
-
-		argumentDescs[8].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[8].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
-
-		argumentDescs[9].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[9].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT14;
-
-		argumentDescs[10].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[10].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT15;
-
-		argumentDescs[11].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[11].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB16;
-
-		argumentDescs[12].Type = IndirectArgumentType.DrawIndexed;
+		argumentDescs[6].Type = IndirectArgumentType.DrawIndexed;
 
 		var signatureDesc = new CommandSignatureDesc
 		{
 			ByteStride = (uint)sizeof(D3D12IndirectCommandBuffer.CommandRecord),
-			NumArgumentDescs = 13,
+			NumArgumentDescs = 7,
 			PArgumentDescs = argumentDescs,
 			NodeMask = 0
 		};

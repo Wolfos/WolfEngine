@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
 
@@ -52,6 +53,15 @@ public sealed class ShaderReflectionLayout
 	public IReadOnlyDictionary<string, ShaderConstantBufferLayout> ConstantBuffersByName => _buffersByName;
 
 	public IReadOnlyDictionary<string, ShaderResourceBindingLayout> ResourcesByName => _resourcesByName;
+
+	public ShaderReflectionLayout WithVisibility(ShaderStage visibility)
+	{
+		return new ShaderReflectionLayout(
+			_buffersByName.Values.Select(buffer => new ShaderConstantBufferLayout(
+				buffer.Name, buffer.RegisterIndex, buffer.SizeInBytes, buffer.Fields, visibility)),
+			_resourcesByName.Values.Select(resource => new ShaderResourceBindingLayout(
+				resource.Name, resource.RegisterIndex, visibility)));
+	}
 
 	public bool TryGetConstantBuffer(string name, out ShaderConstantBufferLayout layout)
 	{

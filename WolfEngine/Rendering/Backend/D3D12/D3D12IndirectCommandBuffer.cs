@@ -7,6 +7,7 @@ using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering.Backend.D3D12;
 
@@ -17,16 +18,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	{
 		public Silk.NET.Direct3D12.VertexBufferView VertexBufferView;
 		public Silk.NET.Direct3D12.IndexBufferView IndexBufferView;
-		public ulong CbvB0Address;
-		public ulong CbvB2Address;
-		public ulong CbvB3Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
 		public ulong SrvT13Address;
-		public ulong SrvT14Address;
-		public ulong SrvT15Address;
-		public ulong CbvB16Address;
 		public DrawIndexedArguments DrawArguments;
 	}
 
@@ -103,14 +98,9 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		D3D12Buffer materialBuffer,
 		D3D12Buffer drawArgsBuffer,
 		D3D12Buffer materialGenerationBuffer,
-		D3D12Buffer terrainMaterialBuffer,
-		D3D12Buffer terrainLayerBuffer,
-		D3D12Buffer cameraBuffer,
-		D3D12Buffer shadowCameraBuffer,
-		D3D12Buffer transparentEnvironmentBuffer,
-		D3D12Buffer transparentLightingBuffer,
 		ulong drawArgsBaseOffsetBytes,
-		uint drawArgsCommandIndex)
+		uint drawArgsCommandIndex,
+		in SharedDrawPerDrawBindings perDrawBindings)
 	{
 		ValidateCommandIndex(commandIndex);
 
@@ -139,13 +129,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		if (instanceBuffer.Resource.Handle is null ||
 		    materialBuffer.Resource.Handle is null ||
 		    drawArgsBuffer.Resource.Handle is null ||
-		    materialGenerationBuffer.Resource.Handle is null ||
-		    terrainMaterialBuffer.Resource.Handle is null ||
-		    terrainLayerBuffer.Resource.Handle is null ||
-		    cameraBuffer.Resource.Handle is null ||
-		    shadowCameraBuffer.Resource.Handle is null ||
-		    transparentEnvironmentBuffer.Resource.Handle is null ||
-		    transparentLightingBuffer.Resource.Handle is null)
+		    materialGenerationBuffer.Resource.Handle is null)
 		{
 			ResetCommand(commandIndex);
 			return;
@@ -168,18 +152,12 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				SizeInBytes = (uint)Math.Min(indexBuffer.SizeInBytes, uint.MaxValue),
 				Format = Format.FormatR32Uint
 			},
-			CbvB0Address = transparentEnvironmentBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			CbvB2Address = cameraBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			CbvB3Address = transparentLightingBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			CbvB16Address = shadowCameraBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT10Address = instanceBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT11Address = materialBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			SrvT12Address = drawArgsBuffer.Resource.Handle->GetGPUVirtualAddress()
 			                 + drawArgsBaseOffsetBytes
 			                 + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
 			SrvT13Address = materialGenerationBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			SrvT14Address = terrainMaterialBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			SrvT15Address = terrainLayerBuffer.Resource.Handle->GetGPUVirtualAddress(),
 			DrawArguments = new DrawIndexedArguments
 			{
 				IndexCountPerInstance = mesh.IndexCount,

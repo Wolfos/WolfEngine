@@ -62,6 +62,12 @@ public readonly struct SharedDrawGraphicsBufferBindings
 
 	public uint? TransparentLightingRegisterIndex { get; }
 
+	public SharedDrawPerDrawBindings ToPerDrawBindings() => new(
+		InstanceRegisterIndex,
+		MaterialRegisterIndex,
+		DrawArgsRegisterIndex,
+		MaterialGenerationRegisterIndex);
+
 	public static SharedDrawGraphicsBufferBindings FromGBufferReflection(ShaderReflectionLayout reflection)
 	{
 		ArgumentNullException.ThrowIfNull(reflection);
