@@ -888,6 +888,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		_d3d12 = D3D12.GetApi();
 		EnableDebugLayerIfRequested();
 
+		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
 		CreateDeviceAndQueue();
 		ConfigureDxgiDebugQueueIfRequested();
 		CreateSwapchain();
@@ -898,11 +899,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void CreateDeviceAndQueue()
 	{
-		SilkMarshal.ThrowHResult(
-			_d3d12.CreateDevice(
-				_adapter,
-				D3DFeatureLevel.Level122,
-				out _device));
+		CreateDeviceForHardwareAdapter();
 		var commandQueueDescription = new CommandQueueDesc
 		{
 			Type = CommandListType.Direct,
@@ -914,6 +911,42 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in commandQueueDescription, out _commandQueue));
 
 		_gfxDevice = new(_device, _commandQueue);
+	}
+
+	private void CreateDeviceForHardwareAdapter()
+	{
+		var lastCreateDeviceResult = 0;
+		var factory = (IDXGIFactory1*) _factory.Handle;
+		for (uint adapterIndex = 0; ; adapterIndex++)
+		{
+			IDXGIAdapter* candidateAdapterPointer = null;
+			var enumerateResult = factory->EnumAdapters(adapterIndex, &candidateAdapterPointer);
+			if (enumerateResult < 0)
+			{
+				break;
+			}
+
+			ComPtr<IDXGIAdapter> candidateAdapter = new(candidateAdapterPointer);
+			ComPtr<ID3D12Device> candidateDevice = default;
+			var createDeviceResult = _d3d12.CreateDevice(
+				candidateAdapter,
+				D3DFeatureLevel.Level122,
+				out candidateDevice);
+			if (createDeviceResult >= 0)
+			{
+				_adapter = candidateAdapter;
+				_device = candidateDevice;
+				return;
+			}
+
+			lastCreateDeviceResult = createDeviceResult;
+			candidateDevice.Dispose();
+			candidateAdapter.Dispose();
+		}
+
+		throw new InvalidOperationException(
+			$"Unable to create a Direct3D 12 device for any hardware adapter. " +
+			$"The last D3D12CreateDevice result was 0x{lastCreateDeviceResult:X8}.");
 	}
 
 	private void EnableDebugLayerIfRequested()
@@ -1242,8 +1275,6 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			Width = (uint) Math.Max(_framebufferSize.X, 1),
 			Height = (uint) Math.Max(_framebufferSize.Y, 1)
 		};
-
-		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
 
 		var factoryPtr = _factory.Handle;
 		var queuePtr = (IUnknown*) _commandQueue.Handle;
@@ -1766,8 +1797,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		// Command lists are now created per-pass
 		_rtvHeap.Dispose();
 
-		_factory.Dispose();
 		_swapchain.Dispose();
+		_factory.Dispose();
 		_commandQueue.Dispose();
 
 		_meshResources.Clear();
@@ -1790,6 +1821,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		}
 
 		_device.Dispose();
+		_adapter.Dispose();
 		_d3d12.Dispose();
 		_dxgi.Dispose();
 
