@@ -18,6 +18,15 @@ internal static class ShaderReflectionLayoutBuilder
 		for (var i = 0; i < parameters.Length; i++)
 		{
 			var parameter = parameters[i];
+			// Graphics stages are reflected independently.  Slang still exposes
+			// declarations from the other stage, but marks their bindings unused.
+			// Do not promote those declarations into the stage layout: doing so can
+			// make a fragment-only b0 overwrite Metal's vertex buffer slot zero.
+			if (HasUsedBinding(parameter) == false)
+			{
+				continue;
+			}
+
 			if (IsConstantBufferType(parameter.Type))
 			{
 				constantBuffers.Add(BuildConstantBuffer(parameter));
@@ -36,6 +45,25 @@ internal static class ShaderReflectionLayoutBuilder
 		}
 
 		return new ShaderReflectionLayout(constantBuffers, resources);
+	}
+
+	private static bool HasUsedBinding(SlangParameter parameter)
+	{
+		var bindings = parameter.Bindings;
+		if (bindings is not { Length: > 0 })
+		{
+			return false;
+		}
+
+		for (var i = 0; i < bindings.Length; i++)
+		{
+			if (bindings[i].Used)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static bool TryBuildResource(SlangParameter parameter, out ShaderResourceBindingLayout layout)

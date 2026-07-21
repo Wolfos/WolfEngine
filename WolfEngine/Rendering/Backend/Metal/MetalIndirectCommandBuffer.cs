@@ -138,7 +138,11 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			var binding = passBindings.Bindings[i];
 			var buffer = ((MetalBuffer)binding.Resource).Buffer;
 			passBuffers[i] = buffer;
-			if (binding.Visibility is GraphicsPassBindingVisibility.Vertex or GraphicsPassBindingVisibility.All)
+			// Shared-draw material pipelines reserve vertex buffer slot zero for
+			// the mesh stream.  A fragment-scoped b0 (for example transparent
+			// environment parameters) must never replace it in an ICB command.
+			if (binding.RegisterIndex != 0 &&
+				binding.Visibility is GraphicsPassBindingVisibility.Vertex or GraphicsPassBindingVisibility.All)
 				command.SetVertexBuffer(buffer, 0, binding.RegisterIndex);
 			if (binding.Visibility is GraphicsPassBindingVisibility.Fragment or GraphicsPassBindingVisibility.All)
 				command.SetFragmentBuffer(buffer, 0, binding.RegisterIndex);
