@@ -18,10 +18,19 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	{
 		public Silk.NET.Direct3D12.VertexBufferView VertexBufferView;
 		public Silk.NET.Direct3D12.IndexBufferView IndexBufferView;
+		public ulong CbvB0Address;
+		public ulong CbvB2Address;
+		public ulong CbvB3Address;
+		public ulong CbvB4Address;
+		public ulong CbvB14Address;
+		public ulong CbvB16Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
 		public ulong SrvT13Address;
+		public ulong SrvT14Address;
+		public ulong SrvT15Address;
+		public ulong SrvT16Address;
 		public DrawIndexedArguments DrawArguments;
 	}
 
@@ -100,6 +109,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		D3D12Buffer materialGenerationBuffer,
 		ulong drawArgsBaseOffsetBytes,
 		uint drawArgsCommandIndex,
+		GraphicsPassBindingSet passBindings,
 		in SharedDrawPerDrawBindings perDrawBindings)
 	{
 		ValidateCommandIndex(commandIndex);
@@ -167,6 +177,20 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				StartInstanceLocation = 0
 			}
 		};
+		foreach (var binding in passBindings.Bindings)
+		{
+			if (binding.Resource is not D3D12Buffer passBuffer || passBuffer.Resource.Handle is null)
+			{
+				ResetCommand(commandIndex);
+				return;
+			}
+
+			SetPassBindingAddress(
+				ref record,
+				binding.Kind,
+				binding.RegisterIndex,
+				passBuffer.Resource.Handle->GetGPUVirtualAddress());
+		}
 
 		_mappedRecords[commandIndex] = record;
 	}
@@ -186,5 +210,40 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		{
 			throw new ArgumentOutOfRangeException(nameof(commandIndex), commandIndex, "Command index is out of range.");
 		}
+	}
+
+	private static void SetPassBindingAddress(
+		ref CommandRecord record,
+		GraphicsPassBindingKind kind,
+		uint registerIndex,
+		ulong gpuAddress)
+	{
+		if (kind == GraphicsPassBindingKind.ConstantBuffer)
+		{
+			switch (registerIndex)
+			{
+				case 0: record.CbvB0Address = gpuAddress; return;
+				case 2: record.CbvB2Address = gpuAddress; return;
+				case 3: record.CbvB3Address = gpuAddress; return;
+				case 4: record.CbvB4Address = gpuAddress; return;
+				case 14: record.CbvB14Address = gpuAddress; return;
+				case 16: record.CbvB16Address = gpuAddress; return;
+			}
+		}
+		else
+		{
+			switch (registerIndex)
+			{
+				case 10: record.SrvT10Address = gpuAddress; return;
+				case 11: record.SrvT11Address = gpuAddress; return;
+				case 12: record.SrvT12Address = gpuAddress; return;
+				case 13: record.SrvT13Address = gpuAddress; return;
+				case 14: record.SrvT14Address = gpuAddress; return;
+				case 15: record.SrvT15Address = gpuAddress; return;
+				case 16: record.SrvT16Address = gpuAddress; return;
+			}
+		}
+
+		throw new InvalidOperationException($"Unsupported D3D12 indirect pass binding {(kind == GraphicsPassBindingKind.ConstantBuffer ? 'b' : 't')}{registerIndex}.");
 	}
 }
