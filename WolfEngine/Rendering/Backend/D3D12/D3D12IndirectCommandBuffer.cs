@@ -18,7 +18,6 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	{
 		public Silk.NET.Direct3D12.VertexBufferView VertexBufferView;
 		public Silk.NET.Direct3D12.IndexBufferView IndexBufferView;
-		public ulong CbvB16Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
 		public ulong SrvT12Address;
@@ -26,6 +25,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		public ulong SrvT14Address;
 		public ulong SrvT15Address;
 		public ulong SrvT16Address;
+		public ulong CbvB16Address;
 		public DrawIndexedArguments DrawArguments;
 	}
 
