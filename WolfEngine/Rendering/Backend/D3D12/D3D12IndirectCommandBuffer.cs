@@ -18,11 +18,6 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	{
 		public Silk.NET.Direct3D12.VertexBufferView VertexBufferView;
 		public Silk.NET.Direct3D12.IndexBufferView IndexBufferView;
-		public ulong CbvB0Address;
-		public ulong CbvB2Address;
-		public ulong CbvB3Address;
-		public ulong CbvB4Address;
-		public ulong CbvB14Address;
 		public ulong CbvB16Address;
 		public ulong SrvT10Address;
 		public ulong SrvT11Address;
@@ -222,12 +217,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		{
 			switch (registerIndex)
 			{
-				case 0: record.CbvB0Address = gpuAddress; return;
-				case 2: record.CbvB2Address = gpuAddress; return;
-				case 3: record.CbvB3Address = gpuAddress; return;
-				case 4: record.CbvB4Address = gpuAddress; return;
-				case 14: record.CbvB14Address = gpuAddress; return;
 				case 16: record.CbvB16Address = gpuAddress; return;
+				default: return; // Other pass CBVs are inherited from command-list state.
 			}
 		}
 		else
