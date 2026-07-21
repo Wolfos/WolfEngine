@@ -573,6 +573,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			throw new InvalidOperationException("Vertex buffer resource was null.");
 		}
 
+		if (buffer.IsCpuWritableDirect == false)
+		{
+			TransitionBufferIfNeeded(buffer, ResourceStates.VertexAndConstantBuffer);
+		}
+
 		var gpuAddress = resource->GetGPUVirtualAddress();
 		var size = buffer.SizeInBytes;
 		var start = vertexBuffer.Offset;
@@ -617,6 +622,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 				throw new InvalidOperationException("Vertex buffer resource was null.");
 			}
 
+			if (buffer.IsCpuWritableDirect == false)
+			{
+				TransitionBufferIfNeeded(buffer, ResourceStates.VertexAndConstantBuffer);
+			}
+
 			var gpuAddress = resource->GetGPUVirtualAddress();
 			var size = buffer.SizeInBytes;
 			var start = view.Offset;
@@ -650,6 +660,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		if (resource is null)
 		{
 			throw new InvalidOperationException("Index buffer resource was null.");
+		}
+
+		if (buffer.IsCpuWritableDirect == false)
+		{
+			TransitionBufferIfNeeded(buffer, ResourceStates.IndexBuffer);
 		}
 
 		var gpuAddress = resource->GetGPUVirtualAddress();
@@ -730,6 +745,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
+		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 		CommandList.ExecuteIndirect(
 			d3d12CommandBuffer.CommandSignature,
 			maxAvailable,
@@ -756,6 +772,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
+		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Range mode: consume {start,count} and execute from command 0 using the count value only.
 		var countOffset = commandRangeOffsetBytes + sizeof(uint);
@@ -786,6 +803,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		D3D12RayTracingGeometryValidation.Validate(in descriptor, vertexBuffer, indexBuffer);
 		TransitionBufferIfNeeded(vertexBuffer, ResourceStates.NonPixelShaderResource);
 		TransitionBufferIfNeeded(indexBuffer, ResourceStates.NonPixelShaderResource);
+		TransitionAccelerationStructureResource(
+			blas.Result.Handle,
+			blas.ResultState,
+			ResourceStates.RaytracingAccelerationStructure);
+		blas.ResultState = ResourceStates.RaytracingAccelerationStructure;
+		TransitionAccelerationStructureResource(blas.Scratch.Handle, blas.ScratchState, ResourceStates.UnorderedAccess);
+		blas.ScratchState = ResourceStates.UnorderedAccess;
 
 		var geometry = CreateBottomLevelGeometry(descriptor, vertexBuffer, indexBuffer);
 		var geometryPtr = &geometry;
@@ -818,6 +842,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 				InsertUavBarrier(blas.Result.Handle);
 			}
 		}
+		TransitionAccelerationStructureResource(
+			tlas.Result.Handle,
+			tlas.ResultState,
+			ResourceStates.RaytracingAccelerationStructure);
+		tlas.ResultState = ResourceStates.RaytracingAccelerationStructure;
+		TransitionAccelerationStructureResource(tlas.Scratch.Handle, tlas.ScratchState, ResourceStates.UnorderedAccess);
+		tlas.ScratchState = ResourceStates.UnorderedAccess;
 
 		var inputs = new BuildRaytracingAccelerationStructureInputs
 		{
@@ -934,6 +965,27 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	{
 		var barrier = new ResourceBarrier { Type = ResourceBarrierType.Uav };
 		barrier.Anonymous.UAV = new ResourceUavBarrier { PResource = resource };
+		CommandList.ResourceBarrier(1, &barrier);
+	}
+
+	private void TransitionAccelerationStructureResource(
+		ID3D12Resource* resource,
+		ResourceStates before,
+		ResourceStates after)
+	{
+		if (resource is null || before == after)
+		{
+			return;
+		}
+
+		var barrier = new ResourceBarrier { Type = ResourceBarrierType.Transition };
+		barrier.Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = resource,
+			Subresource = D3D12Api.ResourceBarrierAllSubresources,
+			StateBefore = before,
+			StateAfter = after
+		};
 		CommandList.ResourceBarrier(1, &barrier);
 	}
 
@@ -1116,6 +1168,17 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		native.Anonymous.Transition = transition;
 		CommandList.ResourceBarrier(1, &native);
 		buffer.CurrentState = targetState;
+	}
+
+	private void TransitionIndirectReferencedBuffers(D3D12IndirectCommandBuffer commandBuffer)
+	{
+		foreach (var (buffer, requiredState) in commandBuffer.ReferencedBufferStates)
+		{
+			if (buffer.IsCpuWritableDirect == false)
+			{
+				TransitionBufferIfNeeded(buffer, requiredState);
+			}
+		}
 	}
 
 	private static ResourceStates ConvertResourceState(ResourceState state)

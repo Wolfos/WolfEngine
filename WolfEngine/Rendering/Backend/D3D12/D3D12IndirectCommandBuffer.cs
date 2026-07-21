@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -32,6 +33,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	private readonly ComPtr<ID3D12Resource> _argumentBuffer;
 	private readonly CommandRecord* _mappedRecords;
 	private readonly ulong _recordStride;
+	private readonly Dictionary<D3D12Buffer, ResourceStates> _referencedBufferStates = new();
 
 	public D3D12IndirectCommandBuffer(
 		string? name,
@@ -88,6 +90,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	internal ulong ArgumentStride => _recordStride;
 
 	internal ulong GetArgumentOffset(uint commandIndex) => _recordStride * commandIndex;
+
+	internal IEnumerable<KeyValuePair<D3D12Buffer, ResourceStates>> ReferencedBufferStates => _referencedBufferStates;
 
 	public void ResetCommand(uint commandIndex)
 	{
@@ -172,6 +176,12 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				StartInstanceLocation = 0
 			}
 		};
+		TrackBuffer(vertexBuffer, ResourceStates.VertexAndConstantBuffer);
+		TrackBuffer(indexBuffer, ResourceStates.IndexBuffer);
+		TrackBuffer(instanceBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(materialBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(drawArgsBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(materialGenerationBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
 		foreach (var binding in passBindings.Bindings)
 		{
 			if (binding.Resource is not D3D12Buffer passBuffer || passBuffer.Resource.Handle is null)
@@ -185,6 +195,11 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				binding.Kind,
 				binding.RegisterIndex,
 				passBuffer.Resource.Handle->GetGPUVirtualAddress());
+			TrackBuffer(
+				passBuffer,
+				binding.Kind == GraphicsPassBindingKind.ConstantBuffer
+					? ResourceStates.VertexAndConstantBuffer
+					: ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
 		}
 
 		_mappedRecords[commandIndex] = record;
@@ -205,6 +220,17 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		{
 			throw new ArgumentOutOfRangeException(nameof(commandIndex), commandIndex, "Command index is out of range.");
 		}
+	}
+
+	private void TrackBuffer(D3D12Buffer buffer, ResourceStates requiredState)
+	{
+		if (_referencedBufferStates.TryGetValue(buffer, out var existingState))
+		{
+			_referencedBufferStates[buffer] = existingState | requiredState;
+			return;
+		}
+
+		_referencedBufferStates.Add(buffer, requiredState);
 	}
 
 	private static void SetPassBindingAddress(

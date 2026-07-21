@@ -90,6 +90,8 @@ internal sealed unsafe class D3D12BottomLevelAccelerationStructure : IGfxBottomL
 	public string? Name => null;
 	public ComPtr<ID3D12Resource> Result { get; private set; }
 	public ComPtr<ID3D12Resource> Scratch { get; private set; }
+	internal ResourceStates ResultState { get; set; } = ResourceStates.RaytracingAccelerationStructure;
+	internal ResourceStates ScratchState { get; set; } = ResourceStates.Common;
 
 	public void Dispose()
 	{
@@ -117,6 +119,8 @@ internal sealed unsafe class D3D12TopLevelAccelerationStructure : IGfxTopLevelAc
 	public ComPtr<ID3D12Resource> Result { get; private set; }
 	public ComPtr<ID3D12Resource> Scratch { get; private set; }
 	public ComPtr<ID3D12Resource> InstanceDescriptions { get; private set; }
+	internal ResourceStates ResultState { get; set; } = ResourceStates.RaytracingAccelerationStructure;
+	internal ResourceStates ScratchState { get; set; } = ResourceStates.Common;
 
 	public void Dispose()
 	{

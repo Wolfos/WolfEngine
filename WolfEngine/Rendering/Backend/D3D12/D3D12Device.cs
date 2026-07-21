@@ -380,10 +380,10 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		var cpuWritableDirect = descriptor.Usage.HasFlag(BufferUsage.Constant);
 		var cpuReadableDirect = isReadbackBuffer;
 		var resourceFlags = allowsUav ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None;
-		// Default-heap buffers are created in COMMON even when UAV-capable; the debug layer ignores UAV here.
-		var initialState = descriptor.Usage.HasFlag(BufferUsage.Vertex) || descriptor.Usage.HasFlag(BufferUsage.Index)
-			? ResourceStates.GenericRead
-			: ResourceStates.Common;
+		// D3D12 creates default-heap buffers in COMMON. Tracking another initial state
+		// makes the first use skip its required transition because the debug layer
+		// ignores the requested state for buffers.
+		var initialState = ResourceStates.Common;
 
 		var resourceDesc = new ResourceDesc
 		{
@@ -496,8 +496,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		var geometryPtr = &geometry;
 		inputs.Anonymous.PGeometryDescs = geometryPtr;
 		_rayTracingDevice.GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuildInfo);
-		var result = CreateRayTracingResource(prebuildInfo.ResultDataMaxSizeInBytes, ResourceStates.RaytracingAccelerationStructure);
-		var scratch = CreateRayTracingResource(prebuildInfo.ScratchDataSizeInBytes, ResourceStates.UnorderedAccess);
+		var result = CreateRayTracingResultResource(prebuildInfo.ResultDataMaxSizeInBytes);
+		var scratch = CreateRayTracingScratchResource(prebuildInfo.ScratchDataSizeInBytes);
 		return new D3D12BottomLevelAccelerationStructure(descriptor, result, scratch);
 	}
 
@@ -518,8 +518,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		};
 		RaytracingAccelerationStructurePrebuildInfo prebuildInfo = default;
 		_rayTracingDevice.GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuildInfo);
-		var result = CreateRayTracingResource(prebuildInfo.ResultDataMaxSizeInBytes, ResourceStates.RaytracingAccelerationStructure);
-		var scratch = CreateRayTracingResource(prebuildInfo.ScratchDataSizeInBytes, ResourceStates.UnorderedAccess);
+		var result = CreateRayTracingResultResource(prebuildInfo.ResultDataMaxSizeInBytes);
+		var scratch = CreateRayTracingScratchResource(prebuildInfo.ScratchDataSizeInBytes);
 		var instanceDescriptions = CreateUploadBuffer((ulong)descriptor.MaxInstanceCount * 64UL);
 		return new D3D12TopLevelAccelerationStructure(descriptor, result, scratch, instanceDescriptions);
 	}
@@ -552,6 +552,16 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		return geometry;
 	}
 
+	private ComPtr<ID3D12Resource> CreateRayTracingResultResource(ulong sizeInBytes)
+	{
+		return CreateRayTracingResource(sizeInBytes, ResourceStates.RaytracingAccelerationStructure);
+	}
+
+	private ComPtr<ID3D12Resource> CreateRayTracingScratchResource(ulong sizeInBytes)
+	{
+		return CreateRayTracingResource(sizeInBytes, ResourceStates.Common);
+	}
+
 	private ComPtr<ID3D12Resource> CreateRayTracingResource(ulong sizeInBytes, ResourceStates initialState)
 	{
 		var desc = new ResourceDesc
@@ -568,6 +578,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			Flags = ResourceFlags.AllowUnorderedAccess
 		};
 		var heap = new HeapProperties(HeapType.Default);
+		// RTAS resources are the sole exception: D3D12 requires their creation
+		// state and forbids transitioning into RAYTRACING_ACCELERATION_STRUCTURE.
 		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(&heap, HeapFlags.None, in desc, initialState, null, out ComPtr<ID3D12Resource> resource));
 		return resource;
 	}
