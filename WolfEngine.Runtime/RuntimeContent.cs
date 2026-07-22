@@ -137,7 +137,7 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			Resolve(properties.Textures.Normal),
 			Resolve(properties.Textures.Emissive),
 			descriptor.RuntimeAlphaMode,
-			properties is AlphaTestMaterialProperties alpha ? alpha.AlphaCutoff : 0.5f);
+			asset.AlphaCutoff);
 	}
 
 	public object? GetInstance(Guid assetId, Type expectedType) => Load(assetId, expectedType);

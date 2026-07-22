@@ -204,28 +204,18 @@ public sealed class TextureImportSettings
 	public int MaxResolution { get; set; } = 8192;
 }
 
-public sealed class MaterialAsset
+public sealed class MaterialAsset : MaterialSurfaceProperties
 {
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 	public const string FileExtension = ".mat.json";
 
 	public int Version { get; set; } = CurrentVersion;
 	public AssetType AssetType { get; set; } = AssetType.Material;
 	public MaterialAssetType MaterialType { get; set; } = MaterialAssetType.Opaque;
-	public OpaqueMaterialProperties Opaque { get; set; } = new();
-	public AlphaTestMaterialProperties AlphaTest { get; set; } = new();
-	public AlphaBlendMaterialProperties AlphaBlend { get; set; } = new();
+	public float AlphaCutoff { get; set; } = 0.5f;
 
-	public MaterialSurfaceProperties GetActiveProperties()
-	{
-		return MaterialType switch
-		{
-			MaterialAssetType.Opaque => Opaque,
-			MaterialAssetType.AlphaTest => AlphaTest,
-			MaterialAssetType.AlphaBlend => AlphaBlend,
-			_ => Opaque
-		};
-	}
+	// Retained as a compatibility convenience for callers that operate on surface properties.
+	public MaterialSurfaceProperties GetActiveProperties() => this;
 }
 
 public sealed class DataAssetFile
@@ -257,20 +247,6 @@ public abstract class MaterialSurfaceProperties
 	public Vector3 EmissiveFactor { get; set; } = Vector3.Zero;
 	public float EmissiveIntensity { get; set; } = 1.0f;
 	public MaterialTextureAssignments Textures { get; set; } = new();
-}
-
-public sealed class OpaqueMaterialProperties : MaterialSurfaceProperties
-{
-}
-
-public sealed class AlphaTestMaterialProperties : MaterialSurfaceProperties
-{
-	public float AlphaCutoff { get; set; } = 0.5f;
-}
-
-public sealed class AlphaBlendMaterialProperties : MaterialSurfaceProperties
-{
-	public float AlphaCutoff { get; set; } = 0.5f;
 }
 
 public sealed class ImportedMeshAssetFile

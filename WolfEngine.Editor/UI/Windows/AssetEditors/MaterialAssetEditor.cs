@@ -113,24 +113,11 @@ public sealed class MaterialAssetEditor
 
 		if (HasProperty(propertyDefinitions, MaterialPropertyKind.AlphaCutoff))
 		{
-			var alphaCutoff = properties switch
-			{
-				AlphaTestMaterialProperties alphaTest => alphaTest.AlphaCutoff,
-				AlphaBlendMaterialProperties alphaBlend => alphaBlend.AlphaCutoff,
-				_ => 0.5f
-			};
+			var alphaCutoff = materialAsset.AlphaCutoff;
 			DrawFloatEditor("Alpha Cutoff", alphaCutoff, value =>
 			{
 				BeginPendingChange(asset);
-				if (properties is AlphaTestMaterialProperties alphaTest)
-				{
-					alphaTest.AlphaCutoff = value;
-				}
-				else if (properties is AlphaBlendMaterialProperties alphaBlend)
-				{
-					alphaBlend.AlphaCutoff = value;
-				}
-
+				materialAsset.AlphaCutoff = value;
 				_hasPendingChanges = true;
 			});
 		}

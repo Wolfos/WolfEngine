@@ -18,10 +18,7 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 	{
 		return new MaterialAsset
 		{
-			MaterialType = materialType,
-			Opaque = new OpaqueMaterialProperties(),
-			AlphaTest = new AlphaTestMaterialProperties(),
-			AlphaBlend = new AlphaBlendMaterialProperties()
+			MaterialType = materialType
 		};
 	}
 
@@ -41,12 +38,7 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 				$"Unsupported material asset version {assetFile.Version}. Expected {MaterialAsset.CurrentVersion}.");
 		}
 
-		assetFile.Opaque ??= new OpaqueMaterialProperties();
-		assetFile.AlphaTest ??= new AlphaTestMaterialProperties();
-		assetFile.AlphaBlend ??= new AlphaBlendMaterialProperties();
-		assetFile.Opaque.Textures ??= new MaterialTextureAssignments();
-		assetFile.AlphaTest.Textures ??= new MaterialTextureAssignments();
-		assetFile.AlphaBlend.Textures ??= new MaterialTextureAssignments();
+		assetFile.Textures ??= new MaterialTextureAssignments();
 		return assetFile;
 	}
 
@@ -60,12 +52,7 @@ public sealed class MaterialAssetStore : IMaterialAssetStore
 		ArgumentNullException.ThrowIfNull(assetFile);
 		assetFile.Version = MaterialAsset.CurrentVersion;
 		assetFile.AssetType = AssetType.Material;
-		assetFile.Opaque ??= new OpaqueMaterialProperties();
-		assetFile.AlphaTest ??= new AlphaTestMaterialProperties();
-		assetFile.AlphaBlend ??= new AlphaBlendMaterialProperties();
-		assetFile.Opaque.Textures ??= new MaterialTextureAssignments();
-		assetFile.AlphaTest.Textures ??= new MaterialTextureAssignments();
-		assetFile.AlphaBlend.Textures ??= new MaterialTextureAssignments();
+		assetFile.Textures ??= new MaterialTextureAssignments();
 		WriteJsonAtomically(assetFilePath, assetFile);
 	}
 

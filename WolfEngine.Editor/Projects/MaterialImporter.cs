@@ -330,11 +330,8 @@ public sealed class MaterialImporter : IMaterialImporter
 		Guid emissiveTextureId)
 	{
 		var materialAsset = _materialAssetStore.CreateDefault(request.MaterialType);
-		ApplyMaterialProperties(materialAsset.Opaque, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
-		ApplyMaterialProperties(materialAsset.AlphaTest, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
-		ApplyMaterialProperties(materialAsset.AlphaBlend, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
-		materialAsset.AlphaTest.AlphaCutoff = request.AlphaCutoff;
-		materialAsset.AlphaBlend.AlphaCutoff = request.AlphaCutoff;
+		ApplyMaterialProperties(materialAsset, request, albedoTextureId, normalTextureId, ormTextureId, emissiveTextureId);
+		materialAsset.AlphaCutoff = request.AlphaCutoff;
 		return materialAsset;
 	}
 

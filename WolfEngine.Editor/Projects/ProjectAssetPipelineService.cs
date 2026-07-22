@@ -1766,14 +1766,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		properties.Textures.Orm = CreateTextureRef(ormTextureIndex, textureNodeIds);
 		properties.Textures.Emissive = CreateTextureRef(importedMaterial.EmissiveTextureIndex, textureNodeIds);
 
-		if (properties is AlphaTestMaterialProperties alphaTest)
-		{
-			alphaTest.AlphaCutoff = importedMaterial.AlphaCutoff;
-		}
-		else if (properties is AlphaBlendMaterialProperties alphaBlend)
-		{
-			alphaBlend.AlphaCutoff = importedMaterial.AlphaCutoff;
-		}
+		materialAsset.AlphaCutoff = importedMaterial.AlphaCutoff;
 
 		return materialAsset;
 	}

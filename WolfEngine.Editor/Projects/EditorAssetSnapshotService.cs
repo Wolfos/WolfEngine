@@ -117,12 +117,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 	{
 		materialAsset.Version = MaterialAsset.CurrentVersion;
 		materialAsset.AssetType = AssetType.Material;
-		materialAsset.Opaque ??= new OpaqueMaterialProperties();
-		materialAsset.AlphaTest ??= new AlphaTestMaterialProperties();
-		materialAsset.AlphaBlend ??= new AlphaBlendMaterialProperties();
-		materialAsset.Opaque.Textures ??= new MaterialTextureAssignments();
-		materialAsset.AlphaTest.Textures ??= new MaterialTextureAssignments();
-		materialAsset.AlphaBlend.Textures ??= new MaterialTextureAssignments();
+		materialAsset.Textures ??= new MaterialTextureAssignments();
 		return JsonSerializer.Serialize(materialAsset, AssetJson.SerializerOptions);
 	}
 
@@ -145,12 +140,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();
 		runtimeMaterial.EmissiveTexture = ResolveTexture(properties.Textures.Emissive) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.AlphaMode = descriptor.RuntimeAlphaMode;
-		runtimeMaterial.AlphaCutoff = properties switch
-		{
-			AlphaTestMaterialProperties alphaTest => alphaTest.AlphaCutoff,
-			AlphaBlendMaterialProperties alphaBlend => alphaBlend.AlphaCutoff,
-			_ => 0.5f
-		};
+		runtimeMaterial.AlphaCutoff = materialAsset.AlphaCutoff;
 		_renderGraph.RefreshMaterialResources(runtimeMaterial);
 	}
 
