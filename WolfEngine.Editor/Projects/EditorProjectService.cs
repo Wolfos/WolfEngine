@@ -30,6 +30,7 @@ public interface IEditorProjectService
 	AssetDatabaseRefreshResult ReloadAssetDatabase();
 	void ReloadAssetDatabaseFromIndex();
 	void RefreshAssetSource(string relativeSourcePath);
+	void RefreshAssetSource(string relativeSourcePath, Guid preservedRuntimeAssetId) => RefreshAssetSource(relativeSourcePath);
 	void SaveAssetDatabase(AssetDatabase database);
 	AssetDatabase CloneCurrentAssetDatabase();
 	bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset);
@@ -254,6 +255,11 @@ public sealed class EditorProjectService : IEditorProjectService
 
 	public void RefreshAssetSource(string relativeSourcePath)
 	{
+		RefreshAssetSource(relativeSourcePath, Guid.Empty);
+	}
+
+	public void RefreshAssetSource(string relativeSourcePath, Guid preservedRuntimeAssetId)
+	{
 		if (HasOpenProject == false)
 		{
 			throw new InvalidOperationException("No project is currently open.");
@@ -276,6 +282,12 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		ApplyDatabase(database);
 		var invalidatedNodeIds = _assetPipelineService.ExpandInvalidationClosure(_projectRootPath!, previousNodeIds);
+		if (preservedRuntimeAssetId != Guid.Empty)
+		{
+			invalidatedNodeIds = invalidatedNodeIds
+				.Where(assetId => assetId != preservedRuntimeAssetId)
+				.ToArray();
+		}
 		_assetInstanceRegistry.InvalidateAssets(invalidatedNodeIds);
 	}
 

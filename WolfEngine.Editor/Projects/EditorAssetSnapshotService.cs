@@ -81,7 +81,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 	{
 		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
 		SynchronizeRuntimeMaterial(asset.Id, materialAsset);
-		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
+		_projectService.RefreshAssetSource(asset.RelativeSourcePath, asset.Id);
 	}
 
 	public void SaveDataAsset(AssetDatabaseEntry asset, Type dataAssetType, IDataAsset dataAsset)
@@ -95,7 +95,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		WriteFileAtomically(_projectService.GetAbsolutePath(snapshot.RelativeAssetPath), snapshot.Json);
 		var materialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(snapshot.RelativeAssetPath));
 		SynchronizeRuntimeMaterial(snapshot.AssetId, materialAsset);
-		_projectService.RefreshAssetSource(snapshot.RelativeSourcePath);
+		_projectService.RefreshAssetSource(snapshot.RelativeSourcePath, snapshot.AssetId);
 	}
 
 	public void ApplyDataAssetSnapshot(EditorAssetFileSnapshot snapshot)
@@ -135,6 +135,8 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
 		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
 		runtimeMaterial.NormalScale = properties.NormalScale;
+		runtimeMaterial.EmissiveFactor = properties.EmissiveFactor;
+		runtimeMaterial.EmissiveIntensity = properties.EmissiveIntensity;
 		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.OrmTexture = ResolveTexture(properties.Textures.Orm) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.NormalTexture = ResolveTexture(properties.Textures.Normal) ?? _textureFactory.GetNeutralNormalTexture();

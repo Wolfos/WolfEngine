@@ -1,3 +1,4 @@
+using System.Numerics;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -1081,6 +1082,49 @@ public sealed class AssetsWindowTests
 			Assert.That(registry.GetInstance(changedAssetId, typeof(object)), Is.Null);
 			Assert.That(registry.GetInstance(dependentAssetId, typeof(object)), Is.Null);
 			Assert.That(registry.GetInstance(unchangedAssetId, typeof(object)), Is.Not.Null);
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot))
+			{
+				Directory.Delete(projectRoot, recursive: true);
+			}
+		}
+	}
+
+	[Test]
+	public void RefreshAssetSource_PreservingRuntimeAsset_KeepsEditedAssetAndInvalidatesDependents()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEnginePreserveMaterialTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "PreserveMaterialTests");
+
+		var materialAssetId = Guid.NewGuid();
+		var dependentAssetId = Guid.NewGuid();
+		var pipeline = new TrackingProjectAssetPipelineService
+		{
+			NextRefreshProjectIncrementalResult = CreateAssetDatabase(
+				CreateAssetEntry(materialAssetId, "material-hash", "Assets/Materials/Test.mat.json"),
+				CreateAssetEntry(dependentAssetId, "dependent-hash")),
+		};
+		pipeline.DependentInvalidations[materialAssetId] = [dependentAssetId];
+
+		var registry = new TestAssetInstanceRegistry();
+		var liveMaterial = new object();
+		registry.Register(materialAssetId, liveMaterial);
+		registry.Register(dependentAssetId, new object());
+		var projectService = new EditorProjectService(pipeline, registry);
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+			registry.Register(materialAssetId, liveMaterial);
+			registry.Register(dependentAssetId, new object());
+
+			projectService.RefreshAssetSource("Assets/Materials/Test.mat.json", materialAssetId);
+
+			Assert.That(registry.GetInstance(materialAssetId, typeof(object)), Is.SameAs(liveMaterial));
+			Assert.That(registry.GetInstance(dependentAssetId, typeof(object)), Is.Null);
 		}
 		finally
 		{
