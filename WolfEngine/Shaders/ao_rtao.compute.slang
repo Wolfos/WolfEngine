@@ -137,7 +137,7 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
         return 0.0f.xxx;
     }
 
-    uint instanceIndex = query.CommittedInstanceID();
+    uint instanceIndex = query.CommittedInstanceIndex();
     if (instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
     {
         return 1.0f.xxx;
