@@ -565,7 +565,9 @@ float DdgiTraceDirectionalLightVisibility(float3 worldPosition, float3 worldNorm
 
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
     query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    query.Proceed();
+    while (query.Proceed())
+    {
+    }
     return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0f : 1.0f;
 }
 
@@ -593,7 +595,9 @@ DdgiTraceResult DdgiTraceRay(
 
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
     query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    query.Proceed();
+    while (query.Proceed())
+    {
+    }
 
     DdgiTraceResult result;
     result.hitGeometry = false;
@@ -649,7 +653,9 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
         RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
         0xFF,
         ray);
-    query.Proceed();
+    while (query.Proceed())
+    {
+    }
 
     DdgiTraceResult result = (DdgiTraceResult)0;
     result.hitDistance = maxRayDistance;
