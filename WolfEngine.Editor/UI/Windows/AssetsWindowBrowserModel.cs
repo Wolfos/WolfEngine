@@ -39,6 +39,52 @@ internal sealed class AssetsWindowSourceItem
 	public required IReadOnlyList<AssetDatabaseEntry> SubAssets { get; init; }
 }
 
+/// <summary>
+/// Retains the browser tree until the project supplies a newer asset database or a different Assets root.
+/// The cached model is treated as immutable by its consumers after construction.
+/// </summary>
+internal sealed class AssetsWindowBrowserModelCache
+{
+	private readonly Func<IReadOnlyList<AssetDatabaseEntry>, string, AssetsWindowBrowserModel> _build;
+	private AssetsWindowBrowserModel? _browserModel;
+	private string? _assetsRootPath;
+	private long _assetDatabaseRevision;
+
+	public AssetsWindowBrowserModelCache(
+		Func<IReadOnlyList<AssetDatabaseEntry>, string, AssetsWindowBrowserModel>? build = null)
+	{
+		_build = build ?? AssetsWindowBrowserModelBuilder.Build;
+	}
+
+	public AssetsWindowBrowserModel GetOrBuild(
+		IReadOnlyList<AssetDatabaseEntry> assets,
+		string assetsRootPath,
+		long assetDatabaseRevision)
+	{
+		ArgumentNullException.ThrowIfNull(assets);
+		ArgumentException.ThrowIfNullOrWhiteSpace(assetsRootPath);
+
+		var normalizedAssetsRootPath = Path.GetFullPath(assetsRootPath);
+		if (_browserModel is not null &&
+		    _assetDatabaseRevision == assetDatabaseRevision &&
+		    string.Equals(_assetsRootPath, normalizedAssetsRootPath, StringComparison.OrdinalIgnoreCase))
+		{
+			return _browserModel;
+		}
+
+		_browserModel = _build(assets, normalizedAssetsRootPath);
+		_assetsRootPath = normalizedAssetsRootPath;
+		_assetDatabaseRevision = assetDatabaseRevision;
+		return _browserModel;
+	}
+
+	public void Invalidate()
+	{
+		_browserModel = null;
+		_assetsRootPath = null;
+	}
+}
+
 internal static class AssetsWindowBrowserModelBuilder
 {
 	public static AssetsWindowBrowserModel Build(IReadOnlyList<AssetDatabaseEntry> assets, string assetsRootPath)

@@ -36,6 +36,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private readonly EditorCameraSystem? _editorCameraSystem;
 	private readonly AssetsWindowDragDropState _dragDrop = new(DragPreviewRounding);
 	private readonly AssetsWindowSelectionState _selection = new();
+	private readonly AssetsWindowBrowserModelCache _browserModelCache = new();
 	private string _errorMessage = string.Empty;
 	private bool _openErrorPopup;
 	private PendingDeleteTarget? _pendingDeleteTarget;
@@ -124,9 +125,10 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return;
 		}
 
-		var browserModel =
-			AssetsWindowBrowserModelBuilder.Build(_projectService.CurrentAssetDatabase.Assets,
-				_projectService.AssetsPath);
+		var browserModel = _browserModelCache.GetOrBuild(
+			_projectService.CurrentAssetDatabase.Assets,
+			_projectService.AssetsPath,
+			_projectService.AssetDatabaseRevision);
 		_selection.Prune(browserModel, _projectService, _assetSelectionService);
 		var selectedFolder = browserModel.FoldersByPath[_selection.SelectedFolderPath];
 
@@ -585,6 +587,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void CompleteSuccessfulMove(AssetBrowserDragTarget dragTarget, string movedPath)
 	{
+		_browserModelCache.Invalidate();
+
 		switch (dragTarget.Kind)
 		{
 			case DragTargetKind.Source:
@@ -641,6 +645,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		try
 		{
 			var folderPath = _projectService.CreateFolder(parentFolderPath, GetNewFolderName(parentFolderPath));
+			_browserModelCache.Invalidate();
 			_selection.RevealFolderPath(folderPath);
 			_selection.ExpandedSourceId = null;
 			ScheduleRename(PendingRenameTarget.ForFolder(folderPath));
@@ -761,6 +766,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		if (result.Success && result.AssetId.HasValue)
 		{
+			_browserModelCache.Invalidate();
 			if (_projectService.TryGetAsset(result.AssetId.Value, out var createdAsset))
 			{
 				_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(createdAsset.RelativeSourcePath));
@@ -921,6 +927,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 					break;
 			}
 
+			_browserModelCache.Invalidate();
 			ValidateSelectionAfterProjectMutation();
 		}
 		catch (Exception ex)
@@ -958,6 +965,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 					break;
 			}
 
+			_browserModelCache.Invalidate();
 			ValidateSelectionAfterProjectMutation();
 			_pendingRenameTarget = null;
 			_renameErrorMessage = string.Empty;

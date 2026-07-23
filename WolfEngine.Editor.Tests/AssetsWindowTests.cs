@@ -14,6 +14,75 @@ namespace WolfEngine.Editor.Tests;
 public sealed class AssetsWindowTests
 {
 	[Test]
+	public void BrowserModelCache_ReusesModel_WhenAssetsRootAndRevisionAreUnchanged()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var buildCount = 0;
+		var cache = new AssetsWindowBrowserModelCache((assets, rootPath) =>
+		{
+			buildCount++;
+			return AssetsWindowBrowserModelBuilder.Build(assets, rootPath);
+		});
+
+		var firstModel = cache.GetOrBuild([], assetsRoot.AssetsPath, assetDatabaseRevision: 4);
+		var secondModel = cache.GetOrBuild([], Path.Combine(assetsRoot.AssetsPath, "."), assetDatabaseRevision: 4);
+
+		Assert.That(secondModel, Is.SameAs(firstModel));
+		Assert.That(buildCount, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void BrowserModelCache_RebuildsWhenAssetDatabaseRevisionChanges()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var cache = new AssetsWindowBrowserModelCache();
+		var assets = new List<AssetDatabaseEntry>();
+		var firstModel = cache.GetOrBuild(assets, assetsRoot.AssetsPath, assetDatabaseRevision: 1);
+		assets.Add(CreateAssetEntry(Guid.NewGuid(), "stone", "Assets/Materials/Stone.mat.json"));
+
+		var secondModel = cache.GetOrBuild(assets, assetsRoot.AssetsPath, assetDatabaseRevision: 2);
+
+		Assert.That(secondModel, Is.Not.SameAs(firstModel));
+		Assert.That(secondModel.FoldersByPath["Assets/Materials"].Sources, Has.Count.EqualTo(1));
+	}
+
+	[Test]
+	public void BrowserModelCache_RebuildsWhenAssetsRootChanges()
+	{
+		using var firstAssetsRoot = new TemporaryAssetsRoot();
+		using var secondAssetsRoot = new TemporaryAssetsRoot();
+		var buildCount = 0;
+		var cache = new AssetsWindowBrowserModelCache((assets, rootPath) =>
+		{
+			buildCount++;
+			return AssetsWindowBrowserModelBuilder.Build(assets, rootPath);
+		});
+
+		var firstModel = cache.GetOrBuild([], firstAssetsRoot.AssetsPath, assetDatabaseRevision: 1);
+		var secondModel = cache.GetOrBuild([], secondAssetsRoot.AssetsPath, assetDatabaseRevision: 1);
+
+		Assert.That(secondModel, Is.Not.SameAs(firstModel));
+		Assert.That(buildCount, Is.EqualTo(2));
+	}
+
+	[Test]
+	public void BrowserModelCache_InvalidateRebuildsAndIncludesNewEmptyFolder()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var cache = new AssetsWindowBrowserModelCache();
+		var firstModel = cache.GetOrBuild([], assetsRoot.AssetsPath, assetDatabaseRevision: 1);
+		Directory.CreateDirectory(Path.Combine(assetsRoot.AssetsPath, "New Empty Folder"));
+
+		var staleModel = cache.GetOrBuild([], assetsRoot.AssetsPath, assetDatabaseRevision: 1);
+		cache.Invalidate();
+		var rebuiltModel = cache.GetOrBuild([], assetsRoot.AssetsPath, assetDatabaseRevision: 1);
+
+		Assert.That(staleModel, Is.SameAs(firstModel));
+		Assert.That(rebuiltModel, Is.Not.SameAs(firstModel));
+		Assert.That(rebuiltModel.FoldersByPath.ContainsKey("Assets/New Empty Folder"), Is.True);
+	}
+
+	[Test]
 	public void BrowserModelBuild_IncludesEmptyFolders_AndGroupsSubAssetsUnderSource()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();
