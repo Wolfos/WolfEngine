@@ -315,14 +315,8 @@ internal sealed class RenderGraphFrameBuilder
 		Vector3 cameraPosition)
 	{
 		var device = _renderer.GetGfxDevice();
-		if (RequiresRayTracingScene(config) && device.SupportsRayTracing == false)
+		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
 		{
-			if (_loggedUnsupportedRayTracing == false)
-			{
-				Console.WriteLine("Ray tracing was requested but is not supported by the active graphics device; disabling RTAO and DDGI.");
-				_loggedUnsupportedRayTracing = true;
-			}
-
 			config = CreateRayTracingDisabledConfig(config);
 		}
 
@@ -2406,17 +2400,8 @@ internal sealed class RenderGraphFrameBuilder
 		ambientOcclusion.Enabled = false;
 		var diffuseGlobalIllumination = source.DiffuseGlobalIllumination;
 		diffuseGlobalIllumination.Enabled = false;
-		return new RenderConfig
-		{
-			AmbientOcclusion = ambientOcclusion,
-			DiffuseGlobalIllumination = diffuseGlobalIllumination,
-			ShadowMaps = source.ShadowMaps,
-			SkyboxConfig = source.SkyboxConfig,
-			TemporalAntiAliasing = source.TemporalAntiAliasing,
-			Tonemapping = source.Tonemapping,
-			Bloom = source.Bloom,
-			Decals = source.Decals
-		};
+		source.DiffuseGlobalIllumination = diffuseGlobalIllumination;
+		return source;
 	}
 
 	private static Int2 GetAmbientOcclusionInternalSize(

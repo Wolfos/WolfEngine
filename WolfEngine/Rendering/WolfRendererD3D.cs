@@ -1440,11 +1440,9 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		mesh.PackedBaseVertex = 0;
 	}
 
-	public IGfxBuffer GetPackedMeshVertexBuffer() =>
-		_packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer has not been initialized.");
+	public IGfxBuffer GetPackedMeshVertexBuffer() => _packedVertexBuffer!;
 
-	public IGfxBuffer GetPackedMeshIndexBuffer() =>
-		_packedIndexBuffer ?? throw new InvalidOperationException("Packed mesh index buffer has not been initialized.");
+	public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
 
 	public bool SupportsGpuCapture => false;
 
