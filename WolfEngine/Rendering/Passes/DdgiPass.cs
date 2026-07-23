@@ -187,6 +187,7 @@ public sealed class DdgiPass
 				? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.SkyboxEnvironment))
 				: DescriptorHandle.Invalid,
 				SamplerHandle = _linearSampler,
+				ErrorTextureHandle = _bindlessRegistry.ErrorTextureHandle,
 				InstanceBuffer = gpuDrawResources.InstanceBuffer ?? throw new InvalidOperationException("GpuDraw instance buffer missing."),
 				DrawCommandBuffer = gpuDrawResources.DrawCommandBuffer ?? throw new InvalidOperationException("GpuDraw draw-command buffer missing."),
 				MaterialBuffer = gpuDrawResources.MaterialBuffer ?? throw new InvalidOperationException("GpuDraw material buffer missing."),
@@ -382,6 +383,7 @@ public sealed class DdgiPass
 		bindlessWriter.SetUInt("probeRelocationDecisionHandle", config.ProbeRelocationDecisionHandle.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.EnvironmentHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
+		bindlessWriter.SetUInt("errorTextureHandle", config.ErrorTextureHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 	}
 

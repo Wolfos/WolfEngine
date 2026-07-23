@@ -36,6 +36,7 @@ cbuffer BindlessHandles : register(b0)
     uint probeRelocationDecisionHandle;
     uint environmentHandle;
     uint samplerHandle;
+    uint errorTextureHandle;
 };
 
 cbuffer DdgiSettings : register(b1)

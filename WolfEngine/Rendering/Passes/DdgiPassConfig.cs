@@ -35,6 +35,7 @@ public readonly struct DdgiPassConfig
 	public required DescriptorHandle ProbeRelocationDecisionHandle { get; init; }
 	public required DescriptorHandle EnvironmentHandle { get; init; }
 	public required DescriptorHandle SamplerHandle { get; init; }
+	public required DescriptorHandle ErrorTextureHandle { get; init; }
 	public required IGfxBuffer InstanceBuffer { get; init; }
 	public required IGfxBuffer DrawCommandBuffer { get; init; }
 	public required IGfxBuffer MaterialBuffer { get; init; }

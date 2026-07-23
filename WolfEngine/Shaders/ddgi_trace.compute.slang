@@ -345,6 +345,25 @@ bool DdgiTryResolveTerrainHitSurface(
 
     uint materialIndex = DdgiResolveMaterialIndex(instanceData.materialHandle);
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
+    if (terrainData.heightmapHandle == errorTextureHandle ||
+        (terrainData.hasLayerMaps != 0u &&
+            (terrainData.layerIndexMapHandle == errorTextureHandle ||
+             terrainData.layerWeightMapHandle == errorTextureHandle)))
+    {
+        return false;
+    }
+
+    uint activeLayerCount = min(max(terrainData.layerCount, 1u), 4u);
+    for (uint layerIndex = 0u; layerIndex < activeLayerCount; layerIndex++)
+    {
+        GpuTerrainLayerData layerData = g_TerrainLayerTable[terrainData.layerStart + layerIndex];
+        if (layerData.albedoHandle == errorTextureHandle ||
+            (layerData.hasHeight != 0u && layerData.heightHandle == errorTextureHandle))
+        {
+            return false;
+        }
+    }
+
     float3 localNormal = DdgiComputeTerrainLocalNormal(surface.uv, instanceData, terrainData);
     surface.worldPosition = rayOrigin + rayDirection * fallbackRayT;
     surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
