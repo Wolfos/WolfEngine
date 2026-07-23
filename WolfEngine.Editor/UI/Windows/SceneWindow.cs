@@ -256,26 +256,26 @@ public class SceneWindow: EditorWindow
         if (ShouldDrawGizmos(_playSession.State))
         {
             _worldManager.OnDrawGizmos(WorldTag.Authoring);
-        }
 
-        if (_sceneToolMode == SceneToolMode.Transform)
-        {
-            _terrainToolController.ClearPreview();
-            _transformGizmoController.DrawAndHandle(
-                scene,
-                world,
-				EditorGui.SelectedEntities,
-                _gizmoMode,
-                _transformSpace,
-                _pivotMode);
-        }
-        else if (_sceneToolMode == SceneToolMode.Terrain)
-        {
-            _terrainToolController.DrawAndHandle(scene, _terrainTool);
-        }
-        else
-        {
-            _terrainToolController.ClearPreview();
+            switch (_sceneToolMode)
+            {
+                case SceneToolMode.Transform:
+                    _terrainToolController.ClearPreview();
+                    _transformGizmoController.DrawAndHandle(
+                        scene,
+                        world,
+                        EditorGui.SelectedEntities,
+                        _gizmoMode,
+                        _transformSpace,
+                        _pivotMode);
+                    break;
+                case SceneToolMode.Terrain:
+                    _terrainToolController.DrawAndHandle(scene, _terrainTool);
+                    break;
+                default:
+                    _terrainToolController.ClearPreview();
+                    break;
+            }
         }
 
         ImGui.End();
@@ -283,7 +283,7 @@ public class SceneWindow: EditorWindow
 
     internal static bool ShouldDrawGizmos(EditorPlayState playState)
     {
-        return playState == EditorPlayState.Edit;
+        return playState is EditorPlayState.Edit or EditorPlayState.Paused;
     }
 
     private void ApplyShortcut(SceneShortcutCommand command)
