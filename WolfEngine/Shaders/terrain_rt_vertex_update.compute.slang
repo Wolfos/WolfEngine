@@ -1,6 +1,6 @@
 import "common_bindless.slang";
 
-RWStructuredBuffer<float3> g_TerrainRtVertices : register(u0);
+RWStructuredBuffer<float4> g_TerrainRtVertices : register(u0);
 
 cbuffer TerrainRtVertexUpdateParams : register(b11)
 {
@@ -52,5 +52,5 @@ void TerrainRayTracingVertexUpdateCS(uint3 dispatchThreadId : SV_DispatchThreadI
 
     float localX = chunkOriginSize.x + baseUv.x * chunkOriginSize.z;
     float localZ = chunkOriginSize.y + baseUv.y * chunkOriginSize.w;
-    g_TerrainRtVertices[vertexIndex] = float3(localX, height, localZ);
+    g_TerrainRtVertices[vertexIndex] = float4(localX, height, localZ, 0.0f);
 }

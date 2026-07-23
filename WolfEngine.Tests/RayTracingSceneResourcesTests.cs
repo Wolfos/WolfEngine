@@ -1524,6 +1524,10 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.InstanceIndexToInstanceHandleBuffer, Is.Not.Null);
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(2));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
+		var terrainBuild = commandList.BottomLevelBuilds.Single(build =>
+			(build.Descriptor.VertexBuffer.Descriptor.Usage & BufferUsage.Structured) != 0);
+		Assert.That(terrainBuild.Descriptor.VertexStrideBytes, Is.EqualTo(16));
+		Assert.That(terrainBuild.Descriptor.VertexBuffer.Descriptor.SizeInBytes, Is.EqualTo(17UL * 17UL * 16UL));
 	}
 
 	[Test]
@@ -1809,17 +1813,20 @@ public sealed class RayTracingSceneResourcesTests
 		}
 	}
 
-	private sealed class TestDevice : IGfxDevice
+	private sealed class TestDevice : IGfxDevice, IGpuSubmissionTimeline
 	{
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 		public bool SupportsRayTracing => true;
+		public ulong LastSubmittedId { get; set; }
+		public ulong CompletedId { get; set; }
+		public void PumpCompleted() { }
 		public IGfxDescriptorTable GlobalTable { get; } = new TestDescriptorTable();
 		public IGfxCommandList BeginGraphics() => throw new NotSupportedException();
 		public IGfxCommandList BeginCompute() => throw new NotSupportedException();
 		public void Submit(IGfxCommandList commandList) => throw new NotSupportedException();
 		public void WaitForIdle() => throw new NotSupportedException();
 		public IGfxTexture CreateTexture(in TextureDescriptor descriptor) => throw new NotSupportedException();
-		public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor) => new TestBuffer(descriptor.Usage);
+		public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor) => new TestBuffer(descriptor);
 		public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor) => throw new NotSupportedException();
 		public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(in BottomLevelAccelerationStructureDescriptor descriptor) => new TestBottomLevelAccelerationStructure(descriptor);
 		public IGfxTopLevelAccelerationStructure CreateTopLevelAccelerationStructure(in TopLevelAccelerationStructureDescriptor descriptor) => new TestTopLevelAccelerationStructure(descriptor);
@@ -1831,14 +1838,20 @@ public sealed class RayTracingSceneResourcesTests
 	{
 		public int BottomLevelBuildCount { get; private set; }
 		public int TopLevelBuildCount { get; private set; }
+		public List<IGfxBottomLevelAccelerationStructure> BottomLevelBuilds { get; } = new();
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 		public void ResetCounts()
 		{
 			BottomLevelBuildCount = 0;
 			TopLevelBuildCount = 0;
+			BottomLevelBuilds.Clear();
 		}
 
-		public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure) => BottomLevelBuildCount++;
+		public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
+		{
+			BottomLevelBuildCount++;
+			BottomLevelBuilds.Add(accelerationStructure);
+		}
 		public void BuildTopLevelAccelerationStructure(IGfxTopLevelAccelerationStructure accelerationStructure, ReadOnlySpan<RayTracingInstanceDescription> instances) => TopLevelBuildCount++;
 		public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure) { }
 		public void BeginPass(in PassTargets targets, in Viewport viewport) => throw new NotSupportedException();
@@ -1870,7 +1883,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void Barrier(in ResourceBarrierDescription barrier) { }
 	}
 
-	private sealed class TestBottomLevelAccelerationStructure : IGfxBottomLevelAccelerationStructure
+	private sealed class TestBottomLevelAccelerationStructure : IGfxBottomLevelAccelerationStructure, IDisposable
 	{
 		public TestBottomLevelAccelerationStructure(in BottomLevelAccelerationStructureDescriptor descriptor)
 		{
@@ -1879,6 +1892,8 @@ public sealed class RayTracingSceneResourcesTests
 
 		public string? Name => null;
 		public BottomLevelAccelerationStructureDescriptor Descriptor { get; }
+		public bool IsDisposed { get; private set; }
+		public void Dispose() => IsDisposed = true;
 	}
 
 	private sealed class TestTopLevelAccelerationStructure : IGfxTopLevelAccelerationStructure
@@ -1903,6 +1918,11 @@ public sealed class RayTracingSceneResourcesTests
 		public TestBuffer(BufferUsage usage)
 		{
 			Descriptor = new BufferDescriptor(256, usage);
+		}
+
+		public TestBuffer(in BufferDescriptor descriptor)
+		{
+			Descriptor = descriptor;
 		}
 
 		public string? Name => null;

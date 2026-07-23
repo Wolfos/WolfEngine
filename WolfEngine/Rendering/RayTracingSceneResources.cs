@@ -88,6 +88,9 @@ public sealed record RayTracingSceneState(
 
 public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDisposable
 {
+	// Slang/MSL aligns float3 structured-buffer elements to 16 bytes. Keep the BLAS vertex
+	// stride explicit so compute writes and acceleration-structure reads share one layout.
+	private const uint TerrainRayTracingVertexStrideBytes = 16;
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<uint, InstanceRecord> _instances = new();
 	private readonly Dictionary<uint, TerrainInstanceRecord> _terrainInstances = new();
@@ -530,14 +533,14 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 		var vertexCount = (uint)((resolution + 1) * (resolution + 1));
 		var vertexBuffer = device.CreateBuffer(new BufferDescriptor(
-			(ulong)vertexCount * 12UL,
+			(ulong)vertexCount * TerrainRayTracingVertexStrideBytes,
 			BufferUsage.Vertex | BufferUsage.Structured,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		var indexRecord = GetOrCreateTerrainIndexBuffer(device, resolution);
 		var descriptor = new BottomLevelAccelerationStructureDescriptor(
 			vertexBuffer,
 			0,
-			12,
+			TerrainRayTracingVertexStrideBytes,
 			vertexCount,
 			indexRecord.IndexBuffer,
 			0,
