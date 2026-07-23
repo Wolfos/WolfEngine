@@ -40,6 +40,7 @@ public static class WolfEngine
 		services.AddSingleton(new RenderPresentationOptions());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
 		services.AddSingleton<EditorFrameCoordinator>();
+		services.AddSingleton<RenderFrameCoordinator>();
 		services.AddSingleton<IFileDialogService, FileDialogService>();
 		services.AddSingleton<GpuDrawResources>();
 		services.AddSingleton<GpuDrawHardeningStats>();

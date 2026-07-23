@@ -296,6 +296,8 @@ internal sealed class RenderGraphFrameBuilder
 		ShaderPipelineInvalidation.Invalidate(_rayTracingSceneResources);
 	}
 
+	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();
+
 	public void SetSkybox(SkyboxResources skybox)
 	{
 		_externalSkybox = skybox;

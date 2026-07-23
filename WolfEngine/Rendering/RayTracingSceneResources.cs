@@ -1,6 +1,7 @@
 #nullable enable
 
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
@@ -57,6 +58,34 @@ public readonly struct RayTracingSceneStats
 	public bool SidecarHitShadingAvailable { get; }
 }
 
+/// <summary>Renderer-thread snapshot used to diagnose ray-tracing scene transitions.</summary>
+public sealed record RayTracingSceneState(
+	string? TopLevelAccelerationStructureIdentity,
+	long TopLevelAccelerationStructureGeneration,
+	int TopLevelInstanceCount,
+	int MeshBottomLevelAccelerationStructureCount,
+	int TerrainBottomLevelAccelerationStructureCount,
+	int PendingBottomLevelBuildCount,
+	RayTracingSceneRebuildReason LastTopLevelUpdateReason,
+	int TerrainInstanceCount,
+	int PendingResourceRetirementCount,
+	ulong LastSubmittedId,
+	ulong CompletedId)
+{
+	public static RayTracingSceneState Empty { get; } = new(
+		null,
+		0,
+		0,
+		0,
+		0,
+		0,
+		RayTracingSceneRebuildReason.None,
+		0,
+		0,
+		0,
+		0);
+}
+
 public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDisposable
 {
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
@@ -67,6 +96,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly uint[] _instanceIndexToInstanceHandle = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly uint[] _instanceIndexToTerrainRayTracingResolution = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
+	private readonly Queue<PendingResourceRetirement> _pendingResourceRetirements = new();
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
@@ -80,8 +110,12 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private ComputeThreadGroupSize? _terrainVertexUpdateThreadGroupSize;
 	private ReadOnlyMemory<byte> _terrainVertexUpdateShaderBytecode;
 	private RayTracingSceneStats _lastStats;
+	private long _topLevelAccelerationStructureGeneration;
+	private RayTracingSceneRebuildReason _lastTopLevelUpdateReason;
 	private bool _bootstrapPending = true;
 	private bool _tlasDirty;
+
+	private readonly record struct PendingResourceRetirement(IDisposable Resource, ulong RetireSubmissionId);
 
 	public RayTracingSceneResources(IShaderCompiler shaderCompiler)
 	{
@@ -100,6 +134,26 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 	public RayTracingSceneStats LastStats => _lastStats;
 
+	public RayTracingSceneState GetState()
+	{
+		var topLevel = _topLevelAccelerationStructure;
+		var topLevelIdentity = topLevel is null
+			? null
+			: $"{topLevel.GetType().Name}:{RuntimeHelpers.GetHashCode(topLevel):X8}";
+		return new RayTracingSceneState(
+			topLevelIdentity,
+			_topLevelAccelerationStructureGeneration,
+			_lastStats.TopLevelInstanceCount,
+			_meshRecords.Count,
+			_terrainInstances.Count,
+			_lastStats.PendingBottomLevelBuildCount,
+			_lastTopLevelUpdateReason,
+			_terrainInstances.Count,
+			_pendingResourceRetirements.Count,
+			0,
+			0);
+	}
+
 	public void RecordUpdate(
 		RenderGraphContext context,
 		IRenderer renderer,
@@ -114,10 +168,15 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			return;
 		}
+		RetirePendingResources(device);
 
 		EnsureSidecarResources(device);
-		_topLevelAccelerationStructure ??= device.CreateTopLevelAccelerationStructure(
-			new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
+		if (_topLevelAccelerationStructure is null)
+		{
+			_topLevelAccelerationStructure = device.CreateTopLevelAccelerationStructure(
+				new TopLevelAccelerationStructureDescriptor(GpuDrawResources.MaxInstanceCount - 1));
+			_topLevelAccelerationStructureGeneration++;
+		}
 
 		var statsBuilder = new RayTracingSceneStatsBuilder();
 		var appliedBootstrap = false;
@@ -154,6 +213,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			commandList.BuildTopLevelAccelerationStructure(_topLevelAccelerationStructure, CollectionsMarshalAsSpan(_instanceDescriptions));
 			_tlasDirty = false;
 			tlasRebuildCount = 1;
+			_lastTopLevelUpdateReason = statsBuilder.TopLevelRebuildReason;
 		}
 
 		_lastStats = new RayTracingSceneStats(
@@ -204,10 +264,10 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	{
 		foreach (var record in _instances.Values)
 		{
-			ReleaseMesh(record.Mesh);
+			ReleaseMesh(record.Mesh, device);
 		}
 		_instances.Clear();
-		ReleaseAllTerrainInstances();
+		ReleaseAllTerrainInstances(device);
 
 		drawDatabase.CollectDrawEntries(_drawEntries);
 		foreach (var entry in _drawEntries)
@@ -250,7 +310,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			if (update.DrawKind == GpuDrawKind.Terrain)
 			{
-				if (RemoveTerrainInstance(update.InstanceHandle.Value))
+				if (RemoveTerrainInstance(update.InstanceHandle.Value, device))
 				{
 					statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Remove;
 				}
@@ -258,7 +318,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				return;
 			}
 
-			if (RemoveInstance(update.InstanceHandle.Value))
+			if (RemoveInstance(update.InstanceHandle.Value, device))
 			{
 				statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Remove;
 			}
@@ -325,7 +385,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		var material = update.Material ?? (hasExistingRecord ? oldRecord.Material : null);
 		if (update.Mesh is null || material is null || IsRayTraceable(update.DrawKind, material, ref statsBuilder) == false)
 		{
-			if (RemoveInstance(update.InstanceHandle.Value))
+			if (RemoveInstance(update.InstanceHandle.Value, device))
 			{
 				statsBuilder.TopLevelRebuildReason |= update.Type == GpuDrawUpdateType.UpdateMesh
 					? RayTracingSceneRebuildReason.Mesh
@@ -338,7 +398,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		var newBlas = AcquireMesh(update.Mesh, device);
 		if (hasExistingRecord)
 		{
-			ReleaseMesh(oldRecord.Mesh);
+			ReleaseMesh(oldRecord.Mesh, device);
 		}
 
 		_instances[update.InstanceHandle.Value] = new InstanceRecord(
@@ -361,7 +421,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		var hasExistingRecord = _terrainInstances.TryGetValue(update.InstanceHandle.Value, out var oldRecord);
 		if (update.TerrainSurface is null)
 		{
-			if (RemoveTerrainInstance(update.InstanceHandle.Value))
+			if (RemoveTerrainInstance(update.InstanceHandle.Value, device))
 			{
 				statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Remove;
 			}
@@ -374,7 +434,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			if (hasExistingRecord)
 			{
-				DisposeTerrainRecord(oldRecord);
+				DisposeTerrainRecord(oldRecord, device);
 			}
 
 			if (TryAcquireTerrain(update, device, out var newRecord))
@@ -701,7 +761,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		return accelerationStructure;
 	}
 
-	private void ReleaseMesh(Mesh mesh)
+	private void ReleaseMesh(Mesh mesh, IGfxDevice device)
 	{
 		if (_meshRecords.TryGetValue(mesh, out var record) == false)
 		{
@@ -716,56 +776,73 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		_meshRecords.Remove(mesh);
-		if (record.AccelerationStructure is IDisposable disposable)
-		{
-			disposable.Dispose();
-		}
+		QueueResourceRetirement(record.AccelerationStructure, device);
 	}
 
-	private bool RemoveInstance(uint instanceHandle)
+	private bool RemoveInstance(uint instanceHandle, IGfxDevice device)
 	{
 		if (_instances.Remove(instanceHandle, out var record) == false)
 		{
 			return false;
 		}
 
-		ReleaseMesh(record.Mesh);
+		ReleaseMesh(record.Mesh, device);
 		_tlasDirty = true;
 		return true;
 	}
 
-	private bool RemoveTerrainInstance(uint instanceHandle)
+	private bool RemoveTerrainInstance(uint instanceHandle, IGfxDevice device)
 	{
 		if (_terrainInstances.Remove(instanceHandle, out var record) == false)
 		{
 			return false;
 		}
 
-		DisposeTerrainRecord(record);
+		DisposeTerrainRecord(record, device);
 		_tlasDirty = true;
 		return true;
 	}
 
-	private void ReleaseAllTerrainInstances()
+	private void ReleaseAllTerrainInstances(IGfxDevice device)
 	{
 		foreach (var record in _terrainInstances.Values)
 		{
-			DisposeTerrainRecord(record);
+			DisposeTerrainRecord(record, device);
 		}
 
 		_terrainInstances.Clear();
 	}
 
-	private static void DisposeTerrainRecord(in TerrainInstanceRecord record)
+	private void DisposeTerrainRecord(in TerrainInstanceRecord record, IGfxDevice device)
 	{
-		if (record.AccelerationStructure is IDisposable blasDisposable)
+		QueueResourceRetirement(record.AccelerationStructure, device);
+		QueueResourceRetirement(record.VertexBuffer, device);
+	}
+
+	private void QueueResourceRetirement(object resource, IGfxDevice device)
+	{
+		if (resource is not IDisposable disposable)
 		{
-			blasDisposable.Dispose();
+			return;
 		}
 
-		if (record.VertexBuffer is IDisposable vertexBufferDisposable)
+		// RecordUpdate runs while building a command list that can still reference this resource.
+		// Retire after its upcoming submission as well as every submission already in flight.
+		var retireSubmissionId = device is IGpuSubmissionTimeline timeline
+			? checked(timeline.LastSubmittedId + 1)
+			: 0UL;
+		_pendingResourceRetirements.Enqueue(new PendingResourceRetirement(disposable, retireSubmissionId));
+	}
+
+	private void RetirePendingResources(IGfxDevice device)
+	{
+		var completedId = device is IGpuSubmissionTimeline timeline
+			? timeline.CompletedId
+			: ulong.MaxValue;
+		while (_pendingResourceRetirements.Count > 0 &&
+			_pendingResourceRetirements.Peek().RetireSubmissionId <= completedId)
 		{
-			vertexBufferDisposable.Dispose();
+			_pendingResourceRetirements.Dequeue().Resource.Dispose();
 		}
 	}
 
@@ -872,7 +949,15 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		_meshRecords.Clear();
-		ReleaseAllTerrainInstances();
+		foreach (var record in _terrainInstances.Values)
+		{
+			DisposeTerrainRecordImmediately(record);
+		}
+		_terrainInstances.Clear();
+		while (_pendingResourceRetirements.Count > 0)
+		{
+			_pendingResourceRetirements.Dequeue().Resource.Dispose();
+		}
 		foreach (var record in _terrainIndexBuffers.Values)
 		{
 			if (record.IndexBuffer is IDisposable disposableIndexBuffer)
@@ -899,6 +984,12 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 		_instanceIndexToTerrainRayTracingResolutionBuffer = null;
 		_sidecarDevice = null;
+	}
+
+	private static void DisposeTerrainRecordImmediately(in TerrainInstanceRecord record)
+	{
+		(record.AccelerationStructure as IDisposable)?.Dispose();
+		(record.VertexBuffer as IDisposable)?.Dispose();
 	}
 
 	private struct RayTracingSceneStatsBuilder

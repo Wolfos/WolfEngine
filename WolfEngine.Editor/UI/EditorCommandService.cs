@@ -25,6 +25,7 @@ public interface IEditorCommandService
 	void BindDeletionHandlers(IEditorEntityDeletionHandler? entityDeletionHandler, IEditorAssetDeletionHandler? assetDeletionHandler);
 	bool RequestNewScene();
 	bool RequestLoadScene(Guid assetId);
+	Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default);
 	Guid? LoadingSceneAssetId { get; }
 	bool SaveScene();
 	bool RefreshAssetDatabase();
@@ -87,6 +88,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	private PendingSceneReplacement? _pendingSceneReplacement;
 	private bool _openUnsavedScenePopup;
 	private Guid? _loadingSceneAssetId;
+	private TaskCompletionSource? _automationSceneLoadCompletion;
 
 	public EditorCommandService(
 		IEditorSceneWorkspace sceneWorkspace,
@@ -165,6 +167,42 @@ public sealed class EditorCommandService : IEditorCommandService
 		}
 
 		return QueueSceneReplacement(new PendingSceneReplacement(PendingSceneReplacementKind.LoadScene, assetId));
+	}
+
+	/// <summary>
+	/// Starts the exact replacement path used by the UI and completes when its background load has
+	/// been applied to the workspace. Automation explicitly discards unsaved authoring changes,
+	/// because it has no interactive confirmation dialog to resolve.
+	/// </summary>
+	public Task LoadSceneForAutomationAsync(Guid assetId, CancellationToken cancellationToken = default)
+	{
+		if (assetId == Guid.Empty)
+		{
+			return Task.FromException(new ArgumentOutOfRangeException(nameof(assetId)));
+		}
+		if (_automationSceneLoadCompletion is not null || _loadingSceneAssetId.HasValue || _operationService.Current.IsActive)
+		{
+			return Task.FromException(new InvalidOperationException("Another scene load or editor operation is already in progress."));
+		}
+
+		var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		_automationSceneLoadCompletion = completion;
+		var startedImmediately = RequestLoadScene(assetId);
+		if (startedImmediately == false)
+		{
+			if (_pendingSceneReplacement is { Kind: PendingSceneReplacementKind.LoadScene, AssetId: var pendingAssetId } &&
+				pendingAssetId == assetId)
+			{
+				ResolvePendingSceneReplacement(PendingSceneReplacementDecision.Discard);
+			}
+			else
+			{
+				_automationSceneLoadCompletion = null;
+				completion.TrySetException(new InvalidOperationException("The editor could not queue the requested scene replacement."));
+			}
+		}
+
+		return completion.Task.WaitAsync(cancellationToken);
 	}
 
 	public bool SaveScene()
@@ -507,6 +545,8 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	private void StartSceneLoad(Guid assetId)
 	{
+		var automationCompletion = _automationSceneLoadCompletion;
+		_automationSceneLoadCompletion = null;
 		EditorScene? loadedScene = null;
 		_loadingSceneAssetId = assetId;
 		if (_operationService.TryStart(
@@ -524,10 +564,12 @@ public sealed class EditorCommandService : IEditorCommandService
 						_undoRedoService.Clear();
 						EditorGui.ClearEntitySelection();
 						_interactionState.ClearSceneDirty();
+						automationCompletion?.TrySetResult();
 					}
 					catch (Exception exception)
 					{
 						_notificationService.ReportError($"Failed to load scene: {exception.Message}");
+						automationCompletion?.TrySetException(exception);
 					}
 					finally
 					{
@@ -538,10 +580,12 @@ public sealed class EditorCommandService : IEditorCommandService
 				{
 					_loadingSceneAssetId = null;
 					_notificationService.ReportError($"Failed to load scene: {exception.Message}");
+					automationCompletion?.TrySetException(exception);
 				}) == false)
 		{
 			_loadingSceneAssetId = null;
 			_notificationService.ReportError("Another editor operation is already in progress.");
+			automationCompletion?.TrySetException(new InvalidOperationException("Another editor operation is already in progress."));
 		}
 	}
 

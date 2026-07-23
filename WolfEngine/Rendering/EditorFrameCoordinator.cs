@@ -8,6 +8,18 @@ public sealed class EditorFrameCoordinator
     private readonly object _sync = new();
     private long _publishedSequence;
 
+    /// <summary>The most recently published editor frame sequence.</summary>
+    public long CompletedSequence
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _publishedSequence;
+            }
+        }
+    }
+
     public long PublishCompletedFrame()
     {
         lock (_sync)

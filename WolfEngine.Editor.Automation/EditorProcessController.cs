@@ -102,6 +102,21 @@ public sealed class EditorProcessController : IAsyncDisposable
 		await GetRunningEditor().DeleteEntityAsync(parsedId, cancellationToken).ConfigureAwait(false);
 	}
 
+	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
+		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
+
+	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
+		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
+
+	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetRayTracingSceneStateAsync(cancellationToken);
+
+	public Task<GpuFrameProfileResult> ProfileGpuFramesAsync(int frameCount, CancellationToken cancellationToken) =>
+		GetRunningEditor().ProfileGpuFramesAsync(frameCount, cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
+
 	public async Task ShutdownAsync(CancellationToken cancellationToken)
 	{
 		var editor = GetRunningEditor();

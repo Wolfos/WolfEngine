@@ -31,6 +31,7 @@ public sealed class RenderGraph
 	private readonly RenderPresentationOptions _presentationOptions;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
+	private readonly RenderFrameCoordinator _renderFrameCoordinator;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly GpuProfiler _gpuProfiler;
@@ -47,6 +48,7 @@ public sealed class RenderGraph
 	private int _frameIndex;
 	private bool _previousTaaEnabled;
 	private Int2 _currentSceneRenderSize;
+	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
 
 	private readonly object _resourceSync = new();
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
@@ -69,6 +71,7 @@ public sealed class RenderGraph
 		IUiFrameProvider uiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
+		RenderFrameCoordinator renderFrameCoordinator,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer,
 		IShaderCompiler shaderCompiler,
@@ -103,6 +106,8 @@ public sealed class RenderGraph
 		_presentationOptions = presentationOptions ?? new RenderPresentationOptions();
 		_editorFrameCoordinator =
 			editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
+		_renderFrameCoordinator =
+			renderFrameCoordinator ?? throw new ArgumentNullException(nameof(renderFrameCoordinator));
 		_mainThreadDispatcher = mainThreadDispatcher;
 		_compiler = new(resourceRegistry);
 		_gpuHardeningLogInterval = GraphicsConfig.GpuHardeningLogIntervalFrames;
@@ -485,10 +490,30 @@ public sealed class RenderGraph
 		_frameIndex++;
 		_hardeningStats.SetDeferredReleaseBacklog(_resourceRegistry.PendingDeferredReleaseCount);
 		LogGpuHardeningStatsIfNeeded();
+		PublishRayTracingSceneState();
+		_renderFrameCoordinator.PublishCompletedFrame();
 		FrameProfiler.Instance.EndFrame();
 	}
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
+
+	/// <summary>Returns the most recent renderer-thread RTAS snapshot without synchronizing the GPU.</summary>
+	public RayTracingSceneState GetRayTracingSceneState() => Volatile.Read(ref _latestRayTracingSceneState);
+
+	private void PublishRayTracingSceneState()
+	{
+		var state = _frameBuilder.GetRayTracingSceneState();
+		if (_renderer.GetGfxDevice() is IGpuSubmissionTimeline timeline)
+		{
+			state = state with
+			{
+				LastSubmittedId = timeline.LastSubmittedId,
+				CompletedId = timeline.CompletedId
+			};
+		}
+
+		Volatile.Write(ref _latestRayTracingSceneState, state);
+	}
 
 	public void EnsureMaterialResources(Material material)
 	{

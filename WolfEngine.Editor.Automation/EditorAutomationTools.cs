@@ -37,6 +37,34 @@ public sealed class EditorAutomationTools
 		return $"Deleted entity {entityId}.";
 	}
 
+	[McpServerTool(Name = "load_scene"), Description("Load a scene from the open project's asset database through the editor's normal scene-replacement path. The persistent editor and renderer remain running until the scene load has completed.")]
+	public Task<SceneLoadResult> LoadScene(
+		[Description("Absolute or project-relative path of a .scene.json asset.")] string scenePath,
+		CancellationToken cancellationToken) =>
+		_controller.LoadSceneAsync(scenePath, cancellationToken);
+
+	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
+	public Task<RenderFrameWaitResult> WaitForRenderFrames(
+		[Description("Positive number of completed render frames to wait for.")] int frameCount,
+		CancellationToken cancellationToken) =>
+		_controller.WaitForRenderFramesAsync(frameCount, cancellationToken);
+
+	[McpServerTool(Name = "get_ray_tracing_scene_state"), Description("Return the latest renderer-side TLAS, BLAS, terrain, retirement, and GPU-submission diagnostics without synchronizing or restarting the renderer.")]
+	public Task<RayTracingSceneStateResult> GetRayTracingSceneState(CancellationToken cancellationToken) =>
+		_controller.GetRayTracingSceneStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "profile_gpu_frames"), Description("Enable the existing GPU profiler and aggregate timing statistics over multiple completed GPU frames. Results include median, p95, and maximum per render pass and nested scope.")]
+	public Task<GpuFrameProfileResult> ProfileGpuFrames(
+		[Description("Positive number of completed GPU-profile frames to aggregate.")] int frameCount,
+		CancellationToken cancellationToken) =>
+		_controller.ProfileGpuFramesAsync(frameCount, cancellationToken);
+
+	[McpServerTool(Name = "capture_frame"), Description("Capture a PNG from the currently running editor on its next rendered frame. This never launches a separate editor process.")]
+	public Task<FrameCaptureResult> CaptureFrame(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		CancellationToken cancellationToken) =>
+		_controller.CaptureFrameAsync(outputPath, cancellationToken);
+
 	[McpServerTool(Name = "shutdown_editor"), Description("Gracefully shut down the running WolfEngine Editor while leaving this MCP server available.")]
 	public async Task<string> ShutdownEditor(CancellationToken cancellationToken)
 	{
