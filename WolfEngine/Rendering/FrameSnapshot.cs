@@ -90,6 +90,7 @@ public sealed class FrameSnapshot
 	{
 		Config.AmbientOcclusion = config.AmbientOcclusion;
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
+		Config.ShadowMaps = config.ShadowMaps;
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
