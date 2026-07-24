@@ -510,20 +510,26 @@ LayerSample SampleTriplanarLayer(
     uint ormHandle,
     uint heightHandle,
     uint hasHeightMap,
+    uint hasNormalMap,
+    uint hasOrmMap,
     float layerScale,
     GpuTerrainMaterialData terrainData)
 {
     SamplerState samplerState = GetSampler(terrainData.layerSamplerHandle);
     LayerSample sample;
     sample.albedo = SampleTriplanarFloat4(albedoHandle, samplerState, worldPosition, geometryNormal, layerScale);
-    float4 orm = SampleTriplanarFloat4(ormHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    float4 orm = hasOrmMap != 0u
+        ? SampleTriplanarFloat4(ormHandle, samplerState, worldPosition, geometryNormal, layerScale)
+        : float4(0.0f, 1.0f, 0.0f, 1.0f);
     float heightValue = 0.5f;
     if (hasHeightMap != 0)
     {
         heightValue = SampleTriplanarFloat4(heightHandle, samplerState, worldPosition, geometryNormal, layerScale).r;
     }
 
-    sample.normal = DecodeTriplanarNormal(normalHandle, samplerState, worldPosition, geometryNormal, layerScale);
+    sample.normal = hasNormalMap != 0u
+        ? DecodeTriplanarNormal(normalHandle, samplerState, worldPosition, geometryNormal, layerScale)
+        : normalize(geometryNormal);
     sample.occlusion = saturate(orm.r);
     sample.roughness = saturate(orm.g);
     sample.metallic = saturate(orm.b);
@@ -570,6 +576,8 @@ PSOutput fragmentShader(VSOutput input)
             layerData.ormHandle,
             layerData.heightHandle,
             layerData.hasHeight,
+            layerData.hasNormal,
+            layerData.hasOrm,
             layerData.scale,
             terrainData);
     }

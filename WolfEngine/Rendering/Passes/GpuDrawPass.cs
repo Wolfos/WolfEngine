@@ -726,6 +726,8 @@ public sealed class GpuDrawPass
 			uint ormHandle = 0;
 			uint heightHandle = 0;
 			uint hasHeight = 0;
+			uint hasNormal = 0;
+			uint hasOrm = 0;
 			float scale = 1.0f;
 			uint autoMaterial = 0;
 			uint useMinimumSlope = 0;
@@ -737,6 +739,8 @@ public sealed class GpuDrawPass
 				ref ormHandle,
 				ref heightHandle,
 				ref hasHeight,
+				ref hasNormal,
+				ref hasOrm,
 				ref scale,
 				ref autoMaterial,
 				ref useMinimumSlope,
@@ -753,7 +757,9 @@ public sealed class GpuDrawPass
 				scale,
 				autoMaterial,
 				useMinimumSlope,
-				minimumSlopeDegrees));
+				minimumSlopeDegrees,
+				hasNormal,
+				hasOrm));
 		}
 	}
 
@@ -1791,6 +1797,8 @@ public sealed class GpuDrawPass
 		ref uint ormHandle,
 		ref uint heightHandle,
 		ref uint hasHeight,
+		ref uint hasNormal,
+		ref uint hasOrm,
 		ref float scale,
 		ref uint autoMaterial,
 		ref uint useMinimumSlope,
@@ -1801,6 +1809,8 @@ public sealed class GpuDrawPass
 		ormHandle = RegisterTerrainTexture(layer.Orm);
 		heightHandle = RegisterTerrainTexture(layer.Height);
 		hasHeight = layer.Height is null ? 0u : 1u;
+		hasNormal = layer.Normal is null ? 0u : 1u;
+		hasOrm = layer.Orm is null ? 0u : 1u;
 		scale = Math.Max(layer.Scale, 0.001f);
 		autoMaterial = layer.AutoMaterial ? 1u : 0u;
 		useMinimumSlope = layer.UseMinimumSlope ? 1u : 0u;
@@ -1866,7 +1876,9 @@ public sealed class GpuDrawPass
 			1.0f,
 			0,
 			0,
-			0.0f);
+			0.0f,
+			0,
+			0);
 		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
 		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");

@@ -65,5 +65,7 @@ void CSUpdateTerrainLayer(uint3 dispatchThreadId : SV_DispatchThreadID)
     layerData.autoMaterial = update.autoMaterial;
     layerData.useMinimumSlope = update.useMinimumSlope;
     layerData.minimumSlopeDegrees = update.minimumSlopeDegrees;
+    layerData.hasNormal = update.hasNormal;
+    layerData.hasOrm = update.hasOrm;
     g_TerrainLayerTable[layerTableIndex] = layerData;
 }

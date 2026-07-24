@@ -77,8 +77,8 @@ struct GpuTerrainLayerData
     uint autoMaterial;
     uint useMinimumSlope;
     float minimumSlopeDegrees;
-    uint pad0;
-    uint pad1;
+    uint hasNormal;
+    uint hasOrm;
     uint pad2;
 };
 
@@ -196,8 +196,8 @@ struct GpuTerrainLayerUpdateData
     uint32_t autoMaterial;
     uint32_t useMinimumSlope;
     float minimumSlopeDegrees;
-    uint32_t pad0;
-    uint32_t pad1;
+    uint32_t hasNormal;
+    uint32_t hasOrm;
     uint32_t pad2;
     uint32_t pad3;
 };

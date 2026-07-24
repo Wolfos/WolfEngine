@@ -158,7 +158,9 @@ public readonly struct GpuTerrainLayerData
 		float scale,
 		uint autoMaterial,
 		uint useMinimumSlope,
-		float minimumSlopeDegrees)
+		float minimumSlopeDegrees,
+		uint hasNormal,
+		uint hasOrm)
 	{
 		AlbedoHandle = albedoHandle;
 		NormalHandle = normalHandle;
@@ -169,8 +171,8 @@ public readonly struct GpuTerrainLayerData
 		AutoMaterial = autoMaterial;
 		UseMinimumSlope = useMinimumSlope;
 		MinimumSlopeDegrees = minimumSlopeDegrees;
-		_pad0 = 0;
-		_pad1 = 0;
+		HasNormal = hasNormal;
+		HasOrm = hasOrm;
 	}
 
 	public readonly uint AlbedoHandle;
@@ -182,8 +184,8 @@ public readonly struct GpuTerrainLayerData
 	public readonly uint AutoMaterial;
 	public readonly uint UseMinimumSlope;
 	public readonly float MinimumSlopeDegrees;
-	private readonly uint _pad0;
-	private readonly uint _pad1;
+	public readonly uint HasNormal;
+	public readonly uint HasOrm;
 	private readonly uint _pad2;
 }
 
@@ -480,7 +482,9 @@ public readonly struct GpuTerrainLayerUpdateData
 		float scale,
 		uint autoMaterial,
 		uint useMinimumSlope,
-		float minimumSlopeDegrees)
+		float minimumSlopeDegrees,
+		uint hasNormal,
+		uint hasOrm)
 	{
 		MaterialHandle = materialHandle;
 		LayerStart = layerStart;
@@ -494,8 +498,8 @@ public readonly struct GpuTerrainLayerUpdateData
 		AutoMaterial = autoMaterial;
 		UseMinimumSlope = useMinimumSlope;
 		MinimumSlopeDegrees = minimumSlopeDegrees;
-		_pad0 = 0;
-		_pad1 = 0;
+		HasNormal = hasNormal;
+		HasOrm = hasOrm;
 		_pad2 = 0;
 	}
 
@@ -511,8 +515,8 @@ public readonly struct GpuTerrainLayerUpdateData
 	public readonly uint AutoMaterial;
 	public readonly uint UseMinimumSlope;
 	public readonly float MinimumSlopeDegrees;
-	private readonly uint _pad0;
-	private readonly uint _pad1;
+	public readonly uint HasNormal;
+	public readonly uint HasOrm;
 	private readonly uint _pad2;
 	private readonly uint _pad3;
 }
