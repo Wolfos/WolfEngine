@@ -803,12 +803,12 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		D3D12RayTracingGeometryValidation.Validate(in descriptor, vertexBuffer, indexBuffer);
 		TransitionBufferIfNeeded(vertexBuffer, ResourceStates.NonPixelShaderResource);
 		TransitionBufferIfNeeded(indexBuffer, ResourceStates.NonPixelShaderResource);
-		TransitionAccelerationStructureResource(
+		TransitionResource(
 			blas.Result.Handle,
 			blas.ResultState,
 			ResourceStates.RaytracingAccelerationStructure);
 		blas.ResultState = ResourceStates.RaytracingAccelerationStructure;
-		TransitionAccelerationStructureResource(blas.Scratch.Handle, blas.ScratchState, ResourceStates.UnorderedAccess);
+		TransitionResource(blas.Scratch.Handle, blas.ScratchState, ResourceStates.UnorderedAccess);
 		blas.ScratchState = ResourceStates.UnorderedAccess;
 
 		var geometry = CreateBottomLevelGeometry(descriptor, vertexBuffer, indexBuffer);
@@ -842,12 +842,12 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 				InsertUavBarrier(blas.Result.Handle);
 			}
 		}
-		TransitionAccelerationStructureResource(
+		TransitionResource(
 			tlas.Result.Handle,
 			tlas.ResultState,
 			ResourceStates.RaytracingAccelerationStructure);
 		tlas.ResultState = ResourceStates.RaytracingAccelerationStructure;
-		TransitionAccelerationStructureResource(tlas.Scratch.Handle, tlas.ScratchState, ResourceStates.UnorderedAccess);
+		TransitionResource(tlas.Scratch.Handle, tlas.ScratchState, ResourceStates.UnorderedAccess);
 		tlas.ScratchState = ResourceStates.UnorderedAccess;
 
 		var inputs = new BuildRaytracingAccelerationStructureInputs
@@ -968,7 +968,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		CommandList.ResourceBarrier(1, &barrier);
 	}
 
-	private void TransitionAccelerationStructureResource(
+	internal void TransitionResource(
 		ID3D12Resource* resource,
 		ResourceStates before,
 		ResourceStates after)

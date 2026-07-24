@@ -35,6 +35,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
+	private readonly object _submissionLock = new();
+	private readonly object _submissionFenceWaitLock = new();
 	private readonly object _constantUploadLock = new();
 	private readonly object _uploadLock = new();
 	private readonly ComPtr<Fence> _submissionFence;
@@ -49,8 +51,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	private readonly Dictionary<TextureDescriptor, Queue<PooledTexture>> _texturePool = new(new TextureDescriptorComparer());
 	private readonly Queue<ExternalD3D12Texture> _externalTexturePool = new();
 	private readonly object _texturePoolLock = new();
-	private ComPtr<ID3D12CommandAllocator> _transitionAllocator;
-	private ComPtr<ID3D12GraphicsCommandList> _transitionCommandList;
 	private ComPtr<ID3D12CommandAllocator> _uploadAllocator;
 	private ComPtr<ID3D12GraphicsCommandList> _uploadCommandList;
 	private ComPtr<ID3D12CommandSignature> _drawIndexedIndirectSignature;
@@ -145,7 +145,16 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	public bool SupportsRayTracing => _rayTracingDevice.Handle is not null;
 	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;
 
-	public ulong LastSubmittedId => _submissionFenceValue;
+	public ulong LastSubmittedId
+	{
+		get
+		{
+			lock (_submissionLock)
+			{
+				return _submissionFenceValue;
+			}
+		}
+	}
 
 	public ulong CompletedId =>
 		_submissionFence.Handle is null ? 0UL : _submissionFence.Handle->GetCompletedValue();
@@ -182,19 +191,34 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			throw new ArgumentException("Command list was not created by the Direct3D12 backend.", nameof(commandList));
 		}
 
-		nativeCommandList.Close();
-
-		var nativeHandle = (ID3D12CommandList*)nativeCommandList.CommandList.Handle;
-		var queue = nativeCommandList.Type == CommandListType.Compute ? _computeQueue : _graphicsQueue;
-
-		queue.ExecuteCommandLists(1, &nativeHandle);
-		var fenceValue = ++_submissionFenceValue;
-		SilkMarshal.ThrowHResult(queue.Signal(_submissionFence, fenceValue));
+		var fenceValue = SubmitCommandList(nativeCommandList);
 
 		lock (_commandListLock)
 		{
 			_inFlightCommandLists.Add(new(nativeCommandList, fenceValue));
 			CleanupCompletedCommandListsLocked();
+		}
+	}
+
+	private ulong SubmitCommandList(D3D12CommandList commandList)
+	{
+		commandList.Close();
+		var nativeHandle = (ID3D12CommandList*)commandList.CommandList.Handle;
+		var queue = commandList.Type == CommandListType.Compute ? _computeQueue : _graphicsQueue;
+		return ExecuteCommandList(queue, nativeHandle);
+	}
+
+	private ulong ExecuteCommandList(
+		ComPtr<ID3D12CommandQueue> queue,
+		ID3D12CommandList* commandList)
+	{
+		lock (_submissionLock)
+		{
+			var fenceValue = checked(_submissionFenceValue + 1UL);
+			queue.ExecuteCommandLists(1, &commandList);
+			SilkMarshal.ThrowHResult(queue.Signal(_submissionFence, fenceValue));
+			_submissionFenceValue = fenceValue;
+			return fenceValue;
 		}
 	}
 
@@ -776,9 +800,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 	private IGfxCommandList CreateCommandList(CommandListType type)
 	{
-		if (_commandListPool.TryGetValue(type, out var queue) && queue.Count > 0)
+		D3D12CommandList? pooled = null;
+		lock (_commandListLock)
 		{
-			var pooled = queue.Dequeue();
+			if (_commandListPool.TryGetValue(type, out var queue) && queue.Count > 0)
+			{
+				pooled = queue.Dequeue();
+			}
+		}
+
+		if (pooled is not null)
+		{
 			pooled.Reset();
 			return pooled;
 		}
@@ -987,18 +1019,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			_graphicsExecuteIndirectSignature = default;
 		}
 
-		if (_transitionCommandList.Handle is not null)
-		{
-			_transitionCommandList.Dispose();
-			_transitionCommandList = default;
-		}
-
-		if (_transitionAllocator.Handle is not null)
-		{
-			_transitionAllocator.Dispose();
-			_transitionAllocator = default;
-		}
-
 		if (_uploadCommandList.Handle is not null)
 		{
 			_uploadCommandList.Dispose();
@@ -1090,48 +1110,16 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return;
 		}
 
-		EnsureTransitionCommandList();
-
-		SilkMarshal.ThrowHResult(_transitionAllocator.Reset());
-		SilkMarshal.ThrowHResult(_transitionCommandList.Reset(_transitionAllocator, (ID3D12PipelineState*) null));
-
-		var barrier = new ResourceBarrier {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
-		barrier.Anonymous.Transition = new()
+		var commandList = (D3D12CommandList)CreateCommandList(CommandListType.Direct);
+		commandList.TransitionResource(resource, before, after);
+		var fenceValue = SubmitCommandList(commandList);
+		lock (_commandListLock)
 		{
-			PResource = resource,
-			Subresource = D3D12Api.ResourceBarrierAllSubresources,
-			StateBefore = before,
-			StateAfter = after
-		};
-
-		_transitionCommandList.ResourceBarrier(1, &barrier);
-		SilkMarshal.ThrowHResult(_transitionCommandList.Close());
-		ID3D12CommandList* lists = (ID3D12CommandList*) _transitionCommandList.Handle;
-		_graphicsQueue.ExecuteCommandLists(1, &lists);
-
-		var fenceValue = ++_submissionFenceValue;
-		SilkMarshal.ThrowHResult(_graphicsQueue.Signal(_submissionFence, fenceValue));
-		WaitForFence(fenceValue);
-	}
-
-	private void EnsureTransitionCommandList()
-	{
-		if (_transitionCommandList.Handle is not null)
-		{
-			return;
+			_inFlightCommandLists.Add(new(commandList, fenceValue));
 		}
 
-		SilkMarshal.ThrowHResult(_device.CreateCommandAllocator(CommandListType.Direct, out _transitionAllocator));
-		SilkMarshal.ThrowHResult(
-			_device.CreateCommandList<ID3D12CommandAllocator, ID3D12PipelineState, ID3D12GraphicsCommandList>(
-				0,
-				CommandListType.Direct,
-				_transitionAllocator,
-				default,
-				out _transitionCommandList));
-
-		// Command lists are created in the recording state; close once so later Reset calls succeed.
-		SilkMarshal.ThrowHResult(_transitionCommandList.Close());
+		WaitForFence(fenceValue);
+		PumpCompleted();
 	}
 
 	private void FlushUploadRange(D3D12Buffer buffer, ulong byteOffset, ulong byteCount)
@@ -1191,10 +1179,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 			SilkMarshal.ThrowHResult(_uploadCommandList.Close());
 			ID3D12CommandList* uploadLists = (ID3D12CommandList*)_uploadCommandList.Handle;
-			_graphicsQueue.ExecuteCommandLists(1, &uploadLists);
-
-			var fenceValue = ++_submissionFenceValue;
-			SilkMarshal.ThrowHResult(_graphicsQueue.Signal(_submissionFence, fenceValue));
+			var fenceValue = ExecuteCommandList(_graphicsQueue, uploadLists);
 			WaitForFence(fenceValue);
 		}
 	}
@@ -1224,7 +1209,12 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return;
 		}
 
-		var lastSubmitted = _submissionFenceValue;
+		ulong lastSubmitted;
+		lock (_submissionLock)
+		{
+			lastSubmitted = _submissionFenceValue;
+		}
+
 		if (lastSubmitted != 0)
 		{
 			WaitForFence(lastSubmitted);
@@ -1318,14 +1308,17 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 	private void WaitForFence(ulong fenceValue)
 	{
-		if (_submissionFence.Handle->GetCompletedValue() >= fenceValue)
+		lock (_submissionFenceWaitLock)
 		{
-			return;
-		}
+			if (_submissionFence.Handle->GetCompletedValue() >= fenceValue)
+			{
+				return;
+			}
 
-		EnsureSubmissionFenceEvent();
-		SilkMarshal.ThrowHResult(_submissionFence.Handle->SetEventOnCompletion(fenceValue, (void*) _submissionFenceEvent));
-		WaitForSingleObject(_submissionFenceEvent, 0xFFFFFFFF);
+			EnsureSubmissionFenceEvent();
+			SilkMarshal.ThrowHResult(_submissionFence.Handle->SetEventOnCompletion(fenceValue, (void*) _submissionFenceEvent));
+			WaitForSingleObject(_submissionFenceEvent, 0xFFFFFFFF);
+		}
 	}
 
 	private void EnsureSubmissionFenceEvent()
