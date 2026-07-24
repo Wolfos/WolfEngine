@@ -17,6 +17,8 @@ public sealed class DataAssetEditor
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private readonly IEditorAssetSnapshotService _assetSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IIconManager _icons;
+	private readonly IAssetSelectionService _assetSelectionService;
 	private DataAssetLoadResult? _loadedAsset;
 	private Guid? _loadedAssetId;
 	private long _loadedAssetDatabaseRevision = -1;
@@ -29,13 +31,17 @@ public sealed class DataAssetEditor
 		IDataAssetStore dataAssetStore,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
 		IEditorAssetSnapshotService assetSnapshotService,
-		IEditorUndoRedoService undoRedoService)
+		IEditorUndoRedoService undoRedoService,
+		IIconManager icons,
+		IAssetSelectionService assetSelectionService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
 		_assetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService));
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
+		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -121,7 +127,7 @@ public sealed class DataAssetEditor
 			try
 			{
 				var value = property.GetValue(target);
-				var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(property.Name, property.PropertyType, value));
+				var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(property.Name, property.PropertyType, value));
 				if (drawResult.Handled)
 				{
 					if (drawResult.Changed)
@@ -242,7 +248,7 @@ public sealed class DataAssetEditor
 		var property = typeof(TerrainLayerDefinition).GetProperty(propertyName)
 			?? throw new InvalidOperationException($"Missing terrain layer property '{propertyName}'.");
 		var value = property.GetValue(layer);
-		var result = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(propertyName, property.PropertyType, value));
+		var result = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(propertyName, property.PropertyType, value));
 		if (result.Handled == false || result.Changed == false)
 		{
 			return false;
@@ -250,6 +256,17 @@ public sealed class DataAssetEditor
 
 		property.SetValue(layer, result.Value);
 		return true;
+	}
+
+	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value)
+	{
+		return new PropertyDrawerContext(
+			label,
+			valueType,
+			value,
+			AssetLinkSelectionButton: new AssetLinkSelectionButton(
+				_icons.Get("search"),
+				assetId => _assetSelectionService.Select(assetId)));
 	}
 
 	private bool TryDrawNestedProperty(object target, PropertyInfo property, object? value)

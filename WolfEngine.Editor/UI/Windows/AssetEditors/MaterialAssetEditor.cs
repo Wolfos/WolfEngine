@@ -17,6 +17,8 @@ public sealed class MaterialAssetEditor
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private readonly IEditorAssetSnapshotService _assetSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IIconManager _icons;
+	private readonly IAssetSelectionService _assetSelectionService;
 	private MaterialAsset? _loadedMaterialAsset;
 	private Guid? _loadedMaterialAssetId;
 	private long _loadedAssetDatabaseRevision = -1;
@@ -30,7 +32,9 @@ public sealed class MaterialAssetEditor
 		IMaterialTypeRegistry materialTypeRegistry,
 		IPropertyDrawerRegistry propertyDrawerRegistry,
 		IEditorAssetSnapshotService assetSnapshotService,
-		IEditorUndoRedoService undoRedoService)
+		IEditorUndoRedoService undoRedoService,
+		IIconManager icons,
+		IAssetSelectionService assetSelectionService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
@@ -38,6 +42,8 @@ public sealed class MaterialAssetEditor
 		_propertyDrawerRegistry = propertyDrawerRegistry ?? throw new ArgumentNullException(nameof(propertyDrawerRegistry));
 		_assetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService));
 		_undoRedoService = undoRedoService ?? throw new ArgumentNullException(nameof(undoRedoService));
+		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
+		_assetSelectionService = assetSelectionService ?? throw new ArgumentNullException(nameof(assetSelectionService));
 	}
 
 	public void Draw(AssetDatabaseEntry asset)
@@ -166,7 +172,7 @@ public sealed class MaterialAssetEditor
 
 	private void DrawBaseColorEditor(AssetDatabaseEntry asset, MaterialAsset materialAsset, MaterialSurfaceProperties properties)
 	{
-		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(
 			"Base Color",
 			typeof(ColorRGBA),
 			properties.BaseColor));
@@ -191,7 +197,7 @@ public sealed class MaterialAssetEditor
 
 	private void DrawFloatEditor(string label, float currentValue, Action<float> setter)
 	{
-		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(label, typeof(float), currentValue));
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(float), currentValue));
 		if (drawResult.Changed && drawResult.Value is float value)
 		{
 			setter(value);
@@ -205,13 +211,24 @@ public sealed class MaterialAssetEditor
 		string label,
 		AssetRef<Texture> currentValue)
 	{
-		var drawResult = _propertyDrawerRegistry.Draw(new PropertyDrawerContext(label, typeof(AssetRef<Texture>), currentValue));
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(AssetRef<Texture>), currentValue));
 		if (drawResult.Changed && drawResult.Value is AssetRef<Texture> textureReference)
 		{
 			BeginPendingChange(materialEntry);
 			SetTextureAssignment(assignments, propertyName, textureReference.NodeId);
 			_hasPendingChanges = true;
 		}
+	}
+
+	private PropertyDrawerContext CreatePropertyDrawerContext(string label, Type valueType, object? value)
+	{
+		return new PropertyDrawerContext(
+			label,
+			valueType,
+			value,
+			AssetLinkSelectionButton: new AssetLinkSelectionButton(
+				_icons.Get("search"),
+				assetId => _assetSelectionService.Select(assetId)));
 	}
 
 	private static void SetTextureAssignment(MaterialTextureAssignments assignments, string propertyName, Guid value)
