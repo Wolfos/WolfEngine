@@ -118,25 +118,38 @@ public sealed class FrameSnapshotBuffer
 	private int _readIndex;
 	private int _writeIndex = 1;
 	private bool _hasPending;
+	private bool _completed;
 
-	public FrameSnapshot BeginWrite()
+	public bool TryBeginWrite(out FrameSnapshot snapshot)
 	{
 		_slotFree.Wait();
 		lock (_lock)
 		{
-			var snapshot = _buffers[_writeIndex];
+			if (_completed)
+			{
+				snapshot = null!;
+				return false;
+			}
+
+			snapshot = _buffers[_writeIndex];
 			snapshot.Clear();
-			return snapshot;
+			return true;
 		}
 	}
 
-	public void PublishWrite()
+	public bool TryPublishWrite()
 	{
 		lock (_lock)
 		{
+			if (_completed)
+			{
+				return false;
+			}
+
 			(_readIndex, _writeIndex) = (_writeIndex, _readIndex);
 			_hasPending = true;
 			_slotFree.Reset();
+			return true;
 		}
 	}
 
@@ -154,6 +167,20 @@ public sealed class FrameSnapshotBuffer
 			_hasPending = false;
 			_slotFree.Set();
 			return true;
+		}
+	}
+
+	public void Complete()
+	{
+		lock (_lock)
+		{
+			if (_completed)
+			{
+				return;
+			}
+
+			_completed = true;
+			_slotFree.Set();
 		}
 	}
 }

@@ -318,14 +318,19 @@ public sealed class RenderGraph
 		_renderer.Run(startup, update, OnRender);
 	}
 
-	public FrameSnapshot BeginSnapshotWrite()
+	public bool TryBeginSnapshotWrite(out FrameSnapshot snapshot)
 	{
-		return _snapshotBuffer.BeginWrite();
+		return _snapshotBuffer.TryBeginWrite(out snapshot);
 	}
 
-	public void PublishSnapshot()
+	public bool TryPublishSnapshot()
 	{
-		_snapshotBuffer.PublishWrite();
+		return _snapshotBuffer.TryPublishWrite();
+	}
+
+	public void CompleteSnapshotPublishing()
+	{
+		_snapshotBuffer.Complete();
 	}
 
 	public void SetSkybox(SkyboxResources skybox)

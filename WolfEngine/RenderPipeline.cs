@@ -32,7 +32,14 @@ public class RenderPipeline : IRenderPipeline
 
 	public void Run(Action? startup = null)
 	{
-		_renderGraph.Startup(startup ?? (() => { }), static _ => { });
+		try
+		{
+			_renderGraph.Startup(startup ?? (() => { }), static _ => { });
+		}
+		finally
+		{
+			_renderGraph.CompleteSnapshotPublishing();
+		}
 	}
 
 	public void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,
@@ -43,7 +50,11 @@ public class RenderPipeline : IRenderPipeline
 			FrameSnapshot snapshot;
 			using (FrameProfiler.Instance.Measure("Wait for snapshot"))
 			{
-				snapshot = _renderGraph.BeginSnapshotWrite();
+				if (_renderGraph.TryBeginSnapshotWrite(out snapshot) == false)
+				{
+					return;
+				}
+
 				snapshot.SetCamera(camera, cameraWorldTransform);
 				snapshot.SetConfig(config);
 			}
@@ -184,7 +195,10 @@ public class RenderPipeline : IRenderPipeline
 			}
 
 			gpuDrawDatabase.EndSync();
-			_renderGraph.PublishSnapshot();
+			if (_renderGraph.TryPublishSnapshot() == false)
+			{
+				return;
+			}
 
 
 			_stressFrame++;

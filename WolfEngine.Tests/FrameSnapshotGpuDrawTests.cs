@@ -105,13 +105,13 @@ public sealed class FrameSnapshotGpuDrawTests
 		var entityA = new Entity(1, 1);
 		var entityB = new Entity(2, 1);
 
-		var snapshotA = buffer.BeginWrite();
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
 		WriteEntity(snapshotA.GpuDrawDatabase, entityA, mesh, material, 1.0f);
-		buffer.PublishWrite();
+		Assert.That(buffer.TryPublishWrite(), Is.True);
 
 		Assert.That(buffer.TryConsumeLatest(out var consumedSnapshotA), Is.True);
 
-		var snapshotB = buffer.BeginWrite();
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
 		WriteEntity(snapshotB.GpuDrawDatabase, entityB, mesh, material, 5.0f);
 
 		var entries = new List<GpuDrawEntry>();
@@ -124,6 +124,41 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshotBuffer_CompleteReleasesBlockedWriter()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		Assert.That(buffer.TryBeginWrite(out _), Is.True);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+
+		using var writerStarted = new ManualResetEventSlim();
+		var blockedWriter = Task.Run(() =>
+		{
+			writerStarted.Set();
+			return buffer.TryBeginWrite(out _);
+		});
+
+		Assert.That(writerStarted.Wait(TimeSpan.FromSeconds(1)), Is.True);
+		Assert.That(blockedWriter.IsCompleted, Is.False);
+
+		buffer.Complete();
+
+		Assert.That(blockedWriter.Wait(TimeSpan.FromSeconds(1)), Is.True);
+		Assert.That(blockedWriter.Result, Is.False);
+	}
+
+	[Test]
+	public void FrameSnapshotBuffer_PublishAfterCompleteDoesNotBlockFutureWriter()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		Assert.That(buffer.TryBeginWrite(out _), Is.True);
+
+		buffer.Complete();
+
+		Assert.That(buffer.TryPublishWrite(), Is.False);
+		Assert.That(buffer.TryBeginWrite(out _), Is.False);
+	}
+
+	[Test]
 	public void FrameSnapshotBuffer_ReusedSnapshotKeepsCameraHistoryAlignedWithGpuDrawHistory()
 	{
 		var buffer = new FrameSnapshotBuffer();
@@ -131,19 +166,19 @@ public sealed class FrameSnapshotGpuDrawTests
 		var material = new Material("test-shader");
 		var entity = new Entity(1, 1);
 
-		var snapshotA = buffer.BeginWrite();
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
 		snapshotA.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
 		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
-		buffer.PublishWrite();
+		Assert.That(buffer.TryPublishWrite(), Is.True);
 		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
 
-		var snapshotB = buffer.BeginWrite();
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
 		snapshotB.SetCamera(CreateCamera(), CreateCameraTransform(5.0f));
 		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 5.0f);
-		buffer.PublishWrite();
+		Assert.That(buffer.TryPublishWrite(), Is.True);
 		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
 
-		var reusedSnapshotA = buffer.BeginWrite();
+		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotA), Is.True);
 		reusedSnapshotA.SetCamera(CreateCamera(), CreateCameraTransform(9.0f));
 		WriteEntity(reusedSnapshotA.GpuDrawDatabase, entity, mesh, material, 9.0f);
 
