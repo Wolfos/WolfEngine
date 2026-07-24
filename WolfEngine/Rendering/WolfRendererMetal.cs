@@ -399,8 +399,23 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         if (_hasRequestedDrawableSize)
         {
-            drawableWidth = _width;
-            drawableHeight = _height;
+            int windowWidth = 0;
+            int windowHeight = 0;
+            _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
+
+            // SetWindowSize also requests an exact initial drawable resolution so
+            // automation captures are independent of the display scale. Stop
+            // enforcing it as soon as the user resizes the logical window; from
+            // then on, SDL's drawable size is authoritative.
+            if (windowWidth == _width && windowHeight == _height)
+            {
+                drawableWidth = _width;
+                drawableHeight = _height;
+            }
+            else
+            {
+                _hasRequestedDrawableSize = false;
+            }
         }
 
         if (drawableWidth <= 0 || drawableHeight <= 0)
