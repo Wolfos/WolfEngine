@@ -19,7 +19,7 @@ public record ImportedScene(
     string Name,
     List<ImportedMaterial> Materials,
     List<ImportedTexture> Textures,
-    List<ImportedNode> RootNodes
+    List<ImportedNode> Nodes
 );
 
 public record struct ImportedMaterial(
@@ -55,7 +55,7 @@ public record ImportedNode(
     string Name,
     Matrix4x4 LocalTransform,
     List<ImportedNodeMesh> Meshes,
-    List<ImportedNode> Children
+    int ParentIndex
 );
 
 public record struct ImportedNodeMesh(

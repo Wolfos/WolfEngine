@@ -88,29 +88,46 @@ public class SceneBuilder : ISceneBuilder
 			materials.Add(material);
 		}
 
-		if (importedScene.RootNodes.Count == 0)
+		if (importedScene.Nodes.Count == 0)
 		{
 			return;
 		}
 
+		var rootCount = importedScene.Nodes.Count(node => node.ParentIndex < 0);
 		var entityCount = 0;
-		if (importedScene.RootNodes.Count == 1)
-		{
-			entityCount += CreateNodeEntity(importedScene.RootNodes[0], world, materials, null);
-		}
-		else
+		Entity? wrapper = null;
+		if (rootCount > 1)
 		{
 			var sceneName = string.IsNullOrWhiteSpace(importedScene.Name)
 				? Path.GetFileNameWithoutExtension(path)
 				: importedScene.Name;
-			var wrapper = world.CreateEntity(sceneName);
-			world.AddTransform(wrapper, Matrix4x4.Identity);
+			wrapper = world.CreateEntity(sceneName);
+			world.AddTransform(wrapper.Value, Matrix4x4.Identity);
 			entityCount++;
+		}
 
-			foreach (var rootNode in importedScene.RootNodes)
+		var nodeEntities = new Entity?[importedScene.Nodes.Count];
+		for (var i = 0; i < importedScene.Nodes.Count; i++)
+		{
+			var node = importedScene.Nodes[i];
+			Entity? parent = wrapper;
+			if (node.ParentIndex >= 0)
 			{
-				entityCount += CreateNodeEntity(rootNode, world, materials, wrapper);
+				if (node.ParentIndex >= i)
+				{
+					throw new InvalidDataException(
+						$"Imported node {i} has invalid parent index {node.ParentIndex}; parents must precede children.");
+				}
+
+				parent = nodeEntities[node.ParentIndex];
+				if (parent is null)
+				{
+					continue;
+				}
 			}
+
+			nodeEntities[i] = CreateNodeEntity(node, world, materials, parent, out var createdEntityCount);
+			entityCount += createdEntityCount;
 		}
 
 		if (entityCount == 0) return;
@@ -118,8 +135,14 @@ public class SceneBuilder : ISceneBuilder
 		Console.Out.WriteLine($"Imported {entityCount} entities");
 	}
 
-	private int CreateNodeEntity(ImportedNode node, World world, IReadOnlyList<Material> materials, Entity? parent)
+	private Entity? CreateNodeEntity(
+		ImportedNode node,
+		World world,
+		IReadOnlyList<Material> materials,
+		Entity? parent,
+		out int createdEntityCount)
 	{
+		createdEntityCount = 0;
 		Entity nodeEntity;
 		try
 		{
@@ -135,11 +158,10 @@ public class SceneBuilder : ISceneBuilder
 		{
 			Console.Out.WriteLine($"Error importing node {node.Name}");
 			Console.Out.WriteLine(e.Message);
-			return 0;
+			return null;
 		}
 
-		var entityCount = 1;
-
+		createdEntityCount = 1;
 		if (node.Meshes.Count == 1)
 		{
 			TryAttachMeshRenderer(nodeEntity, node.Meshes[0], node.Name, world, materials);
@@ -162,17 +184,12 @@ public class SceneBuilder : ISceneBuilder
 					continue;
 				}
 
-				entityCount++;
+				createdEntityCount++;
 				TryAttachMeshRenderer(meshEntity, meshNode, meshNode.Name, world, materials);
 			}
 		}
 
-		foreach (var child in node.Children)
-		{
-			entityCount += CreateNodeEntity(child, world, materials, nodeEntity);
-		}
-
-		return entityCount;
+		return nodeEntity;
 	}
 
 	private void TryAttachMeshRenderer(

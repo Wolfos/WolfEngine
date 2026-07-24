@@ -263,11 +263,11 @@ public sealed class ImportedMeshAssetFile
 
 public sealed class ImportedModelAssetFile
 {
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 
 	public int Version { get; set; } = CurrentVersion;
 	public string Name { get; set; } = string.Empty;
-	public List<ImportedModelAssetNode> RootNodes { get; set; } = new();
+	public List<ImportedModelAssetNode> Nodes { get; set; } = new();
 }
 
 public sealed class ImportedModelAssetNode
@@ -275,7 +275,7 @@ public sealed class ImportedModelAssetNode
 	public string Name { get; set; } = string.Empty;
 	public Matrix4x4 LocalTransform { get; set; } = Matrix4x4.Identity;
 	public List<ImportedModelAssetMeshInstance> Meshes { get; set; } = new();
-	public List<ImportedModelAssetNode> Children { get; set; } = new();
+	public int ParentIndex { get; set; } = -1;
 }
 
 public sealed class ImportedModelAssetMeshInstance

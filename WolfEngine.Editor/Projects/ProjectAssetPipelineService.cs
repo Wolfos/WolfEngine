@@ -408,14 +408,20 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var absoluteModelPath = GetAbsolutePath(projectRootPath, summary.RelativeImportedModelPath);
 		var modelFile =
 			AssetPipelineSerialization.Deserialize<ImportedModelAssetFile>(File.ReadAllText(absoluteModelPath));
-		if (modelFile.RootNodes.Count == 0)
+		if (modelFile.Nodes.Count == 0)
 		{
 			return;
 		}
 
-		if (modelFile.RootNodes.Count == 1)
+		var rootCount = modelFile.Nodes.Count(node => node.ParentIndex < 0);
+		if (rootCount == 0)
 		{
-			var rootEntity = CreateModelNodeEntity(modelFile.RootNodes[0], world, parent: null);
+			throw new InvalidDataException($"Imported model '{modelNodeId}' does not contain a root node.");
+		}
+
+		if (rootCount == 1)
+		{
+			var rootEntity = CreateModelNodeEntities(modelFile.Nodes, world, rootParent: null);
 			ApplySpawnPosition(world, rootEntity, spawnPosition);
 			return;
 		}
@@ -423,10 +429,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var wrapper =
 			world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
 		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
-		foreach (var rootNode in modelFile.RootNodes)
-		{
-			CreateModelNodeEntity(rootNode, world, wrapper);
-		}
+		CreateModelNodeEntities(modelFile.Nodes, world, wrapper);
 
 		ApplySpawnPosition(world, wrapper, spawnPosition);
 	}
@@ -465,47 +468,67 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		ApplySpawnPosition(scene.World, instantiatedRoot, spawnPosition);
 	}
 
-	private Entity CreateModelNodeEntity(ImportedModelAssetNode node, World world, Entity? parent)
+	private Entity CreateModelNodeEntities(
+		IReadOnlyList<ImportedModelAssetNode> nodes,
+		World world,
+		Entity? rootParent)
 	{
-		var entity = world.CreateEntity(node.Name);
-		if (parent is { } parentEntity)
+		var entities = new Entity[nodes.Count];
+		Entity? firstRoot = null;
+		for (var nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
 		{
-			world.SetParent(entity, parentEntity);
-		}
+			var node = nodes[nodeIndex];
+			var entity = world.CreateEntity(node.Name);
+			entities[nodeIndex] = entity;
 
-		world.AddTransform(entity, node.LocalTransform);
-		for (var i = 0; i < node.Meshes.Count; i++)
-		{
-			var meshInstance = node.Meshes[i];
-			var meshEntity = node.Meshes.Count == 1 ? entity : world.CreateEntity(meshInstance.Name);
-			if (node.Meshes.Count > 1)
+			if (node.ParentIndex >= 0)
 			{
-				world.SetParent(meshEntity, entity);
-				world.AddTransform(meshEntity, System.Numerics.Matrix4x4.Identity);
+				if (node.ParentIndex >= nodeIndex)
+				{
+					throw new InvalidDataException(
+						$"Imported model node {nodeIndex} has invalid parent index {node.ParentIndex}; parents must precede children.");
+				}
+
+				world.SetParent(entity, entities[node.ParentIndex]);
+			}
+			else
+			{
+				firstRoot ??= entity;
+				if (rootParent is { } parentEntity)
+				{
+					world.SetParent(entity, parentEntity);
+				}
 			}
 
-			var material = AssetDatabase.GetInstance<Material>(meshInstance.MaterialNodeId);
-			var mesh = AssetDatabase.GetInstance<Mesh>(meshInstance.MeshNodeId);
-			if (material is null || mesh is null)
+			world.AddTransform(entity, node.LocalTransform);
+			for (var meshIndex = 0; meshIndex < node.Meshes.Count; meshIndex++)
 			{
-				continue;
+				var meshInstance = node.Meshes[meshIndex];
+				var meshEntity = node.Meshes.Count == 1 ? entity : world.CreateEntity(meshInstance.Name);
+				if (node.Meshes.Count > 1)
+				{
+					world.SetParent(meshEntity, entity);
+					world.AddTransform(meshEntity, System.Numerics.Matrix4x4.Identity);
+				}
+
+				var material = AssetDatabase.GetInstance<Material>(meshInstance.MaterialNodeId);
+				var mesh = AssetDatabase.GetInstance<Mesh>(meshInstance.MeshNodeId);
+				if (material is null || mesh is null)
+				{
+					continue;
+				}
+
+				world.AddComponent(meshEntity, new MeshRenderer
+				{
+					MeshAsset = new AssetRef<Mesh> { NodeId = meshInstance.MeshNodeId },
+					MaterialAsset = new AssetRef<Material> { NodeId = meshInstance.MaterialNodeId },
+					Material = material,
+					Mesh = mesh
+				});
 			}
-
-			world.AddComponent(meshEntity, new MeshRenderer
-			{
-				MeshAsset = new AssetRef<Mesh> { NodeId = meshInstance.MeshNodeId },
-				MaterialAsset = new AssetRef<Material> { NodeId = meshInstance.MaterialNodeId },
-				Material = material,
-				Mesh = mesh
-			});
 		}
 
-		for (var i = 0; i < node.Children.Count; i++)
-		{
-			CreateModelNodeEntity(node.Children[i], world, entity);
-		}
-
-		return entity;
+		return firstRoot ?? throw new InvalidDataException("Imported model does not contain a root node.");
 	}
 
 	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath,
@@ -840,7 +863,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		LogLibraryBuildStage($"Parsing 3D source '{relativeSourcePath}'.");
 		var importedScene = _threeDFileImporter.Import(absoluteSourcePath);
-		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.RootNodes.Count} root nodes).");
+		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.Nodes.Count(node => node.ParentIndex < 0)} root nodes).");
 		var nodes = new List<AssetNodeRecord>();
 		var artifacts = new List<AssetArtifactRecord>();
 		var dependencies = new List<AssetDependencyRecord>();
@@ -953,21 +976,43 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var modelGraph = new ImportedModelAssetFile
 		{
 			Name = importedScene.Name,
-			RootNodes = new List<ImportedModelAssetNode>()
+			Nodes = new List<ImportedModelAssetNode>(importedScene.Nodes.Count)
 		};
-		for (var i = 0; i < importedScene.RootNodes.Count; i++)
+		var hierarchyKeys = new string[importedScene.Nodes.Count];
+		var childCounts = new int[importedScene.Nodes.Count];
+		var rootCount = 0;
+		for (var i = 0; i < importedScene.Nodes.Count; i++)
 		{
-			var rootNode = CreateModelNode(
+			var importedNode = importedScene.Nodes[i];
+			string hierarchyKey;
+			if (importedNode.ParentIndex < 0)
+			{
+				hierarchyKey = $"root-{rootCount++}-{SanitizeKey(importedNode.Name)}";
+			}
+			else
+			{
+				if (importedNode.ParentIndex >= i)
+				{
+					throw new InvalidDataException(
+						$"Imported node {i} has invalid parent index {importedNode.ParentIndex}; parents must precede children.");
+				}
+
+				var childIndex = childCounts[importedNode.ParentIndex]++;
+				hierarchyKey =
+					$"{hierarchyKeys[importedNode.ParentIndex]}/child-{childIndex}-{SanitizeKey(importedNode.Name)}";
+			}
+
+			hierarchyKeys[i] = hierarchyKey;
+			modelGraph.Nodes.Add(CreateModelNode(
 				projectRootPath,
 				metadata,
 				relativeSourcePath,
 				relativeMetaPath,
-				$"root-{i}-{SanitizeKey(importedScene.RootNodes[i].Name)}",
-				importedScene.RootNodes[i],
+				hierarchyKey,
+				importedNode,
 				materialNodeIds,
 				nodes,
-				dependencies);
-			modelGraph.RootNodes.Add(rootNode);
+				dependencies));
 		}
 
 		var modelNodeId = GetOrCreateNodeId(metadata, "scene", AssetType.Model3D, sourceAssetName);
@@ -991,14 +1036,14 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			SummaryJson = AssetPipelineSerialization.Serialize(new Model3DAssetSummary
 			{
 				RelativeImportedModelPath = relativeModelPath,
-				RootNodeCount = modelGraph.RootNodes.Count
+				RootNodeCount = rootCount
 			})
 		});
 
 		var emittedModelMaterialDependencies = new HashSet<Guid>();
-		for (var i = 0; i < modelGraph.RootNodes.Count; i++)
+		for (var i = 0; i < modelGraph.Nodes.Count; i++)
 		{
-			AddModelDependencies(modelNodeId, modelGraph.RootNodes[i], dependencies, emittedModelMaterialDependencies);
+			AddModelDependencies(modelNodeId, modelGraph.Nodes[i], dependencies, emittedModelMaterialDependencies);
 		}
 
 		return new ImportGraph
@@ -1188,7 +1233,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var modelNode = new ImportedModelAssetNode
 		{
 			Name = node.Name,
-			LocalTransform = node.LocalTransform
+			LocalTransform = node.LocalTransform,
+			ParentIndex = node.ParentIndex
 		};
 
 		for (var i = 0; i < node.Meshes.Count; i++)
@@ -1248,21 +1294,6 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					IsHard = true
 				});
 			}
-		}
-
-		for (var i = 0; i < node.Children.Count; i++)
-		{
-			var childKey = $"{hierarchyKey}/child-{i}-{SanitizeKey(node.Children[i].Name)}";
-			modelNode.Children.Add(CreateModelNode(
-				projectRootPath,
-				metadata,
-				relativeSourcePath,
-				relativeMetaPath,
-				childKey,
-				node.Children[i],
-				materialNodeIds,
-				nodes,
-				dependencies));
 		}
 
 		return modelNode;
@@ -1332,10 +1363,6 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
-		for (var i = 0; i < node.Children.Count; i++)
-		{
-			AddModelDependencies(modelNodeId, node.Children[i], dependencies, emittedModelMaterialDependencies);
-		}
 	}
 
 	private static string NormalizeImportSettingsJson(AssetSourceMetaFile metadata)
@@ -1682,7 +1709,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportAudioSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				3,
+				4,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

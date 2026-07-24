@@ -51,7 +51,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
         }
 
-        var rootNodes = new List<ImportedNode>();
+        var nodes = new List<ImportedNode>();
         var materials = new List<ImportedMaterial>();
         var textures = new List<ImportedTexture>();
         var meshData = new List<(string meshName, Mesh mesh, int materialIndex)>();
@@ -251,14 +251,14 @@ public class ThreeDFileImporter : IThreeDFileImporter
             }
 
             // Traverse node graph to preserve hierarchy and local transforms.
-            BuildRootNodes(scene->MRootNode, meshData, rootNodes);
+            BuildNodes(scene->MRootNode, meshData, nodes);
         }
         finally
         {
             assimp.ReleaseImport(scene);
         }
 
-        return new ImportedScene(sceneName, materials, textures, rootNodes);
+        return new ImportedScene(sceneName, materials, textures, nodes);
     }
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
@@ -489,7 +489,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
             [new Rendering.TextureMipData(width, height, dest)]);
     }
 
-    private static unsafe void BuildRootNodes(
+    private static unsafe void BuildNodes(
         Node* root,
         IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
         List<ImportedNode> output)
@@ -509,16 +509,18 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     continue;
                 }
 
-                output.Add(BuildNodeRecursive(
+                AppendNode(
                     child,
                     meshData,
-                    $"Node_{childIndex}"));
+                    output,
+                    parentIndex: -1,
+                    fallbackName: $"Node_{childIndex}");
             }
 
             return;
         }
 
-        output.Add(BuildNodeRecursive(root, meshData, "Node_0"));
+        AppendNode(root, meshData, output, parentIndex: -1, fallbackName: "Node_0");
     }
 
     private static unsafe bool ShouldTreatChildrenAsRoots(Node* root)
@@ -531,18 +533,16 @@ public class ThreeDFileImporter : IThreeDFileImporter
         return IsApproximatelyIdentity(GetTransform(root->MTransformation));
     }
 
-    private static unsafe ImportedNode BuildNodeRecursive(
+    private static unsafe void AppendNode(
         Node* node,
         IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
+        List<ImportedNode> output,
+        int parentIndex,
         string fallbackName)
     {
         if (node is null)
         {
-            return new ImportedNode(
-                fallbackName,
-                Matrix4x4.Identity,
-                new List<ImportedNodeMesh>(),
-                new List<ImportedNode>());
+            return;
         }
 
         var meshes = new List<ImportedNodeMesh>((int)node->MNumMeshes);
@@ -559,7 +559,10 @@ public class ThreeDFileImporter : IThreeDFileImporter
             meshes.Add(new ImportedNodeMesh(meshName, mesh, materialIndex));
         }
 
-        var children = new List<ImportedNode>((int)node->MNumChildren);
+        var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
+        var nodeIndex = output.Count;
+        output.Add(new ImportedNode(nodeName, GetTransform(node->MTransformation), meshes, parentIndex));
+
         for (var childIndex = 0; childIndex < node->MNumChildren; childIndex++)
         {
             var child = node->MChildren[childIndex];
@@ -568,14 +571,13 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 continue;
             }
 
-            children.Add(BuildNodeRecursive(
+            AppendNode(
                 child,
                 meshData,
-                $"{fallbackName}_{childIndex}"));
+                output,
+                nodeIndex,
+                $"{fallbackName}_{childIndex}");
         }
-
-        var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
-        return new ImportedNode(nodeName, GetTransform(node->MTransformation), meshes, children);
     }
 
     private static bool IsApproximatelyIdentity(Matrix4x4 matrix, float epsilon = 0.0001f)
