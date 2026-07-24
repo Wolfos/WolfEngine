@@ -100,13 +100,20 @@ public sealed class TerrainToolSettingsOverlay
 
 	private void DrawLayerOption(int layerIndex, TerrainLayerDefinition? layer, TerrainToolSettings settings)
 	{
-		if (TryGetAlbedoThumbnail(layer, out var textureId))
+		var thumbnailState = GetAlbedoThumbnailState(layer, out var textureId);
+		if (thumbnailState == AssetThumbnailState.Ready)
 		{
 			ImGui.Image(textureId, LayerThumbnailSize);
 		}
 		else
 		{
 			ImGui.Dummy(LayerThumbnailSize);
+			if (thumbnailState == AssetThumbnailState.Loading)
+			{
+				var min = ImGui.GetItemRectMin();
+				var max = ImGui.GetItemRectMax();
+				EditorGui.DrawLoadingSpinner(ImGui.GetWindowDrawList(), (min + max) * 0.5f);
+			}
 		}
 
 		ImGui.SameLine();
@@ -122,13 +129,17 @@ public sealed class TerrainToolSettingsOverlay
 		}
 	}
 
-	private bool TryGetAlbedoThumbnail(TerrainLayerDefinition? layer, out nint textureId)
+	private AssetThumbnailState GetAlbedoThumbnailState(TerrainLayerDefinition? layer, out nint textureId)
 	{
 		textureId = 0;
-		return layer is not null &&
-		       layer.Albedo.IsValid &&
-		       _projectService.TryGetAsset(layer.Albedo.NodeId, out var asset) &&
-		       _assetThumbnailLoader.TryGetTextureThumbnailId(asset, out textureId);
+		if (layer is null ||
+		    layer.Albedo.IsValid == false ||
+		    _projectService.TryGetAsset(layer.Albedo.NodeId, out var asset) == false)
+		{
+			return AssetThumbnailState.Unavailable;
+		}
+
+		return _assetThumbnailLoader.GetTextureThumbnailState(asset, out textureId);
 	}
 
 	private static string GetLayerLabel(int layerIndex, TerrainLayerSet? layerSet)

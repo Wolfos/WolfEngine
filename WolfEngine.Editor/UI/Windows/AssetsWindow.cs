@@ -1119,10 +1119,20 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return;
 		}
 
-		if (asset.Type == AssetType.Texture2D && _assetThumbnailLoader.TryGetTextureThumbnailId(asset, out var textureId))
+		if (asset.Type == AssetType.Texture2D)
 		{
-			drawList.AddImage(textureId, min, max);
-			return;
+			var thumbnailState = _assetThumbnailLoader.GetTextureThumbnailState(asset, out var textureId);
+			if (thumbnailState == AssetThumbnailState.Loading)
+			{
+				EditorGui.DrawLoadingSpinner(drawList, (min + max) * 0.5f);
+				return;
+			}
+
+			if (thumbnailState == AssetThumbnailState.Ready)
+			{
+				drawList.AddImage(textureId, min, max);
+				return;
+			}
 		}
 
 		drawList.AddRect(min, max, AssetsWindowDrawing.SeparatorColor());

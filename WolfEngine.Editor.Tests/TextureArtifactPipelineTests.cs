@@ -150,7 +150,10 @@ public sealed class TextureArtifactPipelineTests
 		var loader = new AssetThumbnailLoader(projectService, renderer, new ImmediateMainThreadDispatcher());
 		var asset = CreateTextureAsset(importedRelativePath);
 
-		var loaded = loader.TryGetTextureThumbnailId(asset, out var textureId);
+		nint textureId = 0;
+		var loaded = SpinWait.SpinUntil(
+			() => loader.TryGetTextureThumbnailId(asset, out textureId),
+			TimeSpan.FromSeconds(2));
 
 		Assert.That(loaded, Is.True);
 		Assert.That(textureId, Is.EqualTo((nint)resources.ShaderResourceView.Value));

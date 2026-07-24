@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Rendering;
@@ -16,7 +18,8 @@ public sealed class AssetThumbnailLoader : IAssetThumbnailLoader
 	private readonly IEditorProjectService _projectService;
 	private readonly IRenderer _renderer;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
-	private readonly ConcurrentDictionary<string, CachedThumbnail> _cache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ConcurrentDictionary<string, Lazy<Task<CachedThumbnail>>> _cache = new(StringComparer.OrdinalIgnoreCase);
+	private readonly SemaphoreSlim _loadConcurrency = new(Math.Max(1, Math.Min(Environment.ProcessorCount, 4)));
 
 	private sealed class CachedThumbnail
 	{
@@ -37,6 +40,11 @@ public sealed class AssetThumbnailLoader : IAssetThumbnailLoader
 
 	public bool TryGetTextureThumbnailId(AssetDatabaseEntry asset, out nint textureId)
 	{
+		return GetTextureThumbnailState(asset, out textureId) == AssetThumbnailState.Ready;
+	}
+
+	public AssetThumbnailState GetTextureThumbnailState(AssetDatabaseEntry asset, out nint textureId)
+	{
 		textureId = 0;
 		ArgumentNullException.ThrowIfNull(asset);
 		if (asset.Type != AssetType.Texture2D ||
@@ -44,28 +52,53 @@ public sealed class AssetThumbnailLoader : IAssetThumbnailLoader
 		    string.IsNullOrWhiteSpace(summary.RelativeImportedPath) ||
 		    _projectService.HasOpenProject == false)
 		{
-			return false;
+			return AssetThumbnailState.Unavailable;
 		}
 
 		var absoluteImportedPath = _projectService.GetAbsolutePath(summary.RelativeImportedPath);
 		if (File.Exists(absoluteImportedPath) == false)
 		{
-			return false;
+			return AssetThumbnailState.Unavailable;
 		}
 
 		var lastWriteTime = File.GetLastWriteTimeUtc(absoluteImportedPath).Ticks;
 		var cacheKey = $"{TextureThumbnailMaxDimension}:{lastWriteTime}:{absoluteImportedPath}";
-		try
+		var pendingThumbnail = _cache.GetOrAdd(
+			cacheKey,
+			_ => new Lazy<Task<CachedThumbnail>>(
+				() => LoadThumbnailAsync(absoluteImportedPath, asset.Name),
+				LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
+		if (pendingThumbnail.IsCompletedSuccessfully)
 		{
-			var thumbnail = _cache.GetOrAdd(cacheKey, _ => LoadThumbnail(absoluteImportedPath, asset.Name));
+			var thumbnail = pendingThumbnail.Result;
 			textureId = thumbnail.TextureId;
-			return textureId != 0;
+			return textureId != 0 ? AssetThumbnailState.Ready : AssetThumbnailState.Unavailable;
 		}
-		catch
+
+		if (pendingThumbnail.IsFaulted || pendingThumbnail.IsCanceled)
 		{
-			textureId = 0;
-			return false;
+			_ = pendingThumbnail.Exception;
+			return AssetThumbnailState.Unavailable;
 		}
+
+		return AssetThumbnailState.Loading;
+	}
+
+	private Task<CachedThumbnail> LoadThumbnailAsync(string absoluteImportedPath, string assetName)
+	{
+		return Task.Run(async () =>
+		{
+			await _loadConcurrency.WaitAsync().ConfigureAwait(false);
+			try
+			{
+				return LoadThumbnail(absoluteImportedPath, assetName);
+			}
+			finally
+			{
+				_loadConcurrency.Release();
+			}
+		});
 	}
 
 	private CachedThumbnail LoadThumbnail(string absoluteImportedPath, string assetName)
