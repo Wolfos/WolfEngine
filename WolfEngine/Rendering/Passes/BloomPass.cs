@@ -9,7 +9,7 @@ public sealed class BloomPass
 {
 	public enum Stage { Prefilter, Downsample, Upsample, Composite }
 
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly IGfxPipeline?[] _pipelines = new IGfxPipeline[4];
 	private readonly ReadOnlyMemory<byte>[] _shaders = new ReadOnlyMemory<byte>[4];
@@ -19,7 +19,7 @@ public sealed class BloomPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 
-	public BloomPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public BloomPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

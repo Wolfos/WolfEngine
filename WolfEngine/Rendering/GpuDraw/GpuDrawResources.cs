@@ -19,7 +19,7 @@ public sealed class GpuDrawResources : IDisposable
 	public const int MaxTerrainLayerCount = MaxMaterialCount * 16;
 	public const int HardeningCounterCount = 16;
 	public const int MaxShadowViewCount = ShadowMapPass.MaxCascadeCount;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 
 	public IGfxBuffer? InstanceBuffer { get; private set; }
 	public IGfxBuffer? MaterialBuffer { get; private set; }
@@ -73,7 +73,7 @@ public sealed class GpuDrawResources : IDisposable
 	private ulong _indirectBindingVersion = 1;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
-	public GpuDrawResources(IShaderCompiler shaderCompiler)
+	public GpuDrawResources(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}

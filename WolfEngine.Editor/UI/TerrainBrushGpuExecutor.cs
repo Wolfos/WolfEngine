@@ -48,7 +48,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 	private const string PaintLayerEntryPoint = "ApplyLayerMapLayerBrush";
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly object _sync = new();
@@ -59,7 +59,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 
 	public TerrainBrushGpuExecutor(
 		IRenderer renderer,
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		IMainThreadDispatcher mainThreadDispatcher,
 		BindlessResourceRegistry bindlessRegistry)
 	{

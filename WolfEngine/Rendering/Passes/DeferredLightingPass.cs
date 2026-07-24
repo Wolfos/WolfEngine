@@ -9,7 +9,7 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 public sealed class DeferredLightingPass
 {
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
@@ -21,7 +21,7 @@ public sealed class DeferredLightingPass
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 
-	public DeferredLightingPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public DeferredLightingPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

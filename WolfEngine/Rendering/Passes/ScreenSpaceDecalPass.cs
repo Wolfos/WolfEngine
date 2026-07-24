@@ -10,7 +10,7 @@ namespace WolfEngine.Rendering.Passes;
 public sealed class ScreenSpaceDecalPass
 {
 	private readonly IRenderer _renderer;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly DebugPrimitiveMeshFactory _meshFactory = new();
 	private readonly List<GpuDecalProjectorData> _packedProjectors = new();
@@ -38,7 +38,7 @@ public sealed class ScreenSpaceDecalPass
 
 	public ScreenSpaceDecalPass(
 		IRenderer renderer,
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));

@@ -81,7 +81,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private int _width;
 	private int _height;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly IArenaAllocator _arenaAllocator;
 	private readonly IInputSystem _inputSystem;
 	private readonly WindowChromeController _windowChromeController;
@@ -134,7 +134,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
 	public WolfRendererD3D(
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		IArenaAllocator arenaAllocator,
 		IInputSystem inputSystem,
 		IImGuiInputSink imguiSystem,

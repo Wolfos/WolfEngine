@@ -8,7 +8,7 @@ internal sealed class RenderGraphPassSet
 {
 	public RenderGraphPassSet(
 		IRenderer renderer,
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats gpuDrawHardeningStats,

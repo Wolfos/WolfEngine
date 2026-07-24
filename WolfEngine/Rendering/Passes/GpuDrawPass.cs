@@ -10,7 +10,7 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class GpuDrawPass
 {
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly GpuDrawHardeningStats _hardeningStats;
@@ -129,7 +129,7 @@ public sealed class GpuDrawPass
 
 	private readonly record struct ComputeResourceBindings(params uint[] Slots);
 
-	public GpuDrawPass(IShaderCompiler shaderCompiler,
+	public GpuDrawPass(IShaderProvider shaderCompiler,
 		BindlessResourceRegistry bindlessRegistry, GpuDrawResources gpuDrawResources,
 		GpuDrawHardeningStats hardeningStats, IRenderer renderer,
 		IGpuDrawBackendBridge backendBridge)

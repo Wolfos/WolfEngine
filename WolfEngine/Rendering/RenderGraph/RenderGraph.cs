@@ -74,7 +74,6 @@ public sealed class RenderGraph
 		RenderFrameCoordinator renderFrameCoordinator,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer,
-		IShaderCompiler shaderCompiler,
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		IGpuDrawBackendBridge gpuDrawBackendBridge,
@@ -85,7 +84,7 @@ public sealed class RenderGraph
 		_arenaAllocator = arenaAllocator;
 		var passSet = new RenderGraphPassSet(
 			renderer,
-			shaderCompiler,
+			shaderProvider,
 			bindlessResourceRegistry,
 			gpuDrawResources,
 			hardeningStats,
@@ -96,7 +95,7 @@ public sealed class RenderGraph
 			passSet,
 			gpuDrawResources,
 			imGuiRenderer,
-			shaderCompiler);
+			shaderProvider);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));

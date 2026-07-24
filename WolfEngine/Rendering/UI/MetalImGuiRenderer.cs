@@ -22,7 +22,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		public ulong SubmissionId { get; set; }
 	}
 
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxDevice _device;
 	private IGfxPipeline _pipeline;
@@ -36,7 +36,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private UiBufferSet? _recordingBuffers;
 	private bool _fontUploaded;
 
-	public MetalImGuiRenderer(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public MetalImGuiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

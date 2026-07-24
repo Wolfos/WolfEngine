@@ -24,7 +24,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private const uint InvalidDescriptorValue = 0xFFFFFFFF;
 
 	private ComPtr<ID3D12Device> _device;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private D3D12DescriptorTable? _bindlessTable;
 	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
 	private ShaderPropertyWriter? _projectionWriter;
@@ -42,7 +42,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private int _fontTextureHeight;
 	private bool _fontUploaded;
 
-	public D3D12ImGuiRenderer(IShaderCompiler shaderCompiler)
+	public D3D12ImGuiRenderer(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}

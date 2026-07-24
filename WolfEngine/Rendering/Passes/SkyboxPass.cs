@@ -31,7 +31,7 @@ public sealed class SkyboxPass
 	private const float SunIntensityScaleEpsilon = 1e-4f;
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private DescriptorHandle _skyboxSamplerHandle = DescriptorHandle.Invalid;
 	private IGfxPipeline _iblIrradiancePipeline;
@@ -65,7 +65,7 @@ public sealed class SkyboxPass
 	private bool _proceduralBrdfValid;
 	private bool _hasGeneratedProceduralContent;
 
-	public SkyboxPass(IRenderer renderer, IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public SkyboxPass(IRenderer renderer, IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));

@@ -35,7 +35,7 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private int _width;
     private int _height;
-    private readonly IShaderCompiler _shaderCompiler;
+    private readonly IShaderProvider _shaderCompiler;
     private readonly IMacOSInputHandler _inputHandler;
     private readonly BindlessResourceRegistry _bindlessRegistry;
     private readonly GpuDrawHardeningStats _hardeningStats;
@@ -124,7 +124,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     }
 
     public WolfRendererMetal(
-        IShaderCompiler shaderCompiler,
+        IShaderProvider shaderCompiler,
         IMacOSInputHandler inputHandler,
         BindlessResourceRegistry bindlessRegistry,
         GpuDrawHardeningStats hardeningStats)

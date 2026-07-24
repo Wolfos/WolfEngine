@@ -11,7 +11,7 @@ public sealed class DdgiPass
 	private const int FirstProbeRelocationDiagnosticBufferSize =
 		FirstProbeRelocationDiagnosticFloatCount * sizeof(float);
 
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _classifyPipeline;
 	private IGfxPipeline? _tracePipeline;
@@ -60,7 +60,7 @@ public sealed class DdgiPass
 	public IReadOnlyList<DdgiFirstProbeRelocationDiagnostic> LastProbeRelocationDiagnostics =>
 		LastFirstProbeRelocationDiagnostics;
 
-	public DdgiPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public DdgiPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

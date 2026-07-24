@@ -8,7 +8,7 @@ using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine;
 
-public class ShaderCompiler : IShaderCompiler
+public class ShaderCompiler : IShaderProvider
 {
 	private DevelopmentShaderProvider? _provider;
 	private readonly Dictionary<string, ReadOnlyMemory<byte>> _cachedMetalLibraries = new();

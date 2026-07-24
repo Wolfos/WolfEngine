@@ -8,7 +8,7 @@ namespace WolfEngine.Rendering.Passes;
 internal static class GraphicsShaderCompiler
 {
 	public static ShaderBytecodeSet Compile(
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		GraphicsBackendKind backendKind,
 		ShaderProgramId shaderProgram,
 		string vertexEntryPoint,
@@ -22,7 +22,7 @@ internal static class GraphicsShaderCompiler
 	}
 
 	public static CompiledGraphicsShaderWithReflection CompileWithReflection(
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		GraphicsBackendKind backendKind,
 		ShaderProgramId shaderProgram,
 		string vertexEntryPoint,

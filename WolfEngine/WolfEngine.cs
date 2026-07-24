@@ -20,7 +20,6 @@ public static class WolfEngine
 	public static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<EngineShaderCatalog>();
-		services.AddSingleton<IShaderCompiler, LegacyShaderCompilerAdapter>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();
 		services.AddSingleton<IMaterialFactory, MaterialFactory>();

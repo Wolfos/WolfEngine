@@ -231,10 +231,10 @@ internal sealed class RenderGraphFrameBuilder
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
 		IImGuiRenderer imGuiRenderer,
-		IShaderCompiler shaderCompiler)
+		IShaderProvider shaderProvider)
 	{
 		_passSet = passSet;
-		_rayTracingSceneResources = new RayTracingSceneResources(shaderCompiler);
+		_rayTracingSceneResources = new RayTracingSceneResources(shaderProvider);
 		_resources = resources;
 		_renderer = renderer;
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;

@@ -13,7 +13,7 @@ public sealed class ClusteredLightingPass
 		WriteLightIndices
 	}
 
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private GraphicsBackendKind? _compiledBackendKind;
 	private IGfxPipeline? _buildClustersPipeline;
 	private IGfxPipeline? _writeLightIndicesPipeline;
@@ -22,7 +22,7 @@ public sealed class ClusteredLightingPass
 	private ShaderPropertyWriter? _cameraWriter;
 	private ShaderPropertyWriter? _clusterWriter;
 
-	public ClusteredLightingPass(IShaderCompiler shaderCompiler)
+	public ClusteredLightingPass(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}

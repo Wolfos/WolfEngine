@@ -103,7 +103,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private IGfxTopLevelAccelerationStructure? _topLevelAccelerationStructure;
 	private IGfxBuffer? _instanceIndexToInstanceHandleBuffer;
 	private IGfxBuffer? _instanceIndexToTerrainRayTracingResolutionBuffer;
@@ -120,7 +120,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 	private readonly record struct PendingResourceRetirement(IDisposable Resource, ulong RetireSubmissionId);
 
-	public RayTracingSceneResources(IShaderCompiler shaderCompiler)
+	public RayTracingSceneResources(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}

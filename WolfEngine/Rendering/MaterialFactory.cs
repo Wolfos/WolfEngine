@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine;
 
@@ -27,7 +28,7 @@ public class MaterialFactory : IMaterialFactory
 	private readonly RenderGraph _renderGraph;
 	private readonly ITextureFactory _textureFactory;
 
-	public MaterialFactory(IShaderCompiler shaderCompiler, RenderGraph renderGraph, ITextureFactory textureFactory)
+	public MaterialFactory(IShaderProvider shaderCompiler, RenderGraph renderGraph, ITextureFactory textureFactory)
 	{
 		_renderGraph = renderGraph;
 		_textureFactory = textureFactory;

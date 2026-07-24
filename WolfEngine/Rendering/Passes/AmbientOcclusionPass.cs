@@ -6,7 +6,7 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class AmbientOcclusionPass
 {
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _visibilityBitmaskPipeline;
 	private IGfxPipeline? _rayTracedPipeline;
@@ -23,7 +23,7 @@ public sealed class AmbientOcclusionPass
 	private ShaderPropertyWriter? _rayTracedCameraWriter;
 	private ShaderPropertyWriter? _rayTracedSettingsWriter;
 	private uint _frameIndex;
-	public AmbientOcclusionPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public AmbientOcclusionPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));

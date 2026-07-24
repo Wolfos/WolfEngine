@@ -27,7 +27,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 	private const uint Bc1RefinementPasses = 2;
 
 	private readonly IRenderer _renderer;
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
 	private readonly object _sync = new();
 
@@ -46,7 +46,7 @@ internal sealed class TextureGpuCompressionService : ITextureGpuCompressionServi
 
 	public TextureGpuCompressionService(
 		IRenderer renderer,
-		IShaderCompiler shaderCompiler,
+		IShaderProvider shaderCompiler,
 		IMainThreadDispatcher mainThreadDispatcher)
 	{
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));

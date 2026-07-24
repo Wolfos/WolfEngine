@@ -5,7 +5,7 @@ namespace WolfEngine.Rendering.Passes;
 
 public sealed class CasSharpenPass
 {
-	private readonly IShaderCompiler _shaderCompiler;
+	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
@@ -14,7 +14,7 @@ public sealed class CasSharpenPass
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _settingsWriter;
 
-	public CasSharpenPass(IShaderCompiler shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public CasSharpenPass(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
