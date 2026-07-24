@@ -1526,8 +1526,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
 		var terrainBuild = commandList.BottomLevelBuilds.Single(build =>
 			(build.Descriptor.VertexBuffer.Descriptor.Usage & BufferUsage.Structured) != 0);
-		Assert.That(terrainBuild.Descriptor.VertexStrideBytes, Is.EqualTo(16));
-		Assert.That(terrainBuild.Descriptor.VertexBuffer.Descriptor.SizeInBytes, Is.EqualTo(17UL * 17UL * 16UL));
+		Assert.That(terrainBuild.Descriptor.VertexStrideBytes, Is.EqualTo(12));
+		Assert.That(terrainBuild.Descriptor.VertexBuffer.Descriptor.SizeInBytes, Is.EqualTo(17UL * 17UL * 12UL));
 	}
 
 	[Test]

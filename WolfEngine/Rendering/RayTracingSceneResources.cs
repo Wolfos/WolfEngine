@@ -88,9 +88,7 @@ public sealed record RayTracingSceneState(
 
 public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDisposable
 {
-	// Slang/MSL aligns float3 structured-buffer elements to 16 bytes. Keep the BLAS vertex
-	// stride explicit so compute writes and acceleration-structure reads share one layout.
-	private const uint TerrainRayTracingVertexStrideBytes = 16;
+	private const uint TerrainRayTracingVertexStrideBytes = 12;
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<uint, InstanceRecord> _instances = new();
 	private readonly Dictionary<uint, TerrainInstanceRecord> _terrainInstances = new();
