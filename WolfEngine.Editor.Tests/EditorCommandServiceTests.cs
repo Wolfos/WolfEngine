@@ -300,7 +300,7 @@ public sealed class EditorCommandServiceTests
 		var fixture = CreateCommandFixture();
 		fixture.ProjectService.HasOpenProject.Returns(true);
 		fixture.ProjectService.ProjectRootPath.Returns("/project");
-		fixture.FileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Forest.scene.json");
+		fixture.FileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Forest");
 
 		var saved = fixture.Service.SaveScene();
 
@@ -310,7 +310,8 @@ public sealed class EditorCommandServiceTests
 		fixture.FileDialogService.Received(1).SaveFile(Arg.Is<FileDialogOptions>(options =>
 			options.Title == "Save New Scene" &&
 			options.InitialDirectory == "/project/Assets/Scenes" &&
-			options.DefaultFileName == "Untitled Scene.scene.json"));
+			options.DefaultFileName == "Untitled Scene" &&
+			options.AllowedExtensions == null));
 		fixture.SceneWorkspace.Received(1).SaveCurrentScene();
 	}
 
@@ -468,7 +469,7 @@ public sealed class EditorCommandServiceTests
 		playSession.IsActive.Returns(false);
 		var operationService = Substitute.For<IEditorOperationService>();
 		var fileDialogService = Substitute.For<IFileDialogService>();
-		fileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Untitled Scene.scene.json");
+		fileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Untitled Scene");
 		operationService.TryStart(
 			Arg.Any<string>(),
 			Arg.Any<Action<IProgress<string>>>(),

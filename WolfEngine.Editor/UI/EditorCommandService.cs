@@ -243,17 +243,11 @@ public sealed class EditorCommandService : IEditorCommandService
 		{
 			Title = "Save New Scene",
 			InitialDirectory = scenesDirectory,
-			DefaultFileName = $"Untitled Scene{EditorSceneAssetFile.FileExtension}",
-			AllowedExtensions = ["scene.json"]
+			DefaultFileName = "Untitled Scene"
 		});
 		if (string.IsNullOrWhiteSpace(selectedPath))
 		{
 			return false;
-		}
-
-		if (selectedPath.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase) == false)
-		{
-			selectedPath += EditorSceneAssetFile.FileExtension;
 		}
 
 		var projectRoot = Path.GetFullPath(_projectService.ProjectRootPath!);
@@ -272,7 +266,12 @@ public sealed class EditorCommandService : IEditorCommandService
 			return false;
 		}
 
-		var sceneName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(fullSelectedPath));
+		var sceneName = Path.GetFileName(fullSelectedPath);
+		if (sceneName.EndsWith(EditorSceneAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase))
+		{
+			sceneName = sceneName[..^EditorSceneAssetFile.FileExtension.Length];
+		}
+
 		if (string.IsNullOrWhiteSpace(sceneName))
 		{
 			_notificationService.ReportError("Choose a name for the new scene.");
