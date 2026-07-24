@@ -9,6 +9,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+      <ProjectReference Include="..\WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj" />
     </ItemGroup>
 
     <ItemGroup>

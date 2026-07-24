@@ -1,4 +1,5 @@
 #nullable enable
+// Slang reflection is editor tooling; runtime consumes serialized layouts only.
 
 using System;
 using System.Collections.Generic;

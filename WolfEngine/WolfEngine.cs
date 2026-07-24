@@ -17,17 +17,13 @@ namespace WolfEngine;
 
 public static class WolfEngine
 {
-	public static void ConfigureServices(IServiceCollection services, EngineShaderOptions shaderOptions)
+	public static void ConfigureServices(IServiceCollection services)
 	{
-		ArgumentNullException.ThrowIfNull(shaderOptions);
-		services.AddSingleton(shaderOptions);
 		services.AddSingleton<EngineShaderCatalog>();
-		services.AddSingleton<IShaderProvider, DevelopmentShaderProvider>();
 		services.AddSingleton<IShaderCompiler, LegacyShaderCompilerAdapter>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();
 		services.AddSingleton<IMaterialFactory, MaterialFactory>();
-		services.AddSingleton<IThreeDFileImporter, ThreeDFileImporter>();
 		services.AddSingleton<IAssetPipelineIndex, AssetPipelineIndex>();
 		services.AddSingleton<IAssetMetadataStore, AssetMetadataStore>();
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();

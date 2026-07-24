@@ -1,4 +1,5 @@
 #nullable enable
+// Source compilation and hot reload are editor/build tooling concerns.
 
 using System;
 using System.Collections.Generic;

@@ -7,6 +7,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
+using WolfEngine.Editor.Tooling;
 
 namespace WolfEngine.Build;
 
@@ -47,8 +48,8 @@ public static class GameBuilder
 
 		var engineSolutionRoot = FindEngineSolutionRoot();
 		var services = new ServiceCollection();
-		global::WolfEngine.WolfEngine.ConfigureServices(
-			services,
+		global::WolfEngine.WolfEngine.ConfigureServices(services);
+		services.AddEditorToolingShaders(
 			new EngineShaderOptions { EngineContentRoot = Path.Combine(engineSolutionRoot, "WolfEngine") });
 		using var provider = services.BuildServiceProvider();
 		var database = context.AssetDatabase.Assets.ToDictionary(asset => asset.Id);

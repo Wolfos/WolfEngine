@@ -54,9 +54,7 @@ public static class Program
 			gameplaySymbols);
 
 		var services = new ServiceCollection();
-		WolfEngine.ConfigureServices(
-			services,
-			new EngineShaderOptions { EngineContentRoot = AppContext.BaseDirectory });
+		WolfEngine.ConfigureServices(services);
 		services.AddSingleton(new RenderPresentationOptions { OutputMode = RenderOutputMode.FullWindow });
 		var packagedShaders = new PackagedShaderProvider(catalog);
 		services.AddSingleton<IShaderProvider>(packagedShaders);

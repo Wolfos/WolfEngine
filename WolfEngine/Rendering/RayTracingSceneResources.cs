@@ -125,10 +125,6 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 	}
 
-	public RayTracingSceneResources() : this(new ShaderCompiler())
-	{
-	}
-
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure => _topLevelAccelerationStructure;
 
 	public IGfxBuffer? InstanceIndexToInstanceHandleBuffer => _instanceIndexToInstanceHandleBuffer;

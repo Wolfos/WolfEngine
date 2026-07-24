@@ -1509,7 +1509,7 @@ public sealed class RayTracingSceneResourcesTests
 		database.CopyUpdates(updates);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources();
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
 
 		resources.RecordUpdate(context, new TestRenderer(new TestDevice()), updates);
 
@@ -1540,7 +1540,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources();
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();
@@ -1579,7 +1579,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources();
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
 		var renderer = new TestRenderer(new TestDevice());
 		var instanceData = CreateTerrainInstanceData();
 		var surface = CreateTerrainSurface();
@@ -1634,7 +1634,7 @@ public sealed class RayTracingSceneResourcesTests
 		var entity = new Entity(1, 1);
 		var commandList = new TestCommandList();
 		var context = CreateContext(database, commandList);
-		var resources = new RayTracingSceneResources();
+		var resources = new RayTracingSceneResources(new ShaderCompiler());
 		var renderer = new TestRenderer(new TestDevice());
 
 		database.BeginSync();

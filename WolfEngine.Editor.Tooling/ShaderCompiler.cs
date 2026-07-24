@@ -8,8 +8,6 @@ using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine;
 
-public interface IShaderCompiler : IShaderProvider;
-
 public class ShaderCompiler : IShaderCompiler
 {
 	private DevelopmentShaderProvider? _provider;

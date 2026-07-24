@@ -8,6 +8,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Editor.Tooling;
 using Wolfie.IAE.Projects;
 using Wolfie.IAE.UI;
 using Wolfie.IAE.UnityAssets;
@@ -33,7 +34,8 @@ public sealed class WolfieApplication : IDisposable
 	{
 		var services = new ServiceCollection();
 		var engineRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
-		global::WolfEngine.WolfEngine.ConfigureServices(services, new EngineShaderOptions { EngineContentRoot = engineRoot });
+		global::WolfEngine.WolfEngine.ConfigureServices(services);
+		services.AddEditorToolingShaders(new EngineShaderOptions { EngineContentRoot = engineRoot });
 		services.AddSingleton<WolfieProjectService>();
 		services.AddSingleton<WolfiePreferences>();
 		services.AddSingleton<UnityAssetScanner>();

@@ -28,6 +28,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Runtime", "WolfE
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Build", "WolfEngine.Build\WolfEngine.Build.csproj", "{7E530F5E-7B57-4B36-BC26-8C166F7495B0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Editor.Tooling", "WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj", "{1BFB9A84-C3D1-48DF-9B20-3B9567355F31}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Audio", "WolfEngine.Audio\WolfEngine.Audio.csproj", "{9AFBDEFB-1DFA-4D80-A2CF-9155DEA4E0DF}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Audio.Tests", "WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj", "{7732BBF6-58C0-4FF3-985B-607C0D052D73}"
@@ -90,6 +92,10 @@ Global
 		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7E530F5E-7B57-4B36-BC26-8C166F7495B0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1BFB9A84-C3D1-48DF-9B20-3B9567355F31}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1BFB9A84-C3D1-48DF-9B20-3B9567355F31}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1BFB9A84-C3D1-48DF-9B20-3B9567355F31}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1BFB9A84-C3D1-48DF-9B20-3B9567355F31}.Release|Any CPU.Build.0 = Release|Any CPU
 		{9AFBDEFB-1DFA-4D80-A2CF-9155DEA4E0DF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{9AFBDEFB-1DFA-4D80-A2CF-9155DEA4E0DF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9AFBDEFB-1DFA-4D80-A2CF-9155DEA4E0DF}.Release|Any CPU.ActiveCfg = Release|Any CPU

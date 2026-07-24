@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Automation;
+using WolfEngine.Editor.Tooling;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.ECS;
@@ -22,7 +23,9 @@ public sealed class EditorApplication : IDisposable
 	{
 		var services = new ServiceCollection();
 		engineContentRoot ??= Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
-		WolfEngine.ConfigureServices(services, new EngineShaderOptions { EngineContentRoot = engineContentRoot });
+		WolfEngine.ConfigureServices(services);
+		services.AddEditorToolingShaders(new EngineShaderOptions { EngineContentRoot = engineContentRoot });
+		services.AddEditorToolingImporter();
 		Program.ConfigureServices(services);
 		return new EditorApplication(services.BuildServiceProvider());
 	}
