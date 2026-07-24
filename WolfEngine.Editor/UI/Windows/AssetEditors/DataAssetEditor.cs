@@ -110,14 +110,16 @@ public sealed class DataAssetEditor
 
 	private bool DrawObjectProperties(object target, Type targetType, bool includeHeader, string? headerLabel = null)
 	{
-		if (target is TerrainLayerSet terrainLayerSet)
+		if (includeHeader)
 		{
-			return DrawTerrainLayerSetProperties(terrainLayerSet, includeHeader, headerLabel);
+			return DrawCollapsibleGroup(
+				headerLabel ?? targetType.Name,
+				() => DrawObjectProperties(target, targetType, includeHeader: false));
 		}
 
-		if (includeHeader && EditorUIUtility.CollapsingHeader(headerLabel ?? targetType.Name, true) == false)
+		if (target is TerrainLayerSet terrainLayerSet)
 		{
-			return false;
+			return DrawTerrainLayerSetProperties(terrainLayerSet, includeHeader: false, headerLabel: null);
 		}
 
 		var changed = false;
@@ -155,9 +157,11 @@ public sealed class DataAssetEditor
 
 	private bool DrawTerrainLayerSetProperties(TerrainLayerSet layerSet, bool includeHeader, string? headerLabel)
 	{
-		if (includeHeader && EditorUIUtility.CollapsingHeader(headerLabel ?? nameof(TerrainLayerSet), true) == false)
+		if (includeHeader)
 		{
-			return false;
+			return DrawCollapsibleGroup(
+				headerLabel ?? nameof(TerrainLayerSet),
+				() => DrawTerrainLayerSetProperties(layerSet, includeHeader: false, headerLabel: null));
 		}
 
 		var changed = false;
@@ -182,57 +186,65 @@ public sealed class DataAssetEditor
 			ImGui.PushID(layerIndex);
 			try
 			{
-				if (EditorUIUtility.CollapsingHeader($"Layer {layerIndex + 1}", true) == false)
+				if (EditorUIUtility.CollapsingHeader($"Layer {layerIndex + 1}") == false)
 				{
 					continue;
 				}
 
-				var layer = layerSet.GetLayer(layerIndex);
-				var layerName = layer.Name;
-				if (EditorUIUtility.InputText("Name", ref layerName))
+				EditorUIUtility.BeginIndentedGroup();
+				try
 				{
-					layer.Name = layerName;
-					changed = true;
-				}
-
-				var scale = layer.Scale;
-				if (EditorUIUtility.InputFloat("Scale", ref scale))
-				{
-					layer.Scale = scale;
-					changed = true;
-				}
-
-				var autoMaterial = layer.AutoMaterial;
-				if (EditorUIUtility.Checkbox("Auto Material", ref autoMaterial))
-				{
-					layer.AutoMaterial = autoMaterial;
-					changed = true;
-				}
-
-				if (autoMaterial)
-				{
-					var useMinimumSlope = layer.UseMinimumSlope;
-					if (EditorUIUtility.Checkbox("Use Minimum Slope", ref useMinimumSlope))
+					var layer = layerSet.GetLayer(layerIndex);
+					var layerName = layer.Name;
+					if (EditorUIUtility.InputText("Name", ref layerName))
 					{
-						layer.UseMinimumSlope = useMinimumSlope;
+						layer.Name = layerName;
 						changed = true;
 					}
 
-					if (useMinimumSlope)
+					var scale = layer.Scale;
+					if (EditorUIUtility.InputFloat("Scale", ref scale))
 					{
-						var minimumSlopeDegrees = Math.Clamp(layer.MinimumSlopeDegrees, 0.0f, 90.0f);
-						if (ImGui.SliderFloat("Minimum Slope", ref minimumSlopeDegrees, 0.0f, 90.0f, "%.0f deg"))
+						layer.Scale = scale;
+						changed = true;
+					}
+
+					var autoMaterial = layer.AutoMaterial;
+					if (EditorUIUtility.Checkbox("Auto Material", ref autoMaterial))
+					{
+						layer.AutoMaterial = autoMaterial;
+						changed = true;
+					}
+
+					if (autoMaterial)
+					{
+						var useMinimumSlope = layer.UseMinimumSlope;
+						if (EditorUIUtility.Checkbox("Use Minimum Slope", ref useMinimumSlope))
 						{
-							layer.MinimumSlopeDegrees = minimumSlopeDegrees;
+							layer.UseMinimumSlope = useMinimumSlope;
 							changed = true;
 						}
-					}
-				}
 
-				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Albedo));
-				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Normal));
-				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Orm));
-				changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Height));
+						if (useMinimumSlope)
+						{
+							var minimumSlopeDegrees = Math.Clamp(layer.MinimumSlopeDegrees, 0.0f, 90.0f);
+							if (ImGui.SliderFloat("Minimum Slope", ref minimumSlopeDegrees, 0.0f, 90.0f, "%.0f deg"))
+							{
+								layer.MinimumSlopeDegrees = minimumSlopeDegrees;
+								changed = true;
+							}
+						}
+					}
+
+					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Albedo));
+					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Normal));
+					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Orm));
+					changed |= DrawTerrainLayerAssetRef(layer, nameof(TerrainLayerDefinition.Height));
+				}
+				finally
+				{
+					EditorUIUtility.EndIndentedGroup();
+				}
 			}
 			finally
 			{
@@ -241,6 +253,24 @@ public sealed class DataAssetEditor
 		}
 
 		return changed;
+	}
+
+	private static bool DrawCollapsibleGroup(string label, Func<bool> drawContents)
+	{
+		if (EditorUIUtility.CollapsingHeader(label) == false)
+		{
+			return false;
+		}
+
+		EditorUIUtility.BeginIndentedGroup();
+		try
+		{
+			return drawContents();
+		}
+		finally
+		{
+			EditorUIUtility.EndIndentedGroup();
+		}
 	}
 
 	private bool DrawTerrainLayerAssetRef(TerrainLayerDefinition layer, string propertyName)

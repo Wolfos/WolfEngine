@@ -211,7 +211,7 @@ public class EditorUIUtility
 		return changed;
 	}
 
-	public static bool CollapsingHeader(string label, bool isOpenByDefault)
+	public static bool CollapsingHeader(string label, bool isOpenByDefault = false)
 	{
 		var pushedBoldHeader = ImGuiUiSystem.PushBoldFont();
 		var isOpen = ImGui.CollapsingHeader(label, isOpenByDefault ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None);

@@ -202,7 +202,7 @@ public static class RuntimeComponentFieldEditor
 		ImGuiNET.ImGui.PushID(field.Name);
 		try
 		{
-			if (EditorUIUtility.CollapsingHeader(field.Name, isOpenByDefault: true) == false)
+			if (EditorUIUtility.CollapsingHeader(field.Name) == false)
 			{
 				return;
 			}
