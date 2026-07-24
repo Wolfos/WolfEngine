@@ -15,7 +15,7 @@ public sealed class ShadowMapPass
 	public const float DefaultDepthBias = 0.05f;
 	public const float DefaultCascadeBlendDistance = 2.0f;
 
-	private const float DefaultDepthBiasTexelScale = 1.0f;
+	private const float DefaultDepthBiasTexelScale = 5.0f;
 	private const float DefaultStrength = 1.0f;
 	private const float CasterPaddingNear = 96.0f;
 	private const float CasterPaddingFar = 24.0f;
