@@ -43,6 +43,18 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.LoadSceneAsync(scenePath, cancellationToken);
 
+	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
+	public Task<PlayModeStateResult> EnterPlayMode(CancellationToken cancellationToken) =>
+		_controller.EnterPlayModeAsync(cancellationToken);
+
+	[McpServerTool(Name = "pause_play_mode"), Description("Pause the currently running Play-mode scene.")]
+	public Task<PlayModeStateResult> PausePlayMode(CancellationToken cancellationToken) =>
+		_controller.PausePlayModeAsync(cancellationToken);
+
+	[McpServerTool(Name = "stop_play_mode"), Description("Stop Play mode and discard the isolated runtime scene, returning to the authoring scene.")]
+	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
+		_controller.StopPlayModeAsync(cancellationToken);
+
 	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
 	public Task<RenderFrameWaitResult> WaitForRenderFrames(
 		[Description("Positive number of completed render frames to wait for.")] int frameCount,

@@ -18,6 +18,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
+	private readonly IEditorPlaySession _playSession;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly IRenderer _renderer;
@@ -36,6 +37,7 @@ public sealed class EditorRemoteAutomationController
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorSceneSnapshotService sceneSnapshotService,
+		IEditorPlaySession playSession,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		IRenderer renderer,
@@ -49,6 +51,7 @@ public sealed class EditorRemoteAutomationController
 		_gameplayAssemblyHost = gameplayAssemblyHost;
 		_sceneWorkspace = sceneWorkspace;
 		_sceneSnapshotService = sceneSnapshotService;
+		_playSession = playSession;
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_renderer = renderer;
@@ -117,6 +120,36 @@ public sealed class EditorRemoteAutomationController
 				scene.Id,
 				_editorFrameCoordinator.CompletedSequence,
 				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.EnterPlay() == false)
+			{
+				throw new InvalidOperationException($"Cannot enter Play mode while the editor is {_playSession.State}.");
+			}
+			return GetPlayModeState();
+		}, cancellationToken);
+
+	public Task<PlayModeStateResult> PausePlayModeAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.Pause() == false)
+			{
+				throw new InvalidOperationException($"Cannot pause Play mode while the editor is {_playSession.State}.");
+			}
+			return GetPlayModeState();
+		}, cancellationToken);
+
+	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.Stop() == false)
+			{
+				throw new InvalidOperationException("The editor is not in Play mode.");
+			}
+			return GetPlayModeState();
 		}, cancellationToken);
 
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
@@ -263,6 +296,11 @@ public sealed class EditorRemoteAutomationController
 			? outputPath
 			: Path.Combine(_projectPath, outputPath));
 	}
+
+	private PlayModeStateResult GetPlayModeState() => new(
+		_playSession.State.ToString(),
+		_editorFrameCoordinator.CompletedSequence,
+		_renderFrameCoordinator.CompletedSequence);
 
 	private static IReadOnlyList<GpuPassProfileResult> SummarizeGpuFrames(IReadOnlyList<GpuProfileFrame> frames)
 	{

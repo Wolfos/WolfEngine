@@ -105,6 +105,15 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
 
+	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().EnterPlayModeAsync(cancellationToken);
+
+	public Task<PlayModeStateResult> PausePlayModeAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().PausePlayModeAsync(cancellationToken);
+
+	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().StopPlayModeAsync(cancellationToken);
+
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
 

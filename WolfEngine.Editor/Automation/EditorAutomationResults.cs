@@ -6,6 +6,11 @@ public sealed record SceneLoadResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+public sealed record PlayModeStateResult(
+	string State,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
 public sealed record RenderFrameWaitResult(
 	int RequestedFrameCount,
 	long EditorFrameSequence,
