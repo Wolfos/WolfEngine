@@ -116,7 +116,7 @@ public sealed class ColliderGizmoDrawerTests
 	{
 		Assert.That(SceneWindow.ShouldDrawGizmos(EditorPlayState.Edit), Is.True);
 		Assert.That(SceneWindow.ShouldDrawGizmos(EditorPlayState.Playing), Is.False);
-		Assert.That(SceneWindow.ShouldDrawGizmos(EditorPlayState.Paused), Is.False);
+		Assert.That(SceneWindow.ShouldDrawGizmos(EditorPlayState.Paused), Is.True);
 	}
 
 	private static Entity CreateEntityWithTransform(World world, string name)
