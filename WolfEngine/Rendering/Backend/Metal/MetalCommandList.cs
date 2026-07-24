@@ -515,6 +515,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		{
 			return;
 		}
+		if (metalCommandBuffer.UsesCurrentBindlessBuffers(_descriptorTable, maxAvailable) == false)
+		{
+			// An argument buffer grew after this ICB slot was encoded. The backend bridge
+			// observes the pointer change at the next frame boundary and re-encodes the
+			// active slot. Skipping one stale execution is preferable to submitting an ICB
+			// that contains a dangling Metal buffer binding.
+			return;
+		}
 
 		EnsureRenderEncoder();
 		if (maxAvailable >= metalCommandBuffer.Descriptor.MaxCommandCount)
@@ -553,6 +561,16 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		if (commandRangeBuffer is not MetalBuffer metalRangeBuffer)
 		{
 			throw new InvalidOperationException("Command count/range buffer was not created by the Metal backend.");
+		}
+		if (metalRangeBuffer.IsDisposed)
+		{
+			return;
+		}
+		if (metalCommandBuffer.UsesCurrentBindlessBuffers(
+			    _descriptorTable,
+			    metalCommandBuffer.Descriptor.MaxCommandCount) == false)
+		{
+			return;
 		}
 
 		EnsureRenderEncoder();

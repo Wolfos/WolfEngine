@@ -15,6 +15,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 	private nint _lastBindlessTextureBufferPtr;
 	private nint _lastBindlessRwTextureBufferPtr;
 	private nint _lastBindlessSamplerBufferPtr;
+	private ulong _lastIndirectBindingVersion;
 	private MetalDescriptorTable? _descriptorTable;
 
 	public GpuDrawBackendFrameSignals PrepareFrame(
@@ -49,6 +50,11 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		if (BindlessPointersChanged(metalTable))
 		{
 			CacheBindlessPointers(metalTable);
+			requiresFullSlotReencode = true;
+		}
+		if (_lastIndirectBindingVersion != resources.IndirectBindingVersion)
+		{
+			_lastIndirectBindingVersion = resources.IndirectBindingVersion;
 			requiresFullSlotReencode = true;
 		}
 

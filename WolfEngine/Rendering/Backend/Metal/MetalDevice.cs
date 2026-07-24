@@ -59,6 +59,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly string _metallibCacheDirectory;
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
+	private readonly Queue<PendingArgumentBufferRetirement> _pendingArgumentBufferRetirements = new();
 	private readonly object _submissionSync = new();
 	private int _pooledTextureCount;
 	private ulong _lastSubmittedId;
@@ -76,6 +77,18 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		public MetalCommandList CommandList { get; }
 	}
 
+	private readonly struct PendingArgumentBufferRetirement
+	{
+		public PendingArgumentBufferRetirement(MTLBuffer buffer, ulong retireSubmissionId)
+		{
+			Buffer = buffer;
+			RetireSubmissionId = retireSubmissionId;
+		}
+
+		public MTLBuffer Buffer { get; }
+		public ulong RetireSubmissionId { get; }
+	}
+
 	public MetalDevice(MTLDevice device)
 	{
 		_device = device;
@@ -84,7 +97,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		{
 			throw new InvalidOperationException("Failed to create Metal command queue.");
 		}
-		_descriptorTable = new MetalDescriptorTable(_device);
+		_descriptorTable = new MetalDescriptorTable(_device, RetireArgumentBuffer);
 		_gpuProfilerBackend = new MetalGpuProfilerBackend(_device);
 		_metallibCacheDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine", "metallib-cache");
 		Directory.CreateDirectory(_metallibCacheDirectory);
@@ -221,9 +234,48 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	private void MarkSubmissionCompleted(ulong submissionId)
 	{
+		List<MTLBuffer>? retiredBuffers = null;
 		lock (_submissionSync)
 		{
 			_completedId = Math.Max(_completedId, submissionId);
+			while (_pendingArgumentBufferRetirements.Count > 0 &&
+			       _pendingArgumentBufferRetirements.Peek().RetireSubmissionId <= _completedId)
+			{
+				retiredBuffers ??= new List<MTLBuffer>();
+				retiredBuffers.Add(_pendingArgumentBufferRetirements.Dequeue().Buffer);
+			}
+		}
+
+		if (retiredBuffers is null)
+		{
+			return;
+		}
+
+		for (var i = 0; i < retiredBuffers.Count; i++)
+		{
+			if (retiredBuffers[i].NativePtr != IntPtr.Zero)
+			{
+				retiredBuffers[i].Dispose();
+			}
+		}
+	}
+
+	private void RetireArgumentBuffer(MTLBuffer buffer)
+	{
+		if (buffer.NativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		lock (_submissionSync)
+		{
+			// Argument buffers are captured by persistent Metal ICB commands. The command
+			// set observes the pointer change on the next frame and re-encodes a slot before
+			// using it. Keep the old native buffer alive through the submission currently
+			// being recorded so an already-encoded command can never reference freed memory.
+			var retireSubmissionId = checked(_lastSubmittedId + 1UL);
+			_pendingArgumentBufferRetirements.Enqueue(
+				new PendingArgumentBufferRetirement(buffer, retireSubmissionId));
 		}
 	}
 

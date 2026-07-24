@@ -14,14 +14,15 @@ public static class Program
 {
 	public static void Main(string[] args)
 	{
+		using var application = EditorApplication.Create();
+
 		if (EditorAutomationOptions.TryParse(args, out var automationOptions, out var parseError) == false)
 		{
-			Console.Error.WriteLine($"capture failed: {parseError}");
-			Environment.ExitCode = 1;
+			Console.Out.WriteLine($"Args not recognised {parseError}");
+			application.Run();
 			return;
 		}
 
-		using var application = EditorApplication.Create();
 		var captureController = automationOptions is null ? null : application.CreateCaptureController(automationOptions);
 		application.Run(captureController);
 		if (captureController is not null) Environment.ExitCode = captureController.ExitCode;

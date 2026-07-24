@@ -70,6 +70,7 @@ public sealed class GpuDrawResources : IDisposable
 	private int _ddgiDebugBufferSizeInBytes;
 	private int _decalProjectorCapacity;
 	private ClusteredLightingFrameLayout _clusteredLightingLayout;
+	private ulong _indirectBindingVersion = 1;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
 	public GpuDrawResources(IShaderCompiler shaderCompiler)
@@ -154,6 +155,8 @@ public sealed class GpuDrawResources : IDisposable
 		                                                         "GpuDraw camera layout was not initialized.");
 
 	public ClusteredLightingFrameLayout ClusteredLightingLayout => _clusteredLightingLayout;
+
+	internal ulong IndirectBindingVersion => _indirectBindingVersion;
 
 	public void EnsureCreated(IGfxDevice device)
 	{
@@ -587,7 +590,7 @@ public sealed class GpuDrawResources : IDisposable
 		return existingBuffer;
 	}
 
-	private static IGfxBuffer EnsureStructuredBufferCapacity(
+	private IGfxBuffer EnsureStructuredBufferCapacity(
 		IGfxDevice device,
 		IGfxBuffer? existingBuffer,
 		int elementCount,
@@ -600,6 +603,7 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		(existingBuffer as IDisposable)?.Dispose();
+		_indirectBindingVersion = checked(_indirectBindingVersion + 1UL);
 		return device.CreateBuffer(new BufferDescriptor(
 			sizeInBytes,
 			BufferUsage.Structured,

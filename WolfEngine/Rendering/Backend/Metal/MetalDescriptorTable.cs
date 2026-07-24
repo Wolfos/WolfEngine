@@ -13,11 +13,13 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
 	private const int MaxUavDescriptors = 16384;
+	private const ulong MinimumArgumentBufferCapacityBytes = 1024UL * 1024UL;
 	internal const int BindlessArgumentBufferIndexCounts = 27;
 	internal const int BindlessArgumentBufferIndexTextures = 28;
 	internal const int BindlessArgumentBufferIndexRWTextures = 29;
 	internal const int BindlessArgumentBufferIndexSamplers = 30;
 	private readonly MTLDevice _device;
+	private readonly Action<MTLBuffer> _retireArgumentBuffer;
 	private readonly MetalTexture[] _srvTextures = new MetalTexture[MaxDescriptors];
 	private readonly MetalTexture[] _uavTextures = new MetalTexture[MaxDescriptors];
 	private readonly MTLBuffer[] _cbvBuffers = new MTLBuffer[MaxDescriptors];
@@ -50,9 +52,11 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private MetalTexture? _fallbackTexture;
 	private MetalBuffer? _fallbackConstantBuffer;
 
-	public MetalDescriptorTable(MTLDevice device)
+	public MetalDescriptorTable(MTLDevice device, Action<MTLBuffer> retireArgumentBuffer)
 	{
 		_device = device;
+		_retireArgumentBuffer = retireArgumentBuffer ??
+		                        throw new ArgumentNullException(nameof(retireArgumentBuffer));
 	}
 
 	public DescriptorHandle AllocateShaderResourceView(IGfxResource resource)
@@ -368,9 +372,6 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_samplerEncoder = samplerEncoder;
 
 		var forceEncode = _forceEncode || _forceEncodeFrames > 0;
-		var needsEncodeSrv = forceEncode || _bindlessVersion != _encodedSrvVersion;
-		var needsEncodeUav = forceEncode || _bindlessVersion != _encodedUavVersion;
-		var needsEncodeSampler = forceEncode || _bindlessVersion != _encodedSamplerVersion;
 		var encodedAny = false;
 
 		if (_textureEncoder.NativePtr != IntPtr.Zero)
@@ -381,7 +382,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder);
+				var bufferReplaced = EnsureArgumentBuffer(ref _textureArgumentBuffer, _textureEncoder);
+				var needsEncodeSrv = forceEncode ||
+				                     bufferReplaced ||
+				                     _bindlessVersion != _encodedSrvVersion;
 				if (needsEncodeSrv)
 				{
 					for (var i = 0; i < _srvCount; i++)
@@ -403,7 +407,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder);
+				var bufferReplaced = EnsureArgumentBuffer(ref _rwTextureArgumentBuffer, _rwTextureEncoder);
+				var needsEncodeUav = forceEncode ||
+				                     bufferReplaced ||
+				                     _bindlessVersion != _encodedUavVersion;
 				if (needsEncodeUav)
 				{
 					for (var i = 0; i < _uavCount; i++)
@@ -425,7 +432,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			}
 			else
 			{
-				EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder);
+				var bufferReplaced = EnsureArgumentBuffer(ref _samplerArgumentBuffer, _samplerEncoder);
+				var needsEncodeSampler = forceEncode ||
+				                         bufferReplaced ||
+				                         _bindlessVersion != _encodedSamplerVersion;
 				if (needsEncodeSampler)
 				{
 					for (var i = 0; i < _samplerCount; i++)
@@ -558,22 +568,39 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		_samplerEncoder.SetSamplerStates(_singleSampler, new NSRange { location = (ulong)index, length = 1 });
 	}
 
-	private void EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder)
+	private bool EnsureArgumentBuffer(ref MTLBuffer buffer, MTLArgumentEncoder encoder)
 	{
 		var requiredSize = encoder.EncodedLength;
-		if (buffer.NativePtr == IntPtr.Zero || buffer.Length < requiredSize)
+		if (buffer.NativePtr != IntPtr.Zero && buffer.Length >= requiredSize)
 		{
-			if (buffer.NativePtr != IntPtr.Zero)
-			{
-				buffer.Dispose();
-			}
-			buffer = _device.NewBuffer(requiredSize, MTLResourceOptions.ResourceStorageModeShared);
-			if (buffer.NativePtr == IntPtr.Zero)
-			{
-				throw new InvalidOperationException("Failed to create Metal bindless argument buffer.");
-			}
+			encoder.SetArgumentBuffer(buffer, 0);
+			return false;
 		}
 
+		var previousBuffer = buffer;
+		var capacity = GetArgumentBufferCapacity(requiredSize);
+		var replacement = _device.NewBuffer(capacity, MTLResourceOptions.ResourceStorageModeShared);
+		if (replacement.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bindless argument buffer.");
+		}
+
+		buffer = replacement;
 		encoder.SetArgumentBuffer(buffer, 0);
+		if (previousBuffer.NativePtr != IntPtr.Zero)
+		{
+			_retireArgumentBuffer(previousBuffer);
+		}
+		return true;
+	}
+
+	internal static ulong GetArgumentBufferCapacity(ulong requiredSize)
+	{
+		var capacity = MinimumArgumentBufferCapacityBytes;
+		while (capacity < requiredSize)
+		{
+			capacity = checked(capacity * 2UL);
+		}
+		return capacity;
 	}
 }

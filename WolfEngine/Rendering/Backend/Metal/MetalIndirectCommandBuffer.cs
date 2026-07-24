@@ -17,14 +17,16 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	private readonly struct BufferRefEntry
 	{
-		public BufferRefEntry(MTLBuffer buffer, int refCount, int index)
+		public BufferRefEntry(MTLBuffer buffer, MetalBuffer? owner, int refCount, int index)
 		{
 			Buffer = buffer;
+			Owner = owner;
 			RefCount = refCount;
 			Index = index;
 		}
 
 		public MTLBuffer Buffer { get; }
+		public MetalBuffer? Owner { get; }
 		public int RefCount { get; }
 		public int Index { get; }
 	}
@@ -39,6 +41,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MTLBuffer materialGenerationBuffer,
 			MTLBuffer drawArgsBuffer,
 			MTLBuffer[] passBuffers,
+			MetalBuffer vertexBufferOwner,
+			MetalBuffer indexBufferOwner,
+			MetalBuffer instanceBufferOwner,
+			MetalBuffer materialBufferOwner,
+			MetalBuffer materialGenerationBufferOwner,
+			MetalBuffer drawArgsBufferOwner,
+			MetalBuffer[] passBufferOwners,
 			MTLBuffer bindlessCountBuffer,
 			MTLBuffer bindlessTextureBuffer,
 			MTLBuffer bindlessRwTextureBuffer,
@@ -51,6 +60,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			MaterialGenerationBuffer = materialGenerationBuffer;
 			DrawArgsBuffer = drawArgsBuffer;
 			PassBuffers = passBuffers;
+			VertexBufferOwner = vertexBufferOwner;
+			IndexBufferOwner = indexBufferOwner;
+			InstanceBufferOwner = instanceBufferOwner;
+			MaterialBufferOwner = materialBufferOwner;
+			MaterialGenerationBufferOwner = materialGenerationBufferOwner;
+			DrawArgsBufferOwner = drawArgsBufferOwner;
+			PassBufferOwners = passBufferOwners;
 			BindlessCountBuffer = bindlessCountBuffer;
 			BindlessTextureBuffer = bindlessTextureBuffer;
 			BindlessRwTextureBuffer = bindlessRwTextureBuffer;
@@ -64,6 +80,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MTLBuffer MaterialGenerationBuffer { get; }
 		public MTLBuffer DrawArgsBuffer { get; }
 		public MTLBuffer[] PassBuffers { get; }
+		public MetalBuffer VertexBufferOwner { get; }
+		public MetalBuffer IndexBufferOwner { get; }
+		public MetalBuffer InstanceBufferOwner { get; }
+		public MetalBuffer MaterialBufferOwner { get; }
+		public MetalBuffer MaterialGenerationBufferOwner { get; }
+		public MetalBuffer DrawArgsBufferOwner { get; }
+		public MetalBuffer[] PassBufferOwners { get; }
 		public MTLBuffer BindlessCountBuffer { get; }
 		public MTLBuffer BindlessTextureBuffer { get; }
 		public MTLBuffer BindlessRwTextureBuffer { get; }
@@ -133,11 +156,14 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		command.SetFragmentBuffer(materialGenerationBuffer.Buffer, 0, perDrawBindings.MaterialGenerationRegisterIndex);
 		command.SetFragmentBuffer(drawArgsBuffer.Buffer, drawArgsOffsetBytes, perDrawBindings.DrawArgsRegisterIndex);
 		var passBuffers = new MTLBuffer[passBindings.Bindings.Length];
+		var passBufferOwners = new MetalBuffer[passBindings.Bindings.Length];
 		for (var i = 0; i < passBindings.Bindings.Length; i++)
 		{
 			var binding = passBindings.Bindings[i];
-			var buffer = ((MetalBuffer)binding.Resource).Buffer;
+			var owner = (MetalBuffer)binding.Resource;
+			var buffer = owner.Buffer;
 			passBuffers[i] = buffer;
+			passBufferOwners[i] = owner;
 			// Shared-draw material pipelines reserve vertex buffer slot zero for
 			// the mesh stream.  A fragment-scoped b0 (for example transparent
 			// environment parameters) must never replace it in an ICB command.
@@ -192,6 +218,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			materialGenerationBuffer.Buffer,
 			drawArgsBuffer.Buffer,
 			passBuffers,
+			vertexBuffer,
+			indexBuffer,
+			instanceBuffer,
+			materialBuffer,
+			materialGenerationBuffer,
+			drawArgsBuffer,
+			passBufferOwners,
 			bindlessCountBuffer,
 			bindlessTextureBuffer,
 			bindlessRwTextureBuffer,
@@ -200,6 +233,31 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	}
 
 	internal IReadOnlyList<MTLBuffer> GetReferencedBuffers() => _referencedBuffers;
+
+	internal bool UsesCurrentBindlessBuffers(MetalDescriptorTable descriptorTable, uint maxCommandCount)
+	{
+		var currentCountBuffer = descriptorTable.CountBuffer.NativePtr;
+		var currentTextureBuffer = descriptorTable.TextureArgumentBuffer.NativePtr;
+		var currentRwTextureBuffer = descriptorTable.RWTextureArgumentBuffer.NativePtr;
+		var currentSamplerBuffer = descriptorTable.SamplerArgumentBuffer.NativePtr;
+		foreach (var (commandIndex, references) in _commandReferences)
+		{
+			if (commandIndex >= maxCommandCount)
+			{
+				continue;
+			}
+
+			if (references.BindlessCountBuffer.NativePtr != currentCountBuffer ||
+			    references.BindlessTextureBuffer.NativePtr != currentTextureBuffer ||
+			    references.BindlessRwTextureBuffer.NativePtr != currentRwTextureBuffer ||
+			    references.BindlessSamplerBuffer.NativePtr != currentSamplerBuffer)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
 
 	public void CollectReferencedBuffers(
 		uint maxCommandCount,
@@ -239,6 +297,10 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	public void Dispose()
 	{
+		foreach (var entry in _bufferRefsByPointer.Values)
+		{
+			entry.Owner?.ReleaseFromIndirectUse();
+		}
 		_bufferRefsByPointer.Clear();
 		_referencedBuffers.Clear();
 		_commandReferences.Clear();
@@ -271,14 +333,14 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	private void AddBufferRefs(in CommandBufferReferences refs)
 	{
-		AddBufferRef(refs.VertexBuffer);
-		AddBufferRef(refs.IndexBuffer);
-		AddBufferRef(refs.InstanceBuffer);
-		AddBufferRef(refs.MaterialBuffer);
-		AddBufferRef(refs.MaterialGenerationBuffer);
-		AddBufferRef(refs.DrawArgsBuffer);
-		foreach (var passBuffer in refs.PassBuffers)
-			AddBufferRef(passBuffer);
+		AddBufferRef(refs.VertexBuffer, refs.VertexBufferOwner);
+		AddBufferRef(refs.IndexBuffer, refs.IndexBufferOwner);
+		AddBufferRef(refs.InstanceBuffer, refs.InstanceBufferOwner);
+		AddBufferRef(refs.MaterialBuffer, refs.MaterialBufferOwner);
+		AddBufferRef(refs.MaterialGenerationBuffer, refs.MaterialGenerationBufferOwner);
+		AddBufferRef(refs.DrawArgsBuffer, refs.DrawArgsBufferOwner);
+		for (var i = 0; i < refs.PassBuffers.Length; i++)
+			AddBufferRef(refs.PassBuffers[i], refs.PassBufferOwners[i]);
 		AddBufferRef(refs.BindlessCountBuffer);
 		AddBufferRef(refs.BindlessTextureBuffer);
 		AddBufferRef(refs.BindlessRwTextureBuffer);
@@ -301,7 +363,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		RemoveBufferRef(refs.BindlessSamplerBuffer);
 	}
 
-	private void AddBufferRef(MTLBuffer buffer)
+	private void AddBufferRef(MTLBuffer buffer, MetalBuffer? owner = null)
 	{
 		if (buffer.NativePtr == IntPtr.Zero)
 		{
@@ -311,13 +373,25 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		var key = buffer.NativePtr;
 		if (_bufferRefsByPointer.TryGetValue(key, out var entry))
 		{
-			_bufferRefsByPointer[key] = new BufferRefEntry(entry.Buffer, entry.RefCount + 1, entry.Index);
+			if (entry.Owner is not null && owner is not null && ReferenceEquals(entry.Owner, owner) == false)
+			{
+				throw new InvalidOperationException("A Metal buffer pointer is associated with multiple managed owners.");
+			}
+
+			if (entry.Owner is null && owner is not null)
+			{
+				owner.RetainForIndirectUse();
+			}
+
+			_bufferRefsByPointer[key] =
+				new BufferRefEntry(entry.Buffer, entry.Owner ?? owner, entry.RefCount + 1, entry.Index);
 			return;
 		}
 
+		owner?.RetainForIndirectUse();
 		var index = _referencedBuffers.Count;
 		_referencedBuffers.Add(buffer);
-		_bufferRefsByPointer[key] = new BufferRefEntry(buffer, 1, index);
+		_bufferRefsByPointer[key] = new BufferRefEntry(buffer, owner, 1, index);
 	}
 
 	private void RemoveBufferRef(MTLBuffer buffer)
@@ -335,7 +409,8 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 		if (entry.RefCount > 1)
 		{
-			_bufferRefsByPointer[key] = new BufferRefEntry(entry.Buffer, entry.RefCount - 1, entry.Index);
+			_bufferRefsByPointer[key] =
+				new BufferRefEntry(entry.Buffer, entry.Owner, entry.RefCount - 1, entry.Index);
 			return;
 		}
 
@@ -348,11 +423,13 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			var movedKey = movedBuffer.NativePtr;
 			if (_bufferRefsByPointer.TryGetValue(movedKey, out var movedEntry))
 			{
-				_bufferRefsByPointer[movedKey] = new BufferRefEntry(movedEntry.Buffer, movedEntry.RefCount, removeIndex);
+				_bufferRefsByPointer[movedKey] =
+					new BufferRefEntry(movedEntry.Buffer, movedEntry.Owner, movedEntry.RefCount, removeIndex);
 			}
 		}
 
 		_referencedBuffers.RemoveAt(lastIndex);
 		_bufferRefsByPointer.Remove(key);
+		entry.Owner?.ReleaseFromIndirectUse();
 	}
 }

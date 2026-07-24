@@ -7,6 +7,13 @@ namespace WolfEngine.Rendering.Backend.Metal;
 
 internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
+	// Metal indirect commands cache native buffer pointers without retaining them.
+	// Keep disposal pending until every ICB that captured this buffer has been reset.
+	private readonly object _lifetimeSync = new();
+	private int _indirectReferenceCount;
+	private bool _disposeRequested;
+	private bool _nativeDisposed;
+
 	public MetalBuffer(string name, BufferDescriptor descriptor, MTLBuffer buffer)
 	{
 		Name = name;
@@ -20,8 +27,31 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 
 	public MTLBuffer Buffer { get; }
 
+	internal bool IsDisposed
+	{
+		get
+		{
+			lock (_lifetimeSync)
+			{
+				return _disposeRequested;
+			}
+		}
+	}
+
+	internal int IndirectReferenceCount
+	{
+		get
+		{
+			lock (_lifetimeSync)
+			{
+				return _indirectReferenceCount;
+			}
+		}
+	}
+
 	public unsafe void Write<T>(ReadOnlySpan<T> source, ulong elementOffset = 0) where T : unmanaged
 	{
+		ThrowIfDisposed();
 		if (source.IsEmpty)
 		{
 			return;
@@ -43,6 +73,7 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 
 	public unsafe void Read(Span<byte> destination, ulong sourceOffset = 0)
 	{
+		ThrowIfDisposed();
 		if (destination.IsEmpty)
 		{
 			return;
@@ -63,9 +94,70 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 
 	public void Dispose()
 	{
-		if (Buffer.NativePtr != IntPtr.Zero)
+		var releaseNativeBuffer = false;
+		lock (_lifetimeSync)
+		{
+			if (_disposeRequested)
+			{
+				return;
+			}
+
+			_disposeRequested = true;
+			if (_indirectReferenceCount == 0 && _nativeDisposed == false)
+			{
+				_nativeDisposed = true;
+				releaseNativeBuffer = true;
+			}
+		}
+
+		if (releaseNativeBuffer && Buffer.NativePtr != IntPtr.Zero)
 		{
 			Buffer.Dispose();
+		}
+	}
+
+	internal void RetainForIndirectUse()
+	{
+		lock (_lifetimeSync)
+		{
+			if (_disposeRequested)
+			{
+				throw new ObjectDisposedException(Name);
+			}
+
+			_indirectReferenceCount = checked(_indirectReferenceCount + 1);
+		}
+	}
+
+	internal void ReleaseFromIndirectUse()
+	{
+		var releaseNativeBuffer = false;
+		lock (_lifetimeSync)
+		{
+			if (_indirectReferenceCount <= 0)
+			{
+				throw new InvalidOperationException($"Metal buffer '{Name}' has no indirect reference to release.");
+			}
+
+			_indirectReferenceCount--;
+			if (_indirectReferenceCount == 0 && _disposeRequested && _nativeDisposed == false)
+			{
+				_nativeDisposed = true;
+				releaseNativeBuffer = true;
+			}
+		}
+
+		if (releaseNativeBuffer && Buffer.NativePtr != IntPtr.Zero)
+		{
+			Buffer.Dispose();
+		}
+	}
+
+	private void ThrowIfDisposed()
+	{
+		if (IsDisposed)
+		{
+			throw new ObjectDisposedException(Name);
 		}
 	}
 }

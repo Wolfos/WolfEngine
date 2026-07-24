@@ -42,23 +42,11 @@ cbuffer BindlessCounts : register(b27)
     uint g_BindlessPadding;
 };
 
-uint SafeDescriptorIndex(uint handle)
+uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
 {
     uint kind = GetDescriptorKind(handle);
     uint index = GetDescriptorIndex(handle);
-    if (kind > DESCRIPTOR_KIND_SAMPLER)
-    {
-        return WOLF_INVALID_DESCRIPTOR_INDEX;
-    }
-    if (kind == DESCRIPTOR_KIND_SRV && index >= g_BindlessSrvCount)
-    {
-        return WOLF_INVALID_DESCRIPTOR_INDEX;
-    }
-    if (kind == DESCRIPTOR_KIND_UAV && index >= g_BindlessUavCount)
-    {
-        return WOLF_INVALID_DESCRIPTOR_INDEX;
-    }
-    if (kind == DESCRIPTOR_KIND_SAMPLER && index >= g_BindlessSamplerCount)
+    if (kind != expectedKind || index >= descriptorCount)
     {
         return WOLF_INVALID_DESCRIPTOR_INDEX;
     }
@@ -101,7 +89,7 @@ struct DescriptorHeapRWTextures
 
 Texture2D<float4> GetTexture(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_TextureHeap.g_Textures[0];
@@ -112,7 +100,7 @@ Texture2D<float4> GetTexture(uint handle)
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> GetRWTexture(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_UAV, g_BindlessUavCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_RWTextureHeap.g_RWTextures[0];
@@ -123,7 +111,7 @@ RWTexture2D<float4> GetRWTexture(uint handle)
 
 SamplerState GetSampler(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SAMPLER, g_BindlessSamplerCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_SamplerHeap.g_Samplers[0];
@@ -147,7 +135,7 @@ RWTexture2D<float4> g_RWTextures[] : register(u0, space1);
 
 Texture2D<float4> GetTexture(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_Textures[0];
@@ -158,7 +146,7 @@ Texture2D<float4> GetTexture(uint handle)
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> GetRWTexture(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_UAV, g_BindlessUavCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_RWTextures[0];
@@ -169,7 +157,7 @@ RWTexture2D<float4> GetRWTexture(uint handle)
 
 SamplerState GetSampler(uint handle)
 {
-    uint index = SafeDescriptorIndex(handle);
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SAMPLER, g_BindlessSamplerCount);
     if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
     {
         return g_Samplers[0];
