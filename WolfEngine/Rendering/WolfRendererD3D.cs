@@ -124,6 +124,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private readonly List<IKeyboard> _keyboards = new();
 	private readonly List<IMouse> _mice = new();
 	private Vector2 _lastMousePosition;
+	private bool _hasMouseInput;
 	private readonly IImGuiInputSink _imguiInputSink;
 	private readonly bool[] _imguiMouseButtons = new bool[5];
 	private Vector2 _imguiMousePosition;
@@ -344,6 +345,13 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void OnWindowUpdate(double deltaTime)
 	{
+		if (_hasMouseInput == false)
+		{
+			_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, Vector2.Zero);
+		}
+
+		_hasMouseInput = false;
+
 		PollGamepads();
 
 		_updateCallback((float) deltaTime);
@@ -471,6 +479,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		
 		var delta = current - _lastMousePosition;
 		_inputSystem.SetAxis2D(InputActionBinding.MouseDelta, delta);
+		_hasMouseInput = true;
 
 		_lastMousePosition = current;
 	}
