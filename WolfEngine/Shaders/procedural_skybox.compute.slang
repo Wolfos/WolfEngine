@@ -317,13 +317,40 @@ static float2 DirectionToCubeFaceUv(float3 dir, out float faceIndex)
     return uv * 0.5f + 0.5f;
 }
 
+static float3 CubeFaceUvToDirection(float2 uv, float faceIndex)
+{
+    float2 facePosition = uv * 2.0f - 1.0f;
+
+    if (faceIndex < 0.5f)
+    {
+        return normalize(float3(1.0f, facePosition.y, -facePosition.x));
+    }
+    if (faceIndex < 1.5f)
+    {
+        return normalize(float3(-1.0f, facePosition.y, facePosition.x));
+    }
+    if (faceIndex < 2.5f)
+    {
+        return normalize(float3(facePosition.x, 1.0f, -facePosition.y));
+    }
+    if (faceIndex < 3.5f)
+    {
+        return normalize(float3(facePosition.x, -1.0f, facePosition.y));
+    }
+    if (faceIndex < 4.5f)
+    {
+        return normalize(float3(facePosition.x, facePosition.y, 1.0f));
+    }
+
+    return normalize(float3(-facePosition.x, facePosition.y, -1.0f));
+}
+
 static float3 SampleStarLayer(float3 dir, float cellCount, float threshold, float minSize, float maxSize, float intensityScale)
 {
     float faceIndex;
     float2 faceUv = DirectionToCubeFaceUv(dir, faceIndex);
     float2 gridUv = faceUv * cellCount;
     float2 cell = floor(gridUv);
-    float2 local = frac(gridUv) - 0.5f;
     float3 seed = float3(cell, faceIndex);
 
     float starChance = Hash13(seed);
@@ -333,15 +360,18 @@ static float3 SampleStarLayer(float3 dir, float cellCount, float threshold, floa
     }
 
     float2 centerOffset = (Hash23(seed + 19.19f) - 0.5f) * 0.7f;
-    float2 delta = local - centerOffset;
+    float2 centerUv = (cell + 0.5f + centerOffset) / cellCount;
+    float3 centerDir = CubeFaceUvToDirection(centerUv, faceIndex);
+
+    // Measure the footprint on the unit sphere. A circle in cube-face UV space
+    // becomes increasingly elliptical toward face edges and produces stretched
+    // stars after the environment map is projected back onto the sky.
+    float sphericalDistance = length(dir - centerDir) * (cellCount * 0.5f);
 
     float brightnessSeed = Hash13(seed + 3.71f);
     float size = lerp(maxSize, minSize, pow(brightnessSeed, 0.35f));
-    float core = 1.0f - smoothstep(size, size + max(size * 0.75f, 0.01f), length(delta));
-
-    float sparkleX = 1.0f - smoothstep(size * 0.3f, size * 1.6f, abs(delta.x));
-    float sparkleY = 1.0f - smoothstep(size * 0.3f, size * 1.6f, abs(delta.y));
-    float sparkle = max(sparkleX, sparkleY) * 0.15f;
+    float core = 1.0f - smoothstep(size, size + max(size * 0.75f, 0.01f), sphericalDistance);
+    float sparkle = (1.0f - smoothstep(size * 0.3f, size * 1.6f, sphericalDistance)) * 0.15f;
 
     float starIntensity = (core + sparkle) * intensityScale * lerp(0.6f, 1.8f, pow(brightnessSeed, 6.0f));
     float temperature = Hash13(seed + 11.7f);
