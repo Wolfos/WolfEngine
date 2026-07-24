@@ -7,10 +7,15 @@ namespace WolfEngine.Rendering;
 
 internal sealed class EditorSceneRenderTargetManager : IDisposable
 {
+	private readonly Queue<UnsealedTextureRelease> _unsealedReleases = new();
 	private readonly Queue<PendingTextureRelease> _pendingReleases = new();
 	private IGfxTexture? _sceneColor;
 	private Int2 _size = Int2.Zero;
 	private ResourceState _sceneColorState = ResourceState.Common;
+
+	private readonly record struct UnsealedTextureRelease(
+		IGfxTexture Texture,
+		ResourceState LastKnownState);
 
 	private readonly record struct PendingTextureRelease(
 		IGfxTexture Texture,
@@ -19,6 +24,7 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 
 	public void Advance(IGfxDevice device)
 	{
+		SealReleases(device);
 		RetirePending(device);
 	}
 
@@ -95,13 +101,31 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 
 	private void EnqueueRelease(IGfxDevice? device, IGfxTexture texture, ResourceState lastKnownState)
 	{
-		var retireSubmissionId = 0UL;
-		if (device is IGpuSubmissionTimeline submissionTimeline)
+		if (device is null)
 		{
-			retireSubmissionId = submissionTimeline.LastSubmittedId;
+			_pendingReleases.Enqueue(new PendingTextureRelease(texture, 0UL, lastKnownState));
+			return;
 		}
 
-		_pendingReleases.Enqueue(new PendingTextureRelease(texture, retireSubmissionId, lastKnownState));
+		// The UI frame being consumed during this render can still reference the old scene texture.
+		// Defer selecting its retirement fence until the next frame, after that UI work was submitted.
+		_unsealedReleases.Enqueue(new UnsealedTextureRelease(texture, lastKnownState));
+	}
+
+	private void SealReleases(IGfxDevice device)
+	{
+		var retireSubmissionId = device is IGpuSubmissionTimeline submissionTimeline
+			? submissionTimeline.LastSubmittedId
+			: 0UL;
+
+		while (_unsealedReleases.Count > 0)
+		{
+			var release = _unsealedReleases.Dequeue();
+			_pendingReleases.Enqueue(new PendingTextureRelease(
+				release.Texture,
+				retireSubmissionId,
+				release.LastKnownState));
+		}
 	}
 
 	private void RetirePending(IGfxDevice? device)
@@ -134,6 +158,20 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 			}
 
 			_pendingReleases.Dequeue();
+		}
+
+		if (device is not null)
+		{
+			return;
+		}
+
+		while (_unsealedReleases.Count > 0)
+		{
+			var release = _unsealedReleases.Dequeue();
+			if (release.Texture is IDisposable disposableTexture)
+			{
+				disposableTexture.Dispose();
+			}
 		}
 	}
 }

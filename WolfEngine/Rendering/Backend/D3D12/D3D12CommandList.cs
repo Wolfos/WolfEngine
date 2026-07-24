@@ -114,6 +114,12 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		_gpuProfilingFailed = false;
 	}
 
+	internal void SetDebugName(string name)
+	{
+		// Debug names are diagnostic metadata and must never turn a renderable frame into a failure.
+		_ = CommandList.SetName(name);
+	}
+
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
 	{
 		var nativeViewport = new Silk.NET.Direct3D12.Viewport

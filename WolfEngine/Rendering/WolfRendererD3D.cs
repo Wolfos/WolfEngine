@@ -377,6 +377,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		catch
 		{
 			DumpDxgiDebugMessages("OnWindowRender failure");
+			DumpDredData("OnWindowRender failure");
 			throw;
 		}
 	}
@@ -896,6 +897,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 #pragma warning restore CS0618
 		_d3d12 = D3D12.GetApi();
 		EnableDebugLayerIfRequested();
+		ConfigureDredIfRequested();
 
 		_factory = _dxgi.CreateDXGIFactory<IDXGIFactory2>();
 		CreateDeviceAndQueue();
@@ -984,6 +986,39 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		catch
 		{
 			// Swallow exceptions; debug layer enable is best-effort.
+		}
+	}
+
+	private void ConfigureDredIfRequested()
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false || OperatingSystem.IsWindows() == false)
+		{
+			return;
+		}
+
+		ComPtr<ID3D12DeviceRemovedExtendedDataSettings1> settings = default;
+		try
+		{
+			var hr = _d3d12.GetDebugInterface(out settings);
+			if (hr < 0 || settings.Handle is null)
+			{
+				return;
+			}
+
+			settings.SetAutoBreadcrumbsEnablement(DredEnablement.ForcedOn);
+			settings.SetPageFaultEnablement(DredEnablement.ForcedOn);
+			settings.SetBreadcrumbContextEnablement(DredEnablement.ForcedOn);
+		}
+		catch
+		{
+			// Best-effort diagnostics only.
+		}
+		finally
+		{
+			if (settings.Handle is not null)
+			{
+				settings.Dispose();
+			}
 		}
 	}
 
@@ -1580,6 +1615,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		var presentCommandList = _gfxDevice.BeginGraphics() as D3D12CommandList
 		                         ?? throw new InvalidOperationException("Failed to create present command list.");
+		presentCommandList.SetDebugName("Present");
 		var nativeCommandList = (ID3D12GraphicsCommandList*) presentCommandList.CommandList.Handle;
 
 		ResourceBarrier finalColorToCopySource = new() {Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None};
@@ -1714,6 +1750,99 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			{
 				infoQueue.Dispose();
 			}
+		}
+	}
+
+	private void DumpDredData(string context)
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false ||
+		    _device.Handle is null ||
+		    _device.GetDeviceRemovedReason() >= 0)
+		{
+			return;
+		}
+
+		ComPtr<ID3D12DeviceRemovedExtendedData1> dred = default;
+		try
+		{
+			dred = _device.QueryInterface<ID3D12DeviceRemovedExtendedData1>();
+			if (dred.Handle is null)
+			{
+				return;
+			}
+
+			Console.WriteLine($"DRED data ({context}):");
+			DredAutoBreadcrumbsOutput1 breadcrumbs = default;
+			if (dred.GetAutoBreadcrumbsOutput1(&breadcrumbs) >= 0)
+			{
+				var node = breadcrumbs.PHeadAutoBreadcrumbNode;
+				for (var nodeIndex = 0; node is not null && nodeIndex < 256; nodeIndex++, node = node->PNext)
+				{
+					var commandListName = ReadDredName(node->PCommandListDebugNameW, node->PCommandListDebugNameA);
+					var commandQueueName = ReadDredName(node->PCommandQueueDebugNameW, node->PCommandQueueDebugNameA);
+					var reportedCompletedBreadcrumbs = node->PLastBreadcrumbValue is null
+						? 0U
+						: *node->PLastBreadcrumbValue;
+					var completedBreadcrumbs = Math.Min(reportedCompletedBreadcrumbs, node->BreadcrumbCount);
+					Console.WriteLine(
+						$"[DRED breadcrumb] list='{commandListName}' queue='{commandQueueName}' " +
+						$"completed={reportedCompletedBreadcrumbs}/{node->BreadcrumbCount}");
+
+					if (node->PCommandHistory is null || node->BreadcrumbCount == 0)
+					{
+						continue;
+					}
+
+					var first = completedBreadcrumbs > 4U ? completedBreadcrumbs - 4U : 0U;
+					var last = Math.Min(node->BreadcrumbCount, completedBreadcrumbs + 5U);
+					for (var operationIndex = first; operationIndex < last; operationIndex++)
+					{
+						var marker = operationIndex == completedBreadcrumbs ? "next" : "near";
+						Console.WriteLine(
+							$"  [{marker} {operationIndex}] {node->PCommandHistory[operationIndex]}");
+					}
+				}
+			}
+
+			DredPageFaultOutput1 pageFault = default;
+			if (dred.GetPageFaultAllocationOutput1(&pageFault) >= 0 && pageFault.PageFaultVA != 0)
+			{
+				Console.WriteLine($"[DRED page fault] GPU VA=0x{pageFault.PageFaultVA:X16}");
+				DumpDredAllocations("existing", pageFault.PHeadExistingAllocationNode);
+				DumpDredAllocations("recently freed", pageFault.PHeadRecentFreedAllocationNode);
+			}
+		}
+		catch (Exception exception)
+		{
+			Console.WriteLine($"DRED collection failed: {exception.Message}");
+		}
+		finally
+		{
+			if (dred.Handle is not null)
+			{
+				dred.Dispose();
+			}
+		}
+	}
+
+	private static string ReadDredName(char* unicodeName, byte* ansiName)
+	{
+		if (unicodeName is not null)
+		{
+			return Marshal.PtrToStringUni((nint)unicodeName) ?? string.Empty;
+		}
+
+		return ansiName is not null
+			? Marshal.PtrToStringAnsi((nint)ansiName) ?? string.Empty
+			: string.Empty;
+	}
+
+	private static void DumpDredAllocations(string category, DredAllocationNode1* node)
+	{
+		for (var index = 0; node is not null && index < 64; index++, node = node->PNext)
+		{
+			var name = ReadDredName(node->ObjectNameW, node->ObjectNameA);
+			Console.WriteLine($"  [DRED {category}] type={node->AllocationType} name='{name}'");
 		}
 	}
 

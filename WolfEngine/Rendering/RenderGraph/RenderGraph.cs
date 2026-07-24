@@ -8,6 +8,7 @@ using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Utility;
 using WolfEngine.Rendering.Shaders;
+using WolfEngine.Rendering.Backend.D3D12;
 
 namespace WolfEngine.Rendering;
 
@@ -234,6 +235,10 @@ public sealed class RenderGraph
 				var commandList = pass.Kind == PassKind.Graphics
 					? device.BeginGraphics()
 					: device.BeginCompute();
+				if (commandList is D3D12CommandList d3d12CommandList)
+				{
+					d3d12CommandList.SetDebugName(pass.Name);
+				}
 				if (gpuFrameCapture is not null && profilerBackend is IGpuProfilerCaptureBackend captureBackend)
 				{
 					captureBackend.Attach(commandList, gpuFrameCapture.AddPass(pass.Name));
