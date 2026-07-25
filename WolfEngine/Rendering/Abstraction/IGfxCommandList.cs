@@ -23,6 +23,13 @@ public interface IGfxCommandList
 {
 	GraphicsBackendKind BackendKind { get; }
 
+	/// <summary>
+	/// Begins a named command scope. Backends may use this boundary to finish encoding work from the previous scope.
+	/// </summary>
+	void BeginEvent(string name) { }
+
+	void EndEvent() { }
+
 	void BeginPass(in PassTargets targets, in Viewport viewport);
 
 	void EndPass();

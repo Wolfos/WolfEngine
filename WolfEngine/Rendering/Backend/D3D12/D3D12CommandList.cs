@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Text;
 using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -31,7 +32,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	private bool _isClosed;
 	private bool _bindlessHeapsDirty = true;
 	private D3D12GpuProfilerBackend? _gpuProfiler;
-	private GpuProfilePassCapture? _gpuPassCapture;
+	private readonly List<GpuPassCaptureRange> _gpuPassCaptures = new();
 	private readonly List<D3D12GpuProfilerBackend.TimestampBlock> _gpuTimestampBlocks = new();
 	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
 	private D3D12GpuProfilerBackend.TimestampBlock? _activeGpuBlock;
@@ -69,6 +70,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		CloseGpuScope();
+		CloseGpuPassCapture();
 		for (var i = 0; i < _gpuTimestampBlocks.Count; i++)
 		{
 			var block = _gpuTimestampBlocks[i];
@@ -106,7 +108,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		_currentConstantUploadPage = null;
 		_currentConstantUploadOffset = 0;
 		_gpuProfiler = null;
-		_gpuPassCapture = null;
+		_gpuPassCaptures.Clear();
 		_gpuTimestampScopes.Clear();
 		_gpuTimestampBlocks.Clear();
 		_activeGpuBlock = null;
@@ -118,6 +120,28 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	{
 		// Debug names are diagnostic metadata and must never turn a renderable frame into a failure.
 		_ = CommandList.SetName(name);
+	}
+
+	public void BeginEvent(string name)
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer == false)
+		{
+			return;
+		}
+
+		var nameBytes = Encoding.UTF8.GetBytes(name);
+		fixed (byte* namePointer = nameBytes)
+		{
+			CommandList.BeginEvent(0, namePointer, (uint)nameBytes.Length);
+		}
+	}
+
+	public void EndEvent()
+	{
+		if (GraphicsConfig.EnableD3DDebugLayer)
+		{
+			CommandList.EndEvent();
+		}
 	}
 
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)
@@ -223,22 +247,29 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	internal void AttachGpuProfiler(D3D12GpuProfilerBackend profiler, GpuProfilePassCapture passCapture)
 	{
+		CloseGpuScope();
+		CloseGpuPassCapture();
+		if (_gpuProfiler is not null && ReferenceEquals(_gpuProfiler, profiler) == false)
+		{
+			throw new InvalidOperationException("A command list cannot use multiple GPU profiler backends.");
+		}
 		_gpuProfiler = profiler;
-		_gpuPassCapture = passCapture;
+		_gpuPassCaptures.Add(new(passCapture, _gpuTimestampScopes.Count, -1));
 	}
 
 	internal void CompleteGpuProfiling()
 	{
-		if (_gpuProfiler is null || _gpuPassCapture is null)
+		if (_gpuProfiler is null || _gpuPassCaptures.Count == 0)
 		{
 			return;
 		}
 
+		CloseGpuPassCapture();
 		try
 		{
 			if (_gpuProfilingFailed)
 			{
-				_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+				CompleteAllGpuPassCapturesEmpty();
 			}
 			else
 			{
@@ -247,29 +278,59 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 				{
 					blockResults[_gpuTimestampBlocks[i]] = _gpuTimestampBlocks[i].ReadResults();
 				}
-				var scopes = new List<GpuProfileScope>(_gpuTimestampScopes.Count);
-				for (var i = 0; i < _gpuTimestampScopes.Count; i++)
+				for (var captureIndex = 0; captureIndex < _gpuPassCaptures.Count; captureIndex++)
 				{
-					var scope = _gpuTimestampScopes[i];
-					var values = blockResults[scope.Block];
-					scopes.Add(new GpuProfileScope(
-						scope.Name,
-						_gpuProfiler.TicksToMilliseconds(values[scope.StartIndex], values[scope.EndIndex])));
+					var range = _gpuPassCaptures[captureIndex];
+					var scopeCount = range.ScopeEndExclusive - range.ScopeStart;
+					if (scopeCount == 0)
+					{
+						range.Capture.Complete(Array.Empty<GpuProfileScope>());
+						continue;
+					}
+
+					var scopes = new List<GpuProfileScope>(scopeCount);
+					for (var scopeIndex = range.ScopeStart; scopeIndex < range.ScopeEndExclusive; scopeIndex++)
+					{
+						var scope = _gpuTimestampScopes[scopeIndex];
+						var values = blockResults[scope.Block];
+						scopes.Add(new GpuProfileScope(
+							scope.Name,
+							_gpuProfiler.TicksToMilliseconds(values[scope.StartIndex], values[scope.EndIndex])));
+					}
+					range.Capture.Complete(scopes);
 				}
-				_gpuPassCapture.Complete(scopes);
 			}
 		}
 		catch (Exception exception)
 		{
 			_gpuProfiler.ReportFailure(exception);
-			_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+			CompleteAllGpuPassCapturesEmpty();
 		}
 		finally
 		{
 			_gpuProfiler.ReturnBlocks(_gpuTimestampBlocks);
 			_gpuTimestampScopes.Clear();
-			_gpuPassCapture = null;
+			_gpuPassCaptures.Clear();
 			_gpuProfiler = null;
+		}
+	}
+
+	private void CloseGpuPassCapture()
+	{
+		if (_gpuPassCaptures.Count == 0 || _gpuPassCaptures[^1].ScopeEndExclusive >= 0)
+		{
+			return;
+		}
+
+		var range = _gpuPassCaptures[^1];
+		_gpuPassCaptures[^1] = range with { ScopeEndExclusive = _gpuTimestampScopes.Count };
+	}
+
+	private void CompleteAllGpuPassCapturesEmpty()
+	{
+		for (var i = 0; i < _gpuPassCaptures.Count; i++)
+		{
+			_gpuPassCaptures[i].Capture.Complete(Array.Empty<GpuProfileScope>());
 		}
 	}
 
@@ -329,6 +390,11 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		D3D12GpuProfilerBackend.TimestampBlock Block,
 		uint StartIndex,
 		uint EndIndex);
+
+	private readonly record struct GpuPassCaptureRange(
+		GpuProfilePassCapture Capture,
+		int ScopeStart,
+		int ScopeEndExclusive);
 
 	public void SetBindlessTable(IGfxDescriptorTable table)
 	{

@@ -43,7 +43,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private bool _disposed;
 	private bool _committed;
 	private MetalGpuProfilerBackend? _gpuProfiler;
-	private GpuProfilePassCapture? _gpuPassCapture;
+	private readonly List<GpuPassCaptureRange> _gpuPassCaptures = new();
 	private readonly List<MetalGpuProfilerBackend.TimestampBlock> _gpuTimestampBlocks = new();
 	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
 	private bool _gpuProfilingFailed;
@@ -57,6 +57,17 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	}
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
+
+	public void BeginEvent(string name)
+	{
+		ThrowIfDisposed();
+		EndActiveEncoders();
+	}
+
+	public void EndEvent()
+	{
+		ThrowIfDisposed();
+	}
 
 	public void BeginPass(in PassTargets targets, in Viewport viewport)
 	{
@@ -149,49 +160,89 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 	internal void AttachGpuProfiler(MetalGpuProfilerBackend profiler, GpuProfilePassCapture passCapture)
 	{
+		CloseGpuPassCapture();
+		if (_gpuProfiler is not null && ReferenceEquals(_gpuProfiler, profiler) == false)
+		{
+			throw new InvalidOperationException("A command list cannot use multiple GPU profiler backends.");
+		}
+		if (_gpuPassCaptures.Count > 0 && _gpuFrameIndex != passCapture.FrameIndex)
+		{
+			throw new InvalidOperationException("A command list cannot capture passes from multiple frames.");
+		}
 		_gpuProfiler = profiler;
-		_gpuPassCapture = passCapture;
 		_gpuFrameIndex = passCapture.FrameIndex;
+		_gpuPassCaptures.Add(new(passCapture, _gpuTimestampScopes.Count, -1));
 	}
 
 	internal void CompleteGpuProfiling()
 	{
-		if (_gpuProfiler is null || _gpuPassCapture is null)
+		if (_gpuProfiler is null || _gpuPassCaptures.Count == 0)
 		{
 			return;
 		}
 
+		CloseGpuPassCapture();
 		try
 		{
 			if (_gpuProfilingFailed)
 			{
-				_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+				CompleteAllGpuPassCapturesEmpty();
 			}
 			else
 			{
-				var scopes = new List<GpuProfileScope>(_gpuTimestampScopes.Count);
-				for (var i = 0; i < _gpuTimestampScopes.Count; i++)
+				for (var captureIndex = 0; captureIndex < _gpuPassCaptures.Count; captureIndex++)
 				{
-					var scope = _gpuTimestampScopes[i];
-					var values = scope.Block.ReadPair(scope.StartIndex, scope.EndIndex);
-					scopes.Add(new GpuProfileScope(
-						scope.Name,
-						MetalGpuProfilerBackend.TicksToMilliseconds(values.Start, values.End)));
+					var range = _gpuPassCaptures[captureIndex];
+					var scopeCount = range.ScopeEndExclusive - range.ScopeStart;
+					if (scopeCount == 0)
+					{
+						range.Capture.Complete(Array.Empty<GpuProfileScope>());
+						continue;
+					}
+
+					var scopes = new List<GpuProfileScope>(scopeCount);
+					for (var scopeIndex = range.ScopeStart; scopeIndex < range.ScopeEndExclusive; scopeIndex++)
+					{
+						var scope = _gpuTimestampScopes[scopeIndex];
+						var values = scope.Block.ReadPair(scope.StartIndex, scope.EndIndex);
+						scopes.Add(new GpuProfileScope(
+							scope.Name,
+							MetalGpuProfilerBackend.TicksToMilliseconds(values.Start, values.End)));
+					}
+					range.Capture.Complete(scopes);
 				}
-				_gpuPassCapture.Complete(scopes);
 			}
 		}
 		catch (Exception exception)
 		{
 			_gpuProfiler.ReportFailure(exception);
-			_gpuPassCapture.Complete(Array.Empty<GpuProfileScope>());
+			CompleteAllGpuPassCapturesEmpty();
 		}
 		finally
 		{
 			_gpuProfiler.ReleaseBlocks(_gpuTimestampBlocks);
 			_gpuTimestampScopes.Clear();
-			_gpuPassCapture = null;
+			_gpuPassCaptures.Clear();
 			_gpuProfiler = null;
+		}
+	}
+
+	private void CloseGpuPassCapture()
+	{
+		if (_gpuPassCaptures.Count == 0 || _gpuPassCaptures[^1].ScopeEndExclusive >= 0)
+		{
+			return;
+		}
+
+		var range = _gpuPassCaptures[^1];
+		_gpuPassCaptures[^1] = range with { ScopeEndExclusive = _gpuTimestampScopes.Count };
+	}
+
+	private void CompleteAllGpuPassCapturesEmpty()
+	{
+		for (var i = 0; i < _gpuPassCaptures.Count; i++)
+		{
+			_gpuPassCaptures[i].Capture.Complete(Array.Empty<GpuProfileScope>());
 		}
 	}
 
@@ -268,6 +319,11 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		MetalGpuProfilerBackend.TimestampBlock Block,
 		ulong StartIndex,
 		ulong EndIndex);
+
+	private readonly record struct GpuPassCaptureRange(
+		GpuProfilePassCapture Capture,
+		int ScopeStart,
+		int ScopeEndExclusive);
 
 	public void SetPrimitiveTopology(PrimitiveTopology topology)
 	{
@@ -829,6 +885,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			return;
 		}
 		EndActiveEncoders();
+		CloseGpuPassCapture();
 
 		if (_presentDrawable.NativePtr != IntPtr.Zero)
 		{

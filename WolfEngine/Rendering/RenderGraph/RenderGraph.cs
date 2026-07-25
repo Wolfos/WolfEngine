@@ -8,7 +8,6 @@ using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Utility;
 using WolfEngine.Rendering.Shaders;
-using WolfEngine.Rendering.Backend.D3D12;
 
 namespace WolfEngine.Rendering;
 
@@ -216,6 +215,12 @@ public sealed class RenderGraph
 		}
 
 		var gpuFrameCapture = _gpuProfiler.BeginFrame((ulong)_frameIndex);
+		var commandList = _passes.Count == 0
+			? null
+			: _passes[0].Kind == PassKind.Graphics
+				? device.BeginGraphics()
+				: device.BeginCompute();
+		commandList?.SetBindlessTable(device.GlobalTable);
 		foreach (var pass in _passes)
 		{
 			using (FrameProfiler.Instance.Measure($"Pass: {pass.Name}"))
@@ -231,20 +236,16 @@ public sealed class RenderGraph
 					_resourceRegistry.GetResource(pass.Writes[i]);
 				}
 
-				// Create command list for this pass based on its kind
-				var commandList = pass.Kind == PassKind.Graphics
-					? device.BeginGraphics()
-					: device.BeginCompute();
-				if (commandList is D3D12CommandList d3d12CommandList)
+				if (commandList is null)
 				{
-					d3d12CommandList.SetDebugName(pass.Name);
+					throw new InvalidOperationException("The render graph command list was not created.");
 				}
 				if (gpuFrameCapture is not null && profilerBackend is IGpuProfilerCaptureBackend captureBackend)
 				{
 					captureBackend.Attach(commandList, gpuFrameCapture.AddPass(pass.Name));
 				}
 
-				commandList.SetBindlessTable(device.GlobalTable);
+				commandList.BeginEvent(pass.Name);
 
 				// Inject barriers before the pass executes
 				for (var i = 0; i < pass.Barriers.Count; i++)
@@ -261,10 +262,12 @@ public sealed class RenderGraph
 					FrameSnapshot = snapshot
 				};
 				pass.Execute(context);
-
-				// Submit the command list
-				device.Submit(commandList);
+				commandList.EndEvent();
 			}
+		}
+		if (commandList is not null)
+		{
+			device.Submit(commandList);
 		}
 
 		gpuFrameCapture?.Seal();

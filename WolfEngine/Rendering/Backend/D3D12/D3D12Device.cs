@@ -196,7 +196,6 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		lock (_commandListLock)
 		{
 			_inFlightCommandLists.Add(new(nativeCommandList, fenceValue));
-			CleanupCompletedCommandListsLocked();
 		}
 	}
 
