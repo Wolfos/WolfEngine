@@ -62,6 +62,9 @@ public sealed class DeferredLightingPass
 		var ambientOcclusion = resources.AmbientOcclusionFinal.IsValid
 			? context.GetTexture(resources.AmbientOcclusionFinal)
 			: null;
+		var reflections = resources.ReflectionsRadiance.IsValid
+			? context.GetTexture(resources.ReflectionsRadiance)
+			: null;
 		var ddgiIrradianceL0 = resources.DdgiIrradianceL0HistoryWrite.IsValid
 			? context.GetTexture(resources.DdgiIrradianceL0HistoryWrite)
 			: null;
@@ -147,6 +150,7 @@ public sealed class DeferredLightingPass
 			GBufferEmissive = _bindlessRegistry.GetTextureHandle(emissive),
 			GBufferDepth = _bindlessRegistry.GetTextureHandle(depth),
 			AmbientOcclusion = ambientOcclusionHandle,
+			Reflections = _bindlessRegistry.GetTextureHandle(reflections),
 			DdgiIrradianceL0 = _bindlessRegistry.GetTextureHandle(ddgiIrradianceL0),
 			DdgiIrradianceLy = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLy),
 			DdgiIrradianceLz = _bindlessRegistry.GetTextureHandle(ddgiIrradianceLz),
@@ -206,6 +210,7 @@ public sealed class DeferredLightingPass
 			ShadowTexelSizeX = 1.0f / shadowResolution,
 			ShadowTexelSizeY = 1.0f / shadowResolution,
 			AoEnabled = resources.AmbientOcclusionFinal.IsValid,
+			ReflectionsEnabled = reflections is not null,
 			DdgiEnabled = ddgiEnabled,
 			DdgiOrigin = resources.DdgiRuntimeOrigin,
 			DdgiStorageOffset = resources.DdgiStorageOffset,
@@ -249,6 +254,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("gbufferEmissiveHandle", config.GBufferEmissive.Value);
 		bindlessWriter.SetUInt("gbufferDepthHandle", config.GBufferDepth.Value);
 		bindlessWriter.SetUInt("ambientOcclusionHandle", config.AmbientOcclusion.Value);
+		bindlessWriter.SetUInt("reflectionsHandle", config.Reflections.Value);
 		bindlessWriter.SetUInt("ddgiIrradianceL0Handle", config.DdgiIrradianceL0.Value);
 		bindlessWriter.SetUInt("ddgiIrradianceLyHandle", config.DdgiIrradianceLy.Value);
 		bindlessWriter.SetUInt("ddgiIrradianceLzHandle", config.DdgiIrradianceLz.Value);
@@ -342,6 +348,7 @@ public sealed class DeferredLightingPass
 			config.ShadowsEnabled ? (uint)Math.Max(config.ShadowedDirectionalLightIndex, 0) : 0u);
 		lightingWriter.SetUInt("shadowsEnabled", config.ShadowsEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("aoEnabled", config.AoEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("reflectionsEnabled", config.ReflectionsEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);

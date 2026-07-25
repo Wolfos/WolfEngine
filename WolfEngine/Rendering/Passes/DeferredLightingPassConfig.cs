@@ -17,6 +17,7 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle GBufferEmissive { get; init; }
 	public required DescriptorHandle GBufferDepth { get; init; }
 	public required DescriptorHandle AmbientOcclusion { get; init; }
+	public required DescriptorHandle Reflections { get; init; }
 	public required DescriptorHandle DdgiIrradianceL0 { get; init; }
 	public required DescriptorHandle DdgiIrradianceLy { get; init; }
 	public required DescriptorHandle DdgiIrradianceLz { get; init; }
@@ -64,6 +65,7 @@ public struct DeferredLightingPassConfig
 	public required float ShadowTexelSizeX { get; init; }
 	public required float ShadowTexelSizeY { get; init; }
 	public required bool AoEnabled { get; init; }
+	public required bool ReflectionsEnabled { get; init; }
 	public required bool DdgiEnabled { get; init; }
 	public required Vector3 DdgiOrigin { get; init; }
 	public required Int3 DdgiStorageOffset { get; init; }

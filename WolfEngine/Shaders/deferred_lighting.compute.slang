@@ -12,6 +12,7 @@ cbuffer BindlessHandles : register(b0)
     uint gbufferEmissiveHandle;
     uint gbufferDepthHandle;
     uint ambientOcclusionHandle;
+    uint reflectionsHandle;
     uint ddgiIrradianceL0Handle;
     uint ddgiIrradianceLyHandle;
     uint ddgiIrradianceLzHandle;
@@ -50,6 +51,7 @@ cbuffer LightingParams : register(b2)
     uint shadowLightIndex;
     uint shadowsEnabled;
     uint aoEnabled;
+    uint reflectionsEnabled;
     uint ddgiEnabled;
     uint ddgiFinalContributionDebugEnabled;
     uint ddgiProbeDebugEnabled;
@@ -585,6 +587,22 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         skySpecularContribution,
         ddgiSpecularContribution,
         ddgiSpecularBlend);
+    if (reflectionsEnabled != 0u)
+    {
+        // The reflection buffer carries traced incident radiance plus the weight with which it
+        // should replace the probe/environment estimate for this pixel's specular lobe.
+        float4 reflectionSample = GetTexture(reflectionsHandle).Load(int3(dispatchThreadId.xy, 0));
+        float3 reflectionSpecularContribution = EvaluateSpecularImageBasedLightingFromRadiance(
+            surface,
+            viewDir,
+            reflectionSample.rgb,
+            brdfLutHandle,
+            samplerHandle);
+        specularContribution = lerp(
+            specularContribution,
+            reflectionSpecularContribution,
+            saturate(reflectionSample.a));
+    }
     color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + specularContribution;
     if (ddgiFinalContributionDebugEnabled != 0u)
     {

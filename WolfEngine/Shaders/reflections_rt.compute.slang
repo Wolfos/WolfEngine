@@ -1,0 +1,356 @@
+import "common.slang";
+import "constants.slang";
+import "common_bindless.slang";
+import "common_lighting.slang";
+import "draw_data.slang";
+import "normal_decode.slang";
+import "reflections_common.slang";
+
+#define WOLF_MAX_INSTANCE_COUNT 65535
+
+cbuffer BindlessHandles : register(b0)
+{
+    uint depthHandle;
+    uint normalHandle;
+    uint materialHandle;
+    uint velocityHandle;
+    uint environmentHandle;
+    uint irradianceHandle;
+    uint prefilteredHandle;
+    uint brdfLutHandle;
+    uint outputHandle;
+    uint samplerHandle;
+};
+
+cbuffer CameraParams : register(b1)
+{
+    CameraParams camera;
+    row_major float4x4 viewProjection;
+};
+
+cbuffer ReflectionSettings : register(b2)
+{
+    uint framebufferSizeX;
+    uint framebufferSizeY;
+    uint maxSteps;
+    uint binarySearchSteps;
+    float maxRayDistance;
+    float thickness;
+    float bias;
+    float maxRoughness;
+    float edgeFade;
+    float intensity;
+    uint directionalLightCount;
+    uint colorPyramidLevelCount;
+    uint colorPyramidValid;
+    float hitLightingPadding;
+    uint colorPyramidHandles[REFLECTION_MAX_COLOR_PYRAMID_LEVELS];
+    DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
+};
+
+RaytracingAccelerationStructure sceneTlas : register(t3);
+StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
+StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t5);
+StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
+StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
+StructuredBuffer<uint> g_PackedIndices : register(t9);
+
+struct ReflectionPackedVertex
+{
+    float3 position;
+    float3 normal;
+    float2 uv;
+    float4 tangent;
+};
+
+StructuredBuffer<ReflectionPackedVertex> g_PackedVertices : register(t8);
+
+float3 ReconstructCameraRelativePosition(float2 uv, float depth)
+{
+    float4 clip = float4(uv.x * 2.0f - 1.0f, -(uv.y * 2.0f - 1.0f), depth, 1.0f);
+    float4 positionH = mul(clip, camera.invViewProjection);
+    return positionH.xyz / positionH.w;
+}
+
+bool ProjectWorldPosition(float3 worldPosition, out float2 uv)
+{
+    float3 cameraRelativePosition = worldPosition - camera.cameraOrigin;
+    float4 clip = mul(float4(cameraRelativePosition, 1.0f), viewProjection);
+    if (clip.w <= 1e-5f)
+    {
+        uv = 0.0f.xx;
+        return false;
+    }
+    float2 ndc = clip.xy / clip.w;
+    uv = float2(ndc.x * 0.5f + 0.5f, -ndc.y * 0.5f + 0.5f);
+    return all(uv > 0.0f.xx) && all(uv < 1.0f.xx);
+}
+
+bool TrySampleVisibleScreenRadiance(float3 hitPosition, float roughness, out float3 radiance)
+{
+    radiance = 0.0f.xxx;
+    if (colorPyramidValid == 0u)
+    {
+        return false;
+    }
+
+    float2 uv;
+    if (!ProjectWorldPosition(hitPosition, uv))
+    {
+        return false;
+    }
+
+    uint2 size = uint2(framebufferSizeX, framebufferSizeY);
+    uint2 hitPixel = min(uint2(uv * float2(size)), size - 1u);
+    float sceneDepth = GetTexture(depthHandle).Load(int3(hitPixel, 0)).r;
+    if (IsBackgroundDepth(sceneDepth))
+    {
+        return false;
+    }
+
+    float2 hitUv = (float2(hitPixel) + 0.5f) / float2(size);
+    float3 scenePosition = ReconstructCameraRelativePosition(hitUv, sceneDepth) + camera.cameraOrigin;
+    float allowedSeparation = thickness * (1.0f + length(scenePosition - camera.cameraOrigin) * 0.02f);
+    if (distance(scenePosition, hitPosition) > allowedSeparation)
+    {
+        return false;
+    }
+
+    // Reflections run ahead of deferred lighting, so the only shaded color available for a
+    // visible hit is the previous frame's pyramid.
+    float historyConfidence;
+    radiance = SampleReflectionColorPyramid(
+        colorPyramidHandles,
+        colorPyramidLevelCount,
+        samplerHandle,
+        velocityHandle,
+        size,
+        uv,
+        roughness,
+        historyConfidence);
+    return historyConfidence > 0.0f;
+}
+
+float TraceDirectionalVisibility(float3 worldPosition, float3 worldNormal, float3 lightDirection)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = worldPosition + worldNormal * max(bias, 0.002f);
+    shadowRay.Direction = lightDirection;
+    shadowRay.TMin = 0.002f;
+    shadowRay.TMax = max(camera.farPlane, 1.0f);
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> shadowQuery;
+    shadowQuery.TraceRayInline(
+        sceneTlas,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+        0xFF,
+        shadowRay);
+    while (shadowQuery.Proceed())
+    {
+    }
+    return shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0f : 1.0f;
+}
+
+bool TryShadeHitMaterial(
+    RayQuery<RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query,
+    float3 hitPosition,
+    float3 incomingRayDirection,
+    out float3 radiance)
+{
+    radiance = 0.0f.xxx;
+    uint instanceIndex = query.CommittedInstanceIndex();
+    if (instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
+    {
+        return false;
+    }
+
+    uint instanceHandle = g_InstanceIndexToInstanceHandle[instanceIndex];
+    if (!IsPackedHandleValid(instanceHandle))
+    {
+        return false;
+    }
+    GpuInstanceData instanceData = g_InstanceTable[GetHandleIndex(instanceHandle)];
+    if (!IsPackedHandleValid(instanceData.meshHandle) || !IsPackedHandleValid(instanceData.materialHandle))
+    {
+        return false;
+    }
+
+    GpuMeshData mesh = g_MeshTable[GetHandleIndex(instanceData.meshHandle)];
+    uint firstIndex = query.CommittedPrimitiveIndex() * 3u;
+    if (firstIndex + 2u >= mesh.indexCount)
+    {
+        return false;
+    }
+
+    uint i0 = g_PackedIndices[mesh.startIndex + firstIndex + 0u] + mesh.baseVertex;
+    uint i1 = g_PackedIndices[mesh.startIndex + firstIndex + 1u] + mesh.baseVertex;
+    uint i2 = g_PackedIndices[mesh.startIndex + firstIndex + 2u] + mesh.baseVertex;
+    ReflectionPackedVertex v0 = g_PackedVertices[i0];
+    ReflectionPackedVertex v1 = g_PackedVertices[i1];
+    ReflectionPackedVertex v2 = g_PackedVertices[i2];
+    float2 barycentrics = query.CommittedTriangleBarycentrics();
+    float b0 = 1.0f - barycentrics.x - barycentrics.y;
+    float2 uv = v0.uv * b0 + v1.uv * barycentrics.x + v2.uv * barycentrics.y;
+    float3 localNormal = normalize(
+        v0.normal * b0 +
+        v1.normal * barycentrics.x +
+        v2.normal * barycentrics.y);
+    float4 localTangent = normalize(
+        v0.tangent * b0 +
+        v1.tangent * barycentrics.x +
+        v2.tangent * barycentrics.y);
+    float3 worldPosition0 = mul(float4(v0.position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition1 = mul(float4(v1.position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition2 = mul(float4(v2.position, 1.0f), instanceData.world).xyz;
+    float3 worldGeometricNormal = normalize(cross(
+        worldPosition1 - worldPosition0,
+        worldPosition2 - worldPosition0));
+    if (dot(worldGeometricNormal, -incomingRayDirection) < 0.0f)
+    {
+        worldGeometricNormal = -worldGeometricNormal;
+    }
+    float3 worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
+    float3 worldTangent =
+        normalize(mul(float4(localTangent.xyz, 0.0f), instanceData.world).xyz);
+
+    GpuMaterialData material = g_MaterialTable[GetHandleIndex(instanceData.materialHandle)];
+    SamplerState materialSampler = GetSampler(material.samplerHandle);
+    float4 albedoSample =
+        GetTexture(material.albedoHandle).SampleLevel(materialSampler, uv, 0.0f);
+    float4 ormSample =
+        GetTexture(material.ormHandle).SampleLevel(materialSampler, uv, 0.0f);
+    float3 tangentNormal = ApplyNormalMapScale(
+        DecodeNormalMapSample(
+            GetTexture(material.normalHandle).SampleLevel(materialSampler, uv, 0.0f)),
+        material.metallicRoughness.w);
+    float3 worldBitangent =
+        normalize(cross(worldNormal, worldTangent) * localTangent.w);
+    float3x3 tangentToWorld =
+        float3x3(worldTangent, worldBitangent, worldNormal);
+    worldNormal = normalize(mul(tangentNormal, tangentToWorld));
+    if (dot(worldNormal, worldGeometricNormal) < 0.0f)
+    {
+        worldNormal = -worldNormal;
+    }
+
+    float3 albedo = max(material.baseColor.rgb * albedoSample.rgb, 0.0f.xxx);
+    float3 emissive = material.emissiveFactorIntensity.rgb *
+        material.emissiveFactorIntensity.a *
+        GetTexture(material.emissiveHandle).SampleLevel(materialSampler, uv, 0.0f).rgb;
+
+    SurfaceLightingInput surface = (SurfaceLightingInput)0;
+    surface.worldPos = hitPosition;
+    surface.normal = worldNormal;
+    surface.albedo = albedo;
+    surface.metallic = saturate(ormSample.b * material.metallicRoughness.x);
+    surface.roughness = saturate(ormSample.g * material.metallicRoughness.y);
+    surface.occlusion = saturate(ormSample.r);
+    surface.emissive = emissive;
+    float3 hitViewDirection = normalize(-incomingRayDirection);
+    radiance = EvaluateImageBasedLighting(
+        surface,
+        hitViewDirection,
+        irradianceHandle,
+        prefilteredHandle,
+        brdfLutHandle,
+        samplerHandle,
+        IBL_EXPOSURE);
+
+    [unroll]
+    for (uint lightIndex = 0u;
+         lightIndex < directionalLightCount && lightIndex < MAX_DIRECTIONAL_LIGHTS;
+         lightIndex++)
+    {
+        DirectionalLightData light = directionalLights[lightIndex];
+        float3 lightDirection = -normalize(light.directionAndType.xyz);
+        float nDotL = dot(worldNormal, lightDirection);
+        if (nDotL <= 0.0f)
+        {
+            continue;
+        }
+        float visibility =
+            TraceDirectionalVisibility(hitPosition, worldGeometricNormal, lightDirection);
+        float3 lightColor = light.colorIntensity.rgb * light.colorIntensity.a;
+        radiance += AccumulateLight(
+            surface,
+            hitViewDirection,
+            lightColor,
+            lightDirection,
+            1.0f,
+            visibility);
+    }
+
+    radiance = max(radiance + emissive, 0.0f.xxx);
+    return true;
+}
+
+[numthreads(8, 8, 1)]
+void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixel = dispatchThreadId.xy;
+    uint2 size = uint2(framebufferSizeX, framebufferSizeY);
+    if (any(pixel >= size))
+    {
+        return;
+    }
+
+    RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
+    outputTexture[pixel] = 0.0f.xxxx;
+    float depth = GetTexture(depthHandle).Load(int3(pixel, 0)).r;
+    if (IsBackgroundDepth(depth))
+    {
+        return;
+    }
+
+    float4 material = GetTexture(materialHandle).Load(int3(pixel, 0));
+    float roughness = material.g;
+    float roughnessFade = ReflectionRoughnessFade(roughness, maxRoughness);
+    if (roughnessFade <= 0.0f || intensity <= 0.0f)
+    {
+        return;
+    }
+
+    float2 screenUv = (float2(pixel) + 0.5f) / float2(size);
+    float3 cameraRelativePosition = ReconstructCameraRelativePosition(screenUv, depth);
+    float3 worldPosition = cameraRelativePosition + camera.cameraOrigin;
+    float3 normal = DecodeNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
+    float3 viewDirection = normalize(-cameraRelativePosition);
+    float3 reflectionDirection = normalize(reflect(-viewDirection, normal));
+
+    RayDesc ray;
+    float launchBias = max(bias, 0.001f);
+    ray.Origin =
+        worldPosition +
+        normal * launchBias +
+        reflectionDirection * launchBias;
+    ray.Direction = reflectionDirection;
+    ray.TMin = launchBias;
+    ray.TMax = maxRayDistance;
+    RayQuery<RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
+    query.TraceRayInline(sceneTlas, RAY_FLAG_NONE, 0xFF, ray);
+    while (query.Proceed())
+    {
+    }
+
+    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    {
+        // A ray that reaches the sky adds nothing over the environment specular that deferred
+        // lighting already applies, so leave the weight at zero.
+        return;
+    }
+
+    float3 hitPosition = ray.Origin + reflectionDirection * query.CommittedRayT();
+    float3 reflectedRadiance = 0.0f.xxx;
+    if (!TrySampleVisibleScreenRadiance(hitPosition, roughness, reflectedRadiance))
+    {
+        if (!TryShadeHitMaterial(query, hitPosition, reflectionDirection, reflectedRadiance))
+        {
+            // Geometry without a resolvable material still occludes the sky.
+            reflectedRadiance =
+                SamplePrefiltered(prefilteredHandle, samplerHandle, reflectionDirection, roughness) *
+                IBL_EXPOSURE * 0.25f;
+        }
+    }
+
+    outputTexture[pixel] = float4(reflectedRadiance * intensity, saturate(roughnessFade));
+}

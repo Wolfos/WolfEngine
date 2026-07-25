@@ -68,7 +68,14 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
+	public RenderGraphResourceHandle ReflectionsRadiance { get; init; }
 	public RenderGraphResourceHandle ResolvedSceneColor { get; init; }
+	/// <summary>
+	/// Mip chain of the resolved scene color, built at the end of the frame and read by the
+	/// next frame's reflection tracing. Level 0 is full scene resolution.
+	/// </summary>
+	public RenderGraphResourceHandle[] ColorPyramidLevels { get; init; }
+	public bool ColorPyramidHistoryValid { get; init; }
 	public RenderGraphResourceHandle[] BloomDownsampleLevels { get; init; }
 	public RenderGraphResourceHandle[] BloomUpsampleLevels { get; init; }
 	public RenderGraphResourceHandle BloomCompositeSceneColor { get; init; }
@@ -125,10 +132,12 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly GBufferDecalSeedPass _gBufferDecalSeedPass;
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private readonly ReflectionsPass _reflectionsPass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
 	private readonly BloomPass _bloomPass;
+	private readonly ColorPyramidPass _colorPyramidPass;
 	private readonly TonemappingPass _tonemappingPass;
 	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
@@ -166,6 +175,12 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly IGfxTexture?[] _historyDepthTextures = new IGfxTexture?[2];
 	private readonly ResourceState[] _historyColorStates = new ResourceState[2];
 	private readonly ResourceState[] _historyDepthStates = new ResourceState[2];
+	private IGfxDevice? _colorPyramidDevice;
+	private GraphicsBackendKind? _colorPyramidBackendKind;
+	private Int2 _colorPyramidSize;
+	private bool _colorPyramidValid;
+	private IGfxTexture[] _colorPyramidTextures = Array.Empty<IGfxTexture>();
+	private ResourceState[] _colorPyramidStates = Array.Empty<ResourceState>();
 	private IGfxDevice? _ddgiHistoryDevice;
 	private GraphicsBackendKind? _ddgiHistoryBackendKind;
 	private DdgiGridShape _ddgiHistoryGridShape;
@@ -203,6 +218,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gBufferDecalSeedExecute;
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
+	private readonly Action<RenderGraphContext> _reflectionsExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
@@ -245,10 +261,12 @@ internal sealed class RenderGraphFrameBuilder
 		_gBufferDecalSeedPass = passSet.GBufferDecalSeedPass;
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
+		_reflectionsPass = passSet.ReflectionsPass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
 		_bloomPass = passSet.BloomPass;
+		_colorPyramidPass = passSet.ColorPyramidPass;
 		_tonemappingPass = passSet.TonemappingPass;
 		_casSharpenPass = passSet.CasSharpenPass;
 		_copyToFinalPass = passSet.CopyToFinalPass;
@@ -272,6 +290,7 @@ internal sealed class RenderGraphFrameBuilder
 		_gBufferDecalSeedExecute = ExecuteGBufferDecalSeed;
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
+		_reflectionsExecute = ExecuteReflections;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
@@ -369,6 +388,9 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var lightingHandle = default(RenderGraphResourceHandle);
+		var reflectionsRadianceHandle = default(RenderGraphResourceHandle);
+		var colorPyramidLevelHandles = Array.Empty<RenderGraphResourceHandle>();
+		var colorPyramidHistoryValid = false;
 		var gbufferAlbedoHandle = default(RenderGraphResourceHandle);
 		var gbufferNormalHandle = default(RenderGraphResourceHandle);
 		var gbufferMaterialHandle = default(RenderGraphResourceHandle);
@@ -521,6 +543,7 @@ internal sealed class RenderGraphFrameBuilder
 					sceneFramebufferSize.Y,
 					TextureFormat.Rgba16Float,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+			var reflectionsEnabled = HasReflections(config);
 			lightingHandle = taaEnabled
 				? _resources.CreateTransientTexture(new TextureDescriptor(
 					sceneFramebufferSize.X,
@@ -528,6 +551,32 @@ internal sealed class RenderGraphFrameBuilder
 					TextureFormat.Rgba16Float,
 					TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess))
 				: resolvedSceneColorHandle;
+			if (reflectionsEnabled)
+			{
+				reflectionsRadianceHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				EnsureColorPyramidResources(_renderer.GetGfxDevice(), sceneFramebufferSize);
+				if (_colorPyramidTextures.Length > 0)
+				{
+					colorPyramidLevelHandles = new RenderGraphResourceHandle[_colorPyramidTextures.Length];
+					for (var level = 0; level < _colorPyramidTextures.Length; level++)
+					{
+						colorPyramidLevelHandles[level] = _resources.ImportTexture(
+							_colorPyramidTextures[level],
+							takeOwnership: false,
+							initialState: _colorPyramidStates[level]);
+					}
+					colorPyramidHistoryValid = _colorPyramidValid;
+				}
+				else
+				{
+					_colorPyramidValid = false;
+				}
+			}
 
 			if (taaEnabled)
 			{
@@ -861,7 +910,10 @@ internal sealed class RenderGraphFrameBuilder
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
 			LightingBuffer = lightingHandle,
+			ReflectionsRadiance = reflectionsRadianceHandle,
 			ResolvedSceneColor = resolvedSceneColorHandle,
+			ColorPyramidLevels = colorPyramidLevelHandles,
+			ColorPyramidHistoryValid = colorPyramidHistoryValid,
 			HistoryColorRead = historyColorReadHandle,
 			HistoryColorWrite = historyColorWriteHandle,
 			HistoryDepthRead = historyDepthReadHandle,
@@ -891,6 +943,14 @@ internal sealed class RenderGraphFrameBuilder
 			if (ambientOcclusionFinalHandle.IsValid)
 			{
 				RegisterSceneDebugView(SceneDebugViewIds.AmbientOcclusion, "Ambient Occlusion", ambientOcclusionFinalHandle, SceneDebugViewKind.Color);
+			}
+			if (reflectionsRadianceHandle.IsValid)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.Reflections, "Reflection Radiance", reflectionsRadianceHandle, SceneDebugViewKind.Color);
+			}
+			if (colorPyramidLevelHandles.Length > 0)
+			{
+				RegisterSceneDebugView(SceneDebugViewIds.ColorPyramid, "Color Pyramid (Previous Frame)", colorPyramidLevelHandles[0], SceneDebugViewKind.Color);
 			}
 			if (rayTracingHitMaskHandle.IsValid)
 			{
@@ -1167,6 +1227,28 @@ internal sealed class RenderGraphFrameBuilder
 			graph.AddPass("Clustered Lighting Write", PassKind.Compute)
 				.SetExecute(_clusteredLightingWriteExecute);
 
+			// Reflections run before deferred lighting so their radiance can feed the specular
+			// term directly. Shaded hit color therefore comes from the previous frame's pyramid.
+			if (_frameResources.ReflectionsRadiance.IsValid)
+			{
+				var reflectionsBuilder = graph.AddPass(
+						_frameResources.Config.Reflections.Mode == ReflectionMode.RayTraced
+							? "Reflections (Ray Traced)"
+							: "Reflections (Screen Space)",
+						PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.ReflectionsRadiance, ResourceState.UnorderedAccess);
+				foreach (var colorPyramidLevel in _frameResources.ColorPyramidLevels)
+				{
+					reflectionsBuilder.ReadTexture(colorPyramidLevel, ResourceState.ShaderResource);
+				}
+				ReadSkyboxTextures(reflectionsBuilder);
+				reflectionsBuilder.SetExecute(_reflectionsExecute);
+			}
+
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
@@ -1179,6 +1261,10 @@ internal sealed class RenderGraphFrameBuilder
 			if (_frameResources.AmbientOcclusionFinal.IsValid)
 			{
 				deferredLightingBuilder.ReadTexture(_frameResources.AmbientOcclusionFinal, ResourceState.ShaderResource);
+			}
+			if (_frameResources.ReflectionsRadiance.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.ReflectionsRadiance, ResourceState.ShaderResource);
 			}
 			if (_frameResources.DdgiIrradianceL0HistoryWrite.IsValid &&
 			    _frameResources.DdgiIrradianceLyHistoryWrite.IsValid &&
@@ -1258,6 +1344,21 @@ internal sealed class RenderGraphFrameBuilder
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
+
+			// Capture the finished HDR scene color so next frame's reflections have shaded,
+			// pre-filtered radiance to sample.
+			for (var level = 0; level < (_frameResources.ColorPyramidLevels?.Length ?? 0); level++)
+			{
+				var stage = level == 0 ? ColorPyramidPass.Stage.Copy : ColorPyramidPass.Stage.Downsample;
+				var source = level == 0
+					? _frameResources.ResolvedSceneColor
+					: _frameResources.ColorPyramidLevels[level - 1];
+				var output = _frameResources.ColorPyramidLevels[level];
+				graph.AddPass($"Color Pyramid {level}", PassKind.Compute)
+					.ReadTexture(source, ResourceState.ShaderResource)
+					.WriteTexture(output, ResourceState.UnorderedAccess)
+					.SetExecute(context => ExecuteColorPyramid(context, stage, source, output));
+			}
 
 			if (_frameResources.BloomDownsampleLevels?.Length > 0)
 			{
@@ -1747,6 +1848,34 @@ internal sealed class RenderGraphFrameBuilder
 		_deferredLightingPass.Record(context, ref config, context.SceneData!);
 	}
 
+	private void ExecuteReflections(RenderGraphContext context)
+	{
+		var isRayTraced = _frameResources.Config.Reflections.Mode == ReflectionMode.RayTraced;
+		var config = _reflectionsPass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice(),
+			_renderer,
+			_gpuDrawResources,
+			isRayTraced ? _rayTracingSceneResources : null);
+		_reflectionsPass.Record(context, in config, context.SceneData!);
+	}
+
+	private void ExecuteColorPyramid(
+		RenderGraphContext context,
+		ColorPyramidPass.Stage stage,
+		RenderGraphResourceHandle source,
+		RenderGraphResourceHandle output)
+	{
+		var config = _colorPyramidPass.BuildConfig(
+			context,
+			_renderer.GetGfxDevice(),
+			stage,
+			source,
+			output);
+		_colorPyramidPass.Record(context, stage, in config);
+	}
+
 	private void ExecuteClusteredLightingBuild(RenderGraphContext context)
 	{
 		var config = _clusteredLightingPass.BuildConfig(
@@ -2004,6 +2133,20 @@ internal sealed class RenderGraphFrameBuilder
 
 	public void CompleteFrame()
 	{
+		if (_frameResources.ColorPyramidLevels is not { Length: > 0 } || _frameResources.SceneEnabled == false)
+		{
+			_colorPyramidValid = false;
+		}
+		else
+		{
+			for (var level = 0; level < _frameResources.ColorPyramidLevels.Length; level++)
+			{
+				_colorPyramidStates[level] = _resources.GetResourceState(_frameResources.ColorPyramidLevels[level]);
+			}
+
+			_colorPyramidValid = true;
+		}
+
 		if (_frameResources.Config.TemporalAntiAliasing.Enabled == false || _frameResources.SceneEnabled == false)
 		{
 			_historyValid = false;
@@ -2134,6 +2277,75 @@ internal sealed class RenderGraphFrameBuilder
 		_historyReadIndex = 0;
 		_historyValid = false;
 		_resetTaaHistoryThisFrame = true;
+	}
+
+	private static int GetColorPyramidLevelCount(Int2 sceneFramebufferSize)
+	{
+		var levelCount = 1;
+		var width = Math.Max(sceneFramebufferSize.X, 1);
+		var height = Math.Max(sceneFramebufferSize.Y, 1);
+		while (levelCount < ReflectionsPass.MaxColorPyramidLevels && Math.Min(width, height) > 8)
+		{
+			width = Math.Max(1, (width + 1) / 2);
+			height = Math.Max(1, (height + 1) / 2);
+			levelCount++;
+		}
+
+		return levelCount;
+	}
+
+	private void EnsureColorPyramidResources(IGfxDevice device, Int2 sceneFramebufferSize)
+	{
+		var deviceChanged = _colorPyramidDevice is not null && ReferenceEquals(_colorPyramidDevice, device) == false;
+		var backendChanged = _colorPyramidBackendKind.HasValue && _colorPyramidBackendKind.Value != device.BackendKind;
+		var sizeChanged = _colorPyramidSize.X != sceneFramebufferSize.X || _colorPyramidSize.Y != sceneFramebufferSize.Y;
+		if (deviceChanged || backendChanged || sizeChanged)
+		{
+			ReleaseColorPyramidResources();
+		}
+
+		if (_colorPyramidTextures.Length > 0)
+		{
+			return;
+		}
+
+		var levelCount = GetColorPyramidLevelCount(sceneFramebufferSize);
+		var textures = new IGfxTexture[levelCount];
+		var states = new ResourceState[levelCount];
+		var levelSize = new Int2(Math.Max(sceneFramebufferSize.X, 1), Math.Max(sceneFramebufferSize.Y, 1));
+		for (var level = 0; level < levelCount; level++)
+		{
+			textures[level] = device.CreateTexture(new TextureDescriptor(
+				levelSize.X,
+				levelSize.Y,
+				TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+			states[level] = ResourceState.UnorderedAccess;
+			levelSize = new Int2(Math.Max(1, (levelSize.X + 1) / 2), Math.Max(1, (levelSize.Y + 1) / 2));
+		}
+
+		_colorPyramidTextures = textures;
+		_colorPyramidStates = states;
+		_colorPyramidDevice = device;
+		_colorPyramidBackendKind = device.BackendKind;
+		_colorPyramidSize = sceneFramebufferSize;
+		_colorPyramidValid = false;
+	}
+
+	private void ReleaseColorPyramidResources()
+	{
+		for (var level = 0; level < _colorPyramidTextures.Length; level++)
+		{
+			EnqueueTemporalRelease(_colorPyramidDevice, _colorPyramidTextures[level], _colorPyramidStates[level]);
+		}
+
+		_colorPyramidTextures = Array.Empty<IGfxTexture>();
+		_colorPyramidStates = Array.Empty<ResourceState>();
+		_colorPyramidDevice = null;
+		_colorPyramidBackendKind = null;
+		_colorPyramidSize = Int2.Zero;
+		_colorPyramidValid = false;
 	}
 
 	private void ReleaseTemporalHistoryResources()
@@ -2386,18 +2598,37 @@ internal sealed class RenderGraphFrameBuilder
 		         config.AmbientOcclusion.VisibilityBitmaskSettings.StepCount > 0));
 	}
 
+	private static bool HasReflections(RenderConfig config)
+	{
+		return config.Reflections.Enabled &&
+		       (config.Reflections.Mode == ReflectionMode.RayTraced ||
+		        (config.Reflections.ScreenSpaceSettings.MaxSteps > 0 &&
+		         config.Reflections.ScreenSpaceSettings.MaxRayDistance > 0.0f));
+	}
+
 	private static bool HasRayTracedDdgi(RenderConfig config) => DdgiUtilities.IsRayTracedDdgiEnabled(config);
 
 	private static bool RequiresRayTracingScene(RenderConfig config)
 	{
 		return (config.AmbientOcclusion.Enabled && config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced) ||
+		       (config.Reflections.Enabled && config.Reflections.Mode == ReflectionMode.RayTraced) ||
 		       HasRayTracedDdgi(config);
 	}
 
 	private static RenderConfig CreateRayTracingDisabledConfig(RenderConfig source)
 	{
 		var ambientOcclusion = source.AmbientOcclusion;
-		ambientOcclusion.Enabled = false;
+		if (ambientOcclusion.Enabled && ambientOcclusion.Mode == AmbientOcclusionMode.RayTraced)
+		{
+			ambientOcclusion.Enabled = false;
+		}
+		source.AmbientOcclusion = ambientOcclusion;
+		var reflections = source.Reflections;
+		if (reflections.Enabled && reflections.Mode == ReflectionMode.RayTraced)
+		{
+			reflections.Mode = ReflectionMode.ScreenSpace;
+		}
+		source.Reflections = reflections;
 		var diffuseGlobalIllumination = source.DiffuseGlobalIllumination;
 		diffuseGlobalIllumination.Enabled = false;
 		source.DiffuseGlobalIllumination = diffuseGlobalIllumination;

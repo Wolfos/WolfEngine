@@ -8,6 +8,8 @@ public static class SceneDebugViewIds
 {
 	public const string FinalColor = "final-color";
 	public const string AmbientOcclusion = "ambient-occlusion";
+	public const string Reflections = "reflections";
+	public const string ColorPyramid = "color-pyramid";
 	public const string RayTracingHitMask = "ray-tracing-hit-mask";
 	public const string RayTracingHitDistance = "ray-tracing-hit-distance";
 	public const string RayTracingAlbedo = "ray-tracing-albedo";

@@ -42,6 +42,8 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ShadowMap = Id("shadow-map");
 	public static readonly ShaderProgramId AmbientOcclusionVbao = Id("ao-vbao");
 	public static readonly ShaderProgramId AmbientOcclusionRayTraced = Id("ao-rtao");
+	public static readonly ShaderProgramId ReflectionsScreenSpace = Id("reflections-ssr");
+	public static readonly ShaderProgramId ReflectionsRayTraced = Id("reflections-rt");
 	public static readonly ShaderProgramId DdgiClassify = Id("ddgi-classify");
 	public static readonly ShaderProgramId DdgiTrace = Id("ddgi-trace");
 	public static readonly ShaderProgramId DdgiRelocate = Id("ddgi-relocate");
@@ -53,6 +55,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId TaaHistoryStore = Id("taa-history-store");
 	public static readonly ShaderProgramId Tonemapping = Id("tonemapping");
 	public static readonly ShaderProgramId Bloom = Id("bloom");
+	public static readonly ShaderProgramId ColorPyramid = Id("color-pyramid");
 	public static readonly ShaderProgramId CasSharpen = Id("cas-sharpen");
 	public static readonly ShaderProgramId CopyToFinal = Id("copy-to-final");
 	public static readonly ShaderProgramId Bc1Compress = Id("bc1-compress");
@@ -99,6 +102,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ShadowMap, "shadow_map.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionVbao, "ao_vbao.compute.slang"),
 			D(EngineShaderPrograms.AmbientOcclusionRayTraced, "ao_rtao.compute.slang"),
+			D(EngineShaderPrograms.ReflectionsScreenSpace, "reflections_ssr.compute.slang"),
+			D(EngineShaderPrograms.ReflectionsRayTraced, "reflections_rt.compute.slang"),
 			D(EngineShaderPrograms.DdgiClassify, "ddgi_classify.compute.slang"),
 			D(EngineShaderPrograms.DdgiTrace, "ddgi_trace.compute.slang"),
 			D(EngineShaderPrograms.DdgiRelocate, "ddgi_relocate.compute.slang"),
@@ -110,6 +115,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.TaaHistoryStore, "taa_history_store.compute.slang"),
 			D(EngineShaderPrograms.Tonemapping, "tonemapping.compute.slang"),
 			D(EngineShaderPrograms.Bloom, "bloom.compute.slang"),
+			D(EngineShaderPrograms.ColorPyramid, "color_pyramid.compute.slang"),
 			D(EngineShaderPrograms.CasSharpen, "cas_sharpen.compute.slang"),
 			D(EngineShaderPrograms.CopyToFinal, "copy_to_final.compute.slang"),
 			D(EngineShaderPrograms.Bc1Compress, "bc1_compress.compute.slang"),
@@ -243,6 +249,8 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.GpuDrawCull) return ["CSCull"];
 		if (id == EngineShaderPrograms.AmbientOcclusionVbao) return ["AmbientOcclusionVisibilityBitmaskCS"];
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];
+		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];
+		if (id == EngineShaderPrograms.ReflectionsRayTraced) return ["ReflectionsRayTracedCS"];
 		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeClassifyCS"];
 		if (id == EngineShaderPrograms.DdgiTrace) return ["DdgiProbeTraceCS", "DdgiRelocationTraceCS"];
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];
@@ -254,6 +262,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.TaaHistoryStore) return ["TaaHistoryStoreCS"];
 		if (id == EngineShaderPrograms.Tonemapping) return ["TonemappingCS"];
 		if (id == EngineShaderPrograms.Bloom) return ["BloomPrefilterCS", "BloomDownsampleCS", "BloomUpsampleCS", "BloomCompositeCS"];
+		if (id == EngineShaderPrograms.ColorPyramid) return ["ColorPyramidCopyCS", "ColorPyramidDownsampleCS"];
 		if (id == EngineShaderPrograms.CasSharpen) return ["CasSharpenCS"];
 		if (id == EngineShaderPrograms.CopyToFinal) return ["CopyToFinalCS"];
 		if (id == EngineShaderPrograms.Bc1Compress) return ["CompressBc1"];

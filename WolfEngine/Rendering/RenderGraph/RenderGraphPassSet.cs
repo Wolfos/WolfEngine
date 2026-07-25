@@ -29,10 +29,12 @@ internal sealed class RenderGraphPassSet
 		GBufferDecalSeedPass = new(shaderCompiler, bindlessResourceRegistry);
 		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
+		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
 		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry);
 		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
+		ColorPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
 		TonemappingPass = new(shaderCompiler, bindlessResourceRegistry);
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -55,10 +57,12 @@ internal sealed class RenderGraphPassSet
 	public GBufferDecalSeedPass GBufferDecalSeedPass { get; }
 	public ScreenSpaceDecalPass ScreenSpaceDecalPass { get; }
 	public DeferredLightingPass DeferredLightingPass { get; }
+	public ReflectionsPass ReflectionsPass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
 	public TransparentForwardPass TransparentForwardPass { get; }
 	public BloomPass BloomPass { get; }
+	public ColorPyramidPass ColorPyramidPass { get; }
 	public TonemappingPass TonemappingPass { get; }
 	public CasSharpenPass CasSharpenPass { get; }
 	public CopyToFinalPass CopyToFinalPass { get; }

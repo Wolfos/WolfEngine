@@ -150,6 +150,8 @@ public sealed class RayTracingSceneResourcesTests
 			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "deferred_lighting.compute.slang", EntryPoint: "DeferredLightingCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "gbuffer_decal_seed.compute.slang", EntryPoint: "GBufferDecalSeedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "taa_history_store.compute.slang", EntryPoint: "TaaHistoryStoreCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "taa_resolve.compute.slang", EntryPoint: "TaaResolveCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "terrain_rt_vertex_update.compute.slang", EntryPoint: "TerrainRayTracingVertexUpdateCS", ThreadsX: 64u, ThreadsY: 1u),
@@ -236,6 +238,36 @@ public sealed class RayTracingSceneResourcesTests
 				shader.EntryPoint,
 				GraphicsBackendKind.D3D12);
 			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+		}
+	}
+
+	[Test]
+	public void ReflectionShadersCompileForD3D12()
+	{
+		if (OperatingSystem.IsWindows() == false)
+		{
+			Assert.Ignore("DirectX shader validation only runs on Windows.");
+		}
+
+		var shaderCompiler = new ShaderCompiler();
+		foreach (var shader in new[]
+		{
+			(Name: "reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS"),
+			(Name: "reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS")
+		})
+		{
+			var compiled = shaderCompiler.GetComputeShaderWithReflection(
+				ShaderPath(shader.Name),
+				shader.EntryPoint,
+				GraphicsBackendKind.D3D12);
+			Assert.That(compiled.Bytecode.IsEmpty, Is.False, shader.Name);
+			Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8), shader.Name);
+			Assert.That(compiled.ThreadGroupSize.Y, Is.EqualTo(8), shader.Name);
+			Assert.That(
+				compiled.ReflectionLayout.GetConstantBuffer("ReflectionSettings")
+					.GetFieldOrThrow("maxRoughness").ValueKind,
+				Is.EqualTo(ShaderConstantFieldValueKind.Float),
+				shader.Name);
 		}
 	}
 
@@ -389,6 +421,55 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(roundTripped.Bloom.Scatter, Is.EqualTo(0.4f));
 		Assert.That(roundTripped.Bloom.Tint, Is.EqualTo(new Vector3(1.0f, 0.5f, 0.25f)));
 		Assert.That(roundTripped.Bloom.Quality, Is.EqualTo(BloomQuality.Low));
+	}
+
+	[Test]
+	public void ReflectionDefaultsAndSettingsRoundTripThroughAssetJson()
+	{
+		var defaults = new RenderConfig().Reflections;
+		Assert.That(defaults.Enabled, Is.True);
+		Assert.That(defaults.Mode, Is.EqualTo(ReflectionMode.ScreenSpace));
+		Assert.That(defaults.ScreenSpaceSettings.MaxSteps, Is.EqualTo(48));
+		Assert.That(defaults.ScreenSpaceSettings.BinarySearchSteps, Is.EqualTo(5));
+		Assert.That(defaults.RayTracedSettings.MaxRayDistance, Is.EqualTo(100.0f));
+
+		var config = new RenderConfig
+		{
+			Reflections = new ReflectionConfig
+			{
+				Enabled = true,
+				Mode = ReflectionMode.RayTraced,
+				ScreenSpaceSettings = new ScreenSpaceReflectionSettings
+				{
+					MaxSteps = 24,
+					BinarySearchSteps = 3,
+					MaxRayDistance = 20.0f,
+					Thickness = 0.25f,
+					Bias = 0.04f,
+					MaxRoughness = 0.5f,
+					EdgeFade = 0.1f,
+					Intensity = 0.8f
+				},
+				RayTracedSettings = new RayTracedReflectionSettings
+				{
+					MaxRayDistance = 75.0f,
+					Bias = 0.05f,
+					MaxRoughness = 0.7f,
+					ScreenReuseThickness = 0.3f,
+					Intensity = 0.9f
+				}
+			}
+		};
+		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
+			JsonSerializer.Serialize(config, AssetJson.SerializerOptions),
+			AssetJson.SerializerOptions)!;
+
+		Assert.That(roundTripped.Reflections.Mode, Is.EqualTo(ReflectionMode.RayTraced));
+		Assert.That(roundTripped.Reflections.ScreenSpaceSettings.MaxSteps, Is.EqualTo(24));
+		Assert.That(roundTripped.Reflections.ScreenSpaceSettings.Thickness, Is.EqualTo(0.25f));
+		Assert.That(roundTripped.Reflections.RayTracedSettings.MaxRayDistance, Is.EqualTo(75.0f));
+		Assert.That(roundTripped.Reflections.RayTracedSettings.ScreenReuseThickness, Is.EqualTo(0.3f));
+		Assert.That(roundTripped.Reflections.RayTracedSettings.Intensity, Is.EqualTo(0.9f));
 	}
 
 	private static string ShaderPath(string relativePath) => Path.GetFullPath(Path.Combine(

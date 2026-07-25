@@ -7,6 +7,7 @@ namespace WolfEngine.Rendering.Passes;
 public class RenderConfig: IDataAsset
 {
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
+	public ReflectionConfig Reflections { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
@@ -14,6 +15,53 @@ public class RenderConfig: IDataAsset
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+}
+
+public enum ReflectionMode
+{
+	ScreenSpace,
+	RayTraced
+}
+
+public struct ReflectionConfig
+{
+	public ReflectionConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = true;
+	public ReflectionMode Mode { get; set; } = ReflectionMode.ScreenSpace;
+	public ScreenSpaceReflectionSettings ScreenSpaceSettings { get; set; } = new();
+	public RayTracedReflectionSettings RayTracedSettings { get; set; } = new();
+}
+
+public struct ScreenSpaceReflectionSettings
+{
+	public ScreenSpaceReflectionSettings()
+	{
+	}
+
+	public int MaxSteps { get; set; } = 48;
+	public int BinarySearchSteps { get; set; } = 5;
+	public float MaxRayDistance { get; set; } = 40.0f;
+	public float Thickness { get; set; } = 0.15f;
+	public float Bias { get; set; } = 0.03f;
+	public float MaxRoughness { get; set; } = 0.65f;
+	public float EdgeFade { get; set; } = 0.08f;
+	public float Intensity { get; set; } = 1.0f;
+}
+
+public struct RayTracedReflectionSettings
+{
+	public RayTracedReflectionSettings()
+	{
+	}
+
+	public float MaxRayDistance { get; set; } = 100.0f;
+	public float Bias { get; set; } = 0.03f;
+	public float MaxRoughness { get; set; } = 0.8f;
+	public float ScreenReuseThickness { get; set; } = 0.2f;
+	public float Intensity { get; set; } = 1.0f;
 }
 
 public struct ShadowMapConfig

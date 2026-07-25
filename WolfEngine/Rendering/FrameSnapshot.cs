@@ -89,6 +89,7 @@ public sealed class FrameSnapshot
 	public void SetConfig(RenderConfig config)
 	{
 		Config.AmbientOcclusion = config.AmbientOcclusion;
+		Config.Reflections = config.Reflections;
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
 		Config.ShadowMaps = config.ShadowMaps;
 		Config.SkyboxConfig = config.SkyboxConfig;
