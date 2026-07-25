@@ -39,6 +39,19 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 	private uint _activeGpuStartIndex;
 	private string? _activeGpuScopeName;
 	private bool _gpuProfilingFailed;
+	// Latched per recording: toggling the marker flag mid-frame must not leave BeginEvent/EndEvent unpaired.
+	private bool _markersEnabled = GraphicsConfig.ShouldEmitGpuMarkers();
+
+	// PIX event blob encoding, mirroring WinPixEventRuntime's pix3.h.
+	private const uint PixEventBlobVersion = 2;
+	private const int PixBlobQwords = 64;
+	private const int PixReservedTailQwords = 2;
+	private const ulong PixEventTypeBeginNoArgs = 0x002;
+	private const ulong PixEventTypeMask = 0x3FF;
+	private const int PixEventTypeBitShift = 10;
+	private const ulong PixEventColorDefault = 0;
+	// PIXEncodeStringInfo(alignment: 0, copyChunkSize: 8, isANSI: true, isShortcut: false).
+	private const ulong PixStringInfoAnsiChunk8 = (8UL << 55) | (1UL << 54);
 
 	public D3D12CommandList(
 		D3D12Device owner,
@@ -114,6 +127,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		_activeGpuBlock = null;
 		_activeGpuScopeName = null;
 		_gpuProfilingFailed = false;
+		_markersEnabled = GraphicsConfig.ShouldEmitGpuMarkers();
 	}
 
 	internal void SetDebugName(string name)
@@ -124,24 +138,71 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void BeginEvent(string name)
 	{
-		if (GraphicsConfig.EnableD3DDebugLayer == false)
+		if (_markersEnabled == false)
 		{
 			return;
 		}
 
-		var nameBytes = Encoding.UTF8.GetBytes(name);
-		fixed (byte* namePointer = nameBytes)
-		{
-			CommandList.BeginEvent(0, namePointer, (uint)nameBytes.Length);
-		}
+		var blob = stackalloc ulong[PixBlobQwords];
+		var payloadQwords = EncodePixBeginEvent(blob, name);
+		CommandList.BeginEvent(PixEventBlobVersion, blob, (uint)(payloadQwords * sizeof(ulong)));
 	}
 
 	public void EndEvent()
 	{
-		if (GraphicsConfig.EnableD3DDebugLayer)
+		if (_markersEnabled)
 		{
 			CommandList.EndEvent();
 		}
+	}
+
+	/// <summary>
+	/// Writes a WinPixEventRuntime "PIX3 blob" describing a no-argument begin-event, the payload format
+	/// ID3D12GraphicsCommandList::BeginEvent expects when Metadata is <see cref="PixEventBlobVersion"/>.
+	/// A payload the runtime cannot parse is discarded silently while the matching EndEvent still counts,
+	/// so a raw string here does not merely render badly - it unbalances the queue's event nesting and the
+	/// debug layer reports "PixEndEvent occurrences ... exceed PixBeginEvent occurrences".
+	/// Returns the number of qwords to report as the payload size.
+	/// </summary>
+	private static int EncodePixBeginEvent(ulong* blob, string name)
+	{
+		var limit = PixBlobQwords - PixReservedTailQwords;
+		var index = 0;
+
+		blob[index++] = (PixEventTypeBeginNoArgs & PixEventTypeMask) << PixEventTypeBitShift;
+		blob[index++] = PixEventColorDefault;
+		blob[index++] = PixStringInfoAnsiChunk8;
+
+		// The name is packed eight bytes per qword, little-endian and NUL terminated. A name that exactly
+		// fills its last qword still gets a following all-zero qword, matching pix3.h's copy loop.
+		var nameBytes = Encoding.UTF8.GetBytes(name);
+		var offset = 0;
+		while (index < limit)
+		{
+			var chunk = 0UL;
+			var terminated = false;
+			for (var i = 0; i < sizeof(ulong); i++)
+			{
+				if (offset >= nameBytes.Length)
+				{
+					terminated = true;
+					break;
+				}
+
+				chunk |= (ulong)nameBytes[offset++] << (i * 8);
+			}
+
+			blob[index++] = chunk;
+			if (terminated)
+			{
+				break;
+			}
+		}
+
+		// End-of-payload marker. pix3.h deliberately leaves this outside the reported size, which is why
+		// the buffer keeps PixReservedTailQwords of slack beyond the limit above.
+		blob[index] = 0UL;
+		return index;
 	}
 
 	public void BeginPass(in PassTargets targets, in AbstractionViewport viewport)

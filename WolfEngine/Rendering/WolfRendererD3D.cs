@@ -27,7 +27,8 @@ namespace WolfEngine;
 
 public unsafe class WolfRendererD3D : IRenderer
 {
-private const int FrameCount = 2;
+// Triple buffering gives the CPU enough slack to record frame N while the GPU drains N-1.
+private const int FrameCount = 3;
 private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
 private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
@@ -1611,19 +1612,16 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		var frameIdx = _backbufferIndex;
 
+		// Wait only until the GPU is done with the backbuffer we are about to reuse. Waiting on the most
+		// recent submission instead would serialize the CPU against the previous frame's entire GPU
+		// workload, leaving no CPU/GPU overlap. Per-frame GPU-visible buffers are slot-rotated over
+		// GpuDrawResources.MaxFramesInFlight, and the transient texture, command list, and constant upload
+		// pools are all fence-gated, so several frames may safely be in flight.
 		if (_fence.GetCompletedValue() < _frameFenceValues[frameIdx])
 		{
 			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_frameFenceValues[frameIdx], (void*) _fenceEvent));
 			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
 		}
-
-		if (_fence.GetCompletedValue() < _fenceValue)
-		{
-			SilkMarshal.ThrowHResult(_fence.SetEventOnCompletion(_fenceValue, (void*) _fenceEvent));
-			WaitForSingleObject(_fenceEvent, 0xFFFFFFFF);
-		}
-
-		// Command list creation is now handled per-pass by the render graph
 	}
 
 	public void Render(
@@ -1893,8 +1891,12 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			}
 
 			infoQueue.SetMuteDebugOutput(DxgiDebugAll, new Silk.NET.Core.Bool32(0));
-			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Corruption, new Silk.NET.Core.Bool32(1));
-			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Error, new Silk.NET.Core.Bool32(1));
+
+			// Breaking with no debugger attached is a fail-fast, so an advisory message the editor could
+			// have logged and survived instead takes the process down. Messages are dumped either way.
+			var breakOnErrors = new Silk.NET.Core.Bool32(GraphicsConfig.BreakOnD3DDebugError ? 1u : 0u);
+			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Corruption, breakOnErrors);
+			infoQueue.SetBreakOnSeverity(DxgiDebugAll, InfoQueueMessageSeverity.Error, breakOnErrors);
 		}
 		catch
 		{
