@@ -44,6 +44,8 @@ cbuffer ReflectionSettings : register(b2)
     uint colorPyramidLevelCount;
     uint colorPyramidValid;
     float screenReuseFalloff;
+    float reprojectionStrength;
+    float3 reflectionSettingsPadding;
     uint colorPyramidHandles[REFLECTION_MAX_COLOR_PYRAMID_LEVELS];
     DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
 };
@@ -88,13 +90,59 @@ bool ProjectWorldPosition(float3 worldPosition, out float2 uv)
     return true;
 }
 
+// Reflection ray for an arbitrary pixel, used to measure how fast the reflected image moves
+// across neighbouring pixels. Curvature makes this swing hard even at roughness zero.
+bool ReflectionRayAt(uint2 pixel, uint2 size, out float3 worldOrigin, out float3 direction)
+{
+    worldOrigin = 0.0f.xxx;
+    direction = 0.0f.xxx;
+    float depth = GetTexture(depthHandle).Load(int3(pixel, 0)).r;
+    if (IsBackgroundDepth(depth))
+    {
+        return false;
+    }
+
+    float2 uv = (float2(pixel) + 0.5f) / float2(size);
+    float3 cameraRelativePosition = ReconstructCameraRelativePosition(uv, depth);
+    float3 normal = DecodeNormal(GetTexture(normalHandle).Load(int3(pixel, 0)).xyz);
+    float3 viewDirection = normalize(-cameraRelativePosition);
+    worldOrigin = cameraRelativePosition + camera.cameraOrigin;
+    direction = normalize(reflect(-viewDirection, normal));
+    return true;
+}
+
+/// Where a neighbouring pixel's reflection ray would land at the same ray length. Falls back to
+/// the centre uv when the neighbour is not a comparable surface, keeping silhouettes sharp.
+float2 NeighbourReflectionHitUv(uint2 pixel, uint2 size, float rayLength, float2 fallbackUv)
+{
+    float3 worldOrigin;
+    float3 direction;
+    if (!ReflectionRayAt(pixel, size, worldOrigin, direction))
+    {
+        return fallbackUv;
+    }
+
+    float2 uv;
+    if (!ProjectWorldPosition(worldOrigin + direction * rayLength, uv))
+    {
+        return fallbackUv;
+    }
+
+    return uv;
+}
+
 /// Weight with which the previous frame's shaded color can stand in for a ray hit, in 0..1.
 /// Every term is a ramp rather than a test: a hit that is half-trusted contributes half its
 /// screen color and half the freshly shaded material, so the transition between the two sources
 /// is a gradient across the surface instead of a per-pixel coin flip that crawls as the camera
 /// moves. Only genuinely unusable cases (no history, behind the camera, hit projects onto sky)
 /// return zero outright.
-float ComputeScreenReuseWeight(float3 hitPosition, float roughness, out float3 radiance)
+float ComputeScreenReuseWeight(
+    float3 hitPosition,
+    float roughness,
+    float rayLength,
+    uint2 pixel,
+    out float3 radiance)
 {
     radiance = 0.0f.xxx;
     if (colorPyramidValid == 0u)
@@ -140,6 +188,12 @@ float ComputeScreenReuseWeight(float3 hitPosition, float roughness, out float3 r
         return 0.0f;
     }
 
+    float footprintLevel = ReflectionFootprintLevel(
+        uv,
+        NeighbourReflectionHitUv(uint2(min(pixel.x + 1u, size.x - 1u), pixel.y), size, rayLength, uv),
+        NeighbourReflectionHitUv(uint2(pixel.x, min(pixel.y + 1u, size.y - 1u)), size, rayLength, uv),
+        size);
+
     // Reflections run ahead of deferred lighting, so the only shaded color available for a
     // visible hit is the previous frame's pyramid.
     float historyConfidence;
@@ -152,6 +206,8 @@ float ComputeScreenReuseWeight(float3 hitPosition, float roughness, out float3 r
         uv,
         roughness,
         edgeFade,
+        footprintLevel,
+        reprojectionStrength,
         historyConfidence);
     return saturate(edgeWeight * separationWeight * historyConfidence);
 }
@@ -366,7 +422,12 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 hitPosition = ray.Origin + reflectionDirection * query.CommittedRayT();
     float3 screenRadiance;
-    float screenReuseWeight = ComputeScreenReuseWeight(hitPosition, roughness, screenRadiance);
+    float screenReuseWeight = ComputeScreenReuseWeight(
+        hitPosition,
+        roughness,
+        query.CommittedRayT(),
+        pixel,
+        screenRadiance);
     float3 reflectedRadiance = screenRadiance;
     if (screenReuseWeight < 1.0f)
     {

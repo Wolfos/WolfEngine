@@ -19,6 +19,23 @@ float ReflectionScreenEdgeWeight(float2 uv, float edgeFade)
     return saturate(distanceToEdge / max(edgeFade, 1e-4f));
 }
 
+/// Pyramid level needed to sample the reflected image without aliasing, from how far apart
+/// neighbouring pixels land in the pyramid. Roughness alone is not enough: a mirror is roughness
+/// zero, but a curved one compresses a wide swath of the scene into a few pixels, and fetching
+/// that at full resolution aliases. The pattern is fixed while the camera is still and crawls
+/// once it moves, which is the wobble.
+float ReflectionFootprintLevel(
+    float2 hitUv,
+    float2 neighbourHitUvX,
+    float2 neighbourHitUvY,
+    uint2 framebufferSize)
+{
+    float2 deltaX = (neighbourHitUvX - hitUv) * float2(framebufferSize);
+    float2 deltaY = (neighbourHitUvY - hitUv) * float2(framebufferSize);
+    float spreadInPixels = max(length(deltaX), length(deltaY));
+    return log2(max(spreadInPixels, 1.0f));
+}
+
 /// Fetches shaded radiance for a screen-space hit from the previous frame's color pyramid.
 /// The hit is reprojected through its own motion vector, and the pyramid level is chosen from
 /// the reflector's roughness so glossy lobes read pre-filtered color instead of a single tap.
@@ -33,13 +50,15 @@ float3 SampleReflectionColorPyramid(
     float2 hitUv,
     float roughness,
     float edgeFade,
+    float footprintLevel,
+    float reprojectionStrength,
     out float confidence)
 {
     confidence = 0.0f;
     uint levelCount = clamp(colorPyramidLevelCount, 1u, REFLECTION_MAX_COLOR_PYRAMID_LEVELS);
     uint2 hitPixel = min(uint2(saturate(hitUv) * float2(framebufferSize)), framebufferSize - 1u);
     float2 velocity = GetTexture(velocityHandle).Load(int3(hitPixel, 0)).xy;
-    float2 historyUv = hitUv + velocity / float2(framebufferSize);
+    float2 historyUv = hitUv + velocity * reprojectionStrength / float2(framebufferSize);
     float historyEdgeWeight = ReflectionScreenEdgeWeight(historyUv, edgeFade);
     if (historyEdgeWeight <= 0.0f)
     {
@@ -47,7 +66,10 @@ float3 SampleReflectionColorPyramid(
         return 0.0f.xxx;
     }
 
-    float level = saturate(roughness) * float(levelCount - 1u);
+    float level = clamp(
+        max(saturate(roughness) * float(levelCount - 1u), footprintLevel),
+        0.0f,
+        float(levelCount - 1u));
     uint lowLevel = uint(floor(level));
     uint highLevel = min(lowLevel + 1u, levelCount - 1u);
     SamplerState linearSampler = GetSampler(samplerHandle);

@@ -35,6 +35,7 @@ public readonly struct ReflectionsPassConfig
 	public required float MaxRoughness { get; init; }
 	public required float EdgeFade { get; init; }
 	public required float ScreenReuseFalloff { get; init; }
+	public required float ReprojectionStrength { get; init; }
 	public required float Intensity { get; init; }
 	public IGfxTopLevelAccelerationStructure? TopLevelAccelerationStructure { get; init; }
 	public IGfxBuffer? InstanceBuffer { get; init; }

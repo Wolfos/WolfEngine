@@ -31,6 +31,14 @@ public struct ReflectionConfig
 
 	public bool Enabled { get; set; } = true;
 	public ReflectionMode Mode { get; set; } = ReflectionMode.ScreenSpace;
+
+	/// <summary>
+	/// How strongly a screen-space hit is reprojected through its motion vector before the
+	/// previous frame's color pyramid is sampled, in 0..1. One is geometrically correct per
+	/// surface point; zero samples the previous frame where the hit is now, trading a frame of
+	/// lag for a fetch that does not warp per pixel as the camera moves.
+	/// </summary>
+	public float ReprojectionStrength { get; set; } = 1.0f;
 	public ScreenSpaceReflectionSettings ScreenSpaceSettings { get; set; } = new();
 	public RayTracedReflectionSettings RayTracedSettings { get; set; } = new();
 }

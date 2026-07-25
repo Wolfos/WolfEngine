@@ -131,6 +131,7 @@ public sealed class ReflectionsPass
 				1.0f),
 			EdgeFade = Math.Clamp(screenSpace.EdgeFade, 0.001f, 0.5f),
 			ScreenReuseFalloff = Math.Clamp(rayTraced.ScreenReuseFalloff, 0.0f, 1.0f),
+			ReprojectionStrength = Math.Clamp(settings.ReprojectionStrength, 0.0f, 1.0f),
 			Intensity = Math.Max(isRayTraced ? rayTraced.Intensity : screenSpace.Intensity, 0.0f),
 			TopLevelAccelerationStructure = isRayTraced ? rayTracingSceneResources?.TopLevelAccelerationStructure : null,
 			InstanceBuffer = isRayTraced ? gpuDrawResources.InstanceBuffer : null,
@@ -202,6 +203,7 @@ public sealed class ReflectionsPass
 		settingsWriter.SetFloat("maxRoughness", config.MaxRoughness);
 		settingsWriter.SetFloat("edgeFade", config.EdgeFade);
 		settingsWriter.SetFloat("intensity", config.Intensity);
+		settingsWriter.SetFloat("reprojectionStrength", config.ReprojectionStrength);
 		settingsWriter.SetUInt("colorPyramidLevelCount", (uint)Math.Max(config.ColorPyramidLevelCount, 1));
 		settingsWriter.SetUInt("colorPyramidValid", config.ColorPyramidValid ? 1u : 0u);
 		for (var level = 0; level < config.ColorPyramidLevels.Length; level++)
