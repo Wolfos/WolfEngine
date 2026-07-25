@@ -130,6 +130,7 @@ public sealed class ReflectionsPass
 				0.001f,
 				1.0f),
 			EdgeFade = Math.Clamp(screenSpace.EdgeFade, 0.001f, 0.5f),
+			ScreenReuseFalloff = Math.Clamp(rayTraced.ScreenReuseFalloff, 0.0f, 1.0f),
 			Intensity = Math.Max(isRayTraced ? rayTraced.Intensity : screenSpace.Intensity, 0.0f),
 			TopLevelAccelerationStructure = isRayTraced ? rayTracingSceneResources?.TopLevelAccelerationStructure : null,
 			InstanceBuffer = isRayTraced ? gpuDrawResources.InstanceBuffer : null,
@@ -210,6 +211,7 @@ public sealed class ReflectionsPass
 
 		if (config.Mode == ReflectionMode.RayTraced)
 		{
+			settingsWriter.SetFloat("screenReuseFalloff", config.ScreenReuseFalloff);
 			var directionalLightCount = 0;
 			for (var i = 0;
 			     i < sceneData.Lights.Count &&

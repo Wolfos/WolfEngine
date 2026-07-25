@@ -61,6 +61,13 @@ public struct RayTracedReflectionSettings
 	public float Bias { get; set; } = 0.03f;
 	public float MaxRoughness { get; set; } = 0.8f;
 	public float ScreenReuseThickness { get; set; } = 0.2f;
+
+	/// <summary>
+	/// Fraction of the screen-reuse depth budget over which reused screen color cross-fades into
+	/// freshly shaded hit material, in 0..1. Zero restores a hard cutoff, which makes the choice
+	/// binary per pixel and tends to crawl as the camera moves.
+	/// </summary>
+	public float ScreenReuseFalloff { get; set; } = 0.5f;
 	public float Intensity { get; set; } = 1.0f;
 }
 

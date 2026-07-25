@@ -43,7 +43,7 @@ cbuffer ReflectionSettings : register(b2)
     uint directionalLightCount;
     uint colorPyramidLevelCount;
     uint colorPyramidValid;
-    float hitLightingPadding;
+    float screenReuseFalloff;
     uint colorPyramidHandles[REFLECTION_MAX_COLOR_PYRAMID_LEVELS];
     DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
 };
@@ -72,6 +72,8 @@ float3 ReconstructCameraRelativePosition(float2 uv, float depth)
     return positionH.xyz / positionH.w;
 }
 
+// Only rejects positions behind the camera. Whether the projection landed inside the frame is
+// left to an edge weight, so screen reuse ramps out at the borders instead of switching off.
 bool ProjectWorldPosition(float3 worldPosition, out float2 uv)
 {
     float3 cameraRelativePosition = worldPosition - camera.cameraOrigin;
@@ -83,37 +85,59 @@ bool ProjectWorldPosition(float3 worldPosition, out float2 uv)
     }
     float2 ndc = clip.xy / clip.w;
     uv = float2(ndc.x * 0.5f + 0.5f, -ndc.y * 0.5f + 0.5f);
-    return all(uv > 0.0f.xx) && all(uv < 1.0f.xx);
+    return true;
 }
 
-bool TrySampleVisibleScreenRadiance(float3 hitPosition, float roughness, out float3 radiance)
+/// Weight with which the previous frame's shaded color can stand in for a ray hit, in 0..1.
+/// Every term is a ramp rather than a test: a hit that is half-trusted contributes half its
+/// screen color and half the freshly shaded material, so the transition between the two sources
+/// is a gradient across the surface instead of a per-pixel coin flip that crawls as the camera
+/// moves. Only genuinely unusable cases (no history, behind the camera, hit projects onto sky)
+/// return zero outright.
+float ComputeScreenReuseWeight(float3 hitPosition, float roughness, out float3 radiance)
 {
     radiance = 0.0f.xxx;
     if (colorPyramidValid == 0u)
     {
-        return false;
+        return 0.0f;
     }
 
     float2 uv;
     if (!ProjectWorldPosition(hitPosition, uv))
     {
-        return false;
+        return 0.0f;
+    }
+
+    float edgeWeight = ReflectionScreenEdgeWeight(uv, edgeFade);
+    if (edgeWeight <= 0.0f)
+    {
+        return 0.0f;
     }
 
     uint2 size = uint2(framebufferSizeX, framebufferSizeY);
-    uint2 hitPixel = min(uint2(uv * float2(size)), size - 1u);
+    uint2 hitPixel = min(uint2(saturate(uv) * float2(size)), size - 1u);
     float sceneDepth = GetTexture(depthHandle).Load(int3(hitPixel, 0)).r;
     if (IsBackgroundDepth(sceneDepth))
     {
-        return false;
+        return 0.0f;
     }
 
-    float2 hitUv = (float2(hitPixel) + 0.5f) / float2(size);
-    float3 scenePosition = ReconstructCameraRelativePosition(hitUv, sceneDepth) + camera.cameraOrigin;
+    // How well the depth buffer agrees that this hit is the surface visible at that pixel.
+    // Fading over the upper half of the budget keeps thin geometry and grazing hits from
+    // popping in and out between frames.
+    float2 sceneUv = (float2(hitPixel) + 0.5f) / float2(size);
+    float3 scenePosition = ReconstructCameraRelativePosition(sceneUv, sceneDepth) + camera.cameraOrigin;
     float allowedSeparation = thickness * (1.0f + length(scenePosition - camera.cameraOrigin) * 0.02f);
-    if (distance(scenePosition, hitPosition) > allowedSeparation)
+    float separationFadeStart = min(
+        allowedSeparation * (1.0f - saturate(screenReuseFalloff)),
+        allowedSeparation - 1e-5f);
+    float separationWeight = 1.0f - smoothstep(
+        separationFadeStart,
+        allowedSeparation,
+        distance(scenePosition, hitPosition));
+    if (separationWeight <= 0.0f)
     {
-        return false;
+        return 0.0f;
     }
 
     // Reflections run ahead of deferred lighting, so the only shaded color available for a
@@ -127,8 +151,9 @@ bool TrySampleVisibleScreenRadiance(float3 hitPosition, float roughness, out flo
         size,
         uv,
         roughness,
+        edgeFade,
         historyConfidence);
-    return historyConfidence > 0.0f;
+    return saturate(edgeWeight * separationWeight * historyConfidence);
 }
 
 float TraceDirectionalVisibility(float3 worldPosition, float3 worldNormal, float3 lightDirection)
@@ -340,16 +365,22 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float3 hitPosition = ray.Origin + reflectionDirection * query.CommittedRayT();
-    float3 reflectedRadiance = 0.0f.xxx;
-    if (!TrySampleVisibleScreenRadiance(hitPosition, roughness, reflectedRadiance))
+    float3 screenRadiance;
+    float screenReuseWeight = ComputeScreenReuseWeight(hitPosition, roughness, screenRadiance);
+    float3 reflectedRadiance = screenRadiance;
+    if (screenReuseWeight < 1.0f)
     {
-        if (!TryShadeHitMaterial(query, hitPosition, reflectionDirection, reflectedRadiance))
+        // Shading the hit material is the expensive path, so it stays skipped wherever screen
+        // reuse is fully trusted. Partially trusted hits pay for both and cross-fade.
+        float3 materialRadiance;
+        if (!TryShadeHitMaterial(query, hitPosition, reflectionDirection, materialRadiance))
         {
             // Geometry without a resolvable material still occludes the sky.
-            reflectedRadiance =
+            materialRadiance =
                 SamplePrefiltered(prefilteredHandle, samplerHandle, reflectionDirection, roughness) *
                 IBL_EXPOSURE * 0.25f;
         }
+        reflectedRadiance = lerp(materialRadiance, screenRadiance, screenReuseWeight);
     }
 
     outputTexture[pixel] = float4(reflectedRadiance * intensity, saturate(roughnessFade));

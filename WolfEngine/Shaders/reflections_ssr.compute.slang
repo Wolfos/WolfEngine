@@ -64,12 +64,6 @@ bool ProjectCameraRelativePosition(float3 position, out float2 uv)
     return all(uv > 0.0f.xx) && all(uv < 1.0f.xx);
 }
 
-float ScreenEdgeConfidence(float2 uv)
-{
-    float distanceToEdge = min(min(uv.x, 1.0f - uv.x), min(uv.y, 1.0f - uv.y));
-    return saturate(distanceToEdge / max(edgeFade, 1e-4f));
-}
-
 ScreenTraceResult TraceScreenSpaceReflection(float3 origin, float3 direction)
 {
     ScreenTraceResult result;
@@ -191,7 +185,7 @@ ScreenTraceResult TraceScreenSpaceReflection(float3 origin, float3 direction)
 
             result.uv = refinedUv;
             result.confidence =
-                ScreenEdgeConfidence(refinedUv) *
+                ReflectionScreenEdgeWeight(refinedUv, edgeFade) *
                 saturate(1.0f - high / max(maxRayDistance, 1e-4f)) *
                 saturate(1.0f - refinedDepthDelta / max(adaptiveThickness, 1e-4f)) *
                 frontFaceConfidence;
@@ -256,6 +250,7 @@ void ReflectionsScreenSpaceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         size,
         trace.uv,
         roughness,
+        edgeFade,
         historyConfidence);
     float weight = saturate(trace.confidence * roughnessFade * historyConfidence);
     outputTexture[pixel] = float4(reflectedRadiance * intensity, weight);
