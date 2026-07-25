@@ -119,6 +119,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private ulong _packedIndexBufferUsedBytes;
 
 	private uint _backbufferIndex;
+	private uint _swapchainFlags;
+	private bool _allowTearing;
 	private nint _windowHandle;
 	private Int2 _framebufferSize = Int2.Zero;
 	private readonly List<IKeyboard> _keyboards = new();
@@ -1307,8 +1309,32 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		return new Int2(size.X, size.Y);
 	}
 
+	private const uint PresentAllowTearing = 0x00000200;
+
+	private bool QueryAllowTearingSupport()
+	{
+		IDXGIFactory5* factory5 = null;
+		var factory5Guid = IDXGIFactory5.Guid;
+		if (_factory.Handle->QueryInterface(ref factory5Guid, (void**) &factory5) < 0 || factory5 is null)
+		{
+			return false;
+		}
+
+		var allowTearing = 0;
+		var result = factory5->CheckFeatureSupport(
+			Silk.NET.DXGI.Feature.PresentAllowTearing,
+			&allowTearing,
+			(uint) sizeof(int));
+		factory5->Release();
+
+		return result >= 0 && allowTearing != 0;
+	}
+
 	private void CreateSwapchain()
 	{
+		_allowTearing = QueryAllowTearingSupport();
+		_swapchainFlags = _allowTearing ? (uint) SwapChainFlag.AllowTearing : 0u;
+
 		var swapChainDesc = new SwapChainDesc1
 		{
 			BufferCount = FrameCount,
@@ -1316,6 +1342,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			BufferUsage = DXGI.UsageRenderTargetOutput,
 			SwapEffect = SwapEffect.FlipDiscard,
 			SampleDesc = new(1, 0),
+			Flags = _swapchainFlags,
 			Width = (uint) Math.Max(_framebufferSize.X, 1),
 			Height = (uint) Math.Max(_framebufferSize.Y, 1)
 		};
@@ -1568,7 +1595,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		}
 
 		SilkMarshal.ThrowHResult(_swapchain.ResizeBuffers(FrameCount, (uint) newSize.X, (uint) newSize.Y,
-			Format.FormatB8G8R8A8Unorm, 0));
+			Format.FormatB8G8R8A8Unorm, _swapchainFlags));
 		_backbufferIndex = _swapchain.GetCurrentBackBufferIndex();
 
 		CreateRtvHeapAndTargets();
@@ -1662,8 +1689,11 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		_gfxDevice.Submit(presentCommandList);
 
-		var presentInterval = Screen.VSyncEnabled ? 1u : 0u;
-		var presentResult = _swapchain.Present(presentInterval, 0);
+		var vsyncEnabled = Screen.VSyncEnabled;
+		var presentInterval = vsyncEnabled ? 1u : 0u;
+		// The tearing flag is only legal at SyncInterval 0 on a swapchain created with SwapChainFlag.AllowTearing.
+		var presentFlags = !vsyncEnabled && _allowTearing ? PresentAllowTearing : 0u;
+		var presentResult = _swapchain.Present(presentInterval, presentFlags);
 		if (presentResult < 0)
 		{
 			DumpDxgiDebugMessages("Present failure");
