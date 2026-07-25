@@ -4,6 +4,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
+using System.Threading;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
@@ -55,7 +56,8 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private Vector2 _mouseWheel = Vector2.Zero;
 	private ImGuiFontAtlas _fontAtlas;
 	private float _fontDpiScale = 1.0f;
-	private bool _fontAtlasDirty = true;
+
+	private ImGuiFontAtlas _uploadedFontAtlas;
 	private static ImFontPtr _regularFont;
 	private static ImFontPtr _boldFont;
 
@@ -239,7 +241,8 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			io.DisplaySize.X * io.DisplayFramebufferScale.X,
 			io.DisplaySize.Y * io.DisplayFramebufferScale.Y);
 
-		var hasFontAtlas = _fontAtlasDirty && _fontAtlas.PixelsRgba.Length > 0;
+		var hasFontAtlas = ReferenceEquals(Volatile.Read(ref _uploadedFontAtlas), _fontAtlas) == false &&
+		                   _fontAtlas.PixelsRgba.Length > 0;
 		var frame = new UiFrameData
 		{
 			VertexCount = totalVtx,
@@ -362,18 +365,15 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 
 		_fontAtlas = BuildFontAtlas(io);
 		io.Fonts.SetTexID(UiTextureIds.FontAtlas);
-		_fontAtlasDirty = true;
 	}
 
+	/// <summary>
+	/// Called on the render thread after the atlas pixels have been uploaded to the GPU.
+	/// Must stay lock-free: see <see cref="_uploadedFontAtlas"/>.
+	/// </summary>
 	private void MarkFontAtlasUploaded(ImGuiFontAtlas atlas)
 	{
-		lock (_contextLock)
-		{
-			if (ReferenceEquals(_fontAtlas, atlas))
-			{
-				_fontAtlasDirty = false;
-			}
-		}
+		Volatile.Write(ref _uploadedFontAtlas, atlas);
 	}
 
 	private static ImFontPtr TryLoadBoldFont(ImGuiIOPtr io, float dpiScale)
