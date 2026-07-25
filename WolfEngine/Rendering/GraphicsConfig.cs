@@ -16,19 +16,14 @@ public static class GraphicsConfig
 	public static bool EnableD3DDebugLayer { get; set; } = false;
 
 	/// <summary>
-	/// Force per-pass GPU debug markers on. Deliberately independent of <see cref="EnableD3DDebugLayer"/>:
-	/// markers are a capture-tool feature and have nothing to do with validation, and gating them on the
-	/// debug layer meant they only ever ran while validation was on, which is also the only configuration
-	/// that could observe them being malformed. Set by WOLF_GPU_MARKERS=1.
+	/// Force per-pass GPU debug markers on.
 	/// Prefer <see cref="ShouldEmitGpuMarkers"/>, which also picks up an attached capture tool.
 	/// </summary>
 	public static bool EnableGpuMarkers { get; set; } =
 		string.Equals(Environment.GetEnvironmentVariable("WOLF_GPU_MARKERS"), "1", StringComparison.Ordinal);
 
 	/// <summary>
-	/// Whether GPU markers should be recorded right now. Re-checked rather than cached because a capture
-	/// tool typically attaches after the renderer has already started: PIX injects its capturer when a
-	/// capture is requested, which is long after any startup-time probe would have run.
+	/// Whether GPU markers should be recorded right now.
 	/// </summary>
 	public static bool ShouldEmitGpuMarkers() => EnableGpuMarkers || IsCaptureToolAttached();
 
