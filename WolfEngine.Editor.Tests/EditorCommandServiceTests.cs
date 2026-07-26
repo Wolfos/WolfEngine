@@ -373,7 +373,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 
 		var requested = window.RequestDeleteSelectedItem();
 
@@ -393,7 +394,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestDeleteSelectedItem();
@@ -425,7 +427,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestRenameSelectedItem();
@@ -446,7 +449,8 @@ public sealed class EditorCommandServiceTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 		window.SetSelectedFolderForTesting("Assets/Data");
 
 		var requested = window.RequestRenameSelectedItem();

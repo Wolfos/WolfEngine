@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.UI;
 
@@ -33,6 +34,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	private readonly IIconManager _icons;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly IFileManagerService _fileManagerService;
 	private readonly EditorCameraSystem? _editorCameraSystem;
 	private readonly AssetsWindowDragDropState _dragDrop = new(DragPreviewRounding);
 	private readonly AssetsWindowSelectionState _selection = new();
@@ -58,6 +60,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		IIconManager icons,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
+		IFileManagerService fileManagerService,
 		EditorCameraSystem? editorCameraSystem = null)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
@@ -69,6 +72,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_icons = icons ?? throw new ArgumentNullException(nameof(icons));
 		_interactionState = interactionState ?? throw new ArgumentNullException(nameof(interactionState));
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
+		_fileManagerService = fileManagerService ?? throw new ArgumentNullException(nameof(fileManagerService));
 		_editorCameraSystem = editorCameraSystem;
 	}
 
@@ -98,6 +102,16 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	internal void ProcessDeferredRenameForTesting()
 	{
 		ProcessScheduledRename();
+	}
+
+	internal void OpenFolderInFileManagerForTesting(string folderPath)
+	{
+		OpenFolderInFileManager(folderPath);
+	}
+
+	internal void RevealSourceInFileManagerForTesting(string relativeSourcePath)
+	{
+		RevealSourceInFileManager(relativeSourcePath);
 	}
 
 	public override string Name => "Assets";
@@ -638,6 +652,36 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			RequestDelete(PendingDeleteTarget.ForFolder(folderPath));
 		}
+
+		ImGui.Separator();
+		if (ImGui.MenuItem($"Show in {_fileManagerService.FileManagerName}"))
+		{
+			OpenFolderInFileManager(folderPath);
+		}
+	}
+
+	private void OpenFolderInFileManager(string folderPath)
+	{
+		try
+		{
+			_fileManagerService.OpenFolder(_projectService.GetAbsolutePath(folderPath));
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to open folder in {_fileManagerService.FileManagerName}: {ex.Message}");
+		}
+	}
+
+	private void RevealSourceInFileManager(string relativeSourcePath)
+	{
+		try
+		{
+			_fileManagerService.RevealPath(_projectService.GetAbsolutePath(relativeSourcePath));
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to show asset in {_fileManagerService.FileManagerName}: {ex.Message}");
+		}
 	}
 
 	private void CreateFolder(string parentFolderPath)
@@ -725,6 +769,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (ImGui.MenuItem(deleteLabel))
 		{
 			RequestDelete(PendingDeleteTarget.ForSource(contextTarget.RelativeSourcePath!));
+		}
+
+		ImGui.Separator();
+		if (ImGui.MenuItem($"Show in {_fileManagerService.FileManagerName}"))
+		{
+			RevealSourceInFileManager(contextTarget.RelativeSourcePath!);
 		}
 	}
 

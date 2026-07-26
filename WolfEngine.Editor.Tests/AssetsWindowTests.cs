@@ -7,6 +7,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -742,7 +743,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 
 		var movedSourcePath = window.MoveDragTargetForTesting("Source", "Assets/Models/Car.glb", "Assets/Vehicles");
 		var movedFolderPath = window.MoveDragTargetForTesting("Folder", "Assets/Models", "Assets/Vehicles");
@@ -751,6 +753,31 @@ public sealed class AssetsWindowTests
 		Assert.That(movedFolderPath, Is.EqualTo("Assets/Vehicles/Models"));
 		projectService.Received(1).MoveAssetSourceToFolder("Assets/Models/Car.glb", "Assets/Vehicles");
 		projectService.Received(1).MoveFolderToFolder("Assets/Models", "Assets/Vehicles");
+	}
+
+	[Test]
+	public void AssetsWindow_FileManagerActions_OpenFoldersAndRevealSources()
+	{
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.GetAbsolutePath("Assets/Models").Returns("/project/Assets/Models");
+		projectService.GetAbsolutePath("Assets/Models/Car.glb").Returns("/project/Assets/Models/Car.glb");
+		var fileManagerService = Substitute.For<IFileManagerService>();
+		var window = new AssetsWindow(
+			projectService,
+			Substitute.For<IProjectAssetPipelineService>(),
+			Substitute.For<IAssetThumbnailLoader>(),
+			new AssetSelectionService(),
+			Substitute.For<IEditorAssetHandlerRegistry>(),
+			Substitute.For<IIconManager>(),
+			new EditorInteractionState(),
+			Substitute.For<IEditorCommandService>(),
+			fileManagerService);
+
+		window.OpenFolderInFileManagerForTesting("Assets/Models");
+		window.RevealSourceInFileManagerForTesting("Assets/Models/Car.glb");
+
+		fileManagerService.Received(1).OpenFolder("/project/Assets/Models");
+		fileManagerService.Received(1).RevealPath("/project/Assets/Models/Car.glb");
 	}
 
 	[Test]
@@ -778,7 +805,8 @@ public sealed class AssetsWindowTests
 			Substitute.For<IEditorAssetHandlerRegistry>(),
 			Substitute.For<IIconManager>(),
 			new EditorInteractionState(),
-			Substitute.For<IEditorCommandService>());
+			Substitute.For<IEditorCommandService>(),
+			Substitute.For<IFileManagerService>());
 
 		window.HandleCreationResultForTesting(EditorAssetCreationResult.Succeeded(assetId));
 
