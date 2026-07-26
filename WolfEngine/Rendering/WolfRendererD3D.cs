@@ -1275,8 +1275,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private static bool SupportsUnorderedAccess(Texture texture)
 	{
 		return texture is not null &&
-		       texture.IsSrgb == false &&
-		       (texture.Format == TextureFormat.Rgba8Unorm || texture.Format == TextureFormat.Bgra8Unorm);
+		       TextureFormatUtilities.SupportsUnorderedAccess(texture.Format, texture.IsSrgb);
 	}
 
 	private static Format ToDxgiTextureFormat(TextureFormat format, bool isSrgb)
@@ -1292,6 +1291,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			TextureFormat.Bc4Unorm => Format.FormatBC4Unorm,
 			TextureFormat.Bc5Unorm => Format.FormatBC5Unorm,
 			TextureFormat.Bc7Unorm => isSrgb ? Format.FormatBC7UnormSrgb : Format.FormatBC7Unorm,
+			TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported runtime texture format.")
 		};
 	}

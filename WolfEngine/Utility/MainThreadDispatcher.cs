@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 
 namespace WolfEngine.Utility;
@@ -73,10 +74,7 @@ public sealed class MainThreadDispatcher : IMainThreadDispatcher
 		_pending.Enqueue(item);
 		item.Done.Wait();
 
-		if (item.Exception is not null)
-		{
-			throw item.Exception;
-		}
+		Rethrow(item);
 	}
 
 	public T Invoke<T>(Func<T> action)
@@ -96,11 +94,22 @@ public sealed class MainThreadDispatcher : IMainThreadDispatcher
 		_pending.Enqueue(item);
 		item.Done.Wait();
 
-		if (item.Exception is not null)
+		Rethrow(item);
+		return result;
+	}
+
+	/// <summary>
+	/// Rethrows on the calling thread while keeping the stack trace from the main thread. A plain
+	/// <c>throw item.Exception</c> resets it, which reports every failure as originating here and hides
+	/// the frame that actually failed.
+	/// </summary>
+	private static void Rethrow(WorkItem item)
+	{
+		if (item.Exception is null)
 		{
-			throw item.Exception;
+			return;
 		}
 
-		return result;
+		ExceptionDispatchInfo.Capture(item.Exception).Throw();
 	}
 }

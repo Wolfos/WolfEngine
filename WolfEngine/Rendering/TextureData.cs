@@ -24,6 +24,20 @@ public static class TextureFormatUtilities
 		TextureFormat.Bc7Unorm or
 		TextureFormat.Astc4x4Unorm;
 
+	/// <summary>
+	/// Whether a content texture in this format may be created with unordered-access support, so a compute
+	/// shader can write to it. Both backends must agree: creating the resource without it and then binding
+	/// a UAV over it is invalid, which D3D12 reports as a command-list recording failure and Metal does not
+	/// report at all.
+	/// </summary>
+	/// <remarks>
+	/// sRGB is excluded because typed unordered access is not defined for sRGB formats. Rgba16Float is the
+	/// terrain height preview format and is written (never typed-loaded) by the authoring brushes.
+	/// </remarks>
+	public static bool SupportsUnorderedAccess(TextureFormat format, bool isSrgb) =>
+		isSrgb == false &&
+		format is TextureFormat.Rgba8Unorm or TextureFormat.Bgra8Unorm or TextureFormat.Rgba16Float;
+
 	public static int GetBlockWidth(TextureFormat format) => format switch
 	{
 		TextureFormat.Bc1Unorm => 4,

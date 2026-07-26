@@ -19,7 +19,8 @@ public sealed class ScreenSpaceDecalPass
 	private ShaderPropertyWriter? _bindlessWriter;
 	private ShaderPropertyWriter? _cameraWriter;
 	private ShaderPropertyWriter? _drawWriter;
-	private uint _decalProjectorBufferRegisterIndex = 20;
+	private const uint InvalidRegisterIndex = uint.MaxValue;
+	private uint _decalProjectorBufferRegisterIndex = InvalidRegisterIndex;
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private Mesh? _projectorMesh;
 	private IGfxBuffer? _projectorVertexBuffer;
@@ -106,8 +107,7 @@ public sealed class ScreenSpaceDecalPass
 				new ColorTargetBinding(config.TargetNormal),
 				new ColorTargetBinding(config.TargetMaterial),
 				new ColorTargetBinding(config.TargetEmissive)
-			},
-			new DepthTargetBinding(config.DepthTexture, readOnlyDepth: true));
+			});
 		var viewport = new Viewport(0.0f, 0.0f, config.FramebufferWidth, config.FramebufferHeight);
 		commandList.BeginPass(targets, viewport);
 		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
@@ -292,7 +292,7 @@ public sealed class ScreenSpaceDecalPass
 				TextureFormat.Rgba8Unorm,
 				TextureFormat.Rgba16Float
 			}),
-			depthStencil: new DepthStencilFormat(TextureFormat.D32Float, readOnlyDepth: true),
+			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
 			renderState: renderState,
 			shaderVariant: "ScreenSpaceDecal");
 		_pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
@@ -301,10 +301,13 @@ public sealed class ScreenSpaceDecalPass
 		_bindlessWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("BindlessHandles"));
 		_cameraWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("CameraParams"));
 		_drawWriter = new ShaderPropertyWriter(reflection.GetConstantBuffer("DrawParams"));
-		if (reflection.TryGetResource("g_Decals", out var decalResource))
+		if (reflection.TryGetResource("g_Decals", out var decalResource) == false)
 		{
-			_decalProjectorBufferRegisterIndex = decalResource.RegisterIndex;
+			throw new InvalidOperationException(
+				"Screen-space decal shader reflection does not expose 'g_Decals'; the projector buffer has no register to bind to.");
 		}
+
+		_decalProjectorBufferRegisterIndex = decalResource.RegisterIndex;
 
 		_compiledBackendKind = device.BackendKind;
 	}

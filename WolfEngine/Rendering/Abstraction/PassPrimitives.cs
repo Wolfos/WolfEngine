@@ -111,8 +111,14 @@ public readonly struct DepthTargetBinding
 
 	public IGfxTexture Texture { get; }
 
+	/// <remarks>
+	/// Not implemented by any backend. D3D12 always builds a writable DSV (<c>DsvFlags.None</c>) and Metal
+	/// has no read-only depth attachment at all, so a pass that needs to sample the depth buffer it is
+	/// rendering with must read it as a texture and leave the depth attachment unbound.
+	/// </remarks>
 	public bool ReadOnlyDepth { get; }
 
+	/// <inheritdoc cref="ReadOnlyDepth"/>
 	public bool ReadOnlyStencil { get; }
 }
 
@@ -433,8 +439,10 @@ public readonly struct DepthStencilFormat : IEquatable<DepthStencilFormat>
 
 	public TextureFormat Format { get; }
 
+	/// <inheritdoc cref="DepthTargetBinding.ReadOnlyDepth"/>
 	public bool ReadOnlyDepth { get; }
 
+	/// <inheritdoc cref="DepthTargetBinding.ReadOnlyDepth"/>
 	public bool ReadOnlyStencil { get; }
 
 	public bool Equals(DepthStencilFormat other)

@@ -891,8 +891,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private static bool SupportsUnorderedAccess(Texture texture)
     {
         return texture is not null &&
-               texture.IsSrgb == false &&
-               (texture.Format == TextureFormat.Rgba8Unorm || texture.Format == TextureFormat.Bgra8Unorm);
+               TextureFormatUtilities.SupportsUnorderedAccess(texture.Format, texture.IsSrgb);
     }
 
     public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height)

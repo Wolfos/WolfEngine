@@ -21,8 +21,6 @@ public enum PrimitiveTopology
 /// </summary>
 public interface IGfxCommandList
 {
-	GraphicsBackendKind BackendKind { get; }
-
 	/// <summary>
 	/// Begins a named command scope. Backends may use this boundary to finish encoding work from the previous scope.
 	/// </summary>
