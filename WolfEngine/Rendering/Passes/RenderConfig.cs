@@ -242,20 +242,14 @@ public struct TemporalAntiAliasingConfig
 	}
 
 	public bool Enabled { get; set; } = true;
-	public int PhaseCount { get; set; } = 32;
-	public float OpaqueDepthThreshold { get; set; } = 0.004f;
-	public float AlphaTestDepthThreshold { get; set; } = 0.012f;
-	public float OpaqueClampSigma { get; set; } = 1.25f;
-	public float AlphaTestClampSigma { get; set; } = 0.85f;
-	public float LowMotionClampExpansion { get; set; } = 1.35f;
-	public float HighMotionClampExpansion { get; set; } = 1.1f;
-	public float ClampExpansionMotionScale { get; set; } = 0.5f;
-	public float LowMotionOpaqueHistoryWeight { get; set; } = 0.975f;
-	public float HighMotionOpaqueHistoryWeight { get; set; } = 0.85f;
-	public float OpaqueHistoryMotionScale { get; set; } = 0.35f;
-	public float LowMotionAlphaTestHistoryWeight { get; set; } = 0.9f;
-	public float HighMotionAlphaTestHistoryWeight { get; set; } = 0.7f;
-	public float AlphaTestHistoryMotionScale { get; set; } = 0.45f;
+	public int PhaseCount { get; set; } = 8;
+	public float StaticHistoryWeight { get; set; } = 0.95f;
+	public float MovingHistoryWeight { get; set; } = 0.65f;
+	public float MotionResponsePixels { get; set; } = 8.0f;
+	public float DepthRejectionAbsolute { get; set; } = 0.02f;
+	public float DepthRejectionRelative { get; set; } = 0.01f;
+	public float VarianceClipGamma { get; set; } = 1.0f;
+	public float AlphaTestHistoryScale { get; set; } = 0.75f;
 	public bool EnableCasSharpen { get; set; } = true;
-	public float CasSharpness { get; set; } = 1.0f;
+	public float CasSharpness { get; set; } = 0.35f;
 }

@@ -151,6 +151,11 @@ public sealed class RenderGraph
 				(ulong)_frameIndex,
 				taaPhaseCount)
 			: Vector2.Zero;
+		var previousJitterPixels = taaEnabled && _frameIndex > 0
+			? TemporalJitter.GetHaltonJitterPixels(
+				(ulong)(_frameIndex - 1),
+				taaPhaseCount)
+			: jitterPixels;
 		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
 		var jitteredProjection = taaEnabled
 			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
@@ -181,15 +186,22 @@ public sealed class RenderGraph
 			var hasPreviousCameraState = TryCreatePreviousCameraState(
 				snapshot,
 				unjitteredViewProjection,
+				snapshot.Camera.Perspective,
 				cameraPosition,
+				out var previousProjection,
 				out var previousViewProjection,
 				out var previousCameraOrigin);
+			var projectionChanged = hasPreviousCameraState &&
+			                        TemporalJitter.HasProjectionChanged(
+				                        snapshot.Camera.Perspective,
+				                        previousProjection);
 
 			sceneData = new(
 				view,
 				viewProjection,
 				snapshot.Camera.Perspective,
 				unjitteredViewProjection,
+				previousProjection,
 				previousViewProjection,
 				invProjection,
 				invViewProjection,
@@ -199,8 +211,11 @@ public sealed class RenderGraph
 				snapshot.Camera.NearPlane > 0.0f ? snapshot.Camera.NearPlane : Camera.DefaultNearPlane,
 				snapshot.Camera.FarPlane > 0.0f ? snapshot.Camera.FarPlane : Camera.DefaultFarPlane,
 				jitterPixels,
+				previousJitterPixels,
 				jitterNdc,
-				hasPreviousCameraState == false || (taaEnabled && _previousTaaEnabled == false),
+				hasPreviousCameraState == false ||
+				projectionChanged ||
+				(taaEnabled && _previousTaaEnabled == false),
 				_renderLights,
 				snapshot.DecalPackets);
 
@@ -303,7 +318,9 @@ public sealed class RenderGraph
 	private static bool TryCreatePreviousCameraState(
 		FrameSnapshot snapshot,
 		in Matrix4x4 fallbackViewProjection,
+		in Matrix4x4 fallbackProjection,
 		in Vector3 fallbackCameraOrigin,
+		out Matrix4x4 previousProjection,
 		out Matrix4x4 previousViewProjection,
 		out Vector3 previousCameraOrigin)
 	{
@@ -312,13 +329,15 @@ public sealed class RenderGraph
 		    Matrix4x4.Decompose(snapshot.PreviousCameraWorldTransform.LocalToWorld, out _, out _,
 			    out previousCameraOrigin) == false)
 		{
+			previousProjection = fallbackProjection;
 			previousViewProjection = fallbackViewProjection;
 			previousCameraOrigin = fallbackCameraOrigin;
 			return false;
 		}
 
 		previousView.Translation = Vector3.Zero;
-		previousViewProjection = previousView * snapshot.PreviousCamera.Perspective;
+		previousProjection = snapshot.PreviousCamera.Perspective;
+		previousViewProjection = previousView * previousProjection;
 		return true;
 	}
 

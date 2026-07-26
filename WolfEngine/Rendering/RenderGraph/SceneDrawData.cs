@@ -18,6 +18,7 @@ public sealed class SceneDrawData
 		Matrix4x4 viewProjection,
 		Matrix4x4 unjitteredProjection,
 		Matrix4x4 unjitteredViewProjection,
+		Matrix4x4 previousProjection,
 		Matrix4x4 previousViewProjection,
 		Matrix4x4 inverseProjection,
 		Matrix4x4 inverseViewProjection,
@@ -27,6 +28,7 @@ public sealed class SceneDrawData
 		float nearPlane,
 		float farPlane,
 		Vector2 jitterPixels,
+		Vector2 previousJitterPixels,
 		Vector2 jitterNdc,
 		bool resetHistory,
 		IReadOnlyList<LightPacket> lights,
@@ -36,6 +38,7 @@ public sealed class SceneDrawData
 		ViewProjection = viewProjection;
 		UnjitteredProjection = unjitteredProjection;
 		UnjitteredViewProjection = unjitteredViewProjection;
+		PreviousProjection = previousProjection;
 		PreviousViewProjection = previousViewProjection;
 		InverseProjection = inverseProjection;
 		InverseViewProjection = inverseViewProjection;
@@ -45,6 +48,7 @@ public sealed class SceneDrawData
 		NearPlane = nearPlane;
 		FarPlane = farPlane;
 		JitterPixels = jitterPixels;
+		PreviousJitterPixels = previousJitterPixels;
 		JitterNdc = jitterNdc;
 		ResetHistory = resetHistory;
 		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
@@ -58,6 +62,8 @@ public sealed class SceneDrawData
 	public Matrix4x4 UnjitteredProjection { get; }
 
 	public Matrix4x4 UnjitteredViewProjection { get; }
+
+	public Matrix4x4 PreviousProjection { get; }
 
 	public Matrix4x4 PreviousViewProjection { get; }
 
@@ -76,6 +82,8 @@ public sealed class SceneDrawData
 	public float FarPlane { get; }
 
 	public Vector2 JitterPixels { get; }
+
+	public Vector2 PreviousJitterPixels { get; }
 
 	public Vector2 JitterNdc { get; }
 

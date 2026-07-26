@@ -4,6 +4,7 @@ cbuffer BindlessHandles : register(b0)
 {
     uint currentColorHandle;
     uint velocityHandle;
+    uint normalHandle;
     uint materialHandle;
     uint currentDepthHandle;
     uint historyColorHandle;
@@ -18,40 +19,48 @@ cbuffer TaaSettings : register(b1)
     uint renderSizeY;
     uint historyValid;
     uint resetHistory;
-    float opaqueDepthThreshold;
-    float alphaTestDepthThreshold;
-    float opaqueClampSigma;
-    float alphaTestClampSigma;
-    float lowMotionClampExpansion;
-    float highMotionClampExpansion;
-    float clampExpansionMotionScale;
-    float lowMotionOpaqueHistoryWeight;
-    float highMotionOpaqueHistoryWeight;
-    float opaqueHistoryMotionScale;
-    float lowMotionAlphaTestHistoryWeight;
-    float highMotionAlphaTestHistoryWeight;
-    float alphaTestHistoryMotionScale;
-    float _taaPadding0;
-    float _taaPadding1;
+    float2 currentJitterPixels;
+    float2 previousJitterPixels;
+    float staticHistoryWeight;
+    float movingHistoryWeight;
+    float motionResponsePixels;
+    float depthRejectionAbsolute;
+    float depthRejectionRelative;
+    float varianceClipGamma;
+    float alphaTestHistoryScale;
+    float currentProjectionZBias;
+    float currentProjectionZScale;
+    float previousProjectionZBias;
+    float previousProjectionZScale;
+    row_major float4x4 inverseUnjitteredViewProjection;
+    row_major float4x4 previousViewProjection;
 };
+
+static const uint TAA_GROUP_WIDTH = 8u;
+static const uint TAA_TILE_WIDTH = 10u;
+static const uint TAA_TILE_PIXEL_COUNT = TAA_TILE_WIDTH * TAA_TILE_WIDTH;
+static const float TAA_BACKGROUND_DEPTH = 0.999999f;
+static const float TAA_MAX_HISTORY_AGE = 32.0f;
+
+groupshared float4 g_CurrentColorTile[TAA_TILE_PIXEL_COUNT];
 
 float3 RGBToYCoCg(float3 color)
 {
-    float Y = dot(color, float3(0.25f, 0.5f, 0.25f));
-    float Co = color.r - color.b;
-    float Cg = color.g - 0.5f * (color.r + color.b);
-    return float3(Y, Co, Cg);
+    float y = dot(color, float3(0.25f, 0.5f, 0.25f));
+    float co = color.r - color.b;
+    float cg = color.g - 0.5f * (color.r + color.b);
+    return float3(y, co, cg);
 }
 
 float3 YCoCgToRGB(float3 color)
 {
-    float Y = color.x;
-    float Co = color.y;
-    float Cg = color.z;
+    float y = color.x;
+    float co = color.y;
+    float cg = color.z;
     return float3(
-        Y + 0.5f * Co - 0.5f * Cg,
-        Y + 0.5f * Cg,
-        Y - 0.5f * Co - 0.5f * Cg);
+        y + 0.5f * co - 0.5f * cg,
+        y + 0.5f * cg,
+        y - 0.5f * co - 0.5f * cg);
 }
 
 float MaxComponent(float3 value)
@@ -59,7 +68,64 @@ float MaxComponent(float3 value)
     return max(value.x, max(value.y, value.z));
 }
 
-float4 SampleCatmullRom(Texture2D<float4> texture, SamplerState samplerState, float2 uv, float2 textureSize)
+bool IsBackground(float depth)
+{
+    return depth >= TAA_BACKGROUND_DEPTH;
+}
+
+float ReconstructViewDepth(float depth, float projectionZScale, float projectionZBias)
+{
+    float denominator = depth - projectionZBias;
+    if (abs(denominator) < 1e-6f)
+    {
+        denominator = denominator < 0.0f ? -1e-6f : 1e-6f;
+    }
+
+    return projectionZScale / denominator;
+}
+
+float DepthThreshold(float expectedViewDepth)
+{
+    return max(
+        depthRejectionAbsolute,
+        abs(expectedViewDepth) * depthRejectionRelative);
+}
+
+float3 DecodeNormal(float3 encodedNormal)
+{
+    return normalize(encodedNormal * 2.0f - 1.0f);
+}
+
+bool IsNeighborhoodSampleCompatible(
+    float centerDepth,
+    float3 centerNormal,
+    float sampleDepth,
+    float3 sampleNormal)
+{
+    bool centerBackground = IsBackground(centerDepth);
+    bool sampleBackground = IsBackground(sampleDepth);
+    if (centerBackground || sampleBackground)
+    {
+        return centerBackground && sampleBackground;
+    }
+
+    float centerViewDepth = ReconstructViewDepth(
+        centerDepth,
+        currentProjectionZScale,
+        currentProjectionZBias);
+    float sampleViewDepth = ReconstructViewDepth(
+        sampleDepth,
+        currentProjectionZScale,
+        currentProjectionZBias);
+    return abs(sampleViewDepth - centerViewDepth) <= DepthThreshold(centerViewDepth) &&
+        dot(centerNormal, sampleNormal) >= 0.8f;
+}
+
+float4 SampleCatmullRom(
+    Texture2D<float4> texture,
+    SamplerState samplerState,
+    float2 uv,
+    float2 textureSize)
 {
     float2 samplePos = uv * textureSize;
     float2 texPos1 = floor(samplePos - 0.5f) + 0.5f;
@@ -88,16 +154,71 @@ float4 SampleCatmullRom(Texture2D<float4> texture, SamplerState samplerState, fl
         texture.SampleLevel(samplerState, float2(texPos3.x, texPos3.y), 0.0f) * w3.x * w3.y;
 }
 
-[numthreads(8, 8, 1)]
-void TaaResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+float3 ClipLineToAabb(
+    float3 current,
+    float3 history,
+    float3 boxMin,
+    float3 boxMax)
 {
-    if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
+    float3 direction = history - current;
+    float t = 1.0f;
+
+    if (history.x < boxMin.x && direction.x < 0.0f)
+        t = min(t, (boxMin.x - current.x) / direction.x);
+    else if (history.x > boxMax.x && direction.x > 0.0f)
+        t = min(t, (boxMax.x - current.x) / direction.x);
+
+    if (history.y < boxMin.y && direction.y < 0.0f)
+        t = min(t, (boxMin.y - current.y) / direction.y);
+    else if (history.y > boxMax.y && direction.y > 0.0f)
+        t = min(t, (boxMax.y - current.y) / direction.y);
+
+    if (history.z < boxMin.z && direction.z < 0.0f)
+        t = min(t, (boxMin.z - current.z) / direction.z);
+    else if (history.z > boxMax.z && direction.z > 0.0f)
+        t = min(t, (boxMax.z - current.z) / direction.z);
+
+    return current + direction * saturate(t);
+}
+
+bool TryReprojectBackground(float2 currentUv, out float2 previousUv)
+{
+    float2 ndc = float2(
+        currentUv.x * 2.0f - 1.0f,
+        1.0f - currentUv.y * 2.0f);
+    float4 worldPositionH = mul(
+        float4(ndc, TAA_BACKGROUND_DEPTH, 1.0f),
+        inverseUnjitteredViewProjection);
+    if (abs(worldPositionH.w) < 1e-6f)
     {
-        return;
+        previousUv = 0.0f.xx;
+        return false;
     }
 
+    float3 worldDirection = normalize(worldPositionH.xyz / worldPositionH.w);
+    float4 previousClip = mul(float4(worldDirection, 0.0f), previousViewProjection);
+    if (previousClip.w <= 1e-6f)
+    {
+        previousUv = 0.0f.xx;
+        return false;
+    }
+
+    float2 previousNdc = previousClip.xy / previousClip.w;
+    previousUv = float2(
+        previousNdc.x * 0.5f + 0.5f,
+        -previousNdc.y * 0.5f + 0.5f);
+    return true;
+}
+
+[numthreads(8, 8, 1)]
+void TaaResolveCS(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 groupId : SV_GroupID)
+{
     Texture2D<float4> currentColorTexture = GetTexture(currentColorHandle);
     Texture2D<float4> velocityTexture = GetTexture(velocityHandle);
+    Texture2D<float4> normalTexture = GetTexture(normalHandle);
     Texture2D<float4> materialTexture = GetTexture(materialHandle);
     Texture2D<float4> currentDepthTexture = GetTexture(currentDepthHandle);
     Texture2D<float4> historyColorTexture = GetTexture(historyColorHandle);
@@ -105,121 +226,257 @@ void TaaResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
     SamplerState linearSampler = GetSampler(samplerHandle);
 
-    int2 pixel = int2(dispatchThreadId.xy);
+    uint laneIndex = groupThreadId.y * TAA_GROUP_WIDTH + groupThreadId.x;
+    int2 maxPixel = int2(int(renderSizeX) - 1, int(renderSizeY) - 1);
     float2 renderSize = float2(renderSizeX, renderSizeY);
-    float2 centerUv = (float2(pixel) + float2(0.5f, 0.5f)) / renderSize;
-    float3 centerColor = currentColorTexture.Load(int3(pixel, 0)).rgb;
+    int2 groupBasePixel = int2(groupId.xy * TAA_GROUP_WIDTH);
+
+    for (uint tileIndex = laneIndex; tileIndex < TAA_TILE_PIXEL_COUNT; tileIndex += 64u)
+    {
+        int2 tilePixel = int2(
+            int(tileIndex % TAA_TILE_WIDTH),
+            int(tileIndex / TAA_TILE_WIDTH));
+        int2 sourcePixel = clamp(
+            groupBasePixel + tilePixel - int2(1, 1),
+            int2(0, 0),
+            maxPixel);
+        float2 sourceUv =
+            (float2(sourcePixel) + 0.5f.xx + currentJitterPixels) / renderSize;
+        g_CurrentColorTile[tileIndex] =
+            currentColorTexture.SampleLevel(linearSampler, sourceUv, 0.0f);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (dispatchThreadId.x >= renderSizeX || dispatchThreadId.y >= renderSizeY)
+    {
+        return;
+    }
+
+    int2 pixel = int2(dispatchThreadId.xy);
+    float2 centerUv = (float2(pixel) + 0.5f.xx) / renderSize;
+    uint centerTileIndex =
+        (groupThreadId.y + 1u) * TAA_TILE_WIDTH + groupThreadId.x + 1u;
+    float3 currentColor = g_CurrentColorTile[centerTileIndex].rgb;
+    float3 currentYCoCg = RGBToYCoCg(currentColor);
     float centerDepth = currentDepthTexture.Load(int3(pixel, 0)).r;
-    float closestDepth = centerDepth;
-    int2 closestPixel = pixel;
-    float3 minBox = RGBToYCoCg(centerColor);
-    float3 maxBox = minBox;
-    float3 currentColor = centerColor;
+    float3 centerNormal = DecodeNormal(normalTexture.Load(int3(pixel, 0)).xyz);
+    bool background = IsBackground(centerDepth);
+    float4 velocity = velocityTexture.Load(int3(pixel, 0));
+    float motionPixels = background ? 0.0f : length(velocity.xy);
+    float motionFactor = saturate(
+        (motionPixels - 0.5f) / max(motionResponsePixels - 0.5f, 1e-4f));
+
+    float3 neighborhoodMin = currentYCoCg;
+    float3 neighborhoodMax = currentYCoCg;
     float3 firstMoment = 0.0f.xxx;
     float3 secondMoment = 0.0f.xxx;
+    float sampleCount = 0.0f;
 
     for (int offsetY = -1; offsetY <= 1; offsetY++)
     {
         for (int offsetX = -1; offsetX <= 1; offsetX++)
         {
-            int2 samplePixel = clamp(pixel + int2(offsetX, offsetY), int2(0, 0), int2(int(renderSizeX) - 1, int(renderSizeY) - 1));
+            int2 samplePixel = clamp(
+                pixel + int2(offsetX, offsetY),
+                int2(0, 0),
+                maxPixel);
             float sampleDepth = currentDepthTexture.Load(int3(samplePixel, 0)).r;
-            if (sampleDepth < closestDepth)
-            {
-                closestDepth = sampleDepth;
-                closestPixel = samplePixel;
-            }
-
-            float3 sampleColor = currentColorTexture.Load(int3(samplePixel, 0)).rgb;
-            float3 sampleYCoCg = RGBToYCoCg(sampleColor);
-            minBox = min(minBox, sampleYCoCg);
-            maxBox = max(maxBox, sampleYCoCg);
-            firstMoment += sampleYCoCg;
-            secondMoment += sampleYCoCg * sampleYCoCg;
+            float3 sampleNormal = DecodeNormal(
+                normalTexture.Load(int3(samplePixel, 0)).xyz);
+            uint tileIndex =
+                uint(int(groupThreadId.y) + offsetY + 1) * TAA_TILE_WIDTH +
+                uint(int(groupThreadId.x) + offsetX + 1);
+            float3 sampleYCoCg = RGBToYCoCg(g_CurrentColorTile[tileIndex].rgb);
+            neighborhoodMin = min(neighborhoodMin, sampleYCoCg);
+            neighborhoodMax = max(neighborhoodMax, sampleYCoCg);
+            float sampleWeight = IsNeighborhoodSampleCompatible(
+                centerDepth,
+                centerNormal,
+                sampleDepth,
+                sampleNormal)
+                ? 1.0f
+                : 0.5f;
+            firstMoment += sampleYCoCg * sampleWeight;
+            secondMoment += sampleYCoCg * sampleYCoCg * sampleWeight;
+            sampleCount += sampleWeight;
         }
     }
 
-    float3 mean = firstMoment / 9.0f;
-    float3 variance = max(secondMoment / 9.0f - mean * mean, 0.0f.xxx);
+    float inverseSampleCount = rcp(max(sampleCount, 1.0f));
+    float3 mean = firstMoment * inverseSampleCount;
+    float3 variance = max(
+        secondMoment * inverseSampleCount - mean * mean,
+        0.0f.xxx);
     float3 sigma = sqrt(variance);
-
-    float4 velocitySample = velocityTexture.Load(int3(closestPixel, 0));
-    float2 velocity = velocitySample.xy;
-    float expectedHistoryDepth = velocitySample.z;
-    float alphaTestMask = saturate(materialTexture.Load(int3(closestPixel, 0)).a);
-    float motionPixels = length(velocity);
-    float2 closestUv = (float2(closestPixel) + float2(0.5f, 0.5f)) / renderSize;
-    float depthDiscontinuity = abs(closestDepth - centerDepth);
-    float closestSampleWeight = smoothstep(0.0f, 0.02f, depthDiscontinuity) * smoothstep(0.35f, 1.5f, motionPixels);
-    float2 reprojectionBaseUv = lerp(centerUv, closestUv, closestSampleWeight);
+    float3 varianceMin = mean - varianceClipGamma * sigma;
+    float3 varianceMax = mean + varianceClipGamma * sigma;
+    float3 varianceBoxMin = max(neighborhoodMin, varianceMin);
+    float3 varianceBoxMax = min(neighborhoodMax, varianceMax);
+    float varianceInfluence = lerp(0.1f, 1.0f, motionFactor);
+    float3 clipMin = lerp(
+        neighborhoodMin,
+        varianceBoxMin,
+        varianceInfluence);
+    float3 clipMax = lerp(
+        neighborhoodMax,
+        varianceBoxMax,
+        varianceInfluence);
+    clipMin = min(clipMin, currentYCoCg);
+    clipMax = max(clipMax, currentYCoCg);
 
     bool historyAllowed = historyValid != 0u && resetHistory == 0u;
-    float2 prevUv = reprojectionBaseUv + (velocity / renderSize);
-    bool historyRejected = !historyAllowed;
-    historyRejected = historyRejected || any(prevUv < 0.0f.xx) || any(prevUv > 1.0f.xx);
-    historyRejected = historyRejected || motionPixels > max(renderSizeX, renderSizeY);
+    float2 previousUv = 0.0f.xx;
 
-    float3 resolvedColor = currentColor;
-    if (!historyRejected)
+    if (historyAllowed)
     {
-        int2 historyPixel = clamp(int2(prevUv * renderSize), int2(0, 0), int2(int(renderSizeX) - 1, int(renderSizeY) - 1));
-        float historyDepth = historyDepthTexture.Load(int3(historyPixel, 0)).r;
-        for (int offsetY = -1; offsetY <= 1; offsetY++)
+        if (background)
         {
-            for (int offsetX = -1; offsetX <= 1; offsetX++)
-            {
-                int2 samplePixel = clamp(historyPixel + int2(offsetX, offsetY), int2(0, 0), int2(int(renderSizeX) - 1, int(renderSizeY) - 1));
-                historyDepth = min(historyDepth, historyDepthTexture.Load(int3(samplePixel, 0)).r);
-            }
+            historyAllowed = TryReprojectBackground(centerUv, previousUv);
         }
-
-        float depthThreshold = lerp(opaqueDepthThreshold, alphaTestDepthThreshold, alphaTestMask);
-        historyRejected = abs(historyDepth - expectedHistoryDepth) > depthThreshold;
-        if (!historyRejected)
+        else
         {
-            float sigmaScale = lerp(opaqueClampSigma, alphaTestClampSigma, alphaTestMask);
-            float3 varianceMin = mean - sigmaScale * sigma;
-            float3 varianceMax = mean + sigmaScale * sigma;
-
-            float3 clampMin = min(max(minBox, varianceMin), min(maxBox, varianceMax));
-            float3 clampMax = max(max(minBox, varianceMin), min(maxBox, varianceMax));
-
-            float3 center = 0.5f * (clampMin + clampMax);
-            float3 extent = 0.5f * (clampMax - clampMin);
-            float clampExpansion = lerp(
-                lowMotionClampExpansion,
-                highMotionClampExpansion,
-                saturate(motionPixels * clampExpansionMotionScale));
-            extent = max(extent * clampExpansion, float3(0.01f, 0.01f, 0.01f));
-            clampMin = center - extent;
-            clampMax = center + extent;
-
-            float3 historyColor = SampleCatmullRom(historyColorTexture, linearSampler, prevUv, renderSize).rgb;
-            float3 historyYCoCg = RGBToYCoCg(historyColor);
-            float3 clampedHistoryYCoCg = clamp(historyYCoCg, clampMin, clampMax);
-            float3 clampedHistoryRgb = YCoCgToRGB(clampedHistoryYCoCg);
-
-            // If the reprojected sample lands far outside the current neighborhood, respond faster.
-            // Keep this mostly motion-driven so static high-frequency detail can still accumulate.
-            float3 clampRange = max(clampMax - clampMin, float3(0.02f, 0.02f, 0.02f));
-            float3 normalizedClampDelta = abs(clampedHistoryYCoCg - historyYCoCg) / clampRange;
-            float clampAmount = MaxComponent(normalizedClampDelta);
-            float clampResponse = smoothstep(0.2f, 0.9f, clampAmount);
-            float historyConfidence = 1.0f - clampResponse * saturate(motionPixels * 0.35f + alphaTestMask * 0.5f);
-
-            float opaqueHistoryWeight = lerp(
-                lowMotionOpaqueHistoryWeight,
-                highMotionOpaqueHistoryWeight,
-                saturate(motionPixels * opaqueHistoryMotionScale));
-            float alphaTestHistoryWeight = lerp(
-                lowMotionAlphaTestHistoryWeight,
-                highMotionAlphaTestHistoryWeight,
-                saturate(motionPixels * alphaTestHistoryMotionScale));
-            float historyWeight = lerp(opaqueHistoryWeight, alphaTestHistoryWeight, alphaTestMask) * historyConfidence;
-
-            resolvedColor = lerp(currentColor, clampedHistoryRgb, historyWeight);
+            historyAllowed = velocity.w > 0.0f;
+            previousUv = centerUv + velocity.xy / renderSize;
         }
     }
 
-    outputTexture[pixel] = float4(resolvedColor, 1.0f);
+    historyAllowed = historyAllowed &&
+        all(previousUv >= 0.0f.xx) &&
+        all(previousUv <= 1.0f.xx);
+
+    float4 historySample = float4(currentColor, 0.0f);
+    if (historyAllowed)
+    {
+        float2 historyDepthUv =
+            previousUv + previousJitterPixels / renderSize;
+        historyAllowed =
+            all(historyDepthUv >= 0.0f.xx) &&
+            all(historyDepthUv <= 1.0f.xx);
+        float2 historyPixelPosition =
+            historyDepthUv * renderSize - 0.5f.xx;
+        int2 historyBasePixel = int2(floor(historyPixelPosition));
+        uint matchingTapCount = 0u;
+        float expectedPreviousViewDepth = background
+            ? 0.0f
+            : ReconstructViewDepth(
+                velocity.z,
+                previousProjectionZScale,
+                previousProjectionZBias);
+        float rejectionThreshold = DepthThreshold(expectedPreviousViewDepth);
+
+        for (int tapIndex = 0; tapIndex < 4; tapIndex++)
+        {
+            int2 tapOffset = int2(tapIndex & 1, tapIndex >> 1);
+            int2 historyPixel = historyBasePixel + tapOffset;
+            bool tapInBounds =
+                historyPixel.x >= 0 &&
+                historyPixel.y >= 0 &&
+                historyPixel.x < int(renderSizeX) &&
+                historyPixel.y < int(renderSizeY);
+            if (!tapInBounds)
+            {
+                continue;
+            }
+
+            float historyDepth =
+                historyDepthTexture.Load(int3(historyPixel, 0)).r;
+            bool tapMatches = false;
+            float depthError = 0.0f;
+            if (background)
+            {
+                tapMatches = IsBackground(historyDepth);
+            }
+            else if (!IsBackground(historyDepth))
+            {
+                float historyViewDepth = ReconstructViewDepth(
+                    historyDepth,
+                    previousProjectionZScale,
+                    previousProjectionZBias);
+                depthError = abs(historyViewDepth - expectedPreviousViewDepth);
+                tapMatches = depthError <= rejectionThreshold;
+            }
+
+            if (tapMatches)
+            {
+                matchingTapCount++;
+            }
+        }
+
+        historyAllowed = historyAllowed && matchingTapCount > 0u;
+        if (historyAllowed && matchingTapCount == 4u)
+        {
+            historySample = SampleCatmullRom(
+                historyColorTexture,
+                linearSampler,
+                previousUv,
+                renderSize);
+        }
+        else if (historyAllowed)
+        {
+            // Depth history is jittered G-buffer data, while color history is already
+            // reconstructed into unjittered output space. The matching depth taps
+            // validate the surface, but the color point sample must stay at prevUv.
+            int2 historyColorPixel = clamp(
+                int2(previousUv * renderSize),
+                int2(0, 0),
+                maxPixel);
+            historySample = historyColorTexture.Load(int3(historyColorPixel, 0));
+        }
+    }
+
+    float3 resolvedColor = currentColor;
+    float outputHistoryAge = 0.0f;
+    if (historyAllowed)
+    {
+        float3 historyYCoCg = RGBToYCoCg(historySample.rgb);
+        float3 clippedHistoryYCoCg = ClipLineToAabb(
+            currentYCoCg,
+            historyYCoCg,
+            clipMin,
+            clipMax);
+        float3 clipRange = max(
+            clipMax - clipMin,
+            float3(0.02f, 0.02f, 0.02f));
+        float clipDistance = MaxComponent(
+            abs(historyYCoCg - clippedHistoryYCoCg) / clipRange);
+        float clipResponse = saturate(clipDistance);
+
+        float luminanceDenominator = max(
+            max(abs(currentYCoCg.x), abs(historyYCoCg.x)),
+            0.1f);
+        float relativeLuminanceDifference =
+            abs(historyYCoCg.x - currentYCoCg.x) / luminanceDenominator;
+        float luminanceResponse =
+            smoothstep(0.1f, 0.5f, relativeLuminanceDifference);
+        float historyConfidence =
+            1.0f - 0.025f * clipResponse - 0.025f * luminanceResponse;
+
+        float historyWeightCap = lerp(
+            staticHistoryWeight,
+            movingHistoryWeight,
+            motionFactor);
+        float alphaTestMask =
+            saturate(materialTexture.Load(int3(pixel, 0)).a);
+        historyWeightCap *= lerp(
+            1.0f,
+            alphaTestHistoryScale,
+            alphaTestMask);
+
+        float previousHistoryAge =
+            clamp(historySample.a, 0.0f, TAA_MAX_HISTORY_AGE);
+        float startupWeight =
+            previousHistoryAge / (previousHistoryAge + 1.0f);
+        float historyWeight =
+            min(startupWeight, historyWeightCap) * historyConfidence;
+        resolvedColor = lerp(
+            currentColor,
+            YCoCgToRGB(clippedHistoryYCoCg),
+            historyWeight);
+        outputHistoryAge = min(
+            previousHistoryAge + 1.0f,
+            TAA_MAX_HISTORY_AGE);
+    }
+
+    outputTexture[pixel] = float4(max(resolvedColor, 0.0f.xxx), outputHistoryAge);
 }

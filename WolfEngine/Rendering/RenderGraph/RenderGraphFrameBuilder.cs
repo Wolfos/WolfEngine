@@ -1314,6 +1314,8 @@ internal sealed class RenderGraphFrameBuilder
 				graph.AddPass("TAA Resolve", PassKind.Compute)
 					.ReadTexture(_frameResources.LightingBuffer, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.HistoryColorRead, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.HistoryDepthRead, ResourceState.ShaderResource)

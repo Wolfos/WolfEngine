@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
@@ -44,17 +45,22 @@ public sealed class TemporalAntiAliasingPass
 
 		var currentColor = context.GetTexture(resources.LightingBuffer);
 		var velocity = context.GetTexture(resources.GBufferVelocity);
+		var normal = context.GetTexture(resources.GBufferNormal);
 		var material = context.GetTexture(resources.GBufferMaterial);
 		var currentDepth = context.GetTexture(resources.GBufferDepth);
 		var historyColor = context.GetTexture(resources.HistoryColorRead);
 		var historyDepth = context.GetTexture(resources.HistoryDepthRead);
 		var output = context.GetTexture(resources.ResolvedSceneColor);
+		var inverseUnjitteredViewProjectionValid = Matrix4x4.Invert(
+			context.SceneData.UnjitteredViewProjection,
+			out var inverseUnjitteredViewProjection);
 
 		return new TemporalAntiAliasingPassConfig
 		{
 			Pipeline = pipeline,
 			CurrentColorHandle = _bindlessRegistry.GetTextureHandle(currentColor),
 			VelocityHandle = _bindlessRegistry.GetTextureHandle(velocity),
+			NormalHandle = _bindlessRegistry.GetTextureHandle(normal),
 			MaterialHandle = _bindlessRegistry.GetTextureHandle(material),
 			CurrentDepthHandle = _bindlessRegistry.RegisterDepthTexture(currentDepth),
 			HistoryColorHandle = _bindlessRegistry.GetTextureHandle(historyColor),
@@ -62,9 +68,19 @@ public sealed class TemporalAntiAliasingPass
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			LinearSampler = _linearSampler,
 			RenderSize = resources.SceneFramebufferSize,
+			CurrentJitterPixels = context.SceneData.JitterPixels,
+			PreviousJitterPixels = context.SceneData.PreviousJitterPixels,
+			InverseUnjitteredViewProjection = inverseUnjitteredViewProjectionValid
+				? inverseUnjitteredViewProjection
+				: Matrix4x4.Identity,
+			PreviousViewProjection = context.SceneData.PreviousViewProjection,
+			CurrentProjectionZBias = context.SceneData.UnjitteredProjection.M33,
+			CurrentProjectionZScale = context.SceneData.UnjitteredProjection.M43,
+			PreviousProjectionZBias = context.SceneData.PreviousProjection.M33,
+			PreviousProjectionZScale = context.SceneData.PreviousProjection.M43,
 			Settings = resources.Config.TemporalAntiAliasing,
 			HistoryValid = historyValid,
-			ResetHistory = resetHistory
+			ResetHistory = resetHistory || inverseUnjitteredViewProjectionValid == false
 		};
 	}
 
@@ -80,6 +96,7 @@ public sealed class TemporalAntiAliasingPass
 		bindlessWriter.Clear();
 		bindlessWriter.SetUInt("currentColorHandle", config.CurrentColorHandle.Value);
 		bindlessWriter.SetUInt("velocityHandle", config.VelocityHandle.Value);
+		bindlessWriter.SetUInt("normalHandle", config.NormalHandle.Value);
 		bindlessWriter.SetUInt("materialHandle", config.MaterialHandle.Value);
 		bindlessWriter.SetUInt("currentDepthHandle", config.CurrentDepthHandle.Value);
 		bindlessWriter.SetUInt("historyColorHandle", config.HistoryColorHandle.Value);
@@ -96,19 +113,23 @@ public sealed class TemporalAntiAliasingPass
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
 		settingsWriter.SetUInt("historyValid", config.HistoryValid ? 1u : 0u);
 		settingsWriter.SetUInt("resetHistory", config.ResetHistory ? 1u : 0u);
-		settingsWriter.SetFloat("opaqueDepthThreshold", MathF.Max(settings.OpaqueDepthThreshold, 0.0f));
-		settingsWriter.SetFloat("alphaTestDepthThreshold", MathF.Max(settings.AlphaTestDepthThreshold, 0.0f));
-		settingsWriter.SetFloat("opaqueClampSigma", MathF.Max(settings.OpaqueClampSigma, 0.0f));
-		settingsWriter.SetFloat("alphaTestClampSigma", MathF.Max(settings.AlphaTestClampSigma, 0.0f));
-		settingsWriter.SetFloat("lowMotionClampExpansion", MathF.Max(settings.LowMotionClampExpansion, 0.0f));
-		settingsWriter.SetFloat("highMotionClampExpansion", MathF.Max(settings.HighMotionClampExpansion, 0.0f));
-		settingsWriter.SetFloat("clampExpansionMotionScale", MathF.Max(settings.ClampExpansionMotionScale, 0.0f));
-		settingsWriter.SetFloat("lowMotionOpaqueHistoryWeight", Math.Clamp(settings.LowMotionOpaqueHistoryWeight, 0.0f, 0.9999f));
-		settingsWriter.SetFloat("highMotionOpaqueHistoryWeight", Math.Clamp(settings.HighMotionOpaqueHistoryWeight, 0.0f, 0.9999f));
-		settingsWriter.SetFloat("opaqueHistoryMotionScale", MathF.Max(settings.OpaqueHistoryMotionScale, 0.0f));
-		settingsWriter.SetFloat("lowMotionAlphaTestHistoryWeight", Math.Clamp(settings.LowMotionAlphaTestHistoryWeight, 0.0f, 0.9999f));
-		settingsWriter.SetFloat("highMotionAlphaTestHistoryWeight", Math.Clamp(settings.HighMotionAlphaTestHistoryWeight, 0.0f, 0.9999f));
-		settingsWriter.SetFloat("alphaTestHistoryMotionScale", MathF.Max(settings.AlphaTestHistoryMotionScale, 0.0f));
+		settingsWriter.SetVector2("currentJitterPixels", config.CurrentJitterPixels);
+		settingsWriter.SetVector2("previousJitterPixels", config.PreviousJitterPixels);
+		settingsWriter.SetFloat("staticHistoryWeight", Math.Clamp(settings.StaticHistoryWeight, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("movingHistoryWeight", Math.Clamp(settings.MovingHistoryWeight, 0.0f, 0.9999f));
+		settingsWriter.SetFloat("motionResponsePixels", MathF.Max(settings.MotionResponsePixels, 0.5001f));
+		settingsWriter.SetFloat("depthRejectionAbsolute", MathF.Max(settings.DepthRejectionAbsolute, 0.0f));
+		settingsWriter.SetFloat("depthRejectionRelative", MathF.Max(settings.DepthRejectionRelative, 0.0f));
+		settingsWriter.SetFloat("varianceClipGamma", MathF.Max(settings.VarianceClipGamma, 0.0f));
+		settingsWriter.SetFloat("alphaTestHistoryScale", Math.Clamp(settings.AlphaTestHistoryScale, 0.0f, 1.0f));
+		settingsWriter.SetFloat("currentProjectionZBias", config.CurrentProjectionZBias);
+		settingsWriter.SetFloat("currentProjectionZScale", config.CurrentProjectionZScale);
+		settingsWriter.SetFloat("previousProjectionZBias", config.PreviousProjectionZBias);
+		settingsWriter.SetFloat("previousProjectionZScale", config.PreviousProjectionZScale);
+		settingsWriter.SetMatrix4x4(
+			"inverseUnjitteredViewProjection",
+			config.InverseUnjitteredViewProjection);
+		settingsWriter.SetMatrix4x4("previousViewProjection", config.PreviousViewProjection);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSize

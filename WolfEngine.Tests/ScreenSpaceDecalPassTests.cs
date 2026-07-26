@@ -145,6 +145,10 @@ public sealed class ScreenSpaceDecalPassTests
 			ShadowMapDepth2 = registry.CreateTransientTexture(depthDescriptor),
 			LightingBuffer = registry.CreateTransientTexture(textureDescriptor),
 			ResolvedSceneColor = registry.CreateTransientTexture(textureDescriptor),
+			HistoryColorRead = registry.CreateTransientTexture(textureDescriptor),
+			HistoryColorWrite = registry.CreateTransientTexture(textureDescriptor),
+			HistoryDepthRead = registry.CreateTransientTexture(textureDescriptor),
+			HistoryDepthWrite = registry.CreateTransientTexture(textureDescriptor),
 			TonemappedLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
 			DisplayLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
 			EncodedSceneColor = registry.CreateTransientTexture(textureDescriptor),
@@ -183,12 +187,15 @@ public sealed class ScreenSpaceDecalPassTests
 		var decalIndex = Array.IndexOf(passNames, "ScreenSpaceDecal");
 		var aoIndex = Array.IndexOf(passNames, "Ambient Occlusion Evaluate");
 		var deferredIndex = Array.IndexOf(passNames, "Deferred Lighting");
+		var taaResolve = passes.Single(pass => pass.Name == "TAA Resolve");
 
 		Assert.That(gbufferIndex, Is.GreaterThanOrEqualTo(0));
 		Assert.That(seedIndex, Is.GreaterThan(gbufferIndex));
 		Assert.That(decalIndex, Is.GreaterThan(seedIndex));
 		Assert.That(aoIndex, Is.GreaterThan(decalIndex));
 		Assert.That(deferredIndex, Is.GreaterThan(decalIndex));
+		Assert.That(taaResolve.Reads, Does.Contain(frameResources.GBufferNormal));
+		Assert.That(taaResolve.Reads, Does.Contain(frameResources.GBufferMaterial));
 	}
 
 	private static Texture CreateTexture(string name)
