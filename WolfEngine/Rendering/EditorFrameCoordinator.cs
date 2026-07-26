@@ -7,6 +7,7 @@ public sealed class EditorFrameCoordinator
 {
     private readonly object _sync = new();
     private long _publishedSequence;
+    private bool _shutdownRequested;
 
     /// <summary>The most recently published editor frame sequence.</summary>
     public long CompletedSequence
@@ -16,6 +17,17 @@ public sealed class EditorFrameCoordinator
             lock (_sync)
             {
                 return _publishedSequence;
+            }
+        }
+    }
+
+    public bool IsShutdownRequested
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _shutdownRequested;
             }
         }
     }
@@ -30,7 +42,16 @@ public sealed class EditorFrameCoordinator
         }
     }
 
-    public long WaitForNextFrame(long lastObservedSequence, Action pumpMainThreadWork)
+    public void RequestShutdown()
+    {
+        lock (_sync)
+        {
+            _shutdownRequested = true;
+            Monitor.PulseAll(_sync);
+        }
+    }
+
+    public bool TryWaitForNextFrame(long lastObservedSequence, Action pumpMainThreadWork, out long sequence)
     {
         ArgumentNullException.ThrowIfNull(pumpMainThreadWork);
 
@@ -38,9 +59,9 @@ public sealed class EditorFrameCoordinator
         {
             lock (_sync)
             {
-                if (_publishedSequence > lastObservedSequence)
+                if (TryObserve(lastObservedSequence, out sequence, out var published))
                 {
-                    return _publishedSequence;
+                    return published;
                 }
             }
 
@@ -48,13 +69,27 @@ public sealed class EditorFrameCoordinator
 
             lock (_sync)
             {
-                if (_publishedSequence > lastObservedSequence)
+                if (TryObserve(lastObservedSequence, out sequence, out var published))
                 {
-                    return _publishedSequence;
+                    return published;
                 }
 
                 Monitor.Wait(_sync, millisecondsTimeout: 1);
             }
         }
+    }
+
+    private bool TryObserve(long lastObservedSequence, out long sequence, out bool published)
+    {
+        sequence = _publishedSequence;
+
+        if (_publishedSequence > lastObservedSequence)
+        {
+            published = true;
+            return true;
+        }
+
+        published = false;
+        return _shutdownRequested;
     }
 }

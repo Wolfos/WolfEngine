@@ -384,11 +384,19 @@ public sealed class RenderGraph
 		}
 
 		_mainThreadDispatcher.ExecutePending();
+		bool framePublished;
 		using (FrameProfiler.Instance.Measure("Wait For Editor Frame"))
 		{
-			_lastObservedEditorFrameSequence = _editorFrameCoordinator.WaitForNextFrame(
+			framePublished = _editorFrameCoordinator.TryWaitForNextFrame(
 				_lastObservedEditorFrameSequence,
-				_mainThreadDispatcher.ExecutePending);
+				_mainThreadDispatcher.ExecutePending,
+				out _lastObservedEditorFrameSequence);
+		}
+
+		if (framePublished == false)
+		{
+			FrameProfiler.Instance.EndFrame();
+			return;
 		}
 
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());

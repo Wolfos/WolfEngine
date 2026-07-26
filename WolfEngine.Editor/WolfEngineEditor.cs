@@ -141,6 +141,7 @@ public class WolfEngineEditor
 	public void Stop()
 	{
 		_running = false;
+		_editorFrameCoordinator.RequestShutdown();
 	}
 
 	private void CreateWorlds()

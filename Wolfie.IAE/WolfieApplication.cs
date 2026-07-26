@@ -79,6 +79,8 @@ public sealed class WolfieApplication : IDisposable
 			coordinator.PublishCompletedFrame();
 			Thread.Sleep(1);
 		}
+
+		coordinator.RequestShutdown();
 	}
 
 	private void PublishSnapshot(IRenderPipeline renderPipeline, Int2 resolution)

@@ -108,7 +108,7 @@ public static class Program
 			{
 				gameError = exception;
 				Console.Error.WriteLine($"runtime game loop failed: {exception}");
-				provider.GetRequiredService<EditorFrameCoordinator>().PublishCompletedFrame();
+				provider.GetRequiredService<EditorFrameCoordinator>().RequestShutdown();
 				renderer.RequestShutdown();
 			}
 		})
@@ -200,6 +200,8 @@ public static class Program
 
 			Thread.Sleep(0);
 		}
+
+		frameCoordinator.RequestShutdown();
 	}
 
 	private static bool TryGetCamera(World world, out Camera camera, out WorldTransform transform)
