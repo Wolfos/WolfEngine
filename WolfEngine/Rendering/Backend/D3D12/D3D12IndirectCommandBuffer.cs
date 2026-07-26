@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
@@ -30,14 +31,25 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		public DrawIndexedArguments DrawArguments;
 	}
 
+	private readonly record struct TrackedReference(
+		D3D12Buffer Buffer,
+		ulong BakedAddress,
+		ResourceStates RequiredStates);
+
 	private readonly ComPtr<ID3D12Resource> _argumentBuffer;
 	private readonly CommandRecord* _mappedRecords;
 	private readonly ulong _recordStride;
-	private readonly Dictionary<D3D12Buffer, ResourceStates> _referencedBufferStates = new();
 
+	// Tracked per command, not per page. A page-wide set only ever grows: re-encoding a command would
+	// leave the buffers it used to reference in the set, and they would then be reported as dangling
+	// once released even though no live record points at them.
+	private readonly List<TrackedReference>?[] _commandReferences;
+	private readonly Dictionary<D3D12Buffer, ResourceStates> _referencedBufferStates = new();
 	private readonly Dictionary<D3D12Buffer, ulong> _referencedBufferAddresses = new();
+	private bool _aggregatesDirty = true;
 
 	private string? _lastStaleReport;
+	private int _staleReportCount;
 
 	public D3D12IndirectCommandBuffer(
 		string? name,
@@ -49,6 +61,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		Descriptor = descriptor;
 		CommandSignature = commandSignature;
 		_recordStride = (ulong)sizeof(CommandRecord);
+		_commandReferences = new List<TrackedReference>?[descriptor.MaxCommandCount];
 
 		var totalSize = _recordStride * descriptor.MaxCommandCount;
 		var desc = new ResourceDesc
@@ -95,12 +108,20 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 
 	internal ulong GetArgumentOffset(uint commandIndex) => _recordStride * commandIndex;
 
-	internal IEnumerable<KeyValuePair<D3D12Buffer, ResourceStates>> ReferencedBufferStates => _referencedBufferStates;
+	internal IEnumerable<KeyValuePair<D3D12Buffer, ResourceStates>> ReferencedBufferStates
+	{
+		get
+		{
+			RebuildAggregates();
+			return _referencedBufferStates;
+		}
+	}
 
 	public void ResetCommand(uint commandIndex)
 	{
 		ValidateCommandIndex(commandIndex);
 		_mappedRecords[commandIndex] = default;
+		ClearCommandReferences(commandIndex);
 	}
 
 	public void EncodeIndexedDrawCommand(
@@ -180,12 +201,15 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				StartInstanceLocation = 0
 			}
 		};
-		TrackBuffer(vertexBuffer, ResourceStates.VertexAndConstantBuffer);
-		TrackBuffer(indexBuffer, ResourceStates.IndexBuffer);
-		TrackBuffer(instanceBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(materialBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(drawArgsBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(materialGenerationBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		// Re-encoding replaces this command's references outright, so a buffer the previous encoding
+		// pointed at stops being tracked the moment it stops being referenced.
+		ClearCommandReferences(commandIndex);
+		TrackBuffer(commandIndex, vertexBuffer, ResourceStates.VertexAndConstantBuffer);
+		TrackBuffer(commandIndex, indexBuffer, ResourceStates.IndexBuffer);
+		TrackBuffer(commandIndex, instanceBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(commandIndex, materialBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(commandIndex, drawArgsBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
+		TrackBuffer(commandIndex, materialGenerationBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
 		foreach (var binding in passBindings.Bindings)
 		{
 			if (binding.Resource is not D3D12Buffer passBuffer || passBuffer.Resource.Handle is null)
@@ -200,6 +224,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				binding.RegisterIndex,
 				passBuffer.Resource.Handle->GetGPUVirtualAddress());
 			TrackBuffer(
+				commandIndex,
 				passBuffer,
 				binding.Kind == GraphicsPassBindingKind.ConstantBuffer
 					? ResourceStates.VertexAndConstantBuffer
@@ -226,25 +251,69 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		}
 	}
 
-	private void TrackBuffer(D3D12Buffer buffer, ResourceStates requiredState)
+	private void TrackBuffer(uint commandIndex, D3D12Buffer buffer, ResourceStates requiredState)
 	{
 		var resource = buffer.Resource.Handle;
-		if (resource is not null)
+		if (resource is null)
 		{
-			_referencedBufferAddresses[buffer] = resource->GetGPUVirtualAddress();
-		}
-
-		if (_referencedBufferStates.TryGetValue(buffer, out var existingState))
-		{
-			_referencedBufferStates[buffer] = existingState | requiredState;
 			return;
 		}
 
-		_referencedBufferStates.Add(buffer, requiredState);
+		var references = _commandReferences[commandIndex] ??= new List<TrackedReference>();
+		references.Add(new TrackedReference(buffer, resource->GetGPUVirtualAddress(), requiredState));
+		_aggregatesDirty = true;
+	}
+
+	private void ClearCommandReferences(uint commandIndex)
+	{
+		var references = _commandReferences[commandIndex];
+		if (references is null || references.Count == 0)
+		{
+			return;
+		}
+
+		references.Clear();
+		_aggregatesDirty = true;
+	}
+
+	/// <summary>
+	/// Folds the per-command references back into the per-page views used for barriers and staleness
+	/// reporting. Only the buffers currently referenced by a live record survive.
+	/// </summary>
+	private void RebuildAggregates()
+	{
+		if (_aggregatesDirty == false)
+		{
+			return;
+		}
+
+		_referencedBufferStates.Clear();
+		_referencedBufferAddresses.Clear();
+		for (var commandIndex = 0; commandIndex < _commandReferences.Length; commandIndex++)
+		{
+			var references = _commandReferences[commandIndex];
+			if (references is null)
+			{
+				continue;
+			}
+
+			for (var i = 0; i < references.Count; i++)
+			{
+				var reference = references[i];
+				_referencedBufferAddresses[reference.Buffer] = reference.BakedAddress;
+				_referencedBufferStates[reference.Buffer] =
+					_referencedBufferStates.TryGetValue(reference.Buffer, out var existingState)
+						? existingState | reference.RequiredStates
+						: reference.RequiredStates;
+			}
+		}
+
+		_aggregatesDirty = false;
 	}
 
 	internal bool TryDescribeStaleReferences(out string description)
 	{
+		RebuildAggregates();
 		List<string>? stale = null;
 		foreach (var (buffer, bakedAddress) in _referencedBufferAddresses)
 		{
@@ -271,14 +340,25 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			return false;
 		}
 
+		_staleReportCount++;
 		description = $"indirect command buffer '{Name ?? "<unnamed>"}': {string.Join(", ", stale)}";
 		if (string.Equals(_lastStaleReport, description, StringComparison.Ordinal))
 		{
-			description = string.Empty;
-			return false;
+			// Report the same staleness on a curve rather than once, ever. Reporting once hides whether a
+			// dangling reference is a one-off or is being executed on every frame up to the hang, and the
+			// single line is easy to miss; reporting every frame drowns the log it is meant to inform.
+			if (BitOperations.IsPow2(_staleReportCount) == false)
+			{
+				description = string.Empty;
+				return false;
+			}
+
+			description = $"{description} [occurrence {_staleReportCount}]";
+			return true;
 		}
 
 		_lastStaleReport = description;
+		_staleReportCount = 1;
 		return true;
 	}
 

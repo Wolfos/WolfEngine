@@ -215,7 +215,11 @@ public readonly struct DrawArguments
 /// </summary>
 public readonly struct IndirectCommandBufferDescriptor
 {
-	public IndirectCommandBufferDescriptor(PassKind passKind, uint maxCommandCount, bool supportsIndexedExecution = false)
+	public IndirectCommandBufferDescriptor(
+		PassKind passKind,
+		uint maxCommandCount,
+		bool supportsIndexedExecution = false,
+		string? name = null)
 	{
 		if (maxCommandCount == 0)
 		{
@@ -225,6 +229,7 @@ public readonly struct IndirectCommandBufferDescriptor
 		PassKind = passKind;
 		MaxCommandCount = maxCommandCount;
 		SupportsIndexedExecution = supportsIndexedExecution;
+		Name = name;
 	}
 
 	public PassKind PassKind { get; }
@@ -232,6 +237,9 @@ public readonly struct IndirectCommandBufferDescriptor
 	public uint MaxCommandCount { get; }
 
 	public bool SupportsIndexedExecution { get; }
+
+	/// <summary>Diagnostic name, so a stale-reference report identifies which slot and lane it came from.</summary>
+	public string? Name { get; }
 }
 
 /// <summary>

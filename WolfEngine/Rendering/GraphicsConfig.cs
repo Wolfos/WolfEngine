@@ -11,9 +11,12 @@ namespace WolfEngine.Rendering;
 public static class GraphicsConfig
 {
 	/// <summary>
-	/// Enable the D3D12 debug layer when creating the device (Windows only).
+	/// Enable the D3D12 debug layer when creating the device (Windows only). The layer costs frame time,
+	/// so it is opt-in via WOLF_D3D_DEBUG_LAYER=1; scripts/windows/run-editor-diagnostics.cmd sets it.
+	/// Without it the runtime reports every rejected call as a bare E_INVALIDARG with no explanation.
 	/// </summary>
-	public static bool EnableD3DDebugLayer { get; set; } = false;
+	public static bool EnableD3DDebugLayer { get; set; } =
+		string.Equals(Environment.GetEnvironmentVariable("WOLF_D3D_DEBUG_LAYER"), "1", StringComparison.Ordinal);
 
 	/// <summary>
 	/// Force per-pass GPU debug markers on.
@@ -47,6 +50,21 @@ public static class GraphicsConfig
 	/// </summary>
 	public static bool GpuHardeningStressEnabled { get; } =
 		string.Equals(Environment.GetEnvironmentVariable("WOLF_GPU_HARDENING_STRESS"), "1", StringComparison.Ordinal);
+
+	/// <summary>
+	/// 1-based frame index to take a programmatic GPU capture of, or 0 for none. Requires the process to
+	/// have been launched under a capture tool; scripts/windows/capture-gpu-frame.cmd does that.
+	/// </summary>
+	public static int GpuCaptureFrameIndex { get; set; } =
+		ParsePositiveIntEnvironmentVariable("WOLF_GPU_CAPTURE_FRAME", 0);
+
+	/// <summary>
+	/// 1-based terrain brush stamp to capture the following frame for, or 0 for none. A stamp submits its
+	/// own compute work immediately and returns; the frame that draws the result is the next one, so that
+	/// is what gets captured.
+	/// </summary>
+	public static int GpuCaptureTerrainStampIndex { get; set; } =
+		ParsePositiveIntEnvironmentVariable("WOLF_GPU_CAPTURE_TERRAIN_STAMP", 0);
 
 	/// <summary>
 	/// Number of frames between hardening metric logs.

@@ -68,10 +68,12 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 			return commandBuffer;
 		}
 
+		var laneName = ResolveLaneDebugName(executionLaneIndex);
 		commandBuffer = device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
 			PassKind.Graphics,
 			IndirectCommandPageCapacity,
-			supportsIndexedExecution: true));
+			supportsIndexedExecution: true,
+			name: $"{laneName} slot{slotIndex} page{pageIndex}"));
 		pages.Add(pageIndex, commandBuffer);
 		return commandBuffer;
 	}
@@ -180,6 +182,24 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 
 			_commandPages[i].Clear();
 		}
+	}
+
+	/// <summary>
+	/// Lanes are stored in declaration order, which is not required to match their execution index, so
+	/// resolve by the index rather than by position.
+	/// </summary>
+	private static string ResolveLaneDebugName(int executionLaneIndex)
+	{
+		var definitions = GpuDrawExecutionLanes.Definitions;
+		for (var i = 0; i < definitions.Length; i++)
+		{
+			if (definitions[i].ExecutionIndex == executionLaneIndex)
+			{
+				return definitions[i].DebugName;
+			}
+		}
+
+		return $"lane{executionLaneIndex}";
 	}
 
 	public static uint GetPageIndex(uint commandIndex) => commandIndex / IndirectCommandPageCapacity;

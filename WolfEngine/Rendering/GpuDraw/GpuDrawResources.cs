@@ -219,22 +219,26 @@ public sealed class GpuDrawResources : IDisposable
 		InstanceBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxInstanceCount * Marshal.SizeOf<GpuInstanceData>()),
 			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "InstanceBuffer"));
 
 		MaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuMaterialData>()),
 			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "MaterialBuffer"));
 
 		TerrainMaterialBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMaterialCount * Marshal.SizeOf<GpuTerrainMaterialData>()),
 			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "TerrainMaterialBuffer"));
 
 		TerrainLayerBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxTerrainLayerCount * Marshal.SizeOf<GpuTerrainLayerData>()),
 			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "TerrainLayerBuffer"));
 
 		MeshBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMeshCount * Marshal.SizeOf<GpuMeshData>()),
@@ -249,12 +253,14 @@ public sealed class GpuDrawResources : IDisposable
 		DrawArgsBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawArgs>()),
 			BufferUsage.Indirect,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "DrawArgsBuffer"));
 
 		ShadowDrawArgsBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxShadowViewCount * MaxDrawCount * Marshal.SizeOf<GpuDrawArgs>()),
 			BufferUsage.Indirect,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "ShadowDrawArgsBuffer"));
 
 		DiagnosticsCounterBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(HardeningCounterCount * sizeof(uint)),
@@ -351,7 +357,8 @@ public sealed class GpuDrawResources : IDisposable
 			_materialGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)((MaxMaterialCount + 1) * sizeof(uint)),
 				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+				name: $"MaterialGenerationBuffer[{i}]"));
 
 			_meshGenerationBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
 				(ulong)((MaxMeshCount + 1) * sizeof(uint)),
@@ -376,32 +383,38 @@ public sealed class GpuDrawResources : IDisposable
 				device,
 				_clusterPointLightBuffers[i],
 				ClusteredLightingShared.MaxPointLights,
-				Marshal.SizeOf<PointLightGpuData>());
+				Marshal.SizeOf<PointLightGpuData>(),
+				$"ClusterPointLightBuffer[{i}]");
 			_clusterAabbBuffers[i] = EnsureStructuredBufferCapacity(
 				device,
 				_clusterAabbBuffers[i],
 				requiredClusterCount,
-				Marshal.SizeOf<ClusterAabbGpuData>());
+				Marshal.SizeOf<ClusterAabbGpuData>(),
+				$"ClusterAabbBuffer[{i}]");
 			_clusterHeaderBuffers[i] = EnsureStructuredBufferCapacity(
 				device,
 				_clusterHeaderBuffers[i],
 				requiredClusterCount,
-				Marshal.SizeOf<ClusterHeaderGpuData>());
+				Marshal.SizeOf<ClusterHeaderGpuData>(),
+				$"ClusterHeaderBuffer[{i}]");
 			_clusterLightIndexBuffers[i] = EnsureStructuredBufferCapacity(
 				device,
 				_clusterLightIndexBuffers[i],
 				requiredLightIndexCapacity,
-				sizeof(uint));
+				sizeof(uint),
+				$"ClusterLightIndexBuffer[{i}]");
 			_clusterWriteCursorBuffers[i] = EnsureStructuredBufferCapacity(
 				device,
 				_clusterWriteCursorBuffers[i],
 				requiredClusterCount,
-				sizeof(uint));
+				sizeof(uint),
+				$"ClusterWriteCursorBuffer[{i}]");
 			_clusterOverflowBuffers[i] = EnsureStructuredBufferCapacity(
 				device,
 				_clusterOverflowBuffers[i],
 				2,
-				sizeof(uint));
+				sizeof(uint),
+				$"ClusterOverflowBuffer[{i}]");
 		}
 	}
 
@@ -417,7 +430,8 @@ public sealed class GpuDrawResources : IDisposable
 				device,
 				_decalProjectorBuffers[i],
 				_decalProjectorCapacity,
-				Marshal.SizeOf<GpuDecalProjectorData>());
+				Marshal.SizeOf<GpuDecalProjectorData>(),
+				$"DecalProjectorBuffer[{i}]");
 		}
 	}
 
@@ -629,7 +643,8 @@ public sealed class GpuDrawResources : IDisposable
 			return device.CreateBuffer(new BufferDescriptor(
 				(ulong)minimumSizeInBytes,
 				BufferUsage.Constant,
-				BufferFlags.AllowShaderResource));
+				BufferFlags.AllowShaderResource,
+				debugName));
 		}
 
 		var existingSize = checked((int)existingBuffer.Descriptor.SizeInBytes);
@@ -647,7 +662,8 @@ public sealed class GpuDrawResources : IDisposable
 		IGfxDevice device,
 		IGfxBuffer? existingBuffer,
 		int elementCount,
-		int elementSizeInBytes)
+		int elementSizeInBytes,
+		string debugName)
 	{
 		var sizeInBytes = checked((ulong)Math.Max(elementCount, 1) * (ulong)Math.Max(elementSizeInBytes, 1));
 		if (existingBuffer is not null && existingBuffer.Descriptor.SizeInBytes >= sizeInBytes)
@@ -667,6 +683,7 @@ public sealed class GpuDrawResources : IDisposable
 		return device.CreateBuffer(new BufferDescriptor(
 			sizeInBytes,
 			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			debugName));
 	}
 }

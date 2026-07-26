@@ -152,7 +152,7 @@ public readonly struct DescriptorHandle : IEquatable<DescriptorHandle>
 /// </summary>
 public readonly struct BufferDescriptor
 {
-	public BufferDescriptor(ulong sizeInBytes, BufferUsage usage, BufferFlags flags = BufferFlags.None)
+	public BufferDescriptor(ulong sizeInBytes, BufferUsage usage, BufferFlags flags = BufferFlags.None, string? name = null)
 	{
 		if (sizeInBytes == 0)
 		{
@@ -162,6 +162,7 @@ public readonly struct BufferDescriptor
 		SizeInBytes = sizeInBytes;
 		Usage = usage;
 		Flags = flags;
+		Name = name;
 	}
 
 	public ulong SizeInBytes { get; }
@@ -169,6 +170,12 @@ public readonly struct BufferDescriptor
 	public BufferUsage Usage { get; }
 
 	public BufferFlags Flags { get; }
+
+	/// <summary>
+	/// Diagnostic name. Worth setting on anything whose GPU virtual address gets baked into an indirect
+	/// command record: a dangling reference is otherwise reported as '&lt;unnamed&gt;' and identifies nothing.
+	/// </summary>
+	public string? Name { get; }
 }
 
 [Flags]

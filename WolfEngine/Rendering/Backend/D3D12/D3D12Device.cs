@@ -458,8 +458,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				out upload));
 		}
 
+		if (descriptor.Name is not null)
+		{
+			_ = resource.SetName(descriptor.Name);
+		}
+
 		var buffer = new D3D12Buffer(
-			name: null,
+			descriptor.Name,
 			descriptor,
 			resource,
 			sizeInBytes,
@@ -480,7 +485,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		}
 
 		var signature = EnsureGraphicsExecuteIndirectSignature();
-		return new D3D12IndirectCommandBuffer(null, descriptor, _device, signature);
+		return new D3D12IndirectCommandBuffer(descriptor.Name, descriptor, _device, signature);
 	}
 
 	public IGfxBottomLevelAccelerationStructure CreateBottomLevelAccelerationStructure(

@@ -121,6 +121,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private ulong _fenceValue;
 	private nint _fenceEvent = nint.Zero;
 	private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
+	private bool _isGpuCaptureActive;
+	private string _lastGpuCapturePath = string.Empty;
 	private IGfxBuffer? _packedVertexBuffer;
 	private IGfxBuffer? _packedIndexBuffer;
 	private ulong _packedVertexBufferUsedBytes;
@@ -1431,11 +1433,13 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		_packedVertexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
 			DefaultPackedVertexBufferBytes,
 			BufferUsage.Vertex | BufferUsage.Structured,
-			BufferFlags.AllowShaderResource));
+			BufferFlags.AllowShaderResource,
+			name: "PackedMeshVertexBuffer"));
 		_packedIndexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
 			DefaultPackedIndexBufferBytes,
 			BufferUsage.Index | BufferUsage.Structured,
-			BufferFlags.AllowShaderResource));
+			BufferFlags.AllowShaderResource,
+			name: "PackedMeshIndexBuffer"));
 	}
 
 	private MeshResources CreateMeshResources(Mesh mesh)
@@ -1528,22 +1532,48 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
 
-	public bool SupportsGpuCapture => false;
+	public bool SupportsGpuCapture => D3D12ProgrammaticCapture.IsAvailable;
 
-	public bool IsGpuCaptureActive => false;
+	public bool IsGpuCaptureActive => _isGpuCaptureActive;
 
-	public string LastGpuCapturePath => string.Empty;
+	public string LastGpuCapturePath => _lastGpuCapturePath;
 
 	public bool TryStartGpuCapture(string outputPath, out string error)
 	{
-		error = "Programmatic GPU capture is only supported on the Metal renderer.";
-		return false;
+		if (_isGpuCaptureActive)
+		{
+			error = "GPU capture is already active.";
+			return false;
+		}
+
+		if (D3D12ProgrammaticCapture.TryBeginCapture(out error) == false)
+		{
+			return false;
+		}
+
+		// PIX chooses the capture's filename itself, so the requested path is only what we report back.
+		_lastGpuCapturePath = outputPath ?? string.Empty;
+		_isGpuCaptureActive = true;
+		Console.WriteLine("[gpu capture] started; the capture covers everything submitted until it is stopped.");
+		return true;
 	}
 
 	public bool TryStopGpuCapture(out string error)
 	{
-		error = "Programmatic GPU capture is only supported on the Metal renderer.";
-		return false;
+		if (_isGpuCaptureActive == false)
+		{
+			error = "GPU capture is not active.";
+			return false;
+		}
+
+		_isGpuCaptureActive = false;
+		if (D3D12ProgrammaticCapture.TryEndCapture(out error) == false)
+		{
+			return false;
+		}
+
+		Console.WriteLine("[gpu capture] stopped; pixtool has written the capture.");
+		return true;
 	}
 
 	private static ulong Align(ulong size, ulong alignment)

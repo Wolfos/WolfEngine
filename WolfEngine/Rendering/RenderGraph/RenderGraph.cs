@@ -46,6 +46,8 @@ public sealed class RenderGraph
 	private FrameSnapshot _activeSnapshot = null!;
 	private long _lastObservedEditorFrameSequence;
 	private int _frameIndex;
+	private int _gpuCaptureRequested;
+	private bool _gpuCaptureActive;
 	private bool _previousTaaEnabled;
 	private Int2 _currentSceneRenderSize;
 	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
@@ -430,6 +432,8 @@ public sealed class RenderGraph
 			_renderer.BeginFrame();
 		}
 
+		BeginGpuCaptureIfRequested();
+
 
 		using (FrameProfiler.Instance.Measure("Build Frame"))
 		{
@@ -527,6 +531,8 @@ public sealed class RenderGraph
 			}
 		}
 
+		EndGpuCaptureIfActive();
+
 		// Clear for next frame
 		_arenaAllocator.Reset();
 		_frameIndex++;
@@ -535,6 +541,45 @@ public sealed class RenderGraph
 		PublishRayTracingSceneState();
 		_renderFrameCoordinator.PublishCompletedFrame();
 		FrameProfiler.Instance.EndFrame();
+	}
+
+	/// <summary>
+	/// Arms a programmatic GPU capture of the next rendered frame. Safe to call from any thread; the
+	/// capture is taken on the render thread at the next frame boundary.
+	/// </summary>
+	public void RequestGpuCapture() => Volatile.Write(ref _gpuCaptureRequested, 1);
+
+	private void BeginGpuCaptureIfRequested()
+	{
+		var requestedFrame = GraphicsConfig.GpuCaptureFrameIndex;
+		var requested = Interlocked.Exchange(ref _gpuCaptureRequested, 0) != 0 ||
+		                (requestedFrame > 0 && _frameIndex + 1 == requestedFrame);
+		if (requested == false || _renderer.IsGpuCaptureActive)
+		{
+			return;
+		}
+
+		if (_renderer.TryStartGpuCapture($"frame{_frameIndex + 1}", out var error) == false)
+		{
+			Console.WriteLine($"[gpu capture] frame {_frameIndex + 1} could not be captured: {error}");
+			return;
+		}
+
+		_gpuCaptureActive = true;
+	}
+
+	private void EndGpuCaptureIfActive()
+	{
+		if (_gpuCaptureActive == false)
+		{
+			return;
+		}
+
+		_gpuCaptureActive = false;
+		if (_renderer.TryStopGpuCapture(out var error) == false)
+		{
+			Console.WriteLine($"[gpu capture] failed to stop the capture: {error}");
+		}
 	}
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
