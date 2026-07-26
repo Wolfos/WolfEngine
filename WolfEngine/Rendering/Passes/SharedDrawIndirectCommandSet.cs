@@ -34,6 +34,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
 
 	public SharedDrawIndirectCommandSet()
@@ -146,17 +147,25 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		_appliedStructuralVersions[slotIndex] = version;
 	}
 
-	public bool RequiresFullReencode(int slotIndex, int frameSlot, uint bindlessEpoch)
+	/// <param name="bindingVersion">
+	/// <see cref="GpuDrawResources.IndirectBindingVersion"/> as it stands right now. Records bake the GPU
+	/// virtual addresses of the shared buffers, so a slot encoded against an older version points at
+	/// buffers that capacity growth has since replaced, and must be re-encoded before it is executed.
+	/// </param>
+	public bool RequiresFullReencode(int slotIndex, int frameSlot, uint bindlessEpoch, ulong bindingVersion)
 	{
 		ValidateSlot(slotIndex);
-		return _frameBindings[slotIndex] != frameSlot || _bindlessEpochs[slotIndex] != bindlessEpoch;
+		return _frameBindings[slotIndex] != frameSlot ||
+		       _bindlessEpochs[slotIndex] != bindlessEpoch ||
+		       _bindingVersions[slotIndex] != bindingVersion;
 	}
 
-	public void MarkSlotEncoded(int slotIndex, int frameSlot, uint bindlessEpoch, ulong structuralVersion)
+	public void MarkSlotEncoded(int slotIndex, int frameSlot, uint bindlessEpoch, ulong bindingVersion, ulong structuralVersion)
 	{
 		ValidateSlot(slotIndex);
 		_frameBindings[slotIndex] = frameSlot;
 		_bindlessEpochs[slotIndex] = bindlessEpoch;
+		_bindingVersions[slotIndex] = bindingVersion;
 		_appliedStructuralVersions[slotIndex] = structuralVersion;
 	}
 

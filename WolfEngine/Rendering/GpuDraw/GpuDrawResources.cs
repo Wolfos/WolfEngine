@@ -59,6 +59,8 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _instanceGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _materialGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _meshGenerationBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly Queue<IGfxBuffer> _unsealedBufferReleases = new();
+	private readonly Queue<PendingBufferRelease> _pendingBufferReleases = new();
 	private int _activeFrameSlot;
 	private int _activeIndirectCommandSlot;
 	private GraphicsBackendKind? _constantBufferLayoutBackend;
@@ -73,9 +75,50 @@ public sealed class GpuDrawResources : IDisposable
 	private ulong _indirectBindingVersion = 1;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
+	private readonly record struct PendingBufferRelease(IGfxBuffer Buffer, ulong RetireSubmissionId);
+
 	public GpuDrawResources(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+	}
+
+	/// <summary>
+	/// Retires buffers that capacity growth replaced once the GPU has passed the frame that could still
+	/// reference them. Call once per frame, before any pass recording.
+	/// </summary>
+	public void AdvanceFrame(IGfxDevice device)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var timeline = device as IGpuSubmissionTimeline;
+
+		// A buffer replaced mid-recording is still referenced by the command list of the frame that
+		// replaced it, and that list has not been submitted yet. Only seal the release against a
+		// submission id here, one frame later, once that work has gone to the GPU.
+		var retireSubmissionId = timeline?.LastSubmittedId ?? 0UL;
+		while (_unsealedBufferReleases.Count > 0)
+		{
+			_pendingBufferReleases.Enqueue(new PendingBufferRelease(_unsealedBufferReleases.Dequeue(), retireSubmissionId));
+		}
+
+		var completedId = ulong.MaxValue;
+		if (timeline is not null)
+		{
+			timeline.PumpCompleted();
+			completedId = timeline.CompletedId;
+		}
+
+		while (_pendingBufferReleases.Count > 0)
+		{
+			var pending = _pendingBufferReleases.Peek();
+			if (pending.RetireSubmissionId > completedId)
+			{
+				break;
+			}
+
+			(pending.Buffer as IDisposable)?.Dispose();
+			_pendingBufferReleases.Dequeue();
+		}
 	}
 
 	public int ActiveIndirectCommandSlot
@@ -430,6 +473,16 @@ public sealed class GpuDrawResources : IDisposable
 
 	public void Dispose()
 	{
+		while (_unsealedBufferReleases.Count > 0)
+		{
+			(_unsealedBufferReleases.Dequeue() as IDisposable)?.Dispose();
+		}
+
+		while (_pendingBufferReleases.Count > 0)
+		{
+			(_pendingBufferReleases.Dequeue().Buffer as IDisposable)?.Dispose();
+		}
+
 		(InstanceBuffer as IDisposable)?.Dispose();
 		(MaterialBuffer as IDisposable)?.Dispose();
 		(TerrainMaterialBuffer as IDisposable)?.Dispose();
@@ -602,7 +655,14 @@ public sealed class GpuDrawResources : IDisposable
 			return existingBuffer;
 		}
 
-		(existingBuffer as IDisposable)?.Dispose();
+		if (existingBuffer is not null)
+		{
+			// Frames still in flight, and the frame currently being recorded, hold this buffer's GPU
+			// virtual address - both bound directly and baked into indirect command records. Destroying
+			// it here is a use-after-free that surfaces as a device hang at ExecuteIndirect.
+			_unsealedBufferReleases.Enqueue(existingBuffer);
+		}
+
 		_indirectBindingVersion = checked(_indirectBindingVersion + 1UL);
 		return device.CreateBuffer(new BufferDescriptor(
 			sizeInBytes,

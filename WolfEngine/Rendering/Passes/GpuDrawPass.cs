@@ -1259,7 +1259,11 @@ public sealed class GpuDrawPass
 		commandSet.EnsureCreated(device);
 		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
 		var frameSlot = _gpuDrawResources.ActiveFrameSlot;
-		if (commandSet.RequiresFullReencode(activeSlot, frameSlot, _bindlessEpoch))
+		// Read the binding version here rather than trusting the frame-start backend signal: capacity
+		// growth happens while passes are recording, so a pass that encodes after it would otherwise
+		// execute records still holding the replaced buffers' addresses.
+		var bindingVersion = _gpuDrawResources.IndirectBindingVersion;
+		if (commandSet.RequiresFullReencode(activeSlot, frameSlot, _bindlessEpoch, bindingVersion))
 		{
 			using (FrameProfiler.Instance.Measure("GpuDraw.FullSlotReencode"))
 			{
@@ -1275,7 +1279,7 @@ public sealed class GpuDrawPass
 					passBindingResolver);
 			}
 
-			commandSet.MarkSlotEncoded(activeSlot, frameSlot, _bindlessEpoch, _latestStructuralVersion);
+			commandSet.MarkSlotEncoded(activeSlot, frameSlot, _bindlessEpoch, bindingVersion, _latestStructuralVersion);
 			CompactStructuralReplayRecords();
 			return;
 		}
