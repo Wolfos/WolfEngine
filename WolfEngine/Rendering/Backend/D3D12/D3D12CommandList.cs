@@ -545,8 +545,18 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		CommandList.SetGraphicsRootConstantBufferView(slot, gpuAddress);
+		throw new InvalidOperationException(BuildUnmappedGraphicsRegisterMessage(slot));
 	}
+
+	/// <summary>
+	/// The graphics root signature is a fixed table of registers, so an unmapped one has no root
+	/// parameter to bind to. Treating the register as a root parameter index silently writes over an
+	/// unrelated binding, so fail loudly instead - the shader and <see cref="D3D12RootBindings"/> have
+	/// to be brought back into agreement.
+	/// </summary>
+	private static string BuildUnmappedGraphicsRegisterMessage(uint slot) =>
+		$"Graphics register {slot} is not part of the D3D12 graphics root signature. Add it to " +
+		$"{nameof(D3D12RootBindings)}.Graphics and to the root signature, or move the shader binding to a mapped register.";
 
 	public void SetGraphicsConstants(uint slot, ReadOnlySpan<byte> data)
 	{
@@ -567,11 +577,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		var num32BitValues = (uint)data.Length / 4;
-		fixed (byte* dataPtr = data)
-		{
-			CommandList.SetGraphicsRoot32BitConstants(slot, num32BitValues, dataPtr, 0);
-		}
+		throw new InvalidOperationException(BuildUnmappedGraphicsRegisterMessage(slot));
 	}
 
 	public void SetComputeConstants(uint slot, ReadOnlySpan<byte> data)

@@ -23,6 +23,16 @@ internal static class D3D12RootBindings
 		internal const uint SrvT15 = 14;
 		internal const uint SrvT16 = 15;
 		internal const uint CbvB16 = 16;
+		internal const uint CbvB17 = 17;
+		internal const uint CbvB18 = 18;
+		internal const uint CbvB19 = 19;
+
+		/// <summary>
+		/// Number of root parameters in the graphics root signature. Every register a graphics shader
+		/// declares must appear here and in <see cref="TryGetGraphicsCbvIndex"/>/<see cref="TryGetGraphicsSrvIndex"/>,
+		/// or its pipeline fails to create with a bare E_INVALIDARG.
+		/// </summary>
+		internal const uint ParameterCount = 20;
 	}
 
 	internal static class Compute
@@ -61,6 +71,17 @@ internal static class D3D12RootBindings
 				return true;
 			case 16:
 				rootIndex = Graphics.CbvB16;
+				return true;
+			// Screen-space decals bind their own vertex stream, which occupies buffer index 0 on Metal,
+			// so their constant buffers sit above the shared graphics registers.
+			case 17:
+				rootIndex = Graphics.CbvB17;
+				return true;
+			case 18:
+				rootIndex = Graphics.CbvB18;
+				return true;
+			case 19:
+				rootIndex = Graphics.CbvB19;
 				return true;
 			case 27:
 				rootIndex = Graphics.BindlessCountsCbv;

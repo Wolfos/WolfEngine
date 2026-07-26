@@ -1455,8 +1455,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 					psoDesc.RTVFormats[i] = ToDxgiFormat(targetFormats[i]);
 				}
 
-				SilkMarshal.ThrowHResult(
-					_device.CreateGraphicsPipelineState(in psoDesc, out ComPtr<ID3D12PipelineState> pipelineState));
+				var createResult = _device.CreateGraphicsPipelineState(in psoDesc, out ComPtr<ID3D12PipelineState> pipelineState);
+				if (createResult < 0)
+				{
+					// The runtime reports every rejected description as a bare E_INVALIDARG, so name the
+					// pipeline and the most common cause: a shader register with no root parameter behind it.
+					throw new InvalidOperationException(
+						$"Failed to create the graphics pipeline for shader variant " +
+						$"'{key.ShaderVariant ?? "<none>"}' ({key.VertexEntryPoint}/{key.PixelEntryPoint}, layout {key.Layout}). " +
+						$"Check that every register the shader declares is mapped in {nameof(D3D12RootBindings)}.Graphics " +
+						$"and present in the root signature. Enable the debug layer for the runtime's own diagnosis.",
+						Marshal.GetExceptionForHR(createResult));
+				}
 
 				return new D3D12Pipeline(key, PassKind.Graphics, pipelineState, rootSignature);
 			}
@@ -1534,7 +1544,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			OffsetInDescriptorsFromTableStart = 0
 		};
 
-		var rootParameters = stackalloc RootParameter[17];
+		var rootParameters = stackalloc RootParameter[(int)D3D12RootBindings.Graphics.ParameterCount];
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
@@ -1607,9 +1617,21 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].Anonymous.Descriptor = new RootDescriptor(16, 0);
 		rootParameters[D3D12RootBindings.Graphics.SrvT16].ShaderVisibility = ShaderVisibility.All;
 
+		rootParameters[D3D12RootBindings.Graphics.CbvB17].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB17].Anonymous.Descriptor = new RootDescriptor(17, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB17].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.CbvB18].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB18].Anonymous.Descriptor = new RootDescriptor(18, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB18].ShaderVisibility = ShaderVisibility.All;
+
+		rootParameters[D3D12RootBindings.Graphics.CbvB19].ParameterType = RootParameterType.TypeCbv;
+		rootParameters[D3D12RootBindings.Graphics.CbvB19].Anonymous.Descriptor = new RootDescriptor(19, 0);
+		rootParameters[D3D12RootBindings.Graphics.CbvB19].ShaderVisibility = ShaderVisibility.All;
+
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 17,
+			NumParameters = D3D12RootBindings.Graphics.ParameterCount,
 			PParameters = rootParameters,
 			NumStaticSamplers = 0,
 			PStaticSamplers = null,
