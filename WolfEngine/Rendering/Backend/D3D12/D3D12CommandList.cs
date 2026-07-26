@@ -878,6 +878,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
+		ValidateIndirectReferences(d3d12CommandBuffer, maxAvailable);
 		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 		CommandList.ExecuteIndirect(
 			d3d12CommandBuffer.CommandSignature,
@@ -886,6 +887,19 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			0,
 			(ID3D12Resource*)null,
 			0);
+	}
+
+	private static void ValidateIndirectReferences(D3D12IndirectCommandBuffer commandBuffer, uint commandCount)
+	{
+		if (GraphicsConfig.ValidateIndirectCommandBuffers == false)
+		{
+			return;
+		}
+
+		if (commandBuffer.TryDescribeStaleReferences(out var description))
+		{
+			Console.WriteLine($"[indirect validation] {description} (executing {commandCount} commands)");
+		}
 	}
 
 	public void ExecuteIndirectCommandBufferRange(
@@ -905,6 +919,7 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 		EnsureBindlessDescriptorHeaps();
 		ApplyBindlessRootBindings();
+		ValidateIndirectReferences(d3d12CommandBuffer, d3d12CommandBuffer.Descriptor.MaxCommandCount);
 		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
 
 		// Range mode: consume {start,count} and execute from command 0 using the count value only.

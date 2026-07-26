@@ -8,6 +8,8 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 {
+	private ulong _lastIndirectBindingVersion;
+
 	public GpuDrawBackendFrameSignals PrepareFrame(
 		IGfxDevice device,
 		IRenderer renderer,
@@ -22,10 +24,17 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 		}
 
 		_ = renderer;
-		_ = resources;
 		_ = primaryGBufferPipeline;
+
+		var requiresFullSlotReencode = false;
+		if (_lastIndirectBindingVersion != resources.IndirectBindingVersion)
+		{
+			_lastIndirectBindingVersion = resources.IndirectBindingVersion;
+			requiresFullSlotReencode = true;
+		}
+
 		return new GpuDrawBackendFrameSignals(
-			requiresFullSlotReencode: false,
+			requiresFullSlotReencode,
 			supportsIndirectStructuralUpdates: true);
 	}
 

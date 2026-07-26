@@ -530,7 +530,9 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint clusterIndex = ComputeClusterIndex(dispatchThreadId.xy, uint2(framebufferSizeX, framebufferSizeY), max(viewPos.z, nearPlane), nearPlane, farPlane);
     ClusterHeader header = g_ClusterHeaders[clusterIndex];
-    for (uint i = 0; i < header.count; ++i)
+
+    uint pointLightIterations = min(header.count, CLUSTER_MAX_LIGHTS_PER_CLUSTER);
+    for (uint i = 0; i < pointLightIterations; ++i)
     {
         uint pointLightIndex = g_ClusterLightIndices[header.offset + i];
         color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);

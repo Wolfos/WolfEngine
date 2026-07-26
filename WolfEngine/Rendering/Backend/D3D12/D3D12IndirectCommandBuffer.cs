@@ -35,6 +35,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	private readonly ulong _recordStride;
 	private readonly Dictionary<D3D12Buffer, ResourceStates> _referencedBufferStates = new();
 
+	private readonly Dictionary<D3D12Buffer, ulong> _referencedBufferAddresses = new();
+
+	private string? _lastStaleReport;
+
 	public D3D12IndirectCommandBuffer(
 		string? name,
 		in IndirectCommandBufferDescriptor descriptor,
@@ -224,6 +228,12 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 
 	private void TrackBuffer(D3D12Buffer buffer, ResourceStates requiredState)
 	{
+		var resource = buffer.Resource.Handle;
+		if (resource is not null)
+		{
+			_referencedBufferAddresses[buffer] = resource->GetGPUVirtualAddress();
+		}
+
 		if (_referencedBufferStates.TryGetValue(buffer, out var existingState))
 		{
 			_referencedBufferStates[buffer] = existingState | requiredState;
@@ -231,6 +241,45 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		}
 
 		_referencedBufferStates.Add(buffer, requiredState);
+	}
+
+	internal bool TryDescribeStaleReferences(out string description)
+	{
+		List<string>? stale = null;
+		foreach (var (buffer, bakedAddress) in _referencedBufferAddresses)
+		{
+			var resource = buffer.Resource.Handle;
+			if (resource is null)
+			{
+				(stale ??= new List<string>()).Add(
+					$"'{buffer.Name ?? "<unnamed>"}' disposed (record holds 0x{bakedAddress:X16})");
+				continue;
+			}
+
+			var currentAddress = resource->GetGPUVirtualAddress();
+			if (currentAddress != bakedAddress)
+			{
+				(stale ??= new List<string>()).Add(
+					$"'{buffer.Name ?? "<unnamed>"}' moved 0x{bakedAddress:X16} -> 0x{currentAddress:X16}");
+			}
+		}
+
+		if (stale is null)
+		{
+			_lastStaleReport = null;
+			description = string.Empty;
+			return false;
+		}
+
+		description = $"indirect command buffer '{Name ?? "<unnamed>"}': {string.Join(", ", stale)}";
+		if (string.Equals(_lastStaleReport, description, StringComparison.Ordinal))
+		{
+			description = string.Empty;
+			return false;
+		}
+
+		_lastStaleReport = description;
+		return true;
 	}
 
 	private static void SetPassBindingAddress(

@@ -93,6 +93,13 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private Action<float> _renderCallback = static deltaTime => { };
 	private bool _isInitialized;
 
+	/// <summary>
+	/// Set for the whole of <see cref="Dispose"/>. Tearing the window down synchronously reenters the window
+	/// callbacks (SetWindowPos raises a framebuffer resize before DetachWindow returns), and by that point the
+	/// D3D objects those callbacks use have already been released.
+	/// </summary>
+	private bool _isDisposing;
+
 	private DXGI _dxgi = null!;
 	private D3D12 _d3d12 = null!;
 	private ComPtr<IDXGIFactory2> _factory;
@@ -363,7 +370,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void OnWindowRender(double deltaTime)
 	{
-		if (_isInitialized == false)
+		if (_isDisposing || _isInitialized == false)
 		{
 			return;
 		}
@@ -387,6 +394,11 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void OnWindowFramebufferResize(Vector2D<int> newSize)
 	{
+		if (_isDisposing)
+		{
+			return;
+		}
+
 		if (_isInitialized == false)
 		{
 			if (newSize.X > 0 && newSize.Y > 0)
@@ -994,7 +1006,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void ConfigureDredIfRequested()
 	{
-		if (GraphicsConfig.EnableD3DDebugLayer == false || OperatingSystem.IsWindows() == false)
+		if (OperatingSystem.IsWindows() == false)
 		{
 			return;
 		}
@@ -1577,6 +1589,11 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			return;
 		}
 
+		if (_swapchain.Handle is null || _commandQueue.Handle is null || _fence.Handle is null)
+		{
+			return;
+		}
+
 		Screen.CurrentResolution = newSize;
 		_framebufferSize = newSize;
 
@@ -1783,9 +1800,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void DumpDredData(string context)
 	{
-		if (GraphicsConfig.EnableD3DDebugLayer == false ||
-		    _device.Handle is null ||
-		    _device.GetDeviceRemovedReason() >= 0)
+		if (_device.Handle is null || _device.GetDeviceRemovedReason() >= 0)
 		{
 			return;
 		}
@@ -1799,7 +1814,10 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				return;
 			}
 
-			Console.WriteLine($"DRED data ({context}):");
+			// The removal reason separates a hang (DXGI_ERROR_DEVICE_HUNG, 0x887A0006, a shader or indirect
+			// draw that never retired) from a bad access (DXGI_ERROR_DEVICE_REMOVED plus a page fault below),
+			// which are diagnosed in completely different directions.
+			Console.WriteLine($"DRED data ({context}): removal reason 0x{(uint) _device.GetDeviceRemovedReason():X8}");
 			DredAutoBreadcrumbsOutput1 breadcrumbs = default;
 			if (dred.GetAutoBreadcrumbsOutput1(&breadcrumbs) >= 0)
 			{
@@ -1812,9 +1830,29 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 						? 0U
 						: *node->PLastBreadcrumbValue;
 					var completedBreadcrumbs = Math.Min(reportedCompletedBreadcrumbs, node->BreadcrumbCount);
+
+					var enclosingContext = string.Empty;
+					if (completedBreadcrumbs < node->BreadcrumbCount)
+					{
+						var enclosingIndex = -1L;
+						for (var i = 0U; i < node->BreadcrumbContextsCount; i++)
+						{
+							var candidate = node->PBreadcrumbContexts[i];
+							if (candidate.BreadcrumbIndex > completedBreadcrumbs ||
+							    candidate.BreadcrumbIndex <= enclosingIndex ||
+							    candidate.PContextString is null)
+							{
+								continue;
+							}
+
+							enclosingIndex = candidate.BreadcrumbIndex;
+							enclosingContext = $" enclosing='{new string((char*) candidate.PContextString)}'";
+						}
+					}
+
 					Console.WriteLine(
 						$"[DRED breadcrumb] list='{commandListName}' queue='{commandQueueName}' " +
-						$"completed={reportedCompletedBreadcrumbs}/{node->BreadcrumbCount}");
+						$"completed={reportedCompletedBreadcrumbs}/{node->BreadcrumbCount}{enclosingContext}");
 
 					if (node->PCommandHistory is null || node->BreadcrumbCount == 0)
 					{
@@ -1826,8 +1864,25 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 					for (var operationIndex = first; operationIndex < last; operationIndex++)
 					{
 						var marker = operationIndex == completedBreadcrumbs ? "next" : "near";
+
+						// The marker string DRED recorded against this breadcrumb is what actually identifies the offending pass.
+						var operationContext = string.Empty;
+						for (var i = 0U; i < node->BreadcrumbContextsCount; i++)
+						{
+							var breadcrumbContext = node->PBreadcrumbContexts[i];
+							if (breadcrumbContext.BreadcrumbIndex != operationIndex ||
+							    breadcrumbContext.PContextString is null)
+							{
+								continue;
+							}
+
+							var text = new string((char*) breadcrumbContext.PContextString);
+							operationContext = text.Length == 0 ? string.Empty : $" ctx='{text}'";
+							break;
+						}
+
 						Console.WriteLine(
-							$"  [{marker} {operationIndex}] {node->PCommandHistory[operationIndex]}");
+							$"  [{marker} {operationIndex}] {node->PCommandHistory[operationIndex]}{operationContext}");
 					}
 				}
 			}
@@ -1951,6 +2006,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void Dispose()
 	{
+		_isDisposing = true;
+
 		if (_commandQueue.Handle is not null && _fence.Handle is not null)
 		{
 			SignalAndWait();
@@ -1965,9 +2022,14 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		// Command lists are now created per-pass
 		_rtvHeap.Dispose();
 
+		// Cleared as well as released: ComPtr.Dispose leaves the handle dangling, so anything that reaches a
+		// released object later would deref freed memory instead of hitting the null checks guarding these.
 		_swapchain.Dispose();
+		_swapchain = default;
 		_factory.Dispose();
+		_factory = default;
 		_commandQueue.Dispose();
+		_commandQueue = default;
 
 		_meshResources.Clear();
 		(_packedVertexBuffer as IDisposable)?.Dispose();
@@ -2025,12 +2087,14 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		if (_window is not null)
 		{
-			_windowChromeController.DetachWindow();
+			// Unhooked before DetachWindow, not after: restoring the default chrome calls SetWindowPos, which
+			// synchronously drives GLFW's resize callback back into this instance while these are still live.
 			_window.Load -= OnWindowLoad;
 			_window.Update -= OnWindowUpdate;
 			_window.Render -= OnWindowRender;
 			_window.FramebufferResize -= OnWindowFramebufferResize;
 			_window.Closing -= OnWindowClosing;
+			_windowChromeController.DetachWindow();
 			try
 			{
 				_window.Dispose();

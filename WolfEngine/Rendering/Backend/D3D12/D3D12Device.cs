@@ -811,6 +811,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		if (pooled is not null)
 		{
 			pooled.Reset();
+			pooled.SetDebugName($"Unnamed {type}");
 			return pooled;
 		}
 
@@ -825,6 +826,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				out ComPtr<ID3D12GraphicsCommandList> commandList));
 
 		var wrapper = new D3D12CommandList(this, type, allocator, commandList);
+		wrapper.SetDebugName($"Unnamed {type}");
 
 		return wrapper;
 	}

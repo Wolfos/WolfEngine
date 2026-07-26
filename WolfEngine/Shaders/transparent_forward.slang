@@ -201,7 +201,9 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     uint2 pixel = uint2(input.position.xy);
     uint clusterIndex = ComputeClusterIndex(pixel, uint2(frameSizeX, frameSizeY), max(input.viewPos.z, nearPlane), nearPlane, farPlane);
     ClusterHeader header = g_ClusterHeaders[clusterIndex];
-    for (uint i = 0u; i < header.count; ++i)
+
+    uint pointLightIterations = min(header.count, CLUSTER_MAX_LIGHTS_PER_CLUSTER);
+    for (uint i = 0u; i < pointLightIterations; ++i)
     {
         uint pointLightIndex = g_ClusterLightIndices[header.offset + i];
         color += EvaluatePointLight(surface, viewDir, g_PointLights[pointLightIndex]);
