@@ -32,6 +32,8 @@ cbuffer TaaSettings : register(b1)
     float currentProjectionZScale;
     float previousProjectionZBias;
     float previousProjectionZScale;
+    float staticClampExpansion;
+    float clampExpansionMotionPixels;
     row_major float4x4 inverseUnjitteredViewProjection;
     row_major float4x4 previousViewProjection;
 };
@@ -41,6 +43,10 @@ static const uint TAA_TILE_WIDTH = 10u;
 static const uint TAA_TILE_PIXEL_COUNT = TAA_TILE_WIDTH * TAA_TILE_WIDTH;
 static const float TAA_BACKGROUND_DEPTH = 0.999999f;
 static const float TAA_MAX_HISTORY_AGE = 32.0f;
+// Frames of accumulation before a stationary pixel is trusted enough to widen its
+// neighbourhood clamp. Short enough to converge quickly, long enough that a freshly
+// disoccluded pixel resolves against the tight box first.
+static const float TAA_CLAMP_EXPANSION_AGE = 8.0f;
 
 groupshared float4 g_CurrentColorTile[TAA_TILE_PIXEL_COUNT];
 
@@ -267,6 +273,37 @@ void TaaResolveCS(
     float motionFactor = saturate(
         (motionPixels - 0.5f) / max(motionResponsePixels - 0.5f, 1e-4f));
 
+    // Resolve the reprojection target up front. The clamp relaxation below has to know
+    // how far this pixel actually travelled on screen, and for background pixels that
+    // only falls out of the sky reprojection rather than the velocity buffer.
+    bool historyAllowed = historyValid != 0u && resetHistory == 0u;
+    float2 previousUv = centerUv;
+
+    if (historyAllowed)
+    {
+        if (background)
+        {
+            historyAllowed = TryReprojectBackground(centerUv, previousUv);
+        }
+        else
+        {
+            historyAllowed = velocity.w > 0.0f;
+            previousUv = centerUv + velocity.xy / renderSize;
+        }
+    }
+
+    historyAllowed = historyAllowed &&
+        all(previousUv >= 0.0f.xx) &&
+        all(previousUv <= 1.0f.xx);
+
+    // Screen-space travel including the background reprojection, so a rotating camera
+    // does not read as stationary over the sky.
+    float reprojectedMotionPixels = historyAllowed
+        ? length((previousUv - centerUv) * renderSize)
+        : 0.0f;
+    float stationaryFactor = 1.0f - saturate(
+        reprojectedMotionPixels / max(clampExpansionMotionPixels, 1e-4f));
+
     float3 neighborhoodMin = currentYCoCg;
     float3 neighborhoodMax = currentYCoCg;
     float3 firstMoment = 0.0f.xxx;
@@ -322,28 +359,6 @@ void TaaResolveCS(
         neighborhoodMax,
         varianceBoxMax,
         varianceInfluence);
-    clipMin = min(clipMin, currentYCoCg);
-    clipMax = max(clipMax, currentYCoCg);
-
-    bool historyAllowed = historyValid != 0u && resetHistory == 0u;
-    float2 previousUv = 0.0f.xx;
-
-    if (historyAllowed)
-    {
-        if (background)
-        {
-            historyAllowed = TryReprojectBackground(centerUv, previousUv);
-        }
-        else
-        {
-            historyAllowed = velocity.w > 0.0f;
-            previousUv = centerUv + velocity.xy / renderSize;
-        }
-    }
-
-    historyAllowed = historyAllowed &&
-        all(previousUv >= 0.0f.xx) &&
-        all(previousUv <= 1.0f.xx);
 
     float4 historySample = float4(currentColor, 0.0f);
     if (historyAllowed)
@@ -357,6 +372,7 @@ void TaaResolveCS(
             historyDepthUv * renderSize - 0.5f.xx;
         int2 historyBasePixel = int2(floor(historyPixelPosition));
         uint matchingTapCount = 0u;
+        uint matchingFootprintTapCount = 0u;
         float expectedPreviousViewDepth = background
             ? 0.0f
             : ReconstructViewDepth(
@@ -365,46 +381,66 @@ void TaaResolveCS(
                 previousProjectionZBias);
         float rejectionThreshold = DepthThreshold(expectedPreviousViewDepth);
 
-        for (int tapIndex = 0; tapIndex < 4; tapIndex++)
+        // Between two frames the jitter moves the raster grid by up to a pixel, so the
+        // surface this pixel covers can land a whole pixel away in the history depth
+        // buffer even when nothing moved. On sub-pixel geometry - cables, railings,
+        // foliage - the bilinear 2x2 footprint then finds no matching depth, and the
+        // resulting rejection resets the accumulation and puts a raw aliased frame back
+        // on screen. Give the search exactly that one pixel of raster slack while the
+        // pixel is stationary. A genuine disocclusion still fails every tap, and anything
+        // actually moving keeps the plain 2x2 footprint, so rejection under motion is
+        // unchanged.
+        int depthSearchSlack = stationaryFactor > 0.75f ? 1 : 0;
+
+        for (int tapY = -depthSearchSlack; tapY <= 1 + depthSearchSlack; tapY++)
         {
-            int2 tapOffset = int2(tapIndex & 1, tapIndex >> 1);
-            int2 historyPixel = historyBasePixel + tapOffset;
-            bool tapInBounds =
-                historyPixel.x >= 0 &&
-                historyPixel.y >= 0 &&
-                historyPixel.x < int(renderSizeX) &&
-                historyPixel.y < int(renderSizeY);
-            if (!tapInBounds)
+            for (int tapX = -depthSearchSlack; tapX <= 1 + depthSearchSlack; tapX++)
             {
-                continue;
-            }
+                int2 historyPixel = historyBasePixel + int2(tapX, tapY);
+                bool tapInBounds =
+                    historyPixel.x >= 0 &&
+                    historyPixel.y >= 0 &&
+                    historyPixel.x < int(renderSizeX) &&
+                    historyPixel.y < int(renderSizeY);
+                if (!tapInBounds)
+                {
+                    continue;
+                }
 
-            float historyDepth =
-                historyDepthTexture.Load(int3(historyPixel, 0)).r;
-            bool tapMatches = false;
-            float depthError = 0.0f;
-            if (background)
-            {
-                tapMatches = IsBackground(historyDepth);
-            }
-            else if (!IsBackground(historyDepth))
-            {
-                float historyViewDepth = ReconstructViewDepth(
-                    historyDepth,
-                    previousProjectionZScale,
-                    previousProjectionZBias);
-                depthError = abs(historyViewDepth - expectedPreviousViewDepth);
-                tapMatches = depthError <= rejectionThreshold;
-            }
+                float historyDepth =
+                    historyDepthTexture.Load(int3(historyPixel, 0)).r;
+                bool tapMatches = false;
+                float depthError = 0.0f;
+                if (background)
+                {
+                    tapMatches = IsBackground(historyDepth);
+                }
+                else if (!IsBackground(historyDepth))
+                {
+                    float historyViewDepth = ReconstructViewDepth(
+                        historyDepth,
+                        previousProjectionZScale,
+                        previousProjectionZBias);
+                    depthError = abs(historyViewDepth - expectedPreviousViewDepth);
+                    tapMatches = depthError <= rejectionThreshold;
+                }
 
-            if (tapMatches)
-            {
-                matchingTapCount++;
+                if (tapMatches)
+                {
+                    matchingTapCount++;
+                    // Only the bilinear 2x2 decides whether the wider Catmull-Rom
+                    // history filter is safe; the slack ring validates the surface but
+                    // says nothing about the taps that filter would read.
+                    if (tapX >= 0 && tapX <= 1 && tapY >= 0 && tapY <= 1)
+                    {
+                        matchingFootprintTapCount++;
+                    }
+                }
             }
         }
 
         historyAllowed = historyAllowed && matchingTapCount > 0u;
-        if (historyAllowed && matchingTapCount == 4u)
+        if (historyAllowed && matchingFootprintTapCount == 4u)
         {
             historySample = SampleCatmullRom(
                 historyColorTexture,
@@ -429,14 +465,37 @@ void TaaResolveCS(
     float outputHistoryAge = 0.0f;
     if (historyAllowed)
     {
+        float previousHistoryAge =
+            clamp(historySample.a, 0.0f, TAA_MAX_HISTORY_AGE);
+
+        // A converged stationary pixel's history is the supersampled average of this
+        // surface point across every jitter phase. One phase's 3x3 neighbourhood is a
+        // far narrower range than that average legitimately spans on high-frequency
+        // geometry and foliage, so clamping to it hands the aliasing straight back each
+        // frame. Widen the box in proportion to local contrast once the pixel has both
+        // stopped moving and had time to converge - moving and freshly disoccluded
+        // pixels keep the tight box that rejects ghosting and disocclusion leaks.
+        float convergedFactor =
+            saturate(previousHistoryAge / TAA_CLAMP_EXPANSION_AGE);
+        float clampExpansion = lerp(
+            1.0f,
+            max(staticClampExpansion, 1.0f),
+            stationaryFactor * convergedFactor);
+        // Applied as an offset rather than rebuilt from the box centre so that an
+        // expansion of exactly 1.0 leaves the moving-pixel clamp bit-identical.
+        float3 expansionOffset =
+            0.5f * (clipMax - clipMin) * (clampExpansion - 1.0f);
+        float3 expandedClipMin = min(clipMin - expansionOffset, currentYCoCg);
+        float3 expandedClipMax = max(clipMax + expansionOffset, currentYCoCg);
+
         float3 historyYCoCg = RGBToYCoCg(historySample.rgb);
         float3 clippedHistoryYCoCg = ClipLineToAabb(
             currentYCoCg,
             historyYCoCg,
-            clipMin,
-            clipMax);
+            expandedClipMin,
+            expandedClipMax);
         float3 clipRange = max(
-            clipMax - clipMin,
+            expandedClipMax - expandedClipMin,
             float3(0.02f, 0.02f, 0.02f));
         float clipDistance = MaxComponent(
             abs(historyYCoCg - clippedHistoryYCoCg) / clipRange);
@@ -449,8 +508,12 @@ void TaaResolveCS(
             abs(historyYCoCg.x - currentYCoCg.x) / luminanceDenominator;
         float luminanceResponse =
             smoothstep(0.1f, 0.5f, relativeLuminanceDifference);
-        float historyConfidence =
-            1.0f - 0.025f * clipResponse - 0.025f * luminanceResponse;
+        // On stationary geometry these two responses are driven by the frame's own
+        // aliasing rather than by stale history, so letting them cut the weight there
+        // feeds the flicker it is meant to suppress.
+        float confidencePenaltyScale = 1.0f - stationaryFactor * convergedFactor;
+        float historyConfidence = 1.0f - confidencePenaltyScale *
+            (0.025f * clipResponse + 0.025f * luminanceResponse);
 
         float historyWeightCap = lerp(
             staticHistoryWeight,
@@ -458,13 +521,19 @@ void TaaResolveCS(
             motionFactor);
         float alphaTestMask =
             saturate(materialTexture.Load(int3(pixel, 0)).a);
+        // Alpha-tested coverage swims between phases, so its history is discounted while
+        // it moves. A stationary alpha-tested pixel has no such problem, and it is the
+        // sub-pixel foliage that most needs a long accumulation to converge - keeping the
+        // discount there is what leaves foliage visibly boiling on a locked camera.
+        float alphaTestScale = lerp(
+            alphaTestHistoryScale,
+            1.0f,
+            stationaryFactor);
         historyWeightCap *= lerp(
             1.0f,
-            alphaTestHistoryScale,
+            alphaTestScale,
             alphaTestMask);
 
-        float previousHistoryAge =
-            clamp(historySample.a, 0.0f, TAA_MAX_HISTORY_AGE);
         float startupWeight =
             previousHistoryAge / (previousHistoryAge + 1.0f);
         float historyWeight =

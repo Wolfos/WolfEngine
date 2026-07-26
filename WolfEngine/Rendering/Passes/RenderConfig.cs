@@ -249,6 +249,20 @@ public struct TemporalAntiAliasingConfig
 	public float DepthRejectionAbsolute { get; set; } = 0.02f;
 	public float DepthRejectionRelative { get; set; } = 0.01f;
 	public float VarianceClipGamma { get; set; } = 1.0f;
+
+	/// <summary>
+	/// Widens the neighbourhood clamp box, scaled by local contrast, for pixels that are
+	/// stationary and have converged. Stops a single jitter phase's neighbourhood from
+	/// clamping away the supersampled history on high-frequency geometry. 1.0 disables it.
+	/// </summary>
+	public float StaticClampExpansion { get; set; } = 4.0f;
+
+	/// <summary>
+	/// Screen-space motion, in pixels per frame, at which <see cref="StaticClampExpansion"/>
+	/// has fully faded back to the tight clamp box.
+	/// </summary>
+	public float ClampExpansionMotionPixels { get; set; } = 1.0f;
+
 	public float AlphaTestHistoryScale { get; set; } = 0.75f;
 	public bool EnableCasSharpen { get; set; } = true;
 	public float CasSharpness { get; set; } = 0.35f;

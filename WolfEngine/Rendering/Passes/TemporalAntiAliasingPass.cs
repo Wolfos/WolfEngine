@@ -121,6 +121,10 @@ public sealed class TemporalAntiAliasingPass
 		settingsWriter.SetFloat("depthRejectionAbsolute", MathF.Max(settings.DepthRejectionAbsolute, 0.0f));
 		settingsWriter.SetFloat("depthRejectionRelative", MathF.Max(settings.DepthRejectionRelative, 0.0f));
 		settingsWriter.SetFloat("varianceClipGamma", MathF.Max(settings.VarianceClipGamma, 0.0f));
+		settingsWriter.SetFloat("staticClampExpansion", MathF.Max(settings.StaticClampExpansion, 1.0f));
+		settingsWriter.SetFloat(
+			"clampExpansionMotionPixels",
+			MathF.Max(settings.ClampExpansionMotionPixels, 1e-3f));
 		settingsWriter.SetFloat("alphaTestHistoryScale", Math.Clamp(settings.AlphaTestHistoryScale, 0.0f, 1.0f));
 		settingsWriter.SetFloat("currentProjectionZBias", config.CurrentProjectionZBias);
 		settingsWriter.SetFloat("currentProjectionZScale", config.CurrentProjectionZScale);

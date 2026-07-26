@@ -25,6 +25,8 @@ public sealed class TemporalAntiAliasingTests
 			Assert.That(settings.DepthRejectionAbsolute, Is.EqualTo(0.02f));
 			Assert.That(settings.DepthRejectionRelative, Is.EqualTo(0.01f));
 			Assert.That(settings.VarianceClipGamma, Is.EqualTo(1.0f));
+			Assert.That(settings.StaticClampExpansion, Is.EqualTo(4.0f));
+			Assert.That(settings.ClampExpansionMotionPixels, Is.EqualTo(1.0f));
 			Assert.That(settings.AlphaTestHistoryScale, Is.EqualTo(0.75f));
 			Assert.That(settings.EnableCasSharpen, Is.True);
 			Assert.That(settings.CasSharpness, Is.EqualTo(0.35f));
@@ -54,6 +56,10 @@ public sealed class TemporalAntiAliasingTests
 		Assert.That(config.TemporalAntiAliasing.PhaseCount, Is.EqualTo(8));
 		Assert.That(config.TemporalAntiAliasing.StaticHistoryWeight, Is.EqualTo(0.9f));
 		Assert.That(config.TemporalAntiAliasing.MovingHistoryWeight, Is.EqualTo(0.65f));
+		// Absent clamp-relaxation keys must still default to the enabled preset rather
+		// than to zero, which would silently disable the stationary clamp expansion.
+		Assert.That(config.TemporalAntiAliasing.StaticClampExpansion, Is.EqualTo(4.0f));
+		Assert.That(config.TemporalAntiAliasing.ClampExpansionMotionPixels, Is.EqualTo(1.0f));
 	}
 
 	[Test]
