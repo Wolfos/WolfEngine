@@ -38,10 +38,10 @@ public class SceneBuilder : ISceneBuilder
 		for (var i = 0; i < importedScene.Materials.Count; i++)
 		{
 			var importedMaterial = importedScene.Materials[i];
-			Texture albedoTexture = null;
-			Texture ormTexture = null;
-			Texture normalTexture = null;
-			Texture emissiveTexture = null;
+			Texture? albedoTexture = null;
+			Texture? ormTexture = null;
+			Texture? normalTexture = null;
+			Texture? emissiveTexture = null;
 			if (importedMaterial.BaseColorTextureIndex is { } texIndex &&
 			    texIndex >= 0 &&
 			    texIndex < runtimeTextures.Count)

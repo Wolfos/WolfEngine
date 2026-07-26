@@ -79,7 +79,8 @@ public sealed class RuntimeArtifactTargetProvider : IRuntimeArtifactTargetProvid
 
 public static class RuntimeAssetDescriptor
 {
-	private static readonly Dictionary<Type, RuntimeAssetAttribute> Cache = new();
+	// A null value memoizes "this type has no RuntimeAssetAttribute" so the reflection lookup runs once.
+	private static readonly Dictionary<Type, RuntimeAssetAttribute?> Cache = new();
 	private static readonly object Sync = new();
 
 	public static RuntimeAssetAttribute Get(Type runtimeType)

@@ -46,7 +46,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			MipLevels == other.MipLevels &&
 			IsSrgb == other.IsSrgb;
 
-		public override bool Equals(object obj) => obj is TexturePoolKey other && Equals(other);
+		public override bool Equals(object? obj) => obj is TexturePoolKey other && Equals(other);
 
 		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage, MipLevels, IsSrgb);
 	}
@@ -618,7 +618,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 				depthDescriptor.DepthCompareFunction = key.RenderState.DepthTestEnabled
 					? MTLCompareFunction.Less
 					: MTLCompareFunction.Always;
-				depthDescriptor.DepthWriteEnabled = key.RenderState.DepthWriteEnabled;
+				depthDescriptor.IsDepthWriteEnabled = key.RenderState.DepthWriteEnabled;
 				depthState = _device.NewDepthStencilState(depthDescriptor);
 				depthDescriptor.Dispose();
 			}

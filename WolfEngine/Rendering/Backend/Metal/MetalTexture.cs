@@ -1,15 +1,17 @@
 using System;
+using System.Runtime.Versioning;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
+[SupportedOSPlatform("macos")]
 internal sealed class MetalTexture : IGfxTexture, IDisposable
 {
 	private bool _isDisposed;
 	private readonly MetalDescriptorTable _descriptorTable;
 
-	public MetalTexture(string name, TextureDescriptor descriptor, MTLTexture texture, MetalDescriptorTable descriptorTable)
+	public MetalTexture(string? name, TextureDescriptor descriptor, MTLTexture texture, MetalDescriptorTable descriptorTable)
 	{
 		Name = name;
 		Descriptor = descriptor;
@@ -20,7 +22,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		UnorderedAccessView = DescriptorHandle.Invalid;
 	}
 
-	public string Name { get; }
+	public string? Name { get; }
 
 	public TextureDescriptor Descriptor { get; }
 

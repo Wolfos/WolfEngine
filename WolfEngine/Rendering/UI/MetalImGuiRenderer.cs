@@ -24,9 +24,9 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxDevice _device;
-	private IGfxPipeline _pipeline;
-	private MetalTexture _fontTexture;
+	private IGfxDevice? _device;
+	private IGfxPipeline? _pipeline;
+	private MetalTexture? _fontTexture;
 	private DescriptorHandle _fontHandle = DescriptorHandle.Invalid;
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
 	private ShaderPropertyWriter? _projectionWriter;

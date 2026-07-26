@@ -32,7 +32,7 @@ internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 		for (ulong i = 0; i < counterSets.Count; i++)
 		{
 			var candidate = new MTLCounterSet(counterSets.Object(i));
-			if (candidate.Name.ToString().Contains("timestamp", StringComparison.OrdinalIgnoreCase))
+			if (candidate.Name.ToString()?.Contains("timestamp", StringComparison.OrdinalIgnoreCase) == true)
 			{
 				_timestampCounterSet = candidate;
 				break;

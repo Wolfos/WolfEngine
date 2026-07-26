@@ -204,7 +204,7 @@ internal sealed unsafe class D3D12DescriptorTable : IGfxDescriptorTable, IDispos
 				BufferLocation = d3dBuffer.Resource.Handle->GetGPUVirtualAddress(),
 				SizeInBytes = d3dBuffer.GetConstantBufferViewSizeInBytes()
 			};
-			_device.Handle->CreateConstantBufferView(cbvDesc, cpuHandle);
+			_device.Handle->CreateConstantBufferView(in cbvDesc, cpuHandle);
 			return new DescriptorHandle(DescriptorKind.ConstantBufferView, index);
 		}
 	}

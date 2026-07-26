@@ -20,9 +20,9 @@ public class Mesh
     public BoundingSphere BoundingSphere { get; }
     public Box BoundingBox { get; }
     
-    // GPU resources are set by the renderer after creation
-    internal IGfxBuffer VertexBuffer { get; set; }
-    internal IGfxBuffer IndexBuffer { get; set; }
+    // GPU resources are set by the renderer after creation, and cleared again when it releases them
+    internal IGfxBuffer? VertexBuffer { get; set; }
+    internal IGfxBuffer? IndexBuffer { get; set; }
     internal uint StrideInBytes { get; set; }
     internal uint IndexCount { get; set; }
     internal ulong PackedVertexOffsetBytes { get; set; }

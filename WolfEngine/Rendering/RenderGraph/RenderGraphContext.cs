@@ -9,10 +9,11 @@ namespace WolfEngine.Rendering;
 /// </summary>
 public sealed class RenderGraphContext
 {
-	private IGfxCommandList _commandList;
-	private SceneDrawData _sceneData;
-	private GpuDrawDatabase _gpuDrawDatabase;
-	private FrameSnapshot _frameSnapshot;
+	// Assigned by the render graph once per pass, after the context is constructed.
+	private IGfxCommandList? _commandList;
+	private SceneDrawData? _sceneData;
+	private GpuDrawDatabase? _gpuDrawDatabase;
+	private FrameSnapshot? _frameSnapshot;
 
 	internal RenderGraphContext(RenderGraphResourceRegistry resourceRegistry, string passName)
 	{
@@ -32,7 +33,7 @@ public sealed class RenderGraphContext
 	
 	public SceneDrawData SceneData
 	{
-		get => _sceneData;
+		get => _sceneData ?? throw new InvalidOperationException("SceneData has not been set for this pass.");
 		internal set => _sceneData = value;
 	}
 

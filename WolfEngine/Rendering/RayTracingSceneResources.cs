@@ -275,6 +275,10 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				{
 					_terrainInstances[entry.InstanceHandle.Value] = terrainRecord;
 				}
+				else
+				{
+					statsBuilder.SkippedTerrainCount++;
+				}
 
 				continue;
 			}
@@ -444,6 +448,10 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 						? RayTracingSceneRebuildReason.Mesh
 						: RayTracingSceneRebuildReason.Add;
 				}
+			}
+			else
+			{
+				statsBuilder.SkippedTerrainCount++;
 			}
 
 			return;

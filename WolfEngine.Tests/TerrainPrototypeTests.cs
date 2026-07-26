@@ -7,7 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using System.Runtime.Serialization;
+using System.Runtime.CompilerServices;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
@@ -633,7 +633,7 @@ public sealed class TerrainPrototypeTests
 
 	private static RenderGraph CreateTestRenderGraph(IRenderer? renderer = null)
 	{
-		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
 		SetField(renderGraph, "_renderer", renderer ?? new TestRenderer());
 		SetField(renderGraph, "_resourceSync", new object());
 		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());

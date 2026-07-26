@@ -184,7 +184,8 @@ internal static class ShaderReflectionLayoutBuilder
 		var kindName = parameterType.Kind.ToString();
 		if (string.Equals(kindName, "ConstantBuffer", StringComparison.Ordinal))
 		{
-			var constantBufferType = parameterType.ConstantBuffer;
+			var constantBufferType = parameterType.ConstantBuffer
+				?? throw new InvalidOperationException($"Constant buffer '{bufferName}' has no constant buffer layout.");
 			var elementType = constantBufferType.ElementType
 				?? throw new InvalidOperationException($"Constant buffer '{bufferName}' has no element type.");
 			var elementVarLayout = constantBufferType.ElementVarLayout
@@ -197,7 +198,8 @@ internal static class ShaderReflectionLayoutBuilder
 
 		if (string.Equals(kindName, "ParameterBlock", StringComparison.Ordinal))
 		{
-			var parameterBlockType = parameterType.ParameterBlock;
+			var parameterBlockType = parameterType.ParameterBlock
+				?? throw new InvalidOperationException($"Parameter block '{bufferName}' has no parameter block layout.");
 			var elementType = parameterBlockType.ElementType
 				?? throw new InvalidOperationException($"Parameter block '{bufferName}' has no element type.");
 			var elementVarLayout = parameterBlockType.ElementVarLayout
@@ -222,7 +224,9 @@ internal static class ShaderReflectionLayoutBuilder
 		var typeKind = type.Kind.ToString();
 		if (string.Equals(typeKind, "Struct", StringComparison.Ordinal))
 		{
-			var structFields = type.Struct.Fields ?? [];
+			var structType = type.Struct
+				?? throw new InvalidOperationException($"Struct type in '{bufferName}' has no struct layout.");
+			var structFields = structType.Fields ?? [];
 			for (var i = 0; i < structFields.Length; i++)
 			{
 				var field = structFields[i];
@@ -249,7 +253,8 @@ internal static class ShaderReflectionLayoutBuilder
 
 		if (string.Equals(typeKind, "Array", StringComparison.Ordinal))
 		{
-			var array = type.Array;
+			var array = type.Array
+				?? throw new InvalidOperationException($"Array type in '{bufferName}' has no array layout.");
 			var elementType = array.ElementType
 				?? throw new InvalidOperationException($"Array type in '{bufferName}' is missing an element type.");
 			var elementCount = checked((int)array.ElementCount);
@@ -294,9 +299,9 @@ internal static class ShaderReflectionLayoutBuilder
 	private static ShaderConstantFieldValueKind ResolveValueKind(SlangType type)
 	{
 		var typeKind = type.Kind.ToString();
-		if (string.Equals(typeKind, "Scalar", StringComparison.Ordinal))
+		if (string.Equals(typeKind, "Scalar", StringComparison.Ordinal) && type.Scalar is { } scalar)
 		{
-			var scalarTypeName = type.Scalar.ScalarType.ToString();
+			var scalarTypeName = scalar.ScalarType.ToString();
 			if (IsUIntScalar(scalarTypeName))
 			{
 				return ShaderConstantFieldValueKind.UInt;
@@ -312,15 +317,15 @@ internal static class ShaderReflectionLayoutBuilder
 				: ShaderConstantFieldValueKind.Unsupported;
 		}
 
-		if (string.Equals(typeKind, "Vector", StringComparison.Ordinal))
+		if (string.Equals(typeKind, "Vector", StringComparison.Ordinal) && type.Vector is { } vector)
 		{
-			if (type.Vector.ElementType is null)
+			if (vector.ElementType?.Scalar is not { } elementScalar)
 			{
 				return ShaderConstantFieldValueKind.Unsupported;
 			}
 
-			var scalarTypeName = type.Vector.ElementType.Scalar.ScalarType.ToString();
-			var elementCount = checked((int)type.Vector.ElementCount);
+			var scalarTypeName = elementScalar.ScalarType.ToString();
+			var elementCount = checked((int)vector.ElementCount);
 			if (IsFloatScalar(scalarTypeName))
 			{
 				return elementCount switch
@@ -335,15 +340,14 @@ internal static class ShaderReflectionLayoutBuilder
 			return ShaderConstantFieldValueKind.Unsupported;
 		}
 
-		if (string.Equals(typeKind, "Matrix", StringComparison.Ordinal))
+		if (string.Equals(typeKind, "Matrix", StringComparison.Ordinal) && type.Matrix is { } matrix)
 		{
-			var matrix = type.Matrix;
-			if (matrix.ElementType is null)
+			if (matrix.ElementType?.Scalar is not { } elementScalar)
 			{
 				return ShaderConstantFieldValueKind.Unsupported;
 			}
 
-			var scalarTypeName = matrix.ElementType.Scalar.ScalarType.ToString();
+			var scalarTypeName = elementScalar.ScalarType.ToString();
 			var rowCount = checked((int)matrix.RowCount);
 			var columnCount = checked((int)matrix.ColumnCount);
 			if (rowCount == 4 && columnCount == 4 &&
@@ -364,21 +368,21 @@ internal static class ShaderReflectionLayoutBuilder
 			return 4;
 		}
 
-		if (string.Equals(kind, "Vector", StringComparison.Ordinal))
+		if (string.Equals(kind, "Vector", StringComparison.Ordinal) && type.Vector is { } vector)
 		{
-			return checked((int)type.Vector.ElementCount * 4);
+			return checked((int)vector.ElementCount * 4);
 		}
 
-		if (string.Equals(kind, "Matrix", StringComparison.Ordinal))
+		if (string.Equals(kind, "Matrix", StringComparison.Ordinal) && type.Matrix is { } matrix)
 		{
-			return checked((int)(type.Matrix.RowCount * type.Matrix.ColumnCount * 4));
+			return checked((int)(matrix.RowCount * matrix.ColumnCount * 4));
 		}
 
-		if (string.Equals(kind, "Array", StringComparison.Ordinal))
+		if (string.Equals(kind, "Array", StringComparison.Ordinal) && type.Array is { } array)
 		{
-			var elementCount = checked((int)type.Array.ElementCount);
-			var stride = checked((int)type.Array.UniformStride);
-			var elementType = type.Array.ElementType;
+			var elementCount = checked((int)array.ElementCount);
+			var stride = checked((int)array.UniformStride);
+			var elementType = array.ElementType;
 			if (elementCount <= 0)
 			{
 				return 0;

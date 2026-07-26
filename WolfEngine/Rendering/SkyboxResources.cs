@@ -5,7 +5,7 @@ namespace WolfEngine.Rendering;
 public sealed class SkyboxResources
 {
 	public required IGfxTexture EnvironmentTexture { get; init; }
-	public IGfxTexture IrradianceTexture { get; init; }
-	public IGfxTexture PrefilteredEnvironment { get; init; }
-	public IGfxTexture BrdfLut { get; init; }
+	public required IGfxTexture IrradianceTexture { get; init; }
+	public required IGfxTexture PrefilteredEnvironment { get; init; }
+	public required IGfxTexture BrdfLut { get; init; }
 }

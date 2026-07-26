@@ -483,7 +483,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			NodeMask = 0
 		};
 		ComPtr<ID3D12CommandQueue> queue;
-		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(queueDesc, out queue));
+		SilkMarshal.ThrowHResult(_device.CreateCommandQueue(in queueDesc, out queue));
 
 		ID3D12CommandList* lists = (ID3D12CommandList*) uploadList.Handle;
 		queue.Handle->ExecuteCommandLists(1, &lists);
@@ -533,7 +533,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			ResourceMinLODClamp = 0.0f
 		};
 
-		_device.CreateShaderResourceView(_fontTexture, srvDesc, srvCpuHandle);
+		_device.CreateShaderResourceView(_fontTexture, in srvDesc, srvCpuHandle);
 	}
 
 	private void CreatePipeline()

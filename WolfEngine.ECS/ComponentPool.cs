@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace WolfEngine.ECS;
 
 internal interface IComponentPool
 {
 	bool Has(Entity entity);
-	bool TryGetComponent(Entity entity, out IEntityComponent component);
+	bool TryGetComponent(Entity entity, [MaybeNullWhen(false)] out IEntityComponent component);
 	void Remove(Entity entity);
 }
 
@@ -23,7 +24,7 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 
 	bool IComponentPool.Has(Entity entity) => Has(entity);
 
-	bool IComponentPool.TryGetComponent(Entity entity, out IEntityComponent component)
+	bool IComponentPool.TryGetComponent(Entity entity, [MaybeNullWhen(false)] out IEntityComponent component)
 	{
 		if (!Has(entity))
 		{

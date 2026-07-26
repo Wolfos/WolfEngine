@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.Versioning;
 using SharpMetal.Metal;
 using SharpMetal.Foundation;
 using Silk.NET.Direct3D12;
@@ -181,7 +182,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 		return _renderer.GetGfxDevice().BackendKind switch
 		{
 			GraphicsBackendKind.D3D12 => ReadTopMipD3D12(texture),
-			GraphicsBackendKind.Metal => ReadTopMipMetal(texture),
+			GraphicsBackendKind.Metal when OperatingSystem.IsMacOS() => ReadTopMipMetal(texture),
 			_ => throw new NotSupportedException("Terrain GPU authoring is not supported on this graphics backend.")
 		};
 	}
@@ -280,6 +281,7 @@ internal sealed unsafe class TerrainBrushGpuExecutor : ITerrainBrushGpuExecutor
 		return packed;
 	}
 
+	[SupportedOSPlatform("macos")]
 	private static unsafe byte[] ReadTopMipMetal(Texture texture)
 	{
 		if (texture.Resources?.Texture is not MetalTexture metalTexture)

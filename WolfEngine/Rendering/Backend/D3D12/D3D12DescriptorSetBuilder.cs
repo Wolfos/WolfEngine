@@ -52,7 +52,7 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 			Flags = DescriptorHeapFlags.ShaderVisible
 		};
 
-		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(heapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
+		SilkMarshal.ThrowHResult(_device.CreateDescriptorHeap(in heapDesc, out ComPtr<ID3D12DescriptorHeap> heap));
 
 		var cpuStart = heap.Handle->GetCPUDescriptorHandleForHeapStart();
 
@@ -151,7 +151,7 @@ internal sealed unsafe class D3D12DescriptorSetBuilder : IGfxDescriptorSetBuilde
 			SizeInBytes = d3d12Buffer.GetConstantBufferViewSizeInBytes()
 		};
 
-		_device.Handle->CreateConstantBufferView(cbvDesc, cpuHandle);
+		_device.Handle->CreateConstantBufferView(in cbvDesc, cpuHandle);
 	}
 
 	private readonly record struct Entry(uint Slot, DescriptorKind Kind, IGfxResource Resource);

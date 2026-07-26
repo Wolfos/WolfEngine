@@ -91,6 +91,9 @@ public class RenderPipeline : IRenderPipeline
 
 						if (meshRenderer.TryValidate() == false) continue;
 
+						var mesh = meshRenderer.Mesh;
+						var material = meshRenderer.Material;
+
 						if (GraphicsConfig.GpuHardeningStressEnabled)
 						{
 							var churnKey = entry.Entity.Index + _stressFrame;
@@ -100,17 +103,17 @@ public class RenderPipeline : IRenderPipeline
 								continue;
 							}
 
-							if (meshRenderer.Material is not null && (churnKey % 5) == 0)
+							if ((churnKey % 5) == 0)
 							{
 								var toggled = ((_stressFrame / 30) & 1) == 0;
-								meshRenderer.Material.AlphaMode = toggled ? AlphaMode.AlphaTest : AlphaMode.Opaque;
-								meshRenderer.Material.AlphaCutoff = toggled ? 0.4f : 0.0f;
+								material.AlphaMode = toggled ? AlphaMode.AlphaTest : AlphaMode.Opaque;
+								material.AlphaCutoff = toggled ? 0.4f : 0.0f;
 							}
 						}
 
 
 						var transformMatrix = transform.LocalToWorld;
-						gpuDrawDatabase.TouchMesh(entry.Entity, meshRenderer.Mesh, meshRenderer.Material, transformMatrix);
+						gpuDrawDatabase.TouchMesh(entry.Entity, mesh, material, transformMatrix);
 					}
 				}
 

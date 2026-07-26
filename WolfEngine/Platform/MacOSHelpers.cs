@@ -22,8 +22,8 @@ internal sealed class MetalAppDelegate
     private readonly OnApplicationWillFinishLaunchingDelegate _willFinish;
     private readonly OnApplicationDidFinishLaunchingDelegate _didFinish;
 
-    public event Action<NSNotification> WillFinishLaunching;
-    public event Action<NSNotification> DidFinishLaunching;
+    public event Action<NSNotification>? WillFinishLaunching;
+    public event Action<NSNotification>? DidFinishLaunching;
 
     public IntPtr NativePtr { get; }
 
@@ -61,8 +61,8 @@ internal sealed class MetalViewDelegate
     private readonly OnDrawInViewDelegate _drawDelegate;
     private readonly OnDrawableSizeWillChangeDelegate _resizeDelegate;
 
-    public event Action<MTKViewInstance> DrawInMTKView;
-    public event Action<MTKViewInstance, NSRect> DrawableSizeWillChange;
+    public event Action<MTKViewInstance>? DrawInMTKView;
+    public event Action<MTKViewInstance, NSRect>? DrawableSizeWillChange;
 
     public IntPtr NativePtr { get; }
 
@@ -336,7 +336,7 @@ internal sealed class NSWindowDelegate
 
     private readonly WindowWillCloseDelegate _willClose;
 
-    public event Action WindowWillClose;
+    public event Action? WindowWillClose;
 
     public IntPtr NativePtr { get; }
 

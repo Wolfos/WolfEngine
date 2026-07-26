@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using System.Runtime.Serialization;
+using System.Runtime.CompilerServices;
 using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
@@ -156,7 +156,7 @@ public sealed class ScreenSpaceDecalPassTests
 			}
 		};
 
-		var builder = (RenderGraphFrameBuilder)FormatterServices.GetUninitializedObject(typeof(RenderGraphFrameBuilder));
+		var builder = (RenderGraphFrameBuilder)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraphFrameBuilder));
 		SetField(builder, "_frameResources", frameResources);
 		foreach (var field in typeof(RenderGraphFrameBuilder).GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
 		{
@@ -169,7 +169,7 @@ public sealed class ScreenSpaceDecalPassTests
 		InitializePrivateField(builder, "_sceneDebugViews");
 		InitializePrivateField(builder, "_sceneDebugViewOptions");
 
-		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
 		SetField(renderGraph, "_resourceRegistry", registry);
 		SetField(renderGraph, "_passes", new List<RenderGraphPass>());
 		SetField(renderGraph, "_passPool", new Queue<RenderGraphPass>());
@@ -204,7 +204,7 @@ public sealed class ScreenSpaceDecalPassTests
 
 	private static RenderGraph CreateTestRenderGraph()
 	{
-		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
 		SetField(renderGraph, "_resourceSync", new object());
 		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
 		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());

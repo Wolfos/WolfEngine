@@ -4,7 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Runtime.Serialization;
+using System.Runtime.CompilerServices;
 using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
@@ -104,7 +104,7 @@ public sealed class TerrainBrushPreviewDecalControllerTests
 
 	private static RenderGraph CreateTestRenderGraph()
 	{
-		var renderGraph = (RenderGraph)FormatterServices.GetUninitializedObject(typeof(RenderGraph));
+		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
 		SetField(renderGraph, "_resourceSync", new object());
 		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
 		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());

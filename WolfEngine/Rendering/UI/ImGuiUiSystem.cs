@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Numerics;
 using System.Threading;
@@ -57,7 +58,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private ImGuiFontAtlas _fontAtlas;
 	private float _fontDpiScale = 1.0f;
 
-	private ImGuiFontAtlas _uploadedFontAtlas;
+	private ImGuiFontAtlas? _uploadedFontAtlas;
 	private static ImFontPtr _regularFont;
 	private static ImFontPtr _boldFont;
 
@@ -326,6 +327,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		_mouseWheel += scroll;
 	}
 
+	[MemberNotNull(nameof(_fontAtlas))]
 	private void RebuildFonts(float dpiScale)
 	{
 		ImGui.SetCurrentContext(_context);

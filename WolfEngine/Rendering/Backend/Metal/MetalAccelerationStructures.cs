@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
@@ -28,12 +29,13 @@ internal struct MetalAccelerationStructureInstanceDescriptorData
 	public uint AccelerationStructureIndex;
 }
 
+[SupportedOSPlatform("macos")]
 internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAccelerationStructure, IDisposable
 {
 	public MTLPrimitiveAccelerationStructureDescriptor MetalDescriptor;
 
 	public MetalBottomLevelAccelerationStructure(
-		string name,
+		string? name,
 		in BottomLevelAccelerationStructureDescriptor descriptor,
 		MTLPrimitiveAccelerationStructureDescriptor metalDescriptor,
 		MTLAccelerationStructure accelerationStructure,
@@ -48,7 +50,7 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 		BuildFence = buildFence;
 	}
 
-	public string Name { get; }
+	public string? Name { get; }
 
 	public BottomLevelAccelerationStructureDescriptor Descriptor { get; }
 
@@ -82,6 +84,7 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 	}
 }
 
+[SupportedOSPlatform("macos")]
 internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerationStructure, IDisposable
 {
 	public MTLInstanceAccelerationStructureDescriptor MetalDescriptor;
@@ -89,7 +92,7 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 	public readonly List<MTLAccelerationStructure> ReferencedBottomLevelAccelerationStructures = new();
 
 	public MetalTopLevelAccelerationStructure(
-		string name,
+		string? name,
 		in TopLevelAccelerationStructureDescriptor descriptor,
 		MTLInstanceAccelerationStructureDescriptor metalDescriptor,
 		MTLAccelerationStructure accelerationStructure,
@@ -106,7 +109,7 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 		BuildFence = buildFence;
 	}
 
-	public string Name { get; }
+	public string? Name { get; }
 
 	public TopLevelAccelerationStructureDescriptor Descriptor { get; }
 

@@ -23,7 +23,7 @@ internal sealed class MetalPipeline : IGfxPipeline
 		ComputeThreadGroupSize = computeThreadGroupSize;
 	}
 
-	public string Name => null;
+	public string? Name => null;
 
 	public PipelineKey Key { get; }
 

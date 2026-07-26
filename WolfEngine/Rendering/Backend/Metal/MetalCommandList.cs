@@ -32,8 +32,8 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private MTLBuffer _indexBuffer;
 	private MTLIndexType _indexType;
 	private nuint _indexOffset;
-	private MetalPipeline _currentGraphicsPipeline;
-	private MetalPipeline _currentComputePipeline;
+	private MetalPipeline? _currentGraphicsPipeline;
+	private MetalPipeline? _currentComputePipeline;
 	private bool _bindlessBuffersSetRender;
 	private bool _bindlessBuffersSetCompute;
 	private uint _lastBindlessVersionRender = uint.MaxValue;

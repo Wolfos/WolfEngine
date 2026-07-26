@@ -47,6 +47,8 @@ public struct BoxCollider : IEntityComponent
 		if (world.HasComponent<MeshRenderer>(entity) == false) return;
 
 		var meshRenderer = world.GetComponent<MeshRenderer>(entity);
+		if (meshRenderer.Mesh is null) return;
+
 		HalfExtents = meshRenderer.Mesh.BoundingBox.HalfExtents;
 		Center = meshRenderer.Mesh.BoundingBox.Center;
 		PhysicsCacheValid = false;

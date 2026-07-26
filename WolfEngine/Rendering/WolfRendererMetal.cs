@@ -51,7 +51,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
-    private MetalDevice _gfxDevice;
+    // Created during renderer initialization, before any frame work touches it.
+    private MetalDevice _gfxDevice = null!;
     private Window* _window;
     private void* _metalView;
     private CAMetalLayer _metalLayer;
@@ -376,7 +377,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         var descriptor = new MTLDepthStencilDescriptor();
         descriptor.DepthCompareFunction = MTLCompareFunction.Less;
-        descriptor.DepthWriteEnabled = true;
+        descriptor.IsDepthWriteEnabled = true;
 
         _depthState = _device.NewDepthStencilState(descriptor);
         descriptor.Dispose();
@@ -1276,8 +1277,8 @@ internal unsafe class WolfRendererMetal : IRenderer
             return;
         }
 
-        mesh.VertexBuffer = null!;
-        mesh.IndexBuffer = null!;
+        mesh.VertexBuffer = null;
+        mesh.IndexBuffer = null;
         mesh.StrideInBytes = 0;
         mesh.IndexCount = 0;
         mesh.PackedVertexOffsetBytes = 0;

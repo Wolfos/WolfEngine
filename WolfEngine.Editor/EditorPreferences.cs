@@ -10,7 +10,7 @@ namespace WolfEngine.Editor;
 
 public class EditorPreferences
 {
-	private static EditorPreferences _instance;
+	private static EditorPreferences? _instance;
 
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{

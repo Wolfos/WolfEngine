@@ -40,11 +40,11 @@ public sealed class RenderGraph
 	private long _appliedShaderRevision;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
 	private readonly int _gpuHardeningLogInterval;
-	private FrameSnapshot _currentSnapshot;
-	private FrameSnapshot _activeSnapshot;
+	// Populated from the snapshot buffer at the top of every frame, before anything reads them.
+	// Execute() still null-checks _activeSnapshot defensively for the pre-first-frame case.
+	private FrameSnapshot _currentSnapshot = null!;
+	private FrameSnapshot _activeSnapshot = null!;
 	private long _lastObservedEditorFrameSequence;
-	private long _lastProcessWorkingSetBytes;
-	private bool _hasLastProcessMemorySnapshot;
 	private int _frameIndex;
 	private bool _previousTaaEnabled;
 	private Int2 _currentSceneRenderSize;
@@ -140,7 +140,7 @@ public sealed class RenderGraph
 		}
 
 		// Build scene data from snapshot
-		SceneDrawData sceneData = null;
+		SceneDrawData? sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
 		var taaEnabled = snapshot.Config.TemporalAntiAliasing.Enabled;
 		var taaPhaseCount = snapshot.Config.TemporalAntiAliasing.PhaseCount > 0
@@ -257,7 +257,9 @@ public sealed class RenderGraph
 				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
 				{
 					CommandList = commandList,
-					SceneData = sceneData,
+					// Null only on ImGui-only frames (see the guard above); RenderGraphContext.SceneData
+					// throws if a pass that needs scene data reads it.
+					SceneData = sceneData!,
 					GpuDrawDatabase = snapshot.GpuDrawDatabase,
 					FrameSnapshot = snapshot
 				};

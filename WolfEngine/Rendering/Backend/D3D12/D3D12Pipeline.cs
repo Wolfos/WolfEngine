@@ -15,7 +15,7 @@ internal sealed class D3D12Pipeline : IGfxPipeline
 		RootSignature = rootSignature;
 	}
 
-	public string Name => null;
+	public string? Name => null;
 
 	public PipelineKey Key { get; }
 

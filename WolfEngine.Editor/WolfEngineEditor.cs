@@ -487,7 +487,7 @@ public class WolfEngineEditor
 
 	private RenderConfig GetConfig()
 	{
-		RenderConfig config = null;
+		RenderConfig? config = null;
 		foreach (var entry in _currentScene.World.View<WorldSettings>())
 		{
 			config = entry.First.RenderConfigAsset.Asset;

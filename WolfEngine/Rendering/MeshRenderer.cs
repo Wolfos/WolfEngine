@@ -1,6 +1,7 @@
 ﻿using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Rendering;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
 namespace WolfEngine;
@@ -9,10 +10,11 @@ public struct MeshRenderer: IEntityComponent, IJsonOnDeserialized
 {
 	public AssetRef<Mesh> MeshAsset;
 	public AssetRef<Material> MaterialAsset;
+	// Null until the asset references are resolved; see IsValid / TryValidate.
 	[JsonIgnore]
-	public Material Material;
+	public Material? Material;
 	[JsonIgnore]
-	public Mesh Mesh;
+	public Mesh? Mesh;
 
 	public void AssignMeshAsset(AssetRef<Mesh> meshAsset)
 	{
@@ -45,6 +47,7 @@ public struct MeshRenderer: IEntityComponent, IJsonOnDeserialized
 		}
 	}
 
+	[MemberNotNullWhen(true, nameof(Mesh), nameof(Material))]
 	public bool TryValidate()
 	{
 		if (Mesh == null && MeshAsset.IsValid)
@@ -77,6 +80,7 @@ public struct MeshRenderer: IEntityComponent, IJsonOnDeserialized
 		}
 	}
 
+	[MemberNotNullWhen(true, nameof(Material), nameof(Mesh))]
 	public bool IsValid => Material != null && Mesh != null;
 
 	public void OnDeserialized()

@@ -15,10 +15,10 @@ public interface IMaterialFactory
 		float normalScale = 1.0f,
 		Vector3? emissiveFactor = null,
 		float emissiveIntensity = 1.0f,
-		Texture albedoTexture = null,
-		Texture ormTexture = null,
-		Texture normalTexture = null,
-		Texture emissiveTexture = null,
+		Texture? albedoTexture = null,
+		Texture? ormTexture = null,
+		Texture? normalTexture = null,
+		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f);
 }
@@ -42,10 +42,10 @@ public class MaterialFactory : IMaterialFactory
 		float normalScale = 1.0f,
 		Vector3? emissiveFactor = null,
 		float emissiveIntensity = 1.0f,
-		Texture albedoTexture = null,
-		Texture ormTexture = null,
-		Texture normalTexture = null,
-		Texture emissiveTexture = null,
+		Texture? albedoTexture = null,
+		Texture? ormTexture = null,
+		Texture? normalTexture = null,
+		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f)
 	{

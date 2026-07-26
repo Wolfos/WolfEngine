@@ -690,6 +690,10 @@ public sealed class GameplayComponentSupportTests
 		}
 	}
 
+	// Fixture components for the reflection-driven field editor. Their fields are deliberately never
+	// assigned from C#: the tests add the component with default values, let
+	// RuntimeComponentFieldEditor write the fields through reflection, then assert what it wrote.
+#pragma warning disable CS0649 // Field is never assigned to (populated via reflection under test)
 	private struct TestRecursiveComponent : IEntityComponent
 	{
 		public TestRecursiveLevelOne Config;
@@ -728,6 +732,7 @@ public sealed class GameplayComponentSupportTests
 		[RequireComponent(typeof(Light))]
 		public Entity VisualEntity;
 	}
+#pragma warning restore CS0649
 
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	private static WeakReference CreateUnloadedGameplayContextReferenceWithRetainedScene(out EditorScene retainedScene)
@@ -811,8 +816,10 @@ public sealed class GameplayComponentSupportTests
 			_registry = new TestAssetInstanceRegistry();
 			AssetDatabase.SetInstanceRegistry(_registry);
 
-			_gameplayAssemblyHost = new GameplayAssemblyHost(() => _projectService);
-			TypeCatalogImpl = new ProjectTypeCatalog(() => _projectService, _gameplayAssemblyHost);
+			// _projectService is assigned further down this constructor; neither factory invokes the
+			// callback before then.
+			_gameplayAssemblyHost = new GameplayAssemblyHost(() => _projectService!);
+			TypeCatalogImpl = new ProjectTypeCatalog(() => _projectService!, _gameplayAssemblyHost);
 			DataAssetStore = new DataAssetStore(TypeCatalogImpl);
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),

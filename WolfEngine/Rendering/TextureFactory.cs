@@ -20,9 +20,9 @@ public sealed class TextureFactory : ITextureFactory
 	private readonly RenderGraph _renderGraph;
 	private readonly IImageLoader _imageLoader;
 	private readonly ConcurrentDictionary<string, Texture> _cache = new(StringComparer.OrdinalIgnoreCase);
-	private Texture _whiteTexture;
-	private Texture _blackTexture;
-	private Texture _neutralNormalTexture;
+	private Texture? _whiteTexture;
+	private Texture? _blackTexture;
+	private Texture? _neutralNormalTexture;
 
 	public TextureFactory(RenderGraph renderGraph, IImageLoader imageLoader)
 	{

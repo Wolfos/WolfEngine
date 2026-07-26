@@ -34,10 +34,10 @@ public sealed class SkyboxPass
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private DescriptorHandle _skyboxSamplerHandle = DescriptorHandle.Invalid;
-	private IGfxPipeline _iblIrradiancePipeline;
-	private IGfxPipeline _iblPrefilterPipeline;
-	private IGfxPipeline _iblBrdfLutPipeline;
-	private IGfxPipeline _proceduralSkyboxPipeline;
+	private IGfxPipeline? _iblIrradiancePipeline;
+	private IGfxPipeline? _iblPrefilterPipeline;
+	private IGfxPipeline? _iblBrdfLutPipeline;
+	private IGfxPipeline? _proceduralSkyboxPipeline;
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ComputeThreadGroupSize? _iblIrradianceThreadGroupSize;
 	private ComputeThreadGroupSize? _iblPrefilterThreadGroupSize;

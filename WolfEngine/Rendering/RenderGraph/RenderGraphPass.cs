@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
@@ -30,6 +31,7 @@ public sealed class RenderGraphPass
 	
 	public PassKind Kind { get; private set; }
 
+	[MemberNotNull(nameof(Name))]
 	internal void Configure(string name, PassKind kind)
 	{
 		Name = name ?? throw new ArgumentNullException(nameof(name));

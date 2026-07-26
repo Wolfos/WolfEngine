@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System.Numerics;
 using WolfEngine.Profiling;
@@ -329,7 +329,7 @@ public sealed class ShadowMapPass
 		cameraWriter.SetMatrix4x4("viewProjection0", _currentFrameData.CascadeViewProjection0);
 		cameraWriter.SetMatrix4x4("viewProjection1", _currentFrameData.CascadeViewProjection1);
 		cameraWriter.SetMatrix4x4("viewProjection2", _currentFrameData.CascadeViewProjection2);
-		var sceneData = context.SceneData!;
+		var sceneData = context.SceneData;
 		cameraWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
 
 		if (config.CameraBuffer is IWritableGpuBuffer writableCameraBuffer)

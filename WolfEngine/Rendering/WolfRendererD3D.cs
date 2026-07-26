@@ -679,7 +679,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			throw new InvalidOperationException("Window was not initialised.");
 		}
 
-		var win32 = _window.Native.Win32;
+		var win32 = _window.Native?.Win32;
 		if (win32 is null)
 		{
 			throw new InvalidOperationException("Direct3D renderer requires a Win32 window handle.");
@@ -1138,7 +1138,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		fixed (ulong* rowSizePtr = rowSizeInBytes)
 		{
 			_device.GetCopyableFootprints(
-				texDesc,
+				in texDesc,
 				0,
 				(uint)subresourceCount,
 				0,
@@ -1515,8 +1515,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			return;
 		}
 
-		mesh.VertexBuffer = null!;
-		mesh.IndexBuffer = null!;
+		mesh.VertexBuffer = null;
+		mesh.IndexBuffer = null;
 		mesh.StrideInBytes = 0;
 		mesh.IndexCount = 0;
 		mesh.PackedVertexOffsetBytes = 0;
@@ -2082,7 +2082,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			_mice.Clear();
 
 			//_inputContext.Dispose();
-			_inputContext = null;
+			_inputContext = null!;
 		}
 
 		if (_window is not null)
@@ -2103,14 +2103,14 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			{
 				// Silk.NET can still report render-loop context while unwinding from callback exceptions.
 			}
-			_window = null;
+			_window = null!;
 		}
 
 		_isInitialized = false;
 	}
 
 	[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-	private static extern nint CreateEventEx(nint lpEventAttributes, string lpName, uint dwFlags, uint dwDesiredAccess);
+	private static extern nint CreateEventEx(nint lpEventAttributes, string? lpName, uint dwFlags, uint dwDesiredAccess);
 
 	[DllImport("kernel32.dll", SetLastError = true)]
 	private static extern uint WaitForSingleObject(nint hHandle, uint dwMilliseconds);

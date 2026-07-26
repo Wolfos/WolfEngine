@@ -1,10 +1,12 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
+[SupportedOSPlatform("macos")]
 internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	// Metal indirect commands cache native buffer pointers without retaining them.
@@ -14,14 +16,14 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 	private bool _disposeRequested;
 	private bool _nativeDisposed;
 
-	public MetalBuffer(string name, BufferDescriptor descriptor, MTLBuffer buffer)
+	public MetalBuffer(string? name, BufferDescriptor descriptor, MTLBuffer buffer)
 	{
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
 	}
 
-	public string Name { get; }
+	public string? Name { get; }
 
 	public BufferDescriptor Descriptor { get; }
 

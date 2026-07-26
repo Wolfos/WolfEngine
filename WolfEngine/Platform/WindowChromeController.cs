@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.Versioning;
 
@@ -56,7 +56,11 @@ public sealed class WindowTitleBarMetrics
 	public IReadOnlyList<WindowChromeRect> ExclusionRects { get; }
 }
 
-[SupportedOSPlatform("windows")]
+// Safe to call from any platform: every member no-ops when not running on Windows, which lets
+// cross-platform callers (the renderer, the editor menu bar) use it without platform branching.
+// The guards below use `!OperatingSystem.IsWindows()` rather than the usual `== false`: CA1416
+// only recognises the negation form as a platform guard, and would otherwise flag every
+// WindowsHelpers call in this file.
 public sealed class WindowChromeController : IWindowChromeController
 {
 	private nint _windowHandle;
@@ -68,7 +72,12 @@ public sealed class WindowChromeController : IWindowChromeController
 	{
 		get
 		{
-			if (OperatingSystem.IsWindows() == false || _windowHandle == nint.Zero)
+			if (!OperatingSystem.IsWindows())
+			{
+				return false;
+			}
+
+			if (_windowHandle == nint.Zero)
 			{
 				return false;
 			}
@@ -79,7 +88,12 @@ public sealed class WindowChromeController : IWindowChromeController
 
 	public void AttachToWindow(nint windowHandle)
 	{
-		if (OperatingSystem.IsWindows() == false || windowHandle == nint.Zero)
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		if (windowHandle == nint.Zero)
 		{
 			return;
 		}
@@ -90,7 +104,12 @@ public sealed class WindowChromeController : IWindowChromeController
 
 	public void DetachWindow()
 	{
-		if (OperatingSystem.IsWindows() == false || _windowHandle == nint.Zero)
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		if (_windowHandle == nint.Zero)
 		{
 			return;
 		}
@@ -102,7 +121,12 @@ public sealed class WindowChromeController : IWindowChromeController
 
 	public void Minimize()
 	{
-		if (OperatingSystem.IsWindows() == false || _windowHandle == nint.Zero)
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		if (_windowHandle == nint.Zero)
 		{
 			return;
 		}
@@ -112,7 +136,12 @@ public sealed class WindowChromeController : IWindowChromeController
 
 	public void ToggleMaximize()
 	{
-		if (OperatingSystem.IsWindows() == false || _windowHandle == nint.Zero)
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		if (_windowHandle == nint.Zero)
 		{
 			return;
 		}
@@ -122,7 +151,12 @@ public sealed class WindowChromeController : IWindowChromeController
 
 	public void Close()
 	{
-		if (OperatingSystem.IsWindows() == false || _windowHandle == nint.Zero)
+		if (!OperatingSystem.IsWindows())
+		{
+			return;
+		}
+
+		if (_windowHandle == nint.Zero)
 		{
 			return;
 		}

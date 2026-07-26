@@ -28,11 +28,11 @@ public class TransformSystem : IPreRender
     {
         // explicit stack to avoid recursion limits
         Span<(Entity entity, Matrix4x4 parentWorld)> stack = stackalloc (Entity, Matrix4x4)[256];
-        (Entity entity, Matrix4x4 parentWorld)[] heapStack = null;
+        (Entity entity, Matrix4x4 parentWorld)[]? heapStack = null;
         int stackSize = 0;
 
         static void Push(
-            ref (Entity entity, Matrix4x4 parentWorld)[] heap,
+            ref (Entity entity, Matrix4x4 parentWorld)[]? heap,
             Span<(Entity entity, Matrix4x4 parentWorld)> localStack,
             ref int size,
             Entity e,

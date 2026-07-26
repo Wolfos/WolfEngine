@@ -77,14 +77,6 @@ public sealed class GpuDrawPass
 	private bool _loggedUpdateOverflowRecovery;
 	private bool _loggedUnsupportedDrawKind;
 	private bool _gpuStateBootstrapPending = true;
-	private bool _loggedMetalTerrainReflectionDiagnostics;
-	private bool _loggedMetalTerrainGraphicsBindingDiagnostics;
-	private bool _loggedMetalTerrainPayloadDiagnostics;
-	private bool _loggedMetalTerrainLayerPayloadDiagnostics;
-	private bool _loggedMetalTerrainReadbackDiagnostics;
-	private uint? _pendingMetalTerrainReadbackIndex;
-	private uint? _pendingMetalTerrainLayerReadbackStart;
-	private uint _pendingMetalTerrainLayerReadbackCount;
 
 	private const uint DrawFlagActive = GpuDrawFlags.Active;
 	private const int DrawFlagBucketShift = GpuDrawFlags.BucketShift;
@@ -873,7 +865,7 @@ public sealed class GpuDrawPass
 				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
 				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
-		_pendingMetalTerrainReadbackIndex = GetPackedHandleIndex(_terrainMaterialUpdateData[0].MaterialHandle);
+		GetPackedHandleIndex(_terrainMaterialUpdateData[0].MaterialHandle);
 	}
 
 	private void DispatchTerrainLayerUpdates(RenderGraphContext context, IGfxDevice device)
@@ -899,11 +891,6 @@ public sealed class GpuDrawPass
 				commandList.SetComputeBuffer(slots[2], _gpuDrawResources.MaterialGenerationBuffer!);
 				commandList.SetComputeBuffer(slots[3], _gpuDrawResources.DiagnosticsCounterBuffer!);
 			});
-		if (_terrainMaterialUpdateData.Count > 0)
-		{
-			_pendingMetalTerrainLayerReadbackStart = _terrainMaterialUpdateData[0].LayerStart;
-			_pendingMetalTerrainLayerReadbackCount = _terrainMaterialUpdateData[0].LayerCount;
-		}
 	}
 
 	private void DispatchUpdatePass(

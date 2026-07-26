@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
@@ -150,7 +150,6 @@ internal sealed class RenderGraphFrameBuilder
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
-	private bool _loggedUnsupportedRayTracing;
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
 	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
@@ -1347,13 +1346,14 @@ internal sealed class RenderGraphFrameBuilder
 
 			// Capture the finished HDR scene color so next frame's reflections have shaded,
 			// pre-filtered radiance to sample.
-			for (var level = 0; level < (_frameResources.ColorPyramidLevels?.Length ?? 0); level++)
+			var colorPyramidLevels = _frameResources.ColorPyramidLevels ?? [];
+			for (var level = 0; level < colorPyramidLevels.Length; level++)
 			{
 				var stage = level == 0 ? ColorPyramidPass.Stage.Copy : ColorPyramidPass.Stage.Downsample;
 				var source = level == 0
 					? _frameResources.ResolvedSceneColor
-					: _frameResources.ColorPyramidLevels[level - 1];
-				var output = _frameResources.ColorPyramidLevels[level];
+					: colorPyramidLevels[level - 1];
+				var output = colorPyramidLevels[level];
 				graph.AddPass($"Color Pyramid {level}", PassKind.Compute)
 					.ReadTexture(source, ResourceState.ShaderResource)
 					.WriteTexture(output, ResourceState.UnorderedAccess)
@@ -1682,7 +1682,7 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteGpuDrawCullShadow(RenderGraphContext context)
 	{
-		var sceneData = context.SceneData!;
+		var sceneData = context.SceneData;
 		_shadowMapPass.PrepareFrame(sceneData, _frameResources.Config.ShadowMaps);
 		var shadowData = _shadowMapPass.GetCurrentFrameData();
 		if (shadowData.Enabled == false)
@@ -1736,7 +1736,7 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
 	{
-		_gpuDrawPass.RecordCull(context, context.SceneData!);
+		_gpuDrawPass.RecordCull(context, context.SceneData);
 	}
 
 	private void ExecuteSkyboxEnvironment(RenderGraphContext context)
@@ -1813,7 +1813,7 @@ internal sealed class RenderGraphFrameBuilder
 			SkyboxSampler = DescriptorHandle.Invalid
 		};
 
-		GBufferPass.Record(context, gbufferConfig, context.SceneData!);
+		GBufferPass.Record(context, gbufferConfig, context.SceneData);
 	}
 
 	private void ExecuteScreenSpaceDecal(RenderGraphContext context)
@@ -1823,8 +1823,8 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
-			context.SceneData!);
-		_screenSpaceDecalPass.Record(context, in config, context.SceneData!);
+			context.SceneData);
+		_screenSpaceDecalPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteGBufferDecalSeed(RenderGraphContext context)
@@ -1844,8 +1844,8 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
 			_shadowMapPass.GetCurrentFrameData(),
-			context.SceneData!);
-		_deferredLightingPass.Record(context, ref config, context.SceneData!);
+			context.SceneData);
+		_deferredLightingPass.Record(context, ref config, context.SceneData);
 	}
 
 	private void ExecuteReflections(RenderGraphContext context)
@@ -1858,7 +1858,7 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer,
 			_gpuDrawResources,
 			isRayTraced ? _rayTracingSceneResources : null);
-		_reflectionsPass.Record(context, in config, context.SceneData!);
+		_reflectionsPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteColorPyramid(
@@ -1882,7 +1882,7 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
 			_frameResources.SceneFramebufferSize);
-		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.BuildClusters);
+		_clusteredLightingPass.Record(context, in config, context.SceneData, ClusteredLightingPass.Stage.BuildClusters);
 	}
 
 	private void ExecuteClusteredLightingWrite(RenderGraphContext context)
@@ -1891,7 +1891,7 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
 			_frameResources.SceneFramebufferSize);
-		_clusteredLightingPass.Record(context, in config, context.SceneData!, ClusteredLightingPass.Stage.WriteLightIndices);
+		_clusteredLightingPass.Record(context, in config, context.SceneData, ClusteredLightingPass.Stage.WriteLightIndices);
 	}
 
 	private void ExecuteTemporalResolve(RenderGraphContext context)
@@ -1901,7 +1901,7 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice(),
 			_historyValid,
-			_resetTaaHistoryThisFrame || context.SceneData!.ResetHistory);
+			_resetTaaHistoryThisFrame || context.SceneData.ResetHistory);
 		_temporalAntiAliasingPass.Record(context, in config);
 	}
 
@@ -1925,7 +1925,7 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources.Config.AmbientOcclusion.Mode == AmbientOcclusionMode.RayTraced
 				? _rayTracingSceneResources
 				: null);
-		_ambientOcclusionPass.Record(context, in config, context.SceneData!);
+		_ambientOcclusionPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteAmbientOcclusionBlurHorizontal(RenderGraphContext context)
@@ -1935,7 +1935,7 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice(),
 			blurHorizontally: true);
-		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData!);
+		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteAmbientOcclusionBlurVertical(RenderGraphContext context)
@@ -1945,7 +1945,7 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice(),
 			blurHorizontally: false);
-		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData!);
+		_ambientOcclusionBlurPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteAmbientOcclusionUpsample(RenderGraphContext context)
@@ -1954,7 +1954,7 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_frameResources,
 			_renderer.GetGfxDevice());
-		_ambientOcclusionUpsamplePass.Record(context, in config, context.SceneData!);
+		_ambientOcclusionUpsamplePass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteDdgiClassify(RenderGraphContext context)
@@ -1966,7 +1966,7 @@ internal sealed class RenderGraphFrameBuilder
 			_renderer,
 			_gpuDrawResources,
 			_rayTracingSceneResources,
-			context.SceneData!,
+			context.SceneData,
 			_ddgiHistoryValid);
 		_currentDdgiConfigValid = true;
 		_ddgiPass.RecordClassify(context, in _currentDdgiConfig);
@@ -2040,8 +2040,8 @@ internal sealed class RenderGraphFrameBuilder
 			device,
 			_gpuDrawResources,
 			_shadowMapPass.GetCurrentFrameData(),
-			context.SceneData!);
-		_transparentForwardPass.Record(context, in config, context.SceneData!);
+			context.SceneData);
+		_transparentForwardPass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteTonemapping(RenderGraphContext context)

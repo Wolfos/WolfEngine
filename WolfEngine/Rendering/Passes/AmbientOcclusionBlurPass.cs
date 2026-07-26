@@ -8,7 +8,7 @@ public sealed class AmbientOcclusionBlurPass
 {
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private IGfxPipeline _pipeline;
+	private IGfxPipeline? _pipeline;
 	private ReadOnlyMemory<byte> _computeShader;
 	private ComputeThreadGroupSize? _threadGroupSize;
 	private GraphicsBackendKind? _compiledBackendKind;
