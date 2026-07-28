@@ -67,6 +67,23 @@ public static class GraphicsConfig
 		ParsePositiveIntEnvironmentVariable("WOLF_GPU_CAPTURE_TERRAIN_STAMP", 0);
 
 	/// <summary>
+	/// Log GPU draw lifecycle events: shared buffers being replaced by capacity growth, and the full GPU
+	/// state refreshes that follow. Both are rare but expensive, and a refresh re-adds every draw and
+	/// re-encodes every indirect record, so it is worth being able to see them when chasing a stall or a
+	/// device removal.
+	/// </summary>
+	public static bool LogGpuDrawEvents { get; set; } =
+		string.Equals(Environment.GetEnvironmentVariable("WOLF_LOG_GPU_DRAW_EVENTS"), "1", StringComparison.Ordinal);
+
+	/// <summary>
+	/// Log the CPU-side per-draw data for terrain draws as it is queued for upload, flagging values that
+	/// cannot produce sane geometry. This runs before anything is submitted, so it survives a GPU hang
+	/// that a frame capture cannot.
+	/// </summary>
+	public static bool LogTerrainDrawData { get; set; } =
+		string.Equals(Environment.GetEnvironmentVariable("WOLF_LOG_TERRAIN_DRAW_DATA"), "1", StringComparison.Ordinal);
+
+	/// <summary>
 	/// Number of frames between hardening metric logs.
 	/// </summary>
 	public static int GpuHardeningLogIntervalFrames { get; } =

@@ -51,6 +51,7 @@ public sealed class GpuDrawPass
 	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
 	private readonly List<GpuDrawMaterialUpdateData> _materialUpdateData = new();
 	private readonly List<GpuTerrainMaterialUpdateData> _terrainMaterialUpdateData = new();
+	private readonly Dictionary<uint, int> _terrainMaterialUpdateIndices = new();
 	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
 	private readonly List<uint> _drawGenerations = new();
@@ -68,6 +69,7 @@ public sealed class GpuDrawPass
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
 	private readonly Dictionary<uint, TerrainMaterialAllocation> _terrainMaterialAllocations = new();
 	private int _nextTerrainLayerSlot = 1;
+	private int _terrainLogHealthyBudget;
 	private int _activeIndirectSlot = -1;
 	private ulong _latestStructuralVersion;
 	private ulong _nextStructuralVersion = 1;
@@ -171,7 +173,13 @@ public sealed class GpuDrawPass
 
 		if (requireFullGpuStateRefresh)
 		{
-			AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
+			var refreshed = AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
+			if (GraphicsConfig.LogGpuDrawEvents)
+			{
+				Console.WriteLine(
+					$"[gpu draw] full GPU state refresh on frame slot {activeSlot}: re-added {refreshed} draws, " +
+					$"bindless epoch {_bindlessEpoch}. Terrain layer allocations were reset.");
+			}
 		}
 
 		if (_updates.Count > GpuDrawResources.MaxDrawCount)
@@ -195,6 +203,7 @@ public sealed class GpuDrawPass
 		_meshUpdateData.Clear();
 		_materialUpdateData.Clear();
 		_terrainMaterialUpdateData.Clear();
+		_terrainMaterialUpdateIndices.Clear();
 		_terrainLayerUpdateData.Clear();
 
 		var forceGpuRefresh = _gpuStateBootstrapPending || requireFullGpuStateRefresh;
@@ -204,6 +213,9 @@ public sealed class GpuDrawPass
 			_terrainMaterialAllocations.Clear();
 			_nextTerrainLayerSlot = 1;
 		}
+
+		// Per batch, so a repaint reports its suspects plus a few healthy draws for comparison.
+		_terrainLogHealthyBudget = 4;
 
 		var updateCount = Math.Min(_updates.Count, GpuDrawResources.MaxDrawCount);
 
@@ -461,13 +473,16 @@ public sealed class GpuDrawPass
 				if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
 				    update.TerrainSurface is { } terrainSurface)
 				{
-					var allocation = EnsureTerrainMaterialAllocation(update.MaterialHandle.Value, layerCount, forceGpuRefresh);
+					var allocation = EnsureTerrainMaterialAllocation(update.MaterialHandle.Value, layerCount);
 					layerStart = allocation.LayerStart;
 					if (layerStart == 0)
 					{
 						layerCount = 1;
 					}
-					_terrainMaterialUpdateData.Add(new GpuTerrainMaterialUpdateData(
+					// Every chunk sharing a material queues an update, and the update shader writes
+					// g_TerrainMaterialTable[materialIndex] with one thread per entry. Left uncoalesced
+					// that is several threads racing for one slot, so keep a single entry per material.
+					AddOrReplaceTerrainMaterialUpdate(new GpuTerrainMaterialUpdateData(
 						update.MaterialHandle.Value,
 						heightmapHandle,
 						layerIndexMapHandle,
@@ -481,6 +496,7 @@ public sealed class GpuDrawPass
 						heightBlendSharpness,
 						terrainHeightScale));
 
+
 					if (layerStart != 0)
 					{
 						var previousTerrainState = forceGpuRefresh ||
@@ -493,6 +509,16 @@ public sealed class GpuDrawPass
 					_terrainMaterialStates[update.MaterialHandle.Value] = terrainSurface;
 				}
 			}
+
+			LogTerrainDrawDataIfEnabled(
+				in update,
+				drawKind,
+				heightmapHandle,
+				layerStart,
+				layerCount,
+				terrainHeightScale,
+				indexCount,
+				baseVertex);
 		}
 
 		if (_instanceUpdateData.Count == 0 &&
@@ -672,11 +698,32 @@ public sealed class GpuDrawPass
 		return mask;
 	}
 
-	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(uint materialHandle, uint requiredLayerCount, bool forceReallocate)
+	/// <summary>
+	/// Queues a terrain material update, replacing any earlier entry for the same material in this batch.
+	/// The update shader is indexed by material, so duplicate entries are concurrent writes to one slot
+	/// with a nondeterministic winner rather than an ordered last-write-wins.
+	/// </summary>
+	private void AddOrReplaceTerrainMaterialUpdate(in GpuTerrainMaterialUpdateData update)
+	{
+		if (_terrainMaterialUpdateIndices.TryGetValue(update.MaterialHandle, out var existingIndex))
+		{
+			_terrainMaterialUpdateData[existingIndex] = update;
+			return;
+		}
+
+		_terrainMaterialUpdateIndices[update.MaterialHandle] = _terrainMaterialUpdateData.Count;
+		_terrainMaterialUpdateData.Add(update);
+	}
+
+	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(uint materialHandle, uint requiredLayerCount)
 	{
 		requiredLayerCount = Math.Max(requiredLayerCount, 1u);
-		if (!forceReallocate &&
-		    _terrainMaterialAllocations.TryGetValue(materialHandle, out var existingAllocation) &&
+
+		// A full refresh clears _terrainMaterialAllocations before the update loop runs, so the first
+		// request after it already allocates fresh. Bypassing the cache on top of that gave every chunk
+		// sharing a material its own range - N-1 of them orphaned, since only the last is retained - and
+		// left the chunks disagreeing about where their material's layers live.
+		if (_terrainMaterialAllocations.TryGetValue(materialHandle, out var existingAllocation) &&
 		    existingAllocation.LayerCount >= requiredLayerCount)
 		{
 			return existingAllocation with { Reallocated = false };
@@ -1206,6 +1253,100 @@ public sealed class GpuDrawPass
 
 		writableBuffer.Write(data);
 	}
+
+	/// <summary>
+	/// Dumps the CPU-side inputs that decide where a terrain draw's vertices end up, so a hang in the
+	/// terrain GBuffer lane can be split into "the authoring path queued nonsense" and "the data was fine
+	/// on the way in". Entries that cannot produce sane geometry are always reported; healthy ones are
+	/// rate-limited so a repaint of a many-chunk terrain stays readable.
+	/// </summary>
+	private void LogTerrainDrawDataIfEnabled(
+		in GpuDrawUpdate update,
+		GpuDrawKind drawKind,
+		uint heightmapHandle,
+		uint layerStart,
+		uint layerCount,
+		float heightScale,
+		uint indexCount,
+		int baseVertex)
+	{
+		if (GraphicsConfig.LogTerrainDrawData == false || drawKind != GpuDrawKind.Terrain)
+		{
+			return;
+		}
+
+		var chunk = update.TerrainInstanceData.ChunkOriginSize;
+		var uv = update.TerrainInstanceData.HeightmapUvScaleOffset;
+		var problems = new List<string>();
+
+		if (IsFinite(chunk) == false)
+		{
+			problems.Add("chunkOriginSize is not finite");
+		}
+		else if (chunk.Z <= 0.0f || chunk.W <= 0.0f)
+		{
+			problems.Add($"chunk size is degenerate ({chunk.Z}x{chunk.W})");
+		}
+
+		if (IsFinite(uv) == false)
+		{
+			problems.Add("heightmapUvScaleOffset is not finite");
+		}
+
+		if (float.IsFinite(heightScale) == false)
+		{
+			problems.Add("heightScale is not finite");
+		}
+		else if (heightScale < 0.0f)
+		{
+			problems.Add($"heightScale is negative ({heightScale})");
+		}
+
+		if (layerCount == 0)
+		{
+			problems.Add("layerCount is zero");
+		}
+		else if ((ulong)layerStart + layerCount > (ulong)GpuDrawResources.MaxTerrainLayerCount)
+		{
+			problems.Add($"layer range {layerStart}..{layerStart + layerCount} overruns the layer table");
+		}
+
+		if (indexCount == 0)
+		{
+			problems.Add("indexCount is zero");
+		}
+
+		if (update.Type != GpuDrawUpdateType.Remove && update.TerrainSurface is null)
+		{
+			problems.Add("no terrain surface, so the material table keeps whatever it held");
+		}
+
+		if (baseVertex < 0)
+		{
+			problems.Add($"baseVertex is negative ({baseVertex})");
+		}
+
+		if (problems.Count == 0 && _terrainLogHealthyBudget <= 0)
+		{
+			return;
+		}
+
+		if (problems.Count == 0)
+		{
+			_terrainLogHealthyBudget--;
+		}
+
+		var verdict = problems.Count == 0 ? "ok" : $"SUSPECT: {string.Join("; ", problems)}";
+		Console.WriteLine(
+			$"[terrain draw] draw={update.DrawHandle.Value} material={update.MaterialHandle.Value} type={update.Type} " +
+			$"chunkOrigin=({chunk.X}, {chunk.Y}) chunkSize=({chunk.Z}, {chunk.W}) " +
+			$"uvScaleOffset=({uv.X}, {uv.Y}, {uv.Z}, {uv.W}) heightScale={heightScale} " +
+			$"heightmapHandle={heightmapHandle} layers={layerStart}+{layerCount} " +
+			$"indexCount={indexCount} baseVertex={baseVertex} {verdict}");
+	}
+
+	private static bool IsFinite(Vector4 value) =>
+		float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z) && float.IsFinite(value.W);
 
 	private int AdvanceActiveIndirectSlot()
 	{

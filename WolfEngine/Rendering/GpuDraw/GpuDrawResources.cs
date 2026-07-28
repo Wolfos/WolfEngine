@@ -73,9 +73,32 @@ public sealed class GpuDrawResources : IDisposable
 	private int _decalProjectorCapacity;
 	private ClusteredLightingFrameLayout _clusteredLightingLayout;
 	private ulong _indirectBindingVersion = 1;
+	private bool _pendingBindingInvalidation;
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
 	private readonly record struct PendingBufferRelease(IGfxBuffer Buffer, ulong RetireSubmissionId);
+
+	/// <summary>
+	/// Publishes a single binding-version change if any buffer in the batch just completed was replaced.
+	/// Consumers treat a version change as "the bindings moved this frame", so one capacity pass must
+	/// count once no matter how many buffers and frame slots it touched.
+	/// </summary>
+	private void CommitBindingInvalidation(string reason)
+	{
+		if (_pendingBindingInvalidation == false)
+		{
+			return;
+		}
+
+		_pendingBindingInvalidation = false;
+		_indirectBindingVersion = checked(_indirectBindingVersion + 1UL);
+		if (GraphicsConfig.LogGpuDrawEvents)
+		{
+			Console.WriteLine(
+				$"[gpu draw] {reason} replaced live buffers; indirect binding version is now " +
+				$"{_indirectBindingVersion}, forcing a full GPU state refresh.");
+		}
+	}
 
 	public GpuDrawResources(IShaderProvider shaderCompiler)
 	{
@@ -416,6 +439,8 @@ public sealed class GpuDrawResources : IDisposable
 				sizeof(uint),
 				$"ClusterOverflowBuffer[{i}]");
 		}
+
+		CommitBindingInvalidation("Clustered lighting capacity growth");
 	}
 
 	public void EnsureDecalCapacity(IGfxDevice device, int maxProjectorCount)
@@ -433,6 +458,8 @@ public sealed class GpuDrawResources : IDisposable
 				Marshal.SizeOf<GpuDecalProjectorData>(),
 				$"DecalProjectorBuffer[{i}]");
 		}
+
+		CommitBindingInvalidation("Decal capacity growth");
 	}
 
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
@@ -677,9 +704,19 @@ public sealed class GpuDrawResources : IDisposable
 			// virtual address - both bound directly and baked into indirect command records. Destroying
 			// it here is a use-after-free that surfaces as a device hang at ExecuteIndirect.
 			_unsealedBufferReleases.Enqueue(existingBuffer);
+
+			// Only a replacement invalidates bindings. A first allocation replaces nothing, so no record
+			// can be holding a stale address and there is nothing to re-encode; bumping the version for it
+			// would force a full GPU state refresh that buys nothing. Deferred so that one capacity pass
+			// over every buffer and frame slot counts as a single change rather than one per buffer.
+			_pendingBindingInvalidation = true;
+			if (GraphicsConfig.LogGpuDrawEvents)
+			{
+				Console.WriteLine(
+					$"[gpu draw] '{debugName}' grew {existingBuffer.Descriptor.SizeInBytes} -> {sizeInBytes} bytes.");
+			}
 		}
 
-		_indirectBindingVersion = checked(_indirectBindingVersion + 1UL);
 		return device.CreateBuffer(new BufferDescriptor(
 			sizeInBytes,
 			BufferUsage.Structured,

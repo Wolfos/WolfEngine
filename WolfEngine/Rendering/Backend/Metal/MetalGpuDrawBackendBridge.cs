@@ -140,52 +140,14 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 			return;
 		}
 
-		var definitions = GBufferDrawBuckets.StableOrderDefinitions;
+		// Shared memory, so the buffers are read in place; the interpretation is shared with D3D12.
 		var visibleCounts = new ReadOnlySpan<uint>(
 			(void*)drawCountBuffer.Buffer.Contents.ToPointer(),
-			GpuDrawExecutionLanes.ExecutionLaneCount);
+			GpuDrawDiagnosticsSampling.VisibleCountElementCount);
 		var executionRanges = new ReadOnlySpan<uint>(
 			(void*)executionRangeBuffer.Buffer.Contents.ToPointer(),
-			GpuDrawExecutionLanes.ExecutionLaneCount * 2);
-		for (var i = 0; i < definitions.Length; i++)
-		{
-			var definition = definitions[i];
-			long visibleCount = 0;
-			var rangeStart = 0u;
-			var rangeEnd = 0u;
-			var hasRange = false;
-			var laneDefinitions = GpuDrawExecutionLanes.Definitions;
-			for (var laneIndex = 0; laneIndex < laneDefinitions.Length; laneIndex++)
-			{
-				var lane = laneDefinitions[laneIndex];
-				if (lane.BucketId != definition.BucketId)
-				{
-					continue;
-				}
-
-				visibleCount += visibleCounts[lane.ExecutionIndex];
-				var candidateStart = executionRanges[(lane.ExecutionIndex * 2) + 0];
-				var candidateEnd = executionRanges[(lane.ExecutionIndex * 2) + 1];
-				if (candidateEnd == 0)
-				{
-					continue;
-				}
-
-				if (hasRange == false)
-				{
-					rangeStart = candidateStart;
-					rangeEnd = candidateEnd;
-					hasRange = true;
-					continue;
-				}
-
-				rangeStart = Math.Min(rangeStart, candidateStart);
-				rangeEnd = Math.Max(rangeEnd, candidateEnd);
-			}
-
-			stats.SetVisibleDrawCount(definition.BucketId, visibleCount);
-			stats.SetExecutionRange(definition.BucketId, hasRange ? rangeStart : 0, hasRange ? rangeEnd : 0);
-		}
+			GpuDrawDiagnosticsSampling.ExecutionRangeElementCount);
+		GpuDrawDiagnosticsSampling.ApplyVisibilityDiagnostics(visibleCounts, executionRanges, stats);
 	}
 
 	public unsafe void SampleGpuDiagnosticCounters(
@@ -204,39 +166,7 @@ internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 		var counters = new ReadOnlySpan<uint>(
 			(void*)diagnosticsBuffer.Buffer.Contents.ToPointer(),
 			GpuDrawResources.HardeningCounterCount);
-		for (var i = 0; i < counters.Length; i++)
-		{
-			var current = counters[i];
-			var previous = lastCounters[i];
-			if (current < previous)
-			{
-				lastCounters[i] = current;
-				continue;
-			}
-
-			var delta = current - previous;
-			if (delta == 0)
-			{
-				continue;
-			}
-
-			lastCounters[i] = current;
-			switch (i)
-			{
-				case 0:
-					stats.AddStaleHandleRejects(delta);
-					break;
-				case 1:
-					stats.AddFallbackProxySubstitutions(delta);
-					break;
-				case 4:
-					stats.AddVisibleListClampHits(delta);
-					break;
-				case 5:
-					stats.AddMaterialFallbackDrawHits(delta);
-					break;
-			}
-		}
+		GpuDrawDiagnosticsSampling.ApplyDiagnosticCounters(counters, lastCounters, stats);
 	}
 
 	private bool BindlessPointersChanged(MetalDescriptorTable table)
