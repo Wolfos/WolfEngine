@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 
@@ -7,25 +6,16 @@ namespace WolfEngine.Rendering;
 
 internal sealed class EditorSceneRenderTargetManager : IDisposable
 {
-	private readonly Queue<UnsealedTextureRelease> _unsealedReleases = new();
-	private readonly Queue<PendingTextureRelease> _pendingReleases = new();
 	private IGfxTexture? _sceneColor;
 	private Int2 _size = Int2.Zero;
 	private ResourceState _sceneColorState = ResourceState.Common;
 
-	private readonly record struct UnsealedTextureRelease(
-		IGfxTexture Texture,
-		ResourceState LastKnownState);
-
-	private readonly record struct PendingTextureRelease(
-		IGfxTexture Texture,
-		ulong RetireSubmissionId,
-		ResourceState LastKnownState);
-
 	public void Advance(IGfxDevice device)
 	{
-		SealReleases(device);
-		RetirePending(device);
+		if (device is IGpuSubmissionTimeline submissionTimeline)
+		{
+			submissionTimeline.PumpCompleted();
+		}
 	}
 
 	public bool TryGetCurrent(out IGfxTexture texture, out nint textureId, out Int2 size)
@@ -47,7 +37,6 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 
 	public IGfxTexture EnsureTarget(IGfxDevice device, Int2 size)
 	{
-		RetirePending(device);
 		if (_sceneColor is not null && _size == size)
 		{
 			return _sceneColor;
@@ -78,7 +67,6 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 	public void Reset()
 	{
 		ReleaseCurrent(null);
-		RetirePending(null);
 		_size = Int2.Zero;
 	}
 
@@ -103,75 +91,22 @@ internal sealed class EditorSceneRenderTargetManager : IDisposable
 	{
 		if (device is null)
 		{
-			_pendingReleases.Enqueue(new PendingTextureRelease(texture, 0UL, lastKnownState));
+			(texture as IDisposable)?.Dispose();
 			return;
 		}
 
 		// The UI frame being consumed during this render can still reference the old scene texture.
-		// Defer selecting its retirement fence until the next frame, after that UI work was submitted.
-		_unsealedReleases.Enqueue(new UnsealedTextureRelease(texture, lastKnownState));
-	}
-
-	private void SealReleases(IGfxDevice device)
-	{
-		var retireSubmissionId = device is IGpuSubmissionTimeline submissionTimeline
-			? submissionTimeline.LastSubmittedId
-			: 0UL;
-
-		while (_unsealedReleases.Count > 0)
-		{
-			var release = _unsealedReleases.Dequeue();
-			_pendingReleases.Enqueue(new PendingTextureRelease(
-				release.Texture,
-				retireSubmissionId,
-				release.LastKnownState));
-		}
-	}
-
-	private void RetirePending(IGfxDevice? device)
-	{
-		var completedId = ulong.MaxValue;
-		ITexturePoolDevice? texturePoolDevice = null;
-		if (device is IGpuSubmissionTimeline submissionTimeline)
-		{
-			submissionTimeline.PumpCompleted();
-			completedId = submissionTimeline.CompletedId;
-		}
-
-		if (device is ITexturePoolDevice pooledDevice)
-		{
-			texturePoolDevice = pooledDevice;
-		}
-
-		while (_pendingReleases.Count > 0)
-		{
-			var pending = _pendingReleases.Peek();
-			if (pending.RetireSubmissionId > completedId)
+		// Device retirement binds this release to the submission that consumes that UI frame.
+		var texturePoolDevice = device as ITexturePoolDevice;
+		device.Retire(
+			() =>
 			{
-				break;
-			}
-
-			var pooled = texturePoolDevice?.ReturnTexture(pending.Texture, pending.LastKnownState) ?? false;
-			if (pooled == false && pending.Texture is IDisposable disposableTexture)
-			{
-				disposableTexture.Dispose();
-			}
-
-			_pendingReleases.Dequeue();
-		}
-
-		if (device is not null)
-		{
-			return;
-		}
-
-		while (_unsealedReleases.Count > 0)
-		{
-			var release = _unsealedReleases.Dequeue();
-			if (release.Texture is IDisposable disposableTexture)
-			{
-				disposableTexture.Dispose();
-			}
-		}
+				var pooled = texturePoolDevice?.ReturnTexture(texture, lastKnownState) ?? false;
+				if (pooled == false)
+				{
+					(texture as IDisposable)?.Dispose();
+				}
+			},
+			texture.Name ?? "Editor scene render target");
 	}
 }

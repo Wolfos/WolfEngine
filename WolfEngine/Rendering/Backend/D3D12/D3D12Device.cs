@@ -32,6 +32,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 
 	private readonly D3D12DescriptorTable _globalTable;
 	private readonly D3D12GpuProfilerBackend _gpuProfilerBackend;
+	private readonly GpuRetirementQueue _retirementQueue = new();
+	private readonly object _retirementTokenOwner = new();
 
 	private readonly List<CommandListSubmission> _inFlightCommandLists = new();
 	private readonly object _commandListLock = new();
@@ -57,6 +59,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	private ComPtr<ID3D12CommandSignature> _graphicsExecuteIndirectSignature;
 	private nint _submissionFenceEvent;
 	private bool _isDisposed;
+	private GpuSubmissionToken _lastPrimarySubmission;
 	private D3D12ConstantUploadStats _constantUploadStats;
 
 	private readonly struct PooledTexture
@@ -159,6 +162,18 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 	public ulong CompletedId =>
 		_submissionFence.Handle is null ? 0UL : _submissionFence.Handle->GetCompletedValue();
 
+	public GpuRetirementStats RetirementStats => _retirementQueue.Stats;
+	public GpuSubmissionToken LastPrimarySubmission
+	{
+		get
+		{
+			lock (_submissionLock)
+			{
+				return _lastPrimarySubmission;
+			}
+		}
+	}
+
 	internal D3D12ConstantUploadStats ConstantUploadStats => _constantUploadStats;
 
 	public IGfxCommandList BeginGraphics()
@@ -177,6 +192,23 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		{
 			CleanupCompletedCommandListsLocked();
 		}
+
+		_retirementQueue.ReleaseCompleted(CompletedId);
+	}
+
+	public void Retire(Action release, string? name = null)
+	{
+		_retirementQueue.Retire(release, name);
+	}
+
+	public void RetireAfter(GpuSubmissionToken submission, Action release, string? name = null)
+	{
+		if (submission.IsValid == false || submission.BelongsTo(_retirementTokenOwner) == false)
+		{
+			throw new InvalidOperationException("GPU submission token was not issued by this D3D12 device.");
+		}
+
+		_retirementQueue.RetireAfterSubmission(release, name, submission.Value);
 	}
 
 	internal void ResetConstantUploadStats()
@@ -184,14 +216,34 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		_constantUploadStats = default;
 	}
 
-	public void Submit(IGfxCommandList commandList)
+	public void Submit(
+		IGfxCommandList commandList,
+		GpuSubmissionKind submissionKind = GpuSubmissionKind.Auxiliary)
 	{
 		if (commandList is not D3D12CommandList nativeCommandList)
 		{
 			throw new ArgumentException("Command list was not created by the Direct3D12 backend.", nameof(commandList));
 		}
 
-		var fenceValue = SubmitCommandList(nativeCommandList);
+		var retirementBatch = _retirementQueue.PrepareSubmission(submissionKind);
+		ulong fenceValue;
+		try
+		{
+			fenceValue = SubmitCommandList(nativeCommandList);
+			if (submissionKind == GpuSubmissionKind.PrimaryFrame)
+			{
+				lock (_submissionLock)
+				{
+					_lastPrimarySubmission = new GpuSubmissionToken(_retirementTokenOwner, fenceValue);
+				}
+			}
+			_retirementQueue.SealSubmission(retirementBatch, fenceValue);
+		}
+		catch
+		{
+			_retirementQueue.CancelSubmission(retirementBatch);
+			throw;
+		}
 
 		lock (_commandListLock)
 		{
@@ -1230,6 +1282,8 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		{
 			CleanupCompletedCommandListsLocked();
 		}
+
+		_retirementQueue.ReleaseAllAfterIdle();
 	}
 
 	private ComPtr<ID3D12CommandSignature> EnsureDrawIndexedIndirectSignature()

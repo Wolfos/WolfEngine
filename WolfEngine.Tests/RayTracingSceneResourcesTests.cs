@@ -1896,16 +1896,31 @@ public sealed class RayTracingSceneResourcesTests
 
 	private sealed class TestDevice : IGfxDevice, IGpuSubmissionTimeline
 	{
+		private readonly GpuRetirementQueue _retirementQueue = new();
+		private readonly object _retirementTokenOwner = new();
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 		public bool SupportsRayTracing => true;
 		public ulong LastSubmittedId { get; set; }
 		public ulong CompletedId { get; set; }
-		public void PumpCompleted() { }
+		public GpuRetirementStats RetirementStats => _retirementQueue.Stats;
+		public GpuSubmissionToken LastPrimarySubmission { get; private set; }
+		public void PumpCompleted() => _retirementQueue.ReleaseCompleted(CompletedId);
+		public void Retire(Action release, string? name = null) => _retirementQueue.Retire(release, name);
+		public void RetireAfter(GpuSubmissionToken submission, Action release, string? name = null)
+		{
+			if (submission.BelongsTo(_retirementTokenOwner) == false)
+			{
+				throw new InvalidOperationException("Foreign submission token.");
+			}
+
+			_retirementQueue.RetireAfterSubmission(release, name, submission.Value);
+		}
 		public IGfxDescriptorTable GlobalTable { get; } = new TestDescriptorTable();
 		public IGfxCommandList BeginGraphics() => throw new NotSupportedException();
 		public IGfxCommandList BeginCompute() => throw new NotSupportedException();
-		public void Submit(IGfxCommandList commandList) => throw new NotSupportedException();
-		public void WaitForIdle() => throw new NotSupportedException();
+		public void Submit(IGfxCommandList commandList, GpuSubmissionKind submissionKind = GpuSubmissionKind.Auxiliary) =>
+			throw new NotSupportedException();
+		public void WaitForIdle() => _retirementQueue.ReleaseAllAfterIdle();
 		public IGfxTexture CreateTexture(in TextureDescriptor descriptor) => throw new NotSupportedException();
 		public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor) => new TestBuffer(descriptor);
 		public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor) => throw new NotSupportedException();

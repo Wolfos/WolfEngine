@@ -801,7 +801,7 @@ internal unsafe class WolfRendererMetal : IRenderer
                         {
                             commandList.CopyTexture(source, destination, (uint)width, (uint)height);
                             commandList.SetPresentDrawable(drawable);
-                            _gfxDevice.Submit(commandList);
+                            _gfxDevice.Submit(commandList, GpuSubmissionKind.PrimaryFrame);
                         }
                     }
                 }

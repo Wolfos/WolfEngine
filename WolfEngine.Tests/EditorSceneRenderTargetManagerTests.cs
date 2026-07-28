@@ -23,7 +23,7 @@ public sealed class EditorSceneRenderTargetManagerTests
 
 		Assert.That(device.ReturnedTextures, Is.Empty);
 
-		device.LastSubmittedId = 11UL;
+		device.SubmitFrame(11UL);
 		device.CompletedId = 10UL;
 		manager.Advance(device);
 
@@ -43,6 +43,8 @@ public sealed class EditorSceneRenderTargetManagerTests
 	private sealed class TestDevice : IGfxDevice, IGpuSubmissionTimeline, ITexturePoolDevice
 	{
 		private readonly Queue<IGfxTexture> _textures;
+		private readonly GpuRetirementQueue _retirementQueue = new();
+		private readonly object _retirementTokenOwner = new();
 
 		public TestDevice(params IGfxTexture[] textures)
 		{
@@ -54,13 +56,33 @@ public sealed class EditorSceneRenderTargetManagerTests
 		public bool SupportsRayTracing => false;
 		public ulong LastSubmittedId { get; set; }
 		public ulong CompletedId { get; set; }
+		public GpuRetirementStats RetirementStats => _retirementQueue.Stats;
+		public GpuSubmissionToken LastPrimarySubmission { get; private set; }
 		public IGfxDescriptorTable GlobalTable => throw new NotSupportedException();
 
-		public void PumpCompleted() { }
+		public void PumpCompleted() => _retirementQueue.ReleaseCompleted(CompletedId);
+		public void Retire(Action release, string? name = null) => _retirementQueue.Retire(release, name);
+		public void RetireAfter(GpuSubmissionToken submission, Action release, string? name = null)
+		{
+			if (submission.BelongsTo(_retirementTokenOwner) == false)
+			{
+				throw new InvalidOperationException("Foreign submission token.");
+			}
+
+			_retirementQueue.RetireAfterSubmission(release, name, submission.Value);
+		}
+		public void SubmitFrame(ulong submissionId)
+		{
+			var batch = _retirementQueue.PrepareSubmission(GpuSubmissionKind.PrimaryFrame);
+			LastSubmittedId = submissionId;
+			LastPrimarySubmission = new GpuSubmissionToken(_retirementTokenOwner, submissionId);
+			_retirementQueue.SealSubmission(batch, submissionId);
+		}
 		public IGfxCommandList BeginGraphics() => throw new NotSupportedException();
 		public IGfxCommandList BeginCompute() => throw new NotSupportedException();
-		public void Submit(IGfxCommandList commandList) => throw new NotSupportedException();
-		public void WaitForIdle() => throw new NotSupportedException();
+		public void Submit(IGfxCommandList commandList, GpuSubmissionKind submissionKind = GpuSubmissionKind.Auxiliary) =>
+			throw new NotSupportedException();
+		public void WaitForIdle() => _retirementQueue.ReleaseAllAfterIdle();
 		public IGfxTexture CreateTexture(in TextureDescriptor descriptor) => _textures.Dequeue();
 		public IGfxBuffer CreateBuffer(in BufferDescriptor descriptor) => throw new NotSupportedException();
 		public IGfxIndirectCommandBuffer CreateIndirectCommandBuffer(in IndirectCommandBufferDescriptor descriptor) => throw new NotSupportedException();

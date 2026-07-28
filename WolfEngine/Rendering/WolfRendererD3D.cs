@@ -1800,7 +1800,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		};
 		nativeCommandList->ResourceBarrier(1, &swapchainToPresent);
 
-		_gfxDevice.Submit(presentCommandList);
+		_gfxDevice.Submit(presentCommandList, GpuSubmissionKind.PrimaryFrame);
 
 		var vsyncEnabled = Screen.VSyncEnabled;
 		var presentInterval = vsyncEnabled ? 1u : 0u;

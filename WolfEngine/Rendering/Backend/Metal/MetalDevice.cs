@@ -55,15 +55,17 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly MetalGpuProfilerBackend _gpuProfilerBackend;
+	private readonly GpuRetirementQueue _retirementQueue = new();
+	private readonly object _retirementTokenOwner = new();
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
 	private readonly string _metallibCacheDirectory;
 	private readonly Dictionary<TexturePoolKey, Stack<MetalTexture>> _texturePool = new();
 	private readonly Queue<PendingSubmission> _pendingSubmissions = new();
-	private readonly Queue<PendingArgumentBufferRetirement> _pendingArgumentBufferRetirements = new();
 	private readonly object _submissionSync = new();
 	private int _pooledTextureCount;
 	private ulong _lastSubmittedId;
 	private ulong _completedId;
+	private GpuSubmissionToken _lastPrimarySubmission;
 
 	private readonly struct PendingSubmission
 	{
@@ -75,18 +77,6 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 		public ulong Id { get; }
 		public MetalCommandList CommandList { get; }
-	}
-
-	private readonly struct PendingArgumentBufferRetirement
-	{
-		public PendingArgumentBufferRetirement(MTLBuffer buffer, ulong retireSubmissionId)
-		{
-			Buffer = buffer;
-			RetireSubmissionId = retireSubmissionId;
-		}
-
-		public MTLBuffer Buffer { get; }
-		public ulong RetireSubmissionId { get; }
 	}
 
 	public MetalDevice(MTLDevice device)
@@ -131,6 +121,18 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 	}
 
+	public GpuRetirementStats RetirementStats => _retirementQueue.Stats;
+	public GpuSubmissionToken LastPrimarySubmission
+	{
+		get
+		{
+			lock (_submissionSync)
+			{
+				return _lastPrimarySubmission;
+			}
+		}
+	}
+
 	public IGfxCommandList BeginGraphics()
 	{
 		return new MetalCommandList(_commandQueue, _descriptorTable);
@@ -147,22 +149,56 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		{
 			RetireSubmission(submission, waitForCompletion: true);
 		}
+
+		_retirementQueue.ReleaseAllAfterIdle();
 	}
 
-	public void Submit(IGfxCommandList commandList)
+	public void Retire(Action release, string? name = null)
+	{
+		_retirementQueue.Retire(release, name);
+	}
+
+	public void RetireAfter(GpuSubmissionToken submission, Action release, string? name = null)
+	{
+		if (submission.IsValid == false || submission.BelongsTo(_retirementTokenOwner) == false)
+		{
+			throw new InvalidOperationException("GPU submission token was not issued by this Metal device.");
+		}
+
+		_retirementQueue.RetireAfterSubmission(release, name, submission.Value);
+	}
+
+	public void Submit(
+		IGfxCommandList commandList,
+		GpuSubmissionKind submissionKind = GpuSubmissionKind.Auxiliary)
 	{
 		if (commandList is not MetalCommandList metalCommandList)
 		{
 			throw new InvalidOperationException("Command list was not created by the Metal backend.");
 		}
 
-		metalCommandList.Commit();
+		var retirementBatch = _retirementQueue.PrepareSubmission(submissionKind);
+		try
+		{
+			metalCommandList.Commit();
+		}
+		catch
+		{
+			_retirementQueue.CancelSubmission(retirementBatch);
+			throw;
+		}
+
 		ulong submissionId;
 		lock (_submissionSync)
 		{
 			submissionId = ++_lastSubmittedId;
 			_pendingSubmissions.Enqueue(new PendingSubmission(submissionId, metalCommandList));
+			if (submissionKind == GpuSubmissionKind.PrimaryFrame)
+			{
+				_lastPrimarySubmission = new GpuSubmissionToken(_retirementTokenOwner, submissionId);
+			}
 		}
+		_retirementQueue.SealSubmission(retirementBatch, submissionId);
 		PumpCompleted();
 	}
 
@@ -174,6 +210,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		{
 			RetireSubmission(submission, waitForCompletion: true);
 		}
+
+		_retirementQueue.ReleaseCompleted(CompletedId);
 	}
 
 	private bool TryDequeueSubmission(bool onlyWhenOverLimit, out PendingSubmission submission)
@@ -234,30 +272,11 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	private void MarkSubmissionCompleted(ulong submissionId)
 	{
-		List<MTLBuffer>? retiredBuffers = null;
 		lock (_submissionSync)
 		{
 			_completedId = Math.Max(_completedId, submissionId);
-			while (_pendingArgumentBufferRetirements.Count > 0 &&
-			       _pendingArgumentBufferRetirements.Peek().RetireSubmissionId <= _completedId)
-			{
-				retiredBuffers ??= new List<MTLBuffer>();
-				retiredBuffers.Add(_pendingArgumentBufferRetirements.Dequeue().Buffer);
-			}
 		}
-
-		if (retiredBuffers is null)
-		{
-			return;
-		}
-
-		for (var i = 0; i < retiredBuffers.Count; i++)
-		{
-			if (retiredBuffers[i].NativePtr != IntPtr.Zero)
-			{
-				retiredBuffers[i].Dispose();
-			}
-		}
+		_retirementQueue.ReleaseCompleted(submissionId);
 	}
 
 	private void RetireArgumentBuffer(MTLBuffer buffer)
@@ -267,16 +286,15 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			return;
 		}
 
-		lock (_submissionSync)
-		{
-			// Argument buffers are captured by persistent Metal ICB commands. The command
-			// set observes the pointer change on the next frame and re-encodes a slot before
-			// using it. Keep the old native buffer alive through the submission currently
-			// being recorded so an already-encoded command can never reference freed memory.
-			var retireSubmissionId = checked(_lastSubmittedId + 1UL);
-			_pendingArgumentBufferRetirements.Enqueue(
-				new PendingArgumentBufferRetirement(buffer, retireSubmissionId));
-		}
+		Retire(
+			() =>
+			{
+				if (buffer.NativePtr != IntPtr.Zero)
+				{
+					buffer.Dispose();
+				}
+			},
+			"Metal bindless argument buffer");
 	}
 
 	public IGfxTexture CreateTexture(in TextureDescriptor descriptor)

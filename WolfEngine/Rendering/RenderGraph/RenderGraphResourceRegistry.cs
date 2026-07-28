@@ -155,26 +155,6 @@ public sealed class RenderGraphResourceRegistry
 		}
 	}
 
-	private readonly record struct PendingTransientRecycle(
-		IGfxTexture Texture,
-		TexturePoolKey Key,
-		ResourceState LastKnownState,
-		ulong RetireSubmissionId,
-		IGpuSubmissionTimeline? Timeline,
-		int PoolEpoch);
-
-	private readonly record struct PendingTextureRelease(
-		IGfxTexture Texture,
-		ResourceState LastKnownState,
-		ulong RetireSubmissionId,
-		IGpuSubmissionTimeline? Timeline,
-		ITexturePoolDevice? PoolDevice);
-
-	private readonly record struct PendingBufferRelease(
-		IGfxBuffer Buffer,
-		ulong RetireSubmissionId,
-		IGpuSubmissionTimeline? Timeline);
-
 	private int _nextHandleId = 1;
 	private int _transientPoolEpoch = 1;
 	private readonly Dictionary<int, TextureRecord> _textures = new();
@@ -184,15 +164,10 @@ public sealed class RenderGraphResourceRegistry
 	private readonly Dictionary<int, ActiveTransientSlot> _activeTransientSlots = new();
 	private readonly Dictionary<int, ResourceState> _transientSlotStates = new();
 	private readonly Dictionary<TexturePoolKey, Stack<TransientPoolEntry>> _availableTransientTextures = new();
-	private readonly List<PendingTransientRecycle> _pendingTransientRecycles = new();
-	private readonly List<PendingTextureRelease> _pendingTextureReleases = new();
-	private readonly List<PendingBufferRelease> _pendingBufferReleases = new();
 	private IGfxDevice? _device;
 	private ITexturePoolDevice? _texturePoolDevice;
-	private IGpuSubmissionTimeline? _submissionTimeline;
-
-	internal int PendingDeferredReleaseCount =>
-		_pendingTransientRecycles.Count + _pendingTextureReleases.Count + _pendingBufferReleases.Count;
+	private GpuSubmissionToken _previousFrameSubmission;
+	private GpuSubmissionToken _frameStartPrimarySubmission;
 
 	public void SetDevice(IGfxDevice device)
 	{
@@ -204,32 +179,37 @@ public sealed class RenderGraphResourceRegistry
 		if (ReferenceEquals(_device, device))
 		{
 			_texturePoolDevice = device as ITexturePoolDevice;
-			_submissionTimeline = device as IGpuSubmissionTimeline;
 			return;
 		}
 
 		if (_device is not null)
 		{
-			ReclaimFrameRecordsToPending(_submissionTimeline, _texturePoolDevice);
+			ReclaimFrameRecordsToDevice(_device, _texturePoolDevice, _previousFrameSubmission);
+			_device.WaitForIdle();
 			InvalidateTransientTexturePool();
-			RetireDeferredResources();
 		}
 
 		_device = device;
 		_texturePoolDevice = device as ITexturePoolDevice;
-		_submissionTimeline = device as IGpuSubmissionTimeline;
+		_previousFrameSubmission = GpuSubmissionToken.Invalid;
+		_frameStartPrimarySubmission = device.LastPrimarySubmission;
 	}
 
 	public void BeginFrame()
 	{
-		ReclaimFrameRecordsToPending(_submissionTimeline, _texturePoolDevice);
-		RetireDeferredResources();
+		ReclaimFrameRecordsToDevice(_device, _texturePoolDevice, _previousFrameSubmission);
+		_previousFrameSubmission = GpuSubmissionToken.Invalid;
+		_frameStartPrimarySubmission = _device?.LastPrimarySubmission ?? GpuSubmissionToken.Invalid;
 		_nextHandleId = 1;
 	}
 
 	public void EndFrame()
 	{
 		// Resources remain tracked until the next BeginFrame call, where they are reclaimed.
+		var submitted = _device?.LastPrimarySubmission ?? GpuSubmissionToken.Invalid;
+		_previousFrameSubmission = submitted.IsValid && submitted.Equals(_frameStartPrimarySubmission) == false
+			? submitted
+			: GpuSubmissionToken.Invalid;
 	}
 
 	public void InvalidateTransientTexturePool()
@@ -543,34 +523,60 @@ public sealed class RenderGraphResourceRegistry
 		return texture;
 	}
 
-	private void ReclaimFrameRecordsToPending(IGpuSubmissionTimeline? timeline, ITexturePoolDevice? poolDevice)
+	private void ReclaimFrameRecordsToDevice(
+		IGfxDevice? device,
+		ITexturePoolDevice? poolDevice,
+		GpuSubmissionToken submission)
 	{
-		var retireSubmissionId = timeline?.LastSubmittedId ?? 0;
-
 		foreach (var slot in _activeTransientSlots.Values)
 		{
 			var lastKnownState = _transientSlotStates.TryGetValue(slot.SlotId, out var state)
 				? state
 				: slot.InitialState;
-			_pendingTransientRecycles.Add(new PendingTransientRecycle(
-				slot.Texture,
-				slot.PoolKey,
-				lastKnownState,
-				retireSubmissionId,
-				timeline,
-				_transientPoolEpoch));
+			var texture = slot.Texture;
+			var key = slot.PoolKey;
+			var poolEpoch = _transientPoolEpoch;
+			QueueRetirement(
+				device,
+				submission,
+				() =>
+				{
+					if (poolEpoch == _transientPoolEpoch)
+					{
+						if (_availableTransientTextures.TryGetValue(key, out var pool) == false)
+						{
+							pool = new Stack<TransientPoolEntry>();
+							_availableTransientTextures[key] = pool;
+						}
+
+						pool.Push(new TransientPoolEntry(texture, lastKnownState));
+					}
+					else
+					{
+						DisposeTexture(texture);
+					}
+				},
+				texture.Name ?? "Transient render-graph texture");
 		}
 
 		foreach (var record in _textures.Values)
 		{
 			if (record.IsTransient == false && record.Texture is not null && record.OwnsTexture)
 			{
-				_pendingTextureReleases.Add(new PendingTextureRelease(
-					record.Texture,
-					record.CurrentState,
-					retireSubmissionId,
-					timeline,
-					poolDevice));
+				var texture = record.Texture;
+				var lastKnownState = record.CurrentState;
+				QueueRetirement(
+					device,
+					submission,
+					() =>
+					{
+						var recycled = poolDevice?.ReturnTexture(texture, lastKnownState) ?? false;
+						if (recycled == false)
+						{
+							DisposeTexture(texture);
+						}
+					},
+					texture.Name ?? "Owned render-graph texture");
 			}
 
 			record.Reset();
@@ -581,7 +587,15 @@ public sealed class RenderGraphResourceRegistry
 		{
 			if (record.OwnsBuffer && record.Buffer is not null)
 			{
-				_pendingBufferReleases.Add(new PendingBufferRelease(record.Buffer, retireSubmissionId, timeline));
+				var buffer = record.Buffer;
+				if (buffer is IDisposable disposableBuffer)
+				{
+					QueueRetirement(
+						device,
+						submission,
+						disposableBuffer.Dispose,
+						buffer.Name ?? "Owned render-graph buffer");
+				}
 			}
 
 			record.Reset();
@@ -619,77 +633,26 @@ public sealed class RenderGraphResourceRegistry
 		return ResourceState.Common;
 	}
 
-	private void RetireDeferredResources()
+	private void QueueRetirement(
+		IGfxDevice? device,
+		GpuSubmissionToken submission,
+		Action release,
+		string name)
 	{
-		for (var i = _pendingTransientRecycles.Count - 1; i >= 0; i--)
+		if (device is null)
 		{
-			var pending = _pendingTransientRecycles[i];
-			if (IsSubmissionCompleted(pending.RetireSubmissionId, pending.Timeline) == false)
-			{
-				continue;
-			}
-
-			if (pending.PoolEpoch == _transientPoolEpoch)
-			{
-				if (_availableTransientTextures.TryGetValue(pending.Key, out var pool) == false)
-				{
-					pool = new Stack<TransientPoolEntry>();
-					_availableTransientTextures[pending.Key] = pool;
-				}
-
-				pool.Push(new TransientPoolEntry(pending.Texture, pending.LastKnownState));
-			}
-			else
-			{
-				DisposeTexture(pending.Texture);
-			}
-
-			_pendingTransientRecycles.RemoveAt(i);
+			release();
+			return;
 		}
 
-		for (var i = _pendingTextureReleases.Count - 1; i >= 0; i--)
+		if (submission.IsValid)
 		{
-			var pending = _pendingTextureReleases[i];
-			if (IsSubmissionCompleted(pending.RetireSubmissionId, pending.Timeline) == false)
-			{
-				continue;
-			}
-
-			var recycled = pending.PoolDevice?.ReturnTexture(pending.Texture, pending.LastKnownState) ?? false;
-			if (recycled == false)
-			{
-				DisposeTexture(pending.Texture);
-			}
-
-			_pendingTextureReleases.RemoveAt(i);
+			device.RetireAfter(submission, release, name);
 		}
-
-		for (var i = _pendingBufferReleases.Count - 1; i >= 0; i--)
+		else
 		{
-			var pending = _pendingBufferReleases[i];
-			if (IsSubmissionCompleted(pending.RetireSubmissionId, pending.Timeline) == false)
-			{
-				continue;
-			}
-
-			if (pending.Buffer is IDisposable disposableBuffer)
-			{
-				disposableBuffer.Dispose();
-			}
-
-			_pendingBufferReleases.RemoveAt(i);
+			device.Retire(release, name);
 		}
-	}
-
-	private static bool IsSubmissionCompleted(ulong retireSubmissionId, IGpuSubmissionTimeline? timeline)
-	{
-		if (timeline is null)
-		{
-			return true;
-		}
-
-		timeline.PumpCompleted();
-		return retireSubmissionId <= timeline.CompletedId;
 	}
 
 	private static void DisposeTexture(IGfxTexture texture)

@@ -93,15 +93,6 @@ public readonly struct RenderGraphFrameResources
 internal sealed class RenderGraphFrameBuilder
 {
 	private readonly RenderGraphPassSet _passSet;
-	private readonly record struct PendingTemporalTextureRelease(
-		IGfxTexture Texture,
-		ulong RetireSubmissionId,
-		ResourceState LastKnownState);
-
-	private readonly record struct PendingTemporalBufferRelease(
-		IGfxBuffer Buffer,
-		ulong RetireSubmissionId);
-
 	private readonly struct SceneDebugViewRegistration
 	{
 		public SceneDebugViewRegistration(
@@ -168,8 +159,6 @@ internal sealed class RenderGraphFrameBuilder
 	private GraphicsBackendKind? _historyBackendKind;
 	private Int2 _historySize;
 	private int _historyReadIndex;
-	private readonly Queue<PendingTemporalTextureRelease> _pendingTemporalReleases = new();
-	private readonly Queue<PendingTemporalBufferRelease> _pendingTemporalBufferReleases = new();
 	private readonly IGfxTexture?[] _historyColorTextures = new IGfxTexture?[2];
 	private readonly IGfxTexture?[] _historyDepthTextures = new IGfxTexture?[2];
 	private readonly ResourceState[] _historyColorStates = new ResourceState[2];
@@ -353,8 +342,6 @@ internal sealed class RenderGraphFrameBuilder
 		_currentDdgiConfigValid = false;
 		_resetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled && _previousTaaEnabled == false);
 		_previousTaaEnabled = taaEnabled;
-		RetirePendingTemporalReleases(_renderer.GetGfxDevice());
-
 		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, config.SkyboxConfig);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
 		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
@@ -2524,72 +2511,39 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void EnqueueTemporalRelease(IGfxDevice? device, IGfxTexture texture, ResourceState lastKnownState)
 	{
-		var retireSubmissionId = 0UL;
-		if (device is IGpuSubmissionTimeline submissionTimeline)
+		if (device is null)
 		{
-			retireSubmissionId = submissionTimeline.LastSubmittedId;
+			(texture as IDisposable)?.Dispose();
+			return;
 		}
 
-		_pendingTemporalReleases.Enqueue(new PendingTemporalTextureRelease(texture, retireSubmissionId, lastKnownState));
+		var texturePoolDevice = device as ITexturePoolDevice;
+		device.Retire(
+			() =>
+			{
+				var pooled = texturePoolDevice?.ReturnTexture(texture, lastKnownState) ?? false;
+				if (pooled == false)
+				{
+					(texture as IDisposable)?.Dispose();
+				}
+			},
+			texture.Name ?? "Temporal render-graph texture");
 	}
 
 	private void EnqueueTemporalBufferRelease(IGfxDevice? device, IGfxBuffer buffer)
 	{
-		var retireSubmissionId = device is IGpuSubmissionTimeline submissionTimeline
-			? submissionTimeline.LastSubmittedId
-			: 0UL;
-		_pendingTemporalBufferReleases.Enqueue(new PendingTemporalBufferRelease(buffer, retireSubmissionId));
-	}
-
-	private void RetirePendingTemporalReleases(IGfxDevice device)
-	{
-		ArgumentNullException.ThrowIfNull(device);
-
-		var completedId = ulong.MaxValue;
-		ITexturePoolDevice? texturePoolDevice = null;
-		if (device is IGpuSubmissionTimeline submissionTimeline)
+		if (buffer is not IDisposable disposableBuffer)
 		{
-			submissionTimeline.PumpCompleted();
-			completedId = submissionTimeline.CompletedId;
+			return;
 		}
 
-		if (device is ITexturePoolDevice pooledDevice)
+		if (device is null)
 		{
-			texturePoolDevice = pooledDevice;
+			disposableBuffer.Dispose();
+			return;
 		}
 
-		while (_pendingTemporalReleases.Count > 0)
-		{
-			var pending = _pendingTemporalReleases.Peek();
-			if (pending.RetireSubmissionId > completedId)
-			{
-				break;
-			}
-
-			var pooled = texturePoolDevice?.ReturnTexture(pending.Texture, pending.LastKnownState) ?? false;
-			if (pooled == false && pending.Texture is IDisposable disposableTexture)
-			{
-				disposableTexture.Dispose();
-			}
-
-			_pendingTemporalReleases.Dequeue();
-		}
-
-		while (_pendingTemporalBufferReleases.Count > 0)
-		{
-			var pending = _pendingTemporalBufferReleases.Peek();
-			if (pending.RetireSubmissionId > completedId)
-			{
-				break;
-			}
-
-			if (pending.Buffer is IDisposable disposableBuffer)
-			{
-				disposableBuffer.Dispose();
-			}
-
-			_pendingTemporalBufferReleases.Dequeue();
-		}
+		device.Retire(disposableBuffer, buffer.Name ?? "Temporal render-graph buffer");
 	}
 
 	private static bool HasAmbientOcclusion(RenderConfig config)

@@ -19,7 +19,6 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		public required MetalBuffer IndexBuffer { get; init; }
 		public required int VertexBufferSize { get; init; }
 		public required int IndexBufferSize { get; init; }
-		public ulong SubmissionId { get; set; }
 	}
 
 	private readonly IShaderProvider _shaderCompiler;
@@ -31,7 +30,6 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private DescriptorHandle _samplerHandle = DescriptorHandle.Invalid;
 	private ShaderPropertyWriter? _projectionWriter;
 	private ShaderPropertyWriter? _bindlessWriter;
-	private readonly Queue<UiBufferSet> _inFlightBuffers = new();
 	private readonly List<UiBufferSet> _availableBuffers = new();
 	private UiBufferSet? _recordingBuffers;
 	private bool _fontUploaded;
@@ -221,8 +219,6 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			throw new InvalidOperationException("ImGui renderer has no device.");
 		}
 
-		RetireCompletedBuffers();
-
 		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
 		var indexBytes = frame.IndexCount * sizeof(ushort);
 		_recordingBuffers = AcquireBufferSet(_device, vertexBytes, indexBytes);
@@ -263,8 +259,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			VertexBuffer = CreateBuffer(device, requiredVertexBytes, BufferUsage.Vertex),
 			IndexBuffer = CreateBuffer(device, requiredIndexBytes, BufferUsage.Index),
 			VertexBufferSize = requiredVertexBytes,
-			IndexBufferSize = requiredIndexBytes,
-			SubmissionId = 0
+			IndexBufferSize = requiredIndexBytes
 		};
 	}
 
@@ -277,30 +272,15 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 
 		var used = _recordingBuffers;
 		_recordingBuffers = null;
-		if (_device is IGpuSubmissionTimeline submissionTimeline)
+		if (_device is not null)
 		{
-			used.SubmissionId = submissionTimeline.LastSubmittedId + 1;
-			_inFlightBuffers.Enqueue(used);
+			_device.Retire(
+				() => _availableBuffers.Add(used),
+				"Metal ImGui buffer-set recycle");
 			return;
 		}
 
 		_availableBuffers.Add(used);
-	}
-
-	private void RetireCompletedBuffers()
-	{
-		if (_device is not IGpuSubmissionTimeline submissionTimeline)
-		{
-			return;
-		}
-
-		submissionTimeline.PumpCompleted();
-		var completedId = submissionTimeline.CompletedId;
-		while (_inFlightBuffers.Count > 0 && _inFlightBuffers.Peek().SubmissionId <= completedId)
-		{
-			var retired = _inFlightBuffers.Dequeue();
-			_availableBuffers.Add(retired);
-		}
 	}
 
 	private static MetalBuffer CreateBuffer(IGfxDevice device, int size, BufferUsage usage)
@@ -360,7 +340,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 
 		UploadTextureData(texture.Texture, atlas);
-		_fontTexture?.Dispose();
+		if (_fontTexture is not null)
+		{
+			device.Retire(_fontTexture, "Metal ImGui font texture");
+		}
 		_fontTexture = texture;
 		_fontHandle = texture.ShaderResourceView;
 

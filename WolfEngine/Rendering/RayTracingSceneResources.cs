@@ -97,7 +97,6 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private readonly uint[] _instanceIndexToInstanceHandle = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly uint[] _instanceIndexToTerrainRayTracingResolution = new uint[GpuDrawResources.MaxInstanceCount];
 	private readonly List<IGfxBottomLevelAccelerationStructure> _pendingBlasBuilds = new();
-	private readonly Queue<PendingResourceRetirement> _pendingResourceRetirements = new();
 	private readonly List<TerrainVertexUpdateRecord> _pendingTerrainVertexUpdates = new();
 	private readonly List<uint> _pendingTerrainRetryHandles = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
@@ -113,10 +112,9 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 	private RayTracingSceneStats _lastStats;
 	private long _topLevelAccelerationStructureGeneration;
 	private RayTracingSceneRebuildReason _lastTopLevelUpdateReason;
+	private int _pendingResourceRetirementCount;
 	private bool _bootstrapPending = true;
 	private bool _tlasDirty;
-
-	private readonly record struct PendingResourceRetirement(IDisposable Resource, ulong RetireSubmissionId);
 
 	public RayTracingSceneResources(IShaderProvider shaderCompiler)
 	{
@@ -146,7 +144,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			_lastStats.PendingBottomLevelBuildCount,
 			_lastTopLevelUpdateReason,
 			_terrainInstances.Count,
-			_pendingResourceRetirements.Count,
+			_pendingResourceRetirementCount,
 			0,
 			0);
 	}
@@ -165,8 +163,6 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		{
 			return;
 		}
-		RetirePendingResources(device);
-
 		EnsureSidecarResources(device);
 		if (_topLevelAccelerationStructure is null)
 		{
@@ -832,23 +828,21 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		}
 
 		// RecordUpdate runs while building a command list that can still reference this resource.
-		// Retire after its upcoming submission as well as every submission already in flight.
-		var retireSubmissionId = device is IGpuSubmissionTimeline timeline
-			? checked(timeline.LastSubmittedId + 1)
-			: 0UL;
-		_pendingResourceRetirements.Enqueue(new PendingResourceRetirement(disposable, retireSubmissionId));
-	}
-
-	private void RetirePendingResources(IGfxDevice device)
-	{
-		var completedId = device is IGpuSubmissionTimeline timeline
-			? timeline.CompletedId
-			: ulong.MaxValue;
-		while (_pendingResourceRetirements.Count > 0 &&
-			_pendingResourceRetirements.Peek().RetireSubmissionId <= completedId)
-		{
-			_pendingResourceRetirements.Dequeue().Resource.Dispose();
-		}
+		// Device retirement seals it to that command list's actual submission ID.
+		_pendingResourceRetirementCount++;
+		device.Retire(
+			() =>
+			{
+				try
+				{
+					disposable.Dispose();
+				}
+				finally
+				{
+					_pendingResourceRetirementCount--;
+				}
+			},
+			(resource as IGfxResource)?.Name ?? resource.GetType().Name);
 	}
 
 	private void BuildInstanceDescriptions()
@@ -959,10 +953,6 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			DisposeTerrainRecordImmediately(record);
 		}
 		_terrainInstances.Clear();
-		while (_pendingResourceRetirements.Count > 0)
-		{
-			_pendingResourceRetirements.Dequeue().Resource.Dispose();
-		}
 		foreach (var record in _terrainIndexBuffers.Values)
 		{
 			if (record.IndexBuffer is IDisposable disposableIndexBuffer)
