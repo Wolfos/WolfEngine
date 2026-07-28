@@ -56,6 +56,7 @@ public sealed class RenderGraph
 	private readonly HashSet<Material> _pendingMaterials = new(new ReferenceComparer<Material>());
 	private readonly HashSet<Texture> _pendingTextures = new(new ReferenceComparer<Texture>());
 	private readonly HashSet<Material> _trackedMaterials = new(new ReferenceComparer<Material>());
+	private readonly List<ITextureResources> _unsealedTextureResourceReleases = new();
 	private readonly List<PendingTextureResourceRelease> _pendingTextureResourceReleases = new();
 	private readonly ConcurrentQueue<Mesh> _ensureMeshQueue = new();
 
@@ -377,6 +378,7 @@ public sealed class RenderGraph
 			submissionTimeline.PumpCompleted();
 		}
 
+		SealTextureResourceReleases();
 		var gpuProfilerBackend = (_renderer.GetGfxDevice() as IGpuProfilerDevice)?.GpuProfilerBackend;
 		_gpuProfiler.SetBackendAvailability(
 			gpuProfilerBackend?.IsSupported == true,
@@ -756,7 +758,11 @@ public sealed class RenderGraph
 				continue;
 			}
 
-			var resources = _renderer.CreateTextureResources(texture);
+			var currentResources = texture.Resources;
+			var resources = currentResources is not null &&
+			                _renderer.TryUpdateTextureResources(texture, currentResources)
+				? currentResources
+				: _renderer.CreateTextureResources(texture);
 			var previousResources = texture.MarkGpuResourcesCreated(resources);
 			if (previousResources is not null)
 			{
@@ -769,12 +775,30 @@ public sealed class RenderGraph
 
 	private void QueueTextureResourceRelease(ITextureResources resources)
 	{
+		lock (_resourceSync)
+		{
+			// The replacement frame has not been submitted yet. Its persistent GPU tables can still
+			// contain the old descriptor until their update dispatch executes, so seal the retirement
+			// against LastSubmittedId at the start of the next frame, after this frame has been submitted.
+			_unsealedTextureResourceReleases.Add(resources);
+		}
+	}
+
+	private void SealTextureResourceReleases()
+	{
 		var releaseAfterSubmissionId = _renderer.GetGfxDevice() is IGpuSubmissionTimeline submissionTimeline
 			? submissionTimeline.LastSubmittedId
 			: 0UL;
 		lock (_resourceSync)
 		{
-			_pendingTextureResourceReleases.Add(new PendingTextureResourceRelease(resources, releaseAfterSubmissionId));
+			for (var i = 0; i < _unsealedTextureResourceReleases.Count; i++)
+			{
+				_pendingTextureResourceReleases.Add(new PendingTextureResourceRelease(
+					_unsealedTextureResourceReleases[i],
+					releaseAfterSubmissionId));
+			}
+
+			_unsealedTextureResourceReleases.Clear();
 		}
 	}
 

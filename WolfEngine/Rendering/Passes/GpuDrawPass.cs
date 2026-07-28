@@ -514,6 +514,8 @@ public sealed class GpuDrawPass
 				in update,
 				drawKind,
 				heightmapHandle,
+				layerIndexMapHandle,
+				layerWeightMapHandle,
 				layerStart,
 				layerCount,
 				terrainHeightScale,
@@ -1264,6 +1266,8 @@ public sealed class GpuDrawPass
 		in GpuDrawUpdate update,
 		GpuDrawKind drawKind,
 		uint heightmapHandle,
+		uint layerIndexMapHandle,
+		uint layerWeightMapHandle,
 		uint layerStart,
 		uint layerCount,
 		float heightScale,
@@ -1341,7 +1345,8 @@ public sealed class GpuDrawPass
 			$"[terrain draw] draw={update.DrawHandle.Value} material={update.MaterialHandle.Value} type={update.Type} " +
 			$"chunkOrigin=({chunk.X}, {chunk.Y}) chunkSize=({chunk.Z}, {chunk.W}) " +
 			$"uvScaleOffset=({uv.X}, {uv.Y}, {uv.Z}, {uv.W}) heightScale={heightScale} " +
-			$"heightmapHandle={heightmapHandle} layers={layerStart}+{layerCount} " +
+			$"heightmapHandle={heightmapHandle} layerMapHandles=({layerIndexMapHandle},{layerWeightMapHandle}) " +
+			$"layers={layerStart}+{layerCount} " +
 			$"indexCount={indexCount} baseVertex={baseVertex} {verdict}");
 	}
 

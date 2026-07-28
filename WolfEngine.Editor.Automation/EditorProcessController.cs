@@ -117,6 +117,30 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
 
+	public Task<TerrainLayerPaintResult> PaintTerrainLayerAsync(
+		string? terrainEntityId,
+		float localX,
+		float localZ,
+		int layerIndex,
+		float radiusMeters,
+		float strength,
+		float falloff,
+		bool invert,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().PaintTerrainLayerAsync(
+			terrainEntityId,
+			localX,
+			localZ,
+			layerIndex,
+			radiusMeters,
+			strength,
+			falloff,
+			invert,
+			cancellationToken);
+
+	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().UndoAsync(cancellationToken);
+
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetRayTracingSceneStateAsync(cancellationToken);
 

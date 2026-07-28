@@ -3,6 +3,7 @@ using System.Numerics;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Profiling;
@@ -21,6 +22,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorPlaySession _playSession;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
+	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly IRenderer _renderer;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly RenderFrameCoordinator _renderFrameCoordinator;
@@ -40,6 +42,7 @@ public sealed class EditorRemoteAutomationController
 		IEditorPlaySession playSession,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
+		ITerrainAuthoringService terrainAuthoringService,
 		IRenderer renderer,
 		EditorFrameCoordinator editorFrameCoordinator,
 		RenderFrameCoordinator renderFrameCoordinator,
@@ -54,6 +57,7 @@ public sealed class EditorRemoteAutomationController
 		_playSession = playSession;
 		_interactionState = interactionState;
 		_commandService = commandService;
+		_terrainAuthoringService = terrainAuthoringService;
 		_renderer = renderer;
 		_editorFrameCoordinator = editorFrameCoordinator;
 		_renderFrameCoordinator = renderFrameCoordinator;
@@ -160,6 +164,78 @@ public sealed class EditorRemoteAutomationController
 				.ConfigureAwait(false);
 			return new RenderFrameWaitResult(frameCount, _editorFrameCoordinator.CompletedSequence, renderSequence);
 		}, cancellationToken);
+
+	public Task<TerrainLayerPaintResult> PaintTerrainLayerAsync(
+		string? terrainEntityId,
+		float localX,
+		float localZ,
+		int layerIndex,
+		float radiusMeters,
+		float strength,
+		float falloff,
+		bool invert,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Edit)
+			{
+				throw new InvalidOperationException("Terrain authoring is only available outside Play mode.");
+			}
+
+			ValidateFinite(localX, nameof(localX));
+			ValidateFinite(localZ, nameof(localZ));
+			ValidateFinite(radiusMeters, nameof(radiusMeters));
+			ValidateFinite(strength, nameof(strength));
+			ValidateFinite(falloff, nameof(falloff));
+			if (radiusMeters <= 0.0f) throw new InvalidOperationException("radius_meters must be positive.");
+			if (strength < 0.0f || strength > 1.0f) throw new InvalidOperationException("strength must be between 0 and 1.");
+			if (falloff <= 0.0f) throw new InvalidOperationException("falloff must be positive.");
+
+			var scene = _sceneWorkspace.CurrentScene;
+			var (entity, persistentId) = ResolveTerrainEntity(scene, terrainEntityId);
+			var request = new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.LayerMaps,
+				TerrainBrushOperation.PaintLayer,
+				new TerrainBrushSettings(radiusMeters, strength, falloff, layerIndex, null));
+			if (_terrainAuthoringService.BeginStroke(scene, entity, request) == false)
+			{
+				throw new InvalidOperationException($"Could not begin a layer-paint stroke on terrain entity '{persistentId:D}'.");
+			}
+
+			try
+			{
+				_terrainAuthoringService.AppendStamp(
+					new Vector3(localX, 0.0f, localZ),
+					1.0f,
+					new TerrainBrushModifierState(invert));
+				if (_terrainAuthoringService.EndStroke() == false)
+				{
+					throw new InvalidOperationException($"Could not end the layer-paint stroke on terrain entity '{persistentId:D}'.");
+				}
+			}
+			catch
+			{
+				_terrainAuthoringService.CancelStroke();
+				throw;
+			}
+
+			return new TerrainLayerPaintResult(
+				persistentId,
+				layerIndex,
+				localX,
+				localZ,
+				radiusMeters,
+				strength,
+				invert,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	public Task<EditorUndoResult> UndoAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new EditorUndoResult(
+			_commandService.Undo(),
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence), cancellationToken);
 
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(() =>
@@ -285,6 +361,52 @@ public sealed class EditorRemoteAutomationController
 			$"Scene '{scenePath}' was not found in the open project's asset database.");
 	}
 
+	private (Entity Entity, Guid PersistentId) ResolveTerrainEntity(EditorScene scene, string? terrainEntityId)
+	{
+		if (string.IsNullOrWhiteSpace(terrainEntityId) == false)
+		{
+			if (Guid.TryParse(terrainEntityId, out var requestedId) == false)
+			{
+				throw new InvalidOperationException("terrain_entity_id must be a GUID.");
+			}
+
+			foreach (var entry in scene.EntityIds)
+			{
+				if (entry.Value != requestedId)
+				{
+					continue;
+				}
+
+				if (scene.World.IsAlive(entry.Key) == false || scene.World.HasComponent<TerrainComponent>(entry.Key) == false)
+				{
+					throw new InvalidOperationException($"Entity '{requestedId:D}' is not a terrain entity.");
+				}
+
+				return (entry.Key, requestedId);
+			}
+
+			throw new InvalidOperationException($"Terrain entity '{requestedId:D}' was not found in the authoring scene.");
+		}
+
+		(Entity Entity, Guid PersistentId)? match = null;
+		foreach (var entry in scene.EntityIds)
+		{
+			if (scene.World.IsAlive(entry.Key) == false || scene.World.HasComponent<TerrainComponent>(entry.Key) == false)
+			{
+				continue;
+			}
+
+			if (match.HasValue)
+			{
+				throw new InvalidOperationException("The authoring scene contains multiple terrain entities; terrain_entity_id is required.");
+			}
+
+			match = (entry.Key, entry.Value);
+		}
+
+		return match ?? throw new InvalidOperationException("The authoring scene does not contain a terrain entity.");
+	}
+
 	private string ResolveOutputPath(string outputPath)
 	{
 		if (string.IsNullOrWhiteSpace(outputPath))
@@ -320,6 +442,14 @@ public sealed class EditorRemoteAutomationController
 						SummarizeTimings(scopeGroup.Select(scope => scope.DurationMs))))
 					.ToArray()))
 			.ToArray();
+	}
+
+	private static void ValidateFinite(float value, string parameterName)
+	{
+		if (float.IsFinite(value) == false)
+		{
+			throw new InvalidOperationException($"{parameterName} must be finite.");
+		}
 	}
 
 	private static GpuTimingStatistics SummarizeTimings(IEnumerable<double> samples)

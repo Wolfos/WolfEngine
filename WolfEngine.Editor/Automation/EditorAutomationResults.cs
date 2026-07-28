@@ -16,6 +16,22 @@ public sealed record RenderFrameWaitResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+public sealed record TerrainLayerPaintResult(
+	Guid TerrainEntityId,
+	int LayerIndex,
+	float LocalX,
+	float LocalZ,
+	float RadiusMeters,
+	float Strength,
+	bool Invert,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
+public sealed record EditorUndoResult(
+	bool Applied,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
 public sealed record RayTracingSceneStateResult(
 	string TlasIdentity,
 	long TlasGeneration,

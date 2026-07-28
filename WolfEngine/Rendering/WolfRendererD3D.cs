@@ -1105,19 +1105,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		}
 
 		var supportsUnorderedAccess = SupportsUnorderedAccess(texture);
-		var texDesc = new ResourceDesc
-		{
-			Dimension = ResourceDimension.Texture2D,
-			Alignment = 0,
-			Width = (ulong)texture.Width,
-			Height = (uint)texture.Height,
-			DepthOrArraySize = 1,
-			MipLevels = (ushort)texture.MipCount,
-			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
-			SampleDesc = new(1, 0),
-			Layout = TextureLayout.LayoutUnknown,
-			Flags = supportsUnorderedAccess ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None
-		};
+		var texDesc = CreateTextureResourceDescription(texture, supportsUnorderedAccess);
 
 		var defaultHeap = new HeapProperties(HeapType.Default);
 		ComPtr<ID3D12Resource> gpuTexture;
@@ -1130,6 +1118,98 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				null,
 				out gpuTexture));
 
+		UploadTextureData(texture, in texDesc, gpuTexture, ResourceStates.CopyDest);
+
+		var descriptor = new TextureDescriptor(
+			texture.Width,
+			texture.Height,
+			texture.Format,
+			supportsUnorderedAccess ? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess : TextureUsage.ShaderResource,
+			mipLevels: texture.MipCount,
+			isSrgb: texture.IsSrgb);
+
+		var backendTexture = new BackendD3D12Texture();
+		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
+		var srvHandle = _gfxDevice.GlobalTable.AllocateShaderResourceView(backendTexture);
+		var uavHandle = supportsUnorderedAccess
+			? _gfxDevice.GlobalTable.AllocateUnorderedAccessView(backendTexture)
+			: DescriptorHandle.Invalid;
+		backendTexture.SetHandles(
+			srvHandle,
+			DescriptorHandle.Invalid,
+			uavHandle,
+			_gfxDevice.GlobalTable as D3D12DescriptorTable);
+
+		return new D3D12TextureResources
+		{
+			Texture = backendTexture,
+			ShaderResourceView = srvHandle
+		};
+	}
+
+	public bool TryUpdateTextureResources(Texture texture, ITextureResources resources)
+	{
+		ArgumentNullException.ThrowIfNull(texture);
+		ArgumentNullException.ThrowIfNull(resources);
+		if (resources is not D3D12TextureResources d3dResources ||
+		    d3dResources.Texture is not BackendD3D12Texture backendTexture)
+		{
+			return false;
+		}
+
+		var supportsUnorderedAccess = SupportsUnorderedAccess(texture);
+		var descriptor = backendTexture.Descriptor;
+		if (CanUpdateTextureResources(texture, in descriptor) == false)
+		{
+			return false;
+		}
+
+		var texDesc = CreateTextureResourceDescription(texture, supportsUnorderedAccess);
+		UploadTextureData(
+			texture,
+			in texDesc,
+			backendTexture.Resource,
+			ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource);
+		return true;
+	}
+
+	internal static bool CanUpdateTextureResources(Texture texture, in TextureDescriptor descriptor)
+	{
+		ArgumentNullException.ThrowIfNull(texture);
+		var expectedUsage = SupportsUnorderedAccess(texture)
+			? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess
+			: TextureUsage.ShaderResource;
+		return descriptor.Width == texture.Width &&
+		       descriptor.Height == texture.Height &&
+		       descriptor.Format == texture.Format &&
+		       descriptor.MipLevels == texture.MipCount &&
+		       descriptor.IsSrgb == texture.IsSrgb &&
+		       descriptor.Usage == expectedUsage;
+	}
+
+	private ResourceDesc CreateTextureResourceDescription(Texture texture, bool supportsUnorderedAccess)
+	{
+		return new ResourceDesc
+		{
+			Dimension = ResourceDimension.Texture2D,
+			Alignment = 0,
+			Width = (ulong)texture.Width,
+			Height = (uint)texture.Height,
+			DepthOrArraySize = 1,
+			MipLevels = (ushort)texture.MipCount,
+			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
+			SampleDesc = new(1, 0),
+			Layout = TextureLayout.LayoutUnknown,
+			Flags = supportsUnorderedAccess ? ResourceFlags.AllowUnorderedAccess : ResourceFlags.None
+		};
+	}
+
+	private void UploadTextureData(
+		Texture texture,
+		in ResourceDesc texDesc,
+		ComPtr<ID3D12Resource> gpuTexture,
+		ResourceStates initialState)
+	{
 		var subresourceCount = texture.MipCount;
 		var layouts = new PlacedSubresourceFootprint[subresourceCount];
 		var numRows = new uint[subresourceCount];
@@ -1210,6 +1290,20 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				default,
 				out uploadCommandList));
 
+		var shaderReadState = ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource;
+		if (initialState != ResourceStates.CopyDest)
+		{
+			var copyBarrier = new ResourceBarrier { Type = ResourceBarrierType.Transition, Flags = ResourceBarrierFlags.None };
+			copyBarrier.Anonymous.Transition = new()
+			{
+				PResource = gpuTexture.Handle,
+				Subresource = D3D12.ResourceBarrierAllSubresources,
+				StateBefore = initialState,
+				StateAfter = ResourceStates.CopyDest
+			};
+			uploadCommandList.ResourceBarrier(1, &copyBarrier);
+		}
+
 		for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
 		{
 			var destLocation = new TextureCopyLocation
@@ -1235,7 +1329,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			PResource = gpuTexture.Handle,
 			Subresource = D3D12.ResourceBarrierAllSubresources,
 			StateBefore = ResourceStates.CopyDest,
-			StateAfter = ResourceStates.PixelShaderResource | ResourceStates.NonPixelShaderResource
+			StateAfter = shaderReadState
 		};
 		uploadCommandList.ResourceBarrier(1, &textureBarrier);
 
@@ -1246,32 +1340,6 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		uploadCommandList.Dispose();
 		uploadBuffer.Dispose();
-
-		var descriptor = new TextureDescriptor(
-			texture.Width,
-			texture.Height,
-			texture.Format,
-			supportsUnorderedAccess ? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess : TextureUsage.ShaderResource,
-			mipLevels: texture.MipCount,
-			isSrgb: texture.IsSrgb);
-
-		var backendTexture = new BackendD3D12Texture();
-		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
-		var srvHandle = _gfxDevice.GlobalTable.AllocateShaderResourceView(backendTexture);
-		var uavHandle = supportsUnorderedAccess
-			? _gfxDevice.GlobalTable.AllocateUnorderedAccessView(backendTexture)
-			: DescriptorHandle.Invalid;
-		backendTexture.SetHandles(
-			srvHandle,
-			DescriptorHandle.Invalid,
-			uavHandle,
-			_gfxDevice.GlobalTable as D3D12DescriptorTable);
-
-		return new D3D12TextureResources
-		{
-			Texture = backendTexture,
-			ShaderResourceView = srvHandle
-		};
 	}
 
 	private static bool SupportsUnorderedAccess(Texture texture)

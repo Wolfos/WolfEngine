@@ -61,6 +61,32 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.WaitForRenderFramesAsync(frameCount, cancellationToken);
 
+	[McpServerTool(Name = "paint_terrain_layer"), Description("Apply one terrain layer-paint stamp through the editor's real authoring and undo path. The edit remains in memory unless the scene is explicitly saved.")]
+	public Task<TerrainLayerPaintResult> PaintTerrainLayer(
+		[Description("Persistent terrain entity GUID. May be omitted when the authoring scene contains exactly one terrain entity.")] string? terrainEntityId = null,
+		[Description("Terrain-local X coordinate in meters.")] float localX = 0.0f,
+		[Description("Terrain-local Z coordinate in meters.")] float localZ = 0.0f,
+		[Description("Zero-based terrain layer index to paint.")] int layerIndex = 1,
+		[Description("Brush radius in meters.")] float radiusMeters = 8.0f,
+		[Description("Brush strength from 0 through 1.")] float strength = 1.0f,
+		[Description("Positive brush falloff exponent.")] float falloff = 1.0f,
+		[Description("Remove the selected layer instead of adding it.")] bool invert = false,
+		CancellationToken cancellationToken = default) =>
+		_controller.PaintTerrainLayerAsync(
+			terrainEntityId,
+			localX,
+			localZ,
+			layerIndex,
+			radiusMeters,
+			strength,
+			falloff,
+			invert,
+			cancellationToken);
+
+	[McpServerTool(Name = "undo"), Description("Undo the most recent editor authoring action, including a terrain stroke.")]
+	public Task<EditorUndoResult> Undo(CancellationToken cancellationToken) =>
+		_controller.UndoAsync(cancellationToken);
+
 	[McpServerTool(Name = "get_ray_tracing_scene_state"), Description("Return the latest renderer-side TLAS, BLAS, terrain, retirement, and GPU-submission diagnostics without synchronizing or restarting the renderer.")]
 	public Task<RayTracingSceneStateResult> GetRayTracingSceneState(CancellationToken cancellationToken) =>
 		_controller.GetRayTracingSceneStateAsync(cancellationToken);

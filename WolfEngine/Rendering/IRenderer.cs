@@ -11,6 +11,7 @@ public interface IRenderer : IFrameCaptureSource
 	void Run(Action startup, Action<float> update, Action<float> render);
 	IMaterialResources CreateMaterialResources(Material material);
 	ITextureResources CreateTextureResources(Texture texture);
+	bool TryUpdateTextureResources(Texture texture, ITextureResources resources) => false;
 	IGfxDevice GetGfxDevice();
 	Int2 GetFrameBufferSize();
 	Int2 GetWindowSize();
