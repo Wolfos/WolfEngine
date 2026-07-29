@@ -311,6 +311,8 @@ public sealed class EditorCommandService : IEditorCommandService
 			var result = _shaderProvider.Reload(_renderer.GetGfxDevice().BackendKind);
 			if (result.AppliedArtifactCount > 0)
 				_notificationService.ReportInfo($"Reloaded {result.AppliedArtifactCount} engine shader artifact(s).");
+			else if (result.Failures.Count == 0)
+				_notificationService.ReportInfo("Engine shaders are already up to date.");
 			foreach (var failure in result.Failures)
 				_notificationService.ReportError($"Shader reload failed for {failure.Request.ProgramId}: {failure.Error}");
 			return result.AppliedArtifactCount > 0 && result.Succeeded;

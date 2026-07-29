@@ -1,10 +1,5 @@
-#nullable enable
 // Source compilation and hot reload are editor/build tooling concerns.
 
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -27,7 +22,7 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 	private readonly Dictionary<ShaderRequest, CompiledShaderArtifact> _artifacts = new();
 	private readonly HashSet<ShaderRequest> _observedRequests = new();
 	private string? _projectRootPath;
-	private string? _sourceFingerprint;
+	private ShaderSourceIndex? _sourceIndex;
 	private long _revision;
 
 	public DevelopmentShaderProvider(EngineShaderOptions options, EngineShaderCatalog catalog)
@@ -51,7 +46,8 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 			_projectRootPath = string.IsNullOrWhiteSpace(projectRootPath) ? null : Path.GetFullPath(projectRootPath);
 			if (_projectRootPath is not null)
 			{
-				foreach (var artifact in _artifacts.Values) WriteArtifact(artifact);
+				foreach (var artifact in _artifacts.Values) WriteArtifactFile(artifact);
+				WriteManifest();
 			}
 		}
 	}
@@ -63,7 +59,7 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 			_catalog.ValidateRequest(request);
 			_observedRequests.Add(request);
 			if (_artifacts.TryGetValue(request, out var cached)) return cached;
-			var key = BuildContentKey(request, GetSourceFingerprint());
+			var key = BuildContentKey(request, GetProgramFingerprint(request.ProgramId));
 			if (TryReadArtifact(request, key, out cached))
 			{
 				_artifacts[request] = cached;
@@ -72,7 +68,8 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 
 			var compiled = Compile(request, key);
 			_artifacts[request] = compiled;
-			WriteArtifact(compiled);
+			WriteArtifactFile(compiled);
+			WriteManifest();
 			return compiled;
 		}
 	}
@@ -84,14 +81,18 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 		long revision;
 		lock (_sync)
 		{
-			_sourceFingerprint = null;
-			var fingerprint = GetSourceFingerprint();
+			_sourceIndex = null;
 			foreach (var request in _observedRequests.Where(request => request.BackendKind == backendKind).ToArray())
 			{
+				_artifacts.TryGetValue(request, out var previous);
+				var contentKey = BuildContentKey(request, GetProgramFingerprint(request.ProgramId));
+				// Nothing this program compiles has changed, so the loaded artifact is still the right one.
+				if (previous is not null && previous.ContentKey == contentKey) continue;
 				try
 				{
-					var compiled = Compile(request, BuildContentKey(request, fingerprint));
-					if (_artifacts.TryGetValue(request, out var previous) && ReflectionCompatible(previous.ReflectionLayout, compiled.ReflectionLayout) == false)
+					if (TryReadArtifact(request, contentKey, out var compiled) == false)
+						compiled = Compile(request, contentKey);
+					if (previous is not null && ReflectionCompatible(previous.ReflectionLayout, compiled.ReflectionLayout) == false)
 					{
 						failures.Add(new ShaderReloadFailure(request, "The reflected shader interface changed; the previous pipeline was retained."));
 						continue;
@@ -107,9 +108,10 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 			foreach (var entry in staged)
 			{
 				_artifacts[entry.Key] = entry.Value;
-				WriteArtifact(entry.Value);
+				WriteArtifactFile(entry.Value);
 			}
 			if (staged.Count == 0) return new ShaderReloadResult(0, failures);
+			WriteManifest();
 			revision = ++_revision;
 		}
 
@@ -135,19 +137,14 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 		return new CompiledShaderArtifact(request, contentKey, graphics.Bytecode, graphics.ReflectionLayout);
 	}
 
-	private string GetSourceFingerprint()
+	/// <summary>
+	/// Fingerprints the program's own source plus everything it imports, so an edit only invalidates the
+	/// programs that actually compile the edited file.
+	/// </summary>
+	private string GetProgramFingerprint(ShaderProgramId programId)
 	{
-		if (_sourceFingerprint is not null) return _sourceFingerprint;
-		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		foreach (var path in Directory.EnumerateFiles(_shaderSourceRoot, "*", SearchOption.AllDirectories)
-			         .OrderBy(path => path, StringComparer.Ordinal))
-		{
-			var relative = Path.GetRelativePath(_shaderSourceRoot, path).Replace('\\', '/');
-			hash.AppendData(Encoding.UTF8.GetBytes(relative));
-			hash.AppendData(File.ReadAllBytes(path));
-		}
-		_sourceFingerprint = Convert.ToHexString(hash.GetHashAndReset());
-		return _sourceFingerprint;
+		_sourceIndex ??= ShaderSourceIndex.Build(_shaderSourceRoot);
+		return _sourceIndex.GetFingerprint(_catalog.Get(programId).RelativeSourcePath);
 	}
 
 	private static string BuildContentKey(ShaderRequest request, string sourceFingerprint)
@@ -175,7 +172,7 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 		}
 	}
 
-	private void WriteArtifact(CompiledShaderArtifact artifact)
+	private void WriteArtifactFile(CompiledShaderArtifact artifact)
 	{
 		var path = GetArtifactPath(artifact.Request.BackendKind, artifact.ContentKey);
 		if (path is null) return;
@@ -183,7 +180,6 @@ public sealed class DevelopmentShaderProvider : IShaderProvider
 		var tempPath = path + ".tmp";
 		using (var stream = File.Create(tempPath)) ShaderArtifactSerializer.Write(stream, artifact);
 		File.Move(tempPath, path, true);
-		WriteManifest();
 	}
 
 	private void WriteManifest()
