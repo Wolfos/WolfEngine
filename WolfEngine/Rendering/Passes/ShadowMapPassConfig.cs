@@ -118,4 +118,13 @@ public struct ShadowMapPassConfig
 	public required ulong DrawArgsBaseOffsetBytes { get; init; }
 	public required ReadOnlyMemory<ShadowMapExecutionBucket> Buckets { get; init; }
 	public required uint FallbackMaxCommandCount { get; init; }
+
+	/// <summary>Indirect command slot the buckets' pages were taken from, needed to index the count table.</summary>
+	public int IndirectCommandSlot { get; init; }
+
+	/// <summary>
+	/// Per-page compacted command counts when compaction ran for this cascade, otherwise null, which
+	/// selects the full-range execution path.
+	/// </summary>
+	public IGfxBuffer? CompactedCommandCountBuffer { get; init; }
 }

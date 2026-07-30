@@ -30,8 +30,12 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 {
 	public const uint IndirectCommandPageCapacity = 2048;
 
+	/// <summary>Highest page index a draw id can land on, which bounds the per-page count table.</summary>
+	public static readonly uint MaxPageCount = ((GpuDrawResources.MaxDrawCount - 1) / IndirectCommandPageCapacity) + 1;
+
 	private readonly SortedDictionary<uint, IGfxIndirectCommandBuffer>[] _commandPages =
 		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+	private IGfxBuffer? _compactedCommandCounts;
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
@@ -46,9 +50,31 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		}
 	}
 
+	/// <summary>
+	/// Per-page compacted command counts, one entry per (slot, lane, page). Written by the compaction
+	/// dispatch and read by ExecuteIndirect as its count buffer.
+	/// </summary>
+	public IGfxBuffer? CompactedCommandCountBuffer => _compactedCommandCounts;
+
 	public void EnsureCreated(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
+		_compactedCommandCounts ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)CompactedCommandCountEntryCount * sizeof(uint),
+			BufferUsage.Indirect,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			name: "SharedDrawCompactedCommandCounts"));
+	}
+
+	public static int CompactedCommandCountEntryCount =>
+		GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount * (int)MaxPageCount;
+
+	public static int GetCompactedCommandCountIndex(int slotIndex, int executionLaneIndex, uint pageIndex)
+	{
+		ValidateSlot(slotIndex);
+		ValidateLane(executionLaneIndex);
+		ValidatePage(pageIndex);
+		return (FlattenSlotLaneIndex(slotIndex, executionLaneIndex) * (int)MaxPageCount) + (int)pageIndex;
 	}
 
 	public IGfxIndirectCommandBuffer EnsurePage(
@@ -173,6 +199,8 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 
 	public void Dispose()
 	{
+		(_compactedCommandCounts as IDisposable)?.Dispose();
+		_compactedCommandCounts = null;
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
 			foreach (var commandBuffer in _commandPages[i].Values)

@@ -603,6 +603,16 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			new NSRange { location = 0, length = maxAvailable });
 	}
 
+	/// <summary>
+	/// Metal indirect command buffers report no compaction support, so the shared draw passes keep
+	/// executing their full command range and never reach this path.
+	/// </summary>
+	public void ExecuteCompactedIndirectCommandBuffer(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer countBuffer,
+		ulong countOffsetBytes) =>
+		throw new NotSupportedException("The Metal backend does not support compacted indirect command execution.");
+
 	public void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
 		IGfxBuffer commandRangeBuffer,

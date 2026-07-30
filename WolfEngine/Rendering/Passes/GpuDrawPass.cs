@@ -25,6 +25,7 @@ public sealed class GpuDrawPass
 	private IGfxPipeline? _terrainMaterialUpdatePipeline;
 	private IGfxPipeline? _terrainLayerUpdatePipeline;
 	private IGfxPipeline? _cullPipeline;
+	private IGfxPipeline? _compactPipeline;
 	private GraphicsBackendKind? _computeReflectionBackendKind;
 	private ReadOnlyMemory<byte> _instanceUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _meshUpdateShaderBytecode;
@@ -32,12 +33,14 @@ public sealed class GpuDrawPass
 	private ReadOnlyMemory<byte> _terrainMaterialUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _terrainLayerUpdateShaderBytecode;
 	private ReadOnlyMemory<byte> _cullShaderBytecode;
+	private ReadOnlyMemory<byte> _compactShaderBytecode;
 	private ComputeThreadGroupSize? _instanceUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _meshUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _materialUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _terrainMaterialUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _cullThreadGroupSize;
+	private ComputeThreadGroupSize? _compactThreadGroupSize;
 	private ComputeResourceBindings? _terrainMaterialUpdateBindings;
 	private ComputeResourceBindings? _terrainLayerUpdateBindings;
 	private ShaderPropertyWriter? _instanceUpdateParamsWriter;
@@ -46,6 +49,7 @@ public sealed class GpuDrawPass
 	private ShaderPropertyWriter? _terrainMaterialUpdateParamsWriter;
 	private ShaderPropertyWriter? _terrainLayerUpdateParamsWriter;
 	private ShaderPropertyWriter? _cullParamsWriter;
+	private ShaderPropertyWriter? _compactParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
 	private readonly List<GpuDrawInstanceUpdateData> _instanceUpdateData = new();
 	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
@@ -65,6 +69,7 @@ public sealed class GpuDrawPass
 	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ShaderReflectionLayout?[] _gbufferReflections = new ShaderReflectionLayout?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly SharedDrawIndirectCommandSet _gbufferIndirectCommandSet = new();
+	private bool _gbufferCompactionActive;
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
 	private readonly Dictionary<uint, TerrainMaterialAllocation> _terrainMaterialAllocations = new();
@@ -78,6 +83,7 @@ public sealed class GpuDrawPass
 	private bool _loggedCapacityExceeded;
 	private bool _loggedUpdateOverflowRecovery;
 	private bool _loggedUnsupportedDrawKind;
+	private bool _loggedCompactionUnavailable;
 	private bool _gpuStateBootstrapPending = true;
 
 	private const uint DrawFlagActive = GpuDrawFlags.Active;
@@ -1053,6 +1059,174 @@ public sealed class GpuDrawPass
 		return _cullPipeline;
 	}
 
+	/// <summary>
+	/// Compacts a command set's visible draws into dense per-page command lists so the following
+	/// ExecuteIndirect walks only what survived culling. Must run after the cull dispatch that produced
+	/// <paramref name="drawArgsBuffer"/> and after the pass's commands have been encoded.
+	/// </summary>
+	/// <param name="drawArgsBaseOffsetBytes">
+	/// Byte offset of this view's slice of the draw args buffer, so shadow cascades compact against
+	/// their own visibility rather than the first cascade's.
+	/// </param>
+	/// <returns>False when the backend cannot compact, meaning the caller must execute the full range.</returns>
+	public bool RecordIndirectCompaction(
+		RenderGraphContext context,
+		SharedDrawIndirectCommandSet commandSet,
+		DrawPassParticipation participation,
+		IGfxBuffer? drawArgsBuffer,
+		ulong drawArgsBaseOffsetBytes,
+		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(commandSet);
+		ArgumentNullException.ThrowIfNull(laneAvailable);
+
+		if (drawArgsBuffer is null ||
+		    _gpuDrawResources.DrawCommandBuffer is null ||
+		    _supportsIndirectStructuralUpdates == false)
+		{
+			return false;
+		}
+
+		var device = _renderer.GetGfxDevice();
+		commandSet.EnsureCreated(device);
+		var countBuffer = commandSet.CompactedCommandCountBuffer;
+		if (countBuffer is null)
+		{
+			return false;
+		}
+
+		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
+		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(participation);
+		if (SupportsCompaction(commandSet, activeSlot, laneDefinitions, laneAvailable) == false)
+		{
+			LogCompactionUnavailableOnce(participation);
+			return false;
+		}
+
+		// Zeroing through the CPU-writable path stages an upload copy, and that copy's transition back
+		// to UnorderedAccess is what orders the reset ahead of the compaction dispatch below.
+		Span<uint> resetCounts = stackalloc uint[SharedDrawIndirectCommandSet.CompactedCommandCountEntryCount];
+		resetCounts.Clear();
+		WriteBuffer<uint>(countBuffer, resetCounts, "SharedDrawCompactedCommandCounts");
+
+		var pipeline = EnsureCompactPipeline(device);
+		var commandList = context.CommandList;
+		using (FrameProfiler.Instance.Measure("GpuDraw.Compact"))
+		{
+			commandList.BindPipeline(pipeline);
+			var compactParamsWriter = _compactParamsWriter
+			                          ?? throw new InvalidOperationException(
+				                          "GpuDraw compaction reflection writer was not initialized.");
+			var threadGroupSize = _compactThreadGroupSize
+			                      ?? throw new InvalidOperationException(
+				                      "GpuDraw compaction threadgroup size was not initialized.");
+
+			for (var i = 0; i < laneDefinitions.Length; i++)
+			{
+				var lane = laneDefinitions[i];
+				if (laneAvailable(lane) == false)
+				{
+					continue;
+				}
+
+				var pages = commandSet.GetAllocatedPages(activeSlot, lane.ExecutionIndex);
+				for (var pageIndex = 0; pageIndex < pages.Length; pageIndex++)
+				{
+					var page = pages[pageIndex];
+					if (_gpuDrawResources.ActiveDrawCommandUpperBound <= page.PageStartCommandIndex)
+					{
+						continue;
+					}
+
+					var templateBuffer = page.CommandBuffer.TemplateRecordBuffer;
+					var compactedBuffer = page.CommandBuffer.CompactedRecordBuffer;
+					if (templateBuffer is null || compactedBuffer is null)
+					{
+						continue;
+					}
+
+					var countIndex = SharedDrawIndirectCommandSet.GetCompactedCommandCountIndex(
+						activeSlot,
+						lane.ExecutionIndex,
+						page.PageIndex);
+
+					compactParamsWriter.Clear();
+					compactParamsWriter.SetUInt("pageStartCommandIndex", page.PageStartCommandIndex);
+					compactParamsWriter.SetUInt("pageCommandCapacity", page.PageCommandCapacity);
+					compactParamsWriter.SetUInt("laneIndex", (uint)lane.ExecutionIndex);
+					compactParamsWriter.SetUInt("countIndex", (uint)countIndex);
+					compactParamsWriter.SetUInt("recordStrideUints", page.CommandBuffer.RecordStrideInBytes / sizeof(uint));
+					compactParamsWriter.SetUInt(
+						"recordIndexCountUintOffset",
+						page.CommandBuffer.RecordIndexCountOffsetInBytes / sizeof(uint));
+					compactParamsWriter.SetUInt(
+						"activeDrawCommandUpperBound",
+						_gpuDrawResources.ActiveDrawCommandUpperBound);
+					commandList.SetComputeConstants(compactParamsWriter.RegisterIndex, compactParamsWriter.AsBytes());
+
+					commandList.SetComputeBuffer(0, compactedBuffer);
+					commandList.SetComputeBuffer(1, countBuffer);
+					commandList.SetComputeReadOnlyBuffer(2, templateBuffer);
+					commandList.SetComputeReadOnlyBuffer(3, drawArgsBuffer, drawArgsBaseOffsetBytes);
+					commandList.SetComputeReadOnlyBuffer(4, _gpuDrawResources.DrawCommandBuffer);
+
+					var (groupCountX, groupCountY, groupCountZ) =
+						threadGroupSize.GetDispatchGroupCount(page.PageCommandCapacity);
+					commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+				}
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// Compaction is all-or-nothing per command set: a lane left on the full-range path would execute
+	/// stale records that the count buffer no longer describes.
+	/// </summary>
+	private static bool SupportsCompaction(
+		SharedDrawIndirectCommandSet commandSet,
+		int activeSlot,
+		ReadOnlySpan<GpuDrawExecutionLaneDefinition> laneDefinitions,
+		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable)
+	{
+		for (var i = 0; i < laneDefinitions.Length; i++)
+		{
+			var lane = laneDefinitions[i];
+			if (laneAvailable(lane) == false)
+			{
+				continue;
+			}
+
+			var pages = commandSet.GetAllocatedPages(activeSlot, lane.ExecutionIndex);
+			for (var pageIndex = 0; pageIndex < pages.Length; pageIndex++)
+			{
+				if (pages[pageIndex].CommandBuffer.SupportsGpuCompaction == false)
+				{
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private IGfxPipeline EnsureCompactPipeline(IGfxDevice device)
+	{
+		if (_compactPipeline is not null)
+		{
+			return _compactPipeline;
+		}
+
+		EnsureComputeReflectionResources(device.BackendKind);
+		var pipelineKey = new PipelineKey(PassKind.Compute, null, null, "CSCompact", default, default, default);
+		_compactPipeline = device.GetOrCreatePipeline(
+			pipelineKey,
+			new ShaderBytecodeSet(compute: _compactShaderBytecode, computeThreadGroupSize: _compactThreadGroupSize));
+		return _compactPipeline;
+	}
+
 	private void EnsureComputeReflectionResources(GraphicsBackendKind backendKind)
 	{
 		if (_computeReflectionBackendKind.HasValue &&
@@ -1069,6 +1243,9 @@ public sealed class GpuDrawPass
 		    _terrainMaterialUpdateThreadGroupSize.HasValue &&
 		    _terrainLayerUpdateThreadGroupSize.HasValue &&
 		    _cullThreadGroupSize.HasValue &&
+		    _compactThreadGroupSize.HasValue &&
+		    _compactParamsWriter is not null &&
+		    _compactShaderBytecode.IsEmpty == false &&
 		    _instanceUpdateShaderBytecode.IsEmpty == false &&
 		    _meshUpdateShaderBytecode.IsEmpty == false &&
 		    _materialUpdateShaderBytecode.IsEmpty == false &&
@@ -1141,6 +1318,14 @@ public sealed class GpuDrawPass
 		_cullShaderBytecode = cullCompiled.Bytecode;
 		_cullThreadGroupSize = cullCompiled.ThreadGroupSize;
 		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));
+
+		var compactCompiled = _shaderCompiler.GetComputeShaderWithReflection(
+			EngineShaderPrograms.GpuDrawCompact,
+			"CSCompact",
+			backendKind);
+		_compactShaderBytecode = compactCompiled.Bytecode;
+		_compactThreadGroupSize = compactCompiled.ThreadGroupSize;
+		_compactParamsWriter = new ShaderPropertyWriter(compactCompiled.ReflectionLayout.GetConstantBuffer("CompactParams"));
 
 		_computeReflectionBackendKind = backendKind;
 	}
@@ -1364,6 +1549,31 @@ public sealed class GpuDrawPass
 			or GpuDrawUpdateType.Remove
 			or GpuDrawUpdateType.UpdateMaterial
 			or GpuDrawUpdateType.UpdateMesh;
+
+	/// <summary>
+	/// Count buffer for the GBuffer command set when compaction ran this frame, otherwise null so the
+	/// pass falls back to executing its full command range.
+	/// </summary>
+	public IGfxBuffer? GBufferCompactedCommandCountBuffer =>
+		_gbufferCompactionActive ? _gbufferIndirectCommandSet.CompactedCommandCountBuffer : null;
+
+	/// <summary>
+	/// Encodes the GBuffer commands and compacts them against the camera cull results. Runs in the cull
+	/// pass rather than the GBuffer pass because compaction is compute work that has to complete before
+	/// the render pass that consumes it begins.
+	/// </summary>
+	public void RecordGBufferIndirectCompaction(RenderGraphContext context)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		EnsureGBufferIndirectCommands(context);
+		_gbufferCompactionActive = RecordIndirectCompaction(
+			context,
+			_gbufferIndirectCommandSet,
+			DrawPassParticipation.GBuffer,
+			_gpuDrawResources.DrawArgsBuffer,
+			drawArgsBaseOffsetBytes: 0,
+			static _ => true);
+	}
 
 	public void EnsureGBufferIndirectCommands(RenderGraphContext context)
 	{
@@ -2020,6 +2230,23 @@ public sealed class GpuDrawPass
 		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainLayerBuffer!, fallbackTerrainLayerData, 0, "TerrainLayerBuffer");
+	}
+
+	/// <summary>
+	/// Falling back is correct but costs the command processor a walk over every draw slot in the scene
+	/// per lane, so it is worth saying out loud rather than leaving as a silent performance cliff.
+	/// </summary>
+	private void LogCompactionUnavailableOnce(DrawPassParticipation participation)
+	{
+		if (_loggedCompactionUnavailable)
+		{
+			return;
+		}
+
+		_loggedCompactionUnavailable = true;
+		Console.WriteLine(
+			$"GpuDraw: indirect command compaction is unavailable for '{participation}'; falling back to " +
+			"executing the full command range, which does not scale with scene size.");
 	}
 
 	private void LogUnsupportedDrawKindOnce(GpuDrawKind drawKind)

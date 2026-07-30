@@ -43,6 +43,34 @@ public interface IGfxPipeline : IGfxResource
 public interface IGfxIndirectCommandBuffer : IGfxResource
 {
 	IndirectCommandBufferDescriptor Descriptor { get; }
+
+	/// <summary>
+	/// True when the backend can execute a GPU-compacted subset of this buffer's commands, which lets
+	/// culling remove commands instead of leaving the command processor to walk every draw slot.
+	/// Backends that report false are executed through the full command range instead.
+	/// </summary>
+	bool SupportsGpuCompaction => false;
+
+	/// <summary>
+	/// The CPU-encoded command records, readable by a compute shader as the compaction source.
+	/// Null when <see cref="SupportsGpuCompaction"/> is false.
+	/// </summary>
+	IGfxBuffer? TemplateRecordBuffer => null;
+
+	/// <summary>
+	/// The dense command records written by compaction and consumed by the following ExecuteIndirect.
+	/// Null when <see cref="SupportsGpuCompaction"/> is false.
+	/// </summary>
+	IGfxBuffer? CompactedRecordBuffer => null;
+
+	/// <summary>
+	/// Size of a single command record. Compaction copies records opaquely, so it only needs the
+	/// stride and the offset below rather than the backend's record layout.
+	/// </summary>
+	uint RecordStrideInBytes => 0;
+
+	/// <summary>Byte offset of the draw index count within a record, used to skip records that draw nothing.</summary>
+	uint RecordIndexCountOffsetInBytes => 0;
 }
 
 /// <summary>

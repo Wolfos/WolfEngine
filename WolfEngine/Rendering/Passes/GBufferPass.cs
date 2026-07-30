@@ -92,7 +92,23 @@ public static class GBufferPass
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
-				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, config.FallbackMaxCommandCount);
+				if (config.CompactedCommandCountBuffer is { } countBuffer)
+				{
+					SharedDrawIndirectExecution.ExecuteCompactedPages(
+						commandList,
+						bucket.IndirectCommandPages.Span,
+						countBuffer,
+						config.IndirectCommandSlot,
+						bucket.ExecutionIndex,
+						config.FallbackMaxCommandCount);
+				}
+				else
+				{
+					SharedDrawIndirectExecution.ExecutePages(
+						commandList,
+						bucket.IndirectCommandPages.Span,
+						config.FallbackMaxCommandCount);
+				}
 			}
 		}
 
@@ -104,29 +120,6 @@ public static class GBufferPass
 		foreach (var binding in passBindings.Bindings)
 		{
 			commandList.BindConstantBuffer(binding.RegisterIndex, binding.Resource);
-		}
-	}
-
-	private static void ExecuteIndirectPages(
-		IGfxCommandList commandList,
-		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
-		uint commandUpperBound)
-	{
-		for (var i = 0; i < pages.Length; i++)
-		{
-			var page = pages[i];
-			if (commandUpperBound <= page.PageStartCommandIndex)
-			{
-				continue;
-			}
-
-			var pageEnd = page.PageStartCommandIndex + page.PageCommandCapacity;
-			var pageUpperBound = Math.Min(commandUpperBound, pageEnd);
-			var localCount = pageUpperBound - page.PageStartCommandIndex;
-			if (localCount > 0)
-			{
-				commandList.ExecuteIndirectCommandBuffer(page.CommandBuffer, localCount);
-			}
 		}
 	}
 

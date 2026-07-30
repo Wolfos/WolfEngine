@@ -80,6 +80,16 @@ public interface IGfxCommandList
 		IGfxBuffer commandRangeBuffer,
 		ulong commandRangeOffsetBytes);
 
+	/// <summary>
+	/// Executes the compacted records of <paramref name="commandBuffer"/>, taking the command count
+	/// from GPU memory so culling decides how many commands the command processor walks.
+	/// Only valid when the buffer reports <see cref="IGfxIndirectCommandBuffer.SupportsGpuCompaction"/>.
+	/// </summary>
+	void ExecuteCompactedIndirectCommandBuffer(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer countBuffer,
+		ulong countOffsetBytes);
+
 	void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure);
 
 	void BuildTopLevelAccelerationStructure(

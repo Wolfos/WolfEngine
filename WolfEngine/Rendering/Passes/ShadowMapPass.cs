@@ -41,6 +41,10 @@ public sealed class ShadowMapPass
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
 
+	// Set per cascade by the cull pass, which is where compaction runs, and read back when that
+	// cascade's draw config is built.
+	private readonly bool[] _compactedExecutionByCascade = new bool[MaxCascadeCount];
+
 	public ShadowMapPass(IShaderProvider shaderCompiler)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
@@ -75,6 +79,12 @@ public sealed class ShadowMapPass
 	}
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
+
+	public void SetCompactedExecution(int cascadeIndex, bool enabled)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		_compactedExecutionByCascade[cascadeIndex] = enabled;
+	}
 
 	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int cascadeIndex)
 	{
@@ -178,7 +188,11 @@ public sealed class ShadowMapPass
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.ShadowDrawExecutionRangePerBucketBuffer,
 			DrawArgsBaseOffsetBytes = GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
 			Buckets = buckets.ToArray(),
-			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
+			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound,
+			IndirectCommandSlot = activeIndirectSlot,
+			CompactedCommandCountBuffer = _compactedExecutionByCascade[cascadeIndex]
+				? commandSet.CompactedCommandCountBuffer
+				: null
 		};
 	}
 
@@ -245,34 +259,27 @@ public sealed class ShadowMapPass
 				commandList.BindConstantBuffer(
 					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
 					config.CameraBuffer);
-				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, config.FallbackMaxCommandCount);
+				if (config.CompactedCommandCountBuffer is { } countBuffer)
+				{
+					SharedDrawIndirectExecution.ExecuteCompactedPages(
+						commandList,
+						bucket.IndirectCommandPages.Span,
+						countBuffer,
+						config.IndirectCommandSlot,
+						bucket.ExecutionIndex,
+						config.FallbackMaxCommandCount);
+				}
+				else
+				{
+					SharedDrawIndirectExecution.ExecutePages(
+						commandList,
+						bucket.IndirectCommandPages.Span,
+						config.FallbackMaxCommandCount);
+				}
 			}
 		}
 
 		commandList.EndPass();
-	}
-
-	private static void ExecuteIndirectPages(
-		IGfxCommandList commandList,
-		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
-		uint commandUpperBound)
-	{
-		for (var i = 0; i < pages.Length; i++)
-		{
-			var page = pages[i];
-			if (commandUpperBound <= page.PageStartCommandIndex)
-			{
-				continue;
-			}
-
-			var pageEnd = page.PageStartCommandIndex + page.PageCommandCapacity;
-			var pageUpperBound = Math.Min(commandUpperBound, pageEnd);
-			var localCount = pageUpperBound - page.PageStartCommandIndex;
-			if (localCount > 0)
-			{
-				commandList.ExecuteIndirectCommandBuffer(page.CommandBuffer, localCount);
-			}
-		}
 	}
 
 	private IGfxPipeline EnsurePipeline(

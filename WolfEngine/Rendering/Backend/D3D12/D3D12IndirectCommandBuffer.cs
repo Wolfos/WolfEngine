@@ -40,6 +40,12 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	private readonly CommandRecord* _mappedRecords;
 	private readonly ulong _recordStride;
 
+	// Compaction reads the CPU-encoded records through _templateView and writes the visible subset into
+	// _compactedBuffer, which is what ExecuteIndirect then consumes. Both alias resources this buffer
+	// owns, so they are disposed here rather than by whoever binds them.
+	private readonly D3D12Buffer? _templateView;
+	private readonly D3D12Buffer? _compactedBuffer;
+
 	// Tracked per command, not per page. A page-wide set only ever grows: re-encoding a command would
 	// leave the buffers it used to reference in the set, and they would then be reported as dangling
 	// once released even though no live record points at them.
@@ -94,6 +100,52 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		{
 			ResetCommand(i);
 		}
+
+		// Graphics command buffers are the ones culling feeds; compute ones have no visibility to
+		// compact against, so they keep the plain full-range execution path.
+		if (descriptor.PassKind == PassKind.Graphics)
+		{
+			var compactedDesc = desc;
+			compactedDesc.Flags = ResourceFlags.AllowUnorderedAccess;
+			var compactedProps = new HeapProperties(HeapType.Default);
+			// D3D12 creates default-heap buffers in COMMON regardless of the state requested here, so
+			// the wrapper below has to start tracking from COMMON or its first transition is skipped.
+			SilkMarshal.ThrowHResult(device.CreateCommittedResource(
+				&compactedProps,
+				HeapFlags.None,
+				in compactedDesc,
+				ResourceStates.Common,
+				null,
+				out ComPtr<ID3D12Resource> compactedResource));
+
+			if (name is not null)
+			{
+				_ = compactedResource.SetName($"{name} compacted");
+			}
+
+			var bufferDescriptor = new BufferDescriptor(
+				totalSize,
+				BufferUsage.Indirect,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+				name: name);
+
+			_compactedBuffer = new D3D12Buffer(
+				name is null ? null : $"{name} compacted",
+				bufferDescriptor,
+				compactedResource,
+				totalSize,
+				initialState: ResourceStates.Common);
+
+			// The template lives on the upload heap and must stay in GENERIC_READ, so it is flagged
+			// CPU-writable to keep the binding path from transitioning it.
+			_templateView = new D3D12Buffer(
+				name is null ? null : $"{name} template",
+				bufferDescriptor,
+				_argumentBuffer,
+				totalSize,
+				cpuWritableDirect: true,
+				initialState: ResourceStates.GenericRead);
+		}
 	}
 
 	public string? Name { get; }
@@ -103,6 +155,20 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 	internal ComPtr<ID3D12CommandSignature> CommandSignature { get; }
 
 	internal ID3D12Resource* ArgumentBuffer => _argumentBuffer.Handle;
+
+	public bool SupportsGpuCompaction => _compactedBuffer is not null;
+
+	public IGfxBuffer? TemplateRecordBuffer => _templateView;
+
+	public IGfxBuffer? CompactedRecordBuffer => _compactedBuffer;
+
+	public uint RecordStrideInBytes => (uint)_recordStride;
+
+	public uint RecordIndexCountOffsetInBytes =>
+		(uint)(Marshal.OffsetOf<CommandRecord>(nameof(CommandRecord.DrawArguments)) +
+		       Marshal.OffsetOf<DrawIndexedArguments>(nameof(DrawIndexedArguments.IndexCountPerInstance)));
+
+	internal D3D12Buffer? CompactedBuffer => _compactedBuffer;
 
 	internal ulong ArgumentStride => _recordStride;
 
@@ -236,6 +302,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 
 	public void Dispose()
 	{
+		_compactedBuffer?.Dispose();
+
+		// _templateView aliases _argumentBuffer without holding its own reference, so releasing it here
+		// would double-release the resource that is disposed just below.
 		if (_argumentBuffer.Handle is not null)
 		{
 			_argumentBuffer.Unmap(0, (Silk.NET.Direct3D12.Range*)null);

@@ -1973,6 +1973,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void DrawIndexedIndirect(in IndexBufferView indexBuffer, IGfxBuffer indirectArgsBuffer, ulong indirectArgsOffset) => throw new NotSupportedException();
 		public void ExecuteIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, uint maxCommandCount) => throw new NotSupportedException();
 		public void ExecuteIndirectCommandBufferRange(IGfxIndirectCommandBuffer commandBuffer, IGfxBuffer commandRangeBuffer, ulong commandRangeOffsetBytes) => throw new NotSupportedException();
+		public void ExecuteCompactedIndirectCommandBuffer(IGfxIndirectCommandBuffer commandBuffer, IGfxBuffer countBuffer, ulong countOffsetBytes) => throw new NotSupportedException();
 		public void SetComputeAccelerationStructure(uint slot, IGfxTopLevelAccelerationStructure accelerationStructure) => throw new NotSupportedException();
 		public void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ) { }
 		public void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes) => throw new NotSupportedException();

@@ -1691,6 +1691,38 @@ internal sealed class RenderGraphFrameBuilder
 			sceneData.CameraOrigin,
 			useShadowBuffers: true,
 			DrawPassParticipation.ShadowCaster);
+
+		// Encoding and compaction both belong here rather than in the shadow pass: compaction is compute
+		// work, and it has to complete before the render pass that executes its output begins.
+		var device = _renderer.GetGfxDevice();
+		for (var cascadeIndex = 0; cascadeIndex < shadowData.CascadeCount; cascadeIndex++)
+		{
+			EnsureShadowIndirectCommands(context, device, cascadeIndex);
+			var compacted = _gpuDrawPass.RecordIndirectCompaction(
+				context,
+				_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
+				DrawPassParticipation.ShadowCaster,
+				_gpuDrawResources.ShadowDrawArgsBuffer,
+				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane));
+			_shadowMapPass.SetCompactedExecution(cascadeIndex, compacted);
+		}
+	}
+
+	private void EnsureShadowIndirectCommands(RenderGraphContext context, IGfxDevice device, int cascadeIndex)
+	{
+		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex);
+		_gpuDrawPass.EnsureIndirectCommandsForPass(
+			context.GpuDrawDatabase,
+			_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
+			DrawPassParticipation.ShadowCaster,
+			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
+				_gpuDrawResources,
+				_gpuDrawResources.ShadowDrawArgsBuffer,
+				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex)),
+			lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
+			lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
+			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));
 	}
 
 	private void ExecuteShadowMap(RenderGraphContext context)
@@ -1701,18 +1733,7 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			var shadowMapHandle = GetShadowMapHandle(_frameResources, cascadeIndex);
 			var depthTexture = context.GetTexture(shadowMapHandle);
-			_shadowMapPass.EnsureIndirectResources(device, cascadeIndex);
-			_gpuDrawPass.EnsureIndirectCommandsForPass(
-				context.GpuDrawDatabase,
-				_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
-				DrawPassParticipation.ShadowCaster,
-				SharedDrawIndirectEncodeResources.FromGpuDrawResources(
-					_gpuDrawResources,
-					_gpuDrawResources.ShadowDrawArgsBuffer,
-					GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex)),
-				lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
-				lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
-				lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));
+			// Commands were encoded and compacted by the shadow cull pass; this pass only executes them.
 			var config = _shadowMapPass.BuildConfig(
 				context,
 				depthTexture,
@@ -1726,6 +1747,7 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawCullCamera(RenderGraphContext context)
 	{
 		_gpuDrawPass.RecordCull(context, context.SceneData);
+		_gpuDrawPass.RecordGBufferIndirectCompaction(context);
 	}
 
 	private void ExecuteSkyboxEnvironment(RenderGraphContext context)
@@ -1796,6 +1818,8 @@ internal sealed class RenderGraphFrameBuilder
 			MaterialGenerationBuffer = _gpuDrawResources.MaterialGenerationBuffer,
 			Buckets = bucketList.ToArray(),
 			FallbackMaxCommandCount = _gpuDrawResources.ActiveDrawCommandUpperBound,
+			IndirectCommandSlot = _gpuDrawResources.ActiveIndirectCommandSlot,
+			CompactedCommandCountBuffer = _gpuDrawPass.GBufferCompactedCommandCountBuffer,
 			CameraLayout = _gpuDrawResources.GBufferCameraLayout,
 			CameraBuffer = _gpuDrawResources.CameraBuffer,
 			SkyboxEnvironment = DescriptorHandle.Invalid,

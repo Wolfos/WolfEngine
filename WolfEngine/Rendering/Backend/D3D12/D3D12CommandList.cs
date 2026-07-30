@@ -908,6 +908,56 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	public void ExecuteCompactedIndirectCommandBuffer(
+		IGfxIndirectCommandBuffer commandBuffer,
+		IGfxBuffer countBuffer,
+		ulong countOffsetBytes)
+	{
+		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Direct3D12 backend.");
+		}
+
+		if (d3d12CommandBuffer.CompactedBuffer is not { } compactedBuffer || compactedBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException(
+				$"Indirect command buffer '{d3d12CommandBuffer.Name ?? "<unnamed>"}' does not support GPU compaction.");
+		}
+
+		if (countBuffer is not D3D12Buffer d3d12CountBuffer || d3d12CountBuffer.Resource.Handle is null)
+		{
+			throw new InvalidOperationException("Command count buffer was not created by the Direct3D12 backend.");
+		}
+
+		var maxCommandCount = d3d12CommandBuffer.Descriptor.MaxCommandCount;
+		if (maxCommandCount == 0)
+		{
+			return;
+		}
+
+		EnsureBindlessDescriptorHeaps();
+		ApplyBindlessRootBindings();
+		ValidateIndirectReferences(d3d12CommandBuffer, maxCommandCount);
+		TransitionIndirectReferencedBuffers(d3d12CommandBuffer);
+
+		// Both transitions double as the barrier that orders the compaction dispatch's writes ahead of
+		// the command processor reading them.
+		TransitionBufferIfNeeded(compactedBuffer, ResourceStates.IndirectArgument);
+		var previousCountState = d3d12CountBuffer.CurrentState;
+		TransitionBufferIfNeeded(d3d12CountBuffer, ResourceStates.IndirectArgument);
+
+		// D3D12 executes min(maxCommandCount, *countBuffer) commands, so the count written by
+		// compaction caps the walk at the visible draws.
+		CommandList.ExecuteIndirect(
+			d3d12CommandBuffer.CommandSignature,
+			maxCommandCount,
+			compactedBuffer.Resource,
+			0,
+			d3d12CountBuffer.Resource,
+			countOffsetBytes);
+		TransitionBufferIfNeeded(d3d12CountBuffer, previousCountState);
+	}
+
 	public void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
 		IGfxBuffer commandRangeBuffer,

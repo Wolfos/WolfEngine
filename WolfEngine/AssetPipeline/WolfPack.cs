@@ -213,30 +213,40 @@ public sealed class WolfPackCatalog : IDisposable
 
 	public WolfPackCatalog(string manifestPath)
 	{
-		var manifestBytes = File.ReadAllBytes(manifestPath);
-		Manifest = JsonSerializer.Deserialize<WolfBootstrapManifest>(manifestBytes, AssetJson.SerializerOptions)
-			?? throw new InvalidDataException("Bootstrap manifest is invalid.");
-		if (Manifest.Version != WolfBootstrapManifest.CurrentVersion)
-			throw new InvalidDataException($"Unsupported bootstrap manifest version {Manifest.Version}.");
-		var root = Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
-		foreach (var pack in Manifest.Packs.OrderBy(pack => pack.Name, StringComparer.Ordinal))
+		try
 		{
-			var path = Path.Combine(root, pack.FileName);
-			using var hashStream = File.OpenRead(path);
-			var actualHash = Convert.ToHexString(SHA256.HashData(hashStream));
-			if (!string.Equals(actualHash, pack.Sha256, StringComparison.Ordinal))
-				throw new InvalidDataException($"Pack '{pack.FileName}' failed SHA-256 validation.");
-			var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-			_streams.Add(stream);
-			var (_, entries) = WolfPackFile.ReadTable(stream);
-			foreach (var entry in entries)
-				if (!_entries.TryAdd(entry.Id, (path, stream, entry)))
-					throw new InvalidDataException($"Duplicate asset ID '{entry.Id}' across packs.");
+			var manifestBytes = File.ReadAllBytes(manifestPath);
+			Manifest = JsonSerializer.Deserialize<WolfBootstrapManifest>(manifestBytes, AssetJson.SerializerOptions)
+				?? throw new InvalidDataException("Bootstrap manifest is invalid.");
+			if (Manifest.Version != WolfBootstrapManifest.CurrentVersion)
+				throw new InvalidDataException($"Unsupported bootstrap manifest version {Manifest.Version}.");
+			var root = Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
+			foreach (var pack in Manifest.Packs.OrderBy(pack => pack.Name, StringComparer.Ordinal))
+			{
+				var path = Path.Combine(root, pack.FileName);
+				using var hashStream = File.OpenRead(path);
+				var actualHash = Convert.ToHexString(SHA256.HashData(hashStream));
+				if (!string.Equals(actualHash, pack.Sha256, StringComparison.Ordinal))
+					throw new InvalidDataException($"Pack '{pack.FileName}' failed SHA-256 validation.");
+				var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+				_streams.Add(stream);
+				var (_, entries) = WolfPackFile.ReadTable(stream);
+				foreach (var entry in entries)
+					if (!_entries.TryAdd(entry.Id, (path, stream, entry)))
+						throw new InvalidDataException($"Duplicate asset ID '{entry.Id}' across packs.");
+			}
+			foreach (var pair in _entries)
+				foreach (var dependency in pair.Value.Entry.Dependencies)
+					if (!_entries.ContainsKey(dependency))
+						throw new InvalidDataException($"Entry '{pair.Key}' has missing dependency '{dependency}'.");
 		}
-		foreach (var pair in _entries)
-			foreach (var dependency in pair.Value.Entry.Dependencies)
-				if (!_entries.ContainsKey(dependency))
-					throw new InvalidDataException($"Entry '{pair.Key}' has missing dependency '{dependency}'.");
+		catch
+		{
+			// A throwing constructor never yields an instance, so the caller can never dispose the
+			// pack handles we already opened. Release them here or they pin the files until finalization.
+			Dispose();
+			throw;
+		}
 	}
 
 	public WolfBootstrapManifest Manifest { get; }
