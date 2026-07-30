@@ -1,5 +1,3 @@
-#nullable enable
-
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Importing;
 using WolfEngine.Rendering.Shaders;

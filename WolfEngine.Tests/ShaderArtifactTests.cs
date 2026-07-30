@@ -82,6 +82,177 @@ public sealed class ShaderArtifactTests
 	}
 
 	[Test]
+	public void SourceIndex_FingerprintsOnlyTheTransitiveImportClosure()
+	{
+		var root = CreateSourceTree(new Dictionary<string, string>
+		{
+			["leaf.slang"] = "// leaf",
+			["shared.slang"] = "import \"leaf.slang\";",
+			["consumer.slang"] = "import \"shared.slang\";",
+			["unrelated.slang"] = "// unrelated",
+			["Nested/nested.slang"] = "import \"../shared.slang\";"
+		});
+		try
+		{
+			var before = ShaderSourceIndex.Build(root);
+			File.AppendAllText(Path.Combine(root, "leaf.slang"), "\n// edit");
+			var after = ShaderSourceIndex.Build(root);
+
+			Assert.That(after.GetFingerprint("consumer.slang"), Is.Not.EqualTo(before.GetFingerprint("consumer.slang")));
+			Assert.That(after.GetFingerprint("Nested/nested.slang"), Is.Not.EqualTo(before.GetFingerprint("Nested/nested.slang")));
+			Assert.That(after.GetFingerprint("unrelated.slang"), Is.EqualTo(before.GetFingerprint("unrelated.slang")));
+		}
+		finally
+		{
+			Directory.Delete(root, recursive: true);
+		}
+	}
+
+	[Test]
+	public void SourceIndex_FallsBackToWholeTreeWhenDependenciesAreUnreadable()
+	{
+		var root = CreateSourceTree(new Dictionary<string, string>
+		{
+			["opaque.slang"] = "import UnresolvableModule;",
+			["missing.slang"] = "import \"not_on_disk.slang\";",
+			["unrelated.slang"] = "// unrelated"
+		});
+		try
+		{
+			var before = ShaderSourceIndex.Build(root);
+			File.AppendAllText(Path.Combine(root, "unrelated.slang"), "\n// edit");
+			var after = ShaderSourceIndex.Build(root);
+
+			Assert.That(after.GetFingerprint("opaque.slang"), Is.Not.EqualTo(before.GetFingerprint("opaque.slang")));
+			Assert.That(after.GetFingerprint("missing.slang"), Is.Not.EqualTo(before.GetFingerprint("missing.slang")));
+		}
+		finally
+		{
+			Directory.Delete(root, recursive: true);
+		}
+	}
+
+	[Test]
+	public void SourceIndex_TerminatesOnImportCycles()
+	{
+		var root = CreateSourceTree(new Dictionary<string, string>
+		{
+			["first.slang"] = "import \"second.slang\";",
+			["second.slang"] = "import \"first.slang\";"
+		});
+		try
+		{
+			var index = ShaderSourceIndex.Build(root);
+			Assert.That(index.GetFingerprint("first.slang"), Is.EqualTo(index.GetFingerprint("second.slang")));
+		}
+		finally
+		{
+			Directory.Delete(root, recursive: true);
+		}
+	}
+
+	private static string CreateSourceTree(Dictionary<string, string> sources)
+	{
+		var root = Path.Combine(Path.GetTempPath(), "WolfEngineShaderIndexTests", Guid.NewGuid().ToString("N"));
+		foreach (var source in sources)
+		{
+			var path = Path.Combine(root, source.Key);
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			File.WriteAllText(path, source.Value);
+		}
+
+		return root;
+	}
+
+	[Test]
+	public void DevelopmentReload_RecompilesOnlyProgramsAffectedByTheEdit()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+			Assert.Ignore("Metal development reload validation only runs on macOS.");
+
+		var (engineRoot, projectRoot, tempRoot) = CopyEngineShaderTree();
+		try
+		{
+			var provider = new DevelopmentShaderProvider(
+				new EngineShaderOptions { EngineContentRoot = engineRoot }, new EngineShaderCatalog());
+			provider.SetProjectRoot(projectRoot);
+			var edited = ShaderRequest.Compute(
+				EngineShaderPrograms.CopyToFinal, "CopyToFinalCS", GraphicsBackendKind.Metal);
+			var untouched = ShaderRequest.Compute(
+				EngineShaderPrograms.TaaHistoryStore, "TaaHistoryStoreCS", GraphicsBackendKind.Metal);
+			var editedBefore = provider.GetArtifact(edited);
+			var untouchedBefore = provider.GetArtifact(untouched);
+
+			Assert.That(provider.Reload(GraphicsBackendKind.Metal).AppliedArtifactCount, Is.Zero,
+				"A reload with no source changes must not recompile anything.");
+
+			var editedPath = Path.Combine(engineRoot, "Shaders", "copy_to_final.compute.slang");
+			File.AppendAllText(editedPath, Environment.NewLine + "// reload granularity edit");
+			var result = provider.Reload(GraphicsBackendKind.Metal);
+
+			Assert.That(result.Succeeded, Is.True);
+			Assert.That(result.AppliedArtifactCount, Is.EqualTo(1));
+			Assert.That(provider.GetArtifact(edited).ContentKey, Is.Not.EqualTo(editedBefore.ContentKey));
+			Assert.That(provider.GetArtifact(untouched), Is.SameAs(untouchedBefore));
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Test]
+	public void DevelopmentReload_RecompilesDependentsOfAnEditedImport()
+	{
+		if (OperatingSystem.IsMacOS() == false)
+			Assert.Ignore("Metal development reload validation only runs on macOS.");
+
+		var (engineRoot, projectRoot, tempRoot) = CopyEngineShaderTree();
+		try
+		{
+			var provider = new DevelopmentShaderProvider(
+				new EngineShaderOptions { EngineContentRoot = engineRoot }, new EngineShaderCatalog());
+			provider.SetProjectRoot(projectRoot);
+			var first = ShaderRequest.Compute(
+				EngineShaderPrograms.CopyToFinal, "CopyToFinalCS", GraphicsBackendKind.Metal);
+			var second = ShaderRequest.Compute(
+				EngineShaderPrograms.TaaHistoryStore, "TaaHistoryStoreCS", GraphicsBackendKind.Metal);
+			provider.GetArtifact(first);
+			provider.GetArtifact(second);
+
+			// Both programs import common_bindless.slang, so both must be rebuilt.
+			File.AppendAllText(Path.Combine(engineRoot, "Shaders", "common_bindless.slang"),
+				Environment.NewLine + "// shared import edit");
+			var result = provider.Reload(GraphicsBackendKind.Metal);
+
+			Assert.That(result.Succeeded, Is.True);
+			Assert.That(result.AppliedArtifactCount, Is.EqualTo(2));
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	private static (string EngineRoot, string ProjectRoot, string TempRoot) CopyEngineShaderTree()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(TestContext.CurrentContext.TestDirectory,
+			"..", "..", "..", "..", "WolfEngine", "Shaders"));
+		var tempRoot = Path.Combine(Path.GetTempPath(), "WolfEngineShaderReloadTests", Guid.NewGuid().ToString("N"));
+		var engineRoot = Path.Combine(tempRoot, "Engine");
+		var projectRoot = Path.Combine(tempRoot, "Project");
+		foreach (var sourcePath in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+		{
+			var destination = Path.Combine(engineRoot, "Shaders", Path.GetRelativePath(sourceRoot, sourcePath));
+			Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+			File.Copy(sourcePath, destination);
+		}
+
+		Directory.CreateDirectory(projectRoot);
+		return (engineRoot, projectRoot, tempRoot);
+	}
+
+	[Test]
 	public void DevelopmentReload_RetainsPreviousArtifactAfterCompileFailure()
 	{
 		if (OperatingSystem.IsMacOS() == false)

@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using Slangc.NET;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
