@@ -21,7 +21,6 @@ public sealed class TerrainToolController
 	private readonly EditorCameraContext _cameraContext;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
 	private readonly RigidbodySystem _rigidbodySystem;
-	private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
 	private readonly TerrainBrushPreviewDecalController _terrainBrushPreviewDecalController;
 	private EditorScene? _previewScene;
 	private Entity _previewTerrainEntity;
@@ -31,14 +30,12 @@ public sealed class TerrainToolController
 		EditorCameraContext cameraContext,
 		ITerrainAuthoringService terrainAuthoringService,
 		RigidbodySystem rigidbodySystem,
-		TerrainToolSettingsOverlay terrainToolSettingsOverlay,
 		TerrainBrushPreviewDecalController terrainBrushPreviewDecalController)
 	{
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_cameraContext = cameraContext ?? throw new ArgumentNullException(nameof(cameraContext));
 		_terrainAuthoringService = terrainAuthoringService ?? throw new ArgumentNullException(nameof(terrainAuthoringService));
 		_rigidbodySystem = rigidbodySystem ?? throw new ArgumentNullException(nameof(rigidbodySystem));
-		_terrainToolSettingsOverlay = terrainToolSettingsOverlay ?? throw new ArgumentNullException(nameof(terrainToolSettingsOverlay));
 		_terrainBrushPreviewDecalController = terrainBrushPreviewDecalController ?? throw new ArgumentNullException(nameof(terrainBrushPreviewDecalController));
 	}
 
@@ -68,7 +65,7 @@ public sealed class TerrainToolController
 			return;
 		}
 
-		if (_terrainToolSettingsOverlay.BlocksPainting)
+		if (viewportState.PointerAvailable == false && viewportState.PointerCaptured == false)
 		{
 			ClearPreview();
 			HandleRelease();
@@ -98,7 +95,7 @@ public sealed class TerrainToolController
 			return;
 		}
 
-		var leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+		var leftDown = viewportState.PointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left);
 		var localHit = Vector3.Transform(hit.Point, worldToLocal);
 		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(EditorGui.SelectedEntity);
 		UpdatePreview(scene, EditorGui.SelectedEntity, ref terrain, localHit);

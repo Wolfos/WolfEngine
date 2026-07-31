@@ -93,7 +93,9 @@ public sealed class EditorAutomationController
 				contentSizePixels: _options.Resolution,
 				resolutionScale: 1.0f,
 				requestedDebugViewId: SceneDebugViewIds.FinalColor,
-				hovered: false, focused: false, rightMousePressStartedHere: false,
+				hovered: false, focused: false,
+				pointerAvailable: false, pointerCaptured: false,
+				rightMousePressStartedHere: false,
 				imageMin: System.Numerics.Vector2.Zero,
 				imageMax: new System.Numerics.Vector2(_options.Resolution.X, _options.Resolution.Y)));
 		}

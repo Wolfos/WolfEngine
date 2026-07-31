@@ -175,6 +175,18 @@ public sealed class BindlessResourceRegistry
 			throw new InvalidOperationException("Bindless registry is not initialized.");
 		}
 
+		// D3D12 rejects a UAV over a resource created without ALLOW_UNORDERED_ACCESS, but only at the
+		// point the command list is closed, as a bare E_INVALIDARG with no indication of which resource.
+		// Metal accepts the write and produces undefined results. Checking here fails both backends
+		// identically, at the call site that made the mistake.
+		if ((texture.Descriptor.Usage & TextureUsage.UnorderedAccess) == 0)
+		{
+			throw new InvalidOperationException(
+				$"A {texture.Descriptor.Width}x{texture.Descriptor.Height} {texture.Descriptor.Format} texture " +
+				$"(usage {texture.Descriptor.Usage}) cannot be bound as a read-write texture because it was not " +
+				"created with TextureUsage.UnorderedAccess.");
+		}
+
 		if (_uavHandles.TryGetValue(texture, out var handle))
 		{
 			var currentUav = texture.UnorderedAccessView;

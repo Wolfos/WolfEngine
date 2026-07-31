@@ -30,6 +30,8 @@ public sealed class SceneViewportRayUtilityTests
 			requestedDebugViewId: SceneDebugViewIds.FinalColor,
 			hovered: true,
 			focused: true,
+			pointerAvailable: true,
+			pointerCaptured: false,
 			rightMousePressStartedHere: false,
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));
@@ -74,6 +76,8 @@ public sealed class SceneViewportRayUtilityTests
 			requestedDebugViewId: SceneDebugViewIds.FinalColor,
 			hovered: true,
 			focused: true,
+			pointerAvailable: true,
+			pointerCaptured: false,
 			rightMousePressStartedHere: false,
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));

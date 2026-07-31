@@ -228,6 +228,19 @@ public class SceneWindow: EditorWindow
                 "Scene render target unavailable.");
         }
 
+        var pointerAvailable = false;
+        var pointerCaptured = false;
+        if (contentSize.X > 0.0f && contentSize.Y > 0.0f)
+        {
+            ImGui.SetCursorScreenPos(imageMin);
+            ImGui.InvisibleButton(
+                "##SceneViewportInput",
+                contentSize,
+                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
+            pointerAvailable = ImGui.IsItemHovered();
+            pointerCaptured = ImGui.IsItemActive();
+        }
+
         if (_sceneToolMode == SceneToolMode.Terrain)
         {
             TerrainLayerSet? layerSet = null;
@@ -248,6 +261,8 @@ public class SceneWindow: EditorWindow
             _selectedDebugViewId,
             hovered,
             focused,
+            pointerAvailable,
+            pointerCaptured,
             _rightMousePressStartedHere,
             imageMin,
             imageMax));

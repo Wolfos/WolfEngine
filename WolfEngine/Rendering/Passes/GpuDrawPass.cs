@@ -314,11 +314,46 @@ public sealed class GpuDrawPass
 			var executionLaneIndex = 0;
 			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(executionLaneIndex);
 			var alphaCutoff = 0.0f;
+
+			var terrainSurfaceReady = true;
+			if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
+			    update.TerrainSurface.HasValue)
+			{
+				var pendingTerrainSurface = update.TerrainSurface.Value;
+				baseColor = ColorRGBA.White;
+				metallicRoughness = Vector4.Zero;
+				emissiveFactorIntensity = Vector4.Zero;
+				layerCount = (uint)Math.Max(pendingTerrainSurface.LayerCount, 1);
+				heightBlendSharpness = pendingTerrainSurface.HeightBlendSharpness;
+				terrainHeightScale = pendingTerrainSurface.HeightScale;
+				if (pendingTerrainSurface.Heightmap is { } heightmap)
+				{
+					heightmapHandle = RegisterTerrainTexture(heightmap);
+				}
+
+				if (pendingTerrainSurface.LayerIndexMap is { } layerIndexMap)
+				{
+					layerIndexMapHandle = RegisterTerrainTexture(layerIndexMap);
+				}
+
+				if (pendingTerrainSurface.LayerWeightMap is { } layerWeightMap)
+				{
+					layerWeightMapHandle = RegisterTerrainTexture(layerWeightMap);
+				}
+
+				if (pendingTerrainSurface.LayerIndexMap is not null && pendingTerrainSurface.LayerWeightMap is not null)
+				{
+					hasLayerMaps = 1;
+				}
+
+				terrainSurfaceReady = heightmapHandle != _bindlessRegistry.ErrorTextureHandle.Value;
+			}
+
 			var materialReady = drawKind switch
 			{
 				GpuDrawKind.Mesh => material?.HasGpuResources ?? false,
 				GpuDrawKind.DebugPrimitive => material is not null,
-				GpuDrawKind.Terrain => material is not null,
+				GpuDrawKind.Terrain => material is not null && terrainSurfaceReady,
 				_ => false
 			};
 
@@ -410,36 +445,6 @@ public sealed class GpuDrawPass
 				metallicRoughness = Vector4.Zero;
 				emissiveFactorIntensity = Vector4.Zero;
 			}
-			else if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
-			         update.TerrainSurface.HasValue)
-			{
-				var terrainSurface = update.TerrainSurface.Value;
-				baseColor = ColorRGBA.White;
-				metallicRoughness = Vector4.Zero;
-				emissiveFactorIntensity = Vector4.Zero;
-				layerCount = (uint)Math.Max(terrainSurface.LayerCount, 1);
-				heightBlendSharpness = terrainSurface.HeightBlendSharpness;
-				terrainHeightScale = terrainSurface.HeightScale;
-				if (terrainSurface.Heightmap is { } heightmap)
-				{
-					heightmapHandle = RegisterTerrainTexture(heightmap);
-				}
-
-				if (terrainSurface.LayerIndexMap is { } layerIndexMap)
-				{
-					layerIndexMapHandle = RegisterTerrainTexture(layerIndexMap);
-				}
-
-				if (terrainSurface.LayerWeightMap is { } layerWeightMap)
-				{
-					layerWeightMapHandle = RegisterTerrainTexture(layerWeightMap);
-				}
-
-				if (terrainSurface.LayerIndexMap is not null && terrainSurface.LayerWeightMap is not null)
-				{
-					hasLayerMaps = 1;
-				}
-			}
 
 			_instanceUpdateData.Add(new GpuDrawInstanceUpdateData(
 				update.PreviousWorld,
@@ -530,7 +535,8 @@ public sealed class GpuDrawPass
 				layerCount,
 				terrainHeightScale,
 				indexCount,
-				baseVertex);
+				baseVertex,
+				terrainSurfaceReady);
 		}
 
 		if (_instanceUpdateData.Count == 0 &&
@@ -1461,7 +1467,8 @@ public sealed class GpuDrawPass
 		uint layerCount,
 		float heightScale,
 		uint indexCount,
-		int baseVertex)
+		int baseVertex,
+		bool surfaceReady)
 	{
 		if (GraphicsConfig.LogTerrainDrawData == false || drawKind != GpuDrawKind.Terrain)
 		{
@@ -1512,6 +1519,11 @@ public sealed class GpuDrawPass
 		if (update.Type != GpuDrawUpdateType.Remove && update.TerrainSurface is null)
 		{
 			problems.Add("no terrain surface, so the material table keeps whatever it held");
+		}
+
+		if (update.Type != GpuDrawUpdateType.Remove && update.TerrainSurface is not null && surfaceReady == false)
+		{
+			problems.Add("heightmap is not bound yet, so the draw is held back");
 		}
 
 		if (baseVertex < 0)

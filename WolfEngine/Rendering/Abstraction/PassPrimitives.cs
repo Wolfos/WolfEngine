@@ -102,24 +102,12 @@ public readonly struct ColorTargetBinding
 /// </summary>
 public readonly struct DepthTargetBinding
 {
-	public DepthTargetBinding(IGfxTexture texture, bool readOnlyDepth = false, bool readOnlyStencil = false)
+	public DepthTargetBinding(IGfxTexture texture)
 	{
 		Texture = texture ?? throw new ArgumentNullException(nameof(texture));
-		ReadOnlyDepth = readOnlyDepth;
-		ReadOnlyStencil = readOnlyStencil;
 	}
 
 	public IGfxTexture Texture { get; }
-
-	/// <remarks>
-	/// Not implemented by any backend. D3D12 always builds a writable DSV (<c>DsvFlags.None</c>) and Metal
-	/// has no read-only depth attachment at all, so a pass that needs to sample the depth buffer it is
-	/// rendering with must read it as a texture and leave the depth attachment unbound.
-	/// </remarks>
-	public bool ReadOnlyDepth { get; }
-
-	/// <inheritdoc cref="ReadOnlyDepth"/>
-	public bool ReadOnlyStencil { get; }
 }
 
 /// <summary>
@@ -218,7 +206,6 @@ public readonly struct IndirectCommandBufferDescriptor
 	public IndirectCommandBufferDescriptor(
 		PassKind passKind,
 		uint maxCommandCount,
-		bool supportsIndexedExecution = false,
 		string? name = null)
 	{
 		if (maxCommandCount == 0)
@@ -228,15 +215,12 @@ public readonly struct IndirectCommandBufferDescriptor
 
 		PassKind = passKind;
 		MaxCommandCount = maxCommandCount;
-		SupportsIndexedExecution = supportsIndexedExecution;
 		Name = name;
 	}
 
 	public PassKind PassKind { get; }
 
 	public uint MaxCommandCount { get; }
-
-	public bool SupportsIndexedExecution { get; }
 
 	/// <summary>Diagnostic name, so a stale-reference report identifies which slot and lane it came from.</summary>
 	public string? Name { get; }
@@ -438,31 +422,18 @@ public readonly struct RenderTargetFormats : IEquatable<RenderTargetFormats>
 /// </summary>
 public readonly struct DepthStencilFormat : IEquatable<DepthStencilFormat>
 {
-	public DepthStencilFormat(TextureFormat format, bool readOnlyDepth = false, bool readOnlyStencil = false)
+	public DepthStencilFormat(TextureFormat format)
 	{
 		Format = format;
-		ReadOnlyDepth = readOnlyDepth;
-		ReadOnlyStencil = readOnlyStencil;
 	}
 
 	public TextureFormat Format { get; }
 
-	/// <inheritdoc cref="DepthTargetBinding.ReadOnlyDepth"/>
-	public bool ReadOnlyDepth { get; }
-
-	/// <inheritdoc cref="DepthTargetBinding.ReadOnlyDepth"/>
-	public bool ReadOnlyStencil { get; }
-
-	public bool Equals(DepthStencilFormat other)
-	{
-		return Format == other.Format
-		       && ReadOnlyDepth == other.ReadOnlyDepth
-		       && ReadOnlyStencil == other.ReadOnlyStencil;
-	}
+	public bool Equals(DepthStencilFormat other) => Format == other.Format;
 
 	public override bool Equals(object? obj) => obj is DepthStencilFormat other && Equals(other);
 
-	public override int GetHashCode() => HashCode.Combine(Format, ReadOnlyDepth, ReadOnlyStencil);
+	public override int GetHashCode() => Format.GetHashCode();
 }
 
 /// <summary>

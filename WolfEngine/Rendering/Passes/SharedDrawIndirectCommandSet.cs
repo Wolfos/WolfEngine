@@ -98,7 +98,6 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 		commandBuffer = device.CreateIndirectCommandBuffer(new IndirectCommandBufferDescriptor(
 			PassKind.Graphics,
 			IndirectCommandPageCapacity,
-			supportsIndexedExecution: true,
 			name: $"{laneName} slot{slotIndex} page{pageIndex}"));
 		pages.Add(pageIndex, commandBuffer);
 		return commandBuffer;
