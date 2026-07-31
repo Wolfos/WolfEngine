@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using WolfEngine.AssetPipeline;
+using WolfEngine.Editor.UI;
 
 namespace WolfEngine.Editor.Projects;
 
@@ -15,11 +16,18 @@ public interface ITerrainAssetPersistenceService
 public sealed class TerrainAssetPersistenceService : ITerrainAssetPersistenceService
 {
 	private readonly IEditorProjectService _projectService;
+	private readonly ITerrainTexturePreviewRegistry _texturePreviewRegistry;
+	private readonly ITerrainBrushGpuExecutor _brushGpuExecutor;
 	private readonly Dictionary<Guid, TerrainAssetSnapshot> _dirtyStates = new();
 
-	public TerrainAssetPersistenceService(IEditorProjectService projectService)
+	public TerrainAssetPersistenceService(
+		IEditorProjectService projectService,
+		ITerrainTexturePreviewRegistry texturePreviewRegistry,
+		ITerrainBrushGpuExecutor brushGpuExecutor)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_texturePreviewRegistry = texturePreviewRegistry ?? throw new ArgumentNullException(nameof(texturePreviewRegistry));
+		_brushGpuExecutor = brushGpuExecutor ?? throw new ArgumentNullException(nameof(brushGpuExecutor));
 	}
 
 	public void RecordPendingTerrainAssetState(IReadOnlyList<TerrainAssetSnapshot> snapshots)
@@ -44,11 +52,34 @@ public sealed class TerrainAssetPersistenceService : ITerrainAssetPersistenceSer
 		{
 			var snapshot = CloneSnapshot(snapshots[i]);
 			var terrainAsset = AssetDatabase.GetInstance<TerrainAsset>(snapshot.AssetId);
-			terrainAsset?.ApplyMaps(snapshot.Heightmap, snapshot.LayerIndexMap, snapshot.LayerWeightMap);
+			if (terrainAsset is not null)
+			{
+				terrainAsset.ApplyMaps(snapshot.Heightmap, snapshot.LayerIndexMap, snapshot.LayerWeightMap);
+				SynchronizeRegisteredPreviews(snapshot.AssetId, terrainAsset);
+			}
+
 			if (snapshot.AssetId != Guid.Empty)
 			{
 				_dirtyStates[snapshot.AssetId] = snapshot;
 			}
+		}
+	}
+
+	private void SynchronizeRegisteredPreviews(Guid assetId, TerrainAsset terrainAsset)
+	{
+		var previews = _texturePreviewRegistry.GetPreviews(assetId);
+		for (var i = 0; i < previews.Count; i++)
+		{
+			var preview = previews[i];
+			if (preview.SurfaceTarget != TerrainAuthoringSurfaceTarget.Heightmap)
+			{
+				continue;
+			}
+
+			_brushGpuExecutor.SynchronizePreviewTexture(
+				preview.PreviewTexture,
+				terrainAsset.Heightmap,
+				preview.SurfaceTarget);
 		}
 	}
 

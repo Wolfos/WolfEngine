@@ -77,6 +77,61 @@ public sealed class TerrainAuthoringServiceTests
 	}
 
 	[Test]
+	public void UndoRedo_HeightStrokeSynchronizesRetainedRenderPreview()
+	{
+		using var registry = new TestAssetRegistry();
+		var terrainAssetId = Guid.NewGuid();
+		var terrainAsset = CreateTerrainAsset("terrain", 5, 5, 10);
+		registry.Register(terrainAssetId, terrainAsset);
+		var scene = CreateScene(terrainAssetId);
+		var interactionState = new EditorInteractionState();
+		var texturePreviewRegistry = new TerrainTexturePreviewRegistry();
+		var gpuExecutor = new TestTerrainBrushGpuExecutor();
+		var persistenceService = new TerrainAssetPersistenceService(
+			Substitute.For<IEditorProjectService>(),
+			texturePreviewRegistry,
+			gpuExecutor);
+		var undoRedo = new EditorUndoRedoService(
+			Substitute.For<IEditorSceneWorkspace>(),
+			interactionState,
+			Substitute.For<IEditorSceneSnapshotService>(),
+			Substitute.For<IEditorAssetSnapshotService>(),
+			persistenceService);
+		var service = new TerrainAuthoringService(
+			undoRedo,
+			interactionState,
+			persistenceService,
+			texturePreviewRegistry,
+			gpuExecutor);
+		var terrainEntity = GetTerrainEntity(scene);
+
+		service.BeginStroke(
+			scene,
+			terrainEntity,
+			new TerrainBrushStrokeRequest(
+				TerrainAuthoringSurfaceTarget.Heightmap,
+				TerrainBrushOperation.RaiseLower,
+				new TerrainBrushSettings(8.0f, 1.0f, 1.0f, 0, null)));
+		service.AppendStamp(Vector3.Zero, 1.0f, new TerrainBrushModifierState(false));
+		service.EndStroke();
+
+		var centerPixel = (2 * 5) + 2;
+		var paintedHeight = ReadR16(terrainAsset.Heightmap.MipLevels[0].Data, centerPixel);
+		ref var terrain = ref scene.World.GetComponent<TerrainComponent>(terrainEntity);
+		var retainedPreview = terrain.AuthoringPreviewHeightmap;
+		Assert.That(paintedHeight, Is.GreaterThan(10));
+		Assert.That(retainedPreview, Is.Not.Null);
+
+		Assert.That(undoRedo.Undo(), Is.True);
+		Assert.That(ReadR16(terrainAsset.Heightmap.MipLevels[0].Data, centerPixel), Is.EqualTo(10));
+		Assert.That(ReadHalf(retainedPreview!.MipLevels[0].Data, centerPixel * 8), Is.EqualTo(10 / 65535.0f).Within(0.00001f));
+
+		Assert.That(undoRedo.Redo(), Is.True);
+		Assert.That(ReadR16(terrainAsset.Heightmap.MipLevels[0].Data, centerPixel), Is.EqualTo(paintedHeight));
+		Assert.That(ReadHalf(retainedPreview.MipLevels[0].Data, centerPixel * 8), Is.EqualTo(paintedHeight / 65535.0f).Within(0.0001f));
+	}
+
+	[Test]
 	public void EndStroke_MarksHeightmapDirtyForTerrainRayTracingRuntime()
 	{
 		using var registry = new TestAssetRegistry();
@@ -387,6 +442,11 @@ public sealed class TerrainAuthoringServiceTests
 		data[offset + 1] = (byte)(value >> 8);
 	}
 
+	private static float ReadHalf(byte[] data, int offset)
+	{
+		return (float)BitConverter.UInt16BitsToHalf((ushort)(data[offset] | (data[offset + 1] << 8)));
+	}
+
 	private sealed class TestTerrainAssetPersistenceService : ITerrainAssetPersistenceService
 	{
 		public readonly Dictionary<Guid, TerrainAssetSnapshot> States = new();
@@ -481,11 +541,6 @@ public sealed class TerrainAuthoringServiceTests
 			}
 
 			return new Texture(name, source.Width, source.Height, false, TextureFormat.Rgba16Float, [new TextureMipData(source.Width, source.Height, previewData)]);
-		}
-
-		private static float ReadHalf(byte[] data, int offset)
-		{
-			return (float)BitConverter.UInt16BitsToHalf((ushort)(data[offset] | (data[offset + 1] << 8)));
 		}
 
 		private static void WriteHalf(byte[] data, int offset, float value)
