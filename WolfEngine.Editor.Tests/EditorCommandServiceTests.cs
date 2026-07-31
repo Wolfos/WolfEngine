@@ -309,7 +309,7 @@ public sealed class EditorCommandServiceTests
 		Assert.That(fixture.SceneWorkspace.CurrentScene.RelativeAssetPath, Is.EqualTo("Assets/Scenes/Forest/Forest.scene.json"));
 		fixture.FileDialogService.Received(1).SaveFile(Arg.Is<FileDialogOptions>(options =>
 			options.Title == "Save New Scene" &&
-			options.InitialDirectory == "/project/Assets/Scenes" &&
+			options.InitialDirectory == Path.Combine("/project", "Assets", "Scenes") &&
 			options.DefaultFileName == "Untitled Scene" &&
 			options.AllowedExtensions == null));
 		fixture.SceneWorkspace.Received(1).SaveCurrentScene();
