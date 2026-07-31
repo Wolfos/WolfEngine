@@ -23,12 +23,8 @@ public sealed class TerrainToolSettingsOverlay
 		_assetThumbnailLoader = assetThumbnailLoader ?? throw new ArgumentNullException(nameof(assetThumbnailLoader));
 	}
 
-	public bool BlocksPainting { get; private set; }
-
 	internal void Draw(TerrainTool terrainTool, TerrainToolSettings settings, TerrainLayerSet? layerSet, Vector2 viewportMin, Vector2 viewportMax)
 	{
-		BlocksPainting = false;
-
 		var availableWidth = viewportMax.X - viewportMin.X;
 		var availableHeight = viewportMax.Y - viewportMin.Y;
 		if (availableWidth <= 0.0f || availableHeight <= 0.0f)
@@ -56,23 +52,16 @@ public sealed class TerrainToolSettingsOverlay
 			    ImGuiChildFlags.Borders,
 			    ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
 		{
-			var blocksPainting = ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
 			ImGui.TextUnformatted("Terrain Tool");
 			ImGui.Separator();
 			ImGui.TextUnformatted(terrainTool.ToString());
 			ImGui.SliderFloat("Radius", ref settings.RadiusMeters, 1.0f, 64.0f, "%.1fm");
-			blocksPainting |= ImGui.IsItemActive();
 			ImGui.SliderFloat("Strength", ref settings.Strength, 0.01f, 1.0f, "%.2f");
-			blocksPainting |= ImGui.IsItemActive();
 			ImGui.SliderFloat("Falloff", ref settings.Falloff, 0.2f, 4.0f, "%.1f");
-			blocksPainting |= ImGui.IsItemActive();
 			if (terrainTool == TerrainTool.Brush)
 			{
 				DrawLayerSelector(settings, layerSet);
-				blocksPainting |= ImGui.IsItemActive();
 			}
-
-			BlocksPainting = blocksPainting;
 		}
 
 		ImGui.EndChild();

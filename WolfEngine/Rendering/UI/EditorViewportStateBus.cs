@@ -58,6 +58,8 @@ public readonly struct SceneViewportUiState
 		requestedDebugViewId: SceneDebugViewIds.FinalColor,
 		hovered: false,
 		focused: false,
+		pointerAvailable: false,
+		pointerCaptured: false,
 		rightMousePressStartedHere: false,
 		imageMin: Vector2.Zero,
 		imageMax: Vector2.Zero);
@@ -69,6 +71,8 @@ public readonly struct SceneViewportUiState
 		string requestedDebugViewId,
 		bool hovered,
 		bool focused,
+		bool pointerAvailable,
+		bool pointerCaptured,
 		bool rightMousePressStartedHere,
 		Vector2 imageMin,
 		Vector2 imageMax)
@@ -81,6 +85,8 @@ public readonly struct SceneViewportUiState
 			: requestedDebugViewId;
 		Hovered = hovered;
 		Focused = focused;
+		PointerAvailable = pointerAvailable;
+		PointerCaptured = pointerCaptured;
 		RightMousePressStartedHere = rightMousePressStartedHere;
 		ImageMin = imageMin;
 		ImageMax = imageMax;
@@ -92,6 +98,21 @@ public readonly struct SceneViewportUiState
 	public string RequestedDebugViewId { get; }
 	public bool Hovered { get; }
 	public bool Focused { get; }
+
+	/// <summary>
+	/// The mouse is over the viewport image and no other UI is claiming it: no overlay, popup, modal or
+	/// window is on top, and no widget elsewhere is active. Viewport tools must gate the *start* of an
+	/// interaction on this instead of hit-testing <see cref="ImageMin"/>/<see cref="ImageMax"/> themselves.
+	/// </summary>
+	public bool PointerAvailable { get; }
+
+	/// <summary>
+	/// A mouse press that started on the viewport image is still held, so the viewport owns the drag.
+	/// Viewport tools gate *continuing* an interaction on this; it stays true when the cursor moves over
+	/// an overlay or leaves the image, and it prevents any other widget from stealing the drag.
+	/// </summary>
+	public bool PointerCaptured { get; }
+
 	public bool RightMousePressStartedHere { get; }
 	public Vector2 ImageMin { get; }
 	public Vector2 ImageMax { get; }

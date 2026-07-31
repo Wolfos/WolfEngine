@@ -114,37 +114,37 @@ public sealed class TransformGizmoController
 
 		var io = ImGui.GetIO();
 		var mousePosition = io.MousePos;
-		var mouseInViewport = IsPointInsideRect(mousePosition, viewportState.ImageMin, viewportState.ImageMax);
-		var leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+		var canBeginDrag = viewportState.PointerAvailable;
+		var leftDown = viewportState.PointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left);
 		var leftClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
 		var leftReleased = ImGui.IsMouseReleased(ImGuiMouseButton.Left);
 
 		if (_dragState.Active && (leftDown == false || leftReleased))
 		{
-			if (leftReleased)
-			{
-				CommitDrag(scene);
-			}
-
+			CommitDrag(scene);
 			EndDrag();
 		}
 
 		if (_dragState.Active == false)
 		{
-			_hoveredAxis = ResolveHoveredAxis(
-				mode,
-				mousePosition,
-				viewProjection,
-				viewportState.ImageMin,
-				viewportState.ImageMax,
-				gizmoPivotWorld,
-				axisX,
-				axisY,
-				axisZ,
-				handleLength,
-				ringRadius);
+			_hoveredAxis = GizmoAxis.None;
+			if (canBeginDrag)
+			{
+				_hoveredAxis = ResolveHoveredAxis(
+					mode,
+					mousePosition,
+					viewProjection,
+					viewportState.ImageMin,
+					viewportState.ImageMax,
+					gizmoPivotWorld,
+					axisX,
+					axisY,
+					axisZ,
+					handleLength,
+					ringRadius);
+			}
 
-			if (mouseInViewport && leftClicked && _hoveredAxis != GizmoAxis.None)
+			if (leftClicked && _hoveredAxis != GizmoAxis.None)
 			{
 				TryBeginDrag(
 					scene,
@@ -931,14 +931,6 @@ public sealed class TransformGizmoController
 		       state.ContentSizePixels.Y > 0 &&
 		       state.ImageMax.X > state.ImageMin.X &&
 		       state.ImageMax.Y > state.ImageMin.Y;
-	}
-
-	private static bool IsPointInsideRect(Vector2 point, Vector2 min, Vector2 max)
-	{
-		return point.X >= min.X &&
-		       point.X <= max.X &&
-		       point.Y >= min.Y &&
-		       point.Y <= max.Y;
 	}
 
 	private static float DistanceToPolylineSquared(Vector2 point, ReadOnlySpan<Vector2> polyline)
