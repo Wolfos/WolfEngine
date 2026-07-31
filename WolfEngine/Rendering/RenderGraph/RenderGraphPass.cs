@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;
@@ -55,6 +56,9 @@ public sealed class RenderGraphPass
 	internal IReadOnlyList<ResourceUsage> ResourceUsages => _resourceUsages;
 	
 	internal IReadOnlyList<ResourceBarrierDescription> Barriers => _barriers;
+
+	/// <summary>The pass's barriers as a span, so they can be submitted in one batched call.</summary>
+	internal ReadOnlySpan<ResourceBarrierDescription> BarrierSpan => CollectionsMarshal.AsSpan(_barriers);
 
 	internal void SetExecute(Action<RenderGraphContext> execute)
 	{

@@ -259,11 +259,9 @@ public sealed class RenderGraph
 
 				commandList.BeginEvent(pass.Name);
 
-				// Inject barriers before the pass executes
-				for (var i = 0; i < pass.Barriers.Count; i++)
-				{
-					commandList.Barrier(pass.Barriers[i]);
-				}
+				// Inject barriers before the pass executes, as one batch so the backend can collapse a
+				// pass's transitions into a single flush rather than one per resource.
+				commandList.Barriers(pass.BarrierSpan);
 
 				// Execute the pass with the command list and scene data
 				var context = new RenderGraphContext(_resourceRegistry, pass.Name)

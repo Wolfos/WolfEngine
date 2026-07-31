@@ -105,4 +105,17 @@ public interface IGfxCommandList
 	void CopyBuffer(IGfxBuffer source, ulong sourceOffset, IGfxBuffer destination, ulong destinationOffset, ulong sizeInBytes);
 
 	void Barrier(in ResourceBarrierDescription barrier);
+
+	/// <summary>
+	/// Submits a group of barriers as one unit. Backends that can coalesce transitions turn this into a
+	/// single flush instead of one per barrier, which matters where a pass transitions many resources at
+	/// once. Defaults to issuing them individually for backends with nothing to gain.
+	/// </summary>
+	void Barriers(ReadOnlySpan<ResourceBarrierDescription> barriers)
+	{
+		for (var i = 0; i < barriers.Length; i++)
+		{
+			Barrier(barriers[i]);
+		}
+	}
 }

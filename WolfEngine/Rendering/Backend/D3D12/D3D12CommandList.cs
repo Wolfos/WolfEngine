@@ -1444,8 +1444,104 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void Barrier(in ResourceBarrierDescription barrier)
 	{
+		ResourceBarrier native;
+		if (TryBuildTransition(barrier, out native, out var trackedBuffer, out var after) == false)
+		{
+			return;
+		}
+
+		CommandList.ResourceBarrier(1, &native);
+		if (trackedBuffer is not null)
+		{
+			trackedBuffer.CurrentState = after;
+		}
+	}
+
+	/// <summary>
+	/// Issues a pass's transitions in one call. Each separate ResourceBarrier call is a point the driver
+	/// may drain and flush caches at, so a pass that transitions a dozen resources pays a dozen of them
+	/// when the work only needs one.
+	/// </summary>
+	public void Barriers(ReadOnlySpan<ResourceBarrierDescription> barriers)
+	{
+		if (barriers.Length == 0)
+		{
+			return;
+		}
+
+		// Stack space for the common case; a pass transitioning more than this is rare enough that the
+		// rented buffer costs nothing measurable.
+		const int StackBarrierCapacity = 16;
+		var native = barriers.Length <= StackBarrierCapacity
+			? stackalloc ResourceBarrier[StackBarrierCapacity]
+			: new ResourceBarrier[barriers.Length];
+
+		var count = 0;
+		for (var i = 0; i < barriers.Length; i++)
+		{
+			if (TryBuildTransition(barriers[i], out var transition, out var trackedBuffer, out var after) == false)
+			{
+				continue;
+			}
+
+			// Two transitions of the same resource cannot share a call: within one call they are
+			// unordered, so a chained A->B, B->C would be ambiguous. Close the batch and start another,
+			// which keeps them ordered while still batching everything around them.
+			if (count > 0 && ContainsResource(native[..count], transition.Anonymous.Transition.PResource))
+			{
+				SubmitBarrierBatch(native[..count]);
+				count = 0;
+			}
+
+			native[count++] = transition;
+			if (trackedBuffer is not null)
+			{
+				trackedBuffer.CurrentState = after;
+			}
+		}
+
+		if (count > 0)
+		{
+			SubmitBarrierBatch(native[..count]);
+		}
+	}
+
+	private void SubmitBarrierBatch(ReadOnlySpan<ResourceBarrier> batch)
+	{
+		fixed (ResourceBarrier* batchPtr = batch)
+		{
+			CommandList.ResourceBarrier((uint)batch.Length, batchPtr);
+		}
+	}
+
+	private static bool ContainsResource(ReadOnlySpan<ResourceBarrier> batch, ID3D12Resource* resource)
+	{
+		for (var i = 0; i < batch.Length; i++)
+		{
+			if (batch[i].Anonymous.Transition.PResource == resource)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// Resolves a barrier description to its native transition, reporting false for a no-op transition
+	/// that should be dropped rather than submitted.
+	/// </summary>
+	private static bool TryBuildTransition(
+		in ResourceBarrierDescription barrier,
+		out ResourceBarrier native,
+		out D3D12Buffer? trackedBuffer,
+		out ResourceStates after)
+	{
+		native = default;
+		trackedBuffer = null;
+		after = default;
+
 		ID3D12Resource* resource = null;
-		D3D12Buffer? trackedBuffer = null;
 		if (barrier.Resource is ID3D12BackendTexture texture)
 		{
 			resource = texture.Resource;
@@ -1466,31 +1562,25 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		var before = ConvertResourceState(barrier.Before);
-		var after = ConvertResourceState(barrier.After);
+		after = ConvertResourceState(barrier.After);
 		if (before == after)
 		{
-			return;
+			trackedBuffer = null;
+			return false;
 		}
 
-		var transition = new ResourceTransitionBarrier
+		native = new ResourceBarrier
+		{
+			Type = ResourceBarrierType.Transition,
+			Flags = ResourceBarrierFlags.None
+		};
+		native.Anonymous.Transition = new ResourceTransitionBarrier
 		{
 			PResource = resource,
 			Subresource = D3D12Api.ResourceBarrierAllSubresources,
 			StateBefore = before,
 			StateAfter = after
 		};
-
-		var native = new ResourceBarrier
-		{
-			Type = ResourceBarrierType.Transition,
-			Flags = ResourceBarrierFlags.None
-		};
-		native.Anonymous.Transition = transition;
-
-		CommandList.ResourceBarrier(1, &native);
-		if (trackedBuffer is not null)
-		{
-			trackedBuffer.CurrentState = after;
-		}
+		return true;
 	}
 }
