@@ -75,6 +75,15 @@ public sealed class GpuDrawResources : IDisposable
 	public uint ActiveDrawCommandUpperBound { get; set; } = 1;
 
 	/// <summary>
+	/// The packed streams every mesh is suballocated from. Shared draws address them through the base
+	/// vertex and start index in their draw arguments, so a pass binds these once rather than carrying
+	/// per-command buffer views.
+	/// </summary>
+	public IGfxBuffer? PackedMeshVertexBuffer { get; set; }
+	public IGfxBuffer? PackedMeshIndexBuffer { get; set; }
+	public uint PackedMeshVertexStride { get; set; }
+
+	/// <summary>
 	/// Publishes a single binding-version change if any buffer in the batch just completed was replaced.
 	/// Consumers treat a version change as "the bindings moved this frame", so one capacity pass must
 	/// count once no matter how many buffers and frame slots it touched.

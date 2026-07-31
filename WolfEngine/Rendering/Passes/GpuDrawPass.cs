@@ -205,6 +205,10 @@ public sealed class GpuDrawPass
 		}
 
 		_gpuDrawResources.ActiveDrawCommandUpperBound = drawDatabase.GetActiveDrawCommandUpperBound();
+		// Republished every frame because capacity growth can replace the packed buffers underneath us.
+		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
+		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
+		_gpuDrawResources.PackedMeshVertexStride = _renderer.GetPackedMeshVertexStride();
 		_instanceUpdateData.Clear();
 		_meshUpdateData.Clear();
 		_materialUpdateData.Clear();

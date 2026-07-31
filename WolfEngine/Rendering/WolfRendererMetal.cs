@@ -1290,6 +1290,8 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
 
+    public uint GetPackedMeshVertexStride() => (uint)Marshal.SizeOf<VertexData>();
+
     public bool SupportsGpuCapture => true;
 
     public bool IsGpuCaptureActive => _isGpuCaptureActive;

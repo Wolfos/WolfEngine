@@ -161,7 +161,10 @@ public sealed class TransparentForwardPass
 			MaterialGenerationBuffer = gpuDrawResources.MaterialGenerationBuffer,
 			DrawExecutionRangePerBucketBuffer = gpuDrawResources.DrawExecutionRangePerBucketBuffer,
 			Buckets = buckets.ToArray(),
-			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound
+			FallbackMaxCommandCount = gpuDrawResources.ActiveDrawCommandUpperBound,
+			PackedVertexBuffer = gpuDrawResources.PackedMeshVertexBuffer,
+			PackedIndexBuffer = gpuDrawResources.PackedMeshIndexBuffer,
+			PackedVertexStride = gpuDrawResources.PackedMeshVertexStride
 		};
 	}
 
@@ -289,6 +292,11 @@ public sealed class TransparentForwardPass
 			? (uint)GpuDrawResources.MaxDrawCount
 			: config.FallbackMaxCommandCount;
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
+		SharedDrawIndirectExecution.BindPackedGeometry(
+			commandList,
+			config.PackedVertexBuffer,
+			config.PackedIndexBuffer,
+			config.PackedVertexStride);
 
 		for (var i = 0; i < buckets.Length; i++)
 		{
@@ -321,7 +329,12 @@ public sealed class TransparentForwardPass
 				}
 
 				commandList.BindConstantBuffer(_cameraRegisterIndex, config.CameraBuffer);
-				ExecuteIndirectPages(commandList, bucket.IndirectCommandPages.Span, fallbackCount);
+				// Transparency stays on the full-range path: compaction orders draws by atomic arrival,
+				// which would make the alpha-blend order shuffle from frame to frame.
+				SharedDrawIndirectExecution.ExecutePages(
+					commandList,
+					bucket.IndirectCommandPages.Span,
+					fallbackCount);
 			}
 		}
 
@@ -333,29 +346,6 @@ public sealed class TransparentForwardPass
 		foreach (var binding in passBindings.Bindings)
 		{
 			commandList.BindConstantBuffer(binding.RegisterIndex, binding.Resource);
-		}
-	}
-
-	private static void ExecuteIndirectPages(
-		IGfxCommandList commandList,
-		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
-		uint commandUpperBound)
-	{
-		for (var i = 0; i < pages.Length; i++)
-		{
-			var page = pages[i];
-			if (commandUpperBound <= page.PageStartCommandIndex)
-			{
-				continue;
-			}
-
-			var pageEnd = page.PageStartCommandIndex + page.PageCommandCapacity;
-			var pageUpperBound = Math.Min(commandUpperBound, pageEnd);
-			var localCount = pageUpperBound - page.PageStartCommandIndex;
-			if (localCount > 0)
-			{
-				commandList.ExecuteIndirectCommandBuffer(page.CommandBuffer, localCount);
-			}
 		}
 	}
 

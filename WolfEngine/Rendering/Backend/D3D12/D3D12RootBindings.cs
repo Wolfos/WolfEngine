@@ -28,11 +28,22 @@ internal static class D3D12RootBindings
 		internal const uint CbvB19 = 19;
 
 		/// <summary>
+		/// One dword of root constants at b1, holding the draw index that a shared-draw shader uses to
+		/// find its entry in the draw args table. This is the only per-command argument in the indirect
+		/// command signature: a root constant costs the command processor a single user-data write,
+		/// where the root descriptors it replaced each cost an address write plus validation.
+		/// </summary>
+		internal const uint DrawIndexConstants = 20;
+
+		/// <summary>
 		/// Number of root parameters in the graphics root signature. Every register a graphics shader
 		/// declares must appear here and in <see cref="TryGetGraphicsCbvIndex"/>/<see cref="TryGetGraphicsSrvIndex"/>,
 		/// or its pipeline fails to create with a bare E_INVALIDARG.
 		/// </summary>
-		internal const uint ParameterCount = 20;
+		internal const uint ParameterCount = 21;
+
+		/// <summary>Shader register backing <see cref="DrawIndexConstants"/>.</summary>
+		internal const uint DrawIndexConstantsRegister = 1;
 	}
 
 	internal static class Compute
@@ -92,6 +103,12 @@ internal static class D3D12RootBindings
 		}
 	}
 
+	/// <summary>
+	/// Resolves a shader register to an SRV root parameter. <c>BindConstantBuffer</c> consults this
+	/// before <see cref="TryGetGraphicsCbvIndex"/>, so registers 10-16 always bind as SRVs: a graphics
+	/// shader that declares a <c>cbuffer</c> in that range silently receives nothing. Declare constant
+	/// buffers outside 10-16 (b14 and b16 exist as root parameters but are unreachable for this reason).
+	/// </summary>
 	internal static bool TryGetGraphicsSrvIndex(uint register, out uint rootIndex)
 	{
 		switch (register)

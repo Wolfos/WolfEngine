@@ -11,7 +11,17 @@ StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
 
-cbuffer CameraParams : register(b16)
+// Written per indirect command by the command signature's root constant rather than by any binding
+// call, so each draw can find its own entry in the draw args table.
+cbuffer DrawIndexParams : register(b1)
+{
+    uint drawIndex;
+};
+
+// Deliberately not b16: the graphics binding path resolves a register to an SRV before a CBV, and
+// registers 10-16 are SRV registers, so a constant buffer declared there is bound as t16 and never
+// reaches the shader. See D3D12RootBindings.
+cbuffer CameraParams : register(b4)
 {
     row_major float4x4 viewProjection0;
     row_major float4x4 viewProjection1;
@@ -104,7 +114,7 @@ float SampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    GpuDrawArgs drawArgs = g_DrawArgsTable[0];
+    GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);

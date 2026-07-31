@@ -82,7 +82,9 @@ public sealed class GraphicsPassBindingSet
 
 		foreach (var constantBuffer in reflection.ConstantBuffersByName.Values)
 		{
-			if (IsBindlessResource(constantBuffer.Name, constantBuffer.RegisterIndex) || perDrawResourceNames.Contains(constantBuffer.Name))
+			if (IsBindlessResource(constantBuffer.Name, constantBuffer.RegisterIndex) ||
+			    IsIndirectCommandConstant(constantBuffer.Name) ||
+			    perDrawResourceNames.Contains(constantBuffer.Name))
 				continue;
 			bindings.Add(new GraphicsPassBinding(constantBuffer.RegisterIndex, GraphicsPassBindingKind.ConstantBuffer,
 				ResolveRequiredResource(runtimeResources, constantBuffer.Name), ToPassVisibility(constantBuffer.Visibility), constantBuffer.Name));
@@ -105,6 +107,15 @@ public sealed class GraphicsPassBindingSet
 			return resource;
 		throw new InvalidOperationException($"Reflected pass resource '{name}' has no supplied graphics-pass binding.");
 	}
+
+	/// <summary>
+	/// The draw index reaches a shared-draw shader as a root constant written per command by
+	/// ExecuteIndirect, so it has no pass-level buffer to resolve and must not be demanded as one.
+	/// </summary>
+	public const string IndirectCommandConstantBufferName = "DrawIndexParams";
+
+	private static bool IsIndirectCommandConstant(string name) =>
+		name.Equals(IndirectCommandConstantBufferName, StringComparison.Ordinal);
 
 	private static bool IsBindlessResource(string name, uint registerIndex) =>
 		registerIndex == 27 || name.Equals("BindlessCounts", StringComparison.Ordinal) ||

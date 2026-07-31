@@ -13,6 +13,25 @@ namespace WolfEngine.Rendering.Passes;
 internal static class SharedDrawIndirectExecution
 {
 	/// <summary>
+	/// Binds the packed geometry every shared draw reads from. The indirect commands carry only their
+	/// offsets into these streams, so the views have to be bound before any of them execute.
+	/// </summary>
+	public static void BindPackedGeometry(
+		IGfxCommandList commandList,
+		IGfxBuffer? packedVertexBuffer,
+		IGfxBuffer? packedIndexBuffer,
+		uint packedVertexStride)
+	{
+		if (packedVertexBuffer is null || packedIndexBuffer is null || packedVertexStride == 0)
+		{
+			return;
+		}
+
+		commandList.SetVertexBuffer(new VertexBufferView(packedVertexBuffer, packedVertexStride));
+		commandList.SetIndexBuffer(new IndexBufferView(packedIndexBuffer, IndexFormat.UInt32));
+	}
+
+	/// <summary>
 	/// Executes every command slot up to <paramref name="commandUpperBound"/>. Draws that culling
 	/// rejected still cost a command each, because their records stay in place and only the vertex
 	/// shader knows to skip them.

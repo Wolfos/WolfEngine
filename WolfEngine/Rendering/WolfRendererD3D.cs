@@ -1600,6 +1600,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	public IGfxBuffer GetPackedMeshIndexBuffer() => _packedIndexBuffer!;
 
+	public uint GetPackedMeshVertexStride() => (uint)Unsafe.SizeOf<VertexData>();
+
 	public bool SupportsGpuCapture => D3D12ProgrammaticCapture.IsAvailable;
 
 	public bool IsGpuCaptureActive => _isGpuCaptureActive;

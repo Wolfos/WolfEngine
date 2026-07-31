@@ -13,6 +13,13 @@ StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
 StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t15);
 
+// Written per indirect command by the command signature's root constant rather than by any binding
+// call, so each draw can find its own entry in the draw args table.
+cbuffer DrawIndexParams : register(b1)
+{
+    uint drawIndex;
+};
+
 cbuffer CameraParams : register(b2)
 {
     row_major float4x4 viewProjection;
@@ -151,7 +158,7 @@ float3 ComputeTerrainLocalNormal(float2 uv, GpuInstanceData instanceData, GpuTer
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    GpuDrawArgs drawArgs = g_DrawArgsTable[0];
+    GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);

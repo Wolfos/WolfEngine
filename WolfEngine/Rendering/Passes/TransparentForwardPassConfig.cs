@@ -98,4 +98,9 @@ public struct TransparentForwardPassConfig
 
 	public required ReadOnlyMemory<TransparentExecutionBucket> Buckets { get; init; }
 	public required uint FallbackMaxCommandCount { get; init; }
+
+	/// <summary>Packed geometry shared by every shared draw, bound once for the whole pass.</summary>
+	public IGfxBuffer? PackedVertexBuffer { get; init; }
+	public IGfxBuffer? PackedIndexBuffer { get; init; }
+	public uint PackedVertexStride { get; init; }
 }

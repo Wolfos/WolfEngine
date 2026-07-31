@@ -1322,37 +1322,22 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			return _graphicsExecuteIndirectSignature;
 		}
 
-		var argumentDescs = stackalloc IndirectArgumentDesc[11];
+		// Everything a shared draw needs except its own identity is uniform across the pass: all meshes
+		// live in one packed vertex/index buffer, and the instance, material and terrain tables are the
+		// same for every command. Those are bound once per pass, leaving only the draw index here.
+		var argumentDescs = stackalloc IndirectArgumentDesc[2];
 
-		argumentDescs[0].Type = IndirectArgumentType.VertexBufferView;
-		argumentDescs[0].Anonymous.VertexBuffer.Slot = 0;
+		argumentDescs[0].Type = IndirectArgumentType.Constant;
+		argumentDescs[0].Anonymous.Constant.RootParameterIndex = D3D12RootBindings.Graphics.DrawIndexConstants;
+		argumentDescs[0].Anonymous.Constant.DestOffsetIn32BitValues = 0;
+		argumentDescs[0].Anonymous.Constant.Num32BitValuesToSet = 1;
 
-		argumentDescs[1].Type = IndirectArgumentType.IndexBufferView;
-
-		argumentDescs[2].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[2].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT10;
-		argumentDescs[3].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[3].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT11;
-		argumentDescs[4].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[4].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT12;
-		argumentDescs[5].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[5].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT13;
-		argumentDescs[6].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[6].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT14;
-		argumentDescs[7].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[7].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT15;
-		argumentDescs[8].Type = IndirectArgumentType.ShaderResourceView;
-		argumentDescs[8].Anonymous.ShaderResourceView.RootParameterIndex = D3D12RootBindings.Graphics.SrvT16;
-
-		argumentDescs[9].Type = IndirectArgumentType.ConstantBufferView;
-		argumentDescs[9].Anonymous.ConstantBufferView.RootParameterIndex = D3D12RootBindings.Graphics.CbvB16;
-
-		argumentDescs[10].Type = IndirectArgumentType.DrawIndexed;
+		argumentDescs[1].Type = IndirectArgumentType.DrawIndexed;
 
 		var signatureDesc = new CommandSignatureDesc
 		{
 			ByteStride = (uint)sizeof(D3D12IndirectCommandBuffer.CommandRecord),
-			NumArgumentDescs = 11,
+			NumArgumentDescs = 2,
 			PArgumentDescs = argumentDescs,
 			NodeMask = 0
 		};
@@ -1687,6 +1672,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.CbvB19].ParameterType = RootParameterType.TypeCbv;
 		rootParameters[D3D12RootBindings.Graphics.CbvB19].Anonymous.Descriptor = new RootDescriptor(19, 0);
 		rootParameters[D3D12RootBindings.Graphics.CbvB19].ShaderVisibility = ShaderVisibility.All;
+
+		// Written per command by ExecuteIndirect rather than by any binding call, so it has no entry in
+		// the register lookups that the reflection-driven binding path uses.
+		rootParameters[D3D12RootBindings.Graphics.DrawIndexConstants].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[D3D12RootBindings.Graphics.DrawIndexConstants].Anonymous.Constants =
+			new RootConstants(D3D12RootBindings.Graphics.DrawIndexConstantsRegister, 0, 1);
+		rootParameters[D3D12RootBindings.Graphics.DrawIndexConstants].ShaderVisibility = ShaderVisibility.All;
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{

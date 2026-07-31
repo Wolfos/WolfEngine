@@ -1871,6 +1871,7 @@ public sealed class RayTracingSceneResourcesTests
 		public void ReleaseMeshResources(Mesh mesh) { }
 		public IGfxBuffer GetPackedMeshVertexBuffer() => _vertexBuffer;
 		public IGfxBuffer GetPackedMeshIndexBuffer() => _indexBuffer;
+		public uint GetPackedMeshVertexStride() => throw new NotSupportedException();
 		public bool SupportsGpuCapture => false;
 		public bool IsGpuCaptureActive => false;
 		public string LastGpuCapturePath => string.Empty;

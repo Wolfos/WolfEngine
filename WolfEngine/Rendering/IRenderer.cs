@@ -25,6 +25,12 @@ public interface IRenderer : IFrameCaptureSource
 	void ReleaseMeshResources(Mesh mesh);
 	IGfxBuffer GetPackedMeshVertexBuffer();
 	IGfxBuffer GetPackedMeshIndexBuffer();
+
+	/// <summary>
+	/// Stride of the packed mesh vertex stream. Every mesh shares one packed buffer at one stride,
+	/// which is what lets the shared draw passes bind geometry once instead of per indirect command.
+	/// </summary>
+	uint GetPackedMeshVertexStride();
 	bool SupportsGpuCapture { get; }
 	bool IsGpuCaptureActive { get; }
 	string LastGpuCapturePath { get; }

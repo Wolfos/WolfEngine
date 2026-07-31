@@ -10,6 +10,13 @@ StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
+// Written per indirect command by the command signature's root constant rather than by any binding
+// call, so each draw can find its own entry in the draw args table.
+cbuffer DrawIndexParams : register(b1)
+{
+    uint drawIndex;
+};
+
 cbuffer CameraParams : register(b2)
 {
     row_major float4x4 viewProjection;
@@ -114,7 +121,7 @@ struct VSOutput
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    GpuDrawArgs drawArgs = g_DrawArgsTable[0];
+    GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);

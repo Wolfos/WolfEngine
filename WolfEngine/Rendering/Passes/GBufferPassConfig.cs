@@ -103,6 +103,11 @@ public struct GBufferPassConfig
 	/// <summary>Indirect command slot the buckets' pages were taken from, needed to index the count table.</summary>
 	public int IndirectCommandSlot { get; set; }
 
+	/// <summary>Packed geometry shared by every shared draw, bound once for the whole pass.</summary>
+	public IGfxBuffer? PackedVertexBuffer { get; set; }
+	public IGfxBuffer? PackedIndexBuffer { get; set; }
+	public uint PackedVertexStride { get; set; }
+
 	/// <summary>
 	/// Per-page compacted command counts when compaction ran this frame, otherwise null, which selects
 	/// the full-range execution path.

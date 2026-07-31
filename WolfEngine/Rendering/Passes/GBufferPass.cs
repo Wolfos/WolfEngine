@@ -77,6 +77,11 @@ public static class GBufferPass
 			return;
 		}
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
+		SharedDrawIndirectExecution.BindPackedGeometry(
+			commandList,
+			config.PackedVertexBuffer,
+			config.PackedIndexBuffer,
+			config.PackedVertexStride);
 
 		for (var i = 0; i < buckets.Length; i++)
 		{

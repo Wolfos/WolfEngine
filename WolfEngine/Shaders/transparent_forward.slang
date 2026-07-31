@@ -15,6 +15,13 @@ StructuredBuffer<PointLightData> g_PointLights : register(t14);
 StructuredBuffer<ClusterHeader> g_ClusterHeaders : register(t15);
 StructuredBuffer<uint> g_ClusterLightIndices : register(t16);
 
+// Written per indirect command by the command signature's root constant rather than by any binding
+// call, so each draw can find its own entry in the draw args table.
+cbuffer DrawIndexParams : register(b1)
+{
+    uint drawIndex;
+};
+
 cbuffer TransparentEnvironmentParams : register(b0)
 {
     uint environmentHandle;
@@ -91,7 +98,7 @@ struct VSOutput
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
-    GpuDrawArgs drawArgs = g_DrawArgsTable[0];
+    GpuDrawArgs drawArgs = g_DrawArgsTable[drawIndex];
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);

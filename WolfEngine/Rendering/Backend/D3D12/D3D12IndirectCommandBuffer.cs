@@ -15,19 +15,15 @@ namespace WolfEngine.Rendering.Backend.D3D12;
 
 internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
 {
+	/// <summary>
+	/// Must match the indirect command signature built in <see cref="D3D12Device"/>: one dword of root
+	/// constants carrying the draw index, then the draw arguments. The buffers a draw reads are bound
+	/// once per pass instead of per command, which is what keeps this record down to 24 bytes.
+	/// </summary>
 	[StructLayout(LayoutKind.Sequential)]
 	internal struct CommandRecord
 	{
-		public Silk.NET.Direct3D12.VertexBufferView VertexBufferView;
-		public Silk.NET.Direct3D12.IndexBufferView IndexBufferView;
-		public ulong SrvT10Address;
-		public ulong SrvT11Address;
-		public ulong SrvT12Address;
-		public ulong SrvT13Address;
-		public ulong SrvT14Address;
-		public ulong SrvT15Address;
-		public ulong SrvT16Address;
-		public ulong CbvB16Address;
+		public uint DrawIndex;
 		public DrawIndexedArguments DrawArguments;
 	}
 
@@ -235,29 +231,11 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			return;
 		}
 
-		var record = new CommandRecord
+		// The mesh's place in the packed streams travels in the draw arguments, so the record no longer
+		// needs the buffer views themselves: every command in a pass draws from the same two buffers.
+		_mappedRecords[commandIndex] = new CommandRecord
 		{
-			VertexBufferView = new Silk.NET.Direct3D12.VertexBufferView
-			{
-				// Keep the input-assembler views rooted at the packed streams.  The
-				// indexed draw and GpuMeshData both use the same global start/base
-				// offsets, which avoids mixing two addressing conventions.
-				BufferLocation = vertexResource->GetGPUVirtualAddress(),
-				StrideInBytes = mesh.StrideInBytes,
-				SizeInBytes = (uint)Math.Min(vertexBuffer.SizeInBytes, uint.MaxValue)
-			},
-			IndexBufferView = new Silk.NET.Direct3D12.IndexBufferView
-			{
-				BufferLocation = indexResource->GetGPUVirtualAddress(),
-				SizeInBytes = (uint)Math.Min(indexBuffer.SizeInBytes, uint.MaxValue),
-				Format = Format.FormatR32Uint
-			},
-			SrvT10Address = instanceBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			SrvT11Address = materialBuffer.Resource.Handle->GetGPUVirtualAddress(),
-			SrvT12Address = drawArgsBuffer.Resource.Handle->GetGPUVirtualAddress()
-			                 + drawArgsBaseOffsetBytes
-			                 + (drawArgsCommandIndex * (ulong)Marshal.SizeOf<GpuDrawArgs>()),
-			SrvT13Address = materialGenerationBuffer.Resource.Handle->GetGPUVirtualAddress(),
+			DrawIndex = drawArgsCommandIndex,
 			DrawArguments = new DrawIndexedArguments
 			{
 				IndexCountPerInstance = mesh.IndexCount,
@@ -267,37 +245,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 				StartInstanceLocation = 0
 			}
 		};
-		// Re-encoding replaces this command's references outright, so a buffer the previous encoding
-		// pointed at stops being tracked the moment it stops being referenced.
+
+		// Records hold no GPU addresses now, so nothing here can dangle when a buffer is replaced by
+		// capacity growth. The reference tracking is kept only to satisfy the diagnostic reporting.
 		ClearCommandReferences(commandIndex);
-		TrackBuffer(commandIndex, vertexBuffer, ResourceStates.VertexAndConstantBuffer);
-		TrackBuffer(commandIndex, indexBuffer, ResourceStates.IndexBuffer);
-		TrackBuffer(commandIndex, instanceBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(commandIndex, materialBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(commandIndex, drawArgsBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		TrackBuffer(commandIndex, materialGenerationBuffer, ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		foreach (var binding in passBindings.Bindings)
-		{
-			if (binding.Resource is not D3D12Buffer passBuffer || passBuffer.Resource.Handle is null)
-			{
-				ResetCommand(commandIndex);
-				return;
-			}
-
-			SetPassBindingAddress(
-				ref record,
-				binding.Kind,
-				binding.RegisterIndex,
-				passBuffer.Resource.Handle->GetGPUVirtualAddress());
-			TrackBuffer(
-				commandIndex,
-				passBuffer,
-				binding.Kind == GraphicsPassBindingKind.ConstantBuffer
-					? ResourceStates.VertexAndConstantBuffer
-					: ResourceStates.NonPixelShaderResource | ResourceStates.PixelShaderResource);
-		}
-
-		_mappedRecords[commandIndex] = record;
 	}
 
 	public void Dispose()
@@ -432,34 +383,4 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		return true;
 	}
 
-	private static void SetPassBindingAddress(
-		ref CommandRecord record,
-		GraphicsPassBindingKind kind,
-		uint registerIndex,
-		ulong gpuAddress)
-	{
-		if (kind == GraphicsPassBindingKind.ConstantBuffer)
-		{
-			switch (registerIndex)
-			{
-				case 16: record.CbvB16Address = gpuAddress; return;
-				default: return; // Other pass CBVs are inherited from command-list state.
-			}
-		}
-		else
-		{
-			switch (registerIndex)
-			{
-				case 10: record.SrvT10Address = gpuAddress; return;
-				case 11: record.SrvT11Address = gpuAddress; return;
-				case 12: record.SrvT12Address = gpuAddress; return;
-				case 13: record.SrvT13Address = gpuAddress; return;
-				case 14: record.SrvT14Address = gpuAddress; return;
-				case 15: record.SrvT15Address = gpuAddress; return;
-				case 16: record.SrvT16Address = gpuAddress; return;
-			}
-		}
-
-		throw new InvalidOperationException($"Unsupported D3D12 indirect pass binding {(kind == GraphicsPassBindingKind.ConstantBuffer ? 'b' : 't')}{registerIndex}.");
-	}
 }
