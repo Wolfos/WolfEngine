@@ -918,6 +918,25 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_commandBuffer.WaitUntilCompleted();
 	}
 
+	/// <summary>
+	/// True once the GPU is done with this command buffer, so the caller can retire it without blocking.
+	/// An errored command buffer counts as finished: it will never complete, and holding on to it would
+	/// pin its GPU-lifetime resources forever.
+	/// </summary>
+	internal bool HasFinishedExecuting
+	{
+		get
+		{
+			if (_disposed || _committed == false || _commandBuffer.NativePtr == IntPtr.Zero)
+			{
+				return false;
+			}
+
+			var status = _commandBuffer.Status;
+			return status is MTLCommandBufferStatus.Completed or MTLCommandBufferStatus.Error;
+		}
+	}
+
 	public void SetPresentDrawable(CAMetalDrawable drawable)
 	{
 		ThrowIfDisposed();

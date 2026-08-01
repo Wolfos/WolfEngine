@@ -15,7 +15,8 @@ namespace WolfEngine.Rendering.Backend.Metal;
 [SupportedOSPlatform("macos")]
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IGpuProfilerDevice
 {
-	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * 16;
+	private const int SubmissionsPerFrame = 2;
+	private const int MaxPendingCommandLists = GpuDrawResources.MaxFramesInFlight * SubmissionsPerFrame;
 	private const int MaxPooledTextures = 256;
 	private const int MaxPooledTexturesPerDescriptor = 2;
 
@@ -204,14 +205,48 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	public void PumpCompleted()
 	{
-		// SharpMetal does not currently expose a portable non-blocking completion query in this layer.
-		// Keep a bounded in-flight queue and retire oldest submissions when the queue is full.
+		// Retire everything the GPU has already finished. Submissions pin their retirement batch and any
+		// GPU profiler timestamp sample buffers they sampled into, so leaving finished work on the queue
+		// is what starves those pools; the queue depth must not decide how long they stay pinned.
+		while (TryDequeueFinishedSubmission(out var finished))
+		{
+			RetireSubmission(finished, waitForCompletion: false);
+		}
+
+		// Anything still running past the in-flight budget is throttled by blocking on it, oldest first.
 		while (TryDequeueSubmission(onlyWhenOverLimit: true, out var submission))
 		{
 			RetireSubmission(submission, waitForCompletion: true);
 		}
 
 		_retirementQueue.ReleaseCompleted(CompletedId);
+	}
+
+	/// <summary>
+	/// Dequeues the oldest submission only when its command buffer has already finished on the GPU.
+	/// Submissions complete in queue order, so stopping at the first unfinished one keeps retirement
+	/// in submission order without ever blocking.
+	/// </summary>
+	private bool TryDequeueFinishedSubmission(out PendingSubmission submission)
+	{
+		lock (_submissionSync)
+		{
+			if (_pendingSubmissions.Count == 0)
+			{
+				submission = default;
+				return false;
+			}
+
+			var oldest = _pendingSubmissions.Peek();
+			if (oldest.CommandList is { HasFinishedExecuting: false })
+			{
+				submission = default;
+				return false;
+			}
+
+			submission = _pendingSubmissions.Dequeue();
+			return true;
+		}
 	}
 
 	private bool TryDequeueSubmission(bool onlyWhenOverLimit, out PendingSubmission submission)
