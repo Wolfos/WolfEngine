@@ -54,6 +54,16 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId AmbientOcclusionUpsample = Id("ao-upsample");
 	public static readonly ShaderProgramId TaaResolve = Id("taa-resolve");
 	public static readonly ShaderProgramId TaaHistoryStore = Id("taa-history-store");
+	public static readonly ShaderProgramId Fsr3Rcas = Id("fsr3-rcas");
+	public static readonly ShaderProgramId Fsr3PrepareInputs = Id("fsr3-prepare-inputs");
+	public static readonly ShaderProgramId Fsr3LumaPyramid = Id("fsr3-luma-pyramid");
+	public static readonly ShaderProgramId Fsr3ShadingChangePyramid = Id("fsr3-shading-change-pyramid");
+	public static readonly ShaderProgramId Fsr3ShadingChange = Id("fsr3-shading-change");
+	public static readonly ShaderProgramId Fsr3PrepareReactivity = Id("fsr3-prepare-reactivity");
+	public static readonly ShaderProgramId Fsr3DebugView = Id("fsr3-debug-view");
+	public static readonly ShaderProgramId Fsr3LumaInstability = Id("fsr3-luma-instability");
+	public static readonly ShaderProgramId Fsr3Accumulate = Id("fsr3-accumulate");
+	public static readonly ShaderProgramId Fsr3Clear = Id("fsr3-clear");
 	public static readonly ShaderProgramId Tonemapping = Id("tonemapping");
 	public static readonly ShaderProgramId Bloom = Id("bloom");
 	public static readonly ShaderProgramId ColorPyramid = Id("color-pyramid");
@@ -115,6 +125,16 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.AmbientOcclusionUpsample, "ao_upsample.compute.slang"),
 			D(EngineShaderPrograms.TaaResolve, "taa_resolve.compute.slang"),
 			D(EngineShaderPrograms.TaaHistoryStore, "taa_history_store.compute.slang"),
+			D(EngineShaderPrograms.Fsr3Rcas, "fsr3_rcas.compute.slang"),
+			D(EngineShaderPrograms.Fsr3PrepareInputs, "fsr3_prepare_inputs.compute.slang"),
+			D(EngineShaderPrograms.Fsr3LumaPyramid, "fsr3_luma_pyramid.compute.slang"),
+			D(EngineShaderPrograms.Fsr3ShadingChangePyramid, "fsr3_shading_change_pyramid.compute.slang"),
+			D(EngineShaderPrograms.Fsr3ShadingChange, "fsr3_shading_change.compute.slang"),
+			D(EngineShaderPrograms.Fsr3PrepareReactivity, "fsr3_prepare_reactivity.compute.slang"),
+			D(EngineShaderPrograms.Fsr3DebugView, "fsr3_debug_view.compute.slang"),
+			D(EngineShaderPrograms.Fsr3LumaInstability, "fsr3_luma_instability.compute.slang"),
+			D(EngineShaderPrograms.Fsr3Accumulate, "fsr3_accumulate.compute.slang"),
+			D(EngineShaderPrograms.Fsr3Clear, "fsr3_clear.compute.slang"),
 			D(EngineShaderPrograms.Tonemapping, "tonemapping.compute.slang"),
 			D(EngineShaderPrograms.Bloom, "bloom.compute.slang"),
 			D(EngineShaderPrograms.ColorPyramid, "color_pyramid.compute.slang"),
@@ -263,6 +283,16 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.AmbientOcclusionUpsample) return ["AmbientOcclusionUpsampleCS"];
 		if (id == EngineShaderPrograms.TaaResolve) return ["TaaResolveCS"];
 		if (id == EngineShaderPrograms.TaaHistoryStore) return ["TaaHistoryStoreCS"];
+		if (id == EngineShaderPrograms.Fsr3Rcas) return ["Fsr3RcasCS"];
+		if (id == EngineShaderPrograms.Fsr3PrepareInputs) return ["Fsr3PrepareInputsCS"];
+		if (id == EngineShaderPrograms.Fsr3LumaPyramid) return ["Fsr3LumaPyramidCS"];
+		if (id == EngineShaderPrograms.Fsr3ShadingChangePyramid) return ["Fsr3ShadingChangePyramidCS"];
+		if (id == EngineShaderPrograms.Fsr3ShadingChange) return ["Fsr3ShadingChangeCS"];
+		if (id == EngineShaderPrograms.Fsr3PrepareReactivity) return ["Fsr3PrepareReactivityCS"];
+		if (id == EngineShaderPrograms.Fsr3DebugView) return ["Fsr3DebugViewCS"];
+		if (id == EngineShaderPrograms.Fsr3LumaInstability) return ["Fsr3LumaInstabilityCS"];
+		if (id == EngineShaderPrograms.Fsr3Accumulate) return ["Fsr3AccumulateCS"];
+		if (id == EngineShaderPrograms.Fsr3Clear) return ["Fsr3ClearFloatCS", "Fsr3ClearUintCS"];
 		if (id == EngineShaderPrograms.Tonemapping) return ["TonemappingCS"];
 		if (id == EngineShaderPrograms.Bloom) return ["BloomPrefilterCS", "BloomDownsampleCS", "BloomUpsampleCS", "BloomCompositeCS"];
 		if (id == EngineShaderPrograms.ColorPyramid) return ["ColorPyramidCopyCS", "ColorPyramidDownsampleCS"];

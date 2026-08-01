@@ -139,22 +139,24 @@ public sealed class RenderGraph
 		// Build scene data from snapshot
 		SceneDrawData? sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
-		var taaEnabled = snapshot.Config.TemporalAntiAliasing.Enabled;
-		var taaPhaseCount = snapshot.Config.TemporalAntiAliasing.PhaseCount > 0
-			? snapshot.Config.TemporalAntiAliasing.PhaseCount
-			: TemporalJitter.DefaultPhaseCount;
-		var jitterPixels = taaEnabled
+		var fsr3Enabled = snapshot.Config.Fsr3.Enabled;
+		// FSR3 owns the sequence length. At native resolution this is eight phases; once
+		// render/display sizes split, the display width belongs in the second argument.
+		var fsr3PhaseCount = Fsr3Constants.GetJitterPhaseCount(
+			_currentSceneRenderSize.X,
+			_currentSceneRenderSize.X);
+		var jitterPixels = fsr3Enabled
 			? TemporalJitter.GetHaltonJitterPixels(
 				(ulong)_frameIndex,
-				taaPhaseCount)
+				fsr3PhaseCount)
 			: Vector2.Zero;
-		var previousJitterPixels = taaEnabled && _frameIndex > 0
+		var previousJitterPixels = fsr3Enabled && _frameIndex > 0
 			? TemporalJitter.GetHaltonJitterPixels(
 				(ulong)(_frameIndex - 1),
-				taaPhaseCount)
+				fsr3PhaseCount)
 			: jitterPixels;
 		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
-		var jitteredProjection = taaEnabled
+		var jitteredProjection = fsr3Enabled
 			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
 			: snapshot.Camera.Perspective;
 		if (Matrix4x4.Invert(world, out var view) &&
@@ -212,11 +214,11 @@ public sealed class RenderGraph
 				jitterNdc,
 				hasPreviousCameraState == false ||
 				projectionChanged ||
-				(taaEnabled && _previousTaaEnabled == false),
+				(fsr3Enabled && _previousTaaEnabled == false),
 				_renderLights,
 				snapshot.DecalPackets);
 
-			_previousTaaEnabled = taaEnabled;
+			_previousTaaEnabled = fsr3Enabled;
 		}
 
 		if (sceneData is null &&

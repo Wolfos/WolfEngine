@@ -94,7 +94,8 @@ public sealed class TransparentForwardPass
 			_shadowSampler = _bindlessRegistry.GetSamplerHandle(shadowSampler);
 		}
 
-		var lighting = context.GetTexture(resources.ResolvedSceneColor);
+		var lighting = context.GetTexture(resources.LightingBuffer);
+		var reactiveMask = context.GetTexture(resources.Fsr3.TransparencyMask);
 		var depth = context.GetTexture(resources.GBufferDepth);
 		var shadowMap0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMap1 = context.GetTexture(resources.ShadowMapDepth1);
@@ -113,6 +114,7 @@ public sealed class TransparentForwardPass
 			FramebufferWidth = resources.SceneFramebufferSize.X,
 			FramebufferHeight = resources.SceneFramebufferSize.Y,
 			LightingTarget = lighting,
+			ReactiveMaskTarget = reactiveMask,
 			DepthTarget = depth,
 			ShadowMapDepth0 = shadowMap0,
 			ShadowMapDepth1 = shadowMap1,
@@ -175,10 +177,15 @@ public sealed class TransparentForwardPass
 
 		var commandList = context.CommandList;
 		var targets = new PassTargets(
-			new[] { new ColorTargetBinding(config.LightingTarget) },
+			new[]
+			{
+				new ColorTargetBinding(config.LightingTarget),
+				new ColorTargetBinding(config.ReactiveMaskTarget)
+			},
 			new DepthTargetBinding(config.DepthTarget));
 		var viewport = new Viewport(0.0f, 0.0f, config.FramebufferWidth, config.FramebufferHeight);
 		commandList.BeginPass(targets, viewport);
+		commandList.ClearColorAttachment(1, new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f));
 		commandList.SetScissorRect(new RectInt(0, 0, config.FramebufferWidth, config.FramebufferHeight));
 
 		if (config.InstanceBuffer is null ||
@@ -393,7 +400,7 @@ public sealed class TransparentForwardPass
 			vertexEntryPoint: "vertexShader",
 			pixelEntryPoint: "fragmentShader",
 			computeEntryPoint: null,
-			renderTargets: new(new[] { TextureFormat.Rgba16Float }),
+			renderTargets: new(new[] { TextureFormat.Rgba16Float, TextureFormat.Rgba8Unorm }),
 			depthStencil: new DepthStencilFormat(TextureFormat.D32Float),
 			renderState: renderState,
 			layout: GraphicsLayoutKind.Material,

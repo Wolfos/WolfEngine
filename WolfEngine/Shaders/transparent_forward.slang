@@ -130,11 +130,20 @@ VSOutput vertexShader(VSInput input)
     return output;
 }
 
-float4 fragmentShader(VSOutput input) : SV_Target0
+struct TransparentOutput
 {
+    float4 color : SV_Target0;
+    float4 reactive : SV_Target1;
+};
+
+TransparentOutput fragmentShader(VSOutput input)
+{
+    TransparentOutput output;
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
-        return float4(1.0f, 0.0f, 1.0f, 1.0f);
+        output.color = float4(1.0f, 0.0f, 1.0f, 1.0f);
+        output.reactive = 1.0f;
+        return output;
     }
 
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
@@ -227,5 +236,8 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     color += surface.emissive;
 
     float alpha = saturate(materialData.baseColor.a * albedoSample.a);
-    return float4(color, alpha);
+    output.color = float4(color, alpha);
+    // Alpha blending this white value produces accumulated transparent coverage.
+    output.reactive = float4(1.0f, 1.0f, 1.0f, alpha);
+    return output;
 }

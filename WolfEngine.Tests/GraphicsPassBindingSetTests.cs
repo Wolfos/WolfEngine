@@ -26,7 +26,10 @@ public sealed class GraphicsPassBindingSetTests
 			new ShaderResourceBindingLayout("g_PointLights", 14),
 			new ShaderResourceBindingLayout("g_ClusterHeaders", 15),
 			new ShaderResourceBindingLayout("g_ClusterLightIndices", 16),
-			new ShaderResourceBindingLayout("g_TextureHeap", 28)
+			new ShaderResourceBindingLayout("g_TextureHeap", 28),
+			new ShaderResourceBindingLayout("g_RWTextures", 0),
+			new ShaderResourceBindingLayout("g_RWTexturesUint", 0),
+			new ShaderResourceBindingLayout("g_RWTexturesCoherent", 0)
 		]);
 		var resources = Resources("TransparentEnvironmentParams", "CameraParams", "LightingParams",
 			"g_PointLights", "g_ClusterHeaders", "g_ClusterLightIndices");

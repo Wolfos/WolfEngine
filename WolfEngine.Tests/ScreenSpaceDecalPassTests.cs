@@ -187,15 +187,15 @@ public sealed class ScreenSpaceDecalPassTests
 		var decalIndex = Array.IndexOf(passNames, "ScreenSpaceDecal");
 		var aoIndex = Array.IndexOf(passNames, "Ambient Occlusion Evaluate");
 		var deferredIndex = Array.IndexOf(passNames, "Deferred Lighting");
-		var taaResolve = passes.Single(pass => pass.Name == "TAA Resolve");
+		var deferredLighting = passes.Single(pass => pass.Name == "Deferred Lighting");
 
 		Assert.That(gbufferIndex, Is.GreaterThanOrEqualTo(0));
 		Assert.That(seedIndex, Is.GreaterThan(gbufferIndex));
 		Assert.That(decalIndex, Is.GreaterThan(seedIndex));
 		Assert.That(aoIndex, Is.GreaterThan(decalIndex));
 		Assert.That(deferredIndex, Is.GreaterThan(decalIndex));
-		Assert.That(taaResolve.Reads, Does.Contain(frameResources.GBufferNormal));
-		Assert.That(taaResolve.Reads, Does.Contain(frameResources.GBufferMaterial));
+		Assert.That(deferredLighting.Reads, Does.Contain(frameResources.GBufferNormal));
+		Assert.That(deferredLighting.Reads, Does.Contain(frameResources.GBufferMaterial));
 	}
 
 	private static Texture CreateTexture(string name)

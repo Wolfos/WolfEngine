@@ -4,6 +4,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Tests;
 
@@ -11,40 +12,32 @@ namespace WolfEngine.Tests;
 public sealed class TemporalAntiAliasingTests
 {
 	[Test]
-	public void DefaultsMatchBalancedNativeResolutionPreset()
+	public void DefaultsExposeOnlyFsr3HostControls()
 	{
-		var settings = new TemporalAntiAliasingConfig();
+		var settings = new Fsr3UpscalerConfig();
 
 		Assert.Multiple(() =>
 		{
 			Assert.That(settings.Enabled, Is.True);
-			Assert.That(settings.PhaseCount, Is.EqualTo(8));
-			Assert.That(settings.StaticHistoryWeight, Is.EqualTo(0.95f));
-			Assert.That(settings.MovingHistoryWeight, Is.EqualTo(0.65f));
-			Assert.That(settings.MotionResponsePixels, Is.EqualTo(8.0f));
-			Assert.That(settings.DepthRejectionAbsolute, Is.EqualTo(0.02f));
-			Assert.That(settings.DepthRejectionRelative, Is.EqualTo(0.01f));
-			Assert.That(settings.VarianceClipGamma, Is.EqualTo(1.0f));
-			Assert.That(settings.StaticClampExpansion, Is.EqualTo(4.0f));
-			Assert.That(settings.ClampExpansionMotionPixels, Is.EqualTo(1.0f));
-			Assert.That(settings.AlphaTestHistoryScale, Is.EqualTo(0.75f));
-			Assert.That(settings.EnableCasSharpen, Is.True);
-			Assert.That(settings.CasSharpness, Is.EqualTo(0.35f));
+			Assert.That(settings.EnableSharpening, Is.False);
+			Assert.That(settings.Sharpness, Is.EqualTo(0.2f));
+			Assert.That(settings.AlphaTestReactiveScale, Is.EqualTo(1.0f));
+			Assert.That(settings.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
 		});
 	}
 
 	[Test]
-	public void LegacyJsonPropertiesAreIgnoredWithoutLosingFocusedSettings()
+	public void LegacyTemporalAntiAliasingJsonKeyMigratesToFsr3Settings()
 	{
 		const string json =
 			"""
 			{
 			  "TemporalAntiAliasing": {
-			    "Enabled": true,
+			    "Enabled": false,
 			    "PhaseCount": 8,
-			    "OpaqueDepthThreshold": 0.004,
-			    "LowMotionOpaqueHistoryWeight": 0.975,
-			    "StaticHistoryWeight": 0.9
+			    "EnableCasSharpen": true,
+			    "CasSharpness": 1.0,
+			    "StaticHistoryWeight": 0.97
 			  }
 			}
 			""";
@@ -53,13 +46,15 @@ public sealed class TemporalAntiAliasingTests
 			json,
 			AssetJson.SerializerOptions)!;
 
-		Assert.That(config.TemporalAntiAliasing.PhaseCount, Is.EqualTo(8));
-		Assert.That(config.TemporalAntiAliasing.StaticHistoryWeight, Is.EqualTo(0.9f));
-		Assert.That(config.TemporalAntiAliasing.MovingHistoryWeight, Is.EqualTo(0.65f));
-		// Absent clamp-relaxation keys must still default to the enabled preset rather
-		// than to zero, which would silently disable the stationary clamp expansion.
-		Assert.That(config.TemporalAntiAliasing.StaticClampExpansion, Is.EqualTo(4.0f));
-		Assert.That(config.TemporalAntiAliasing.ClampExpansionMotionPixels, Is.EqualTo(1.0f));
+		Assert.Multiple(() =>
+		{
+			Assert.That(config.Fsr3.Enabled, Is.False);
+			// Legacy sharpening fields must not silently enable the old post-tonemap CAS pass.
+			Assert.That(config.Fsr3.EnableSharpening, Is.False);
+			Assert.That(config.Fsr3.Sharpness, Is.EqualTo(0.2f));
+			Assert.That(config.Fsr3.AlphaTestReactiveScale, Is.EqualTo(1.0f));
+			Assert.That(config.Fsr3.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
+		});
 	}
 
 	[Test]
@@ -92,6 +87,21 @@ public sealed class TemporalAntiAliasingTests
 		Assert.That(
 			TemporalJitter.HasProjectionChanged(projection, changed),
 			Is.True);
+	}
+
+	[TestCase(1280, 720, 640, 360)]
+	[TestCase(1279, 719, 639, 359)]
+	[TestCase(1, 1, 1, 1)]
+	public void Fsr3ShadingChangeTargetUsesHalfRenderResolution(
+		int renderWidth,
+		int renderHeight,
+		int expectedWidth,
+		int expectedHeight)
+	{
+		var size = RenderGraphFrameBuilder.GetFsr3ShadingChangeSize(
+			new Int2(renderWidth, renderHeight));
+
+		Assert.That(size, Is.EqualTo(new Int2(expectedWidth, expectedHeight)));
 	}
 
 	[Test]

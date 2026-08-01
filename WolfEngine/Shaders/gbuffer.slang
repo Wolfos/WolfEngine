@@ -172,11 +172,14 @@ PSOutput EvaluateFragment(VSOutput input)
     float occlusion = saturate(ormSample.r);
     float roughness = saturate(ormSample.g * materialData.metallicRoughness.y);
     float metallic = saturate(ormSample.b * materialData.metallicRoughness.x);
-    float alphaTestMask = 0.0f;
+    float alphaTestReactiveMask = 0.0f;
 #ifdef WOLF_ALPHA_CLIP
-    alphaTestMask = 1.0f;
+    // Surviving fully opaque texels follow geometry motion and should accumulate normally.
+    // Only fractional coverage near a cutout edge needs reactive treatment; a binary 1 here
+    // made FSR3 discard every alpha-tested sample on every jitter phase.
+    alphaTestReactiveMask = saturate(1.0f - albedoSample.a);
 #endif
-    float4 materialParams = float4(occlusion, roughness, metallic, alphaTestMask);
+    float4 materialParams = float4(occlusion, roughness, metallic, alphaTestReactiveMask);
 
     output.albedo = materialData.baseColor * albedoSample;
     output.normal = float4(normal * 0.5f + 0.5f, 1.0f);

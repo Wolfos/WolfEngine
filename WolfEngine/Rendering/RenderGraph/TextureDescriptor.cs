@@ -41,20 +41,22 @@ public readonly struct TextureDescriptor
 public enum TextureFormat
 {
 	Unknown = 0,
-	Bgra8Unorm,
-	Rgba8Unorm,
-	Rgba8Uint,
-	R16Unorm,
-	Rg16Float,
-	Rgba16Float,
-	R32Float,
-	D32Float,
-	Bc3Unorm,
-	Bc5Unorm,
-	Bc7Unorm,
-	Astc4x4Unorm,
-	Bc1Unorm,
-	Bc4Unorm
+	Bgra8Unorm = 1,
+	Rgba8Unorm = 2,
+	Rgba8Uint = 3,
+	R16Unorm = 4,
+	Rg16Float = 5,
+	Rgba16Float = 6,
+	R32Float = 7,
+	D32Float = 8,
+	Bc3Unorm = 9,
+	Bc5Unorm = 10,
+	Bc7Unorm = 11,
+	Astc4x4Unorm = 12,
+	Bc1Unorm = 13,
+	Bc4Unorm = 14,
+	/// <summary>Single-channel 32-bit unsigned integer. Required for textures written by integer atomics.</summary>
+	R32Uint = 15
 }
 
 [Flags]

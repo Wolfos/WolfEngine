@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Rendering.Passes;
@@ -11,7 +12,10 @@ public class RenderConfig: IDataAsset
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
-	public TemporalAntiAliasingConfig TemporalAntiAliasing { get; set; } = new();
+	// Keep the serialized key for existing render-config assets while presenting the
+	// renderer that actually owns these settings in the editor.
+	[JsonPropertyName("TemporalAntiAliasing")]
+	public Fsr3UpscalerConfig Fsr3 { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
@@ -266,4 +270,33 @@ public struct TemporalAntiAliasingConfig
 	public float AlphaTestHistoryScale { get; set; } = 0.75f;
 	public bool EnableCasSharpen { get; set; } = true;
 	public float CasSharpness { get; set; } = 0.35f;
+}
+
+/// <summary>
+/// Host-side controls exposed by the FSR3 upscaler integration. History weighting,
+/// clipping, and disocclusion thresholds are owned by FSR3 itself and are intentionally
+/// not exposed as legacy TAA tuning knobs.
+/// </summary>
+public struct Fsr3UpscalerConfig
+{
+	public Fsr3UpscalerConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = true;
+
+	/// <summary>Runs FSR3's RCAS pass on the temporally reconstructed HDR image.</summary>
+	public bool EnableSharpening { get; set; } = false;
+
+	/// <summary>FSR3 dispatch sharpness in 0..1. Zero is the mildest RCAS setting.</summary>
+	public float Sharpness { get; set; } = 0.2f;
+
+	/// <summary>
+	/// Scales coverage-aware reactivity for surviving alpha-tested samples. One preserves
+	/// the authored coverage signal; zero lets FSR3 treat them as ordinary opaque pixels.
+	/// </summary>
+	public float AlphaTestReactiveScale { get; set; } = 1.0f;
+
+	/// <summary>Scales the transparent-forward composition mask supplied to FSR3.</summary>
+	public float TransparencyAndCompositionMaskScale { get; set; } = 1.0f;
 }

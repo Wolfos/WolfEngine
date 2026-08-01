@@ -32,6 +32,16 @@ internal sealed class RenderGraphPassSet
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3ClearPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3PrepareInputsPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3LumaPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3ShadingChangePyramidPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3ShadingChangePass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3PrepareReactivityPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3LumaInstabilityPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3AccumulatePass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3RcasPass = new(shaderCompiler, bindlessResourceRegistry);
+		Fsr3DebugViewPass = new(shaderCompiler, bindlessResourceRegistry);
 		TransparentForwardPass = new(shaderCompiler, bindlessResourceRegistry);
 		BloomPass = new(shaderCompiler, bindlessResourceRegistry);
 		ColorPyramidPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -60,6 +70,16 @@ internal sealed class RenderGraphPassSet
 	public ReflectionsPass ReflectionsPass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
+	public Fsr3ClearPass Fsr3ClearPass { get; }
+	public Fsr3PrepareInputsPass Fsr3PrepareInputsPass { get; }
+	public Fsr3LumaPyramidPass Fsr3LumaPyramidPass { get; }
+	public Fsr3ShadingChangePyramidPass Fsr3ShadingChangePyramidPass { get; }
+	public Fsr3ShadingChangePass Fsr3ShadingChangePass { get; }
+	public Fsr3PrepareReactivityPass Fsr3PrepareReactivityPass { get; }
+	public Fsr3LumaInstabilityPass Fsr3LumaInstabilityPass { get; }
+	public Fsr3AccumulatePass Fsr3AccumulatePass { get; }
+	public Fsr3RcasPass Fsr3RcasPass { get; }
+	public Fsr3DebugViewPass Fsr3DebugViewPass { get; }
 	public TransparentForwardPass TransparentForwardPass { get; }
 	public BloomPass BloomPass { get; }
 	public ColorPyramidPass ColorPyramidPass { get; }

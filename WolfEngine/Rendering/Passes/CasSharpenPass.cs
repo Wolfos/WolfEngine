@@ -33,16 +33,16 @@ public sealed class CasSharpenPass
 
 		var input = context.GetTexture(resources.TonemappedLinearSceneColor);
 		var output = context.GetTexture(resources.DisplayLinearSceneColor);
-		var taa = resources.Config.TemporalAntiAliasing;
-
 		return new CasSharpenPassConfig
 		{
 			Pipeline = pipeline,
 			InputHandle = _bindlessRegistry.GetTextureHandle(input),
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			RenderSize = resources.FramebufferSize,
-			SharpenEnabled = taa.Enabled && taa.EnableCasSharpen,
-			Sharpness = Math.Clamp(taa.CasSharpness, 0.0f, 1.0f)
+			// FSR3 RCAS runs before bloom/tonemapping when requested. Running this legacy
+			// post-tonemap CAS as well double-sharpens temporal noise and small details.
+			SharpenEnabled = false,
+			Sharpness = 0.0f
 		};
 	}
 
