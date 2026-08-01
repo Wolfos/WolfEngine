@@ -37,7 +37,11 @@ static const int ACCUMULAION = 3;
 
 static const FfxFloat32 fLockThreshold = 1.0f;
 static const FfxFloat32 fLockMax = 2.0f;
-static const FfxFloat32 fAverageLanczosWeightPerFrame = 0.74f;
+// Keep the 1/16 normalization from upstream's fUpsampleLanczosWeightScale. Using the
+// unscaled AverageLanczosWeightPerFrame() helper value here makes every new jittered
+// sample sixteen times too influential and prevents static detail from converging.
+static const FfxFloat32 fUpsampleLanczosWeightScale = 1.0f / 16.0f;
+static const FfxFloat32 fAverageLanczosWeightPerFrame = 0.74f * fUpsampleLanczosWeightScale;
 
 struct AccumulationPassCommonParams
 {
