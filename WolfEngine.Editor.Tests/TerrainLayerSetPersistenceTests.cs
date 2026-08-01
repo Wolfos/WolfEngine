@@ -18,6 +18,7 @@ public sealed class TerrainLayerSetPersistenceTests
 		{
 			ActiveLayerCount = 5,
 			HeightBlendSharpness = 6.5f,
+			AutoMaterialBlendDegrees = 9.5f,
 			Layer0 = new TerrainLayerDefinition
 			{
 				Name = "Grass",
@@ -50,6 +51,7 @@ public sealed class TerrainLayerSetPersistenceTests
 		Assert.That(loadResult.DataAssetType, Is.EqualTo(typeof(TerrainLayerSet)));
 		Assert.That(loaded.ActiveLayerCount, Is.EqualTo(5));
 		Assert.That(loaded.HeightBlendSharpness, Is.EqualTo(6.5f).Within(0.0001f));
+		Assert.That(loaded.AutoMaterialBlendDegrees, Is.EqualTo(9.5f).Within(0.0001f));
 		Assert.That(loaded.Layer0.Scale, Is.EqualTo(12.0f).Within(0.0001f));
 		Assert.That(loaded.Layer0.Name, Is.EqualTo("Grass"));
 		Assert.That(loaded.Layer1.Scale, Is.EqualTo(24.0f).Within(0.0001f));

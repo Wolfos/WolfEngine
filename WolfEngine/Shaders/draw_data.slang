@@ -59,11 +59,11 @@ struct GpuTerrainMaterialData
     uint layerCount;
     float heightBlendSharpness;
     float heightScale;
+    float autoMaterialBlendDegrees;
     uint pad0;
     uint pad1;
     uint pad2;
     uint pad3;
-    uint pad4;
 };
 
 struct GpuTerrainLayerData
@@ -176,10 +176,10 @@ struct GpuTerrainMaterialUpdateData
     uint32_t layerCount;
     float heightBlendSharpness;
     float heightScale;
+    float autoMaterialBlendDegrees;
     uint32_t pad0;
     uint32_t pad1;
     uint32_t pad2;
-    uint32_t pad3;
 };
 
 struct GpuTerrainLayerUpdateData

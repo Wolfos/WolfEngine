@@ -14,6 +14,10 @@ public sealed class TerrainLayerSet : IDataAsset
 	public int ActiveLayerCount { get; set; } = 2;
 	public float HeightBlendSharpness { get; set; } = 4.0f;
 
+	// Half-width, in degrees, of the slope band an automatic layer fades across. Zero restores the
+	// hard threshold switch.
+	public float AutoMaterialBlendDegrees { get; set; } = 12.0f;
+
 	[JsonInclude]
 	public List<TerrainLayerDefinition> Layers { get; set; } =
 	[

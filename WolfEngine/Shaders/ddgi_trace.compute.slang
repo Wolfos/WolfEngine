@@ -1,6 +1,7 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 import "ddgi_common.slang";
+import "terrain_layer_blend.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -42,12 +43,6 @@ struct DdgiHitSurface
     float2 uv;
     float3 albedo;
     float3 emissive;
-};
-
-struct DdgiTerrainLayerBlend
-{
-    uint4 indices;
-    float4 weights;
 };
 
 struct DdgiTerrainLayerSample
@@ -139,104 +134,6 @@ float3 DdgiComputeTerrainLocalNormal(float2 uv, GpuInstanceData instanceData, Gp
     return normalize(cross(tangentZ, tangentX));
 }
 
-void DdgiAddTerrainLayerContribution(inout uint4 indices, inout float4 weights, uint layerIndex, float contribution)
-{
-    if (contribution <= 0.0f)
-    {
-        return;
-    }
-
-    [unroll]
-    for (uint slot = 0u; slot < 4u; slot++)
-    {
-        if (weights[slot] > 0.0f && indices[slot] == layerIndex)
-        {
-            weights[slot] += contribution;
-            return;
-        }
-    }
-
-    uint minSlot = 0u;
-    float minWeight = weights.x;
-    [unroll]
-    for (uint slot = 0u; slot < 4u; slot++)
-    {
-        if (weights[slot] <= 0.0f)
-        {
-            indices[slot] = layerIndex;
-            weights[slot] = contribution;
-            return;
-        }
-        if (weights[slot] < minWeight)
-        {
-            minWeight = weights[slot];
-            minSlot = slot;
-        }
-    }
-
-    if (contribution > minWeight)
-    {
-        indices[minSlot] = layerIndex;
-        weights[minSlot] = contribution;
-    }
-}
-
-void DdgiAccumulateTerrainLayerMapTexel(
-    Texture2D<float4> indexMap,
-    Texture2D<float4> weightMap,
-    uint2 texel,
-    float bilinearWeight,
-    inout uint4 indices,
-    inout float4 weights)
-{
-    float4 indexSample = indexMap.Load(int3(texel, 0));
-    float4 weightSample = saturate(weightMap.Load(int3(texel, 0))) * bilinearWeight;
-    uint4 texelIndices = uint4(round(saturate(indexSample) * 255.0f));
-    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.x, weightSample.x);
-    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.y, weightSample.y);
-    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.z, weightSample.z);
-    DdgiAddTerrainLayerContribution(indices, weights, texelIndices.w, weightSample.w);
-}
-
-DdgiTerrainLayerBlend DdgiSampleTerrainLayerBlend(float2 uv, GpuTerrainMaterialData terrainData)
-{
-    DdgiTerrainLayerBlend blend;
-    blend.indices = uint4(0, 0, 0, 0);
-    blend.weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
-    if (terrainData.hasLayerMaps == 0)
-    {
-        return blend;
-    }
-
-    Texture2D<float4> indexMap = GetTexture(terrainData.layerIndexMapHandle);
-    uint indexWidth = 1;
-    uint indexHeight = 1;
-    indexMap.GetDimensions(indexWidth, indexHeight);
-    float2 samplePosition = saturate(uv) * float2(indexWidth, indexHeight) - 0.5f;
-    float2 basePosition = floor(samplePosition);
-    float2 fraction = saturate(samplePosition - basePosition);
-    int2 maxTexel = int2(max(indexWidth, 1u) - 1u, max(indexHeight, 1u) - 1u);
-    int2 texel00 = clamp(int2(basePosition), int2(0, 0), maxTexel);
-    int2 texel10 = clamp(texel00 + int2(1, 0), int2(0, 0), maxTexel);
-    int2 texel01 = clamp(texel00 + int2(0, 1), int2(0, 0), maxTexel);
-    int2 texel11 = clamp(texel00 + int2(1, 1), int2(0, 0), maxTexel);
-
-    blend.indices = uint4(0, 0, 0, 0);
-    blend.weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    Texture2D<float4> weightMap = GetTexture(terrainData.layerWeightMapHandle);
-    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), blend.indices, blend.weights);
-    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), blend.indices, blend.weights);
-    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, blend.indices, blend.weights);
-    DdgiAccumulateTerrainLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, blend.indices, blend.weights);
-    return blend;
-}
-
-float4 DdgiNormalizeTerrainWeights(float4 weights)
-{
-    float sum = weights.x + weights.y + weights.z + weights.w;
-    return sum > 1e-5f ? weights / sum : float4(1.0f, 0.0f, 0.0f, 0.0f);
-}
-
 float3 DdgiGetTriplanarWeights(float3 worldNormal)
 {
     float3 weights = pow(abs(normalize(worldNormal)), 4.0f);
@@ -271,10 +168,16 @@ DdgiTerrainLayerSample DdgiSampleTerrainLayer(
 
 float3 DdgiSampleTerrainAlbedo(float2 uv, float3 worldPosition, float3 worldNormal, GpuTerrainMaterialData terrainData)
 {
-    DdgiTerrainLayerBlend blend = DdgiSampleTerrainLayerBlend(uv, terrainData);
-    if (terrainData.layerCount < 4u) blend.weights.w = 0.0f;
-    if (terrainData.layerCount < 3u) blend.weights.z = 0.0f;
-    if (terrainData.layerCount < 2u) blend.weights.y = 0.0f;
+    // Resolved exactly as the g-buffer pass does, terrain normal included, so a slope that renders
+    // as cliff also bounces cliff albedo instead of whatever layer zero happens to be.
+    TerrainLayerBlend blend = SampleTerrainLayerBlend(
+        GetTexture(terrainData.layerIndexMapHandle),
+        GetTexture(terrainData.layerWeightMapHandle),
+        g_TerrainLayerTable,
+        uv,
+        worldNormal,
+        terrainData);
+    blend.weights = MaskInactiveTerrainLayers(blend.weights, terrainData.layerCount);
 
     DdgiTerrainLayerSample layerSamples[4];
     [unroll]
@@ -297,7 +200,7 @@ float3 DdgiSampleTerrainAlbedo(float2 uv, float3 worldPosition, float3 worldNorm
     biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    float4 weights = DdgiNormalizeTerrainWeights(biased);
+    float4 weights = NormalizeTerrainLayerWeights(biased);
 
     float4 albedo = layerSamples[0].albedo * weights.x +
         layerSamples[1].albedo * weights.y +

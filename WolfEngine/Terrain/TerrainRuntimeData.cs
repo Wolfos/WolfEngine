@@ -139,6 +139,7 @@ public sealed class TerrainRuntimeData
 		var layerSet = _resolvedLayerSet;
 		var layerCount = layerSet?.ResolvedLayerCount ?? 1;
 		var heightBlendSharpness = layerSet?.HeightBlendSharpness ?? 4.0f;
+		var autoMaterialBlendDegrees = layerSet?.AutoMaterialBlendDegrees ?? 12.0f;
 		var layers = ResolveLayers(layerSet);
 		for (var i = 0; i < _chunks.Count; i++)
 		{
@@ -160,6 +161,7 @@ public sealed class TerrainRuntimeData
 					_resolvedHeightScale,
 					layerCount,
 					heightBlendSharpness,
+					autoMaterialBlendDegrees,
 					layers),
 				_rayTracingChunks[i].CreateData(i)));
 		}

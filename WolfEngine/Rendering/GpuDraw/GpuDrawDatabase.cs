@@ -824,6 +824,7 @@ public sealed class GpuDrawDatabase
 		    MathF.Abs(left.HeightScale - right.HeightScale) > 0.0001f ||
 		    left.LayerCount != right.LayerCount ||
 		    MathF.Abs(left.HeightBlendSharpness - right.HeightBlendSharpness) > 0.0001f ||
+		    MathF.Abs(left.AutoMaterialBlendDegrees - right.AutoMaterialBlendDegrees) > 0.0001f ||
 		    left.Layers.Count != right.Layers.Count)
 		{
 			return false;

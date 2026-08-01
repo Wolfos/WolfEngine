@@ -1804,6 +1804,7 @@ public sealed class RayTracingSceneResourcesTests
 			heightScale: 16.0f,
 			layerCount: 1,
 			heightBlendSharpness: 4.0f,
+			autoMaterialBlendDegrees: 6.0f,
 			layers:
 			[
 				new TerrainResolvedLayer(null, null, null, null, 8.0f)

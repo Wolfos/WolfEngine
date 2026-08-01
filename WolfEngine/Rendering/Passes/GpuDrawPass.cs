@@ -306,6 +306,7 @@ public sealed class GpuDrawPass
 			uint layerStart = 0;
 			uint layerCount = 0;
 			var heightBlendSharpness = 0.0f;
+			var autoMaterialBlendDegrees = 0.0f;
 			var terrainHeightScale = 0.0f;
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
@@ -325,6 +326,7 @@ public sealed class GpuDrawPass
 				emissiveFactorIntensity = Vector4.Zero;
 				layerCount = (uint)Math.Max(pendingTerrainSurface.LayerCount, 1);
 				heightBlendSharpness = pendingTerrainSurface.HeightBlendSharpness;
+				autoMaterialBlendDegrees = pendingTerrainSurface.AutoMaterialBlendDegrees;
 				terrainHeightScale = pendingTerrainSurface.HeightScale;
 				if (pendingTerrainSurface.Heightmap is { } heightmap)
 				{
@@ -509,7 +511,8 @@ public sealed class GpuDrawPass
 						layerStart,
 						layerCount,
 						heightBlendSharpness,
-						terrainHeightScale));
+						terrainHeightScale,
+						autoMaterialBlendDegrees));
 
 
 					if (layerStart != 0)
@@ -2229,7 +2232,8 @@ public sealed class GpuDrawPass
 			0,
 			1,
 			4.0f,
-			64.0f);
+			64.0f,
+			12.0f);
 		var fallbackTerrainLayerData = new GpuTerrainLayerData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,

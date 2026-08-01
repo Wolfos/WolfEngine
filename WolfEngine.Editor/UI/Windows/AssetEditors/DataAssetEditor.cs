@@ -180,6 +180,13 @@ public sealed class DataAssetEditor
 			changed = true;
 		}
 
+		var autoMaterialBlendDegrees = layerSet.AutoMaterialBlendDegrees;
+		if (EditorUIUtility.InputFloat("Auto Material Blend (deg)", ref autoMaterialBlendDegrees))
+		{
+			layerSet.AutoMaterialBlendDegrees = Math.Max(autoMaterialBlendDegrees, 0.0f);
+			changed = true;
+		}
+
 		layerSet.EnsureLayerCapacity(activeLayerCount);
 		for (var layerIndex = 0; layerIndex < activeLayerCount; layerIndex++)
 		{

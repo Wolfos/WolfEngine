@@ -15,6 +15,7 @@ public readonly struct TerrainDrawSurface
 		float heightScale,
 		int layerCount,
 		float heightBlendSharpness,
+		float autoMaterialBlendDegrees,
 		IReadOnlyList<TerrainResolvedLayer> layers)
 	{
 		Heightmap = heightmap;
@@ -26,6 +27,7 @@ public readonly struct TerrainDrawSurface
 		HeightScale = heightScale;
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
+		AutoMaterialBlendDegrees = autoMaterialBlendDegrees;
 		Layers = layers ?? throw new ArgumentNullException(nameof(layers));
 	}
 
@@ -38,6 +40,7 @@ public readonly struct TerrainDrawSurface
 	public float HeightScale { get; }
 	public int LayerCount { get; }
 	public float HeightBlendSharpness { get; }
+	public float AutoMaterialBlendDegrees { get; }
 	public IReadOnlyList<TerrainResolvedLayer> Layers { get; }
 }
 

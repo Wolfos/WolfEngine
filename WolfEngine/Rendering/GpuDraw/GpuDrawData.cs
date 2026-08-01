@@ -108,7 +108,8 @@ public readonly struct GpuTerrainMaterialData
 		uint layerStart,
 		uint layerCount,
 		float heightBlendSharpness,
-		float heightScale)
+		float heightScale,
+		float autoMaterialBlendDegrees)
 	{
 		HeightmapHandle = heightmapHandle;
 		LayerIndexMapHandle = layerIndexMapHandle;
@@ -121,11 +122,11 @@ public readonly struct GpuTerrainMaterialData
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
 		HeightScale = heightScale;
+		AutoMaterialBlendDegrees = autoMaterialBlendDegrees;
 		_pad0 = 0;
 		_pad1 = 0;
 		_pad2 = 0;
 		_pad3 = 0;
-		_pad4 = 0;
 	}
 
 	public readonly uint HeightmapHandle;
@@ -139,11 +140,11 @@ public readonly struct GpuTerrainMaterialData
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
 	public readonly float HeightScale;
+	public readonly float AutoMaterialBlendDegrees;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
 	private readonly uint _pad3;
-	private readonly uint _pad4;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -429,7 +430,8 @@ public readonly struct GpuTerrainMaterialUpdateData
 		uint layerStart,
 		uint layerCount,
 		float heightBlendSharpness,
-		float heightScale)
+		float heightScale,
+		float autoMaterialBlendDegrees)
 	{
 		MaterialHandle = materialHandle;
 		HeightmapHandle = heightmapHandle;
@@ -443,10 +445,10 @@ public readonly struct GpuTerrainMaterialUpdateData
 		LayerCount = layerCount;
 		HeightBlendSharpness = heightBlendSharpness;
 		HeightScale = heightScale;
+		AutoMaterialBlendDegrees = autoMaterialBlendDegrees;
 		_pad0 = 0;
 		_pad1 = 0;
 		_pad2 = 0;
-		_pad3 = 0;
 	}
 
 	public readonly uint MaterialHandle;
@@ -461,10 +463,10 @@ public readonly struct GpuTerrainMaterialUpdateData
 	public readonly uint LayerCount;
 	public readonly float HeightBlendSharpness;
 	public readonly float HeightScale;
+	public readonly float AutoMaterialBlendDegrees;
 	private readonly uint _pad0;
 	private readonly uint _pad1;
 	private readonly uint _pad2;
-	private readonly uint _pad3;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -605,7 +605,7 @@ public sealed class FrameSnapshotGpuDrawTests
 		};
 	}
 
-	private static TerrainDrawSurface CreateTerrainSurface(float heightBlendSharpness = 4.0f)
+	private static TerrainDrawSurface CreateTerrainSurface(float heightBlendSharpness = 4.0f, float autoMaterialBlendDegrees = 6.0f)
 	{
 		return new TerrainDrawSurface(
 			heightmap: null,
@@ -614,6 +614,7 @@ public sealed class FrameSnapshotGpuDrawTests
 			heightScale: 16.0f,
 			layerCount: 1,
 			heightBlendSharpness: heightBlendSharpness,
+			autoMaterialBlendDegrees: autoMaterialBlendDegrees,
 			layers:
 			[
 				new TerrainResolvedLayer(null, null, null, null, 8.0f)

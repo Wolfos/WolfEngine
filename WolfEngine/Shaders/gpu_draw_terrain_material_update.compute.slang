@@ -53,6 +53,7 @@ void CSUpdateTerrainMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     terrainData.layerCount = update.layerCount;
     terrainData.heightBlendSharpness = update.heightBlendSharpness;
     terrainData.heightScale = update.heightScale;
+    terrainData.autoMaterialBlendDegrees = update.autoMaterialBlendDegrees;
     g_TerrainMaterialTable[materialIndex] = terrainData;
     g_MaterialGenerations[materialIndex] = materialGeneration;
 }

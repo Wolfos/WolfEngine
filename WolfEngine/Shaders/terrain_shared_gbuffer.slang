@@ -2,6 +2,7 @@
 import "common_bindless.slang";
 import "draw_data.slang";
 import "normal_decode.slang";
+import "terrain_layer_blend.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -233,228 +234,6 @@ uint ResolveMaterialIndex(uint materialHandle)
     return 0;
 }
 
-struct TerrainLayerBlend
-{
-    uint4 indices;
-    float4 weights;
-};
-
-void AddLayerContribution(inout uint4 indices, inout float4 weights, uint layerIndex, float contribution)
-{
-    if (contribution <= 0.0f)
-    {
-        return;
-    }
-
-    if (weights.x > 0.0f && indices.x == layerIndex)
-    {
-        weights.x += contribution;
-        return;
-    }
-
-    if (weights.y > 0.0f && indices.y == layerIndex)
-    {
-        weights.y += contribution;
-        return;
-    }
-
-    if (weights.z > 0.0f && indices.z == layerIndex)
-    {
-        weights.z += contribution;
-        return;
-    }
-
-    if (weights.w > 0.0f && indices.w == layerIndex)
-    {
-        weights.w += contribution;
-        return;
-    }
-
-    if (weights.x <= 0.0f)
-    {
-        indices.x = layerIndex;
-        weights.x = contribution;
-        return;
-    }
-
-    if (weights.y <= 0.0f)
-    {
-        indices.y = layerIndex;
-        weights.y = contribution;
-        return;
-    }
-
-    if (weights.z <= 0.0f)
-    {
-        indices.z = layerIndex;
-        weights.z = contribution;
-        return;
-    }
-
-    if (weights.w <= 0.0f)
-    {
-        indices.w = layerIndex;
-        weights.w = contribution;
-        return;
-    }
-
-    float minWeight = weights.x;
-    uint minSlot = 0;
-    if (weights.y < minWeight)
-    {
-        minWeight = weights.y;
-        minSlot = 1;
-    }
-
-    if (weights.z < minWeight)
-    {
-        minWeight = weights.z;
-        minSlot = 2;
-    }
-
-    if (weights.w < minWeight)
-    {
-        minWeight = weights.w;
-        minSlot = 3;
-    }
-
-    if (contribution <= minWeight)
-    {
-        return;
-    }
-
-    if (minSlot == 0)
-    {
-        indices.x = layerIndex;
-        weights.x = contribution;
-    }
-    else if (minSlot == 1)
-    {
-        indices.y = layerIndex;
-        weights.y = contribution;
-    }
-    else if (minSlot == 2)
-    {
-        indices.z = layerIndex;
-        weights.z = contribution;
-    }
-    else
-    {
-        indices.w = layerIndex;
-        weights.w = contribution;
-    }
-}
-
-void AccumulateLayerMapTexel(
-    Texture2D<float4> indexMap,
-    Texture2D<float4> weightMap,
-    uint2 texel,
-    float bilinearWeight,
-    float3 terrainNormal,
-    GpuTerrainMaterialData terrainData,
-    inout uint4 indices,
-    inout float4 weights)
-{
-    float4 indexSample = indexMap.Load(int3(texel, 0));
-    float4 weightSample = saturate(weightMap.Load(int3(texel, 0))) * bilinearWeight;
-    uint4 texelIndices = uint4(round(saturate(indexSample) * 255.0f));
-    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.x, terrainNormal, terrainData), weightSample.x);
-    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.y, terrainNormal, terrainData), weightSample.y);
-    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.z, terrainNormal, terrainData), weightSample.z);
-    AddLayerContribution(indices, weights, ResolveTerrainLayerIndex(texelIndices.w, terrainNormal, terrainData), weightSample.w);
-}
-
-uint ResolveTerrainLayerIndex(uint storedIndex, float3 terrainNormal, GpuTerrainMaterialData terrainData)
-{
-    uint layerCount = max(terrainData.layerCount, 1u);
-    if (storedIndex != 0u)
-    {
-        return min(storedIndex - 1u, layerCount - 1u);
-    }
-
-    float slopeDegrees = degrees(acos(saturate(normalize(terrainNormal).y)));
-    uint selectedLayer = 0u;
-    float selectedMinimumSlope = -1.0f;
-    [unroll]
-    for (uint layerIndex = 0u; layerIndex < 4u; layerIndex++)
-    {
-        if (layerIndex >= layerCount)
-        {
-            break;
-        }
-
-        GpuTerrainLayerData layer = g_TerrainLayerTable[terrainData.layerStart + layerIndex];
-        if (layer.autoMaterial == 0u)
-        {
-            continue;
-        }
-
-        float minimumSlope = layer.useMinimumSlope != 0u ? clamp(layer.minimumSlopeDegrees, 0.0f, 90.0f) : 0.0f;
-        if (slopeDegrees >= minimumSlope && minimumSlope > selectedMinimumSlope)
-        {
-            selectedLayer = layerIndex;
-            selectedMinimumSlope = minimumSlope;
-        }
-    }
-
-    return selectedLayer;
-}
-
-TerrainLayerBlend SampleTerrainLayerBlend(float2 uv, float3 terrainNormal, GpuTerrainMaterialData terrainData)
-{
-    TerrainLayerBlend blend;
-    blend.indices = uint4(0, 0, 0, 0);
-    blend.weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
-
-    if (terrainData.hasLayerMaps == 0)
-    {
-		blend.indices.x = ResolveTerrainLayerIndex(0u, terrainNormal, terrainData);
-        return blend;
-    }
-
-    Texture2D<float4> indexMap = GetTexture(terrainData.layerIndexMapHandle);
-    uint indexWidth = 1;
-    uint indexHeight = 1;
-    indexMap.GetDimensions(indexWidth, indexHeight);
-    float2 samplePosition = saturate(uv) * float2(indexWidth, indexHeight) - 0.5f;
-    float2 basePosition = floor(samplePosition);
-    float2 fraction = saturate(samplePosition - basePosition);
-    int2 maxTexel = int2(max(indexWidth, 1u) - 1u, max(indexHeight, 1u) - 1u);
-    int2 texel00 = clamp(int2(basePosition), int2(0, 0), maxTexel);
-    int2 texel10 = clamp(texel00 + int2(1, 0), int2(0, 0), maxTexel);
-    int2 texel01 = clamp(texel00 + int2(0, 1), int2(0, 0), maxTexel);
-    int2 texel11 = clamp(texel00 + int2(1, 1), int2(0, 0), maxTexel);
-
-    blend.indices = uint4(0, 0, 0, 0);
-    blend.weights = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    Texture2D<float4> weightMap = GetTexture(terrainData.layerWeightMapHandle);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel00), (1.0f - fraction.x) * (1.0f - fraction.y), terrainNormal, terrainData, blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel10), fraction.x * (1.0f - fraction.y), terrainNormal, terrainData, blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel01), (1.0f - fraction.x) * fraction.y, terrainNormal, terrainData, blend.indices, blend.weights);
-    AccumulateLayerMapTexel(indexMap, weightMap, uint2(texel11), fraction.x * fraction.y, terrainNormal, terrainData, blend.indices, blend.weights);
-    return blend;
-}
-
-float4 NormalizeWeights(float4 weights)
-{
-    float sum = weights.x + weights.y + weights.z + weights.w;
-    if (sum <= 1e-5f)
-    {
-        return float4(1.0f, 0.0f, 0.0f, 0.0f);
-    }
-
-    return weights / sum;
-}
-
-float4 MaskInactiveLayers(float4 weights, uint activeLayerCount)
-{
-    float4 masked = weights;
-    if (activeLayerCount < 4) masked.w = 0.0f;
-    if (activeLayerCount < 3) masked.z = 0.0f;
-    if (activeLayerCount < 2) masked.y = 0.0f;
-    return masked;
-}
-
 float3 GetTriplanarWeights(float3 worldNormal)
 {
     float3 weights = pow(abs(normalize(worldNormal)), 4.0f);
@@ -561,8 +340,14 @@ PSOutput fragmentShader(VSOutput input)
     uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
     GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
 
-    TerrainLayerBlend blend = SampleTerrainLayerBlend(input.uv, input.normal, terrainData);
-    blend.weights = MaskInactiveLayers(blend.weights, terrainData.layerCount);
+    TerrainLayerBlend blend = SampleTerrainLayerBlend(
+        GetTexture(terrainData.layerIndexMapHandle),
+        GetTexture(terrainData.layerWeightMapHandle),
+        g_TerrainLayerTable,
+        input.uv,
+        input.normal,
+        terrainData);
+    blend.weights = MaskInactiveTerrainLayers(blend.weights, terrainData.layerCount);
     LayerSample layerSamples[4];
     [unroll]
     for (uint i = 0; i < 4; i++)
@@ -595,7 +380,7 @@ PSOutput fragmentShader(VSOutput input)
     biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
     biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    float4 weights = NormalizeWeights(biased);
+    float4 weights = NormalizeTerrainLayerWeights(biased);
 
     float4 albedo = layerSamples[0].albedo * weights.x +
                     layerSamples[1].albedo * weights.y +
