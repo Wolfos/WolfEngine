@@ -24,7 +24,7 @@ internal static class ProjectTypeStateTransferUtility
 		{
 			if (field.IsInitOnly ||
 			    Attribute.IsDefined(field, typeof(NotSerializedAttribute)) ||
-			    data.TryGetProperty(field.Name, out var fieldData) == false)
+			    data.TryGetProperty(GetSerializedName(field), out var fieldData) == false)
 			{
 				continue;
 			}
@@ -45,7 +45,7 @@ internal static class ProjectTypeStateTransferUtility
 			    property.GetIndexParameters().Length != 0 ||
 			    property.SetMethod?.IsPublic != true ||
 			    Attribute.IsDefined(property, typeof(NotSerializedAttribute)) ||
-			    data.TryGetProperty(property.Name, out var propertyData) == false)
+			    data.TryGetProperty(GetSerializedName(property), out var propertyData) == false)
 			{
 				continue;
 			}
@@ -67,6 +67,9 @@ internal static class ProjectTypeStateTransferUtility
 
 		return value;
 	}
+
+	private static string GetSerializedName(MemberInfo member) =>
+		member.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? member.Name;
 
 	public static object DeserializeWithFieldMerge(JsonElement data, Type targetType, Func<Guid, Entity?> entityResolver)
 	{

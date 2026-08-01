@@ -1562,7 +1562,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[3];
+		var ranges = stackalloc DescriptorRange[5];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1579,7 +1579,28 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			RegisterSpace = 1,
 			OffsetInDescriptorsFromTableStart = 0
 		};
+		// ranges[2] and ranges[3] alias ranges[1]: the same UAV descriptors seen as
+		// RWTexture2D<uint> (integer atomics, which a float-typed UAV cannot express) and as
+		// globallycoherent RWTexture2D<float4> (cross-thread-group visibility). Legal because
+		// all three start at the same offset in the table. They must stay adjacent to
+		// ranges[1] - the UAV root parameter points at the run of three.
 		ranges[2] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 2,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[3] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 3,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[4] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
@@ -1596,13 +1617,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[1];
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[4];
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
@@ -1732,7 +1753,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[3];
+		var ranges = stackalloc DescriptorRange[5];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1749,7 +1770,28 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			RegisterSpace = 1,
 			OffsetInDescriptorsFromTableStart = 0
 		};
+		// ranges[2] and ranges[3] alias ranges[1]: the same UAV descriptors seen as
+		// RWTexture2D<uint> (integer atomics, which a float-typed UAV cannot express) and as
+		// globallycoherent RWTexture2D<float4> (cross-thread-group visibility). Legal because
+		// all three start at the same offset in the table. They must stay adjacent to
+		// ranges[1] - the UAV root parameter points at the run of three.
 		ranges[2] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 2,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[3] = new DescriptorRange
+		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 3,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[4] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
@@ -1766,13 +1808,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[1];
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[4];
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
@@ -2059,6 +2101,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		TextureFormat.Rg16Float => Format.FormatR16G16Float,
 		TextureFormat.Rgba16Float => Format.FormatR16G16B16A16Float,
 		TextureFormat.R32Float => Format.FormatR32Float,
+		TextureFormat.R32Uint => Format.FormatR32Uint,
 		TextureFormat.D32Float => Format.FormatD32Float,
 		TextureFormat.Bc1Unorm => isSrgb ? Format.FormatBC1UnormSrgb : Format.FormatBC1Unorm,
 		TextureFormat.Bc3Unorm => isSrgb ? Format.FormatBC3UnormSrgb : Format.FormatBC3Unorm,

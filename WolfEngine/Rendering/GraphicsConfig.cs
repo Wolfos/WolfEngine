@@ -90,6 +90,13 @@ public static class GraphicsConfig
 		ParsePositiveIntEnvironmentVariable("WOLF_GPU_HARDENING_LOG_INTERVAL", 0);
 
 	/// <summary>
+	/// Replace the reconstructed FSR3 output with its diagnostic mosaic. This is intended for
+	/// unattended visual captures of motion vectors, locks, depth, and reactive masks.
+	/// </summary>
+	public static bool Fsr3DebugViewEnabled { get; set; } =
+		string.Equals(Environment.GetEnvironmentVariable("WOLF_FSR3_DEBUG_VIEW"), "1", StringComparison.Ordinal);
+
+	/// <summary>
 	/// A capture tool injects its own module into the process, so a loaded module handle is enough to know
 	/// markers will actually be read by something.
 	/// </summary>

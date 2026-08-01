@@ -46,6 +46,7 @@ public struct TransparentForwardPassConfig
 	public required int FramebufferHeight { get; init; }
 
 	public required IGfxTexture LightingTarget { get; init; }
+	public required IGfxTexture ReactiveMaskTarget { get; init; }
 	public required IGfxTexture DepthTarget { get; init; }
 	public required IGfxTexture ShadowMapDepth0 { get; init; }
 	public required IGfxTexture ShadowMapDepth1 { get; init; }

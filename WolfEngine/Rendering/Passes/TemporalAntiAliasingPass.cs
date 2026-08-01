@@ -78,7 +78,9 @@ public sealed class TemporalAntiAliasingPass
 			CurrentProjectionZScale = context.SceneData.UnjitteredProjection.M43,
 			PreviousProjectionZBias = context.SceneData.PreviousProjection.M33,
 			PreviousProjectionZScale = context.SceneData.PreviousProjection.M43,
-			Settings = resources.Config.TemporalAntiAliasing,
+			// The legacy resolver is retained for shader/reference coverage but is no longer
+			// selected by the render graph. Its old tuning block must not leak into FSR3.
+			Settings = new TemporalAntiAliasingConfig(),
 			HistoryValid = historyValid,
 			ResetHistory = resetHistory || inverseUnjitteredViewProjectionValid == false
 		};

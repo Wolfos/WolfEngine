@@ -145,11 +145,25 @@ VSOutput vertexShader(VSInput input)
     return output;
 }
 
-float4 fragmentShader(VSOutput input) : SV_Target0
+struct TransparentOutput
+{
+    float4 color : SV_Target0;
+    float4 reactive : SV_Target1;
+};
+
+TransparentOutput MakeTransparentOutput(float4 color)
+{
+    TransparentOutput output;
+    output.color = color;
+    output.reactive = float4(1.0f, 1.0f, 1.0f, color.a);
+    return output;
+}
+
+TransparentOutput fragmentShader(VSOutput input)
 {
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
-        return float4(1.0f, 0.0f, 1.0f, 1.0f);
+        return MakeTransparentOutput(float4(1.0f, 0.0f, 1.0f, 1.0f));
     }
 
     GpuInstanceData instanceData = g_InstanceTable[input.instanceId];
@@ -169,7 +183,7 @@ float4 fragmentShader(VSOutput input) : SV_Target0
     float4 baseColor = g_MaterialTable[materialIndex].baseColor;
     if (input.isDdgiProbe == 0u)
     {
-        return baseColor;
+        return MakeTransparentOutput(baseColor);
     }
 
     float3 stateColor =
@@ -177,5 +191,5 @@ float4 fragmentShader(VSOutput input) : SV_Target0
         input.ddgiProbeState == 2u ? float3(1.0f, 0.75f, 0.1f) :
         input.ddgiProbeState == 3u ? float3(1.0f, 0.1f, 0.1f) :
         float3(0.35f, 0.35f, 0.35f);
-    return float4(baseColor.rgb * stateColor, baseColor.a);
+    return MakeTransparentOutput(float4(baseColor.rgb * stateColor, baseColor.a));
 }

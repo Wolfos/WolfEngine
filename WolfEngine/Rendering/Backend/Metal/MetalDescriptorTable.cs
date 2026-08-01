@@ -13,6 +13,12 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
 	private const int MaxUavDescriptors = 16384;
+
+	/// <summary>
+	/// Number of typed views declared over the UAV descriptors in DescriptorHeapRWTextures
+	/// (float4, uint, globallycoherent float4). Must match common_bindless.slang.
+	/// </summary>
+	private const int RwTextureViewCount = 3;
 	private const ulong MinimumArgumentBufferCapacityBytes = 1024UL * 1024UL;
 	internal const int BindlessArgumentBufferIndexCounts = 27;
 	internal const int BindlessArgumentBufferIndexTextures = 28;
@@ -549,6 +555,19 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		_singleTexture[0] = texture;
 		_rwTextureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)index, length = 1 });
+
+		// common_bindless.slang declares three arrays in the RW argument buffer over the same
+		// descriptors, in this order: RWTexture2D<float4>, RWTexture2D<uint> (for the integer
+		// atomics a float-typed UAV cannot express), and globallycoherent RWTexture2D<float4>
+		// (for cross-thread-group visibility). Slang lays them out back to back, so the alias
+		// for descriptor `index` in view n lives at n * MaxUavDescriptors + index. Every slot
+		// is written because the shader picks the view, not the encoder.
+		for (var view = 1; view < RwTextureViewCount; view++)
+		{
+			_rwTextureEncoder.SetTextures(
+				_singleTexture,
+				new NSRange { location = (ulong)(view * MaxUavDescriptors + index), length = 1 });
+		}
 	}
 
 	private void EncodeSampler(int index)

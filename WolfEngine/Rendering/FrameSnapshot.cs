@@ -93,7 +93,7 @@ public sealed class FrameSnapshot
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
 		Config.ShadowMaps = config.ShadowMaps;
 		Config.SkyboxConfig = config.SkyboxConfig;
-		Config.TemporalAntiAliasing = config.TemporalAntiAliasing;
+		Config.Fsr3 = config.Fsr3;
 		Config.Tonemapping = config.Tonemapping;
 		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;
