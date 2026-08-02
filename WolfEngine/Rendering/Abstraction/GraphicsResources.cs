@@ -40,26 +40,60 @@ public interface IGfxPipeline : IGfxResource
 	PipelineKey Key { get; }
 }
 
+/// <summary>
+/// How a backend compacts an indirect command buffer down to the draws culling left visible, which
+/// is what lets execution stop scaling with the size of the scene rather than with what survived.
+/// </summary>
+public enum IndirectCompactionKind
+{
+	/// <summary>The backend cannot compact, so the caller executes the full command range instead.</summary>
+	None,
+
+	/// <summary>
+	/// Commands are plain records in a buffer, so a shared compute kernel copies the surviving records
+	/// from <see cref="IGfxIndirectCommandBuffer.TemplateRecordBuffer"/> into
+	/// <see cref="IGfxIndirectCommandBuffer.CompactedRecordBuffer"/>.
+	/// </summary>
+	CommandRecords,
+
+	/// <summary>
+	/// Commands are opaque objects that no shader can copy as memory, so the backend records the
+	/// compaction itself through <see cref="IGfxCommandList.RecordNativeIndirectCompaction"/>.
+	/// </summary>
+	NativeCommands
+}
+
+/// <summary>
+/// Layout of the entries compaction writes and the following execute reads: <c>{ location, length }</c>,
+/// which is an execution range Metal consumes whole. Compaction always emits from index zero, so
+/// location stays zero and backends that want only a count read the length field.
+/// </summary>
+public static class IndirectCompactionExecutionRange
+{
+	public const int StrideInBytes = 2 * sizeof(uint);
+
+	public const int LengthOffsetInBytes = sizeof(uint);
+}
+
 public interface IGfxIndirectCommandBuffer : IGfxResource
 {
 	IndirectCommandBufferDescriptor Descriptor { get; }
 
 	/// <summary>
-	/// True when the backend can execute a GPU-compacted subset of this buffer's commands, which lets
-	/// culling remove commands instead of leaving the command processor to walk every draw slot.
-	/// Backends that report false are executed through the full command range instead.
+	/// How this buffer's commands can be compacted, or <see cref="IndirectCompactionKind.None"/> when
+	/// the backend cannot, in which case it is executed through its full command range instead.
 	/// </summary>
-	bool SupportsGpuCompaction => false;
+	IndirectCompactionKind CompactionKind => IndirectCompactionKind.None;
 
 	/// <summary>
 	/// The CPU-encoded command records, readable by a compute shader as the compaction source.
-	/// Null when <see cref="SupportsGpuCompaction"/> is false.
+	/// Null unless <see cref="CompactionKind"/> is <see cref="IndirectCompactionKind.CommandRecords"/>.
 	/// </summary>
 	IGfxBuffer? TemplateRecordBuffer => null;
 
 	/// <summary>
 	/// The dense command records written by compaction and consumed by the following ExecuteIndirect.
-	/// Null when <see cref="SupportsGpuCompaction"/> is false.
+	/// Null unless <see cref="CompactionKind"/> is <see cref="IndirectCompactionKind.CommandRecords"/>.
 	/// </summary>
 	IGfxBuffer? CompactedRecordBuffer => null;
 

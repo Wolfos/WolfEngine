@@ -152,7 +152,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 
 	internal ID3D12Resource* ArgumentBuffer => _argumentBuffer.Handle;
 
-	public bool SupportsGpuCompaction => _compactedBuffer is not null;
+	public IndirectCompactionKind CompactionKind =>
+		_compactedBuffer is null ? IndirectCompactionKind.None : IndirectCompactionKind.CommandRecords;
 
 	public IGfxBuffer? TemplateRecordBuffer => _templateView;
 

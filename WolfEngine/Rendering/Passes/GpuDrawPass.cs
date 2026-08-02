@@ -41,6 +41,7 @@ public sealed class GpuDrawPass
 	private ComputeThreadGroupSize? _terrainLayerUpdateThreadGroupSize;
 	private ComputeThreadGroupSize? _cullThreadGroupSize;
 	private ComputeThreadGroupSize? _compactThreadGroupSize;
+	private uint[]? _executionRangeReset;
 	private ComputeResourceBindings? _terrainMaterialUpdateBindings;
 	private ComputeResourceBindings? _terrainLayerUpdateBindings;
 	private ShaderPropertyWriter? _instanceUpdateParamsWriter;
@@ -1095,7 +1096,7 @@ public sealed class GpuDrawPass
 		ArgumentNullException.ThrowIfNull(laneAvailable);
 
 		if (drawArgsBuffer is null ||
-		    _gpuDrawResources.DrawCommandBuffer is null ||
+		    _gpuDrawResources.DrawCommandBuffer is not { } drawCommandBuffer ||
 		    _supportsIndirectStructuralUpdates == false)
 		{
 			return false;
@@ -1103,37 +1104,46 @@ public sealed class GpuDrawPass
 
 		var device = _renderer.GetGfxDevice();
 		commandSet.EnsureCreated(device);
-		var countBuffer = commandSet.CompactedCommandCountBuffer;
-		if (countBuffer is null)
+		var executionRangeBuffer = commandSet.CompactedExecutionRangeBuffer;
+		if (executionRangeBuffer is null)
 		{
 			return false;
 		}
 
 		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(participation);
-		if (SupportsCompaction(commandSet, activeSlot, laneDefinitions, laneAvailable) == false)
+		if (ResolveCompactionKind(commandSet, activeSlot, laneDefinitions, laneAvailable) is not { } compactionKind)
+		{
+			// Nothing has been encoded for this pass yet, so there is nothing to compact and nothing to
+			// say about it. Executing the empty full range costs the same as executing an empty compaction.
+			return false;
+		}
+
+		if (compactionKind == IndirectCompactionKind.None)
 		{
 			LogCompactionUnavailableOnce(participation);
 			return false;
 		}
 
-		// Zeroing through the CPU-writable path stages an upload copy, and that copy's transition back
-		// to UnorderedAccess is what orders the reset ahead of the compaction dispatch below.
-		Span<uint> resetCounts = stackalloc uint[SharedDrawIndirectCommandSet.CompactedCommandCountEntryCount];
-		resetCounts.Clear();
-		WriteBuffer<uint>(countBuffer, resetCounts, "SharedDrawCompactedCommandCounts");
-
-		var pipeline = EnsureCompactPipeline(device);
 		var commandList = context.CommandList;
 		using (FrameProfiler.Instance.Measure("GpuDraw.Compact"))
 		{
-			commandList.BindPipeline(pipeline);
-			var compactParamsWriter = _compactParamsWriter
-			                          ?? throw new InvalidOperationException(
-				                          "GpuDraw compaction reflection writer was not initialized.");
-			var threadGroupSize = _compactThreadGroupSize
-			                      ?? throw new InvalidOperationException(
-				                      "GpuDraw compaction threadgroup size was not initialized.");
+			// Both resets leave every range's location field at the zero compaction emits from, and both
+			// have to land ahead of the dispatches below. The record-copy path gets that from the upload
+			// copy its CPU write stages, whose transition back to UnorderedAccess orders it; the native
+			// path has no such copy, so the backend clears the table on the GPU timeline instead.
+			if (compactionKind == IndirectCompactionKind.CommandRecords)
+			{
+				WriteBuffer<uint>(
+					executionRangeBuffer,
+					RentExecutionRangeReset(),
+					"SharedDrawCompactedExecutionRanges");
+				commandList.BindPipeline(EnsureCompactPipeline(device));
+			}
+			else
+			{
+				commandList.ResetNativeIndirectCompactionRanges(executionRangeBuffer);
+			}
 
 			for (var i = 0; i < laneDefinitions.Length; i++)
 			{
@@ -1152,41 +1162,29 @@ public sealed class GpuDrawPass
 						continue;
 					}
 
-					var templateBuffer = page.CommandBuffer.TemplateRecordBuffer;
-					var compactedBuffer = page.CommandBuffer.CompactedRecordBuffer;
-					if (templateBuffer is null || compactedBuffer is null)
-					{
-						continue;
-					}
-
-					var countIndex = SharedDrawIndirectCommandSet.GetCompactedCommandCountIndex(
+					var rangeIndex = SharedDrawIndirectCommandSet.GetCompactedExecutionRangeIndex(
 						activeSlot,
 						lane.ExecutionIndex,
 						page.PageIndex);
-
-					compactParamsWriter.Clear();
-					compactParamsWriter.SetUInt("pageStartCommandIndex", page.PageStartCommandIndex);
-					compactParamsWriter.SetUInt("pageCommandCapacity", page.PageCommandCapacity);
-					compactParamsWriter.SetUInt("laneIndex", (uint)lane.ExecutionIndex);
-					compactParamsWriter.SetUInt("countIndex", (uint)countIndex);
-					compactParamsWriter.SetUInt("recordStrideUints", page.CommandBuffer.RecordStrideInBytes / sizeof(uint));
-					compactParamsWriter.SetUInt(
-						"recordIndexCountUintOffset",
-						page.CommandBuffer.RecordIndexCountOffsetInBytes / sizeof(uint));
-					compactParamsWriter.SetUInt(
-						"activeDrawCommandUpperBound",
+					var request = new NativeIndirectCompactionRequest(
+						page.CommandBuffer,
+						executionRangeBuffer,
+						(uint)rangeIndex,
+						drawArgsBuffer,
+						drawArgsBaseOffsetBytes,
+						drawCommandBuffer,
+						page.PageStartCommandIndex,
+						page.PageCommandCapacity,
+						(uint)lane.ExecutionIndex,
 						_gpuDrawResources.ActiveDrawCommandUpperBound);
-					commandList.SetComputeConstants(compactParamsWriter.RegisterIndex, compactParamsWriter.AsBytes());
 
-					commandList.SetComputeBuffer(0, compactedBuffer);
-					commandList.SetComputeBuffer(1, countBuffer);
-					commandList.SetComputeReadOnlyBuffer(2, templateBuffer);
-					commandList.SetComputeReadOnlyBuffer(3, drawArgsBuffer, drawArgsBaseOffsetBytes);
-					commandList.SetComputeReadOnlyBuffer(4, _gpuDrawResources.DrawCommandBuffer);
+					if (compactionKind == IndirectCompactionKind.NativeCommands)
+					{
+						commandList.RecordNativeIndirectCompaction(request);
+						continue;
+					}
 
-					var (groupCountX, groupCountY, groupCountZ) =
-						threadGroupSize.GetDispatchGroupCount(page.PageCommandCapacity);
-					commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+					RecordRecordCopyCompaction(commandList, in request);
 				}
 			}
 		}
@@ -1195,15 +1193,81 @@ public sealed class GpuDrawPass
 	}
 
 	/// <summary>
-	/// Compaction is all-or-nothing per command set: a lane left on the full-range path would execute
-	/// stale records that the count buffer no longer describes.
+	/// Dispatches the shared kernel that copies a page's surviving command records into its dense list.
 	/// </summary>
-	private static bool SupportsCompaction(
+	private void RecordRecordCopyCompaction(IGfxCommandList commandList, in NativeIndirectCompactionRequest request)
+	{
+		var templateBuffer = request.CommandBuffer.TemplateRecordBuffer;
+		var compactedBuffer = request.CommandBuffer.CompactedRecordBuffer;
+		if (templateBuffer is null || compactedBuffer is null)
+		{
+			return;
+		}
+
+		var compactParamsWriter = _compactParamsWriter
+		                          ?? throw new InvalidOperationException(
+			                          "GpuDraw compaction reflection writer was not initialized.");
+		var threadGroupSize = _compactThreadGroupSize
+		                      ?? throw new InvalidOperationException(
+			                      "GpuDraw compaction threadgroup size was not initialized.");
+
+		compactParamsWriter.Clear();
+		compactParamsWriter.SetUInt("pageStartCommandIndex", request.PageStartCommandIndex);
+		compactParamsWriter.SetUInt("pageCommandCapacity", request.PageCommandCapacity);
+		compactParamsWriter.SetUInt("laneIndex", request.LaneIndex);
+		compactParamsWriter.SetUInt("executionRangeIndex", request.ExecutionRangeIndex);
+		compactParamsWriter.SetUInt("recordStrideUints", request.CommandBuffer.RecordStrideInBytes / sizeof(uint));
+		compactParamsWriter.SetUInt(
+			"recordIndexCountUintOffset",
+			request.CommandBuffer.RecordIndexCountOffsetInBytes / sizeof(uint));
+		compactParamsWriter.SetUInt("activeDrawCommandUpperBound", request.ActiveDrawCommandUpperBound);
+		commandList.SetComputeConstants(compactParamsWriter.RegisterIndex, compactParamsWriter.AsBytes());
+
+		commandList.SetComputeBuffer(0, compactedBuffer);
+		commandList.SetComputeBuffer(1, request.ExecutionRangeBuffer);
+		commandList.SetComputeReadOnlyBuffer(2, templateBuffer);
+		commandList.SetComputeReadOnlyBuffer(3, request.DrawArgsBuffer, request.DrawArgsBaseOffsetBytes);
+		commandList.SetComputeReadOnlyBuffer(4, request.DrawCommandBuffer);
+
+		var (groupCountX, groupCountY, groupCountZ) =
+			threadGroupSize.GetDispatchGroupCount(request.PageCommandCapacity);
+		commandList.Dispatch(groupCountX, groupCountY, groupCountZ);
+	}
+
+	/// <summary>
+	/// The zeroed range table, kept as a field because it is sized by the lane and page counts and would
+	/// otherwise be a multi-kilobyte stack allocation on every compacting pass.
+	/// </summary>
+	private uint[] RentExecutionRangeReset()
+	{
+		var length = SharedDrawIndirectCommandSet.CompactedExecutionRangeEntryCount *
+		             (IndirectCompactionExecutionRange.StrideInBytes / sizeof(uint));
+		if (_executionRangeReset is null || _executionRangeReset.Length != length)
+		{
+			_executionRangeReset = new uint[length];
+			return _executionRangeReset;
+		}
+
+		Array.Clear(_executionRangeReset);
+		return _executionRangeReset;
+	}
+
+	/// <summary>
+	/// Compaction is all-or-nothing per command set: a lane left on the full-range path would execute
+	/// stale commands that the range table no longer describes. Pages also have to agree on how they
+	/// compact, since one dispatch shape has to cover the whole set.
+	/// </summary>
+	/// <returns>
+	/// Null when the set has no pages to compact, which is not a backend limitation and must not be
+	/// reported as one.
+	/// </returns>
+	private static IndirectCompactionKind? ResolveCompactionKind(
 		SharedDrawIndirectCommandSet commandSet,
 		int activeSlot,
 		ReadOnlySpan<GpuDrawExecutionLaneDefinition> laneDefinitions,
 		Func<GpuDrawExecutionLaneDefinition, bool> laneAvailable)
 	{
+		var resolved = (IndirectCompactionKind?)null;
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var lane = laneDefinitions[i];
@@ -1215,14 +1279,17 @@ public sealed class GpuDrawPass
 			var pages = commandSet.GetAllocatedPages(activeSlot, lane.ExecutionIndex);
 			for (var pageIndex = 0; pageIndex < pages.Length; pageIndex++)
 			{
-				if (pages[pageIndex].CommandBuffer.SupportsGpuCompaction == false)
+				var kind = pages[pageIndex].CommandBuffer.CompactionKind;
+				if (kind == IndirectCompactionKind.None || (resolved is { } previous && previous != kind))
 				{
-					return false;
+					return IndirectCompactionKind.None;
 				}
+
+				resolved = kind;
 			}
 		}
 
-		return true;
+		return resolved;
 	}
 
 	private IGfxPipeline EnsureCompactPipeline(IGfxDevice device)
@@ -1573,8 +1640,8 @@ public sealed class GpuDrawPass
 	/// Count buffer for the GBuffer command set when compaction ran this frame, otherwise null so the
 	/// pass falls back to executing its full command range.
 	/// </summary>
-	public IGfxBuffer? GBufferCompactedCommandCountBuffer =>
-		_gbufferCompactionActive ? _gbufferIndirectCommandSet.CompactedCommandCountBuffer : null;
+	public IGfxBuffer? GBufferCompactedExecutionRangeBuffer =>
+		_gbufferCompactionActive ? _gbufferIndirectCommandSet.CompactedExecutionRangeBuffer : null;
 
 	/// <summary>
 	/// Encodes the GBuffer commands and compacts them against the camera cull results. Runs in the cull

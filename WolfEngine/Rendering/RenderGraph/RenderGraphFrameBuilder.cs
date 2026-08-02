@@ -1901,7 +1901,7 @@ internal sealed class RenderGraphFrameBuilder
 			Buckets = bucketList.ToArray(),
 			FallbackMaxCommandCount = _gpuDrawResources.ActiveDrawCommandUpperBound,
 			IndirectCommandSlot = _gpuDrawResources.ActiveIndirectCommandSlot,
-			CompactedCommandCountBuffer = _gpuDrawPass.GBufferCompactedCommandCountBuffer,
+			CompactedExecutionRangeBuffer = _gpuDrawPass.GBufferCompactedExecutionRangeBuffer,
 			PackedVertexBuffer = _gpuDrawResources.PackedMeshVertexBuffer,
 			PackedIndexBuffer = _gpuDrawResources.PackedMeshIndexBuffer,
 			PackedVertexStride = _gpuDrawResources.PackedMeshVertexStride,

@@ -193,8 +193,8 @@ public sealed class ShadowMapPass
 			PackedVertexBuffer = gpuDrawResources.PackedMeshVertexBuffer,
 			PackedIndexBuffer = gpuDrawResources.PackedMeshIndexBuffer,
 			PackedVertexStride = gpuDrawResources.PackedMeshVertexStride,
-			CompactedCommandCountBuffer = _compactedExecutionByCascade[cascadeIndex]
-				? commandSet.CompactedCommandCountBuffer
+			CompactedExecutionRangeBuffer = _compactedExecutionByCascade[cascadeIndex]
+				? commandSet.CompactedExecutionRangeBuffer
 				: null
 		};
 	}
@@ -267,12 +267,12 @@ public sealed class ShadowMapPass
 				commandList.BindConstantBuffer(
 					_cameraWriter?.RegisterIndex ?? throw new InvalidOperationException("Shadow camera writer was not initialized."),
 					config.CameraBuffer);
-				if (config.CompactedCommandCountBuffer is { } countBuffer)
+				if (config.CompactedExecutionRangeBuffer is { } executionRangeBuffer)
 				{
 					SharedDrawIndirectExecution.ExecuteCompactedPages(
 						commandList,
 						bucket.IndirectCommandPages.Span,
-						countBuffer,
+						executionRangeBuffer,
 						config.IndirectCommandSlot,
 						bucket.ExecutionIndex,
 						config.FallbackMaxCommandCount);

@@ -97,12 +97,12 @@ public static class GBufferPass
 				{
 					commandList.BindConstantBuffer(bucket.BufferBindings.MaterialGenerationRegisterIndex, config.MaterialGenerationBuffer);
 				}
-				if (config.CompactedCommandCountBuffer is { } countBuffer)
+				if (config.CompactedExecutionRangeBuffer is { } executionRangeBuffer)
 				{
 					SharedDrawIndirectExecution.ExecuteCompactedPages(
 						commandList,
 						bucket.IndirectCommandPages.Span,
-						countBuffer,
+						executionRangeBuffer,
 						config.IndirectCommandSlot,
 						bucket.ExecutionIndex,
 						config.FallbackMaxCommandCount);

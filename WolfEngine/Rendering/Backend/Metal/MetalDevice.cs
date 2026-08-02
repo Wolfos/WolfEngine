@@ -56,6 +56,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 	private readonly MTLCommandQueue _commandQueue;
 	private readonly MetalDescriptorTable _descriptorTable;
 	private readonly MetalGpuProfilerBackend _gpuProfilerBackend;
+	private readonly MetalIndirectCompactionKernel _indirectCompactionKernel;
 	private readonly GpuRetirementQueue _retirementQueue = new();
 	private readonly object _retirementTokenOwner = new();
 	private readonly Dictionary<PipelineKey, MetalPipeline> _pipelines = new();
@@ -90,6 +91,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		}
 		_descriptorTable = new MetalDescriptorTable(_device, RetireArgumentBuffer);
 		_gpuProfilerBackend = new MetalGpuProfilerBackend(_device);
+		_indirectCompactionKernel = new MetalIndirectCompactionKernel(_device);
 		_metallibCacheDirectory = Path.Combine(Path.GetTempPath(), "WolfEngine", "metallib-cache");
 		Directory.CreateDirectory(_metallibCacheDirectory);
 	}
@@ -136,12 +138,12 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	public IGfxCommandList BeginGraphics()
 	{
-		return new MetalCommandList(_commandQueue, _descriptorTable);
+		return new MetalCommandList(_commandQueue, _descriptorTable, _indirectCompactionKernel);
 	}
 
 	public IGfxCommandList BeginCompute()
 	{
-		return new MetalCommandList(_commandQueue, _descriptorTable);
+		return new MetalCommandList(_commandQueue, _descriptorTable, _indirectCompactionKernel);
 	}
 
 	public void WaitForIdle()
@@ -424,7 +426,31 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 			}
 
 			commandBuffer.Reset(new NSRange { location = 0, length = descriptor.MaxCommandCount });
-			return new MetalIndirectCommandBuffer(null, descriptor, commandBuffer);
+
+			// The compaction destination is built from the same descriptor, which is what makes the two
+			// buffers' commands copyable into one another. Without the kernel there is nothing to write it,
+			// so the page reports no compaction support and the shared draw passes execute the full range.
+			var compactedBuffer = default(MTLIndirectCommandBuffer);
+			var compactionArguments = default(MTLBuffer);
+			if (_indirectCompactionKernel.IsAvailable)
+			{
+				compactedBuffer = _device.NewIndirectCommandBuffer(
+					indirectDescriptor,
+					descriptor.MaxCommandCount,
+					MTLResourceOptions.ResourceStorageModeShared);
+				if (compactedBuffer.NativePtr != IntPtr.Zero)
+				{
+					compactedBuffer.Reset(new NSRange { location = 0, length = descriptor.MaxCommandCount });
+					compactionArguments = _indirectCompactionKernel.CreateArgumentBuffer(commandBuffer, compactedBuffer);
+				}
+			}
+
+			return new MetalIndirectCommandBuffer(
+				descriptor.Name,
+				descriptor,
+				commandBuffer,
+				compactedBuffer,
+				compactionArguments);
 		}
 		finally
 		{

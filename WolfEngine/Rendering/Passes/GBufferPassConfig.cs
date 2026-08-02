@@ -112,5 +112,5 @@ public struct GBufferPassConfig
 	/// Per-page compacted command counts when compaction ran this frame, otherwise null, which selects
 	/// the full-range execution path.
 	/// </summary>
-	public IGfxBuffer? CompactedCommandCountBuffer { get; set; }
+	public IGfxBuffer? CompactedExecutionRangeBuffer { get; set; }
 }
