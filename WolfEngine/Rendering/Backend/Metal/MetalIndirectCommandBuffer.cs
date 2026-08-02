@@ -93,11 +93,18 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		public MTLBuffer BindlessSamplerBuffer { get; }
 	}
 
-	public MetalIndirectCommandBuffer(string? name, in IndirectCommandBufferDescriptor descriptor, MTLIndirectCommandBuffer buffer)
+	public MetalIndirectCommandBuffer(
+		string? name,
+		in IndirectCommandBufferDescriptor descriptor,
+		MTLIndirectCommandBuffer buffer,
+		MTLIndirectCommandBuffer compactedBuffer = default,
+		MTLBuffer compactionArguments = default)
 	{
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
+		CompactedBuffer = compactedBuffer;
+		CompactionArguments = compactionArguments;
 	}
 
 	public string? Name { get; }
@@ -105,6 +112,24 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 	public IndirectCommandBufferDescriptor Descriptor { get; }
 
 	internal MTLIndirectCommandBuffer Buffer { get; }
+
+	/// <summary>
+	/// Destination for the commands culling leaves visible, holding them densely from index zero so the
+	/// execute walks only what survived. Null-valued when the compaction kernel is unavailable.
+	/// </summary>
+	internal MTLIndirectCommandBuffer CompactedBuffer { get; }
+
+	/// <summary>
+	/// Argument buffer naming <see cref="Buffer"/> and <see cref="CompactedBuffer"/> to the compaction
+	/// kernel. Metal cannot bind an indirect command buffer to a compute encoder any other way, and the
+	/// pair never changes, so it is built once with the page.
+	/// </summary>
+	internal MTLBuffer CompactionArguments { get; }
+
+	public IndirectCompactionKind CompactionKind =>
+		CompactedBuffer.NativePtr != IntPtr.Zero && CompactionArguments.NativePtr != IntPtr.Zero
+			? IndirectCompactionKind.NativeCommands
+			: IndirectCompactionKind.None;
 
 	public void ResetCommand(uint commandIndex)
 	{
@@ -307,6 +332,16 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		if (Buffer.NativePtr != IntPtr.Zero)
 		{
 			Buffer.Dispose();
+		}
+
+		if (CompactedBuffer.NativePtr != IntPtr.Zero)
+		{
+			CompactedBuffer.Dispose();
+		}
+
+		if (CompactionArguments.NativePtr != IntPtr.Zero)
+		{
+			CompactionArguments.Dispose();
 		}
 	}
 

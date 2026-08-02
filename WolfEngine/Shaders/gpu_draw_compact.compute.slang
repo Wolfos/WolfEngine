@@ -15,7 +15,7 @@ cbuffer CompactParams : register(b12)
     uint pageStartCommandIndex;
     uint pageCommandCapacity;
     uint laneIndex;
-    uint countIndex;
+    uint executionRangeIndex;
     uint recordStrideUints;
     uint recordIndexCountUintOffset;
     uint activeDrawCommandUpperBound;
@@ -23,7 +23,9 @@ cbuffer CompactParams : register(b12)
 };
 
 RWStructuredBuffer<uint> g_DestinationRecords : register(u0);
-RWStructuredBuffer<uint> g_Counts : register(u1);
+// Entries are execution ranges of { location, length }. Compacted records always start at zero, so
+// only the length moves, and it doubles as the allocator for the dense destination slots.
+RWStructuredBuffer<uint> g_ExecutionRanges : register(u1);
 
 StructuredBuffer<uint> g_SourceRecords : register(t2);
 // Bound with the view's base offset already applied, so this indexes by draw id directly.
@@ -74,7 +76,7 @@ void CSCompact(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint destinationIndex;
-    InterlockedAdd(g_Counts[countIndex], 1, destinationIndex);
+    InterlockedAdd(g_ExecutionRanges[(executionRangeIndex * 2) + 1], 1, destinationIndex);
     if (destinationIndex >= pageCommandCapacity)
     {
         return;

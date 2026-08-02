@@ -35,7 +35,7 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 
 	private readonly SortedDictionary<uint, IGfxIndirectCommandBuffer>[] _commandPages =
 		new SortedDictionary<uint, IGfxIndirectCommandBuffer>[GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount];
-	private IGfxBuffer? _compactedCommandCounts;
+	private IGfxBuffer? _compactedExecutionRanges;
 	private readonly ulong[] _appliedStructuralVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
@@ -51,25 +51,25 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	}
 
 	/// <summary>
-	/// Per-page compacted command counts, one entry per (slot, lane, page). Written by the compaction
-	/// dispatch and read by ExecuteIndirect as its count buffer.
+	/// Per-page compacted execution ranges, one entry per (slot, lane, page). Written by the compaction
+	/// dispatch and read by the following execute to bound how many commands it walks.
 	/// </summary>
-	public IGfxBuffer? CompactedCommandCountBuffer => _compactedCommandCounts;
+	public IGfxBuffer? CompactedExecutionRangeBuffer => _compactedExecutionRanges;
 
 	public void EnsureCreated(IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(device);
-		_compactedCommandCounts ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)CompactedCommandCountEntryCount * sizeof(uint),
+		_compactedExecutionRanges ??= device.CreateBuffer(new BufferDescriptor(
+			(ulong)CompactedExecutionRangeEntryCount * IndirectCompactionExecutionRange.StrideInBytes,
 			BufferUsage.Indirect,
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "SharedDrawCompactedCommandCounts"));
+			name: "SharedDrawCompactedExecutionRanges"));
 	}
 
-	public static int CompactedCommandCountEntryCount =>
+	public static int CompactedExecutionRangeEntryCount =>
 		GpuDrawResources.IndirectCommandBufferSlotCount * GpuDrawExecutionLanes.ExecutionLaneCount * (int)MaxPageCount;
 
-	public static int GetCompactedCommandCountIndex(int slotIndex, int executionLaneIndex, uint pageIndex)
+	public static int GetCompactedExecutionRangeIndex(int slotIndex, int executionLaneIndex, uint pageIndex)
 	{
 		ValidateSlot(slotIndex);
 		ValidateLane(executionLaneIndex);
@@ -198,8 +198,8 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 
 	public void Dispose()
 	{
-		(_compactedCommandCounts as IDisposable)?.Dispose();
-		_compactedCommandCounts = null;
+		(_compactedExecutionRanges as IDisposable)?.Dispose();
+		_compactedExecutionRanges = null;
 		for (var i = 0; i < _commandPages.Length; i++)
 		{
 			foreach (var commandBuffer in _commandPages[i].Values)

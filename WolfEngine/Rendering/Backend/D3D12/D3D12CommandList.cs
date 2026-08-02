@@ -910,8 +910,8 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 
 	public void ExecuteCompactedIndirectCommandBuffer(
 		IGfxIndirectCommandBuffer commandBuffer,
-		IGfxBuffer countBuffer,
-		ulong countOffsetBytes)
+		IGfxBuffer executionRangeBuffer,
+		ulong executionRangeOffsetBytes)
 	{
 		if (commandBuffer is not D3D12IndirectCommandBuffer d3d12CommandBuffer)
 		{
@@ -924,9 +924,9 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 				$"Indirect command buffer '{d3d12CommandBuffer.Name ?? "<unnamed>"}' does not support GPU compaction.");
 		}
 
-		if (countBuffer is not D3D12Buffer d3d12CountBuffer || d3d12CountBuffer.Resource.Handle is null)
+		if (executionRangeBuffer is not D3D12Buffer d3d12CountBuffer || d3d12CountBuffer.Resource.Handle is null)
 		{
-			throw new InvalidOperationException("Command count buffer was not created by the Direct3D12 backend.");
+			throw new InvalidOperationException("Command execution range buffer was not created by the Direct3D12 backend.");
 		}
 
 		var maxCommandCount = d3d12CommandBuffer.Descriptor.MaxCommandCount;
@@ -947,14 +947,15 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		TransitionBufferIfNeeded(d3d12CountBuffer, ResourceStates.IndirectArgument);
 
 		// D3D12 executes min(maxCommandCount, *countBuffer) commands, so the count written by
-		// compaction caps the walk at the visible draws.
+		// compaction caps the walk at the visible draws. Compacted records always start at index zero,
+		// which leaves the range entry's location field unused and the count in its length field.
 		CommandList.ExecuteIndirect(
 			d3d12CommandBuffer.CommandSignature,
 			maxCommandCount,
 			compactedBuffer.Resource,
 			0,
 			d3d12CountBuffer.Resource,
-			countOffsetBytes);
+			executionRangeOffsetBytes + IndirectCompactionExecutionRange.LengthOffsetInBytes);
 		TransitionBufferIfNeeded(d3d12CountBuffer, previousCountState);
 	}
 

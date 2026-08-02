@@ -60,14 +60,14 @@ internal static class SharedDrawIndirectExecution
 	}
 
 	/// <summary>
-	/// Executes the dense records produced by compaction, taking each page's command count from GPU
-	/// memory. Pages past the active draw range are skipped outright: their count is zero, so the only
-	/// thing executing them would add is a command-processor round trip.
+	/// Executes the dense commands produced by compaction, taking each page's range from GPU memory.
+	/// Pages past the active draw range are skipped outright: their range is empty, so the only thing
+	/// executing them would add is a command-processor round trip.
 	/// </summary>
 	public static void ExecuteCompactedPages(
 		IGfxCommandList commandList,
 		ReadOnlySpan<SharedDrawIndirectCommandPage> pages,
-		IGfxBuffer countBuffer,
+		IGfxBuffer executionRangeBuffer,
 		int slotIndex,
 		int executionLaneIndex,
 		uint commandUpperBound)
@@ -80,14 +80,14 @@ internal static class SharedDrawIndirectExecution
 				continue;
 			}
 
-			var countIndex = SharedDrawIndirectCommandSet.GetCompactedCommandCountIndex(
+			var rangeIndex = SharedDrawIndirectCommandSet.GetCompactedExecutionRangeIndex(
 				slotIndex,
 				executionLaneIndex,
 				page.PageIndex);
 			commandList.ExecuteCompactedIndirectCommandBuffer(
 				page.CommandBuffer,
-				countBuffer,
-				(ulong)countIndex * sizeof(uint));
+				executionRangeBuffer,
+				(ulong)rangeIndex * IndirectCompactionExecutionRange.StrideInBytes);
 		}
 	}
 }

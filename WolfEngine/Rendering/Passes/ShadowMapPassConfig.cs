@@ -131,5 +131,5 @@ public struct ShadowMapPassConfig
 	/// Per-page compacted command counts when compaction ran for this cascade, otherwise null, which
 	/// selects the full-range execution path.
 	/// </summary>
-	public IGfxBuffer? CompactedCommandCountBuffer { get; init; }
+	public IGfxBuffer? CompactedExecutionRangeBuffer { get; init; }
 }

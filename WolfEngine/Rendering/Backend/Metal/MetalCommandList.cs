@@ -17,6 +17,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 {
 	private readonly MTLCommandQueue _queue;
 	private readonly MetalDescriptorTable _descriptorTable;
+	private readonly MetalIndirectCompactionKernel _indirectCompactionKernel;
 	private readonly MTLCommandBuffer _commandBuffer;
 	private MTLRenderCommandEncoder _renderEncoder;
 	private MTLComputeCommandEncoder _computeEncoder;
@@ -49,10 +50,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private bool _gpuProfilingFailed;
 	private ulong _gpuFrameIndex;
 
-	public MetalCommandList(MTLCommandQueue queue, MetalDescriptorTable descriptorTable)
+	public MetalCommandList(
+		MTLCommandQueue queue,
+		MetalDescriptorTable descriptorTable,
+		MetalIndirectCompactionKernel indirectCompactionKernel)
 	{
 		_queue = queue;
 		_descriptorTable = descriptorTable;
+		_indirectCompactionKernel = indirectCompactionKernel;
 		_commandBuffer = _queue.CommandBuffer();
 	}
 
@@ -604,14 +609,167 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	}
 
 	/// <summary>
-	/// Metal indirect command buffers report no compaction support, so the shared draw passes keep
-	/// executing their full command range and never reach this path.
+	/// Executes the commands compaction left in the destination buffer. Metal reads the whole
+	/// <c>{ location, length }</c> entry as an execution range, so the count culling produced bounds the
+	/// walk without a round trip through the CPU.
 	/// </summary>
 	public void ExecuteCompactedIndirectCommandBuffer(
 		IGfxIndirectCommandBuffer commandBuffer,
-		IGfxBuffer countBuffer,
-		ulong countOffsetBytes) =>
-		throw new NotSupportedException("The Metal backend does not support compacted indirect command execution.");
+		IGfxBuffer executionRangeBuffer,
+		ulong executionRangeOffsetBytes)
+	{
+		ThrowIfDisposed();
+		if (commandBuffer is not MetalIndirectCommandBuffer metalCommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Metal backend.");
+		}
+
+		if (metalCommandBuffer.CompactionKind != IndirectCompactionKind.NativeCommands)
+		{
+			throw new InvalidOperationException(
+				$"Indirect command buffer '{metalCommandBuffer.Name ?? "<unnamed>"}' does not support GPU compaction.");
+		}
+
+		if (executionRangeBuffer is not MetalBuffer metalRangeBuffer)
+		{
+			throw new InvalidOperationException("Command execution range buffer was not created by the Metal backend.");
+		}
+		if (metalRangeBuffer.IsDisposed)
+		{
+			return;
+		}
+		if (metalCommandBuffer.UsesCurrentBindlessBuffers(
+			    _descriptorTable,
+			    metalCommandBuffer.Descriptor.MaxCommandCount) == false)
+		{
+			return;
+		}
+
+		EnsureRenderEncoder();
+
+		// The compacted commands are copies, so they bind exactly the buffers the encoded commands do and
+		// the template's reference list is the right residency set for them.
+		var referenced = metalCommandBuffer.GetReferencedBuffers();
+		for (var i = 0; i < referenced.Count; i++)
+		{
+			_renderEncoder.UseResource(referenced[i], MTLResourceUsage.Read);
+		}
+
+		_renderEncoder.UseResource(metalRangeBuffer.Buffer, MTLResourceUsage.Read);
+		_renderEncoder.ExecuteCommandsInBuffer(
+			metalCommandBuffer.CompactedBuffer,
+			metalRangeBuffer.Buffer,
+			(nuint)executionRangeOffsetBytes);
+	}
+
+	/// <summary>
+	/// Clears the execution range table with a blit fill, which puts the reset on the same timeline as
+	/// the dispatches that follow and, unlike a CPU write into shared storage, cannot land underneath a
+	/// frame that has not retired yet.
+	/// </summary>
+	public void ResetNativeIndirectCompactionRanges(IGfxBuffer executionRangeBuffer)
+	{
+		ThrowIfDisposed();
+		if (executionRangeBuffer is not MetalBuffer metalBuffer)
+		{
+			throw new InvalidOperationException("Command execution range buffer was not created by the Metal backend.");
+		}
+		if (metalBuffer.IsDisposed)
+		{
+			return;
+		}
+
+		EndActiveEncoders();
+		var blit = _commandBuffer.BlitCommandEncoder();
+		blit.FillBuffer(metalBuffer.Buffer, new NSRange { location = 0, length = metalBuffer.Buffer.Length }, 0);
+		blit.EndEncoding();
+		if (blit.NativePtr != IntPtr.Zero)
+		{
+			blit.Dispose();
+		}
+	}
+
+	/// <summary>
+	/// Dispatches the kernel that copies a page's visible commands into its compacted buffer. Metal
+	/// commands are opaque objects rather than records in memory, so only the backend can move them.
+	/// </summary>
+	public void RecordNativeIndirectCompaction(in NativeIndirectCompactionRequest request)
+	{
+		ThrowIfDisposed();
+		if (request.CommandBuffer is not MetalIndirectCommandBuffer metalCommandBuffer)
+		{
+			throw new InvalidOperationException("Indirect command buffer was not created by the Metal backend.");
+		}
+
+		if (metalCommandBuffer.CompactionKind != IndirectCompactionKind.NativeCommands)
+		{
+			throw new InvalidOperationException(
+				$"Indirect command buffer '{metalCommandBuffer.Name ?? "<unnamed>"}' does not support GPU compaction.");
+		}
+
+		if (request.ExecutionRangeBuffer is not MetalBuffer executionRangeBuffer ||
+		    request.DrawArgsBuffer is not MetalBuffer drawArgsBuffer ||
+		    request.DrawCommandBuffer is not MetalBuffer drawCommandBuffer)
+		{
+			throw new InvalidOperationException("Compaction input buffers were not created by the Metal backend.");
+		}
+
+		if (executionRangeBuffer.IsDisposed || drawArgsBuffer.IsDisposed || drawCommandBuffer.IsDisposed)
+		{
+			return;
+		}
+
+		EnsureComputeEncoder();
+
+		// This kernel belongs to the backend and has no MetalPipeline wrapper, so setting it directly
+		// leaves the cached compute bindings describing state that is no longer bound. Clearing them makes
+		// the next BindPipeline re-establish everything rather than trust the cache.
+		_computeEncoder.SetComputePipelineState(_indirectCompactionKernel.PipelineState);
+		_currentComputePipeline = null;
+		_bindlessBuffersSetCompute = false;
+		_lastBindlessVersionCompute = uint.MaxValue;
+
+		_computeEncoder.SetBuffer(
+			metalCommandBuffer.CompactionArguments,
+			0,
+			MetalIndirectCompactionKernel.CommandBuffersBufferIndex);
+		// The two command buffers are reached through the argument buffer, so residency for them has to be
+		// declared here rather than inferred from the bindings.
+		_computeEncoder.UseResource(metalCommandBuffer.Buffer, MTLResourceUsage.Read);
+		_computeEncoder.UseResource(metalCommandBuffer.CompactedBuffer, MTLResourceUsage.Write);
+
+		_computeEncoder.SetBuffer(
+			executionRangeBuffer.Buffer,
+			0,
+			MetalIndirectCompactionKernel.ExecutionRangeBufferIndex);
+		_computeEncoder.SetBuffer(
+			drawArgsBuffer.Buffer,
+			(nuint)request.DrawArgsBaseOffsetBytes,
+			MetalIndirectCompactionKernel.DrawArgsBufferIndex);
+		_computeEncoder.SetBuffer(
+			drawCommandBuffer.Buffer,
+			0,
+			MetalIndirectCompactionKernel.DrawCommandsBufferIndex);
+
+		var parameters = new MetalIndirectCompactionParams
+		{
+			PageStartCommandIndex = request.PageStartCommandIndex,
+			PageCommandCapacity = request.PageCommandCapacity,
+			LaneIndex = request.LaneIndex,
+			ExecutionRangeIndex = request.ExecutionRangeIndex,
+			ActiveDrawCommandUpperBound = request.ActiveDrawCommandUpperBound
+		};
+		_computeEncoder.SetBytes(
+			(IntPtr)(&parameters),
+			(nuint)sizeof(MetalIndirectCompactionParams),
+			MetalIndirectCompactionKernel.ParamsBufferIndex);
+
+		var threadsPerThreadgroup = MetalIndirectCompactionKernel.ThreadsPerThreadgroup;
+		var threadgroupCount = (request.PageCommandCapacity + threadsPerThreadgroup - 1) / threadsPerThreadgroup;
+		_computeEncoder.DispatchThreadgroups(
+			new MTLSize { width = threadgroupCount, height = 1, depth = 1 },
+			new MTLSize { width = threadsPerThreadgroup, height = 1, depth = 1 });
+	}
 
 	public void ExecuteIndirectCommandBufferRange(
 		IGfxIndirectCommandBuffer commandBuffer,
