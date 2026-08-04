@@ -33,7 +33,7 @@ internal sealed class MetalIndirectCompactionKernel : IDisposable
 	public const uint ParamsBufferIndex = 4;
 
 	private const string EntryPoint = "CSCompactIndirectCommands";
-	private const string SourceResourceName = "WolfEngine.Shaders.Metal.gpu_draw_compact_icb.metal";
+	private const string SourceResourceName = "WolfEngine.Shaders.GpuDraw.Metal.gpu_draw_compact_icb.metal";
 	private const ulong SourceCommandBufferArgumentIndex = 0;
 	private const ulong DestinationCommandBufferArgumentIndex = 1;
 

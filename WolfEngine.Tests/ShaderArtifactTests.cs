@@ -186,7 +186,7 @@ public sealed class ShaderArtifactTests
 			Assert.That(provider.Reload(GraphicsBackendKind.Metal).AppliedArtifactCount, Is.Zero,
 				"A reload with no source changes must not recompile anything.");
 
-			var editedPath = Path.Combine(engineRoot, "Shaders", "copy_to_final.compute.slang");
+			var editedPath = Path.Combine(engineRoot, "Shaders", "PostProcess", "copy_to_final.compute.slang");
 			File.AppendAllText(editedPath, Environment.NewLine + "// reload granularity edit");
 			var result = provider.Reload(GraphicsBackendKind.Metal);
 
@@ -221,7 +221,7 @@ public sealed class ShaderArtifactTests
 			provider.GetArtifact(second);
 
 			// Both programs import common_bindless.slang, so both must be rebuilt.
-			File.AppendAllText(Path.Combine(engineRoot, "Shaders", "common_bindless.slang"),
+			File.AppendAllText(Path.Combine(engineRoot, "Shaders", "Common", "common_bindless.slang"),
 				Environment.NewLine + "// shared import edit");
 			var result = provider.Reload(GraphicsBackendKind.Metal);
 
@@ -280,7 +280,7 @@ public sealed class ShaderArtifactTests
 				EngineShaderPrograms.CopyToFinal, "CopyToFinalCS", GraphicsBackendKind.Metal);
 			var previous = provider.GetArtifact(request);
 
-			var editedPath = Path.Combine(copiedShaders, "copy_to_final.compute.slang");
+			var editedPath = Path.Combine(copiedShaders, "PostProcess", "copy_to_final.compute.slang");
 			var originalSource = File.ReadAllText(editedPath);
 			File.WriteAllText(editedPath, "this is deliberately invalid slang source");
 			var failedReload = provider.Reload(GraphicsBackendKind.Metal);

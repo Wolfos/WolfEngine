@@ -23,11 +23,11 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var tonemapping = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("tonemapping.compute.slang"),
+			ShaderPath("PostProcess/tonemapping.compute.slang"),
 			"TonemappingCS",
 			GraphicsBackendKind.Metal);
 		var presentation = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("copy_to_final.compute.slang"),
+			ShaderPath("PostProcess/copy_to_final.compute.slang"),
 			"CopyToFinalCS",
 			GraphicsBackendKind.Metal);
 
@@ -50,8 +50,8 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "tonemapping.compute.slang", EntryPoint: "TonemappingCS"),
-			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS")
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingCS"),
+			(Name: "PostProcess/copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS")
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -72,7 +72,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("gpu_draw_cull.compute.slang"),
+			ShaderPath("GpuDraw/gpu_draw_cull.compute.slang"),
 			"CSCull",
 			GraphicsBackendKind.Metal);
 		var cullParams = compiled.ReflectionLayout.GetConstantBuffer("CullParams");
@@ -99,7 +99,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("ao_rtao.compute.slang"),
+			ShaderPath("AmbientOcclusion/ao_rtao.compute.slang"),
 			"AmbientOcclusionRayTracedCS",
 			GraphicsBackendKind.Metal);
 
@@ -118,7 +118,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("terrain_rt_vertex_update.compute.slang"),
+			ShaderPath("Terrain/terrain_rt_vertex_update.compute.slang"),
 			"TerrainRayTracingVertexUpdateCS",
 			GraphicsBackendKind.Metal);
 
@@ -138,24 +138,24 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ao_vbao.compute.slang", EntryPoint: "AmbientOcclusionVisibilityBitmaskCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ao_blur.compute.slang", EntryPoint: "AmbientOcclusionBlurCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ao_upsample.compute.slang", EntryPoint: "AmbientOcclusionUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "cas_sharpen.compute.slang", EntryPoint: "CasSharpenCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "bloom.compute.slang", EntryPoint: "BloomPrefilterCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "bloom.compute.slang", EntryPoint: "BloomDownsampleCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "bloom.compute.slang", EntryPoint: "BloomUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "bloom.compute.slang", EntryPoint: "BloomCompositeCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "deferred_lighting.compute.slang", EntryPoint: "DeferredLightingCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "gbuffer_decal_seed.compute.slang", EntryPoint: "GBufferDecalSeedCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "taa_history_store.compute.slang", EntryPoint: "TaaHistoryStoreCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "taa_resolve.compute.slang", EntryPoint: "TaaResolveCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "terrain_rt_vertex_update.compute.slang", EntryPoint: "TerrainRayTracingVertexUpdateCS", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "tonemapping.compute.slang", EntryPoint: "TonemappingCS", ThreadsX: 8u, ThreadsY: 8u)
+			(Name: "AmbientOcclusion/ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "AmbientOcclusion/ao_vbao.compute.slang", EntryPoint: "AmbientOcclusionVisibilityBitmaskCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "AmbientOcclusion/ao_blur.compute.slang", EntryPoint: "AmbientOcclusionBlurCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "AmbientOcclusion/ao_upsample.compute.slang", EntryPoint: "AmbientOcclusionUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "ThirdParty/FfxCas/cas_sharpen.compute.slang", EntryPoint: "CasSharpenCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/bloom.compute.slang", EntryPoint: "BloomPrefilterCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/bloom.compute.slang", EntryPoint: "BloomDownsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/bloom.compute.slang", EntryPoint: "BloomUpsampleCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/bloom.compute.slang", EntryPoint: "BloomCompositeCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Lighting/deferred_lighting.compute.slang", EntryPoint: "DeferredLightingCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Geometry/gbuffer_decal_seed.compute.slang", EntryPoint: "GBufferDecalSeedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Reflections/reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Reflections/reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Taa/taa_history_store.compute.slang", EntryPoint: "TaaHistoryStoreCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Taa/taa_resolve.compute.slang", EntryPoint: "TaaResolveCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Terrain/terrain_rt_vertex_update.compute.slang", EntryPoint: "TerrainRayTracingVertexUpdateCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingCS", ThreadsX: 8u, ThreadsY: 8u)
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -180,12 +180,12 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS", ThreadsX: 16u, ThreadsY: 1u),
-			(Name: "ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS", ThreadsX: 8u, ThreadsY: 8u),
-			(Name: "ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS", ThreadsX: 16u, ThreadsY: 16u)
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS", ThreadsX: 16u, ThreadsY: 1u),
+			(Name: "Ddgi/ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Ddgi/ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "Ddgi/ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS", ThreadsX: 16u, ThreadsY: 16u)
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -224,13 +224,13 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS"),
-			(Name: "ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS"),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS"),
-			(Name: "ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS"),
-			(Name: "ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS"),
-			(Name: "ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS"),
-			(Name: "ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS")
+			(Name: "AmbientOcclusion/ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS"),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS"),
+			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS"),
+			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS"),
+			(Name: "Ddgi/ddgi_relocate.compute.slang", EntryPoint: "DdgiRelocationSolveCS"),
+			(Name: "Ddgi/ddgi_irradiance_integrate.compute.slang", EntryPoint: "DdgiIrradianceIntegrateCS"),
+			(Name: "Ddgi/ddgi_integrate.compute.slang", EntryPoint: "DdgiVisibilityIntegrateCS")
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -252,8 +252,8 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS"),
-			(Name: "reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS")
+			(Name: "Reflections/reflections_ssr.compute.slang", EntryPoint: "ReflectionsScreenSpaceCS"),
+			(Name: "Reflections/reflections_rt.compute.slang", EntryPoint: "ReflectionsRayTracedCS")
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(
@@ -281,7 +281,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetGraphicsShaderWithReflection(
-			ShaderPath("debug_primitive_forward.slang"),
+			ShaderPath("Geometry/debug_primitive_forward.slang"),
 			"vertexShader",
 			"fragmentShader",
 			GraphicsBackendKind.Metal);
@@ -376,7 +376,7 @@ public sealed class RayTracingSceneResourcesTests
 
 		var shaderCompiler = new ShaderCompiler();
 		var compiled = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("deferred_lighting.compute.slang"),
+			ShaderPath("Lighting/deferred_lighting.compute.slang"),
 			"DeferredLightingCS",
 			GraphicsBackendKind.Metal);
 

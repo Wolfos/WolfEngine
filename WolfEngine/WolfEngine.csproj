@@ -26,7 +26,7 @@
     <ItemGroup>
         <!-- The Metal backend compiles this at runtime, so it ships inside the assembly rather than
              going through the Slang shader pipeline the rest of the shaders use. -->
-        <EmbeddedResource Include="Shaders\Metal\gpu_draw_compact_icb.metal" />
+        <EmbeddedResource Include="Shaders\GpuDraw\Metal\gpu_draw_compact_icb.metal" />
     </ItemGroup>
 
     <ItemGroup>

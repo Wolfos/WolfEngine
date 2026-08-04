@@ -113,7 +113,7 @@ public sealed class TemporalAntiAliasingTests
 		}
 
 		var compiled = new ShaderCompiler().GetComputeShaderWithReflection(
-			ShaderPath("taa_resolve.compute.slang"),
+			ShaderPath("Taa/taa_resolve.compute.slang"),
 			"TaaResolveCS",
 			GraphicsBackendKind.D3D12);
 

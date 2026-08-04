@@ -19,7 +19,7 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public class MetalIndirectCompactionKernelTests
 {
-	private const string SourceResourceName = "WolfEngine.Shaders.Metal.gpu_draw_compact_icb.metal";
+	private const string SourceResourceName = "WolfEngine.Shaders.GpuDraw.Metal.gpu_draw_compact_icb.metal";
 
 	[Test]
 	public void TheKernelSource_ShipsInsideTheAssembly()
@@ -58,7 +58,7 @@ public class MetalIndirectCompactionKernelTests
 	[Test]
 	public void TheVisibilityRules_StayInStepWithTheSharedRecordCopyKernel()
 	{
-		var slang = File.ReadAllText(Path.Combine(ResolveShaderDirectory(), "gpu_draw_compact.compute.slang"));
+		var slang = File.ReadAllText(Path.Combine(ResolveShaderDirectory(), "GpuDraw", "gpu_draw_compact.compute.slang"));
 		Assert.Multiple(() =>
 		{
 			Assert.That(ReadUintConstant(slang, "DRAW_FLAG_ACTIVE"), Is.EqualTo(GpuDrawFlags.Active));
@@ -77,7 +77,7 @@ public class MetalIndirectCompactionKernelTests
 		var entryUints = IndirectCompactionExecutionRange.StrideInBytes / sizeof(uint);
 		var lengthUintOffset = IndirectCompactionExecutionRange.LengthOffsetInBytes / sizeof(uint);
 
-		var slang = File.ReadAllText(Path.Combine(ResolveShaderDirectory(), "gpu_draw_compact.compute.slang"));
+		var slang = File.ReadAllText(Path.Combine(ResolveShaderDirectory(), "GpuDraw", "gpu_draw_compact.compute.slang"));
 		Assert.Multiple(() =>
 		{
 			Assert.That(

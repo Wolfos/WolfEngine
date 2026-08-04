@@ -8,7 +8,7 @@ namespace WolfEngine.Rendering.Passes;
 /// </summary>
 /// <remarks>
 /// Mirrors <c>Fsr3UpscalerConstants</c> from FidelityFX SDK v1.1.2. The field order here
-/// is the constant buffer's field order; see Shaders/fsr3_constants.slang.
+/// is the constant buffer's field order; see Shaders/ThirdParty/Fsr3/fsr3_constants.slang.
 /// </remarks>
 public readonly struct Fsr3ConstantValues
 {
