@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.ECS;
@@ -421,7 +422,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		if (rootCount == 1)
 		{
-			var rootEntity = CreateModelNodeEntities(modelFile.Nodes, world, rootParent: null);
+			var rootEntity = CreateModelNodeEntities(modelFile.Nodes, world, rootParent: null, modelFile);
 			ApplySpawnPosition(world, rootEntity, spawnPosition);
 			return;
 		}
@@ -429,7 +430,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var wrapper =
 			world.CreateEntity(string.IsNullOrWhiteSpace(modelFile.Name) ? "Imported 3D Model" : modelFile.Name);
 		world.AddTransform(wrapper, System.Numerics.Matrix4x4.Identity);
-		CreateModelNodeEntities(modelFile.Nodes, world, wrapper);
+		CreateModelNodeEntities(modelFile.Nodes, world, wrapper, modelFile);
 
 		ApplySpawnPosition(world, wrapper, spawnPosition);
 	}
@@ -471,10 +472,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private Entity CreateModelNodeEntities(
 		IReadOnlyList<ImportedModelAssetNode> nodes,
 		World world,
-		Entity? rootParent)
+		Entity? rootParent,
+		ImportedModelAssetFile? modelFile = null)
 	{
 		var entities = new Entity[nodes.Count];
 		Entity? firstRoot = null;
+		var skinnedMeshEntities = new List<Entity>();
+
 		for (var nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
 		{
 			var node = nodes[nodeIndex];
@@ -518,6 +522,18 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					continue;
 				}
 
+				if (meshInstance.SkeletonNodeId != Guid.Empty && mesh.IsSkinned)
+				{
+					world.AddComponent(meshEntity, SkinnedMeshRenderer.Create(
+						new AssetRef<Mesh> { NodeId = meshInstance.MeshNodeId },
+						new AssetRef<Material> { NodeId = meshInstance.MaterialNodeId },
+						new AssetRef<Skeleton> { NodeId = meshInstance.SkeletonNodeId },
+						// Patched once the animator's owning entity is known, below.
+						default));
+					skinnedMeshEntities.Add(meshEntity);
+					continue;
+				}
+
 				world.AddComponent(meshEntity, new MeshRenderer
 				{
 					MeshAsset = new AssetRef<Mesh> { NodeId = meshInstance.MeshNodeId },
@@ -528,7 +544,42 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
-		return firstRoot ?? throw new InvalidDataException("Imported model does not contain a root node.");
+		var resolvedRoot = firstRoot ?? throw new InvalidDataException("Imported model does not contain a root node.");
+
+		if (skinnedMeshEntities.Count > 0)
+		{
+			AttachModelAnimator(world, rootParent ?? resolvedRoot, skinnedMeshEntities, modelFile);
+		}
+
+		return resolvedRoot;
+	}
+
+	/// <summary>
+	/// Gives a skinned model one animator that every skinned mesh in it shares. Body and clothing
+	/// meshes are separate renderers but a single skeleton, so a per-mesh animator would evaluate
+	/// the same pose repeatedly and let the parts drift out of sync.
+	/// </summary>
+	private static void AttachModelAnimator(
+		World world,
+		Entity animatorEntity,
+		IReadOnlyList<Entity> skinnedMeshEntities,
+		ImportedModelAssetFile? modelFile)
+	{
+		var skeletonNodeId = modelFile?.SkeletonNodeIds.FirstOrDefault() ?? Guid.Empty;
+		var clipNodeId = modelFile?.AnimationNodeIds.FirstOrDefault() ?? Guid.Empty;
+
+		if (skeletonNodeId != Guid.Empty && world.HasComponent<Animator>(animatorEntity) == false)
+		{
+			world.AddComponent(animatorEntity, Animator.Create(
+				new AssetRef<Skeleton> { NodeId = skeletonNodeId },
+				new AssetRef<AnimationClip> { NodeId = clipNodeId }));
+		}
+
+		for (var i = 0; i < skinnedMeshEntities.Count; i++)
+		{
+			ref var renderer = ref world.GetComponent<SkinnedMeshRenderer>(skinnedMeshEntities[i]);
+			renderer.AnimatorEntity = animatorEntity;
+		}
 	}
 
 	private void ImportSource(string projectRootPath, string absoluteSourcePath, string relativeSourcePath,
@@ -972,11 +1023,31 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			}
 		}
 
+		var skeletonNodeIds = WriteSkeletonSubAssets(
+			projectRootPath,
+			metadata,
+			relativeSourcePath,
+			relativeMetaPath,
+			importedScene.Skeletons,
+			nodes);
+
+		var animationNodeIds = WriteAnimationSubAssets(
+			projectRootPath,
+			metadata,
+			relativeSourcePath,
+			relativeMetaPath,
+			importedScene,
+			skeletonNodeIds,
+			nodes,
+			dependencies);
+
 		var sourceAssetName = Path.GetFileName(relativeSourcePath);
 		var modelGraph = new ImportedModelAssetFile
 		{
 			Name = importedScene.Name,
-			Nodes = new List<ImportedModelAssetNode>(importedScene.Nodes.Count)
+			Nodes = new List<ImportedModelAssetNode>(importedScene.Nodes.Count),
+			SkeletonNodeIds = skeletonNodeIds,
+			AnimationNodeIds = animationNodeIds
 		};
 		var hierarchyKeys = new string[importedScene.Nodes.Count];
 		var childCounts = new int[importedScene.Nodes.Count];
@@ -1011,6 +1082,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				hierarchyKey,
 				importedNode,
 				materialNodeIds,
+				skeletonNodeIds,
 				nodes,
 				dependencies));
 		}
@@ -1036,7 +1108,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			SummaryJson = AssetPipelineSerialization.Serialize(new Model3DAssetSummary
 			{
 				RelativeImportedModelPath = relativeModelPath,
-				RootNodeCount = rootCount
+				RootNodeCount = rootCount,
+				SkeletonCount = skeletonNodeIds.Count,
+				AnimationCount = animationNodeIds.Count
 			})
 		});
 
@@ -1219,6 +1293,146 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 	}
 
+	/// <summary>
+	/// Writes one skeleton artifact per imported skeleton and registers it as a sub-asset of the
+	/// source, the same way meshes and materials are registered.
+	/// </summary>
+	private List<Guid> WriteSkeletonSubAssets(
+		string projectRootPath,
+		AssetSourceMetaFile metadata,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		IReadOnlyList<ImportedSkeleton> skeletons,
+		List<AssetNodeRecord> nodes)
+	{
+		var skeletonNodeIds = new List<Guid>(skeletons.Count);
+		for (var i = 0; i < skeletons.Count; i++)
+		{
+			var skeleton = skeletons[i];
+			var nodeKey = $"skeleton:{i}";
+			var name = string.IsNullOrWhiteSpace(skeleton.Name) ? $"Skeleton {i}" : skeleton.Name;
+			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.Skeleton, name);
+			skeletonNodeIds.Add(nodeId);
+
+			var relativeSkeletonPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ImportedFolderName,
+				metadata.SourceId.ToString("D"),
+				"skeletons",
+				$"{nodeKey.Replace(':', '_')}.skel.bin"));
+
+			SkeletonSerializer.Write(GetAbsolutePath(projectRootPath, relativeSkeletonPath), new ImportedSkeletonAssetFile
+			{
+				Name = skeleton.Name,
+				BoneNames = skeleton.BoneNames,
+				ParentIndices = skeleton.ParentIndices,
+				BindPoseLocal = skeleton.BindPoseLocal,
+				InverseBindMatrices = skeleton.InverseBindMatrices
+			});
+
+			nodes.Add(new AssetNodeRecord
+			{
+				NodeId = nodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.Skeleton,
+				NodeKey = nodeKey,
+				Name = name,
+				IsGenerated = true,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = relativeSkeletonPath,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new SkeletonAssetSummary
+				{
+					RelativeImportedSkeletonPath = relativeSkeletonPath,
+					BoneCount = skeleton.BoneNames.Length,
+					RootBoneName = skeleton.BoneNames.Length > 0 ? skeleton.BoneNames[0] : string.Empty
+				})
+			});
+		}
+
+		return skeletonNodeIds;
+	}
+
+	private List<Guid> WriteAnimationSubAssets(
+		string projectRootPath,
+		AssetSourceMetaFile metadata,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		ImportedScene importedScene,
+		IReadOnlyList<Guid> skeletonNodeIds,
+		List<AssetNodeRecord> nodes,
+		List<AssetDependencyRecord> dependencies)
+	{
+		var animationNodeIds = new List<Guid>(importedScene.Animations.Count);
+		for (var i = 0; i < importedScene.Animations.Count; i++)
+		{
+			var animation = importedScene.Animations[i];
+			var nodeKey = $"animation:{i}";
+			var name = string.IsNullOrWhiteSpace(animation.Name) ? $"Animation {i}" : animation.Name;
+			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.AnimationClip, name);
+			animationNodeIds.Add(nodeId);
+
+			var relativeClipPath = NormalizeRelativePath(Path.Combine(
+				AssetPipelinePaths.LibraryFolderName,
+				AssetPipelinePaths.ImportedFolderName,
+				metadata.SourceId.ToString("D"),
+				"animations",
+				$"{nodeKey.Replace(':', '_')}.anim.bin"));
+
+			var sourceSkeleton = animation.SkeletonIndex >= 0 && animation.SkeletonIndex < importedScene.Skeletons.Count
+				? importedScene.Skeletons[animation.SkeletonIndex]
+				: null;
+
+			AnimationClipSerializer.Write(GetAbsolutePath(projectRootPath, relativeClipPath), new ImportedAnimationClipAssetFile
+			{
+				Name = animation.Name,
+				Duration = animation.Duration,
+				FramesPerSecond = animation.FramesPerSecond,
+				Loop = true,
+				TransformTracks = animation.TransformTracks,
+				PropertyTracks = animation.PropertyTracks,
+				// Retargeting needs the rest pose the clip was authored against, so it travels with
+				// the clip rather than being looked up from whatever skeleton happens to play it.
+				SourceSkeletonName = sourceSkeleton?.Name ?? string.Empty,
+				SourceBindPoseLocal = sourceSkeleton?.BindPoseLocal ?? []
+			});
+
+			nodes.Add(new AssetNodeRecord
+			{
+				NodeId = nodeId,
+				SourceId = metadata.SourceId,
+				Type = AssetType.AnimationClip,
+				NodeKey = nodeKey,
+				Name = name,
+				IsGenerated = true,
+				RelativeSourcePath = relativeSourcePath,
+				RelativeAssetPath = relativeClipPath,
+				RelativeMetaPath = relativeMetaPath,
+				SummaryJson = AssetPipelineSerialization.Serialize(new AnimationClipAssetSummary
+				{
+					RelativeImportedClipPath = relativeClipPath,
+					Duration = animation.Duration,
+					FramesPerSecond = animation.FramesPerSecond,
+					TransformTrackCount = animation.TransformTracks.Length,
+					PropertyTrackCount = animation.PropertyTracks.Length
+				})
+			});
+
+			if (animation.SkeletonIndex >= 0 && animation.SkeletonIndex < skeletonNodeIds.Count)
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = nodeId,
+					ToNodeId = skeletonNodeIds[animation.SkeletonIndex],
+					Kind = "animation-skeleton",
+					IsHard = false
+				});
+			}
+		}
+
+		return animationNodeIds;
+	}
+
 	private ImportedModelAssetNode CreateModelNode(
 		string projectRootPath,
 		AssetSourceMetaFile metadata,
@@ -1227,6 +1441,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string hierarchyKey,
 		ImportedNode node,
 		IReadOnlyList<Guid> materialNodeIds,
+		IReadOnlyList<Guid> skeletonNodeIds,
 		List<AssetNodeRecord> nodes,
 		List<AssetDependencyRecord> dependencies)
 	{
@@ -1254,7 +1469,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				Indices = meshInfo.Mesh.Indices,
 				Normals = meshInfo.Mesh.Normals,
 				Tangents = meshInfo.Mesh.Tangents,
-				UVs = meshInfo.Mesh.UVs
+				UVs = meshInfo.Mesh.UVs,
+				BoneIndices = meshInfo.Mesh.BoneIndices ?? [],
+				BoneWeights = meshInfo.Mesh.BoneWeights ?? []
 			});
 			nodes.Add(new AssetNodeRecord
 			{
@@ -1271,18 +1488,23 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				{
 					RelativeImportedMeshPath = relativeMeshPath,
 					VertexCount = meshInfo.Mesh.Vertices.Length,
-					IndexCount = meshInfo.Mesh.Indices.Length
+					IndexCount = meshInfo.Mesh.Indices.Length,
+					IsSkinned = meshInfo.Mesh.IsSkinned
 				})
 			});
 
 			var materialNodeId = meshInfo.MaterialIndex >= 0 && meshInfo.MaterialIndex < materialNodeIds.Count
 				? materialNodeIds[meshInfo.MaterialIndex]
 				: Guid.Empty;
+			var skeletonNodeId = meshInfo.SkeletonIndex >= 0 && meshInfo.SkeletonIndex < skeletonNodeIds.Count
+				? skeletonNodeIds[meshInfo.SkeletonIndex]
+				: Guid.Empty;
 			modelNode.Meshes.Add(new ImportedModelAssetMeshInstance
 			{
 				Name = meshInfo.Name,
 				MeshNodeId = meshNodeId,
-				MaterialNodeId = materialNodeId
+				MaterialNodeId = materialNodeId,
+				SkeletonNodeId = skeletonNodeId
 			});
 			if (materialNodeId != Guid.Empty)
 			{
@@ -1291,6 +1513,17 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					FromNodeId = meshNodeId,
 					ToNodeId = materialNodeId,
 					Kind = "mesh-material",
+					IsHard = true
+				});
+			}
+
+			if (skeletonNodeId != Guid.Empty)
+			{
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = meshNodeId,
+					ToNodeId = skeletonNodeId,
+					Kind = "mesh-skeleton",
 					IsHard = true
 				});
 			}

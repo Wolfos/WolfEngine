@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Gameplay;
@@ -87,6 +88,8 @@ public static class Program
 		var worldManager = provider.GetRequiredService<IWorldManager>();
 		worldManager.RegisterWorld(world);
 		worldManager.AddSystem<CameraResolutionUpdater>();
+		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
+		worldManager.AddSystem<AnimationSystem>();
 		worldManager.AddSystem<TransformSystem>();
 		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);

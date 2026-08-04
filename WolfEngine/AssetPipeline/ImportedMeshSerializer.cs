@@ -1,53 +1,39 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Numerics;
 
 namespace WolfEngine.AssetPipeline;
 
 public static class ImportedMeshSerializer
 {
 	private static ReadOnlySpan<byte> Magic => "WEMH"u8;
-	public const int CurrentVersion = 1;
+
+	/// <summary>Version 2 appends per-vertex skin influences. Version 1 artifacts read back as unskinned.</summary>
+	public const int CurrentVersion = 2;
+
+	private const int SkinnedVersion = 2;
 
 	public static void Write(string path, ImportedMeshAssetFile mesh)
 	{
-		if (string.IsNullOrWhiteSpace(path))
-		{
-			throw new ArgumentException("Output path cannot be null or empty.", nameof(path));
-		}
-
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
 		ArgumentNullException.ThrowIfNull(mesh);
 
-		var directory = Path.GetDirectoryName(path);
-		if (string.IsNullOrWhiteSpace(directory) == false)
-		{
-			Directory.CreateDirectory(directory);
-		}
-
-		var tempPath = path + ".tmp";
-		using (var stream = File.Create(tempPath))
-		using (var writer = new BinaryWriter(stream))
+		AssetBinaryPrimitives.WriteFileAtomically(path, writer =>
 		{
 			writer.Write(Magic);
 			writer.Write(CurrentVersion);
-			WriteVector4Array(writer, mesh.Vertices);
-			WriteUInt32Array(writer, mesh.Indices);
-			WriteVector3Array(writer, mesh.Normals);
-			WriteVector4Array(writer, mesh.Tangents);
-			WriteVector2Array(writer, mesh.UVs);
-		}
-
-		File.Move(tempPath, path, true);
+			AssetBinaryPrimitives.WriteVector4Array(writer, mesh.Vertices);
+			AssetBinaryPrimitives.WriteUInt32Array(writer, mesh.Indices);
+			AssetBinaryPrimitives.WriteVector3Array(writer, mesh.Normals);
+			AssetBinaryPrimitives.WriteVector4Array(writer, mesh.Tangents);
+			AssetBinaryPrimitives.WriteVector2Array(writer, mesh.UVs);
+			AssetBinaryPrimitives.WriteUInt32Array(writer, mesh.BoneIndices ?? []);
+			AssetBinaryPrimitives.WriteSingleArray(writer, mesh.BoneWeights ?? []);
+		});
 	}
 
 	public static ImportedMeshAssetFile Read(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
-		{
-			throw new ArgumentException("Input path cannot be null or empty.", nameof(path));
-		}
-
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
 		if (File.Exists(path) == false)
 		{
 			throw new FileNotFoundException($"Imported mesh artifact '{path}' was not found.", path);
@@ -68,118 +54,28 @@ public static class ImportedMeshSerializer
 		}
 
 		var version = reader.ReadInt32();
-		if (version != CurrentVersion)
+		if (version is < 1 or > CurrentVersion)
 		{
 			throw new InvalidOperationException(
-				$"Unsupported imported mesh artifact version {version}. Expected {CurrentVersion}.");
+				$"Unsupported imported mesh artifact version {version}. Expected 1 to {CurrentVersion}.");
 		}
 
-		return new ImportedMeshAssetFile
+		var mesh = new ImportedMeshAssetFile
 		{
-			Vertices = ReadVector4Array(reader),
-			Indices = ReadUInt32Array(reader),
-			Normals = ReadVector3Array(reader),
-			Tangents = ReadVector4Array(reader),
-			UVs = ReadVector2Array(reader)
+			Version = version,
+			Vertices = AssetBinaryPrimitives.ReadVector4Array(reader),
+			Indices = AssetBinaryPrimitives.ReadUInt32Array(reader),
+			Normals = AssetBinaryPrimitives.ReadVector3Array(reader),
+			Tangents = AssetBinaryPrimitives.ReadVector4Array(reader),
+			UVs = AssetBinaryPrimitives.ReadVector2Array(reader)
 		};
-	}
 
-	private static void WriteUInt32Array(BinaryWriter writer, IReadOnlyList<uint> values)
-	{
-		writer.Write(values.Count);
-		for (var i = 0; i < values.Count; i++)
+		if (version >= SkinnedVersion)
 		{
-			writer.Write(values[i]);
-		}
-	}
-
-	private static uint[] ReadUInt32Array(BinaryReader reader)
-	{
-		var count = reader.ReadInt32();
-		var values = new uint[count];
-		for (var i = 0; i < count; i++)
-		{
-			values[i] = reader.ReadUInt32();
+			mesh.BoneIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
+			mesh.BoneWeights = AssetBinaryPrimitives.ReadSingleArray(reader);
 		}
 
-		return values;
-	}
-
-	private static void WriteVector2Array(BinaryWriter writer, IReadOnlyList<Vector2> values)
-	{
-		writer.Write(values.Count);
-		for (var i = 0; i < values.Count; i++)
-		{
-			writer.Write(values[i].X);
-			writer.Write(values[i].Y);
-		}
-	}
-
-	private static Vector2[] ReadVector2Array(BinaryReader reader)
-	{
-		var count = reader.ReadInt32();
-		var values = new Vector2[count];
-		for (var i = 0; i < count; i++)
-		{
-			values[i] = new Vector2(
-				reader.ReadSingle(),
-				reader.ReadSingle());
-		}
-
-		return values;
-	}
-
-	private static void WriteVector3Array(BinaryWriter writer, IReadOnlyList<Vector3> values)
-	{
-		writer.Write(values.Count);
-		for (var i = 0; i < values.Count; i++)
-		{
-			writer.Write(values[i].X);
-			writer.Write(values[i].Y);
-			writer.Write(values[i].Z);
-		}
-	}
-
-	private static Vector3[] ReadVector3Array(BinaryReader reader)
-	{
-		var count = reader.ReadInt32();
-		var values = new Vector3[count];
-		for (var i = 0; i < count; i++)
-		{
-			values[i] = new Vector3(
-				reader.ReadSingle(),
-				reader.ReadSingle(),
-				reader.ReadSingle());
-		}
-
-		return values;
-	}
-
-	private static void WriteVector4Array(BinaryWriter writer, IReadOnlyList<Vector4> values)
-	{
-		writer.Write(values.Count);
-		for (var i = 0; i < values.Count; i++)
-		{
-			writer.Write(values[i].X);
-			writer.Write(values[i].Y);
-			writer.Write(values[i].Z);
-			writer.Write(values[i].W);
-		}
-	}
-
-	private static Vector4[] ReadVector4Array(BinaryReader reader)
-	{
-		var count = reader.ReadInt32();
-		var values = new Vector4[count];
-		for (var i = 0; i < count; i++)
-		{
-			values[i] = new Vector4(
-				reader.ReadSingle(),
-				reader.ReadSingle(),
-				reader.ReadSingle(),
-				reader.ReadSingle());
-		}
-
-		return values;
+		return mesh;
 	}
 }

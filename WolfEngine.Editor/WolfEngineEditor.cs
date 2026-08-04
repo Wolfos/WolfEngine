@@ -12,6 +12,7 @@ using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Physics;
@@ -157,6 +158,8 @@ public class WolfEngineEditor
 		_sceneWorkspace.Initialize(authoringScene);
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
+		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
+		_worldManager.AddSystem<AnimationSystem>();
 		_worldManager.AddSystem<TransformSystem>();
 		_worldManager.AddSystem(_serviceProvider.GetRequiredService<EditorCameraSystem>());
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);

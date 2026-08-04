@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.Animation;
 using WolfEngine.ECS;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
@@ -77,6 +78,8 @@ public static class WolfEngine
 	public static void AddDefaultSystems(IWorldManager worldManager)
 	{
 		worldManager.AddSystem<CameraResolutionUpdater>();
+		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
+		worldManager.AddSystem<AnimationSystem>();
 		worldManager.AddSystem<TransformSystem>();
 	}
 }

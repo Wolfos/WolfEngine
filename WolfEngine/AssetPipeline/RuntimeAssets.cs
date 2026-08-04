@@ -64,6 +64,14 @@ public interface IMeshRuntimeAssetResolver : IRuntimeAssetResolver
 {
 }
 
+public interface ISkeletonRuntimeAssetResolver : IRuntimeAssetResolver
+{
+}
+
+public interface IAnimationClipRuntimeAssetResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IRuntimeArtifactTargetProvider
 {
 	string CurrentTarget { get; }

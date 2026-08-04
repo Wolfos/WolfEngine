@@ -1,9 +1,11 @@
+using WolfEngine.Animation;
 using WolfEngine.Rendering;
 using System.Numerics;
 using Silk.NET.Assimp;
 using File = System.IO.File;
 using AssimpTexture = Silk.NET.Assimp.Texture;
 using AssimpMaterial = Silk.NET.Assimp.Material;
+using AssimpAnimation = Silk.NET.Assimp.Animation;
 using InvalidOperationException = System.InvalidOperationException;
 
 namespace WolfEngine.Importing;
@@ -34,12 +36,15 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         var modelDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
 
+        // LimitBoneWeights caps influences at four per vertex. Without it Assimp happily emits more,
+        // and the extra influences would be silently dropped when packing the GPU skin attributes.
         const PostProcessSteps postProcess = PostProcessSteps.Triangulate
                                              | PostProcessSteps.JoinIdenticalVertices
                                              | PostProcessSteps.CalculateTangentSpace
                                              | PostProcessSteps.MakeLeftHanded
                                              | PostProcessSteps.FlipWindingOrder
-                                             | PostProcessSteps.FlipUVs;
+                                             | PostProcessSteps.FlipUVs
+                                             | PostProcessSteps.LimitBoneWeights;
 
         var scene = assimp.ImportFile(fullPath, (uint)postProcess);
         if (scene == null)
@@ -47,10 +52,17 @@ public class ThreeDFileImporter : IThreeDFileImporter
             throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
         }
 
+        if (RequiresPivotCollapse(scene))
+        {
+            scene = ReimportWithoutFbxPivots(assimp, scene, fullPath, (uint)postProcess);
+        }
+
         var nodes = new List<ImportedNode>();
         var materials = new List<ImportedMaterial>();
         var textures = new List<ImportedTexture>();
-        var meshData = new List<(string meshName, Mesh mesh, int materialIndex)>();
+        var skeletons = new List<ImportedSkeleton>();
+        var animations = new List<ImportedAnimation>();
+        var meshData = new List<(string meshName, Mesh mesh, int materialIndex, int skeletonIndex)>();
         var textureLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var sceneName = string.IsNullOrWhiteSpace(scene->MRootNode->MName.AsString)
             ? Path.GetFileNameWithoutExtension(fullPath)
@@ -173,6 +185,14 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     ));
             }
 
+            // The skeleton has to exist before meshes are built, because a mesh's per-vertex bone
+            // indices address skeleton bones rather than the mesh's own local bone list.
+            var skeletonBuild = SkeletonBuilder.Build(scene);
+            if (skeletonBuild is not null)
+            {
+                skeletons.Add(skeletonBuild.Skeleton);
+            }
+
             // Mesh data (geometry + material index)
             for (var meshIndex = 0; meshIndex < scene->MNumMeshes; meshIndex++)
             {
@@ -237,24 +257,108 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 var meshName = string.IsNullOrWhiteSpace(mesh->MName.AsString)
                     ? $"Mesh_{meshIndex}"
                     : mesh->MName.AsString;
+
+                uint[] boneIndices = [];
+                float[] boneWeights = [];
+                var hasSkin = skeletonBuild is not null &&
+                              SkinWeightPacker.TryPack(
+                                  mesh,
+                                  skeletonBuild.BoneIndicesByName,
+                                  (int)vertexCount,
+                                  meshName,
+                                  out boneIndices,
+                                  out boneWeights);
+
                 var importedMesh = new Mesh(
                     vertices,
                     indexList,
                     rawNormals is not null ? normals : null,
                     hasTexCoords ? uvs : null,
-                    tangents);
-                meshData.Add((meshName, importedMesh, materialIndex));
+                    tangents,
+                    hasSkin ? boneIndices : null,
+                    hasSkin ? boneWeights : null);
+                meshData.Add((meshName, importedMesh, materialIndex, hasSkin ? 0 : -1));
             }
 
-            // Traverse node graph to preserve hierarchy and local transforms.
-            BuildNodes(scene->MRootNode, meshData, nodes);
+            // Traverse node graph to preserve hierarchy and local transforms. Bone nodes are folded
+            // into the skeleton instead of becoming entities, so they are skipped here.
+            BuildNodes(scene->MRootNode, meshData, nodes, skeletonBuild?.SkeletonNodeNames);
+
+            if (skeletonBuild is not null || scene->MNumAnimations > 0)
+            {
+                AnimationConverter.Convert(scene, skeletonBuild, animations);
+            }
         }
         finally
         {
             assimp.ReleaseImport(scene);
         }
 
-        return new ImportedScene(sceneName, materials, textures, nodes);
+        return new ImportedScene(sceneName, materials, textures, nodes, skeletons, animations);
+    }
+
+    /// <summary>
+    /// Assimp's FBX reader splits each node's transform into synthetic <c>$AssimpFbx$</c> pivot
+    /// nodes unless told otherwise. For a rig that is ruinous: a 65-bone Mixamo skeleton arrives as
+    /// 176 bones named <c>mixamorig:Hips_$AssimpFbx$_PreRotation</c> and friends, which inflates
+    /// every pose evaluation and, worse, replaces the portable bone names that clip binding and
+    /// future retargeting are built on with importer-specific ones.
+    /// </summary>
+    /// <remarks>
+    /// The setting has to be chosen before the file is parsed, and whether a file is rigged is only
+    /// known after. Rather than change how every existing static FBX asset is laid out — which would
+    /// renumber their sub-asset keys and break scene references — the collapse is applied only on a
+    /// second pass, and only for files that actually contain a skin or an animation.
+    /// </remarks>
+    private static unsafe bool RequiresPivotCollapse(Scene* scene)
+    {
+        if (scene is null)
+        {
+            return false;
+        }
+
+        if (scene->MNumAnimations > 0)
+        {
+            return true;
+        }
+
+        for (var meshIndex = 0; meshIndex < scene->MNumMeshes; meshIndex++)
+        {
+            var mesh = scene->MMeshes[meshIndex];
+            if (mesh is not null && mesh->MNumBones > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static unsafe Scene* ReimportWithoutFbxPivots(Assimp assimp, Scene* original, string fullPath, uint postProcess)
+    {
+        var propertyStore = assimp.CreatePropertyStore();
+        if (propertyStore is null)
+        {
+            return original;
+        }
+
+        try
+        {
+            assimp.SetImportPropertyInteger(propertyStore, "IMPORT_FBX_PRESERVE_PIVOTS", 0);
+            var collapsed = assimp.ImportFileExWithProperties(fullPath, postProcess, null, propertyStore);
+            if (collapsed is null)
+            {
+                // Keep the pivot-preserving scene rather than failing the import outright.
+                return original;
+            }
+
+            assimp.ReleaseImport(original);
+            return collapsed;
+        }
+        finally
+        {
+            assimp.ReleasePropertyStore(propertyStore);
+        }
     }
 
     private static bool IsSrgb(TextureSemantic semantic) => semantic is TextureSemantic.BaseColor or TextureSemantic.Emissive;
@@ -487,8 +591,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
     private static unsafe void BuildNodes(
         Node* root,
-        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
-        List<ImportedNode> output)
+        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex, int skeletonIndex)> meshData,
+        List<ImportedNode> output,
+        IReadOnlySet<string>? skeletonNodeNames)
     {
         if (root is null)
         {
@@ -510,13 +615,52 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     meshData,
                     output,
                     parentIndex: -1,
-                    fallbackName: $"Node_{childIndex}");
+                    fallbackName: $"Node_{childIndex}",
+                    skeletonNodeNames);
             }
 
             return;
         }
 
-        AppendNode(root, meshData, output, parentIndex: -1, fallbackName: "Node_0");
+        AppendNode(root, meshData, output, parentIndex: -1, fallbackName: "Node_0", skeletonNodeNames);
+    }
+
+    /// <summary>
+    /// A bone becomes part of the <see cref="ImportedSkeleton"/> rather than an entity, so its node
+    /// is dropped from the hierarchy. The subtree check keeps geometry parented under a bone — a
+    /// weapon on a hand bone, say — from disappearing along with the bone chain.
+    /// </summary>
+    private static unsafe bool ShouldSkipSkeletonNode(Node* node, IReadOnlySet<string>? skeletonNodeNames)
+    {
+        if (skeletonNodeNames is null || node is null)
+        {
+            return false;
+        }
+
+        return skeletonNodeNames.Contains(node->MName.AsString) && SubtreeHasMeshes(node) == false;
+    }
+
+    private static unsafe bool SubtreeHasMeshes(Node* node)
+    {
+        if (node is null)
+        {
+            return false;
+        }
+
+        if (node->MNumMeshes > 0)
+        {
+            return true;
+        }
+
+        for (var i = 0; i < node->MNumChildren; i++)
+        {
+            if (SubtreeHasMeshes(node->MChildren[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static unsafe bool ShouldTreatChildrenAsRoots(Node* root)
@@ -531,12 +675,18 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
     private static unsafe void AppendNode(
         Node* node,
-        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex)> meshData,
+        IReadOnlyList<(string meshName, Mesh mesh, int materialIndex, int skeletonIndex)> meshData,
         List<ImportedNode> output,
         int parentIndex,
-        string fallbackName)
+        string fallbackName,
+        IReadOnlySet<string>? skeletonNodeNames)
     {
         if (node is null)
+        {
+            return;
+        }
+
+        if (ShouldSkipSkeletonNode(node, skeletonNodeNames))
         {
             return;
         }
@@ -551,8 +701,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 continue;
             }
 
-            var (meshName, mesh, materialIndex) = meshData[meshIndex];
-            meshes.Add(new ImportedNodeMesh(meshName, mesh, materialIndex));
+            var (meshName, mesh, materialIndex, skeletonIndex) = meshData[meshIndex];
+            meshes.Add(new ImportedNodeMesh(meshName, mesh, materialIndex, skeletonIndex));
         }
 
         var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
@@ -572,9 +722,12 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 meshData,
                 output,
                 nodeIndex,
-                $"{fallbackName}_{childIndex}");
+                $"{fallbackName}_{childIndex}",
+                skeletonNodeNames);
         }
     }
+
+    internal static Matrix4x4 ConvertTransform(Matrix4x4 assimpMatrix) => GetTransform(assimpMatrix);
 
     private static bool IsApproximatelyIdentity(Matrix4x4 matrix, float epsilon = 0.0001f)
     {

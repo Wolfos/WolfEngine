@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WolfEngine.Animation;
 using WolfEngine.ECS;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
@@ -114,6 +115,39 @@ public class RenderPipeline : IRenderPipeline
 
 						var transformMatrix = transform.LocalToWorld;
 						gpuDrawDatabase.TouchMesh(entry.Entity, mesh, material, transformMatrix);
+					}
+				}
+
+				using (FrameProfiler.Instance.Measure("Gather skinned meshes"))
+				{
+					foreach (var entry in world.View<WorldTransform, SkinnedMeshRenderer>())
+					{
+						if (world.IsEnabled(entry.Entity) == false) continue;
+
+						ref var transform = ref entry.First;
+						ref var skinnedRenderer = ref entry.Second;
+
+						if (skinnedRenderer.TryValidate() == false) continue;
+
+						var sourceMesh = skinnedRenderer.Mesh;
+						var material = skinnedRenderer.Material;
+
+						// Every instance owns a copy of the mesh so the skinning pass has somewhere
+						// private to write. It is a distinct Mesh reference, which is also what earns
+						// it its own draw handle and its own bottom-level acceleration structure.
+						skinnedRenderer.SkinnedInstance ??= sourceMesh.CreateSkinnedInstance(skinnedRenderer.BoundsExpansion);
+						var instanceMesh = skinnedRenderer.SkinnedInstance;
+
+						var animatorEntity = skinnedRenderer.AnimatorEntity.IsValid
+							? skinnedRenderer.AnimatorEntity
+							: entry.Entity;
+						if (world.HasComponent<Animator>(animatorEntity) == false) continue;
+
+						ref var animator = ref world.GetComponent<Animator>(animatorEntity);
+						if (animator.SkinningMatrices is not { Length: > 0 } skinningMatrices) continue;
+
+						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices);
+						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
 					}
 				}
 

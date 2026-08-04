@@ -20,6 +20,7 @@ public sealed class FrameSnapshot
 	{
 		LightPackets = new List<LightPacket>(16);
 		DecalPackets = new List<DecalProjectorPacket>(16);
+		SkinningPackets = new List<SkinningPacket>(8);
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
@@ -33,6 +34,9 @@ public sealed class FrameSnapshot
 	public bool HasPreviousCameraState { get; private set; }
 	public List<LightPacket> LightPackets { get; }
 	public List<DecalProjectorPacket> DecalPackets { get; }
+
+	/// <summary>Skinned instances the render thread must deform this frame.</summary>
+	public List<SkinningPacket> SkinningPackets { get; }
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
@@ -63,9 +67,26 @@ public sealed class FrameSnapshot
 	{
 		LightPackets.Clear();
 		DecalPackets.Clear();
+		SkinningPackets.Clear();
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		GpuDrawDatabase.ResetForSnapshotWrite();
+	}
+
+	/// <summary>
+	/// Records a skinned instance to deform. The bone matrices are copied rather than referenced:
+	/// this is the game-thread-to-render-thread handoff, and the animator will keep mutating its
+	/// own array while the render thread is reading.
+	/// </summary>
+	public void AddSkinning(Mesh sourceMesh, Mesh instanceMesh, ReadOnlySpan<Matrix4x4> boneMatrices)
+	{
+		if (boneMatrices.IsEmpty)
+		{
+			return;
+		}
+
+		var copy = boneMatrices.ToArray();
+		SkinningPackets.Add(new SkinningPacket(sourceMesh, instanceMesh, copy, copy.Length));
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)

@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
 using WolfEngine.Mathematics;
@@ -19,7 +20,21 @@ public class Mesh
     public Vector2[] UVs { get; }
     public BoundingSphere BoundingSphere { get; }
     public Box BoundingBox { get; }
-    
+
+    /// <summary>
+    /// Four bone influences per vertex, flattened, or null for static geometry. Kept out of the
+    /// packed vertex format on purpose: widening every vertex in the world by 32 bytes to serve
+    /// the handful of skinned meshes would be a poor trade.
+    /// </summary>
+    public uint[]? BoneIndices { get; }
+    public float[]? BoneWeights { get; }
+
+    /// <summary>
+    /// For a per-instance skinned clone, the bind-pose mesh the skinning pass reads from.
+    /// Null for ordinary meshes, including the skinned source mesh itself.
+    /// </summary>
+    internal Mesh? SkinningSource { get; }
+
     // GPU resources are set by the renderer after creation, and cleared again when it releases them
     internal IGfxBuffer? VertexBuffer { get; set; }
     internal IGfxBuffer? IndexBuffer { get; set; }
@@ -28,13 +43,29 @@ public class Mesh
     internal ulong PackedVertexOffsetBytes { get; set; }
     internal ulong PackedIndexOffsetBytes { get; set; }
     internal int PackedBaseVertex { get; set; }
-    
+
+    /// <summary>Offset of this mesh's influences in the renderer's skin attribute buffer.</summary>
+    internal ulong PackedSkinOffsetBytes { get; set; }
+
+    internal bool HasSkinAttributeAllocation { get; set; }
+
+    [MemberNotNullWhen(true, nameof(BoneIndices), nameof(BoneWeights))]
+    public bool IsSkinned => BoneIndices is not null && BoneWeights is not null;
+
+    /// <summary>True when this mesh owns a per-instance vertex range written by the skinning pass.</summary>
+    internal bool IsSkinnedInstance => SkinningSource is not null;
+
+    /// <summary>Whether the renderer has backed this mesh with GPU geometry. Exposed for diagnostics.</summary>
+    public bool HasGpuVertexRange => VertexBuffer is not null;
+
     public Mesh(
         IReadOnlyList<Vector4> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<Vector3>? normals = null,
         IReadOnlyList<Vector2>? uvs = null,
-        IReadOnlyList<Vector4>? tangents = null)
+        IReadOnlyList<Vector4>? tangents = null,
+        IReadOnlyList<uint>? boneIndices = null,
+        IReadOnlyList<float>? boneWeights = null)
     {
         Vertices = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
         if (Vertices.Length == 0)
@@ -90,8 +121,74 @@ public class Mesh
             UVs = Enumerable.Repeat(Vector2.Zero, Vertices.Length).ToArray();
         }
 
+        if (boneIndices is not null && boneWeights is not null)
+        {
+            var expected = Vertices.Length * InfluencesPerVertex;
+            if (boneIndices.Count != expected || boneWeights.Count != expected)
+            {
+                throw new ArgumentException(
+                    $"Skin influence arrays must hold {expected} entries ({InfluencesPerVertex} per vertex), " +
+                    $"but hold {boneIndices.Count} indices and {boneWeights.Count} weights.",
+                    nameof(boneIndices));
+            }
+
+            BoneIndices = boneIndices.ToArray();
+            BoneWeights = boneWeights.ToArray();
+        }
+        else if (boneIndices is not null || boneWeights is not null)
+        {
+            throw new ArgumentException("Bone indices and bone weights must be supplied together.", nameof(boneIndices));
+        }
+
         BoundingSphere = ComputeBoundingSphere(Vertices);
         BoundingBox = ComputeBoundingBox(Vertices);
+    }
+
+    /// <summary>
+    /// Creates a per-instance skinned clone. The CPU-side geometry arrays are aliased rather than
+    /// copied — every instance shares one bind pose, and only the GPU vertex range differs — so
+    /// spawning a character does not duplicate its mesh in managed memory.
+    /// </summary>
+    private Mesh(Mesh source, float boundsExpansion)
+    {
+        Vertices = source.Vertices;
+        Indices = source.Indices;
+        Normals = source.Normals;
+        Tangents = source.Tangents;
+        UVs = source.UVs;
+        BoneIndices = source.BoneIndices;
+        BoneWeights = source.BoneWeights;
+        SkinningSource = source;
+
+        // A deformed pose leaves the bind pose's bounds, and the exact per-frame bounds are not
+        // known until after skinning has run on the GPU. Expanding is the conservative choice:
+        // it costs some culling efficiency, where being too tight would pop limbs out of frame.
+        BoundingSphere = new BoundingSphere(
+            source.BoundingSphere.Center,
+            source.BoundingSphere.Radius * boundsExpansion);
+        BoundingBox = new Box
+        {
+            Center = source.BoundingBox.Center,
+            Size = source.BoundingBox.Size * boundsExpansion
+        };
+    }
+
+    /// <summary>Number of bone influences stored per vertex. Matches the skinning compute shader.</summary>
+    public const int InfluencesPerVertex = 4;
+
+    internal Mesh CreateSkinnedInstance(float boundsExpansion)
+    {
+        if (IsSkinned == false)
+        {
+            throw new InvalidOperationException("Only a skinned mesh can produce a skinned instance.");
+        }
+
+        if (IsSkinnedInstance)
+        {
+            throw new InvalidOperationException("A skinned instance cannot itself be instanced.");
+        }
+
+        return new Mesh(this, boundsExpansion);
     }
 
 

@@ -37,6 +37,20 @@ public sealed class EditorAutomationTools
 		return $"Deleted entity {entityId}.";
 	}
 
+	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model into the authoring scene by asset name, through the same path the Assets window uses. Reports how many skinned mesh renderers and animators the model brought with it.")]
+	public Task<InstantiatedModelResult> InstantiateModel(
+		[Description("Substring of the 3D model asset name, such as 'Macarena'.")] string assetName,
+		[Description("Optional spawn X in world units.")] float? x = null,
+		[Description("Optional spawn Y in world units.")] float? y = null,
+		[Description("Optional spawn Z in world units.")] float? z = null,
+		[Description("Uniform scale applied to the instantiated root. Useful for sources authored in centimetres.")] float uniformScale = 1.0f,
+		CancellationToken cancellationToken = default) =>
+		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
+
+	[McpServerTool(Name = "get_animation_state"), Description("Report every animator in the authoring scene: bound clip and skeleton, bone and track counts, how many clip tracks resolved against the skeleton, playback time, and how far the current pose has moved from the bind pose.")]
+	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
+		_controller.GetAnimationStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "load_scene"), Description("Load a scene from the open project's asset database through the editor's normal scene-replacement path. The persistent editor and renderer remain running until the scene load has completed.")]
 	public Task<SceneLoadResult> LoadScene(
 		[Description("Absolute or project-relative path of a .scene.json asset.")] string scenePath,

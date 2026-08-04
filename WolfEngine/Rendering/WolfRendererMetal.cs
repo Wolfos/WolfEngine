@@ -44,6 +44,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private MetalBuffer? _packedIndexBuffer;
     private ulong _packedVertexBufferUsedBytes;
     private ulong _packedIndexBufferUsedBytes;
+    private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
     private bool _needsPackedGeometryReencode;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
@@ -536,6 +537,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         _packedIndexBuffer = null;
         _packedVertexBufferUsedBytes = 0;
         _packedIndexBufferUsedBytes = 0;
+        _skinnedInstanceVertexAllocator.Clear();
         _meshResources.Clear();
 
         if (_metalView is not null)
@@ -1139,17 +1141,6 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
     }
 
-    private static ulong AlignUp(ulong value, ulong alignment)
-    {
-        if (alignment == 0)
-        {
-            return value;
-        }
-
-        var mask = alignment - 1;
-        return (value + mask) & ~mask;
-    }
-
     private static unsafe void CopyToBufferAtOffset<T>(ReadOnlySpan<T> source, MTLBuffer buffer, ulong byteOffset) where T : unmanaged
     {
         if (source.IsEmpty)
@@ -1202,8 +1193,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         // baseVertex addressing requires offsets aligned to full vertex strides.
-        var vertexOffsetBytes = AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
-        var indexOffsetBytes = AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
+        var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
+        var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
         if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, indexOffsetBytes + indexBufferLength) == false)
         {
             _hardeningStats.IncrementFallbackProxySubstitutions();
@@ -1269,12 +1260,88 @@ internal unsafe class WolfRendererMetal : IRenderer
         } 
     }
 
+    public void EnsureSkinnedInstanceResources(Mesh skinnedInstance)
+    {
+        ArgumentNullException.ThrowIfNull(skinnedInstance);
+        var source = skinnedInstance.SkinningSource
+            ?? throw new InvalidOperationException("Mesh is not a skinned instance.");
+
+        // Unconditionally, before the instance check: the instance may already have been uploaded
+        // through the ordinary mesh path, but the skinning shader reads its bind pose out of the
+        // source's range, so the source has to be resident either way.
+        EnsureMeshResources(source);
+        if (source.VertexBuffer is null || source.IndexBuffer is null)
+        {
+            return;
+        }
+
+        if (_meshResources.ContainsKey(skinnedInstance))
+        {
+            return;
+        }
+
+        var vertexStrideBytes = (ulong)Marshal.SizeOf<VertexData>();
+        var vertexRangeBytes = (ulong)skinnedInstance.Vertices.Length * vertexStrideBytes;
+
+        if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
+        {
+            vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
+            if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexRangeBytes, _packedIndexBufferUsedBytes) == false)
+            {
+                _hardeningStats.IncrementPackedCapacityFailures();
+                _hardeningStats.IncrementFallbackProxySubstitutions();
+                return;
+            }
+
+            _packedVertexBufferUsedBytes = vertexOffsetBytes + vertexRangeBytes;
+        }
+
+        // Seed the range with the bind pose so the instance is drawable even on the first frame,
+        // before any skinning dispatch has run.
+        CopyPackedVertexRange(source.PackedVertexOffsetBytes, vertexOffsetBytes, vertexRangeBytes);
+
+        skinnedInstance.VertexBuffer = _packedVertexBuffer;
+        skinnedInstance.IndexBuffer = source.IndexBuffer;
+        skinnedInstance.StrideInBytes = (uint)vertexStrideBytes;
+        skinnedInstance.IndexCount = source.IndexCount;
+        skinnedInstance.PackedVertexOffsetBytes = vertexOffsetBytes;
+        skinnedInstance.PackedIndexOffsetBytes = source.PackedIndexOffsetBytes;
+        skinnedInstance.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStrideBytes));
+
+        _meshResources[skinnedInstance] = new MeshResources(
+            vertexOffsetBytes,
+            source.PackedIndexOffsetBytes,
+            skinnedInstance.PackedBaseVertex,
+            source.IndexCount);
+    }
+
+    private unsafe void CopyPackedVertexRange(ulong sourceOffsetBytes, ulong destinationOffsetBytes, ulong byteCount)
+    {
+        if (_packedVertexBuffer is null || byteCount == 0)
+        {
+            return;
+        }
+
+        var length = checked((int)byteCount);
+        var basePointer = (byte*)_packedVertexBuffer.Buffer.Contents.ToPointer();
+        var source = new ReadOnlySpan<byte>(basePointer + (nint)sourceOffsetBytes, length);
+        var destination = new Span<byte>(basePointer + (nint)destinationOffsetBytes, length);
+        source.CopyTo(destination);
+    }
+
     public void ReleaseMeshResources(Mesh mesh)
     {
         ArgumentNullException.ThrowIfNull(mesh);
         if (_meshResources.Remove(mesh) == false)
         {
             return;
+        }
+
+        if (mesh.IsSkinnedInstance)
+        {
+            _skinnedInstanceVertexAllocator.Release(
+                mesh.PackedVertexOffsetBytes,
+                (ulong)mesh.Vertices.Length * (ulong)Marshal.SizeOf<VertexData>());
         }
 
         mesh.VertexBuffer = null;

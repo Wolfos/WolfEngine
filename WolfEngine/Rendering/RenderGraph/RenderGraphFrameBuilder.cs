@@ -165,6 +165,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly RayTracingSceneResources _rayTracingSceneResources;
+	private readonly SkinningPass _skinningPass;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private SkyboxResources? _externalSkybox;
@@ -275,6 +276,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_passSet = passSet;
 		_rayTracingSceneResources = new RayTracingSceneResources(shaderProvider);
+		_skinningPass = new SkinningPass(shaderProvider);
 		_resources = resources;
 		_renderer = renderer;
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
@@ -337,6 +339,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_passSet.InvalidateShaderPipelines();
 		ShaderPipelineInvalidation.Invalidate(_rayTracingSceneResources);
+		_skinningPass.InvalidateShaders();
 	}
 
 	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();
@@ -1744,10 +1747,43 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
 		context.GpuDrawDatabase.CopyUpdates(_frameGpuDrawUpdates);
+
+		// Before RecordUpdate, not after. RecordUpdate would otherwise upload the instance through
+		// the ordinary mesh path, which allocates a vertex range but leaves the shared bind-pose
+		// source mesh unuploaded — and the skinning shader reads its bind pose from there.
+		var skinningPackets = context.FrameSnapshot.SkinningPackets;
+		EnsureSkinnedInstanceResources(skinningPackets);
+
 		_gpuDrawPass.RecordUpdate(context);
+
+		if (skinningPackets.Count > 0)
+		{
+			_skinningPass.Record(context.CommandList, _renderer.GetGfxDevice(), _renderer, skinningPackets);
+		}
+
 		if (RequiresRayTracingScene(_frameResources.Config))
 		{
+			// Deliberately after skinning: acceleration structures are built over the vertices this
+			// frame produced, so a ray-traced reflection shows the pose being drawn rather than the
+			// previous one.
+			for (var i = 0; i < skinningPackets.Count; i++)
+			{
+				_rayTracingSceneResources.QueueSkinnedInstanceRebuild(skinningPackets[i].InstanceMesh);
+			}
+
 			_rayTracingSceneResources.RecordUpdate(context, _renderer, _frameGpuDrawUpdates);
+		}
+	}
+
+	/// <summary>
+	/// Claims each skinned instance's private vertex range, and makes its shared bind-pose source
+	/// resident, before anything else can upload the instance through the ordinary mesh path.
+	/// </summary>
+	private void EnsureSkinnedInstanceResources(IReadOnlyList<SkinningPacket> packets)
+	{
+		for (var i = 0; i < packets.Count; i++)
+		{
+			_renderer.EnsureSkinnedInstanceResources(packets[i].InstanceMesh);
 		}
 	}
 

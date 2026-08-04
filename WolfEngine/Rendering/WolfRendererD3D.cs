@@ -127,6 +127,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private IGfxBuffer? _packedIndexBuffer;
 	private ulong _packedVertexBufferUsedBytes;
 	private ulong _packedIndexBufferUsedBytes;
+	private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
 
 	private uint _backbufferIndex;
 	private uint _swapchainFlags;
@@ -259,7 +260,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 				throw new InvalidOperationException($"Frame capture only supports RGBA8 or BGRA8 color targets, but got '{texture.Descriptor.Format}'.");
 			}
 
-			var rowPitch = Align((ulong)width * 4, D3D12.TextureDataPitchAlignment);
+			var rowPitch = BufferAlignment.AlignUp((ulong)width * 4, D3D12.TextureDataPitchAlignment);
 			using var readbackBuffer = _gfxDevice.CreateBuffer(new BufferDescriptor(rowPitch * (ulong)height, BufferUsage.Staging)) as D3D12Buffer
 				?? throw new InvalidOperationException("Direct3D12 did not create a readable frame-capture buffer.");
 			var priorState = resourceRegistry.GetResourceState(sceneColor);
@@ -1541,8 +1542,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
 		var vertexDataSize = (ulong)vertexStride * (uint)vertexCount;
 		var indexDataSize = (ulong)sizeof(uint) * (uint)mesh.Indices.Length;
-		var vertexOffsetBytes = Align(_packedVertexBufferUsedBytes, vertexStride);
-		var indexOffsetBytes = Align(_packedIndexBufferUsedBytes, sizeof(uint));
+		var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
+		var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
 		if (vertexOffsetBytes + vertexDataSize > vertexBuffer.Descriptor.SizeInBytes ||
 		    indexOffsetBytes + indexDataSize > indexBuffer.Descriptor.SizeInBytes)
 		{
@@ -1580,12 +1581,95 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		_meshResources.Add(mesh, resources);
 	}
 
+	public void EnsureSkinnedInstanceResources(Mesh skinnedInstance)
+	{
+		ArgumentNullException.ThrowIfNull(skinnedInstance);
+		var source = skinnedInstance.SkinningSource
+			?? throw new InvalidOperationException("Mesh is not a skinned instance.");
+
+		// Unconditionally, before the instance check: the instance may already have been uploaded
+		// through the ordinary mesh path, but the skinning shader reads its bind pose out of the
+		// source's range, so the source has to be resident either way.
+		EnsureMeshResources(source);
+		if (source.VertexBuffer is null || source.IndexBuffer is null)
+		{
+			return;
+		}
+
+		if (_meshResources.ContainsKey(skinnedInstance))
+		{
+			return;
+		}
+
+		EnsurePackedGeometryBuffers();
+		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer was not created.");
+		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer)
+		{
+			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
+		}
+
+		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
+		var vertexCount = skinnedInstance.Vertices.Length;
+		var vertexRangeBytes = (ulong)vertexStride * (uint)vertexCount;
+
+		if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
+		{
+			vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
+			if (vertexOffsetBytes + vertexRangeBytes > vertexBuffer.Descriptor.SizeInBytes)
+			{
+				throw new InvalidOperationException(
+					$"Packed geometry capacity exceeded allocating a skinned instance range. " +
+					$"requiredVertexBytes={vertexOffsetBytes + vertexRangeBytes}, " +
+					$"vertexCapacity={vertexBuffer.Descriptor.SizeInBytes}.");
+			}
+
+			_packedVertexBufferUsedBytes = vertexOffsetBytes + vertexRangeBytes;
+		}
+
+		// Seed the range with the bind pose so the instance is drawable even on the first frame,
+		// before any skinning dispatch has run.
+		var bindPose = new VertexData[vertexCount];
+		for (var i = 0; i < vertexCount; i++)
+		{
+			bindPose[i].Position = new Vector3(
+				skinnedInstance.Vertices[i].X,
+				skinnedInstance.Vertices[i].Y,
+				skinnedInstance.Vertices[i].Z);
+			bindPose[i].Normal = i < skinnedInstance.Normals.Length ? skinnedInstance.Normals[i] : Vector3.UnitY;
+			bindPose[i].TexCoord = i < skinnedInstance.UVs.Length ? skinnedInstance.UVs[i] : Vector2.Zero;
+			bindPose[i].Tangent = i < skinnedInstance.Tangents.Length ? skinnedInstance.Tangents[i] : new Vector4(1, 0, 0, 1);
+		}
+
+		writableVertexBuffer.Write<VertexData>(bindPose, vertexOffsetBytes / vertexStride);
+
+		skinnedInstance.VertexBuffer = vertexBuffer;
+		skinnedInstance.IndexBuffer = source.IndexBuffer;
+		skinnedInstance.StrideInBytes = vertexStride;
+		skinnedInstance.IndexCount = source.IndexCount;
+		skinnedInstance.PackedVertexOffsetBytes = vertexOffsetBytes;
+		skinnedInstance.PackedIndexOffsetBytes = source.PackedIndexOffsetBytes;
+		skinnedInstance.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
+
+		_meshResources.Add(skinnedInstance, new MeshResources(
+			vertexOffsetBytes,
+			source.PackedIndexOffsetBytes,
+			skinnedInstance.PackedBaseVertex,
+			source.IndexCount));
+	}
+
 	public void ReleaseMeshResources(Mesh mesh)
 	{
 		ArgumentNullException.ThrowIfNull(mesh);
 		if (_meshResources.Remove(mesh) == false)
 		{
 			return;
+		}
+
+		if (mesh.IsSkinnedInstance)
+		{
+			_skinnedInstanceVertexAllocator.Release(
+				mesh.PackedVertexOffsetBytes,
+				(ulong)mesh.Vertices.Length * (uint)Unsafe.SizeOf<VertexData>());
 		}
 
 		mesh.VertexBuffer = null;
@@ -1645,20 +1729,6 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 		Console.WriteLine("[gpu capture] stopped; pixtool has written the capture.");
 		return true;
-	}
-
-	private static ulong Align(ulong size, ulong alignment)
-	{
-		if (alignment == 0)
-		{
-			return size;
-		}
-
-		// The packed vertex stride is 48 bytes, which is not a power of two.
-		// Bit-mask alignment silently produced offsets such as 64 for a 48-byte
-		// stride. CPU uploads divided that offset by the stride, while DXR used
-		// the raw byte offset, making the BLAS read a different vertex range.
-		return checked(((size + alignment - 1) / alignment) * alignment);
 	}
 
 	private DescriptorHandle GetOrCreateDefaultMaterialSampler()

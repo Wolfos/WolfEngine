@@ -82,6 +82,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId GpuDrawTerrainLayerUpdate = Id("gpu-draw-terrain-layer-update");
 	public static readonly ShaderProgramId GpuDrawTerrainMaterialUpdate = Id("gpu-draw-terrain-material-update");
 	public static readonly ShaderProgramId TerrainRayTracingVertexUpdate = Id("terrain-rt-vertex-update");
+	public static readonly ShaderProgramId Skinning = Id("skinning");
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
@@ -153,6 +154,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.GpuDrawTerrainLayerUpdate, "GpuDraw/gpu_draw_terrain_layer_update.compute.slang"),
 			D(EngineShaderPrograms.GpuDrawTerrainMaterialUpdate, "GpuDraw/gpu_draw_terrain_material_update.compute.slang"),
 			D(EngineShaderPrograms.TerrainRayTracingVertexUpdate, "Terrain/terrain_rt_vertex_update.compute.slang"),
+			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang")
@@ -308,6 +310,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.GpuDrawTerrainLayerUpdate) return ["CSUpdateTerrainLayer"];
 		if (id == EngineShaderPrograms.GpuDrawTerrainMaterialUpdate) return ["CSUpdateTerrainMaterial"];
 		if (id == EngineShaderPrograms.TerrainRayTracingVertexUpdate) return ["TerrainRayTracingVertexUpdateCS"];
+		if (id == EngineShaderPrograms.Skinning) return ["SkinningCS"];
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
 		return [];
