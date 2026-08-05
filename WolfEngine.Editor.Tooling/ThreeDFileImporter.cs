@@ -85,9 +85,10 @@ public class ThreeDFileImporter : IThreeDFileImporter
         var animations = new List<ImportedAnimation>();
         var meshData = new List<(string meshName, Mesh mesh, int materialIndex, int skeletonIndex)>();
         var textureLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var sceneName = string.IsNullOrWhiteSpace(scene->MRootNode->MName.AsString)
-            ? Path.GetFileNameWithoutExtension(fullPath)
-            : scene->MRootNode->MName.AsString;
+        // Assimp's synthetic root node carries no useful name — FBX reports "RootNode" and glTF
+        // whatever the exporter emitted ("ROOT", "Scene") — and that name ends up on the wrapper
+        // entity a multi-root model is instantiated under. The file name is what the user recognises.
+        var sceneName = Path.GetFileNameWithoutExtension(fullPath);
 
         try
         {

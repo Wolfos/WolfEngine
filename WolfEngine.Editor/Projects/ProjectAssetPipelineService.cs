@@ -1043,9 +1043,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			dependencies);
 
 		var sourceAssetName = Path.GetFileName(relativeSourcePath);
+		var modelDisplayName = Path.GetFileNameWithoutExtension(relativeSourcePath);
+		var totalRootCount = importedScene.Nodes.Count(node => node.ParentIndex < 0);
 		var modelGraph = new ImportedModelAssetFile
 		{
-			Name = importedScene.Name,
+			Name = modelDisplayName,
 			Nodes = new List<ImportedModelAssetNode>(importedScene.Nodes.Count),
 			SkeletonNodeIds = skeletonNodeIds,
 			AnimationNodeIds = animationNodeIds
@@ -1082,6 +1084,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				relativeMetaPath,
 				hierarchyKey,
 				importedNode,
+				GetModelNodeDisplayName(importedNode, totalRootCount, modelDisplayName),
 				materialNodeIds,
 				skeletonNodeIds,
 				nodes,
@@ -1434,6 +1437,16 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return animationNodeIds;
 	}
 
+	private static string GetModelNodeDisplayName(ImportedNode node, int totalRootCount, string modelDisplayName)
+	{
+		if (node.ParentIndex >= 0 || totalRootCount != 1 || string.IsNullOrWhiteSpace(modelDisplayName))
+		{
+			return node.Name;
+		}
+
+		return modelDisplayName;
+	}
+
 	private ImportedModelAssetNode CreateModelNode(
 		string projectRootPath,
 		AssetSourceMetaFile metadata,
@@ -1441,6 +1454,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeMetaPath,
 		string hierarchyKey,
 		ImportedNode node,
+		string displayName,
 		IReadOnlyList<Guid> materialNodeIds,
 		IReadOnlyList<Guid> skeletonNodeIds,
 		List<AssetNodeRecord> nodes,
@@ -1448,7 +1462,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		var modelNode = new ImportedModelAssetNode
 		{
-			Name = node.Name,
+			Name = displayName,
 			LocalTransform = node.LocalTransform,
 			ParentIndex = node.ParentIndex
 		};
@@ -1947,7 +1961,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportAudioSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				5,
+				6,
 				path =>
 				{
 					var extension = Path.GetExtension(path);
