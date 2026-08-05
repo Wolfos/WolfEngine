@@ -1480,11 +1480,12 @@ internal sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.BloomCompositeSceneColor.IsValid ? _frameResources.BloomCompositeSceneColor : _frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
-
-			graph.AddPass("CAS Sharpen", PassKind.Compute)
-				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
-				.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
-				.SetExecute(_casSharpenExecute);
+			
+			// This is married to TAA which is currently unavailable. FSR has its own RCAS sharpening
+			// graph.AddPass("CAS Sharpen", PassKind.Compute)
+			// 	.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+			// 	.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
+			// 	.SetExecute(_casSharpenExecute);
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
 				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
