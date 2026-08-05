@@ -90,9 +90,10 @@ public static class Program
 		worldManager.AddSystem<CameraResolutionUpdater>();
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
 		worldManager.AddSystem<AnimationSystem>();
-		worldManager.AddSystem<TransformSystem>();
+		// Register before TransformSystem so interpolated child poses propagate this frame.
 		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
+		worldManager.AddSystem<TransformSystem>();
 		foreach (var system in gameplay.CreateSystems(provider))
 			worldManager.AddSystem(system, SystemExecutionGroup.Gameplay);
 

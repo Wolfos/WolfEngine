@@ -10,6 +10,18 @@ public enum RigidbodyBodyType
 	Dynamic
 }
 
+/// <summary>Controls how dynamic bodies render between fixed steps.</summary>
+public enum RigidbodyInterpolation
+{
+	None,
+
+	/// <summary>Blends the last two fixed-step poses.</summary>
+	Interpolate,
+
+	/// <summary>Advances the latest pose using its velocity.</summary>
+	Extrapolate
+}
+
 public struct Rigidbody : IEntityComponent
 {
 	public RigidbodyBodyType BodyType;
@@ -23,6 +35,7 @@ public struct Rigidbody : IEntityComponent
 	public bool AllowSleeping;
 	public bool UseManifoldReduction;
 	public bool IsSensor;
+	public RigidbodyInterpolation Interpolation;
 	[NotSerialized]
 	[HideFromEditor]
 	internal bool PhysicsCacheValid;
@@ -65,6 +78,7 @@ public struct Rigidbody : IEntityComponent
 		AllowSleeping = true;
 		UseManifoldReduction = false;
 		IsSensor = false;
+		Interpolation = RigidbodyInterpolation.None;
 		PhysicsCacheValid = false;
 	}
 

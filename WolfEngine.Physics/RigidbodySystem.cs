@@ -8,7 +8,7 @@ using WolfEngine.Profiling;
 
 namespace WolfEngine.Physics;
 
-public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDisposable
+public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedListener, IDisposable
 {
 	private const int CollisionSteps = 1;
 	private static readonly Vector3 QueryShapeScale = Vector3.One;
@@ -44,9 +44,27 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				}
 			}
 
+			state.InterpolationClock.OnFixedStep(fixedDeltaTime);
 			SyncDynamicBodiesBackToWorld(world, state);
-			VehicleSystem.SyncVehicleVisuals(world, state);
+			VehicleSystem.SyncVehicleVisuals(world, state, fixedDeltaTime);
 			DispatchSensorCallbacks(world, state);
+		}
+	}
+
+	/// <summary>Applies interpolated physics poses before rendering.</summary>
+	public void PreRender(float deltaTime, World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state) == false)
+		{
+			return;
+		}
+
+		using (FrameProfiler.Instance.Measure("Physics.Interpolate"))
+		{
+			state.InterpolationClock.OnFrame(deltaTime);
+			ApplyInterpolatedPoses(world, state);
 		}
 	}
 
@@ -845,6 +863,8 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 		if (previousDefinition.Position != currentDefinition.Position ||
 		    previousDefinition.Rotation != currentDefinition.Rotation)
 		{
+			// Do not interpolate across authored transform changes.
+			bodyState.Interpolation.Invalidate();
 			if (currentDefinition.MotionType == MotionType.Kinematic && fixedDeltaTime > 0.0f)
 			{
 				state.BodyInterface.MoveKinematic(
@@ -944,13 +964,9 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 					worldPosition = vehicleState.Definition.GetEntityPosition(position, rotation);
 				}
 
-				if (HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
-				{
-					changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, worldPosition, rotation));
-				}
-
 				var linearVelocity = bodyState.Definition.LinearVelocity;
 				var angularVelocity = bodyState.Definition.AngularVelocity;
+				var interpolation = RigidbodyInterpolation.None;
 				if (world.HasComponent<Rigidbody>(pair.Key))
 				{
 					using (FrameProfiler.Instance.Measure("Physics.SyncBack.ReadVelocity"))
@@ -960,8 +976,17 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 						rigidbody.AngularVelocity = state.BodyInterface.GetAngularVelocity(bodyState.BodyId);
 						linearVelocity = rigidbody.LinearVelocity;
 						angularVelocity = rigidbody.AngularVelocity;
+						interpolation = rigidbody.Interpolation;
 						CacheRigidbodyState(ref rigidbody);
 					}
+				}
+
+				bodyState.Interpolation.PushSample(worldPosition, rotation, linearVelocity, angularVelocity);
+
+				if (interpolation == RigidbodyInterpolation.None &&
+				    HasWorldPoseChanged(bodyState.Definition.Position, bodyState.Definition.Rotation, position, rotation))
+				{
+					changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, worldPosition, rotation));
 				}
 
 				bodyState.Definition = bodyState.Definition with
@@ -979,6 +1004,58 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IWorldRemovedListener, IDi
 				{
 					world.ApplyPhysicsWorldPoses(changedPoses);
 				}
+			}
+		}
+	}
+
+	private static void ApplyInterpolatedPoses(World world, PhysicsWorldState state)
+	{
+		var alpha = state.InterpolationClock.Alpha;
+		var timeSinceLastStep = state.InterpolationClock.TimeSinceLastStep;
+		var changedPoses = state.InterpolationPoseBuffer;
+		changedPoses.Clear();
+
+		foreach (var pair in state.BodiesByEntity)
+		{
+			var bodyState = pair.Value;
+			if (bodyState.Definition.MotionType != MotionType.Dynamic ||
+			    bodyState.Interpolation.HasHistory == false ||
+			    world.IsAlive(pair.Key) == false ||
+			    world.HasComponent<Rigidbody>(pair.Key) == false ||
+			    world.HasComponent<LocalTransform>(pair.Key) == false)
+			{
+				continue;
+			}
+
+			var interpolation = world.GetComponent<Rigidbody>(pair.Key).Interpolation;
+			if (interpolation == RigidbodyInterpolation.None)
+			{
+				continue;
+			}
+
+			// Preserve authored changes until the simulation consumes them.
+			if (world.GetComponent<LocalTransform>(pair.Key).IsDirty)
+			{
+				continue;
+			}
+
+			bodyState.Interpolation.Evaluate(interpolation, alpha, timeSinceLastStep, out var position, out var rotation);
+			if (bodyState.Interpolation.TryTrackAppliedPose(position, rotation) == false)
+			{
+				continue;
+			}
+
+			changedPoses.Add(new PhysicsWorldPoseSyncItem(pair.Key, position, rotation));
+		}
+
+		// Apply wheels with their chassis so parent transforms match this frame.
+		VehicleSystem.CollectInterpolatedWheelPoses(world, state, alpha, timeSinceLastStep, changedPoses);
+
+		if (changedPoses.Count > 0)
+		{
+			using (FrameProfiler.Instance.Measure("Physics.Interpolate.WritePose"))
+			{
+				world.ApplyPhysicsWorldPoses(changedPoses);
 			}
 		}
 	}

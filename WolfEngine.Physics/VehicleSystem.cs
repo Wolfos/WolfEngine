@@ -92,36 +92,104 @@ public sealed class VehicleSystem : IPhysicsUpdate, IWorldRemovedListener, IDisp
 		}
 	}
 
-	internal static void SyncVehicleVisuals(World world, PhysicsWorldState state)
+	/// <summary>Records wheel poses after each fixed step.</summary>
+	internal static void SyncVehicleVisuals(World world, PhysicsWorldState state, float fixedDeltaTime)
 	{
 		foreach (var pair in state.VehiclesByEntity)
 		{
 			var vehicleState = pair.Value;
+			var interpolation = GetInterpolationMode(world, pair.Key);
 			for (var wheelIndex = 0; wheelIndex < vehicleState.Definition.Wheels.Length; wheelIndex++)
 			{
 				var wheelDefinition = vehicleState.Definition.Wheels[wheelIndex];
-				if (wheelDefinition.VisualEntity.IsValid == false ||
-				    world.IsAlive(wheelDefinition.VisualEntity) == false ||
-				    world.HasComponent<LocalTransform>(wheelDefinition.VisualEntity) == false ||
-				    world.HasComponent<WorldTransform>(wheelDefinition.VisualEntity) == false)
+				if (TryGetWheelVisualPose(world, vehicleState, wheelIndex, wheelDefinition, out var position, out var rotation) == false)
 				{
+					vehicleState.WheelInterpolation[wheelIndex].Invalidate();
 					continue;
 				}
 
-				var wheelUp = Normalize(wheelDefinition.WheelUp, Vector3.UnitY);
-				var wheelRight = Vector3.Cross(
-					Normalize(wheelDefinition.WheelForward, Vector3.UnitZ),
-					wheelUp);
-				wheelRight = Normalize(wheelRight, Vector3.UnitX);
-				var wheelMatrix = vehicleState.Constraint.GetWheelWorldTransform(wheelIndex, in wheelRight, in wheelUp);
-				if (TryDecomposeWheelTransform(wheelMatrix, out var rotation, out var position) == false)
+				vehicleState.WheelInterpolation[wheelIndex].PushDerivedSample(position, rotation, fixedDeltaTime);
+				if (interpolation == RigidbodyInterpolation.None)
 				{
-					continue;
+					world.ApplyPhysicsWorldPose(wheelDefinition.VisualEntity, position, rotation);
 				}
-
-				world.ApplyPhysicsWorldPose(wheelDefinition.VisualEntity, position, rotation);
 			}
 		}
+	}
+
+	/// <summary>Adds interpolated wheel poses to the frame's transform batch.</summary>
+	internal static void CollectInterpolatedWheelPoses(
+		World world,
+		PhysicsWorldState state,
+		float alpha,
+		float timeSinceLastStep,
+		List<PhysicsWorldPoseSyncItem> poses)
+	{
+		foreach (var pair in state.VehiclesByEntity)
+		{
+			var vehicleState = pair.Value;
+			var interpolation = GetInterpolationMode(world, pair.Key);
+			if (interpolation == RigidbodyInterpolation.None)
+			{
+				continue;
+			}
+
+			for (var wheelIndex = 0; wheelIndex < vehicleState.Definition.Wheels.Length; wheelIndex++)
+			{
+				ref var wheelInterpolation = ref vehicleState.WheelInterpolation[wheelIndex];
+				var visualEntity = vehicleState.Definition.Wheels[wheelIndex].VisualEntity;
+				if (wheelInterpolation.HasHistory == false ||
+				    visualEntity.IsValid == false ||
+				    world.IsAlive(visualEntity) == false ||
+				    world.HasComponent<LocalTransform>(visualEntity) == false ||
+				    world.HasComponent<WorldTransform>(visualEntity) == false)
+				{
+					continue;
+				}
+
+				wheelInterpolation.Evaluate(interpolation, alpha, timeSinceLastStep, out var position, out var rotation);
+				if (wheelInterpolation.TryTrackAppliedPose(position, rotation) == false)
+				{
+					continue;
+				}
+
+				poses.Add(new PhysicsWorldPoseSyncItem(visualEntity, position, rotation));
+			}
+		}
+	}
+
+	private static bool TryGetWheelVisualPose(
+		World world,
+		PhysicsVehicleState vehicleState,
+		int wheelIndex,
+		PhysicsVehicleWheelDefinition wheelDefinition,
+		out Vector3 position,
+		out Quaternion rotation)
+	{
+		position = Vector3.Zero;
+		rotation = Quaternion.Identity;
+		if (wheelDefinition.VisualEntity.IsValid == false ||
+		    world.IsAlive(wheelDefinition.VisualEntity) == false ||
+		    world.HasComponent<LocalTransform>(wheelDefinition.VisualEntity) == false ||
+		    world.HasComponent<WorldTransform>(wheelDefinition.VisualEntity) == false)
+		{
+			return false;
+		}
+
+		var wheelUp = Normalize(wheelDefinition.WheelUp, Vector3.UnitY);
+		var wheelRight = Vector3.Cross(
+			Normalize(wheelDefinition.WheelForward, Vector3.UnitZ),
+			wheelUp);
+		wheelRight = Normalize(wheelRight, Vector3.UnitX);
+		var wheelMatrix = vehicleState.Constraint.GetWheelWorldTransform(wheelIndex, in wheelRight, in wheelUp);
+		return TryDecomposeWheelTransform(wheelMatrix, out rotation, out position);
+	}
+
+	private static RigidbodyInterpolation GetInterpolationMode(World world, Entity entity)
+	{
+		return world.HasComponent<Rigidbody>(entity)
+			? world.GetComponent<Rigidbody>(entity).Interpolation
+			: RigidbodyInterpolation.None;
 	}
 
 	internal int GetTrackedVehicleCount(World world)
@@ -671,6 +739,7 @@ internal sealed class PhysicsVehicleState
 		CollisionTester = collisionTester;
 		Controller = controller;
 		Definition = definition;
+		WheelInterpolation = new PhysicsBodyInterpolationState[definition.Wheels.Length];
 	}
 
 	public Entity Entity { get; }
@@ -681,6 +750,8 @@ internal sealed class PhysicsVehicleState
 	public WheeledVehicleController Controller { get; }
 	public PhysicsVehicleDefinition Definition { get; set; }
 	public float LogTimer { get; set; }
+
+	public PhysicsBodyInterpolationState[] WheelInterpolation { get; }
 
 	public void Dispose(PhysicsWorldState state)
 	{
