@@ -9,12 +9,13 @@ using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.Passes;
 
-/// <summary>Per-vertex skin influences, as the skinning shader reads them.</summary>
+/// <summary>Bind-pose position and skin influences shared with the shader.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal readonly struct GpuSkinAttribute
+internal readonly struct GpuSkinVertex
 {
-	internal GpuSkinAttribute(uint index0, uint index1, uint index2, uint index3, Vector4 weights)
+	internal GpuSkinVertex(Vector4 bindPosition, uint index0, uint index1, uint index2, uint index3, Vector4 weights)
 	{
+		BindPosition = bindPosition;
 		Index0 = index0;
 		Index1 = index1;
 		Index2 = index2;
@@ -22,6 +23,8 @@ internal readonly struct GpuSkinAttribute
 		Weights = weights;
 	}
 
+	/// <summary>Float4 keeps the shared struct stride consistent across backends.</summary>
+	public readonly Vector4 BindPosition;
 	public readonly uint Index0;
 	public readonly uint Index1;
 	public readonly uint Index2;
@@ -29,14 +32,52 @@ internal readonly struct GpuSkinAttribute
 	public readonly Vector4 Weights;
 }
 
+/// <summary>Per-instance skinning ranges, indexed by mesh-handle slot.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal readonly struct GpuSkinnedInstanceData
+{
+	internal GpuSkinnedInstanceData(
+		uint meshHandle,
+		uint skinVertexBase,
+		uint boneMatrixOffset,
+		uint previousBoneMatrixOffset,
+		uint boneCount)
+	{
+		MeshHandle = meshHandle;
+		SkinVertexBase = skinVertexBase;
+		BoneMatrixOffset = boneMatrixOffset;
+		PreviousBoneMatrixOffset = previousBoneMatrixOffset;
+		BoneCount = boneCount;
+		Pad0 = 0;
+		Pad1 = 0;
+		Pad2 = 0;
+	}
+
+	/// <summary>Full handle validates entries in recycled slots.</summary>
+	public readonly uint MeshHandle;
+	public readonly uint SkinVertexBase;
+	public readonly uint BoneMatrixOffset;
+	public readonly uint PreviousBoneMatrixOffset;
+	public readonly uint BoneCount;
+	public readonly uint Pad0;
+	public readonly uint Pad1;
+	public readonly uint Pad2;
+}
+
 /// <summary>One skinned instance to deform this frame.</summary>
 public readonly struct SkinningPacket
 {
-	public SkinningPacket(Mesh sourceMesh, Mesh instanceMesh, Matrix4x4[] boneMatrices, int boneCount)
+	public SkinningPacket(
+		Mesh sourceMesh,
+		Mesh instanceMesh,
+		int boneMatrixOffset,
+		int previousBoneMatrixOffset,
+		int boneCount)
 	{
 		SourceMesh = sourceMesh;
 		InstanceMesh = instanceMesh;
-		BoneMatrices = boneMatrices;
+		BoneMatrixOffset = boneMatrixOffset;
+		PreviousBoneMatrixOffset = previousBoneMatrixOffset;
 		BoneCount = boneCount;
 	}
 
@@ -46,11 +87,11 @@ public readonly struct SkinningPacket
 	/// <summary>The instance-owned mesh the deformation is written into.</summary>
 	public Mesh InstanceMesh { get; }
 
-	/// <summary>
-	/// Skinning matrices for this instance, copied at snapshot time. The render thread must not
-	/// reach back into the animator for these.
-	/// </summary>
-	public Matrix4x4[] BoneMatrices { get; }
+	/// <summary>Current-pose offset in <see cref="FrameSnapshot.BoneMatrices"/>.</summary>
+	public int BoneMatrixOffset { get; }
+
+	/// <summary>Start of the matrices for the pose the previous frame rendered.</summary>
+	public int PreviousBoneMatrixOffset { get; }
 
 	public int BoneCount { get; }
 }
@@ -76,13 +117,17 @@ public sealed class SkinningPass
 	private ComputeThreadGroupSize? _threadGroupSize;
 	private ReadOnlyMemory<byte>? _shaderBytecode;
 
-	private IGfxBuffer? _skinAttributeBuffer;
-	private uint _skinAttributeVertexCapacity;
-	private uint _skinAttributeVertexCount;
+	private IGfxBuffer? _skinVertexBuffer;
+	private uint _skinVertexCapacity;
+	private uint _skinVertexCount;
 
 	private IGfxBuffer? _boneMatrixBuffer;
 	private int _boneMatrixCapacity;
 	private Matrix4x4[] _boneMatrixStaging = [];
+
+	private IGfxBuffer? _skinnedInstanceBuffer;
+	private readonly List<uint> _publishedInstanceSlots = new();
+	private readonly List<uint> _previouslyPublishedInstanceSlots = new();
 
 	private int _lastDispatchedInstanceCount;
 
@@ -94,35 +139,42 @@ public sealed class SkinningPass
 	/// <summary>Skinned instances deformed during the most recent recording. Used by tests and diagnostics.</summary>
 	public int LastDispatchedInstanceCount => _lastDispatchedInstanceCount;
 
+	public IGfxBuffer? SkinVertexBuffer => _skinVertexBuffer;
+
+	public IGfxBuffer? BoneMatrixBuffer => _boneMatrixBuffer;
+
+	public IGfxBuffer? SkinnedInstanceBuffer => _skinnedInstanceBuffer;
+
 	public void Record(
 		IGfxCommandList commandList,
 		IGfxDevice device,
 		IRenderer renderer,
-		IReadOnlyList<SkinningPacket> packets)
+		IReadOnlyList<SkinningPacket> packets,
+		ReadOnlySpan<Matrix4x4> boneMatrices,
+		GpuDrawDatabase drawDatabase)
 	{
 		ArgumentNullException.ThrowIfNull(commandList);
 		ArgumentNullException.ThrowIfNull(device);
 		ArgumentNullException.ThrowIfNull(renderer);
+		ArgumentNullException.ThrowIfNull(drawDatabase);
 
 		_lastDispatchedInstanceCount = 0;
-		if (packets is null || packets.Count == 0)
+		if (EnsureResources(device) == false)
 		{
 			return;
 		}
 
 		var packedVertexBuffer = renderer.GetPackedMeshVertexBuffer();
-		if (packedVertexBuffer is null)
+		if (packets is null || packets.Count == 0 || packedVertexBuffer is null)
 		{
+			RetireStaleSkinnedInstances();
 			return;
 		}
 
-		if (TryEnsureSkinAttributes(device, packets) == false)
+		if (TryEnsureSkinVertices(device, packets) == false ||
+		    TryUploadBoneMatrices(device, packets, boneMatrices, out var boneMatrixOffsets) == false)
 		{
-			return;
-		}
-
-		if (TryUploadBoneMatrices(device, packets, out var boneMatrixOffsets) == false)
-		{
+			RetireStaleSkinnedInstances();
 			return;
 		}
 
@@ -134,8 +186,10 @@ public sealed class SkinningPass
 
 		commandList.BindPipeline(pipeline);
 		commandList.SetComputeBuffer(0, packedVertexBuffer);
-		commandList.SetComputeBuffer(1, _skinAttributeBuffer!);
-		commandList.SetComputeBuffer(2, _boneMatrixBuffer!);
+		commandList.SetComputeReadOnlyBuffer(2, _skinVertexBuffer!);
+		commandList.SetComputeReadOnlyBuffer(3, _boneMatrixBuffer!);
+
+		_publishedInstanceSlots.Clear();
 
 		for (var i = 0; i < packets.Count; i++)
 		{
@@ -152,19 +206,30 @@ public sealed class SkinningPass
 				continue;
 			}
 
+			var boneMatrixOffset = boneMatrixOffsets[i];
 			writer.Clear();
 			writer.SetUInt("vertexCount", vertexCount);
 			writer.SetUInt("sourceVertexIndex", (uint)packet.SourceMesh.PackedBaseVertex);
 			writer.SetUInt("destVertexIndex", (uint)instance.PackedBaseVertex);
 			writer.SetUInt("skinVertexIndex", skinRange.FirstVertex);
-			writer.SetUInt("boneMatrixOffset", boneMatrixOffsets[i]);
+			writer.SetUInt("boneMatrixOffset", boneMatrixOffset);
 			writer.SetUInt("boneCount", (uint)packet.BoneCount);
 			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 
 			var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(vertexCount, 1, 1);
 			commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
 			_lastDispatchedInstanceCount++;
+
+			PublishSkinnedInstance(
+				drawDatabase,
+				instance,
+				skinRange.FirstVertex,
+				boneMatrixOffset,
+				boneMatrixOffset + (uint)packet.BoneCount,
+				(uint)packet.BoneCount);
 		}
+
+		RetireStaleSkinnedInstances();
 
 		if (_lastDispatchedInstanceCount > 0)
 		{
@@ -177,11 +242,8 @@ public sealed class SkinningPass
 		}
 	}
 
-	/// <summary>
-	/// Uploads skin influences for any source mesh not seen before. Influences never change, so this
-	/// costs nothing after a character's first frame.
-	/// </summary>
-	private bool TryEnsureSkinAttributes(IGfxDevice device, IReadOnlyList<SkinningPacket> packets)
+	/// <summary>Uploads static skin data for newly seen source meshes.</summary>
+	private bool TryEnsureSkinVertices(IGfxDevice device, IReadOnlyList<SkinningPacket> packets)
 	{
 		var newVertices = 0u;
 		for (var i = 0; i < packets.Count; i++)
@@ -195,40 +257,25 @@ public sealed class SkinningPass
 
 		if (newVertices == 0)
 		{
-			return _skinAttributeBuffer is not null;
+			return _skinVertexBuffer is not null;
 		}
 
-		var requiredVertices = _skinAttributeVertexCount + newVertices;
-		if (_skinAttributeBuffer is null || requiredVertices > _skinAttributeVertexCapacity)
+		var requiredVertices = _skinVertexCount + newVertices;
+		if (_skinVertexBuffer is null || requiredVertices > _skinVertexCapacity)
 		{
-			// Growing means a new buffer, so everything already registered is re-uploaded alongside
-			// the new meshes. Character meshes are few and this only runs when one first appears.
-			var capacity = Math.Max(requiredVertices, Math.Max(_skinAttributeVertexCapacity * 2, 65536u));
-			var buffer = device.CreateBuffer(new BufferDescriptor(
-				(ulong)capacity * (ulong)Marshal.SizeOf<GpuSkinAttribute>(),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-				"SkinAttributeBuffer"));
-			if (buffer is not IWritableGpuBuffer)
+			// A replacement buffer requires re-uploading registered meshes.
+			var capacity = Math.Max(requiredVertices, Math.Max(_skinVertexCapacity * 2, 65536u));
+			if (TryCreateSkinVertexBuffer(device, capacity) == false)
 			{
 				return false;
 			}
 
-			var previousBuffer = _skinAttributeBuffer;
-			if (previousBuffer is not null)
-			{
-				device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinAttributeBuffer");
-			}
-
-			_skinAttributeBuffer = buffer;
-			_skinAttributeVertexCapacity = capacity;
-			_skinAttributeVertexCount = 0;
 			var previousOrder = new List<Mesh>(_skinUploadOrder);
 			_skinRangesBySourceMesh.Clear();
 			_skinUploadOrder.Clear();
 			for (var i = 0; i < previousOrder.Count; i++)
 			{
-				AppendSkinAttributes(previousOrder[i]);
+				AppendSkinVertices(previousOrder[i]);
 			}
 		}
 
@@ -237,28 +284,30 @@ public sealed class SkinningPass
 			var source = packets[i].SourceMesh;
 			if (source.IsSkinned && _skinRangesBySourceMesh.ContainsKey(source) == false)
 			{
-				AppendSkinAttributes(source);
+				AppendSkinVertices(source);
 			}
 		}
 
 		return true;
 	}
 
-	private void AppendSkinAttributes(Mesh source)
+	private void AppendSkinVertices(Mesh source)
 	{
-		if (_skinAttributeBuffer is not IWritableGpuBuffer writable || source.IsSkinned == false)
+		if (_skinVertexBuffer is not IWritableGpuBuffer writable || source.IsSkinned == false)
 		{
 			return;
 		}
 
 		var vertexCount = source.Vertices.Length;
-		var attributes = new GpuSkinAttribute[vertexCount];
+		var skinVertices = new GpuSkinVertex[vertexCount];
+		var positions = source.Vertices;
 		var boneIndices = source.BoneIndices;
 		var boneWeights = source.BoneWeights;
 		for (var vertex = 0; vertex < vertexCount; vertex++)
 		{
 			var offset = vertex * Mesh.InfluencesPerVertex;
-			attributes[vertex] = new GpuSkinAttribute(
+			skinVertices[vertex] = new GpuSkinVertex(
+				new Vector4(positions[vertex].X, positions[vertex].Y, positions[vertex].Z, 1.0f),
 				boneIndices[offset + 0],
 				boneIndices[offset + 1],
 				boneIndices[offset + 2],
@@ -270,65 +319,197 @@ public sealed class SkinningPass
 					boneWeights[offset + 3]));
 		}
 
-		writable.Write<GpuSkinAttribute>(attributes, _skinAttributeVertexCount);
-		_skinRangesBySourceMesh[source] = new SkinAttributeRange(_skinAttributeVertexCount, (uint)vertexCount);
+		writable.Write<GpuSkinVertex>(skinVertices, _skinVertexCount);
+		_skinRangesBySourceMesh[source] = new SkinAttributeRange(_skinVertexCount, (uint)vertexCount);
 		_skinUploadOrder.Add(source);
-		_skinAttributeVertexCount += (uint)vertexCount;
+		_skinVertexCount += (uint)vertexCount;
 	}
 
-	private bool TryUploadBoneMatrices(
-		IGfxDevice device,
-		IReadOnlyList<SkinningPacket> packets,
-		out uint[] boneMatrixOffsets)
+	/// <summary>Allocates the skinning buffers before graphics bindings are built.</summary>
+	public bool EnsureResources(IGfxDevice device)
 	{
-		boneMatrixOffsets = new uint[packets.Count];
-		var totalBones = 0;
-		for (var i = 0; i < packets.Count; i++)
+		ArgumentNullException.ThrowIfNull(device);
+		if (_skinnedInstanceBuffer is null)
 		{
-			boneMatrixOffsets[i] = (uint)totalBones;
-			totalBones += packets[i].BoneCount;
-		}
-
-		if (totalBones == 0)
-		{
-			return false;
-		}
-
-		if (_boneMatrixBuffer is null || totalBones > _boneMatrixCapacity)
-		{
-			var capacity = Math.Max(totalBones, Math.Max(_boneMatrixCapacity * 2, 1024));
 			var buffer = device.CreateBuffer(new BufferDescriptor(
-				(ulong)capacity * (ulong)Marshal.SizeOf<Matrix4x4>(),
+				(ulong)GpuDrawResources.MaxMeshCount * (ulong)Marshal.SizeOf<GpuSkinnedInstanceData>(),
 				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-				"SkinningBoneMatrixBuffer"));
-			if (buffer is not IWritableGpuBuffer)
+				BufferFlags.AllowShaderResource,
+				"SkinnedInstanceBuffer"));
+			if (buffer is not IWritableGpuBuffer writableInstances)
 			{
 				return false;
 			}
 
-			var previousBuffer = _boneMatrixBuffer;
-			if (previousBuffer is not null)
-			{
-				device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinningBoneMatrixBuffer");
-			}
-
-			_boneMatrixBuffer = buffer;
-			_boneMatrixCapacity = capacity;
+			writableInstances.Write<GpuSkinnedInstanceData>(new GpuSkinnedInstanceData[GpuDrawResources.MaxMeshCount]);
+			_skinnedInstanceBuffer = buffer;
 		}
 
-		if (_boneMatrixStaging.Length < totalBones)
+		if (_skinVertexBuffer is null && TryCreateSkinVertexBuffer(device, 1u) == false)
 		{
-			_boneMatrixStaging = new Matrix4x4[totalBones];
+			return false;
 		}
 
+		if (_boneMatrixBuffer is null && TryCreateBoneMatrixBuffer(device, 1) == false)
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	private bool TryCreateSkinVertexBuffer(IGfxDevice device, uint capacity)
+	{
+		var buffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)capacity * (ulong)Marshal.SizeOf<GpuSkinVertex>(),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource,
+			"SkinVertexBuffer"));
+		if (buffer is not IWritableGpuBuffer)
+		{
+			return false;
+		}
+
+		var previousBuffer = _skinVertexBuffer;
+		if (previousBuffer is not null)
+		{
+			device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinVertexBuffer");
+		}
+
+		_skinVertexBuffer = buffer;
+		_skinVertexCapacity = capacity;
+		_skinVertexCount = 0;
+		return true;
+	}
+
+	private bool TryCreateBoneMatrixBuffer(IGfxDevice device, int capacity)
+	{
+		var buffer = device.CreateBuffer(new BufferDescriptor(
+			(ulong)capacity * (ulong)Marshal.SizeOf<Matrix4x4>(),
+			BufferUsage.Structured,
+			BufferFlags.AllowShaderResource,
+			"SkinningBoneMatrixBuffer"));
+		if (buffer is not IWritableGpuBuffer)
+		{
+			return false;
+		}
+
+		var previousBuffer = _boneMatrixBuffer;
+		if (previousBuffer is not null)
+		{
+			device.Retire(() => (previousBuffer as IDisposable)?.Dispose(), "SkinningBoneMatrixBuffer");
+		}
+
+		_boneMatrixBuffer = buffer;
+		_boneMatrixCapacity = capacity;
+		return true;
+	}
+
+	/// <summary>Publishes skinning ranges at the mesh handle's index.</summary>
+	private void PublishSkinnedInstance(
+		GpuDrawDatabase drawDatabase,
+		Mesh instance,
+		uint skinVertexBase,
+		uint boneMatrixOffset,
+		uint previousBoneMatrixOffset,
+		uint boneCount)
+	{
+		if (_skinnedInstanceBuffer is not IWritableGpuBuffer writable ||
+		    drawDatabase.TryGetMeshHandle(instance, out var meshHandle) == false ||
+		    meshHandle.IsValid == false ||
+		    meshHandle.Index >= GpuDrawResources.MaxMeshCount)
+		{
+			return;
+		}
+
+		var slot = (uint)meshHandle.Index;
+		Span<GpuSkinnedInstanceData> entry =
+		[
+			new GpuSkinnedInstanceData(
+				meshHandle.Value,
+				skinVertexBase,
+				boneMatrixOffset,
+				previousBoneMatrixOffset,
+				boneCount)
+		];
+		writable.Write<GpuSkinnedInstanceData>(entry, slot);
+		_publishedInstanceSlots.Add(slot);
+	}
+
+	/// <summary>Clears stale entries because mesh handles are recycled.</summary>
+	private void RetireStaleSkinnedInstances()
+	{
+		if (_skinnedInstanceBuffer is IWritableGpuBuffer writable)
+		{
+			for (var i = 0; i < _previouslyPublishedInstanceSlots.Count; i++)
+			{
+				var slot = _previouslyPublishedInstanceSlots[i];
+				if (_publishedInstanceSlots.Contains(slot))
+				{
+					continue;
+				}
+
+				Span<GpuSkinnedInstanceData> cleared = [default];
+				writable.Write<GpuSkinnedInstanceData>(cleared, slot);
+			}
+		}
+
+		_previouslyPublishedInstanceSlots.Clear();
+		_previouslyPublishedInstanceSlots.AddRange(_publishedInstanceSlots);
+		_publishedInstanceSlots.Clear();
+	}
+
+	/// <summary>Packs current and previous matrices for GPU upload.</summary>
+	private bool TryUploadBoneMatrices(
+		IGfxDevice device,
+		IReadOnlyList<SkinningPacket> packets,
+		ReadOnlySpan<Matrix4x4> boneMatrices,
+		out uint[] boneMatrixOffsets)
+	{
+		boneMatrixOffsets = new uint[packets.Count];
+		var totalMatrices = 0;
+		for (var i = 0; i < packets.Count; i++)
+		{
+			boneMatrixOffsets[i] = (uint)totalMatrices;
+			totalMatrices += packets[i].BoneCount * 2;
+		}
+
+		if (totalMatrices == 0)
+		{
+			return false;
+		}
+
+		if (_boneMatrixBuffer is null || totalMatrices > _boneMatrixCapacity)
+		{
+			var capacity = Math.Max(totalMatrices, Math.Max(_boneMatrixCapacity * 2, 1024));
+			if (TryCreateBoneMatrixBuffer(device, capacity) == false)
+			{
+				return false;
+			}
+		}
+
+		if (_boneMatrixStaging.Length < totalMatrices)
+		{
+			_boneMatrixStaging = new Matrix4x4[totalMatrices];
+		}
+
+		var staging = _boneMatrixStaging.AsSpan();
 		for (var i = 0; i < packets.Count; i++)
 		{
 			var packet = packets[i];
-			Array.Copy(packet.BoneMatrices, 0, _boneMatrixStaging, boneMatrixOffsets[i], packet.BoneCount);
+			var boneCount = packet.BoneCount;
+			if (packet.BoneMatrixOffset + boneCount > boneMatrices.Length ||
+			    packet.PreviousBoneMatrixOffset + boneCount > boneMatrices.Length)
+			{
+				return false;
+			}
+
+			var destination = (int)boneMatrixOffsets[i];
+			boneMatrices.Slice(packet.BoneMatrixOffset, boneCount).CopyTo(staging[destination..]);
+			boneMatrices.Slice(packet.PreviousBoneMatrixOffset, boneCount).CopyTo(staging[(destination + boneCount)..]);
 		}
 
-		((IWritableGpuBuffer)_boneMatrixBuffer!).Write<Matrix4x4>(_boneMatrixStaging.AsSpan(0, totalBones));
+		((IWritableGpuBuffer)_boneMatrixBuffer!).Write<Matrix4x4>(staging[..totalMatrices]);
 		return true;
 	}
 

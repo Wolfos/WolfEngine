@@ -145,8 +145,9 @@ public class RenderPipeline : IRenderPipeline
 
 						ref var animator = ref world.GetComponent<Animator>(animatorEntity);
 						if (animator.SkinningMatrices is not { Length: > 0 } skinningMatrices) continue;
+						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
-						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices);
+						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices, previousSkinningMatrices);
 						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
 					}
 				}

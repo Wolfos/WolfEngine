@@ -1754,12 +1754,26 @@ internal sealed class RenderGraphFrameBuilder
 		var skinningPackets = context.FrameSnapshot.SkinningPackets;
 		EnsureSkinnedInstanceResources(skinningPackets);
 
+		// Graphics bindings require these buffers even when no meshes are skinned.
+		var device = _renderer.GetGfxDevice();
+		_skinningPass.EnsureResources(device);
+		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
+		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
+		_gpuDrawResources.SkinnedInstanceBuffer = _skinningPass.SkinnedInstanceBuffer;
+
 		_gpuDrawPass.RecordUpdate(context);
 
-		if (skinningPackets.Count > 0)
-		{
-			_skinningPass.Record(context.CommandList, _renderer.GetGfxDevice(), _renderer, skinningPackets);
-		}
+		_skinningPass.Record(
+			context.CommandList,
+			device,
+			_renderer,
+			skinningPackets,
+			context.FrameSnapshot.BoneMatrices,
+			context.GpuDrawDatabase);
+
+		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
+		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
+		_gpuDrawResources.SkinnedInstanceBuffer = _skinningPass.SkinnedInstanceBuffer;
 
 		if (RequiresRayTracingScene(_frameResources.Config))
 		{

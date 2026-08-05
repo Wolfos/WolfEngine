@@ -164,6 +164,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<GpuFrameProfileResult> ProfileGpuFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().ProfileGpuFramesAsync(frameCount, cancellationToken);
 
+	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
+
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
 

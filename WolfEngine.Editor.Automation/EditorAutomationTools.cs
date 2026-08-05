@@ -111,6 +111,17 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.ProfileGpuFramesAsync(frameCount, cancellationToken);
 
+	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
+	public async Task<string> SetSceneDebugView(
+		[Description("Debug view id, or empty to release.")] string debugViewId,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetSceneDebugViewAsync(debugViewId, cancellationToken).ConfigureAwait(false);
+		return string.IsNullOrWhiteSpace(debugViewId)
+			? "Scene debug view override released."
+			: $"Scene viewport pinned to debug view '{debugViewId}'.";
+	}
+
 	[McpServerTool(Name = "capture_frame"), Description("Capture a PNG from the currently running editor on its next rendered frame. This never launches a separate editor process.")]
 	public Task<FrameCaptureResult> CaptureFrame(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

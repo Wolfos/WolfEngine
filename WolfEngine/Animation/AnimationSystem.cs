@@ -36,8 +36,8 @@ public sealed class AnimationSystem : IUpdate
 			var poseSource = animator.PoseSource;
 			var pose = animator.Pose;
 			var skeleton = animator.Skeleton;
-			var skinningMatrices = animator.SkinningMatrices;
-			if (poseSource is null || pose is null || skeleton is null || skinningMatrices is null)
+			if (poseSource is null || pose is null || skeleton is null ||
+			    animator.SkinningMatrices is null || animator.PreviousSkinningMatrices is null)
 			{
 				continue;
 			}
@@ -51,8 +51,20 @@ public sealed class AnimationSystem : IUpdate
 				clipSource.Time = animator.Time;
 			}
 
+			// Keep the last evaluated pose for motion vectors without copying matrices.
+			(animator.SkinningMatrices, animator.PreviousSkinningMatrices) =
+				(animator.PreviousSkinningMatrices, animator.SkinningMatrices);
+			var skinningMatrices = animator.SkinningMatrices;
+
 			poseSource.Evaluate(deltaTime, pose);
 			pose.ComputeSkinningMatrices(skeleton, skinningMatrices);
+
+			if (animator.HasPreviousPose == false)
+			{
+				// Seed the first previous pose to avoid identity-matrix motion.
+				skinningMatrices.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+				animator.HasPreviousPose = true;
+			}
 
 			if (poseSource is SingleClipPoseSource advanced)
 			{

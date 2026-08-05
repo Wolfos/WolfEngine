@@ -29,6 +29,12 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 	/// <summary>Bone matrices for the current pose, uploaded to the skinning pass each frame.</summary>
 	[JsonIgnore] internal Matrix4x4[]? SkinningMatrices;
 
+	/// <summary>Bone matrices for the previous rendered pose, used for motion vectors.</summary>
+	[JsonIgnore] internal Matrix4x4[]? PreviousSkinningMatrices;
+
+	/// <summary>Whether the previous-pose matrices have been initialized.</summary>
+	[JsonIgnore] internal bool HasPreviousPose;
+
 	/// <summary>Bumped whenever the pose changes, so the renderer can skip unchanged characters.</summary>
 	[JsonIgnore] internal uint PoseGeneration;
 
@@ -68,6 +74,8 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 		PoseSource = source;
 		Pose = Clip.CreatePose(Skeleton);
 		SkinningMatrices = new Matrix4x4[Skeleton.BoneCount];
+		PreviousSkinningMatrices = new Matrix4x4[Skeleton.BoneCount];
+		HasPreviousPose = false;
 		return true;
 	}
 
@@ -78,6 +86,8 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 		PoseSource = null;
 		Pose = null;
 		SkinningMatrices = null;
+		PreviousSkinningMatrices = null;
+		HasPreviousPose = false;
 	}
 }
 

@@ -289,6 +289,19 @@ public sealed class GpuDrawDatabase
 		destination.AddRange(_updates);
 	}
 
+	/// <summary>Gets the mesh's GPU handle.</summary>
+	public bool TryGetMeshHandle(Mesh mesh, out GpuDrawHandle meshHandle)
+	{
+		if (mesh is not null && _meshHandles.TryGetValue(mesh, out var entry))
+		{
+			meshHandle = entry.Handle;
+			return true;
+		}
+
+		meshHandle = GpuDrawHandle.Invalid;
+		return false;
+	}
+
 	public uint GetActiveDrawCommandUpperBound()
 	{
 		if (_records.Count == 0)

@@ -2,6 +2,7 @@
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
+import "../Animation/skinning_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -10,6 +11,11 @@ StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+
+// Rebuilds skinned vertices' previous positions for motion vectors.
+StructuredBuffer<GpuSkinVertex> g_SkinVertices : register(t14);
+StructuredBuffer<GpuBoneMatrix> g_BoneMatrices : register(t15);
+StructuredBuffer<GpuSkinnedInstanceData> g_SkinnedInstances : register(t16);
 
 // Written per indirect command by the command signature's root constant rather than by any binding
 // call, so each draw can find its own entry in the draw args table.
@@ -43,6 +49,7 @@ struct VSInput
     float2 uv : TEXCOORD0;
     float4 tangent : TANGENT;
     uint instanceId : SV_InstanceID;
+    uint vertexId : SV_VertexID;
 };
 
 struct VSOutput
@@ -55,6 +62,29 @@ struct VSOutput
     float4 currentClip : TEXCOORD4;
     float4 previousClip : TEXCOORD5;
 };
+
+/// Rebuilds a skinned vertex's previous object-space position.
+float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData, GpuDrawArgs drawArgs)
+{
+    // Validate the full handle because table slots are recycled.
+    GpuSkinnedInstanceData skinnedInstance = g_SkinnedInstances[GetHandleIndex(instanceData.meshHandle)];
+    if (skinnedInstance.boneCount == 0u || skinnedInstance.meshHandle != instanceData.meshHandle)
+    {
+        return input.position;
+    }
+
+    // Convert the packed-buffer vertex ID to a mesh-local index.
+    uint localVertex = input.vertexId - uint(drawArgs.baseVertex);
+    GpuSkinVertex skinVertex = g_SkinVertices[skinnedInstance.skinVertexBase + localVertex];
+
+    return WolfSkinPosition(
+        skinVertex.bindPosition.xyz,
+        skinVertex.boneIndices,
+        skinVertex.boneWeights,
+        g_BoneMatrices,
+        skinnedInstance.previousBoneMatrixOffset,
+        skinnedInstance.boneCount);
+}
 
 VSOutput vertexShader(VSInput input)
 {
@@ -77,7 +107,8 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
-    float4 previousWorldPosition = mul(float4(input.position, 1.0f), instanceData.previousWorld);
+    float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData, drawArgs);
+    float4 previousWorldPosition = mul(float4(previousObjectPosition, 1.0f), instanceData.previousWorld);
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;

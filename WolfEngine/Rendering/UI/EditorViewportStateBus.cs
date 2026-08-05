@@ -152,6 +152,7 @@ public sealed class EditorViewportStateBus
 	private SceneViewportUiState _uiState = SceneViewportUiState.Hidden;
 	private SceneViewportRenderState _renderState = SceneViewportRenderState.Empty;
 	private bool _gizmoDragging;
+	private string? _debugViewOverrideId;
 
 	public SceneViewportUiState GetUiState()
 	{
@@ -165,9 +166,37 @@ public sealed class EditorViewportStateBus
 	{
 		lock (_sync)
 		{
-			_uiState = state;
+			_uiState = _debugViewOverrideId is null
+				? state
+				: WithDebugView(state, _debugViewOverrideId);
 		}
 	}
+
+	/// <summary>Overrides the UI-selected debug view until released.</summary>
+	public void OverrideDebugView(string? debugViewId)
+	{
+		lock (_sync)
+		{
+			_debugViewOverrideId = string.IsNullOrWhiteSpace(debugViewId) ? null : debugViewId;
+			if (_debugViewOverrideId is not null)
+			{
+				_uiState = WithDebugView(_uiState, _debugViewOverrideId);
+			}
+		}
+	}
+
+	private static SceneViewportUiState WithDebugView(in SceneViewportUiState state, string debugViewId) => new(
+		state.Visible,
+		state.ContentSizePixels,
+		state.ResolutionScale,
+		debugViewId,
+		state.Hovered,
+		state.Focused,
+		state.PointerAvailable,
+		state.PointerCaptured,
+		state.RightMousePressStartedHere,
+		state.ImageMin,
+		state.ImageMax);
 
 	public SceneViewportRenderState GetRenderState()
 	{

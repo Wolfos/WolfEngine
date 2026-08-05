@@ -37,11 +37,16 @@ public sealed class FrameSnapshot
 
 	/// <summary>Skinned instances the render thread must deform this frame.</summary>
 	public List<SkinningPacket> SkinningPackets { get; }
+
+	/// <summary>Packed current and previous bone matrices for this frame.</summary>
+	public ReadOnlySpan<Matrix4x4> BoneMatrices => _boneMatrixArena.AsSpan(0, _boneMatrixArenaUsed);
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
 	public GpuDrawDatabase GpuDrawDatabase { get; }
 	private bool _hasCameraState;
+	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
+	private int _boneMatrixArenaUsed;
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
@@ -68,25 +73,43 @@ public sealed class FrameSnapshot
 		LightPackets.Clear();
 		DecalPackets.Clear();
 		SkinningPackets.Clear();
+		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		GpuDrawDatabase.ResetForSnapshotWrite();
 	}
 
-	/// <summary>
-	/// Records a skinned instance to deform. The bone matrices are copied rather than referenced:
-	/// this is the game-thread-to-render-thread handoff, and the animator will keep mutating its
-	/// own array while the render thread is reading.
-	/// </summary>
-	public void AddSkinning(Mesh sourceMesh, Mesh instanceMesh, ReadOnlySpan<Matrix4x4> boneMatrices)
+	/// <summary>Records current and previous poses for render-thread skinning.</summary>
+	public void AddSkinning(
+		Mesh sourceMesh,
+		Mesh instanceMesh,
+		ReadOnlySpan<Matrix4x4> boneMatrices,
+		ReadOnlySpan<Matrix4x4> previousBoneMatrices)
 	{
-		if (boneMatrices.IsEmpty)
+		if (boneMatrices.IsEmpty || previousBoneMatrices.Length != boneMatrices.Length)
 		{
 			return;
 		}
 
-		var copy = boneMatrices.ToArray();
-		SkinningPackets.Add(new SkinningPacket(sourceMesh, instanceMesh, copy, copy.Length));
+		var boneCount = boneMatrices.Length;
+		var required = _boneMatrixArenaUsed + (boneCount * 2);
+		if (required > _boneMatrixArena.Length)
+		{
+			Array.Resize(ref _boneMatrixArena, Math.Max(required, _boneMatrixArena.Length * 2));
+		}
+
+		var boneMatrixOffset = _boneMatrixArenaUsed;
+		var previousBoneMatrixOffset = boneMatrixOffset + boneCount;
+		boneMatrices.CopyTo(_boneMatrixArena.AsSpan(boneMatrixOffset));
+		previousBoneMatrices.CopyTo(_boneMatrixArena.AsSpan(previousBoneMatrixOffset));
+		_boneMatrixArenaUsed = previousBoneMatrixOffset + boneCount;
+
+		SkinningPackets.Add(new SkinningPacket(
+			sourceMesh,
+			instanceMesh,
+			boneMatrixOffset,
+			previousBoneMatrixOffset,
+			boneCount));
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)

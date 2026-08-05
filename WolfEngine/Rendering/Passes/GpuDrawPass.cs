@@ -1488,7 +1488,10 @@ public sealed class GpuDrawPass
 			{
 				["CameraParams"] = _gpuDrawResources.CameraBuffer,
 				["g_TerrainMaterialTable"] = _gpuDrawResources.TerrainMaterialBuffer,
-				["g_TerrainLayerTable"] = _gpuDrawResources.TerrainLayerBuffer
+				["g_TerrainLayerTable"] = _gpuDrawResources.TerrainLayerBuffer,
+				["g_SkinVertices"] = _gpuDrawResources.SkinVertexBuffer,
+				["g_BoneMatrices"] = _gpuDrawResources.BoneMatrixBuffer,
+				["g_SkinnedInstances"] = _gpuDrawResources.SkinnedInstanceBuffer
 			},
 			SharedDrawPerDrawBindings.ResourceNames);
 	}

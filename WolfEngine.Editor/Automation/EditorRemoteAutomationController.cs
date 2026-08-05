@@ -9,6 +9,7 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.Automation;
 
@@ -30,6 +31,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly RenderFrameCoordinator _renderFrameCoordinator;
 	private readonly RenderGraph _renderGraph;
 	private readonly GpuProfiler _gpuProfiler;
+	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -50,8 +52,10 @@ public sealed class EditorRemoteAutomationController
 		EditorFrameCoordinator editorFrameCoordinator,
 		RenderFrameCoordinator renderFrameCoordinator,
 		RenderGraph renderGraph,
-		GpuProfiler gpuProfiler)
+		GpuProfiler gpuProfiler,
+		EditorViewportStateBus viewportStateBus)
 	{
+		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
 		_projectService = projectService;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
@@ -469,6 +473,10 @@ public sealed class EditorRemoteAutomationController
 				_gpuProfiler.Enabled = wasEnabled;
 			}
 		}, cancellationToken);
+
+	/// <summary>Sets the scene debug-view override used by frame capture.</summary>
+	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
+		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
