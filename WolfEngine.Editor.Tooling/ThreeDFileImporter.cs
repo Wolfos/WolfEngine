@@ -1,4 +1,5 @@
 using WolfEngine.Animation;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering;
 using System.Numerics;
 using Silk.NET.Assimp;
@@ -12,6 +13,21 @@ namespace WolfEngine.Importing;
 
 public class ThreeDFileImporter : IThreeDFileImporter
 {
+    /// <summary>
+    /// <c>aiProcess_GlobalScale</c>. Silk.NET's <see cref="PostProcessSteps"/> enum stops at
+    /// <see cref="PostProcessSteps.Debone"/> and never picked up the flags Assimp added after it, so
+    /// the value is taken from <c>postprocess.h</c> directly.
+    /// </summary>
+    private const uint GlobalScalePostProcessStep = 0x8000000;
+
+    /// <summary>
+    /// <c>AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY</c>. The scale step multiplies this with the file's own
+    /// unit scale, which is how a centimetre-authored FBX arrives in metres.
+    /// </summary>
+    private const string GlobalScaleFactorProperty = "GLOBAL_SCALE_FACTOR";
+
+    private const string FbxPreservePivotsProperty = "IMPORT_FBX_PRESERVE_PIVOTS";
+
     private readonly IImageLoader _imageLoader;
 
     public ThreeDFileImporter(IImageLoader imageLoader)
@@ -19,9 +35,10 @@ public class ThreeDFileImporter : IThreeDFileImporter
         _imageLoader = imageLoader ?? throw new ArgumentNullException(nameof(imageLoader));
     }
 
-    public unsafe ImportedScene Import(string filename)
+    public unsafe ImportedScene Import(string filename, ModelImportSettings settings)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filename);
+        ArgumentNullException.ThrowIfNull(settings);
 
         var assimp = Assimp.GetApi();
 
@@ -38,15 +55,19 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         // LimitBoneWeights caps influences at four per vertex. Without it Assimp happily emits more,
         // and the extra influences would be silently dropped when packing the GPU skin attributes.
-        const PostProcessSteps postProcess = PostProcessSteps.Triangulate
-                                             | PostProcessSteps.JoinIdenticalVertices
-                                             | PostProcessSteps.CalculateTangentSpace
-                                             | PostProcessSteps.MakeLeftHanded
-                                             | PostProcessSteps.FlipWindingOrder
-                                             | PostProcessSteps.FlipUVs
-                                             | PostProcessSteps.LimitBoneWeights;
+        // GlobalScale bakes the import scale into vertices, bone offsets and animation keys instead
+        // of leaving a scale on the root node for every consumer of the hierarchy to reapply.
+        const PostProcessSteps postProcessSteps = PostProcessSteps.Triangulate
+                                                  | PostProcessSteps.JoinIdenticalVertices
+                                                  | PostProcessSteps.CalculateTangentSpace
+                                                  | PostProcessSteps.MakeLeftHanded
+                                                  | PostProcessSteps.FlipWindingOrder
+                                                  | PostProcessSteps.FlipUVs
+                                                  | PostProcessSteps.LimitBoneWeights;
+        var postProcess = (uint)postProcessSteps | GlobalScalePostProcessStep;
+        var scaleFactor = settings.GetEffectiveScaleFactor();
 
-        var scene = assimp.ImportFile(fullPath, (uint)postProcess);
+        var scene = ImportWithProperties(assimp, fullPath, postProcess, scaleFactor, preserveFbxPivots: true);
         if (scene == null)
         {
             throw new InvalidOperationException($"Failed to load mesh from '{fullPath}'.");
@@ -54,7 +75,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         if (RequiresPivotCollapse(scene))
         {
-            scene = ReimportWithoutFbxPivots(assimp, scene, fullPath, (uint)postProcess);
+            scene = ReimportWithoutFbxPivots(assimp, scene, fullPath, postProcess, scaleFactor);
         }
 
         var nodes = new List<ImportedNode>();
@@ -334,26 +355,51 @@ public class ThreeDFileImporter : IThreeDFileImporter
         return false;
     }
 
-    private static unsafe Scene* ReimportWithoutFbxPivots(Assimp assimp, Scene* original, string fullPath, uint postProcess)
+    private static unsafe Scene* ReimportWithoutFbxPivots(
+        Assimp assimp,
+        Scene* original,
+        string fullPath,
+        uint postProcess,
+        float scaleFactor)
+    {
+        var collapsed = ImportWithProperties(assimp, fullPath, postProcess, scaleFactor, preserveFbxPivots: false);
+        if (collapsed is null)
+        {
+            // Keep the pivot-preserving scene rather than failing the import outright.
+            return original;
+        }
+
+        assimp.ReleaseImport(original);
+        return collapsed;
+    }
+
+    /// <summary>
+    /// Every import goes through a property store because the scale factor is a configuration
+    /// property rather than a post-process flag; <c>aiProcess_GlobalScale</c> on its own would only
+    /// apply the source file's unit conversion.
+    /// </summary>
+    private static unsafe Scene* ImportWithProperties(
+        Assimp assimp,
+        string fullPath,
+        uint postProcess,
+        float scaleFactor,
+        bool preserveFbxPivots)
     {
         var propertyStore = assimp.CreatePropertyStore();
         if (propertyStore is null)
         {
-            return original;
+            throw new InvalidOperationException($"Failed to allocate Assimp import properties for '{fullPath}'.");
         }
 
         try
         {
-            assimp.SetImportPropertyInteger(propertyStore, "IMPORT_FBX_PRESERVE_PIVOTS", 0);
-            var collapsed = assimp.ImportFileExWithProperties(fullPath, postProcess, null, propertyStore);
-            if (collapsed is null)
+            assimp.SetImportPropertyFloat(propertyStore, GlobalScaleFactorProperty, scaleFactor);
+            if (preserveFbxPivots == false)
             {
-                // Keep the pivot-preserving scene rather than failing the import outright.
-                return original;
+                assimp.SetImportPropertyInteger(propertyStore, FbxPreservePivotsProperty, 0);
             }
 
-            assimp.ReleaseImport(original);
-            return collapsed;
+            return assimp.ImportFileExWithProperties(fullPath, postProcess, null, propertyStore);
         }
         finally
         {

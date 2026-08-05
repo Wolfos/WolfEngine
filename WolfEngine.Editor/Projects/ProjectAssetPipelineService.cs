@@ -912,8 +912,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string relativeMetaPath,
 		AssetSourceMetaFile metadata)
 	{
-		LogLibraryBuildStage($"Parsing 3D source '{relativeSourcePath}'.");
-		var importedScene = _threeDFileImporter.Import(absoluteSourcePath);
+		var importSettings = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
+		LogLibraryBuildStage($"Parsing 3D source '{relativeSourcePath}' (scale {importSettings.GetEffectiveScaleFactor()}).");
+		var importedScene = _threeDFileImporter.Import(absoluteSourcePath, importSettings);
 		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.Nodes.Count(node => node.ParentIndex < 0)} root nodes).");
 		var nodes = new List<AssetNodeRecord>();
 		var artifacts = new List<AssetArtifactRecord>();
@@ -1608,6 +1609,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			metadata.GetImportSettingsOrDefault(() => new AudioImportSettings());
 		}
+		else if (string.Equals(metadata.ImporterId, AssetImporterIds.ThreeDScene, StringComparison.Ordinal))
+		{
+			metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
+		}
 
 		return string.IsNullOrWhiteSpace(metadata.ImportSettingsJson) ? "{}" : metadata.ImportSettingsJson;
 	}
@@ -1942,7 +1947,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportAudioSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				4,
+				5,
 				path =>
 				{
 					var extension = Path.GetExtension(path);
@@ -1950,7 +1955,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					       string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase) ||
 					       string.Equals(extension, ".fbx", StringComparison.OrdinalIgnoreCase);
 				},
-				() => "{}",
+				() => AssetPipelineSerialization.Serialize(new ModelImportSettings()),
 				ImportThreeDSource)
 		];
 	}

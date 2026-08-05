@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.IO;
+using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
@@ -31,7 +32,8 @@ public class SceneBuilder : ISceneBuilder
 
 	public void Import3DScene(string path, World world)
 	{
-		var importedScene = _fileImporter.Import(path);
+		// This path bypasses the asset pipeline, so there is no meta file to read settings from.
+		var importedScene = _fileImporter.Import(path, new ModelImportSettings());
 		var runtimeTextures = importedScene.Textures.Select(_textureFactory.GetTexture).ToList();
 
 		var materials = new List<Material>();
