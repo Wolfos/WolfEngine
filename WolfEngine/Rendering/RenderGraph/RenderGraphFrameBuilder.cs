@@ -57,6 +57,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle DecalSourceGBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle GBufferVelocity { get; init; }
+	public RenderGraphResourceHandle MotionVectorDebugColor { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionRaw { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionTemp { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionFinal { get; init; }
@@ -161,6 +162,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly TonemappingPass _tonemappingPass;
 	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
+	private readonly MotionVectorDebugPass _motionVectorDebugPass;
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
@@ -251,6 +253,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
 	private readonly Action<RenderGraphContext> _copyToFinalExecute;
+	private readonly Action<RenderGraphContext> _motionVectorDebugExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -296,6 +299,7 @@ internal sealed class RenderGraphFrameBuilder
 		_tonemappingPass = passSet.TonemappingPass;
 		_casSharpenPass = passSet.CasSharpenPass;
 		_copyToFinalPass = passSet.CopyToFinalPass;
+		_motionVectorDebugPass = passSet.MotionVectorDebugPass;
 		_shadowMapPass = passSet.ShadowMapPass;
 		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
@@ -324,6 +328,7 @@ internal sealed class RenderGraphFrameBuilder
 		_tonemappingExecute = ExecuteTonemapping;
 		_casSharpenExecute = ExecuteCasSharpen;
 		_copyToFinalExecute = ExecuteCopyToFinal;
+		_motionVectorDebugExecute = ExecuteMotionVectorDebug;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -426,6 +431,7 @@ internal sealed class RenderGraphFrameBuilder
 		var decalSourceEmissiveHandle = default(RenderGraphResourceHandle);
 		var gbufferDepthHandle = default(RenderGraphResourceHandle);
 		var gbufferVelocityHandle = default(RenderGraphResourceHandle);
+		var motionVectorDebugHandle = default(RenderGraphResourceHandle);
 		var shadowMapHandle0 = default(RenderGraphResourceHandle);
 		var shadowMapHandle1 = default(RenderGraphResourceHandle);
 		var shadowMapHandle2 = default(RenderGraphResourceHandle);
@@ -503,6 +509,15 @@ internal sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+			if (IsMotionVectorDebugView(_requestedSceneDebugViewId))
+			{
+				motionVectorDebugHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+			}
 			gbufferDepthHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
@@ -948,6 +963,7 @@ internal sealed class RenderGraphFrameBuilder
 			DecalSourceGBufferEmissive = decalSourceEmissiveHandle,
 			GBufferDepth = gbufferDepthHandle,
 			GBufferVelocity = gbufferVelocityHandle,
+			MotionVectorDebugColor = motionVectorDebugHandle,
 			AmbientOcclusionRaw = ambientOcclusionRawHandle,
 			AmbientOcclusionTemp = ambientOcclusionTempHandle,
 			AmbientOcclusionFinal = ambientOcclusionFinalHandle,
@@ -1074,7 +1090,13 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferNormal, "GBuffer Normal", gbufferNormalHandle, SceneDebugViewKind.Color);
-			RegisterSceneDebugView(SceneDebugViewIds.MotionVectors, "Motion Vectors", gbufferVelocityHandle, SceneDebugViewKind.Color);
+			// The flow-field encoding only exists while this view is selected; the option itself
+			// has to stay in the dropdown so it can be selected in the first place.
+			RegisterSceneDebugView(
+				SceneDebugViewIds.MotionVectors,
+				"Motion Vectors (Flow Field)",
+				motionVectorDebugHandle.IsValid ? motionVectorDebugHandle : gbufferVelocityHandle,
+				SceneDebugViewKind.Color);
 			_sceneDebugViewOptions = BuildSceneDebugViewOptions();
 		}
 	}
@@ -1492,6 +1514,14 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
+
+			if (_frameResources.MotionVectorDebugColor.IsValid)
+			{
+				graph.AddPass("Motion Vector Debug", PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.MotionVectorDebugColor, ResourceState.UnorderedAccess)
+					.SetExecute(_motionVectorDebugExecute);
+			}
 		}
 
 		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
@@ -1707,6 +1737,14 @@ internal sealed class RenderGraphFrameBuilder
 		return string.Equals(
 			NormalizeSceneDebugViewId(requestedDebugViewId),
 			SceneDebugViewIds.DdgiFinalContribution,
+			StringComparison.Ordinal);
+	}
+
+	private static bool IsMotionVectorDebugView(string? requestedDebugViewId)
+	{
+		return string.Equals(
+			NormalizeSceneDebugViewId(requestedDebugViewId),
+			SceneDebugViewIds.MotionVectors,
 			StringComparison.Ordinal);
 	}
 
@@ -2486,6 +2524,18 @@ internal sealed class RenderGraphFrameBuilder
 			_frameResources,
 			_renderer.GetGfxDevice());
 		_copyToFinalPass.Record(context, in config);
+	}
+
+	private void ExecuteMotionVectorDebug(RenderGraphContext context)
+	{
+		var config = _motionVectorDebugPass.BuildConfig(
+			context,
+			_renderer.GetGfxDevice(),
+			_frameResources.GBufferVelocity,
+			_frameResources.MotionVectorDebugColor,
+			_frameResources.SceneFramebufferSize,
+			_frameResources.Config.MotionVectorDebug);
+		_motionVectorDebugPass.Record(context, in config);
 	}
 
 	private void ExecuteImGui(RenderGraphContext context)

@@ -19,6 +19,7 @@ public class RenderConfig: IDataAsset
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
+	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
 }
 
 public enum ReflectionMode
@@ -195,6 +196,19 @@ public struct RayTracedAmbientOcclusionSettings
 	public float Radius { get; set; } = 2.0f;
 	public float Bias { get; set; } = 0.03f;
 	public float Strength { get; set; } = 1.0f;
+}
+
+/// <summary>Tuning for the Motion Vectors scene debug view; has no effect on the rendered image.</summary>
+public struct MotionVectorDebugConfig
+{
+	public MotionVectorDebugConfig()
+	{
+	}
+
+	/// <summary>Per-frame displacement, in pixels, that maps to a fully saturated colour.</summary>
+	public float MaxPixelsPerFrame { get; set; } = 16.0f;
+	public bool ShowLegend { get; set; } = true;
+	public int LegendRadiusPixels { get; set; } = 48;
 }
 
 public struct DecalConfig

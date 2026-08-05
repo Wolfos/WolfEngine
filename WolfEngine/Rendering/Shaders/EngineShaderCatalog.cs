@@ -69,6 +69,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ColorPyramid = Id("color-pyramid");
 	public static readonly ShaderProgramId CasSharpen = Id("cas-sharpen");
 	public static readonly ShaderProgramId CopyToFinal = Id("copy-to-final");
+	public static readonly ShaderProgramId MotionVectorDebug = Id("motion-vector-debug");
 	public static readonly ShaderProgramId Bc1Compress = Id("bc1-compress");
 	public static readonly ShaderProgramId Bc4Compress = Id("bc4-compress");
 	public static readonly ShaderProgramId Bc3Stitch = Id("bc3-stitch");
@@ -141,6 +142,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ColorPyramid, "PostProcess/color_pyramid.compute.slang"),
 			D(EngineShaderPrograms.CasSharpen, "ThirdParty/FfxCas/cas_sharpen.compute.slang"),
 			D(EngineShaderPrograms.CopyToFinal, "PostProcess/copy_to_final.compute.slang"),
+			D(EngineShaderPrograms.MotionVectorDebug, "PostProcess/motion_vector_debug.compute.slang"),
 			D(EngineShaderPrograms.Bc1Compress, "ThirdParty/Betsy/bc1_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc4Compress, "ThirdParty/Betsy/bc4_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc3Stitch, "ThirdParty/Betsy/bc3_stitch.compute.slang"),
@@ -300,6 +302,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.ColorPyramid) return ["ColorPyramidCopyCS", "ColorPyramidDownsampleCS"];
 		if (id == EngineShaderPrograms.CasSharpen) return ["CasSharpenCS"];
 		if (id == EngineShaderPrograms.CopyToFinal) return ["CopyToFinalCS"];
+		if (id == EngineShaderPrograms.MotionVectorDebug) return ["MotionVectorDebugCS"];
 		if (id == EngineShaderPrograms.Bc1Compress) return ["CompressBc1"];
 		if (id == EngineShaderPrograms.Bc4Compress) return ["CompressBc4"];
 		if (id == EngineShaderPrograms.Bc3Stitch) return ["StitchBc3"];

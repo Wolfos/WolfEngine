@@ -48,6 +48,7 @@ internal sealed class RenderGraphPassSet
 		TonemappingPass = new(shaderCompiler, bindlessResourceRegistry);
 		CasSharpenPass = new(shaderCompiler, bindlessResourceRegistry);
 		CopyToFinalPass = new(shaderCompiler, bindlessResourceRegistry);
+		MotionVectorDebugPass = new(shaderCompiler, bindlessResourceRegistry);
 		ShadowMapPass = new(shaderCompiler);
 		GpuDrawPass = new(
 			shaderCompiler,
@@ -86,6 +87,7 @@ internal sealed class RenderGraphPassSet
 	public TonemappingPass TonemappingPass { get; }
 	public CasSharpenPass CasSharpenPass { get; }
 	public CopyToFinalPass CopyToFinalPass { get; }
+	public MotionVectorDebugPass MotionVectorDebugPass { get; }
 	public ShadowMapPass ShadowMapPass { get; }
 	public GpuDrawPass GpuDrawPass { get; }
 	public SkyboxPass SkyboxPass { get; }
