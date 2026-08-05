@@ -2,45 +2,54 @@ using System;
 
 namespace WolfEngine.Physics;
 
-/// <summary>Tracks render time since the last fixed physics step.</summary>
+/// <summary>
+/// Holds how far the frame being rendered has advanced past the last completed fixed physics step.
+/// </summary>
+/// <remarks>
+/// The value is published by the host that owns the fixed-step accumulator rather than reconstructed
+/// here. Reconstructing it from frame and step deltas is exact only while every assumption about the
+/// host's loop holds, and it desynchronizes silently when one does not; taking the accumulator directly
+/// cannot drift. A host that never publishes renders every body at its newest simulation sample, which
+/// looks exactly like interpolation being switched off.
+/// </remarks>
 internal sealed class PhysicsInterpolationClock
 {
-	private const float DefaultFixedDeltaTime = 1.0f / 60.0f;
+	private float _fixedDeltaTime;
+	private float _accumulatedTime;
+	private bool _hasAccumulatedTime;
 
-	private const int MaxTrailingSteps = 16;
-
-	private float _fixedDeltaTime = DefaultFixedDeltaTime;
-	private float _timeSinceLastStep;
-
+	/// <summary>The most recent fixed timestep the simulation was advanced with.</summary>
 	public float FixedDeltaTime => _fixedDeltaTime;
 
-	public float TimeSinceLastStep => Math.Clamp(_timeSinceLastStep, 0.0f, _fixedDeltaTime);
+	/// <summary>Time elapsed since the last fixed step, clamped to a single step.</summary>
+	public float TimeSinceLastStep => _hasAccumulatedTime
+		? Math.Clamp(_accumulatedTime, 0.0f, _fixedDeltaTime)
+		: 0.0f;
 
-	public float Alpha => _fixedDeltaTime > 0.0f ? Math.Clamp(_timeSinceLastStep / _fixedDeltaTime, 0.0f, 1.0f) : 0.0f;
+	/// <summary>
+	/// Normalized position between the two most recent fixed steps, in the range [0, 1]. Defaults to the
+	/// newest sample until the host publishes its accumulator.
+	/// </summary>
+	public float Alpha => _hasAccumulatedTime && _fixedDeltaTime > 0.0f
+		? Math.Clamp(_accumulatedTime / _fixedDeltaTime, 0.0f, 1.0f)
+		: 1.0f;
 
 	public void OnFixedStep(float fixedDeltaTime)
 	{
-		if (fixedDeltaTime <= 0.0f)
+		if (fixedDeltaTime > 0.0f)
 		{
-			return;
+			_fixedDeltaTime = fixedDeltaTime;
 		}
-
-		_fixedDeltaTime = fixedDeltaTime;
-		_timeSinceLastStep = MathF.Max(_timeSinceLastStep - fixedDeltaTime, -fixedDeltaTime * MaxTrailingSteps);
 	}
 
-	public void OnFrame(float deltaTime)
+	public void PublishAccumulatedTime(float accumulatedTime, float fixedDeltaTime)
 	{
-		if (deltaTime <= 0.0f)
+		if (fixedDeltaTime > 0.0f)
 		{
-			return;
+			_fixedDeltaTime = fixedDeltaTime;
 		}
 
-		_timeSinceLastStep = MathF.Min(_timeSinceLastStep + deltaTime, _fixedDeltaTime);
-	}
-
-	public void Reset()
-	{
-		_timeSinceLastStep = 0.0f;
+		_accumulatedTime = MathF.Max(accumulatedTime, 0.0f);
+		_hasAccumulatedTime = true;
 	}
 }

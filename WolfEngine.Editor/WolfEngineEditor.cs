@@ -54,6 +54,7 @@ public class WolfEngineEditor
 	private readonly List<ISystem> _registeredGameplaySystems = new();
 	private readonly FixedStepAccumulator _physicsAccumulator = new(PhysicsFixedDeltaTime, PhysicsMaxStepsPerFrame);
 	private readonly IServiceProvider _serviceProvider;
+	private readonly RigidbodySystem _rigidbodySystem;
 	private readonly IAudioRuntime _audioRuntime;
 	private EditorPlayState _lastAudioPlayState = EditorPlayState.Edit;
 
@@ -118,6 +119,7 @@ public class WolfEngineEditor
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_serviceProvider = serviceProvider;
+		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
 
 	public void Run()
@@ -357,6 +359,13 @@ public class WolfEngineEditor
 			_boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World);
 			_worldManager.PhysicsUpdate(fixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
 		});
+
+		// The accumulator left over after this frame's steps is how far the frame being rendered has
+		// advanced past the last one, which is what rigidbody interpolation blends by.
+		_rigidbodySystem.PublishFixedStepAccumulator(
+			runtimeScene.World,
+			_physicsAccumulator.AccumulatedTime,
+			PhysicsFixedDeltaTime);
 	}
 
 	internal static bool CanAdvancePhysics(EditorPlayState state, World? runtimeWorld, World? boundGameplayWorld)

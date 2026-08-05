@@ -63,8 +63,26 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 
 		using (FrameProfiler.Instance.Measure("Physics.Interpolate"))
 		{
-			state.InterpolationClock.OnFrame(deltaTime);
 			ApplyInterpolatedPoses(world, state);
+		}
+	}
+
+	/// <summary>
+	/// Publishes the host's fixed-step accumulator, which is how far the frame about to be rendered has
+	/// advanced past the last completed fixed step.
+	/// </summary>
+	/// <remarks>
+	/// Call once per frame after that frame's fixed steps have run and before <see cref="PreRender"/>.
+	/// A host that never calls this poses every body at its newest simulation sample, so interpolation
+	/// degrades to the behavior of <see cref="RigidbodyInterpolation.None"/> rather than to something worse.
+	/// </remarks>
+	public void PublishFixedStepAccumulator(World world, float accumulatedTime, float fixedDeltaTime)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+
+		if (PhysicsWorldRegistry.TryGetWorldState(world, out var state))
+		{
+			state.InterpolationClock.PublishAccumulatedTime(accumulatedTime, fixedDeltaTime);
 		}
 	}
 
