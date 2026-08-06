@@ -1,7 +1,8 @@
 // FSR3 upscaler - prepare reactivity pass.
 //
 // Ported from ffx-fsr3/upstream/ffx_fsr3upscaler_prepare_reactivity.h
-// (FidelityFX SDK v1.1.2).
+// (FidelityFX SDK v1.1.2), with the improved disocclusion accumulation defaults from
+// SDK v1.1.4 / FSR 3.1.4.
 //
 // Combines authored reactive/transparency masks with disocclusion, motion divergence,
 // shading change, and thin-feature detection. The packed output controls how much history
@@ -245,13 +246,17 @@ FfxFloat32 UpdateAccumulation(
     }
 
     fAccumulation = ffxLerp(fAccumulation, 0.0f, fShadingChange);
-    fAccumulation = ffxLerp(fAccumulation, ffxMin(fAccumulation, 0.25f), fDisocclusion);
+    fAccumulation = ffxLerp(
+        fAccumulation,
+        ffxMin(fMinDisocclusionAccumulation, fAccumulation),
+        fDisocclusion);
     fAccumulation *= FfxFloat32(round(fAccumulation * 100.0f) > 1.0f);
 
-    // Update for next frame, normalized to store in unorm.
-    const FfxFloat32 fAccumulatedFramesMax = 3.0f;
+    // Update for next frame, normalized to store in unorm. A full disocclusion resolves to
+    // zero above, so the stored value begins at one accumulation step and history is not
+    // trusted again until the newly revealed surface has contributed a complete frame.
     const FfxFloat32 fAccumulatedFramesToStore =
-        ffxSaturate(fAccumulation + (1.0f / fAccumulatedFramesMax));
+        ffxSaturate(fAccumulation + fAccumulationAddedPerFrame);
     StoreAccumulation(iPxPos, fAccumulatedFramesToStore);
 
     return fAccumulation;

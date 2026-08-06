@@ -2125,6 +2125,14 @@ internal sealed class RenderGraphFrameBuilder
 		foreach (var mip in fsr.ShadingSpdMips) shadingChange.ReadTexture(mip, ResourceState.ShaderResource);
 		shadingChange.SetExecute(ExecuteFsr3ShadingChange);
 
+		// Prepare Reactivity only writes pixels that acquire a new thin-feature lock. NewLocks is
+		// transient and may alias an earlier full-resolution FSR3 intermediate, so its untouched
+		// pixels are not implicitly zero even though its descriptor has a zero clear colour. Clear
+		// at the lifetime boundary, after those earlier intermediates have finished using the alias.
+		// Otherwise their depth/luma payload is read as a positive lock and stale colour history is
+		// protected from rectification, producing bright trails behind moving opaque geometry.
+		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, size, 0u, false);
+
 		graph.AddPass("FSR3 Prepare Reactivity", PassKind.Compute)
 			.ReadTexture(fsr.ReconstructedPrevNearestDepth, ResourceState.UnorderedAccess)
 			.ReadTexture(fsr.DilatedMotionVectors, ResourceState.ShaderResource)

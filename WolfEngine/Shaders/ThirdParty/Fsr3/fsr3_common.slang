@@ -42,6 +42,11 @@ static const FfxFloat32 fLockMax = 2.0f;
 // sample sixteen times too influential and prevents static detail from converging.
 static const FfxFloat32 fUpsampleLanczosWeightScale = 1.0f / 16.0f;
 static const FfxFloat32 fAverageLanczosWeightPerFrame = 0.74f * fUpsampleLanczosWeightScale;
+// FSR 3.1.4 defaults. A disocclusion stores zero accumulation this frame and delays
+// rebuilding temporal confidence by one additional frame, preventing newly revealed
+// pixels from immediately accepting stale history.
+static const FfxFloat32 fAccumulationAddedPerFrame = 1.0f / 3.0f;
+static const FfxFloat32 fMinDisocclusionAccumulation = -fAccumulationAddedPerFrame;
 
 struct AccumulationPassCommonParams
 {
