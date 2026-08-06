@@ -43,6 +43,7 @@ public sealed class Fsr3PrepareReactivityPass
 		RenderGraphResourceHandle reconstructedPrevNearestDepth,
 		RenderGraphResourceHandle dilatedMotionVectors,
 		RenderGraphResourceHandle dilatedDepth,
+		RenderGraphResourceHandle inputDepth,
 		RenderGraphResourceHandle reactiveMask,
 		RenderGraphResourceHandle transparencyAndCompositionMask,
 		RenderGraphResourceHandle accumulationRead,
@@ -73,6 +74,7 @@ public sealed class Fsr3PrepareReactivityPass
 			DilatedMotionVectorsHandle = _bindlessRegistry.GetTextureHandle(
 				context.GetTexture(dilatedMotionVectors)),
 			DilatedDepthHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(dilatedDepth)),
+			InputDepthHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(inputDepth)),
 			ReactiveMaskHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(reactiveMask)),
 			TransparencyAndCompositionMaskHandle = _bindlessRegistry.GetTextureHandle(
 				context.GetTexture(transparencyAndCompositionMask)),
@@ -106,6 +108,7 @@ public sealed class Fsr3PrepareReactivityPass
 		bindlessWriter.SetUInt("reconstructedPrevNearestDepthHandle", config.ReconstructedPrevNearestDepthHandle.Value);
 		bindlessWriter.SetUInt("dilatedMotionVectorsReadHandle", config.DilatedMotionVectorsHandle.Value);
 		bindlessWriter.SetUInt("dilatedDepthHandle", config.DilatedDepthHandle.Value);
+		bindlessWriter.SetUInt("inputDepthHandle", config.InputDepthHandle.Value);
 		bindlessWriter.SetUInt("reactiveMaskHandle", config.ReactiveMaskHandle.Value);
 		bindlessWriter.SetUInt(
 			"transparencyAndCompositionMaskHandle", config.TransparencyAndCompositionMaskHandle.Value);

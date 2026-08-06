@@ -131,6 +131,15 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().StopPlayModeAsync(cancellationToken);
 
+	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetInputButtonAsync(binding, pressed, cancellationToken);
+
+	public Task SetInputAxis2DAsync(
+		string binding,
+		System.Numerics.Vector2 value,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetInputAxis2DAsync(binding, value, cancellationToken);
+
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
 

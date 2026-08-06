@@ -69,6 +69,28 @@ public sealed class EditorAutomationTools
 	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
 		_controller.StopPlayModeAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_input_button"), Description("Press or release one named input binding in a running Play-mode scene, through the same input system used by gameplay.")]
+	public async Task<string> SetInputButton(
+		[Description("InputActionBinding name, such as KeyW or GamepadFaceSouth.")] string binding,
+		[Description("True to press the binding; false to release it.")] bool pressed,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetInputButtonAsync(binding, pressed, cancellationToken).ConfigureAwait(false);
+		return $"Input binding '{binding}' is now {(pressed ? "pressed" : "released")}.";
+	}
+
+	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
+	public async Task<string> SetInputAxis2D(
+		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,
+		[Description("Horizontal axis value.")] float x,
+		[Description("Vertical axis value.")] float y,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetInputAxis2DAsync(binding, new System.Numerics.Vector2(x, y), cancellationToken)
+			.ConfigureAwait(false);
+		return $"Input axis '{binding}' is now ({x}, {y}).";
+	}
+
 	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
 	public Task<RenderFrameWaitResult> WaitForRenderFrames(
 		[Description("Positive number of completed render frames to wait for.")] int frameCount,

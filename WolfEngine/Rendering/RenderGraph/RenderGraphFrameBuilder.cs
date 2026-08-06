@@ -2137,6 +2137,7 @@ internal sealed class RenderGraphFrameBuilder
 			.ReadTexture(fsr.ReconstructedPrevNearestDepth, ResourceState.UnorderedAccess)
 			.ReadTexture(fsr.DilatedMotionVectors, ResourceState.ShaderResource)
 			.ReadTexture(fsr.DilatedDepth, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(fsr.TransparencyMask, ResourceState.ShaderResource)
 			.ReadTexture(fsr.AccumulationRead, ResourceState.ShaderResource)
@@ -2271,6 +2272,7 @@ internal sealed class RenderGraphFrameBuilder
 		var settings = _frameResources.Config.Fsr3;
 		var config = _passSet.Fsr3PrepareReactivityPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.ReconstructedPrevNearestDepth, fsr.DilatedMotionVectors, fsr.DilatedDepth,
+			_frameResources.GBufferDepth,
 			_frameResources.GBufferMaterial, fsr.TransparencyMask, fsr.AccumulationRead, fsr.AccumulationWrite,
 			fsr.ShadingChange, fsr.CurrentLumaWrite, fsr.FrameInfo, fsr.DilatedReactiveMasks,
 			fsr.NewLocks, in constants,

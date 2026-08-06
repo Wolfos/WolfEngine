@@ -7,6 +7,7 @@ using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
+using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -22,6 +23,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
+	private readonly IInputSystem _inputSystem;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
@@ -44,6 +46,7 @@ public sealed class EditorRemoteAutomationController
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorPlaySession playSession,
+		IInputSystem inputSystem,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		ITerrainAuthoringService terrainAuthoringService,
@@ -62,6 +65,7 @@ public sealed class EditorRemoteAutomationController
 		_sceneWorkspace = sceneWorkspace;
 		_sceneSnapshotService = sceneSnapshotService;
 		_playSession = playSession;
+		_inputSystem = inputSystem;
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_terrainAuthoringService = terrainAuthoringService;
@@ -349,6 +353,43 @@ public sealed class EditorRemoteAutomationController
 				throw new InvalidOperationException("The editor is not in Play mode.");
 			}
 			return GetPlayModeState();
+		}, cancellationToken);
+
+	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
+	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Playing)
+			{
+				throw new InvalidOperationException("Input injection is only available while Play mode is running.");
+			}
+			if (Enum.TryParse<InputActionBinding>(binding, ignoreCase: true, out var parsed) == false ||
+			    parsed == InputActionBinding.None)
+			{
+				throw new InvalidOperationException($"Unknown input button binding '{binding}'.");
+			}
+
+			_inputSystem.SetButton(parsed, pressed);
+		}, cancellationToken);
+
+	/// <summary>Injects a two-dimensional axis binding through the gameplay input system.</summary>
+	public Task SetInputAxis2DAsync(
+		string binding,
+		Vector2 value,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Playing)
+			{
+				throw new InvalidOperationException("Input injection is only available while Play mode is running.");
+			}
+			if (Enum.TryParse<InputActionBinding>(binding, ignoreCase: true, out var parsed) == false ||
+			    parsed == InputActionBinding.None)
+			{
+				throw new InvalidOperationException($"Unknown input axis binding '{binding}'.");
+			}
+
+			_inputSystem.SetAxis2D(parsed, value);
 		}, cancellationToken);
 
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
