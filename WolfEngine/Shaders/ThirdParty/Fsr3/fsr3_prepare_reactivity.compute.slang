@@ -86,7 +86,8 @@ FfxFloat32 ComputeDisocclusions(FfxFloat32x2 fUv, FfxFloat32x2 fMotionVector, Ff
 // foreground sample cannot seed a multi-frame colour trail.
 FfxFloat32 ComputeDilatedForegroundDisocclusion(
     FfxFloat32 fCurrentDepth,
-    FfxFloat32 fDilatedDepth)
+    FfxFloat32 fDilatedDepth,
+    FfxFloat32x2 fDilatedMotionVector)
 {
     const FfxFloat32 fCurrentDepthViewSpace = GetViewSpaceDepth(fCurrentDepth);
     const FfxFloat32 fDilatedDepthViewSpace = GetViewSpaceDepth(fDilatedDepth);
@@ -100,8 +101,18 @@ FfxFloat32 ComputeDilatedForegroundDisocclusion(
     const FfxFloat32 fRequiredDepthSeparation =
         1.37e-05f * fHalfViewportWidth * fDepthThreshold;
 
-    return ffxSaturate(fDepthDifference /
+    const FfxFloat32 fDepthRejection = ffxSaturate(fDepthDifference /
         ffxMax(fRequiredDepthSeparation, FSR3UPSCALER_FP32_MIN));
+
+    // A static depth edge also has a different current and dilated depth, but it must
+    // keep accumulating jittered samples. Gate the extra rejection on actual foreground
+    // motion. The low transition excludes exact zero-motion geometry without weakening
+    // slowly moving silhouettes, and 4K-normalized velocity keeps it resolution independent.
+    const FfxFloat32 fMotion4K = Get4KVelocity(fDilatedMotionVector);
+    const FfxFloat32 fMotionRejection = ffxSaturate(
+        (fMotion4K - 0.01f) / 0.09f);
+
+    return fDepthRejection * fMotionRejection;
 }
 
 FfxFloat32 ComputeMotionDivergence(
@@ -317,8 +328,9 @@ void PrepareReactivity(FfxInt32x2 iPxPos)
     // Comparing the real current-pixel depth keeps the robust dilated motion while
     // correctly rejecting history where the foreground has moved away.
     const FfxFloat32 fDisocclusion = ffxMax(
-        ComputeDisocclusions(fUv, fMotionVector, GetViewSpaceDepth(fInputDepth)),
-        ComputeDilatedForegroundDisocclusion(fInputDepth, fDilatedDepth));
+        ComputeDisocclusions(fUv, fMotionVector, GetViewSpaceDepth(fDilatedDepth)),
+        ComputeDilatedForegroundDisocclusion(
+            fInputDepth, fDilatedDepth, fMotionVector));
     const FfxFloat32 fShadingChange = ffxMax(
         DilateReactiveMasks(iPxPos, fUv), ComputeShadingChange(fUv));
 
