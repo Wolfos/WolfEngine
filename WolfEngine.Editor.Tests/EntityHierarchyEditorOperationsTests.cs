@@ -162,6 +162,54 @@ public sealed class EntityHierarchyEditorOperationsTests
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityCreationUndoRedoEntry>());
 	}
 
+	[Test]
+	public void DuplicateEntity_RetargetsInternalReferencesAndKeepsExternalOnes()
+	{
+		var scene = new EditorScene();
+		var snapshotService = new EditorSceneSnapshotService(CreateTypeResolver());
+		var parent = scene.World.CreateEntity("Parent", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		var child = scene.World.CreateEntity("Child", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		scene.World.SetParent(child, parent);
+		var external = scene.World.CreateEntity("External");
+		snapshotService.EnsurePersistentEntityId(scene, external);
+		scene.World.AddComponent(parent, new EntityReferenceComponent
+		{
+			Target = child,
+			External = external
+		});
+
+		var duplicate = EntityHierarchyEditorOperations.DuplicateEntity(
+			scene,
+			parent,
+			snapshotService,
+			Substitute.For<IEditorUndoRedoService>(),
+			Substitute.For<IEditorInteractionState>());
+
+		Assert.That(duplicate.HasValue, Is.True);
+		var duplicateChild = scene.World.GetComponent<Children>(duplicate.Value).First;
+		var component = scene.World.GetComponent<EntityReferenceComponent>(duplicate.Value);
+
+		Assert.That(duplicateChild.IsValid, Is.True);
+		Assert.That(duplicateChild, Is.Not.EqualTo(child));
+		Assert.That(component.Target, Is.EqualTo(duplicateChild));
+		Assert.That(component.External, Is.EqualTo(external));
+		Assert.That(scene.World.GetComponent<EntityReferenceComponent>(parent).Target, Is.EqualTo(child));
+	}
+
+	private static IProjectTypeResolver CreateTypeResolver()
+	{
+		var resolver = Substitute.For<IProjectTypeResolver>();
+		resolver.GetTypeName(Arg.Any<Type>()).Returns(call => call.Arg<Type>().AssemblyQualifiedName);
+		resolver.GetStableTypeId(Arg.Any<Type>()).Returns(call => call.Arg<Type>().FullName);
+		return resolver;
+	}
+
+	private struct EntityReferenceComponent : IEntityComponent
+	{
+		public Entity Target;
+		public Entity External;
+	}
+
 	private static void AssertMatrix(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)
 	{
 		Assert.That(actual.M11, Is.EqualTo(expected.M11).Within(tolerance));

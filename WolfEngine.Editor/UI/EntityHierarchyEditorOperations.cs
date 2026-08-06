@@ -293,6 +293,13 @@ internal static class EntityHierarchyEditorOperations
 				clonedEntity.ParentEntityId = duplicatedParentId;
 			}
 
+			// Point references that targeted the duplicated subtree at the copies instead of the originals.
+			for (var componentIndex = 0; componentIndex < clonedEntity.Components.Count; componentIndex++)
+			{
+				var component = clonedEntity.Components[componentIndex];
+				component.Data = EditorEntityReferenceUtility.RemapEntityReferences(component.Data, idMap);
+			}
+
 			clones.Add(new DeletedEntitySnapshot(snapshot.CellKey, clonedEntity));
 		}
 
