@@ -159,8 +159,10 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
-	public void FrameSnapshotBuffer_ReusedSnapshotKeepsCameraHistoryAlignedWithGpuDrawHistory()
+	public void FrameSnapshotBuffer_ReusedSnapshotTakesCameraAndGpuDrawHistoryFromThePreviousPublishedFrame()
 	{
+		// A snapshot's own last write is two published frames back, but a motion vector spans one frame,
+		// so both halves of it have to come from the frame published in the other slot.
 		var buffer = new FrameSnapshotBuffer();
 		var mesh = CreateTestMesh();
 		var material = new Material("test-shader");
@@ -186,12 +188,77 @@ public sealed class FrameSnapshotGpuDrawTests
 		reusedSnapshotA.GpuDrawDatabase.ConsumeUpdates(updates);
 
 		Assert.That(reusedSnapshotA.HasPreviousCameraState, Is.True);
-		Assert.That(reusedSnapshotA.PreviousCameraWorldTransform.LocalToWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(reusedSnapshotA.PreviousCameraWorldTransform.LocalToWorld.Translation.X, Is.EqualTo(5.0f).Within(0.0001f));
 		Assert.That(reusedSnapshotA.CameraWorldTransform.LocalToWorld.Translation.X, Is.EqualTo(9.0f).Within(0.0001f));
 		Assert.That(updates, Has.Count.EqualTo(1));
 		Assert.That(updates[0].Type, Is.EqualTo(GpuDrawUpdateType.UpdateTransform));
-		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(5.0f).Within(0.0001f));
 		Assert.That(updates[0].World.Translation.X, Is.EqualTo(9.0f).Within(0.0001f));
+	}
+
+	[Test]
+	public void FrameSnapshotBuffer_DrawAddedInTheSecondSlotSpansOneFrameOfMovement()
+	{
+		// The slot that has not tracked a draw yet still has to describe its movement: reporting the
+		// draw as freshly placed would zero its motion vector on every other frame.
+		var buffer = new FrameSnapshotBuffer();
+		var mesh = CreateTestMesh();
+		var material = new Material("test-shader");
+		var entity = new Entity(1, 1);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
+		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
+		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 3.0f);
+
+		var updates = new List<GpuDrawUpdate>();
+		snapshotB.GpuDrawDatabase.ConsumeUpdates(updates);
+
+		Assert.That(updates, Has.Count.EqualTo(1));
+		Assert.That(updates[0].Type, Is.EqualTo(GpuDrawUpdateType.Add));
+		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(1.0f).Within(0.0001f));
+		Assert.That(updates[0].World.Translation.X, Is.EqualTo(3.0f).Within(0.0001f));
+	}
+
+	[Test]
+	public void FrameSnapshotBuffer_DrawThatStopsMovingSettlesToAZeroMotionVector()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var mesh = CreateTestMesh();
+		var material = new Material("test-shader");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
+		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
+		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 3.0f);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		// Stops here, so the frame that follows must report no movement rather than the step it took
+		// the last time this slot was written.
+		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotA), Is.True);
+		WriteEntity(reusedSnapshotA.GpuDrawDatabase, entity, mesh, material, 3.0f);
+		reusedSnapshotA.GpuDrawDatabase.ConsumeUpdates(updates);
+
+		Assert.That(updates, Has.Count.EqualTo(1));
+		Assert.That(updates[0].PreviousWorld.Translation.X, Is.EqualTo(3.0f).Within(0.0001f));
+		Assert.That(updates[0].World.Translation.X, Is.EqualTo(3.0f).Within(0.0001f));
+
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotB), Is.True);
+		WriteEntity(reusedSnapshotB.GpuDrawDatabase, entity, mesh, material, 3.0f);
+		reusedSnapshotB.GpuDrawDatabase.ConsumeUpdates(updates);
+
+		Assert.That(updates, Is.Empty, "A draw that has already settled must not keep re-uploading.");
 	}
 
 	[Test]

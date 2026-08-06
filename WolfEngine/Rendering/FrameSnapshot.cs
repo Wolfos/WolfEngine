@@ -17,6 +17,14 @@ public sealed class FrameSnapshot
 	private static readonly Vector3 DefaultSunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
 
 	public FrameSnapshot()
+		: this(new GpuDrawTransformHistory())
+	{
+	}
+
+	/// <param name="drawTransformHistory">
+	/// Previous-frame draw transforms, shared with the other snapshots in the same buffer.
+	/// </param>
+	internal FrameSnapshot(GpuDrawTransformHistory drawTransformHistory)
 	{
 		LightPackets = new List<LightPacket>(16);
 		DecalPackets = new List<DecalProjectorPacket>(16);
@@ -24,7 +32,7 @@ public sealed class FrameSnapshot
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
-		GpuDrawDatabase = new GpuDrawDatabase();
+		GpuDrawDatabase = new GpuDrawDatabase(drawTransformHistory);
 	}
 
 	public Camera Camera { get; private set; }
@@ -50,22 +58,33 @@ public sealed class FrameSnapshot
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
-		if (_hasCameraState)
-		{
-			PreviousCamera = Camera;
-			PreviousCameraWorldTransform = CameraWorldTransform;
-			HasPreviousCameraState = true;
-		}
-		else
+		if (HasPreviousCameraState == false)
 		{
 			PreviousCamera = camera;
 			PreviousCameraWorldTransform = worldTransform;
-			HasPreviousCameraState = false;
 		}
 
 		Camera = camera;
 		CameraWorldTransform = worldTransform;
 		_hasCameraState = true;
+	}
+
+	/// <summary>Takes the previously published frame's camera as this frame's camera history.</summary>
+	/// <remarks>
+	/// Snapshots rotate, so the camera a snapshot itself last carried is two published frames old. A
+	/// motion vector spans one frame, and the camera half of it has to line up with the transform half,
+	/// which <see cref="GpuDrawTransformHistory"/> also takes from the previously published frame.
+	/// </remarks>
+	internal void SeedPreviousCameraFrom(FrameSnapshot published)
+	{
+		if (ReferenceEquals(published, this) || published._hasCameraState == false)
+		{
+			return;
+		}
+
+		PreviousCamera = published.Camera;
+		PreviousCameraWorldTransform = published.CameraWorldTransform;
+		HasPreviousCameraState = true;
 	}
 
 	public void Clear()
@@ -76,6 +95,7 @@ public sealed class FrameSnapshot
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
+		HasPreviousCameraState = false;
 		GpuDrawDatabase.ResetForSnapshotWrite();
 	}
 
@@ -158,13 +178,21 @@ public sealed class FrameSnapshot
 
 public sealed class FrameSnapshotBuffer
 {
-	private readonly FrameSnapshot[] _buffers = { new(), new() };
+	private readonly FrameSnapshot[] _buffers;
 	private readonly object _lock = new();
 	private readonly ManualResetEventSlim _slotFree = new(true);
 	private int _readIndex;
 	private int _writeIndex = 1;
 	private bool _hasPending;
 	private bool _completed;
+
+	public FrameSnapshotBuffer()
+	{
+		// One history across both slots: each snapshot's previous-frame state has to describe the frame
+		// published before it, not the one that last wrote its own slot.
+		var drawTransformHistory = new GpuDrawTransformHistory();
+		_buffers = new FrameSnapshot[] { new(drawTransformHistory), new(drawTransformHistory) };
+	}
 
 	public bool TryBeginWrite(out FrameSnapshot snapshot)
 	{
@@ -179,6 +207,7 @@ public sealed class FrameSnapshotBuffer
 
 			snapshot = _buffers[_writeIndex];
 			snapshot.Clear();
+			snapshot.SeedPreviousCameraFrom(_buffers[_readIndex]);
 			return true;
 		}
 	}
