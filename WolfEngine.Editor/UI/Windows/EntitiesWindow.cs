@@ -326,7 +326,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 				var createdEntity = scene.World.CreateEntity(
 					"Entity", GetNewEntityPosition(), Quaternion.Identity, Vector3.One);
 				EditorGui.SelectEntity(createdEntity, scene.World);
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(scene.World);
 			}
 
 			ImGui.EndMenu();
@@ -431,7 +431,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
 		}
 
-		_interactionState.MarkSceneDirty();
+		_interactionState.MarkSceneDirty(scene.World);
 		PendingDeleteEntities.Clear();
 	}
 
@@ -483,7 +483,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			_undoRedoService.CommitCapture(new EntityDeletionUndoRedoEntry("Delete Entity", deletedEntities));
 		}
 
-		_interactionState.MarkSceneDirty();
+		_interactionState.MarkSceneDirty(scene.World);
 		PendingDeleteEntities.Clear();
 	}
 
@@ -562,7 +562,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 				_assetSelectionService.Select(assetId);
 			}
 
-			_interactionState.MarkSceneDirty();
+			_interactionState.MarkSceneDirty(scene.World);
 			return;
 		}
 

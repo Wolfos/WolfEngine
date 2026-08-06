@@ -17,9 +17,21 @@ public interface IEditorUndoRedoService
 	void Clear();
 }
 
+/// <summary>
+/// What an undo entry replays against. Authoring-scene entries always resolve their target through
+/// <see cref="IEditorSceneWorkspace.CurrentScene"/>, so they are only valid for edits made to the
+/// authoring scene, never for edits made to the isolated play-mode runtime scene.
+/// </summary>
+public enum EditorUndoRedoScope
+{
+	AuthoringScene,
+	Asset
+}
+
 public interface IEditorUndoRedoEntry
 {
 	string Description { get; }
+	EditorUndoRedoScope Scope { get; }
 	void Undo(EditorUndoRedoContext context);
 	void Redo(EditorUndoRedoContext context);
 }
@@ -53,6 +65,8 @@ public sealed class SceneComponentEditUndoRedoEntry : IEditorUndoRedoEntry
 
 	public string Description { get; }
 
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
+
 	public void Undo(EditorUndoRedoContext context)
 	{
 		context.SceneSnapshotService.ApplyComponentSnapshots(context.SceneWorkspace.CurrentScene, _before);
@@ -77,6 +91,8 @@ public sealed class SceneComponentRemovalUndoRedoEntry : IEditorUndoRedoEntry
 	}
 
 	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
 
 	public void Undo(EditorUndoRedoContext context)
 	{
@@ -104,6 +120,8 @@ public sealed class EntityDeletionUndoRedoEntry : IEditorUndoRedoEntry
 	}
 
 	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
 
 	public void Undo(EditorUndoRedoContext context)
 	{
@@ -140,6 +158,8 @@ public sealed class EntityCreationUndoRedoEntry : IEditorUndoRedoEntry
 	}
 
 	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
 
 	public void Undo(EditorUndoRedoContext context)
 	{
@@ -179,6 +199,8 @@ public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
 
 	public string Description { get; }
 
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.AuthoringScene;
+
 	public void Undo(EditorUndoRedoContext context)
 	{
 		EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, _before);
@@ -206,6 +228,8 @@ public sealed class MaterialAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 
 	public string Description { get; }
 
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.Asset;
+
 	public void Undo(EditorUndoRedoContext context)
 	{
 		context.AssetSnapshotService.ApplyMaterialAssetSnapshot(_before);
@@ -230,6 +254,8 @@ public sealed class DataAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 	}
 
 	public string Description { get; }
+
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.Asset;
 
 	public void Undo(EditorUndoRedoContext context)
 	{
@@ -259,6 +285,8 @@ public sealed class TerrainAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 
 	public string Description { get; }
 
+	public EditorUndoRedoScope Scope => EditorUndoRedoScope.Asset;
+
 	public void Undo(EditorUndoRedoContext context)
 	{
 		context.TerrainAssetPersistenceService.ApplyTerrainAssetStates(_before);
@@ -275,6 +303,7 @@ public sealed class TerrainAssetEditUndoRedoEntry : IEditorUndoRedoEntry
 public sealed class EditorUndoRedoService : IEditorUndoRedoService
 {
 	private readonly EditorUndoRedoContext _context;
+	private readonly IEditorPlaySession _playSession;
 	private readonly Stack<IEditorUndoRedoEntry> _undoStack = new();
 	private readonly Stack<IEditorUndoRedoEntry> _redoStack = new();
 	private string? _pendingDescription;
@@ -285,7 +314,8 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 		IEditorInteractionState interactionState,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorAssetSnapshotService assetSnapshotService,
-		ITerrainAssetPersistenceService terrainAssetPersistenceService)
+		ITerrainAssetPersistenceService terrainAssetPersistenceService,
+		IEditorPlaySession playSession)
 	{
 		_context = new EditorUndoRedoContext
 		{
@@ -295,10 +325,11 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 			AssetSnapshotService = assetSnapshotService ?? throw new ArgumentNullException(nameof(assetSnapshotService)),
 			TerrainAssetPersistenceService = terrainAssetPersistenceService ?? throw new ArgumentNullException(nameof(terrainAssetPersistenceService))
 		};
+		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 	}
 
-	public bool CanUndo => _undoStack.Count > 0;
-	public bool CanRedo => _redoStack.Count > 0;
+	public bool CanUndo => CanReplay(_undoStack);
+	public bool CanRedo => CanReplay(_redoStack);
 
 	public void BeginCapture(string description)
 	{
@@ -312,7 +343,7 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 
 	public bool CommitCapture(IEditorUndoRedoEntry entry)
 	{
-		if (_isReplaying || entry is null)
+		if (_isReplaying || entry is null || IsBlockedByPlayMode(entry))
 		{
 			_pendingDescription = null;
 			return false;
@@ -331,7 +362,7 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 
 	public bool Undo()
 	{
-		if (_undoStack.Count == 0)
+		if (CanReplay(_undoStack) == false)
 		{
 			return false;
 		}
@@ -354,7 +385,7 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 
 	public bool Redo()
 	{
-		if (_redoStack.Count == 0)
+		if (CanReplay(_redoStack) == false)
 		{
 			return false;
 		}
@@ -381,4 +412,15 @@ public sealed class EditorUndoRedoService : IEditorUndoRedoService
 		_redoStack.Clear();
 		_pendingDescription = null;
 	}
+
+	/// <summary>
+	/// Play mode edits the isolated runtime scene while the authoring scene stays frozen, so authoring-scene
+	/// entries must neither be recorded nor replayed until play mode stops. Asset entries stay available
+	/// because they replay against files rather than the open scene.
+	/// </summary>
+	private bool IsBlockedByPlayMode(IEditorUndoRedoEntry entry)
+		=> entry.Scope == EditorUndoRedoScope.AuthoringScene && _playSession.IsActive;
+
+	private bool CanReplay(Stack<IEditorUndoRedoEntry> stack)
+		=> stack.Count > 0 && IsBlockedByPlayMode(stack.Peek()) == false;
 }

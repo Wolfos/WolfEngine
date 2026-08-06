@@ -48,7 +48,7 @@ internal static class EntityHierarchyEditorOperations
 		EditorGui.SelectEntity(duplicatedRoot, world, requestFocus: false);
 		undoRedoService.BeginCapture("Duplicate Entity");
 		undoRedoService.CommitCapture(new EntityCreationUndoRedoEntry("Duplicate Entity", duplicatedSnapshots));
-		interactionState.MarkSceneDirty();
+		interactionState.MarkSceneDirty(scene.World);
 		return duplicatedRoot;
 	}
 
@@ -111,7 +111,7 @@ internal static class EntityHierarchyEditorOperations
 			after));
 
 		EditorGui.SelectEntity(entity, world, requestFocus: false);
-		interactionState.MarkSceneDirty();
+		interactionState.MarkSceneDirty(scene.World);
 		return true;
 	}
 

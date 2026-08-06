@@ -143,7 +143,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         if (EditorUIUtility.Checkbox("Enabled", ref isEnabled))
         {
             scene.World.SetEnabled(entity, isEnabled);
-            _interactionState.MarkSceneDirty();
+            _interactionState.MarkSceneDirty(scene.World);
         }
 
         DrawPrefabControls(scene, entity);
@@ -241,7 +241,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
                     RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
                     EditorGui.SelectEntity(entity, scene.World);
-                    _interactionState.MarkSceneDirty();
+                    _interactionState.MarkSceneDirty(scene.World);
                     ImGui.CloseCurrentPopup();
                     break;
                 }
@@ -592,7 +592,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             var before = CaptureSingleComponentSnapshot(scene, entity, componentType);
             RuntimeComponentAccessor.WriteBoxed(world, entity, componentType, stagedComponent);
             PushComponentEdit("Edit TerrainComponent", before, CaptureSingleComponentSnapshot(scene, entity, componentType));
-            interactionState.MarkSceneDirty();
+            interactionState.MarkSceneDirty(world);
             _pendingTerrainEdits.Remove(key);
         }
 
@@ -671,7 +671,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             apply(_componentTargets[i]);
         }
 
-        PushComponentEdit(description, before, CaptureComponentSnapshots(scene, componentType));
+        PushComponentEdit(scene.World, description, before, CaptureComponentSnapshots(scene, componentType));
     }
 
     private void ApplyGenericComponentEdits(EditorScene scene, Type componentType, IReadOnlyList<RuntimeComponentFieldEditor.FieldEdit> edits)
@@ -705,7 +705,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             }
         }
 
-        PushComponentEdit($"Edit {componentType.Name}", before, CaptureComponentSnapshots(scene, componentType));
+        PushComponentEdit(scene.World, $"Edit {componentType.Name}", before, CaptureComponentSnapshots(scene, componentType));
     }
 
     private List<SceneComponentSnapshot> CaptureComponentSnapshots(EditorScene scene, Type componentType)
@@ -802,7 +802,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, [before], [after]));
     }
 
-    private void PushComponentEdit(string description, IReadOnlyList<SceneComponentSnapshot> before, IReadOnlyList<SceneComponentSnapshot> after)
+    private void PushComponentEdit(World world, string description, IReadOnlyList<SceneComponentSnapshot> before, IReadOnlyList<SceneComponentSnapshot> after)
     {
         var changedBefore = new List<SceneComponentSnapshot>();
         var changedAfter = new List<SceneComponentSnapshot>();
@@ -825,7 +825,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
 
         _undoRedoService.BeginCapture(description);
         _undoRedoService.CommitCapture(new SceneComponentEditUndoRedoEntry(description, changedBefore, changedAfter));
-        _interactionState.MarkSceneDirty();
+        _interactionState.MarkSceneDirty(world);
     }
 
     private static bool SnapshotsEqual(SceneComponentSnapshot left, SceneComponentSnapshot right)
@@ -898,7 +898,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         EditorGui.RefreshSelectedEntity(scene.World, requestFocus: false);
         _undoRedoService.BeginCapture($"Remove {componentType.Name}");
         _undoRedoService.CommitCapture(new SceneComponentRemovalUndoRedoEntry($"Remove {componentType.Name}", [snapshot]));
-        _interactionState.MarkSceneDirty();
+        _interactionState.MarkSceneDirty(scene.World);
     }
 
     private void ClearPendingTerrainEdit(World world, Entity entity)
@@ -962,7 +962,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                     if (ImGui.ImageButton("##icon", textureId, PickerIconSize))
                     {
                         scene.EntityIcons[entity] = name;
-                        interactionState.MarkSceneDirty();
+                        interactionState.MarkSceneDirty(scene.World);
                         ImGui.CloseCurrentPopup();
                     }
 
@@ -1161,7 +1161,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         }
 
         ApplySavedEntityToScene(scene, entity, sourceEntity);
-        _interactionState.MarkSceneDirty();
+        _interactionState.MarkSceneDirty(scene.World);
     }
 
     private readonly record struct TerrainEditKey(World World, Entity Entity)

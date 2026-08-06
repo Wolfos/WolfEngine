@@ -34,7 +34,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.World.HasComponent<Parent>(child), Is.True);
 		Assert.That(scene.World.GetComponent<Parent>(child).Value, Is.EqualTo(parent));
 		AssertMatrix(scene.World.GetComponent<WorldTransform>(child).LocalToWorld, beforeWorldTransform);
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Reparent Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityHierarchyUndoRedoEntry>());
 	}
@@ -64,7 +64,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(changed, Is.True);
 		Assert.That(scene.World.HasComponent<Parent>(child), Is.False);
 		AssertMatrix(scene.World.GetComponent<WorldTransform>(child).LocalToWorld, beforeWorldTransform);
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Unparent Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityHierarchyUndoRedoEntry>());
 	}
@@ -88,7 +88,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 			interactionState);
 
 		Assert.That(changed, Is.False);
-		interactionState.DidNotReceive().MarkSceneDirty();
+		interactionState.DidNotReceiveWithAnyArgs().MarkSceneDirty(default!);
 		undoRedoService.DidNotReceive().BeginCapture(Arg.Any<string>());
 		undoRedoService.DidNotReceive().CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
@@ -117,7 +117,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.World.HasComponent<Parent>(parent), Is.False);
 		Assert.That(scene.World.GetComponent<Parent>(child).Value, Is.EqualTo(parent));
 		Assert.That(scene.World.GetComponent<Parent>(grandchild).Value, Is.EqualTo(child));
-		interactionState.DidNotReceive().MarkSceneDirty();
+		interactionState.DidNotReceiveWithAnyArgs().MarkSceneDirty(default!);
 		undoRedoService.DidNotReceive().BeginCapture(Arg.Any<string>());
 		undoRedoService.DidNotReceive().CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
@@ -157,7 +157,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.EntityIds[duplicateChildren], Is.Not.EqualTo(scene.EntityIds[child]));
 		Assert.That(scene.EntityIcons[duplicateChildren], Is.EqualTo("object"));
 
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Duplicate Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityCreationUndoRedoEntry>());
 	}

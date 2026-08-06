@@ -728,7 +728,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			{
 				_assetPipelineService.InstantiateImportedModel(
 					_projectService.ProjectRootPath!, asset.Id, scene.World, GetSceneSpawnPosition());
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(scene.World);
 			}
 			catch (Exception ex)
 			{
@@ -742,7 +742,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			{
 				_assetPipelineService.InstantiatePrefab(
 					_projectService.ProjectRootPath!, asset.Id, scene, GetSceneSpawnPosition());
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(scene.World);
 			}
 			catch (Exception ex)
 			{
