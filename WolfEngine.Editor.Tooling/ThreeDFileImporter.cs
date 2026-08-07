@@ -291,14 +291,23 @@ public class ThreeDFileImporter : IThreeDFileImporter
                                   out boneIndices,
                                   out boneWeights);
 
-                var importedMesh = new Mesh(
+                var geometry = MeshOptimization.Optimize(new MeshGeometry(
                     vertices,
-                    indexList,
                     rawNormals is not null ? normals : null,
                     hasTexCoords ? uvs : null,
                     tangents,
                     hasSkin ? boneIndices : null,
-                    hasSkin ? boneWeights : null);
+                    hasSkin ? boneWeights : null,
+                    indexList.ToArray()));
+
+                var importedMesh = new Mesh(
+                    geometry.Positions,
+                    geometry.Indices,
+                    geometry.Normals,
+                    geometry.Uvs,
+                    geometry.Tangents,
+                    geometry.BoneIndices,
+                    geometry.BoneWeights);
                 meshData.Add((meshName, importedMesh, materialIndex, hasSkin ? 0 : -1));
             }
 

@@ -1961,7 +1961,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportAudioSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				6,
+				7,
 				path =>
 				{
 					var extension = Path.GetExtension(path);
