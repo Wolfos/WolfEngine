@@ -119,6 +119,7 @@ public static class Program
 		services.AddSingleton<SphereColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
+		services.AddSingleton<SceneSelectionController>();
 		services.AddSingleton<EditorGui>();
 		services.AddSingleton<ProjectSettingsWindow>();
 		

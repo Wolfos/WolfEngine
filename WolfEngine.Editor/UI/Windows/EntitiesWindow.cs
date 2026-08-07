@@ -14,6 +14,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly List<Entity> VisibleEntities = new();
 	private static readonly List<Entity> PendingDeleteEntities = new();
+	private static readonly HashSet<Entity> RevealAncestors = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 	private const string ContextMenuId = "EntitiesContextMenu";
 
@@ -30,6 +31,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private Entity? _draggedEntity;
 	private Entity? _hoveredEntity;
 	private EntitySelectionClick? _pendingSelectionClick;
+	private Entity? _revealEntity;
 
 	public EntitiesWindow(
 		IIconManager iconManager,
@@ -72,6 +74,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		BuildRootList(world);
 		_hoveredEntity = null;
 		VisibleEntities.Clear();
+		BeginRevealRequest(world);
 
 		var style = ImGui.GetStyle();
 		ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(style.ItemSpacing.X, 0.0f));
@@ -84,6 +87,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		ClearSelectionOnBackgroundClick();
 		ApplyPendingSelectionClick(world);
+		EndRevealRequest();
 
 		CompleteDragDrop(scene);
 		DrawContextMenu(scene);
@@ -142,8 +146,20 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		var nameComponent = world.GetComponent<NameComponent>(entity);
 		var name = nameComponent.Name ?? "Unnamed";
+		if (RevealAncestors.Contains(entity))
+		{
+			// Written into ImGui's own node storage, so the branch stays open afterwards and the user
+			// can collapse it again like any other.
+			ImGui.SetNextItemOpen(true);
+		}
+
 		var nodeCursorPosition = ImGui.GetCursorScreenPos();
 		var open = ImGui.TreeNodeEx("##EntityNode", flags);
+		if (_revealEntity == entity)
+		{
+			ImGui.SetScrollHereY(0.5f);
+		}
+
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup |
 		                        ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
@@ -192,6 +208,34 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		ImGui.PopID();
 	}
 
+	/// <summary>
+	/// Picks up a selection made elsewhere — the viewport, an undo, a freshly instantiated prefab —
+	/// and unfolds this frame's tree down to it.
+	/// </summary>
+	private void BeginRevealRequest(World world)
+	{
+		if (EditorGui.ConsumeSelectionRevealRequest(out var entity) == false)
+		{
+			return;
+		}
+
+		if (world.IsAlive(entity) == false)
+		{
+			// The window is not drawn in every editor mode, so a request can outlive its entity.
+			RevealAncestors.Clear();
+			return;
+		}
+
+		_revealEntity = entity;
+		EntityHierarchyReveal.CollectAncestors(world, entity, RevealAncestors);
+	}
+
+	private void EndRevealRequest()
+	{
+		_revealEntity = null;
+		RevealAncestors.Clear();
+	}
+
 	private void ClearSelectionOnBackgroundClick()
 	{
 		if (_hoveredEntity is null &&
@@ -223,6 +267,10 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		{
 			EditorGui.ReplaceEntitySelection(click.Entity, world);
 		}
+
+		// The clicked row is already on screen under the cursor. Revealing it would only scroll it to
+		// centre, moving the list out from under the click.
+		EditorGui.DiscardSelectionRevealRequest();
 	}
 
 	private void CompleteDragDrop(EditorScene scene)
