@@ -32,6 +32,8 @@ public static class WolfEngine
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+		services.AddSingleton<IGameplayUiFrameProvider>(NullGameplayUiFrameProvider.Instance);
+		services.AddSingleton<GameplayUiGpuRenderer>();
 		services.AddSingleton<EditorViewportStateBus>();
 		services.AddSingleton(new RenderPresentationOptions());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();

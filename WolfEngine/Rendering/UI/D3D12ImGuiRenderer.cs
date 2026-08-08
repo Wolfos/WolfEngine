@@ -41,10 +41,12 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private int _fontTextureWidth;
 	private int _fontTextureHeight;
 	private bool _fontUploaded;
+	private readonly string _pixelEntryPoint;
 
-	public D3D12ImGuiRenderer(IShaderProvider shaderCompiler)
+	public D3D12ImGuiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_pixelEntryPoint = sampleTexture ? "fragmentShader" : "solidFragmentShader";
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
@@ -95,7 +97,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		_rootSignature = default;
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+		ColorRGBA? clearColor = null)
 	{
 		var finalColor = finalColorTarget as ID3D12BackendTexture;
 		if (finalColor is null)
@@ -112,8 +115,9 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
 		if (clearTarget)
 		{
-			var clearColor = stackalloc float[4] { 0.05f, 0.05f, 0.05f, 1.0f };
-			native->ClearRenderTargetView(rtvHandle, clearColor, 0, null);
+			var resolvedClear = clearColor ?? new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f);
+			var clearValues = stackalloc float[4] { resolvedClear.R, resolvedClear.G, resolvedClear.B, resolvedClear.A };
+			native->ClearRenderTargetView(rtvHandle, clearValues, 0, null);
 		}
 
 		if (frame.CommandCount == 0)
@@ -564,7 +568,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
 			EngineShaderPrograms.ImGui,
 			"vertexShader",
-			"fragmentShader",
+			_pixelEntryPoint,
 			GraphicsBackendKind.D3D12);
 		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
 		if (_projectionWriter.RegisterIndex != 0)

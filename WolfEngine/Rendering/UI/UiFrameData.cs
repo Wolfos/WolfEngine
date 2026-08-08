@@ -35,10 +35,21 @@ public sealed class UiFrameData
 
 	private Action<UiFrameData>? _releaseAction;
 	private Action<ImGuiFontAtlas>? _fontAtlasUploadedAction;
+	private int _referenceCount;
 
 	internal void SetRelease(Action<UiFrameData>? releaseAction)
 	{
 		_releaseAction = releaseAction;
+		Volatile.Write(ref _referenceCount, releaseAction is null ? 0 : 1);
+	}
+
+	internal UiFrameData Retain()
+	{
+		if (Volatile.Read(ref _releaseAction) is not null)
+		{
+			Interlocked.Increment(ref _referenceCount);
+		}
+		return this;
 	}
 
 	internal void SetFontAtlasUploaded(Action<ImGuiFontAtlas>? fontAtlasUploadedAction)
@@ -54,8 +65,18 @@ public sealed class UiFrameData
 
 	public void Release()
 	{
-		var releaseAction = _releaseAction;
-		_releaseAction = null;
+		if (Volatile.Read(ref _releaseAction) is null)
+		{
+			_fontAtlasUploadedAction = null;
+			return;
+		}
+
+		if (Interlocked.Decrement(ref _referenceCount) != 0)
+		{
+			return;
+		}
+
+		var releaseAction = Interlocked.Exchange(ref _releaseAction, null);
 		_fontAtlasUploadedAction = null;
 		releaseAction?.Invoke(this);
 	}

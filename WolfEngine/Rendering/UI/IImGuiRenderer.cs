@@ -11,5 +11,6 @@ public interface IImGuiRenderer
 
 	void InvalidateShaderPipeline();
 
-	void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget);
+	void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+		ColorRGBA? clearColor = null);
 }

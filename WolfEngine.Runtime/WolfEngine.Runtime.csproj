@@ -12,6 +12,7 @@
     <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
     <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
     <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
+    <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />

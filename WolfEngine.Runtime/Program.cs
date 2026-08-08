@@ -14,6 +14,7 @@ using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Audio;
+using WolfEngine.UI;
 
 namespace WolfEngine.Runtime;
 
@@ -56,6 +57,7 @@ public static class Program
 
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
+		services.AddWolfEngineGameplayUi();
 		services.AddSingleton(new RenderPresentationOptions { OutputMode = RenderOutputMode.FullWindow });
 		var packagedShaders = new PackagedShaderProvider(catalog);
 		services.AddSingleton<IShaderProvider>(packagedShaders);

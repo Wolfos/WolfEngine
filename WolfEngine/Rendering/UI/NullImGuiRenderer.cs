@@ -14,7 +14,8 @@ public sealed class NullImGuiRenderer : IImGuiRenderer
 	{
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+		ColorRGBA? clearColor = null)
 	{
 	}
 }

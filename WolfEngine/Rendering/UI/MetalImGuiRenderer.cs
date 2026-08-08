@@ -33,11 +33,15 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private readonly List<UiBufferSet> _availableBuffers = new();
 	private UiBufferSet? _recordingBuffers;
 	private bool _fontUploaded;
+	private readonly string _fragmentEntryPoint;
+	private readonly bool _sampleTexture;
 
-	public MetalImGuiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry)
+	public MetalImGuiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_fragmentEntryPoint = "fragmentShader";
+		_sampleTexture = sampleTexture;
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
@@ -70,7 +74,8 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		_pipeline = null;
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+		ColorRGBA? clearColor = null)
 	{
 		var commandList = context.CommandList as MetalCommandList;
 		if (commandList is null)
@@ -95,7 +100,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.BeginPass(targets, viewport);
 		if (clearTarget)
 		{
-			commandList.ClearColorAttachment(0, new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f));
+			commandList.ClearColorAttachment(0, clearColor ?? new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f));
 		}
 
 		if (frame.CommandCount == 0 || _pipeline is null || _fontTexture is null)
@@ -152,6 +157,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 				bindlessWriter.Clear();
 				bindlessWriter.SetUInt("textureHandle", textureHandle);
 				bindlessWriter.SetUInt("samplerHandle", _samplerHandle.Value);
+				bindlessWriter.SetUInt("sampleTexture", _sampleTexture ? 1u : 0u);
 				commandList.SetGraphicsConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 				activeTextureHandle = textureHandle;
 				hasActiveTextureHandle = true;
@@ -299,7 +305,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
 			EngineShaderPrograms.ImGui,
 			"vertexShader",
-			"fragmentShader",
+			_fragmentEntryPoint,
 			GraphicsBackendKind.Metal);
 		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
 		_bindlessWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("ImGuiBindless"));
@@ -315,7 +321,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		var pipelineKey = new PipelineKey(
 			PassKind.Graphics,
 			vertexEntryPoint: "vertexShader",
-			pixelEntryPoint: "fragmentShader",
+			pixelEntryPoint: _fragmentEntryPoint,
 			computeEntryPoint: null,
 			renderTargets: new(new[] { TextureFormat.Bgra8Unorm }),
 			depthStencil: new DepthStencilFormat(TextureFormat.Unknown),
@@ -345,12 +351,12 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 			device.Retire(_fontTexture, "Metal ImGui font texture");
 		}
 		_fontTexture = texture;
-		_fontHandle = texture.ShaderResourceView;
+		_bindlessRegistry.EnsureInitialized(device);
+		_fontHandle = _bindlessRegistry.RegisterTexture(texture);
 
 		if (_samplerHandle.IsValid == false)
 		{
 			var sampler = new SamplerDescriptor(FilterMode.Bilinear, AddressMode.Clamp, AddressMode.Clamp, AddressMode.Clamp);
-			_bindlessRegistry.EnsureInitialized(device);
 			_samplerHandle = _bindlessRegistry.GetSamplerHandle(sampler);
 		}
 	}

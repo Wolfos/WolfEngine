@@ -34,6 +34,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Audio", "WolfEng
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.Audio.Tests", "WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj", "{7732BBF6-58C0-4FF3-985B-607C0D052D73}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.UI", "WolfEngine.UI\WolfEngine.UI.csproj", "{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F10}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WolfEngine.UI.Tests", "WolfEngine.UI.Tests\WolfEngine.UI.Tests.csproj", "{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -104,6 +108,14 @@ Global
 		{7732BBF6-58C0-4FF3-985B-607C0D052D73}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7732BBF6-58C0-4FF3-985B-607C0D052D73}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7732BBF6-58C0-4FF3-985B-607C0D052D73}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F10}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -115,5 +127,6 @@ Global
 		{02589DEC-17AE-4A13-9D57-304B3C237510} = {3D935CEA-AEC9-4293-B608-60598098804E}
 		{A8EC2A3C-5507-41DC-9D4C-88AF5518DB5C} = {3D935CEA-AEC9-4293-B608-60598098804E}
 		{7732BBF6-58C0-4FF3-985B-607C0D052D73} = {3D935CEA-AEC9-4293-B608-60598098804E}
+		{A5E0A7AF-DBF8-49C2-A73F-F4278D6E9F11} = {3D935CEA-AEC9-4293-B608-60598098804E}
 	EndGlobalSection
 EndGlobal

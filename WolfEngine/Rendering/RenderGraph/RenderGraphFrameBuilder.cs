@@ -170,9 +170,17 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly SkinningPass _skinningPass;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
+	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
+	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
+	private readonly List<GameplayTextureTarget> _gameplayTextureTargets = [];
+
+	private readonly record struct GameplayTextureTarget(
+		GameplayUiTextureSurfaceFrame Surface,
+		RenderGraphResourceHandle Handle,
+		IGfxTexture Texture);
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
 	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
@@ -254,6 +262,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
 	private readonly Action<RenderGraphContext> _copyToFinalExecute;
 	private readonly Action<RenderGraphContext> _motionVectorDebugExecute;
+	private readonly Action<RenderGraphContext> _gameplayScreenEncodedUiExecute;
+	private readonly Action<RenderGraphContext> _gameplayScreenFinalUiExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -275,6 +285,7 @@ internal sealed class RenderGraphFrameBuilder
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
 		IImGuiRenderer imGuiRenderer,
+		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider)
 	{
 		_passSet = passSet;
@@ -305,6 +316,7 @@ internal sealed class RenderGraphFrameBuilder
 		_gpuDrawResources = gpuDrawResources;
 		_skyboxPass = passSet.SkyboxPass;
 		_imGuiRenderer = imGuiRenderer;
+		_gameplayUiRenderer = gameplayUiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
 		_ambientOcclusionExecute = ExecuteAmbientOcclusion;
@@ -329,6 +341,8 @@ internal sealed class RenderGraphFrameBuilder
 		_casSharpenExecute = ExecuteCasSharpen;
 		_copyToFinalExecute = ExecuteCopyToFinal;
 		_motionVectorDebugExecute = ExecuteMotionVectorDebug;
+		_gameplayScreenEncodedUiExecute = ExecuteGameplayScreenEncodedUi;
+		_gameplayScreenFinalUiExecute = ExecuteGameplayScreenFinalUi;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -366,6 +380,15 @@ internal sealed class RenderGraphFrameBuilder
 		Vector3 cameraPosition)
 	{
 		var device = _renderer.GetGfxDevice();
+		_gameplayTextureTargets.Clear();
+		for (var i = 0; i < _gameplayUiFrame.TextureSurfaces.Length; i++)
+		{
+			var surface = _gameplayUiFrame.TextureSurfaces[i];
+			var texture = _gameplayUiRenderer.EnsureTarget(device, surface.Target);
+			var handle = _resources.ImportTexture(texture, takeOwnership: false, initialState: ResourceState.ShaderResource);
+			_gameplayTextureTargets.Add(new GameplayTextureTarget(surface, handle, texture));
+		}
+		_gameplayUiRenderer.PruneTargets(device, _gameplayUiFrame);
 		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
 		{
 			config = CreateRayTracingDisabledConfig(config);
@@ -917,7 +940,7 @@ internal sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 
@@ -1106,6 +1129,11 @@ internal sealed class RenderGraphFrameBuilder
 		_uiFrame = uiFrame;
 	}
 
+	public void SetGameplayUiFrame(GameplayUiRenderFrame frame)
+	{
+		_gameplayUiFrame = frame ?? GameplayUiRenderFrame.Empty;
+	}
+
 	public void SetSceneViewportSelection(string requestedDebugViewId)
 	{
 		_requestedSceneDebugViewId = NormalizeSceneDebugViewId(requestedDebugViewId);
@@ -1117,6 +1145,19 @@ internal sealed class RenderGraphFrameBuilder
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public void Build(RenderGraph graph)
 	{
+		for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+		{
+			var target = _gameplayTextureTargets[i];
+			if (target.Surface.IsDirty == false)
+			{
+				continue;
+			}
+
+			graph.AddPass($"Gameplay UI Texture {target.Surface.SurfaceId}", PassKind.Graphics)
+				.WriteTexture(target.Handle, ResourceState.RenderTarget)
+				.SetExecute(context => ExecuteGameplayTextureUi(context, target));
+		}
+
 		if (_frameResources.SceneEnabled)
 		{
 			graph.AddPass("GpuDraw Update", PassKind.Compute)
@@ -1134,14 +1175,18 @@ internal sealed class RenderGraphFrameBuilder
 			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
 				.SetExecute(_gpuDrawCameraCullExecute);
 
-			graph.AddPass("GBuffer", PassKind.Graphics)
+			var gbufferBuilder = graph.AddPass("GBuffer", PassKind.Graphics)
 				.WriteTexture(_frameResources.DecalSourceGBufferAlbedo.IsValid ? _frameResources.DecalSourceGBufferAlbedo : _frameResources.GBufferAlbedo, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferNormal.IsValid ? _frameResources.DecalSourceGBufferNormal : _frameResources.GBufferNormal, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferMaterial.IsValid ? _frameResources.DecalSourceGBufferMaterial : _frameResources.GBufferMaterial, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferEmissive.IsValid ? _frameResources.DecalSourceGBufferEmissive : _frameResources.GBufferEmissive, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferVelocity, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-				.SetExecute(_gbufferExecute);
+				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite);
+			for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+			{
+				gbufferBuilder.ReadTexture(_gameplayTextureTargets[i].Handle, ResourceState.ShaderResource);
+			}
+			gbufferBuilder.SetExecute(_gbufferExecute);
 
 			if (_frameResources.DecalSourceGBufferAlbedo.IsValid)
 			{
@@ -1502,7 +1547,7 @@ internal sealed class RenderGraphFrameBuilder
 				.ReadTexture(_frameResources.BloomCompositeSceneColor.IsValid ? _frameResources.BloomCompositeSceneColor : _frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
-			
+
 			// This is married to TAA which is currently unavailable. FSR has its own RCAS sharpening
 			// graph.AddPass("CAS Sharpen", PassKind.Compute)
 			// 	.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
@@ -1510,10 +1555,23 @@ internal sealed class RenderGraphFrameBuilder
 			// 	.SetExecute(_casSharpenExecute);
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
-				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
+
+			if (ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
+			    _gameplayUiFrame.Screen.CommandCount > 0)
+			{
+				// Keep capture/debug output and the presented target identical. Both are BGRA8, which
+				// matches the UI pipeline, and CSS colors are already authored in display space.
+				graph.AddPass("Gameplay UI Screen Capture", PassKind.Graphics)
+					.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.RenderTarget)
+					.SetExecute(_gameplayScreenEncodedUiExecute);
+				graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
+					.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
+					.SetExecute(_gameplayScreenFinalUiExecute);
+			}
 
 			if (_frameResources.MotionVectorDebugColor.IsValid)
 			{
@@ -2553,6 +2611,31 @@ internal sealed class RenderGraphFrameBuilder
 		var finalColor = context.GetTexture(_frameResources.FinalColor);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
 		_imGuiRenderer.Record(context, _uiFrame, finalColor, clearTarget: _frameResources.SceneEnabled == false);
+	}
+
+	private void ExecuteGameplayScreenEncodedUi(RenderGraphContext context) =>
+		ExecuteGameplayScreenUi(context, _frameResources.EncodedSceneColor);
+
+	private void ExecuteGameplayScreenFinalUi(RenderGraphContext context) =>
+		ExecuteGameplayScreenUi(context, _frameResources.FinalColor);
+
+	private void ExecuteGameplayScreenUi(RenderGraphContext context, RenderGraphResourceHandle targetHandle)
+	{
+		var target = context.GetTexture(targetHandle);
+		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), _gameplayUiFrame.Screen);
+		_gameplayUiRenderer.Record(context, _gameplayUiFrame.Screen, target, clearTarget: false);
+	}
+
+	private void ExecuteGameplayTextureUi(RenderGraphContext context, GameplayTextureTarget target)
+	{
+		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), target.Surface.Frame);
+		_gameplayUiRenderer.Record(
+			context,
+			target.Surface.Frame,
+			target.Texture,
+			clearTarget: true,
+			target.Surface.ClearColor);
+		target.Surface.IsDirty = false;
 	}
 
 	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderGraphFrameResources resources, int cascadeIndex)
