@@ -133,6 +133,10 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.ProfileGpuFramesAsync(frameCount, cancellationToken);
 
+	[McpServerTool(Name = "get_cpu_frame_profile"), Description("Return the latest completed CPU profiler tree for every profiled thread, including duration and managed allocation per scope.")]
+	public Task<CpuFrameProfileResult> GetCpuFrameProfile(CancellationToken cancellationToken) =>
+		_controller.GetCpuFrameProfileAsync(cancellationToken);
+
 	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
 	public async Task<string> SetSceneDebugView(
 		[Description("Debug view id, or empty to release.")] string debugViewId,

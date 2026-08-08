@@ -515,6 +515,17 @@ public sealed class EditorRemoteAutomationController
 			}
 		}, cancellationToken);
 
+	public Task<CpuFrameProfileResult> GetCpuFrameProfileAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new CpuFrameProfileResult(
+			FrameProfiler.Instance.GetLastFrames()
+				.Select(frame => new CpuThreadProfileResult(
+					frame.ThreadId,
+					frame.ThreadName,
+					CopyCpuNode(frame.Root)))
+				.ToArray(),
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence), cancellationToken);
+
 	/// <summary>Sets the scene debug-view override used by frame capture.</summary>
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
@@ -683,6 +694,12 @@ public sealed class EditorRemoteAutomationController
 					.ToArray()))
 			.ToArray();
 	}
+
+	private static CpuProfileNodeResult CopyCpuNode(FrameProfiler.ProfileNode node) => new(
+		node.Name,
+		node.DurationMs,
+		node.AllocatedBytes,
+		node.Children.Select(CopyCpuNode).ToArray());
 
 	private static void ValidateFinite(float value, string parameterName)
 	{

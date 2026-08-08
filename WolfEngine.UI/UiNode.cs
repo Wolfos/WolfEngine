@@ -37,25 +37,43 @@ internal sealed class UiNode
 	}
 }
 
+internal readonly record struct UiTreeChanges(
+	bool CanRetain,
+	bool LayoutChanged,
+	bool IntrinsicSizeChanged,
+	bool VisualChanged)
+{
+	public static UiTreeChanges Unchanged => new(true, false, false, false);
+	public static UiTreeChanges Rebuild => new(false, true, true, true);
+}
+
 internal static class UiTreeReconciler
 {
-	public static bool Reconcile(UiNode retained, UiNode updated)
+	public static UiTreeChanges Reconcile(UiNode retained, UiNode updated)
 	{
 		if (!string.Equals(retained.Name, updated.Name, StringComparison.Ordinal) ||
 			retained.Children.Count != updated.Children.Count)
 		{
-			return false;
+			return UiTreeChanges.Rebuild;
 		}
 
-		var layoutUnchanged = (retained.Text?.Length ?? 0) == (updated.Text?.Length ?? 0) &&
-			LayoutStyleEquals(retained.Style, updated.Style);
+		var textChanged = !string.Equals(retained.Text, updated.Text, StringComparison.Ordinal);
+		var intrinsicSizeChanged = (retained.Text?.Length ?? 0) != (updated.Text?.Length ?? 0);
+		var layoutChanged = !LayoutStyleEquals(retained.Style, updated.Style);
+		var visualChanged = textChanged || !Equals(retained.Style, updated.Style);
 		retained.Text = updated.Text;
 		retained.Style = updated.Style;
 		retained.Attributes.Clear();
 		foreach (var pair in updated.Attributes) retained.Attributes[pair.Key] = pair.Value;
 		for (var i = 0; i < retained.Children.Count; i++)
-			layoutUnchanged &= Reconcile(retained.Children[i], updated.Children[i]);
-		return layoutUnchanged;
+		{
+			var childChanges = Reconcile(retained.Children[i], updated.Children[i]);
+			if (!childChanges.CanRetain) return UiTreeChanges.Rebuild;
+			layoutChanged |= childChanges.LayoutChanged;
+			intrinsicSizeChanged |= childChanges.IntrinsicSizeChanged;
+			visualChanged |= childChanges.VisualChanged;
+		}
+		return new UiTreeChanges(true, layoutChanged, intrinsicSizeChanged, visualChanged);
 	}
 
 	private static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>

@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Numerics;
-using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
@@ -19,7 +18,7 @@ using D3DPrimitiveTopologyType = Silk.NET.Direct3D12.PrimitiveTopologyType;
 
 namespace WolfEngine.Rendering.UI;
 
-internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
+internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 {
 	private const uint InvalidDescriptorValue = 0xFFFFFFFF;
 
@@ -43,7 +42,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private bool _fontUploaded;
 	private readonly string _pixelEntryPoint;
 
-	public D3D12ImGuiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
+	public D3D12UiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_pixelEntryPoint = sampleTexture ? "fragmentShader" : "solidFragmentShader";
@@ -107,7 +106,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 
 		var commandList = (context.CommandList as Backend.D3D12.D3D12CommandList)
-		                  ?? throw new InvalidOperationException("ImGui renderer requires D3D12 command list.");
+			                  ?? throw new InvalidOperationException("UI renderer requires a D3D12 command list.");
 		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
 
 		var rtvHandle = finalColor.RenderTargetView
@@ -138,15 +137,15 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		SilkMarshal.ThrowHResult(_vertexBuffer.Map(0, (D3DRange*) null, (void**) &vertexMapped));
 		SilkMarshal.ThrowHResult(_indexBuffer.Map(0, (D3DRange*) null, (void**) &indexMapped));
 
-		fixed (ImDrawVert* srcVerts = frame.Vertices)
+		fixed (UiVertex* srcVerts = frame.Vertices)
 		{
-			var size = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
+			var size = frame.VertexCount * Unsafe.SizeOf<UiVertex>();
 			Buffer.MemoryCopy(srcVerts, vertexMapped, size, size);
 		}
 
-		fixed (ushort* srcIndices = frame.Indices)
+		fixed (uint* srcIndices = frame.Indices)
 		{
-			var size = frame.IndexCount * sizeof(ushort);
+			var size = frame.IndexCount * sizeof(uint);
 			Buffer.MemoryCopy(srcIndices, indexMapped, size, size);
 		}
 
@@ -175,7 +174,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		var vbView = new D3DVertexBufferView
 		{
 			BufferLocation = _vertexBuffer.GetGPUVirtualAddress(),
-			StrideInBytes = (uint) Unsafe.SizeOf<ImDrawVert>(),
+			StrideInBytes = (uint) Unsafe.SizeOf<UiVertex>(),
 			SizeInBytes = (uint) _vertexBufferSize
 		};
 
@@ -183,7 +182,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		{
 			BufferLocation = _indexBuffer.GetGPUVirtualAddress(),
 			SizeInBytes = (uint) _indexBufferSize,
-			Format = Format.FormatR16Uint
+			Format = Format.FormatR32Uint
 		};
 
 		native->IASetVertexBuffers(0, 1, &vbView);
@@ -301,8 +300,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 	private void EnsureBuffers(UiFrameData frame)
 	{
-		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
-		var indexBytes = frame.IndexCount * sizeof(ushort);
+		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<UiVertex>();
+		var indexBytes = frame.IndexCount * sizeof(uint);
 
 		if (_vertexBuffer.Handle is null || _vertexBufferSize < vertexBytes)
 		{
@@ -319,7 +318,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	private bool NeedsFontUpload(ImGuiFontAtlas atlas)
+	private bool NeedsFontUpload(UiTextureAtlas atlas)
 	{
 		return _fontUploaded == false ||
 		       _fontTexture.Handle is null ||
@@ -366,7 +365,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			out buffer));
 	}
 
-	private void CreateFontTexture(in ImGuiFontAtlas atlas)
+	private void CreateFontTexture(in UiTextureAtlas atlas)
 	{
 		if (atlas.PixelsRgba.Length == 0 || atlas.Width == 0 || atlas.Height == 0)
 		{

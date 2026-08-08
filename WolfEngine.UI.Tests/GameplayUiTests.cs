@@ -1,4 +1,5 @@
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.UI.Tests;
 
@@ -17,13 +18,49 @@ public sealed class GameplayUiTests
 			""");
 
 		sheet.Apply(root, 400, 200);
-		new YogaLayoutEngine().Layout(root, 400, 200);
+		using var layout = new YogaLayoutEngine();
+		layout.Layout(root, 400, 200);
 
 		Assert.Multiple(() =>
 		{
 			Assert.That(panel.Width, Is.EqualTo(240).Within(0.01));
 			Assert.That(panel.Height, Is.EqualTo(40).Within(0.01));
 			Assert.That(panel.Style.Background, Is.EqualTo(new ColorRGBA(17 / 255f, 34 / 255f, 51 / 255f, 1)));
+		});
+	}
+
+	[Test]
+	public void YogaLayoutRetainsTreeAndUpdatesChangedTextMetrics()
+	{
+		var root = new UiNode { Name = "root" };
+		var container = new UiNode
+		{
+			Name = "div",
+			Style = ComputedStyle.Default with
+			{
+				Width = UiLength.Pixels(100),
+				Height = UiLength.Pixels(50),
+				AlignItems = "center",
+				JustifyContent = "center"
+			}
+		};
+		var span = new UiNode { Name = "span" };
+		var text = new UiNode { Name = "#text", Text = "9" };
+		span.Children.Add(text);
+		container.Children.Add(span);
+		root.Children.Add(container);
+		using var layout = new YogaLayoutEngine();
+		layout.Layout(root, 200, 100, fullLayoutRequired: false);
+		var previousLeft = text.Left;
+		var previousWidth = text.Width;
+
+		text.Text = "10";
+		layout.Layout(root, 200, 100, fullLayoutRequired: false);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(text.Width, Is.GreaterThan(previousWidth));
+			Assert.That(text.Left, Is.LessThan(previousLeft));
 		});
 	}
 
@@ -52,20 +89,43 @@ public sealed class GameplayUiTests
 		var retained = Node("0042", opacity: 1);
 		var updated = Node("0043", opacity: 0.25f);
 
-		var layoutUnchanged = UiTreeReconciler.Reconcile(retained, updated);
+		var changes = UiTreeReconciler.Reconcile(retained, updated);
 
 		Assert.Multiple(() =>
 		{
-			Assert.That(layoutUnchanged, Is.True);
+			Assert.That(changes.CanRetain, Is.True);
+			Assert.That(changes.LayoutChanged, Is.False);
+			Assert.That(changes.IntrinsicSizeChanged, Is.False);
+			Assert.That(changes.VisualChanged, Is.True);
 			Assert.That(retained.Children[0].Text, Is.EqualTo("0043"));
 			Assert.That(retained.Children[0].Style.Opacity, Is.EqualTo(0.25f));
 		});
 	}
 
 	[Test]
-	public void ReconcilerRequestsLayoutWhenTextWidthChanges()
+	public void ReconcilerReportsIntrinsicSizeChangeWhenTextWidthChanges()
 	{
-		Assert.That(UiTreeReconciler.Reconcile(Node("9", 1), Node("10", 1)), Is.False);
+		var changes = UiTreeReconciler.Reconcile(Node("9", 1), Node("10", 1));
+		Assert.Multiple(() =>
+		{
+			Assert.That(changes.CanRetain, Is.True);
+			Assert.That(changes.LayoutChanged, Is.False);
+			Assert.That(changes.IntrinsicSizeChanged, Is.True);
+			Assert.That(changes.VisualChanged, Is.True);
+		});
+	}
+
+	[Test]
+	public void ReconcilerReportsIdenticalTreeAsUnchanged()
+	{
+		var changes = UiTreeReconciler.Reconcile(Node("0042", 1), Node("0042", 1));
+		Assert.Multiple(() =>
+		{
+			Assert.That(changes.CanRetain, Is.True);
+			Assert.That(changes.LayoutChanged, Is.False);
+			Assert.That(changes.IntrinsicSizeChanged, Is.False);
+			Assert.That(changes.VisualChanged, Is.False);
+		});
 	}
 
 	[Test]
@@ -85,8 +145,7 @@ public sealed class GameplayUiTests
 			});
 		}
 
-		using var atlas = new UiFontAtlas();
-		var frame = new UiFrameBuilder(atlas).Build(root, 1280, 720);
+		var frame = new UiFrameBuilder().Build(root, 1280, 720);
 
 		try
 		{
@@ -96,6 +155,43 @@ public sealed class GameplayUiTests
 				Assert.That(frame.IndexCount, Is.EqualTo(6000));
 				Assert.That(frame.CommandCount, Is.EqualTo(1));
 				Assert.That(frame.HasFontAtlas, Is.True);
+			});
+		}
+		finally
+		{
+			frame.Release();
+		}
+	}
+
+	[Test]
+	public void FrameBuilderSupportsMoreThanSixtyFiveThousandVertices()
+	{
+		const int rectangleCount = 16_385;
+		using var geometry = new UiGeometryBuilder();
+		for (var i = 0; i < rectangleCount; i++)
+		{
+			var x = i % 256;
+			var y = i / 256;
+			geometry.AddFilledRect(new(x, y), new(x + 1, y + 1), 0xffffffff);
+		}
+
+		var frame = geometry.BuildFrame(256, 256, new UiTextureAtlas
+		{
+			Width = 1,
+			Height = 1,
+			PixelsRgba = [255, 255, 255, 255]
+		});
+
+		try
+		{
+			Assert.Multiple(() =>
+			{
+				Assert.That(System.Runtime.InteropServices.Marshal.SizeOf<UiVertex>(), Is.EqualTo(20));
+				Assert.That(frame.VertexCount, Is.EqualTo(rectangleCount * 4));
+				Assert.That(frame.VertexCount, Is.GreaterThan(ushort.MaxValue));
+				Assert.That(frame.IndexCount, Is.EqualTo(rectangleCount * 6));
+				Assert.That(frame.Indices[frame.IndexCount - 1], Is.GreaterThan(ushort.MaxValue));
+				Assert.That(frame.CommandCount, Is.EqualTo(1));
 			});
 		}
 		finally

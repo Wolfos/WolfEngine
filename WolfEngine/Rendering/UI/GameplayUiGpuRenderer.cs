@@ -6,7 +6,7 @@ using WolfEngine.Rendering.Shaders;
 namespace WolfEngine.Rendering.UI;
 
 /// <summary>
-/// Owns a UI renderer instance separate from editor ImGui, including its font atlas and upload buffers.
+/// Owns the native gameplay UI renderer, its white texture, and upload buffers.
 /// </summary>
 public sealed class GameplayUiGpuRenderer
 {
@@ -17,7 +17,7 @@ public sealed class GameplayUiGpuRenderer
 		public DescriptorHandle ShaderResourceView => RegisteredShaderResourceView;
 	}
 
-	private readonly IImGuiRenderer _renderer;
+	private readonly IUiDrawRenderer _renderer;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly Dictionary<Texture, ITextureResources> _targets = new(ReferenceEqualityComparer.Instance);
 
@@ -25,8 +25,8 @@ public sealed class GameplayUiGpuRenderer
 	{
 		_bindlessRegistry = bindlessRegistry;
 		_renderer = OperatingSystem.IsMacOS()
-			? new MetalImGuiRenderer(shaderProvider, bindlessRegistry, sampleTexture: false)
-			: new D3D12ImGuiRenderer(shaderProvider, sampleTexture: false);
+			? new MetalUiRenderer(shaderProvider, bindlessRegistry, sampleTexture: false)
+			: new D3D12UiRenderer(shaderProvider, sampleTexture: false);
 	}
 
 	public IGfxTexture EnsureTarget(IGfxDevice device, Texture target)

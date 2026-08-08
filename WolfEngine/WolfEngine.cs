@@ -60,14 +60,14 @@ public static class WolfEngine
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
 			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
-			services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
+			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
 			services.AddSingleton<IGpuDrawBackendBridge, D3D12GpuDrawBackendBridge>();
-			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
+			services.AddSingleton<IImGuiRenderer, D3D12UiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 

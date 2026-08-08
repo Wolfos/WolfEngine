@@ -31,8 +31,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		UiSurfaceOptions options,
 		string? css,
 		IReadOnlyDictionary<string, object?> initialParameters,
-		IServiceProvider services,
-		UiFontAtlas font)
+		IServiceProvider services)
 	{
 		_host = host;
 		Id = id;
@@ -43,7 +42,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		_rootComponentId = _renderer.AttachRoot(componentType);
 		_styleSheet = CssStyleSheet.Parse(css ?? string.Empty);
 		_layout = new YogaLayoutEngine();
-		_frames = new UiFrameBuilder(font);
+		_frames = new UiFrameBuilder();
 		if (options.Kind == UiSurfaceKind.Texture)
 		{
 			Texture = Texture.CreateRenderTarget(
@@ -106,39 +105,51 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 				_styleSheet.Apply(updatedRoot, width, height);
 			}
 
-			bool layoutRan;
+			UiTreeChanges changes;
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Reconcile"))
 			{
-				layoutRan = _root is null || _layoutWidth != width || _layoutHeight != height ||
-				            !UiTreeReconciler.Reconcile(_root, updatedRoot);
+				changes = _root is null
+					? UiTreeChanges.Rebuild
+					: UiTreeReconciler.Reconcile(_root, updatedRoot);
 			}
 
-			if (layoutRan)
+			var topologyChanged = !changes.CanRetain;
+			if (topologyChanged)
 			{
 				var previousRoot = _root;
 				_root = updatedRoot;
 				_renderer.RecycleTree(previousRoot);
-				using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Layout"))
-				{
-					_layout.Layout(_root, width, height);
-				}
-				_layoutWidth = width;
-				_layoutHeight = height;
 			}
 			else
 			{
 				_renderer.RecycleTree(updatedRoot);
 			}
 
-			using (FrameProfiler.Instance.Measure("Gameplay UI.Build Geometry"))
+			var fullLayoutRequired = topologyChanged || _layoutWidth != width || _layoutHeight != height ||
+			                         changes.LayoutChanged;
+			var layoutRan = fullLayoutRequired || changes.IntrinsicSizeChanged;
+			if (layoutRan)
 			{
-				var previousFrame = Frame;
-				Frame = _frames.Build(_root!, width, height);
-				previousFrame.Release();
+				using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Layout"))
+				{
+					_layout.Layout(_root!, width, height, fullLayoutRequired);
+				}
+				_layoutWidth = width;
+				_layoutHeight = height;
+			}
+			var geometryChanged = layoutRan || changes.VisualChanged;
+			if (geometryChanged)
+			{
+				using (FrameProfiler.Instance.Measure("Gameplay UI.Build Geometry"))
+				{
+					var previousFrame = Frame;
+					Frame = _frames.Build(_root!, width, height);
+					previousFrame.Release();
+				}
+				IsDirty = true;
 			}
 			timer.Stop();
 			_revision++;
-			IsDirty = true;
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Collect Metrics"))
 			{
 				Performance = new UiPerformanceSnapshot(
@@ -151,7 +162,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 					GC.GetAllocatedBytesForCurrentThread() - allocatedBefore,
 					LayoutRan: layoutRan);
 			}
-			_host.Publish();
+			if (geometryChanged) _host.Publish();
 		}
 	}
 
@@ -162,6 +173,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 #pragma warning disable BL0006
 		_renderer.Dispose();
 #pragma warning restore BL0006
+		_layout.Dispose();
 		_renderer.RecycleTree(_root);
 		_root = null;
 		_host.Remove(this);
@@ -173,7 +185,6 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, IDisposable
 {
 	private readonly IServiceProvider _services;
-	private readonly UiFontAtlas _font = new();
 	private readonly object _sync = new();
 	private readonly List<GameplayUiSurface> _surfaces = [];
 	private readonly ConcurrentQueue<GameplayUiRenderFrame> _pendingFrames = new();
@@ -215,7 +226,7 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 		lock (_sync)
 		{
 			surface = new GameplayUiSurface(this, ++_nextSurfaceId, typeof(TComponent), options, css,
-				initialParameters ?? new Dictionary<string, object?>(), _services, _font);
+				initialParameters ?? new Dictionary<string, object?>(), _services);
 			_surfaces.Add(surface);
 		}
 		Publish();
@@ -315,6 +326,5 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 		lock (_sync) surfaces = _surfaces.ToArray();
 		for (var i = 0; i < surfaces.Length; i++) surfaces[i].Dispose();
 		while (_pendingFrames.TryDequeue(out var frame)) frame.Release();
-		_font.Dispose();
 	}
 }

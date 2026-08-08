@@ -119,3 +119,19 @@ public sealed record GpuFrameProfileResult(
 	IReadOnlyList<GpuPassProfileResult> Passes,
 	long EditorFrameSequence,
 	long RenderFrameSequence);
+
+public sealed record CpuProfileNodeResult(
+	string Name,
+	double DurationMilliseconds,
+	long AllocatedBytes,
+	IReadOnlyList<CpuProfileNodeResult> Children);
+
+public sealed record CpuThreadProfileResult(
+	int ThreadId,
+	string ThreadName,
+	CpuProfileNodeResult Root);
+
+public sealed record CpuFrameProfileResult(
+	IReadOnlyList<CpuThreadProfileResult> Threads,
+	long EditorFrameSequence,
+	long RenderFrameSequence);

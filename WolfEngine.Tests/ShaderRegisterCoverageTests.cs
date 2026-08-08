@@ -28,7 +28,7 @@ public class ShaderRegisterCoverageTests
 		RegexOptions.Compiled);
 
 	/// <summary>
-	/// ImGui is bound through its own root signature on D3D12 (<c>D3D12ImGuiRenderer</c>) and its own
+	/// ImGui is bound through its own root signature on D3D12 (<c>D3D12UiRenderer</c>) and its own
 	/// vertex descriptor on Metal, so it is not subject to the shared limits.
 	/// </summary>
 	private static readonly string[] ExcludedShaders = ["imgui.slang"];

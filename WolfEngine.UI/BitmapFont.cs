@@ -1,12 +1,11 @@
 using System.Numerics;
-using ImGuiNET;
 
 namespace WolfEngine.UI;
 
 /// <summary>A compact deterministic 5x7 HUD font rendered from the atlas white pixel.</summary>
 internal static class BitmapFont
 {
-	public static void Draw(ImDrawListPtr draw, Vector2 position, float fontSize, uint color, string text)
+	public static void Draw(UiGeometryBuilder geometry, Vector2 position, float fontSize, uint color, string text)
 	{
 		var pixel = MathF.Max(1, fontSize / 7f);
 		var originX = position.X;
@@ -27,7 +26,7 @@ internal static class BitmapFont
 				{
 					if ((rows[row] & (1 << (4 - column))) == 0) continue;
 					var min = new Vector2(x + column * pixel, y + row * pixel);
-					draw.AddRectFilled(min, min + new Vector2(pixel, pixel), color);
+					geometry.AddFilledRect(min, min + new Vector2(pixel, pixel), color);
 				}
 			}
 			x += 6 * pixel;

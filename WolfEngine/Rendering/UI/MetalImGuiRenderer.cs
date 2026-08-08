@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
-using ImGuiNET;
 using SharpMetal.Metal;
 using WolfEngine.Platform;
 using WolfEngine.Rendering.Abstraction;
@@ -11,7 +10,7 @@ using WolfEngine.Rendering.Shaders;
 namespace WolfEngine.Rendering.UI;
 
 [SupportedOSPlatform("MacOS")]
-internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
+internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 {
 	private sealed class UiBufferSet
 	{
@@ -36,7 +35,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	private readonly string _fragmentEntryPoint;
 	private readonly bool _sampleTexture;
 
-	public MetalImGuiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry, bool sampleTexture = true)
+	public MetalUiRenderer(IShaderProvider shaderCompiler, BindlessResourceRegistry bindlessRegistry, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
@@ -114,10 +113,10 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		commandList.BindPipeline(_pipeline);
 		commandList.SetPrimitiveTopology(PrimitiveTopology.TriangleList);
 
-		var buffers = _recordingBuffers ?? throw new InvalidOperationException("ImGui buffers were not prepared.");
-		var vertexView = new VertexBufferView(buffers.VertexBuffer, (uint)Unsafe.SizeOf<ImDrawVert>());
+		var buffers = _recordingBuffers ?? throw new InvalidOperationException("UI buffers were not prepared.");
+		var vertexView = new VertexBufferView(buffers.VertexBuffer, (uint)Unsafe.SizeOf<UiVertex>());
 		commandList.SetVertexBuffers(new[] { vertexView, vertexView, vertexView });
-		commandList.SetIndexBuffer(new IndexBufferView(buffers.IndexBuffer, IndexFormat.UInt16, 0));
+		commandList.SetIndexBuffer(new IndexBufferView(buffers.IndexBuffer, IndexFormat.UInt32, 0));
 
 		var L = frame.DisplayPos.X;
 		var R = frame.DisplayPos.X + frame.DisplaySize.X;
@@ -222,23 +221,23 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 	{
 		if (_device is null)
 		{
-			throw new InvalidOperationException("ImGui renderer has no device.");
+			throw new InvalidOperationException("UI renderer has no device.");
 		}
 
-		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
-		var indexBytes = frame.IndexCount * sizeof(ushort);
+		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<UiVertex>();
+		var indexBytes = frame.IndexCount * sizeof(uint);
 		_recordingBuffers = AcquireBufferSet(_device, vertexBytes, indexBytes);
 
 		if (frame.VertexCount > 0)
 		{
-			BufferHelper.CopyToBuffer<ImDrawVert>(
+			BufferHelper.CopyToBuffer<UiVertex>(
 				frame.Vertices.AsSpan(0, frame.VertexCount),
 				_recordingBuffers.VertexBuffer.Buffer);
 		}
 
 		if (frame.IndexCount > 0)
 		{
-			BufferHelper.CopyToBuffer<ushort>(
+			BufferHelper.CopyToBuffer<uint>(
 				frame.Indices.AsSpan(0, frame.IndexCount),
 				_recordingBuffers.IndexBuffer.Buffer);
 		}
@@ -331,7 +330,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		return device.GetOrCreatePipeline(pipelineKey, new ShaderBytecodeSet(shaderBytes, shaderBytes));
 	}
 
-	private void CreateFontTexture(IGfxDevice device, ImGuiFontAtlas atlas)
+	private void CreateFontTexture(IGfxDevice device, UiTextureAtlas atlas)
 	{
 		var descriptor = new TextureDescriptor(
 			atlas.Width,
@@ -361,7 +360,7 @@ internal sealed unsafe class MetalImGuiRenderer : IImGuiRenderer
 		}
 	}
 
-	private static void UploadTextureData(MTLTexture texture, ImGuiFontAtlas atlas)
+	private static void UploadTextureData(MTLTexture texture, UiTextureAtlas atlas)
 	{
 		if (atlas.PixelsRgba.Length == 0)
 		{
