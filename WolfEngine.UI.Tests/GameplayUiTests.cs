@@ -1,3 +1,7 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
@@ -5,6 +9,36 @@ namespace WolfEngine.UI.Tests;
 
 public sealed class GameplayUiTests
 {
+	[Test]
+	public async Task ScreenSurfaceSerializesResizeAndParameterRebuilds()
+	{
+		using var services = new ServiceCollection().BuildServiceProvider();
+		using var host = new GameplayUiHost(services);
+		using var surface = host.Create<ConcurrentHud>(new UiSurfaceOptions { Name = "Concurrent HUD" },
+			initialParameters: new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 0 });
+		using var start = new ManualResetEventSlim();
+		var parameters = new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 0 };
+
+		var update = Task.Run(() =>
+		{
+			start.Wait();
+			for (var i = 1; i <= 20; i++)
+			{
+				parameters[nameof(ConcurrentHud.Frame)] = i;
+				surface.SetParameters(parameters);
+			}
+		});
+		var resize = Task.Run(() =>
+		{
+			start.Wait();
+			for (var i = 1; i <= 20; i++) host.SetViewportSize(new Int2(800 + i, 600 + i));
+		});
+
+		start.Set();
+		await Task.WhenAll(update, resize);
+		Assert.That(surface.Performance.Revision, Is.GreaterThanOrEqualTo(41));
+	}
+
 	[Test]
 	public void CssCascadeAndYogaLayoutResolvePercentAndMinDimensions()
 	{
@@ -225,5 +259,23 @@ public sealed class GameplayUiTests
 			Style = ComputedStyle.Default with { Opacity = opacity }
 		});
 		return root;
+	}
+
+	private sealed class ConcurrentHud : ComponentBase
+	{
+		[Parameter]
+		public int Frame { get; set; }
+
+		protected override void BuildRenderTree(RenderTreeBuilder builder)
+		{
+			builder.OpenElement(0, "div");
+			for (var i = 0; i < 250; i++)
+			{
+				builder.OpenElement(1, "span");
+				builder.AddContent(2, $"{Frame + i:D4}");
+				builder.CloseElement();
+			}
+			builder.CloseElement();
+		}
 	}
 }

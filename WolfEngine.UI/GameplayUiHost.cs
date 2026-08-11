@@ -10,6 +10,7 @@ namespace WolfEngine.UI;
 
 internal sealed class GameplayUiSurface : IGameplayUiSurface
 {
+	private readonly object _rebuildSync = new();
 	private readonly GameplayUiHost _host;
 	private readonly RazorTreeRenderer _renderer;
 	private readonly int _rootComponentId;
@@ -17,7 +18,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	private readonly IUiLayoutEngine _layout;
 	private readonly UiFrameBuilder _frames;
 	private readonly string _profilerName;
-	private IReadOnlyDictionary<string, object?> _parameters;
+	private readonly Dictionary<string, object?> _parameters;
 	private bool _disposed;
 	private long _revision;
 	private UiNode? _root;
@@ -37,7 +38,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		Id = id;
 		Options = options;
 		_profilerName = $"Gameplay UI.Rebuild [{options.Name ?? id.ToString()}]";
-		_parameters = initialParameters;
+		_parameters = new Dictionary<string, object?>(initialParameters);
 		_renderer = new RazorTreeRenderer(services);
 		_rootComponentId = _renderer.AttachRoot(componentType);
 		_styleSheet = CssStyleSheet.Parse(css ?? string.Empty);
@@ -63,25 +64,52 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 
 	public void SetParameters(IReadOnlyDictionary<string, object?> parameters)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		_parameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
-		Rebuild();
+		ArgumentNullException.ThrowIfNull(parameters);
+		lock (_rebuildSync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			CopyParameters(parameters);
+			RebuildCore();
+		}
 	}
 
 	public void Invalidate()
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		Rebuild();
+		lock (_rebuildSync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			RebuildCore();
+		}
 	}
 
 	internal void ResizeAndRebuild()
 	{
-		if (!_disposed && Options.Kind == UiSurfaceKind.Screen) Rebuild();
+		lock (_rebuildSync)
+		{
+			if (!_disposed && Options.Kind == UiSurfaceKind.Screen) RebuildCore();
+		}
 	}
 
 	internal void MarkPublishedClean() => IsDirty = false;
 
 	private void Rebuild()
+	{
+		lock (_rebuildSync) RebuildCore();
+	}
+
+	private void CopyParameters(IReadOnlyDictionary<string, object?> parameters)
+	{
+		_parameters.Clear();
+		if (parameters is Dictionary<string, object?> dictionary)
+		{
+			foreach (var pair in dictionary) _parameters[pair.Key] = pair.Value;
+			return;
+		}
+
+		foreach (var pair in parameters) _parameters[pair.Key] = pair.Value;
+	}
+
+	private void RebuildCore()
 	{
 		using (FrameProfiler.Instance.Measure(_profilerName))
 		{
@@ -168,17 +196,20 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 
 	public void Dispose()
 	{
-		if (_disposed) return;
-		_disposed = true;
+		lock (_rebuildSync)
+		{
+			if (_disposed) return;
+			_disposed = true;
 #pragma warning disable BL0006
-		_renderer.Dispose();
+			_renderer.Dispose();
 #pragma warning restore BL0006
-		_layout.Dispose();
-		_renderer.RecycleTree(_root);
-		_root = null;
-		_host.Remove(this);
-		Frame.Release();
-		Frame = UiFrameData.Empty;
+			_layout.Dispose();
+			_renderer.RecycleTree(_root);
+			_root = null;
+			_host.Remove(this);
+			Frame.Release();
+			Frame = UiFrameData.Empty;
+		}
 	}
 }
 
