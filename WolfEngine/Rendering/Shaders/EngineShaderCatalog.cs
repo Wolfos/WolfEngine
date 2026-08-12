@@ -45,6 +45,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId AmbientOcclusionRayTraced = Id("ao-rtao");
 	public static readonly ShaderProgramId ReflectionsScreenSpace = Id("reflections-ssr");
 	public static readonly ShaderProgramId ReflectionsRayTraced = Id("reflections-rt");
+	public static readonly ShaderProgramId ReflectionsUpsample = Id("reflections-upsample");
 	public static readonly ShaderProgramId DdgiClassify = Id("ddgi-classify");
 	public static readonly ShaderProgramId DdgiTrace = Id("ddgi-trace");
 	public static readonly ShaderProgramId DdgiRelocate = Id("ddgi-relocate");
@@ -118,6 +119,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.AmbientOcclusionRayTraced, "AmbientOcclusion/ao_rtao.compute.slang"),
 			D(EngineShaderPrograms.ReflectionsScreenSpace, "Reflections/reflections_ssr.compute.slang"),
 			D(EngineShaderPrograms.ReflectionsRayTraced, "Reflections/reflections_rt.compute.slang"),
+			D(EngineShaderPrograms.ReflectionsUpsample, "Reflections/reflections_upsample.compute.slang"),
 			D(EngineShaderPrograms.DdgiClassify, "Ddgi/ddgi_classify.compute.slang"),
 			D(EngineShaderPrograms.DdgiTrace, "Ddgi/ddgi_trace.compute.slang"),
 			D(EngineShaderPrograms.DdgiRelocate, "Ddgi/ddgi_relocate.compute.slang"),
@@ -278,6 +280,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];
 		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];
 		if (id == EngineShaderPrograms.ReflectionsRayTraced) return ["ReflectionsRayTracedCS"];
+		if (id == EngineShaderPrograms.ReflectionsUpsample) return ["ReflectionsUpsampleCS"];
 		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeClassifyCS"];
 		if (id == EngineShaderPrograms.DdgiTrace) return ["DdgiProbeTraceCS", "DdgiRelocationTraceCS"];
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];

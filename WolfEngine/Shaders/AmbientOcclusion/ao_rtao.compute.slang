@@ -2,6 +2,8 @@ import "../Common/common.slang";
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Common/draw_data.slang";
+import "../Common/packed_vertex.slang";
+import "../Common/raytracing_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 
@@ -40,15 +42,7 @@ StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
 StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
 
-struct RtaoPackedVertex
-{
-    float3 position;
-    float3 normal;
-    float2 uv;
-    float4 tangent;
-};
-
-StructuredBuffer<RtaoPackedVertex> g_PackedMeshVertices : register(t8);
+StructuredBuffer<PackedMeshVertex> g_PackedMeshVertices : register(t8);
 
 float Hash12(uint2 pixel, uint frame)
 {
@@ -84,18 +78,11 @@ RtaoRayQueryResult TraceRtaoRay(float3 worldPosition, float3 normal, uint2 pixel
     ray.TMin = 0.001f;
     ray.TMax = radius;
 
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    // Proceed advances traversal to the next candidate and only finalizes the
-    // committed result when traversal returns false. A single call is not
-    // sufficient on all DXR implementations, even with ACCEPT_FIRST_HIT.
-    while (query.Proceed())
-    {
-    }
+    WolfRayAnyHit hit = WolfTraceAny(sceneTlas, ray, 0xFF);
 
     RtaoRayQueryResult result;
-    result.hit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
-    result.committedRayT = result.hit ? query.CommittedRayT() : radius;
+    result.hit = hit.hit;
+    result.committedRayT = hit.distance;
     return result;
 }
 
@@ -127,17 +114,13 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
     ray.TMin = 0.001f;
     ray.TMax = 100000.0f;
 
-    RayQuery<RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_NONE, 0xFF, ray);
-    while (query.Proceed())
-    {
-    }
-    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    if (!hit.hit)
     {
         return 0.0f.xxx;
     }
 
-    uint instanceIndex = query.CommittedInstanceIndex();
+    uint instanceIndex = hit.instanceIndex;
     if (instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
     {
         return 1.0f.xxx;
@@ -154,7 +137,7 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
     }
     uint meshIndex = GetHandleIndex(instanceData.meshHandle);
     GpuMeshData meshData = g_MeshTable[meshIndex];
-    uint firstIndex = query.CommittedPrimitiveIndex() * 3u;
+    uint firstIndex = hit.primitiveIndex * 3u;
     if (firstIndex + 2u >= meshData.indexCount)
     {
         return 1.0f.xxx;
@@ -163,13 +146,16 @@ float3 TracePrimaryAlbedo(uint2 pixel, uint2 fullSize)
     uint i0 = g_PackedIndices[meshData.startIndex + firstIndex + 0u] + meshData.baseVertex;
     uint i1 = g_PackedIndices[meshData.startIndex + firstIndex + 1u] + meshData.baseVertex;
     uint i2 = g_PackedIndices[meshData.startIndex + firstIndex + 2u] + meshData.baseVertex;
-    RtaoPackedVertex v0 = g_PackedMeshVertices[i0];
-    RtaoPackedVertex v1 = g_PackedMeshVertices[i1];
-    RtaoPackedVertex v2 = g_PackedMeshVertices[i2];
-    float b1 = query.CommittedTriangleBarycentrics().x;
-    float b2 = query.CommittedTriangleBarycentrics().y;
+    PackedMeshVertex v0 = g_PackedMeshVertices[i0];
+    PackedMeshVertex v1 = g_PackedMeshVertices[i1];
+    PackedMeshVertex v2 = g_PackedMeshVertices[i2];
+    float b1 = hit.barycentrics.x;
+    float b2 = hit.barycentrics.y;
     float b0 = 1.0f - b1 - b2;
-    float2 hitUv = v0.uv * b0 + v1.uv * b1 + v2.uv * b2;
+    float2 hitUv =
+        GetPackedVertexUv(v0) * b0 +
+        GetPackedVertexUv(v1) * b1 +
+        GetPackedVertexUv(v2) * b2;
 
     uint materialIndex = GetHandleIndex(instanceData.materialHandle);
     GpuMaterialData material = g_MaterialTable[materialIndex];

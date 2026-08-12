@@ -26,6 +26,7 @@ public readonly struct ReflectionsPassConfig
 	public required DescriptorHandle[] ColorPyramidLevels { get; init; }
 	public required int ColorPyramidLevelCount { get; init; }
 	public required bool ColorPyramidValid { get; init; }
+	public required Int2 FramebufferSize { get; init; }
 	public required Int2 DispatchSize { get; init; }
 	public required int MaxSteps { get; init; }
 	public required int BinarySearchSteps { get; init; }

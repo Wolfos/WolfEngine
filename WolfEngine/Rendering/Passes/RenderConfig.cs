@@ -71,6 +71,7 @@ public struct RayTracedReflectionSettings
 	}
 
 	public float MaxRayDistance { get; set; } = 100.0f;
+	public RayTracedReflectionResolution Resolution { get; set; } = RayTracedReflectionResolution.Full;
 	public float Bias { get; set; } = 0.03f;
 	public float MaxRoughness { get; set; } = 0.8f;
 	public float ScreenReuseThickness { get; set; } = 0.2f;
@@ -81,7 +82,22 @@ public struct RayTracedReflectionSettings
 	/// binary per pixel and tends to crawl as the camera moves.
 	/// </summary>
 	public float ScreenReuseFalloff { get; set; } = 0.5f;
+	public float UpsampleSharpness { get; set; } = 16.0f;
 	public float Intensity { get; set; } = 1.0f;
+}
+
+/// <summary>
+/// Per-axis resolution used for hardware reflection rays. Half traces one quarter as many rays;
+/// quarter traces one sixteenth as many. The result is reconstructed against full-resolution
+/// depth and normals before deferred lighting consumes it.
+/// </summary>
+public enum RayTracedReflectionResolution
+{
+	// Full is zero so serialized settings that predate this property retain their original behavior.
+	// Reduced-resolution tracing is an explicit quality/performance choice.
+	Full = 0,
+	Half = 1,
+	Quarter = 2
 }
 
 public struct ShadowMapConfig

@@ -97,6 +97,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
+	public RenderGraphResourceHandle ReflectionsTrace { get; init; }
 	public RenderGraphResourceHandle ReflectionsRadiance { get; init; }
 	public RenderGraphResourceHandle ResolvedSceneColor { get; init; }
 	/// <summary>
@@ -154,6 +155,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly ReflectionsPass _reflectionsPass;
+	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
@@ -254,6 +256,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
+	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
@@ -302,6 +305,7 @@ internal sealed class RenderGraphFrameBuilder
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_reflectionsPass = passSet.ReflectionsPass;
+		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
@@ -333,6 +337,7 @@ internal sealed class RenderGraphFrameBuilder
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_reflectionsExecute = ExecuteReflections;
+		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
@@ -441,6 +446,7 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var lightingHandle = default(RenderGraphResourceHandle);
+		var reflectionsTraceHandle = default(RenderGraphResourceHandle);
 		var reflectionsRadianceHandle = default(RenderGraphResourceHandle);
 		var colorPyramidLevelHandles = Array.Empty<RenderGraphResourceHandle>();
 		var colorPyramidHistoryValid = false;
@@ -627,6 +633,17 @@ internal sealed class RenderGraphFrameBuilder
 					TextureFormat.Rgba16Float,
 					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				var reflectionTraceSize = GetReflectionTraceSize(sceneFramebufferSize, config.Reflections);
+				reflectionsTraceHandle =
+					reflectionTraceSize.X == sceneFramebufferSize.X &&
+					reflectionTraceSize.Y == sceneFramebufferSize.Y
+						? reflectionsRadianceHandle
+						: _resources.CreateTransientTexture(new TextureDescriptor(
+							reflectionTraceSize.X,
+							reflectionTraceSize.Y,
+							TextureFormat.Rgba16Float,
+							TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+							new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 				EnsureColorPyramidResources(_renderer.GetGfxDevice(), sceneFramebufferSize);
 				if (_colorPyramidTextures.Length > 0)
 				{
@@ -1035,6 +1052,7 @@ internal sealed class RenderGraphFrameBuilder
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
 			LightingBuffer = lightingHandle,
+			ReflectionsTrace = reflectionsTraceHandle,
 			ReflectionsRadiance = reflectionsRadianceHandle,
 			ResolvedSceneColor = resolvedSceneColorHandle,
 			ColorPyramidLevels = colorPyramidLevelHandles,
@@ -1394,13 +1412,25 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.ReflectionsRadiance, ResourceState.UnorderedAccess);
+					.WriteTexture(_frameResources.ReflectionsTrace, ResourceState.UnorderedAccess);
 				foreach (var colorPyramidLevel in _frameResources.ColorPyramidLevels)
 				{
 					reflectionsBuilder.ReadTexture(colorPyramidLevel, ResourceState.ShaderResource);
 				}
 				ReadSkyboxTextures(reflectionsBuilder);
 				reflectionsBuilder.SetExecute(_reflectionsExecute);
+
+				if (_frameResources.Config.Reflections.Mode == ReflectionMode.RayTraced &&
+				    _frameResources.Config.Reflections.RayTracedSettings.Resolution !=
+				    RayTracedReflectionResolution.Full)
+				{
+					graph.AddPass("Reflections Upsample", PassKind.Compute)
+						.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.ReflectionsTrace, ResourceState.ShaderResource)
+						.WriteTexture(_frameResources.ReflectionsRadiance, ResourceState.UnorderedAccess)
+						.SetExecute(_reflectionsUpsampleExecute);
+				}
 			}
 
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
@@ -2104,6 +2134,15 @@ internal sealed class RenderGraphFrameBuilder
 			_gpuDrawResources,
 			isRayTraced ? _rayTracingSceneResources : null);
 		_reflectionsPass.Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteReflectionsUpsample(RenderGraphContext context)
+	{
+		var config = _reflectionsUpsamplePass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteColorPyramid(
@@ -3184,6 +3223,25 @@ internal sealed class RenderGraphFrameBuilder
 		       (config.Reflections.Mode == ReflectionMode.RayTraced ||
 		        (config.Reflections.ScreenSpaceSettings.MaxSteps > 0 &&
 		         config.Reflections.ScreenSpaceSettings.MaxRayDistance > 0.0f));
+	}
+
+	private static Int2 GetReflectionTraceSize(Int2 fullSize, ReflectionConfig config)
+	{
+		if (config.Mode != ReflectionMode.RayTraced)
+		{
+			return fullSize;
+		}
+
+		var divisor = config.RayTracedSettings.Resolution switch
+		{
+			RayTracedReflectionResolution.Full => 1,
+			RayTracedReflectionResolution.Half => 2,
+			RayTracedReflectionResolution.Quarter => 4,
+			_ => 2
+		};
+		return new Int2(
+			Math.Max((fullSize.X + divisor - 1) / divisor, 1),
+			Math.Max((fullSize.Y + divisor - 1) / divisor, 1));
 	}
 
 	private static bool HasRayTracedDdgi(RenderConfig config) => DdgiUtilities.IsRayTracedDdgiEnabled(config);

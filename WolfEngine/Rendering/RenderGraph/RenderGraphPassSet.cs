@@ -30,6 +30,7 @@ internal sealed class RenderGraphPassSet
 		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
+		ReflectionsUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalHistoryStorePass = new(shaderCompiler, bindlessResourceRegistry);
 		Fsr3ClearPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -69,6 +70,7 @@ internal sealed class RenderGraphPassSet
 	public ScreenSpaceDecalPass ScreenSpaceDecalPass { get; }
 	public DeferredLightingPass DeferredLightingPass { get; }
 	public ReflectionsPass ReflectionsPass { get; }
+	public ReflectionsUpsamplePass ReflectionsUpsamplePass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }
 	public TemporalHistoryStorePass TemporalHistoryStorePass { get; }
 	public Fsr3ClearPass Fsr3ClearPass { get; }

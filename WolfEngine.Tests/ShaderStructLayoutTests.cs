@@ -30,19 +30,6 @@ public class ShaderStructLayoutTests
 		@"^\s*(float3|int3|uint3|half3|double3)\s+(\w+)\s*;",
 		RegexOptions.Compiled);
 
-	/// <summary>
-	/// Structs that already break this rule, recorded so the guard can be introduced without a red
-	/// suite. These are not exemptions: all three mirror the engine's 48-byte packed VertexData, and
-	/// Slang lays them out at 64 bytes in Metal Shading Language, so the ray-traced passes that read
-	/// them are fetching vertices at the wrong offsets on Metal today. Fix them and delete the entry.
-	/// </summary>
-	private static readonly string[] KnownBroken =
-	[
-		"ReflectionPackedVertex",
-		"RtaoPackedVertex",
-		"DdgiPackedVertex"
-	];
-
 	[Test]
 	public void NoBufferElementStruct_DeclaresAThreeComponentVector()
 	{
@@ -77,7 +64,7 @@ public class ShaderStructLayoutTests
 				if (declaration.Success)
 				{
 					var name = declaration.Groups[1].Value;
-					currentStruct = bufferElementTypes.Contains(name) && KnownBroken.Contains(name) == false
+					currentStruct = bufferElementTypes.Contains(name)
 						? name
 						: null;
 					continue;
