@@ -15,13 +15,24 @@ internal sealed class UiFrameBuilder
 	};
 	private readonly UiGeometryBuilder _geometry = new();
 
-	public UiFrameData Build(UiNode root, int width, int height)
+	/// <summary>
+	/// Turns a laid-out tree into geometry.
+	/// </summary>
+	/// <param name="root">Tree laid out in logical pixels.</param>
+	/// <param name="outputWidth">Render target width in physical pixels.</param>
+	/// <param name="outputHeight">Render target height in physical pixels.</param>
+	/// <param name="scale">
+	/// Physical pixels per logical pixel. Layout runs at logical size and every coordinate, radius and glyph is
+	/// multiplied here, which is what keeps authored sizes looking the same on a HiDPI display as on a standard
+	/// one without every layout having to know about the display.
+	/// </param>
+	public UiFrameData Build(UiNode root, int outputWidth, int outputHeight, float scale = 1.0f)
 	{
 		_geometry.Prepare();
 		try
 		{
-			Append(_geometry, root, 1);
-			return _geometry.BuildFrame(width, height, WhiteAtlas);
+			Append(_geometry, root, 1, scale);
+			return _geometry.BuildFrame(outputWidth, outputHeight, WhiteAtlas);
 		}
 		catch
 		{
@@ -30,24 +41,24 @@ internal sealed class UiFrameBuilder
 		}
 	}
 
-	private static void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity)
+	private static void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity, float scale)
 	{
 		if (!node.Style.Display) return;
 		var opacity = inheritedOpacity * node.Style.Opacity;
 		if (!node.IsText && node.Width > 0 && node.Height > 0 && node.Style.Background.A * opacity > 0.001f)
 		{
 			geometry.AddFilledRect(
-				new Vector2(node.Left, node.Top),
-				new Vector2(node.Left + node.Width, node.Top + node.Height),
+				new Vector2(node.Left, node.Top) * scale,
+				new Vector2(node.Left + node.Width, node.Top + node.Height) * scale,
 				Pack(WithOpacity(node.Style.Background, opacity)),
-				MathF.Max(0, node.Style.BorderRadius));
+				MathF.Max(0, node.Style.BorderRadius) * scale);
 		}
 		if (node.IsText && !string.IsNullOrEmpty(node.Text))
 		{
-			BitmapFont.Draw(geometry, new Vector2(node.Left, node.Top), node.Style.FontSize,
+			BitmapFont.Draw(geometry, new Vector2(node.Left, node.Top) * scale, node.Style.FontSize * scale,
 				Pack(WithOpacity(node.Style.Color, opacity)), node.Text!);
 		}
-		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity);
+		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale);
 	}
 
 	private static uint Pack(ColorRGBA value)

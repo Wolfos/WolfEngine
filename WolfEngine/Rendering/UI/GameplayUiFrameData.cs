@@ -6,7 +6,16 @@ namespace WolfEngine.Rendering.UI;
 /// <summary>Game-thread UI snapshots consumed by the render graph. Implementations use a latest-wins queue.</summary>
 public interface IGameplayUiFrameProvider
 {
-	void SetViewportSize(Int2 size);
+	/// <summary>
+	/// Reports the render target the screen UI is drawn into.
+	/// </summary>
+	/// <param name="size">Target size in physical pixels.</param>
+	/// <param name="displayScale">
+	/// Physical pixels per logical pixel, i.e. framebuffer size over window size. On a HiDPI display this is
+	/// greater than one, and the UI lays itself out in logical pixels so that authored sizes stay the same
+	/// apparent size on every display. Mirrors what <c>ImGuiUiSystem</c> does with DisplayFramebufferScale.
+	/// </param>
+	void SetViewportSize(Int2 size, float displayScale = 1.0f);
 	bool TryConsumeLatest(out GameplayUiRenderFrame frame);
 }
 
@@ -14,7 +23,7 @@ public sealed class NullGameplayUiFrameProvider : IGameplayUiFrameProvider
 {
 	public static NullGameplayUiFrameProvider Instance { get; } = new();
 	private NullGameplayUiFrameProvider() { }
-	public void SetViewportSize(Int2 size) { }
+	public void SetViewportSize(Int2 size, float displayScale = 1.0f) { }
 	public bool TryConsumeLatest(out GameplayUiRenderFrame frame)
 	{
 		frame = GameplayUiRenderFrame.Empty;

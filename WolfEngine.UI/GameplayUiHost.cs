@@ -24,6 +24,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	private UiNode? _root;
 	private int _layoutWidth;
 	private int _layoutHeight;
+	private float _layoutScale = 1.0f;
 
 	public GameplayUiSurface(
 		GameplayUiHost host,
@@ -113,8 +114,12 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	{
 		using (FrameProfiler.Instance.Measure(_profilerName))
 		{
-			var width = Options.Kind == UiSurfaceKind.Screen ? Math.Max(1, _host.ViewportSize.X) : Math.Max(1, Options.Width);
-			var height = Options.Kind == UiSurfaceKind.Screen ? Math.Max(1, _host.ViewportSize.Y) : Math.Max(1, Options.Height);
+			var isScreen = Options.Kind == UiSurfaceKind.Screen;
+			var scale = isScreen ? _host.DisplayScale : 1.0f;
+			var outputWidth = isScreen ? Math.Max(1, _host.ViewportSize.X) : Math.Max(1, Options.Width);
+			var outputHeight = isScreen ? Math.Max(1, _host.ViewportSize.Y) : Math.Max(1, Options.Height);
+			var width = Math.Max(1, (int)MathF.Round(outputWidth / scale));
+			var height = Math.Max(1, (int)MathF.Round(outputHeight / scale));
 			var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
 			var timer = Stopwatch.StartNew();
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Razor Render"))
@@ -154,7 +159,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 			}
 
 			var fullLayoutRequired = topologyChanged || _layoutWidth != width || _layoutHeight != height ||
-			                         changes.LayoutChanged;
+			                         _layoutScale.Equals(scale) == false || changes.LayoutChanged;
 			var layoutRan = fullLayoutRequired || changes.IntrinsicSizeChanged;
 			if (layoutRan)
 			{
@@ -164,6 +169,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 				}
 				_layoutWidth = width;
 				_layoutHeight = height;
+				_layoutScale = scale;
 			}
 			var geometryChanged = layoutRan || changes.VisualChanged;
 			if (geometryChanged)
@@ -171,7 +177,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 				using (FrameProfiler.Instance.Measure("Gameplay UI.Build Geometry"))
 				{
 					var previousFrame = Frame;
-					Frame = _frames.Build(_root!, width, height);
+					Frame = _frames.Build(_root!, outputWidth, outputHeight, scale);
 					previousFrame.Release();
 				}
 				IsDirty = true;
@@ -221,12 +227,23 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 	private readonly ConcurrentQueue<GameplayUiRenderFrame> _pendingFrames = new();
 	private long _nextSurfaceId;
 	private Int2 _viewportSize = new(1280, 720);
+	private float _displayScale = 1.0f;
+
+	private const float MinDisplayScale = 0.25f;
+	private const float MaxDisplayScale = 8.0f;
 
 	public GameplayUiHost(IServiceProvider services) => _services = services;
 
+	/// <summary>Screen render target size, in physical pixels.</summary>
 	internal Int2 ViewportSize
 	{
 		get { lock (_sync) return _viewportSize; }
+	}
+
+	/// <summary>Physical pixels per logical pixel. Screen surfaces lay out in logical pixels and scale on output.</summary>
+	internal float DisplayScale
+	{
+		get { lock (_sync) return _displayScale; }
 	}
 
 	public UiPerformanceSnapshot AggregatePerformance
@@ -264,13 +281,21 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 		return surface;
 	}
 
-	public void SetViewportSize(Int2 size)
+	public void SetViewportSize(Int2 size, float displayScale = 1.0f)
 	{
 		GameplayUiSurface[] screens;
 		lock (_sync)
 		{
-			if (size.X <= 0 || size.Y <= 0 || (_viewportSize.X == size.X && _viewportSize.Y == size.Y)) return;
+			if (size.X <= 0 || size.Y <= 0) return;
+
+			var scale = float.IsFinite(displayScale)
+				? Math.Clamp(displayScale, MinDisplayScale, MaxDisplayScale)
+				: 1.0f;
+
+			if (_viewportSize.X == size.X && _viewportSize.Y == size.Y && _displayScale.Equals(scale)) return;
+
 			_viewportSize = size;
+			_displayScale = scale;
 			screens = _surfaces.Where(x => x.Options.Kind == UiSurfaceKind.Screen).ToArray();
 		}
 		for (var i = 0; i < screens.Length; i++) screens[i].ResizeAndRebuild();

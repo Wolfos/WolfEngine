@@ -1,3 +1,4 @@
+using System.Numerics;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.Extensions.DependencyInjection;
@@ -96,6 +97,54 @@ public sealed class GameplayUiTests
 			Assert.That(text.Width, Is.GreaterThan(previousWidth));
 			Assert.That(text.Left, Is.LessThan(previousLeft));
 		});
+	}
+
+	[Test]
+	public void GeometryScalesWithDisplayScaleWhileLayoutStaysLogical()
+	{
+		var root = new UiNode { Name = "root" };
+		var panel = new UiNode
+		{
+			Name = "div",
+			Style = ComputedStyle.Default with
+			{
+				Width = UiLength.Pixels(100),
+				Height = UiLength.Pixels(50),
+				Background = new ColorRGBA(1, 1, 1, 1)
+			}
+		};
+		root.Children.Add(panel);
+		using var layout = new YogaLayoutEngine();
+		layout.Layout(root, 640, 360, fullLayoutRequired: true);
+
+		var builder = new UiFrameBuilder();
+		var unscaled = builder.Build(root, 640, 360, 1.0f);
+		var unscaledExtent = MaxVertexPosition(unscaled);
+		unscaled.Release();
+
+		var scaled = builder.Build(root, 1280, 720, 2.0f);
+		var scaledExtent = MaxVertexPosition(scaled);
+		var scaledDisplaySize = scaled.DisplaySize;
+		scaled.Release();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(panel.Width, Is.EqualTo(100).Within(0.01), "Layout stays in logical pixels.");
+			Assert.That(scaledExtent.X, Is.EqualTo(unscaledExtent.X * 2).Within(0.01));
+			Assert.That(scaledExtent.Y, Is.EqualTo(unscaledExtent.Y * 2).Within(0.01));
+			Assert.That(scaledDisplaySize, Is.EqualTo(new Vector2(1280, 720)), "Output stays in physical pixels.");
+		});
+	}
+
+	private static Vector2 MaxVertexPosition(UiFrameData frame)
+	{
+		var max = Vector2.Zero;
+		for (var i = 0; i < frame.VertexCount; i++)
+		{
+			max = Vector2.Max(max, frame.Vertices[i].Position);
+		}
+
+		return max;
 	}
 
 	[Test]

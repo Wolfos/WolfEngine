@@ -473,7 +473,7 @@ public sealed class RenderGraph
 				}
 				// Gameplay screen UI is recorded into the full presentation targets. The editor later
 				// scales those targets into its scene viewport, while standalone presents them directly.
-				_gameplayUiFrameProvider.SetViewportSize(frameBufferSize);
+				_gameplayUiFrameProvider.SetViewportSize(frameBufferSize, ComputeDisplayScale(frameBufferSize));
 				if (_gameplayUiFrameProvider.TryConsumeLatest(out var latestGameplayUi))
 				{
 					_gameplayUiFrame.Release();
@@ -590,6 +590,14 @@ public sealed class RenderGraph
 		{
 			Console.WriteLine($"[gpu capture] failed to stop the capture: {error}");
 		}
+	}
+
+	private float ComputeDisplayScale(Int2 frameBufferSize)
+	{
+		var windowSize = _renderer.GetWindowSize();
+		if (windowSize.X <= 0 || windowSize.Y <= 0) return 1.0f;
+
+		return (frameBufferSize.X / (float)windowSize.X + frameBufferSize.Y / (float)windowSize.Y) * 0.5f;
 	}
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
