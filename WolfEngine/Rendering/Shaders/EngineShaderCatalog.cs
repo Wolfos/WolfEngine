@@ -188,7 +188,7 @@ public sealed class EngineShaderCatalog
 		if (request.Kind == ShaderRequestKind.Graphics)
 		{
 			if (IsGraphicsProgram(request.ProgramId) == false ||
-			    request.VertexEntryPoint != "vertexShader" || request.PixelEntryPoint != "fragmentShader")
+			    IsDeclaredGraphicsEntryPointCombination(request) == false)
 				throw new InvalidOperationException($"Shader request '{request}' is not a declared graphics entry-point combination.");
 		}
 		else if (GetComputeEntryPoints(request.ProgramId).Contains(request.ComputeEntryPoint!, StringComparer.Ordinal) == false)
@@ -227,13 +227,21 @@ public sealed class EngineShaderCatalog
 		var requests = new List<ShaderRequest>();
 		foreach (var descriptor in _byId.Values.OrderBy(value => value.Id.Value, StringComparer.Ordinal))
 		{
-			if (descriptor.Id == EngineShaderPrograms.ImGui || descriptor.Id == EngineShaderPrograms.Bc1Compress ||
+			if (descriptor.Id == EngineShaderPrograms.Bc1Compress ||
 			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
 			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
 				continue;
 			if (IsGraphicsProgram(descriptor.Id))
 			{
 				requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind));
+				if (descriptor.Id == EngineShaderPrograms.ImGui && backendKind == GraphicsBackendKind.D3D12)
+				{
+					requests.Add(ShaderRequest.Graphics(
+						descriptor.Id,
+						"vertexShader",
+						"solidFragmentShader",
+						backendKind));
+				}
 				if (SupportsAlphaClip(descriptor.Id))
 					requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_ALPHA_CLIP"));
 				if (descriptor.Id == EngineShaderPrograms.ShadowMap)
@@ -262,6 +270,13 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.TransparentForward || id == EngineShaderPrograms.ShadowMap ||
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
 		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal;
+
+	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
+		request.VertexEntryPoint == "vertexShader" &&
+		(request.PixelEntryPoint == "fragmentShader" ||
+		 request.ProgramId == EngineShaderPrograms.ImGui &&
+		 request.BackendKind == GraphicsBackendKind.D3D12 &&
+		 request.PixelEntryPoint == "solidFragmentShader");
 
 	private static bool SupportsAlphaClip(ShaderProgramId id) =>
 		id == EngineShaderPrograms.GBuffer || id == EngineShaderPrograms.ShadowMap;

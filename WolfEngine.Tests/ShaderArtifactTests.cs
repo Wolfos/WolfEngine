@@ -46,6 +46,38 @@ public sealed class ShaderArtifactTests
 			EngineShaderPrograms.GBuffer, "vertexShader", "fragmentShader", GraphicsBackendKind.Metal, "UNDECLARED")), Throws.InvalidOperationException);
 	}
 
+	[Test]
+	public void Catalog_DeclaresTheBackendSpecificImGuiRuntimeVariants()
+	{
+		var catalog = new EngineShaderCatalog();
+		var texturedD3D12 = ShaderRequest.Graphics(
+			EngineShaderPrograms.ImGui,
+			"vertexShader",
+			"fragmentShader",
+			GraphicsBackendKind.D3D12);
+		var solidD3D12 = ShaderRequest.Graphics(
+			EngineShaderPrograms.ImGui,
+			"vertexShader",
+			"solidFragmentShader",
+			GraphicsBackendKind.D3D12);
+		var solidMetal = ShaderRequest.Graphics(
+			EngineShaderPrograms.ImGui,
+			"vertexShader",
+			"solidFragmentShader",
+			GraphicsBackendKind.Metal);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(() => catalog.ValidateRequest(texturedD3D12), Throws.Nothing);
+			Assert.That(() => catalog.ValidateRequest(solidD3D12), Throws.Nothing);
+			Assert.That(() => catalog.ValidateRequest(solidMetal), Throws.InvalidOperationException);
+			Assert.That(catalog.GetDeclaredRuntimeRequests(GraphicsBackendKind.D3D12),
+				Does.Contain(texturedD3D12).And.Contain(solidD3D12));
+			Assert.That(catalog.GetDeclaredRuntimeRequests(GraphicsBackendKind.Metal),
+				Does.Not.Contain(solidMetal));
+		});
+	}
+
 	[TestCase(ShaderRequestKind.Compute)]
 	[TestCase(ShaderRequestKind.Graphics)]
 	public void Artifact_RoundTripsBytecodeReflectionAndThreadGroup(ShaderRequestKind kind)

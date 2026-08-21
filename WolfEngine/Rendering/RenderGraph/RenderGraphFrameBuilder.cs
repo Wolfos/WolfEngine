@@ -975,7 +975,7 @@ internal sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 

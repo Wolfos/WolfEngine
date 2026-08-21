@@ -1251,6 +1251,12 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 		}
 
 		CommandList.SetDescriptorHeaps((uint)heaps.Length, heapPtrs);
+		_bindlessHeapsDirty = true;
+	}
+
+	internal void NotifyExternalDescriptorHeapBinding()
+	{
+		_bindlessHeapsDirty = true;
 	}
 
 	public void SetComputeRootDescriptorTable(uint rootParameterIndex, GpuDescriptorHandle baseDescriptor)
