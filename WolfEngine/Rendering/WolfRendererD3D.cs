@@ -1503,7 +1503,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		_packedVertexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
 			DefaultPackedVertexBufferBytes,
 			BufferUsage.Vertex | BufferUsage.Structured,
-			BufferFlags.AllowShaderResource,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
 			name: "PackedMeshVertexBuffer"));
 		_packedIndexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
 			DefaultPackedIndexBufferBytes,

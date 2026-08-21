@@ -618,6 +618,13 @@ internal unsafe class D3D12CommandList : IGfxCommandList, IDisposable
 			throw new NotSupportedException($"Compute buffer slot {slot} is not supported by the D3D12 root signature.");
 		}
 
+		if ((d3d12Buffer.Descriptor.Flags & BufferFlags.AllowUnorderedAccess) == 0)
+		{
+			throw new InvalidOperationException(
+				$"Buffer '{d3d12Buffer.Name ?? "<unnamed>"}' cannot be bound for compute writes because it was not " +
+				$"created with {nameof(BufferFlags.AllowUnorderedAccess)}.");
+		}
+
 		if (d3d12Buffer.IsCpuWritableDirect == false)
 		{
 			TransitionBufferIfNeeded(d3d12Buffer, ResourceStates.UnorderedAccess);

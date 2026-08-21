@@ -21,7 +21,7 @@ struct GpuSkinnedInstanceData
     uint boneMatrixOffset;
     uint previousBoneMatrixOffset;
     uint boneCount;
-    uint pad0;
+    uint vertexCount;
     uint pad1;
     uint pad2;
 };

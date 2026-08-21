@@ -64,7 +64,7 @@ struct VSOutput
 };
 
 /// Rebuilds a skinned vertex's previous object-space position.
-float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData, GpuDrawArgs drawArgs)
+float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData)
 {
     // Validate the full handle because table slots are recycled.
     GpuSkinnedInstanceData skinnedInstance = g_SkinnedInstances[GetHandleIndex(instanceData.meshHandle)];
@@ -73,8 +73,15 @@ float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData
         return input.position;
     }
 
-    // Convert the packed-buffer vertex ID to a mesh-local index.
-    uint localVertex = input.vertexId - uint(drawArgs.baseVertex);
+    // Direct3D's SV_VertexID is the index-buffer value before BaseVertexLocation is applied. Metal's
+    // ICB path likewise binds the mesh's vertex range at an offset and uses base vertex zero. It is
+    // therefore already mesh-local on both backends; subtracting the packed base vertex underflows
+    // on Direct3D and turns this into an out-of-bounds structured-buffer read.
+    uint localVertex = input.vertexId;
+    if (localVertex >= skinnedInstance.vertexCount)
+    {
+        return input.position;
+    }
     GpuSkinVertex skinVertex = g_SkinVertices[skinnedInstance.skinVertexBase + localVertex];
 
     return WolfSkinPosition(
@@ -107,7 +114,7 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
-    float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData, drawArgs);
+    float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData);
     float4 previousWorldPosition = mul(float4(previousObjectPosition, 1.0f), instanceData.previousWorld);
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);

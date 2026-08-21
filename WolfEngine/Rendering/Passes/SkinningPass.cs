@@ -41,14 +41,15 @@ internal readonly struct GpuSkinnedInstanceData
 		uint skinVertexBase,
 		uint boneMatrixOffset,
 		uint previousBoneMatrixOffset,
-		uint boneCount)
+		uint boneCount,
+		uint vertexCount)
 	{
 		MeshHandle = meshHandle;
 		SkinVertexBase = skinVertexBase;
 		BoneMatrixOffset = boneMatrixOffset;
 		PreviousBoneMatrixOffset = previousBoneMatrixOffset;
 		BoneCount = boneCount;
-		Pad0 = 0;
+		VertexCount = vertexCount;
 		Pad1 = 0;
 		Pad2 = 0;
 	}
@@ -59,7 +60,7 @@ internal readonly struct GpuSkinnedInstanceData
 	public readonly uint BoneMatrixOffset;
 	public readonly uint PreviousBoneMatrixOffset;
 	public readonly uint BoneCount;
-	public readonly uint Pad0;
+	public readonly uint VertexCount;
 	public readonly uint Pad1;
 	public readonly uint Pad2;
 }
@@ -226,7 +227,8 @@ public sealed class SkinningPass
 				skinRange.FirstVertex,
 				boneMatrixOffset,
 				boneMatrixOffset + (uint)packet.BoneCount,
-				(uint)packet.BoneCount);
+				(uint)packet.BoneCount,
+				vertexCount);
 		}
 
 		RetireStaleSkinnedInstances();
@@ -412,7 +414,8 @@ public sealed class SkinningPass
 		uint skinVertexBase,
 		uint boneMatrixOffset,
 		uint previousBoneMatrixOffset,
-		uint boneCount)
+		uint boneCount,
+		uint vertexCount)
 	{
 		if (_skinnedInstanceBuffer is not IWritableGpuBuffer writable ||
 		    drawDatabase.TryGetMeshHandle(instance, out var meshHandle) == false ||
@@ -430,7 +433,8 @@ public sealed class SkinningPass
 				skinVertexBase,
 				boneMatrixOffset,
 				previousBoneMatrixOffset,
-				boneCount)
+				boneCount,
+				vertexCount)
 		];
 		writable.Write<GpuSkinnedInstanceData>(entry, slot);
 		_publishedInstanceSlots.Add(slot);
