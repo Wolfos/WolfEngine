@@ -1,10 +1,6 @@
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using Moq;
 using WolfEngine;
 using WolfEngine.ECS;
@@ -61,13 +57,13 @@ public sealed class ScreenSpaceDecalPassTests
 			ChannelMask = DecalChannelMask.Albedo
 		});
 
-		var renderGraph = CreateTestRenderGraph();
-		RenderPipeline.CollectDecalProjectors(snapshot, world, renderGraph);
+		var resourceScheduler = new Mock<IRenderResourceScheduler>();
+		RenderPipeline.CollectDecalProjectors(snapshot, world, resourceScheduler.Object);
 
 		Assert.That(snapshot.DecalPackets, Has.Count.EqualTo(1));
 		Assert.That(snapshot.DecalPackets[0].Projector.ChannelMask, Is.EqualTo(DecalChannelMask.Albedo));
 		Assert.That(snapshot.DecalPackets[0].Transform.Translation.X, Is.EqualTo(2.0f).Within(0.0001f));
-		Assert.That(validTexture.ResourceRequestPending, Is.True);
+		resourceScheduler.Verify(value => value.EnsureTextureResources(validTexture), Times.Once);
 	}
 
 	[Test]
@@ -169,15 +165,6 @@ public sealed class ScreenSpaceDecalPassTests
 			[new TextureMipData(1, 1, [255, 255, 255, 255])]);
 	}
 
-	private static RenderGraph CreateTestRenderGraph()
-	{
-		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
-		SetField(renderGraph, "_resourceSync", new object());
-		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
-		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());
-		return renderGraph;
-	}
-
 	private static (RenderGraph Graph, RenderGraphFrameBuilder FrameBuilder) CreateSchedulingFixture(
 		RenderGraphResourceRegistry registry)
 	{
@@ -233,13 +220,6 @@ public sealed class ScreenSpaceDecalPassTests
 			shaderProvider.Object);
 
 		return (graph, frameBuilder);
-	}
-
-	private static void SetField(object instance, string fieldName, object value)
-	{
-		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
-		            ?? throw new AssertionException($"Field '{fieldName}' was not found.");
-		field.SetValue(instance, value);
 	}
 
 }

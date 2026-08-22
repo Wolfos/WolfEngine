@@ -1,7 +1,3 @@
-#nullable enable
-
-using System.Collections.Generic;
-using NUnit.Framework;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;

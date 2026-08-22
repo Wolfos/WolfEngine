@@ -82,28 +82,28 @@ public struct DecalProjector : IEntityComponent
 		}
 	}
 
-	public readonly void EnsureTextureResources(RenderGraph renderGraph)
+	public readonly void EnsureTextureResources(IRenderResourceScheduler resourceScheduler)
 	{
-		ArgumentNullException.ThrowIfNull(renderGraph);
+		ArgumentNullException.ThrowIfNull(resourceScheduler);
 
 		if (AlbedoTexture is not null)
 		{
-			renderGraph.EnsureTextureResources(AlbedoTexture);
+			resourceScheduler.EnsureTextureResources(AlbedoTexture);
 		}
 
 		if (NormalTexture is not null)
 		{
-			renderGraph.EnsureTextureResources(NormalTexture);
+			resourceScheduler.EnsureTextureResources(NormalTexture);
 		}
 
 		if (MaterialTexture is not null)
 		{
-			renderGraph.EnsureTextureResources(MaterialTexture);
+			resourceScheduler.EnsureTextureResources(MaterialTexture);
 		}
 
 		if (EmissiveTexture is not null)
 		{
-			renderGraph.EnsureTextureResources(EmissiveTexture);
+			resourceScheduler.EnsureTextureResources(EmissiveTexture);
 		}
 	}
 }

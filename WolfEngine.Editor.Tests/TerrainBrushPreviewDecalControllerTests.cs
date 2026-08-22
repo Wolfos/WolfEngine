@@ -1,10 +1,9 @@
 #nullable enable
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Runtime.CompilerServices;
+using NSubstitute;
 using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
@@ -81,8 +80,8 @@ public sealed class TerrainBrushPreviewDecalControllerTests
 		});
 
 		var snapshot = new FrameSnapshot();
-		var renderGraph = CreateTestRenderGraph();
-		RenderPipeline.CollectDecalProjectors(snapshot, world, renderGraph);
+		var resourceScheduler = Substitute.For<IRenderResourceScheduler>();
+		RenderPipeline.CollectDecalProjectors(snapshot, world, resourceScheduler);
 
 		Assert.That(snapshot.DecalPackets, Has.Count.EqualTo(1));
 		var expected = Matrix4x4.CreateTranslation(2.0f, 3.0f, -1.0f) * Matrix4x4.CreateTranslation(10.0f, 0.0f, 4.0f);
@@ -100,22 +99,6 @@ public sealed class TerrainBrushPreviewDecalControllerTests
 			true,
 			TextureFormat.Rgba8Unorm,
 			[new TextureMipData(1, 1, [255, 255, 255, 255])]);
-	}
-
-	private static RenderGraph CreateTestRenderGraph()
-	{
-		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
-		SetField(renderGraph, "_resourceSync", new object());
-		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
-		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());
-		return renderGraph;
-	}
-
-	private static void SetField(object instance, string fieldName, object value)
-	{
-		var field = instance.GetType().GetField(fieldName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
-		            ?? throw new AssertionException($"Field '{fieldName}' was not found.");
-		field.SetValue(instance, value);
 	}
 
 	private sealed class TestTextureFactory : ITextureFactory

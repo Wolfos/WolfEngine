@@ -294,11 +294,14 @@ public class RenderPipeline : IRenderPipeline
 		}
 	}
 
-	internal static void CollectDecalProjectors(FrameSnapshot snapshot, World world, RenderGraph renderGraph)
+	internal static void CollectDecalProjectors(
+		FrameSnapshot snapshot,
+		World world,
+		IRenderResourceScheduler resourceScheduler)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 		ArgumentNullException.ThrowIfNull(world);
-		ArgumentNullException.ThrowIfNull(renderGraph);
+		ArgumentNullException.ThrowIfNull(resourceScheduler);
 
 		foreach (var entry in world.View<WorldTransform, DecalProjector>())
 		{
@@ -314,7 +317,7 @@ public class RenderPipeline : IRenderPipeline
 				continue;
 			}
 
-			projector.EnsureTextureResources(renderGraph);
+			projector.EnsureTextureResources(resourceScheduler);
 			snapshot.AddDecal(projector, transform.LocalToWorld);
 		}
 
@@ -333,7 +336,7 @@ public class RenderPipeline : IRenderPipeline
 				continue;
 			}
 
-			previewProjector.EnsureTextureResources(renderGraph);
+			previewProjector.EnsureTextureResources(resourceScheduler);
 			snapshot.AddDecal(
 				previewProjector,
 				terrain.AuthoringBrushPreviewLocalTransform * terrainTransform.LocalToWorld);

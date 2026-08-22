@@ -1,22 +1,14 @@
-#nullable enable
-
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using Moq;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
-using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Tests;
 
 [TestFixture]
-public sealed class TerrainPrototypeTests
+public sealed class TerrainTests
 {
 	[TearDown]
 	public void TearDown()
@@ -198,12 +190,12 @@ public sealed class TerrainPrototypeTests
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 
-		var renderGraph = CreateTestRenderGraph();
+		var resourceScheduler = Mock.Of<IRenderResourceScheduler>();
 		var material = new Material("__terrain__");
 		var nearCamera = new Vector3(0.0f, 40.0f, -60.0f);
 		var records = new List<TerrainChunkDrawRecord>();
 
-		runtime.CollectChunkDrawRecords(renderGraph, material, nearCamera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(resourceScheduler, material, nearCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.SharedLodMeshes[0]));
@@ -213,7 +205,7 @@ public sealed class TerrainPrototypeTests
 
 		records.Clear();
 		var farCamera = new Vector3(0.0f, 50.0f, -400.0f);
-		runtime.CollectChunkDrawRecords(renderGraph, material, farCamera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(resourceScheduler, material, farCamera, Matrix4x4.Identity, records);
 
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Mesh, Is.SameAs(runtime.SharedLodMeshes[2]));
@@ -221,7 +213,7 @@ public sealed class TerrainPrototypeTests
 
 		records.Clear();
 		runtime.CollectChunkDrawRecords(
-			renderGraph,
+			resourceScheduler,
 			material,
 			nearCamera,
 			Matrix4x4.CreateTranslation(5000.0f, 0.0f, 0.0f),
@@ -281,12 +273,12 @@ public sealed class TerrainPrototypeTests
 		var baselineVersion = runtime.RuntimeVersion;
 
 		component.AuthoringPreviewHeightmap = CreateHeightTexture("height-preview", 5, 5, 255);
-		var renderGraph = CreateTestRenderGraph();
+		var resourceScheduler = Mock.Of<IRenderResourceScheduler>();
 		var material = new Material("__terrain__");
 		var records = new List<TerrainChunkDrawRecord>();
 
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
-		runtime.CollectChunkDrawRecords(renderGraph, material, new Vector3(0.0f, 10.0f, -20.0f), Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(resourceScheduler, material, new Vector3(0.0f, 10.0f, -20.0f), Matrix4x4.Identity, records);
 
 		Assert.That(runtime.RuntimeVersion, Is.EqualTo(baselineVersion));
 		Assert.That(records, Has.Count.EqualTo(1));
@@ -313,17 +305,17 @@ public sealed class TerrainPrototypeTests
 		var runtime = new TerrainRuntimeData();
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 
-		var renderGraph = CreateTestRenderGraph();
+		var resourceScheduler = Mock.Of<IRenderResourceScheduler>();
 		var material = new Material("__terrain__");
 		var records = new List<TerrainChunkDrawRecord>();
 		var camera = new Vector3(0.0f, 40.0f, -60.0f);
 
-		runtime.CollectChunkDrawRecords(renderGraph, material, camera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(resourceScheduler, material, camera, Matrix4x4.Identity, records);
 		Assert.That(records, Has.Count.EqualTo(1));
 		var firstMaterial = records[0].Material;
 
 		records.Clear();
-		runtime.CollectChunkDrawRecords(renderGraph, material, camera, Matrix4x4.Identity, records);
+		runtime.CollectChunkDrawRecords(resourceScheduler, material, camera, Matrix4x4.Identity, records);
 		Assert.That(records, Has.Count.EqualTo(1));
 		Assert.That(records[0].Material, Is.SameAs(firstMaterial));
 	}
@@ -385,11 +377,13 @@ public sealed class TerrainPrototypeTests
 		component.WorldSizeMeters = new Vector2(128.0f, 128.0f);
 		Assert.That(runtime.EnsureBuilt(component), Is.True);
 
-		var renderer = new TestRenderer();
-		var renderGraph = CreateTestRenderGraph(renderer);
-		runtime.ReleasePendingMeshResources(renderGraph);
+		var resourceScheduler = new Mock<IRenderResourceScheduler>();
+		runtime.ReleasePendingMeshResources(resourceScheduler.Object);
 
-		Assert.That(renderer.ReleasedMeshes, Is.EquivalentTo(initialMeshes));
+		foreach (var mesh in initialMeshes)
+		{
+			resourceScheduler.Verify(value => value.ReleaseMeshResources(mesh), Times.Once);
+		}
 	}
 
 	[Test]
@@ -629,58 +623,6 @@ public sealed class TerrainPrototypeTests
 			TextureFormat.Rgba8Unorm,
 			layerMips.Weights);
 		return new TerrainAsset(heightTexture.Name, heightmap, layerIndexMap, layerWeightMap);
-	}
-
-	private static RenderGraph CreateTestRenderGraph(IRenderer? renderer = null)
-	{
-		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
-		SetField(renderGraph, "_renderer", renderer ?? new TestRenderer());
-		SetField(renderGraph, "_resourceSync", new object());
-		SetField(renderGraph, "_pendingTextures", new HashSet<Texture>());
-		SetField(renderGraph, "_ensureMeshQueue", new ConcurrentQueue<Mesh>());
-		return renderGraph;
-	}
-
-	private static void SetField(object instance, string fieldName, object value)
-	{
-		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
-			?? throw new AssertionException($"Field '{fieldName}' was not found.");
-		field.SetValue(instance, value);
-	}
-
-	private sealed class TestRenderer : IRenderer
-	{
-		public List<Mesh> ReleasedMeshes { get; } = new();
-
-		public void Run(Action startup, Action<float> update, Action<float> render) => throw new NotSupportedException();
-		public IMaterialResources CreateMaterialResources(Material material) => throw new NotSupportedException();
-		public ITextureResources CreateTextureResources(Texture texture) => throw new NotSupportedException();
-		public IGfxDevice GetGfxDevice() => throw new NotSupportedException();
-		public Int2 GetFrameBufferSize() => Int2.Zero;
-		public Int2 GetWindowSize() => Int2.Zero;
-		public void BeginFrame() => throw new NotSupportedException();
-		public void Render(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle finalColor) => throw new NotSupportedException();
-		public RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height) => throw new NotSupportedException();
-		public void EnsureMeshResources(Mesh mesh)
-		{
-		}
-
-		public void ReleaseMeshResources(Mesh mesh)
-		{
-			ReleasedMeshes.Add(mesh);
-		}
-
-		public IGfxBuffer GetPackedMeshVertexBuffer() => null!;
-
-		public IGfxBuffer GetPackedMeshIndexBuffer() => null!;
-
-		public uint GetPackedMeshVertexStride() => 0;
-
-		public bool SupportsGpuCapture => false;
-		public bool IsGpuCaptureActive => false;
-		public string LastGpuCapturePath => string.Empty;
-		public bool TryStartGpuCapture(string outputPath, out string error) => throw new NotSupportedException();
-		public bool TryStopGpuCapture(out string error) => throw new NotSupportedException();
 	}
 
 	private sealed class TestAssetRegistry : IAssetInstanceRegistry, IDisposable

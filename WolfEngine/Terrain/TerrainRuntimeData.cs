@@ -96,9 +96,9 @@ public sealed class TerrainRuntimeData
 			: dirtyRegion;
 	}
 
-	public void ReleasePendingMeshResources(RenderGraph renderGraph)
+	public void ReleasePendingMeshResources(IRenderResourceScheduler resourceScheduler)
 	{
-		ArgumentNullException.ThrowIfNull(renderGraph);
+		ArgumentNullException.ThrowIfNull(resourceScheduler);
 		if (_pendingReleasedMeshes.Count == 0)
 		{
 			return;
@@ -106,20 +106,20 @@ public sealed class TerrainRuntimeData
 
 		for (var i = 0; i < _pendingReleasedMeshes.Count; i++)
 		{
-			renderGraph.ReleaseMeshResources(_pendingReleasedMeshes[i]);
+			resourceScheduler.ReleaseMeshResources(_pendingReleasedMeshes[i]);
 		}
 
 		_pendingReleasedMeshes.Clear();
 	}
 
 	public void CollectChunkDrawRecords(
-		RenderGraph renderGraph,
+		IRenderResourceScheduler resourceScheduler,
 		Material material,
 		Vector3 cameraOrigin,
 		Matrix4x4 worldTransform,
 		List<TerrainChunkDrawRecord> destination)
 	{
-		ArgumentNullException.ThrowIfNull(renderGraph);
+		ArgumentNullException.ThrowIfNull(resourceScheduler);
 		ArgumentNullException.ThrowIfNull(material);
 		ArgumentNullException.ThrowIfNull(destination);
 		if (_built == false || _chunks.Count == 0 || _sharedLodMeshes.Length == 0)
@@ -127,7 +127,7 @@ public sealed class TerrainRuntimeData
 			return;
 		}
 
-		EnsureTerrainResources(renderGraph);
+		EnsureTerrainResources(resourceScheduler);
 		var selectedLods = new int[_chunks.Count];
 		for (var i = 0; i < _chunks.Count; i++)
 		{
@@ -146,7 +146,7 @@ public sealed class TerrainRuntimeData
 			var chunk = _chunks[i];
 			var lodIndex = Math.Clamp(selectedLods[i], 0, _sharedLodMeshes.Length - 1);
 			var mesh = _sharedLodMeshes[lodIndex];
-			renderGraph.EnsureMeshResources(mesh);
+			resourceScheduler.EnsureMeshResources(mesh);
 			destination.Add(new TerrainChunkDrawRecord(
 				i,
 				mesh,
@@ -496,21 +496,21 @@ public sealed class TerrainRuntimeData
 		_hasLayoutState = false;
 	}
 
-	private void EnsureTerrainResources(RenderGraph renderGraph)
+	private void EnsureTerrainResources(IRenderResourceScheduler resourceScheduler)
 	{
 		if (_resolvedRenderHeightmap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedRenderHeightmap);
+			resourceScheduler.EnsureTextureResources(_resolvedRenderHeightmap);
 		}
 
 		if (_resolvedRenderLayerIndexMap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedRenderLayerIndexMap);
+			resourceScheduler.EnsureTextureResources(_resolvedRenderLayerIndexMap);
 		}
 
 		if (_resolvedRenderLayerWeightMap is not null)
 		{
-			renderGraph.EnsureTextureResources(_resolvedRenderLayerWeightMap);
+			resourceScheduler.EnsureTextureResources(_resolvedRenderLayerWeightMap);
 		}
 
 		if (_resolvedLayerSet is null)
@@ -523,19 +523,19 @@ public sealed class TerrainRuntimeData
 			var layer = _resolvedLayerSet.GetLayer(i);
 			if (layer.Albedo.Asset is { } albedo)
 			{
-				renderGraph.EnsureTextureResources(albedo);
+				resourceScheduler.EnsureTextureResources(albedo);
 			}
 			if (layer.Normal.Asset is { } normal)
 			{
-				renderGraph.EnsureTextureResources(normal);
+				resourceScheduler.EnsureTextureResources(normal);
 			}
 			if (layer.Orm.Asset is { } orm)
 			{
-				renderGraph.EnsureTextureResources(orm);
+				resourceScheduler.EnsureTextureResources(orm);
 			}
 			if (layer.Height.Asset is { } height)
 			{
-				renderGraph.EnsureTextureResources(height);
+				resourceScheduler.EnsureTextureResources(height);
 			}
 		}
 	}

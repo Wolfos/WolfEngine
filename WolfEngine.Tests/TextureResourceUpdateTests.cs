@@ -1,5 +1,4 @@
 using WolfEngine.Rendering;
-using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Tests;
 

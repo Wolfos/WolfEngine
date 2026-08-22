@@ -15,7 +15,7 @@ namespace WolfEngine.Rendering;
 /// Entry point for recording and executing passes in the renderer's frame graph.
 /// Responsible for owning pass order, compiling transient resources, and dispatching execution.
 /// </summary>
-public sealed class RenderGraph
+public sealed class RenderGraph : IRenderResourceScheduler
 {
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
 	private readonly RenderGraphFrameBuilder _frameBuilder;

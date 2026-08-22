@@ -1,8 +1,5 @@
-using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
