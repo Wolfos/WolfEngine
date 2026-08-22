@@ -127,6 +127,8 @@ public sealed class RenderGraph
 		return new(pass, _resourceRegistry);
 	}
 
+	internal IReadOnlyList<RenderGraphPass> Passes => _passes;
+
 	public void Execute()
 	{
 		ApplyPendingShaderReload();
