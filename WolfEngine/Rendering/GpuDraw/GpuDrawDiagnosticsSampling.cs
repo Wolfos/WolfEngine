@@ -1,6 +1,3 @@
-#nullable enable
-
-using System;
 using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;

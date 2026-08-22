@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using ImGuiNET;
 using System.Numerics;
 using WolfEngine.Rendering.UI;

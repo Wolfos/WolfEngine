@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace WolfEngine.ECS;
+﻿namespace WolfEngine.ECS;
 
 public readonly ref struct View<T1>
 	where T1:struct, IEntityComponent

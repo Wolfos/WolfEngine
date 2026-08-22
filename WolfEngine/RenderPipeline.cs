@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using WolfEngine.Animation;
 using WolfEngine.ECS;
 using WolfEngine.Profiling;

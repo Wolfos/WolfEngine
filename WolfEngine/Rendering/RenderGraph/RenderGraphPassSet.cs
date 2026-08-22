@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 

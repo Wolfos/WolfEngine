@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Concurrent;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;

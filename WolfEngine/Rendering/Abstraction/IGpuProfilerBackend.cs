@@ -1,5 +1,3 @@
-#nullable enable
-
 using WolfEngine.Profiling;
 
 namespace WolfEngine.Rendering.Abstraction;

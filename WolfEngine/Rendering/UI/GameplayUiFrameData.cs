@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;

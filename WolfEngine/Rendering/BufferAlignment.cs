@@ -1,7 +1,3 @@
-#nullable enable
-
-using System;
-
 namespace WolfEngine.Rendering;
 
 /// <summary>Alignment helpers for byte offsets into GPU buffers.</summary>

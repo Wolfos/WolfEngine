@@ -1,8 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;

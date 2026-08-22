@@ -1,7 +1,4 @@
-using System;
 using System.Text.Json.Serialization;
-
-#nullable enable
 
 namespace WolfEngine.AssetPipeline;
 

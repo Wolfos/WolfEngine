@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Animation;
 using WolfEngine.Rendering;

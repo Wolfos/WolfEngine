@@ -1,4 +1,3 @@
-using System;
 using StbImageSharp;
 using File = System.IO.File;
 

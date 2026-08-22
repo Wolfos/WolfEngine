@@ -1,5 +1,4 @@
 using WolfEngine.ECS;
-using WolfEngine;
 
 namespace WolfEngine.Editor;
 

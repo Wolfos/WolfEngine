@@ -1,9 +1,4 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
 using System.Numerics;
-using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering;

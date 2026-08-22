@@ -1,5 +1,3 @@
-using System;
-
 namespace WolfEngine.ECS;
 
 [Flags]

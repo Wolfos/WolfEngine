@@ -1,9 +1,7 @@
-using System;
 using System.Numerics;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
-using WolfEngine.Rendering;
 
 namespace WolfEngine;
 

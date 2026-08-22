@@ -1,6 +1,5 @@
 using System.Numerics;
 using ImGuiNET;
-using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;

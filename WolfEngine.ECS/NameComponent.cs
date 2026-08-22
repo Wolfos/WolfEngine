@@ -1,6 +1,4 @@
-﻿using WolfEngine.ECS;
-
-namespace WolfEngine.ECS;
+﻿namespace WolfEngine.ECS;
 
 [ExcludeFromAddComponent]
 public struct NameComponent: IEntityComponent

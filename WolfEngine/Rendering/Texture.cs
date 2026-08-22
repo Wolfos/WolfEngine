@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering;

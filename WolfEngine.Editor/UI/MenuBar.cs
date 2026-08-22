@@ -1,15 +1,10 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
 using WolfEngine.Build;
-using WolfEngine.Editor;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Platform;
-using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
-using WolfEngine.Audio;
 
 namespace WolfEngine.Editor.UI;
 

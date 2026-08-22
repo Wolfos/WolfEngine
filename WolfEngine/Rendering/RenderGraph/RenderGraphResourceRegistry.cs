@@ -1,7 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering;

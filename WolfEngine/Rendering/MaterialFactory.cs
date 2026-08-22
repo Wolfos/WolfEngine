@@ -1,4 +1,3 @@
-using System;
 using System.Numerics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Shaders;

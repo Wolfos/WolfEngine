@@ -1,4 +1,3 @@
-using System;
 using System.Numerics;
 using WolfEngine.Animation;
 using WolfEngine.ECS;

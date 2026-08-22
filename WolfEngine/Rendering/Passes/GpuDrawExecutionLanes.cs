@@ -1,9 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-using WolfEngine.Rendering;
-
 namespace WolfEngine.Rendering.Passes;
 
 public readonly record struct GpuDrawExecutionKey(GpuDrawKind DrawKind, GpuDrawBucketId BucketId);

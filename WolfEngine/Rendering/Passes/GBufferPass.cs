@@ -1,7 +1,3 @@
-#nullable enable
-
-using System;
-using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 

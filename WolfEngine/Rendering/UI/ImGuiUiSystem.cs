@@ -1,13 +1,8 @@
-using System;
 using System.Collections.Concurrent;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Numerics;
-using System.Threading;
 using ImGuiNET;
-using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.UI;

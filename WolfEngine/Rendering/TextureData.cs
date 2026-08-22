@@ -1,5 +1,3 @@
-using System;
-
 namespace WolfEngine.Rendering;
 
 public readonly record struct TextureMipData(

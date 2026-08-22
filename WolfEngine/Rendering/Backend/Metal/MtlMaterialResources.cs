@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using SharpMetal.Metal;
+﻿using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Backend.Metal;

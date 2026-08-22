@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.Versioning;
 using SharpMetal.Metal;
 using WolfEngine.Rendering.Abstraction;

@@ -1,5 +1,3 @@
-using System;
-
 namespace WolfEngine.Editor.UI;
 
 public class FramerateTool

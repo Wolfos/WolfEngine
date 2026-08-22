@@ -1,6 +1,4 @@
-﻿#nullable enable
-
-using System.Numerics;
+﻿using System.Numerics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;

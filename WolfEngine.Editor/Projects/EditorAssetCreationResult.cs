@@ -1,5 +1,3 @@
-using System;
-
 namespace WolfEngine.Editor.Projects;
 
 public readonly record struct EditorAssetCreationResult(bool Success, string? ErrorMessage, Guid? AssetId)

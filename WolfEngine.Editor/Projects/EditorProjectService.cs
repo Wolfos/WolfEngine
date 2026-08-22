@@ -1,12 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
-using WolfEngine.Importing;
-using WolfEngine.Editor;
 using WolfEngine.Editor.UI;
 using WolfEngine.Rendering.Shaders;
 

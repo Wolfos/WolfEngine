@@ -1,6 +1,3 @@
-#nullable enable
-
-using System;
 using Silk.NET.Direct3D12;
 
 namespace WolfEngine.Rendering.Abstraction;

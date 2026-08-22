@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using WolfEngine.Mathematics;
-using WolfEngine.Rendering;
 
 namespace WolfEngine;
 

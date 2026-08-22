@@ -1,6 +1,3 @@
-#nullable enable
-
-using System;
 using System.Numerics;
 
 namespace WolfEngine.Rendering.Abstraction;

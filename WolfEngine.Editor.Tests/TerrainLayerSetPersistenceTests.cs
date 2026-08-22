@@ -1,6 +1,5 @@
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Tests;
 

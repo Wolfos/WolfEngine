@@ -1,9 +1,6 @@
-using System;
-using System.IO;
 using ImGuiNET;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Input;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Utility;
 

@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-
 namespace WolfEngine.Rendering;
 
 public sealed class EditorFrameCoordinator

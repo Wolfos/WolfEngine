@@ -4,9 +4,7 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.Shaders;
-using WolfEngine.Rendering.UI;
 using WolfEngine.Utility;
 
 namespace WolfEngine.Editor.Tests;

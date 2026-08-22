@@ -1,10 +1,5 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using NSubstitute;
-using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Editor.UI;
 using WolfEngine.Importing;

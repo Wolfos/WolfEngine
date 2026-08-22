@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-using System.Numerics;
 using WolfEngine.Animation;
 
 namespace WolfEngine.AssetPipeline;

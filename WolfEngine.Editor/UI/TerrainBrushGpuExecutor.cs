@@ -1,11 +1,7 @@
-using System;
 using System.Numerics;
 using System.Runtime.Versioning;
 using SharpMetal.Metal;
-using SharpMetal.Foundation;
 using Silk.NET.Direct3D12;
-using Silk.NET.DXGI;
-using WolfEngine.Backend.D3D12;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Backend.D3D12;

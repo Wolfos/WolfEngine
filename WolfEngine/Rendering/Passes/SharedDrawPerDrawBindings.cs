@@ -1,8 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-
 namespace WolfEngine.Rendering.Passes;
 
 /// <summary>Reflected bindings which vary for every encoded indirect draw.</summary>

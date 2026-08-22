@@ -1,4 +1,3 @@
-using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Rendering;
 using System.Numerics;
@@ -6,7 +5,6 @@ using Silk.NET.Assimp;
 using File = System.IO.File;
 using AssimpTexture = Silk.NET.Assimp.Texture;
 using AssimpMaterial = Silk.NET.Assimp.Material;
-using AssimpAnimation = Silk.NET.Assimp.Animation;
 using InvalidOperationException = System.InvalidOperationException;
 
 namespace WolfEngine.Importing;

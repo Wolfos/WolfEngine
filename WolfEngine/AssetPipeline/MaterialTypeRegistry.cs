@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace WolfEngine.AssetPipeline;
 
 public enum MaterialPropertyKind

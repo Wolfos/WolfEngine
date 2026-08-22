@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace WolfEngine.ECS;
+﻿namespace WolfEngine.ECS;
 
 public readonly struct Entity : IEquatable<Entity>
 {

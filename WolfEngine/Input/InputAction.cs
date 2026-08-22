@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace WolfEngine.Input;
+﻿namespace WolfEngine.Input;
 
 public struct InputAction(string name, InputActionType type, InputActionBinding[] bindings)
 {

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using WolfEngine.Editor.Projects;
 using WolfEngine.ECS;
 

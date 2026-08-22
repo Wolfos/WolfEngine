@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace WolfEngine.Rendering.Backend.D3D12;
 
 internal static class D3D12RootBindings

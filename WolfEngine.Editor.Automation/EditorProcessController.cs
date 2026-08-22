@@ -1,6 +1,3 @@
-using WolfEngine.Editor;
-using WolfEngine.Editor.Automation;
-
 namespace WolfEngine.Editor.Automation;
 
 public sealed record CreatedEntity(Guid EntityId, string Name);

@@ -1,9 +1,4 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Threading;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using WolfEngine.Profiling;

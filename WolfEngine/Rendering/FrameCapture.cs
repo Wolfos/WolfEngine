@@ -1,6 +1,3 @@
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace WolfEngine.Rendering;
 
 /// <summary>CPU-readable pixels from a completed renderer frame.</summary>

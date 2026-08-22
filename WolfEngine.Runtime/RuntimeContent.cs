@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
-using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using ImGuiNET;

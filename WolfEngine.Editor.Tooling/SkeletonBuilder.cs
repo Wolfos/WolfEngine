@@ -1,7 +1,6 @@
 using System.Numerics;
 using Silk.NET.Assimp;
 using WolfEngine.Animation;
-using WolfEngine.Importing;
 
 namespace WolfEngine.Importing;
 

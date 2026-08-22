@@ -1,6 +1,3 @@
-#nullable enable
-
-using System;
 using System.Runtime.InteropServices;
 
 namespace WolfEngine.Rendering.Backend.D3D12;

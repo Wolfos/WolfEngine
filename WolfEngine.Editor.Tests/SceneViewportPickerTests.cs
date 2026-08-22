@@ -2,7 +2,6 @@ using System.Numerics;
 using WolfEngine.Animation;
 using WolfEngine.Editor.UI;
 using WolfEngine.ECS;
-using WolfEngine.Rendering;
 
 namespace WolfEngine.Editor.Tests;
 

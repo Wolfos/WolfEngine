@@ -1,8 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-
 namespace WolfEngine.Rendering;
 
 public readonly struct GpuDrawHandle : IEquatable<GpuDrawHandle>

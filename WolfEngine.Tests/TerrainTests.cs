@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Reflection;
 using Moq;
 using WolfEngine.AssetPipeline;
-using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 
 namespace WolfEngine.Tests;

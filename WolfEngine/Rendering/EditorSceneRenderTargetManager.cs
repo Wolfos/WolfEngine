@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 

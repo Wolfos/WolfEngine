@@ -1,7 +1,5 @@
-using System;
 using WolfEngine.Rendering.Abstraction;
 using System.Numerics;
-using WolfEngine.Mathematics;
 
 namespace WolfEngine.Rendering.Passes;
 

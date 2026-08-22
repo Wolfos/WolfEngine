@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
-using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Rendering.UI;
 using WolfEngine.Editor.UI;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;

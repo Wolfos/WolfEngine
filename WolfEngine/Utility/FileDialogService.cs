@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.Platform;
 
 namespace WolfEngine.Utility;

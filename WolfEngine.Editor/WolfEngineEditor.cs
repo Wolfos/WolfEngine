@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +8,6 @@ using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
-using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;

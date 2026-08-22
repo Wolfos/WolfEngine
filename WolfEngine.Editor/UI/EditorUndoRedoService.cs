@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;

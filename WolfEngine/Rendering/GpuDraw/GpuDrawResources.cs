@@ -1,5 +1,3 @@
-#nullable enable
-
 using System.Runtime.InteropServices;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;

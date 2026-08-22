@@ -1,5 +1,3 @@
-#nullable enable
-
 namespace WolfEngine.Rendering.Abstraction;
 
 public enum GraphicsBackendKind

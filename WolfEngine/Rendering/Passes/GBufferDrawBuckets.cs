@@ -1,9 +1,3 @@
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-using WolfEngine;
-
 namespace WolfEngine.Rendering.Passes;
 
 [Flags]

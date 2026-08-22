@@ -1,7 +1,3 @@
-#nullable enable
-
-using System;
-
 namespace WolfEngine.Rendering;
 
 public readonly struct CompiledComputeShaderWithReflection

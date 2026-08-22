@@ -1,4 +1,3 @@
-using Silk.NET.Assimp;
 using AssimpMesh = Silk.NET.Assimp.Mesh;
 using EngineMesh = WolfEngine.Mesh;
 

@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
-using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 

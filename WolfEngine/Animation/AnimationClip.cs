@@ -1,4 +1,3 @@
-using System;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Animation;

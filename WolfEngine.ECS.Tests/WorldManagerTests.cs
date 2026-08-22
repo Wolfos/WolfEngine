@@ -1,5 +1,4 @@
 using NUnit.Framework;
-using WolfEngine.ECS;
 
 namespace WolfEngine.ECS.Tests;
 
