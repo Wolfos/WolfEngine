@@ -98,6 +98,7 @@ public sealed class ReflectionsPass
 				: _bindlessRegistry.GetTextureHandle(emissiveFallback);
 		}
 
+		var outputTexture = context.GetTexture(resources.ReflectionsTrace);
 		return new ReflectionsPassConfig
 		{
 			Pipeline = pipeline,
@@ -110,12 +111,13 @@ public sealed class ReflectionsPass
 			Irradiance = _bindlessRegistry.GetTextureHandle(irradiance),
 			PrefilteredEnvironment = _bindlessRegistry.GetTextureHandle(prefiltered),
 			BrdfLut = _bindlessRegistry.GetTextureHandle(brdfLut),
-			Output = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.ReflectionsRadiance)),
+			Output = _bindlessRegistry.RegisterRwTexture(outputTexture),
 			LinearSampler = _linearSampler,
 			ColorPyramidLevels = colorPyramidLevels,
 			ColorPyramidLevelCount = colorPyramidLevelCount,
 			ColorPyramidValid = resources.ColorPyramidHistoryValid && colorPyramidLevelCount > 0,
-			DispatchSize = resources.SceneFramebufferSize,
+			FramebufferSize = resources.SceneFramebufferSize,
+			DispatchSize = new(outputTexture.Descriptor.Width, outputTexture.Descriptor.Height),
 			MaxSteps = Math.Max(screenSpace.MaxSteps, 1),
 			BinarySearchSteps = Math.Max(screenSpace.BinarySearchSteps, 0),
 			MaxRayDistance = Math.Max(
@@ -193,8 +195,8 @@ public sealed class ReflectionsPass
 			: _screenSpaceSettingsWriter)
 			?? throw new InvalidOperationException("Reflections settings writer was not initialized.");
 		settingsWriter.Clear();
-		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.DispatchSize.X, 1));
-		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.DispatchSize.Y, 1));
+		settingsWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.FramebufferSize.X, 1));
+		settingsWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.FramebufferSize.Y, 1));
 		settingsWriter.SetUInt("maxSteps", (uint)config.MaxSteps);
 		settingsWriter.SetUInt("binarySearchSteps", (uint)config.BinarySearchSteps);
 		settingsWriter.SetFloat("maxRayDistance", config.MaxRayDistance);
@@ -214,6 +216,8 @@ public sealed class ReflectionsPass
 		if (config.Mode == ReflectionMode.RayTraced)
 		{
 			settingsWriter.SetFloat("screenReuseFalloff", config.ScreenReuseFalloff);
+			settingsWriter.SetUInt("outputSizeX", (uint)Math.Max(config.DispatchSize.X, 1));
+			settingsWriter.SetUInt("outputSizeY", (uint)Math.Max(config.DispatchSize.Y, 1));
 			var directionalLightCount = 0;
 			for (var i = 0;
 			     i < sceneData.Lights.Count &&

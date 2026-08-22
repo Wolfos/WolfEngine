@@ -55,10 +55,10 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	private bool _rightSuperDown;
 	private Vector2 _mousePosition = new(-1, -1);
 	private Vector2 _mouseWheel = Vector2.Zero;
-	private ImGuiFontAtlas _fontAtlas;
+	private UiTextureAtlas _fontAtlas;
 	private float _fontDpiScale = 1.0f;
 
-	private ImGuiFontAtlas? _uploadedFontAtlas;
+	private UiTextureAtlas? _uploadedFontAtlas;
 	private static ImFontPtr _regularFont;
 	private static ImFontPtr _boldFont;
 
@@ -194,8 +194,8 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			totalCmd += drawData.CmdLists[n].CmdBuffer.Size;
 		}
 
-		var verts = ArrayPool<ImDrawVert>.Shared.Rent(Math.Max(totalVtx, 1));
-		var indices = ArrayPool<ushort>.Shared.Rent(Math.Max(totalIdx, 1));
+		var verts = ArrayPool<UiVertex>.Shared.Rent(Math.Max(totalVtx, 1));
+		var indices = ArrayPool<uint>.Shared.Rent(Math.Max(totalIdx, 1));
 		var commands = ArrayPool<UiDrawCommand>.Shared.Rent(Math.Max(totalCmd, 1));
 
 		var vtxOffset = 0;
@@ -212,7 +212,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 				unsafe
 				{
 					var ptr = (ImDrawVert*) src.NativePtr;
-					verts[vtxOffset + v] = *ptr;
+					verts[vtxOffset + v] = new UiVertex(ptr->pos, ptr->uv, ptr->col);
 				}
 			}
 
@@ -373,7 +373,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	/// Called on the render thread after the atlas pixels have been uploaded to the GPU.
 	/// Must stay lock-free: see <see cref="_uploadedFontAtlas"/>.
 	/// </summary>
-	private void MarkFontAtlasUploaded(ImGuiFontAtlas atlas)
+	private void MarkFontAtlasUploaded(UiTextureAtlas atlas)
 	{
 		Volatile.Write(ref _uploadedFontAtlas, atlas);
 	}
@@ -418,12 +418,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		}
 	}
 
-	private static ImGuiFontAtlas BuildFontAtlas(ImGuiIOPtr io)
+	private static UiTextureAtlas BuildFontAtlas(ImGuiIOPtr io)
 	{
 		io.Fonts.GetTexDataAsRGBA32(out byte* pixels, out var width, out var height, out _);
 		if (pixels == null || width == 0 || height == 0)
 		{
-			return new ImGuiFontAtlas();
+			return new UiTextureAtlas();
 		}
 
 		var size = width * height * 4;
@@ -433,7 +433,7 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 			fontPixels[i] = pixels[i];
 		}
 
-		return new ImGuiFontAtlas
+		return new UiTextureAtlas
 		{
 			Width = width,
 			Height = height,
@@ -520,12 +520,12 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 	{
 		if (frame.Vertices.Length > 0)
 		{
-			ArrayPool<ImDrawVert>.Shared.Return(frame.Vertices, clearArray: false);
+			ArrayPool<UiVertex>.Shared.Return(frame.Vertices, clearArray: false);
 		}
 
 		if (frame.Indices.Length > 0)
 		{
-			ArrayPool<ushort>.Shared.Return(frame.Indices, clearArray: false);
+			ArrayPool<uint>.Shared.Return(frame.Indices, clearArray: false);
 		}
 
 		if (frame.Commands.Length > 0)

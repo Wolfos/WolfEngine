@@ -308,7 +308,7 @@ public sealed class TransformGizmoController
 				{
 					if (world.IsAlive(target.Entity)) world.SetWorldPosition(target.Entity, target.WorldPosition + (_dragState.AxisWorld * delta));
 				}
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(world);
 				break;
 			}
 			case TransformGizmoMode.Rotate:
@@ -337,7 +337,7 @@ public sealed class TransformGizmoController
 					}
 					world.SetWorldRotation(target.Entity, NormalizeOrIdentity(deltaRotation * target.WorldRotation));
 				}
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(world);
 				break;
 			}
 			case TransformGizmoMode.Scale:
@@ -365,7 +365,7 @@ public sealed class TransformGizmoController
 					world.SetWorldPosition(target.Entity, scaledPosition);
 					world.SetLocalScale(target.Entity, localScale);
 				}
-				_interactionState.MarkSceneDirty();
+				_interactionState.MarkSceneDirty(world);
 				break;
 			}
 		}

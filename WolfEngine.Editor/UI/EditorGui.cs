@@ -17,6 +17,7 @@ public class EditorGui
 	public static Entity SelectedEntity;
 	public static bool HasSelectedEntity = false;
 	public static Entity? SelectionRangeAnchor;
+	private static Entity? _selectionRevealRequest;
 	private static bool _componentsWindowFocusRequested;
 	private static bool _defaultDockLayoutApplied;
 
@@ -181,6 +182,21 @@ public class EditorGui
 		RefreshSelectedEntity(world, requestFocus);
 	}
 
+	/// <summary>
+	/// Adds <paramref name="entity"/> to the selection, or removes it when it is already selected.
+	/// </summary>
+	public static void ToggleEntitySelection(Entity entity, World world, bool requestFocus = true)
+	{
+		if (SelectedEntities.Remove(entity))
+		{
+			SelectionRangeAnchor = SelectedEntities.Count > 0 ? SelectedEntities[^1] : null;
+			RefreshSelectedEntity(world, requestFocus);
+			return;
+		}
+
+		AddEntitySelection(entity, world, requestFocus);
+	}
+
 	public static void AddEntitySelectionRange(IReadOnlyList<Entity> visibleEntities, Entity clickedEntity, World world, bool requestFocus = true)
 	{
 		var anchor = SelectionRangeAnchor is { } candidate && visibleEntities.Contains(candidate)
@@ -206,6 +222,35 @@ public class EditorGui
 
 		SelectionRangeAnchor = clickedEntity;
 		RefreshSelectedEntity(world, requestFocus);
+	}
+
+	/// <summary>
+	/// Takes the entity the hierarchy should unfold to and scroll into view, if a selection has been
+	/// made since the last call. Requests are raised by every selection path, so a selection made
+	/// anywhere — the viewport, an undo, a newly instantiated prefab — becomes visible in the tree
+	/// without each of those callers knowing the hierarchy exists.
+	/// </summary>
+	public static bool ConsumeSelectionRevealRequest(out Entity entity)
+	{
+		if (_selectionRevealRequest is not { } requested)
+		{
+			entity = default;
+			return false;
+		}
+
+		_selectionRevealRequest = null;
+		entity = requested;
+		return true;
+	}
+
+	/// <summary>
+	/// Drops a pending reveal. The hierarchy calls this for selections it made itself: the entity is
+	/// already on screen under the cursor, and scrolling it to centre would yank the list out from
+	/// under the click.
+	/// </summary>
+	public static void DiscardSelectionRevealRequest()
+	{
+		_selectionRevealRequest = null;
 	}
 
 	public static bool ConsumeComponentsWindowFocusRequest()
@@ -237,6 +282,10 @@ public class EditorGui
 
 		HasSelectedEntity = true;
 		SelectedEntity = SelectedEntities[0];
+
+		_selectionRevealRequest = SelectionRangeAnchor is { } anchor && SelectedEntities.Contains(anchor)
+			? anchor
+			: SelectedEntity;
 		SelectedComponentTypes.Clear();
 		var componentTypes = new List<Type>();
 		for (var i = 0; i < SelectedEntities.Count; i++)
@@ -261,6 +310,7 @@ public class EditorGui
 		SelectedEntities.Clear();
 		SelectionRangeAnchor = null;
 		SelectedComponentTypes.Clear();
+		_selectionRevealRequest = null;
 		_componentsWindowFocusRequested = false;
 	}
 

@@ -547,6 +547,199 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void PhysicsUpdate_InterpolatedBodyDefersTransformWriteToPreRender()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition.X, Is.EqualTo(0.0f));
+
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(fixedDeltaTime).Within(0.001f));
+	}
+
+	[Test]
+	public void PreRender_InterpolatedBodyBlendsBetweenLastTwoFixedSteps()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(fixedDeltaTime, world);
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+		system.PhysicsUpdate(fixedDeltaTime, world);
+
+		RenderFrame(system, world, fixedDeltaTime * 0.5f, fixedDeltaTime);
+
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(fixedDeltaTime * 1.5f).Within(0.001f));
+	}
+
+	[Test]
+	public void PreRender_ExtrapolatedBodyLeadsLatestFixedStep()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Extrapolate);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(fixedDeltaTime, world);
+		RenderFrame(system, world, fixedDeltaTime * 0.5f, fixedDeltaTime);
+
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(fixedDeltaTime * 1.5f).Within(0.001f));
+	}
+
+	[Test]
+	public void PreRender_InterpolationDisabledLeavesSimulationPose()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.None);
+		using var system = new RigidbodySystem();
+
+		system.PhysicsUpdate(fixedDeltaTime, world);
+		var simulationPosition = world.GetComponent<LocalTransform>(entity).LocalPosition;
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+
+		Assert.That(simulationPosition.X, Is.EqualTo(fixedDeltaTime).Within(0.001f));
+		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition, Is.EqualTo(simulationPosition));
+	}
+
+	[Test]
+	public void PreRender_InterpolatedPoseDoesNotFeedBackIntoSimulation()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		const int stepCount = 6;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+
+		for (var step = 0; step < stepCount; step++)
+		{
+			system.PhysicsUpdate(fixedDeltaTime, world);
+			RenderFrame(system, world, 0.0f, fixedDeltaTime);
+		}
+
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(fixedDeltaTime * (stepCount - 1)).Within(0.001f));
+		Assert.That(world.GetComponent<Rigidbody>(entity).LinearVelocity.X, Is.EqualTo(1.0f).Within(0.01f));
+	}
+
+	[Test]
+	public void PreRender_AuthoredTransformChangeSurvivesAndResetsInterpolation()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+		system.PhysicsUpdate(fixedDeltaTime, world);
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+
+		world.SetWorldPosition(entity, new Vector3(5.0f, 0.0f, 0.0f));
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+
+		Assert.That(world.GetComponent<LocalTransform>(entity).LocalPosition.X, Is.EqualTo(5.0f));
+
+		system.PhysicsUpdate(fixedDeltaTime, world);
+		RenderFrame(system, world, 0.0f, fixedDeltaTime);
+
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(5.0f + fixedDeltaTime).Within(0.001f));
+	}
+
+	[Test]
+	public void PreRender_InterpolatedBodyRendersEvenlySpacedPositionsBetweenFixedSteps()
+	{
+		const float fixedDeltaTime = 1.0f / 20.0f;
+		const float frameDeltaTime = 1.0f / 60.0f;
+		const int frameCount = 24;
+		const int warmupFrames = 6;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+
+		var accumulator = 0.0f;
+		var positions = new List<float>();
+		for (var frame = 0; frame < frameCount; frame++)
+		{
+			accumulator += frameDeltaTime;
+			while (accumulator + 0.000001f >= fixedDeltaTime)
+			{
+				accumulator -= fixedDeltaTime;
+				system.PhysicsUpdate(fixedDeltaTime, world);
+			}
+
+			RenderFrame(system, world, accumulator, fixedDeltaTime);
+			positions.Add(world.GetComponent<LocalTransform>(entity).LocalPosition.X);
+		}
+
+		// The body travels at a constant 1 m/s, so once two samples exist every frame must advance it by
+		// one frame worth of travel. Posing it at a raw simulation sample instead holds it still for two
+		// frames and then jumps a whole fixed step, which is what choppy interpolation looks like.
+		for (var frame = warmupFrames + 1; frame < frameCount; frame++)
+		{
+			Assert.That(
+				positions[frame] - positions[frame - 1],
+				Is.EqualTo(frameDeltaTime).Within(frameDeltaTime * 0.05f),
+				$"Frame {frame} did not advance by one frame worth of travel.");
+		}
+	}
+
+	[Test]
+	public void PreRender_WithoutPublishedAccumulatorRendersNewestSample()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		const int stepCount = 4;
+		var world = new World(WorldTag.Game);
+		var entity = CreateInterpolatedBody(world, RigidbodyInterpolation.Interpolate);
+		using var system = new RigidbodySystem();
+
+		for (var step = 0; step < stepCount; step++)
+		{
+			system.PhysicsUpdate(fixedDeltaTime, world);
+			system.PreRender(fixedDeltaTime, world);
+		}
+
+		// A host that never publishes its accumulator gives nothing to interpolate against, so bodies must
+		// fall back to the newest simulation sample rather than to a stale one.
+		Assert.That(
+			world.GetComponent<LocalTransform>(entity).LocalPosition.X,
+			Is.EqualTo(fixedDeltaTime * stepCount).Within(0.001f));
+	}
+
+	/// <summary>Renders one frame the way a host does: publish the accumulator, then pre-render.</summary>
+	private static void RenderFrame(RigidbodySystem system, World world, float accumulatedTime, float fixedDeltaTime)
+	{
+		system.PublishFixedStepAccumulator(world, accumulatedTime, fixedDeltaTime);
+		system.PreRender(fixedDeltaTime, world);
+	}
+
+	private static Entity CreateInterpolatedBody(World world, RigidbodyInterpolation interpolation)
+	{
+		var entity = world.CreateEntity("Dynamic Box", Matrix4x4.Identity);
+		world.AddComponent(entity, BoxCollider.CreateDefault());
+		var rigidbody = Rigidbody.CreateDefault();
+		rigidbody.GravityFactor = 0.0f;
+		rigidbody.LinearVelocity = new Vector3(1.0f, 0.0f, 0.0f);
+		rigidbody.Interpolation = interpolation;
+		world.AddComponent(entity, rigidbody);
+		return entity;
+	}
+
+	[Test]
 	public void TryMoveKinematicBody_MovesBodyWithoutRecreation()
 	{
 		var world = new World(WorldTag.Game);
@@ -961,6 +1154,96 @@ public sealed class RigidbodySystemTests
 		Assert.That(world.GetComponent<LocalTransform>(vehicle.FrontRight.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
 		Assert.That(world.GetComponent<LocalTransform>(vehicle.RearLeft.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
 		Assert.That(world.GetComponent<LocalTransform>(vehicle.RearRight.VisualEntity).LocalPosition.Y, Is.LessThan(0.0f));
+	}
+
+	[Test]
+	public void VehiclePhysicsUpdate_InterpolatedWheelVisualsDeferToPreRender()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		var world = CreateVehicleWorldWithGround(out var chassis);
+		SetInterpolation(world, chassis, RigidbodyInterpolation.Interpolate);
+		using var vehicleSystem = new VehicleSystem();
+		using var rigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(world, vehicleSystem, rigidbodySystem, 30);
+
+		foreach (var wheel in GetWheelVisuals(world, chassis))
+		{
+			Assert.That(world.GetComponent<LocalTransform>(wheel).LocalPosition, Is.EqualTo(Vector3.Zero));
+		}
+
+		RenderFrame(rigidbodySystem, world, 0.0f, fixedDeltaTime);
+
+		foreach (var wheel in GetWheelVisuals(world, chassis))
+		{
+			Assert.That(world.GetComponent<LocalTransform>(wheel).LocalPosition.Y, Is.LessThan(0.0f));
+		}
+	}
+
+	[Test]
+	public void VehiclePreRender_InterpolatedWheelVisualsStayAttachedToChassis()
+	{
+		const float fixedDeltaTime = 1.0f / 60.0f;
+		const int stepCount = 30;
+		var referenceWorld = CreateVehicleWorldWithGround(out var referenceChassis);
+		var interpolatedWorld = CreateVehicleWorldWithGround(out var interpolatedChassis);
+		SetThrottle(referenceWorld, referenceChassis);
+		SetThrottle(interpolatedWorld, interpolatedChassis);
+		SetInterpolation(interpolatedWorld, interpolatedChassis, RigidbodyInterpolation.Interpolate);
+		using var referenceVehicleSystem = new VehicleSystem();
+		using var referenceRigidbodySystem = new RigidbodySystem();
+		using var interpolatedVehicleSystem = new VehicleSystem();
+		using var interpolatedRigidbodySystem = new RigidbodySystem();
+
+		StepVehicle(referenceWorld, referenceVehicleSystem, referenceRigidbodySystem, stepCount);
+		for (var step = 0; step < stepCount; step++)
+		{
+			StepVehicle(interpolatedWorld, interpolatedVehicleSystem, interpolatedRigidbodySystem, 1);
+			RenderFrame(interpolatedRigidbodySystem, interpolatedWorld, 0.0f, fixedDeltaTime);
+		}
+
+		var referenceWheels = GetWheelVisuals(referenceWorld, referenceChassis);
+		var interpolatedWheels = GetWheelVisuals(interpolatedWorld, interpolatedChassis);
+		for (var index = 0; index < referenceWheels.Length; index++)
+		{
+			var referenceOffset = GetWorldPosition(referenceWorld, referenceWheels[index]) -
+			                      GetWorldPosition(referenceWorld, referenceChassis);
+			var interpolatedOffset = GetWorldPosition(interpolatedWorld, interpolatedWheels[index]) -
+			                         GetWorldPosition(interpolatedWorld, interpolatedChassis);
+			Assert.That(
+				interpolatedOffset,
+				Is.EqualTo(referenceOffset).Using(Vector3Comparer.Within(0.001f)),
+				$"Wheel {index} drifted from the chassis under interpolation.");
+		}
+	}
+
+	private static void SetThrottle(World world, Entity chassis)
+	{
+		ref var input = ref world.GetComponent<VehicleInput>(chassis);
+		input.Throttle = 1.0f;
+	}
+
+	private static void SetInterpolation(World world, Entity entity, RigidbodyInterpolation interpolation)
+	{
+		ref var rigidbody = ref world.GetComponent<Rigidbody>(entity);
+		rigidbody.Interpolation = interpolation;
+	}
+
+	private static Entity[] GetWheelVisuals(World world, Entity chassis)
+	{
+		var vehicle = world.GetComponent<Vehicle>(chassis);
+		return
+		[
+			vehicle.FrontLeft.VisualEntity,
+			vehicle.FrontRight.VisualEntity,
+			vehicle.RearLeft.VisualEntity,
+			vehicle.RearRight.VisualEntity
+		];
+	}
+
+	private static Vector3 GetWorldPosition(World world, Entity entity)
+	{
+		return world.GetComponent<WorldTransform>(entity).LocalToWorld.Translation;
 	}
 
 	[Test]

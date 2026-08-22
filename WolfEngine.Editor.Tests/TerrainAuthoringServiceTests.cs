@@ -96,7 +96,8 @@ public sealed class TerrainAuthoringServiceTests
 			interactionState,
 			Substitute.For<IEditorSceneSnapshotService>(),
 			Substitute.For<IEditorAssetSnapshotService>(),
-			persistenceService);
+			persistenceService,
+			Substitute.For<IEditorPlaySession>());
 		var service = new TerrainAuthoringService(
 			undoRedo,
 			interactionState,

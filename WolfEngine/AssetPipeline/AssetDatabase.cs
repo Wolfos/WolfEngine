@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using System.Text.Json;
+using WolfEngine.Animation;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
 
@@ -18,7 +19,10 @@ public enum AssetType
 	Scene,
 	SceneCell,
 	Prefab,
-	AudioClip
+	AudioClip,
+	// Persisted as integers in the SQLite index, so new members are appended rather than inserted.
+	Skeleton,
+	AnimationClip
 }
 
 public enum MaterialAssetType
@@ -165,12 +169,31 @@ public sealed class MeshAssetSummary
 	public string RelativeImportedMeshPath { get; set; } = string.Empty;
 	public int VertexCount { get; set; }
 	public int IndexCount { get; set; }
+	public bool IsSkinned { get; set; }
+}
+
+public sealed class SkeletonAssetSummary
+{
+	public string RelativeImportedSkeletonPath { get; set; } = string.Empty;
+	public int BoneCount { get; set; }
+	public string RootBoneName { get; set; } = string.Empty;
+}
+
+public sealed class AnimationClipAssetSummary
+{
+	public string RelativeImportedClipPath { get; set; } = string.Empty;
+	public float Duration { get; set; }
+	public float FramesPerSecond { get; set; }
+	public int TransformTrackCount { get; set; }
+	public int PropertyTrackCount { get; set; }
 }
 
 public sealed class Model3DAssetSummary
 {
 	public string RelativeImportedModelPath { get; set; } = string.Empty;
 	public int RootNodeCount { get; set; }
+	public int SkeletonCount { get; set; }
+	public int AnimationCount { get; set; }
 }
 
 public sealed class SceneAssetSummary
@@ -202,6 +225,25 @@ public sealed class TextureImportSettings
 {
 	public TextureSemantic TextureSemantic { get; set; } = TextureSemantic.BaseColor;
 	public int MaxResolution { get; set; } = 8192;
+}
+
+public sealed class ModelImportSettings
+{
+	/// <summary>
+	/// Uniform scale applied while the source file is parsed. Assimp's global-scale step bakes it
+	/// into mesh vertices, bone offset matrices, animation position keys and node translations, so
+	/// no scale is left on the imported hierarchy for the runtime to carry.
+	/// </summary>
+	public float ScaleFactor { get; set; } = 1.0f;
+
+	/// <summary>
+	/// Meta files are hand-editable, and a zero, negative or NaN factor would collapse a model to a
+	/// point rather than fail loudly, so the import falls back to the identity scale instead.
+	/// </summary>
+	public float GetEffectiveScaleFactor()
+	{
+		return float.IsFinite(ScaleFactor) && ScaleFactor > 0.0f ? ScaleFactor : 1.0f;
+	}
 }
 
 public sealed class MaterialAsset : MaterialSurfaceProperties
@@ -251,7 +293,7 @@ public abstract class MaterialSurfaceProperties
 
 public sealed class ImportedMeshAssetFile
 {
-	public const int CurrentVersion = 1;
+	public const int CurrentVersion = 2;
 
 	public int Version { get; set; } = CurrentVersion;
 	public Vector4[] Vertices { get; set; } = [];
@@ -259,15 +301,62 @@ public sealed class ImportedMeshAssetFile
 	public Vector3[] Normals { get; set; } = [];
 	public Vector4[] Tangents { get; set; } = [];
 	public Vector2[] UVs { get; set; } = [];
+
+	/// <summary>
+	/// Four bone influences per vertex, flattened. Empty for unskinned meshes, which is every mesh
+	/// written before artifact version 2.
+	/// </summary>
+	public uint[] BoneIndices { get; set; } = [];
+
+	public float[] BoneWeights { get; set; } = [];
+}
+
+public sealed class ImportedSkeletonAssetFile
+{
+	public const int CurrentVersion = 1;
+
+	public int Version { get; set; } = CurrentVersion;
+	public string Name { get; set; } = string.Empty;
+	public string[] BoneNames { get; set; } = [];
+	public int[] ParentIndices { get; set; } = [];
+	public BoneTransform[] BindPoseLocal { get; set; } = [];
+	public Matrix4x4[] InverseBindMatrices { get; set; } = [];
+
+	public Skeleton ToSkeleton() =>
+		new(Name, BoneNames, ParentIndices, BindPoseLocal, InverseBindMatrices);
+}
+
+public sealed class ImportedAnimationClipAssetFile
+{
+	public const int CurrentVersion = 1;
+
+	public int Version { get; set; } = CurrentVersion;
+	public string Name { get; set; } = string.Empty;
+	public float Duration { get; set; }
+	public float FramesPerSecond { get; set; } = 30.0f;
+	public bool Loop { get; set; } = true;
+	public TransformTrack[] TransformTracks { get; set; } = [];
+	public PropertyTrack[] PropertyTracks { get; set; } = [];
+	public string SourceSkeletonName { get; set; } = string.Empty;
+	public BoneTransform[] SourceBindPoseLocal { get; set; } = [];
+
+	public AnimationClip ToClip() =>
+		new(Name, Duration, FramesPerSecond, Loop, TransformTracks, PropertyTracks, SourceSkeletonName, SourceBindPoseLocal);
 }
 
 public sealed class ImportedModelAssetFile
 {
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = 3;
 
 	public int Version { get; set; } = CurrentVersion;
 	public string Name { get; set; } = string.Empty;
 	public List<ImportedModelAssetNode> Nodes { get; set; } = new();
+
+	/// <summary>Skeleton sub-assets produced by this source, in the order the importer discovered them.</summary>
+	public List<Guid> SkeletonNodeIds { get; set; } = new();
+
+	/// <summary>Animation clip sub-assets produced by this source.</summary>
+	public List<Guid> AnimationNodeIds { get; set; } = new();
 }
 
 public sealed class ImportedModelAssetNode
@@ -283,4 +372,7 @@ public sealed class ImportedModelAssetMeshInstance
 	public string Name { get; set; } = string.Empty;
 	public Guid MeshNodeId { get; set; }
 	public Guid MaterialNodeId { get; set; }
+
+	/// <summary>Skeleton this mesh is skinned to, or <see cref="Guid.Empty"/> for static geometry.</summary>
+	public Guid SkeletonNodeId { get; set; }
 }

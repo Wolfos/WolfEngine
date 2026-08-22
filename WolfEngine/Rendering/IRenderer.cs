@@ -27,6 +27,15 @@ public interface IRenderer : IFrameCaptureSource
 	IGfxBuffer GetPackedMeshIndexBuffer();
 
 	/// <summary>
+	/// Gives a skinned instance its own vertex range in the packed buffer, seeded with the source
+	/// mesh's bind pose, while sharing the source's index range. The skinning pass overwrites the
+	/// range each frame; sharing indices keeps a spawned character from duplicating index data it
+	/// never modifies.
+	/// </summary>
+	void EnsureSkinnedInstanceResources(Mesh skinnedInstance)
+		=> throw new PlatformNotSupportedException("Skinned instances are not supported by this renderer.");
+
+	/// <summary>
 	/// Stride of the packed mesh vertex stream. Every mesh shares one packed buffer at one stride,
 	/// which is what lets the shared draw passes bind geometry once instead of per indirect command.
 	/// </summary>

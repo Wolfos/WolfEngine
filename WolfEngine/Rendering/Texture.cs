@@ -14,8 +14,15 @@ public sealed class Texture
     private bool _isSrgb;
     private TextureFormat _format;
     private TextureMipData[] _mipLevels;
+    private readonly bool _isRenderTarget;
 
     public Texture(string name, int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
+        : this(name, width, height, isSrgb, format, mipLevels, isRenderTarget: false)
+    {
+    }
+
+    private Texture(string name, int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels,
+        bool isRenderTarget)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         _width = width;
@@ -23,6 +30,7 @@ public sealed class Texture
         _isSrgb = isSrgb;
         _format = format;
         _mipLevels = mipLevels ?? throw new ArgumentNullException(nameof(mipLevels));
+        _isRenderTarget = isRenderTarget;
         if (width <= 0 || height <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
@@ -41,6 +49,24 @@ public sealed class Texture
     public TextureFormat Format => _format;
     public TextureMipData[] MipLevels => _mipLevels;
     public int MipCount => _mipLevels.Length;
+    public bool IsRenderTarget => _isRenderTarget;
+
+    /// <summary>
+    /// Creates a logical texture whose storage is owned by a persistent GPU render target rather than CPU mip data.
+    /// The render graph does not upload the placeholder mip; the surface renderer publishes the GPU resource.
+    /// </summary>
+    public static Texture CreateRenderTarget(string name, int width, int height, bool isSrgb = false,
+        TextureFormat format = TextureFormat.Rgba8Unorm)
+    {
+        return new Texture(
+            name,
+            width,
+            height,
+            isSrgb,
+            format,
+            [new TextureMipData(width, height, Array.Empty<byte>())],
+            isRenderTarget: true);
+    }
 
     internal ITextureResources? Resources
     {
@@ -134,6 +160,10 @@ public sealed class Texture
 
     public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
     {
+        if (_isRenderTarget)
+        {
+            throw new InvalidOperationException("Render-target texture contents are GPU-owned.");
+        }
         ArgumentNullException.ThrowIfNull(mipLevels);
         if (width <= 0 || height <= 0)
         {

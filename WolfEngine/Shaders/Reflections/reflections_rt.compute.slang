@@ -4,6 +4,8 @@ import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
+import "../Common/packed_vertex.slang";
+import "../Common/raytracing_common.slang";
 import "reflections_common.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
@@ -45,7 +47,9 @@ cbuffer ReflectionSettings : register(b2)
     uint colorPyramidValid;
     float screenReuseFalloff;
     float reprojectionStrength;
-    float3 reflectionSettingsPadding;
+    uint outputSizeX;
+    uint outputSizeY;
+    float2 reflectionSettingsPadding;
     uint colorPyramidHandles[REFLECTION_MAX_COLOR_PYRAMID_LEVELS];
     DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
 };
@@ -57,15 +61,7 @@ StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
 StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
 
-struct ReflectionPackedVertex
-{
-    float3 position;
-    float3 normal;
-    float2 uv;
-    float4 tangent;
-};
-
-StructuredBuffer<ReflectionPackedVertex> g_PackedVertices : register(t8);
+StructuredBuffer<PackedMeshVertex> g_PackedVertices : register(t8);
 
 float3 ReconstructCameraRelativePosition(float2 uv, float depth)
 {
@@ -220,26 +216,18 @@ float TraceDirectionalVisibility(float3 worldPosition, float3 worldNormal, float
     shadowRay.TMin = 0.002f;
     shadowRay.TMax = max(camera.farPlane, 1.0f);
 
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> shadowQuery;
-    shadowQuery.TraceRayInline(
-        sceneTlas,
-        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-        0xFF,
-        shadowRay);
-    while (shadowQuery.Proceed())
-    {
-    }
-    return shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0f : 1.0f;
+    return WolfTraceAny(sceneTlas, shadowRay, 0xFF).hit ? 0.0f : 1.0f;
 }
 
 bool TryShadeHitMaterial(
-    RayQuery<RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query,
+    uint instanceIndex,
+    uint primitiveIndex,
+    float2 barycentrics,
     float3 hitPosition,
     float3 incomingRayDirection,
     out float3 radiance)
 {
     radiance = 0.0f.xxx;
-    uint instanceIndex = query.CommittedInstanceIndex();
     if (instanceIndex >= WOLF_MAX_INSTANCE_COUNT)
     {
         return false;
@@ -257,7 +245,7 @@ bool TryShadeHitMaterial(
     }
 
     GpuMeshData mesh = g_MeshTable[GetHandleIndex(instanceData.meshHandle)];
-    uint firstIndex = query.CommittedPrimitiveIndex() * 3u;
+    uint firstIndex = primitiveIndex * 3u;
     if (firstIndex + 2u >= mesh.indexCount)
     {
         return false;
@@ -266,23 +254,25 @@ bool TryShadeHitMaterial(
     uint i0 = g_PackedIndices[mesh.startIndex + firstIndex + 0u] + mesh.baseVertex;
     uint i1 = g_PackedIndices[mesh.startIndex + firstIndex + 1u] + mesh.baseVertex;
     uint i2 = g_PackedIndices[mesh.startIndex + firstIndex + 2u] + mesh.baseVertex;
-    ReflectionPackedVertex v0 = g_PackedVertices[i0];
-    ReflectionPackedVertex v1 = g_PackedVertices[i1];
-    ReflectionPackedVertex v2 = g_PackedVertices[i2];
-    float2 barycentrics = query.CommittedTriangleBarycentrics();
+    PackedMeshVertex v0 = g_PackedVertices[i0];
+    PackedMeshVertex v1 = g_PackedVertices[i1];
+    PackedMeshVertex v2 = g_PackedVertices[i2];
     float b0 = 1.0f - barycentrics.x - barycentrics.y;
-    float2 uv = v0.uv * b0 + v1.uv * barycentrics.x + v2.uv * barycentrics.y;
+    float2 uv =
+        GetPackedVertexUv(v0) * b0 +
+        GetPackedVertexUv(v1) * barycentrics.x +
+        GetPackedVertexUv(v2) * barycentrics.y;
     float3 localNormal = normalize(
-        v0.normal * b0 +
-        v1.normal * barycentrics.x +
-        v2.normal * barycentrics.y);
+        GetPackedVertexNormal(v0) * b0 +
+        GetPackedVertexNormal(v1) * barycentrics.x +
+        GetPackedVertexNormal(v2) * barycentrics.y);
     float4 localTangent = normalize(
         v0.tangent * b0 +
         v1.tangent * barycentrics.x +
         v2.tangent * barycentrics.y);
-    float3 worldPosition0 = mul(float4(v0.position, 1.0f), instanceData.world).xyz;
-    float3 worldPosition1 = mul(float4(v1.position, 1.0f), instanceData.world).xyz;
-    float3 worldPosition2 = mul(float4(v2.position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition0 = mul(float4(GetPackedVertexPosition(v0), 1.0f), instanceData.world).xyz;
+    float3 worldPosition1 = mul(float4(GetPackedVertexPosition(v1), 1.0f), instanceData.world).xyz;
+    float3 worldPosition2 = mul(float4(GetPackedVertexPosition(v2), 1.0f), instanceData.world).xyz;
     float3 worldGeometricNormal = normalize(cross(
         worldPosition1 - worldPosition0,
         worldPosition2 - worldPosition0));
@@ -368,15 +358,20 @@ bool TryShadeHitMaterial(
 [numthreads(8, 8, 1)]
 void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint2 pixel = dispatchThreadId.xy;
-    uint2 size = uint2(framebufferSizeX, framebufferSizeY);
-    if (any(pixel >= size))
+    uint2 outputPixel = dispatchThreadId.xy;
+    uint2 outputSize = uint2(outputSizeX, outputSizeY);
+    if (any(outputPixel >= outputSize))
     {
         return;
     }
 
+    uint2 size = uint2(framebufferSizeX, framebufferSizeY);
+    float2 fullPixelPosition =
+        (float2(outputPixel) + 0.5f) * float2(size) / float2(outputSize);
+    uint2 pixel = min(uint2(fullPixelPosition), size - 1u);
+
     RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
-    outputTexture[pixel] = 0.0f.xxxx;
+    outputTexture[outputPixel] = 0.0f.xxxx;
     float depth = GetTexture(depthHandle).Load(int3(pixel, 0)).r;
     if (IsBackgroundDepth(depth))
     {
@@ -407,25 +402,21 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     ray.Direction = reflectionDirection;
     ray.TMin = launchBias;
     ray.TMax = maxRayDistance;
-    RayQuery<RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_NONE, 0xFF, ray);
-    while (query.Proceed())
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    if (!hit.hit)
     {
-    }
-
-    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
-    {
-        // A ray that reaches the sky adds nothing over the environment specular that deferred
-        // lighting already applies, so leave the weight at zero.
         return;
     }
+    float hitDistance = hit.distance;
 
-    float3 hitPosition = ray.Origin + reflectionDirection * query.CommittedRayT();
+    // A ray that reaches the sky adds nothing over the environment specular that deferred
+    // lighting already applies, so leave the weight at zero.
+    float3 hitPosition = ray.Origin + reflectionDirection * hitDistance;
     float3 screenRadiance;
     float screenReuseWeight = ComputeScreenReuseWeight(
         hitPosition,
         roughness,
-        query.CommittedRayT(),
+        hitDistance,
         pixel,
         screenRadiance);
     float3 reflectedRadiance = screenRadiance;
@@ -434,7 +425,13 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         // Shading the hit material is the expensive path, so it stays skipped wherever screen
         // reuse is fully trusted. Partially trusted hits pay for both and cross-fade.
         float3 materialRadiance;
-        if (!TryShadeHitMaterial(query, hitPosition, reflectionDirection, materialRadiance))
+        if (!TryShadeHitMaterial(
+            hit.instanceIndex,
+            hit.primitiveIndex,
+            hit.barycentrics,
+            hitPosition,
+            reflectionDirection,
+            materialRadiance))
         {
             // Geometry without a resolvable material still occludes the sky.
             materialRadiance =
@@ -444,5 +441,5 @@ void ReflectionsRayTracedCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         reflectedRadiance = lerp(materialRadiance, screenRadiance, screenReuseWeight);
     }
 
-    outputTexture[pixel] = float4(reflectedRadiance * intensity, saturate(roughnessFade));
+    outputTexture[outputPixel] = float4(reflectedRadiance * intensity, saturate(roughnessFade));
 }

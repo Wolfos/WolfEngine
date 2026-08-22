@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.IO;
+using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Importing;
 using WolfEngine.Rendering;
@@ -31,7 +32,8 @@ public class SceneBuilder : ISceneBuilder
 
 	public void Import3DScene(string path, World world)
 	{
-		var importedScene = _fileImporter.Import(path);
+		// This path bypasses the asset pipeline, so there is no meta file to read settings from.
+		var importedScene = _fileImporter.Import(path, new ModelImportSettings());
 		var runtimeTextures = importedScene.Textures.Select(_textureFactory.GetTexture).ToList();
 
 		var materials = new List<Material>();
@@ -126,7 +128,12 @@ public class SceneBuilder : ISceneBuilder
 				}
 			}
 
-			nodeEntities[i] = CreateNodeEntity(node, world, materials, parent, out var createdEntityCount);
+			// A lone root stands in for the whole asset, so it is named after the file rather than
+			// whatever the DCC tool called it. Several roots share a wrapper that carries that name.
+			var displayName = node.ParentIndex < 0 && rootCount == 1 && string.IsNullOrWhiteSpace(importedScene.Name) == false
+				? importedScene.Name
+				: node.Name;
+			nodeEntities[i] = CreateNodeEntity(node, displayName, world, materials, parent, out var createdEntityCount);
 			entityCount += createdEntityCount;
 		}
 
@@ -137,6 +144,7 @@ public class SceneBuilder : ISceneBuilder
 
 	private Entity? CreateNodeEntity(
 		ImportedNode node,
+		string displayName,
 		World world,
 		IReadOnlyList<Material> materials,
 		Entity? parent,
@@ -146,7 +154,7 @@ public class SceneBuilder : ISceneBuilder
 		Entity nodeEntity;
 		try
 		{
-			nodeEntity = world.CreateEntity(node.Name);
+			nodeEntity = world.CreateEntity(displayName);
 			if (parent is { } parentEntity)
 			{
 				world.SetParent(nodeEntity, parentEntity);

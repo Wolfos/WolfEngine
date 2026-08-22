@@ -51,6 +51,7 @@ public sealed class RuntimeShaderCompilationTests
 			"reconstructedPrevNearestDepthHandle",
 			"dilatedMotionVectorsReadHandle",
 			"dilatedDepthHandle",
+			"inputDepthHandle",
 			"reactiveMaskHandle",
 			"transparencyAndCompositionMaskHandle",
 			"accumulationReadHandle",

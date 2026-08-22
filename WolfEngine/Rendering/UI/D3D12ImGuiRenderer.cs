@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Numerics;
-using ImGuiNET;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D12;
 using Silk.NET.DXGI;
@@ -19,11 +18,20 @@ using D3DPrimitiveTopologyType = Silk.NET.Direct3D12.PrimitiveTopologyType;
 
 namespace WolfEngine.Rendering.UI;
 
-internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
+internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 {
 	private const uint InvalidDescriptorValue = 0xFFFFFFFF;
 
+	private sealed class UiBufferSet
+	{
+		public ComPtr<ID3D12Resource> VertexBuffer;
+		public ComPtr<ID3D12Resource> IndexBuffer;
+		public int VertexBufferSize;
+		public int IndexBufferSize;
+	}
+
 	private ComPtr<ID3D12Device> _device;
+	private IGfxDevice? _gfxDevice;
 	private readonly IShaderProvider _shaderCompiler;
 	private D3D12DescriptorTable? _bindlessTable;
 	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
@@ -34,17 +42,18 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 	private ComPtr<ID3D12Resource> _fontTexture;
 	private ComPtr<ID3D12PipelineState> _pipelineState;
 	private ComPtr<ID3D12RootSignature> _rootSignature;
-	private ComPtr<ID3D12Resource> _vertexBuffer;
-	private ComPtr<ID3D12Resource> _indexBuffer;
-	private int _vertexBufferSize;
-	private int _indexBufferSize;
+	private readonly List<UiBufferSet> _availableBuffers = new();
+	private UiBufferSet? _recordingBuffers;
 	private int _fontTextureWidth;
 	private int _fontTextureHeight;
 	private bool _fontUploaded;
+	private readonly string _pixelEntryPoint;
+	private bool _disposed;
 
-	public D3D12ImGuiRenderer(IShaderProvider shaderCompiler)
+	public D3D12UiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
+		_pixelEntryPoint = sampleTexture ? "fragmentShader" : "solidFragmentShader";
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
@@ -57,6 +66,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			}
 
 			_device = d3d12Device.NativeDevice;
+			_gfxDevice = device;
 			_bindlessTable = d3d12Device.BindlessDescriptorTable;
 			_fallbackTextureHandleValue = _bindlessTable.GetOrCreateFallbackHandles().ShaderResourceView.Value;
 		}
@@ -95,7 +105,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		_rootSignature = default;
 	}
 
-	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget)
+	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture finalColorTarget, bool clearTarget,
+		ColorRGBA? clearColor = null)
 	{
 		var finalColor = finalColorTarget as ID3D12BackendTexture;
 		if (finalColor is null)
@@ -104,7 +115,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		}
 
 		var commandList = (context.CommandList as Backend.D3D12.D3D12CommandList)
-		                  ?? throw new InvalidOperationException("ImGui renderer requires D3D12 command list.");
+			                  ?? throw new InvalidOperationException("UI renderer requires a D3D12 command list.");
 		var native = (ID3D12GraphicsCommandList*) commandList.CommandList.Handle;
 
 		var rtvHandle = finalColor.RenderTargetView
@@ -112,8 +123,9 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		native->OMSetRenderTargets(1, &rtvHandle, 0, null);
 		if (clearTarget)
 		{
-			var clearColor = stackalloc float[4] { 0.05f, 0.05f, 0.05f, 1.0f };
-			native->ClearRenderTargetView(rtvHandle, clearColor, 0, null);
+			var resolvedClear = clearColor ?? new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f);
+			var clearValues = stackalloc float[4] { resolvedClear.R, resolvedClear.G, resolvedClear.B, resolvedClear.A };
+			native->ClearRenderTargetView(rtvHandle, clearValues, 0, null);
 		}
 
 		if (frame.CommandCount == 0)
@@ -126,28 +138,28 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			return;
 		}
 
-		EnsureBuffers(frame);
+		var buffers = AcquireBuffers(frame);
 
 		byte* vertexMapped = null;
 		byte* indexMapped = null;
 
-		SilkMarshal.ThrowHResult(_vertexBuffer.Map(0, (D3DRange*) null, (void**) &vertexMapped));
-		SilkMarshal.ThrowHResult(_indexBuffer.Map(0, (D3DRange*) null, (void**) &indexMapped));
+		SilkMarshal.ThrowHResult(buffers.VertexBuffer.Map(0, (D3DRange*) null, (void**) &vertexMapped));
+		SilkMarshal.ThrowHResult(buffers.IndexBuffer.Map(0, (D3DRange*) null, (void**) &indexMapped));
 
-		fixed (ImDrawVert* srcVerts = frame.Vertices)
+		fixed (UiVertex* srcVerts = frame.Vertices)
 		{
-			var size = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
+			var size = frame.VertexCount * Unsafe.SizeOf<UiVertex>();
 			Buffer.MemoryCopy(srcVerts, vertexMapped, size, size);
 		}
 
-		fixed (ushort* srcIndices = frame.Indices)
+		fixed (uint* srcIndices = frame.Indices)
 		{
-			var size = frame.IndexCount * sizeof(ushort);
+			var size = frame.IndexCount * sizeof(uint);
 			Buffer.MemoryCopy(srcIndices, indexMapped, size, size);
 		}
 
-		_vertexBuffer.Unmap(0, (D3DRange*) null);
-		_indexBuffer.Unmap(0, (D3DRange*) null);
+		buffers.VertexBuffer.Unmap(0, (D3DRange*) null);
+		buffers.IndexBuffer.Unmap(0, (D3DRange*) null);
 
 		var viewport = new D3DViewport
 		{
@@ -160,9 +172,6 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		};
 		native->RSSetViewports(1, &viewport);
 
-		ID3D12DescriptorHeap* heaps = _srvHeap.Handle;
-		native->SetDescriptorHeaps(1, &heaps);
-
 		native->SetGraphicsRootSignature(_rootSignature.Handle);
 		native->SetPipelineState(_pipelineState.Handle);
 
@@ -170,16 +179,16 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 		var vbView = new D3DVertexBufferView
 		{
-			BufferLocation = _vertexBuffer.GetGPUVirtualAddress(),
-			StrideInBytes = (uint) Unsafe.SizeOf<ImDrawVert>(),
-			SizeInBytes = (uint) _vertexBufferSize
+			BufferLocation = buffers.VertexBuffer.GetGPUVirtualAddress(),
+			StrideInBytes = (uint) Unsafe.SizeOf<UiVertex>(),
+			SizeInBytes = (uint) buffers.VertexBufferSize
 		};
 
 		var ibView = new D3DIndexBufferView
 		{
-			BufferLocation = _indexBuffer.GetGPUVirtualAddress(),
-			SizeInBytes = (uint) _indexBufferSize,
-			Format = Format.FormatR16Uint
+			BufferLocation = buffers.IndexBuffer.GetGPUVirtualAddress(),
+			SizeInBytes = (uint) buffers.IndexBufferSize,
+			Format = Format.FormatR32Uint
 		};
 
 		native->IASetVertexBuffers(0, 1, &vbView);
@@ -224,6 +233,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			{
 				ResolveTextureBinding(cmd.TextureId, out var heap, out var textureHandle);
 				native->SetDescriptorHeaps(1, &heap);
+				commandList.NotifyExternalDescriptorHeapBinding();
 				native->SetGraphicsRootDescriptorTable(0, textureHandle);
 				activeTextureId = cmd.TextureId;
 				hasActiveTexture = true;
@@ -249,6 +259,8 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 			native->DrawIndexedInstanced((uint) cmd.ElemCount, 1, (uint) cmd.IdxOffset, (int) cmd.VtxOffset, 0);
 		}
+
+		FinalizeFrameBuffers();
 	}
 
 	private void ResolveTextureBinding(
@@ -295,27 +307,75 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		handle = _srvGpuHandle;
 	}
 
-	private void EnsureBuffers(UiFrameData frame)
+	private UiBufferSet AcquireBuffers(UiFrameData frame)
 	{
-		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<ImDrawVert>();
-		var indexBytes = frame.IndexCount * sizeof(ushort);
+		var vertexBytes = frame.VertexCount * Unsafe.SizeOf<UiVertex>();
+		var indexBytes = frame.IndexCount * sizeof(uint);
+		var requiredVertexBytes = (int)Math.Max(vertexBytes, 65536);
+		var requiredIndexBytes = (int)Math.Max(indexBytes, 65536);
 
-		if (_vertexBuffer.Handle is null || _vertexBufferSize < vertexBytes)
+		for (var i = 0; i < _availableBuffers.Count; i++)
 		{
-			_vertexBuffer.Dispose();
-			_vertexBufferSize = (int) Math.Max(vertexBytes, 65536);
-			CreateUploadBuffer(ref _vertexBuffer, (ulong) _vertexBufferSize);
+			var candidate = _availableBuffers[i];
+			if (candidate.VertexBufferSize < requiredVertexBytes || candidate.IndexBufferSize < requiredIndexBytes)
+			{
+				continue;
+			}
+
+			_availableBuffers.RemoveAt(i);
+			_recordingBuffers = candidate;
+			return candidate;
 		}
 
-		if (_indexBuffer.Handle is null || _indexBufferSize < indexBytes)
+		var buffers = new UiBufferSet
 		{
-			_indexBuffer.Dispose();
-			_indexBufferSize = (int) Math.Max(indexBytes, 65536);
-			CreateUploadBuffer(ref _indexBuffer, (ulong) _indexBufferSize);
-		}
+			VertexBufferSize = requiredVertexBytes,
+			IndexBufferSize = requiredIndexBytes
+		};
+		CreateUploadBuffer(ref buffers.VertexBuffer, (ulong)requiredVertexBytes);
+		CreateUploadBuffer(ref buffers.IndexBuffer, (ulong)requiredIndexBytes);
+		_recordingBuffers = buffers;
+		return buffers;
 	}
 
-	private bool NeedsFontUpload(ImGuiFontAtlas atlas)
+	private void FinalizeFrameBuffers()
+	{
+		if (_recordingBuffers is null)
+		{
+			return;
+		}
+
+		var used = _recordingBuffers;
+		_recordingBuffers = null;
+		if (_gfxDevice is null)
+		{
+			RecycleOrDispose(used);
+			return;
+		}
+
+		_gfxDevice.Retire(
+			() => RecycleOrDispose(used),
+			"D3D12 UI buffer-set recycle");
+	}
+
+	private void RecycleOrDispose(UiBufferSet buffers)
+	{
+		if (_disposed)
+		{
+			DisposeBufferSet(buffers);
+			return;
+		}
+
+		_availableBuffers.Add(buffers);
+	}
+
+	private static void DisposeBufferSet(UiBufferSet buffers)
+	{
+		buffers.VertexBuffer.Dispose();
+		buffers.IndexBuffer.Dispose();
+	}
+
+	private bool NeedsFontUpload(UiTextureAtlas atlas)
 	{
 		return _fontUploaded == false ||
 		       _fontTexture.Handle is null ||
@@ -362,7 +422,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 			out buffer));
 	}
 
-	private void CreateFontTexture(in ImGuiFontAtlas atlas)
+	private void CreateFontTexture(in UiTextureAtlas atlas)
 	{
 		if (atlas.PixelsRgba.Length == 0 || atlas.Width == 0 || atlas.Height == 0)
 		{
@@ -564,7 +624,7 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 		var compiled = _shaderCompiler.GetGraphicsShaderWithReflection(
 			EngineShaderPrograms.ImGui,
 			"vertexShader",
-			"fragmentShader",
+			_pixelEntryPoint,
 			GraphicsBackendKind.D3D12);
 		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
 		if (_projectionWriter.RegisterIndex != 0)
@@ -785,10 +845,19 @@ internal unsafe sealed class D3D12ImGuiRenderer : IImGuiRenderer
 
 	public void Dispose()
 	{
+		_disposed = true;
 		_fontTexture.Dispose();
 		_srvHeap.Dispose();
-		_vertexBuffer.Dispose();
-		_indexBuffer.Dispose();
+		if (_recordingBuffers is not null)
+		{
+			DisposeBufferSet(_recordingBuffers);
+			_recordingBuffers = null;
+		}
+		for (var i = 0; i < _availableBuffers.Count; i++)
+		{
+			DisposeBufferSet(_availableBuffers[i]);
+		}
+		_availableBuffers.Clear();
 		_pipelineState.Dispose();
 		_rootSignature.Dispose();
 	}

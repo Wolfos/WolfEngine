@@ -5,13 +5,17 @@ using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Moq;
 using WolfEngine;
 using WolfEngine.ECS;
 using WolfEngine.Mathematics;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
+using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Utility;
 
 namespace WolfEngine.Tests;
 
@@ -112,81 +116,36 @@ public sealed class ScreenSpaceDecalPassTests
 	public void RenderGraphFrameBuilder_Build_InsertsScreenSpaceDecalBetweenGBufferAndReaders()
 	{
 		var registry = new RenderGraphResourceRegistry();
-		var textureDescriptor = new TextureDescriptor(
-			16,
-			16,
-			TextureFormat.Rgba8Unorm,
-			TextureUsage.RenderTarget | TextureUsage.ShaderResource);
-		var depthDescriptor = new TextureDescriptor(
-			16,
-			16,
-			TextureFormat.D32Float,
-			TextureUsage.DepthStencil | TextureUsage.ShaderResource);
-
-		var frameResources = new RenderGraphFrameResources
+		var (renderGraph, frameBuilder) = CreateSchedulingFixture(registry);
+		var config = new RenderConfig
 		{
-			SceneEnabled = true,
-			SceneFramebufferSize = new Int2(16, 16),
-			GBufferAlbedo = registry.CreateTransientTexture(textureDescriptor),
-			GBufferNormal = registry.CreateTransientTexture(textureDescriptor),
-			GBufferMaterial = registry.CreateTransientTexture(textureDescriptor),
-			GBufferEmissive = registry.CreateTransientTexture(textureDescriptor),
-			DecalSourceGBufferAlbedo = registry.CreateTransientTexture(textureDescriptor),
-			DecalSourceGBufferNormal = registry.CreateTransientTexture(textureDescriptor),
-			DecalSourceGBufferMaterial = registry.CreateTransientTexture(textureDescriptor),
-			DecalSourceGBufferEmissive = registry.CreateTransientTexture(textureDescriptor),
-			GBufferDepth = registry.CreateTransientTexture(depthDescriptor),
-			GBufferVelocity = registry.CreateTransientTexture(textureDescriptor),
-			AmbientOcclusionRaw = registry.CreateTransientTexture(textureDescriptor),
-			AmbientOcclusionTemp = registry.CreateTransientTexture(textureDescriptor),
-			AmbientOcclusionFinal = registry.CreateTransientTexture(textureDescriptor),
-			ShadowMapDepth0 = registry.CreateTransientTexture(depthDescriptor),
-			ShadowMapDepth1 = registry.CreateTransientTexture(depthDescriptor),
-			ShadowMapDepth2 = registry.CreateTransientTexture(depthDescriptor),
-			LightingBuffer = registry.CreateTransientTexture(textureDescriptor),
-			ResolvedSceneColor = registry.CreateTransientTexture(textureDescriptor),
-			HistoryColorRead = registry.CreateTransientTexture(textureDescriptor),
-			HistoryColorWrite = registry.CreateTransientTexture(textureDescriptor),
-			HistoryDepthRead = registry.CreateTransientTexture(textureDescriptor),
-			HistoryDepthWrite = registry.CreateTransientTexture(textureDescriptor),
-			TonemappedLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
-			DisplayLinearSceneColor = registry.CreateTransientTexture(textureDescriptor),
-			EncodedSceneColor = registry.CreateTransientTexture(textureDescriptor),
-			FinalColor = registry.CreateTransientTexture(textureDescriptor),
-			Config = new RenderConfig
-			{
-				Decals = new DecalConfig { Enabled = true },
-				AmbientOcclusion = new AmbientOcclusionConfig { Enabled = true }
-			}
+			Decals = new DecalConfig { Enabled = true },
+			AmbientOcclusion = new AmbientOcclusionConfig { Enabled = true },
+			Reflections = new ReflectionConfig { Enabled = false },
+			Fsr3 = new Fsr3UpscalerConfig { Enabled = false },
+			Bloom = new BloomConfig { Enabled = false }
 		};
+		frameBuilder.BeginFrame(
+			new Int2(16, 16),
+			new Int2(16, 16),
+			default,
+			sceneEnabled: true,
+			hasActiveDecals: true,
+			Vector3.UnitY,
+			1.0f,
+			config,
+			Vector3.Zero);
+		frameBuilder.Build(renderGraph);
 
-		var builder = (RenderGraphFrameBuilder)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraphFrameBuilder));
-		SetField(builder, "_frameResources", frameResources);
-		foreach (var field in typeof(RenderGraphFrameBuilder).GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
-		{
-			if (field.FieldType == typeof(Action<RenderGraphContext>))
-			{
-				field.SetValue(builder, (Action<RenderGraphContext>)(_ => { }));
-			}
-		}
-		SetField(builder, "_requestedSceneDebugViewId", SceneDebugViewIds.FinalColor);
-		InitializePrivateField(builder, "_sceneDebugViews");
-		InitializePrivateField(builder, "_sceneDebugViewOptions");
-
-		var renderGraph = (RenderGraph)RuntimeHelpers.GetUninitializedObject(typeof(RenderGraph));
-		SetField(renderGraph, "_resourceRegistry", registry);
-		SetField(renderGraph, "_passes", new List<RenderGraphPass>());
-		SetField(renderGraph, "_passPool", new Queue<RenderGraphPass>());
-
-		builder.Build(renderGraph);
-
-		var passes = (List<RenderGraphPass>)GetField(renderGraph, "_passes");
+		var passes = renderGraph.Passes;
 		var passNames = passes.Select(pass => pass.Name).ToArray();
 		var gbufferIndex = Array.IndexOf(passNames, "GBuffer");
 		var seedIndex = Array.IndexOf(passNames, "GBuffer Decal Seed");
 		var decalIndex = Array.IndexOf(passNames, "ScreenSpaceDecal");
 		var aoIndex = Array.IndexOf(passNames, "Ambient Occlusion Evaluate");
 		var deferredIndex = Array.IndexOf(passNames, "Deferred Lighting");
+		var screenSpaceDecal = passes.Single(pass => pass.Name == "ScreenSpaceDecal");
+		var ambientOcclusion = passes.Single(pass => pass.Name == "Ambient Occlusion Evaluate");
 		var deferredLighting = passes.Single(pass => pass.Name == "Deferred Lighting");
 
 		Assert.That(gbufferIndex, Is.GreaterThanOrEqualTo(0));
@@ -194,8 +153,9 @@ public sealed class ScreenSpaceDecalPassTests
 		Assert.That(decalIndex, Is.GreaterThan(seedIndex));
 		Assert.That(aoIndex, Is.GreaterThan(decalIndex));
 		Assert.That(deferredIndex, Is.GreaterThan(decalIndex));
-		Assert.That(deferredLighting.Reads, Does.Contain(frameResources.GBufferNormal));
-		Assert.That(deferredLighting.Reads, Does.Contain(frameResources.GBufferMaterial));
+		Assert.That(screenSpaceDecal.Writes, Has.Count.EqualTo(4));
+		Assert.That(screenSpaceDecal.Writes.All(deferredLighting.Reads.Contains), Is.True);
+		Assert.That(screenSpaceDecal.Writes.Intersect(ambientOcclusion.Reads).Count(), Is.EqualTo(1));
 	}
 
 	private static Texture CreateTexture(string name)
@@ -218,6 +178,63 @@ public sealed class ScreenSpaceDecalPassTests
 		return renderGraph;
 	}
 
+	private static (RenderGraph Graph, RenderGraphFrameBuilder FrameBuilder) CreateSchedulingFixture(
+		RenderGraphResourceRegistry registry)
+	{
+		var texture = new Mock<IGfxTexture>();
+		texture.SetupGet(value => value.Descriptor).Returns(new TextureDescriptor(
+			1,
+			1,
+			TextureFormat.Rgba16Float,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess));
+		var device = new Mock<IGfxDevice>();
+		device.Setup(value => value.CreateTexture(in It.Ref<TextureDescriptor>.IsAny)).Returns(texture.Object);
+		var renderer = new Mock<IRenderer>();
+		renderer.Setup(value => value.GetGfxDevice()).Returns(device.Object);
+		var shaderProvider = new Mock<IShaderProvider>();
+		var gpuDrawBackendBridge = new Mock<IGpuDrawBackendBridge>();
+		var bindlessRegistry = new BindlessResourceRegistry();
+		var gpuDrawResources = new GpuDrawResources(shaderProvider.Object);
+		var hardeningStats = new GpuDrawHardeningStats();
+		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry);
+
+		var graph = new RenderGraph(
+			registry,
+			renderer.Object,
+			new ArenaAllocator(),
+			gpuDrawResources,
+			hardeningStats,
+			new GpuProfiler(),
+			Mock.Of<IUiFrameProvider>(),
+			NullGameplayUiFrameProvider.Instance,
+			new EditorViewportStateBus(),
+			new EditorFrameCoordinator(),
+			new RenderFrameCoordinator(),
+			new MainThreadDispatcher(),
+			NullImGuiRenderer.Instance,
+			gameplayUiRenderer,
+			shaderProvider.Object,
+			bindlessRegistry,
+			gpuDrawBackendBridge.Object);
+		var passSet = new RenderGraphPassSet(
+			renderer.Object,
+			shaderProvider.Object,
+			bindlessRegistry,
+			gpuDrawResources,
+			hardeningStats,
+			gpuDrawBackendBridge.Object);
+		var frameBuilder = new RenderGraphFrameBuilder(
+			registry,
+			renderer.Object,
+			passSet,
+			gpuDrawResources,
+			NullImGuiRenderer.Instance,
+			gameplayUiRenderer,
+			shaderProvider.Object);
+
+		return (graph, frameBuilder);
+	}
+
 	private static void SetField(object instance, string fieldName, object value)
 	{
 		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
@@ -225,28 +242,4 @@ public sealed class ScreenSpaceDecalPassTests
 		field.SetValue(instance, value);
 	}
 
-	private static object GetField(object instance, string fieldName)
-	{
-		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
-		            ?? throw new AssertionException($"Field '{fieldName}' was not found.");
-		return field.GetValue(instance)!;
-	}
-
-	private static void InitializePrivateField(object instance, string fieldName)
-	{
-		var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
-		            ?? throw new AssertionException($"Field '{fieldName}' was not found.");
-		if (field.GetValue(instance) is not null)
-		{
-			return;
-		}
-
-		if (field.FieldType.IsArray)
-		{
-			field.SetValue(instance, Array.CreateInstance(field.FieldType.GetElementType()!, 0));
-			return;
-		}
-
-		field.SetValue(instance, Activator.CreateInstance(field.FieldType));
-	}
 }

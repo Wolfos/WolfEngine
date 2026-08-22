@@ -27,6 +27,8 @@ public sealed class RenderGraph
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	private readonly List<LightPacket> _renderLights = new();
 	private readonly IUiFrameProvider _uiFrameProvider;
+	private readonly IGameplayUiFrameProvider _gameplayUiFrameProvider;
+	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly RenderPresentationOptions _presentationOptions;
 	private readonly IMainThreadDispatcher _mainThreadDispatcher;
@@ -36,6 +38,7 @@ public sealed class RenderGraph
 	private readonly GpuDrawHardeningStats _hardeningStats;
 	private readonly GpuProfiler _gpuProfiler;
 	private readonly IImGuiRenderer _imGuiRenderer;
+	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private long _pendingShaderRevision;
 	private long _appliedShaderRevision;
 	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
@@ -66,11 +69,13 @@ public sealed class RenderGraph
 		GpuDrawHardeningStats hardeningStats,
 		GpuProfiler gpuProfiler,
 		IUiFrameProvider uiFrameProvider,
+		IGameplayUiFrameProvider gameplayUiFrameProvider,
 		EditorViewportStateBus viewportStateBus,
 		EditorFrameCoordinator editorFrameCoordinator,
 		RenderFrameCoordinator renderFrameCoordinator,
 		IMainThreadDispatcher mainThreadDispatcher,
 		IImGuiRenderer imGuiRenderer,
+		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider,
 		BindlessResourceRegistry bindlessResourceRegistry,
 		IGpuDrawBackendBridge gpuDrawBackendBridge,
@@ -92,12 +97,15 @@ public sealed class RenderGraph
 			passSet,
 			gpuDrawResources,
 			imGuiRenderer,
+			gameplayUiRenderer,
 			shaderProvider);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
 		_imGuiRenderer = imGuiRenderer ?? throw new ArgumentNullException(nameof(imGuiRenderer));
+		_gameplayUiRenderer = gameplayUiRenderer ?? throw new ArgumentNullException(nameof(gameplayUiRenderer));
 		_uiFrameProvider = uiFrameProvider;
+		_gameplayUiFrameProvider = gameplayUiFrameProvider ?? throw new ArgumentNullException(nameof(gameplayUiFrameProvider));
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_presentationOptions = presentationOptions ?? new RenderPresentationOptions();
 		_editorFrameCoordinator =
@@ -118,6 +126,8 @@ public sealed class RenderGraph
 		_passes.Add(pass);
 		return new(pass, _resourceRegistry);
 	}
+
+	internal IReadOnlyList<RenderGraphPass> Passes => _passes;
 
 	public void Execute()
 	{
@@ -463,6 +473,14 @@ public sealed class RenderGraph
 				{
 					Screen.CurrentResolution = currentResolution;
 				}
+				// Gameplay screen UI is recorded into the full presentation targets. The editor later
+				// scales those targets into its scene viewport, while standalone presents them directly.
+				_gameplayUiFrameProvider.SetViewportSize(frameBufferSize, ComputeDisplayScale(frameBufferSize));
+				if (_gameplayUiFrameProvider.TryConsumeLatest(out var latestGameplayUi))
+				{
+					_gameplayUiFrame.Release();
+					_gameplayUiFrame = latestGameplayUi;
+				}
 
 				_currentSceneRenderSize = sceneRenderSize;
 				var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
@@ -497,6 +515,7 @@ public sealed class RenderGraph
 					snapshot.Config,
 					frameCameraPosition);
 				_frameBuilder.SetUiFrame(uiFrame);
+				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
 
 				_frameBuilder.Build(this);
 				Execute();
@@ -575,6 +594,14 @@ public sealed class RenderGraph
 		}
 	}
 
+	private float ComputeDisplayScale(Int2 frameBufferSize)
+	{
+		var windowSize = _renderer.GetWindowSize();
+		if (windowSize.X <= 0 || windowSize.Y <= 0) return 1.0f;
+
+		return (frameBufferSize.X / (float)windowSize.X + frameBufferSize.Y / (float)windowSize.Y) * 0.5f;
+	}
+
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
 
 	/// <summary>Returns the most recent renderer-thread RTAS snapshot without synchronizing the GPU.</summary>
@@ -635,6 +662,13 @@ public sealed class RenderGraph
 		if (texture is null)
 		{
 			throw new ArgumentNullException(nameof(texture));
+		}
+
+		// Persistent render targets are created and published by their owning renderer. Treating their
+		// placeholder mip as an asset upload would replace the stable shader-resource descriptor.
+		if (texture.IsRenderTarget)
+		{
+			return;
 		}
 
 		texture.MarkResourceRequested();
@@ -817,7 +851,11 @@ public sealed class RenderGraph
 			var textures = material.GetTrackedTextures();
 			for (var textureIndex = 0; textureIndex < textures.Length; textureIndex++)
 			{
-				if (textures[textureIndex] is not null)
+				if (textures[textureIndex] is { IsRenderTarget: true } renderTarget)
+				{
+					_gameplayUiRenderer.EnsureTarget(_renderer.GetGfxDevice(), renderTarget);
+				}
+				else if (textures[textureIndex] is not null)
 				{
 					EnsureTextureResources(textures[textureIndex]);
 				}

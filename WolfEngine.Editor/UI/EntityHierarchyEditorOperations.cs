@@ -48,7 +48,7 @@ internal static class EntityHierarchyEditorOperations
 		EditorGui.SelectEntity(duplicatedRoot, world, requestFocus: false);
 		undoRedoService.BeginCapture("Duplicate Entity");
 		undoRedoService.CommitCapture(new EntityCreationUndoRedoEntry("Duplicate Entity", duplicatedSnapshots));
-		interactionState.MarkSceneDirty();
+		interactionState.MarkSceneDirty(scene.World);
 		return duplicatedRoot;
 	}
 
@@ -111,7 +111,7 @@ internal static class EntityHierarchyEditorOperations
 			after));
 
 		EditorGui.SelectEntity(entity, world, requestFocus: false);
-		interactionState.MarkSceneDirty();
+		interactionState.MarkSceneDirty(scene.World);
 		return true;
 	}
 
@@ -291,6 +291,13 @@ internal static class EntityHierarchyEditorOperations
 			if (clonedEntity.ParentEntityId is { } parentEntityId && idMap.TryGetValue(parentEntityId, out var duplicatedParentId))
 			{
 				clonedEntity.ParentEntityId = duplicatedParentId;
+			}
+
+			// Point references that targeted the duplicated subtree at the copies instead of the originals.
+			for (var componentIndex = 0; componentIndex < clonedEntity.Components.Count; componentIndex++)
+			{
+				var component = clonedEntity.Components[componentIndex];
+				component.Data = EditorEntityReferenceUtility.RemapEntityReferences(component.Data, idMap);
 			}
 
 			clones.Add(new DeletedEntitySnapshot(snapshot.CellKey, clonedEntity));

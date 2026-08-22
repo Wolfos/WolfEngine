@@ -44,7 +44,24 @@ FfxFloat32x4 HistorySample(FfxFloat32x2 uv, FfxInt32x2 size)
             totalWeight += weight;
         }
     }
-    return value / ffxMax(abs(totalWeight), FSR3UPSCALER_EPSILON);
+
+    value /= ffxMax(abs(totalWeight), FSR3UPSCALER_EPSILON);
+
+    // Match the reference HistorySample deringing step. The outer Lanczos lobes can
+    // otherwise pull a high-contrast foreground sample into a reprojected background
+    // pixel even after the foreground has moved away. Restrict the result to the range
+    // of the four bilinear taps surrounding the sample position so those lobes retain
+    // sharpness without creating a smooth temporal trail at disocclusion boundaries.
+    const FfxFloat32x4 center00 = LoadHistory(basePixel + FfxInt32x2(0, 0));
+    const FfxFloat32x4 center10 = LoadHistory(basePixel + FfxInt32x2(1, 0));
+    const FfxFloat32x4 center01 = LoadHistory(basePixel + FfxInt32x2(0, 1));
+    const FfxFloat32x4 center11 = LoadHistory(basePixel + FfxInt32x2(1, 1));
+    const FfxFloat32x4 deringingMin = ffxMin(
+        ffxMin(center00, center10), ffxMin(center01, center11));
+    const FfxFloat32x4 deringingMax = ffxMax(
+        ffxMax(center00, center10), ffxMax(center01, center11));
+
+    return clamp(value, deringingMin, deringingMax);
 }
 
 FfxFloat32 GetUpsampleLanczosWeight(FfxFloat32x2 offset, FfxFloat32 kernelWeight)

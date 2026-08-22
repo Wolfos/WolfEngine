@@ -16,6 +16,7 @@ internal static class ProjectGameplayScaffolder
 	private const string EcsProjectReference = "../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj";
 	private const string PhysicsProjectReference = "../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj";
 	private const string AudioProjectReference = "../../WolfEngine/WolfEngine.Audio/WolfEngine.Audio.csproj";
+	private const string UiProjectReference = "../../WolfEngine/WolfEngine.UI/WolfEngine.UI.csproj";
 	private const string EngineSolutionReference = @"..\WolfEngine\WolfEngine\WolfEngine.csproj";
 	private const string EcsSolutionReference = @"..\WolfEngine\WolfEngine.ECS\WolfEngine.ECS.csproj";
 	private const string PhysicsSolutionReference = @"..\WolfEngine\WolfEngine.Physics\WolfEngine.Physics.csproj";
@@ -29,6 +30,8 @@ internal static class ProjectGameplayScaffolder
 	private const string BuildSolutionReference = @"..\WolfEngine\WolfEngine.Build\WolfEngine.Build.csproj";
 	private const string AudioTestsSolutionReference = @"..\WolfEngine\WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj";
 	private const string AudioSolutionReference = @"..\WolfEngine\WolfEngine.Audio\WolfEngine.Audio.csproj";
+	private const string UiSolutionReference = @"..\WolfEngine\WolfEngine.UI\WolfEngine.UI.csproj";
+	private const string UiTestsSolutionReference = @"..\WolfEngine\WolfEngine.UI.Tests\WolfEngine.UI.Tests.csproj";
 
 	public static string GetGameplayProjectRelativePath(string projectName)
 	{
@@ -64,7 +67,7 @@ internal static class ProjectGameplayScaffolder
 	{
 		return
 			$"""
-			 <Project Sdk="Microsoft.NET.Sdk">
+			 <Project Sdk="Microsoft.NET.Sdk.Razor">
 			   <PropertyGroup>
 			     <TargetFramework>{TargetFramework}</TargetFramework>
 			     <ImplicitUsings>enable</ImplicitUsings>
@@ -73,10 +76,16 @@ internal static class ProjectGameplayScaffolder
 			   </PropertyGroup>
 
 			   <ItemGroup>
+			     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+			     <EmbeddedResource Include="UI\**\*.css" />
+			   </ItemGroup>
+
+			   <ItemGroup>
 			     <ProjectReference Include="{EngineProjectReference}" />
 			     <ProjectReference Include="{EcsProjectReference}" />
 			     <ProjectReference Include="{PhysicsProjectReference}" />
 			     <ProjectReference Include="{AudioProjectReference}" />
+			     <ProjectReference Include="{UiProjectReference}" />
 			   </ItemGroup>
 			 </Project>
 			 """;
@@ -143,6 +152,8 @@ internal static class ProjectGameplayScaffolder
 		var buildProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var audioTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var audioProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var uiProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var uiTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var engineFolderGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var testsFolderGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 
@@ -176,6 +187,10 @@ internal static class ProjectGameplayScaffolder
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Audio.Tests", "{{AudioTestsSolutionReference}}", "{{audioTestsProjectGuid}}"
 			  EndProject
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Audio", "{{AudioSolutionReference}}", "{{audioProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.UI", "{{UiSolutionReference}}", "{{uiProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.UI.Tests", "{{UiTestsSolutionReference}}", "{{uiTestsProjectGuid}}"
 			  EndProject
 			  Project("{{SolutionFolderTypeGuid}}") = "Engine", "Engine", "{{engineFolderGuid}}"
 			  EndProject
@@ -243,6 +258,14 @@ internal static class ProjectGameplayScaffolder
 			  		{{audioProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
 			  		{{audioProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
 			  		{{audioProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{uiProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{uiProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{uiProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{uiProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{uiTestsProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{uiTestsProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{uiTestsProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{uiTestsProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
 			  EndGlobalSection
 			  GlobalSection(NestedProjects) = preSolution
 			  		{{engineProjectGuid}} = {{engineFolderGuid}}
@@ -253,12 +276,14 @@ internal static class ProjectGameplayScaffolder
 			  		{{runtimeProjectGuid}} = {{engineFolderGuid}}
 			  		{{buildProjectGuid}} = {{engineFolderGuid}}
 			  		{{audioProjectGuid}} = {{engineFolderGuid}}
+			  		{{uiProjectGuid}} = {{engineFolderGuid}}
 			  		{{testsFolderGuid}} = {{engineFolderGuid}}
 			  		{{ecsTestsProjectGuid}} = {{testsFolderGuid}}
 			  		{{editorTestsProjectGuid}} = {{testsFolderGuid}}
 			  		{{physicsTestsProjectGuid}} = {{testsFolderGuid}}
 			  		{{engineTestsProjectGuid}} = {{testsFolderGuid}}
 			  		{{audioTestsProjectGuid}} = {{testsFolderGuid}}
+			  		{{uiTestsProjectGuid}} = {{testsFolderGuid}}
 			  EndGlobalSection
 			  EndGlobal
 			  """;

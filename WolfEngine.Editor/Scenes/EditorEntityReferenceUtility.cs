@@ -86,6 +86,27 @@ internal static class EditorEntityReferenceUtility
 		return DeserializeEntityAwareValue(data, targetType, entityResolver);
 	}
 
+	/// <summary>
+	/// Rewrites every serialized entity reference whose persistent id appears in <paramref name="entityIdMap"/>.
+	/// References to entities outside the map are left untouched so they keep pointing at their original target.
+	/// </summary>
+	public static JsonElement RemapEntityReferences(JsonElement data, IReadOnlyDictionary<Guid, Guid> entityIdMap)
+	{
+		ArgumentNullException.ThrowIfNull(entityIdMap);
+		if (entityIdMap.Count == 0 || data.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+		{
+			return data;
+		}
+
+		var node = JsonNode.Parse(data.GetRawText());
+		if (RemapEntityReferenceNodes(node, entityIdMap) == false)
+		{
+			return data;
+		}
+
+		return SerializeNodeToElement(node);
+	}
+
 	public static bool ContainsEntityReferences(Type type)
 	{
 		ArgumentNullException.ThrowIfNull(type);
@@ -243,6 +264,55 @@ internal static class EditorEntityReferenceUtility
 		}
 
 		return result;
+	}
+
+	private static bool RemapEntityReferenceNodes(JsonNode? node, IReadOnlyDictionary<Guid, Guid> entityIdMap)
+	{
+		switch (node)
+		{
+			case JsonObject entityReference when TryGetEntityReferenceId(entityReference, out var entityId):
+			{
+				if (entityIdMap.TryGetValue(entityId, out var remappedEntityId) == false)
+				{
+					return false;
+				}
+
+				entityReference[EntityReferenceIdPropertyName] = remappedEntityId.ToString();
+				return true;
+			}
+			case JsonObject jsonObject:
+			{
+				var changed = false;
+				foreach (var property in jsonObject)
+				{
+					changed |= RemapEntityReferenceNodes(property.Value, entityIdMap);
+				}
+
+				return changed;
+			}
+			case JsonArray jsonArray:
+			{
+				var changed = false;
+				for (var i = 0; i < jsonArray.Count; i++)
+				{
+					changed |= RemapEntityReferenceNodes(jsonArray[i], entityIdMap);
+				}
+
+				return changed;
+			}
+			default:
+				return false;
+		}
+	}
+
+	private static bool TryGetEntityReferenceId(JsonObject jsonObject, out Guid entityId)
+	{
+		entityId = Guid.Empty;
+		return jsonObject.Count == 1
+		       && jsonObject.TryGetPropertyValue(EntityReferenceIdPropertyName, out var entityIdNode)
+		       && entityIdNode is JsonValue entityIdValue
+		       && entityIdValue.TryGetValue<string>(out var entityIdText)
+		       && Guid.TryParse(entityIdText, out entityId);
 	}
 
 	private static JsonElement SerializeNodeToElement(JsonNode? node)

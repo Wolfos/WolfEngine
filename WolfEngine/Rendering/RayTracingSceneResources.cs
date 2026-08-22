@@ -610,6 +610,35 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		return indices;
 	}
 
+	/// <summary>
+	/// Marks a skinned instance's acceleration structure as stale for this frame.
+	/// </summary>
+	/// <remarks>
+	/// This is a full rebuild rather than a refit, matching what terrain already does. Refitting
+	/// would be considerably cheaper and is the obvious next step once character counts justify it,
+	/// but a rebuild is unconditionally correct regardless of how far the pose has moved from the
+	/// one the structure was built against.
+	/// </remarks>
+	public void QueueSkinnedInstanceRebuild(Mesh skinnedInstance)
+	{
+		if (skinnedInstance is null || _meshRecords.TryGetValue(skinnedInstance, out var record) == false)
+		{
+			// Not yet registered as a ray tracing instance; AcquireMesh queues the initial build.
+			return;
+		}
+
+		if (_pendingBlasBuilds.Contains(record.AccelerationStructure))
+		{
+			return;
+		}
+
+		_pendingBlasBuilds.Add(record.AccelerationStructure);
+
+		// The structure's contents change even though the instance transform does not, so the
+		// top-level structure has to be rebuilt against the new geometry.
+		_tlasDirty = true;
+	}
+
 	private bool QueueTerrainVertexUpdate(in TerrainInstanceRecord record)
 	{
 		if (record.TerrainSurface.Heightmap is not { } heightmap ||

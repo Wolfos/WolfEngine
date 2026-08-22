@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Gameplay;
@@ -13,6 +14,7 @@ using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Audio;
+using WolfEngine.UI;
 
 namespace WolfEngine.Runtime;
 
@@ -55,6 +57,7 @@ public static class Program
 
 		var services = new ServiceCollection();
 		WolfEngine.ConfigureServices(services);
+		services.AddWolfEngineGameplayUi();
 		services.AddSingleton(new RenderPresentationOptions { OutputMode = RenderOutputMode.FullWindow });
 		var packagedShaders = new PackagedShaderProvider(catalog);
 		services.AddSingleton<IShaderProvider>(packagedShaders);
@@ -87,9 +90,12 @@ public static class Program
 		var worldManager = provider.GetRequiredService<IWorldManager>();
 		worldManager.RegisterWorld(world);
 		worldManager.AddSystem<CameraResolutionUpdater>();
-		worldManager.AddSystem<TransformSystem>();
+		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
+		worldManager.AddSystem<AnimationSystem>();
+		// Register before TransformSystem so interpolated child poses propagate this frame.
 		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
+		worldManager.AddSystem<TransformSystem>();
 		foreach (var system in gameplay.CreateSystems(provider))
 			worldManager.AddSystem(system, SystemExecutionGroup.Gameplay);
 
@@ -147,6 +153,7 @@ public static class Program
 		var renderer = services.GetRequiredService<IRenderer>();
 		var frameCoordinator = services.GetRequiredService<EditorFrameCoordinator>();
 		var audio = services.GetRequiredService<IAudioRuntime>();
+		var rigidbodySystem = services.GetRequiredService<RigidbodySystem>();
 		var stopwatch = Stopwatch.StartNew();
 		var last = stopwatch.Elapsed;
 		var accumulator = 0f;
@@ -169,6 +176,9 @@ public static class Program
 				accumulator -= settings.FixedDeltaTime;
 			}
 
+			// The accumulator left over after this frame's steps is how far the frame being rendered has
+			// advanced past the last one, which is what rigidbody interpolation blends by.
+			rigidbodySystem.PublishFixedStepAccumulator(world, accumulator, settings.FixedDeltaTime);
 			gameplay.Update(delta, world);
 			manager.Update(delta, WorldTag.Game, SystemExecutionGroup.All);
 			audio.Update(delta);

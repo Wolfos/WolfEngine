@@ -11,6 +11,7 @@ namespace WolfEngine.Rendering;
 
 public sealed class GpuDrawDatabase
 {
+	private readonly GpuDrawTransformHistory _transformHistory;
 	private readonly Dictionary<DrawRecordKey, DrawRecord> _records = new();
 	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
@@ -23,9 +24,20 @@ public sealed class GpuDrawDatabase
 	private int _maxActiveDrawIndex;
 	private bool _maxActiveDrawIndexDirty;
 
+	public GpuDrawDatabase()
+		: this(new GpuDrawTransformHistory())
+	{
+	}
+
+	internal GpuDrawDatabase(GpuDrawTransformHistory transformHistory)
+	{
+		_transformHistory = transformHistory;
+	}
+
 	public void BeginSync()
 	{
 		_syncStamp++;
+		_transformHistory.BeginFrame();
 	}
 
 	public void ResetForSnapshotWrite()
@@ -44,7 +56,7 @@ public sealed class GpuDrawDatabase
 		var key = new DrawRecordKey(entity, 0);
 		if (_records.TryGetValue(key, out var record))
 		{
-			ApplyChanges(record, GpuDrawKind.Mesh, mesh, material, worldTransform);
+			ApplyChanges(key, record, GpuDrawKind.Mesh, mesh, material, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
@@ -91,6 +103,7 @@ public sealed class GpuDrawDatabase
 			}
 
 			ApplyDebugPrimitiveChanges(
+				key,
 				record,
 				primitiveMesh,
 				tint,
@@ -171,7 +184,7 @@ public sealed class GpuDrawDatabase
 					$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={GpuDrawKind.Terrain}.");
 			}
 
-			ApplyTerrainChanges(record, mesh, material, localBounds, instanceData, surface, rayTracingChunk, worldTransform);
+			ApplyTerrainChanges(key, record, mesh, material, localBounds, instanceData, surface, rayTracingChunk, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
 		}
@@ -227,6 +240,8 @@ public sealed class GpuDrawDatabase
 				_maxActiveDrawIndexDirty = true;
 			}
 		}
+
+		_transformHistory.PruneUnseen();
 	}
 
 	public void NotifyMaterialChanged(Material material)
@@ -246,7 +261,9 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				// An instance update rewrites the whole entry, so a material change that carried the
+				// current transform as both halves would flatten the draw's motion vector to zero.
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
@@ -287,6 +304,19 @@ public sealed class GpuDrawDatabase
 	{
 		destination.Clear();
 		destination.AddRange(_updates);
+	}
+
+	/// <summary>Gets the mesh's GPU handle.</summary>
+	public bool TryGetMeshHandle(Mesh mesh, out GpuDrawHandle meshHandle)
+	{
+		if (mesh is not null && _meshHandles.TryGetValue(mesh, out var entry))
+		{
+			meshHandle = entry.Handle;
+			return true;
+		}
+
+		meshHandle = GpuDrawHandle.Invalid;
+		return false;
 	}
 
 	public uint GetActiveDrawCommandUpperBound()
@@ -334,7 +364,13 @@ public sealed class GpuDrawDatabase
 
 	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) => _drawHandlePool.IsCurrent(handle);
 
-	private void ApplyChanges(DrawRecord record, GpuDrawKind drawKind, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	private void ApplyChanges(
+		in DrawRecordKey key,
+		DrawRecord record,
+		GpuDrawKind drawKind,
+		Mesh mesh,
+		Material material,
+		in Matrix4x4 worldTransform)
 	{
 		if (record.DrawKind != drawKind)
 		{
@@ -342,18 +378,22 @@ public sealed class GpuDrawDatabase
 				$"Shared draw kind mismatch for entity {record.Entity}. Existing kind={record.DrawKind}, requested kind={drawKind}.");
 		}
 
+		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
 		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
-		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
+		var uploadStale = _transformHistory.IsUploadStale(key, uploadPreviousWorld, worldTransform);
 
-		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || settlePreviousTransform) == false)
+		// The record mirrors what the instance table should hold even when nothing is uploaded, because a
+		// full GPU state refresh re-uploads straight from the records.
+		record.PreviousWorld = uploadPreviousWorld;
+		record.World = worldTransform;
+
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || uploadStale) == false)
 		{
 			return;
 		}
-
-		var uploadPreviousWorld = record.World;
 
 		if (meshChanged)
 		{
@@ -376,7 +416,6 @@ public sealed class GpuDrawDatabase
 
 		if (transformChanged || meshChanged)
 		{
-			record.World = worldTransform;
 			ComputeBounds(record, mesh);
 		}
 
@@ -388,7 +427,7 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				mesh));
@@ -402,14 +441,14 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
 				material));
 		}
 
-		if (transformChanged)
+		if (uploadStale)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -417,28 +456,16 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				uploadPreviousWorld,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius));
-			record.PreviousWorld = uploadPreviousWorld;
 		}
 
-		if (settlePreviousTransform)
-		{
-			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
-				record.DrawKind,
-				record.DrawHandle,
-				record.InstanceHandle,
-				record.MeshHandle,
-				record.MaterialHandle,
-				record.World,
-				record.World,
-				record.BoundsCenterRadius));
-			record.PreviousWorld = record.World;
-		}
+		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
 	}
 
 	private void ApplyDebugPrimitiveChanges(
+		in DrawRecordKey key,
 		DrawRecord record,
 		Mesh primitiveMesh,
 		ColorRGBA tint,
@@ -447,19 +474,21 @@ public sealed class GpuDrawDatabase
 		in TerrainChunkInstanceData instanceData)
 	{
 		var material = record.Material;
+		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, primitiveMesh) == false;
 		var tintChanged = material.Color.Equals(tint) == false;
 		var alphaModeChanged = material.AlphaMode != alphaMode;
 		var instanceDataChanged = TerrainInstanceEquals(record.TerrainInstanceData, instanceData) == false;
-		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
+		var uploadStale = _transformHistory.IsUploadStale(key, uploadPreviousWorld, worldTransform);
 
-		if ((transformChanged || meshChanged || tintChanged || alphaModeChanged || instanceDataChanged || settlePreviousTransform) == false)
+		record.PreviousWorld = uploadPreviousWorld;
+		record.World = worldTransform;
+
+		if ((transformChanged || meshChanged || tintChanged || alphaModeChanged || instanceDataChanged || uploadStale) == false)
 		{
 			return;
 		}
-
-		var uploadPreviousWorld = record.World;
 
 		if (meshChanged)
 		{
@@ -470,7 +499,6 @@ public sealed class GpuDrawDatabase
 
 		if (transformChanged || meshChanged)
 		{
-			record.World = worldTransform;
 			ComputeBounds(record, primitiveMesh);
 		}
 		record.TerrainInstanceData = instanceData;
@@ -483,7 +511,7 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
@@ -500,7 +528,7 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
@@ -508,7 +536,7 @@ public sealed class GpuDrawDatabase
 				record.TerrainInstanceData));
 		}
 
-		if (transformChanged || instanceDataChanged)
+		if (uploadStale || instanceDataChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -516,30 +544,17 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				uploadPreviousWorld,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.TerrainInstanceData));
-			record.PreviousWorld = uploadPreviousWorld;
 		}
 
-		if (settlePreviousTransform)
-		{
-			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
-				record.DrawKind,
-				record.DrawHandle,
-				record.InstanceHandle,
-				record.MeshHandle,
-				record.MaterialHandle,
-				record.World,
-				record.World,
-				record.BoundsCenterRadius,
-				record.TerrainInstanceData));
-			record.PreviousWorld = record.World;
-		}
+		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
 	}
 
 	private void ApplyTerrainChanges(
+		in DrawRecordKey key,
 		DrawRecord record,
 		Mesh mesh,
 		Material material,
@@ -549,6 +564,7 @@ public sealed class GpuDrawDatabase
 		in TerrainRayTracingChunkData rayTracingChunk,
 		in Matrix4x4 worldTransform)
 	{
+		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
@@ -557,14 +573,15 @@ public sealed class GpuDrawDatabase
 		var boundsChanged = record.HasBoundsOverride == false || record.LocalBoundsOverride.Equals(localBounds) == false;
 		var surfaceChanged = record.TerrainSurface.HasValue == false || TerrainSurfaceEquals(record.TerrainSurface.Value, surface) == false;
 		var rayTracingChunkChanged = TerrainRayTracingChunkEquals(record.TerrainRayTracingChunk, rayTracingChunk) == false;
-		var settlePreviousTransform = transformChanged == false && record.PreviousWorld.Equals(record.World) == false;
+		var uploadStale = _transformHistory.IsUploadStale(key, uploadPreviousWorld, worldTransform);
 
-		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || terrainInstanceChanged || boundsChanged || surfaceChanged || rayTracingChunkChanged || settlePreviousTransform) == false)
+		record.PreviousWorld = uploadPreviousWorld;
+		record.World = worldTransform;
+
+		if ((transformChanged || meshChanged || materialChanged || materialResourceChanged || terrainInstanceChanged || boundsChanged || surfaceChanged || rayTracingChunkChanged || uploadStale) == false)
 		{
 			return;
 		}
-
-		var uploadPreviousWorld = record.World;
 
 		if (meshChanged)
 		{
@@ -608,7 +625,6 @@ public sealed class GpuDrawDatabase
 
 		if (transformChanged || meshChanged || boundsChanged || terrainInstanceChanged)
 		{
-			record.World = worldTransform;
 			ComputeBounds(record, mesh);
 		}
 
@@ -620,7 +636,7 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
@@ -637,7 +653,7 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				record.World,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.Mesh,
@@ -647,7 +663,7 @@ public sealed class GpuDrawDatabase
 				record.TerrainRayTracingChunk));
 		}
 
-		if (transformChanged || terrainInstanceChanged || boundsChanged)
+		if (uploadStale || terrainInstanceChanged || boundsChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
 				record.DrawKind,
@@ -655,29 +671,14 @@ public sealed class GpuDrawDatabase
 				record.InstanceHandle,
 				record.MeshHandle,
 				record.MaterialHandle,
-				uploadPreviousWorld,
+				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
 				record.TerrainInstanceData,
 				record.TerrainRayTracingChunk));
-			record.PreviousWorld = uploadPreviousWorld;
 		}
 
-		if (settlePreviousTransform)
-		{
-			_updates.Add(GpuDrawUpdate.CreateTransformUpdate(
-				record.DrawKind,
-				record.DrawHandle,
-				record.InstanceHandle,
-				record.MeshHandle,
-				record.MaterialHandle,
-				record.World,
-				record.World,
-				record.BoundsCenterRadius,
-				record.TerrainInstanceData,
-				record.TerrainRayTracingChunk));
-			record.PreviousWorld = record.World;
-		}
+		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
 	}
 
 	private DrawRecord CreateRecord(
@@ -701,7 +702,10 @@ public sealed class GpuDrawDatabase
 			MaterialHandle = AcquireMaterialHandle(material),
 			MaterialResourceRevision = material.ResourceRevision,
 			World = worldTransform,
-			PreviousWorld = worldTransform,
+			// A draw the other snapshot buffer already tracks keeps moving through the frame it first
+			// appears in this database, so its history rather than its current transform is what the
+			// motion vector spans.
+			PreviousWorld = _transformHistory.Advance(key, worldTransform),
 			LastSeenStamp = _syncStamp,
 			HasBoundsOverride = localBoundsOverride.HasValue,
 			LocalBoundsOverride = localBoundsOverride ?? default,
@@ -709,6 +713,7 @@ public sealed class GpuDrawDatabase
 		};
 
 		ComputeBounds(record, mesh);
+		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
 		return record;
 	}
 
@@ -905,7 +910,7 @@ public sealed class GpuDrawDatabase
 		public int RefCount { get; set; }
 	}
 
-	private readonly record struct DrawRecordKey(Entity Entity, int SubdrawId);
+	internal readonly record struct DrawRecordKey(Entity Entity, int SubdrawId);
 
 	private sealed class EntityComparer : IEqualityComparer<Entity>
 	{

@@ -9,6 +9,7 @@ public readonly struct Fsr3PrepareReactivityPassConfig
 	public required DescriptorHandle ReconstructedPrevNearestDepthHandle { get; init; }
 	public required DescriptorHandle DilatedMotionVectorsHandle { get; init; }
 	public required DescriptorHandle DilatedDepthHandle { get; init; }
+	public required DescriptorHandle InputDepthHandle { get; init; }
 	public required DescriptorHandle ReactiveMaskHandle { get; init; }
 	public required DescriptorHandle TransparencyAndCompositionMaskHandle { get; init; }
 	public required DescriptorHandle AccumulationReadHandle { get; init; }

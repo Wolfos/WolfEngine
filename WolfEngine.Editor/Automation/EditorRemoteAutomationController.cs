@@ -2,12 +2,15 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
+using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.Automation;
 
@@ -20,14 +23,17 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
+	private readonly IInputSystem _inputSystem;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
+	private readonly IProjectAssetPipelineService _assetPipelineService;
 	private readonly IRenderer _renderer;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly RenderFrameCoordinator _renderFrameCoordinator;
 	private readonly RenderGraph _renderGraph;
 	private readonly GpuProfiler _gpuProfiler;
+	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -40,24 +46,30 @@ public sealed class EditorRemoteAutomationController
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorPlaySession playSession,
+		IInputSystem inputSystem,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		ITerrainAuthoringService terrainAuthoringService,
+		IProjectAssetPipelineService assetPipelineService,
 		IRenderer renderer,
 		EditorFrameCoordinator editorFrameCoordinator,
 		RenderFrameCoordinator renderFrameCoordinator,
 		RenderGraph renderGraph,
-		GpuProfiler gpuProfiler)
+		GpuProfiler gpuProfiler,
+		EditorViewportStateBus viewportStateBus)
 	{
+		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
 		_projectService = projectService;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
 		_sceneWorkspace = sceneWorkspace;
 		_sceneSnapshotService = sceneSnapshotService;
 		_playSession = playSession;
+		_inputSystem = inputSystem;
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_terrainAuthoringService = terrainAuthoringService;
+		_assetPipelineService = assetPipelineService;
 		_renderer = renderer;
 		_editorFrameCoordinator = editorFrameCoordinator;
 		_renderFrameCoordinator = renderFrameCoordinator;
@@ -105,6 +117,193 @@ public sealed class EditorRemoteAutomationController
 			_interactionState.MarkSceneDirty();
 			return (entityId, resolvedName);
 		}, cancellationToken);
+
+	/// <summary>
+	/// Instantiates an imported 3D model into the authoring scene by asset name, through the same
+	/// path the Assets window uses for a drag and drop.
+	/// </summary>
+	public Task<InstantiatedModelResult> InstantiateModelAsync(
+		string assetName,
+		Vector3? spawnPosition,
+		float uniformScale,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (string.IsNullOrWhiteSpace(assetName))
+			{
+				throw new InvalidOperationException("asset_name is required.");
+			}
+
+			var projectRoot = Path.GetFullPath(_projectPath);
+			var database = _assetPipelineService.LoadDatabase(projectRoot);
+			var model = database.Assets.FirstOrDefault(asset =>
+				asset.Type == AssetType.Model3D &&
+				asset.Name.Contains(assetName, StringComparison.OrdinalIgnoreCase));
+			if (model is null)
+			{
+				var available = string.Join(", ", database.Assets
+					.Where(asset => asset.Type == AssetType.Model3D)
+					.Select(asset => asset.Name));
+				throw new InvalidOperationException(
+					$"No 3D model asset matching '{assetName}'. Available models: {available}");
+			}
+
+			var scene = _sceneWorkspace.CurrentScene;
+			var world = scene.World;
+			var existingEntities = new HashSet<Entity>(EnumerateEntities(world));
+
+			_assetPipelineService.InstantiateImportedModel(projectRoot, model.Id, world, spawnPosition);
+
+			var rootEntity = default(Entity);
+			var skinnedMeshRendererCount = 0;
+			var animatorCount = 0;
+			foreach (var entity in EnumerateEntities(world))
+			{
+				if (existingEntities.Contains(entity))
+				{
+					continue;
+				}
+
+				scene.EntityCellKeys[entity] = SceneCellKey.Global;
+				if (world.HasComponent<Parent>(entity) == false && rootEntity.IsValid == false)
+				{
+					rootEntity = entity;
+				}
+
+				if (world.HasComponent<SkinnedMeshRenderer>(entity))
+				{
+					skinnedMeshRendererCount++;
+				}
+
+				if (world.HasComponent<Animator>(entity))
+				{
+					animatorCount++;
+				}
+			}
+
+			if (rootEntity.IsValid && Math.Abs(uniformScale - 1.0f) > float.Epsilon)
+			{
+				world.SetLocalScale(rootEntity, new Vector3(uniformScale, uniformScale, uniformScale));
+			}
+
+			var rootEntityId = rootEntity.IsValid
+				? _sceneSnapshotService.EnsurePersistentEntityId(scene, rootEntity)
+				: Guid.Empty;
+			_interactionState.MarkSceneDirty();
+
+			return new InstantiatedModelResult(
+				model.Name,
+				model.Id,
+				rootEntityId,
+				skinnedMeshRendererCount,
+				animatorCount,
+				_editorFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	/// <summary>
+	/// Reports what every animator in the authoring scene is actually doing. The bind-pose offset is
+	/// the useful number: it is zero when a character is posed at rest, so a non-zero value is
+	/// positive evidence that clip data reached the skinning matrices.
+	/// </summary>
+	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var world = _sceneWorkspace.CurrentScene.World;
+			var animators = new List<AnimatorStateResult>();
+
+			foreach (var entry in world.View<Animator>())
+			{
+				ref var animator = ref entry.First;
+				var skeleton = animator.Skeleton;
+				var clip = animator.Clip;
+				var matrices = animator.SkinningMatrices;
+
+				var maxOffset = 0.0f;
+				if (matrices is not null)
+				{
+					for (var i = 0; i < matrices.Length; i++)
+					{
+						maxOffset = MathF.Max(maxOffset, matrices[i].Translation.Length());
+					}
+				}
+
+				var matched = 0;
+				var unmatched = 0;
+				if (animator.PoseSource is SingleClipPoseSource clipSource)
+				{
+					matched = clipSource.MatchedBoneTrackCount;
+					unmatched = clipSource.UnmatchedBoneTrackCount;
+				}
+
+				animators.Add(new AnimatorStateResult(
+					_sceneSnapshotService.EnsurePersistentEntityId(_sceneWorkspace.CurrentScene, entry.Entity),
+					world.HasComponent<NameComponent>(entry.Entity)
+						? world.GetComponent<NameComponent>(entry.Entity).Name
+						: string.Empty,
+					clip?.Name ?? string.Empty,
+					skeleton?.Name ?? string.Empty,
+					skeleton?.BoneCount ?? 0,
+					clip?.TransformTracks.Length ?? 0,
+					matched,
+					unmatched,
+					animator.Time,
+					clip?.Duration ?? 0.0f,
+					animator.Playing,
+					maxOffset));
+			}
+
+			var skinnedRendererCount = 0;
+			var skinnedWithGpuRange = 0;
+			var skinnedRenderers = new List<SkinnedRendererStateResult>();
+			foreach (var entry in world.View<WorldTransform, SkinnedMeshRenderer>())
+			{
+				skinnedRendererCount++;
+				ref var renderer = ref entry.Second;
+				if (renderer.SkinnedInstance?.HasGpuVertexRange == true)
+				{
+					skinnedWithGpuRange++;
+				}
+
+				var localToWorld = entry.First.LocalToWorld;
+				Matrix4x4.Decompose(localToWorld, out var scale, out _, out var translation);
+				skinnedRenderers.Add(new SkinnedRendererStateResult(
+					world.HasComponent<NameComponent>(entry.Entity)
+						? world.GetComponent<NameComponent>(entry.Entity).Name
+						: string.Empty,
+					renderer.SkinnedInstance?.HasGpuVertexRange ?? false,
+					renderer.Mesh?.Vertices.Length ?? 0,
+					renderer.Mesh?.BoundingSphere.Radius ?? 0.0f,
+					renderer.SkinnedInstance?.BoundingSphere.Radius ?? 0.0f,
+					scale.X,
+					translation.X,
+					translation.Y,
+					translation.Z));
+			}
+
+			return new AnimationStateResult(
+				animators.Count,
+				skinnedRendererCount,
+				skinnedWithGpuRange,
+				animators,
+				skinnedRenderers,
+				_editorFrameCoordinator.CompletedSequence,
+				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	/// <summary>
+	/// Snapshots the transform-bearing entities. Materialised into a list rather than returned lazily
+	/// because the ECS view enumerator is a ref struct and cannot survive an iterator.
+	/// </summary>
+	private static List<Entity> EnumerateEntities(World world)
+	{
+		var entities = new List<Entity>();
+		foreach (var entry in world.View<LocalTransform>())
+		{
+			entities.Add(entry.Entity);
+		}
+
+		return entities;
+	}
 
 	public Task DeleteEntityAsync(Guid entityId, CancellationToken cancellationToken) => Enqueue(() =>
 	{
@@ -154,6 +353,43 @@ public sealed class EditorRemoteAutomationController
 				throw new InvalidOperationException("The editor is not in Play mode.");
 			}
 			return GetPlayModeState();
+		}, cancellationToken);
+
+	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
+	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Playing)
+			{
+				throw new InvalidOperationException("Input injection is only available while Play mode is running.");
+			}
+			if (Enum.TryParse<InputActionBinding>(binding, ignoreCase: true, out var parsed) == false ||
+			    parsed == InputActionBinding.None)
+			{
+				throw new InvalidOperationException($"Unknown input button binding '{binding}'.");
+			}
+
+			_inputSystem.SetButton(parsed, pressed);
+		}, cancellationToken);
+
+	/// <summary>Injects a two-dimensional axis binding through the gameplay input system.</summary>
+	public Task SetInputAxis2DAsync(
+		string binding,
+		Vector2 value,
+		CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (_playSession.State != EditorPlayState.Playing)
+			{
+				throw new InvalidOperationException("Input injection is only available while Play mode is running.");
+			}
+			if (Enum.TryParse<InputActionBinding>(binding, ignoreCase: true, out var parsed) == false ||
+			    parsed == InputActionBinding.None)
+			{
+				throw new InvalidOperationException($"Unknown input axis binding '{binding}'.");
+			}
+
+			_inputSystem.SetAxis2D(parsed, value);
 		}, cancellationToken);
 
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
@@ -278,6 +514,21 @@ public sealed class EditorRemoteAutomationController
 				_gpuProfiler.Enabled = wasEnabled;
 			}
 		}, cancellationToken);
+
+	public Task<CpuFrameProfileResult> GetCpuFrameProfileAsync(CancellationToken cancellationToken) =>
+		Enqueue(() => new CpuFrameProfileResult(
+			FrameProfiler.Instance.GetLastFrames()
+				.Select(frame => new CpuThreadProfileResult(
+					frame.ThreadId,
+					frame.ThreadName,
+					CopyCpuNode(frame.Root)))
+				.ToArray(),
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence), cancellationToken);
+
+	/// <summary>Sets the scene debug-view override used by frame capture.</summary>
+	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
+		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
@@ -443,6 +694,12 @@ public sealed class EditorRemoteAutomationController
 					.ToArray()))
 			.ToArray();
 	}
+
+	private static CpuProfileNodeResult CopyCpuNode(FrameProfiler.ProfileNode node) => new(
+		node.Name,
+		node.DurationMs,
+		node.AllocatedBytes,
+		node.Children.Select(CopyCpuNode).ToArray());
 
 	private static void ValidateFinite(float value, string parameterName)
 	{

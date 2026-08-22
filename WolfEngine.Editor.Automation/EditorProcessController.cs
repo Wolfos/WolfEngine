@@ -102,6 +102,23 @@ public sealed class EditorProcessController : IAsyncDisposable
 		await GetRunningEditor().DeleteEntityAsync(parsedId, cancellationToken).ConfigureAwait(false);
 	}
 
+	public Task<InstantiatedModelResult> InstantiateModelAsync(
+		string assetName,
+		float? x,
+		float? y,
+		float? z,
+		float uniformScale,
+		CancellationToken cancellationToken)
+	{
+		System.Numerics.Vector3? spawnPosition = x.HasValue || y.HasValue || z.HasValue
+			? new System.Numerics.Vector3(x ?? 0.0f, y ?? 0.0f, z ?? 0.0f)
+			: null;
+		return GetRunningEditor().InstantiateModelAsync(assetName, spawnPosition, uniformScale, cancellationToken);
+	}
+
+	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
+
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
 
@@ -113,6 +130,15 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<PlayModeStateResult> StopPlayModeAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().StopPlayModeAsync(cancellationToken);
+
+	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetInputButtonAsync(binding, pressed, cancellationToken);
+
+	public Task SetInputAxis2DAsync(
+		string binding,
+		System.Numerics.Vector2 value,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().SetInputAxis2DAsync(binding, value, cancellationToken);
 
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
@@ -146,6 +172,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<GpuFrameProfileResult> ProfileGpuFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().ProfileGpuFramesAsync(frameCount, cancellationToken);
+
+	public Task<CpuFrameProfileResult> GetCpuFrameProfileAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetCpuFrameProfileAsync(cancellationToken);
+
+	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);

@@ -37,6 +37,20 @@ public sealed class EditorAutomationTools
 		return $"Deleted entity {entityId}.";
 	}
 
+	[McpServerTool(Name = "instantiate_model"), Description("Instantiate an imported 3D model into the authoring scene by asset name, through the same path the Assets window uses. Reports how many skinned mesh renderers and animators the model brought with it.")]
+	public Task<InstantiatedModelResult> InstantiateModel(
+		[Description("Substring of the 3D model asset name, such as 'Macarena'.")] string assetName,
+		[Description("Optional spawn X in world units.")] float? x = null,
+		[Description("Optional spawn Y in world units.")] float? y = null,
+		[Description("Optional spawn Z in world units.")] float? z = null,
+		[Description("Uniform scale applied to the instantiated root. Useful for sources authored in centimetres.")] float uniformScale = 1.0f,
+		CancellationToken cancellationToken = default) =>
+		_controller.InstantiateModelAsync(assetName, x, y, z, uniformScale, cancellationToken);
+
+	[McpServerTool(Name = "get_animation_state"), Description("Report every animator in the authoring scene: bound clip and skeleton, bone and track counts, how many clip tracks resolved against the skeleton, playback time, and how far the current pose has moved from the bind pose.")]
+	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
+		_controller.GetAnimationStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "load_scene"), Description("Load a scene from the open project's asset database through the editor's normal scene-replacement path. The persistent editor and renderer remain running until the scene load has completed.")]
 	public Task<SceneLoadResult> LoadScene(
 		[Description("Absolute or project-relative path of a .scene.json asset.")] string scenePath,
@@ -54,6 +68,28 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "stop_play_mode"), Description("Stop Play mode and discard the isolated runtime scene, returning to the authoring scene.")]
 	public Task<PlayModeStateResult> StopPlayMode(CancellationToken cancellationToken) =>
 		_controller.StopPlayModeAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_input_button"), Description("Press or release one named input binding in a running Play-mode scene, through the same input system used by gameplay.")]
+	public async Task<string> SetInputButton(
+		[Description("InputActionBinding name, such as KeyW or GamepadFaceSouth.")] string binding,
+		[Description("True to press the binding; false to release it.")] bool pressed,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetInputButtonAsync(binding, pressed, cancellationToken).ConfigureAwait(false);
+		return $"Input binding '{binding}' is now {(pressed ? "pressed" : "released")}.";
+	}
+
+	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
+	public async Task<string> SetInputAxis2D(
+		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,
+		[Description("Horizontal axis value.")] float x,
+		[Description("Vertical axis value.")] float y,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetInputAxis2DAsync(binding, new System.Numerics.Vector2(x, y), cancellationToken)
+			.ConfigureAwait(false);
+		return $"Input axis '{binding}' is now ({x}, {y}).";
+	}
 
 	[McpServerTool(Name = "wait_for_render_frames"), Description("Wait for completed render-graph frames, rather than editor update ticks, and return the editor and render sequence numbers.")]
 	public Task<RenderFrameWaitResult> WaitForRenderFrames(
@@ -96,6 +132,21 @@ public sealed class EditorAutomationTools
 		[Description("Positive number of completed GPU-profile frames to aggregate.")] int frameCount,
 		CancellationToken cancellationToken) =>
 		_controller.ProfileGpuFramesAsync(frameCount, cancellationToken);
+
+	[McpServerTool(Name = "get_cpu_frame_profile"), Description("Return the latest completed CPU profiler tree for every profiled thread, including duration and managed allocation per scope.")]
+	public Task<CpuFrameProfileResult> GetCpuFrameProfile(CancellationToken cancellationToken) =>
+		_controller.GetCpuFrameProfileAsync(cancellationToken);
+
+	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
+	public async Task<string> SetSceneDebugView(
+		[Description("Debug view id, or empty to release.")] string debugViewId,
+		CancellationToken cancellationToken)
+	{
+		await _controller.SetSceneDebugViewAsync(debugViewId, cancellationToken).ConfigureAwait(false);
+		return string.IsNullOrWhiteSpace(debugViewId)
+			? "Scene debug view override released."
+			: $"Scene viewport pinned to debug view '{debugViewId}'.";
+	}
 
 	[McpServerTool(Name = "capture_frame"), Description("Capture a PNG from the currently running editor on its next rendered frame. This never launches a separate editor process.")]
 	public Task<FrameCaptureResult> CaptureFrame(

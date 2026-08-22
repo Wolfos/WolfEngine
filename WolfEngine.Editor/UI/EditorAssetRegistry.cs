@@ -275,6 +275,34 @@ public sealed class PrefabEditorAssetHandler : IEditorAssetHandler
 	}
 }
 
+public sealed class ModelEditorAssetHandler : IEditorAssetHandler
+{
+	private readonly ModelAssetEditor _editor;
+
+	public ModelEditorAssetHandler(ModelAssetEditor editor)
+	{
+		_editor = editor ?? throw new ArgumentNullException(nameof(editor));
+	}
+
+	public AssetType AssetType => AssetType.Model3D;
+	public string DisplayName => "3D Model";
+	public string ThumbnailLabel => "3D";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.TryGetSummary<Model3DAssetSummary>(out var summary) == false
+			? "3D Model"
+			: $"3D Model | {summary.RootNodeCount} root node(s) | {summary.AnimationCount} animation(s)";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		_editor.Draw(asset);
+	}
+}
+
 public sealed class AudioEditorAssetHandler : IEditorAssetHandler
 {
 	private readonly AudioAssetEditor _editor;

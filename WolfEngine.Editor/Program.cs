@@ -84,6 +84,8 @@ public static class Program
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
+		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
+		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<AudioAssetEditor>();
@@ -92,6 +94,7 @@ public static class Program
 		services.AddSingleton<DataAssetEditor>();
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();
+		services.AddSingleton<ModelAssetEditor>();
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
@@ -99,6 +102,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, SceneEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, PrefabEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, ModelEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
 		services.AddSingleton<IEditorModeState, EditorModeState>();
 		services.AddSingleton<IMenuBar, MenuBar>();
@@ -115,6 +119,7 @@ public static class Program
 		services.AddSingleton<SphereColliderGizmoDrawer>();
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
+		services.AddSingleton<SceneSelectionController>();
 		services.AddSingleton<EditorGui>();
 		services.AddSingleton<ProjectSettingsWindow>();
 		

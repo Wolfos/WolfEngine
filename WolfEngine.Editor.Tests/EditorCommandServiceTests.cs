@@ -265,6 +265,55 @@ public sealed class EditorCommandServiceTests
 	}
 
 	[Test]
+	public void DeleteFocusedSelection_DuringPlayMode_TargetsRuntimeSceneNotAuthoringScene()
+	{
+		var fixture = CreateCommandFixture();
+		var runtimeScene = new EditorScene();
+		fixture.PlaySession.IsActive.Returns(true);
+		fixture.PlaySession.RuntimeScene.Returns(runtimeScene);
+		fixture.PlaySession.ActiveScene.Returns(runtimeScene);
+		var entityHandler = new TrackingEntityDeletionHandler();
+		fixture.Service.BindDeletionHandlers(entityHandler, new TrackingAssetDeletionHandler());
+
+		fixture.InteractionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		Assert.That(fixture.Service.DeleteFocusedSelection(), Is.True);
+
+		Assert.That(entityHandler.LastDeletedScene, Is.SameAs(runtimeScene));
+		Assert.That(entityHandler.LastDeletedScene, Is.Not.SameAs(fixture.SceneWorkspace.CurrentScene));
+	}
+
+	[Test]
+	public void DuplicateFocusedSelection_DuringPlayMode_TargetsRuntimeSceneNotAuthoringScene()
+	{
+		var fixture = CreateCommandFixture();
+		var runtimeScene = new EditorScene();
+		fixture.PlaySession.IsActive.Returns(true);
+		fixture.PlaySession.RuntimeScene.Returns(runtimeScene);
+		fixture.PlaySession.ActiveScene.Returns(runtimeScene);
+		var entityHandler = new TrackingEntityDeletionHandler();
+		fixture.Service.BindDeletionHandlers(entityHandler, new TrackingAssetDeletionHandler());
+
+		fixture.InteractionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		Assert.That(fixture.Service.DuplicateFocusedSelection(), Is.True);
+
+		Assert.That(entityHandler.LastDuplicatedScene, Is.SameAs(runtimeScene));
+		Assert.That(entityHandler.LastDuplicatedScene, Is.Not.SameAs(fixture.SceneWorkspace.CurrentScene));
+	}
+
+	[Test]
+	public void DeleteFocusedSelection_InEditMode_TargetsAuthoringScene()
+	{
+		var fixture = CreateCommandFixture();
+		var entityHandler = new TrackingEntityDeletionHandler();
+		fixture.Service.BindDeletionHandlers(entityHandler, new TrackingAssetDeletionHandler());
+
+		fixture.InteractionState.SetFocusedWindow(EditorFocusedWindow.Entities);
+		Assert.That(fixture.Service.DeleteFocusedSelection(), Is.True);
+
+		Assert.That(entityHandler.LastDeletedScene, Is.SameAs(fixture.SceneWorkspace.CurrentScene));
+	}
+
+	[Test]
 	public void InteractionState_BeginFrame_DoesNotClearTrackedDeleteTarget()
 	{
 		var state = new EditorInteractionState();
@@ -349,6 +398,30 @@ public sealed class EditorCommandServiceTests
 		Assert.That(scene.World.IsAlive(entity), Is.False);
 		Assert.That(EditorGui.HasSelectedEntity, Is.False);
 		Assert.That(interactionState.IsSceneDirty, Is.True);
+	}
+
+	[Test]
+	public void EntitiesWindow_DeleteSelectedEntity_InRuntimeScene_LeavesAuthoringSceneCleanAndUnrecorded()
+	{
+		var interactionState = new EditorInteractionState();
+		var undoRedoService = Substitute.For<IEditorUndoRedoService>();
+		var window = new EntitiesWindow(
+			Substitute.For<IIconManager>(),
+			interactionState,
+			Substitute.For<IEditorSceneSnapshotService>(),
+			undoRedoService,
+			Substitute.For<IPrefabAssetCreator>(),
+			Substitute.For<IAssetSelectionService>(),
+			Substitute.For<IEditorNotificationService>());
+		var runtimeScene = new EditorScene { World = new World(WorldTag.Game) };
+		var entity = runtimeScene.World.CreateEntity("Entity");
+		EditorGui.SelectEntity(entity, runtimeScene.World, requestFocus: false);
+
+		var deleted = window.DeleteSelectedEntity(runtimeScene);
+
+		Assert.That(deleted, Is.True);
+		Assert.That(runtimeScene.World.IsAlive(entity), Is.False);
+		Assert.That(interactionState.IsSceneDirty, Is.False);
 	}
 
 	[Test]
@@ -463,7 +536,8 @@ public sealed class EditorCommandServiceTests
 	private static CommandFixture CreateCommandFixture()
 	{
 		var sceneWorkspace = Substitute.For<IEditorSceneWorkspace>();
-		sceneWorkspace.CurrentScene.Returns(new EditorScene());
+		var authoringScene = new EditorScene();
+		sceneWorkspace.CurrentScene.Returns(authoringScene);
 		sceneWorkspace.LoadSceneAsset(Arg.Any<Guid>()).Returns(_ => new EditorScene());
 
 		var projectService = Substitute.For<IEditorProjectService>();
@@ -471,6 +545,8 @@ public sealed class EditorCommandServiceTests
 		var assetRefreshService = Substitute.For<IEditorAssetRefreshService>();
 		var playSession = Substitute.For<IEditorPlaySession>();
 		playSession.IsActive.Returns(false);
+		playSession.AuthoringScene.Returns(authoringScene);
+		playSession.ActiveScene.Returns(authoringScene);
 		var operationService = Substitute.For<IEditorOperationService>();
 		var fileDialogService = Substitute.For<IFileDialogService>();
 		fileDialogService.SaveFile(Arg.Any<FileDialogOptions>()).Returns("/project/Assets/Scenes/Untitled Scene");
@@ -531,16 +607,20 @@ public sealed class EditorCommandServiceTests
 	{
 		public int CallCount { get; private set; }
 		public int DuplicateCallCount { get; private set; }
+		public EditorScene? LastDeletedScene { get; private set; }
+		public EditorScene? LastDuplicatedScene { get; private set; }
 
 		public bool DuplicateSelectedEntity(EditorScene scene)
 		{
 			DuplicateCallCount++;
+			LastDuplicatedScene = scene;
 			return true;
 		}
 
 		public bool DeleteSelectedEntity(EditorScene scene)
 		{
 			CallCount++;
+			LastDeletedScene = scene;
 			return true;
 		}
 	}

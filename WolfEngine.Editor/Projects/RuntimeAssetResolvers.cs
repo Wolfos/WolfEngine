@@ -153,11 +153,34 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 		var summary = context.Asset.GetRequiredSummary<MeshAssetSummary>();
 		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
 		var meshFile = ImportedMeshSerializer.Read(absoluteMeshPath);
+		var hasSkin = meshFile.BoneIndices.Length > 0 && meshFile.BoneWeights.Length > 0;
 		return new Mesh(
 			meshFile.Vertices,
 			meshFile.Indices,
 			meshFile.Normals,
 			meshFile.UVs,
-			meshFile.Tangents);
+			meshFile.Tangents,
+			hasSkin ? meshFile.BoneIndices : null,
+			hasSkin ? meshFile.BoneWeights : null);
+	}
+}
+
+public sealed class SkeletonRuntimeAssetResolver : ISkeletonRuntimeAssetResolver
+{
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var summary = context.Asset.GetRequiredSummary<SkeletonAssetSummary>();
+		var absolutePath = context.GetAbsolutePath(summary.RelativeImportedSkeletonPath);
+		return SkeletonSerializer.Read(absolutePath).ToSkeleton();
+	}
+}
+
+public sealed class AnimationClipRuntimeAssetResolver : IAnimationClipRuntimeAssetResolver
+{
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var summary = context.Asset.GetRequiredSummary<AnimationClipAssetSummary>();
+		var absolutePath = context.GetAbsolutePath(summary.RelativeImportedClipPath);
+		return AnimationClipSerializer.Read(absolutePath).ToClip();
 	}
 }

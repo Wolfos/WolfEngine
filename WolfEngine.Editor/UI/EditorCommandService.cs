@@ -336,9 +336,11 @@ public sealed class EditorCommandService : IEditorCommandService
 
 	public bool DeleteFocusedSelection()
 	{
+		// Entity shortcuts must target the scene the entities window is showing, which is the isolated
+		// runtime scene while play mode is active.
 		return _interactionState.FocusedWindow switch
 		{
-			EditorFocusedWindow.Entities => _entityDeletionHandler?.DeleteSelectedEntity(_sceneWorkspace.CurrentScene) ?? false,
+			EditorFocusedWindow.Entities => _entityDeletionHandler?.DeleteSelectedEntity(_playSession.ActiveScene) ?? false,
 			EditorFocusedWindow.Assets => _assetDeletionHandler?.RequestDeleteSelectedItem() ?? false,
 			_ => false
 		};
@@ -348,7 +350,7 @@ public sealed class EditorCommandService : IEditorCommandService
 	{
 		return _interactionState.FocusedWindow switch
 		{
-			EditorFocusedWindow.Entities => _entityDeletionHandler?.DuplicateSelectedEntity(_sceneWorkspace.CurrentScene) ?? false,
+			EditorFocusedWindow.Entities => _entityDeletionHandler?.DuplicateSelectedEntity(_playSession.ActiveScene) ?? false,
 			_ => false
 		};
 	}

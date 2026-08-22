@@ -83,6 +83,10 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? PackedMeshIndexBuffer { get; set; }
 	public uint PackedMeshVertexStride { get; set; }
 
+	public IGfxBuffer? SkinVertexBuffer { get; set; }
+	public IGfxBuffer? BoneMatrixBuffer { get; set; }
+	public IGfxBuffer? SkinnedInstanceBuffer { get; set; }
+
 	/// <summary>
 	/// Publishes a single binding-version change if any buffer in the batch just completed was replaced.
 	/// Consumers treat a version change as "the bindings moved this frame", so one capacity pass must

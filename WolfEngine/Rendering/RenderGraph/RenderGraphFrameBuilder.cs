@@ -57,6 +57,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle DecalSourceGBufferEmissive { get; init; }
 	public RenderGraphResourceHandle GBufferDepth { get; init; }
 	public RenderGraphResourceHandle GBufferVelocity { get; init; }
+	public RenderGraphResourceHandle MotionVectorDebugColor { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionRaw { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionTemp { get; init; }
 	public RenderGraphResourceHandle AmbientOcclusionFinal { get; init; }
@@ -96,6 +97,7 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
+	public RenderGraphResourceHandle ReflectionsTrace { get; init; }
 	public RenderGraphResourceHandle ReflectionsRadiance { get; init; }
 	public RenderGraphResourceHandle ResolvedSceneColor { get; init; }
 	/// <summary>
@@ -153,6 +155,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly ReflectionsPass _reflectionsPass;
+	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
 	private readonly TemporalHistoryStorePass _temporalHistoryStorePass;
 	private readonly TransparentForwardPass _transparentForwardPass;
@@ -161,15 +164,25 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly TonemappingPass _tonemappingPass;
 	private readonly CasSharpenPass _casSharpenPass;
 	private readonly CopyToFinalPass _copyToFinalPass;
+	private readonly MotionVectorDebugPass _motionVectorDebugPass;
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly RayTracingSceneResources _rayTracingSceneResources;
+	private readonly SkinningPass _skinningPass;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
+	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private SkyboxResources? _externalSkybox;
 	private RenderGraphFrameResources _frameResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
+	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
+	private readonly List<GameplayTextureTarget> _gameplayTextureTargets = [];
+
+	private readonly record struct GameplayTextureTarget(
+		GameplayUiTextureSurfaceFrame Surface,
+		RenderGraphResourceHandle Handle,
+		IGfxTexture Texture);
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
 	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
@@ -243,6 +256,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
+	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
 	private readonly Action<RenderGraphContext> _taaHistoryStoreExecute;
 	private readonly Action<RenderGraphContext> _transparentForwardExecute;
@@ -250,6 +264,9 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _tonemappingExecute;
 	private readonly Action<RenderGraphContext> _casSharpenExecute;
 	private readonly Action<RenderGraphContext> _copyToFinalExecute;
+	private readonly Action<RenderGraphContext> _motionVectorDebugExecute;
+	private readonly Action<RenderGraphContext> _gameplayScreenEncodedUiExecute;
+	private readonly Action<RenderGraphContext> _gameplayScreenFinalUiExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
@@ -271,10 +288,12 @@ internal sealed class RenderGraphFrameBuilder
 		RenderGraphPassSet passSet,
 		GpuDrawResources gpuDrawResources,
 		IImGuiRenderer imGuiRenderer,
+		GameplayUiGpuRenderer gameplayUiRenderer,
 		IShaderProvider shaderProvider)
 	{
 		_passSet = passSet;
 		_rayTracingSceneResources = new RayTracingSceneResources(shaderProvider);
+		_skinningPass = new SkinningPass(shaderProvider);
 		_resources = resources;
 		_renderer = renderer;
 		_ambientOcclusionPass = passSet.AmbientOcclusionPass;
@@ -286,6 +305,7 @@ internal sealed class RenderGraphFrameBuilder
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_reflectionsPass = passSet.ReflectionsPass;
+		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
 		_temporalHistoryStorePass = passSet.TemporalHistoryStorePass;
 		_transparentForwardPass = passSet.TransparentForwardPass;
@@ -294,11 +314,13 @@ internal sealed class RenderGraphFrameBuilder
 		_tonemappingPass = passSet.TonemappingPass;
 		_casSharpenPass = passSet.CasSharpenPass;
 		_copyToFinalPass = passSet.CopyToFinalPass;
+		_motionVectorDebugPass = passSet.MotionVectorDebugPass;
 		_shadowMapPass = passSet.ShadowMapPass;
 		_gpuDrawPass = passSet.GpuDrawPass;
 		_gpuDrawResources = gpuDrawResources;
 		_skyboxPass = passSet.SkyboxPass;
 		_imGuiRenderer = imGuiRenderer;
+		_gameplayUiRenderer = gameplayUiRenderer;
 
 		_gbufferExecute = ExecuteGBuffer;
 		_ambientOcclusionExecute = ExecuteAmbientOcclusion;
@@ -315,6 +337,7 @@ internal sealed class RenderGraphFrameBuilder
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_reflectionsExecute = ExecuteReflections;
+		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
 		_taaHistoryStoreExecute = ExecuteTemporalHistoryStore;
 		_transparentForwardExecute = ExecuteTransparentForward;
@@ -322,6 +345,9 @@ internal sealed class RenderGraphFrameBuilder
 		_tonemappingExecute = ExecuteTonemapping;
 		_casSharpenExecute = ExecuteCasSharpen;
 		_copyToFinalExecute = ExecuteCopyToFinal;
+		_motionVectorDebugExecute = ExecuteMotionVectorDebug;
+		_gameplayScreenEncodedUiExecute = ExecuteGameplayScreenEncodedUi;
+		_gameplayScreenFinalUiExecute = ExecuteGameplayScreenFinalUi;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
@@ -337,6 +363,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_passSet.InvalidateShaderPipelines();
 		ShaderPipelineInvalidation.Invalidate(_rayTracingSceneResources);
+		_skinningPass.InvalidateShaders();
 	}
 
 	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();
@@ -358,6 +385,15 @@ internal sealed class RenderGraphFrameBuilder
 		Vector3 cameraPosition)
 	{
 		var device = _renderer.GetGfxDevice();
+		_gameplayTextureTargets.Clear();
+		for (var i = 0; i < _gameplayUiFrame.TextureSurfaces.Length; i++)
+		{
+			var surface = _gameplayUiFrame.TextureSurfaces[i];
+			var texture = _gameplayUiRenderer.EnsureTarget(device, surface.Target);
+			var handle = _resources.ImportTexture(texture, takeOwnership: false, initialState: ResourceState.ShaderResource);
+			_gameplayTextureTargets.Add(new GameplayTextureTarget(surface, handle, texture));
+		}
+		_gameplayUiRenderer.PruneTargets(device, _gameplayUiFrame);
 		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
 		{
 			config = CreateRayTracingDisabledConfig(config);
@@ -410,6 +446,7 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var lightingHandle = default(RenderGraphResourceHandle);
+		var reflectionsTraceHandle = default(RenderGraphResourceHandle);
 		var reflectionsRadianceHandle = default(RenderGraphResourceHandle);
 		var colorPyramidLevelHandles = Array.Empty<RenderGraphResourceHandle>();
 		var colorPyramidHistoryValid = false;
@@ -423,6 +460,7 @@ internal sealed class RenderGraphFrameBuilder
 		var decalSourceEmissiveHandle = default(RenderGraphResourceHandle);
 		var gbufferDepthHandle = default(RenderGraphResourceHandle);
 		var gbufferVelocityHandle = default(RenderGraphResourceHandle);
+		var motionVectorDebugHandle = default(RenderGraphResourceHandle);
 		var shadowMapHandle0 = default(RenderGraphResourceHandle);
 		var shadowMapHandle1 = default(RenderGraphResourceHandle);
 		var shadowMapHandle2 = default(RenderGraphResourceHandle);
@@ -500,6 +538,15 @@ internal sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.RenderTarget | TextureUsage.ShaderResource,
 				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+			if (IsMotionVectorDebugView(_requestedSceneDebugViewId))
+			{
+				motionVectorDebugHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+					sceneFramebufferSize.X,
+					sceneFramebufferSize.Y,
+					TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f)));
+			}
 			gbufferDepthHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 				sceneFramebufferSize.X,
 				sceneFramebufferSize.Y,
@@ -586,6 +633,17 @@ internal sealed class RenderGraphFrameBuilder
 					TextureFormat.Rgba16Float,
 					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				var reflectionTraceSize = GetReflectionTraceSize(sceneFramebufferSize, config.Reflections);
+				reflectionsTraceHandle =
+					reflectionTraceSize.X == sceneFramebufferSize.X &&
+					reflectionTraceSize.Y == sceneFramebufferSize.Y
+						? reflectionsRadianceHandle
+						: _resources.CreateTransientTexture(new TextureDescriptor(
+							reflectionTraceSize.X,
+							reflectionTraceSize.Y,
+							TextureFormat.Rgba16Float,
+							TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+							new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 				EnsureColorPyramidResources(_renderer.GetGfxDevice(), sceneFramebufferSize);
 				if (_colorPyramidTextures.Length > 0)
 				{
@@ -899,7 +957,7 @@ internal sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 
@@ -917,7 +975,7 @@ internal sealed class RenderGraphFrameBuilder
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Bgra8Unorm,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 
@@ -945,6 +1003,7 @@ internal sealed class RenderGraphFrameBuilder
 			DecalSourceGBufferEmissive = decalSourceEmissiveHandle,
 			GBufferDepth = gbufferDepthHandle,
 			GBufferVelocity = gbufferVelocityHandle,
+			MotionVectorDebugColor = motionVectorDebugHandle,
 			AmbientOcclusionRaw = ambientOcclusionRawHandle,
 			AmbientOcclusionTemp = ambientOcclusionTempHandle,
 			AmbientOcclusionFinal = ambientOcclusionFinalHandle,
@@ -993,6 +1052,7 @@ internal sealed class RenderGraphFrameBuilder
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
 			LightingBuffer = lightingHandle,
+			ReflectionsTrace = reflectionsTraceHandle,
 			ReflectionsRadiance = reflectionsRadianceHandle,
 			ResolvedSceneColor = resolvedSceneColorHandle,
 			ColorPyramidLevels = colorPyramidLevelHandles,
@@ -1071,7 +1131,13 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferNormal, "GBuffer Normal", gbufferNormalHandle, SceneDebugViewKind.Color);
-			RegisterSceneDebugView(SceneDebugViewIds.MotionVectors, "Motion Vectors", gbufferVelocityHandle, SceneDebugViewKind.Color);
+			// The flow-field encoding only exists while this view is selected; the option itself
+			// has to stay in the dropdown so it can be selected in the first place.
+			RegisterSceneDebugView(
+				SceneDebugViewIds.MotionVectors,
+				"Motion Vectors (Flow Field)",
+				motionVectorDebugHandle.IsValid ? motionVectorDebugHandle : gbufferVelocityHandle,
+				SceneDebugViewKind.Color);
 			_sceneDebugViewOptions = BuildSceneDebugViewOptions();
 		}
 	}
@@ -1079,6 +1145,11 @@ internal sealed class RenderGraphFrameBuilder
 	public void SetUiFrame(UiFrameData uiFrame)
 	{
 		_uiFrame = uiFrame;
+	}
+
+	public void SetGameplayUiFrame(GameplayUiRenderFrame frame)
+	{
+		_gameplayUiFrame = frame ?? GameplayUiRenderFrame.Empty;
 	}
 
 	public void SetSceneViewportSelection(string requestedDebugViewId)
@@ -1092,6 +1163,19 @@ internal sealed class RenderGraphFrameBuilder
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public void Build(RenderGraph graph)
 	{
+		for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+		{
+			var target = _gameplayTextureTargets[i];
+			if (target.Surface.IsDirty == false)
+			{
+				continue;
+			}
+
+			graph.AddPass($"Gameplay UI Texture {target.Surface.SurfaceId}", PassKind.Graphics)
+				.WriteTexture(target.Handle, ResourceState.RenderTarget)
+				.SetExecute(context => ExecuteGameplayTextureUi(context, target));
+		}
+
 		if (_frameResources.SceneEnabled)
 		{
 			graph.AddPass("GpuDraw Update", PassKind.Compute)
@@ -1109,14 +1193,18 @@ internal sealed class RenderGraphFrameBuilder
 			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
 				.SetExecute(_gpuDrawCameraCullExecute);
 
-			graph.AddPass("GBuffer", PassKind.Graphics)
+			var gbufferBuilder = graph.AddPass("GBuffer", PassKind.Graphics)
 				.WriteTexture(_frameResources.DecalSourceGBufferAlbedo.IsValid ? _frameResources.DecalSourceGBufferAlbedo : _frameResources.GBufferAlbedo, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferNormal.IsValid ? _frameResources.DecalSourceGBufferNormal : _frameResources.GBufferNormal, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferMaterial.IsValid ? _frameResources.DecalSourceGBufferMaterial : _frameResources.GBufferMaterial, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.DecalSourceGBufferEmissive.IsValid ? _frameResources.DecalSourceGBufferEmissive : _frameResources.GBufferEmissive, ResourceState.RenderTarget)
 				.WriteTexture(_frameResources.GBufferVelocity, ResourceState.RenderTarget)
-				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite)
-				.SetExecute(_gbufferExecute);
+				.WriteTexture(_frameResources.GBufferDepth, ResourceState.DepthWrite);
+			for (var i = 0; i < _gameplayTextureTargets.Count; i++)
+			{
+				gbufferBuilder.ReadTexture(_gameplayTextureTargets[i].Handle, ResourceState.ShaderResource);
+			}
+			gbufferBuilder.SetExecute(_gbufferExecute);
 
 			if (_frameResources.DecalSourceGBufferAlbedo.IsValid)
 			{
@@ -1324,13 +1412,25 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.ReflectionsRadiance, ResourceState.UnorderedAccess);
+					.WriteTexture(_frameResources.ReflectionsTrace, ResourceState.UnorderedAccess);
 				foreach (var colorPyramidLevel in _frameResources.ColorPyramidLevels)
 				{
 					reflectionsBuilder.ReadTexture(colorPyramidLevel, ResourceState.ShaderResource);
 				}
 				ReadSkyboxTextures(reflectionsBuilder);
 				reflectionsBuilder.SetExecute(_reflectionsExecute);
+
+				if (_frameResources.Config.Reflections.Mode == ReflectionMode.RayTraced &&
+				    _frameResources.Config.Reflections.RayTracedSettings.Resolution !=
+				    RayTracedReflectionResolution.Full)
+				{
+					graph.AddPass("Reflections Upsample", PassKind.Compute)
+						.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+						.ReadTexture(_frameResources.ReflectionsTrace, ResourceState.ShaderResource)
+						.WriteTexture(_frameResources.ReflectionsRadiance, ResourceState.UnorderedAccess)
+						.SetExecute(_reflectionsUpsampleExecute);
+				}
 			}
 
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
@@ -1478,16 +1578,38 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
 
-			graph.AddPass("CAS Sharpen", PassKind.Compute)
-				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
-				.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
-				.SetExecute(_casSharpenExecute);
+			// This is married to TAA which is currently unavailable. FSR has its own RCAS sharpening
+			// graph.AddPass("CAS Sharpen", PassKind.Compute)
+			// 	.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+			// 	.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
+			// 	.SetExecute(_casSharpenExecute);
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
-				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
+
+			if (ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
+			    _gameplayUiFrame.Screen.CommandCount > 0)
+			{
+				// Keep capture/debug output and the presented target identical. Both are BGRA8, which
+				// matches the UI pipeline, and CSS colors are already authored in display space.
+				graph.AddPass("Gameplay UI Screen Capture", PassKind.Graphics)
+					.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.RenderTarget)
+					.SetExecute(_gameplayScreenEncodedUiExecute);
+				graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
+					.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
+					.SetExecute(_gameplayScreenFinalUiExecute);
+			}
+
+			if (_frameResources.MotionVectorDebugColor.IsValid)
+			{
+				graph.AddPass("Motion Vector Debug", PassKind.Compute)
+					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.MotionVectorDebugColor, ResourceState.UnorderedAccess)
+					.SetExecute(_motionVectorDebugExecute);
+			}
 		}
 
 		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
@@ -1706,6 +1828,14 @@ internal sealed class RenderGraphFrameBuilder
 			StringComparison.Ordinal);
 	}
 
+	private static bool IsMotionVectorDebugView(string? requestedDebugViewId)
+	{
+		return string.Equals(
+			NormalizeSceneDebugViewId(requestedDebugViewId),
+			SceneDebugViewIds.MotionVectors,
+			StringComparison.Ordinal);
+	}
+
 	private static bool IsDdgiProbeDebugView(string? requestedDebugViewId)
 	{
 		var debugViewId = NormalizeSceneDebugViewId(requestedDebugViewId);
@@ -1744,10 +1874,57 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
 		context.GpuDrawDatabase.CopyUpdates(_frameGpuDrawUpdates);
+
+		// Before RecordUpdate, not after. RecordUpdate would otherwise upload the instance through
+		// the ordinary mesh path, which allocates a vertex range but leaves the shared bind-pose
+		// source mesh unuploaded — and the skinning shader reads its bind pose from there.
+		var skinningPackets = context.FrameSnapshot.SkinningPackets;
+		EnsureSkinnedInstanceResources(skinningPackets);
+
+		// Graphics bindings require these buffers even when no meshes are skinned.
+		var device = _renderer.GetGfxDevice();
+		_skinningPass.EnsureResources(device);
+		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
+		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
+		_gpuDrawResources.SkinnedInstanceBuffer = _skinningPass.SkinnedInstanceBuffer;
+
 		_gpuDrawPass.RecordUpdate(context);
+
+		_skinningPass.Record(
+			context.CommandList,
+			device,
+			_renderer,
+			skinningPackets,
+			context.FrameSnapshot.BoneMatrices,
+			context.GpuDrawDatabase);
+
+		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
+		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
+		_gpuDrawResources.SkinnedInstanceBuffer = _skinningPass.SkinnedInstanceBuffer;
+
 		if (RequiresRayTracingScene(_frameResources.Config))
 		{
+			// Deliberately after skinning: acceleration structures are built over the vertices this
+			// frame produced, so a ray-traced reflection shows the pose being drawn rather than the
+			// previous one.
+			for (var i = 0; i < skinningPackets.Count; i++)
+			{
+				_rayTracingSceneResources.QueueSkinnedInstanceRebuild(skinningPackets[i].InstanceMesh);
+			}
+
 			_rayTracingSceneResources.RecordUpdate(context, _renderer, _frameGpuDrawUpdates);
+		}
+	}
+
+	/// <summary>
+	/// Claims each skinned instance's private vertex range, and makes its shared bind-pose source
+	/// resident, before anything else can upload the instance through the ordinary mesh path.
+	/// </summary>
+	private void EnsureSkinnedInstanceResources(IReadOnlyList<SkinningPacket> packets)
+	{
+		for (var i = 0; i < packets.Count; i++)
+		{
+			_renderer.EnsureSkinnedInstanceResources(packets[i].InstanceMesh);
 		}
 	}
 
@@ -1959,6 +2136,15 @@ internal sealed class RenderGraphFrameBuilder
 		_reflectionsPass.Record(context, in config, context.SceneData);
 	}
 
+	private void ExecuteReflectionsUpsample(RenderGraphContext context)
+	{
+		var config = _reflectionsUpsamplePass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_reflectionsUpsamplePass.Record(context, in config, context.SceneData);
+	}
+
 	private void ExecuteColorPyramid(
 		RenderGraphContext context,
 		ColorPyramidPass.Stage stage,
@@ -2036,10 +2222,19 @@ internal sealed class RenderGraphFrameBuilder
 		foreach (var mip in fsr.ShadingSpdMips) shadingChange.ReadTexture(mip, ResourceState.ShaderResource);
 		shadingChange.SetExecute(ExecuteFsr3ShadingChange);
 
+		// Prepare Reactivity only writes pixels that acquire a new thin-feature lock. NewLocks is
+		// transient and may alias an earlier full-resolution FSR3 intermediate, so its untouched
+		// pixels are not implicitly zero even though its descriptor has a zero clear colour. Clear
+		// at the lifetime boundary, after those earlier intermediates have finished using the alias.
+		// Otherwise their depth/luma payload is read as a positive lock and stale colour history is
+		// protected from rectification, producing bright trails behind moving opaque geometry.
+		AddFsr3Clear(graph, "FSR3 Clear New Locks", fsr.NewLocks, size, 0u, false);
+
 		graph.AddPass("FSR3 Prepare Reactivity", PassKind.Compute)
 			.ReadTexture(fsr.ReconstructedPrevNearestDepth, ResourceState.UnorderedAccess)
 			.ReadTexture(fsr.DilatedMotionVectors, ResourceState.ShaderResource)
 			.ReadTexture(fsr.DilatedDepth, ResourceState.ShaderResource)
+			.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
 			.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
 			.ReadTexture(fsr.TransparencyMask, ResourceState.ShaderResource)
 			.ReadTexture(fsr.AccumulationRead, ResourceState.ShaderResource)
@@ -2174,6 +2369,7 @@ internal sealed class RenderGraphFrameBuilder
 		var settings = _frameResources.Config.Fsr3;
 		var config = _passSet.Fsr3PrepareReactivityPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.ReconstructedPrevNearestDepth, fsr.DilatedMotionVectors, fsr.DilatedDepth,
+			_frameResources.GBufferDepth,
 			_frameResources.GBufferMaterial, fsr.TransparencyMask, fsr.AccumulationRead, fsr.AccumulationWrite,
 			fsr.ShadingChange, fsr.CurrentLumaWrite, fsr.FrameInfo, fsr.DilatedReactiveMasks,
 			fsr.NewLocks, in constants,
@@ -2437,11 +2633,48 @@ internal sealed class RenderGraphFrameBuilder
 		_copyToFinalPass.Record(context, in config);
 	}
 
+	private void ExecuteMotionVectorDebug(RenderGraphContext context)
+	{
+		var config = _motionVectorDebugPass.BuildConfig(
+			context,
+			_renderer.GetGfxDevice(),
+			_frameResources.GBufferVelocity,
+			_frameResources.MotionVectorDebugColor,
+			_frameResources.SceneFramebufferSize,
+			_frameResources.Config.MotionVectorDebug);
+		_motionVectorDebugPass.Record(context, in config);
+	}
+
 	private void ExecuteImGui(RenderGraphContext context)
 	{
 		var finalColor = context.GetTexture(_frameResources.FinalColor);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
 		_imGuiRenderer.Record(context, _uiFrame, finalColor, clearTarget: _frameResources.SceneEnabled == false);
+	}
+
+	private void ExecuteGameplayScreenEncodedUi(RenderGraphContext context) =>
+		ExecuteGameplayScreenUi(context, _frameResources.EncodedSceneColor);
+
+	private void ExecuteGameplayScreenFinalUi(RenderGraphContext context) =>
+		ExecuteGameplayScreenUi(context, _frameResources.FinalColor);
+
+	private void ExecuteGameplayScreenUi(RenderGraphContext context, RenderGraphResourceHandle targetHandle)
+	{
+		var target = context.GetTexture(targetHandle);
+		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), _gameplayUiFrame.Screen);
+		_gameplayUiRenderer.Record(context, _gameplayUiFrame.Screen, target, clearTarget: false);
+	}
+
+	private void ExecuteGameplayTextureUi(RenderGraphContext context, GameplayTextureTarget target)
+	{
+		_gameplayUiRenderer.EnsureResources(_renderer.GetGfxDevice(), target.Surface.Frame);
+		_gameplayUiRenderer.Record(
+			context,
+			target.Surface.Frame,
+			target.Texture,
+			clearTarget: true,
+			target.Surface.ClearColor);
+		target.Surface.IsDirty = false;
 	}
 
 	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderGraphFrameResources resources, int cascadeIndex)
@@ -2990,6 +3223,25 @@ internal sealed class RenderGraphFrameBuilder
 		       (config.Reflections.Mode == ReflectionMode.RayTraced ||
 		        (config.Reflections.ScreenSpaceSettings.MaxSteps > 0 &&
 		         config.Reflections.ScreenSpaceSettings.MaxRayDistance > 0.0f));
+	}
+
+	private static Int2 GetReflectionTraceSize(Int2 fullSize, ReflectionConfig config)
+	{
+		if (config.Mode != ReflectionMode.RayTraced)
+		{
+			return fullSize;
+		}
+
+		var divisor = config.RayTracedSettings.Resolution switch
+		{
+			RayTracedReflectionResolution.Full => 1,
+			RayTracedReflectionResolution.Half => 2,
+			RayTracedReflectionResolution.Quarter => 4,
+			_ => 2
+		};
+		return new Int2(
+			Math.Max((fullSize.X + divisor - 1) / divisor, 1),
+			Math.Max((fullSize.Y + divisor - 1) / divisor, 1));
 	}
 
 	private static bool HasRayTracedDdgi(RenderConfig config) => DdgiUtilities.IsRayTracedDdgiEnabled(config);

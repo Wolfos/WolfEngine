@@ -1,7 +1,8 @@
 // FSR3 upscaler - prepare reactivity pass.
 //
 // Ported from ffx-fsr3/upstream/ffx_fsr3upscaler_prepare_reactivity.h
-// (FidelityFX SDK v1.1.2).
+// (FidelityFX SDK v1.1.2), with the improved disocclusion accumulation defaults from
+// SDK v1.1.4 / FSR 3.1.4.
 //
 // Combines authored reactive/transparency masks with disocclusion, motion divergence,
 // shading change, and thin-feature detection. The packed output controls how much history
@@ -75,6 +76,43 @@ FfxFloat32 ComputeDisocclusions(FfxFloat32x2 fUv, FfxFloat32x2 fMotionVector, Ff
         : 0.0f;
 
     return fDisocclusion;
+}
+
+// The reference four-tap test above requires every contributing previous-depth tap to
+// be behind the current surface. At a foreground silhouette, motion-vector dilation
+// deliberately selects the foreground while the current raster pixel may already be
+// newly exposed background. One matching foreground tap then vetoes the entire test.
+// Detect that exact condition from the current and dilated depths so a one-pixel stale
+// foreground sample cannot seed a multi-frame colour trail.
+FfxFloat32 ComputeDilatedForegroundDisocclusion(
+    FfxFloat32 fCurrentDepth,
+    FfxFloat32 fDilatedDepth,
+    FfxFloat32x2 fDilatedMotionVector)
+{
+    const FfxFloat32 fCurrentDepthViewSpace = GetViewSpaceDepth(fCurrentDepth);
+    const FfxFloat32 fDilatedDepthViewSpace = GetViewSpaceDepth(fDilatedDepth);
+    const FfxFloat32 fDepthDifference =
+        fCurrentDepthViewSpace - fDilatedDepthViewSpace;
+
+    const FfxFloat32 fHalfViewportWidth =
+        length(FfxFloat32x2(RenderSize()) * 0.5f);
+    const FfxFloat32 fDepthThreshold =
+        ffxMax(fCurrentDepthViewSpace, fDilatedDepthViewSpace);
+    const FfxFloat32 fRequiredDepthSeparation =
+        1.37e-05f * fHalfViewportWidth * fDepthThreshold;
+
+    const FfxFloat32 fDepthRejection = ffxSaturate(fDepthDifference /
+        ffxMax(fRequiredDepthSeparation, FSR3UPSCALER_FP32_MIN));
+
+    // A static depth edge also has a different current and dilated depth, but it must
+    // keep accumulating jittered samples. Gate the extra rejection on actual foreground
+    // motion. The low transition excludes exact zero-motion geometry without weakening
+    // slowly moving silhouettes, and 4K-normalized velocity keeps it resolution independent.
+    const FfxFloat32 fMotion4K = Get4KVelocity(fDilatedMotionVector);
+    const FfxFloat32 fMotionRejection = ffxSaturate(
+        (fMotion4K - 0.01f) / 0.09f);
+
+    return fDepthRejection * fMotionRejection;
 }
 
 FfxFloat32 ComputeMotionDivergence(
@@ -245,13 +283,17 @@ FfxFloat32 UpdateAccumulation(
     }
 
     fAccumulation = ffxLerp(fAccumulation, 0.0f, fShadingChange);
-    fAccumulation = ffxLerp(fAccumulation, ffxMin(fAccumulation, 0.25f), fDisocclusion);
+    fAccumulation = ffxLerp(
+        fAccumulation,
+        ffxMin(fMinDisocclusionAccumulation, fAccumulation),
+        fDisocclusion);
     fAccumulation *= FfxFloat32(round(fAccumulation * 100.0f) > 1.0f);
 
-    // Update for next frame, normalized to store in unorm.
-    const FfxFloat32 fAccumulatedFramesMax = 3.0f;
+    // Update for next frame, normalized to store in unorm. A full disocclusion resolves to
+    // zero above, so the stored value begins at one accumulation step and history is not
+    // trusted again until the newly revealed surface has contributed a complete frame.
     const FfxFloat32 fAccumulatedFramesToStore =
-        ffxSaturate(fAccumulation + (1.0f / fAccumulatedFramesMax));
+        ffxSaturate(fAccumulation + fAccumulationAddedPerFrame);
     StoreAccumulation(iPxPos, fAccumulatedFramesToStore);
 
     return fAccumulation;
@@ -277,9 +319,18 @@ void PrepareReactivity(FfxInt32x2 iPxPos)
     const FfxFloat32x2 fUv = (iPxPos + 0.5f) / RenderSize();
     const FfxFloat32x2 fMotionVector = LoadDilatedMotionVector(iPxPos);
     const FfxFloat32 fDilatedDepth = LoadDilatedDepth(iPxPos);
+    const FfxFloat32 fInputDepth = LoadInputDepth(iPxPos);
 
-    const FfxFloat32 fDisocclusion = ComputeDisocclusions(
-        fUv, fMotionVector, GetViewSpaceDepth(fDilatedDepth));
+    // Motion-vector dilation deliberately borrows the nearest foreground sample so
+    // reprojection stays stable at silhouettes. Do not also borrow that sample's depth
+    // for disocclusion: on newly exposed background it makes the reconstructed previous
+    // foreground depth appear to match and preserves the foreground colour as a trail.
+    // Comparing the real current-pixel depth keeps the robust dilated motion while
+    // correctly rejecting history where the foreground has moved away.
+    const FfxFloat32 fDisocclusion = ffxMax(
+        ComputeDisocclusions(fUv, fMotionVector, GetViewSpaceDepth(fDilatedDepth)),
+        ComputeDilatedForegroundDisocclusion(
+            fInputDepth, fDilatedDepth, fMotionVector));
     const FfxFloat32 fShadingChange = ffxMax(
         DilateReactiveMasks(iPxPos, fUv), ComputeShadingChange(fUv));
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.Animation;
 using WolfEngine.ECS;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
@@ -31,6 +32,8 @@ public static class WolfEngine
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());
+		services.AddSingleton<IGameplayUiFrameProvider>(NullGameplayUiFrameProvider.Instance);
+		services.AddSingleton<GameplayUiGpuRenderer>();
 		services.AddSingleton<EditorViewportStateBus>();
 		services.AddSingleton(new RenderPresentationOptions());
 		services.AddSingleton<IMainThreadDispatcher, MainThreadDispatcher>();
@@ -57,14 +60,14 @@ public static class WolfEngine
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
 			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
-			services.AddSingleton<IImGuiRenderer, MetalImGuiRenderer>();
+			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 		}
 		else if (OperatingSystem.IsWindows())
 		{
 			services.AddSingleton<IGpuDrawBackendBridge, D3D12GpuDrawBackendBridge>();
-			services.AddSingleton<IImGuiRenderer, D3D12ImGuiRenderer>();
+			services.AddSingleton<IImGuiRenderer, D3D12UiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererD3D>();
 			services.AddSingleton<IRenderPipeline, RenderPipeline>();
 
@@ -77,6 +80,8 @@ public static class WolfEngine
 	public static void AddDefaultSystems(IWorldManager worldManager)
 	{
 		worldManager.AddSystem<CameraResolutionUpdater>();
+		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
+		worldManager.AddSystem<AnimationSystem>();
 		worldManager.AddSystem<TransformSystem>();
 	}
 }

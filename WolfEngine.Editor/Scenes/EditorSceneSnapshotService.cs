@@ -134,6 +134,10 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 		ArgumentNullException.ThrowIfNull(deletedEntities);
 
 		var entitiesById = new Dictionary<Guid, Entity>(deletedEntities.Count);
+		var restoredEntities = new List<(Entity Entity, SavedEntity Saved)>(deletedEntities.Count);
+
+		// Create and register every entity before restoring any component, so entity
+		// references between entities in the same batch can resolve their persistent ids.
 		for (var i = 0; i < deletedEntities.Count; i++)
 		{
 			var snapshot = deletedEntities[i];
@@ -148,26 +152,31 @@ public sealed class EditorSceneSnapshotService : IEditorSceneSnapshotService
 				continue;
 			}
 
-				var entity = CreateEntity(scene.World, snapshot.Entity);
-				scene.EntityIds[entity] = snapshot.Entity.EntityId;
-				scene.EntityCellKeys[entity] = snapshot.CellKey;
-				if (snapshot.Entity.PrefabSourcePath.Count > 0)
-				{
-					scene.EntityPrefabSourcePaths[entity] = EditorPrefabUtility.ClonePrefabSourcePath(snapshot.Entity.PrefabSourcePath);
-				}
+			var entity = CreateEntity(scene.World, snapshot.Entity);
+			scene.EntityIds[entity] = snapshot.Entity.EntityId;
+			scene.EntityCellKeys[entity] = snapshot.CellKey;
+			if (snapshot.Entity.PrefabSourcePath.Count > 0)
+			{
+				scene.EntityPrefabSourcePaths[entity] = EditorPrefabUtility.ClonePrefabSourcePath(snapshot.Entity.PrefabSourcePath);
+			}
 
-				if (string.IsNullOrWhiteSpace(snapshot.Entity.Icon) == false)
-				{
-					scene.EntityIcons[entity] = snapshot.Entity.Icon;
+			if (string.IsNullOrWhiteSpace(snapshot.Entity.Icon) == false)
+			{
+				scene.EntityIcons[entity] = snapshot.Entity.Icon;
 			}
 
 			scene.World.SetEnabled(entity, snapshot.Entity.Enabled);
-			for (var componentIndex = 0; componentIndex < snapshot.Entity.Components.Count; componentIndex++)
-			{
-				ApplySavedComponent(scene, entity, snapshot.Entity.Components[componentIndex]);
-			}
-
 			entitiesById[snapshot.Entity.EntityId] = entity;
+			restoredEntities.Add((entity, snapshot.Entity));
+		}
+
+		for (var i = 0; i < restoredEntities.Count; i++)
+		{
+			var (entity, saved) = restoredEntities[i];
+			for (var componentIndex = 0; componentIndex < saved.Components.Count; componentIndex++)
+			{
+				ApplySavedComponent(scene, entity, saved.Components[componentIndex]);
+			}
 		}
 
 		for (var i = 0; i < deletedEntities.Count; i++)

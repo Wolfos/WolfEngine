@@ -9,6 +9,7 @@
     <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Evergine.Bindings.MeshOptimizer" Version="2026.8.3.18" />
     <PackageReference Include="Slangc.NET" Version="2026.7.0" />
     <PackageReference Include="Silk.NET.Assimp" Version="2.22.0" />
   </ItemGroup>

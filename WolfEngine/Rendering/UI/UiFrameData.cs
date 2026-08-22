@@ -1,6 +1,6 @@
 using System;
 using System.Numerics;
-using ImGuiNET;
+using System.Runtime.InteropServices;
 
 namespace WolfEngine.Rendering.UI;
 
@@ -11,8 +11,8 @@ public static class UiTextureIds
 }
 
 /// <summary>
-/// Immutable snapshot of ImGui draw data produced on the game thread.
-/// Flattened for easy upload on the render thread.
+/// Immutable snapshot of UI draw data produced on the game thread.
+/// Flattened for easy upload on the render thread and independent of the UI producer.
 /// </summary>
 public sealed class UiFrameData
 {
@@ -27,21 +27,32 @@ public sealed class UiFrameData
 	public float DeltaTime { get; init; }
 	public bool HasFontAtlas { get; init; }
 
-	public ImGuiFontAtlas FontAtlas { get; init; } = new ImGuiFontAtlas();
+	public UiTextureAtlas FontAtlas { get; init; } = new UiTextureAtlas();
 
 	public UiDrawCommand[] Commands { get; init; } = Array.Empty<UiDrawCommand>();
-	public ImDrawVert[] Vertices { get; init; } = Array.Empty<ImDrawVert>();
-	public ushort[] Indices { get; init; } = Array.Empty<ushort>();
+	public UiVertex[] Vertices { get; init; } = Array.Empty<UiVertex>();
+	public uint[] Indices { get; init; } = Array.Empty<uint>();
 
 	private Action<UiFrameData>? _releaseAction;
-	private Action<ImGuiFontAtlas>? _fontAtlasUploadedAction;
+	private Action<UiTextureAtlas>? _fontAtlasUploadedAction;
+	private int _referenceCount;
 
 	internal void SetRelease(Action<UiFrameData>? releaseAction)
 	{
 		_releaseAction = releaseAction;
+		Volatile.Write(ref _referenceCount, releaseAction is null ? 0 : 1);
 	}
 
-	internal void SetFontAtlasUploaded(Action<ImGuiFontAtlas>? fontAtlasUploadedAction)
+	internal UiFrameData Retain()
+	{
+		if (Volatile.Read(ref _releaseAction) is not null)
+		{
+			Interlocked.Increment(ref _referenceCount);
+		}
+		return this;
+	}
+
+	internal void SetFontAtlasUploaded(Action<UiTextureAtlas>? fontAtlasUploadedAction)
 	{
 		_fontAtlasUploadedAction = fontAtlasUploadedAction;
 	}
@@ -54,14 +65,40 @@ public sealed class UiFrameData
 
 	public void Release()
 	{
-		var releaseAction = _releaseAction;
-		_releaseAction = null;
+		if (Volatile.Read(ref _releaseAction) is null)
+		{
+			_fontAtlasUploadedAction = null;
+			return;
+		}
+
+		if (Interlocked.Decrement(ref _referenceCount) != 0)
+		{
+			return;
+		}
+
+		var releaseAction = Interlocked.Exchange(ref _releaseAction, null);
 		_fontAtlasUploadedAction = null;
 		releaseAction?.Invoke(this);
 	}
 }
 
-public sealed class ImGuiFontAtlas
+/// <summary>Backend-neutral UI vertex. The layout intentionally matches the UI graphics pipeline.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct UiVertex
+{
+	public UiVertex(Vector2 position, Vector2 uv, uint color)
+	{
+		Position = position;
+		UV = uv;
+		Color = color;
+	}
+
+	public Vector2 Position { get; }
+	public Vector2 UV { get; }
+	public uint Color { get; }
+}
+
+public sealed class UiTextureAtlas
 {
 	public int Width { get; init; }
 	public int Height { get; init; }

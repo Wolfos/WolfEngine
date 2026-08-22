@@ -193,6 +193,9 @@ internal sealed class PhysicsWorldState : IDisposable
 	public Dictionary<BodyID, PhysicsBodyState> BodiesByBodyId { get; } = new();
 	public Dictionary<Entity, PhysicsVehicleState> VehiclesByEntity { get; } = new();
 	public List<PhysicsContactEvent> ContactEvents { get; } = new();
+	public PhysicsInterpolationClock InterpolationClock { get; } = new();
+
+	public List<PhysicsWorldPoseSyncItem> InterpolationPoseBuffer { get; } = new();
 	public int LastBoxColliderCount { get; set; } = -1;
 	public int LastSphereColliderCount { get; set; } = -1;
 	public int LastCapsuleColliderCount { get; set; } = -1;
@@ -363,10 +366,140 @@ internal sealed class PhysicsBodyState : IDisposable
 	public RotatedTranslatedShape? TranslatedShape { get; }
 	public PhysicsBodyOwner Owner { get; }
 
+	public PhysicsBodyInterpolationState Interpolation;
+
 	public void Dispose()
 	{
 		TranslatedShape?.Dispose();
 		BaseShape.Dispose();
+	}
+}
+
+/// <summary>Fixed-step samples used to render an interpolated physics pose.</summary>
+internal struct PhysicsBodyInterpolationState
+{
+	private const float PositionEpsilonSquared = 0.000001f;
+	private const float RotationDotEpsilon = 0.999999f;
+
+	public bool HasHistory;
+	public Vector3 PreviousPosition;
+	public Quaternion PreviousRotation;
+	public Vector3 CurrentPosition;
+	public Quaternion CurrentRotation;
+	public Vector3 LinearVelocity;
+	public Vector3 AngularVelocity;
+	private bool _hasAppliedPose;
+	private Vector3 _appliedPosition;
+	private Quaternion _appliedRotation;
+
+	/// <summary>Records the latest fixed-step pose.</summary>
+	public void PushSample(Vector3 position, Quaternion rotation, Vector3 linearVelocity, Vector3 angularVelocity)
+	{
+		if (HasHistory)
+		{
+			PreviousPosition = CurrentPosition;
+			PreviousRotation = CurrentRotation;
+		}
+		else
+		{
+			PreviousPosition = position;
+			PreviousRotation = rotation;
+			HasHistory = true;
+		}
+
+		CurrentPosition = position;
+		CurrentRotation = rotation;
+		LinearVelocity = linearVelocity;
+		AngularVelocity = angularVelocity;
+	}
+
+	/// <summary>Records a pose and derives its velocity from sample history.</summary>
+	public void PushDerivedSample(Vector3 position, Quaternion rotation, float fixedDeltaTime)
+	{
+		var hadHistory = HasHistory;
+		var lastPosition = CurrentPosition;
+		var lastRotation = CurrentRotation;
+		PushSample(position, rotation, Vector3.Zero, Vector3.Zero);
+		if (hadHistory == false || fixedDeltaTime <= 0.0f)
+		{
+			return;
+		}
+
+		LinearVelocity = (position - lastPosition) / fixedDeltaTime;
+		AngularVelocity = DeriveAngularVelocity(lastRotation, rotation, fixedDeltaTime);
+	}
+
+	/// <summary>Clears sample history.</summary>
+	public void Invalidate()
+	{
+		HasHistory = false;
+		_hasAppliedPose = false;
+	}
+
+	public readonly void Evaluate(
+		RigidbodyInterpolation mode,
+		float alpha,
+		float timeSinceLastStep,
+		out Vector3 position,
+		out Quaternion rotation)
+	{
+		if (mode == RigidbodyInterpolation.Extrapolate)
+		{
+			position = CurrentPosition + LinearVelocity * timeSinceLastStep;
+			rotation = IntegrateRotation(CurrentRotation, AngularVelocity, timeSinceLastStep);
+			return;
+		}
+
+		position = Vector3.Lerp(PreviousPosition, CurrentPosition, alpha);
+		rotation = Quaternion.Slerp(PreviousRotation, CurrentRotation, alpha);
+	}
+
+	/// <summary>Returns whether this pose differs from the last pose applied to the transform.</summary>
+	public bool TryTrackAppliedPose(Vector3 position, Quaternion rotation)
+	{
+		if (_hasAppliedPose &&
+		    Vector3.DistanceSquared(_appliedPosition, position) <= PositionEpsilonSquared &&
+		    MathF.Abs(Quaternion.Dot(_appliedRotation, rotation)) >= RotationDotEpsilon)
+		{
+			return false;
+		}
+
+		_hasAppliedPose = true;
+		_appliedPosition = position;
+		_appliedRotation = rotation;
+		return true;
+	}
+
+	private static Vector3 DeriveAngularVelocity(Quaternion from, Quaternion to, float deltaTime)
+	{
+		var delta = to * Quaternion.Conjugate(from);
+		if (delta.W < 0.0f)
+		{
+			delta = -delta;
+		}
+
+		var axis = new Vector3(delta.X, delta.Y, delta.Z);
+		var sinHalfAngle = axis.Length();
+		if (sinHalfAngle <= 0.000001f)
+		{
+			return Vector3.Zero;
+		}
+
+		var angle = 2.0f * MathF.Atan2(sinHalfAngle, Math.Clamp(delta.W, -1.0f, 1.0f));
+		return axis * (angle / (sinHalfAngle * deltaTime));
+	}
+
+	private static Quaternion IntegrateRotation(Quaternion rotation, Vector3 angularVelocity, float deltaTime)
+	{
+		var angularSpeed = angularVelocity.Length();
+		var angle = angularSpeed * deltaTime;
+		if (angle <= 0.000001f)
+		{
+			return rotation;
+		}
+
+		var delta = Quaternion.CreateFromAxisAngle(angularVelocity / angularSpeed, angle);
+		return Quaternion.Normalize(delta * rotation);
 	}
 }
 

@@ -24,6 +24,7 @@ public class SceneWindow: EditorWindow
     private readonly TerrainToolSettingsOverlay _terrainToolSettingsOverlay;
     private readonly TerrainToolController _terrainToolController;
     private readonly TransformGizmoController _transformGizmoController;
+    private readonly SceneSelectionController _sceneSelectionController;
     private float _sceneViewportScale;
     private string _selectedDebugViewId = SceneDebugViewIds.FinalColor;
     private bool _rightMousePressStartedHere;
@@ -42,7 +43,8 @@ public class SceneWindow: EditorWindow
         IIconManager icons,
         TerrainToolSettingsOverlay terrainToolSettingsOverlay,
         TerrainToolController terrainToolController,
-        TransformGizmoController transformGizmoController)
+        TransformGizmoController transformGizmoController,
+        SceneSelectionController sceneSelectionController)
     {
         _viewportStateBus = viewportStateBus;
         _worldManager = worldManager;
@@ -52,7 +54,8 @@ public class SceneWindow: EditorWindow
         _terrainToolSettingsOverlay = terrainToolSettingsOverlay;
         _terrainToolController = terrainToolController;
         _transformGizmoController = transformGizmoController;
-        
+        _sceneSelectionController = sceneSelectionController;
+
         _sceneViewportScale = Math.Clamp(EditorPreferences.GetSceneViewportResolutionScale(), 0.5f, 1.0f);
     }
 
@@ -283,6 +286,10 @@ public class SceneWindow: EditorWindow
                         _gizmoMode,
                         _transformSpace,
                         _pivotMode);
+
+                    // After the gizmo, so a press it claimed for a drag does not also change the
+                    // selection out from under that drag.
+                    _sceneSelectionController.Update(scene);
                     break;
                 case SceneToolMode.Terrain:
                     _terrainToolController.DrawAndHandle(scene, _terrainTool);

@@ -34,7 +34,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.World.HasComponent<Parent>(child), Is.True);
 		Assert.That(scene.World.GetComponent<Parent>(child).Value, Is.EqualTo(parent));
 		AssertMatrix(scene.World.GetComponent<WorldTransform>(child).LocalToWorld, beforeWorldTransform);
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Reparent Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityHierarchyUndoRedoEntry>());
 	}
@@ -64,7 +64,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(changed, Is.True);
 		Assert.That(scene.World.HasComponent<Parent>(child), Is.False);
 		AssertMatrix(scene.World.GetComponent<WorldTransform>(child).LocalToWorld, beforeWorldTransform);
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Unparent Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityHierarchyUndoRedoEntry>());
 	}
@@ -88,7 +88,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 			interactionState);
 
 		Assert.That(changed, Is.False);
-		interactionState.DidNotReceive().MarkSceneDirty();
+		interactionState.DidNotReceiveWithAnyArgs().MarkSceneDirty(default!);
 		undoRedoService.DidNotReceive().BeginCapture(Arg.Any<string>());
 		undoRedoService.DidNotReceive().CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
@@ -117,7 +117,7 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.World.HasComponent<Parent>(parent), Is.False);
 		Assert.That(scene.World.GetComponent<Parent>(child).Value, Is.EqualTo(parent));
 		Assert.That(scene.World.GetComponent<Parent>(grandchild).Value, Is.EqualTo(child));
-		interactionState.DidNotReceive().MarkSceneDirty();
+		interactionState.DidNotReceiveWithAnyArgs().MarkSceneDirty(default!);
 		undoRedoService.DidNotReceive().BeginCapture(Arg.Any<string>());
 		undoRedoService.DidNotReceive().CommitCapture(Arg.Any<IEditorUndoRedoEntry>());
 	}
@@ -157,9 +157,57 @@ public sealed class EntityHierarchyEditorOperationsTests
 		Assert.That(scene.EntityIds[duplicateChildren], Is.Not.EqualTo(scene.EntityIds[child]));
 		Assert.That(scene.EntityIcons[duplicateChildren], Is.EqualTo("object"));
 
-		interactionState.Received(1).MarkSceneDirty();
+		interactionState.Received(1).MarkSceneDirty(scene.World);
 		undoRedoService.Received(1).BeginCapture("Duplicate Entity");
 		undoRedoService.Received(1).CommitCapture(Arg.Any<EntityCreationUndoRedoEntry>());
+	}
+
+	[Test]
+	public void DuplicateEntity_RetargetsInternalReferencesAndKeepsExternalOnes()
+	{
+		var scene = new EditorScene();
+		var snapshotService = new EditorSceneSnapshotService(CreateTypeResolver());
+		var parent = scene.World.CreateEntity("Parent", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		var child = scene.World.CreateEntity("Child", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		scene.World.SetParent(child, parent);
+		var external = scene.World.CreateEntity("External");
+		snapshotService.EnsurePersistentEntityId(scene, external);
+		scene.World.AddComponent(parent, new EntityReferenceComponent
+		{
+			Target = child,
+			External = external
+		});
+
+		var duplicate = EntityHierarchyEditorOperations.DuplicateEntity(
+			scene,
+			parent,
+			snapshotService,
+			Substitute.For<IEditorUndoRedoService>(),
+			Substitute.For<IEditorInteractionState>());
+
+		Assert.That(duplicate.HasValue, Is.True);
+		var duplicateChild = scene.World.GetComponent<Children>(duplicate.Value).First;
+		var component = scene.World.GetComponent<EntityReferenceComponent>(duplicate.Value);
+
+		Assert.That(duplicateChild.IsValid, Is.True);
+		Assert.That(duplicateChild, Is.Not.EqualTo(child));
+		Assert.That(component.Target, Is.EqualTo(duplicateChild));
+		Assert.That(component.External, Is.EqualTo(external));
+		Assert.That(scene.World.GetComponent<EntityReferenceComponent>(parent).Target, Is.EqualTo(child));
+	}
+
+	private static IProjectTypeResolver CreateTypeResolver()
+	{
+		var resolver = Substitute.For<IProjectTypeResolver>();
+		resolver.GetTypeName(Arg.Any<Type>()).Returns(call => call.Arg<Type>().AssemblyQualifiedName);
+		resolver.GetStableTypeId(Arg.Any<Type>()).Returns(call => call.Arg<Type>().FullName);
+		return resolver;
+	}
+
+	private struct EntityReferenceComponent : IEntityComponent
+	{
+		public Entity Target;
+		public Entity External;
 	}
 
 	private static void AssertMatrix(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)

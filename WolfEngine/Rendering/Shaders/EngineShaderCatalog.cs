@@ -45,6 +45,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId AmbientOcclusionRayTraced = Id("ao-rtao");
 	public static readonly ShaderProgramId ReflectionsScreenSpace = Id("reflections-ssr");
 	public static readonly ShaderProgramId ReflectionsRayTraced = Id("reflections-rt");
+	public static readonly ShaderProgramId ReflectionsUpsample = Id("reflections-upsample");
 	public static readonly ShaderProgramId DdgiClassify = Id("ddgi-classify");
 	public static readonly ShaderProgramId DdgiTrace = Id("ddgi-trace");
 	public static readonly ShaderProgramId DdgiRelocate = Id("ddgi-relocate");
@@ -69,6 +70,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId ColorPyramid = Id("color-pyramid");
 	public static readonly ShaderProgramId CasSharpen = Id("cas-sharpen");
 	public static readonly ShaderProgramId CopyToFinal = Id("copy-to-final");
+	public static readonly ShaderProgramId MotionVectorDebug = Id("motion-vector-debug");
 	public static readonly ShaderProgramId Bc1Compress = Id("bc1-compress");
 	public static readonly ShaderProgramId Bc4Compress = Id("bc4-compress");
 	public static readonly ShaderProgramId Bc3Stitch = Id("bc3-stitch");
@@ -82,6 +84,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId GpuDrawTerrainLayerUpdate = Id("gpu-draw-terrain-layer-update");
 	public static readonly ShaderProgramId GpuDrawTerrainMaterialUpdate = Id("gpu-draw-terrain-material-update");
 	public static readonly ShaderProgramId TerrainRayTracingVertexUpdate = Id("terrain-rt-vertex-update");
+	public static readonly ShaderProgramId Skinning = Id("skinning");
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
@@ -116,6 +119,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.AmbientOcclusionRayTraced, "AmbientOcclusion/ao_rtao.compute.slang"),
 			D(EngineShaderPrograms.ReflectionsScreenSpace, "Reflections/reflections_ssr.compute.slang"),
 			D(EngineShaderPrograms.ReflectionsRayTraced, "Reflections/reflections_rt.compute.slang"),
+			D(EngineShaderPrograms.ReflectionsUpsample, "Reflections/reflections_upsample.compute.slang"),
 			D(EngineShaderPrograms.DdgiClassify, "Ddgi/ddgi_classify.compute.slang"),
 			D(EngineShaderPrograms.DdgiTrace, "Ddgi/ddgi_trace.compute.slang"),
 			D(EngineShaderPrograms.DdgiRelocate, "Ddgi/ddgi_relocate.compute.slang"),
@@ -140,6 +144,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.ColorPyramid, "PostProcess/color_pyramid.compute.slang"),
 			D(EngineShaderPrograms.CasSharpen, "ThirdParty/FfxCas/cas_sharpen.compute.slang"),
 			D(EngineShaderPrograms.CopyToFinal, "PostProcess/copy_to_final.compute.slang"),
+			D(EngineShaderPrograms.MotionVectorDebug, "PostProcess/motion_vector_debug.compute.slang"),
 			D(EngineShaderPrograms.Bc1Compress, "ThirdParty/Betsy/bc1_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc4Compress, "ThirdParty/Betsy/bc4_compress.compute.slang"),
 			D(EngineShaderPrograms.Bc3Stitch, "ThirdParty/Betsy/bc3_stitch.compute.slang"),
@@ -153,6 +158,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.GpuDrawTerrainLayerUpdate, "GpuDraw/gpu_draw_terrain_layer_update.compute.slang"),
 			D(EngineShaderPrograms.GpuDrawTerrainMaterialUpdate, "GpuDraw/gpu_draw_terrain_material_update.compute.slang"),
 			D(EngineShaderPrograms.TerrainRayTracingVertexUpdate, "Terrain/terrain_rt_vertex_update.compute.slang"),
+			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang")
@@ -182,7 +188,7 @@ public sealed class EngineShaderCatalog
 		if (request.Kind == ShaderRequestKind.Graphics)
 		{
 			if (IsGraphicsProgram(request.ProgramId) == false ||
-			    request.VertexEntryPoint != "vertexShader" || request.PixelEntryPoint != "fragmentShader")
+			    IsDeclaredGraphicsEntryPointCombination(request) == false)
 				throw new InvalidOperationException($"Shader request '{request}' is not a declared graphics entry-point combination.");
 		}
 		else if (GetComputeEntryPoints(request.ProgramId).Contains(request.ComputeEntryPoint!, StringComparer.Ordinal) == false)
@@ -221,13 +227,21 @@ public sealed class EngineShaderCatalog
 		var requests = new List<ShaderRequest>();
 		foreach (var descriptor in _byId.Values.OrderBy(value => value.Id.Value, StringComparer.Ordinal))
 		{
-			if (descriptor.Id == EngineShaderPrograms.ImGui || descriptor.Id == EngineShaderPrograms.Bc1Compress ||
+			if (descriptor.Id == EngineShaderPrograms.Bc1Compress ||
 			    descriptor.Id == EngineShaderPrograms.Bc4Compress || descriptor.Id == EngineShaderPrograms.Bc3Stitch ||
 			    descriptor.Id == EngineShaderPrograms.Bc5Stitch || descriptor.Id == EngineShaderPrograms.TerrainAuthoringBrushes)
 				continue;
 			if (IsGraphicsProgram(descriptor.Id))
 			{
 				requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind));
+				if (descriptor.Id == EngineShaderPrograms.ImGui && backendKind == GraphicsBackendKind.D3D12)
+				{
+					requests.Add(ShaderRequest.Graphics(
+						descriptor.Id,
+						"vertexShader",
+						"solidFragmentShader",
+						backendKind));
+				}
 				if (SupportsAlphaClip(descriptor.Id))
 					requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_ALPHA_CLIP"));
 				if (descriptor.Id == EngineShaderPrograms.ShadowMap)
@@ -257,6 +271,13 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
 		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal;
 
+	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
+		request.VertexEntryPoint == "vertexShader" &&
+		(request.PixelEntryPoint == "fragmentShader" ||
+		 request.ProgramId == EngineShaderPrograms.ImGui &&
+		 request.BackendKind == GraphicsBackendKind.D3D12 &&
+		 request.PixelEntryPoint == "solidFragmentShader");
+
 	private static bool SupportsAlphaClip(ShaderProgramId id) =>
 		id == EngineShaderPrograms.GBuffer || id == EngineShaderPrograms.ShadowMap;
 
@@ -274,6 +295,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.AmbientOcclusionRayTraced) return ["AmbientOcclusionRayTracedCS"];
 		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];
 		if (id == EngineShaderPrograms.ReflectionsRayTraced) return ["ReflectionsRayTracedCS"];
+		if (id == EngineShaderPrograms.ReflectionsUpsample) return ["ReflectionsUpsampleCS"];
 		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeClassifyCS"];
 		if (id == EngineShaderPrograms.DdgiTrace) return ["DdgiProbeTraceCS", "DdgiRelocationTraceCS"];
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];
@@ -298,6 +320,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.ColorPyramid) return ["ColorPyramidCopyCS", "ColorPyramidDownsampleCS"];
 		if (id == EngineShaderPrograms.CasSharpen) return ["CasSharpenCS"];
 		if (id == EngineShaderPrograms.CopyToFinal) return ["CopyToFinalCS"];
+		if (id == EngineShaderPrograms.MotionVectorDebug) return ["MotionVectorDebugCS"];
 		if (id == EngineShaderPrograms.Bc1Compress) return ["CompressBc1"];
 		if (id == EngineShaderPrograms.Bc4Compress) return ["CompressBc4"];
 		if (id == EngineShaderPrograms.Bc3Stitch) return ["StitchBc3"];
@@ -308,6 +331,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.GpuDrawTerrainLayerUpdate) return ["CSUpdateTerrainLayer"];
 		if (id == EngineShaderPrograms.GpuDrawTerrainMaterialUpdate) return ["CSUpdateTerrainMaterial"];
 		if (id == EngineShaderPrograms.TerrainRayTracingVertexUpdate) return ["TerrainRayTracingVertexUpdateCS"];
+		if (id == EngineShaderPrograms.Skinning) return ["SkinningCS"];
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
 		return [];

@@ -1,5 +1,7 @@
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
+import "../Common/packed_vertex.slang";
+import "../Common/raytracing_common.slang";
 import "ddgi_common.slang";
 import "../Terrain/terrain_layer_blend.slang";
 
@@ -7,20 +9,12 @@ import "../Terrain/terrain_layer_blend.slang";
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_DRAW_KIND_TERRAIN 2u
 
-struct DdgiPackedVertex
-{
-    float3 position;
-    float3 normal;
-    float2 uv;
-    float4 tangent;
-};
-
 RaytracingAccelerationStructure sceneTlas : register(t3);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t5);
 StructuredBuffer<uint> g_InstanceIndexToInstanceHandle : register(t6);
 StructuredBuffer<GpuMeshData> g_MeshTable : register(t7);
-StructuredBuffer<DdgiPackedVertex> g_PackedVertices : register(t8);
+StructuredBuffer<PackedMeshVertex> g_PackedVertices : register(t8);
 StructuredBuffer<uint> g_PackedIndices : register(t9);
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t10);
 StructuredBuffer<GpuTerrainLayerData> g_TerrainLayerTable : register(t11);
@@ -367,9 +361,12 @@ bool DdgiTryResolveGeometricNormal(
     uint i0 = g_PackedIndices[meshData.startIndex + firstIndex + 0u] + meshData.baseVertex;
     uint i1 = g_PackedIndices[meshData.startIndex + firstIndex + 1u] + meshData.baseVertex;
     uint i2 = g_PackedIndices[meshData.startIndex + firstIndex + 2u] + meshData.baseVertex;
-    float3 worldPosition0 = mul(float4(g_PackedVertices[i0].position, 1.0f), instanceData.world).xyz;
-    float3 worldPosition1 = mul(float4(g_PackedVertices[i1].position, 1.0f), instanceData.world).xyz;
-    float3 worldPosition2 = mul(float4(g_PackedVertices[i2].position, 1.0f), instanceData.world).xyz;
+    float3 worldPosition0 = mul(
+        float4(GetPackedVertexPosition(g_PackedVertices[i0]), 1.0f), instanceData.world).xyz;
+    float3 worldPosition1 = mul(
+        float4(GetPackedVertexPosition(g_PackedVertices[i1]), 1.0f), instanceData.world).xyz;
+    float3 worldPosition2 = mul(
+        float4(GetPackedVertexPosition(g_PackedVertices[i2]), 1.0f), instanceData.world).xyz;
     worldGeometricNormal = normalize(cross(
         worldPosition1 - worldPosition0,
         worldPosition2 - worldPosition0));
@@ -421,24 +418,27 @@ bool DdgiTryResolveHitSurface(
             uint i0 = g_PackedIndices[meshData.startIndex + firstIndex + 0u] + meshData.baseVertex;
             uint i1 = g_PackedIndices[meshData.startIndex + firstIndex + 1u] + meshData.baseVertex;
             uint i2 = g_PackedIndices[meshData.startIndex + firstIndex + 2u] + meshData.baseVertex;
-            DdgiPackedVertex v0 = g_PackedVertices[i0];
-            DdgiPackedVertex v1 = g_PackedVertices[i1];
-            DdgiPackedVertex v2 = g_PackedVertices[i2];
+            PackedMeshVertex v0 = g_PackedVertices[i0];
+            PackedMeshVertex v1 = g_PackedVertices[i1];
+            PackedMeshVertex v2 = g_PackedVertices[i2];
             float b1 = barycentrics.x;
             float b2 = barycentrics.y;
             float b0 = 1.0f - b1 - b2;
             float3 localPosition =
-                v0.position * b0 +
-                v1.position * b1 +
-                v2.position * b2;
-            float3 localNormal = normalize(v0.normal * b0 + v1.normal * b1 + v2.normal * b2);
+                GetPackedVertexPosition(v0) * b0 +
+                GetPackedVertexPosition(v1) * b1 +
+                GetPackedVertexPosition(v2) * b2;
+            float3 localNormal = normalize(
+                GetPackedVertexNormal(v0) * b0 +
+                GetPackedVertexNormal(v1) * b1 +
+                GetPackedVertexNormal(v2) * b2);
             surface.uv =
-                v0.uv * b0 +
-                v1.uv * b1 +
-                v2.uv * b2;
-            float3 worldPosition0 = mul(float4(v0.position, 1.0f), instanceData.world).xyz;
-            float3 worldPosition1 = mul(float4(v1.position, 1.0f), instanceData.world).xyz;
-            float3 worldPosition2 = mul(float4(v2.position, 1.0f), instanceData.world).xyz;
+                GetPackedVertexUv(v0) * b0 +
+                GetPackedVertexUv(v1) * b1 +
+                GetPackedVertexUv(v2) * b2;
+            float3 worldPosition0 = mul(float4(GetPackedVertexPosition(v0), 1.0f), instanceData.world).xyz;
+            float3 worldPosition1 = mul(float4(GetPackedVertexPosition(v1), 1.0f), instanceData.world).xyz;
+            float3 worldPosition2 = mul(float4(GetPackedVertexPosition(v2), 1.0f), instanceData.world).xyz;
             surface.worldPosition = mul(float4(localPosition, 1.0f), instanceData.world).xyz;
             surface.worldNormal = normalize(mul(float4(localNormal, 0.0f), instanceData.world).xyz);
             surface.worldGeometricNormal = normalize(cross(
@@ -485,12 +485,7 @@ float DdgiTraceDirectionalLightVisibility(float3 worldPosition, float3 worldNorm
     ray.TMin = 0.01f;
     ray.TMax = 10000.0f;
 
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    while (query.Proceed())
-    {
-    }
-    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0f : 1.0f;
+    return WolfTraceAny(sceneTlas, ray, 0xFF).hit ? 0.0f : 1.0f;
 }
 
 float3 DdgiShadeHitSurface(DdgiHitSurface surface)
@@ -515,24 +510,20 @@ DdgiTraceResult DdgiTraceRay(
     ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
 
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(sceneTlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, ray);
-    while (query.Proceed())
-    {
-    }
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
 
     DdgiTraceResult result;
     result.hitGeometry = false;
     result.backfaceHit = false;
-    if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    if (hit.hit)
     {
         result.hitGeometry = true;
-        result.hitDistance = query.CommittedRayT();
+        result.hitDistance = hit.distance;
         DdgiHitSurface surface;
         if (DdgiTryResolveHitSurface(
-            query.CommittedInstanceIndex(),
-            query.CommittedPrimitiveIndex(),
-            query.CommittedTriangleBarycentrics(),
+            hit.instanceIndex,
+            hit.primitiveIndex,
+            hit.barycentrics,
             result.hitDistance,
             ray.Origin,
             rayDirection,
@@ -569,30 +560,22 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
     ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
 
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> query;
-    query.TraceRayInline(
-        sceneTlas,
-        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-        0xFF,
-        ray);
-    while (query.Proceed())
-    {
-    }
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
 
     DdgiTraceResult result = (DdgiTraceResult)0;
     result.hitDistance = maxRayDistance;
-    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    if (!hit.hit)
     {
         return result;
     }
 
     result.hitGeometry = true;
-    result.hitDistance = query.CommittedRayT();
+    result.hitDistance = hit.distance;
     float3 worldGeometricNormal;
     if (DdgiTryResolveGeometricNormal(
-        query.CommittedInstanceIndex(),
-        query.CommittedPrimitiveIndex(),
-        query.CommittedTriangleBarycentrics(),
+        hit.instanceIndex,
+        hit.primitiveIndex,
+        hit.barycentrics,
         worldGeometricNormal))
     {
         result.backfaceHit = dot(worldGeometricNormal, rayDirection) > 0.0f;
