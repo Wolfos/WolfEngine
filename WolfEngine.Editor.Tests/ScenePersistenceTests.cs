@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using NSubstitute;
 using EditorUI = WolfEngine.Editor.UI;
 using WolfEngine.AssetPipeline;
@@ -287,6 +288,50 @@ public sealed class ScenePersistenceTests
 		var loadedComponent = loadedScene.World.GetComponent<EntityReferenceComponent>(loadedSource);
 
 		Assert.That(loadedComponent.Target, Is.EqualTo(default(Entity)));
+	}
+
+	[Test]
+	public void EntityAwareSerialization_HonorsJsonIgnoreForRuntimeFields()
+	{
+		var targetId = Guid.NewGuid();
+		var world = new World(WorldTag.Authoring);
+		var target = world.CreateEntity("Target");
+		var component = new JsonIgnoredEntityReferenceComponent
+		{
+			Target = target,
+			RuntimePayload = "must not be serialized"
+		};
+
+		var data = EditorEntityReferenceUtility.SerializeValue(
+			component,
+			typeof(JsonIgnoredEntityReferenceComponent),
+			entity => entity == target ? targetId : null);
+
+		Assert.That(data.TryGetProperty(nameof(JsonIgnoredEntityReferenceComponent.Target), out _), Is.True);
+		Assert.That(data.TryGetProperty(nameof(JsonIgnoredEntityReferenceComponent.RuntimePayload), out _), Is.False);
+	}
+
+	[Test]
+	public void EntityAwareDeserialization_IgnoresLegacyJsonForIgnoredRuntimeFields()
+	{
+		var targetId = Guid.NewGuid();
+		var world = new World(WorldTag.Authoring);
+		var target = world.CreateEntity("Target");
+		using var document = JsonDocument.Parse(
+			$$"""
+			{
+			  "Target": { "__entityRefId": "{{targetId:D}}" },
+			  "RuntimePayload": "legacy serialized runtime data"
+			}
+			""");
+
+		var component = (JsonIgnoredEntityReferenceComponent)EditorEntityReferenceUtility.DeserializeValue(
+			document.RootElement,
+			typeof(JsonIgnoredEntityReferenceComponent),
+			entityId => entityId == targetId ? target : null)!;
+
+		Assert.That(component.Target, Is.EqualTo(target));
+		Assert.That(component.RuntimePayload, Is.Null);
 	}
 
 	[Test]
@@ -693,6 +738,12 @@ public sealed class ScenePersistenceTests
 	private struct EntityReferenceComponent : IEntityComponent
 	{
 		public Entity Target;
+	}
+
+	private struct JsonIgnoredEntityReferenceComponent : IEntityComponent
+	{
+		public Entity Target;
+		[JsonIgnore] public string? RuntimePayload;
 	}
 
 	private sealed class TestEnvironment : IDisposable

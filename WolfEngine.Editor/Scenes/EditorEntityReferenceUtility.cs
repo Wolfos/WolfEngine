@@ -148,7 +148,7 @@ internal static class EditorEntityReferenceUtility
 		{
 			foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public))
 			{
-				if (Attribute.IsDefined(field, typeof(NotSerializedAttribute)))
+				if (IsAlwaysIgnored(field))
 				{
 					continue;
 				}
@@ -163,7 +163,7 @@ internal static class EditorEntityReferenceUtility
 			{
 				if (property.GetIndexParameters().Length != 0 ||
 				    property.CanRead == false ||
-				    Attribute.IsDefined(property, typeof(NotSerializedAttribute)))
+				    IsAlwaysIgnored(property))
 				{
 					continue;
 				}
@@ -241,24 +241,29 @@ internal static class EditorEntityReferenceUtility
 		var result = new JsonObject();
 		foreach (var field in valueType.GetFields(BindingFlags.Instance | BindingFlags.Public))
 		{
-			if (Attribute.IsDefined(field, typeof(NotSerializedAttribute)))
+			var fieldValue = field.GetValue(value);
+			if (ShouldSkipWriting(field, fieldValue, field.FieldType))
 			{
 				continue;
 			}
 
-			result[field.Name] = SerializeNode(field.GetValue(value), field.FieldType, entityIdResolver);
+			result[field.Name] = SerializeNode(fieldValue, field.FieldType, entityIdResolver);
 		}
 
 		foreach (var property in valueType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
 		{
-			if (property.GetIndexParameters().Length != 0 ||
-			    property.CanRead == false ||
-			    Attribute.IsDefined(property, typeof(NotSerializedAttribute)))
+			if (property.GetIndexParameters().Length != 0 || property.CanRead == false)
 			{
 				continue;
 			}
 
-			result[property.Name] = SerializeNode(property.GetValue(value), property.PropertyType, entityIdResolver);
+			var propertyValue = property.GetValue(value);
+			if (ShouldSkipWriting(property, propertyValue, property.PropertyType))
+			{
+				continue;
+			}
+
+			result[property.Name] = SerializeNode(propertyValue, property.PropertyType, entityIdResolver);
 		}
 
 		return result;
@@ -393,7 +398,7 @@ internal static class EditorEntityReferenceUtility
 		foreach (var field in targetType.GetFields(BindingFlags.Instance | BindingFlags.Public))
 		{
 			if (field.IsInitOnly ||
-			    Attribute.IsDefined(field, typeof(NotSerializedAttribute)) ||
+			    IsAlwaysIgnored(field) ||
 			    data.TryGetProperty(field.Name, out var fieldData) == false)
 			{
 				continue;
@@ -413,7 +418,7 @@ internal static class EditorEntityReferenceUtility
 			if (property.CanWrite == false ||
 			    property.GetIndexParameters().Length != 0 ||
 			    property.SetMethod?.IsPublic != true ||
-			    Attribute.IsDefined(property, typeof(NotSerializedAttribute)) ||
+			    IsAlwaysIgnored(property) ||
 			    data.TryGetProperty(property.Name, out var propertyData) == false)
 			{
 				continue;
@@ -434,6 +439,42 @@ internal static class EditorEntityReferenceUtility
 		}
 
 		return value;
+	}
+
+	private static bool IsAlwaysIgnored(MemberInfo member)
+	{
+		if (Attribute.IsDefined(member, typeof(NotSerializedAttribute)))
+		{
+			return true;
+		}
+
+		return member.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition == JsonIgnoreCondition.Always;
+	}
+
+	private static bool ShouldSkipWriting(MemberInfo member, object? value, Type valueType)
+	{
+		if (Attribute.IsDefined(member, typeof(NotSerializedAttribute)))
+		{
+			return true;
+		}
+
+		return member.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition switch
+		{
+			JsonIgnoreCondition.Always => true,
+			JsonIgnoreCondition.WhenWritingNull => value is null,
+			JsonIgnoreCondition.WhenWritingDefault => IsDefaultValue(value, valueType),
+			_ => false
+		};
+	}
+
+	private static bool IsDefaultValue(object? value, Type valueType)
+	{
+		if (value is null)
+		{
+			return true;
+		}
+
+		return valueType.IsValueType && value.Equals(Activator.CreateInstance(valueType));
 	}
 
 	private static bool TryGetCollectionElementType(Type type, out Type elementType)
