@@ -374,13 +374,15 @@ PSOutput fragmentShader(VSOutput input)
             terrainData);
     }
 
-    float4 biased = blend.weights;
-
-    biased.x *= pow(max(layerSamples[0].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    biased.y *= pow(max(layerSamples[1].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    biased.z *= pow(max(layerSamples[2].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    biased.w *= pow(max(layerSamples[3].height, 0.0001f), max(terrainData.heightBlendSharpness, 0.0001f));
-    float4 weights = NormalizeTerrainLayerWeights(biased);
+    float4 heights = float4(
+        layerSamples[0].height,
+        layerSamples[1].height,
+        layerSamples[2].height,
+        layerSamples[3].height);
+    float4 weights = ResolveTerrainHeightBlendWeights(
+        blend.weights,
+        heights,
+        terrainData.heightBlendSharpness);
 
     float4 albedo = layerSamples[0].albedo * weights.x +
                     layerSamples[1].albedo * weights.y +

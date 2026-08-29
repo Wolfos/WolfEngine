@@ -241,6 +241,24 @@ float4 NormalizeTerrainLayerWeights(float4 weights)
     return weights / sum;
 }
 
+float4 ResolveTerrainHeightBlendWeights(float4 controlWeights, float4 heights, float sharpness)
+{
+    // Include painted coverage in the height comparison so a vanishingly small control weight cannot
+    // win solely because its height texel is bright while the dominant layer's texel is dark. The
+    // previous weight * pow(height, sharpness) formulation allowed that ratio to reach 10,000:1,
+    // exposing 1/255 quantization values as faint lines inside otherwise smooth painted blends.
+    float4 scores = saturate(heights) + controlWeights;
+    scores.x = controlWeights.x > 0.0f ? scores.x : -2.0f;
+    scores.y = controlWeights.y > 0.0f ? scores.y : -2.0f;
+    scores.z = controlWeights.z > 0.0f ? scores.z : -2.0f;
+    scores.w = controlWeights.w > 0.0f ? scores.w : -2.0f;
+
+    float maximumScore = max(max(scores.x, scores.y), max(scores.z, scores.w));
+    float transition = rcp(max(sharpness, 0.0001f));
+    float4 heightWeights = max(scores - maximumScore + transition, 0.0f) * controlWeights;
+    return NormalizeTerrainLayerWeights(heightWeights);
+}
+
 float4 MaskInactiveTerrainLayers(float4 weights, uint activeLayerCount)
 {
     float4 masked = weights;
