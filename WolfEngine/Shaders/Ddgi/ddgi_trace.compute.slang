@@ -508,9 +508,12 @@ DdgiTraceResult DdgiTraceRay(
     float3 rayDirection)
 {
     RayDesc ray;
-    ray.Origin = originPosition + rayDirection * normalBias;
+    // Keep ray distances in the probe's coordinate system. Moving the origin
+    // forward made every visibility moment shorter than the receiver distance
+    // measured during sampling, which falsely occluded surfaces close to a probe.
+    ray.Origin = originPosition;
     ray.Direction = rayDirection;
-    ray.TMin = 0.001f;
+    ray.TMin = max(normalBias, 0.001f);
     ray.TMax = maxRayDistance;
 
     WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);

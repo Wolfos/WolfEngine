@@ -300,7 +300,12 @@ DdgiShSample SampleDdgiSh(
                 float3 toSurface = biasedPos - probePosition;
                 float distanceToProbe = length(toSurface);
                 float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
-                float nWeight = saturate(dot(normal, -direction)) * 0.9f + 0.1f;
+                // A wrapped-cosine weight keeps nearby tangent probes available
+                // while strongly rejecting probes on the back side of a surface.
+                // The old linear 10% floor let probes outside thin walls retain
+                // enough weight to inject sky radiance into enclosed surfaces.
+                float wrappedNormal = saturate(dot(normal, -direction) * 0.5f + 0.5f);
+                float nWeight = wrappedNormal * wrappedNormal;
                 float weight = trilinearWeight * nWeight;
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, DDGI_VISIBILITY_TILE_INTERIOR_SIZE);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;

@@ -432,7 +432,8 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
                 float3 toSurface = biasedPosition - probePosition;
                 float distanceToProbe = length(toSurface);
                 float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
-                float normalWeight = saturate(dot(normal, -direction)) * 0.9f + 0.1f;
+                float wrappedNormal = saturate(dot(normal, -direction) * 0.5f + 0.5f);
+                float normalWeight = wrappedNormal * wrappedNormal;
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, visibilityTileInteriorSize);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
                 float normalizedDistance = saturate(distanceToProbe / max(maxRayDistance, 0.001f));

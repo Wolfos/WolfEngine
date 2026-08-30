@@ -92,7 +92,7 @@ public sealed class EditorAutomationController
 				visible: true,
 				contentSizePixels: _options.Resolution,
 				resolutionScale: 1.0f,
-				requestedDebugViewId: SceneDebugViewIds.FinalColor,
+				requestedDebugViewId: Environment.GetEnvironmentVariable("WOLF_CAPTURE_DEBUG_VIEW") ?? SceneDebugViewIds.FinalColor,
 				hovered: false, focused: false,
 				pointerAvailable: false, pointerCaptured: false,
 				rightMousePressStartedHere: false,

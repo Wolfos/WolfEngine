@@ -1049,6 +1049,25 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void DdgiProbeNormalWeightStronglyRejectsBackSideProbes()
+	{
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(0.0f), Is.EqualTo(0.25f));
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(-1.0f), Is.EqualTo(0.0f));
+	}
+
+	[Test]
+	public void DdgiVisibilityMomentBlendRemovesBetweenPopulationVariance()
+	{
+		var allMoments = new Vector2(0.6f, 0.52f);
+		var hitMoments = new Vector2(0.2f, 0.041f);
+		Assert.That(DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 0.0f), Is.EqualTo(allMoments));
+		var hitDominant = DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 1.0f);
+		Assert.That(hitDominant.X, Is.EqualTo(hitMoments.X).Within(1e-6f));
+		Assert.That(hitDominant.Y, Is.EqualTo(hitMoments.Y).Within(1e-6f));
+	}
+
+	[Test]
 	public void DdgiOctahedralProjectionWeightsDistortedDirectionsBySolidAngle()
 	{
 		var centerWeight = DdgiUtilities.GetOctahedralSolidAngleWeight(Vector2.Zero);
