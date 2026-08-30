@@ -1065,6 +1065,12 @@ public sealed class RayTracingSceneResourcesTests
 		var hitDominant = DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 1.0f);
 		Assert.That(hitDominant.X, Is.EqualTo(hitMoments.X).Within(1e-6f));
 		Assert.That(hitDominant.Y, Is.EqualTo(hitMoments.Y).Within(1e-6f));
+
+		var mixed = DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 0.4f);
+		var unclusteredVisibility = DdgiUtilities.EvaluateVisibility(allMoments.X, allMoments.Y, 0.4f);
+		var clusteredVisibility = DdgiUtilities.EvaluateVisibility(mixed.X, mixed.Y, 0.4f);
+		Assert.That(unclusteredVisibility, Is.EqualTo(1.0f));
+		Assert.That(clusteredVisibility, Is.LessThan(0.5f));
 	}
 
 	[Test]
