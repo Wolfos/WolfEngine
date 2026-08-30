@@ -36,6 +36,23 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshot_SetConfig_CopiesLighting()
+	{
+		var snapshot = new FrameSnapshot();
+		snapshot.SetConfig(new RenderConfig
+		{
+			Lighting = new LightingConfig
+			{
+				DiffuseIndirectMultiplier = 0.35f,
+				SpecularIndirectMultiplier = 1.75f
+			}
+		});
+
+		Assert.That(snapshot.Config.Lighting.DiffuseIndirectMultiplier, Is.EqualTo(0.35f));
+		Assert.That(snapshot.Config.Lighting.SpecularIndirectMultiplier, Is.EqualTo(1.75f));
+	}
+
+	[Test]
 	public void FrameSnapshot_SetConfig_CopiesDiffuseGlobalIllumination()
 	{
 		var snapshot = new FrameSnapshot();

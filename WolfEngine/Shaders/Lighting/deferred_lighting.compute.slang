@@ -88,6 +88,8 @@ cbuffer LightingParams : register(b2)
     float farPlane;
     uint framebufferSizeX;
     uint framebufferSizeY;
+    float diffuseIndirectMultiplier;
+    float specularIndirectMultiplier;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -588,7 +590,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         brdfLutHandle,
         samplerHandle);
     float ddgiSpecularBlend = ddgiSample.valid != 0u
-        ? max(ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness), 0.7f)
+        ? max(ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness), 1.0f)
         : 0.0f;
     float3 specularContribution = lerp(
         skySpecularContribution,
@@ -610,7 +612,12 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             reflectionSpecularContribution,
             saturate(reflectionSample.a));
     }
-    color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + specularContribution;
+    float3 diffuseIndirectContribution = lerp(
+        skyDiffuseContribution,
+        ddgiContribution,
+        ddgiGridInfluence);
+    color += diffuseIndirectContribution * diffuseIndirectMultiplier +
+        specularContribution * specularIndirectMultiplier;
     if (ddgiFinalContributionDebugEnabled != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);
