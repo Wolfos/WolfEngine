@@ -84,6 +84,8 @@ public class TransformSystem : IPreRender
             Matrix4x4.Invert(worldM, out worldTransform.WorldToLocal);
             local.IsDirty = false;
 
+			world.MarkWorldTransformChanged(e);
+
             // push children with this world matrix as their parent
             if (world.HasComponent<Children>(e))
             {

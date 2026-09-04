@@ -396,6 +396,39 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_PersistentMesh_SurvivesIncrementalSyncAndIsRemovedByReconciliation()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("persistent-mesh-shader");
+		var entity = new Entity(2, 1);
+		var updates = new List<GpuDrawUpdate>();
+
+		database.BeginSync(reconcilePersistentMeshes: true);
+		database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+
+		database.BeginSync();
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		Assert.That(updates, Is.Empty);
+
+		var entries = new List<GpuDrawEntry>();
+		database.CollectDrawEntries(entries);
+		Assert.That(entries, Has.Count.EqualTo(1));
+
+		database.BeginSync(reconcilePersistentMeshes: true);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+
+		database.CollectDrawEntries(entries);
+		Assert.That(entries, Is.Empty);
+	}
+
+	[Test]
 	public void GpuDrawDatabase_DebugPrimitiveRegistrationAndUpdates_PreserveDebugPrimitiveDrawKind()
 	{
 		var database = new GpuDrawDatabase();

@@ -18,6 +18,7 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 	private T[] _data = Array.Empty<T>();
 
 	public int Count { get; private set; }
+	public int Version { get; private set; }
 
 	internal ReadOnlySpan<Entity> EntitiesSpan => _entities.AsSpan(0, Count);
 
@@ -44,11 +45,13 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 			if (_entities[slot] == e)
 			{
 				_data[slot] = value;
+				Version++;
 				return;
 			}
 
 			_entities[slot] = e;
 			_data[slot] = value;
+			Version++;
 			return;
 		}
 
@@ -58,6 +61,7 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 		_data[Count] = value;
 		_sparse[e.Index] = Count + 1;
 		Count++;
+		Version++;
 	}
 
 	public bool Has(Entity e) => TryGetSlot(e, out _);
@@ -89,6 +93,7 @@ public class ComponentPool<T> : IComponentPool where T:struct, IEntityComponent
 
 		_sparse[e.Index] = 0;
 		Count--;
+		Version++;
 	}
 
 	private bool TryGetSlot(Entity entity, out int slot)

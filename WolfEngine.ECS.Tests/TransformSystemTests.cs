@@ -38,6 +38,22 @@ public class TransformSystemTests
         Assert.That(world.GetComponent<LocalTransform>(child).IsDirty, Is.False);
     }
 
+	[Test]
+	public void PreRender_ResetsExistingDirtyWorldTransformConsumption()
+	{
+		var world = new World(WorldTag.All);
+		var system = new TransformSystem();
+		var entity = world.CreateEntity("Moving", Vector3.Zero, Quaternion.Identity, Vector3.One);
+
+		system.PreRender(0.0f, world);
+		world.GetComponent<DirtyWorldTransform>(entity).Consumed = 2;
+		world.SetLocalPosition(entity, Vector3.One);
+
+		system.PreRender(0.0f, world);
+
+		Assert.That(world.GetComponent<DirtyWorldTransform>(entity).Consumed, Is.Zero);
+	}
+
     [Test]
     public void PreRender_AfterParentingDirtyTransforms_UsesParentTransformInsteadOfStaleChildRoot()
     {

@@ -93,4 +93,12 @@ public struct DirtyTransformRoot : IEntityComponent
 {
 }
 
+[ExcludeFromEditor]
+[NotSerialized]
+public struct DirtyWorldTransform : IEntityComponent
+{
+	// Render snapshots increment this after consuming the transform. Transform writers reset it to zero.
+	public int Consumed;
+}
+
 internal readonly record struct PhysicsWorldPoseSyncItem(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation);

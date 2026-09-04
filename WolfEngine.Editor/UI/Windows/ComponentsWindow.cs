@@ -665,6 +665,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         for (var i = 0; i < _componentTargets.Count; i++)
         {
             apply(_componentTargets[i]);
+			if (componentType == typeof(MeshRenderer))
+			{
+				scene.World.MarkWorldTransformChanged(_componentTargets[i]);
+			}
         }
 
         PushComponentEdit(scene.World, description, before, CaptureComponentSnapshots(scene, componentType));

@@ -17,12 +17,17 @@ public interface IRenderPipeline
 
 public class RenderPipeline : IRenderPipeline
 {
+	// Both snapshot databases consume the change, then one additional snapshot settles motion history.
+	private const int DirtyWorldTransformSyncCount = 3;
 	private const int DdgiDebugProbeEntityBaseIndex = -2_000_000_000;
 	private const float DdgiDebugProbeInstanceMarker = 1.0f;
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
+	private readonly Dictionary<GpuDrawDatabase, List<MeshWorldVersion>> _meshWorldVersions = new();
+	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
 	private int _stressFrame;
+	private bool _gpuHardeningStressWasEnabled;
 
 	public RenderPipeline(RenderGraph renderGraph)
 	{
@@ -66,9 +71,15 @@ public class RenderPipeline : IRenderPipeline
 			if (Matrix4x4.Decompose(cameraWorldTransform.LocalToWorld, out _, out _, out cameraOrigin))
 			{
 			}
+			var meshStructureChanged = HaveMeshWorldsChanged(gpuDrawDatabase, worlds);
+			var gpuHardeningStressEnabled = GraphicsConfig.GpuHardeningStressEnabled;
+			var reconcilePersistentMeshes = meshStructureChanged ||
+			                                gpuHardeningStressEnabled ||
+			                                (_gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false);
+			_gpuHardeningStressWasEnabled = gpuHardeningStressEnabled;
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
-				gpuDrawDatabase.BeginSync();
+				gpuDrawDatabase.BeginSync(reconcilePersistentMeshes);
 			}
 
 			for (var i = 0; i < (worlds?.Count ?? 0); i++)
@@ -81,19 +92,40 @@ public class RenderPipeline : IRenderPipeline
 
 				using (FrameProfiler.Instance.Measure("Gather meshes"))
 				{
-					foreach (var entry in world.View<WorldTransform, MeshRenderer>())
+					if (reconcilePersistentMeshes)
 					{
-						if (world.IsEnabled(entry.Entity) == false) continue;
-						
+						foreach (var entry in world.View<MeshRenderer>())
+						{
+							if (world.HasComponent<DirtyWorldTransform>(entry.Entity))
+							{
+								world.GetComponent<DirtyWorldTransform>(entry.Entity).Consumed = 0;
+							}
+							else
+							{
+								world.AddComponent<DirtyWorldTransform>(entry.Entity);
+							}
+						}
+					}
+
+					foreach (var entry in world.View<WorldTransform, MeshRenderer, DirtyWorldTransform>())
+					{
 						ref var transform = ref entry.First;
 						ref var meshRenderer = ref entry.Second;
+
+						ref var dirty = ref entry.Third;
+						dirty.Consumed++;
+						if (world.IsEnabled(entry.Entity) == false)
+						{
+							gpuDrawDatabase.RemovePersistentMesh(entry.Entity);
+							continue;
+						}
 
 						if (meshRenderer.TryValidate() == false) continue;
 
 						var mesh = meshRenderer.Mesh;
 						var material = meshRenderer.Material;
 
-						if (GraphicsConfig.GpuHardeningStressEnabled)
+						if (gpuHardeningStressEnabled)
 						{
 							var churnKey = entry.Entity.Index + _stressFrame;
 							if ((churnKey % 7) == 0)
@@ -112,7 +144,7 @@ public class RenderPipeline : IRenderPipeline
 
 
 						var transformMatrix = transform.LocalToWorld;
-						gpuDrawDatabase.TouchMesh(entry.Entity, mesh, material, transformMatrix);
+						gpuDrawDatabase.TouchPersistentMesh(entry.Entity, mesh, material, transformMatrix);
 					}
 				}
 
@@ -147,6 +179,25 @@ public class RenderPipeline : IRenderPipeline
 
 						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices, previousSkinningMatrices);
 						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
+					}
+				}
+
+				using (FrameProfiler.Instance.Measure("Clean used dirties"))
+				{
+					_dirtyWorldTransformRemovalScratch.Clear();
+					foreach (var entry in world.View<DirtyWorldTransform>())
+					{
+						ref var dirty = ref entry.First;
+						if (dirty.Consumed >= DirtyWorldTransformSyncCount ||
+						    (dirty.Consumed == 0 && world.HasComponent<MeshRenderer>(entry.Entity) == false))
+						{
+							_dirtyWorldTransformRemovalScratch.Add(entry.Entity);
+						}
+					}
+
+					for (var dirtyIndex = 0; dirtyIndex < _dirtyWorldTransformRemovalScratch.Count; dirtyIndex++)
+					{
+						world.RemoveComponent<DirtyWorldTransform>(_dirtyWorldTransformRemovalScratch[dirtyIndex]);
 					}
 				}
 
@@ -240,6 +291,59 @@ public class RenderPipeline : IRenderPipeline
 			_stressFrame++;
 		}
 	}
+
+	private bool HaveMeshWorldsChanged(GpuDrawDatabase database, IReadOnlyList<World> worlds)
+	{
+		if (_meshWorldVersions.TryGetValue(database, out var versions) == false)
+		{
+			versions = new List<MeshWorldVersion>();
+			_meshWorldVersions.Add(database, versions);
+		}
+
+		var versionIndex = 0;
+		var changed = false;
+		for (var i = 0; i < (worlds?.Count ?? 0); i++)
+		{
+			var world = worlds![i];
+			if (world is null)
+			{
+				continue;
+			}
+
+			var current = new MeshWorldVersion(
+				world,
+				world.GetComponentVersion<MeshRenderer>());
+			if (versionIndex >= versions.Count || versions[versionIndex] != current)
+			{
+				changed = true;
+			}
+			versionIndex++;
+		}
+
+		if (versionIndex != versions.Count)
+		{
+			changed = true;
+		}
+		if (changed == false)
+		{
+			return false;
+		}
+
+		versions.Clear();
+		for (var i = 0; i < (worlds?.Count ?? 0); i++)
+		{
+			var world = worlds![i];
+			if (world is not null)
+			{
+				versions.Add(new MeshWorldVersion(
+					world,
+					world.GetComponentVersion<MeshRenderer>()));
+			}
+		}
+		return true;
+	}
+
+	private readonly record struct MeshWorldVersion(World World, int MeshVersion);
 
 	internal static void CollectDdgiProbeDebugPrimitives(
 		RenderConfig config,
