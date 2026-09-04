@@ -10,6 +10,7 @@ public class RenderConfig: IDataAsset
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public ReflectionConfig Reflections { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
+	public LightingConfig Lighting { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	// Keep the serialized key for existing render-config assets while presenting the
@@ -20,6 +21,19 @@ public class RenderConfig: IDataAsset
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
 	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
+}
+
+public struct LightingConfig
+{
+	public LightingConfig()
+	{
+	}
+
+	/// <summary>Multiplier for the complete indirect diffuse contribution, including sky and DDGI.</summary>
+	public float DiffuseIndirectMultiplier { get; set; } = 1.0f;
+
+	/// <summary>Multiplier for the complete indirect specular contribution, including reflections.</summary>
+	public float SpecularIndirectMultiplier { get; set; } = 1.0f;
 }
 
 public enum ReflectionMode

@@ -1,11 +1,12 @@
 import "../Common/common_bindless.slang";
 import "ddgi_common.slang";
+import "ddgi_visibility.slang";
 
 static const uint DDGI_VISIBILITY_RESOLUTION = 16u;
 static const uint DDGI_VISIBILITY_TEXEL_COUNT =
     DDGI_VISIBILITY_RESOLUTION * DDGI_VISIBILITY_RESOLUTION;
 
-groupshared float2 g_RayMoments[DDGI_VISIBILITY_TEXEL_COUNT];
+groupshared float4 g_RayVisibility[DDGI_VISIBILITY_TEXEL_COUNT];
 groupshared float3 g_RayDirections[DDGI_VISIBILITY_TEXEL_COUNT];
 groupshared float4 g_FinalVisibility[DDGI_VISIBILITY_TEXEL_COUNT];
 groupshared uint g_UpdateActive;
@@ -70,8 +71,8 @@ void DdgiVisibilityIntegrateCS(
                 probeIndex,
                 groupIndex,
                 visibilityTileInteriorSize);
-            g_RayMoments[groupIndex] =
-                GetTexture(traceVisibilityReadHandle).Load(int3(samplePixel, 0)).rg;
+            g_RayVisibility[groupIndex] =
+                GetTexture(traceVisibilityReadHandle).Load(int3(samplePixel, 0));
             g_RayDirections[groupIndex] =
                 DdgiRayDirection(groupIndex, rayCount, probeIndex);
         }
@@ -81,7 +82,9 @@ void DdgiVisibilityIntegrateCS(
             DdgiInteriorUv(interiorPixel, visibilityTileInteriorSize));
         float filterExponent = clamp(float(rayCount) / 6.0f - 1.0f, 8.0f, 32.0f);
         float2 moments = 0.0f.xx;
+        float2 hitMoments = 0.0f.xx;
         float weightSum = 0.0f;
+        float hitWeightSum = 0.0f;
         for (uint rayIndex = 0u; rayIndex < rayCount; rayIndex++)
         {
             float weight = pow(
@@ -92,13 +95,28 @@ void DdgiVisibilityIntegrateCS(
                 continue;
             }
 
-            moments += g_RayMoments[rayIndex] * weight;
+            float4 rayVisibility = g_RayVisibility[rayIndex];
+            moments += rayVisibility.rg * weight;
             weightSum += weight;
+            float hitWeight = weight * saturate(rayVisibility.b);
+            hitMoments += rayVisibility.rg * hitWeight;
+            hitWeightSum += hitWeight;
         }
 
-        float4 traceValue = weightSum > 1e-5f
-            ? float4(moments / weightSum, 0.0f, 1.0f)
-            : float4(1.0f, 1.0f, 0.0f, 1.0f);
+        float4 traceValue = float4(1.0f, 1.0f, 0.0f, 1.0f);
+        if (weightSum > 1e-5f)
+        {
+            float2 allMoments = moments / weightSum;
+            float hitCoverage = saturate(hitWeightSum / weightSum);
+            float2 localHitMoments = hitWeightSum > 1e-5f
+                ? hitMoments / hitWeightSum
+                : allMoments;
+            traceValue.rg = DdgiBlendVisibilityMoments(
+                allMoments,
+                localHitMoments,
+                hitCoverage);
+            traceValue.b = hitCoverage;
+        }
         float historyWeight = g_UsableHistory != 0u ? hysteresis : 0.0f;
         finalValue = lerp(traceValue, historyValue, historyWeight);
     }

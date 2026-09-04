@@ -150,6 +150,7 @@ public sealed class FrameSnapshot
 		Config.AmbientOcclusion = config.AmbientOcclusion;
 		Config.Reflections = config.Reflections;
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
+		Config.Lighting = config.Lighting;
 		Config.ShadowMaps = config.ShadowMaps;
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.Fsr3 = config.Fsr3;

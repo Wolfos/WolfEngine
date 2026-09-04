@@ -66,6 +66,8 @@ public struct DeferredLightingPassConfig
 	public required float ShadowTexelSizeY { get; init; }
 	public required bool AoEnabled { get; init; }
 	public required bool ReflectionsEnabled { get; init; }
+	public required float DiffuseIndirectMultiplier { get; init; }
+	public required float SpecularIndirectMultiplier { get; init; }
 	public required bool DdgiEnabled { get; init; }
 	public required Vector3 DdgiOrigin { get; init; }
 	public required Int3 DdgiStorageOffset { get; init; }

@@ -88,6 +88,8 @@ cbuffer LightingParams : register(b2)
     float farPlane;
     uint framebufferSizeX;
     uint framebufferSizeY;
+    float diffuseIndirectMultiplier;
+    float specularIndirectMultiplier;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -300,7 +302,12 @@ DdgiShSample SampleDdgiSh(
                 float3 toSurface = biasedPos - probePosition;
                 float distanceToProbe = length(toSurface);
                 float3 direction = distanceToProbe > 1e-4f ? toSurface / distanceToProbe : normal;
-                float nWeight = saturate(dot(normal, -direction)) * 0.9f + 0.1f;
+                // A wrapped-cosine weight keeps nearby tangent probes available
+                // while strongly rejecting probes on the back side of a surface.
+                // The old linear 10% floor let probes outside thin walls retain
+                // enough weight to inject sky radiance into enclosed surfaces.
+                float wrappedNormal = saturate(dot(normal, -direction) * 0.5f + 0.5f);
+                float nWeight = wrappedNormal * wrappedNormal;
                 float weight = trilinearWeight * nWeight;
                 float2 visibilityUv = DdgiProbeAtlasUv(probeIndex, direction, DDGI_VISIBILITY_TILE_INTERIOR_SIZE);
                 float2 moments = visibilityTex.SampleLevel(linearSampler, visibilityUv, 0.0f).rg;
@@ -393,11 +400,12 @@ float DdgiShLobeScale(float3 dc, float3 directionalX, float3 directionalY, float
 
 float3 EvaluateDdgiDiffuse(DdgiShSample sample, float3 normal)
 {
-    // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
+    // Integration stores an L1 representation of cosine-filtered irradiance / PI.
+    // Reconstruct it directly rather than applying a second cosine convolution.
     // Limit the directional lobe before evaluation so truncated L1 ringing cannot
     // drive individual color channels negative and create black or tinted bands.
     float3 dc = max(sample.coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
-    float directionalScale = (2.0f / 3.0f) * DDGI_SH_BASIS_L1;
+    float directionalScale = DDGI_SH_BASIS_L1;
     float3 directionalX = sample.coefficientLx * directionalScale;
     float3 directionalY = sample.coefficientLy * directionalScale;
     float3 directionalZ = sample.coefficientLz * directionalScale;
@@ -583,7 +591,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         brdfLutHandle,
         samplerHandle);
     float ddgiSpecularBlend = ddgiSample.valid != 0u
-        ? max(ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness), 0.7f)
+        ? max(ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness), 1.0f)
         : 0.0f;
     float3 specularContribution = lerp(
         skySpecularContribution,
@@ -605,7 +613,12 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             reflectionSpecularContribution,
             saturate(reflectionSample.a));
     }
-    color += lerp(skyDiffuseContribution, ddgiContribution, ddgiGridInfluence) + specularContribution;
+    float3 diffuseIndirectContribution = lerp(
+        skyDiffuseContribution,
+        ddgiContribution,
+        ddgiGridInfluence);
+    color += diffuseIndirectContribution * diffuseIndirectMultiplier +
+        specularContribution * specularIndirectMultiplier;
     if (ddgiFinalContributionDebugEnabled != 0u)
     {
         RWTexture2D<float4> ddgiFinalContribution = GetRWTexture(ddgiFinalContributionHandle);

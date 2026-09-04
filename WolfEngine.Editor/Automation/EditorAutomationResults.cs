@@ -100,6 +100,23 @@ public sealed record FrameCaptureResult(
 	long EditorFrameSequence,
 	long RenderFrameSequence);
 
+public sealed record GameplayFrameCaptureResult(
+	string OutputPath,
+	int Width,
+	int Height,
+	string CameraName,
+	float CameraFov,
+	float CameraPositionX,
+	float CameraPositionY,
+	float CameraPositionZ,
+	float CameraForwardX,
+	float CameraForwardY,
+	float CameraForwardZ,
+	bool EnteredPlayMode,
+	int SettledRenderFrameCount,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
 public sealed record GpuTimingStatistics(
 	int SampleCount,
 	double MedianMilliseconds,

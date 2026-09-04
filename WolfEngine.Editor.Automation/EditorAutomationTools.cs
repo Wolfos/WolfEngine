@@ -154,6 +154,13 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.CaptureFrameAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "capture_gameplay_frame"), Description("Enter or resume Play mode, verify that an enabled gameplay Camera is driving the viewport, wait for gameplay startup frames, and capture a PNG from that camera. Fails instead of silently falling back to the authoring camera.")]
+	public Task<GameplayFrameCaptureResult> CaptureGameplayFrame(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		[Description("Positive number of rendered Play-mode frames to wait before validating the gameplay camera and capturing.")] int settleFrameCount = 4,
+		CancellationToken cancellationToken = default) =>
+		_controller.CaptureGameplayFrameAsync(outputPath, settleFrameCount, cancellationToken);
+
 	[McpServerTool(Name = "shutdown_editor"), Description("Gracefully shut down the running WolfEngine Editor while leaving this MCP server available.")]
 	public async Task<string> ShutdownEditor(CancellationToken cancellationToken)
 	{

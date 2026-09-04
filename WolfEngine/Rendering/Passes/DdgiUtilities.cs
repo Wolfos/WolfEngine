@@ -332,6 +332,28 @@ public static class DdgiUtilities
 		return MathF.Pow(Math.Clamp(directionDot, 0.0f, 1.0f), exponent);
 	}
 
+	public static float GetProbeNormalWeight(float normalDotDirectionToProbe)
+	{
+		var wrappedNormal = Math.Clamp(normalDotDirectionToProbe * 0.5f + 0.5f, 0.0f, 1.0f);
+		return wrappedNormal * wrappedNormal;
+	}
+
+	public static Vector2 BlendVisibilityMoments(Vector2 allMoments, Vector2 hitMoments, float hitCoverage)
+	{
+		var blend = SmoothStep(0.15f, 0.5f, Math.Clamp(hitCoverage, 0.0f, 1.0f));
+		var allVariance = Math.Max(allMoments.Y - allMoments.X * allMoments.X, 0.0f);
+		var hitVariance = Math.Max(hitMoments.Y - hitMoments.X * hitMoments.X, 0.0f);
+		var meanDistance = float.Lerp(allMoments.X, hitMoments.X, blend);
+		var variance = float.Lerp(allVariance, hitVariance, blend);
+		return new Vector2(meanDistance, meanDistance * meanDistance + variance);
+	}
+
+	private static float SmoothStep(float edge0, float edge1, float value)
+	{
+		var t = Math.Clamp((value - edge0) / Math.Max(edge1 - edge0, 1e-6f), 0.0f, 1.0f);
+		return t * t * (3.0f - 2.0f * t);
+	}
+
 	public static float GetOctahedralSolidAngleWeight(Vector2 octUv)
 	{
 		var unnormalizedDirection = new Vector3(

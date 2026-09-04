@@ -1049,6 +1049,54 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
+	public void LightingDefaultsAndSettingsRoundTripThroughAssetJson()
+	{
+		var defaults = new RenderConfig().Lighting;
+		Assert.That(defaults.DiffuseIndirectMultiplier, Is.EqualTo(1.0f));
+		Assert.That(defaults.SpecularIndirectMultiplier, Is.EqualTo(1.0f));
+
+		var config = new RenderConfig
+		{
+			Lighting = new LightingConfig
+			{
+				DiffuseIndirectMultiplier = 0.4f,
+				SpecularIndirectMultiplier = 1.6f
+			}
+		};
+		var roundTripped = JsonSerializer.Deserialize<RenderConfig>(
+			JsonSerializer.Serialize(config, AssetJson.SerializerOptions),
+			AssetJson.SerializerOptions)!;
+
+		Assert.That(roundTripped.Lighting.DiffuseIndirectMultiplier, Is.EqualTo(0.4f));
+		Assert.That(roundTripped.Lighting.SpecularIndirectMultiplier, Is.EqualTo(1.6f));
+	}
+
+	[Test]
+	public void DdgiProbeNormalWeightStronglyRejectsBackSideProbes()
+	{
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(1.0f), Is.EqualTo(1.0f));
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(0.0f), Is.EqualTo(0.25f));
+		Assert.That(DdgiUtilities.GetProbeNormalWeight(-1.0f), Is.EqualTo(0.0f));
+	}
+
+	[Test]
+	public void DdgiVisibilityMomentBlendRemovesBetweenPopulationVariance()
+	{
+		var allMoments = new Vector2(0.6f, 0.52f);
+		var hitMoments = new Vector2(0.2f, 0.041f);
+		Assert.That(DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 0.0f), Is.EqualTo(allMoments));
+		var hitDominant = DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 1.0f);
+		Assert.That(hitDominant.X, Is.EqualTo(hitMoments.X).Within(1e-6f));
+		Assert.That(hitDominant.Y, Is.EqualTo(hitMoments.Y).Within(1e-6f));
+
+		var mixed = DdgiUtilities.BlendVisibilityMoments(allMoments, hitMoments, 0.4f);
+		var unclusteredVisibility = DdgiUtilities.EvaluateVisibility(allMoments.X, allMoments.Y, 0.4f);
+		var clusteredVisibility = DdgiUtilities.EvaluateVisibility(mixed.X, mixed.Y, 0.4f);
+		Assert.That(unclusteredVisibility, Is.EqualTo(1.0f));
+		Assert.That(clusteredVisibility, Is.LessThan(0.5f));
+	}
+
+	[Test]
 	public void DdgiOctahedralProjectionWeightsDistortedDirectionsBySolidAngle()
 	{
 		var centerWeight = DdgiUtilities.GetOctahedralSolidAngleWeight(Vector2.Zero);

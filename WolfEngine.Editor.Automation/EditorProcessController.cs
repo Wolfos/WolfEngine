@@ -179,6 +179,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
 
+	public Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
+		string outputPath,
+		int settleFrameCount,
+		CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureGameplayFrameAsync(outputPath, settleFrameCount, cancellationToken);
+
 	public async Task ShutdownAsync(CancellationToken cancellationToken)
 	{
 		var editor = GetRunningEditor();

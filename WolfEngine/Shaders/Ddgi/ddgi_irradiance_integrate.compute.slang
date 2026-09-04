@@ -5,7 +5,10 @@ static const uint DDGI_DIRECTION_RESOLUTION = 8u;
 static const uint DDGI_DIRECTION_COUNT = DDGI_DIRECTION_RESOLUTION * DDGI_DIRECTION_RESOLUTION;
 static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
 static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
-static const float DDGI_MAX_MEAN_BLEND = 0.02f;
+// Temporal rates are authored per rendered frame, but a probe may only run once
+// every probeUpdateFrames frames. Convert them to an equivalent per-update rate
+// so sparse scheduling does not make persistent lighting converge arbitrarily slowly.
+static const float DDGI_MEAN_BLEND_PER_FRAME = 0.02f;
 
 struct DdgiVarianceData
 {
@@ -71,25 +74,36 @@ void StoreVarianceData(uint index, DdgiVarianceData data)
         PackHalf2(float2(data.vbbr, data.inconsistency)));
 }
 
+float DdgiCadenceAdjustedBlend(float perFrameBlend)
+{
+    float clampedBlend = saturate(perFrameBlend);
+    return 1.0f - pow(1.0f - clampedBlend, float(max(probeUpdateFrames, 1u)));
+}
+
 void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
 {
     float3 deviation = sqrt(max(1e-5f.xxx, data.variance));
     float3 highThreshold = 0.1f.xxx + data.shortMean + deviation * 8.0f;
     sampleValue -= max(0.0f.xxx, sampleValue - highThreshold);
 
+    float shortMeanBlend = DdgiCadenceAdjustedBlend(irradianceTemporalBlendSpeed);
+    float varianceBlend = DdgiCadenceAdjustedBlend(irradianceTemporalBlendSpeed * 0.5f);
     float3 delta = sampleValue - data.shortMean;
-    data.shortMean = lerp(data.shortMean, sampleValue, irradianceTemporalBlendSpeed);
+    data.shortMean = lerp(data.shortMean, sampleValue, shortMeanBlend);
     float3 delta2 = sampleValue - data.shortMean;
     data.variance = lerp(
         data.variance,
         max(0.0f.xxx, delta * delta2),
-        irradianceTemporalBlendSpeed * 0.5f);
+        varianceBlend);
     deviation = sqrt(max(1e-5f.xxx, data.variance));
 
     float relativeDifference = dot(
         float3(0.299f, 0.587f, 0.114f),
         abs(data.mean - data.shortMean) / max(1e-5f.xxx, deviation));
-    data.inconsistency = lerp(data.inconsistency, relativeDifference, 0.08f);
+    data.inconsistency = lerp(
+        data.inconsistency,
+        relativeDifference,
+        DdgiCadenceAdjustedBlend(0.08f));
 
     float varianceBlendReduction = clamp(
         dot(
@@ -97,12 +111,20 @@ void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
             0.5f * data.shortMean / max(1e-5f.xxx, deviation)),
         1.0f / 32.0f,
         1.0f);
-    float catchUpBlend = clamp(
-        smoothstep(0.0f, 1.0f, relativeDifference * max(0.02f, data.inconsistency - 0.2f)),
-        1.0f / 256.0f,
-        1.0f) * data.vbbr;
-    data.vbbr = lerp(data.vbbr, varianceBlendReduction, 0.1f);
-    data.mean = lerp(data.mean, sampleValue, min(saturate(catchUpBlend), DDGI_MAX_MEAN_BLEND));
+    data.vbbr = lerp(
+        data.vbbr,
+        varianceBlendReduction,
+        DdgiCadenceAdjustedBlend(0.1f));
+
+    // The short mean is the robust sample estimate: the high-side clamp above
+    // absorbs isolated fireflies before they reach it. Track that filtered value
+    // independently at a cadence-adjusted rate instead of applying a 2% ceiling
+    // once per scheduled probe update. The old coupling made recursive feedback
+    // take minutes to approach its fixed point when probes updated every 16 frames.
+    data.mean = lerp(
+        data.mean,
+        data.shortMean,
+        DdgiCadenceAdjustedBlend(DDGI_MEAN_BLEND_PER_FRAME));
 }
 
 float3 IntegrateDirection(float3 direction, uint rayCount)
