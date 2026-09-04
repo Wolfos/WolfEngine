@@ -461,7 +461,10 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
     coefficientLx *= inverseWeight;
 
     float3 dc = max(coefficientL0 * DDGI_HISTORY_SH_BASIS_L0, 0.0f.xxx);
-    float directionalScale = (2.0f / 3.0f) * DDGI_HISTORY_SH_BASIS_L1;
+    // Irradiance integration already cosine-filters incident radiance and divides
+    // by PI. Reconstruct that stored E/PI function directly; applying the L1
+    // clamped-cosine factor here would convolve recursive transport a second time.
+    float directionalScale = DDGI_HISTORY_SH_BASIS_L1;
     float3 directionalX = coefficientLx * directionalScale;
     float3 directionalY = coefficientLy * directionalScale;
     float3 directionalZ = coefficientLz * directionalScale;

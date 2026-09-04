@@ -500,7 +500,21 @@ float3 DdgiShadeHitSurface(DdgiHitSurface surface)
     float3 recursiveRadiance =
         DdgiSampleHistory(surface.worldPosition, surface.worldNormal) *
         saturate(recursiveBounceEnergy);
-    return surface.albedo * (directRadiance + recursiveRadiance) + surface.emissive;
+    // Repeated probe projection, interpolation, and L1 reconstruction damp the
+    // feedback signal at every bounce. Compensate that numerical loss without
+    // allowing a surface's recursive throughput to reach one and run away.
+    static const float DDGI_RECURSIVE_FEEDBACK_COMPENSATION = 4.0f;
+    static const float DDGI_MAX_RECURSIVE_SURFACE_THROUGHPUT = 0.9f;
+    float maximumSurfaceThroughput =
+        max(surface.albedo.r, max(surface.albedo.g, surface.albedo.b)) *
+        saturate(recursiveBounceEnergy);
+    float recursiveCompensation = min(
+        DDGI_RECURSIVE_FEEDBACK_COMPENSATION,
+        DDGI_MAX_RECURSIVE_SURFACE_THROUGHPUT /
+            max(maximumSurfaceThroughput, 1e-4f));
+    return surface.albedo *
+        (directRadiance + recursiveRadiance * recursiveCompensation) +
+        surface.emissive;
 }
 
 DdgiTraceResult DdgiTraceRay(

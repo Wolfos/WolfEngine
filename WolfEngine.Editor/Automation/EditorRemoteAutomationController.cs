@@ -546,7 +546,96 @@ public sealed class EditorRemoteAutomationController
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
 
+	/// <summary>
+	/// Enters or resumes Play mode, waits for gameplay startup to publish a runtime camera, verifies the
+	/// camera that the viewport will use, and captures the next frame from that camera.
+	/// </summary>
+	public async Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
+		string outputPath,
+		int settleFrameCount,
+		CancellationToken cancellationToken)
+	{
+		if (settleFrameCount < 1)
+		{
+			throw new InvalidOperationException("settle_frame_count must be positive.");
+		}
+
+		var enteredPlayMode = await Enqueue(() =>
+		{
+			if (_playSession.State == EditorPlayState.Playing)
+			{
+				return false;
+			}
+
+			if (_playSession.State == EditorPlayState.Paused)
+			{
+				if (_playSession.Resume() == false)
+				{
+					throw new InvalidOperationException("Could not resume Play mode for gameplay-camera capture.");
+				}
+				return false;
+			}
+
+			if (_playSession.EnterPlay() == false)
+			{
+				throw new InvalidOperationException($"Cannot enter Play mode while the editor is {_playSession.State}.");
+			}
+			return true;
+		}, cancellationToken).ConfigureAwait(false);
+
+		await _renderFrameCoordinator
+			.WaitForCompletedFramesAsync(settleFrameCount, cancellationToken)
+			.ConfigureAwait(false);
+
+		var camera = await Enqueue(GetGameplayCameraInfo, cancellationToken).ConfigureAwait(false);
+		var capture = await CaptureFrameAsync(outputPath, cancellationToken).ConfigureAwait(false);
+		return new GameplayFrameCaptureResult(
+			capture.OutputPath,
+			capture.Width,
+			capture.Height,
+			camera.Name,
+			camera.Fov,
+			camera.Position.X,
+			camera.Position.Y,
+			camera.Position.Z,
+			camera.Forward.X,
+			camera.Forward.Y,
+			camera.Forward.Z,
+			enteredPlayMode,
+			settleFrameCount,
+			capture.EditorFrameSequence,
+			capture.RenderFrameSequence);
+	}
+
 	public Task ShutdownAsync(CancellationToken cancellationToken) => Enqueue(() => { ShutdownRequested = true; }, cancellationToken);
+
+	private (string Name, float Fov, Vector3 Position, Vector3 Forward) GetGameplayCameraInfo()
+	{
+		if (_playSession.State != EditorPlayState.Playing || _playSession.RuntimeScene is not { } runtimeScene)
+		{
+			throw new InvalidOperationException("Gameplay-camera capture requires a running Play-mode scene.");
+		}
+
+		var world = runtimeScene.World;
+		foreach (var entry in world.View<Camera, WorldTransform>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			var name = world.HasComponent<NameComponent>(entry.Entity)
+				? world.GetComponent<NameComponent>(entry.Entity).Name
+				: string.Empty;
+			var transform = entry.Second.LocalToWorld;
+			var forward = Vector3.TransformNormal(Vector3.UnitZ, transform);
+			forward = forward.LengthSquared() > 1e-8f ? Vector3.Normalize(forward) : Vector3.UnitZ;
+			return (name, entry.First.Fov, transform.Translation, forward);
+		}
+
+		throw new InvalidOperationException(
+			"The running gameplay scene has no enabled Camera with a WorldTransform; refusing to capture the editor camera as a fallback.");
+	}
 
 	private Task<T> Enqueue<T>(Func<T> operation, CancellationToken cancellationToken)
 	{

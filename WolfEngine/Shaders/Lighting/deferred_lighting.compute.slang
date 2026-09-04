@@ -400,11 +400,12 @@ float DdgiShLobeScale(float3 dc, float3 directionalX, float3 directionalY, float
 
 float3 EvaluateDdgiDiffuse(DdgiShSample sample, float3 normal)
 {
-    // L1 radiance SH convolved with a clamped cosine lobe and divided by PI.
+    // Integration stores an L1 representation of cosine-filtered irradiance / PI.
+    // Reconstruct it directly rather than applying a second cosine convolution.
     // Limit the directional lobe before evaluation so truncated L1 ringing cannot
     // drive individual color channels negative and create black or tinted bands.
     float3 dc = max(sample.coefficientL0 * DDGI_SH_BASIS_L0, 0.0f.xxx);
-    float directionalScale = (2.0f / 3.0f) * DDGI_SH_BASIS_L1;
+    float directionalScale = DDGI_SH_BASIS_L1;
     float3 directionalX = sample.coefficientLx * directionalScale;
     float3 directionalY = sample.coefficientLy * directionalScale;
     float3 directionalZ = sample.coefficientLz * directionalScale;
