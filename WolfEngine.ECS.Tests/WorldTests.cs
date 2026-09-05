@@ -250,24 +250,6 @@ public class WorldTests
     }
 
 	[Test]
-	public void ComponentVersion_TracksAddReplaceAndRemoval()
-	{
-		var world = new World(WorldTag.All);
-		var entity = world.CreateEntity();
-		var initialVersion = world.GetComponentVersion<TestComponentA>();
-
-		world.AddComponent(entity, new TestComponentA { Value = 1 });
-		var addedVersion = world.GetComponentVersion<TestComponentA>();
-		world.AddComponent(entity, new TestComponentA { Value = 2 });
-		var replacedVersion = world.GetComponentVersion<TestComponentA>();
-		world.RemoveComponent<TestComponentA>(entity);
-
-		Assert.That(addedVersion, Is.GreaterThan(initialVersion));
-		Assert.That(replacedVersion, Is.GreaterThan(addedVersion));
-		Assert.That(world.GetComponentVersion<TestComponentA>(), Is.GreaterThan(replacedVersion));
-	}
-
-	[Test]
 	public void SetEnabled_MarksWorldTransformChanged()
 	{
 		var world = new World(WorldTag.All);

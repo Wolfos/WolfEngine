@@ -98,9 +98,6 @@ public class World
     internal int GetComponentCount<T>() where T : struct, IEntityComponent
         => Pool<T>().Count;
 
-	public int GetComponentVersion<T>() where T : struct, IEntityComponent
-		=> Pool<T>().Version;
-
     public void GetAllEntities(List<Entity> entities)
     {
         entities.Clear();

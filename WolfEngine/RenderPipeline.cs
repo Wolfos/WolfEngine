@@ -24,7 +24,7 @@ public class RenderPipeline : IRenderPipeline
 	private readonly RenderGraph _renderGraph;
 	private readonly TerrainRuntimeCache _terrainRuntimeCache = new();
 	private readonly DebugPrimitiveMeshFactory _debugPrimitiveMeshFactory = new();
-	private readonly Dictionary<GpuDrawDatabase, List<MeshWorldVersion>> _meshWorldVersions = new();
+	private readonly Dictionary<GpuDrawDatabase, List<World>> _renderWorldsByDatabase = new();
 	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
 	private int _stressFrame;
 	private bool _gpuHardeningStressWasEnabled;
@@ -71,9 +71,9 @@ public class RenderPipeline : IRenderPipeline
 			if (Matrix4x4.Decompose(cameraWorldTransform.LocalToWorld, out _, out _, out cameraOrigin))
 			{
 			}
-			var meshStructureChanged = HaveMeshWorldsChanged(gpuDrawDatabase, worlds);
+			var renderWorldListChanged = HasRenderWorldListChanged(gpuDrawDatabase, worlds);
 			var gpuHardeningStressEnabled = GraphicsConfig.GpuHardeningStressEnabled;
-			var reconcilePersistentMeshes = meshStructureChanged ||
+			var reconcilePersistentMeshes = renderWorldListChanged ||
 			                                gpuHardeningStressEnabled ||
 			                                (_gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false);
 			_gpuHardeningStressWasEnabled = gpuHardeningStressEnabled;
@@ -292,15 +292,15 @@ public class RenderPipeline : IRenderPipeline
 		}
 	}
 
-	private bool HaveMeshWorldsChanged(GpuDrawDatabase database, IReadOnlyList<World> worlds)
+	private bool HasRenderWorldListChanged(GpuDrawDatabase database, IReadOnlyList<World> worlds)
 	{
-		if (_meshWorldVersions.TryGetValue(database, out var versions) == false)
+		if (_renderWorldsByDatabase.TryGetValue(database, out var previousWorlds) == false)
 		{
-			versions = new List<MeshWorldVersion>();
-			_meshWorldVersions.Add(database, versions);
+			previousWorlds = new List<World>();
+			_renderWorldsByDatabase.Add(database, previousWorlds);
 		}
 
-		var versionIndex = 0;
+		var worldIndex = 0;
 		var changed = false;
 		for (var i = 0; i < (worlds?.Count ?? 0); i++)
 		{
@@ -310,17 +310,14 @@ public class RenderPipeline : IRenderPipeline
 				continue;
 			}
 
-			var current = new MeshWorldVersion(
-				world,
-				world.GetComponentVersion<MeshRenderer>());
-			if (versionIndex >= versions.Count || versions[versionIndex] != current)
+			if (worldIndex >= previousWorlds.Count || ReferenceEquals(previousWorlds[worldIndex], world) == false)
 			{
 				changed = true;
 			}
-			versionIndex++;
+			worldIndex++;
 		}
 
-		if (versionIndex != versions.Count)
+		if (worldIndex != previousWorlds.Count)
 		{
 			changed = true;
 		}
@@ -329,21 +326,17 @@ public class RenderPipeline : IRenderPipeline
 			return false;
 		}
 
-		versions.Clear();
+		previousWorlds.Clear();
 		for (var i = 0; i < (worlds?.Count ?? 0); i++)
 		{
 			var world = worlds![i];
 			if (world is not null)
 			{
-				versions.Add(new MeshWorldVersion(
-					world,
-					world.GetComponentVersion<MeshRenderer>()));
+				previousWorlds.Add(world);
 			}
 		}
 		return true;
 	}
-
-	private readonly record struct MeshWorldVersion(World World, int MeshVersion);
 
 	internal static void CollectDdgiProbeDebugPrimitives(
 		RenderConfig config,
