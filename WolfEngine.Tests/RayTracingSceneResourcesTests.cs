@@ -74,6 +74,11 @@ public sealed class RayTracingSceneResourcesTests
 			ShaderPath("GpuDraw/gpu_draw_cull.compute.slang"),
 			"CSCull",
 			GraphicsBackendKind.Metal);
+		var diagnosticCompiled = shaderCompiler.GetComputeShaderWithReflection(
+			ShaderPath("GpuDraw/gpu_draw_cull.compute.slang"),
+			"CSCull",
+			GraphicsBackendKind.Metal,
+			"WOLF_GPU_DRAW_DIAGNOSTICS");
 		var cullParams = compiled.ReflectionLayout.GetConstantBuffer("CullParams");
 
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
@@ -84,8 +89,10 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(cullParams.GetFieldOrThrow("outputLaneStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("participatingLaneMask").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(compiled.ReflectionLayout.GetResource("g_DrawArgs").RegisterIndex, Is.EqualTo(3u));
-		Assert.That(compiled.ReflectionLayout.GetResource("g_DrawExecutionRangePerBucket").RegisterIndex, Is.EqualTo(5u));
-		Assert.That(compiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex, Is.EqualTo(10u));
+		Assert.That(compiled.ReflectionLayout.TryGetResource("g_DrawExecutionRangePerBucket", out _), Is.False);
+		Assert.That(compiled.ReflectionLayout.TryGetResource("g_Diagnostics", out _), Is.False);
+		Assert.That(diagnosticCompiled.ReflectionLayout.GetResource("g_DrawExecutionRangePerBucket").RegisterIndex, Is.EqualTo(5u));
+		Assert.That(diagnosticCompiled.ReflectionLayout.GetResource("g_Diagnostics").RegisterIndex, Is.EqualTo(10u));
 	}
 
 	[Test]

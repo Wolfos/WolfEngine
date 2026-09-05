@@ -193,6 +193,7 @@ public sealed class EngineShaderCatalog
 		foreach (var define in request.GetDefines())
 		{
 			var legal = define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
+			            define == "WOLF_GPU_DRAW_DIAGNOSTICS" && request.ProgramId == EngineShaderPrograms.GpuDrawCull ||
 			            request.ProgramId == EngineShaderPrograms.ShadowMap &&
 			            (define == "WOLF_SHADOW_CASCADE_INDEX=0" || define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
 			if (legal == false)
@@ -250,7 +251,17 @@ public sealed class EngineShaderCatalog
 			else
 			{
 				foreach (var entryPoint in GetComputeEntryPoints(descriptor.Id))
+				{
 					requests.Add(ShaderRequest.Compute(descriptor.Id, entryPoint, backendKind));
+					if (descriptor.Id == EngineShaderPrograms.GpuDrawCull)
+					{
+						requests.Add(ShaderRequest.Compute(
+							descriptor.Id,
+							entryPoint,
+							backendKind,
+							"WOLF_GPU_DRAW_DIAGNOSTICS"));
+					}
+				}
 			}
 		}
 		return requests;
