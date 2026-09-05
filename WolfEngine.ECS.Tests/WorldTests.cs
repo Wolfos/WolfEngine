@@ -419,7 +419,7 @@ public class WorldTests
     }
 
     [Test]
-    public void MarkDirty_AddsTopmostDirtyRoot()
+    public void MarkDirty_AddsOnlyChangedEntityAsDirtyRoot()
     {
         var world = new World(WorldTag.All);
         var transformSystem = new TransformSystem();
@@ -431,7 +431,8 @@ public class WorldTests
 
         world.MarkDirty(child);
 
-        Assert.That(world.HasComponent<DirtyTransformRoot>(parent), Is.True);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(parent), Is.False);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(child), Is.True);
         Assert.That(world.GetComponent<LocalTransform>(child).IsDirty, Is.True);
     }
 

@@ -365,38 +365,8 @@ public class World
 
     public void MarkDirty(Entity entity)
     {
-        ref var localTransform = ref GetComponent<LocalTransform>(entity);
-
-        var current = entity;
-        var candidateRoot = entity;
-
-        while (HasComponent<Parent>(current))
-        {
-            var parent = GetComponent<Parent>(current).Value;
-
-            if (HasComponent<DirtyTransformRoot>(parent))
-            {
-                localTransform.IsDirty = true;
-                if (HasComponent<DirtyTransformRoot>(entity))
-                {
-                    RemoveComponent<DirtyTransformRoot>(entity);
-                }
-
-                return;
-            }
-
-            candidateRoot = parent;
-            current = parent;
-        }
-
-        localTransform.IsDirty = true;
-        if (candidateRoot != entity && HasComponent<DirtyTransformRoot>(entity))
-        {
-            RemoveComponent<DirtyTransformRoot>(entity);
-        }
-
-        // mark this topmost ancestor as a dirty subtree root
-        AddComponent<DirtyTransformRoot>(candidateRoot);
+        GetComponent<LocalTransform>(entity).IsDirty = true;
+        AddComponent<DirtyTransformRoot>(entity);
     }
 
     public void Translate(Entity e, Vector3 translation, bool isLocal = false)

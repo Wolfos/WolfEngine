@@ -91,6 +91,7 @@ public struct Sibling : IEntityComponent
 [NotSerialized]
 public struct DirtyTransformRoot : IEntityComponent
 {
+    // Pending subtree update; this entity may have a parent or another dirty ancestor.
 }
 
 [ExcludeFromEditor]
