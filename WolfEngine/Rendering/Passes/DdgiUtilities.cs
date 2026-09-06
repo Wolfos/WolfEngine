@@ -13,13 +13,14 @@ public static class DdgiUtilities
 	public const int IrradianceEstimatorDirectionCount = IrradianceTileInteriorSize * IrradianceTileInteriorSize;
 	public const int IrradianceEstimatorStride = 16;
 	public const int RelocationRayCount = 16;
+	public const int TemporalReferenceRayCount = 16;
 	public const int RelocationIterationCount = 1;
 	public const float DefaultRecursiveBounceEnergy = 0.5f;
 	private const float ShBasisL0 = 0.28209479177f;
 	private const float ShBasisL1 = 0.48860251190f;
 	private const float ShDirectionalLimit = 0.95f;
 	private const float VisibilityVarianceFloor = 0.000001f;
-	private const float MaxIrradianceMeanBlend = 0.02f;
+	private const float StableIrradianceMeanBlend = 0.02f;
 	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
 
@@ -161,7 +162,7 @@ public static class DdgiUtilities
 	{
 		var visibilityRayCount = GetRaySampleCount(requestedRayCount, VisibilityTileInteriorSize);
 		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
-		return checked(visibilityRayCount + irradianceRayCount);
+		return checked(visibilityRayCount + irradianceRayCount + TemporalReferenceRayCount);
 	}
 
 	internal static bool IsRelocationTraceEnabled(RenderConfig config)
@@ -209,42 +210,24 @@ public static class DdgiUtilities
 
 	public static DdgiVarianceData UpdateVarianceEstimator(
 		Vector3 sampleValue,
+		Vector3 referenceValue,
 		DdgiVarianceData data,
 		float shortWindowBlend)
 	{
-		shortWindowBlend = Math.Clamp(shortWindowBlend, 1.0f / 256.0f, 1.0f);
+		var referenceScale = Math.Max(Math.Max(referenceValue.Length(), data.ReferenceMean.Length()), 1e-4f);
+		var relativeChange = (referenceValue - data.ReferenceMean).Length() / referenceScale;
+		var meanBlend = Math.Clamp(relativeChange * 8.0f, StableIrradianceMeanBlend, 1.0f);
+		shortWindowBlend = Math.Max(Math.Clamp(shortWindowBlend, 1.0f / 256.0f, 1.0f), meanBlend);
 		var deviation = Vector3.SquareRoot(Vector3.Max(new Vector3(1e-5f), data.Variance));
-		var highThreshold = new Vector3(0.1f) + data.ShortMean + deviation * 8.0f;
-		sampleValue = Vector3.Min(sampleValue, highThreshold);
-
+		if (meanBlend <= StableIrradianceMeanBlend)
+			sampleValue = Vector3.Min(sampleValue, new Vector3(0.1f) + data.ShortMean + deviation * 8.0f);
 		var delta = sampleValue - data.ShortMean;
 		data.ShortMean = Vector3.Lerp(data.ShortMean, sampleValue, shortWindowBlend);
 		var delta2 = sampleValue - data.ShortMean;
-		data.Variance = Vector3.Lerp(
-			data.Variance,
-			Vector3.Max(Vector3.Zero, delta * delta2),
-			shortWindowBlend * 0.5f);
-		deviation = Vector3.SquareRoot(Vector3.Max(new Vector3(1e-5f), data.Variance));
-
-		var relativeDifference = Luminance(Vector3.Abs(data.Mean - data.ShortMean) / deviation);
-		data.Inconsistency += (relativeDifference - data.Inconsistency) * 0.08f;
-		var varianceBlendReduction = Math.Clamp(
-			Luminance(0.5f * data.ShortMean / deviation),
-			1.0f / 32.0f,
-			1.0f);
-		var catchUpInput = relativeDifference * MathF.Max(0.02f, data.Inconsistency - 0.2f);
-		var smoothCatchUp = Math.Clamp(catchUpInput, 0.0f, 1.0f);
-		smoothCatchUp = smoothCatchUp * smoothCatchUp * (3.0f - 2.0f * smoothCatchUp);
-		var catchUpBlend = Math.Clamp(smoothCatchUp, 1.0f / 256.0f, 1.0f) * data.VarianceBlendReduction;
-		data.VarianceBlendReduction += (varianceBlendReduction - data.VarianceBlendReduction) * 0.1f;
-		var meanBlend = Math.Min(Math.Clamp(catchUpBlend, 0.0f, 1.0f), MaxIrradianceMeanBlend);
+		data.Variance = Vector3.Lerp(data.Variance, Vector3.Max(Vector3.Zero, delta * delta2), shortWindowBlend * 0.5f);
 		data.Mean = Vector3.Lerp(data.Mean, sampleValue, meanBlend);
+		data.ReferenceMean = Vector3.Lerp(data.ReferenceMean, referenceValue, meanBlend);
 		return data;
-	}
-
-	private static float Luminance(Vector3 value)
-	{
-		return Vector3.Dot(value, new Vector3(0.299f, 0.587f, 0.114f));
 	}
 
 	public static DdgiL1Sh ProjectRadiance(Vector3 direction, Vector3 radiance, float solidAngle)
@@ -743,9 +726,8 @@ public readonly record struct DdgiL1Sh(
 public record struct DdgiVarianceData(
 	Vector3 Mean,
 	Vector3 ShortMean,
-	float VarianceBlendReduction,
 	Vector3 Variance,
-	float Inconsistency);
+	Vector3 ReferenceMean);
 
 public readonly record struct DdgiRelocationHit(
 	Vector3 Direction,

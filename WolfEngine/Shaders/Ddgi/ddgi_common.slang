@@ -558,6 +558,26 @@ float3 DdgiVisibilityRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
     return DdgiRayDirection(rayIndex, rayCount, probeIndex, 0u);
 }
 
+// Reference rays retain their directions across updates. Comparing their
+// radiance distinguishes scene changes from the rotating estimator's ray noise.
+static const uint DDGI_TEMPORAL_REFERENCE_RAY_COUNT = 16u;
+
+float3 DdgiReferenceRayDirection(uint rayIndex, uint probeIndex)
+{
+    return DdgiRayDirection(rayIndex, DDGI_TEMPORAL_REFERENCE_RAY_COUNT, probeIndex, 0u);
+}
+
+uint2 DdgiReferenceRayPixel(uint probeIndex, uint rayIndex)
+{
+    // The irradiance trace atlas has unused borders. Its top and bottom rows
+    // hold the reference samples without adding an atlas or increasing its size.
+    uint tileSize = irradianceTileInteriorSize + tileBorderSize * 2u;
+    uint2 local = rayIndex < tileSize
+        ? uint2(rayIndex, 0u)
+        : uint2(rayIndex - tileSize, tileSize - 1u);
+    return DdgiProbeTileOrigin(probeIndex, irradianceTileInteriorSize) + local;
+}
+
 float3 DdgiRelocationRayDirection(uint rayIndex)
 {
     const float goldenAngle = 2.39996322973f;

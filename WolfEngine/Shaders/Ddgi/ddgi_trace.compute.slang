@@ -694,6 +694,14 @@ void DdgiProbeTraceCS(
             result.backfaceHit ? 1.0f : 0.0f);
     }
 
+    if (groupThreadId.x < DDGI_TEMPORAL_REFERENCE_RAY_COUNT)
+    {
+        uint rayIndex = groupThreadId.x;
+        float3 direction = DdgiReferenceRayDirection(rayIndex, probeIndex);
+        DdgiTraceResult result = DdgiTraceRay(probePosition, direction);
+        irradianceTarget[DdgiReferenceRayPixel(probeIndex, rayIndex)] = float4(result.radiance, 1.0f);
+    }
+
     if (groupThreadId.x < irradianceRayCount)
     {
         uint rayIndex = groupThreadId.x;

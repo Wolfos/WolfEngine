@@ -160,6 +160,13 @@ public sealed class EditorAutomationTools
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
 
+	[McpServerTool(Name = "set_entity_rotation"), Description("Set an entity's local Euler rotation in degrees in the active authoring or Play-mode scene, without saving. Uses the same transform setter as the inspector.")]
+	public async Task<string> SetEntityRotation(string entityId, float pitch, float yaw, float roll, CancellationToken cancellationToken)
+	{
+		await _controller.SetEntityRotationAsync(Guid.Parse(entityId), new System.Numerics.Vector3(pitch, yaw, roll), cancellationToken);
+		return $"Entity {entityId}: rotation ({pitch}, {yaw}, {roll}) degrees. Changed in memory only.";
+	}
+
 	[McpServerTool(Name = "capture_frame"), Description("Capture a PNG from the currently running editor on its next rendered frame. This never launches a separate editor process.")]
 	public Task<FrameCaptureResult> CaptureFrame(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

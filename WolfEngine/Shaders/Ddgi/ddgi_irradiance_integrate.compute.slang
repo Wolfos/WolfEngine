@@ -8,31 +8,22 @@ static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
 // A scheduled update contributes one stochastic estimate, regardless of how
 // many rendered frames elapsed. Cadence scaling gives sparse, noisy samples
 // nearly unit weight (73% at 64 frames) and makes indirect lighting pulse.
-static const float DDGI_MAX_MEAN_BLEND = 0.02f;
+static const float DDGI_STABLE_MEAN_BLEND = 0.02f;
 
 struct DdgiVarianceData
 {
     float3 mean;
     float3 shortMean;
-    float vbbr;
     float3 variance;
-    float inconsistency;
+    float3 referenceMean;
 };
 
 RWStructuredBuffer<uint4> g_IrradianceEstimator : register(u2);
 groupshared uint g_FilteredRadiance[DDGI_DIRECTION_COUNT];
 groupshared float3 g_TraceRadiance[DDGI_DIRECTION_COUNT];
 groupshared float3 g_TraceDirections[DDGI_DIRECTION_COUNT];
-
-uint PackHalf2(float2 value)
-{
-    return f32tof16(value.x) | (f32tof16(value.y) << 16u);
-}
-
-float2 UnpackHalf2(uint value)
-{
-    return float2(f16tof32(value), f16tof32(value >> 16u));
-}
+groupshared float3 g_ReferenceRadiance[DDGI_TEMPORAL_REFERENCE_RAY_COUNT];
+groupshared float3 g_ReferenceDirections[DDGI_TEMPORAL_REFERENCE_RAY_COUNT];
 
 uint PackRgbe(float3 rgb)
 {
@@ -59,9 +50,7 @@ DdgiVarianceData LoadVarianceData(uint index)
     data.mean = UnpackRgbe(packed.x);
     data.shortMean = UnpackRgbe(packed.y);
     data.variance = UnpackRgbe(packed.z);
-    float2 other = UnpackHalf2(packed.w);
-    data.vbbr = other.x;
-    data.inconsistency = other.y;
+    data.referenceMean = UnpackRgbe(packed.w);
     return data;
 }
 
@@ -71,37 +60,36 @@ void StoreVarianceData(uint index, DdgiVarianceData data)
         PackRgbe(data.mean),
         PackRgbe(data.shortMean),
         PackRgbe(data.variance),
-        PackHalf2(float2(data.vbbr, data.inconsistency)));
+        PackRgbe(data.referenceMean));
 }
 
-void MultiscaleMeanEstimator(float3 sampleValue, inout DdgiVarianceData data)
+void MultiscaleMeanEstimator(float3 sampleValue, float3 referenceValue, inout DdgiVarianceData data)
 {
-    float shortMeanBlend = clamp(irradianceTemporalBlendSpeed, 1.0f / 256.0f, 1.0f);
+    // Both reference estimates observe the same directions. Their difference
+    // measures actual transport changes (lighting, occluders, emissives, bounces),
+    // rather than a different Monte Carlo realization. Keep the reference anchor
+    // filtered at the same rate as the output, so response stays fast until the
+    // accumulated lighting has caught up, including after a light stops moving.
+    float referenceScale = max(max(length(referenceValue), length(data.referenceMean)), 1e-4f);
+    float relativeChange = length(referenceValue - data.referenceMean) / referenceScale;
+    float meanBlend = clamp(relativeChange * 8.0f, DDGI_STABLE_MEAN_BLEND, 1.0f);
+
+    float shortMeanBlend = max(clamp(irradianceTemporalBlendSpeed, 1.0f / 256.0f, 1.0f), meanBlend);
     float3 deviation = sqrt(max(1e-5f.xxx, data.variance));
     float3 highThreshold = 0.1f.xxx + data.shortMean + deviation * 8.0f;
-    sampleValue = min(sampleValue, highThreshold);
+    // Preserve firefly rejection when the reference is unchanged. Actual
+    // increases must not be clipped against the previous, potentially dark sky.
+    if (meanBlend <= DDGI_STABLE_MEAN_BLEND)
+    {
+        sampleValue = min(sampleValue, highThreshold);
+    }
 
     float3 delta = sampleValue - data.shortMean;
     data.shortMean = lerp(data.shortMean, sampleValue, shortMeanBlend);
     float3 delta2 = sampleValue - data.shortMean;
-    data.variance = lerp(
-        data.variance,
-        max(0.0f.xxx, delta * delta2),
-        shortMeanBlend * 0.5f);
-    deviation = sqrt(max(1e-5f.xxx, data.variance));
-
-    float relativeDifference = dot(
-        float3(0.299f, 0.587f, 0.114f),
-        abs(data.mean - data.shortMean) / deviation);
-    data.inconsistency = lerp(data.inconsistency, relativeDifference, 0.08f);
-    float varianceBlendReduction = clamp(
-        dot(float3(0.299f, 0.587f, 0.114f), 0.5f * data.shortMean / deviation),
-        1.0f / 32.0f,
-        1.0f);
-    float catchUpInput = relativeDifference * max(0.02f, data.inconsistency - 0.2f);
-    float catchUpBlend = clamp(smoothstep(0.0f, 1.0f, catchUpInput), 1.0f / 256.0f, 1.0f) * data.vbbr;
-    data.vbbr = lerp(data.vbbr, varianceBlendReduction, 0.1f);
-    data.mean = lerp(data.mean, sampleValue, min(saturate(catchUpBlend), DDGI_MAX_MEAN_BLEND));
+    data.variance = lerp(data.variance, max(0.0f.xxx, delta * delta2), shortMeanBlend * 0.5f);
+    data.mean = lerp(data.mean, sampleValue, meanBlend);
+    data.referenceMean = lerp(data.referenceMean, referenceValue, meanBlend);
 }
 
 float3 IntegrateDirection(float3 direction, uint rayCount)
@@ -112,6 +100,19 @@ float3 IntegrateDirection(float3 direction, uint rayCount)
     {
         float weight = saturate(dot(direction, g_TraceDirections[rayIndex]));
         radiance += g_TraceRadiance[rayIndex] * weight;
+        weightSum += weight;
+    }
+    return weightSum > 1e-5f ? radiance / weightSum : 0.0f.xxx;
+}
+
+float3 IntegrateReferenceDirection(float3 direction)
+{
+    float3 radiance = 0.0f.xxx;
+    float weightSum = 0.0f;
+    for (uint rayIndex = 0u; rayIndex < DDGI_TEMPORAL_REFERENCE_RAY_COUNT; rayIndex++)
+    {
+        float weight = saturate(dot(direction, g_ReferenceDirections[rayIndex]));
+        radiance += g_ReferenceRadiance[rayIndex] * weight;
         weightSum += weight;
     }
     return weightSum > 1e-5f ? radiance / weightSum : 0.0f.xxx;
@@ -167,11 +168,18 @@ void DdgiIrradianceIntegrateCS(
         g_TraceDirections[groupIndex] =
             DdgiRayDirection(groupIndex, rayCount, probeIndex);
     }
+    if (groupIndex < DDGI_TEMPORAL_REFERENCE_RAY_COUNT)
+    {
+        g_ReferenceRadiance[groupIndex] = GetTexture(traceIrradianceReadHandle)
+            .Load(int3(DdgiReferenceRayPixel(probeIndex, groupIndex), 0)).rgb;
+        g_ReferenceDirections[groupIndex] = DdgiReferenceRayDirection(groupIndex, probeIndex);
+    }
     GroupMemoryBarrierWithGroupSync();
 
     float2 octUv = ((float2(groupThreadId.xy) + 0.5f) / float(DDGI_DIRECTION_RESOLUTION)) * 2.0f - 1.0f;
     float3 direction = DdgiOctDecode(octUv);
     float3 currentRadiance = IntegrateDirection(direction, rayCount);
+    float3 referenceRadiance = IntegrateReferenceDirection(direction);
     uint estimatorIndex = DdgiPhysicalProbeIndex(probeIndex) * DDGI_DIRECTION_COUNT + groupIndex;
     DdgiVarianceData varianceData;
     if (!DdgiProbeHasUsableIntegrationHistory(probeIndex))
@@ -179,13 +187,13 @@ void DdgiIrradianceIntegrateCS(
         varianceData = (DdgiVarianceData)0;
         varianceData.mean = currentRadiance;
         varianceData.shortMean = currentRadiance;
-        varianceData.inconsistency = 1.0f;
+        varianceData.referenceMean = referenceRadiance;
     }
     else
     {
         varianceData = LoadVarianceData(estimatorIndex);
     }
-    MultiscaleMeanEstimator(currentRadiance, varianceData);
+    MultiscaleMeanEstimator(currentRadiance, referenceRadiance, varianceData);
     StoreVarianceData(estimatorIndex, varianceData);
     g_FilteredRadiance[groupIndex] = PackRgbe(varianceData.mean);
 
