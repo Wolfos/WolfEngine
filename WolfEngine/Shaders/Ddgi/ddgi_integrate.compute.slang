@@ -50,7 +50,7 @@ void DdgiVisibilityIntegrateCS(
     if (groupIndex == 0u)
     {
         g_UpdateActive = DdgiIsProbeUpdateActive(probeIndex) ? 1u : 0u;
-        g_UsableHistory = DdgiProbeHasUsableHistory(probeIndex) ? 1u : 0u;
+        g_UsableHistory = DdgiProbeHasUsableIntegrationHistory(probeIndex) ? 1u : 0u;
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -74,7 +74,7 @@ void DdgiVisibilityIntegrateCS(
             g_RayVisibility[groupIndex] =
                 GetTexture(traceVisibilityReadHandle).Load(int3(samplePixel, 0));
             g_RayDirections[groupIndex] =
-                DdgiRayDirection(groupIndex, rayCount, probeIndex);
+                DdgiVisibilityRayDirection(groupIndex, rayCount, probeIndex);
         }
         GroupMemoryBarrierWithGroupSync();
 

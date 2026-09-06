@@ -259,6 +259,21 @@ bool DdgiIsProbeScheduled(uint probeIndex)
         (probeIndex % updateFrames) == min(probeUpdateFrameIndex, updateFrames - 1u);
 }
 
+// Irradiance and distance moments describe the previous probe position. A
+// relocation must not blend those distances with observations at its new origin.
+// Recursive shading still uses the previous atlas and previous probe positions.
+bool DdgiProbeHasUsableIntegrationHistory(uint probeIndex)
+{
+    if (!DdgiProbeHasUsableHistory(probeIndex))
+    {
+        return false;
+    }
+    float3 previousOffset = DdgiLoadProbeState(probeStateReadHandle, probeIndex).xyz;
+    float3 currentOffset = DdgiLoadProbeState(probeStateCurrentHandle, probeIndex).xyz;
+    float3 delta = currentOffset - previousOffset;
+    return dot(delta, delta) <= 1e-8f;
+}
+
 bool DdgiIsProbeUpdateActive(uint probeIndex)
 {
     if (!DdgiIsProbeEnabled(probeIndex))
@@ -274,7 +289,7 @@ bool DdgiIsProbeUpdateActive(uint probeIndex)
     return
         historyValid == 0u ||
         !DdgiProbeHasHistory(probeIndex) ||
-        !DdgiProbeHasUsableHistory(probeIndex) ||
+        !DdgiProbeHasUsableIntegrationHistory(probeIndex) ||
         DdgiIsProbeScheduled(probeIndex);
 }
 
@@ -484,24 +499,24 @@ float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
     return max(dc + directional, 0.0f.xxx);
 }
 
-uint DdgiHash(uint3 v)
+uint DdgiHash(uint3 v, uint sequence)
 {
-    uint h = v.x * 747796405u + v.y * 2891336453u + v.z * 277803737u + frameIndex * 1597334677u;
+    uint h = v.x * 747796405u + v.y * 2891336453u + v.z * 277803737u + sequence * 1597334677u;
     h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
     return (h >> 22u) ^ h;
 }
 
-float DdgiHashFloat(uint probeIndex, uint salt)
+float DdgiHashFloat(uint probeIndex, uint salt, uint sequence)
 {
-    return (float(DdgiHash(uint3(probeIndex, salt, frameIndex))) + 0.5f) / 4294967296.0f;
+    return (float(DdgiHash(uint3(probeIndex, salt, sequence), sequence)) + 0.5f) / 4294967296.0f;
 }
 
-float4 DdgiRayRotation(uint probeIndex)
+float4 DdgiRayRotation(uint probeIndex, uint sequence)
 {
     uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
-    float u1 = DdgiHashFloat(physicalProbeIndex, 0x68bc21ebu);
-    float u2 = DdgiHashFloat(physicalProbeIndex, 0x02e5be93u);
-    float u3 = DdgiHashFloat(physicalProbeIndex, 0x967a889bu);
+    float u1 = DdgiHashFloat(physicalProbeIndex, 0x68bc21ebu, sequence);
+    float u2 = DdgiHashFloat(physicalProbeIndex, 0x02e5be93u, sequence);
+    float u3 = DdgiHashFloat(physicalProbeIndex, 0x967a889bu, sequence);
     float sqrtOneMinusU1 = sqrt(saturate(1.0f - u1));
     float sqrtU1 = sqrt(saturate(u1));
     float angle2 = 2.0f * WOLF_PI * u2;
@@ -519,7 +534,7 @@ float3 DdgiRotateDirection(float3 direction, float4 rotation)
         2.0f * cross(rotation.xyz, cross(rotation.xyz, direction) + rotation.w * direction);
 }
 
-float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
+float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex, uint sequence)
 {
     float sample = float(rayIndex) + 0.5f;
     float count = max(float(rayCount), 1.0f);
@@ -527,7 +542,20 @@ float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
     float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
     float phi = float(rayIndex) * 2.39996322973f;
     float3 baseDirection = float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
-    return normalize(DdgiRotateDirection(baseDirection, DdgiRayRotation(probeIndex)));
+    return normalize(DdgiRotateDirection(baseDirection, DdgiRayRotation(probeIndex, sequence)));
+}
+
+float3 DdgiRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
+{
+    return DdgiRayDirection(rayIndex, rayCount, probeIndex, frameIndex);
+}
+
+float3 DdgiVisibilityRayDirection(uint rayIndex, uint rayCount, uint probeIndex)
+{
+    // Geometry visibility needs a repeatable quadrature, not a fresh Monte Carlo
+    // realization that changes interpolation weights even in a static scene.
+    // Physical storage identity keeps the rotation unchanged when the grid scrolls.
+    return DdgiRayDirection(rayIndex, rayCount, probeIndex, 0u);
 }
 
 float3 DdgiRelocationRayDirection(uint rayIndex)

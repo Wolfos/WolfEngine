@@ -669,15 +669,16 @@ void DdgiProbeTraceCS(
 
     uint visibilityRayCount = DdgiRaySampleCount(visibilityTileInteriorSize);
     uint irradianceRayCount = DdgiRaySampleCount(irradianceTileInteriorSize);
-    bool sharedRaySet = visibilityRayCount == irradianceRayCount;
     float3 probePosition = DdgiCurrentProbePosition(probeIndex);
     RWTexture2D<float4> visibilityTarget = GetRWTexture(traceVisibilityHandle);
     RWTexture2D<float4> irradianceTarget = GetRWTexture(traceIrradianceHandle);
 
     for (uint rayIndex = groupThreadId.x; rayIndex < visibilityRayCount; rayIndex += 64u)
     {
-        float3 direction = DdgiRayDirection(rayIndex, visibilityRayCount, probeIndex);
-        DdgiTraceResult result = DdgiTraceRay(probePosition, direction);
+        float3 direction = DdgiVisibilityRayDirection(rayIndex, visibilityRayCount, probeIndex);
+        // Visibility rays only need geometry. Keep stochastic, shaded irradiance
+        // rays separate even when the two sets contain the same number of rays.
+        DdgiTraceResult result = DdgiTraceGeometryRay(probePosition, direction);
         float visibilityDistance = result.backfaceHit
             ? result.hitDistance * 0.9f
             : result.hitDistance;
@@ -691,18 +692,9 @@ void DdgiProbeTraceCS(
             normalizedDistance * normalizedDistance,
             result.hitGeometry ? 1.0f : 0.0f,
             result.backfaceHit ? 1.0f : 0.0f);
-
-        if (sharedRaySet)
-        {
-            uint2 irradiancePixel = DdgiRaySamplePixel(
-                probeIndex,
-                rayIndex,
-                irradianceTileInteriorSize);
-            irradianceTarget[irradiancePixel] = float4(result.radiance, 1.0f);
-        }
     }
 
-    if (!sharedRaySet && groupThreadId.x < irradianceRayCount)
+    if (groupThreadId.x < irradianceRayCount)
     {
         uint rayIndex = groupThreadId.x;
         float3 direction = DdgiRayDirection(rayIndex, irradianceRayCount, probeIndex);

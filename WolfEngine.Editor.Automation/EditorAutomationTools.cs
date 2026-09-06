@@ -156,6 +156,10 @@ public sealed class EditorAutomationTools
 			: $"Scene viewport pinned to debug view '{debugViewId}'.";
 	}
 
+	[McpServerTool(Name = "set_ddgi_relocation"), Description("Enable or disable DDGI probe relocation in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
+	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
+		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
+
 	[McpServerTool(Name = "capture_frame"), Description("Capture a PNG from the currently running editor on its next rendered frame. This never launches a separate editor process.")]
 	public Task<FrameCaptureResult> CaptureFrame(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

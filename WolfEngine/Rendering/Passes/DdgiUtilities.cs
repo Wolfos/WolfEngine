@@ -161,9 +161,7 @@ public static class DdgiUtilities
 	{
 		var visibilityRayCount = GetRaySampleCount(requestedRayCount, VisibilityTileInteriorSize);
 		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
-		return visibilityRayCount == irradianceRayCount
-			? visibilityRayCount
-			: checked(visibilityRayCount + irradianceRayCount);
+		return checked(visibilityRayCount + irradianceRayCount);
 	}
 
 	internal static bool IsRelocationTraceEnabled(RenderConfig config)
@@ -469,16 +467,8 @@ public static class DdgiUtilities
 				hasCandidate = true;
 			}
 		}
-		else if (closestFrontfaceDistance > keepDistance &&
-		         previousOffset.LengthSquared() > relocationTolerance * relocationTolerance)
-		{
-			var moveBackMargin = Math.Min(
-				closestFrontfaceDistance - keepDistance,
-				previousOffset.Length());
-			target += Vector3.Normalize(-previousOffset) * moveBackMargin;
-			decision = DdgiProbeRelocationDecision.ReturnToLattice;
-			hasCandidate = true;
-		}
+		// Clearance at the relocated position is not evidence that the original
+		// lattice position is safe. Retain a clear offset to avoid a limit cycle.
 
 		var acceptanceRadius = Math.Max(maxRelocationDistance, 0.0f);
 		if (!hasCandidate || target.LengthSquared() >= acceptanceRadius * acceptanceRadius)

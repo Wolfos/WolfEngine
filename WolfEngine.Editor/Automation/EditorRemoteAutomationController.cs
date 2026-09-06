@@ -99,6 +99,21 @@ public sealed class EditorRemoteAutomationController
 		}, cancellationToken);
 
 	public Task Ready => _ready.Task;
+
+	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.DiffuseGlobalIllumination;
+			settings.ProbeRelocationEnabled = enabled;
+			config.DiffuseGlobalIllumination = settings;
+			return $"DDGI relocation: {enabled}. Changed in memory only.";
+		}, cancellationToken);
 	public Task Stopped => _stopped.Task;
 	public bool ShutdownRequested { get; private set; }
 	public bool ShouldStop => ShutdownRequested;

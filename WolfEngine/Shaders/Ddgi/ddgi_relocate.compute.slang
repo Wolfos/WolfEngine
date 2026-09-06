@@ -201,16 +201,9 @@ void DdgiRelocationSolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             hasCandidate = true;
         }
     }
-    else if (closestFrontfaceDistance > keepDistance &&
-        dot(previousOffset, previousOffset) > relocationTolerance * relocationTolerance)
-    {
-        float moveBackMargin = min(
-            closestFrontfaceDistance - keepDistance,
-            length(previousOffset));
-        targetOffset += normalize(-previousOffset) * moveBackMargin;
-        decision = 3u;
-        hasCandidate = true;
-    }
+    // Once clear, keep the offset. Sparse rays at the relocated origin cannot
+    // prove the lattice position is clear; returning toward it recreates the
+    // same penetration and produces a perpetual relocate/return limit cycle.
 
     float acceptanceRadius = min(
         max(probeMaxRelocationDistance, 0.0f),

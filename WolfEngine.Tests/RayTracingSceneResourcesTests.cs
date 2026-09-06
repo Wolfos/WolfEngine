@@ -623,10 +623,10 @@ public sealed class RayTracingSceneResourcesTests
 			Is.EqualTo(expectedRayCount));
 	}
 
-	[TestCase(1, 1)]
-	[TestCase(64, 64)]
+	[TestCase(1, 2)]
+	[TestCase(64, 128)]
 	[TestCase(256, 320)]
-	public void DdgiProbeTraceInvocationCountMergesOnlyIdenticalRaySets(
+	public void DdgiProbeTraceInvocationCountIncludesUnshadedVisibilityRays(
 		int requestedRayCount,
 		int expectedInvocationCount)
 	{
@@ -1307,7 +1307,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiRelocationReturnsToGridWhenClear()
+	public void DdgiRelocationPreservesEscapeWhenRelocatedPositionIsClear()
 	{
 		var hits = CreateRelocationMisses();
 		for (var index = 0; index < 5; index++)
@@ -1323,9 +1323,9 @@ public sealed class RayTracingSceneResourcesTests
 			maxRayDistance: 10.0f,
 			previousOffset: escaped.Offset);
 
-		AssertVector3(settled.Offset, Vector3.Zero);
+		AssertVector3(settled.Offset, escaped.Offset);
 		Assert.That(settled.State, Is.EqualTo(DdgiProbeState.Stable));
-		Assert.That(settled.Decision, Is.EqualTo(DdgiProbeRelocationDecision.ReturnToLattice));
+		Assert.That(settled.Decision, Is.EqualTo(DdgiProbeRelocationDecision.None));
 	}
 
 	[Test]
@@ -1394,7 +1394,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiRelocationRepeatedStableRevalidationReturnsOffsetToGrid()
+	public void DdgiRelocationRepeatedStableRevalidationPreservesClearOffset()
 	{
 		var originalOffset = new Vector3(0.4f, -0.2f, 0.1f);
 		var offset = originalOffset;
@@ -1411,10 +1411,35 @@ public sealed class RayTracingSceneResourcesTests
 			Assert.That(result.State, Is.EqualTo(DdgiProbeState.Stable));
 			Assert.That(
 				result.Decision,
-				Is.AnyOf(DdgiProbeRelocationDecision.ReturnToLattice, DdgiProbeRelocationDecision.None));
+				Is.EqualTo(DdgiProbeRelocationDecision.None));
 		}
 
-		AssertVector3(offset, Vector3.Zero);
+		AssertVector3(offset, originalOffset);
+	}
+
+	[Test]
+	public void DdgiRelocationSettlesOutsideStaticWallWithoutReturningIntoIt()
+	{
+		var latticePosition = new Vector3(-0.05f, 0.0f, 0.0f);
+		var offset = Vector3.Zero;
+		var settledOffset = Vector3.Zero;
+		for (var update = 0; update < 128; update++)
+		{
+			var position = latticePosition + offset;
+			var hits = CreateRelocationMisses();
+			for (var ray = 0; ray < hits.Length; ray++)
+			{
+				var direction = DdgiUtilities.GetRelocationRayDirection(ray);
+				var distance = -position.X / direction.X;
+				if (distance > 0.001f && distance < 10.0f)
+					hits[ray] = new DdgiRelocationHit(direction, distance, Backface: direction.X > 0.0f);
+			}
+			var result = DdgiUtilities.SolveProbeRelocation(hits, 0.2f, 1.35f, 10.0f, offset);
+			offset = result.Offset;
+			if (update == 63) settledOffset = offset;
+			if (update > 63) AssertVector3(offset, settledOffset);
+		}
+		Assert.That((latticePosition + offset).X, Is.GreaterThan(0.0f));
 	}
 
 	[Test]
