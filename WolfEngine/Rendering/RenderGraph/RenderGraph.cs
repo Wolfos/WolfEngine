@@ -52,6 +52,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 	private int _gpuCaptureRequested;
 	private bool _gpuCaptureActive;
 	private bool _previousTaaEnabled;
+	private AntiAliasingMode _previousAntiAliasingMode;
+	private int _previousJitterPhaseCount;
 	private Int2 _currentSceneRenderSize;
 	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
 
@@ -149,24 +151,24 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		// Build scene data from snapshot
 		SceneDrawData? sceneData = null;
 		var world = snapshot.CameraWorldTransform.LocalToWorld;
-		var fsr3Enabled = snapshot.Config.Fsr3.Enabled;
+		var taaEnabled = snapshot.Config.AntiAliasing.Enabled;
 		// FSR3 owns the sequence length. At native resolution this is eight phases; once
 		// render/display sizes split, the display width belongs in the second argument.
-		var fsr3PhaseCount = Fsr3Constants.GetJitterPhaseCount(
-			_currentSceneRenderSize.X,
-			_currentSceneRenderSize.X);
-		var jitterPixels = fsr3Enabled
+		var phaseCount = snapshot.Config.AntiAliasing.Mode == AntiAliasingMode.Fsr3
+			? Fsr3Constants.GetJitterPhaseCount(_currentSceneRenderSize.X, _currentSceneRenderSize.X)
+			: Math.Max(1, snapshot.Config.AntiAliasing.Taa.PhaseCount);
+		var jitterPixels = taaEnabled
 			? TemporalJitter.GetHaltonJitterPixels(
 				(ulong)_frameIndex,
-				fsr3PhaseCount)
+				phaseCount)
 			: Vector2.Zero;
-		var previousJitterPixels = fsr3Enabled && _frameIndex > 0
+		var previousJitterPixels = taaEnabled && _frameIndex > 0
 			? TemporalJitter.GetHaltonJitterPixels(
 				(ulong)(_frameIndex - 1),
-				fsr3PhaseCount)
+				phaseCount)
 			: jitterPixels;
 		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
-		var jitteredProjection = fsr3Enabled
+		var jitteredProjection = taaEnabled
 			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
 			: snapshot.Camera.Perspective;
 		if (Matrix4x4.Invert(world, out var view) &&
@@ -224,11 +226,15 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				jitterNdc,
 				hasPreviousCameraState == false ||
 				projectionChanged ||
-				(fsr3Enabled && _previousTaaEnabled == false),
+				(taaEnabled && (!_previousTaaEnabled ||
+				 _previousAntiAliasingMode != snapshot.Config.AntiAliasing.Mode ||
+				 _previousJitterPhaseCount != phaseCount)),
 				_renderLights,
 				snapshot.DecalPackets);
 
-			_previousTaaEnabled = fsr3Enabled;
+			_previousTaaEnabled = taaEnabled;
+			_previousAntiAliasingMode = snapshot.Config.AntiAliasing.Mode;
+			_previousJitterPhaseCount = phaseCount;
 		}
 
 		if (sceneData is null &&

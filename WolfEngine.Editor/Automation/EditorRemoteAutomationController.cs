@@ -10,6 +10,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
+using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.Automation;
@@ -76,6 +77,26 @@ public sealed class EditorRemoteAutomationController
 		_renderGraph = renderGraph;
 		_gpuProfiler = gpuProfiler;
 	}
+
+	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!Enum.TryParse<AntiAliasingMode>(mode, true, out var selectedMode) || !Enum.IsDefined(selectedMode))
+				throw new ArgumentException("Anti-aliasing mode must be Taa or Fsr3.", nameof(mode));
+			RenderConfig? config = null;
+			foreach (var entry in _sceneWorkspace.CurrentScene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The authoring scene has no resolved render config asset.");
+			var settings = config.AntiAliasing;
+			settings.Mode = selectedMode;
+			settings.Enabled = enabled;
+			var taa = settings.Taa;
+			taa.EnableCasSharpen = casSharpening;
+			settings.Taa = taa;
+			config.AntiAliasing = settings;
+			return $"Anti-aliasing: {selectedMode}, enabled: {enabled}, CAS: {settings.UsesCasSharpening}. Changed in memory only.";
+		}, cancellationToken);
 
 	public Task Ready => _ready.Task;
 	public Task Stopped => _stopped.Task;

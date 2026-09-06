@@ -137,6 +137,14 @@ public sealed class EditorAutomationTools
 	public Task<CpuFrameProfileResult> GetCpuFrameProfile(CancellationToken cancellationToken) =>
 		_controller.GetCpuFrameProfileAsync(cancellationToken);
 
+	[McpServerTool(Name = "set_anti_aliasing"), Description("Switch the authoring scene's anti-aliasing method in memory without saving its render config asset. Use with frame waits, GPU profiling, and captures to compare TAA/CAS and FSR3.")]
+	public Task<string> SetAntiAliasing(
+		[Description("Taa or Fsr3.")] string mode,
+		[Description("Whether temporal anti-aliasing is enabled.")] bool enabled = true,
+		[Description("Whether to sharpen TAA with CAS after tonemapping. Does not affect FSR3 RCAS.")] bool casSharpening = true,
+		CancellationToken cancellationToken = default) =>
+		_controller.SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
+
 	[McpServerTool(Name = "set_scene_debug_view"), Description("Sets the debug view captured from the scene viewport; pass an empty string to release it.")]
 	public async Task<string> SetSceneDebugView(
 		[Description("Debug view id, or empty to release.")] string debugViewId,

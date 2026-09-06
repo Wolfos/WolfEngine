@@ -192,6 +192,8 @@ internal sealed class RenderGraphFrameBuilder
 	private int _previousShadowMapResolution;
 	private bool _previousSceneEnabled;
 	private bool _previousTaaEnabled;
+	private AntiAliasingMode _previousAntiAliasingMode;
+	private AntiAliasingMode _historyMode;
 	private bool _historyValid;
 	private bool _ddgiHistoryValid;
 	private bool _resetTaaHistoryThisFrame;
@@ -397,7 +399,7 @@ internal sealed class RenderGraphFrameBuilder
 			config = CreateRayTracingDisabledConfig(config);
 		}
 
-		var taaEnabled = config.Fsr3.Enabled;
+		var taaEnabled = config.AntiAliasing.Enabled;
 		var frameShapeChanged = _hasPreviousFrameShape == false ||
 		                        _previousFramebufferSize.X != framebufferSize.X ||
 		                        _previousFramebufferSize.Y != framebufferSize.Y ||
@@ -410,7 +412,13 @@ internal sealed class RenderGraphFrameBuilder
 		_sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 		_resolvedSceneViewportState = SceneViewportRenderState.Empty;
 		_currentDdgiConfigValid = false;
-		_resetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled && _previousTaaEnabled == false);
+		_resetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled &&
+			(!_previousTaaEnabled || _previousAntiAliasingMode != config.AntiAliasing.Mode));
+		_previousAntiAliasingMode = config.AntiAliasing.Mode;
+		if (!taaEnabled || !sceneEnabled)
+		{
+			ReleaseTemporalHistoryResources();
+		}
 		_previousTaaEnabled = taaEnabled;
 		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, config.SkyboxConfig);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
@@ -661,9 +669,10 @@ internal sealed class RenderGraphFrameBuilder
 				}
 			}
 
+			fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
 			if (taaEnabled)
 			{
-				EnsureTemporalHistoryResources(_renderer.GetGfxDevice(), sceneFramebufferSize);
+				EnsureTemporalHistoryResources(_renderer.GetGfxDevice(), sceneFramebufferSize, config.AntiAliasing.Mode);
 				var historyWriteIndex = 1 - _historyReadIndex;
 				if (_historyColorTextures[_historyReadIndex] is IGfxTexture historyColorRead &&
 				    _historyColorTextures[historyWriteIndex] is IGfxTexture historyColorWrite &&
@@ -694,7 +703,8 @@ internal sealed class RenderGraphFrameBuilder
 				}
 
 				var writeIndex = 1 - _historyReadIndex;
-				if (_fsr3CurrentLumaTextures[_historyReadIndex] is IGfxTexture currentLumaRead &&
+				if (config.AntiAliasing.UsesFsr3 &&
+				    _fsr3CurrentLumaTextures[_historyReadIndex] is IGfxTexture currentLumaRead &&
 				    _fsr3CurrentLumaTextures[writeIndex] is IGfxTexture currentLumaWrite &&
 				    _fsr3AccumulationTextures[_historyReadIndex] is IGfxTexture accumulationRead &&
 				    _fsr3AccumulationTextures[writeIndex] is IGfxTexture accumulationWrite)
@@ -744,10 +754,6 @@ internal sealed class RenderGraphFrameBuilder
 						HistoryValid = _historyValid
 					};
 				}
-			}
-			else
-			{
-				fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
 			}
 
 			if (HasAmbientOcclusion(config))
@@ -959,14 +965,14 @@ internal sealed class RenderGraphFrameBuilder
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
 			: default;
 
-		var displayLinearSceneColorHandle = sceneEnabled
+		var displayLinearSceneColorHandle = sceneEnabled && config.AntiAliasing.UsesCasSharpening
 			? _resources.CreateTransientTexture(new TextureDescriptor(
 				framebufferSize.X,
 				framebufferSize.Y,
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f)))
-			: default;
+			: tonemappedLinearSceneColorHandle;
 
 		var encodedSceneColorHandle = sceneEnabled
 			? _resources.CreateTransientTexture(new TextureDescriptor(
@@ -1508,9 +1514,28 @@ internal sealed class RenderGraphFrameBuilder
 			ReadSkyboxTextures(transparentForwardBuilder);
 			transparentForwardBuilder.SetExecute(_transparentForwardExecute);
 
-			if (_frameResources.Config.Fsr3.Enabled && _frameResources.Fsr3.InternalHistoryWrite.IsValid)
+			if (_frameResources.Config.AntiAliasing.UsesFsr3 && _frameResources.Fsr3.InternalHistoryWrite.IsValid)
 			{
 				AddFsr3Passes(graph);
+			}
+			else if (_frameResources.Config.AntiAliasing.Enabled && _frameResources.HistoryColorWrite.IsValid)
+			{
+				graph.AddPass("TAA Resolve", PassKind.Compute)
+					.ReadTexture(_frameResources.LightingBuffer, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferVelocity, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferMaterial, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.HistoryColorRead, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.HistoryDepthRead, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.ResolvedSceneColor, ResourceState.UnorderedAccess)
+					.SetExecute(_taaResolveExecute);
+				graph.AddPass("TAA History Store", PassKind.Compute)
+					.ReadTexture(_frameResources.ResolvedSceneColor, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.HistoryColorWrite, ResourceState.UnorderedAccess)
+					.WriteTexture(_frameResources.HistoryDepthWrite, ResourceState.UnorderedAccess)
+					.SetExecute(_taaHistoryStoreExecute);
 			}
 
 			// Capture the finished HDR scene color so next frame's reflections have shaded,
@@ -1576,14 +1601,16 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.UnorderedAccess)
 				.SetExecute(_tonemappingExecute);
 
-			// This is married to TAA which is currently unavailable. FSR has its own RCAS sharpening
-			// graph.AddPass("CAS Sharpen", PassKind.Compute)
-			// 	.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
-			// 	.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
-			// 	.SetExecute(_casSharpenExecute);
+			if (_frameResources.Config.AntiAliasing.UsesCasSharpening)
+			{
+				graph.AddPass("CAS Sharpen", PassKind.Compute)
+					.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.DisplayLinearSceneColor, ResourceState.UnorderedAccess)
+					.SetExecute(_casSharpenExecute);
+			}
 
 			graph.AddPass("Copy To Final", PassKind.Compute)
-				.ReadTexture(_frameResources.TonemappedLinearSceneColor, ResourceState.ShaderResource)
+				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
@@ -2364,7 +2391,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var fsr = _frameResources.Fsr3;
 		var constants = BuildFsr3Constants(context);
-		var settings = _frameResources.Config.Fsr3;
+		var settings = _frameResources.Config.AntiAliasing;
 		var config = _passSet.Fsr3PrepareReactivityPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.ReconstructedPrevNearestDepth, fsr.DilatedMotionVectors, fsr.DilatedDepth,
 			_frameResources.GBufferDepth,
@@ -2402,7 +2429,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var fsr = _frameResources.Fsr3;
 		var constants = BuildFsr3Constants(context);
-		var settings = _frameResources.Config.Fsr3;
+		var settings = _frameResources.Config.AntiAliasing;
 		var config = _passSet.Fsr3RcasPass.BuildConfig(context, _renderer.GetGfxDevice(),
 			fsr.InternalHistoryWrite, _frameResources.ResolvedSceneColor, fsr.FrameInfo,
 			in constants, settings.Sharpness, settings.EnableSharpening);
@@ -2728,7 +2755,7 @@ internal sealed class RenderGraphFrameBuilder
 			_colorPyramidValid = true;
 		}
 
-		if (_frameResources.Config.Fsr3.Enabled == false || _frameResources.SceneEnabled == false)
+		if (_frameResources.Config.AntiAliasing.Enabled == false || _frameResources.SceneEnabled == false)
 		{
 			_historyValid = false;
 		}
@@ -2752,14 +2779,17 @@ internal sealed class RenderGraphFrameBuilder
 			var writeIndex = 1 - _historyReadIndex;
 			_historyColorStates[writeIndex] = _resources.GetResourceState(_frameResources.HistoryColorWrite);
 			_historyDepthStates[writeIndex] = _resources.GetResourceState(_frameResources.HistoryDepthWrite);
-			_fsr3CurrentLumaStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.Fsr3.CurrentLumaRead);
-			_fsr3CurrentLumaStates[writeIndex] = _resources.GetResourceState(_frameResources.Fsr3.CurrentLumaWrite);
-			_fsr3AccumulationStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.Fsr3.AccumulationRead);
-			_fsr3AccumulationStates[writeIndex] = _resources.GetResourceState(_frameResources.Fsr3.AccumulationWrite);
-			_fsr3FrameInfoState = _resources.GetResourceState(_frameResources.Fsr3.FrameInfo);
+			if (_frameResources.Config.AntiAliasing.UsesFsr3)
+			{
+				_fsr3CurrentLumaStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.Fsr3.CurrentLumaRead);
+				_fsr3CurrentLumaStates[writeIndex] = _resources.GetResourceState(_frameResources.Fsr3.CurrentLumaWrite);
+				_fsr3AccumulationStates[_historyReadIndex] = _resources.GetResourceState(_frameResources.Fsr3.AccumulationRead);
+				_fsr3AccumulationStates[writeIndex] = _resources.GetResourceState(_frameResources.Fsr3.AccumulationWrite);
+				_fsr3FrameInfoState = _resources.GetResourceState(_frameResources.Fsr3.FrameInfo);
+				_fsr3FrameIndex++;
+			}
 			_historyReadIndex = writeIndex;
 			_historyValid = true;
-			_fsr3FrameIndex++;
 		}
 
 		if (HasRayTracedDdgi(_frameResources.Config) == false || _frameResources.SceneEnabled == false)
@@ -2822,12 +2852,12 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
-	private void EnsureTemporalHistoryResources(IGfxDevice device, Int2 sceneFramebufferSize)
+	private void EnsureTemporalHistoryResources(IGfxDevice device, Int2 sceneFramebufferSize, AntiAliasingMode mode)
 	{
 		var deviceChanged = _historyDevice is not null && ReferenceEquals(_historyDevice, device) == false;
 		var backendChanged = _historyBackendKind.HasValue && _historyBackendKind.Value != device.BackendKind;
 		var sizeChanged = _historySize.X != sceneFramebufferSize.X || _historySize.Y != sceneFramebufferSize.Y;
-		if (deviceChanged || backendChanged || sizeChanged)
+		if (deviceChanged || backendChanged || sizeChanged || _historyMode != mode)
 		{
 			ReleaseTemporalHistoryResources();
 		}
@@ -2835,12 +2865,7 @@ internal sealed class RenderGraphFrameBuilder
 		if (_historyColorTextures[0] is not null &&
 		    _historyColorTextures[1] is not null &&
 		    _historyDepthTextures[0] is not null &&
-		    _historyDepthTextures[1] is not null &&
-		    _fsr3CurrentLumaTextures[0] is not null &&
-		    _fsr3CurrentLumaTextures[1] is not null &&
-		    _fsr3AccumulationTextures[0] is not null &&
-		    _fsr3AccumulationTextures[1] is not null &&
-		    _fsr3FrameInfoTexture is not null)
+		    _historyDepthTextures[1] is not null)
 		{
 			return;
 		}
@@ -2859,25 +2884,32 @@ internal sealed class RenderGraphFrameBuilder
 				TextureFormat.Rgba16Float,
 				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 				new ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f)));
-			_fsr3CurrentLumaTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-			_fsr3AccumulationTextures[i] = device.CreateTexture(new TextureDescriptor(
-				sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
-				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+			if (mode == AntiAliasingMode.Fsr3)
+			{
+				_fsr3CurrentLumaTextures[i] = device.CreateTexture(new TextureDescriptor(
+					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+				_fsr3AccumulationTextures[i] = device.CreateTexture(new TextureDescriptor(
+					sceneFramebufferSize.X, sceneFramebufferSize.Y, TextureFormat.Rgba16Float,
+					TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+					new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+			}
 			_historyColorStates[i] = ResourceState.UnorderedAccess;
 			_historyDepthStates[i] = ResourceState.UnorderedAccess;
 			_fsr3CurrentLumaStates[i] = ResourceState.UnorderedAccess;
 			_fsr3AccumulationStates[i] = ResourceState.UnorderedAccess;
 		}
 
-		_fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
-			1, 1, TextureFormat.Rgba16Float,
-			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-			new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
-		_fsr3FrameInfoState = ResourceState.UnorderedAccess;
+		if (mode == AntiAliasingMode.Fsr3)
+		{
+			_fsr3FrameInfoTexture = device.CreateTexture(new TextureDescriptor(
+				1, 1, TextureFormat.Rgba16Float,
+				TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
+			_fsr3FrameInfoState = ResourceState.UnorderedAccess;
+		}
+		_historyMode = mode;
 
 		_historyDevice = device;
 		_historyBackendKind = device.BackendKind;
