@@ -84,6 +84,7 @@ public sealed class GpuDrawPass
 	private bool _loggedUnsupportedDrawKind;
 	private bool _loggedCompactionUnavailable;
 	private bool _gpuStateBootstrapPending = true;
+	private static bool GpuDrawDiagnosticsEnabled => GraphicsConfig.GpuHardeningLogIntervalFrames > 0;
 
 	private const uint DrawFlagActive = GpuDrawFlags.Active;
 	private const int DrawFlagBucketShift = GpuDrawFlags.BucketShift;
@@ -149,8 +150,11 @@ public sealed class GpuDrawPass
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureTerrainSamplers();
 		_gpuDrawResources.EnsureCreated(device);
-		SampleVisibilityDiagnostics();
-		_hardeningStats.ResetSubmissionDiagnostics();
+		if (GpuDrawDiagnosticsEnabled)
+		{
+			SampleVisibilityDiagnostics();
+			_hardeningStats.ResetSubmissionDiagnostics();
+		}
 		EnsureGBufferPipelines(device);
 		var primaryGBufferPipeline = GetPrimaryGBufferPipeline();
 		var backendSignals = _backendBridge.PrepareFrame(device, _renderer, _gpuDrawResources, primaryGBufferPipeline);
@@ -556,7 +560,10 @@ public sealed class GpuDrawPass
 		DispatchTerrainMaterialUpdates(context, device);
 		DispatchTerrainLayerUpdates(context, device);
 
-		PublishSubmittedBucketDiagnostics(drawDatabase);
+		if (GpuDrawDiagnosticsEnabled)
+		{
+			PublishSubmittedBucketDiagnostics(drawDatabase);
+		}
 	}
 
 	public void RecordCull(RenderGraphContext context, SceneDrawData sceneData)
@@ -626,17 +633,20 @@ public sealed class GpuDrawPass
 		}
 
 		var outputViewCount = viewProjections.Length;
-		Span<uint> resetCounts =
-			stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount];
-		resetCounts = resetCounts[..(outputViewCount * executionLaneCount)];
-		resetCounts.Clear();
-		WriteBuffer<uint>(drawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
+		if (GpuDrawDiagnosticsEnabled)
+		{
+			Span<uint> resetCounts =
+				stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount];
+			resetCounts = resetCounts[..(outputViewCount * executionLaneCount)];
+			resetCounts.Clear();
+			WriteBuffer<uint>(drawCountPerBucketBuffer!, resetCounts, "DrawCountPerBucketBuffer");
 
-		Span<uint> resetRanges =
-			stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2];
-		resetRanges = resetRanges[..(outputViewCount * executionLaneCount * 2)];
-		resetRanges.Clear();
-		WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
+			Span<uint> resetRanges =
+				stackalloc uint[GpuDrawResources.MaxShadowViewCount * GpuDrawExecutionLanes.ExecutionLaneCount * 2];
+			resetRanges = resetRanges[..(outputViewCount * executionLaneCount * 2)];
+			resetRanges.Clear();
+			WriteBuffer<uint>(drawExecutionRangePerBucketBuffer!, resetRanges, "DrawExecutionRangePerBucketBuffer");
+		}
 
 		var pipeline = EnsureCullPipeline(device);
 		var commandList = context.CommandList;
@@ -677,13 +687,19 @@ public sealed class GpuDrawPass
 			commandList.SetComputeBuffer(1, _gpuDrawResources.InstanceBuffer!);
 			commandList.SetComputeBuffer(2, _gpuDrawResources.MeshBuffer!);
 			commandList.SetComputeBuffer(3, drawArgsBuffer!);
-			commandList.SetComputeBuffer(4, drawCountPerBucketBuffer!);
-			commandList.SetComputeBuffer(5, drawExecutionRangePerBucketBuffer!);
+			if (GpuDrawDiagnosticsEnabled)
+			{
+				commandList.SetComputeBuffer(4, drawCountPerBucketBuffer!);
+				commandList.SetComputeBuffer(5, drawExecutionRangePerBucketBuffer!);
+			}
 			commandList.SetComputeBuffer(6, _gpuDrawResources.DrawGenerationBuffer!);
 			commandList.SetComputeBuffer(7, _gpuDrawResources.InstanceGenerationBuffer!);
 			commandList.SetComputeBuffer(8, _gpuDrawResources.MeshGenerationBuffer!);
-			commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
-			commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			if (GpuDrawDiagnosticsEnabled)
+			{
+				commandList.SetComputeBuffer(9, _gpuDrawResources.MaterialGenerationBuffer!);
+				commandList.SetComputeBuffer(10, _gpuDrawResources.DiagnosticsCounterBuffer!);
+			}
 
 			var threadGroupSize = _cullThreadGroupSize
 			                      ?? throw new InvalidOperationException(
@@ -1392,7 +1408,8 @@ public sealed class GpuDrawPass
 		var cullCompiled = _shaderCompiler.GetComputeShaderWithReflection(
 			EngineShaderPrograms.GpuDrawCull,
 			"CSCull",
-			backendKind);
+			backendKind,
+			GpuDrawDiagnosticsEnabled ? "WOLF_GPU_DRAW_DIAGNOSTICS" : string.Empty);
 		_cullShaderBytecode = cullCompiled.Bytecode;
 		_cullThreadGroupSize = cullCompiled.ThreadGroupSize;
 		_cullParamsWriter = new ShaderPropertyWriter(cullCompiled.ReflectionLayout.GetConstantBuffer("CullParams"));

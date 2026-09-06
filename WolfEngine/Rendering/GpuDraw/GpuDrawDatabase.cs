@@ -12,6 +12,9 @@ public sealed class GpuDrawDatabase
 	private readonly Dictionary<Mesh, ResourceId> _meshHandles = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<Material, ResourceId> _materialHandles = new(new ReferenceComparer<Material>());
 	private readonly List<GpuDrawUpdate> _updates = new();
+	private readonly HashSet<DrawRecordKey> _persistentMeshKeys = new();
+	private readonly HashSet<DrawRecordKey> _transientKeys = new();
+	private readonly List<DrawRecordKey> _removeScratch = new();
 	private readonly GpuDrawHandlePool _drawHandlePool = new(GpuDrawResources.MaxDrawCount - 1);
 	private readonly GpuDrawHandlePool _instanceHandlePool = new(GpuDrawResources.MaxInstanceCount - 1);
 	private readonly GpuDrawHandlePool _meshHandlePool = new(GpuDrawResources.MaxMeshCount - 1);
@@ -19,6 +22,7 @@ public sealed class GpuDrawDatabase
 	private int _syncStamp;
 	private int _maxActiveDrawIndex;
 	private bool _maxActiveDrawIndexDirty;
+	private bool _reconcilePersistentMeshes;
 
 	public GpuDrawDatabase()
 		: this(new GpuDrawTransformHistory())
@@ -30,9 +34,10 @@ public sealed class GpuDrawDatabase
 		_transformHistory = transformHistory;
 	}
 
-	public void BeginSync()
+	public void BeginSync(bool reconcilePersistentMeshes = false)
 	{
 		_syncStamp++;
+		_reconcilePersistentMeshes = reconcilePersistentMeshes;
 		_transformHistory.BeginFrame();
 	}
 
@@ -40,6 +45,7 @@ public sealed class GpuDrawDatabase
 	{
 		_updates.Clear();
 		_syncStamp++;
+		_reconcilePersistentMeshes = false;
 	}
 
 	public void Touch(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
@@ -49,9 +55,25 @@ public sealed class GpuDrawDatabase
 
 	public void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
 	{
+		TouchMesh(entity, mesh, material, worldTransform, persistent: false);
+	}
+
+	public void TouchPersistentMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
+	{
+		TouchMesh(entity, mesh, material, worldTransform, persistent: true);
+	}
+
+	public void RemovePersistentMesh(Entity entity)
+	{
+		RemoveRecord(new DrawRecordKey(entity, 0));
+	}
+
+	private void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform, bool persistent)
+	{
 		var key = new DrawRecordKey(entity, 0);
 		if (_records.TryGetValue(key, out var record))
 		{
+			SetPersistence(key, persistent);
 			ApplyChanges(key, record, GpuDrawKind.Mesh, mesh, material, worldTransform);
 			record.LastSeenStamp = _syncStamp;
 			return;
@@ -59,6 +81,7 @@ public sealed class GpuDrawDatabase
 
 		var newRecord = CreateRecord(key, GpuDrawKind.Mesh, mesh, material, worldTransform);
 		_records.Add(key, newRecord);
+		SetPersistence(key, persistent);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
 			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
@@ -119,6 +142,7 @@ public sealed class GpuDrawDatabase
 			worldTransform,
 			terrainInstanceData: instanceData);
 		_records.Add(key, newRecord);
+		_transientKeys.Add(key);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
 			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
@@ -189,6 +213,7 @@ public sealed class GpuDrawDatabase
 		newRecord.TerrainSurface = surface;
 		newRecord.TerrainRayTracingChunk = rayTracingChunk;
 		_records.Add(key, newRecord);
+		_transientKeys.Add(key);
 		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
 		{
 			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
@@ -212,32 +237,60 @@ public sealed class GpuDrawDatabase
 
 	public void EndSync()
 	{
-		var toRemove = new List<DrawRecordKey>();
-		foreach (var (key, record) in _records)
+		_removeScratch.Clear();
+		CollectUnseen(_transientKeys);
+		if (_reconcilePersistentMeshes)
 		{
-			if (record.LastSeenStamp != _syncStamp)
-			{
-				toRemove.Add(key);
-			}
+			CollectUnseen(_persistentMeshKeys);
 		}
 
-		foreach (var key in toRemove)
+		for (var i = 0; i < _removeScratch.Count; i++)
 		{
-			if (_records.TryGetValue(key, out var record) == false)
-			{
-				continue;
-			}
+			RemoveRecord(_removeScratch[i]);
+		}
+		_removeScratch.Clear();
+	}
 
-			_records.Remove(key);
-			_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.DrawHandle, record.InstanceHandle));
-			ReleaseRecord(record);
-			if (record.DrawHandle.Index == _maxActiveDrawIndex)
+	private void CollectUnseen(HashSet<DrawRecordKey> keys)
+	{
+		foreach (var key in keys)
+		{
+			if (_records[key].LastSeenStamp != _syncStamp)
 			{
-				_maxActiveDrawIndexDirty = true;
+				_removeScratch.Add(key);
 			}
 		}
+	}
 
-		_transformHistory.PruneUnseen();
+	private void SetPersistence(in DrawRecordKey key, bool persistent)
+	{
+		if (persistent)
+		{
+			_transientKeys.Remove(key);
+			_persistentMeshKeys.Add(key);
+			return;
+		}
+
+		_persistentMeshKeys.Remove(key);
+		_transientKeys.Add(key);
+	}
+
+	private void RemoveRecord(in DrawRecordKey key)
+	{
+		if (_records.Remove(key, out var record) == false)
+		{
+			return;
+		}
+
+		_persistentMeshKeys.Remove(key);
+		_transientKeys.Remove(key);
+		_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.DrawHandle, record.InstanceHandle));
+		ReleaseRecord(record);
+		_transformHistory.Remove(key);
+		if (record.DrawHandle.Index == _maxActiveDrawIndex)
+		{
+			_maxActiveDrawIndexDirty = true;
+		}
 	}
 
 	public void NotifyMaterialChanged(Material material)

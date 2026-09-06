@@ -116,8 +116,31 @@ public class World
 
     public void SetEnabled(Entity e, bool enabled)
     {
+		var wasEnabled = IsEnabled(e);
         _entities.SetEnabled(e, enabled);
+		if (wasEnabled != IsEnabled(e))
+		{
+			MarkWorldTransformChanged(e);
+		}
     }
+
+	public void MarkWorldTransformChanged(Entity entity)
+	{
+		if (IsAlive(entity) == false || HasComponent<WorldTransform>(entity) == false)
+		{
+			return;
+		}
+
+		var pool = Pool<DirtyWorldTransform>();
+		if (pool.Has(entity))
+		{
+			pool.Get(entity).Consumed = 0;
+		}
+		else
+		{
+			pool.Add(entity, default);
+		}
+	}
 
     public void GetAllComponents(Entity entity, List<IEntityComponent> components)
     {
@@ -342,38 +365,8 @@ public class World
 
     public void MarkDirty(Entity entity)
     {
-        ref var localTransform = ref GetComponent<LocalTransform>(entity);
-
-        var current = entity;
-        var candidateRoot = entity;
-
-        while (HasComponent<Parent>(current))
-        {
-            var parent = GetComponent<Parent>(current).Value;
-
-            if (HasComponent<DirtyTransformRoot>(parent))
-            {
-                localTransform.IsDirty = true;
-                if (HasComponent<DirtyTransformRoot>(entity))
-                {
-                    RemoveComponent<DirtyTransformRoot>(entity);
-                }
-
-                return;
-            }
-
-            candidateRoot = parent;
-            current = parent;
-        }
-
-        localTransform.IsDirty = true;
-        if (candidateRoot != entity && HasComponent<DirtyTransformRoot>(entity))
-        {
-            RemoveComponent<DirtyTransformRoot>(entity);
-        }
-
-        // mark this topmost ancestor as a dirty subtree root
-        AddComponent<DirtyTransformRoot>(candidateRoot);
+        GetComponent<LocalTransform>(entity).IsDirty = true;
+        AddComponent<DirtyTransformRoot>(entity);
     }
 
     public void Translate(Entity e, Vector3 translation, bool isLocal = false)
@@ -608,6 +601,7 @@ public class World
         ref var worldTransform = ref GetComponent<WorldTransform>(entity);
         worldTransform.LocalToWorld = finalLocalMatrix * parentLocalToWorld;
         Matrix4x4.Invert(worldTransform.LocalToWorld, out worldTransform.WorldToLocal);
+		MarkWorldTransformChanged(entity);
 
         if (HasComponent<DirtyTransformRoot>(entity))
         {
@@ -674,6 +668,7 @@ public class World
         worldTransform.LocalToWorld = worldMatrix;
         Matrix4x4.Invert(worldMatrix, out worldTransform.WorldToLocal);
         localTransform.IsDirty = false;
+		MarkWorldTransformChanged(entity);
     }
 
     private void MarkChildTransformsDirty(Entity entity)

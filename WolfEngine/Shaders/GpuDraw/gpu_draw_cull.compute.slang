@@ -10,10 +10,12 @@ static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
 static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
 
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
 static const uint HARDEN_COUNTER_FALLBACK_SUBSTITUTE = 1;
 static const uint HARDEN_COUNTER_VISIBLE_CLAMP = 4;
 static const uint HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW = 5;
+#endif
 
 cbuffer CullParams : register(b12)
 {
@@ -33,13 +35,17 @@ RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u0);
 RWStructuredBuffer<GpuInstanceData> g_InstanceTable : register(u1);
 RWStructuredBuffer<GpuMeshData> g_MeshTable : register(u2);
 RWStructuredBuffer<GpuDrawArgs> g_DrawArgs : register(u3);
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
 RWStructuredBuffer<uint> g_DrawCountPerBucket : register(u4);
 RWStructuredBuffer<uint> g_DrawExecutionRangePerBucket : register(u5);
+#endif
 RWStructuredBuffer<uint> g_DrawGenerations : register(u6);
 RWStructuredBuffer<uint> g_InstanceGenerations : register(u7);
 RWStructuredBuffer<uint> g_MeshGenerations : register(u8);
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
 RWStructuredBuffer<uint> g_MaterialGenerations : register(u9);
 RWStructuredBuffer<uint> g_Diagnostics : register(u10);
+#endif
 
 bool IsSphereVisible(uint viewIndex, float3 center, float radius)
 {
@@ -98,7 +104,9 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         cmd.flags = 0;
         g_DrawCommands[drawId] = cmd;
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
+#endif
         return;
     }
 
@@ -106,7 +114,9 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         cmd.flags = 0;
         g_DrawCommands[drawId] = cmd;
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
+#endif
         return;
     }
 
@@ -118,11 +128,14 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         cmd.flags = 0;
         g_DrawCommands[drawId] = cmd;
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
+#endif
         return;
     }
 
     GpuInstanceData instanceData = g_InstanceTable[instanceIndex];
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
     uint materialHandle = instanceData.materialHandle;
     if (!IsPackedHandleValid(materialHandle))
     {
@@ -139,6 +152,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
             InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW], 1);
         }
     }
+#endif
 
     uint meshIndex = 0;
     uint meshHandle = instanceData.meshHandle;
@@ -156,7 +170,9 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (meshIndex == 0)
     {
         meshIndex = GetHandleIndex(fallbackMeshHandle);
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_FALLBACK_SUBSTITUTE], 1);
+#endif
     }
 
     GpuMeshData meshData = g_MeshTable[meshIndex];
@@ -183,6 +199,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
             continue;
         }
 
+#ifdef WOLF_GPU_DRAW_DIAGNOSTICS
         uint laneIndex = (viewIndex * outputLaneStride) + bucketIndex;
         uint visibleDrawIndex;
         InterlockedAdd(g_DrawCountPerBucket[laneIndex], 1, visibleDrawIndex);
@@ -194,6 +211,7 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint rangeBase = laneIndex * 2;
         InterlockedMax(g_DrawExecutionRangePerBucket[rangeBase + 1], drawId + 1);
+#endif
 
         args.indexCount = meshData.indexCount;
         args.instanceCount = 1;

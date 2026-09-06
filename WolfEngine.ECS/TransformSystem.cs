@@ -4,24 +4,48 @@ namespace WolfEngine.ECS;
 
 public class TransformSystem : IPreRender
 {
+    private readonly List<Entity> _dirtyRoots = new();
+
     public void PreRender(float deltaTime, World world)
     {
-        // View of dirty subtree roots: they have Local+World+DirtyTransformRoot
-        var roots = world.View<LocalTransform, WorldTransform, DirtyTransformRoot>();
-
-        foreach (var entry in roots)
+        // Select disjoint subtrees before clearing any tags. A dirty ancestor
+        // covers this entity even when it was marked later or resolved by physics.
+        // Snapshot the roots so subtree updates do not mutate the enumerated view.
+        _dirtyRoots.Clear();
+        foreach (var entry in world.View<LocalTransform, WorldTransform, DirtyTransformRoot>())
         {
-            var rootEntity = entry.Entity;
-
-            // parent of a root is identity
-            UpdateSubtreeIterative(rootEntity, Matrix4x4.Identity, world);
-            
-            // clear the tag so it's not processed next frame
-            world.RemoveComponent<DirtyTransformRoot>(rootEntity);
+            if (!HasDirtyAncestor(entry.Entity, world))
+                _dirtyRoots.Add(entry.Entity);
         }
+
+        foreach (var root in _dirtyRoots)
+        {
+            var parentWorld = Matrix4x4.Identity;
+            if (world.HasComponent<Parent>(root))
+            {
+                var parent = world.GetComponent<Parent>(root).Value;
+                if (parent.IsValid && world.HasComponent<WorldTransform>(parent))
+                    parentWorld = world.GetComponent<WorldTransform>(parent).LocalToWorld;
+            }
+
+            UpdateSubtreeIterative(root, parentWorld, world);
+        }
+        _dirtyRoots.Clear();
     }
 
     public WorldTag GetTag() => WorldTag.All;
+
+    private static bool HasDirtyAncestor(Entity entity, World world)
+    {
+        while (world.HasComponent<Parent>(entity))
+        {
+            entity = world.GetComponent<Parent>(entity).Value;
+            if (world.HasComponent<DirtyTransformRoot>(entity))
+                return true;
+        }
+
+        return false;
+    }
 
     private void UpdateSubtreeIterative(Entity root, in Matrix4x4 parentWorld, World world)
     {
@@ -83,6 +107,9 @@ public class TransformSystem : IPreRender
             worldTransform.LocalToWorld = worldM;
             Matrix4x4.Invert(worldM, out worldTransform.WorldToLocal);
             local.IsDirty = false;
+            world.RemoveComponent<DirtyTransformRoot>(e);
+
+			world.MarkWorldTransformChanged(e);
 
             // push children with this world matrix as their parent
             if (world.HasComponent<Children>(e))

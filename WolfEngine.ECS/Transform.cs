@@ -91,6 +91,15 @@ public struct Sibling : IEntityComponent
 [NotSerialized]
 public struct DirtyTransformRoot : IEntityComponent
 {
+    // Pending subtree update; this entity may have a parent or another dirty ancestor.
+}
+
+[ExcludeFromEditor]
+[NotSerialized]
+public struct DirtyWorldTransform : IEntityComponent
+{
+	// Render snapshots increment this after consuming the transform. Transform writers reset it to zero.
+	public int Consumed;
 }
 
 internal readonly record struct PhysicsWorldPoseSyncItem(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation);

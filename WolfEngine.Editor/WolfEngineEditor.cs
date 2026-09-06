@@ -465,6 +465,7 @@ public class WolfEngineEditor
 		{
 			ref var meshRenderer = ref entry.First;
 			meshRenderer.RefreshResolvedAssets(_renderGraph);
+			scene.World.MarkWorldTransformChanged(entry.Entity);
 		}
 	}
 

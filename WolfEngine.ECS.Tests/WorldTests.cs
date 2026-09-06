@@ -249,6 +249,18 @@ public class WorldTests
         Assert.That(entities, Does.Not.Contain(excluded));
     }
 
+	[Test]
+	public void SetEnabled_MarksWorldTransformChanged()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Toggle", Vector3.Zero, Quaternion.Identity, Vector3.One);
+		world.RemoveComponent<DirtyWorldTransform>(entity);
+
+		world.SetEnabled(entity, false);
+
+		Assert.That(world.HasComponent<DirtyWorldTransform>(entity), Is.True);
+	}
+
     [Test]
     public void View_WithTwoComponents_ReturnsIntersection()
     {
@@ -407,7 +419,7 @@ public class WorldTests
     }
 
     [Test]
-    public void MarkDirty_AddsTopmostDirtyRoot()
+    public void MarkDirty_AddsOnlyChangedEntityAsDirtyRoot()
     {
         var world = new World(WorldTag.All);
         var transformSystem = new TransformSystem();
@@ -419,7 +431,8 @@ public class WorldTests
 
         world.MarkDirty(child);
 
-        Assert.That(world.HasComponent<DirtyTransformRoot>(parent), Is.True);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(parent), Is.False);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(child), Is.True);
         Assert.That(world.GetComponent<LocalTransform>(child).IsDirty, Is.True);
     }
 
