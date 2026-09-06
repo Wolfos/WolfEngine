@@ -39,10 +39,8 @@ public sealed class CasSharpenPass
 			InputHandle = _bindlessRegistry.GetTextureHandle(input),
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			RenderSize = resources.FramebufferSize,
-			// FSR3 RCAS runs before bloom/tonemapping when requested. Running this legacy
-			// post-tonemap CAS as well double-sharpens temporal noise and small details.
-			SharpenEnabled = false,
-			Sharpness = 0.0f
+			SharpenEnabled = resources.Config.AntiAliasing.UsesCasSharpening,
+			Sharpness = Math.Clamp(resources.Config.AntiAliasing.Taa.CasSharpness, 0.0f, 1.0f)
 		};
 	}
 

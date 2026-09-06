@@ -16,7 +16,7 @@ public class RenderConfig: IDataAsset
 	// Keep the serialized key for existing render-config assets while presenting the
 	// renderer that actually owns these settings in the editor.
 	[JsonPropertyName("TemporalAntiAliasing")]
-	public Fsr3UpscalerConfig Fsr3 { get; set; } = new();
+	public AntiAliasingConfig AntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
@@ -289,7 +289,6 @@ public struct TemporalAntiAliasingConfig
 	{
 	}
 
-	public bool Enabled { get; set; } = true;
 	public int PhaseCount { get; set; } = 8;
 	public float StaticHistoryWeight { get; set; } = 0.95f;
 	public float MovingHistoryWeight { get; set; } = 0.65f;
@@ -317,17 +316,24 @@ public struct TemporalAntiAliasingConfig
 }
 
 /// <summary>
-/// Host-side controls exposed by the FSR3 upscaler integration. History weighting,
-/// clipping, and disocclusion thresholds are owned by FSR3 itself and are intentionally
-/// not exposed as legacy TAA tuning knobs.
+/// Selects the temporal resolve method. TAA tuning and CAS apply only to TAA;
+/// the remaining host controls apply only to FSR3.
 /// </summary>
-public struct Fsr3UpscalerConfig
+public struct AntiAliasingConfig
 {
-	public Fsr3UpscalerConfig()
+	public AntiAliasingConfig()
 	{
 	}
 
 	public bool Enabled { get; set; } = true;
+	public AntiAliasingMode Mode { get; set; } = AntiAliasingMode.Taa;
+	public TemporalAntiAliasingConfig Taa { get; set; } = new();
+
+	[JsonIgnore]
+	public bool UsesFsr3 => Enabled && Mode == AntiAliasingMode.Fsr3;
+
+	[JsonIgnore]
+	public bool UsesCasSharpening => Enabled && Mode == AntiAliasingMode.Taa && Taa.EnableCasSharpen;
 
 	/// <summary>Runs FSR3's RCAS pass on the temporally reconstructed HDR image.</summary>
 	public bool EnableSharpening { get; set; } = false;
@@ -343,4 +349,10 @@ public struct Fsr3UpscalerConfig
 
 	/// <summary>Scales the transparent-forward composition mask supplied to FSR3.</summary>
 	public float TransparencyAndCompositionMaskScale { get; set; } = 1.0f;
+}
+
+public enum AntiAliasingMode
+{
+	Taa,
+	Fsr3
 }

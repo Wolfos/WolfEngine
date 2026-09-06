@@ -118,7 +118,7 @@ public sealed class ScreenSpaceDecalPassTests
 			Decals = new DecalConfig { Enabled = true },
 			AmbientOcclusion = new AmbientOcclusionConfig { Enabled = true },
 			Reflections = new ReflectionConfig { Enabled = false },
-			Fsr3 = new Fsr3UpscalerConfig { Enabled = false },
+			AntiAliasing = new AntiAliasingConfig { Enabled = false },
 			Bloom = new BloomConfig { Enabled = false }
 		};
 		frameBuilder.BeginFrame(
@@ -174,7 +174,7 @@ public sealed class ScreenSpaceDecalPassTests
 		return renderGraph;
 	}
 
-	private static (RenderGraph Graph, RenderGraphFrameBuilder FrameBuilder) CreateSchedulingFixture(
+	internal static (RenderGraph Graph, RenderGraphFrameBuilder FrameBuilder) CreateSchedulingFixture(
 		RenderGraphResourceRegistry registry)
 	{
 		var texture = new Mock<IGfxTexture>();

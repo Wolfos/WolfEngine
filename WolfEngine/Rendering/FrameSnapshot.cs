@@ -153,7 +153,7 @@ public sealed class FrameSnapshot
 		Config.Lighting = config.Lighting;
 		Config.ShadowMaps = config.ShadowMaps;
 		Config.SkyboxConfig = config.SkyboxConfig;
-		Config.Fsr3 = config.Fsr3;
+		Config.AntiAliasing = config.AntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
 		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;

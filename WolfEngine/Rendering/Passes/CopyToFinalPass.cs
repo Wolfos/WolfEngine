@@ -30,9 +30,8 @@ public sealed class CopyToFinalPass
 
 		var pipeline = EnsurePipeline(device);
 		_bindlessRegistry.EnsureInitialized(device);
-		// CAS is currently disabled, so tonemapping is the producer immediately upstream. Keeping
-		// this in sync with the graph declaration also preserves gameplay UI composited into it.
-		var input = context.GetTexture(resources.TonemappedLinearSceneColor);
+		// DisplayLinearSceneColor aliases tonemapping when CAS is disabled.
+		var input = context.GetTexture(resources.DisplayLinearSceneColor);
 		var output = context.GetTexture(resources.FinalColor);
 		var encodedSceneOutput = context.GetTexture(resources.EncodedSceneColor);
 

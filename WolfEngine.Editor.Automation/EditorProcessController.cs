@@ -173,6 +173,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<CpuFrameProfileResult> GetCpuFrameProfileAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetCpuFrameProfileAsync(cancellationToken);
 
+	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetAntiAliasingAsync(mode, enabled, casSharpening, cancellationToken);
+
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 

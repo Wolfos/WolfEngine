@@ -12,13 +12,16 @@ namespace WolfEngine.Tests;
 public sealed class TemporalAntiAliasingTests
 {
 	[Test]
-	public void DefaultsExposeOnlyFsr3HostControls()
+	public void DefaultsSelectTaaWithCasAndRetainFsr3HostControls()
 	{
-		var settings = new Fsr3UpscalerConfig();
+		var settings = new AntiAliasingConfig();
 
 		Assert.Multiple(() =>
 		{
 			Assert.That(settings.Enabled, Is.True);
+			Assert.That(settings.Mode, Is.EqualTo(AntiAliasingMode.Taa));
+			Assert.That(settings.UsesCasSharpening, Is.True);
+			Assert.That(settings.Taa.CasSharpness, Is.EqualTo(0.35f));
 			Assert.That(settings.EnableSharpening, Is.False);
 			Assert.That(settings.Sharpness, Is.EqualTo(0.2f));
 			Assert.That(settings.AlphaTestReactiveScale, Is.EqualTo(1.0f));
@@ -27,7 +30,7 @@ public sealed class TemporalAntiAliasingTests
 	}
 
 	[Test]
-	public void LegacyTemporalAntiAliasingJsonKeyMigratesToFsr3Settings()
+	public void LegacyJsonKeyPreservesFsr3ControlsWithTaaAsDefault()
 	{
 		const string json =
 			"""
@@ -48,12 +51,42 @@ public sealed class TemporalAntiAliasingTests
 
 		Assert.Multiple(() =>
 		{
-			Assert.That(config.Fsr3.Enabled, Is.False);
-			// Legacy sharpening fields must not silently enable the old post-tonemap CAS pass.
-			Assert.That(config.Fsr3.EnableSharpening, Is.False);
-			Assert.That(config.Fsr3.Sharpness, Is.EqualTo(0.2f));
-			Assert.That(config.Fsr3.AlphaTestReactiveScale, Is.EqualTo(1.0f));
-			Assert.That(config.Fsr3.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
+			Assert.That(config.AntiAliasing.Enabled, Is.False);
+			// FSR3 controls remain independent of TAA/CAS tuning.
+			Assert.That(config.AntiAliasing.EnableSharpening, Is.False);
+			Assert.That(config.AntiAliasing.Sharpness, Is.EqualTo(0.2f));
+			Assert.That(config.AntiAliasing.AlphaTestReactiveScale, Is.EqualTo(1.0f));
+			Assert.That(config.AntiAliasing.TransparencyAndCompositionMaskScale, Is.EqualTo(1.0f));
+		});
+	}
+
+	[TestCase(AntiAliasingMode.Taa)]
+	[TestCase(AntiAliasingMode.Fsr3)]
+	public void ConfigAndSnapshotPreserveBothMethods(AntiAliasingMode mode)
+	{
+		var config = new RenderConfig
+		{
+			AntiAliasing = new AntiAliasingConfig
+			{
+				Mode = mode,
+				EnableSharpening = true,
+				Sharpness = 0.6f,
+				Taa = new TemporalAntiAliasingConfig { PhaseCount = 16, CasSharpness = 0.8f, StaticHistoryWeight = 0.97f }
+			}
+		};
+		var json = JsonSerializer.Serialize(config, AssetJson.SerializerOptions);
+		var restored = JsonSerializer.Deserialize<RenderConfig>(json, AssetJson.SerializerOptions)!;
+		var snapshot = new FrameSnapshot();
+		snapshot.SetConfig(restored);
+		Assert.Multiple(() =>
+		{
+			Assert.That(snapshot.Config.AntiAliasing.Mode, Is.EqualTo(mode));
+			Assert.That(snapshot.Config.AntiAliasing.Taa.PhaseCount, Is.EqualTo(16));
+			Assert.That(snapshot.Config.AntiAliasing.Taa.StaticHistoryWeight, Is.EqualTo(0.97f));
+			Assert.That(snapshot.Config.AntiAliasing.Taa.CasSharpness, Is.EqualTo(0.8f));
+			Assert.That(snapshot.Config.AntiAliasing.Sharpness, Is.EqualTo(0.6f));
+			Assert.That(snapshot.Config.AntiAliasing.EnableSharpening, Is.True);
+			Assert.That(snapshot.Config.AntiAliasing.UsesCasSharpening, Is.EqualTo(mode == AntiAliasingMode.Taa));
 		});
 	}
 
@@ -104,18 +137,20 @@ public sealed class TemporalAntiAliasingTests
 		Assert.That(size, Is.EqualTo(new Int2(expectedWidth, expectedHeight)));
 	}
 
-	[Test]
-	public void ResolveShaderCompilesWithFocusedBindingsForD3D12()
+	[TestCase(GraphicsBackendKind.D3D12)]
+	[TestCase(GraphicsBackendKind.Metal)]
+	public void ResolveShaderCompilesWithFocusedBindings(GraphicsBackendKind backend)
 	{
-		if (OperatingSystem.IsWindows() == false)
+		if (backend == GraphicsBackendKind.D3D12 && !OperatingSystem.IsWindows() ||
+		    backend == GraphicsBackendKind.Metal && !OperatingSystem.IsMacOS())
 		{
-			Assert.Ignore("DirectX shader validation only runs on Windows.");
+			Assert.Ignore("Shader validation requires the matching platform.");
 		}
 
 		var compiled = new ShaderCompiler().GetComputeShaderWithReflection(
 			ShaderPath("Taa/taa_resolve.compute.slang"),
 			"TaaResolveCS",
-			GraphicsBackendKind.D3D12);
+			backend);
 
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(8));
