@@ -49,7 +49,8 @@ DdgiVarianceData LoadVarianceData(uint index)
     DdgiVarianceData data;
     data.mean = UnpackRgbe(packed.x);
     data.shortMean = UnpackRgbe(packed.y);
-    data.variance = UnpackRgbe(packed.z);
+    float3 deviation = UnpackRgbe(packed.z);
+    data.variance = deviation * deviation;
     data.referenceMean = UnpackRgbe(packed.w);
     return data;
 }
@@ -59,7 +60,9 @@ void StoreVarianceData(uint index, DdgiVarianceData data)
     g_IrradianceEstimator[index] = uint4(
         PackRgbe(data.mean),
         PackRgbe(data.shortMean),
-        PackRgbe(data.variance),
+        // Squared low-light values underflow RGB9E5 long before radiance does.
+        // Store deviation to retain the noise estimate throughout its range.
+        PackRgbe(sqrt(max(0.0f.xxx, data.variance))),
         PackRgbe(data.referenceMean));
 }
 
@@ -70,24 +73,33 @@ void MultiscaleMeanEstimator(float3 sampleValue, float3 referenceValue, inout Dd
     // rather than a different Monte Carlo realization. Keep the reference anchor
     // filtered at the same rate as the output, so response stays fast until the
     // accumulated lighting has caught up, including after a light stops moving.
+    // Reference rays include recursively sampled DDGI, so they are coherent but
+    // not noise-free. Do not amplify inherited Monte Carlo noise just because
+    // the mean is small. Require a change beyond the measured noise envelope.
+    float3 deviation = sqrt(max(0.0f.xxx, data.variance));
+    float referenceNoise = length(deviation) * 0.25f;
+    float3 referenceDelta = referenceValue - data.referenceMean;
     float referenceScale = max(max(length(referenceValue), length(data.referenceMean)), 1e-4f);
-    float relativeChange = length(referenceValue - data.referenceMean) / referenceScale;
+    float relativeChange = max(0.0f, length(referenceDelta) - referenceNoise) / referenceScale;
     float meanBlend = clamp(relativeChange * 8.0f, DDGI_STABLE_MEAN_BLEND, 1.0f);
-
     float shortMeanBlend = max(clamp(irradianceTemporalBlendSpeed, 1.0f / 256.0f, 1.0f), meanBlend);
-    float3 deviation = sqrt(max(1e-5f.xxx, data.variance));
-    float3 highThreshold = 0.1f.xxx + data.shortMean + deviation * 8.0f;
-    // Preserve firefly rejection when the reference is unchanged. Actual
-    // increases must not be clipped against the previous, potentially dark sky.
-    if (meanBlend <= DDGI_STABLE_MEAN_BLEND)
-    {
-        sampleValue = min(sampleValue, highThreshold);
-    }
 
-    float3 delta = sampleValue - data.shortMean;
+    // Move the outlier envelope with observed transport changes instead of
+    // disabling it as soon as the adaptive rate exceeds its minimum. Calibrate
+    // the reference's coarser quadrature against the accumulated irradiance.
+    float3 referenceGain = clamp(data.mean / max(data.referenceMean, 1e-4f.xxx), 1.0f.xxx, 8.0f.xxx);
+    float3 predictedMean = max(0.0f.xxx, data.mean + referenceDelta * referenceGain);
+    float3 highThreshold = data.shortMean + 1e-4f.xxx + deviation * 8.0f +
+        max(0.0f.xxx, referenceDelta) * referenceGain;
+    sampleValue = min(sampleValue, highThreshold);
+
+    // Estimate unexplained sample noise, not the lighting change itself. The
+    // old delta * deltaAfterBlend collapsed to zero at a blend of one, precisely
+    // when the next update still needed an uncertainty estimate.
+    float3 residual = sampleValue - predictedMean;
+    data.variance = lerp(data.variance, residual * residual, shortMeanBlend * 0.5f);
     data.shortMean = lerp(data.shortMean, sampleValue, shortMeanBlend);
-    float3 delta2 = sampleValue - data.shortMean;
-    data.variance = lerp(data.variance, max(0.0f.xxx, delta * delta2), shortMeanBlend * 0.5f);
+
     data.mean = lerp(data.mean, sampleValue, meanBlend);
     data.referenceMean = lerp(data.referenceMean, referenceValue, meanBlend);
 }

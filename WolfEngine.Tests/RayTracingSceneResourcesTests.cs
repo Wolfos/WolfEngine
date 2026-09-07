@@ -891,6 +891,63 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(state.Mean.X, Is.EqualTo(5).Within(0.1f));
 	}
 
+	[TestCase(0.08f)]
+	[TestCase(0.5f)]
+	[TestCase(1.0f)]
+	public void DdgiEstimatorDoesNotAmplifyNoisyReferenceInDimIndirectLighting(float shortWindowBlend)
+	{
+		var level = new Vector3(0.001f);
+		var state = new DdgiVarianceData(level, level, new Vector3(1e-6f), level);
+		for (var update = 0; update < 128; update++)
+		{
+			var sample = new Vector3(update % 2 == 0 ? 0 : 0.002f);
+			var reference = new Vector3(update % 2 == 0 ? 0.00095f : 0.00105f);
+			var previous = state.Mean;
+			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, shortWindowBlend);
+			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+		}
+	}
+
+	[Test]
+	public void DdgiEstimatorPackedNoiseEstimateSurvivesVeryDimLighting()
+	{
+		var level = new Vector3(1e-5f);
+		var state = new DdgiVarianceData(level, level, new Vector3(1e-10f), level);
+		for (var update = 0; update < 128; update++)
+		{
+			// The GPU stores deviation, since directly packed variance underflows.
+			var deviation = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(Vector3.SquareRoot(state.Variance)));
+			state.Variance = deviation * deviation;
+			Assert.That(state.Variance.X, Is.GreaterThan(0));
+			var sample = new Vector3(update % 2 == 0 ? 0 : 2e-5f);
+			var reference = new Vector3(update % 2 == 0 ? 0.95e-5f : 1.05e-5f);
+			var previous = state.Mean;
+			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, 0.5f);
+			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
+			state.ShortMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ShortMean));
+			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
+		}
+	}
+
+	[Test]
+	public void DdgiEstimatorSmallReferenceChangeCannotDisableFireflyRejection()
+	{
+		var level = new Vector3(0.01f);
+		var state = new DdgiVarianceData(level, level, Vector3.Zero, level);
+		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(100), new Vector3(0.0105f), state, 0.5f);
+		Assert.That(state.Mean.X, Is.LessThan(0.011f));
+	}
+
+	[TestCase(0.0f, 0.01f)]
+	[TestCase(0.01f, 0.0f)]
+	public void DdgiEstimatorStillTracksRealDimLightingChanges(float before, float after)
+	{
+		var state = new DdgiVarianceData(new Vector3(before), new Vector3(before), Vector3.Zero, new Vector3(before));
+		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(after), new Vector3(after), state, 0.5f);
+		Assert.That(state.Mean.X, Is.EqualTo(after).Within(1e-6f));
+	}
+
 	[Test]
 	public void DdgiEstimatorRejectsUncorroboratedFirefly()
 	{

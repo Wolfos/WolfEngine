@@ -214,17 +214,22 @@ public static class DdgiUtilities
 		DdgiVarianceData data,
 		float shortWindowBlend)
 	{
+		var deviation = Vector3.SquareRoot(Vector3.Max(Vector3.Zero, data.Variance));
+		var referenceNoise = deviation.Length() * 0.25f;
+		var referenceDelta = referenceValue - data.ReferenceMean;
 		var referenceScale = Math.Max(Math.Max(referenceValue.Length(), data.ReferenceMean.Length()), 1e-4f);
-		var relativeChange = (referenceValue - data.ReferenceMean).Length() / referenceScale;
+		var relativeChange = Math.Max(0.0f, referenceDelta.Length() - referenceNoise) / referenceScale;
 		var meanBlend = Math.Clamp(relativeChange * 8.0f, StableIrradianceMeanBlend, 1.0f);
 		shortWindowBlend = Math.Max(Math.Clamp(shortWindowBlend, 1.0f / 256.0f, 1.0f), meanBlend);
-		var deviation = Vector3.SquareRoot(Vector3.Max(new Vector3(1e-5f), data.Variance));
-		if (meanBlend <= StableIrradianceMeanBlend)
-			sampleValue = Vector3.Min(sampleValue, new Vector3(0.1f) + data.ShortMean + deviation * 8.0f);
-		var delta = sampleValue - data.ShortMean;
+		var referenceGain = Vector3.Clamp(data.Mean / Vector3.Max(data.ReferenceMean, new Vector3(1e-4f)), Vector3.One, new Vector3(8));
+		var predictedMean = Vector3.Max(Vector3.Zero, data.Mean + referenceDelta * referenceGain);
+		var highThreshold = data.ShortMean + new Vector3(1e-4f) + deviation * 8.0f +
+			Vector3.Max(Vector3.Zero, referenceDelta) * referenceGain;
+		sampleValue = Vector3.Min(sampleValue, highThreshold);
+		var residual = sampleValue - predictedMean;
+		data.Variance = Vector3.Lerp(data.Variance, residual * residual, shortWindowBlend * 0.5f);
 		data.ShortMean = Vector3.Lerp(data.ShortMean, sampleValue, shortWindowBlend);
-		var delta2 = sampleValue - data.ShortMean;
-		data.Variance = Vector3.Lerp(data.Variance, Vector3.Max(Vector3.Zero, delta * delta2), shortWindowBlend * 0.5f);
+
 		data.Mean = Vector3.Lerp(data.Mean, sampleValue, meanBlend);
 		data.ReferenceMean = Vector3.Lerp(data.ReferenceMean, referenceValue, meanBlend);
 		return data;
