@@ -98,6 +98,35 @@ public sealed class EditorRemoteAutomationController
 			return $"Anti-aliasing: {selectedMode}, enabled: {enabled}, CAS: {settings.UsesCasSharpening}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.DiffuseGlobalIllumination;
+			settings.ProbeRelocationEnabled = enabled;
+			config.DiffuseGlobalIllumination = settings;
+			return $"DDGI relocation: {enabled}. Changed in memory only.";
+		}, cancellationToken);
+
+	public Task SetEntityRotationAsync(Guid entityId, Vector3 eulerDegrees, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			foreach (var pair in scene.EntityIds)
+			{
+				if (pair.Value != entityId) continue;
+				var radians = eulerDegrees * (MathF.PI / 180.0f);
+				scene.World.SetLocalRotation(pair.Key, Quaternion.CreateFromYawPitchRoll(radians.Y, radians.X, radians.Z));
+				return;
+			}
+			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
+		}, cancellationToken);
+
 	public Task Ready => _ready.Task;
 	public Task Stopped => _stopped.Task;
 	public bool ShutdownRequested { get; private set; }

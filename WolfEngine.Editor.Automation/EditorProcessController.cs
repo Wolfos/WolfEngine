@@ -179,6 +179,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task SetSceneDebugViewAsync(string? debugViewId, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetSceneDebugViewAsync(debugViewId, cancellationToken);
 
+	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetDdgiRelocationAsync(enabled, cancellationToken);
+
+	public Task SetEntityRotationAsync(Guid entityId, System.Numerics.Vector3 eulerDegrees, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEntityRotationAsync(entityId, eulerDegrees, cancellationToken);
+
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
 
