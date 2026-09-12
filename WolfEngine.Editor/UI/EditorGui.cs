@@ -31,6 +31,7 @@ public class EditorGui
 	private readonly MaterialImporterWindow _materialImporterWindow;
 	private readonly ComponentsWindow _componentsWindow;
 	private readonly ProfilerWindow _profilerWindow;
+	private readonly LogWindow _logWindow;
 	private readonly SceneWindow _sceneWindow;
 	private readonly ProjectSettingsWindow _projectSettingsWindow;
 
@@ -54,6 +55,7 @@ public class EditorGui
 		_materialImporterWindow = serviceProvider.GetRequiredService<MaterialImporterWindow>();
 		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
 		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
+		_logWindow = serviceProvider.GetRequiredService<LogWindow>();
 		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
 		_projectSettingsWindow = serviceProvider.GetRequiredService<ProjectSettingsWindow>();
 		_commandService.BindDeletionHandlers(_entitiesWindow, _assetsWindow);
@@ -92,6 +94,7 @@ public class EditorGui
 		}
 
 		DrawWindow(_profilerWindow, scene);
+		DrawWindow(_logWindow, scene);
 		DrawWindow(_materialImporterWindow, scene);
 
 		_commandService.ProcessShortcuts();
@@ -379,10 +382,12 @@ public class EditorGui
 
 		NativeDockBuilder.SplitNode(dockspaceId, ImGuiDir.Left, 0.18f, out var leftId, out var centerAndRightId);
 		NativeDockBuilder.SplitNode(centerAndRightId, ImGuiDir.Right, 0.20f, out var rightId, out var centerId);
+		NativeDockBuilder.SplitNode(centerId, ImGuiDir.Down, 0.25f, out var bottomId, out var centerTopId);
 
 		NativeDockBuilder.DockWindow("Entities", leftId);
-		NativeDockBuilder.DockWindow("Scene", centerId);
-		NativeDockBuilder.DockWindow("Assets", centerId);
+		NativeDockBuilder.DockWindow("Scene", centerTopId);
+		NativeDockBuilder.DockWindow("Assets", centerTopId);
+		NativeDockBuilder.DockWindow("Log", bottomId);
 		NativeDockBuilder.DockWindow("Components", rightId);
 		NativeDockBuilder.DockWindow("Asset Editor", rightId);
 		NativeDockBuilder.Finish(dockspaceId);

@@ -1,10 +1,18 @@
 using WolfEngine.ECS;
+using WolfEngine.Logging;
 
 namespace WolfEngine.Editor;
 
-internal static class GameplayExceptionReporter
+internal sealed class GameplayExceptionReporter
 {
-	public static void Run(string callback, Action action)
+	private readonly ILogService _log;
+
+	public GameplayExceptionReporter(ILogService log)
+	{
+		_log = log ?? throw new ArgumentNullException(nameof(log));
+	}
+
+	public void Run(string callback, Action action)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(callback);
 		ArgumentNullException.ThrowIfNull(action);
@@ -19,7 +27,7 @@ internal static class GameplayExceptionReporter
 		}
 	}
 
-	public static bool TryRun<T>(string callback, Func<T> action, out T result)
+	public bool TryRun<T>(string callback, Func<T> action, out T result)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(callback);
 		ArgumentNullException.ThrowIfNull(action);
@@ -37,14 +45,14 @@ internal static class GameplayExceptionReporter
 		}
 	}
 
-	public static void ReportSystem(ISystem system, Exception exception)
+	public void ReportSystem(ISystem system, Exception exception)
 	{
 		ArgumentNullException.ThrowIfNull(system);
 		Report(system.GetType().FullName ?? system.GetType().Name, exception);
 	}
 
-	private static void Report(string callback, Exception exception)
+	private void Report(string callback, Exception exception)
 	{
-		Console.WriteLine($"Gameplay exception in {callback}:{Environment.NewLine}{exception}");
+		_log.Error($"Gameplay exception in {callback}.", exception);
 	}
 }

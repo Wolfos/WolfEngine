@@ -5,6 +5,7 @@ using WolfEngine.ECS;
 using WolfEngine.Gameplay;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
+using WolfEngine.Logging;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -53,6 +54,7 @@ public class WolfEngineEditor
 	private readonly IServiceProvider _serviceProvider;
 	private readonly RigidbodySystem _rigidbodySystem;
 	private readonly IAudioRuntime _audioRuntime;
+	private readonly GameplayExceptionReporter _gameplayExceptionReporter;
 	private EditorPlayState _lastAudioPlayState = EditorPlayState.Edit;
 
 	private EditorScene _currentScene = null!;
@@ -90,6 +92,7 @@ public class WolfEngineEditor
 		SphereColliderGizmoDrawer sphereColliderGizmoDrawer,
 		CapsuleColliderGizmoDrawer capsuleColliderGizmoDrawer,
 		IAudioRuntime audioRuntime,
+		ILogService logService,
 		IServiceProvider serviceProvider)
 	{
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
@@ -115,6 +118,8 @@ public class WolfEngineEditor
 		_sphereColliderGizmoDrawer = sphereColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(sphereColliderGizmoDrawer));
 		_capsuleColliderGizmoDrawer = capsuleColliderGizmoDrawer ?? throw new ArgumentNullException(nameof(capsuleColliderGizmoDrawer));
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
+		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
+		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
@@ -326,7 +331,7 @@ public class WolfEngineEditor
 			return;
 		}
 
-		GameplayExceptionReporter.Run(
+		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.Update),
 			() => _boundGameplayModule?.Update(deltaTime, runtimeScene.World));
 	}
@@ -355,7 +360,7 @@ public class WolfEngineEditor
 
 		_physicsAccumulator.Execute(deltaTime, fixedDeltaTime =>
 		{
-			GameplayExceptionReporter.Run(
+			_gameplayExceptionReporter.Run(
 				nameof(IGameplayModule.PhysicsUpdate),
 				() => _boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World));
 			_worldManager.PhysicsUpdate(fixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
@@ -384,7 +389,7 @@ public class WolfEngineEditor
 			return;
 		}
 
-		if (GameplayExceptionReporter.TryRun(
+		if (_gameplayExceptionReporter.TryRun(
 				nameof(IGameplayAssemblyHost.EnsureLoaded),
 				_gameplayAssemblyHost.EnsureLoaded,
 				out GameplayLoadResult loadResult) == false)
@@ -406,10 +411,10 @@ public class WolfEngineEditor
 		}
 
 		UnbindGameplayModule();
-		GameplayExceptionReporter.Run(
+		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.CreateSystems),
 			() => RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider)));
-		GameplayExceptionReporter.Run(
+		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.OnLoaded),
 			() => loadResult.Module?.OnLoaded(runtimeScene.World));
 		_boundGameplayGeneration = loadResult.Generation;
@@ -623,7 +628,7 @@ public class WolfEngineEditor
 			return;
 		}
 
-		GameplayExceptionReporter.Run(
+		_gameplayExceptionReporter.Run(
 			nameof(IGameplayModule.OnUnloading),
 			() => _boundGameplayModule?.OnUnloading(_boundGameplayWorld));
 		_audioRuntime.StopAll();

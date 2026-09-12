@@ -42,7 +42,6 @@ public sealed class EditorApplication : IDisposable
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		var worldManager = _services.GetRequiredService<IWorldManager>();
-		worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, GameplayExceptionReporter.ReportSystem);
 		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem(_services.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
 		AssetDatabase.SetInstanceRegistry(_services.GetRequiredService<IAssetInstanceRegistry>());

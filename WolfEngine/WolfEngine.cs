@@ -4,6 +4,7 @@ using WolfEngine.ECS;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
 using WolfEngine.Input;
+using WolfEngine.Logging;
 using WolfEngine.Platform;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
@@ -20,6 +21,7 @@ public static class WolfEngine
 {
 	public static void ConfigureServices(IServiceCollection services)
 	{
+		services.AddSingleton<ILogService, LogService>();
 		services.AddSingleton<EngineShaderCatalog>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();

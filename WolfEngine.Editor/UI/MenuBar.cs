@@ -30,6 +30,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly ITextureAssetImporter _textureAssetImporter;
 	private readonly IAudioAssetImporter _audioAssetImporter;
 	private readonly MaterialImporterWindow _materialImporterWindow;
+	private readonly LogWindow _logWindow;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorModeState _editorModeState;
@@ -57,6 +58,7 @@ public sealed class MenuBar : IMenuBar
 		ITextureAssetImporter textureAssetImporter,
 		IAudioAssetImporter audioAssetImporter,
 		MaterialImporterWindow materialImporterWindow,
+		LogWindow logWindow,
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
 		IEditorModeState editorModeState,
@@ -76,6 +78,7 @@ public sealed class MenuBar : IMenuBar
 		_textureAssetImporter = textureAssetImporter;
 		_audioAssetImporter = audioAssetImporter;
 		_materialImporterWindow = materialImporterWindow ?? throw new ArgumentNullException(nameof(materialImporterWindow));
+		_logWindow = logWindow ?? throw new ArgumentNullException(nameof(logWindow));
 		_icons = icons;
 		_windowChromeController = windowChromeController;
 		_editorModeState = editorModeState;
@@ -137,6 +140,7 @@ public sealed class MenuBar : IMenuBar
 		AddRect(exclusionRects, DrawFileMenu());
 		AddRect(exclusionRects, DrawEditMenu());
 		AddRect(exclusionRects, DrawImportMenu(scene));
+		AddRect(exclusionRects, DrawWindowMenu());
 		
 		AddRect(exclusionRects, DrawGameplayReloadButton());
 		AddRect(exclusionRects, DrawPlayControls());
@@ -504,6 +508,27 @@ public sealed class MenuBar : IMenuBar
 		}
 
 		ImGui.EndMenu();
+		return menuRect;
+	}
+
+	private WindowChromeRect DrawWindowMenu()
+	{
+		var isOpen = ImGui.BeginMenu("Window");
+		var menuRect = GetLastItemRect();
+		if (isOpen)
+		{
+			if (ImGui.MenuItem("Log"))
+			{
+				_logWindow.Open();
+			}
+
+			if (ImGui.MenuItem("Profiler"))
+			{
+				ProfilerWindow.Open();
+			}
+			ImGui.EndMenu();
+		}
+
 		return menuRect;
 	}
 

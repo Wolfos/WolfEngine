@@ -5,6 +5,7 @@ using WolfEngine.Editor.UI;
 using WolfEngine.Physics;
 using WolfEngine.Editor.Automation;
 using WolfEngine.Audio;
+using WolfEngine.Logging;
 
 namespace WolfEngine.Editor;
 
@@ -35,6 +36,9 @@ public static class Program
 		services.AddSingleton<EditorCameraSystem>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();
+		services.AddSingleton<EditorLogBuffer>();
+		services.AddSingleton<IEditorLogStore>(provider => provider.GetRequiredService<EditorLogBuffer>());
+		services.AddSingleton<ILogSink>(provider => provider.GetRequiredService<EditorLogBuffer>());
 		services.AddSingleton<IEditorOperationService, EditorOperationService>();
 		services.AddSingleton<IEditorInteractionState, EditorInteractionState>();
 		services.AddSingleton<IEditorAssetRefreshService, EditorAssetRefreshService>();
@@ -133,6 +137,9 @@ public static class Program
 		services.AddTransient<AssetEditorWindow>();
 		services.AddSingleton<MaterialImporterWindow>();
 		services.AddTransient<ProfilerWindow>();
+		services.AddSingleton(provider => new LogWindow(
+			provider.GetRequiredService<IEditorLogStore>(),
+			provider.GetRequiredService<IIconManager>()));
 		services.AddTransient<SceneWindow>();
 	}
 }
