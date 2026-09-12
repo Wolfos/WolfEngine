@@ -861,7 +861,8 @@ public sealed class ScenePersistenceTests
 				new DataAssetStore(),
 				new MaterialAssetStore(),
 				Substitute.For<IThreeDFileImporter>(),
-				typeResolver: TypeResolver);
+				Substitute.For<ITextureGpuCompressionService>(),
+				TypeResolver);
 			PipelineService = pipelineService;
 			ProjectService = new EditorProjectService(pipelineService, Registry);
 			PrefabCreator = new PrefabAssetCreator(

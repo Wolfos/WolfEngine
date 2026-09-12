@@ -1450,7 +1450,8 @@ public sealed class AssetsWindowTests
 				Substitute.For<Importing.IImageLoader>(),
 				new DataAssetStore(),
 				new MaterialAssetStore(),
-				Substitute.For<IThreeDFileImporter>());
+				Substitute.For<IThreeDFileImporter>(),
+				Substitute.For<ITextureGpuCompressionService>());
 			PipelineService = pipelineService;
 			ProjectService = new EditorProjectService(pipelineService, Registry, notificationService);
 			if (ProjectService.CreateProject(ParentDirectory, "Project", out var errorMessage) == false)

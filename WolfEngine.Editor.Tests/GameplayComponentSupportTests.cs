@@ -927,8 +927,9 @@ public sealed class GameplayComponentSupportTests
 				DataAssetStore,
 				new MaterialAssetStore(),
 				Substitute.For<IThreeDFileImporter>(),
-				typeResolver: TypeCatalogImpl,
-				notificationService: NotificationService);
+				Substitute.For<ITextureGpuCompressionService>(),
+				TypeCatalogImpl,
+				NotificationService);
 			PipelineService = pipelineService;
 			_projectService = new EditorProjectService(pipelineService, _registry);
 			if (_projectService.CreateProject(_parentDirectory, ProjectName, out var errorMessage) == false)
