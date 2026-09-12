@@ -2,6 +2,7 @@
 
 namespace WolfEngine.Rendering;
 
+[DefaultIcon("light")]
 public struct Light: IEntityComponent
 {
 	public LightType Type;

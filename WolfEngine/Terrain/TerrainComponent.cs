@@ -5,6 +5,7 @@ using WolfEngine.ECS;
 
 namespace WolfEngine;
 
+[DefaultIcon("terrain")]
 public struct TerrainComponent : IEntityComponent
 {
 	public AssetRef<TerrainAsset> TerrainAsset;

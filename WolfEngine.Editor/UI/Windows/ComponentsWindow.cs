@@ -234,6 +234,13 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
                     {
                         continue;
                     }
+                    
+                    var defaultIconAttribute = descriptor.Type.GetCustomAttribute<DefaultIconAttribute>();
+                    var icon = defaultIconAttribute?.iconName;
+                    if (icon != null)
+                    {
+                        scene.EntityIcons.TryAdd(entity, icon);
+                    }
 
                     RuntimeComponentAccessor.AddDefault(scene.World, entity, descriptor.Type);
                     EditorGui.SelectEntity(entity, scene.World);
@@ -1206,9 +1213,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         {
             sourceEntity.LocalTransform = currentEntity.LocalTransform;
         }
-        // Written data has to address the prefab's own entities, so references that point inside this
-        // instance are translated back. References to entities outside the prefab keep their scene id and
-        // only resolve in the scene they were authored in.
+
         var sceneToPrefabEntityIds = GetPrefabInstanceEntityIdMap(scene, entity).SceneToPrefab;
         sourceEntity.Components = currentEntity.Components.Select(EditorPrefabUtility.CloneComponent).ToList();
         for (var i = 0; i < sourceEntity.Components.Count; i++)

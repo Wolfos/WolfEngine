@@ -32,3 +32,14 @@ public sealed class RequireComponentAttribute(Type type): Attribute
 {
 	public Type Type = type;
 }
+
+[AttributeUsage(AttributeTargets.Struct, Inherited = false)]
+public class DefaultIconAttribute: Attribute
+{
+	public string? iconName;
+
+	public DefaultIconAttribute(string iconName)
+	{
+		this.iconName = iconName;
+	}
+}
