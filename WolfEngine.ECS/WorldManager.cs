@@ -8,6 +8,7 @@ public interface IWorldManager
 	public void AddSystem<T>(SystemExecutionGroup group = SystemExecutionGroup.Shared) where T : ISystem, new();
 	public void AddSystem(ISystem system, SystemExecutionGroup group = SystemExecutionGroup.Shared);
 	public bool RemoveSystem(ISystem system);
+	public void SetExceptionHandler(SystemExecutionGroup groupMask, Action<ISystem, Exception>? exceptionHandler);
 	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 	public void PhysicsUpdate(float fixedDeltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
 	public void OnPreRender(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All);
@@ -18,6 +19,8 @@ public class WorldManager: IWorldManager
 {
 	private readonly List<World> _worlds = new();
 	private readonly List<SystemRegistration> _systems = new();
+	private SystemExecutionGroup _recoverableExceptionGroupMask;
+	private Action<ISystem, Exception>? _exceptionHandler;
 
 	private readonly record struct SystemRegistration(ISystem System, SystemExecutionGroup Group);
 	
@@ -50,9 +53,19 @@ public class WorldManager: IWorldManager
 
 		for (var index = 0; index < _systems.Count; index++)
 		{
-			if (_systems[index].System is IWorldRemovedListener listener)
+			var registration = _systems[index];
+			if (registration.System is not IWorldRemovedListener listener)
+			{
+				continue;
+			}
+
+			try
 			{
 				listener.OnWorldRemoved(world);
+			}
+			catch (Exception exception) when (CanRecoverException(registration.Group))
+			{
+				_exceptionHandler!(registration.System, exception);
 			}
 		}
 
@@ -92,6 +105,12 @@ public class WorldManager: IWorldManager
 		return removed;
 	}
 
+	public void SetExceptionHandler(SystemExecutionGroup groupMask, Action<ISystem, Exception>? exceptionHandler)
+	{
+		_recoverableExceptionGroupMask = exceptionHandler is null ? SystemExecutionGroup.None : groupMask;
+		_exceptionHandler = exceptionHandler;
+	}
+
 	public void Update(float deltaTime, WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
 	{
 		foreach (var world in _worlds)
@@ -105,13 +124,22 @@ public class WorldManager: IWorldManager
 			{
 				var registration = _systems[index];
 				if ((registration.Group & groupMask) == 0 ||
-				    registration.System is not IUpdate updateable ||
-				    (updateable.GetTag() & world.Tag) == 0)
+				    registration.System is not IUpdate updateable)
 				{
 					continue;
 				}
 
-				updateable.Update(deltaTime, world);
+				try
+				{
+					if ((updateable.GetTag() & world.Tag) != 0)
+					{
+						updateable.Update(deltaTime, world);
+					}
+				}
+				catch (Exception exception) when (CanRecoverException(registration.Group))
+				{
+					_exceptionHandler!(registration.System, exception);
+				}
 			}
 		}
 	}
@@ -129,13 +157,22 @@ public class WorldManager: IWorldManager
 			{
 				var registration = _systems[index];
 				if ((registration.Group & groupMask) == 0 ||
-				    registration.System is not IPhysicsUpdate physicsUpdate ||
-				    (physicsUpdate.GetTag() & world.Tag) == 0)
+				    registration.System is not IPhysicsUpdate physicsUpdate)
 				{
 					continue;
 				}
 
-				physicsUpdate.PhysicsUpdate(fixedDeltaTime, world);
+				try
+				{
+					if ((physicsUpdate.GetTag() & world.Tag) != 0)
+					{
+						physicsUpdate.PhysicsUpdate(fixedDeltaTime, world);
+					}
+				}
+				catch (Exception exception) when (CanRecoverException(registration.Group))
+				{
+					_exceptionHandler!(registration.System, exception);
+				}
 			}
 		}
 	}
@@ -153,15 +190,30 @@ public class WorldManager: IWorldManager
 			{
 				var registration = _systems[index];
 				if ((registration.Group & groupMask) == 0 ||
-				    registration.System is not IPreRender preRender ||
-				    (preRender.GetTag() & world.Tag) == 0)
+				    registration.System is not IPreRender preRender)
 				{
 					continue;
 				}
 
-				preRender.PreRender(deltaTime, world);
+				try
+				{
+					if ((preRender.GetTag() & world.Tag) != 0)
+					{
+						preRender.PreRender(deltaTime, world);
+					}
+				}
+				catch (Exception exception) when (CanRecoverException(registration.Group))
+				{
+					_exceptionHandler!(registration.System, exception);
+				}
 			}
 		}
+	}
+
+	private bool CanRecoverException(SystemExecutionGroup systemGroup)
+	{
+		return _exceptionHandler is not null &&
+		       (systemGroup & _recoverableExceptionGroupMask) != 0;
 	}
 
 	public void OnDrawGizmos(WorldTag worldTagMask, SystemExecutionGroup groupMask = SystemExecutionGroup.All)
@@ -177,13 +229,22 @@ public class WorldManager: IWorldManager
 			{
 				var registration = _systems[index];
 				if ((registration.Group & groupMask) == 0 ||
-				    registration.System is not IOnDrawGizmos gizmoDrawer ||
-				    (gizmoDrawer.GetTag() & world.Tag) == 0)
+				    registration.System is not IOnDrawGizmos gizmoDrawer)
 				{
 					continue;
 				}
 
-				gizmoDrawer.OnDrawGizmos(world);
+				try
+				{
+					if ((gizmoDrawer.GetTag() & world.Tag) != 0)
+					{
+						gizmoDrawer.OnDrawGizmos(world);
+					}
+				}
+				catch (Exception exception) when (CanRecoverException(registration.Group))
+				{
+					_exceptionHandler!(registration.System, exception);
+				}
 			}
 		}
 	}

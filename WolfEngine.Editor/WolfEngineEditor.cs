@@ -326,7 +326,9 @@ public class WolfEngineEditor
 			return;
 		}
 
-		_boundGameplayModule?.Update(deltaTime, runtimeScene.World);
+		GameplayExceptionReporter.Run(
+			nameof(IGameplayModule.Update),
+			() => _boundGameplayModule?.Update(deltaTime, runtimeScene.World));
 	}
 
 	private void UpdateAudioLifecycle(float deltaTime)
@@ -353,7 +355,9 @@ public class WolfEngineEditor
 
 		_physicsAccumulator.Execute(deltaTime, fixedDeltaTime =>
 		{
-			_boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World);
+			GameplayExceptionReporter.Run(
+				nameof(IGameplayModule.PhysicsUpdate),
+				() => _boundGameplayModule?.PhysicsUpdate(fixedDeltaTime, runtimeScene.World));
 			_worldManager.PhysicsUpdate(fixedDeltaTime, WorldTag.Game, SystemExecutionGroup.All);
 		});
 
@@ -380,7 +384,15 @@ public class WolfEngineEditor
 			return;
 		}
 
-		var loadResult = _gameplayAssemblyHost.EnsureLoaded();
+		if (GameplayExceptionReporter.TryRun(
+				nameof(IGameplayAssemblyHost.EnsureLoaded),
+				_gameplayAssemblyHost.EnsureLoaded,
+				out GameplayLoadResult loadResult) == false)
+		{
+			UnbindGameplayModule();
+			return;
+		}
+
 		if (loadResult.Generation == 0)
 		{
 			UnbindGameplayModule();
@@ -394,8 +406,12 @@ public class WolfEngineEditor
 		}
 
 		UnbindGameplayModule();
-		RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider));
-		loadResult.Module?.OnLoaded(runtimeScene.World);
+		GameplayExceptionReporter.Run(
+			nameof(IGameplayModule.CreateSystems),
+			() => RegisterGameplaySystems(loadResult.Module?.CreateSystems(_serviceProvider)));
+		GameplayExceptionReporter.Run(
+			nameof(IGameplayModule.OnLoaded),
+			() => loadResult.Module?.OnLoaded(runtimeScene.World));
 		_boundGameplayGeneration = loadResult.Generation;
 		_boundGameplayWorld = runtimeScene.World;
 		_boundGameplayModule = loadResult.Module;
@@ -607,7 +623,9 @@ public class WolfEngineEditor
 			return;
 		}
 
-		_boundGameplayModule?.OnUnloading(_boundGameplayWorld);
+		GameplayExceptionReporter.Run(
+			nameof(IGameplayModule.OnUnloading),
+			() => _boundGameplayModule?.OnUnloading(_boundGameplayWorld));
 		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{

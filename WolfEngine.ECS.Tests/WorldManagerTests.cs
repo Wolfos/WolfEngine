@@ -119,6 +119,68 @@ public sealed class WorldManagerTests
 		Assert.That(listener.RemovedWorlds[0], Is.SameAs(world));
 	}
 
+	[Test]
+	public void Update_GameplayExceptionHandlerAllowsLaterSystemsToRun()
+	{
+		var manager = new WorldManager();
+		manager.CreateWorld(WorldTag.Game);
+		var exception = new InvalidOperationException("Gameplay failed.");
+		var throwing = new ThrowingUpdateSystem(exception);
+		var following = new CountingUpdateSystem(WorldTag.Game);
+		ISystem? reportedSystem = null;
+		Exception? reportedException = null;
+
+		manager.SetExceptionHandler(SystemExecutionGroup.Gameplay, (system, caughtException) =>
+		{
+			reportedSystem = system;
+			reportedException = caughtException;
+		});
+		manager.AddSystem(throwing, SystemExecutionGroup.Gameplay);
+		manager.AddSystem(following, SystemExecutionGroup.Gameplay);
+		manager.Update(0.016f, WorldTag.Game);
+
+		Assert.That(reportedSystem, Is.SameAs(throwing));
+		Assert.That(reportedException, Is.SameAs(exception));
+		Assert.That(following.UpdateCount, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void Update_SharedExceptionIsNotHandledByGameplayBoundary()
+	{
+		var manager = new WorldManager();
+		manager.CreateWorld(WorldTag.Game);
+		var exception = new InvalidOperationException("Engine failed.");
+		var throwing = new ThrowingUpdateSystem(exception);
+		var handlerCalled = false;
+
+		manager.SetExceptionHandler(SystemExecutionGroup.Gameplay, (_, _) => handlerCalled = true);
+		manager.AddSystem(throwing, SystemExecutionGroup.Shared);
+
+		var thrown = Assert.Throws<InvalidOperationException>(() => manager.Update(0.016f, WorldTag.Game));
+
+		Assert.That(thrown, Is.SameAs(exception));
+		Assert.That(handlerCalled, Is.False);
+	}
+
+	[Test]
+	public void GameplayExceptionBoundaryCoversAllSystemCallbacks()
+	{
+		var manager = new WorldManager();
+		var world = manager.CreateWorld(WorldTag.Game);
+		var throwing = new ThrowingAllCallbacksSystem();
+		var reportedExceptions = new List<Exception>();
+		void HandleException(ISystem _, Exception exception) => reportedExceptions.Add(exception);
+
+		manager.SetExceptionHandler(SystemExecutionGroup.Gameplay, HandleException);
+		manager.AddSystem(throwing, SystemExecutionGroup.Gameplay);
+		manager.PhysicsUpdate(1.0f / 60.0f, WorldTag.Game);
+		manager.OnPreRender(0.016f, WorldTag.Game);
+		manager.OnDrawGizmos(WorldTag.Game);
+		manager.RemoveWorld(world);
+
+		Assert.That(reportedExceptions, Has.Count.EqualTo(4));
+	}
+
 	private sealed class RecordingUpdateSystem : IUpdate
 	{
 		private readonly WorldTag _tag;
@@ -157,6 +219,33 @@ public sealed class WorldManagerTests
 		}
 
 		public WorldTag GetTag() => _tag;
+	}
+
+	private sealed class ThrowingUpdateSystem : IUpdate
+	{
+		private readonly Exception _exception;
+
+		public ThrowingUpdateSystem(Exception exception)
+		{
+			_exception = exception;
+		}
+
+		public void Update(float deltaTime, World world) => throw _exception;
+
+		public WorldTag GetTag() => WorldTag.Game;
+	}
+
+	private sealed class ThrowingAllCallbacksSystem : IPhysicsUpdate, IPreRender, IOnDrawGizmos, IWorldRemovedListener
+	{
+		public void PhysicsUpdate(float fixedDeltaTime, World world) => throw new InvalidOperationException();
+
+		public void PreRender(float deltaTime, World world) => throw new InvalidOperationException();
+
+		public void OnDrawGizmos(World world) => throw new InvalidOperationException();
+
+		public void OnWorldRemoved(World world) => throw new InvalidOperationException();
+
+		public WorldTag GetTag() => WorldTag.Game;
 	}
 
 	private sealed class CountingPreRenderSystem : IPreRender
