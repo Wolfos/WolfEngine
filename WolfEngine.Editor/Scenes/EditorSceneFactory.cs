@@ -91,8 +91,10 @@ public class EditorSceneFactory : IEditorSceneFactory
 			loadedCells.Add((SceneCellKey.Spatial(coordinates), cell));
 		}
 
-		var entitiesById = CreateEntities(scene, loadedCells);
-		ApplyEntityState(scene, loadedCells, entitiesById);
+		var prefabInstanceMaps = EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(
+			loadedCells.SelectMany(loadedCell => loadedCell.Cell.Entities));
+		var entitiesById = CreateEntities(scene, loadedCells, prefabInstanceMaps);
+		ApplyEntityState(scene, loadedCells, entitiesById, prefabInstanceMaps);
 		RestoreHierarchy(scene.World, loadedCells, entitiesById);
 		return scene;
 	}
@@ -156,6 +158,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 			scene.EntityIds[entity] = Guid.NewGuid();
 		}
 
+		var prefabInstanceMaps = EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(scene);
 		for (var i = 0; i < entities.Count; i++)
 		{
 			var entity = entities[i];
@@ -168,7 +171,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 				scene.EntityCellKeys[entity] = cellKey;
 			}
 
-			var serializedEntity = SerializeEntity(scene, entity, scene.EntityIds[entity]);
+			var serializedEntity = SerializeEntity(scene, entity, scene.EntityIds[entity], prefabInstanceMaps);
 			if (cellKey.IsGlobal)
 			{
 				serializedGlobalCell.Entities.Add(serializedEntity);
@@ -227,7 +230,10 @@ public class EditorSceneFactory : IEditorSceneFactory
 		}
 	}
 
-	private Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
+	private Dictionary<Guid, Entity> CreateEntities(
+		EditorScene scene,
+		List<(SceneCellKey CellKey, Cell Cell)> loadedCells,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		var entitiesById = new Dictionary<Guid, Entity>();
 		for (var i = 0; i < loadedCells.Count; i++)
@@ -246,7 +252,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 					throw new InvalidOperationException($"Scene contains duplicate entity id '{savedEntity.EntityId}'.");
 				}
 
-					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var mergedEntity = MergePrefabSourceEntity(savedEntity, prefabInstanceMaps);
 					var entity = CreateEntity(scene.World, mergedEntity);
 					entitiesById[savedEntity.EntityId] = entity;
 					scene.EntityIds[entity] = savedEntity.EntityId;
@@ -266,7 +272,11 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return entitiesById;
 	}
 
-	private void ApplyEntityState(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
+	private void ApplyEntityState(
+		EditorScene scene,
+		List<(SceneCellKey CellKey, Cell Cell)> loadedCells,
+		Dictionary<Guid, Entity> entitiesById,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		for (var i = 0; i < loadedCells.Count; i++)
 		{
@@ -275,7 +285,7 @@ public class EditorSceneFactory : IEditorSceneFactory
 			{
 				var savedEntity = cell.Entities[entityIndex];
 					var entity = entitiesById[savedEntity.EntityId];
-					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var mergedEntity = MergePrefabSourceEntity(savedEntity, prefabInstanceMaps);
 					scene.World.SetEnabled(entity, mergedEntity.Enabled);
 					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
 					{
@@ -308,7 +318,11 @@ public class EditorSceneFactory : IEditorSceneFactory
 		}
 	}
 
-	private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
+	private SavedEntity SerializeEntity(
+		EditorScene scene,
+		Entity entity,
+		Guid entityId,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		var world = scene.World;
 		var hasName = world.HasComponent<NameComponent>(entity);
@@ -346,6 +360,13 @@ public class EditorSceneFactory : IEditorSceneFactory
 
 			if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
 			{
+				// Both sides have to speak scene ids, or every component holding a reference into the prefab
+				// would read as an override.
+				if (prefabInstanceMaps.TryGetValue(entityId, out var entityIdMap))
+				{
+					sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(sourceEntity, entityIdMap);
+				}
+
 				savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
 				if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity))
 				{
@@ -651,11 +672,19 @@ public class EditorSceneFactory : IEditorSceneFactory
 		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
 	}
 
-	private SavedEntity MergePrefabSourceEntity(SavedEntity savedEntity)
+	private SavedEntity MergePrefabSourceEntity(
+		SavedEntity savedEntity,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity) == false)
 		{
 			return savedEntity;
+		}
+
+		// The prefab addresses its own entities; this instance knows them by its own persistent ids.
+		if (prefabInstanceMaps.TryGetValue(savedEntity.EntityId, out var entityIdMap))
+		{
+			sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(sourceEntity, entityIdMap);
 		}
 
 		return EditorPrefabUtility.MergePrefabSourceEntity(savedEntity, sourceEntity);

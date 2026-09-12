@@ -53,6 +53,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IThreeDFileImporter _threeDFileImporter;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
+	private readonly IProjectTypeResolver? _typeResolver;
+	private readonly IEditorNotificationService? _notificationService;
 	private readonly IReadOnlyList<AssetImporterDescriptor> _importers;
 	private Stopwatch? _libraryBuildStopwatch;
 
@@ -62,26 +64,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		ImportImageLoader imageLoader,
 		IDataAssetStore dataAssetStore,
 		IMaterialAssetStore materialAssetStore,
-		IThreeDFileImporter threeDFileImporter)
-		: this(
-			index,
-			metadataStore,
-			imageLoader,
-			dataAssetStore,
-			materialAssetStore,
-			threeDFileImporter,
-			new UnsupportedTextureGpuCompressionService())
-	{
-	}
-
-	public ProjectAssetPipelineService(
-		IAssetPipelineIndex index,
-		IAssetMetadataStore metadataStore,
-		ImportImageLoader imageLoader,
-		IDataAssetStore dataAssetStore,
-		IMaterialAssetStore materialAssetStore,
 		IThreeDFileImporter threeDFileImporter,
-		ITextureGpuCompressionService textureGpuCompressionService)
+		ITextureGpuCompressionService textureGpuCompressionService,
+		IProjectTypeResolver? typeResolver = null,
+		IEditorNotificationService? notificationService = null)
 	{
 		_index = index ?? throw new ArgumentNullException(nameof(index));
 		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
@@ -89,8 +75,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_dataAssetStore = dataAssetStore ?? throw new ArgumentNullException(nameof(dataAssetStore));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
 		_threeDFileImporter = threeDFileImporter ?? throw new ArgumentNullException(nameof(threeDFileImporter));
-		_textureGpuCompressionService = textureGpuCompressionService ??
-		                                throw new ArgumentNullException(nameof(textureGpuCompressionService));
+		_textureGpuCompressionService = textureGpuCompressionService ?? new UnsupportedTextureGpuCompressionService();
+		_typeResolver = typeResolver;
+		_notificationService = notificationService;
 		_importers = CreateImporters();
 	}
 
@@ -464,9 +451,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				$"Prefab '{prefabNodeId}' does not contain root entity '{prefabFile.RootEntityId}'.");
 		}
 
+		var skippedComponents = new List<string>();
 		var instantiatedRoot = InstantiatePrefabEntities(
-			scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent);
+			scene, projectRootPath, prefabNodeId, rootEntity, entitiesById, childrenByParent, skippedComponents);
 		ApplySpawnPosition(scene.World, instantiatedRoot, spawnPosition);
+		ReportSkippedPrefabComponents(prefabNode.RelativeAssetPath, skippedComponents);
 	}
 
 	private Entity CreateModelNodeEntities(
@@ -2330,14 +2319,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		Guid prefabNodeId,
 		SavedEntity rootEntity,
 		Dictionary<Guid, SavedEntity> entitiesById,
-		Dictionary<Guid, List<SavedEntity>> childrenByParent)
+		Dictionary<Guid, List<SavedEntity>> childrenByParent,
+		List<string> skippedComponents)
 	{
 		var resolvedEntitiesById =
 			ResolvePrefabEntitiesForInstantiation(projectRootPath, rootEntity.EntityId, entitiesById, childrenByParent);
 		var instantiatedEntitiesBySourceId = new Dictionary<Guid, Entity>(resolvedEntitiesById.Count);
 		CreateInstantiatedPrefabEntities(scene, prefabNodeId, rootEntity.EntityId, resolvedEntitiesById,
 			childrenByParent, instantiatedEntitiesBySourceId, parent: null);
-		ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId);
+		ApplyInstantiatedPrefabEntityState(scene, resolvedEntitiesById, instantiatedEntitiesBySourceId, skippedComponents);
 		return instantiatedEntitiesBySourceId[rootEntity.EntityId];
 	}
 
@@ -2432,10 +2422,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
-	private static void ApplyInstantiatedPrefabEntityState(
+	private void ApplyInstantiatedPrefabEntityState(
 		EditorScene scene,
 		IReadOnlyDictionary<Guid, SavedEntity> resolvedEntitiesById,
-		IReadOnlyDictionary<Guid, Entity> instantiatedEntitiesBySourceId)
+		IReadOnlyDictionary<Guid, Entity> instantiatedEntitiesBySourceId,
+		List<string> skippedComponents)
 	{
 		foreach (var entry in instantiatedEntitiesBySourceId)
 		{
@@ -2444,7 +2435,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			scene.World.SetEnabled(entity, sourceEntity.Enabled);
 			for (var i = 0; i < sourceEntity.Components.Count; i++)
 			{
-				ApplySavedComponent(scene, instantiatedEntitiesBySourceId, entity, sourceEntity.Components[i]);
+				ApplySavedComponent(scene, instantiatedEntitiesBySourceId, entity, sourceEntity.Components[i],
+					skippedComponents);
 			}
 		}
 	}
@@ -2546,29 +2538,75 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return entity;
 	}
 
-	private static void ApplySavedComponent(EditorScene scene, IReadOnlyDictionary<Guid, Entity>? sourceEntitiesById,
-		Entity entity, SavedComponent component)
+	private void ApplySavedComponent(EditorScene scene, IReadOnlyDictionary<Guid, Entity> sourceEntitiesById,
+		Entity entity, SavedComponent component, List<string> skippedComponents)
 	{
-		if ((ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out var componentType) ==
-		     false &&
-		     ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType) == false) ||
-		    componentType == typeof(NameComponent) ||
-		    componentType.IsValueType == false ||
-		    typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+		if (TryResolveComponentType(component, out var componentType) == false)
+		{
+			skippedComponents.Add(DescribeSavedComponent(component));
+			return;
+		}
+
+		// The name is authored per entity rather than carried by the saved component list.
+		if (componentType == typeof(NameComponent))
 		{
 			return;
 		}
 
-		var deserialized = sourceEntitiesById is null
-			? EditorEntityReferenceUtility.DeserializeComponentData(scene, component.Data, componentType)
-			: EditorEntityReferenceUtility.DeserializeValue(component.Data, componentType, entityId =>
-			{
-				return sourceEntitiesById.TryGetValue(entityId, out var resolvedEntity)
-					? resolvedEntity
-					: null;
-			});
+		if (componentType.IsValueType == false || typeof(IEntityComponent).IsAssignableFrom(componentType) == false)
+		{
+			skippedComponents.Add($"{DescribeSavedComponent(component)} (not a component struct)");
+			return;
+		}
+
+		var deserialized = EditorEntityReferenceUtility.DeserializeValue(component.Data, componentType, entityId =>
+		{
+			return sourceEntitiesById.TryGetValue(entityId, out var resolvedEntity)
+				? resolvedEntity
+				: null;
+		});
 		RuntimeComponentAccessor.WriteBoxed(scene.World, entity, componentType,
 			deserialized ?? ProjectTypeStateTransferUtility.CreateDefaultValue(componentType));
+	}
+
+	// Mirrors the resolution order used when loading scenes: the project type resolver is the only
+	// source that knows about gameplay types, and the loaded-assembly scan covers engine types when
+	// no resolver was supplied.
+	private bool TryResolveComponentType(SavedComponent component, out Type componentType)
+	{
+		if (_typeResolver?.TryResolveStableTypeId(component.TypeId, out componentType) == true)
+		{
+			return true;
+		}
+
+		if (_typeResolver?.TryResolveType(component.Type, out componentType) == true)
+		{
+			return true;
+		}
+
+		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out componentType) ||
+		       ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
+	}
+
+	private static string DescribeSavedComponent(SavedComponent component)
+	{
+		return string.IsNullOrWhiteSpace(component.TypeId) ? component.Type : component.TypeId;
+	}
+
+	private void ReportSkippedPrefabComponents(string prefabRelativePath, List<string> skippedComponents)
+	{
+		if (skippedComponents.Count == 0)
+		{
+			return;
+		}
+
+		var distinctComponents = skippedComponents.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+		var message =
+			$"Instantiated prefab '{prefabRelativePath}' without {skippedComponents.Count} component(s) that could not be applied: " +
+			$"{string.Join(", ", distinctComponents)}. " +
+			"Gameplay components need the gameplay assembly to be built and loaded.";
+		Console.WriteLine($"[Prefab] {message}");
+		_notificationService?.ReportError(message);
 	}
 
 	private static string GetUniqueDestinationPath(string destinationFolder, string baseName, string extension)

@@ -193,6 +193,225 @@ internal static class EditorPrefabUtility
 		};
 	}
 
+	/// <summary>
+	/// Translation between one prefab instance's entities and the prefab file they came from. Component data
+	/// inside a prefab addresses the prefab's own entities, while a scene addresses them by the persistent ids
+	/// its instance was given, so every reference crossing that boundary has to be translated. The map is per
+	/// instance: a scene can hold several instances of the same prefab, each with its own scene ids.
+	/// Prefab entities the instance no longer contains, and references to entities outside the prefab, are
+	/// absent from the map and are left pointing where they already point.
+	/// </summary>
+	public readonly record struct PrefabInstanceEntityIdMap
+	{
+		private static readonly Dictionary<Guid, Guid> NoEntityIds = new();
+		private readonly IReadOnlyDictionary<Guid, Guid>? _prefabToScene;
+
+		public PrefabInstanceEntityIdMap(IReadOnlyDictionary<Guid, Guid> prefabToScene)
+		{
+			_prefabToScene = prefabToScene;
+		}
+
+		/// <summary>An instance that translates nothing, leaving every reference where it points.</summary>
+		public static PrefabInstanceEntityIdMap Empty => default;
+
+		/// <summary>Reads prefab data into a scene: prefab entity id to the id the instance gave that entity.</summary>
+		public IReadOnlyDictionary<Guid, Guid> PrefabToScene => _prefabToScene ?? NoEntityIds;
+
+		/// <summary>Writes scene data back into a prefab. Builds the inverse on demand, so hold on to the result.</summary>
+		public IReadOnlyDictionary<Guid, Guid> SceneToPrefab
+		{
+			get
+			{
+				var inverted = new Dictionary<Guid, Guid>(PrefabToScene.Count);
+				foreach (var entry in PrefabToScene)
+				{
+					inverted[entry.Value] = entry.Key;
+				}
+
+				return inverted;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Builds one <see cref="PrefabInstanceEntityIdMap"/> per prefab instance in a loaded set of cells, keyed by
+	/// the persistent id of every entity in that instance.
+	/// </summary>
+	public static Dictionary<Guid, PrefabInstanceEntityIdMap> BuildPrefabInstanceEntityIdMaps(
+		IEnumerable<SavedEntity> savedEntities)
+	{
+		ArgumentNullException.ThrowIfNull(savedEntities);
+		var members = new List<PrefabInstanceMember>();
+		var parentEntityIds = new Dictionary<Guid, Guid>();
+		var prefabAssetIds = new Dictionary<Guid, Guid>();
+		foreach (var savedEntity in savedEntities)
+		{
+			if (savedEntity.EntityId == Guid.Empty)
+			{
+				continue;
+			}
+
+			parentEntityIds[savedEntity.EntityId] = savedEntity.ParentEntityId ?? Guid.Empty;
+			if (savedEntity.PrefabSourcePath.Count == 0)
+			{
+				continue;
+			}
+
+			var link = savedEntity.PrefabSourcePath[0];
+			prefabAssetIds[savedEntity.EntityId] = link.PrefabAssetId;
+			members.Add(new PrefabInstanceMember(savedEntity.EntityId, link.PrefabAssetId, link.PrefabEntityId));
+		}
+
+		return BuildPrefabInstanceEntityIdMaps(members, parentEntityIds, prefabAssetIds);
+	}
+
+	/// <summary>
+	/// Builds one <see cref="PrefabInstanceEntityIdMap"/> per prefab instance in a live scene, keyed by the
+	/// persistent id of every entity in that instance. Entities that have not been assigned a persistent id
+	/// yet cannot be referenced from saved data, so they are left out.
+	/// </summary>
+	public static Dictionary<Guid, PrefabInstanceEntityIdMap> BuildPrefabInstanceEntityIdMaps(EditorScene scene)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		var members = new List<PrefabInstanceMember>();
+		var parentEntityIds = new Dictionary<Guid, Guid>();
+		var prefabAssetIds = new Dictionary<Guid, Guid>();
+		foreach (var entry in scene.EntityIds)
+		{
+			var entity = entry.Key;
+			var entityId = entry.Value;
+			if (entityId == Guid.Empty || scene.World.IsAlive(entity) == false)
+			{
+				continue;
+			}
+
+			parentEntityIds[entityId] = TryGetParentEntityId(scene, entity);
+			if (scene.EntityPrefabSourcePaths.TryGetValue(entity, out var sourcePath) == false || sourcePath.Count == 0)
+			{
+				continue;
+			}
+
+			prefabAssetIds[entityId] = sourcePath[0].PrefabAssetId;
+			members.Add(new PrefabInstanceMember(entityId, sourcePath[0].PrefabAssetId, sourcePath[0].PrefabEntityId));
+		}
+
+		return BuildPrefabInstanceEntityIdMaps(members, parentEntityIds, prefabAssetIds);
+	}
+
+	/// <summary>
+	/// Rewrites the entity references in a prefab source entity's components so they address the instance the
+	/// data is being merged into.
+	/// </summary>
+	public static SavedEntity RemapPrefabSourceEntityReferences(
+		SavedEntity sourceEntity,
+		PrefabInstanceEntityIdMap entityIdMap)
+	{
+		return RemapEntityReferences(sourceEntity, entityIdMap.PrefabToScene);
+	}
+
+	public static SavedEntity RemapEntityReferences(SavedEntity entity, IReadOnlyDictionary<Guid, Guid> entityIdMap)
+	{
+		ArgumentNullException.ThrowIfNull(entity);
+		ArgumentNullException.ThrowIfNull(entityIdMap);
+		if (entityIdMap.Count == 0)
+		{
+			return entity;
+		}
+
+		var remapped = CloneEntity(entity);
+		for (var i = 0; i < remapped.Components.Count; i++)
+		{
+			remapped.Components[i].Data =
+				EditorEntityReferenceUtility.RemapEntityReferences(remapped.Components[i].Data, entityIdMap);
+		}
+
+		return remapped;
+	}
+
+	private static Guid TryGetParentEntityId(EditorScene scene, Entity entity)
+	{
+		if (scene.World.HasComponent<Parent>(entity) == false)
+		{
+			return Guid.Empty;
+		}
+
+		var parent = scene.World.GetComponent<Parent>(entity).Value;
+		return parent.IsValid && scene.World.IsAlive(parent) && scene.EntityIds.TryGetValue(parent, out var parentEntityId)
+			? parentEntityId
+			: Guid.Empty;
+	}
+
+	private static Dictionary<Guid, PrefabInstanceEntityIdMap> BuildPrefabInstanceEntityIdMaps(
+		List<PrefabInstanceMember> members,
+		Dictionary<Guid, Guid> parentEntityIds,
+		Dictionary<Guid, Guid> prefabAssetIds)
+	{
+		var membersByInstanceRoot = new Dictionary<Guid, List<PrefabInstanceMember>>();
+		var instanceRootByEntityId = new Dictionary<Guid, Guid>(members.Count);
+		for (var i = 0; i < members.Count; i++)
+		{
+			var member = members[i];
+			var instanceRootId = FindInstanceRootEntityId(member, parentEntityIds, prefabAssetIds);
+			instanceRootByEntityId[member.EntityId] = instanceRootId;
+			if (membersByInstanceRoot.TryGetValue(instanceRootId, out var instanceMembers) == false)
+			{
+				instanceMembers = [];
+				membersByInstanceRoot[instanceRootId] = instanceMembers;
+			}
+
+			instanceMembers.Add(member);
+		}
+
+		var mapsByInstanceRoot = new Dictionary<Guid, PrefabInstanceEntityIdMap>(membersByInstanceRoot.Count);
+		foreach (var entry in membersByInstanceRoot)
+		{
+			var prefabToScene = new Dictionary<Guid, Guid>(entry.Value.Count);
+			for (var i = 0; i < entry.Value.Count; i++)
+			{
+				var member = entry.Value[i];
+				if (member.PrefabEntityId != Guid.Empty)
+				{
+					prefabToScene[member.PrefabEntityId] = member.EntityId;
+				}
+			}
+
+			mapsByInstanceRoot[entry.Key] = new PrefabInstanceEntityIdMap(prefabToScene);
+		}
+
+		var mapsByEntityId = new Dictionary<Guid, PrefabInstanceEntityIdMap>(members.Count);
+		foreach (var entry in instanceRootByEntityId)
+		{
+			mapsByEntityId[entry.Key] = mapsByInstanceRoot[entry.Value];
+		}
+
+		return mapsByEntityId;
+	}
+
+	/// <summary>
+	/// Walks up to the outermost entity that still belongs to the same prefab instance. Ancestors from another
+	/// prefab, or none at all, end the walk, which keeps sibling instances of one prefab in separate maps.
+	/// </summary>
+	private static Guid FindInstanceRootEntityId(
+		PrefabInstanceMember member,
+		Dictionary<Guid, Guid> parentEntityIds,
+		Dictionary<Guid, Guid> prefabAssetIds)
+	{
+		var instanceRootId = member.EntityId;
+		var visited = new HashSet<Guid> { instanceRootId };
+		while (parentEntityIds.TryGetValue(instanceRootId, out var parentEntityId) &&
+		       parentEntityId != Guid.Empty &&
+		       prefabAssetIds.TryGetValue(parentEntityId, out var parentPrefabAssetId) &&
+		       parentPrefabAssetId == member.PrefabAssetId &&
+		       visited.Add(parentEntityId))
+		{
+			instanceRootId = parentEntityId;
+		}
+
+		return instanceRootId;
+	}
+
+	private readonly record struct PrefabInstanceMember(Guid EntityId, Guid PrefabAssetId, Guid PrefabEntityId);
+
 	private static bool TryResolvePrefabSourceEntity(
 		IEditorProjectService projectService,
 		SavedPrefabLink sourceLink,

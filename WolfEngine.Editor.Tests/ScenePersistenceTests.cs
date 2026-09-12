@@ -18,6 +18,19 @@ namespace WolfEngine.Editor.Tests;
 public sealed class ScenePersistenceTests
 {
 	[Test]
+	public void ProjectAssetPipelineService_ExposesSingleConstructorTakingTypeResolver()
+	{
+		// Dependency injection picks the greediest constructor it can satisfy. A second constructor without
+		// the type resolver would still be satisfiable, and choosing it would leave the editor silently
+		// unable to resolve gameplay component types when instantiating prefabs.
+		var constructor = typeof(ProjectAssetPipelineService).GetConstructors().Single();
+
+		Assert.That(
+			constructor.GetParameters().Select(parameter => parameter.ParameterType),
+			Does.Contain(typeof(IProjectTypeResolver)));
+	}
+
+	[Test]
 	public void SaveAndLoad_EmptyScene_RoundTripsSceneAssetAndGlobalCell()
 	{
 		using var environment = new TestEnvironment();
@@ -669,6 +682,87 @@ public sealed class ScenePersistenceTests
 		return entities;
 	}
 
+	[Test]
+	public void InstantiatePrefab_WithReferenceBetweenPrefabEntities_PointsAtTheInstanceAcrossSaveAndReload()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAssetId = CreateReferencingPrefab(environment, out var prefabChildEntityId);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabAssetId, scene);
+
+		var instanceRoot = FindEntityByName(scene.World, "Rig Root");
+		var instanceChild = FindEntityByName(scene.World, "Rig Pivot");
+		Assert.That(scene.World.GetComponent<EntityReferenceComponent>(instanceRoot).Target, Is.EqualTo(instanceChild));
+
+		environment.Factory.Save(scene);
+
+		// The reference matches the prefab once both are read in the same id space, so the instance carries
+		// no override for it and keeps following the prefab.
+		var savedRoot = scene.GlobalCell.Entities.Single(entity => entity.Name == "Rig Root");
+		Assert.That(savedRoot.PrefabOverrides.ComponentTypeIds, Is.Empty);
+		Assert.That(
+			scene.GlobalCell.Entities.Single(entity => entity.Name == "Rig Pivot").EntityId,
+			Is.Not.EqualTo(prefabChildEntityId),
+			"The instance must have its own entity ids for this to prove anything.");
+
+		var loadedScene = environment.Factory.Load(scene.AssetId);
+		var loadedRoot = FindEntityByName(loadedScene.World, "Rig Root");
+		var loadedChild = FindEntityByName(loadedScene.World, "Rig Pivot");
+
+		Assert.That(loadedScene.World.GetComponent<EntityReferenceComponent>(loadedRoot).Target, Is.EqualTo(loadedChild));
+	}
+
+	[Test]
+	public void BuildPrefabInstanceEntityIdMaps_WithTwoInstancesOfOnePrefab_TranslatesEachInstanceSeparately()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAssetId = CreateReferencingPrefab(environment, out var prefabChildEntityId);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Two Instances";
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabAssetId, scene);
+		var firstChildId = scene.EntityIds[FindEntityByName(scene.World, "Rig Pivot")];
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, prefabAssetId, scene);
+		var secondChildId = GetAllEntities(scene.World)
+			.Where(entity => scene.World.HasComponent<NameComponent>(entity) &&
+			                 scene.World.GetComponent<NameComponent>(entity).Name == "Rig Pivot")
+			.Select(entity => scene.EntityIds[entity])
+			.Single(entityId => entityId != firstChildId);
+
+		var maps = EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(scene);
+
+		Assert.That(maps[firstChildId].PrefabToScene[prefabChildEntityId], Is.EqualTo(firstChildId));
+		Assert.That(maps[secondChildId].PrefabToScene[prefabChildEntityId], Is.EqualTo(secondChildId));
+		Assert.That(maps[firstChildId].SceneToPrefab[firstChildId], Is.EqualTo(prefabChildEntityId));
+		Assert.That(maps[firstChildId].SceneToPrefab.ContainsKey(secondChildId), Is.False);
+	}
+
+	/// <summary>
+	/// Creates a two-entity prefab whose root holds a reference to its own child, and reports the child's id
+	/// inside the prefab file.
+	/// </summary>
+	private static Guid CreateReferencingPrefab(TestEnvironment environment, out Guid prefabChildEntityId)
+	{
+		var authoringScene = environment.Factory.New();
+		authoringScene.Name = "Prefab Authoring";
+		var sourceRoot = authoringScene.World.CreateEntity("Rig Root");
+		authoringScene.World.AddTransform(sourceRoot, Matrix4x4.Identity);
+		var sourceChild = authoringScene.World.CreateEntity("Rig Pivot");
+		authoringScene.World.AddTransform(sourceChild, Matrix4x4.Identity);
+		authoringScene.World.SetParent(sourceChild, sourceRoot);
+		authoringScene.World.AddComponent(sourceRoot, new EntityReferenceComponent { Target = sourceChild });
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(authoringScene, sourceRoot, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+
+		Assert.That(environment.ProjectService.TryGetAsset(prefabCreationResult.AssetId!.Value, out var prefabAsset), Is.True);
+		var prefabFile = PrefabAssetFile.Load(environment.ProjectService.GetAbsolutePath(prefabAsset.RelativeAssetPath));
+		prefabChildEntityId = prefabFile.Entities.Single(entity => entity.Name == "Rig Pivot").EntityId;
+		return prefabCreationResult.AssetId.Value;
+	}
+
 	private static Entity FindEntityByName(World world, string name)
 	{
 		var entities = GetAllEntities(world);
@@ -757,16 +851,19 @@ public sealed class ScenePersistenceTests
 			AssetDatabase.SetInstanceRegistry(Registry);
 
 			var metadataStore = new AssetMetadataStore();
+			// ProjectService is assigned further down this constructor; the catalog only reads it when a
+			// type is resolved, which cannot happen before then.
+			TypeResolver = new ProjectTypeCatalog(() => ProjectService!);
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),
 				metadataStore,
 				Substitute.For<IImageLoader>(),
 				new DataAssetStore(),
 				new MaterialAssetStore(),
-				Substitute.For<IThreeDFileImporter>());
+				Substitute.For<IThreeDFileImporter>(),
+				typeResolver: TypeResolver);
 			PipelineService = pipelineService;
 			ProjectService = new EditorProjectService(pipelineService, Registry);
-			TypeResolver = new ProjectTypeCatalog(() => ProjectService);
 			PrefabCreator = new PrefabAssetCreator(
 				ProjectService,
 				metadataStore,

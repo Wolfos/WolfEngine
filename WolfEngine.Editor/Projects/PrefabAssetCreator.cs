@@ -178,6 +178,11 @@ public sealed class PrefabAssetCreator : IPrefabAssetCreator
 
 		if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
 		{
+			if (EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(scene).TryGetValue(entityId, out var entityIdMap))
+			{
+				sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(sourceEntity, entityIdMap);
+			}
+
 			savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
 		}
 

@@ -376,6 +376,13 @@ internal static class ProjectTypeResolverUtility
 		StableTypeIds.Clear();
 	}
 
+	/// <summary>
+	/// Resolves engine types by assembly-qualified name. Assemblies outside the default load context are
+	/// skipped, so this never returns a gameplay type: a reload leaves older gameplay load contexts alive
+	/// until their last reference drops, and matching by name alone could pick a stale generation of a type.
+	/// Gameplay types must go through <see cref="IProjectTypeResolver"/>, which is keyed to the current
+	/// gameplay assembly generation.
+	/// </summary>
 	public static bool TryResolveFromLoadedAssemblies(string typeName, out Type type)
 	{
 		if (string.IsNullOrWhiteSpace(typeName))

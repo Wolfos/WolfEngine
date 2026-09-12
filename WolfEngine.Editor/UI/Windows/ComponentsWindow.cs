@@ -1153,6 +1153,11 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
             return;
         }
 
+        // The prefab addresses its own entities; this instance knows them by its own persistent ids.
+        sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(
+            sourceEntity,
+            GetPrefabInstanceEntityIdMap(scene, entity));
+
         if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity) &&
             scene.World.HasComponent<LocalTransform>(entity))
         {
@@ -1201,7 +1206,17 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         {
             sourceEntity.LocalTransform = currentEntity.LocalTransform;
         }
+        // Written data has to address the prefab's own entities, so references that point inside this
+        // instance are translated back. References to entities outside the prefab keep their scene id and
+        // only resolve in the scene they were authored in.
+        var sceneToPrefabEntityIds = GetPrefabInstanceEntityIdMap(scene, entity).SceneToPrefab;
         sourceEntity.Components = currentEntity.Components.Select(EditorPrefabUtility.CloneComponent).ToList();
+        for (var i = 0; i < sourceEntity.Components.Count; i++)
+        {
+            sourceEntity.Components[i].Data = EditorEntityReferenceUtility.RemapEntityReferences(
+                sourceEntity.Components[i].Data,
+                sceneToPrefabEntityIds);
+        }
         if (sourceEntity.PrefabSourcePath.Count > 0 &&
             EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, sourceEntity, out var nestedSourceEntity))
         {
@@ -1216,6 +1231,14 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         File.WriteAllText(prefabPath, json);
         _projectService.RefreshAssetSource(prefabAsset.RelativeSourcePath);
         _assetRefreshService.RefreshOpenSceneAssets(refreshSnapshot);
+    }
+
+    private static EditorPrefabUtility.PrefabInstanceEntityIdMap GetPrefabInstanceEntityIdMap(EditorScene scene, Entity entity)
+    {
+        return scene.EntityIds.TryGetValue(entity, out var entityId) &&
+               EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(scene).TryGetValue(entityId, out var entityIdMap)
+            ? entityIdMap
+            : EditorPrefabUtility.PrefabInstanceEntityIdMap.Empty;
     }
 
     private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)

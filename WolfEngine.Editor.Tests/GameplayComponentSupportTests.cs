@@ -153,6 +153,94 @@ public sealed class GameplayComponentSupportTests
 	}
 
 	[Test]
+	public void GameplayComponent_SavedAsPrefab_IsAppliedWhenPrefabIsInstantiated()
+	{
+		using var environment = new GameplayTestEnvironment();
+		environment.BuildAndLoadGameplayAssembly(
+			"""
+			using WolfEngine.ECS;
+
+			namespace GameplayComponentSupport;
+
+			public struct GameplayPrefabComponent : IEntityComponent
+			{
+				public int Count;
+				public Entity Target;
+			}
+			""");
+
+		var componentType = environment.TypeCatalog.GetComponentTypes()
+			.Single(candidate => string.Equals(candidate.Type.Name, "GameplayPrefabComponent", StringComparison.Ordinal))
+			.Type;
+
+		var authoringScene = environment.Factory.New();
+		authoringScene.Name = "Prefab Authoring";
+		var sourceRoot = authoringScene.World.CreateEntity("Rig Root");
+		authoringScene.World.AddTransform(sourceRoot, Matrix4x4.Identity);
+		var sourceChild = authoringScene.World.CreateEntity("Rig Pivot");
+		authoringScene.World.AddTransform(sourceChild, Matrix4x4.Identity);
+		authoringScene.World.SetParent(sourceChild, sourceRoot);
+
+		RuntimeComponentAccessor.AddDefault(authoringScene.World, sourceRoot, componentType);
+		var componentValue = RuntimeComponentAccessor.ReadBoxed(authoringScene.World, sourceRoot, componentType);
+		componentType.GetField("Count")!.SetValue(componentValue, 17);
+		componentType.GetField("Target")!.SetValue(componentValue, sourceChild);
+		RuntimeComponentAccessor.WriteBoxed(authoringScene.World, sourceRoot, componentType, componentValue);
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(authoringScene, sourceRoot, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(
+			environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId!.Value, scene);
+
+		var instanceRoot = FindEntityByName(scene.World, "Rig Root");
+		var instanceChild = FindEntityByName(scene.World, "Rig Pivot");
+		var instanceComponent = RuntimeComponentAccessor.ReadBoxed(scene.World, instanceRoot, componentType);
+
+		AssertFieldValue(instanceComponent, "Count", 17);
+		AssertFieldValue(instanceComponent, "Target", instanceChild);
+		Assert.That(DequeueNotificationMessages(environment), Is.Empty);
+	}
+
+	[Test]
+	public void InstantiatePrefab_WithUnresolvableComponentType_ReportsErrorInsteadOfSkippingSilently()
+	{
+		using var environment = new GameplayTestEnvironment();
+		var authoringScene = environment.Factory.New();
+		authoringScene.Name = "Prefab Authoring";
+		var sourceRoot = authoringScene.World.CreateEntity("Rig Root");
+		authoringScene.World.AddTransform(sourceRoot, Matrix4x4.Identity);
+
+		var prefabCreationResult = environment.PrefabCreator.SaveEntityAsPrefab(authoringScene, sourceRoot, "Assets/Prefabs");
+		Assert.That(prefabCreationResult.Success, Is.True, prefabCreationResult.ErrorMessage);
+		Assert.That(environment.ProjectService.TryGetAsset(prefabCreationResult.AssetId!.Value, out var prefabAsset), Is.True);
+
+		var prefabAbsolutePath = environment.ProjectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+		var prefabFile = PrefabAssetFile.Load(prefabAbsolutePath);
+		prefabFile.Entities.Single(entity => entity.EntityId == prefabFile.RootEntityId).Components.Add(new SavedComponent
+		{
+			Type = "GameplayComponentSupport.DeletedComponent, Missing.Gameplay",
+			TypeId = "gameplay:GameplayComponentSupport.DeletedComponent",
+			Data = JsonSerializer.SerializeToElement(new { Count = 3 })
+		});
+		File.WriteAllText(prefabAbsolutePath, JsonSerializer.Serialize(prefabFile, AssetJson.SerializerOptions));
+		environment.ProjectService.RefreshAssetSource(prefabAsset.RelativeAssetPath);
+
+		var scene = environment.Factory.New();
+		scene.Name = "Prefab Instance Scene";
+		environment.PipelineService.InstantiatePrefab(
+			environment.ProjectService.ProjectRootPath!, prefabCreationResult.AssetId.Value, scene);
+
+		// The instance is still created; only the unresolved component is missing from it.
+		Assert.That(FindEntityByName(scene.World, "Rig Root").IsValid, Is.True);
+		var message = DequeueNotificationMessages(environment).Single();
+		Assert.That(message, Does.Contain("gameplay:GameplayComponentSupport.DeletedComponent"));
+		Assert.That(message, Does.Contain(prefabAsset.RelativeAssetPath));
+	}
+
+	[Test]
 	public void GameplayComponent_AddDefault_AppliesComponentDefaultValues()
 	{
 		using var environment = new GameplayTestEnvironment();
@@ -670,6 +758,17 @@ public sealed class GameplayComponentSupportTests
 		throw new AssertionException($"Entity '{name}' was not found.");
 	}
 
+	private static List<string> DequeueNotificationMessages(GameplayTestEnvironment environment)
+	{
+		var messages = new List<string>();
+		while (environment.NotificationService.TryDequeue(out var notification))
+		{
+			messages.Add(notification.Message);
+		}
+
+		return messages;
+	}
+
 	private static void AssertFieldValue<T>(object componentValue, string fieldName, T expectedValue)
 	{
 		var field = componentValue.GetType().GetField(fieldName)
@@ -819,13 +918,18 @@ public sealed class GameplayComponentSupportTests
 			_gameplayAssemblyHost = new GameplayAssemblyHost(() => _projectService!);
 			TypeCatalogImpl = new ProjectTypeCatalog(() => _projectService!, _gameplayAssemblyHost);
 			DataAssetStore = new DataAssetStore(TypeCatalogImpl);
+			NotificationService = new EditorNotificationService();
+			var metadataStore = new AssetMetadataStore();
 			var pipelineService = new ProjectAssetPipelineService(
 				new AssetPipelineIndex(),
-				new AssetMetadataStore(),
+				metadataStore,
 				Substitute.For<ImportImageLoader>(),
 				DataAssetStore,
 				new MaterialAssetStore(),
-				Substitute.For<IThreeDFileImporter>());
+				Substitute.For<IThreeDFileImporter>(),
+				typeResolver: TypeCatalogImpl,
+				notificationService: NotificationService);
+			PipelineService = pipelineService;
 			_projectService = new EditorProjectService(pipelineService, _registry);
 			if (_projectService.CreateProject(_parentDirectory, ProjectName, out var errorMessage) == false)
 			{
@@ -837,6 +941,12 @@ public sealed class GameplayComponentSupportTests
 			TypeCatalog = TypeCatalogImpl;
 			Factory = new EditorSceneFactory(_projectService, pipelineService, TypeCatalogImpl);
 			SceneReloadService = new EditorSceneReloadService(TypeCatalogImpl);
+			PrefabCreator = new PrefabAssetCreator(
+				_projectService,
+				metadataStore,
+				pipelineService,
+				new EditorSceneSnapshotService(TypeCatalogImpl),
+				TypeCatalogImpl);
 		}
 
 		public string ProjectName { get; }
@@ -845,6 +955,9 @@ public sealed class GameplayComponentSupportTests
 		public ProjectTypeCatalog TypeCatalogImpl { get; }
 		public IProjectTypeCatalog TypeCatalog { get; }
 		public DataAssetStore DataAssetStore { get; }
+		public EditorNotificationService NotificationService { get; }
+		public IProjectAssetPipelineService PipelineService { get; }
+		public IPrefabAssetCreator PrefabCreator { get; }
 		public IEditorSceneFactory Factory { get; }
 		public IEditorSceneReloadService SceneReloadService { get; }
 		public IEditorProjectService ProjectService => _projectService;

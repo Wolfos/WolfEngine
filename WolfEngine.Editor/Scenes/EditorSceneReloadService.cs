@@ -69,6 +69,7 @@ public interface IEditorSceneReloadService
 			EnsureEntityId(scene, entities[i]);
 		}
 
+		var prefabInstanceMaps = EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(scene);
 		for (var i = 0; i < entities.Count; i++)
 		{
 			var entity = entities[i];
@@ -80,7 +81,7 @@ public interface IEditorSceneReloadService
 				cellKey = SceneCellKey.Global;
 			}
 
-			var serializedEntity = SerializeEntity(scene, entity, scene.EntityIds[entity]);
+			var serializedEntity = SerializeEntity(scene, entity, scene.EntityIds[entity], prefabInstanceMaps);
 			if (cellKey.IsGlobal)
 			{
 				serializedGlobalCell.Entities.Add(serializedEntity);
@@ -133,10 +134,12 @@ public interface IEditorSceneReloadService
 		}
 
 
-		var entitiesById = CreateEntities(scene, loadedCells);
+		var prefabInstanceMaps = EditorPrefabUtility.BuildPrefabInstanceEntityIdMaps(
+			loadedCells.SelectMany(loadedCell => loadedCell.Cell.Entities));
+		var entitiesById = CreateEntities(scene, loadedCells, prefabInstanceMaps);
 
 
-		ApplyEntityState(scene, loadedCells, entitiesById);
+		ApplyEntityState(scene, loadedCells, entitiesById, prefabInstanceMaps);
 		RestoreHierarchy(scene.World, loadedCells, entitiesById);
 
 		return scene;
@@ -222,7 +225,11 @@ public interface IEditorSceneReloadService
 		}
 	}
 
-	private SavedEntity SerializeEntity(EditorScene scene, Entity entity, Guid entityId)
+	private SavedEntity SerializeEntity(
+		EditorScene scene,
+		Entity entity,
+		Guid entityId,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		var world = scene.World;
 		var hasName = world.HasComponent<NameComponent>(entity);
@@ -261,6 +268,13 @@ public interface IEditorSceneReloadService
 			if (_projectService is not null &&
 			    EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
 			{
+				// Both sides have to speak scene ids, or every component holding a reference into the prefab
+				// would read as an override.
+				if (prefabInstanceMaps.TryGetValue(entityId, out var entityIdMap))
+				{
+					sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(sourceEntity, entityIdMap);
+				}
+
 				savedEntity.PrefabOverrides = EditorPrefabUtility.ComputePrefabOverrides(savedEntity, sourceEntity);
 				if (EditorPrefabUtility.IsPrefabInstanceRoot(scene, entity))
 				{
@@ -284,7 +298,11 @@ public interface IEditorSceneReloadService
 		};
 	}
 
-	private void ApplyEntityState(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells, Dictionary<Guid, Entity> entitiesById)
+	private void ApplyEntityState(
+		EditorScene scene,
+		List<(SceneCellKey CellKey, Cell Cell)> loadedCells,
+		Dictionary<Guid, Entity> entitiesById,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		for (var i = 0; i < loadedCells.Count; i++)
 		{
@@ -293,7 +311,7 @@ public interface IEditorSceneReloadService
 			{
 					var savedEntity = cell.Entities[entityIndex];
 					var entity = entitiesById[savedEntity.EntityId];
-					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var mergedEntity = MergePrefabSourceEntity(savedEntity, prefabInstanceMaps);
 					scene.World.SetEnabled(entity, mergedEntity.Enabled);
 					for (var componentIndex = 0; componentIndex < mergedEntity.Components.Count; componentIndex++)
 					{
@@ -343,7 +361,10 @@ public interface IEditorSceneReloadService
 		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
 	}
 
-	private Dictionary<Guid, Entity> CreateEntities(EditorScene scene, List<(SceneCellKey CellKey, Cell Cell)> loadedCells)
+	private Dictionary<Guid, Entity> CreateEntities(
+		EditorScene scene,
+		List<(SceneCellKey CellKey, Cell Cell)> loadedCells,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		var entitiesById = new Dictionary<Guid, Entity>();
 		for (var i = 0; i < loadedCells.Count; i++)
@@ -352,7 +373,7 @@ public interface IEditorSceneReloadService
 			for (var entityIndex = 0; entityIndex < cell.Entities.Count; entityIndex++)
 			{
 				var savedEntity = cell.Entities[entityIndex];
-					var mergedEntity = MergePrefabSourceEntity(savedEntity);
+					var mergedEntity = MergePrefabSourceEntity(savedEntity, prefabInstanceMaps);
 					var entity = CreateEntity(scene.World, mergedEntity);
 					entitiesById[savedEntity.EntityId] = entity;
 					scene.EntityIds[entity] = savedEntity.EntityId;
@@ -479,12 +500,20 @@ public interface IEditorSceneReloadService
 		return EditorPrefabUtility.CloneEntity(source);
 	}
 
-	private SavedEntity MergePrefabSourceEntity(SavedEntity savedEntity)
+	private SavedEntity MergePrefabSourceEntity(
+		SavedEntity savedEntity,
+		IReadOnlyDictionary<Guid, EditorPrefabUtility.PrefabInstanceEntityIdMap> prefabInstanceMaps)
 	{
 		if (_projectService is null ||
 		    EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity) == false)
 		{
 			return savedEntity;
+		}
+
+		// The prefab addresses its own entities; this instance knows them by its own persistent ids.
+		if (prefabInstanceMaps.TryGetValue(savedEntity.EntityId, out var entityIdMap))
+		{
+			sourceEntity = EditorPrefabUtility.RemapPrefabSourceEntityReferences(sourceEntity, entityIdMap);
 		}
 
 		return EditorPrefabUtility.MergePrefabSourceEntity(savedEntity, sourceEntity);
