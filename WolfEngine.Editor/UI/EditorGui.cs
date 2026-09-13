@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ImGuiNET;
-using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.ECS;
 using WolfEngine.Profiling;
 

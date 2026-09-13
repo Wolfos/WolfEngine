@@ -366,13 +366,13 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		if (ImGui.BeginMenu("Create"))
 		{
-			if (ImGui.MenuItem("Entity"))
-			{
-				var createdEntity = scene.World.CreateEntity(
-					"Entity", GetNewEntityPosition(), Quaternion.Identity, Vector3.One);
-				EditorGui.SelectEntity(createdEntity, scene.World);
-				_interactionState.MarkSceneDirty(scene.World);
-			}
+			DrawCreateMenuItem(scene, EntityCreationPreset.Empty);
+			ImGui.Separator();
+			DrawCreateMenuItem(scene, EntityCreationPreset.PointLight);
+			DrawCreateMenuItem(scene, EntityCreationPreset.DirectionalLight);
+			ImGui.Separator();
+			DrawCreateMenuItem(scene, EntityCreationPreset.Cube);
+			DrawCreateMenuItem(scene, EntityCreationPreset.Sphere);
 
 			ImGui.EndMenu();
 		}
@@ -402,6 +402,22 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 
 		ImGui.EndPopup();
+	}
+
+	private void DrawCreateMenuItem(EditorScene scene, EntityCreationPreset preset)
+	{
+		if (ImGui.MenuItem(EntityCreationOperations.GetDisplayName(preset)) == false)
+		{
+			return;
+		}
+
+		EntityCreationOperations.CreateEntity(
+			scene,
+			preset,
+			GetNewEntityPosition(),
+			_sceneSnapshotService,
+			_undoRedoService,
+			_interactionState);
 	}
 
 	private Vector3 GetNewEntityPosition()

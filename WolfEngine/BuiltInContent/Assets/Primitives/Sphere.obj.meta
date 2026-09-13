@@ -1,0 +1,27 @@
+{
+  "Version": 1,
+  "SourceId": "cdfafe4c-6cf5-467d-bca1-798713decb48",
+  "ImporterId": "three-d-scene",
+  "ImporterVersion": 7,
+  "ImportSettingsJson": "{\n  \u0022ScaleFactor\u0022: 1\n}",
+  "SubAssets": [
+    {
+      "Key": "material:0",
+      "NodeId": "baddfb5b-b614-4d85-b91d-643924684001",
+      "Type": "Material",
+      "Name": "Material 0"
+    },
+    {
+      "Key": "mesh:root-0-Sphere:0:Sphere",
+      "NodeId": "c51b476b-26a7-4ea9-aaac-8be9c30cf5aa",
+      "Type": "Mesh",
+      "Name": "Sphere"
+    },
+    {
+      "Key": "scene",
+      "NodeId": "ad7ec639-bbfd-4ee4-8ab2-1e8f33319edf",
+      "Type": "Model3D",
+      "Name": "Sphere.obj"
+    }
+  ]
+}
