@@ -2,12 +2,15 @@ namespace WolfEngine.Editor.UI;
 
 public class FramerateTool
 {
+	private readonly EditorWindowRegistry _windows;
 	private const int SampleCount = 120;
 	private readonly float[] _samples = new float[SampleCount];
 	private int _nextIndex;
 	private int _filledCount;
 	private float _averageMs;
 	private float _maxMs;
+
+	public FramerateTool(EditorWindowRegistry windows) => _windows = windows;
 
 	public void DrawRightAlignedInMenuBar(float rightInset = 0.0f)
 	{
@@ -23,7 +26,7 @@ public class FramerateTool
 		ImGuiNET.ImGui.SetCursorPosX(rightX);
 		if (ImGuiNET.ImGui.MenuItem(label))
 		{
-			ProfilerWindow.Open();
+			_windows.Open(EditorWindowIds.Profiler);
 		}
 	}
 

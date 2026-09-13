@@ -5,11 +5,10 @@ using WolfEngine.Editor.Projects;
 
 namespace WolfEngine.Editor.UI;
 
-public sealed class ProjectSettingsWindow
+public sealed class ProjectSettingsWindow : EditorWindow
 {
 	private readonly IEditorProjectService _projectService;
 	private readonly IEditorNotificationService _notificationService;
-	private bool _isOpen;
 	private WolfEngineBuildConfig? _config;
 	private string? _loadedProjectPath;
 
@@ -19,25 +18,26 @@ public sealed class ProjectSettingsWindow
 		_notificationService = notificationService;
 	}
 
-	public void Open()
+	public override string Name => "Project Settings";
+
+	public override bool CanOpen(out string? reason)
 	{
 		if (_projectService.HasOpenProject == false)
 		{
-			_notificationService.ReportError("Open a project before editing project settings.");
-			return;
+			reason = "Open a project before editing project settings.";
+			return false;
 		}
-
-		Load();
-		_isOpen = true;
+		reason = null;
+		return true;
 	}
 
-	public void Draw()
+	public override void OnOpened() => Load();
+
+	public override void Draw(EditorScene scene)
 	{
-		if (_isOpen == false)
-			return;
 		if (_projectService.HasOpenProject == false)
 		{
-			_isOpen = false;
+			CloseCurrentWorkspaceWindow();
 			return;
 		}
 		if (_config is null || !string.Equals(_loadedProjectPath, _projectService.ProjectRootPath, StringComparison.Ordinal))
@@ -46,7 +46,7 @@ public sealed class ProjectSettingsWindow
 			return;
 
 		ImGui.SetNextWindowSize(new System.Numerics.Vector2(560, 360), ImGuiCond.FirstUseEver);
-		ImGui.Begin("Project Settings", ref _isOpen);
+		Begin();
 		ImGui.TextUnformatted("Project Scenes");
 		ImGui.TextDisabled("The first scene is launched when the game starts. All listed scenes are included in builds.");
 		ImGui.Separator();
@@ -55,8 +55,8 @@ public sealed class ProjectSettingsWindow
 		for (var index = 0; index < _config.SceneIds.Count; index++)
 		{
 			var sceneId = _config.SceneIds[index];
-			var scene = scenes.FirstOrDefault(asset => asset.Id == sceneId);
-			var label = scene is null ? $"Missing scene ({sceneId:D})" : scene.Name;
+			var projectScene = scenes.FirstOrDefault(asset => asset.Id == sceneId);
+			var label = projectScene is null ? $"Missing scene ({sceneId:D})" : projectScene.Name;
 			ImGui.TextUnformatted(index == 0 ? $"Start: {label}" : label);
 			ImGui.SameLine();
 			if (index > 0 && ImGui.SmallButton($"Make Start##{sceneId:D}"))
@@ -75,10 +75,10 @@ public sealed class ProjectSettingsWindow
 		ImGui.Spacing();
 		if (ImGui.BeginCombo("Add Scene", "Select a scene..."))
 		{
-			foreach (var scene in scenes.Where(scene => !_config.SceneIds.Contains(scene.Id)))
+			foreach (var projectScene in scenes.Where(candidate => !_config.SceneIds.Contains(candidate.Id)))
 			{
-				if (ImGui.Selectable($"{scene.Name}##{scene.Id:D}"))
-					_config.SceneIds.Add(scene.Id);
+				if (ImGui.Selectable($"{projectScene.Name}##{projectScene.Id:D}"))
+					_config.SceneIds.Add(projectScene.Id);
 			}
 			ImGui.EndCombo();
 		}

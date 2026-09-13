@@ -60,6 +60,13 @@ public class SceneWindow: EditorWindow
 
     public override string Name => "Scene";
 
+    public void OnHidden()
+    {
+        _viewportStateBus.PublishUiState(SceneViewportUiState.Hidden);
+        _terrainToolController.ClearPreview();
+        _gizmoLineRenderer.BeginFrame();
+    }
+
     public override void Draw(EditorScene scene)
     {
         var world = scene.World;

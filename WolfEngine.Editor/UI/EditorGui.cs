@@ -17,47 +17,41 @@ public class EditorGui
 	public static Entity? SelectionRangeAnchor;
 	private static Entity? _selectionRevealRequest;
 	private static bool _componentsWindowFocusRequested;
-	private static bool _defaultDockLayoutApplied;
-
 	private readonly IMenuBar _menuBar;
-	private readonly IEditorModeState _editorModeState;
+	private readonly IEditorWorkspaceService _workspaces;
+	private readonly EditorWindowRegistry _windowRegistry;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly IEditorOperationService _operationService;
 
 	private readonly EntitiesWindow _entitiesWindow;
 	private readonly AssetsWindow _assetsWindow;
-	private readonly AssetEditorWindow _assetEditorWindow;
-	private readonly MaterialImporterWindow _materialImporterWindow;
 	private readonly ComponentsWindow _componentsWindow;
-	private readonly ProfilerWindow _profilerWindow;
-	private readonly LogWindow _logWindow;
 	private readonly SceneWindow _sceneWindow;
-	private readonly ProjectSettingsWindow _projectSettingsWindow;
 
 	public EditorGui(
 		IMenuBar menuBar,
-		IEditorModeState editorModeState,
+		IEditorWorkspaceService workspaces,
+		EditorWindowRegistry windowRegistry,
 		IEditorInteractionState interactionState,
 		IEditorCommandService commandService,
 		IEditorOperationService operationService,
-		IServiceProvider serviceProvider)
+		EntitiesWindow entitiesWindow,
+		AssetsWindow assetsWindow,
+		ComponentsWindow componentsWindow,
+		SceneWindow sceneWindow)
 	{
 		_menuBar = menuBar;
-		_editorModeState = editorModeState;
+		_workspaces = workspaces;
+		_windowRegistry = windowRegistry;
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_operationService = operationService;
 
-		_entitiesWindow = serviceProvider.GetRequiredService<EntitiesWindow>();
-		_assetsWindow = serviceProvider.GetRequiredService<AssetsWindow>();
-		_assetEditorWindow = serviceProvider.GetRequiredService<AssetEditorWindow>();
-		_materialImporterWindow = serviceProvider.GetRequiredService<MaterialImporterWindow>();
-		_componentsWindow = serviceProvider.GetRequiredService<ComponentsWindow>();
-		_profilerWindow = serviceProvider.GetRequiredService<ProfilerWindow>();
-		_logWindow = serviceProvider.GetRequiredService<LogWindow>();
-		_sceneWindow = serviceProvider.GetRequiredService<SceneWindow>();
-		_projectSettingsWindow = serviceProvider.GetRequiredService<ProjectSettingsWindow>();
+		_entitiesWindow = entitiesWindow;
+		_assetsWindow = assetsWindow;
+		_componentsWindow = componentsWindow;
+		_sceneWindow = sceneWindow;
 		_commandService.BindDeletionHandlers(_entitiesWindow, _assetsWindow);
 	}
 
@@ -65,46 +59,38 @@ public class EditorGui
 	{
 		if (_operationService.Current is { IsActive: true } operation && _commandService.LoadingSceneAssetId.HasValue == false)
 		{
+			_sceneWindow.OnHidden();
 			DrawLoadingScreen(operation);
 			return;
 		}
 		_interactionState.BeginFrame();
-		DockSpace();
+		_workspaces.LoadImGuiSettings();
 
 		using (FrameProfiler.Instance.Measure("Menu Bar"))
 		{
 			_menuBar.Draw(scene);
 		}
+		DockSpaces();
 
-		switch (_editorModeState.CurrentMode)
-		{
-			case EditorMode.Scene:
-				DrawWindow(_entitiesWindow, scene);
-				DrawWindow(_sceneWindow, scene);
-				DrawWindow(_componentsWindow, scene);
-				DrawWindow(_assetEditorWindow, scene);
-				break;
-			case EditorMode.Assets:
-				DrawWindow(_assetsWindow, scene);
-				DrawWindow(_componentsWindow, scene);
-				DrawWindow(_assetEditorWindow, scene);
-				break;
-			case EditorMode.Animation:
-				break;
-		}
-
-		DrawWindow(_profilerWindow, scene);
-		DrawWindow(_logWindow, scene);
-		DrawWindow(_materialImporterWindow, scene);
+		if (_componentsWindowFocusRequested) _windowRegistry.Open(EditorWindowIds.Components);
+		_windowRegistry.DrawVisible(scene);
+		if (!_workspaces.IsWindowOpen(EditorWindowIds.Scene)) _sceneWindow.OnHidden();
+		if (_workspaces.ActiveWorkspace.OpenWindows.Count == 0) DrawEmptyWorkspaceHint();
 
 		_commandService.ProcessShortcuts();
 		_commandService.DrawPendingDialogs();
 
-		using (FrameProfiler.Instance.Measure("Preferences"))
-		{
-			EditorPreferencesMenu.Draw();
-		}
-		_projectSettingsWindow.Draw();
+		_workspaces.SaveImGuiSettingsIfNeeded();
+	}
+
+	private static void DrawEmptyWorkspaceHint()
+	{
+		var viewport = ImGui.GetMainViewport();
+		const string hint = "This workspace is empty. Open a panel from the Window menu.";
+		var size = ImGui.CalcTextSize(hint);
+		ImGui.GetForegroundDrawList().AddText(
+			viewport.WorkPos + (viewport.WorkSize - size) * 0.5f,
+			ImGui.GetColorU32(ImGuiCol.TextDisabled), hint);
 	}
 
 	private static void DrawLoadingScreen(EditorOperationSnapshot operation)
@@ -328,15 +314,17 @@ public class EditorGui
 		return -1;
 	}
 
-	private static void DrawWindow(EditorWindow window, EditorScene scene)
+	private void DockSpaces()
 	{
-		using (FrameProfiler.Instance.Measure(window.Name))
+		var activeId = _workspaces.ActiveWorkspace.Id;
+		foreach (var workspace in _workspaces.Workspaces)
 		{
-			window.Draw(scene);
+			if (workspace.Id != activeId) DockSpace(workspace, false);
 		}
+		DockSpace(_workspaces.ActiveWorkspace, true);
 	}
 
-	private static void DockSpace()
+	private void DockSpace(EditorWorkspace workspace, bool active)
 	{
 		var viewport = ImGui.GetMainViewport();
 		ImGui.SetNextWindowPos(viewport.WorkPos);
@@ -347,7 +335,7 @@ public class EditorGui
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0.0f);
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
 
-		const ImGuiWindowFlags flags = ImGuiWindowFlags.NoDocking
+		var flags = ImGuiWindowFlags.NoDocking
 		                               | ImGuiWindowFlags.NoTitleBar
 		                               | ImGuiWindowFlags.NoCollapse
 		                               | ImGuiWindowFlags.NoResize
@@ -355,27 +343,28 @@ public class EditorGui
 		                               | ImGuiWindowFlags.NoBringToFrontOnFocus
 		                               | ImGuiWindowFlags.NoNavFocus
 		                               | ImGuiWindowFlags.NoBackground;
+		if (!active) flags |= ImGuiWindowFlags.NoInputs;
 
-		ImGui.Begin("DockSpace", flags);
+		ImGui.Begin($"DockSpace###DockSpace-{workspace.Id:N}", flags);
 		ImGui.PopStyleVar(3);
 
-		var dockspaceId = ImGui.GetID("MainDockSpace");
-		ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
-		ApplyDefaultDockLayout(dockspaceId);
+		var dockspaceId = ImGui.GetID($"MainDockSpace-{workspace.Id:N}");
+		ApplyDefaultDockLayout(workspace, dockspaceId);
+		var dockFlags = active
+			? ImGuiDockNodeFlags.PassthruCentralNode
+			: ImGuiDockNodeFlags.KeepAliveOnly;
+		ImGui.DockSpace(dockspaceId, Vector2.Zero, dockFlags);
 		ImGui.End();
 	}
 
-	private static void ApplyDefaultDockLayout(uint dockspaceId)
+	private void ApplyDefaultDockLayout(EditorWorkspace workspace, uint dockspaceId)
 	{
-		if (_defaultDockLayoutApplied || HasSavedDockLayout())
-		{
-			_defaultDockLayoutApplied = true;
-			return;
-		}
+		if (NativeDockBuilder.GetNode(dockspaceId) != IntPtr.Zero) return;
+		if (workspace.Id != EditorWorkspaceService.SceneWorkspaceId && workspace.Id != EditorWorkspaceService.AssetsWorkspaceId) return;
 
 		// ImGui.NET 1.91 does not expose DockBuilder even though the cimgui library
-		// bundled with the engine does. Build a layout once, then let ImGui persist
-		// all future user changes in its normal ini file.
+		// bundled with the engine does. Build a layout once, then let the workspace
+		// service persist all future changes inside editor preferences.
 		NativeDockBuilder.RemoveNode(dockspaceId);
 		NativeDockBuilder.AddNode(dockspaceId, NativeDockBuilder.DockSpaceFlag);
 		NativeDockBuilder.SetNodeSize(dockspaceId, ImGui.GetWindowSize());
@@ -384,20 +373,25 @@ public class EditorGui
 		NativeDockBuilder.SplitNode(centerAndRightId, ImGuiDir.Right, 0.20f, out var rightId, out var centerId);
 		NativeDockBuilder.SplitNode(centerId, ImGuiDir.Down, 0.25f, out var bottomId, out var centerTopId);
 
-		NativeDockBuilder.DockWindow("Entities", leftId);
-		NativeDockBuilder.DockWindow("Scene", centerTopId);
-		NativeDockBuilder.DockWindow("Assets", centerTopId);
-		NativeDockBuilder.DockWindow("Log", bottomId);
-		NativeDockBuilder.DockWindow("Components", rightId);
-		NativeDockBuilder.DockWindow("Asset Editor", rightId);
+		if (workspace.Id == EditorWorkspaceService.SceneWorkspaceId)
+		{
+			Dock(EditorWindowIds.Entities, leftId);
+			Dock(EditorWindowIds.Scene, centerTopId);
+		}
+		else
+		{
+			Dock(EditorWindowIds.Assets, centerTopId);
+		}
+		Dock(EditorWindowIds.Log, bottomId);
+		Dock(EditorWindowIds.Components, rightId);
+		Dock(EditorWindowIds.AssetEditor, rightId);
 		NativeDockBuilder.Finish(dockspaceId);
-		_defaultDockLayoutApplied = true;
-	}
 
-	private static bool HasSavedDockLayout()
-	{
-		var settings = ImGui.SaveIniSettingsToMemory();
-		return settings.Contains("DockNode", StringComparison.Ordinal);
+		void Dock(string windowId, uint nodeId)
+		{
+			var descriptor = _windowRegistry.Get(windowId);
+			NativeDockBuilder.DockWindow(descriptor.Window.GetWorkspaceImGuiName(workspace.Id, windowId), nodeId);
+		}
 	}
 
 	private static class NativeDockBuilder
@@ -406,6 +400,9 @@ public class EditorGui
 		// DockSpace is an internal Dear ImGui flag (1 << 10) and is intentionally
 		// omitted from ImGui.NET's public ImGuiDockNodeFlags enum.
 		public const int DockSpaceFlag = 1 << 10;
+
+		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderGetNode")]
+		public static extern IntPtr GetNode(uint nodeId);
 
 		[DllImport(CImGuiLibrary, CallingConvention = CallingConvention.Cdecl, EntryPoint = "igDockBuilderRemoveNode")]
 		public static extern void RemoveNode(uint nodeId);

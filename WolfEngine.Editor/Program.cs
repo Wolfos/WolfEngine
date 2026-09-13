@@ -106,7 +106,8 @@ public static class Program
 		services.AddSingleton<IEditorAssetHandler, PrefabEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ModelEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandlerRegistry, EditorAssetHandlerRegistry>();
-		services.AddSingleton<IEditorModeState, EditorModeState>();
+		services.AddSingleton<IEditorWorkspaceService, EditorWorkspaceService>();
+		services.AddSingleton<EditorWindowRegistry>();
 		services.AddSingleton<IMenuBar, MenuBar>();
 		services.AddSingleton<IImageLoader, ImageLoader>();
 		services.AddSingleton<IAssetThumbnailLoader, AssetThumbnailLoader>();
@@ -124,6 +125,7 @@ public static class Program
 		services.AddSingleton<SceneSelectionController>();
 		services.AddSingleton<EditorGui>();
 		services.AddSingleton<ProjectSettingsWindow>();
+		services.AddSingleton<EditorPreferencesWindow>();
 		
 		ConfigureEditorWindows(services);
 	}
@@ -132,14 +134,14 @@ public static class Program
 	{
 		services.AddSingleton<ComponentsWindow>();
 		services.AddSingleton<IComponentEditor>(provider => provider.GetRequiredService<ComponentsWindow>());
-		services.AddTransient<EntitiesWindow>();
-		services.AddTransient<AssetsWindow>();
-		services.AddTransient<AssetEditorWindow>();
+		services.AddSingleton<EntitiesWindow>();
+		services.AddSingleton<AssetsWindow>();
+		services.AddSingleton<AssetEditorWindow>();
 		services.AddSingleton<MaterialImporterWindow>();
-		services.AddTransient<ProfilerWindow>();
+		services.AddSingleton<ProfilerWindow>();
 		services.AddSingleton(provider => new LogWindow(
 			provider.GetRequiredService<IEditorLogStore>(),
 			provider.GetRequiredService<IIconManager>()));
-		services.AddTransient<SceneWindow>();
+		services.AddSingleton<SceneWindow>();
 	}
 }

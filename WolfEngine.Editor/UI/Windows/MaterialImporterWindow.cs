@@ -26,7 +26,6 @@ public sealed class MaterialImporterWindow : EditorWindow
 	private readonly IEditorProjectService _projectService;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly MaterialImportRequest _request = new();
-	private bool _isOpen;
 
 	public MaterialImporterWindow(
 		IFileDialogService fileDialogService,
@@ -43,25 +42,10 @@ public sealed class MaterialImporterWindow : EditorWindow
 
 	public override string Name => "Material Importer";
 
-	public void Open()
-	{
-		_isOpen = true;
-	}
-
 	public override void Draw(EditorScene scene)
 	{
-		if (_isOpen == false)
-		{
-			return;
-		}
-
 		ImGui.SetNextWindowSize(new Vector2(620.0f, 680.0f), ImGuiCond.FirstUseEver);
-		Begin(ref _isOpen);
-		if (_isOpen == false)
-		{
-			ImGui.End();
-			return;
-		}
+		Begin();
 
 		if (_projectService.HasOpenProject == false)
 		{
@@ -135,7 +119,7 @@ public sealed class MaterialImporterWindow : EditorWindow
 			{
 				_notificationService.ReportInfo($"Imported material '{_request.MaterialName}'.");
 				ResetRequest();
-				_isOpen = false;
+				CloseCurrentWorkspaceWindow();
 			}
 			else
 			{

@@ -17,6 +17,8 @@ public sealed class MenuBar : IMenuBar
 {
 	private const string NewProjectPopupId = "New Project";
 	private const string NotificationPopupId = "Editor Notification";
+	private const string WorkspaceNamePopupId = "Workspace Name";
+	private const string DeleteWorkspacePopupId = "Delete Workspace";
 	private const float MacTitlebarButtonInset = 70.0f;
 	private const float WindowsCaptionButtonWidth = 45.0f;
 	private const float WindowsCaptionButtonSpacing = 0.0f;
@@ -29,17 +31,15 @@ public sealed class MenuBar : IMenuBar
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
 	private readonly IAudioAssetImporter _audioAssetImporter;
-	private readonly MaterialImporterWindow _materialImporterWindow;
-	private readonly LogWindow _logWindow;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
-	private readonly IEditorModeState _editorModeState;
+	private readonly IEditorWorkspaceService _workspaces;
+	private readonly EditorWindowRegistry _windows;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorPlaySession _playSession;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorNotificationService _notificationService;
 	private readonly IEditorCommandService _commandService;
-	private readonly ProjectSettingsWindow _projectSettingsWindow;
 	private readonly IGameBuildService _gameBuildService;
 	private readonly IEditorOperationService _operationService;
 
@@ -49,6 +49,13 @@ public sealed class MenuBar : IMenuBar
 	private bool _openNotificationPopup;
 	private string _notificationTitle = string.Empty;
 	private string _notificationMessage = string.Empty;
+	private string _workspaceName = string.Empty;
+	private string _workspaceNameError = string.Empty;
+	private Guid? _renameWorkspaceId;
+	private Guid? _deleteWorkspaceId;
+	private Guid? _draggingWorkspaceId;
+	private bool _openWorkspaceNamePopup;
+	private bool _openDeleteWorkspacePopup;
 
 	public MenuBar(
 		IFileDialogService fileDialogService,
@@ -57,17 +64,15 @@ public sealed class MenuBar : IMenuBar
 		IEditorProjectService projectService,
 		ITextureAssetImporter textureAssetImporter,
 		IAudioAssetImporter audioAssetImporter,
-		MaterialImporterWindow materialImporterWindow,
-		LogWindow logWindow,
 		IIconManager icons,
 		IWindowChromeController windowChromeController,
-		IEditorModeState editorModeState,
+		IEditorWorkspaceService workspaces,
+		EditorWindowRegistry windows,
 		IEditorSceneWorkspace sceneWorkspace,
 		IEditorPlaySession playSession,
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorNotificationService notificationService,
 		IEditorCommandService commandService,
-		ProjectSettingsWindow projectSettingsWindow,
 		IGameBuildService gameBuildService,
 		IEditorOperationService operationService)
 	{
@@ -77,17 +82,15 @@ public sealed class MenuBar : IMenuBar
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
 		_audioAssetImporter = audioAssetImporter;
-		_materialImporterWindow = materialImporterWindow ?? throw new ArgumentNullException(nameof(materialImporterWindow));
-		_logWindow = logWindow ?? throw new ArgumentNullException(nameof(logWindow));
 		_icons = icons;
 		_windowChromeController = windowChromeController;
-		_editorModeState = editorModeState;
+		_workspaces = workspaces;
+		_windows = windows;
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 		_commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
-		_projectSettingsWindow = projectSettingsWindow ?? throw new ArgumentNullException(nameof(projectSettingsWindow));
 		_gameBuildService = gameBuildService ?? throw new ArgumentNullException(nameof(gameBuildService));
 		_operationService = operationService ?? throw new ArgumentNullException(nameof(operationService));
 	}
@@ -148,7 +151,7 @@ public sealed class MenuBar : IMenuBar
 		var rightInset = isWindowsChrome
 			? (WindowsCaptionButtonWidth * 3.0f) + WindowsCaptionButtonSpacing + ImGui.GetStyle().ItemSpacing.X
 			: 0.0f;
-		DrawCenteredEditorModeButtons(exclusionRects, rightInset);
+		DrawWorkspaceTabs(exclusionRects, rightInset);
 
 		// if (_projectService.HasOpenProject)
 		// {
@@ -182,57 +185,69 @@ public sealed class MenuBar : IMenuBar
 		DrawPopups();
 	}
 
-	private void DrawCenteredEditorModeButtons(List<WindowChromeRect> exclusionRects, float rightInset)
+	private void DrawWorkspaceTabs(List<WindowChromeRect> exclusionRects, float rightInset)
 	{
-		const string SceneLabel = "Scene";
-		const string AssetsLabel = "Assets";
-		const string AnimationLabel = "Animation";
 		const string FramerateTemplateLabel = "Frame 0000.00 ms avg | 0000.00 ms max";
 
 		var style = ImGui.GetStyle();
 		var leftBoundary = ImGui.GetCursorPosX() + style.ItemSpacing.X;
 		var buttonHeight = ImGui.GetFrameHeight();
-		var sceneWidth = ImGui.CalcTextSize(SceneLabel).X + (style.FramePadding.X * 2.0f);
-		var assetsWidth = ImGui.CalcTextSize(AssetsLabel).X + (style.FramePadding.X * 2.0f);
-		var animationWidth = ImGui.CalcTextSize(AnimationLabel).X + (style.FramePadding.X * 2.0f);
-		var groupWidth = sceneWidth + assetsWidth + animationWidth + (style.ItemSpacing.X * 2.0f);
 		var framerateWidth = ImGui.CalcTextSize(FramerateTemplateLabel).X + (style.FramePadding.X * 2.0f);
 		var rightBoundary = ImGui.GetWindowWidth() - style.WindowPadding.X - rightInset - framerateWidth - style.ItemSpacing.X;
-		var centeredX = (ImGui.GetWindowWidth() - groupWidth) * 0.5f;
-		var startX = MathF.Max(leftBoundary, centeredX);
-		if (startX + groupWidth > rightBoundary)
-		{
-			startX = MathF.Max(leftBoundary, rightBoundary - groupWidth);
-		}
-		
+		var controlsWidth = buttonHeight + style.ItemSpacing.X;
+		var desiredTabWidth = _workspaces.Workspaces.Sum(workspace => ImGui.CalcTextSize(workspace.Name).X + style.FramePadding.X * 2.0f + style.ItemSpacing.X);
+		var groupWidth = MathF.Min(MathF.Max(160.0f, desiredTabWidth + controlsWidth), MathF.Max(160.0f, rightBoundary - leftBoundary));
+		var startX = MathF.Max(leftBoundary, MathF.Min((ImGui.GetWindowWidth() - groupWidth) * 0.5f, rightBoundary - groupWidth));
 		var notSelectedColor = ImGui.GetStyle().Colors[(int)ImGuiCol.TitleBg];
-		var currentMode = _editorModeState.CurrentMode;
-
-		void DrawEditorModeButton(string label, float width, EditorMode mode)
-		{
-			var selected = currentMode == mode;
-			if(selected == false) ImGui.PushStyleColor(ImGuiCol.Button, notSelectedColor);
-			
-			if (ImGui.Button(label, new Vector2(width, buttonHeight)))
-			{
-				_editorModeState.SetMode(mode);
-			}
-			AddLastItemRect(exclusionRects);
-			
-			if(selected == false) ImGui.PopStyleColor();
-		}
+		var activeId = _workspaces.ActiveWorkspace.Id;
+		Guid? moveId = null;
+		var moveIndex = -1;
 
 		ImGui.SameLine();
 		ImGui.SetCursorPosX(startX);
-		DrawEditorModeButton(SceneLabel, sceneWidth, EditorMode.Scene);
-
-		
+		var childWidth = MathF.Max(80.0f, groupWidth - controlsWidth);
+		ImGui.SetNextWindowContentSize(new Vector2(desiredTabWidth, 0.0f));
+		ImGui.BeginChild("WorkspaceTabs", new Vector2(childWidth, buttonHeight), ImGuiChildFlags.None,
+			ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoSavedSettings);
+		for (var index = 0; index < _workspaces.Workspaces.Count; index++)
+		{
+			var workspace = _workspaces.Workspaces[index];
+			if (index > 0) ImGui.SameLine();
+			var selected = activeId == workspace.Id;
+			if(selected == false) ImGui.PushStyleColor(ImGuiCol.Button, notSelectedColor);
+			var width = ImGui.CalcTextSize(workspace.Name).X + style.FramePadding.X * 2.0f;
+			if (ImGui.Button($"{workspace.Name}##Workspace-{workspace.Id:N}", new Vector2(width, buttonHeight)))
+			{
+				_workspaces.Activate(workspace.Id);
+			}
+			if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) BeginRenameWorkspace(workspace);
+			if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left)) _draggingWorkspaceId = workspace.Id;
+			if (_draggingWorkspaceId is { } dragged && dragged != workspace.Id &&
+			    ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
+			{
+				moveId = dragged;
+				moveIndex = index;
+			}
+			if (ImGui.BeginPopupContextItem($"WorkspaceContext-{workspace.Id:N}"))
+			{
+				if (ImGui.MenuItem("Rename")) BeginRenameWorkspace(workspace);
+				if (_workspaces.Workspaces.Count == 1) ImGui.BeginDisabled();
+				if (ImGui.MenuItem("Delete Workspace")) { _deleteWorkspaceId = workspace.Id; _openDeleteWorkspacePopup = true; }
+				if (_workspaces.Workspaces.Count == 1) ImGui.EndDisabled();
+				ImGui.EndPopup();
+			}
+			if(selected == false) ImGui.PopStyleColor();
+		}
+		ImGui.EndChild();
+		if (moveId is { } id) _workspaces.Move(id, moveIndex);
+		if (!ImGui.IsMouseDown(ImGuiMouseButton.Left)) _draggingWorkspaceId = null;
 		ImGui.SameLine();
-		DrawEditorModeButton(AssetsLabel, assetsWidth, EditorMode.Assets);
-
-		ImGui.SameLine();
-		DrawEditorModeButton(AnimationLabel, animationWidth, EditorMode.Animation);
-
+		ImGui.PushStyleColor(ImGuiCol.Button, notSelectedColor);
+		if (ImGui.Button("+", new Vector2(buttonHeight, buttonHeight))) BeginCreateWorkspace();
+		ImGui.PopStyleColor();
+		AddRect(exclusionRects, new WindowChromeRect(
+			ImGui.GetWindowPos().X + startX, ImGui.GetWindowPos().Y,
+			ImGui.GetWindowPos().X + startX + groupWidth, ImGui.GetWindowPos().Y + ImGui.GetWindowHeight()));
 	}
 
 	private void DrawWindowsCaptionButtons(
@@ -424,7 +439,7 @@ public sealed class MenuBar : IMenuBar
 
 		if (ImGui.MenuItem("Preferences"))
 		{
-			EditorPreferencesMenu.Open();
+			_windows.Open(EditorWindowIds.Preferences);
 		}
 
 		ImGui.EndMenu();
@@ -439,7 +454,7 @@ public sealed class MenuBar : IMenuBar
 		{
 			if (ImGui.MenuItem("Project Settings..."))
 			{
-				_projectSettingsWindow.Open();
+				_windows.Open(EditorWindowIds.ProjectSettings);
 			}
 			ImGui.EndMenu();
 		}
@@ -499,7 +514,7 @@ public sealed class MenuBar : IMenuBar
 
 		if (ImGui.MenuItem("Material..."))
 		{
-			_materialImporterWindow.Open();
+			_windows.Open(EditorWindowIds.MaterialImporter);
 		}
 
 		if (hasOpenProject == false || _playSession.IsActive)
@@ -517,14 +532,10 @@ public sealed class MenuBar : IMenuBar
 		var menuRect = GetLastItemRect();
 		if (isOpen)
 		{
-			if (ImGui.MenuItem("Log"))
+			foreach (var window in _windows.Windows)
 			{
-				_logWindow.Open();
-			}
-
-			if (ImGui.MenuItem("Profiler"))
-			{
-				ProfilerWindow.Open();
+				var isWindowOpen = _workspaces.IsWindowOpen(window.Id);
+				if (ImGui.MenuItem(window.DisplayName, string.Empty, isWindowOpen)) _windows.Open(window.Id);
 			}
 			ImGui.EndMenu();
 		}
@@ -648,9 +659,75 @@ public sealed class MenuBar : IMenuBar
 			ImGui.OpenPopup(NotificationPopupId);
 			_openNotificationPopup = false;
 		}
+		if (_openWorkspaceNamePopup)
+		{
+			ImGui.OpenPopup(WorkspaceNamePopupId);
+			_openWorkspaceNamePopup = false;
+		}
+		if (_openDeleteWorkspacePopup)
+		{
+			ImGui.OpenPopup(DeleteWorkspacePopupId);
+			_openDeleteWorkspacePopup = false;
+		}
 
 		DrawNewProjectPopup();
 		DrawNotificationPopup();
+		DrawWorkspaceNamePopup();
+		DrawDeleteWorkspacePopup();
+	}
+
+	private void BeginCreateWorkspace()
+	{
+		_renameWorkspaceId = null;
+		_workspaceName = string.Empty;
+		_workspaceNameError = string.Empty;
+		_openWorkspaceNamePopup = true;
+	}
+
+	private void BeginRenameWorkspace(EditorWorkspace workspace)
+	{
+		_renameWorkspaceId = workspace.Id;
+		_workspaceName = workspace.Name;
+		_workspaceNameError = string.Empty;
+		_openWorkspaceNamePopup = true;
+	}
+
+	private void DrawWorkspaceNamePopup()
+	{
+		var open = true;
+		if (!ImGui.BeginPopupModal(WorkspaceNamePopupId, ref open, ImGuiWindowFlags.AlwaysAutoResize)) return;
+		if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+		ImGui.SetNextItemWidth(360.0f);
+		var confirm = ImGui.InputText("Name", ref _workspaceName, 65, ImGuiInputTextFlags.EnterReturnsTrue);
+		if (!string.IsNullOrEmpty(_workspaceNameError)) ImGui.TextColored(new Vector4(0.95f, 0.35f, 0.35f, 1.0f), _workspaceNameError);
+		confirm |= ImGui.Button(_renameWorkspaceId.HasValue ? "Rename" : "Create", new Vector2(100.0f, 0.0f));
+		ImGui.SameLine();
+		if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)) || ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
+		if (confirm)
+		{
+			var success = _renameWorkspaceId is { } id
+				? _workspaces.TryRename(id, _workspaceName, out _workspaceNameError)
+				: _workspaces.TryCreate(_workspaceName, out _, out _workspaceNameError);
+			if (success) ImGui.CloseCurrentPopup();
+		}
+		ImGui.EndPopup();
+	}
+
+	private void DrawDeleteWorkspacePopup()
+	{
+		var open = true;
+		if (!ImGui.BeginPopupModal(DeleteWorkspacePopupId, ref open, ImGuiWindowFlags.AlwaysAutoResize)) return;
+		var workspace = _deleteWorkspaceId is { } id ? _workspaces.Workspaces.FirstOrDefault(item => item.Id == id) : null;
+		ImGui.TextWrapped(workspace is null ? "This workspace no longer exists." : $"Delete workspace '{workspace.Name}' and its layout?");
+		if (workspace is not null && ImGui.Button("Delete", new Vector2(100.0f, 0.0f)))
+		{
+			_workspaces.Delete(workspace.Id);
+			_deleteWorkspaceId = null;
+			ImGui.CloseCurrentPopup();
+		}
+		if (workspace is not null) ImGui.SameLine();
+		if (ImGui.Button("Cancel", new Vector2(100.0f, 0.0f)) || ImGui.IsKeyPressed(ImGuiKey.Escape)) ImGui.CloseCurrentPopup();
+		ImGui.EndPopup();
 	}
 
 	private void DrawNewProjectPopup()

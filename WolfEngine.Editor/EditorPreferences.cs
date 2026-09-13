@@ -23,6 +23,7 @@ public class EditorPreferences
 	public bool LimitFPS { get; set; } = false;
 	public int MaxFPS { get; set; } = 0;
 	public string? LastProjectPath { get; set; }
+	public EditorWorkspacePreferences? WorkspaceSettings { get; set; }
 
 	public EditorPreferences()
 	{
@@ -121,6 +122,25 @@ public class EditorPreferences
 			: Path.GetFullPath(projectPath);
 	}
 
+	public static EditorWorkspacePreferences? GetWorkspaceSettings()
+	{
+		_instance ??= new EditorPreferences();
+		return _instance.WorkspaceSettings;
+	}
+
+	public static void SetWorkspaceSettings(EditorWorkspacePreferences settings)
+	{
+		_instance ??= new EditorPreferences();
+		_instance.WorkspaceSettings = settings;
+	}
+
+	public static void SetWorkspaceImGuiSettings(string settings)
+	{
+		_instance ??= new EditorPreferences();
+		_instance.WorkspaceSettings ??= new EditorWorkspacePreferences();
+		_instance.WorkspaceSettings.ImGuiSettings = settings;
+	}
+
 	public static void Load()
 	{
 		var path = GetPreferencesPath();
@@ -165,14 +185,33 @@ public class EditorPreferences
 		}
 
 		var json = JsonSerializer.Serialize(_instance, JsonOptions);
-		File.WriteAllText(path, json);
+		var temporaryPath = path + ".tmp";
+		File.WriteAllText(temporaryPath, json);
+		File.Move(temporaryPath, path, true);
 	}
 
 	private static string GetPreferencesPath()
 	{
+		var overridePath = Environment.GetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH");
+		if (!string.IsNullOrWhiteSpace(overridePath)) return Path.GetFullPath(overridePath);
 		var baseDir = Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
 			"WolfEngine");
 		return Path.Combine(baseDir, PreferencesFileName);
 	}
+}
+
+public sealed class EditorWorkspacePreferences
+{
+	public int Version { get; set; }
+	public Guid ActiveWorkspaceId { get; set; }
+	public List<EditorWorkspacePreference> Workspaces { get; set; } = new();
+	public string ImGuiSettings { get; set; } = string.Empty;
+}
+
+public sealed class EditorWorkspacePreference
+{
+	public Guid Id { get; set; }
+	public string Name { get; set; } = string.Empty;
+	public List<string> OpenWindowIds { get; set; } = new();
 }

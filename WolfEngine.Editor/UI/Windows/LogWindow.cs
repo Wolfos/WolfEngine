@@ -16,7 +16,6 @@ public sealed class LogWindow : EditorWindow
 	private readonly List<LogEntry> _visibleEntries = new();
 	private long _snapshotVersion = -1;
 	private long? _selectedSequence;
-	private bool _isOpen = true;
 	private bool _showInfo = true;
 	private bool _showWarnings = true;
 	private bool _showErrors = true;
@@ -32,20 +31,10 @@ public sealed class LogWindow : EditorWindow
 
 	public override string Name => "Log";
 
-	public void Open()
-	{
-		_isOpen = true;
-	}
-
 	public override void Draw(EditorScene scene)
 	{
-		if (_isOpen == false)
-		{
-			return;
-		}
-
 		RefreshEntries();
-		Begin(ref _isOpen);
+		Begin();
 		DrawToolbar();
 		RefreshEntries();
 		ImGui.Separator();

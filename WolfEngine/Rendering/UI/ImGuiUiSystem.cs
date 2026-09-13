@@ -19,6 +19,7 @@ public interface IImGuiInputSink
 public interface IUiFrameProvider
 {
 	bool TryConsumeLatest(out UiFrameData frame);
+	void DisableAutomaticIniPersistence();
 	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize);
 	public void RunGui(Action draw);
 
@@ -67,6 +68,15 @@ public sealed unsafe class ImGuiUiSystem : IImGuiInputSink, IUiFrameProvider
 		ApplyDefaultStyle();
 
 		RebuildFonts(1.0f);
+	}
+
+	public void DisableAutomaticIniPersistence()
+	{
+		lock (_contextLock)
+		{
+			ImGui.SetCurrentContext(_context);
+			ImGui.GetIO().NativePtr->IniFilename = null;
+		}
 	}
 
 	public void NewFrame(float deltaTime, Int2 windowSize, Int2 framebufferSize)

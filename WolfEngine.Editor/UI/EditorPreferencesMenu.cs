@@ -3,31 +3,14 @@ using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
 
-public class EditorPreferencesMenu
+public sealed class EditorPreferencesWindow : EditorWindow
 {
-	private static bool _isOpen;
+	public override string Name => "Preferences";
 
-	public static void Open()
+	public override void Draw(EditorScene scene)
 	{
-		_isOpen = true;
-	}
-
-	public static void Close()
-	{
-		_isOpen = false;
-	}
-
-	public static void Draw()
-	{
-		if (_isOpen == false) return;
-
 		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-		ImGui.Begin("Preferences", ref _isOpen);
-		if (ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem) &&
-		    ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-		{
-			ImGui.SetWindowFocus();
-		}
+		Begin();
 		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		if (ImGui.Button("Save"))
 		{

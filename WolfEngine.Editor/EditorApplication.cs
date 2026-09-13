@@ -29,7 +29,10 @@ public sealed class EditorApplication : IDisposable
 		services.AddEditorToolingShaders(new EngineShaderOptions { EngineContentRoot = engineContentRoot });
 		services.AddEditorToolingImporter();
 		Program.ConfigureServices(services);
-		return new EditorApplication(services.BuildServiceProvider());
+		var provider = services.BuildServiceProvider();
+		provider.GetRequiredService<IUiFrameProvider>().DisableAutomaticIniPersistence();
+		EditorPreferences.Load();
+		return new EditorApplication(provider);
 	}
 
 	public EditorAutomationController CreateCaptureController(EditorAutomationOptions options) =>
@@ -56,7 +59,7 @@ public sealed class EditorApplication : IDisposable
 		}
 		if (automationController is not null) editor.SetRemoteAutomationController(automationController);
 
-		var lastProjectPath = captureController is null && automationController is null ? LoadLastProjectPath() : null;
+		var lastProjectPath = captureController is null && automationController is null ? EditorPreferences.GetLastProjectPath() : null;
 		// Arm the loading state before the editor thread starts so its very first
 		// submitted frame is the loading screen. The worker waits until the renderer
 		// has created its graphics device because asset import may dispatch GPU work.
@@ -94,12 +97,6 @@ public sealed class EditorApplication : IDisposable
 			AssetDatabase.ClearInstanceRegistry();
 			automationController?.NotifyStopped();
 		}
-	}
-
-	private static string? LoadLastProjectPath()
-	{
-		EditorPreferences.Load();
-		return EditorPreferences.GetLastProjectPath();
 	}
 
 	public void Dispose()

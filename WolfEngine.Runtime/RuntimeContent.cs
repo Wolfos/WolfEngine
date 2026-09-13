@@ -13,6 +13,7 @@ namespace WolfEngine.Runtime;
 
 public sealed class RuntimeNullUi : IUiFrameProvider, IImGuiInputSink
 {
+	public void DisableAutomaticIniPersistence() { }
 	public bool TryConsumeLatest(out UiFrameData frame)
 	{
 		frame = UiFrameData.Empty;

@@ -8,6 +8,8 @@ public static class Program
 {
 	public static async Task Main()
 	{
+		var isolatedPreferencesPath = Path.Combine(Path.GetTempPath(), $"WolfEngine.Editor.Automation-{Environment.ProcessId}.json");
+		Environment.SetEnvironmentVariable("WOLF_EDITOR_PREFERENCES_PATH", isolatedPreferencesPath);
 		// The editor writes diagnostics through Console.Out; reserve stdout exclusively for MCP JSON-RPC.
 		Console.SetOut(Console.Error);
 		var builder = Host.CreateApplicationBuilder();

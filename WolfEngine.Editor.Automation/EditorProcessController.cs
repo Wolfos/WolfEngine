@@ -140,6 +140,24 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<RenderFrameWaitResult> WaitForRenderFramesAsync(int frameCount, CancellationToken cancellationToken) =>
 		GetRunningEditor().WaitForRenderFramesAsync(frameCount, cancellationToken);
 
+	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetWorkspaceStateAsync(cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
+		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
+		GetRunningEditor().RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> ActivateWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
+		GetRunningEditor().ActivateWorkspaceAsync(workspaceId, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> DeleteWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
+		GetRunningEditor().DeleteWorkspaceAsync(workspaceId, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> SetWorkspaceWindowOpenAsync(string windowId, bool open, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetWorkspaceWindowOpenAsync(windowId, open, cancellationToken);
+
 	public Task<TerrainLayerPaintResult> PaintTerrainLayerAsync(
 		string? terrainEntityId,
 		float localX,
@@ -199,6 +217,14 @@ public sealed class EditorProcessController : IAsyncDisposable
 		var editor = GetRunningEditor();
 		await editor.ShutdownAsync(cancellationToken).ConfigureAwait(false);
 		await editor.Stopped.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+		while (true)
+		{
+			lock (_sync)
+			{
+				if (_editor is null) return;
+			}
+			await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+		}
 	}
 
 	private EditorRemoteAutomationController GetRunningEditor()

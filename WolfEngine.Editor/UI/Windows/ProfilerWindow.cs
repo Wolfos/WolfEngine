@@ -8,7 +8,6 @@ namespace WolfEngine.Editor.UI;
 
 public class ProfilerWindow: EditorWindow
 {
-	private static bool _isOpen;
 	private readonly GpuProfiler _gpuProfiler;
 
 	public ProfilerWindow(GpuProfiler gpuProfiler)
@@ -16,26 +15,11 @@ public class ProfilerWindow: EditorWindow
 		_gpuProfiler = gpuProfiler;
 	}
 
-	public static void Open()
-	{
-		_isOpen = true;
-	}
-
-	public static void Close()
-	{
-		_isOpen = false;
-	}
-
 	public override string Name => "Profiler";
 
 	public override void Draw(EditorScene scene)
 	{
-		if (_isOpen == false)
-		{
-			return;
-		}
-
-		Begin(ref _isOpen);
+		Begin();
 		if (ImGui.BeginTabBar("profiler-tabs"))
 		{
 			if (ImGui.BeginTabItem("CPU"))

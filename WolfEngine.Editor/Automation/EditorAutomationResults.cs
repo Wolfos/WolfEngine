@@ -1,5 +1,12 @@
 namespace WolfEngine.Editor.Automation;
 
+public sealed record EditorWorkspaceSummaryResult(Guid Id, string Name, IReadOnlyList<string> OpenWindowIds);
+
+public sealed record EditorWorkspaceStateResult(
+	Guid ActiveWorkspaceId,
+	IReadOnlyList<EditorWorkspaceSummaryResult> Workspaces,
+	int SavedLayoutCharacterCount);
+
 public sealed record SceneLoadResult(
 	string ScenePath,
 	Guid SceneAssetId,

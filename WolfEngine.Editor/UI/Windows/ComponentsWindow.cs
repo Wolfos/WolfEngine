@@ -98,8 +98,7 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         }
 
 		var pushedBoldTitle = ImGuiUiSystem.PushBoldFont();
-		ImGui.Begin(Name);
-		FocusOnRightClickStart();
+		Begin();
 		var pushedRegularContent = ImGuiUiSystem.PushRegularFont();
 		if (EditorGui.HasSelectedEntity)
 		{

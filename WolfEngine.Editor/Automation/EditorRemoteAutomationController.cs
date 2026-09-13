@@ -35,6 +35,8 @@ public sealed class EditorRemoteAutomationController
 	private readonly RenderGraph _renderGraph;
 	private readonly GpuProfiler _gpuProfiler;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly IEditorWorkspaceService _workspaces;
+	private readonly EditorWindowRegistry _windows;
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -57,7 +59,9 @@ public sealed class EditorRemoteAutomationController
 		RenderFrameCoordinator renderFrameCoordinator,
 		RenderGraph renderGraph,
 		GpuProfiler gpuProfiler,
-		EditorViewportStateBus viewportStateBus)
+		EditorViewportStateBus viewportStateBus,
+		IEditorWorkspaceService workspaces,
+		EditorWindowRegistry windows)
 	{
 		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
@@ -76,7 +80,55 @@ public sealed class EditorRemoteAutomationController
 		_renderFrameCoordinator = renderFrameCoordinator;
 		_renderGraph = renderGraph;
 		_gpuProfiler = gpuProfiler;
+		_workspaces = workspaces;
+		_windows = windows;
 	}
+
+	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(CreateWorkspaceState, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!_workspaces.TryCreate(name, out _, out var error)) throw new InvalidOperationException(error);
+			return CreateWorkspaceState();
+		}, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> RenameWorkspaceAsync(string workspaceId, string name, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!Guid.TryParse(workspaceId, out var id)) throw new InvalidOperationException("workspace_id must be a GUID.");
+			if (!_workspaces.TryRename(id, name, out var error)) throw new InvalidOperationException(error);
+			return CreateWorkspaceState();
+		}, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> ActivateWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!Guid.TryParse(workspaceId, out var id) || !_workspaces.Activate(id)) throw new InvalidOperationException("Workspace was not found.");
+			return CreateWorkspaceState();
+		}, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> DeleteWorkspaceAsync(string workspaceId, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!Guid.TryParse(workspaceId, out var id) || !_workspaces.Delete(id)) throw new InvalidOperationException("Workspace was not found or is the only workspace.");
+			return CreateWorkspaceState();
+		}, cancellationToken);
+
+	public Task<EditorWorkspaceStateResult> SetWorkspaceWindowOpenAsync(string windowId, bool open, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!EditorWindowIds.All.Contains(windowId)) throw new InvalidOperationException($"Unknown window id '{windowId}'.");
+			if (open) _windows.Open(windowId); else _workspaces.CloseWindow(windowId);
+			return CreateWorkspaceState();
+		}, cancellationToken);
+
+	private EditorWorkspaceStateResult CreateWorkspaceState() => new(
+		_workspaces.ActiveWorkspace.Id,
+		_workspaces.Workspaces.Select(workspace => new EditorWorkspaceSummaryResult(
+			workspace.Id, workspace.Name, workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
+		EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings.Length ?? 0);
 
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		Enqueue(() =>

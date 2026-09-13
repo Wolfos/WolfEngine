@@ -97,6 +97,30 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.WaitForRenderFramesAsync(frameCount, cancellationToken);
 
+	[McpServerTool(Name = "get_workspace_state"), Description("Return all editor workspaces, their stable ids, open windows, active workspace, and saved docking-layout size.")]
+	public Task<EditorWorkspaceStateResult> GetWorkspaceState(CancellationToken cancellationToken) =>
+		_controller.GetWorkspaceStateAsync(cancellationToken);
+
+	[McpServerTool(Name = "create_workspace"), Description("Create and activate an empty editor workspace.")]
+	public Task<EditorWorkspaceStateResult> CreateWorkspace(string name, CancellationToken cancellationToken) =>
+		_controller.CreateWorkspaceAsync(name, cancellationToken);
+
+	[McpServerTool(Name = "rename_workspace"), Description("Rename an editor workspace without changing its stable layout identity.")]
+	public Task<EditorWorkspaceStateResult> RenameWorkspace(string workspaceId, string name, CancellationToken cancellationToken) =>
+		_controller.RenameWorkspaceAsync(workspaceId, name, cancellationToken);
+
+	[McpServerTool(Name = "activate_workspace"), Description("Activate an editor workspace by stable id.")]
+	public Task<EditorWorkspaceStateResult> ActivateWorkspace(string workspaceId, CancellationToken cancellationToken) =>
+		_controller.ActivateWorkspaceAsync(workspaceId, cancellationToken);
+
+	[McpServerTool(Name = "delete_workspace"), Description("Delete an editor workspace. The only remaining workspace cannot be deleted.")]
+	public Task<EditorWorkspaceStateResult> DeleteWorkspace(string workspaceId, CancellationToken cancellationToken) =>
+		_controller.DeleteWorkspaceAsync(workspaceId, cancellationToken);
+
+	[McpServerTool(Name = "set_workspace_window_open"), Description("Open or close one registered editor window in the active workspace.")]
+	public Task<EditorWorkspaceStateResult> SetWorkspaceWindowOpen(string windowId, bool open, CancellationToken cancellationToken) =>
+		_controller.SetWorkspaceWindowOpenAsync(windowId, open, cancellationToken);
+
 	[McpServerTool(Name = "paint_terrain_layer"), Description("Apply one terrain layer-paint stamp through the editor's real authoring and undo path. The edit remains in memory unless the scene is explicitly saved.")]
 	public Task<TerrainLayerPaintResult> PaintTerrainLayer(
 		[Description("Persistent terrain entity GUID. May be omitted when the authoring scene contains exactly one terrain entity.")] string? terrainEntityId = null,
