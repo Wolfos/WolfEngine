@@ -252,12 +252,20 @@ public struct DecalConfig
 	public bool DebugProjectorBounds { get; set; }
 }
 
+public enum TonemappingMode
+{
+	Aces = 0,
+	AgX = 1,
+	KhronosPbrNeutral = 2
+}
+
 public struct TonemappingConfig
 {
 	public TonemappingConfig()
 	{
 	}
 
+	public TonemappingMode Mode { get; set; } = TonemappingMode.Aces;
 	public float Exposure { get; set; } = 1.0f;
 }
 

@@ -13,7 +13,7 @@ namespace WolfEngine.Tests;
 public sealed class RayTracingSceneResourcesTests
 {
 	[Test]
-	public void Aces2SdrTonemappingAndPresentationShadersCompileForMetal()
+	public void TonemappingAndPresentationShadersCompileForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
 		{
@@ -21,16 +21,20 @@ public sealed class RayTracingSceneResourcesTests
 		}
 
 		var shaderCompiler = new ShaderCompiler();
-		var tonemapping = shaderCompiler.GetComputeShaderWithReflection(
-			ShaderPath("PostProcess/tonemapping.compute.slang"),
-			"TonemappingCS",
-			GraphicsBackendKind.Metal);
+		foreach (var mode in Enum.GetValues<TonemappingMode>())
+		{
+			var tonemapping = shaderCompiler.GetComputeShaderWithReflection(
+				ShaderPath("PostProcess/tonemapping.compute.slang"),
+				TonemappingPass.GetEntryPoint(mode),
+				GraphicsBackendKind.Metal);
+			Assert.That(tonemapping.Bytecode.IsEmpty, Is.False, mode.ToString());
+		}
+
 		var presentation = shaderCompiler.GetComputeShaderWithReflection(
 			ShaderPath("PostProcess/copy_to_final.compute.slang"),
 			"CopyToFinalCS",
 			GraphicsBackendKind.Metal);
 
-		Assert.That(tonemapping.Bytecode.IsEmpty, Is.False);
 		Assert.That(presentation.Bytecode.IsEmpty, Is.False);
 		Assert.That(
 			presentation.ReflectionLayout.GetConstantBuffer("BindlessHandles")
@@ -39,7 +43,7 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void Aces2SdrTonemappingAndPresentationShadersCompileForD3D12()
+	public void TonemappingAndPresentationShadersCompileForD3D12()
 	{
 		if (OperatingSystem.IsWindows() == false)
 		{
@@ -49,7 +53,9 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
-			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingCS"),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingAces"),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingAgX"),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingPbrNeutral"),
 			(Name: "PostProcess/copy_to_final.compute.slang", EntryPoint: "CopyToFinalCS")
 		})
 		{
@@ -161,7 +167,9 @@ public sealed class RayTracingSceneResourcesTests
 			(Name: "Taa/taa_history_store.compute.slang", EntryPoint: "TaaHistoryStoreCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "Taa/taa_resolve.compute.slang", EntryPoint: "TaaResolveCS", ThreadsX: 8u, ThreadsY: 8u),
 			(Name: "Terrain/terrain_rt_vertex_update.compute.slang", EntryPoint: "TerrainRayTracingVertexUpdateCS", ThreadsX: 64u, ThreadsY: 1u),
-			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingCS", ThreadsX: 8u, ThreadsY: 8u)
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingAces", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingAgX", ThreadsX: 8u, ThreadsY: 8u),
+			(Name: "PostProcess/tonemapping.compute.slang", EntryPoint: "TonemappingPbrNeutral", ThreadsX: 8u, ThreadsY: 8u)
 		})
 		{
 			var compiled = shaderCompiler.GetComputeShaderWithReflection(

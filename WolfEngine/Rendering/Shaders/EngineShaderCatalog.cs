@@ -320,7 +320,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.Fsr3LumaInstability) return ["Fsr3LumaInstabilityCS"];
 		if (id == EngineShaderPrograms.Fsr3Accumulate) return ["Fsr3AccumulateCS"];
 		if (id == EngineShaderPrograms.Fsr3Clear) return ["Fsr3ClearFloatCS", "Fsr3ClearUintCS"];
-		if (id == EngineShaderPrograms.Tonemapping) return ["TonemappingCS"];
+		if (id == EngineShaderPrograms.Tonemapping) return ["TonemappingAces", "TonemappingAgX", "TonemappingPbrNeutral"];
 		if (id == EngineShaderPrograms.Bloom) return ["BloomPrefilterCS", "BloomDownsampleCS", "BloomUpsampleCS", "BloomCompositeCS"];
 		if (id == EngineShaderPrograms.ColorPyramid) return ["ColorPyramidCopyCS", "ColorPyramidDownsampleCS"];
 		if (id == EngineShaderPrograms.CasSharpen) return ["CasSharpenCS"];
