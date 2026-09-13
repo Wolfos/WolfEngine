@@ -18,6 +18,7 @@ public class RenderConfig: IDataAsset
 	[JsonPropertyName("TemporalAntiAliasing")]
 	public AntiAliasingConfig AntiAliasing { get; set; } = new();
 	public TonemappingConfig Tonemapping { get; set; } = new();
+	public ColorGradingConfig ColorGrading { get; set; } = new();
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
 	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
@@ -267,6 +268,23 @@ public struct TonemappingConfig
 
 	public TonemappingMode Mode { get; set; } = TonemappingMode.Aces;
 	public float Exposure { get; set; } = 1.0f;
+}
+
+/// <summary>
+/// Look applied to the display-referred image after tonemapping. Colour lookup tables are authored against
+/// display-encoded sRGB, which is the space the tonemapper's output is sampled in.
+/// </summary>
+public struct ColorGradingConfig
+{
+	public ColorGradingConfig()
+	{
+	}
+
+	/// <summary>3D lookup table imported from a .cube file. Unset disables grading.</summary>
+	public AssetRef<ColorLookupTable> LookupTable { get; set; }
+
+	/// <summary>Blend from the ungraded image (0) to the fully graded image (1).</summary>
+	public float Contribution { get; set; } = 1.0f;
 }
 
 public enum BloomQuality

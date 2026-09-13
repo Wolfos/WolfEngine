@@ -13,6 +13,8 @@ public sealed class Texture
     private bool _isSrgb;
     private TextureFormat _format;
     private TextureMipData[] _mipLevels;
+    private TextureDimension _dimension;
+    private int _depth;
     private readonly bool _isRenderTarget;
 
     public Texture(string name, int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
@@ -21,34 +23,41 @@ public sealed class Texture
     }
 
     private Texture(string name, int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels,
-        bool isRenderTarget)
+        bool isRenderTarget, TextureDimension dimension = TextureDimension.Texture2D, int depth = 1)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
+        ArgumentNullException.ThrowIfNull(mipLevels);
+        ValidateTextureData(width, height, mipLevels, dimension, depth);
         _width = width;
         _height = height;
         _isSrgb = isSrgb;
         _format = format;
-        _mipLevels = mipLevels ?? throw new ArgumentNullException(nameof(mipLevels));
+        _mipLevels = mipLevels;
+        _dimension = dimension;
+        _depth = depth;
         _isRenderTarget = isRenderTarget;
-        if (width <= 0 || height <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
-        }
-
-        if (mipLevels.Length == 0)
-        {
-            throw new ArgumentException("Texture must contain at least one mip level.", nameof(mipLevels));
-        }
     }
 
     public string Name { get; }
     public int Width => _width;
     public int Height => _height;
+    public int Depth => _depth;
+    public TextureDimension Dimension => _dimension;
     public bool IsSrgb => _isSrgb;
     public TextureFormat Format => _format;
     public TextureMipData[] MipLevels => _mipLevels;
     public int MipCount => _mipLevels.Length;
     public bool IsRenderTarget => _isRenderTarget;
+
+    /// <summary>
+    /// Creates a linear volume texture. Each mip's data holds its depth slices back to back.
+    /// </summary>
+    public static Texture Create3D(string name, int width, int height, int depth, TextureFormat format,
+        TextureMipData[] mipLevels)
+    {
+        return new Texture(name, width, height, isSrgb: false, format, mipLevels, isRenderTarget: false,
+            TextureDimension.Texture3D, depth);
+    }
 
     /// <summary>
     /// Creates a logical texture whose storage is owned by a persistent GPU render target rather than CPU mip data.
@@ -157,28 +166,42 @@ public sealed class Texture
         }
     }
 
-    public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels)
+    public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels,
+        TextureDimension dimension = TextureDimension.Texture2D, int depth = 1)
     {
         if (_isRenderTarget)
         {
             throw new InvalidOperationException("Render-target texture contents are GPU-owned.");
         }
         ArgumentNullException.ThrowIfNull(mipLevels);
-        if (width <= 0 || height <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
-        }
-
-        if (mipLevels.Length == 0)
-        {
-            throw new ArgumentException("Texture must contain at least one mip level.", nameof(mipLevels));
-        }
+        ValidateTextureData(width, height, mipLevels, dimension, depth);
 
         _width = width;
         _height = height;
         _isSrgb = isSrgb;
         _format = format;
         _mipLevels = mipLevels;
+        _dimension = dimension;
+        _depth = depth;
         MarkGpuResourcesDirty();
+    }
+
+    private static void ValidateTextureData(int width, int height, TextureMipData[] mipLevels,
+        TextureDimension dimension, int depth)
+    {
+        if (width <= 0 || height <= 0 || depth <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), "Texture dimensions must be positive.");
+        }
+
+        if (dimension == TextureDimension.Texture2D && depth != 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(depth), "2D textures must have a depth of one.");
+        }
+
+        if (mipLevels.Length == 0)
+        {
+            throw new ArgumentException("Texture must contain at least one mip level.", nameof(mipLevels));
+        }
     }
 }

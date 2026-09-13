@@ -54,6 +54,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private bool _fallbackHandlesInitialized;
 	private BindlessFallbackHandles _fallbackHandles;
 	private MetalTexture? _fallbackTexture;
+	private MetalTexture? _fallbackVolumeTexture;
+	private uint _fallbackVolumeTextureIndex;
 	private MetalBuffer? _fallbackConstantBuffer;
 
 	public MetalDescriptorTable(MTLDevice device, Action<MTLBuffer> retireArgumentBuffer)
@@ -245,6 +247,35 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		var uavHandle = AllocateUnorderedAccessView(_fallbackTexture);
 		_fallbackTexture.SetHandles(srvHandle, DescriptorHandle.Invalid, uavHandle);
 
+		// GetTexture3D cannot fall back to SRV 0, whose texture is 2D and only encoded in the 2D view.
+		// The volume fallback's index is published through the counts buffer instead.
+		var volumeDescriptor = new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource,
+			dimension: TextureDimension.Texture3D);
+		var metalVolumeDescriptor = new MTLTextureDescriptor
+		{
+			Width = 1,
+			Height = 1,
+			Depth = 1,
+			MipmapLevelCount = 1,
+			PixelFormat = MTLPixelFormat.RGBA8Unorm,
+			TextureType = MTLTextureType.Type3D,
+			StorageMode = MTLStorageMode.Managed,
+			Usage = MTLTextureUsage.ShaderRead
+		};
+		var volumeTexture = _device.NewTexture(metalVolumeDescriptor);
+		metalVolumeDescriptor.Dispose();
+		if (volumeTexture.NativePtr == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Metal bindless fallback volume texture.");
+		}
+
+		UploadFallbackTexture(volumeTexture, isVolume: true);
+		_fallbackVolumeTexture = new MetalTexture("__BindlessFallbackVolumeTexture", volumeDescriptor, volumeTexture, this);
+		var volumeSrvHandle = AllocateShaderResourceView(_fallbackVolumeTexture);
+		_fallbackVolumeTexture.SetHandles(volumeSrvHandle, DescriptorHandle.Invalid, DescriptorHandle.Invalid);
+		_fallbackVolumeTextureIndex = (uint)volumeSrvHandle.Index;
+		UpdateCountBuffer();
+
 		var fallbackBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
 		if (fallbackBuffer.NativePtr == IntPtr.Zero)
 		{
@@ -279,7 +310,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		counts[0] = (uint)_srvCount;
 		counts[1] = (uint)_uavCount;
 		counts[2] = (uint)_samplerCount;
-		counts[3] = 0;
+		counts[3] = _fallbackVolumeTextureIndex;
 		BufferHelper.CopyToBuffer(counts, _countBuffer);
 	}
 
@@ -463,7 +494,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 	}
 
-	private static unsafe void UploadFallbackTexture(MTLTexture texture)
+	private static unsafe void UploadFallbackTexture(MTLTexture texture, bool isVolume = false)
 	{
 		var color = stackalloc byte[4];
 		color[0] = 255;
@@ -477,7 +508,14 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			size = new MTLSize { width = 1, height = 1, depth = 1 }
 		};
 
-		texture.ReplaceRegion(region, 0, (nint)color, 4);
+		if (isVolume)
+		{
+			texture.ReplaceRegion(region, 0, 0, (nint)color, 4, 4);
+		}
+		else
+		{
+			texture.ReplaceRegion(region, 0, (nint)color, 4);
+		}
 	}
 
 	private static MTLSamplerAddressMode ToAddressMode(AddressMode mode) => mode switch
@@ -528,8 +566,14 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			return;
 		}
 
+		// common_bindless.slang declares Texture2D and Texture3D arrays back to back in the texture
+		// argument buffer, so the volume view of descriptor `index` lives at MaxDescriptors + index.
+		// Argument slots are typed, so only the view matching the texture's dimension is written.
+		var slot = srvTexture.Descriptor.Dimension == TextureDimension.Texture3D
+			? MaxDescriptors + index
+			: index;
 		_singleTexture[0] = texture;
-		_textureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)index, length = 1 });
+		_textureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)slot, length = 1 });
 	}
 
 	private void EncodeUav(int index)

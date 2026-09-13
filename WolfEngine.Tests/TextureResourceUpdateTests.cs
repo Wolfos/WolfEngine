@@ -53,6 +53,22 @@ public sealed class TextureResourceUpdateTests
 		Assert.That(WolfRendererD3D.CanUpdateTextureResources(texture, in descriptor), Is.False);
 	}
 
+	[Test]
+	public void VolumeContentChange_PreservesD3D12Resource_AndShapeChangeReplacesIt()
+	{
+		var texels = new byte[TextureFormatUtilities.GetMipDataSize(TextureFormat.Rgba16Float, 4, 4, 4)];
+		var texture = Texture.Create3D("volume", 4, 4, 4, TextureFormat.Rgba16Float, [new TextureMipData(4, 4, texels, 4)]);
+		var matching = new TextureDescriptor(4, 4, TextureFormat.Rgba16Float, TextureUsage.ShaderResource,
+			dimension: TextureDimension.Texture3D, depth: 4);
+		var deeper = new TextureDescriptor(4, 4, TextureFormat.Rgba16Float, TextureUsage.ShaderResource,
+			dimension: TextureDimension.Texture3D, depth: 8);
+		var flat = new TextureDescriptor(4, 4, TextureFormat.Rgba16Float, TextureUsage.ShaderResource);
+
+		Assert.That(WolfRendererD3D.CanUpdateTextureResources(texture, in matching), Is.True);
+		Assert.That(WolfRendererD3D.CanUpdateTextureResources(texture, in deeper), Is.False);
+		Assert.That(WolfRendererD3D.CanUpdateTextureResources(texture, in flat), Is.False);
+	}
+
 	private static Texture CreateTexture(int width, int height, TextureFormat format, int mipCount)
 	{
 		var mips = new TextureMipData[mipCount];

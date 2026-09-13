@@ -144,6 +144,32 @@ public sealed class TextureRuntimeAssetResolver : ITextureRuntimeAssetResolver
 	}
 }
 
+public sealed class ColorLookupTableRuntimeAssetResolver : IColorLookupTableRuntimeResolver
+{
+	private readonly ITextureFactory _textureFactory;
+
+	public ColorLookupTableRuntimeAssetResolver(ITextureFactory textureFactory)
+	{
+		_textureFactory = textureFactory ?? throw new ArgumentNullException(nameof(textureFactory));
+	}
+
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var artifact = context.Asset.Artifacts.FirstOrDefault(artifact =>
+			               string.Equals(artifact.Kind, ColorLookupTableArtifactSerializer.ArtifactKind, StringComparison.Ordinal))
+		               ?? throw new InvalidOperationException(
+			               $"Colour lookup table '{context.AssetId}' does not expose a runtime artifact.");
+		var data = ColorLookupTableArtifactSerializer.Read(context.GetAbsolutePath(artifact.RelativePath));
+		return ColorLookupTable.Create(GetRuntimeName(context.AssetId), data, _textureFactory);
+	}
+
+	/// <summary>
+	/// The texture factory caches by name, so the name is keyed by asset id alone and cannot collide with
+	/// 2D texture names; a reimport of the same asset then updates the cached volume in place.
+	/// </summary>
+	internal static string GetRuntimeName(Guid assetId) => $"lut:{assetId:D}";
+}
+
 public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 {
 	public object Resolve(RuntimeAssetResolveContext context)

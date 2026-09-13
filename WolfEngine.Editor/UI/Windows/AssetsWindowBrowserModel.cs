@@ -391,8 +391,9 @@ internal static class AssetsWindowBrowserModelBuilder
 			AssetType.Material => 4,
 			AssetType.Terrain => 5,
 			AssetType.Texture2D => 6,
-			AssetType.AudioClip => 7,
-			AssetType.DataAsset => 8,
+			AssetType.ColorLookupTable => 7,
+			AssetType.AudioClip => 8,
+			AssetType.DataAsset => 9,
 			_ => 10
 		};
 	}

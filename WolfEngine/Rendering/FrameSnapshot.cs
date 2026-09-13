@@ -47,6 +47,12 @@ public sealed class FrameSnapshot
 	public Vector3 SunDirection { get; private set; }
 	public float SunIntensityScale { get; private set; }
 	public RenderConfig Config { get; private set; }
+
+	/// <summary>
+	/// <see cref="ColorGradingConfig.LookupTable"/>, resolved on the game thread so the render thread never
+	/// touches the asset database. Null when no table is assigned.
+	/// </summary>
+	public ColorLookupTable? ColorGradingLookupTable { get; private set; }
 	public GpuDrawDatabase GpuDrawDatabase { get; }
 	private bool _hasCameraState;
 	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
@@ -156,8 +162,14 @@ public sealed class FrameSnapshot
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.AntiAliasing = config.AntiAliasing;
 		Config.Tonemapping = config.Tonemapping;
+		Config.ColorGrading = config.ColorGrading;
 		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;
+	}
+
+	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable)
+	{
+		ColorGradingLookupTable = lookupTable;
 	}
 
 	public readonly struct LightPacket

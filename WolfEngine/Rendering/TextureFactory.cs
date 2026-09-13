@@ -52,7 +52,8 @@ public sealed class TextureFactory : ITextureFactory
 		var cached = _cache.GetOrAdd(texture.Name, _ => texture);
 		if (ReferenceEquals(cached, texture) == false)
 		{
-			cached.ApplyTextureData(texture.Width, texture.Height, texture.IsSrgb, texture.Format, texture.MipLevels);
+			cached.ApplyTextureData(texture.Width, texture.Height, texture.IsSrgb, texture.Format, texture.MipLevels,
+				texture.Dimension, texture.Depth);
 		}
 
 		_renderGraph.EnsureTextureResources(cached);

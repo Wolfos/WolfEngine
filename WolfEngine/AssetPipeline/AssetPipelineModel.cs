@@ -22,6 +22,7 @@ public static class AssetImporterIds
 {
 	public const string Texture = "texture";
 	public const string Audio = "audio";
+	public const string ColorLookupTable = "color-lookup-table";
 	public const string Material = "material";
 	public const string DataAsset = "data";
 	public const string Terrain = "terrain";
