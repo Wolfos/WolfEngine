@@ -39,7 +39,9 @@ cbuffer BindlessCounts : register(b27)
     uint g_BindlessSrvCount;
     uint g_BindlessUavCount;
     uint g_BindlessSamplerCount;
-    uint g_BindlessPadding;
+    // SRV index of a 1x1x1 volume texture. Index 0 is a 2D texture and cannot back the 3D view,
+    // so GetTexture3D falls back here instead.
+    uint g_BindlessFallbackTexture3D;
 };
 
 uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
@@ -54,12 +56,19 @@ uint SafeDescriptorIndex(uint handle, uint expectedKind, uint descriptorCount)
 }
 
 #if defined(WOLF_TARGET_METAL)
+// Two views over the SRV descriptors - same handle, same index, different dimension. Metal
+// argument buffer slots are typed, so unlike D3D12 the views cannot share slots: they are laid
+// out back to back, and index i of the 3D view sits at WOLF_BINDLESS_TEXTURE_MAX + i.
+// MetalDescriptorTable.EncodeSrv writes only the slot matching the texture's dimension; keep
+// that in sync with the order here.
 struct DescriptorHeapTextures
 {
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
     Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX];
+    Texture3D<float4> g_Textures3D[WOLF_BINDLESS_TEXTURE_MAX];
 #else
     Texture2D<float4> g_Textures[];
+    Texture3D<float4> g_Textures3D[];
 #endif
 };
 
@@ -112,6 +121,18 @@ Texture2D<float4> GetTexture(uint handle)
         return g_TextureHeap.g_Textures[0];
     }
     return g_TextureHeap.g_Textures[index];
+}
+
+/// Same descriptors as GetTexture, viewed as volumes. Only valid for textures created with
+/// TextureDimension.Texture3D.
+Texture3D<float4> GetTexture3D(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_TextureHeap.g_Textures3D[g_BindlessFallbackTexture3D];
+    }
+    return g_TextureHeap.g_Textures3D[index];
 }
 
 #if !defined(WOLF_NO_RW_TEXTURES)
@@ -179,6 +200,9 @@ SamplerState GetSampler(uint handle)
 #else
 #if defined(WOLF_BINDLESS_FIXED_SIZE)
 Texture2D<float4> g_Textures[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space1);
+// Aliases the same SRV descriptor range as g_Textures. The matching D3D12_DESCRIPTOR_RANGE is
+// added to the bindless SRV root parameter in D3D12Device with the same table offset.
+Texture3D<float4> g_Textures3D[WOLF_BINDLESS_TEXTURE_MAX] : register(t0, space2);
 SamplerState g_Samplers[WOLF_BINDLESS_SAMPLER_MAX] : register(s0, space1);
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> g_RWTextures[WOLF_BINDLESS_RW_TEXTURE_MAX] : register(u0, space1);
@@ -190,6 +214,7 @@ globallycoherent RWTexture2D<float4> g_RWTexturesCoherent[WOLF_BINDLESS_RW_TEXTU
 #endif
 #else
 Texture2D<float4> g_Textures[] : register(t0, space1);
+Texture3D<float4> g_Textures3D[] : register(t0, space2);
 SamplerState g_Samplers[] : register(s0, space1);
 #if !defined(WOLF_NO_RW_TEXTURES)
 RWTexture2D<float4> g_RWTextures[] : register(u0, space1);
@@ -206,6 +231,18 @@ Texture2D<float4> GetTexture(uint handle)
         return g_Textures[0];
     }
     return g_Textures[index];
+}
+
+/// Same descriptors as GetTexture, viewed as volumes. Only valid for textures created with
+/// TextureDimension.Texture3D.
+Texture3D<float4> GetTexture3D(uint handle)
+{
+    uint index = SafeDescriptorIndex(handle, DESCRIPTOR_KIND_SRV, g_BindlessSrvCount);
+    if (index == WOLF_INVALID_DESCRIPTOR_INDEX)
+    {
+        return g_Textures3D[g_BindlessFallbackTexture3D];
+    }
+    return g_Textures3D[index];
 }
 
 #if !defined(WOLF_NO_RW_TEXTURES)

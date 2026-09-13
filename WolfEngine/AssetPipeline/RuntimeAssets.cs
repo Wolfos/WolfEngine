@@ -79,6 +79,10 @@ public interface IAnimationClipRuntimeAssetResolver : IRuntimeAssetResolver
 {
 }
 
+public interface IColorLookupTableRuntimeResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IRuntimeArtifactTargetProvider
 {
 	string CurrentTarget { get; }

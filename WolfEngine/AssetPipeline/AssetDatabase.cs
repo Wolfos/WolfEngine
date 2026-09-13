@@ -20,7 +20,8 @@ public enum AssetType
 	AudioClip,
 	// Persisted as integers in the SQLite index, so new members are appended rather than inserted.
 	Skeleton,
-	AnimationClip
+	AnimationClip,
+	ColorLookupTable
 }
 
 public enum MaterialAssetType
@@ -139,6 +140,12 @@ public sealed class TextureAssetSummary
 	public int Channels { get; set; }
 	public TextureSemantic Semantic { get; set; }
 	public string SourceExtension { get; set; } = string.Empty;
+}
+
+public sealed class ColorLookupTableAssetSummary
+{
+	public string Title { get; set; } = string.Empty;
+	public int Size { get; set; }
 }
 
 public sealed class MaterialAssetSummary

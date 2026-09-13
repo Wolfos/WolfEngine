@@ -1128,7 +1128,9 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			texture.Format,
 			supportsUnorderedAccess ? TextureUsage.ShaderResource | TextureUsage.UnorderedAccess : TextureUsage.ShaderResource,
 			mipLevels: texture.MipCount,
-			isSrgb: texture.IsSrgb);
+			isSrgb: texture.IsSrgb,
+			dimension: texture.Dimension,
+			depth: texture.Depth);
 
 		var backendTexture = new BackendD3D12Texture();
 		backendTexture.Initialize(texture.Name, descriptor, gpuTexture);
@@ -1183,6 +1185,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			: TextureUsage.ShaderResource;
 		return descriptor.Width == texture.Width &&
 		       descriptor.Height == texture.Height &&
+		       descriptor.Depth == texture.Depth &&
+		       descriptor.Dimension == texture.Dimension &&
 		       descriptor.Format == texture.Format &&
 		       descriptor.MipLevels == texture.MipCount &&
 		       descriptor.IsSrgb == texture.IsSrgb &&
@@ -1193,11 +1197,13 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	{
 		return new ResourceDesc
 		{
-			Dimension = ResourceDimension.Texture2D,
+			Dimension = texture.Dimension == TextureDimension.Texture3D
+				? ResourceDimension.Texture3D
+				: ResourceDimension.Texture2D,
 			Alignment = 0,
 			Width = (ulong)texture.Width,
 			Height = (uint)texture.Height,
-			DepthOrArraySize = 1,
+			DepthOrArraySize = (ushort)texture.Depth,
 			MipLevels = (ushort)texture.MipCount,
 			Format = ToDxgiTextureFormat(texture.Format, texture.IsSrgb),
 			SampleDesc = new(1, 0),
@@ -1264,15 +1270,30 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 			for (var mipIndex = 0; mipIndex < subresourceCount; mipIndex++)
 			{
 				var mip = texture.MipLevels[mipIndex];
+				var rowPitch = (ulong)layouts[mipIndex].Footprint.RowPitch;
+				var rowsPerSlice = (ulong)numRows[mipIndex];
+				// Volume footprints lay slices out back to back, each rowsPerSlice rows at rowPitch.
+				// 2D textures are the single-slice case.
+				var sliceCount = Math.Max(1u, layouts[mipIndex].Footprint.Depth);
+				var sourceRowSize = (ulong)TextureFormatUtilities.GetBytesPerRow(texture.Format, mip.Width);
+				if ((ulong)mip.Data.Length < sliceCount * rowsPerSlice * sourceRowSize)
+				{
+					throw new ArgumentException(
+						$"Texture '{texture.Name}' mip {mipIndex} data is smaller than its {texture.Format} footprint.",
+						nameof(texture));
+				}
+
 				fixed (byte* src = mip.Data)
 				{
-					var rowPitch = layouts[mipIndex].Footprint.RowPitch;
-					var sourceRowSize = (ulong)TextureFormatUtilities.GetBytesPerRow(texture.Format, mip.Width);
-					for (uint row = 0; row < numRows[mipIndex]; row++)
+					for (ulong slice = 0; slice < sliceCount; slice++)
 					{
-						var destRow = mapped + layouts[mipIndex].Offset + row * rowPitch;
-						var srcRow = src + row * sourceRowSize;
-						Buffer.MemoryCopy(srcRow, destRow, sourceRowSize, sourceRowSize);
+						var destSlice = mapped + layouts[mipIndex].Offset + slice * rowsPerSlice * rowPitch;
+						var srcSlice = src + slice * rowsPerSlice * sourceRowSize;
+						for (ulong row = 0; row < rowsPerSlice; row++)
+						{
+							Buffer.MemoryCopy(srcSlice + row * sourceRowSize, destSlice + row * rowPitch,
+								sourceRowSize, sourceRowSize);
+						}
 					}
 				}
 			}
@@ -1347,6 +1368,7 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private static bool SupportsUnorderedAccess(Texture texture)
 	{
 		return texture is not null &&
+		       texture.Dimension == TextureDimension.Texture2D &&
 		       TextureFormatUtilities.SupportsUnorderedAccess(texture.Format, texture.IsSrgb);
 	}
 

@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 
@@ -56,6 +57,17 @@ public sealed class TonemappingPass
 			: resources.ResolvedSceneColor);
 		var output = context.GetTexture(resources.TonemappedLinearSceneColor);
 
+		// The LUT is a persistent asset texture rather than a graph resource. Until its upload has published a
+		// volume SRV, grading is skipped: the bindless error texture is 2D and cannot stand in for it.
+		var colorGrading = resources.Config.ColorGrading;
+		var lookupTable = context.FrameSnapshot.ColorGradingLookupTable;
+		var lookupTableResources = lookupTable is not null && lookupTable.Texture.HasGpuResources
+			? lookupTable.Texture.Resources
+			: null;
+		var gradingActive = colorGrading.Contribution > 0.0f &&
+		                    lookupTableResources is not null &&
+		                    lookupTableResources.ShaderResourceView.IsValid;
+
 		return new TonemappingPassConfig
 		{
 			Pipeline = pipeline,
@@ -63,7 +75,12 @@ public sealed class TonemappingPass
 			OutputHandle = _bindlessRegistry.RegisterRwTexture(output),
 			LinearSampler = _linearSampler,
 			RenderSize = resources.FramebufferSize,
-			Settings = settings
+			Settings = settings,
+			LookupTableHandle = gradingActive ? lookupTableResources!.ShaderResourceView : DescriptorHandle.Invalid,
+			LookupTableContribution = gradingActive ? MathF.Min(colorGrading.Contribution, 1.0f) : 0.0f,
+			LookupTableSize = lookupTable?.Size ?? 2,
+			LookupTableDomainMin = lookupTable?.DomainMin ?? Vector3.Zero,
+			LookupTableDomainMax = lookupTable?.DomainMax ?? Vector3.One
 		};
 	}
 
@@ -81,6 +98,7 @@ public sealed class TonemappingPass
 		bindlessWriter.SetUInt("inputHandle", config.InputHandle.Value);
 		bindlessWriter.SetUInt("outputHandle", config.OutputHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.LinearSampler.Value);
+		bindlessWriter.SetUInt("lutHandle", config.LookupTableHandle.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var settingsWriter = _settingsWriters[index]
@@ -89,6 +107,13 @@ public sealed class TonemappingPass
 		settingsWriter.SetUInt("renderSizeX", (uint)Math.Max(config.RenderSize.X, 1));
 		settingsWriter.SetUInt("renderSizeY", (uint)Math.Max(config.RenderSize.Y, 1));
 		settingsWriter.SetFloat("exposure", MathF.Max(config.Settings.Exposure, 0.0f));
+		var lutSize = (float)Math.Max(config.LookupTableSize, 2);
+		var domainExtent = Vector3.Max(config.LookupTableDomainMax - config.LookupTableDomainMin, new Vector3(1e-6f));
+		settingsWriter.SetFloat("lutContribution", config.LookupTableContribution);
+		settingsWriter.SetFloat("lutScale", (lutSize - 1.0f) / lutSize);
+		settingsWriter.SetFloat("lutOffset", 0.5f / lutSize);
+		settingsWriter.SetVector3("lutDomainMin", config.LookupTableDomainMin);
+		settingsWriter.SetVector3("lutInverseDomainExtent", Vector3.One / domainExtent);
 		commandList.SetComputeConstants(settingsWriter.RegisterIndex, settingsWriter.AsBytes());
 
 		var threadGroupSize = _threadGroupSizes[index]

@@ -85,6 +85,7 @@ public static class Program
 		services.AddSingleton<ITerrainAssetRuntimeResolver, TerrainAssetRuntimeResolver>();
 		services.AddSingleton<IMaterialRuntimeAssetResolver, MaterialRuntimeAssetResolver>();
 		services.AddSingleton<ITextureRuntimeAssetResolver, TextureRuntimeAssetResolver>();
+		services.AddSingleton<IColorLookupTableRuntimeResolver, ColorLookupTableRuntimeAssetResolver>();
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
@@ -99,6 +100,7 @@ public static class Program
 		services.AddSingleton<ModelAssetEditor>();
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();

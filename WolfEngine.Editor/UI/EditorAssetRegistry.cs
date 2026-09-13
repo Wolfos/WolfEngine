@@ -1,6 +1,7 @@
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Audio;
+using ImGuiNET;
 
 namespace WolfEngine.Editor.UI;
 
@@ -80,6 +81,34 @@ public sealed class TextureEditorAssetHandler : IEditorAssetHandler
 	public void DrawEditor(AssetDatabaseEntry asset)
 	{
 		_editor.Draw(asset);
+	}
+}
+
+public sealed class ColorLookupTableEditorAssetHandler : IEditorAssetHandler
+{
+	public AssetType AssetType => AssetType.ColorLookupTable;
+	public string DisplayName => "Color LUT";
+	public string ThumbnailLabel => "LUT";
+
+	public string GetSubtitle(AssetDatabaseEntry asset)
+	{
+		return asset.TryGetSummary<ColorLookupTableAssetSummary>(out var summary) == false
+			? "Color LUT"
+			: $"Color LUT | {summary.Size}^3";
+	}
+
+	public IReadOnlyList<EditorAssetCreateMenuItem> GetCreateMenuItems() => [];
+
+	public void DrawEditor(AssetDatabaseEntry asset)
+	{
+		ImGui.TextUnformatted(GetSubtitle(asset));
+		if (asset.TryGetSummary<ColorLookupTableAssetSummary>(out var summary) &&
+		    string.IsNullOrWhiteSpace(summary.Title) == false)
+		{
+			ImGui.TextUnformatted($"Title: {summary.Title}");
+		}
+
+		ImGui.TextDisabled("Assign it in a Render Config under Color Grading > Lookup Table.");
 	}
 }
 

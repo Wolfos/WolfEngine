@@ -23,6 +23,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		{
 			Width = descriptor.Width;
 			Height = descriptor.Height;
+			Depth = descriptor.Depth;
+			Dimension = descriptor.Dimension;
 			Format = descriptor.Format;
 			Usage = descriptor.Usage;
 			MipLevels = descriptor.MipLevels;
@@ -31,6 +33,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 		public int Width { get; }
 		public int Height { get; }
+		public int Depth { get; }
+		public TextureDimension Dimension { get; }
 		public TextureFormat Format { get; }
 		public TextureUsage Usage { get; }
 		public int MipLevels { get; }
@@ -39,6 +43,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		public bool Equals(TexturePoolKey other) =>
 			Width == other.Width &&
 			Height == other.Height &&
+			Depth == other.Depth &&
+			Dimension == other.Dimension &&
 			Format == other.Format &&
 			Usage == other.Usage &&
 			MipLevels == other.MipLevels &&
@@ -46,7 +52,8 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 		public override bool Equals(object? obj) => obj is TexturePoolKey other && Equals(other);
 
-		public override int GetHashCode() => HashCode.Combine(Width, Height, Format, Usage, MipLevels, IsSrgb);
+		public override int GetHashCode() =>
+			HashCode.Combine(Width, Height, Depth, Dimension, Format, Usage, MipLevels, IsSrgb);
 	}
 
 	private MTLDevice _device;
@@ -354,10 +361,12 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		var textureDescriptor = new MTLTextureDescriptor();
 		textureDescriptor.Width = (ulong)descriptor.Width;
 		textureDescriptor.Height = (ulong)descriptor.Height;
-		textureDescriptor.Depth = 1;
+		textureDescriptor.Depth = (ulong)descriptor.Depth;
 		textureDescriptor.MipmapLevelCount = (ulong)descriptor.MipLevels;
 		textureDescriptor.PixelFormat = ToPixelFormat(descriptor.Format, descriptor.IsSrgb);
-		textureDescriptor.TextureType = MTLTextureType.Type2D;
+		textureDescriptor.TextureType = descriptor.Dimension == TextureDimension.Texture3D
+			? MTLTextureType.Type3D
+			: MTLTextureType.Type2D;
 		textureDescriptor.StorageMode = MTLStorageMode.Managed;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
 

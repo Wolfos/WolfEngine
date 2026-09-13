@@ -1,9 +1,14 @@
 namespace WolfEngine.Rendering;
 
+/// <summary>
+/// One mip level of texture content. For volume textures, <see cref="Data"/> holds
+/// <see cref="Depth"/> slices back to back, each laid out as a 2D mip of the same size.
+/// </summary>
 public readonly record struct TextureMipData(
 	int Width,
 	int Height,
-	byte[] Data);
+	byte[] Data,
+	int Depth = 1);
 
 public enum TextureCompressionFamily
 {
@@ -90,18 +95,19 @@ public static class TextureFormatUtilities
 		return width * GetBytesPerBlock(format);
 	}
 
-	public static int GetMipDataSize(TextureFormat format, int width, int height)
+	public static int GetMipDataSize(TextureFormat format, int width, int height, int depth = 1)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
 
 		if (IsCompressed(format))
 		{
 			var blocksX = (width + GetBlockWidth(format) - 1) / GetBlockWidth(format);
 			var blocksY = (height + GetBlockHeight(format) - 1) / GetBlockHeight(format);
-			return blocksX * blocksY * GetBytesPerBlock(format);
+			return blocksX * blocksY * depth * GetBytesPerBlock(format);
 		}
 
-		return width * height * GetBytesPerBlock(format);
+		return width * height * depth * GetBytesPerBlock(format);
 	}
 }

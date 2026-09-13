@@ -6,6 +6,7 @@ cbuffer BindlessHandles : register(b0)
     uint inputHandle;
     uint outputHandle;
     uint samplerHandle;
+    uint lutHandle;
 };
 
 cbuffer TonemappingSettings : register(b1)
@@ -13,7 +14,14 @@ cbuffer TonemappingSettings : register(b1)
     uint renderSizeX;
     uint renderSizeY;
     float exposure;
-    float _padding0;
+    // Zero disables colour grading; lutHandle is then the invalid handle.
+    float lutContribution;
+    float3 lutDomainMin;
+    // (N - 1) / N and 0.5 / N: map [0, 1] onto texel centres so the lattice ends are not filtered
+    // against the clamped border.
+    float lutScale;
+    float3 lutInverseDomainExtent;
+    float lutOffset;
 };
 
 bool TryLoadExposedSceneHdr(uint2 pixel, out float3 exposedSceneHdr)
@@ -34,10 +42,46 @@ bool TryLoadExposedSceneHdr(uint2 pixel, out float3 exposedSceneHdr)
     return true;
 }
 
+float ColorGradingEncodeSrgbChannel(float linear)
+{
+    return linear <= 0.0031308f ? linear * 12.92f : 1.055f * pow(linear, 1.0f / 2.4f) - 0.055f;
+}
+
+float ColorGradingDecodeSrgbChannel(float encoded)
+{
+    return encoded <= 0.04045f ? encoded / 12.92f : pow((encoded + 0.055f) / 1.055f, 2.4f);
+}
+
+// .cube LUTs are authored against display-encoded values, so grading happens in sRGB encoding
+// and the result is decoded back to the linear display space the rest of the chain expects.
+float3 ApplyColorGrading(float3 linearDisplaySrgb)
+{
+    if (lutContribution <= 0.0f)
+    {
+        return linearDisplaySrgb;
+    }
+
+    float3 linearClamped = saturate(linearDisplaySrgb);
+    float3 encoded = float3(
+        ColorGradingEncodeSrgbChannel(linearClamped.r),
+        ColorGradingEncodeSrgbChannel(linearClamped.g),
+        ColorGradingEncodeSrgbChannel(linearClamped.b));
+    float3 lattice = saturate((encoded - lutDomainMin) * lutInverseDomainExtent);
+    float3 uvw = lattice * lutScale + lutOffset;
+
+    Texture3D<float4> lut = GetTexture3D(lutHandle);
+    float3 graded = lut.SampleLevel(GetSampler(samplerHandle), uvw, 0.0f).rgb;
+    float3 blended = saturate(lerp(encoded, graded, lutContribution));
+    return float3(
+        ColorGradingDecodeSrgbChannel(blended.r),
+        ColorGradingDecodeSrgbChannel(blended.g),
+        ColorGradingDecodeSrgbChannel(blended.b));
+}
+
 void WriteLinearDisplaySrgb(uint2 pixel, float3 linearDisplaySrgb)
 {
     RWTexture2D<float4> outputTexture = GetRWTexture(outputHandle);
-    outputTexture[pixel] = float4(linearDisplaySrgb, 1.0f);
+    outputTexture[pixel] = float4(ApplyColorGrading(linearDisplaySrgb), 1.0f);
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -809,6 +809,69 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 	}
 
+	private ImportGraph ImportColorLookupTableSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var name = Path.GetFileNameWithoutExtension(relativeSourcePath);
+		LogLibraryBuildStage($"Parsing colour lookup table '{relativeSourcePath}'.");
+		var lut = CubeLutParser.Parse(absoluteSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.ColorLookupTable, name);
+		// Half-float texels are identical on every backend, so a single target-agnostic artifact is cooked.
+		var relativeArtifactPath = NormalizeRelativePath(Path.Combine(
+			AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName,
+			nodeId.ToString("D"),
+			"lut.bin"));
+		var absoluteArtifactPath = GetAbsolutePath(projectRootPath, relativeArtifactPath);
+		ColorLookupTableArtifactSerializer.Write(absoluteArtifactPath, ColorLookupTableArtifactSerializer.CreateArtifact(lut));
+		var info = new FileInfo(absoluteArtifactPath);
+		var summary = new ColorLookupTableAssetSummary
+		{
+			Title = lut.Title,
+			Size = lut.Size
+		};
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = AssetType.ColorLookupTable,
+					NodeKey = "main",
+					Name = name,
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = relativeSourcePath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = AssetPipelineSerialization.Serialize(summary)
+				}
+			],
+			Artifacts =
+			[
+				new AssetArtifactRecord
+				{
+					NodeId = nodeId,
+					ArtifactKey = "runtime-lut",
+					Kind = ColorLookupTableArtifactSerializer.ArtifactKind,
+					Target = "generic",
+					RelativePath = relativeArtifactPath,
+					ContentHash = AssetHashing.ComputeFileHash(absoluteArtifactPath),
+					ByteSize = info.Length,
+					ChunkIndex = 0,
+					ChunkCount = 1
+				}
+			],
+			Dependencies = []
+		};
+	}
+
 	private ImportGraph ImportMaterialSource(
 		string projectRootPath,
 		string absoluteSourcePath,
@@ -1991,6 +2054,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				AudioAssetConstants.IsSupportedSource,
 				() => AssetPipelineSerialization.Serialize(new AudioImportSettings()),
 				ImportAudioSource),
+			new AssetImporterDescriptor(
+				AssetImporterIds.ColorLookupTable,
+				1,
+				path => string.Equals(Path.GetExtension(path), ".cube", StringComparison.OrdinalIgnoreCase),
+				() => "{}",
+				ImportColorLookupTableSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
 				7,

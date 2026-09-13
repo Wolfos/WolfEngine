@@ -212,6 +212,11 @@ public static class GameBuilder
 			path = asset.Artifacts.FirstOrDefault(item => item.Kind == AudioAssetConstants.RuntimeArtifactKind)?.RelativePath
 			       ?? throw new InvalidOperationException($"Audio clip '{asset.Id}' has no runtime artifact.");
 		}
+		else if (asset.Type == AssetType.ColorLookupTable)
+		{
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == ColorLookupTableArtifactSerializer.ArtifactKind)?.RelativePath
+			       ?? throw new InvalidOperationException($"Colour lookup table '{asset.Id}' has no runtime artifact.");
+		}
 		else
 		{
 			path = asset.RelativeAssetPath;
@@ -310,7 +315,7 @@ public static class GameBuilder
 
 	private static string GetPackName(AssetType type) => type switch
 	{
-		AssetType.Texture2D => "textures",
+		AssetType.Texture2D or AssetType.ColorLookupTable => "textures",
 		AssetType.Mesh or AssetType.Model3D or AssetType.Skeleton or AssetType.AnimationClip => "meshes-models",
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",

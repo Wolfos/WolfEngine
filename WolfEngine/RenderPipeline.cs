@@ -64,6 +64,15 @@ public class RenderPipeline : IRenderPipeline
 
 				snapshot.SetCamera(camera, cameraWorldTransform);
 				snapshot.SetConfig(config);
+
+				var lookupTableRef = config.ColorGrading.LookupTable;
+				var lookupTable = lookupTableRef.IsValid ? lookupTableRef.Asset : null;
+				if (lookupTable is not null)
+				{
+					_renderGraph.EnsureTextureResources(lookupTable.Texture);
+				}
+
+				snapshot.SetColorGradingLookupTable(lookupTable);
 			}
 
 			var sunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
