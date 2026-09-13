@@ -17,7 +17,7 @@ public interface IEngineAssetMountProvider
 public sealed class EngineAssetMountProvider : IEngineAssetMountProvider
 {
 	private const string MountId = "engine";
-	private const string MountDisplayName = "Engine";
+	private const string MountDisplayName = "Engine Content";
 	private readonly string _sourceRoot;
 	private readonly string _cacheRoot;
 	private readonly IProjectAssetPipelineService _assetPipelineService;
@@ -75,6 +75,8 @@ public sealed class EngineAssetMountProvider : IEngineAssetMountProvider
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Append(hash, $"content-version:{ReadOnlyAssetMountLoader.CurrentContentVersion}\n");
 		Append(hash, $"target:{_targetProvider.CurrentTarget}\n");
+		// The manifest is written into the cache, so its identity must invalidate previously generated entries.
+		Append(hash, $"mount:{MountId}\0{MountDisplayName}\n");
 		Append(hash, $"importers:{_assetPipelineService.ImporterVersionFingerprint ?? string.Empty}\n");
 
 		foreach (var sourcePath in Directory.EnumerateFiles(_sourceRoot, "*", SearchOption.AllDirectories)

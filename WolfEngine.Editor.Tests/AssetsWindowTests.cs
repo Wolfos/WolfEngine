@@ -178,26 +178,62 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
-	public void BrowserModelBuild_AddsReadOnlyMountedAssetsUnderNamedRoot()
+	public void BrowserModelBuild_AddsReadOnlyMountedAssetsUnderSeparateRoot()
 	{
 		using var assetsRoot = new TemporaryAssetsRoot();
 		var engineAsset = CreateAssetEntry(Guid.NewGuid(), "Cube", "Assets/Primitives/Cube.obj");
 		var projectMount = new DirectoryAssetMount("project", "Project",
 			Directory.GetParent(assetsRoot.AssetsPath)!.FullName, false, new AssetDatabase());
-		var engineMount = new DirectoryAssetMount("engine", "Engine", Path.GetTempPath(), true,
+		var engineMount = new DirectoryAssetMount("engine", "Engine Content", Path.GetTempPath(), true,
 			new AssetDatabase { Assets = [engineAsset] });
 
 		var browserModel = AssetsWindowBrowserModelBuilder.Build(
 			new AssetCatalog([projectMount, engineMount]), assetsRoot.AssetsPath);
 
-		var engineFolder = browserModel.FoldersByPath["Assets/Engine/Primitives"];
+		var engineFolder = browserModel.FoldersByPath["Engine Content/Primitives"];
 		Assert.That(engineFolder.Sources, Has.Count.EqualTo(1));
 		Assert.Multiple(() =>
 		{
+			Assert.That(browserModel.RootFolders.Select(folder => folder.RelativePath),
+				Is.EqualTo(new[] { "Assets", "Engine Content" }));
+			Assert.That(browserModel.RootFolders[1].Children, Is.EqualTo(new[] { engineFolder }));
+			Assert.That(browserModel.FoldersByPath.ContainsKey("Assets/Engine Content"), Is.False);
+			Assert.That(engineFolder.Sources[0].FolderPath, Is.EqualTo("Engine Content/Primitives"));
 			Assert.That(engineFolder.Sources[0].MountId, Is.EqualTo("engine"));
 			Assert.That(engineFolder.Sources[0].IsReadOnly, Is.True);
 			Assert.That(engineFolder.Sources[0].PrimaryAsset.Id, Is.EqualTo(engineAsset.Id));
+			Assert.That(AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, "Engine Content/Primitives/Missing"),
+				Is.EqualTo("Engine Content/Primitives"));
+			Assert.That(AssetsWindowBrowserModelBuilder.NormalizeSelectedFolderPath(browserModel, "Unknown Root/Folder"),
+				Is.EqualTo("Assets"));
 		});
+	}
+
+	[Test]
+	public void BrowserModelBuild_RejectsMountRootNamedAssets()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var projectMount = new DirectoryAssetMount("project", "Project",
+			Directory.GetParent(assetsRoot.AssetsPath)!.FullName, false, new AssetDatabase());
+		var conflictingMount = new DirectoryAssetMount("engine", "Assets", Path.GetTempPath(), true, new AssetDatabase());
+
+		Assert.Throws<InvalidOperationException>(() => AssetsWindowBrowserModelBuilder.Build(
+			new AssetCatalog([projectMount, conflictingMount]), assetsRoot.AssetsPath));
+	}
+
+	[Test]
+	public void SelectionState_ValidateAfterProjectMutation_KeepsMountedFolderSelection()
+	{
+		var projectService = Substitute.For<IEditorProjectService>();
+		projectService.HasOpenProject.Returns(true);
+		projectService.CurrentAssetCatalog.Returns(new AssetCatalog([]));
+		var selection = new AssetsWindowSelectionState();
+		selection.SetSelectedFolderPath("Engine Content/Materials");
+
+		selection.ValidateAfterProjectMutation(projectService, new AssetSelectionService());
+
+		Assert.That(selection.SelectedFolderPath, Is.EqualTo("Engine Content/Materials"));
+		projectService.DidNotReceive().GetAbsolutePath(Arg.Any<string>());
 	}
 
 	[Test]

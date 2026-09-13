@@ -11,7 +11,7 @@ internal sealed class AssetsWindowSelectionState
 
 	public void SetSelectedFolderPath(string relativeFolderPath)
 	{
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		var normalizedFolderPath = AssetsWindowBrowserPaths.Normalize(relativeFolderPath);
 		if (string.Equals(SelectedFolderPath, normalizedFolderPath, StringComparison.OrdinalIgnoreCase) == false)
 		{
 			FolderTreeRevealPath = normalizedFolderPath;
@@ -27,7 +27,7 @@ internal sealed class AssetsWindowSelectionState
 
 	public void RevealFolderPath(string relativeFolderPath)
 	{
-		FolderTreeRevealPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		FolderTreeRevealPath = AssetsWindowBrowserPaths.Normalize(relativeFolderPath);
 	}
 
 	public void Prune(
@@ -79,8 +79,8 @@ internal sealed class AssetsWindowSelectionState
 
 	public void UpdateSelectedFolderAfterRelocation(string oldFolderPath, string newFolderPath)
 	{
-		var normalizedOldPath = ProjectPathUtility.NormalizeAssetsFolderPath(oldFolderPath);
-		var normalizedNewPath = ProjectPathUtility.NormalizeAssetsFolderPath(newFolderPath);
+		var normalizedOldPath = AssetsWindowBrowserPaths.Normalize(oldFolderPath);
+		var normalizedNewPath = AssetsWindowBrowserPaths.Normalize(newFolderPath);
 		if (string.Equals(SelectedFolderPath, normalizedOldPath, StringComparison.OrdinalIgnoreCase))
 		{
 			SetSelectedFolderPath(normalizedNewPath);
@@ -99,7 +99,13 @@ internal sealed class AssetsWindowSelectionState
 		IEditorProjectService projectService,
 		string relativeFolderPath)
 	{
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		var normalizedFolderPath = AssetsWindowBrowserPaths.Normalize(relativeFolderPath);
+		// Mounted roots have no project directory to probe; Prune validates them against the browser model.
+		if (AssetsWindowBrowserPaths.IsProjectPath(normalizedFolderPath) == false)
+		{
+			return normalizedFolderPath;
+		}
+
 		while (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName,
 			       StringComparison.OrdinalIgnoreCase) == false)
 		{

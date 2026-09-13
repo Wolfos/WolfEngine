@@ -172,7 +172,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 	{
 		AssetsWindowDrawing.PushPaneStyle();
 		ImGui.BeginChild("AssetsFolderTree", new Vector2(FolderTreeWidth, 0.0f), ImGuiChildFlags.None);
-		DrawFolderTreeNode(browserModel.RootFolder);
+		for (var i = 0; i < browserModel.RootFolders.Count; i++)
+		{
+			DrawFolderTreeNode(browserModel.RootFolders[i]);
+		}
+
 		_selection.ClearFolderRevealPath();
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId + "Tree",
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
@@ -402,12 +406,14 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
 		var doubleClicked = leftClicked && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
-		if (leftClicked)
+		var isReadOnly = IsReadOnlyBrowserFolder(folder.RelativePath);
+		if (leftClicked && !isReadOnly)
 		{
 			_dragDrop.Press(AssetBrowserDragTarget.ForFolder(folder.RelativePath));
 		}
 
-		_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
+		if (!isReadOnly)
+			_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderCardContents(folder);
 
 		if (doubleClicked)
@@ -676,14 +682,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
-	private bool IsReadOnlyBrowserFolder(string folderPath)
-	{
-		var catalog = _projectService.CurrentAssetCatalog;
-		return catalog is not null && catalog.Mounts
-			.Where(mount => mount.IsReadOnly)
-			.Select(mount => $"{AssetPipelinePaths.AssetsFolderName}/{mount.DisplayName}")
-			.Any(root => ProjectPathUtility.IsSameOrDescendant(folderPath, root));
-	}
+	// Only the project's Assets root maps to editable project files; every mounted root is browse-only.
+	private static bool IsReadOnlyBrowserFolder(string folderPath) =>
+		AssetsWindowBrowserPaths.IsProjectPath(folderPath) == false;
 
 	private void OpenFolderInFileManager(string folderPath)
 	{
@@ -1114,8 +1115,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return true;
 		}
 
-		if (string.Equals(_selection.SelectedFolderPath, AssetPipelinePaths.AssetsFolderName,
-			    StringComparison.OrdinalIgnoreCase))
+		if (AssetsWindowBrowserPaths.IsRoot(_selection.SelectedFolderPath) ||
+		    IsReadOnlyBrowserFolder(_selection.SelectedFolderPath))
 		{
 			return false;
 		}
@@ -1144,8 +1145,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return true;
 		}
 
-		if (string.Equals(_selection.SelectedFolderPath, AssetPipelinePaths.AssetsFolderName,
-			    StringComparison.OrdinalIgnoreCase))
+		if (AssetsWindowBrowserPaths.IsRoot(_selection.SelectedFolderPath) ||
+		    IsReadOnlyBrowserFolder(_selection.SelectedFolderPath))
 		{
 			return false;
 		}

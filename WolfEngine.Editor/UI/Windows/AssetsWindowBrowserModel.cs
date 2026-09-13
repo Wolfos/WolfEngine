@@ -5,7 +5,7 @@ namespace WolfEngine.Editor.UI;
 
 internal sealed class AssetsWindowBrowserModel
 {
-	public required AssetsWindowFolderNode RootFolder { get; init; }
+	public required IReadOnlyList<AssetsWindowFolderNode> RootFolders { get; init; }
 	public required IReadOnlyDictionary<string, AssetsWindowFolderNode> FoldersByPath { get; init; }
 	public required IReadOnlyDictionary<Guid, AssetsWindowSourceItem> SourcesBySourceId { get; init; }
 }
@@ -35,6 +35,51 @@ internal sealed class AssetsWindowSourceItem
 	public required string FolderPath { get; init; }
 	public required AssetDatabaseEntry PrimaryAsset { get; init; }
 	public required IReadOnlyList<AssetDatabaseEntry> SubAssets { get; init; }
+}
+
+/// <summary>
+/// Browser folder paths are rooted either at the project's Assets folder or at a mount root named after the
+/// mount's display name. Only paths under Assets correspond to project files that the editor may mutate.
+/// </summary>
+internal static class AssetsWindowBrowserPaths
+{
+	public static string Normalize(string? folderPath)
+	{
+		if (string.IsNullOrWhiteSpace(folderPath)) return AssetPipelinePaths.AssetsFolderName;
+
+		var normalized = ProjectPathUtility.NormalizeRelativePath(folderPath).Trim('/');
+		if (string.IsNullOrWhiteSpace(normalized)) return AssetPipelinePaths.AssetsFolderName;
+
+		var segments = normalized.Split('/');
+		if (segments.Any(segment => segment.Length == 0 || segment == "." || segment == ".."))
+			throw new InvalidOperationException($"Browser folder path '{folderPath}' is invalid.");
+		return normalized;
+	}
+
+	public static bool IsRoot(string folderPath) => Normalize(folderPath).Contains('/') == false;
+
+	public static bool IsProjectPath(string folderPath) =>
+		ProjectPathUtility.IsAssetsPathOrDescendant(Normalize(folderPath));
+
+	public static string GetParent(string folderPath)
+	{
+		var normalized = Normalize(folderPath);
+		var separatorIndex = normalized.LastIndexOf('/');
+		return separatorIndex < 0 ? normalized : normalized[..separatorIndex];
+	}
+
+	public static string GetMountRootPath(IAssetMount mount)
+	{
+		ArgumentNullException.ThrowIfNull(mount);
+		var rootName = mount.DisplayName.Trim();
+		if (rootName.Length == 0 || rootName.IndexOfAny(['/', '\\']) >= 0 || rootName == "." || rootName == "..")
+			throw new InvalidOperationException(
+				$"Asset mount '{mount.Id}' has display name '{mount.DisplayName}', which cannot be used as a browser root.");
+		if (string.Equals(rootName, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase))
+			throw new InvalidOperationException(
+				$"Asset mount '{mount.Id}' cannot use '{AssetPipelinePaths.AssetsFolderName}' as its browser root.");
+		return rootName;
+	}
 }
 
 /// <summary>
@@ -103,12 +148,17 @@ internal static class AssetsWindowBrowserModelBuilder
 		ArgumentNullException.ThrowIfNull(catalog);
 		var project = catalog.Mounts.FirstOrDefault(mount => string.Equals(mount.Id, "project", StringComparison.Ordinal));
 		var model = Build(project?.Database.Assets ?? [], assetsRootPath);
+		var roots = (List<AssetsWindowFolderNode>)model.RootFolders;
 		var folders = (Dictionary<string, AssetsWindowFolderNode>)model.FoldersByPath;
 		var sources = (Dictionary<Guid, AssetsWindowSourceItem>)model.SourcesBySourceId;
 		foreach (var mount in catalog.Mounts.Where(mount => !string.Equals(mount.Id, "project", StringComparison.Ordinal)))
 		{
-			var mountRoot = $"{AssetPipelinePaths.AssetsFolderName}/{mount.DisplayName}";
-			EnsureFolder(mountRoot, folders);
+			var mountRoot = AssetsWindowBrowserPaths.GetMountRootPath(mount);
+			if (folders.ContainsKey(mountRoot))
+				throw new InvalidOperationException(
+					$"Asset mount '{mount.Id}' uses browser root '{mountRoot}', which is already used by another mount.");
+			var rootFolder = EnsureFolder(mountRoot, folders);
+			roots.Add(rootFolder);
 			foreach (var group in mount.Database.Assets.Where(IsVisibleAsset).GroupBy(asset => asset.SourceId))
 			{
 				var sourceItem = CreateSourceItem(group, mount.Id, mount.IsReadOnly, mountRoot);
@@ -116,8 +166,8 @@ internal static class AssetsWindowBrowserModelBuilder
 				if (!sources.TryAdd(sourceItem.SourceId, sourceItem))
 					throw new InvalidOperationException($"Source ID '{sourceItem.SourceId}' occurs in multiple asset mounts.");
 			}
+			SortFolder(rootFolder);
 		}
-		SortFolder(model.RootFolder);
 		return model;
 	}
 
@@ -152,7 +202,7 @@ internal static class AssetsWindowBrowserModelBuilder
 		SortFolder(rootFolder);
 		return new AssetsWindowBrowserModel
 		{
-			RootFolder = rootFolder,
+			RootFolders = new List<AssetsWindowFolderNode> { rootFolder },
 			FoldersByPath = foldersByPath,
 			SourcesBySourceId = sourcesBySourceId
 		};
@@ -162,11 +212,11 @@ internal static class AssetsWindowBrowserModelBuilder
 	{
 		ArgumentNullException.ThrowIfNull(browserModel);
 
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(selectedFolderPath);
+		var normalizedFolderPath = AssetsWindowBrowserPaths.Normalize(selectedFolderPath);
 		while (browserModel.FoldersByPath.ContainsKey(normalizedFolderPath) == false
-		       && string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false)
+		       && AssetsWindowBrowserPaths.IsRoot(normalizedFolderPath) == false)
 		{
-			normalizedFolderPath = ProjectPathUtility.GetParentFolderPath(normalizedFolderPath);
+			normalizedFolderPath = AssetsWindowBrowserPaths.GetParent(normalizedFolderPath);
 		}
 
 		return browserModel.FoldersByPath.ContainsKey(normalizedFolderPath)
@@ -233,6 +283,7 @@ internal static class AssetsWindowBrowserModelBuilder
 		var folderPath = ProjectPathUtility.GetFolderPath(primaryAsset.RelativeSourcePath);
 		if (mountRoot is not null)
 		{
+			// Mounted sources are stored relative to the mount's own Assets folder; re-root them under the mount.
 			var suffix = folderPath.Equals(AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase)
 				? string.Empty
 				: folderPath.StartsWith(AssetPipelinePaths.AssetsFolderName + "/", StringComparison.OrdinalIgnoreCase)
@@ -256,7 +307,7 @@ internal static class AssetsWindowBrowserModelBuilder
 
 	private static AssetsWindowFolderNode EnsureFolder(string relativeFolderPath, Dictionary<string, AssetsWindowFolderNode> foldersByPath)
 	{
-		var normalizedFolderPath = ProjectPathUtility.NormalizeAssetsFolderPath(relativeFolderPath);
+		var normalizedFolderPath = AssetsWindowBrowserPaths.Normalize(relativeFolderPath);
 		if (foldersByPath.TryGetValue(normalizedFolderPath, out var existingFolder))
 		{
 			return existingFolder;
@@ -265,16 +316,13 @@ internal static class AssetsWindowBrowserModelBuilder
 		var folder = new AssetsWindowFolderNode
 		{
 			RelativePath = normalizedFolderPath,
-			Name = string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase)
-				? AssetPipelinePaths.AssetsFolderName
-				: Path.GetFileName(normalizedFolderPath)
+			Name = Path.GetFileName(normalizedFolderPath)
 		};
 		foldersByPath[normalizedFolderPath] = folder;
 
-		if (string.Equals(normalizedFolderPath, AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase) == false)
+		if (AssetsWindowBrowserPaths.IsRoot(normalizedFolderPath) == false)
 		{
-			var parentFolderPath = ProjectPathUtility.GetParentFolderPath(normalizedFolderPath);
-			var parent = EnsureFolder(parentFolderPath, foldersByPath);
+			var parent = EnsureFolder(AssetsWindowBrowserPaths.GetParent(normalizedFolderPath), foldersByPath);
 			if (parent.Children.Contains(folder) == false)
 			{
 				parent.Children.Add(folder);
