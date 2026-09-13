@@ -220,6 +220,100 @@ public class WorldTests
     }
 
     [Test]
+    public void DestroyEntity_WithWorldTransform_RecordsWorldTransformRemoval()
+    {
+        var world = new World(WorldTag.All);
+        var withTransform = world.CreateEntity("WithTransform", Matrix4x4.Identity);
+        var withoutTransform = world.CreateEntity("WithoutTransform");
+
+        world.DestroyEntity(withTransform);
+        world.DestroyEntity(withoutTransform);
+
+        Assert.That(world.WorldTransformRemovals.ToArray().Select(removal => removal.Entity), Is.EqualTo(new[] { withTransform }));
+    }
+
+    [Test]
+    public void DestroyEntity_DestroyingParent_RecordsDescendantWorldTransformRemovals()
+    {
+        var world = new World(WorldTag.All);
+        var parent = world.CreateEntity("Parent", Matrix4x4.Identity);
+        var child = world.CreateEntity("Child", Matrix4x4.Identity);
+        world.SetParent(child, parent);
+
+        world.DestroyEntity(parent);
+
+        Assert.That(world.WorldTransformRemovals.ToArray().Select(removal => removal.Entity), Is.EquivalentTo(new[] { parent, child }));
+    }
+
+    [Test]
+    public void RemoveComponent_TrackedComponentOnTransformEntity_RecordsWorldTransformRemoval()
+    {
+        var world = new World(WorldTag.All);
+        var genericEntity = world.CreateEntity("Generic", Matrix4x4.Identity);
+        var runtimeTypeEntity = world.CreateEntity("RuntimeType", Matrix4x4.Identity);
+        var transformEntity = world.CreateEntity("Transform", Matrix4x4.Identity);
+        world.AddComponent(genericEntity, new TestComponentA { Value = 1 });
+        world.AddComponent(runtimeTypeEntity, new TestComponentA { Value = 1 });
+
+        world.RemoveComponent<TestComponentA>(genericEntity);
+        world.RemoveComponent(runtimeTypeEntity, typeof(TestComponentA));
+        world.RemoveComponent<WorldTransform>(transformEntity);
+
+        Assert.That(
+            world.WorldTransformRemovals.ToArray().Select(removal => removal.Entity),
+            Is.EqualTo(new[] { genericEntity, runtimeTypeEntity, transformEntity }));
+    }
+
+    [Test]
+    public void RemoveComponent_TransformBookkeepingOrMissingComponent_DoesNotRecordWorldTransformRemoval()
+    {
+        var world = new World(WorldTag.All);
+        var parent = world.CreateEntity("Parent", Matrix4x4.Identity);
+        var child = world.CreateEntity("Child", Matrix4x4.Identity);
+        world.SetParent(child, parent);
+        world.MarkWorldTransformChanged(child);
+
+        world.RemoveParent(child);
+        world.RemoveComponent<DirtyTransformRoot>(child);
+        world.RemoveComponent<DirtyWorldTransform>(child);
+        world.RemoveComponent<TestComponentA>(child);
+
+        Assert.That(world.WorldTransformRemovals.Length, Is.Zero);
+    }
+
+    [Test]
+    public void PruneWorldTransformRemovals_RemovesOnlyFullyConsumedEntries()
+    {
+        var world = new World(WorldTag.All);
+        var consumed = world.CreateEntity("Consumed", Matrix4x4.Identity);
+        var pending = world.CreateEntity("Pending", Matrix4x4.Identity);
+        world.DestroyEntity(consumed);
+        world.DestroyEntity(pending);
+        world.WorldTransformRemovals[0].Consumed = 2;
+        world.WorldTransformRemovals[1].Consumed = 1;
+
+        world.PruneWorldTransformRemovals(2);
+
+        Assert.That(world.WorldTransformRemovals.ToArray().Select(removal => removal.Entity), Is.EqualTo(new[] { pending }));
+    }
+
+    [Test]
+    public void DestroyEntity_UnconsumedWorldTransformRemovals_OverflowInsteadOfGrowingUnbounded()
+    {
+        var world = new World(WorldTag.All);
+        const int removalCount = (1 << 16) + 1;
+
+        for (var i = 0; i < removalCount; i++)
+        {
+            world.DestroyEntity(world.CreateEntity("Entity", Matrix4x4.Identity));
+        }
+
+        Assert.That(world.WorldTransformRemovals.Length, Is.LessThan(removalCount));
+        Assert.That(world.ConsumeWorldTransformRemovalOverflow(), Is.True);
+        Assert.That(world.ConsumeWorldTransformRemovalOverflow(), Is.False);
+    }
+
+    [Test]
     public void RemoveComponentPool_WithRuntimeType_RemovesPool()
     {
         var world = new World(WorldTag.All);

@@ -12,14 +12,15 @@ public sealed class FrameSnapshot
 	private static readonly Vector3 DefaultSunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
 
 	public FrameSnapshot()
-		: this(new GpuDrawTransformHistory())
+		: this(new GpuDrawTransformHistory(), new GpuDrawHandleRegistry())
 	{
 	}
 
 	/// <param name="drawTransformHistory">
 	/// Previous-frame draw transforms, shared with the other snapshots in the same buffer.
 	/// </param>
-	internal FrameSnapshot(GpuDrawTransformHistory drawTransformHistory)
+	/// <param name="drawHandles">GPU table slots, shared with the other snapshots in the same buffer.</param>
+	internal FrameSnapshot(GpuDrawTransformHistory drawTransformHistory, GpuDrawHandleRegistry drawHandles)
 	{
 		LightPackets = new List<LightPacket>(16);
 		DecalPackets = new List<DecalProjectorPacket>(16);
@@ -27,7 +28,7 @@ public sealed class FrameSnapshot
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
-		GpuDrawDatabase = new GpuDrawDatabase(drawTransformHistory);
+		GpuDrawDatabase = new GpuDrawDatabase(drawTransformHistory, drawHandles);
 	}
 
 	public Camera Camera { get; private set; }
@@ -187,7 +188,9 @@ public sealed class FrameSnapshotBuffer
 		// One history across both slots: each snapshot's previous-frame state has to describe the frame
 		// published before it, not the one that last wrote its own slot.
 		var drawTransformHistory = new GpuDrawTransformHistory();
-		_buffers = new FrameSnapshot[] { new(drawTransformHistory), new(drawTransformHistory) };
+		// The GPU draw tables are shared too, so both slots must agree on which draw owns each table slot.
+		var drawHandles = new GpuDrawHandleRegistry();
+		_buffers = new FrameSnapshot[] { new(drawTransformHistory, drawHandles), new(drawTransformHistory, drawHandles) };
 	}
 
 	public bool TryBeginWrite(out FrameSnapshot snapshot)

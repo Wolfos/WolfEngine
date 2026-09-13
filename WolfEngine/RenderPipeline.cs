@@ -19,6 +19,8 @@ public class RenderPipeline : IRenderPipeline
 {
 	// Both snapshot databases consume the change, then one additional snapshot settles motion history.
 	private const int DirtyWorldTransformSyncCount = 3;
+	// Both snapshot databases consume the removal; motion history is dropped along with the draw.
+	private const int WorldTransformRemovalSyncCount = 2;
 	private const int DdgiDebugProbeEntityBaseIndex = -2_000_000_000;
 	private const float DdgiDebugProbeInstanceMarker = 1.0f;
 	private readonly RenderGraph _renderGraph;
@@ -28,6 +30,7 @@ public class RenderPipeline : IRenderPipeline
 	private readonly List<Entity> _dirtyWorldTransformRemovalScratch = new();
 	private int _stressFrame;
 	private bool _gpuHardeningStressWasEnabled;
+	private int _forcedReconcileSnapshotCount;
 
 	public RenderPipeline(RenderGraph renderGraph)
 	{
@@ -73,10 +76,20 @@ public class RenderPipeline : IRenderPipeline
 			}
 			var renderWorldListChanged = HasRenderWorldListChanged(gpuDrawDatabase, worlds);
 			var gpuHardeningStressEnabled = GraphicsConfig.GpuHardeningStressEnabled;
+			if (ConsumeWorldTransformRemovalOverflow(worlds))
+			{
+				// Removals were dropped; both snapshot databases rebuild from the live worlds.
+				_forcedReconcileSnapshotCount = WorldTransformRemovalSyncCount;
+			}
 			var reconcilePersistentMeshes = renderWorldListChanged ||
 			                                gpuHardeningStressEnabled ||
-			                                (_gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false);
+			                                (_gpuHardeningStressWasEnabled && gpuHardeningStressEnabled == false) ||
+			                                _forcedReconcileSnapshotCount > 0;
 			_gpuHardeningStressWasEnabled = gpuHardeningStressEnabled;
+			if (_forcedReconcileSnapshotCount > 0)
+			{
+				_forcedReconcileSnapshotCount--;
+			}
 			using (FrameProfiler.Instance.Measure("Begin Sync"))
 			{
 				gpuDrawDatabase.BeginSync(reconcilePersistentMeshes);
@@ -88,6 +101,11 @@ public class RenderPipeline : IRenderPipeline
 				if (world is null)
 				{
 					continue;
+				}
+
+				using (FrameProfiler.Instance.Measure("Remove meshes"))
+				{
+					RemoveMeshesForWorldTransformRemovals(world, gpuDrawDatabase);
 				}
 
 				using (FrameProfiler.Instance.Measure("Gather meshes"))
@@ -290,6 +308,44 @@ public class RenderPipeline : IRenderPipeline
 
 			_stressFrame++;
 		}
+	}
+
+	internal static void RemoveMeshesForWorldTransformRemovals(World world, GpuDrawDatabase gpuDrawDatabase)
+	{
+		var removals = world.WorldTransformRemovals;
+		for (var i = 0; i < removals.Length; i++)
+		{
+			ref var removal = ref removals[i];
+			removal.Consumed++;
+
+			var entity = removal.Entity;
+			if (world.IsAlive(entity) &&
+			    world.HasComponent<WorldTransform>(entity) &&
+			    world.HasComponent<MeshRenderer>(entity))
+			{
+				// Another component was removed, or the renderer was added back; resync instead of removing.
+				world.MarkWorldTransformChanged(entity);
+				continue;
+			}
+
+			gpuDrawDatabase.RemovePersistentMesh(entity);
+		}
+
+		world.PruneWorldTransformRemovals(WorldTransformRemovalSyncCount);
+	}
+
+	private static bool ConsumeWorldTransformRemovalOverflow(IReadOnlyList<World> worlds)
+	{
+		var overflowed = false;
+		for (var i = 0; i < (worlds?.Count ?? 0); i++)
+		{
+			if (worlds![i] is { } world && world.ConsumeWorldTransformRemovalOverflow())
+			{
+				overflowed = true;
+			}
+		}
+
+		return overflowed;
 	}
 
 	private bool HasRenderWorldListChanged(GpuDrawDatabase database, IReadOnlyList<World> worlds)

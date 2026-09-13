@@ -102,4 +102,12 @@ public struct DirtyWorldTransform : IEntityComponent
 	public int Consumed;
 }
 
+public struct WorldTransformRemoval
+{
+	// An entity that had a WorldTransform and was destroyed or lost a tracked component.
+	public Entity Entity;
+	// Render snapshots increment this after removing the entity's draws.
+	public int Consumed;
+}
+
 internal readonly record struct PhysicsWorldPoseSyncItem(Entity Entity, Vector3 WorldPosition, Quaternion WorldRotation);

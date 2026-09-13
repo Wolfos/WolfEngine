@@ -138,6 +138,50 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshotBuffer_UpdatesTheRenderThreadDidNotConsume_SurviveTheNextWrite()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var updates = new List<GpuDrawUpdate>();
+
+		Assert.That(buffer.TryBeginWrite(out var first), Is.True);
+		WriteEntity(first.GpuDrawDatabase, new Entity(1, 1), CreateTestMesh(), new Material("test-shader"), 1.0f);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		// Taken by the render thread, but the scene was hidden so no pass consumed its draw updates.
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out _), Is.True);
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var firstAgain), Is.True);
+		Assert.That(firstAgain, Is.SameAs(first));
+		firstAgain.GpuDrawDatabase.ConsumeUpdates(updates);
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Add }));
+		Assert.That(firstAgain.GpuDrawDatabase.ConsumeDroppedUpdates(), Is.False);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_ResetForSnapshotWrite_DropsBacklogLargerThanTheGpuTables()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("backlog-shader");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+		for (var i = 0; i <= GpuDrawResources.MaxDrawCount; i++)
+		{
+			WriteEntity(database, entity, mesh, material, i);
+		}
+
+		database.ResetForSnapshotWrite();
+
+		database.ConsumeUpdates(updates);
+		Assert.That(updates, Is.Empty);
+		Assert.That(database.ConsumeDroppedUpdates(), Is.True);
+		Assert.That(database.ConsumeDroppedUpdates(), Is.False);
+	}
+
+	[Test]
 	public void FrameSnapshotBuffer_CompleteReleasesBlockedWriter()
 	{
 		var buffer = new FrameSnapshotBuffer();
@@ -182,23 +226,23 @@ public sealed class FrameSnapshotGpuDrawTests
 		var material = new Material("test-shader");
 		var entity = new Entity(1, 1);
 
+		var updates = new List<GpuDrawUpdate>();
 		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
 		snapshotA.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
 		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
 		Assert.That(buffer.TryPublishWrite(), Is.True);
-		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+		ConsumeRenderedSnapshot(buffer, updates);
 
 		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
 		snapshotB.SetCamera(CreateCamera(), CreateCameraTransform(5.0f));
 		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 5.0f);
 		Assert.That(buffer.TryPublishWrite(), Is.True);
-		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+		ConsumeRenderedSnapshot(buffer, updates);
 
 		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotA), Is.True);
 		reusedSnapshotA.SetCamera(CreateCamera(), CreateCameraTransform(9.0f));
 		WriteEntity(reusedSnapshotA.GpuDrawDatabase, entity, mesh, material, 9.0f);
 
-		var updates = new List<GpuDrawUpdate>();
 		reusedSnapshotA.GpuDrawDatabase.ConsumeUpdates(updates);
 
 		Assert.That(reusedSnapshotA.HasPreviousCameraState, Is.True);
@@ -249,12 +293,12 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
 		WriteEntity(snapshotA.GpuDrawDatabase, entity, mesh, material, 1.0f);
 		Assert.That(buffer.TryPublishWrite(), Is.True);
-		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+		ConsumeRenderedSnapshot(buffer, updates);
 
 		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
 		WriteEntity(snapshotB.GpuDrawDatabase, entity, mesh, material, 3.0f);
 		Assert.That(buffer.TryPublishWrite(), Is.True);
-		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+		ConsumeRenderedSnapshot(buffer, updates);
 
 		// Stops here, so the frame that follows must report no movement rather than the step it took
 		// the last time this slot was written.
@@ -276,7 +320,7 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
-	public void GpuDrawDatabase_ResetForSnapshotWrite_ClearsPendingUpdatesButPreservesTrackedEntries()
+	public void GpuDrawDatabase_ResetForSnapshotWrite_PreservesTrackedEntries()
 	{
 		var database = new GpuDrawDatabase();
 		var mesh = CreateTestMesh();
@@ -426,6 +470,185 @@ public sealed class FrameSnapshotGpuDrawTests
 
 		database.CollectDrawEntries(entries);
 		Assert.That(entries, Is.Empty);
+	}
+
+	[Test]
+	public void RenderPipeline_DestroyedMeshRendererEntity_RemovesPersistentMeshFromBothDatabases()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Renderer", Matrix4x4.Identity);
+		world.AddComponent(entity, new MeshRenderer());
+		var databases = new[] { new GpuDrawDatabase(), new GpuDrawDatabase() };
+		var mesh = CreateTestMesh();
+		var material = new Material("destroyed-mesh-shader");
+		var updates = new List<GpuDrawUpdate>();
+		var entries = new List<GpuDrawEntry>();
+		foreach (var database in databases)
+		{
+			database.BeginSync(reconcilePersistentMeshes: true);
+			database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+			database.EndSync();
+			database.ConsumeUpdates(updates);
+		}
+
+		world.DestroyEntity(entity);
+
+		foreach (var database in databases)
+		{
+			database.BeginSync();
+			RenderPipeline.RemoveMeshesForWorldTransformRemovals(world, database);
+			database.EndSync();
+			database.ConsumeUpdates(updates);
+			Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+
+			database.CollectDrawEntries(entries);
+			Assert.That(entries, Is.Empty);
+		}
+
+		Assert.That(world.WorldTransformRemovals.Length, Is.Zero);
+	}
+
+	[Test]
+	public void RenderPipeline_RemovedMeshRendererComponent_RemovesPersistentMesh()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Renderer", Matrix4x4.Identity);
+		world.AddComponent(entity, new MeshRenderer());
+		var database = new GpuDrawDatabase();
+		var updates = new List<GpuDrawUpdate>();
+		database.BeginSync(reconcilePersistentMeshes: true);
+		database.TouchPersistentMesh(entity, CreateTestMesh(), new Material("removed-renderer-shader"), Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		world.RemoveComponent<MeshRenderer>(entity);
+		database.BeginSync();
+		RenderPipeline.RemoveMeshesForWorldTransformRemovals(world, database);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Is.EqualTo(new[] { GpuDrawUpdateType.Remove }));
+	}
+
+	[Test]
+	public void RenderPipeline_UnrelatedComponentRemovedFromRenderer_KeepsPersistentMeshAndResyncs()
+	{
+		var world = new World(WorldTag.All);
+		var entity = world.CreateEntity("Renderer", Matrix4x4.Identity);
+		world.AddComponent(entity, new MeshRenderer());
+		world.AddComponent(entity, new RemovableTestComponent());
+		var database = new GpuDrawDatabase();
+		var updates = new List<GpuDrawUpdate>();
+		database.BeginSync(reconcilePersistentMeshes: true);
+		database.TouchPersistentMesh(entity, CreateTestMesh(), new Material("kept-renderer-shader"), Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+		world.RemoveComponent<DirtyWorldTransform>(entity);
+
+		world.RemoveComponent<RemovableTestComponent>(entity);
+		database.BeginSync();
+		RenderPipeline.RemoveMeshesForWorldTransformRemovals(world, database);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates, Is.Empty);
+		Assert.That(world.HasComponent<DirtyWorldTransform>(entity), Is.True);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_SharedHandles_DrawSeenByOnlyOneDatabaseDoesNotDesyncLaterAllocations()
+	{
+		var history = new GpuDrawTransformHistory();
+		var handles = new GpuDrawHandleRegistry();
+		var first = new GpuDrawDatabase(history, handles);
+		var second = new GpuDrawDatabase(history, handles);
+		var updates = new List<GpuDrawUpdate>();
+		var shortLived = new Entity(1, 1);
+		var survivor = new Entity(2, 1);
+
+		// Created and destroyed between two snapshots, so only the first database ever sees it.
+		first.BeginSync();
+		first.TouchPersistentMesh(shortLived, CreateTestMesh(), new Material("short-lived-shader"), Matrix4x4.Identity);
+		first.EndSync();
+		first.ConsumeUpdates(updates);
+		first.BeginSync();
+		first.RemovePersistentMesh(shortLived);
+		first.EndSync();
+		first.ConsumeUpdates(updates);
+
+		var survivorMesh = CreateOffsetMesh();
+		var survivorMaterial = new Material("survivor-shader");
+		first.BeginSync();
+		first.TouchPersistentMesh(survivor, survivorMesh, survivorMaterial, Matrix4x4.Identity);
+		first.EndSync();
+		first.ConsumeUpdates(updates);
+		var firstAdd = updates.Single(update => update.Type == GpuDrawUpdateType.Add);
+
+		second.BeginSync();
+		second.TouchPersistentMesh(survivor, survivorMesh, survivorMaterial, Matrix4x4.Identity);
+		second.EndSync();
+		second.ConsumeUpdates(updates);
+		var secondAdd = updates.Single(update => update.Type == GpuDrawUpdateType.Add);
+
+		Assert.That(secondAdd.DrawHandle, Is.EqualTo(firstAdd.DrawHandle));
+		Assert.That(secondAdd.InstanceHandle, Is.EqualTo(firstAdd.InstanceHandle));
+		Assert.That(secondAdd.MeshHandle, Is.EqualTo(firstAdd.MeshHandle));
+		Assert.That(secondAdd.MaterialHandle, Is.EqualTo(firstAdd.MaterialHandle));
+		Assert.That(first.IsCurrentDrawHandle(firstAdd.DrawHandle), Is.True);
+		Assert.That(second.IsCurrentDrawHandle(firstAdd.DrawHandle), Is.True);
+		Assert.That(second.GetActiveDrawCommandUpperBound(), Is.EqualTo(first.GetActiveDrawCommandUpperBound()));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_SharedHandles_DrawStaysCurrentUntilEveryDatabaseRemovesIt()
+	{
+		var history = new GpuDrawTransformHistory();
+		var handles = new GpuDrawHandleRegistry();
+		var first = new GpuDrawDatabase(history, handles);
+		var second = new GpuDrawDatabase(history, handles);
+		var updates = new List<GpuDrawUpdate>();
+		var entity = new Entity(4, 1);
+		var mesh = CreateTestMesh();
+		var material = new Material("shared-draw-shader");
+		foreach (var database in new[] { first, second })
+		{
+			database.BeginSync();
+			database.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+			database.EndSync();
+			database.ConsumeUpdates(updates);
+		}
+
+		var drawHandle = updates.Single().DrawHandle;
+
+		first.BeginSync();
+		first.RemovePersistentMesh(entity);
+		first.EndSync();
+		Assert.That(first.IsCurrentDrawHandle(drawHandle), Is.True);
+
+		second.BeginSync();
+		second.RemovePersistentMesh(entity);
+		second.EndSync();
+		Assert.That(second.IsCurrentDrawHandle(drawHandle), Is.False);
+	}
+
+	[Test]
+	public void GpuDrawDatabase_RemovePersistentMesh_IgnoresTransientRecordWithSameEntity()
+	{
+		var database = new GpuDrawDatabase();
+		var entity = new Entity(3, 1);
+		var updates = new List<GpuDrawUpdate>();
+		database.BeginSync();
+		database.TouchMesh(entity, CreateTestMesh(), new Material("transient-mesh-shader"), Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		database.BeginSync();
+		database.RemovePersistentMesh(entity);
+		database.TouchMesh(entity, CreateTestMesh(), new Material("transient-mesh-shader"), Matrix4x4.Identity);
+		database.EndSync();
+		database.ConsumeUpdates(updates);
+
+		Assert.That(updates.Select(update => update.Type), Does.Not.Contain(GpuDrawUpdateType.Remove));
 	}
 
 	[Test]
@@ -650,6 +873,13 @@ public sealed class FrameSnapshotGpuDrawTests
 		AssertGpuStructSizeIs16ByteAligned<GpuTerrainLayerUpdateData>();
 	}
 
+	// What the render thread does with a snapshot whose scene it draws: the GPU draw pass consumes its updates.
+	private static void ConsumeRenderedSnapshot(FrameSnapshotBuffer buffer, List<GpuDrawUpdate> updates)
+	{
+		Assert.That(buffer.TryConsumeLatest(out var snapshot), Is.True);
+		snapshot.GpuDrawDatabase.ConsumeUpdates(updates);
+	}
+
 	private static void WriteEntity(
 		GpuDrawDatabase database,
 		Entity entity,
@@ -674,6 +904,10 @@ public sealed class FrameSnapshotGpuDrawTests
 			EmissiveFactor = Vector3.Zero,
 			EmissiveIntensity = 0.0f
 		};
+	}
+
+	private struct RemovableTestComponent : IEntityComponent
+	{
 	}
 
 	private static Mesh CreateTestMesh()

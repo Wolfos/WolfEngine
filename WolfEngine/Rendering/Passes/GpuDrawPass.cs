@@ -53,6 +53,12 @@ public sealed class GpuDrawPass
 	private readonly List<GpuDrawInstanceUpdateData> _instanceUpdateData = new();
 	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
 	private readonly List<GpuDrawMaterialUpdateData> _materialUpdateData = new();
+	// The update shaders apply a batch's entries in parallel, so a batch holding two entries for the same
+	// table slot (a backlog kept while the scene was hidden, a refresh on top of this frame's changes, or a
+	// slot released and reused) could land in either order. Only the last entry per slot is uploaded.
+	private readonly Dictionary<int, int> _instanceUpdateIndices = new();
+	private readonly Dictionary<int, int> _meshUpdateIndices = new();
+	private readonly Dictionary<int, int> _materialUpdateIndices = new();
 	private readonly List<GpuTerrainMaterialUpdateData> _terrainMaterialUpdateData = new();
 	private readonly Dictionary<uint, int> _terrainMaterialUpdateIndices = new();
 	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
@@ -170,6 +176,7 @@ public sealed class GpuDrawPass
 		var requireFullGpuStateRefresh = backendSignals.RequiresFullSlotReencode;
 
 		drawDatabase.ConsumeUpdates(_updates);
+		var updatesDropped = drawDatabase.ConsumeDroppedUpdates();
 		UploadGenerationTables(drawDatabase);
 		if (_gpuStateBootstrapPending)
 		{
@@ -191,7 +198,7 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		if (_updates.Count > GpuDrawResources.MaxDrawCount)
+		if (updatesDropped || _updates.Count > GpuDrawResources.MaxDrawCount)
 		{
 			var droppedDeltaCount = _updates.Count;
 			_updates.Clear();
@@ -215,6 +222,9 @@ public sealed class GpuDrawPass
 		_instanceUpdateData.Clear();
 		_meshUpdateData.Clear();
 		_materialUpdateData.Clear();
+		_instanceUpdateIndices.Clear();
+		_meshUpdateIndices.Clear();
+		_materialUpdateIndices.Clear();
 		_terrainMaterialUpdateData.Clear();
 		_terrainMaterialUpdateIndices.Clear();
 		_terrainLayerUpdateData.Clear();
@@ -451,7 +461,7 @@ public sealed class GpuDrawPass
 				emissiveFactorIntensity = Vector4.Zero;
 			}
 
-			_instanceUpdateData.Add(new GpuDrawInstanceUpdateData(
+			AddOrReplaceUpdate(_instanceUpdateData, _instanceUpdateIndices, update.DrawIndex, new GpuDrawInstanceUpdateData(
 				update.PreviousWorld,
 				update.World,
 				update.BoundsCenterRadius,
@@ -467,7 +477,7 @@ public sealed class GpuDrawPass
 
 			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMesh)
 			{
-				_meshUpdateData.Add(new GpuDrawMeshUpdateData(
+				AddOrReplaceUpdate(_meshUpdateData, _meshUpdateIndices, update.MeshIndex, new GpuDrawMeshUpdateData(
 					update.MeshHandle.Value,
 					vertexHandle,
 					indexHandle,
@@ -479,7 +489,7 @@ public sealed class GpuDrawPass
 
 			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMaterial)
 			{
-				_materialUpdateData.Add(new GpuDrawMaterialUpdateData(
+				AddOrReplaceUpdate(_materialUpdateData, _materialUpdateIndices, update.MaterialIndex, new GpuDrawMaterialUpdateData(
 					update.MaterialHandle.Value,
 					baseColor,
 					metallicRoughness,
@@ -739,6 +749,19 @@ public sealed class GpuDrawPass
 	/// The update shader is indexed by material, so duplicate entries are concurrent writes to one slot
 	/// with a nondeterministic winner rather than an ordered last-write-wins.
 	/// </summary>
+	private static void AddOrReplaceUpdate<T>(List<T> updates, Dictionary<int, int> indicesBySlot, int slot, T update)
+		where T : struct
+	{
+		if (indicesBySlot.TryGetValue(slot, out var existingIndex))
+		{
+			updates[existingIndex] = update;
+			return;
+		}
+
+		indicesBySlot[slot] = updates.Count;
+		updates.Add(update);
+	}
+
 	private void AddOrReplaceTerrainMaterialUpdate(in GpuTerrainMaterialUpdateData update)
 	{
 		if (_terrainMaterialUpdateIndices.TryGetValue(update.MaterialHandle, out var existingIndex))

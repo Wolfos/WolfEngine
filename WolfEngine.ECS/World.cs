@@ -1,11 +1,15 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace WolfEngine.ECS;
 
 public class World
 {
+	private const int MaxWorldTransformRemovals = 1 << 16;
     private readonly FreeList _entities = new();
     private readonly Dictionary<Type, IComponentPool> _pools = new();
+	private readonly List<WorldTransformRemoval> _worldTransformRemovals = new();
+	private bool _worldTransformRemovalsOverflowed;
     
     public WorldTag Tag { get; }
     
@@ -64,7 +68,15 @@ public class World
     }
 
     public void RemoveComponent<T>(Entity e) where T : struct, IEntityComponent
-        => Pool<T>().Remove(e);
+    {
+        var pool = Pool<T>();
+        if (RemovalTracking<T>.Enabled && pool.Has(e))
+        {
+            RecordWorldTransformRemoval(e);
+        }
+
+        pool.Remove(e);
+    }
 
     public void RemoveComponent(Entity e, Type componentType)
     {
@@ -72,6 +84,11 @@ public class World
         if (_pools.TryGetValue(componentType, out var pool) == false)
         {
             return;
+        }
+
+        if (TracksRemovalOf(componentType) && pool.Has(e))
+        {
+            RecordWorldTransformRemoval(e);
         }
 
         pool.Remove(e);
@@ -191,6 +208,7 @@ public class World
             RemoveParent(entity);
         }
 
+        RecordWorldTransformRemoval(entity);
         foreach (var pool in _pools.Values)
         {
             pool.Remove(entity);
@@ -198,6 +216,58 @@ public class World
 
         _entities.Destroy(entity);
     }
+
+	// Render snapshots increment Consumed on each entry, then prune entries every snapshot has seen.
+	public Span<WorldTransformRemoval> WorldTransformRemovals => CollectionsMarshal.AsSpan(_worldTransformRemovals);
+
+	// True once if removals were dropped because nobody consumed them; the consumer must rebuild from the live world.
+	public bool ConsumeWorldTransformRemovalOverflow()
+	{
+		var overflowed = _worldTransformRemovalsOverflowed;
+		_worldTransformRemovalsOverflowed = false;
+		return overflowed;
+	}
+
+	public void PruneWorldTransformRemovals(int consumedCount)
+	{
+		var writeIndex = 0;
+		for (var readIndex = 0; readIndex < _worldTransformRemovals.Count; readIndex++)
+		{
+			var removal = _worldTransformRemovals[readIndex];
+			if (removal.Consumed < consumedCount)
+			{
+				_worldTransformRemovals[writeIndex++] = removal;
+			}
+		}
+
+		_worldTransformRemovals.RemoveRange(writeIndex, _worldTransformRemovals.Count - writeIndex);
+	}
+
+	private void RecordWorldTransformRemoval(Entity entity)
+	{
+		if (HasComponent<WorldTransform>(entity) == false)
+		{
+			return;
+		}
+
+		if (_worldTransformRemovals.Count >= MaxWorldTransformRemovals)
+		{
+			_worldTransformRemovals.Clear();
+			_worldTransformRemovalsOverflowed = true;
+		}
+
+		_worldTransformRemovals.Add(new WorldTransformRemoval { Entity = entity });
+	}
+
+	// Hierarchy and transform tags are ECS bookkeeping. Removing WorldTransform or a component
+	// defined outside the ECS (such as a renderer) can take an entity out of the rendered set.
+	private static bool TracksRemovalOf(Type componentType)
+		=> componentType == typeof(WorldTransform) || componentType.Assembly != typeof(World).Assembly;
+
+	private static class RemovalTracking<T> where T : struct, IEntityComponent
+	{
+		public static readonly bool Enabled = TracksRemovalOf(typeof(T));
+	}
 
     private ComponentPool<T> Pool<T>() where T:struct, IEntityComponent
         => (ComponentPool<T>) (_pools.TryGetValue(typeof(T), out var p)

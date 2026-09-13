@@ -15,23 +15,29 @@ public sealed class GpuDrawDatabase
 	private readonly HashSet<DrawRecordKey> _persistentMeshKeys = new();
 	private readonly HashSet<DrawRecordKey> _transientKeys = new();
 	private readonly List<DrawRecordKey> _removeScratch = new();
-	private readonly GpuDrawHandlePool _drawHandlePool = new(GpuDrawResources.MaxDrawCount - 1);
-	private readonly GpuDrawHandlePool _instanceHandlePool = new(GpuDrawResources.MaxInstanceCount - 1);
-	private readonly GpuDrawHandlePool _meshHandlePool = new(GpuDrawResources.MaxMeshCount - 1);
-	private readonly GpuDrawHandlePool _materialHandlePool = new(GpuDrawResources.MaxMaterialCount - 1);
+	private readonly GpuDrawHandleRegistry _handles;
+	// Copied from the shared registry at the end of each sync, because the render thread reads them while
+	// the other snapshot's sync is changing the registry.
+	private readonly List<uint> _drawGenerations = new();
+	private readonly List<uint> _instanceGenerations = new();
+	private readonly List<uint> _meshGenerations = new();
+	private readonly List<uint> _materialGenerations = new();
+	private uint _activeDrawCommandUpperBound = 1;
+	private int _copiedHandleVersion = -1;
 	private int _syncStamp;
-	private int _maxActiveDrawIndex;
-	private bool _maxActiveDrawIndexDirty;
 	private bool _reconcilePersistentMeshes;
+	private bool _updatesDropped;
 
 	public GpuDrawDatabase()
-		: this(new GpuDrawTransformHistory())
+		: this(new GpuDrawTransformHistory(), new GpuDrawHandleRegistry())
 	{
 	}
 
-	internal GpuDrawDatabase(GpuDrawTransformHistory transformHistory)
+	internal GpuDrawDatabase(GpuDrawTransformHistory transformHistory, GpuDrawHandleRegistry handles)
 	{
 		_transformHistory = transformHistory;
+		_handles = handles;
+		CopyHandleState();
 	}
 
 	public void BeginSync(bool reconcilePersistentMeshes = false)
@@ -43,9 +49,26 @@ public sealed class GpuDrawDatabase
 
 	public void ResetForSnapshotWrite()
 	{
-		_updates.Clear();
+		// The render thread skips the GPU draw update when the scene is not drawn (a hidden scene viewport),
+		// so updates can still be pending here. They are owed to the GPU tables, and discarding them would
+		// leave those draws stale until something happened to touch them again. Keep them, unless the
+		// backlog outgrew the tables, in which case the pass rebuilds everything from the records.
+		if (_updates.Count > GpuDrawResources.MaxDrawCount)
+		{
+			_updates.Clear();
+			_updatesDropped = true;
+		}
+
 		_syncStamp++;
 		_reconcilePersistentMeshes = false;
+	}
+
+	/// <summary>True once after pending updates were dropped; the GPU tables must be rebuilt from the records.</summary>
+	public bool ConsumeDroppedUpdates()
+	{
+		var dropped = _updatesDropped;
+		_updatesDropped = false;
+		return dropped;
 	}
 
 	public void Touch(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform)
@@ -65,7 +88,12 @@ public sealed class GpuDrawDatabase
 
 	public void RemovePersistentMesh(Entity entity)
 	{
-		RemoveRecord(new DrawRecordKey(entity, 0));
+		// Transient records sharing the key (e.g. skinned meshes) are reconciled by EndSync instead.
+		var key = new DrawRecordKey(entity, 0);
+		if (_persistentMeshKeys.Contains(key))
+		{
+			RemoveRecord(key);
+		}
 	}
 
 	private void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform, bool persistent)
@@ -82,10 +110,6 @@ public sealed class GpuDrawDatabase
 		var newRecord = CreateRecord(key, GpuDrawKind.Mesh, mesh, material, worldTransform);
 		_records.Add(key, newRecord);
 		SetPersistence(key, persistent);
-		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
-		{
-			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
-		}
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
@@ -143,10 +167,6 @@ public sealed class GpuDrawDatabase
 			terrainInstanceData: instanceData);
 		_records.Add(key, newRecord);
 		_transientKeys.Add(key);
-		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
-		{
-			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
-		}
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
@@ -214,10 +234,6 @@ public sealed class GpuDrawDatabase
 		newRecord.TerrainRayTracingChunk = rayTracingChunk;
 		_records.Add(key, newRecord);
 		_transientKeys.Add(key);
-		if (newRecord.DrawHandle.Index > _maxActiveDrawIndex)
-		{
-			_maxActiveDrawIndex = newRecord.DrawHandle.Index;
-		}
 
 		_updates.Add(GpuDrawUpdate.CreateAdd(
 			newRecord.DrawKind,
@@ -249,6 +265,19 @@ public sealed class GpuDrawDatabase
 			RemoveRecord(_removeScratch[i]);
 		}
 		_removeScratch.Clear();
+		CopyHandleState();
+	}
+
+	private void CopyHandleState()
+	{
+		if (_copiedHandleVersion == _handles.Version)
+		{
+			return;
+		}
+
+		_handles.CopyGenerationTables(_drawGenerations, _instanceGenerations, _meshGenerations, _materialGenerations);
+		_activeDrawCommandUpperBound = _handles.GetActiveDrawCommandUpperBound();
+		_copiedHandleVersion = _handles.Version;
 	}
 
 	private void CollectUnseen(HashSet<DrawRecordKey> keys)
@@ -285,12 +314,8 @@ public sealed class GpuDrawDatabase
 		_persistentMeshKeys.Remove(key);
 		_transientKeys.Remove(key);
 		_updates.Add(GpuDrawUpdate.CreateRemove(record.DrawKind, record.DrawHandle, record.InstanceHandle));
-		ReleaseRecord(record);
+		ReleaseRecord(key, record);
 		_transformHistory.Remove(key);
-		if (record.DrawHandle.Index == _maxActiveDrawIndex)
-		{
-			_maxActiveDrawIndexDirty = true;
-		}
 	}
 
 	public void NotifyMaterialChanged(Material material)
@@ -368,32 +393,8 @@ public sealed class GpuDrawDatabase
 		return false;
 	}
 
-	public uint GetActiveDrawCommandUpperBound()
-	{
-		if (_records.Count == 0)
-		{
-			_maxActiveDrawIndex = 0;
-			_maxActiveDrawIndexDirty = false;
-			return 1;
-		}
-
-		if (_maxActiveDrawIndexDirty)
-		{
-			var maxDrawIndex = 0;
-			foreach (var record in _records.Values)
-			{
-				if (record.DrawHandle.Index > maxDrawIndex)
-				{
-					maxDrawIndex = record.DrawHandle.Index;
-				}
-			}
-
-			_maxActiveDrawIndex = maxDrawIndex;
-			_maxActiveDrawIndexDirty = false;
-		}
-
-		return (uint)(_maxActiveDrawIndex + 1);
-	}
+	/// <summary>Covers draws held by any snapshot database, since they share the GPU draw tables.</summary>
+	public uint GetActiveDrawCommandUpperBound() => _activeDrawCommandUpperBound;
 
 	public void CopyGenerationTables(
 		List<uint> drawGenerations,
@@ -401,17 +402,24 @@ public sealed class GpuDrawDatabase
 		List<uint> meshGenerations,
 		List<uint> materialGenerations)
 	{
-		_drawHandlePool.WriteGenerations(drawGenerations);
-		_instanceHandlePool.WriteGenerations(instanceGenerations);
-		_meshHandlePool.WriteGenerations(meshGenerations);
-		_materialHandlePool.WriteGenerations(materialGenerations);
+		CopyList(_drawGenerations, drawGenerations);
+		CopyList(_instanceGenerations, instanceGenerations);
+		CopyList(_meshGenerations, meshGenerations);
+		CopyList(_materialGenerations, materialGenerations);
 	}
 
-	public GpuDrawHandle FallbackMeshHandle => _meshHandlePool.FallbackHandle;
+	public GpuDrawHandle FallbackMeshHandle => GpuDrawHandle.Create(0, (ushort)_meshGenerations[0]);
 
-	public GpuDrawHandle FallbackMaterialHandle => _materialHandlePool.FallbackHandle;
+	public GpuDrawHandle FallbackMaterialHandle => GpuDrawHandle.Create(0, (ushort)_materialGenerations[0]);
 
-	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) => _drawHandlePool.IsCurrent(handle);
+	public bool IsCurrentDrawHandle(in GpuDrawHandle handle) =>
+		(uint)handle.Index < (uint)_drawGenerations.Count && _drawGenerations[handle.Index] == handle.Generation;
+
+	private static void CopyList(List<uint> source, List<uint> destination)
+	{
+		destination.Clear();
+		destination.AddRange(source);
+	}
 
 	private void ApplyChanges(
 		in DrawRecordKey key,
@@ -739,12 +747,13 @@ public sealed class GpuDrawDatabase
 		BoundingSphere? localBoundsOverride = null,
 		TerrainChunkInstanceData? terrainInstanceData = null)
 	{
+		_handles.AcquireDraw(key, out var drawHandle, out var instanceHandle);
 		var record = new DrawRecord
 		{
 			Entity = key.Entity,
 			DrawKind = drawKind,
-			DrawHandle = _drawHandlePool.Acquire(),
-			InstanceHandle = _instanceHandlePool.Acquire(),
+			DrawHandle = drawHandle,
+			InstanceHandle = instanceHandle,
 			Mesh = mesh,
 			Material = material,
 			MeshHandle = AcquireMeshHandle(mesh),
@@ -766,14 +775,15 @@ public sealed class GpuDrawDatabase
 		return record;
 	}
 
-	private void ReleaseRecord(DrawRecord record)
+	private void ReleaseRecord(in DrawRecordKey key, DrawRecord record)
 	{
-		_drawHandlePool.Release(record.DrawHandle);
-		_instanceHandlePool.Release(record.InstanceHandle);
+		_handles.ReleaseDraw(key);
 		ReleaseMesh(record.MeshHandle, record.Mesh);
 		ReleaseMaterial(record.MaterialHandle, record.Material);
 	}
 
+	// Per-database reference counts, so the render thread can look handles up without touching the shared
+	// registry. The registry is acquired from and released to as this database starts and stops using one.
 	private GpuDrawHandle AcquireMeshHandle(Mesh mesh)
 	{
 		if (_meshHandles.TryGetValue(mesh, out var entry))
@@ -783,7 +793,7 @@ public sealed class GpuDrawDatabase
 			return entry.Handle;
 		}
 
-		var handle = _meshHandlePool.Acquire();
+		var handle = _handles.AcquireMesh(mesh);
 		_meshHandles[mesh] = new ResourceId(handle, 1);
 		return handle;
 	}
@@ -803,7 +813,7 @@ public sealed class GpuDrawDatabase
 		}
 
 		_meshHandles.Remove(mesh);
-		_meshHandlePool.Release(handle);
+		_handles.ReleaseMesh(mesh);
 	}
 
 	private GpuDrawHandle AcquireMaterialHandle(Material material)
@@ -815,7 +825,7 @@ public sealed class GpuDrawDatabase
 			return entry.Handle;
 		}
 
-		var handle = _materialHandlePool.Acquire();
+		var handle = _handles.AcquireMaterial(material);
 		_materialHandles[material] = new ResourceId(handle, 1);
 		return handle;
 	}
@@ -835,7 +845,7 @@ public sealed class GpuDrawDatabase
 		}
 
 		_materialHandles.Remove(material);
-		_materialHandlePool.Release(handle);
+		_handles.ReleaseMaterial(material);
 	}
 
 	private static void ComputeBounds(DrawRecord record, Mesh mesh)
