@@ -27,6 +27,8 @@ public interface IProjectAssetPipelineService
 	void RemoveDeletedSourcesUnderFolder(string projectRootPath, string relativeFolderPath);
 	void ReimportSource(string projectRootPath, string relativeSourcePath);
 	AssetDatabase LoadDatabase(string projectRootPath);
+	IReadOnlyList<AssetDependencyRecord> GetDependencies(string projectRootPath) => [];
+	string ImporterVersionFingerprint => string.Empty;
 	bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset);
 	bool TryGetPrimaryNodeIdForRelativeSourcePath(string projectRootPath, string relativeSourcePath, out Guid nodeId);
 	void AssignSceneCellAssetIds(
@@ -38,6 +40,16 @@ public interface IProjectAssetPipelineService
 	AssetImportResult ImportExternalSource(string projectRootPath, string absoluteSourcePath);
 	void InstantiateImportedModel(string projectRootPath, Guid modelNodeId, World world, Vector3? spawnPosition = null);
 	void InstantiatePrefab(string projectRootPath, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null);
+	void InstantiateImportedModel(IAssetCatalog catalog, Guid modelNodeId, World world, Vector3? spawnPosition = null)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
+		InstantiateImportedModel(catalog.GetAsset(modelNodeId).Mount.RootPath, modelNodeId, world, spawnPosition);
+	}
+	void InstantiatePrefab(IAssetCatalog catalog, Guid prefabNodeId, EditorScene scene, Vector3? spawnPosition = null)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
+		InstantiatePrefab(catalog.GetAsset(prefabNodeId).Mount.RootPath, prefabNodeId, scene, spawnPosition);
+	}
 }
 
 public readonly record struct AssetPipelineRefreshResult(
@@ -258,6 +270,16 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 	}
 
+	public IReadOnlyList<AssetDependencyRecord> GetDependencies(string projectRootPath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRootPath);
+		return _index.GetDependencies(projectRootPath);
+	}
+
+	public string ImporterVersionFingerprint => string.Join(';', _importers
+		.OrderBy(importer => importer.Id, StringComparer.Ordinal)
+		.Select(importer => $"{importer.Id}:{importer.Version}"));
+
 	public bool TryGetAsset(string projectRootPath, Guid nodeId, out AssetDatabaseEntry asset)
 	{
 		if (_index.TryGetNode(projectRootPath, nodeId, out var node) == false)
@@ -394,6 +416,27 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 		var summary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(modelNode.SummaryJson);
 		var absoluteModelPath = GetAbsolutePath(projectRootPath, summary.RelativeImportedModelPath);
+		InstantiateImportedModelFile(modelNodeId, world, spawnPosition, absoluteModelPath);
+	}
+
+	public void InstantiateImportedModel(IAssetCatalog catalog, Guid modelNodeId, World world, Vector3? spawnPosition = null)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
+		ArgumentNullException.ThrowIfNull(world);
+		var mountedModel = catalog.GetAsset(modelNodeId);
+		if (mountedModel.Asset.Type != AssetType.Model3D)
+			throw new InvalidOperationException($"Asset node '{modelNodeId}' is not a 3D model.");
+		var summary = AssetPipelineSerialization.Deserialize<Model3DAssetSummary>(mountedModel.Asset.SummaryJson);
+		InstantiateImportedModelFile(
+			modelNodeId, world, spawnPosition, mountedModel.Mount.GetAbsolutePath(summary.RelativeImportedModelPath));
+	}
+
+	private void InstantiateImportedModelFile(
+		Guid modelNodeId,
+		World world,
+		Vector3? spawnPosition,
+		string absoluteModelPath)
+	{
 		var modelFile =
 			AssetPipelineSerialization.Deserialize<ImportedModelAssetFile>(File.ReadAllText(absoluteModelPath));
 		if (modelFile.Nodes.Count == 0)
@@ -1956,7 +1999,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					var extension = Path.GetExtension(path);
 					return string.Equals(extension, ".gltf", StringComparison.OrdinalIgnoreCase) ||
 					       string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase) ||
-					       string.Equals(extension, ".fbx", StringComparison.OrdinalIgnoreCase);
+					       string.Equals(extension, ".fbx", StringComparison.OrdinalIgnoreCase) ||
+					       string.Equals(extension, ".obj", StringComparison.OrdinalIgnoreCase);
 				},
 				() => AssetPipelineSerialization.Serialize(new ModelImportSettings()),
 				ImportThreeDSource)

@@ -71,7 +71,8 @@ public sealed class ModelAssetEditor
 		try
 		{
 			_loadedModelAssetId = asset.Id;
-			_loadedMetadata = _metadataStore.Load(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
+			_loadedMetadata = _metadataStore.Load(
+				_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath));
 			return _loadedMetadata;
 		}
 		catch
@@ -84,7 +85,9 @@ public sealed class ModelAssetEditor
 
 	private void SaveModelMetadata(AssetDatabaseEntry asset, AssetSourceMetaFile metadata)
 	{
-		_metadataStore.Save(_projectService.GetAbsolutePath(asset.RelativeMetaPath), metadata);
+		if (_projectService.IsAssetReadOnly(asset.Id))
+			throw new InvalidOperationException($"Asset '{asset.Id}' belongs to a read-only mount.");
+		_metadataStore.Save(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath), metadata);
 		_loadedMetadata = metadata;
 		_loadedModelAssetId = asset.Id;
 		_projectService.RefreshAssetSource(asset.RelativeSourcePath);

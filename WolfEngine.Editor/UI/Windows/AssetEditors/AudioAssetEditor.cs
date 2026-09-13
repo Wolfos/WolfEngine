@@ -18,7 +18,7 @@ public sealed class AudioAssetEditor
 		ImGui.TextUnformatted($"Duration: {TimeSpan.FromSeconds(summary.DurationSeconds):mm\\:ss\\.fff}");
 		ImGui.TextUnformatted($"Cooked as: {summary.StorageMode}");
 		AssetSourceMetaFile metadata;
-		try { metadata = _metadata.Load(_project.GetAbsolutePath(asset.RelativeMetaPath)); }
+		try { metadata = _metadata.Load(_project.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath)); }
 		catch { ImGui.TextUnformatted("Failed to load audio metadata."); return; }
 		var settings = metadata.GetImportSettingsOrDefault(() => new AudioImportSettings());
 		var current = settings.Usage;
@@ -31,7 +31,9 @@ public sealed class AudioAssetEditor
 				{
 					settings.Usage = usage;
 					metadata.SetImportSettings(settings);
-					_metadata.Save(_project.GetAbsolutePath(asset.RelativeMetaPath), metadata);
+					if (_project.IsAssetReadOnly(asset.Id))
+						throw new InvalidOperationException($"Asset '{asset.Id}' belongs to a read-only mount.");
+					_metadata.Save(_project.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath), metadata);
 					_project.RefreshAssetSource(asset.RelativeSourcePath);
 				}
 				if (selected) ImGui.SetItemDefaultFocus();

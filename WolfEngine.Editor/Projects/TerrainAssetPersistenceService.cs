@@ -103,13 +103,15 @@ public sealed class TerrainAssetPersistenceService : ITerrainAssetPersistenceSer
 		{
 			return;
 		}
+		if (_projectService.IsAssetReadOnly(snapshot.AssetId))
+			throw new InvalidOperationException($"Terrain asset '{snapshot.AssetId}' belongs to a read-only mount.");
 
 		var terrainAsset = new TerrainAsset(
 			snapshot.Name,
 			TerrainAsset.CloneTexture(snapshot.Heightmap),
 			TerrainAsset.CloneTexture(snapshot.LayerIndexMap),
 			TerrainAsset.CloneTexture(snapshot.LayerWeightMap));
-		TerrainAssetSerializer.Write(_projectService.GetAbsolutePath(asset.RelativeAssetPath), terrainAsset);
+		TerrainAssetSerializer.Write(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath), terrainAsset);
 	}
 
 	private static TerrainAssetSnapshot CloneSnapshot(TerrainAssetSnapshot snapshot)

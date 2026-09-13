@@ -41,7 +41,8 @@ public sealed class TextureAssetEditor
 			: StbImageLoader.IsSrgb(textureSummary.Semantic);
 		var previewRelativePath = asset.IsGenerated ? string.Empty : textureSummary.RelativeSourceAssetPath;
 		if (string.IsNullOrWhiteSpace(previewRelativePath) == false &&
-		    _imageLoader.TryGetImGuiTextureId(_projectService.GetAbsolutePath(previewRelativePath), out var textureId, previewIsSrgb))
+		    _imageLoader.TryGetImGuiTextureId(
+			    _projectService.GetAbsoluteAssetPath(asset.Id, previewRelativePath), out var textureId, previewIsSrgb))
 		{
 			ImGui.Image(textureId, PreviewSize);
 		}
@@ -127,7 +128,8 @@ public sealed class TextureAssetEditor
 		try
 		{
 			_loadedTextureAssetId = asset.Id;
-			_loadedMetadata = _metadataStore.Load(_projectService.GetAbsolutePath(asset.RelativeMetaPath));
+			_loadedMetadata = _metadataStore.Load(
+				_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath));
 			return _loadedMetadata;
 		}
 		catch
@@ -140,7 +142,9 @@ public sealed class TextureAssetEditor
 
 	private void SaveTextureMetadata(AssetDatabaseEntry asset, AssetSourceMetaFile metadata)
 	{
-		_metadataStore.Save(_projectService.GetAbsolutePath(asset.RelativeMetaPath), metadata);
+		if (_projectService.IsAssetReadOnly(asset.Id))
+			throw new InvalidOperationException($"Asset '{asset.Id}' belongs to a read-only mount.");
+		_metadataStore.Save(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath), metadata);
 		_loadedMetadata = metadata;
 		_loadedTextureAssetId = asset.Id;
 		_projectService.RefreshAssetSource(asset.RelativeSourcePath);

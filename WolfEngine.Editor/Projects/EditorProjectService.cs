@@ -16,6 +16,9 @@ public interface IEditorProjectService
 	string? GameplayProjectRelativePath { get; }
 	string? GameplayProjectPath { get; }
 	AssetDatabase CurrentAssetDatabase { get; }
+	IAssetCatalog CurrentAssetCatalog => HasOpenProject && ProjectRootPath is not null
+		? new AssetCatalog([new DirectoryAssetMount("project", "Project", ProjectRootPath, false, CurrentAssetDatabase)])
+		: new AssetCatalog([]);
 	long AssetDatabaseRevision => 0;
 
 	bool CreateProject(string parentFolder, string projectName, out string errorMessage);
@@ -23,11 +26,25 @@ public interface IEditorProjectService
 	void CloseProject();
 	AssetDatabaseRefreshResult ReloadAssetDatabase();
 	void ReloadAssetDatabaseFromIndex();
+	void ReloadAssetMounts() { }
 	void RefreshAssetSource(string relativeSourcePath);
 	void RefreshAssetSource(string relativeSourcePath, Guid preservedRuntimeAssetId) => RefreshAssetSource(relativeSourcePath);
 	void SaveAssetDatabase(AssetDatabase database);
 	AssetDatabase CloneCurrentAssetDatabase();
 	bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset);
+	bool TryGetMountedAsset(Guid assetId, out MountedAsset asset)
+	{
+		if (TryGetAsset(assetId, out var entry) && ProjectRootPath is not null)
+		{
+			asset = new MountedAsset(new DirectoryAssetMount("project", "Project", ProjectRootPath, false,
+				new AssetDatabase { Assets = [entry] }), entry);
+			return true;
+		}
+		asset = default;
+		return false;
+	}
+	string GetAbsoluteAssetPath(Guid assetId, string relativePath) => GetAbsolutePath(relativePath);
+	bool IsAssetReadOnly(Guid assetId) => false;
 	string GetAbsolutePath(string relativePath);
 	void DeleteAssetSource(string relativeSourcePath);
 	void DeleteFolder(string relativeFolderPath);
@@ -50,7 +67,9 @@ public sealed class EditorProjectService : IEditorProjectService
 	private readonly IEditorNotificationService? _notificationService;
 	private readonly IServiceProvider? _serviceProvider;
 	private readonly IShaderProvider? _shaderProvider;
+	private readonly IEngineAssetMountProvider _engineAssetMountProvider;
 	private AssetDatabase _currentAssetDatabase = new();
+	private IAssetCatalog _currentAssetCatalog = new AssetCatalog([]);
 	private long _assetDatabaseRevision;
 	private string? _projectRootPath;
 	private EditorProjectManifest? _projectManifest;
@@ -60,13 +79,15 @@ public sealed class EditorProjectService : IEditorProjectService
 		IAssetInstanceRegistry assetInstanceRegistry,
 		IEditorNotificationService? notificationService = null,
 		IServiceProvider? serviceProvider = null,
-		IShaderProvider? shaderProvider = null)
+		IShaderProvider? shaderProvider = null,
+		IEngineAssetMountProvider? engineAssetMountProvider = null)
 	{
 		_assetPipelineService = assetPipelineService ?? throw new ArgumentNullException(nameof(assetPipelineService));
 		_assetInstanceRegistry = assetInstanceRegistry ?? throw new ArgumentNullException(nameof(assetInstanceRegistry));
 		_notificationService = notificationService;
 		_serviceProvider = serviceProvider;
 		_shaderProvider = shaderProvider;
+		_engineAssetMountProvider = engineAssetMountProvider ?? EmptyEngineAssetMountProvider.Instance;
 		_assetInstanceRegistry.Clear();
 	}
 
@@ -80,6 +101,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		? GetAbsolutePath(_projectManifest.GameplayProjectRelativePath)
 		: null;
 	public AssetDatabase CurrentAssetDatabase => _currentAssetDatabase;
+	public IAssetCatalog CurrentAssetCatalog => _currentAssetCatalog;
 	public long AssetDatabaseRevision => _assetDatabaseRevision;
 
 	public bool CreateProject(string parentFolder, string projectName, out string errorMessage)
@@ -193,6 +215,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			_shaderProvider?.SetProjectRoot(null);
 			_projectManifest = null;
 			_currentAssetDatabase = new AssetDatabase();
+			_currentAssetCatalog = new AssetCatalog([]);
 			_assetInstanceRegistry.Clear();
 			errorMessage = $"Failed to open project: {ex.Message}";
 			Console.WriteLine(ex.Message);
@@ -208,6 +231,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		_shaderProvider?.SetProjectRoot(null);
 		_projectManifest = null;
 		_currentAssetDatabase = new AssetDatabase();
+		_currentAssetCatalog = new AssetCatalog([]);
 		_assetInstanceRegistry.Clear();
 		ClearUndoHistory();
 	}
@@ -218,6 +242,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = new AssetDatabase();
+			_currentAssetCatalog = new AssetCatalog([]);
 			_assetInstanceRegistry.Clear();
 			return AssetDatabaseRefreshResult.Empty;
 		}
@@ -240,11 +265,30 @@ public sealed class EditorProjectService : IEditorProjectService
 		if (HasOpenProject == false)
 		{
 			_currentAssetDatabase = new AssetDatabase();
+			_currentAssetCatalog = new AssetCatalog([]);
 			_assetInstanceRegistry.Clear();
 			return;
 		}
 
 		ApplyDatabase(_assetPipelineService.LoadDatabase(_projectRootPath!));
+	}
+
+	public void ReloadAssetMounts()
+	{
+		if (!HasOpenProject)
+			return;
+		var previous = _currentAssetCatalog.Assets.ToDictionary(asset => asset.Asset.Id);
+		ApplyDatabase(_currentAssetDatabase);
+		var changed = new HashSet<Guid>();
+		foreach (var oldAsset in previous)
+		{
+			if (!_currentAssetCatalog.TryGetAsset(oldAsset.Key, out var current) ||
+			    !MountedAssetEntriesEqual(oldAsset.Value, current))
+				changed.Add(oldAsset.Key);
+		}
+		foreach (var current in _currentAssetCatalog.Assets)
+			if (!previous.ContainsKey(current.Asset.Id)) changed.Add(current.Asset.Id);
+		_assetInstanceRegistry.InvalidateAssets(ExpandCatalogInvalidationClosure(changed));
 	}
 
 	public void RefreshAssetSource(string relativeSourcePath)
@@ -301,19 +345,23 @@ public sealed class EditorProjectService : IEditorProjectService
 
 	public bool TryGetAsset(Guid assetId, out AssetDatabaseEntry asset)
 	{
-		for (var i = 0; i < _currentAssetDatabase.Assets.Count; i++)
+		if (_currentAssetCatalog.TryGetAsset(assetId, out var mounted))
 		{
-			var candidate = _currentAssetDatabase.Assets[i];
-			if (candidate.Id == assetId)
-			{
-				asset = CloneEntry(candidate);
-				return true;
-			}
+			asset = CloneEntry(mounted.Asset);
+			return true;
 		}
-
 		asset = null!;
 		return false;
 	}
+
+	public bool TryGetMountedAsset(Guid assetId, out MountedAsset asset) =>
+		_currentAssetCatalog.TryGetAsset(assetId, out asset);
+
+	public string GetAbsoluteAssetPath(Guid assetId, string relativePath) =>
+		_currentAssetCatalog.GetAsset(assetId).Mount.GetAbsolutePath(relativePath);
+
+	public bool IsAssetReadOnly(Guid assetId) =>
+		_currentAssetCatalog.TryGetAsset(assetId, out var mounted) && mounted.Mount.IsReadOnly;
 
 	public string GetAbsolutePath(string relativePath)
 	{
@@ -793,8 +841,12 @@ public sealed class EditorProjectService : IEditorProjectService
 	{
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
+		var projectMount = new DirectoryAssetMount(
+			"project", "Project", _projectRootPath!, false, CloneCurrentAssetDatabase(),
+			_assetPipelineService.GetDependencies(_projectRootPath!));
+		_currentAssetCatalog = new AssetCatalog([projectMount, .._engineAssetMountProvider.GetMounts()]);
 		_assetDatabaseRevision++;
-		_assetInstanceRegistry.RefreshProject(_projectRootPath!, CloneCurrentAssetDatabase());
+		_assetInstanceRegistry.RefreshCatalog(_currentAssetCatalog);
 	}
 
 	private static IReadOnlyCollection<Guid> CollectChangedNodeIds(AssetDatabase previousDatabase, AssetDatabase refreshedDatabase)
@@ -825,6 +877,25 @@ public sealed class EditorProjectService : IEditorProjectService
 
 		return changedNodeIds.ToArray();
 	}
+
+	private IReadOnlyCollection<Guid> ExpandCatalogInvalidationClosure(IEnumerable<Guid> changedIds)
+	{
+		var result = changedIds.Where(id => id != Guid.Empty).ToHashSet();
+		var reverse = _currentAssetCatalog.Mounts.SelectMany(mount => mount.Dependencies)
+			.GroupBy(edge => edge.ToNodeId)
+			.ToDictionary(group => group.Key, group => group.Select(edge => edge.FromNodeId).ToArray());
+		var pending = new Queue<Guid>(result);
+		while (pending.TryDequeue(out var changed))
+			if (reverse.TryGetValue(changed, out var dependents))
+				foreach (var dependent in dependents)
+					if (result.Add(dependent)) pending.Enqueue(dependent);
+		return result;
+	}
+
+	private static bool MountedAssetEntriesEqual(MountedAsset left, MountedAsset right) =>
+		string.Equals(left.Mount.Id, right.Mount.Id, StringComparison.Ordinal) &&
+		string.Equals(left.Mount.RootPath, right.Mount.RootPath, StringComparison.Ordinal) &&
+		AssetEntriesEqual(left.Asset, right.Asset);
 
 	private static bool AssetEntriesEqual(AssetDatabaseEntry left, AssetDatabaseEntry right)
 	{

@@ -142,7 +142,7 @@ public sealed class TextureArtifactPipelineTests
 				]));
 		var projectService = Substitute.For<IEditorProjectService>();
 		projectService.HasOpenProject.Returns(true);
-		projectService.GetAbsolutePath(importedRelativePath).Returns(importedPath);
+		projectService.GetAbsoluteAssetPath(Arg.Any<Guid>(), importedRelativePath).Returns(importedPath);
 		var resources = new TestTextureResources();
 		var renderer = Substitute.For<IRenderer>();
 		Texture? uploadedTexture = null;
@@ -171,7 +171,8 @@ public sealed class TextureArtifactPipelineTests
 		var importedRelativePath = "Library/Imported/source/missing.bin";
 		var projectService = Substitute.For<IEditorProjectService>();
 		projectService.HasOpenProject.Returns(true);
-		projectService.GetAbsolutePath(importedRelativePath).Returns(Path.Combine(tempDirectory.Path, importedRelativePath));
+		projectService.GetAbsoluteAssetPath(Arg.Any<Guid>(), importedRelativePath)
+			.Returns(Path.Combine(tempDirectory.Path, importedRelativePath));
 		var renderer = Substitute.For<IRenderer>();
 		var loader = new AssetThumbnailLoader(projectService, renderer, new ImmediateMainThreadDispatcher());
 		var asset = CreateTextureAsset(importedRelativePath);

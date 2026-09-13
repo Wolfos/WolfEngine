@@ -6,10 +6,12 @@ namespace WolfEngine.AssetPipeline;
 
 public sealed class WolfEngineBuildConfig
 {
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = 3;
 	public int Version { get; set; } = CurrentVersion;
 	/// <summary>Scenes included in the game build. The first scene is launched by default.</summary>
 	public List<Guid> SceneIds { get; set; } = [];
+	/// <summary>Assets loaded only through code and therefore not discoverable from serialized scene references.</summary>
+	public List<Guid> AssetIds { get; set; } = [];
 	// Retained for reading version 1 project settings and for the runtime bootstrap manifest.
 	public Guid InitialSceneId { get; set; }
 	public CookedRuntimeSettings RuntimeSettings { get; set; } = new();
@@ -30,6 +32,9 @@ public sealed class WolfEngineBuildConfig
 		InitialSceneId = SceneIds.FirstOrDefault();
 		Version = CurrentVersion;
 	}
+
+	public IReadOnlyList<Guid> GetExplicitAssetIds() =>
+		AssetIds.Where(id => id != Guid.Empty).Distinct().ToArray();
 }
 
 public sealed class CookedRuntimeSettings

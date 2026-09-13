@@ -16,6 +16,7 @@ public sealed class GameBuildContext
 	public required string ProjectRootPath { get; init; }
 	public required string GameplayProjectPath { get; init; }
 	public required AssetDatabase AssetDatabase { get; init; }
+	public IAssetCatalog? AssetCatalog { get; init; }
 }
 
 public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false);
@@ -52,10 +53,13 @@ public static class GameBuilder
 		services.AddEditorToolingShaders(
 			new EngineShaderOptions { EngineContentRoot = Path.Combine(engineSolutionRoot, "WolfEngine") });
 		using var provider = services.BuildServiceProvider();
-		var database = context.AssetDatabase.Assets.ToDictionary(asset => asset.Id);
+		var catalog = context.AssetCatalog ?? new AssetCatalog([
+			new DirectoryAssetMount("project", "Project", projectRoot, false, context.AssetDatabase)
+		]);
+		var database = catalog.Assets.ToDictionary(asset => asset.Asset.Id);
 		foreach (var sceneId in sceneIds)
 		{
-			if (!database.TryGetValue(sceneId, out var scene) || scene.Type != AssetType.Scene)
+			if (!database.TryGetValue(sceneId, out var scene) || scene.Asset.Type != AssetType.Scene)
 				throw new InvalidOperationException($"Project scene '{sceneId}' was not found.");
 		}
 
@@ -104,20 +108,21 @@ public static class GameBuilder
 		if (Directory.Exists(leakedEngineAssets))
 			Directory.Delete(leakedEngineAssets, true);
 
-		var graph = provider.GetRequiredService<IAssetPipelineIndex>().GetDependencies(projectRoot)
+		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
 			.GroupBy(edge => edge.FromNodeId)
 			.ToDictionary(
 				group => group.Key,
 				group => group.Where(edge => edge.IsHard).Select(edge => edge.ToNodeId).ToHashSet());
 		foreach (var asset in database.Values)
-			AddSerializedDependencies(projectRoot, asset, graph);
+			AddSerializedDependencies(asset, graph);
 
-		var closure = ComputeClosure(sceneIds, database, graph);
+		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Distinct().ToArray();
+		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
 		var groups = closure
-			.Select(id => CreateSource(projectRoot, database[id], graph.GetValueOrDefault(id) ?? []))
-			.GroupBy(source => GetPackName(database[source.Id].Type))
+			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? []))
+			.GroupBy(source => GetPackName(database[source.Id].Asset.Type))
 			.ToDictionary(group => group.Key, group => group.ToList());
 
 		var shaderSources = CookShaders(provider, GetBackend());
@@ -169,6 +174,12 @@ public static class GameBuilder
 				Id = sceneId,
 				Dependencies = ComputeClosure([sceneId], database, graph).Where(id => id != sceneId).Order().ToList()
 			}),
+			..config.GetExplicitAssetIds().Select(assetId => new WolfManifestRoot
+			{
+				Kind = "ExplicitAsset",
+				Id = assetId,
+				Dependencies = ComputeClosure([assetId], database, graph).Where(id => id != assetId).Order().ToList()
+			}),
 			new WolfManifestRoot { Kind = "GameplayAssembly", Id = GameplayAssemblyId },
 			..(options.Debug
 				? new[] { new WolfManifestRoot { Kind = "GameplaySymbols", Id = GameplaySymbolsId } }
@@ -186,8 +197,9 @@ public static class GameBuilder
 		return new GameBuildResult(output, closure.Count);
 	}
 
-	private static WolfPackSource CreateSource(string projectRoot, AssetDatabaseEntry asset, IReadOnlyCollection<Guid> dependencies)
+	private static WolfPackSource CreateSource(MountedAsset mountedAsset, IReadOnlyCollection<Guid> dependencies)
 	{
+		var asset = mountedAsset.Asset;
 		string path;
 		if (asset.Type == AssetType.Texture2D)
 		{
@@ -205,19 +217,22 @@ public static class GameBuilder
 			path = asset.RelativeAssetPath;
 		}
 
-		var absolute = Path.GetFullPath(Path.Combine(projectRoot, path.Replace('/', Path.DirectorySeparatorChar)));
+		var absolute = mountedAsset.Mount.GetAbsolutePath(path);
 		if (!File.Exists(absolute))
 			throw new FileNotFoundException($"Cooked input for '{asset.Id}' is missing.", absolute);
 
 		return WolfPackSource.FromFile(asset.Id, asset.Type.ToString(), absolute, dependencies);
 	}
 
-	private static void AddSerializedDependencies(string root, AssetDatabaseEntry asset, Dictionary<Guid, HashSet<Guid>> graph)
+	private static void AddSerializedDependencies(MountedAsset mountedAsset, Dictionary<Guid, HashSet<Guid>> graph)
 	{
+		var asset = mountedAsset.Asset;
 		if (asset.Type is AssetType.Texture2D or AssetType.Mesh or AssetType.Model3D)
 			return;
 
-		var path = Path.Combine(root, asset.RelativeAssetPath.Replace('/', Path.DirectorySeparatorChar));
+		if (string.IsNullOrWhiteSpace(asset.RelativeAssetPath))
+			return;
+		var path = mountedAsset.Mount.GetAbsolutePath(asset.RelativeAssetPath);
 		if (!File.Exists(path) || !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
 			return;
 
@@ -257,7 +272,7 @@ public static class GameBuilder
 		}
 	}
 
-	private static HashSet<Guid> ComputeClosure(IEnumerable<Guid> roots, Dictionary<Guid, AssetDatabaseEntry> database, Dictionary<Guid, HashSet<Guid>> graph)
+	private static HashSet<Guid> ComputeClosure(IEnumerable<Guid> roots, Dictionary<Guid, MountedAsset> database, Dictionary<Guid, HashSet<Guid>> graph)
 	{
 		var result = new HashSet<Guid>();
 		var pending = new Stack<Guid>();
@@ -296,7 +311,7 @@ public static class GameBuilder
 	private static string GetPackName(AssetType type) => type switch
 	{
 		AssetType.Texture2D => "textures",
-		AssetType.Mesh or AssetType.Model3D => "meshes-models",
+		AssetType.Mesh or AssetType.Model3D or AssetType.Skeleton or AssetType.AnimationClip => "meshes-models",
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
 		AssetType.AudioClip => "audio",

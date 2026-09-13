@@ -27,6 +27,8 @@ internal sealed class AssetsWindowFolderContents
 
 internal sealed class AssetsWindowSourceItem
 {
+	public required string MountId { get; init; }
+	public required bool IsReadOnly { get; init; }
 	public required Guid SourceId { get; init; }
 	public required string RelativeSourcePath { get; init; }
 	public required string DisplayName { get; init; }
@@ -74,6 +76,19 @@ internal sealed class AssetsWindowBrowserModelCache
 		return _browserModel;
 	}
 
+	public AssetsWindowBrowserModel GetOrBuild(IAssetCatalog catalog, string assetsRootPath, long assetDatabaseRevision)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
+		var normalizedAssetsRootPath = Path.GetFullPath(assetsRootPath);
+		if (_browserModel is not null && _assetDatabaseRevision == assetDatabaseRevision &&
+		    string.Equals(_assetsRootPath, normalizedAssetsRootPath, StringComparison.OrdinalIgnoreCase))
+			return _browserModel;
+		_browserModel = AssetsWindowBrowserModelBuilder.Build(catalog, normalizedAssetsRootPath);
+		_assetsRootPath = normalizedAssetsRootPath;
+		_assetDatabaseRevision = assetDatabaseRevision;
+		return _browserModel;
+	}
+
 	public void Invalidate()
 	{
 		_browserModel = null;
@@ -83,6 +98,29 @@ internal sealed class AssetsWindowBrowserModelCache
 
 internal static class AssetsWindowBrowserModelBuilder
 {
+	public static AssetsWindowBrowserModel Build(IAssetCatalog catalog, string assetsRootPath)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
+		var project = catalog.Mounts.FirstOrDefault(mount => string.Equals(mount.Id, "project", StringComparison.Ordinal));
+		var model = Build(project?.Database.Assets ?? [], assetsRootPath);
+		var folders = (Dictionary<string, AssetsWindowFolderNode>)model.FoldersByPath;
+		var sources = (Dictionary<Guid, AssetsWindowSourceItem>)model.SourcesBySourceId;
+		foreach (var mount in catalog.Mounts.Where(mount => !string.Equals(mount.Id, "project", StringComparison.Ordinal)))
+		{
+			var mountRoot = $"{AssetPipelinePaths.AssetsFolderName}/{mount.DisplayName}";
+			EnsureFolder(mountRoot, folders);
+			foreach (var group in mount.Database.Assets.Where(IsVisibleAsset).GroupBy(asset => asset.SourceId))
+			{
+				var sourceItem = CreateSourceItem(group, mount.Id, mount.IsReadOnly, mountRoot);
+				EnsureFolder(sourceItem.FolderPath, folders).Sources.Add(sourceItem);
+				if (!sources.TryAdd(sourceItem.SourceId, sourceItem))
+					throw new InvalidOperationException($"Source ID '{sourceItem.SourceId}' occurs in multiple asset mounts.");
+			}
+		}
+		SortFolder(model.RootFolder);
+		return model;
+	}
+
 	public static AssetsWindowBrowserModel Build(IReadOnlyList<AssetDatabaseEntry> assets, string assetsRootPath)
 	{
 		ArgumentNullException.ThrowIfNull(assets);
@@ -106,7 +144,7 @@ internal static class AssetsWindowBrowserModelBuilder
 		var sourcesBySourceId = new Dictionary<Guid, AssetsWindowSourceItem>();
 		foreach (var group in assets.Where(IsVisibleAsset).GroupBy(asset => asset.SourceId))
 		{
-			var sourceItem = CreateSourceItem(group);
+			var sourceItem = CreateSourceItem(group, "project", false, null);
 			EnsureFolder(sourceItem.FolderPath, foldersByPath).Sources.Add(sourceItem);
 			sourcesBySourceId[sourceItem.SourceId] = sourceItem;
 		}
@@ -167,7 +205,8 @@ internal static class AssetsWindowBrowserModelBuilder
 		};
 	}
 
-	private static AssetsWindowSourceItem CreateSourceItem(IGrouping<Guid, AssetDatabaseEntry> group)
+	private static AssetsWindowSourceItem CreateSourceItem(IGrouping<Guid, AssetDatabaseEntry> group, string mountId,
+		bool isReadOnly, string? mountRoot)
 	{
 		var groupedAssets = group
 			.OrderBy(GetAssetTypeSortOrder)
@@ -191,12 +230,25 @@ internal static class AssetsWindowBrowserModelBuilder
 			displayName = primaryAsset.Name;
 		}
 
+		var folderPath = ProjectPathUtility.GetFolderPath(primaryAsset.RelativeSourcePath);
+		if (mountRoot is not null)
+		{
+			var suffix = folderPath.Equals(AssetPipelinePaths.AssetsFolderName, StringComparison.OrdinalIgnoreCase)
+				? string.Empty
+				: folderPath.StartsWith(AssetPipelinePaths.AssetsFolderName + "/", StringComparison.OrdinalIgnoreCase)
+					? folderPath[(AssetPipelinePaths.AssetsFolderName.Length + 1)..]
+					: folderPath;
+			folderPath = string.IsNullOrWhiteSpace(suffix) ? mountRoot : $"{mountRoot}/{suffix}";
+		}
+
 		return new AssetsWindowSourceItem
 		{
+			MountId = mountId,
+			IsReadOnly = isReadOnly,
 			SourceId = group.Key,
 			RelativeSourcePath = primaryAsset.RelativeSourcePath,
 			DisplayName = displayName,
-			FolderPath = ProjectPathUtility.GetFolderPath(primaryAsset.RelativeSourcePath),
+			FolderPath = folderPath,
 			PrimaryAsset = primaryAsset,
 			SubAssets = subAssets
 		};

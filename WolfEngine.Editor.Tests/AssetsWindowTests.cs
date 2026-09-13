@@ -178,6 +178,29 @@ public sealed class AssetsWindowTests
 	}
 
 	[Test]
+	public void BrowserModelBuild_AddsReadOnlyMountedAssetsUnderNamedRoot()
+	{
+		using var assetsRoot = new TemporaryAssetsRoot();
+		var engineAsset = CreateAssetEntry(Guid.NewGuid(), "Cube", "Assets/Primitives/Cube.obj");
+		var projectMount = new DirectoryAssetMount("project", "Project",
+			Directory.GetParent(assetsRoot.AssetsPath)!.FullName, false, new AssetDatabase());
+		var engineMount = new DirectoryAssetMount("engine", "Engine", Path.GetTempPath(), true,
+			new AssetDatabase { Assets = [engineAsset] });
+
+		var browserModel = AssetsWindowBrowserModelBuilder.Build(
+			new AssetCatalog([projectMount, engineMount]), assetsRoot.AssetsPath);
+
+		var engineFolder = browserModel.FoldersByPath["Assets/Engine/Primitives"];
+		Assert.That(engineFolder.Sources, Has.Count.EqualTo(1));
+		Assert.Multiple(() =>
+		{
+			Assert.That(engineFolder.Sources[0].MountId, Is.EqualTo("engine"));
+			Assert.That(engineFolder.Sources[0].IsReadOnly, Is.True);
+			Assert.That(engineFolder.Sources[0].PrimaryAsset.Id, Is.EqualTo(engineAsset.Id));
+		});
+	}
+
+	[Test]
 	public void ToggleExpandedSource_SwitchesBetweenSources_AndCollapsesRepeatedClick()
 	{
 		var firstSourceId = Guid.NewGuid();
@@ -1132,6 +1155,69 @@ public sealed class AssetsWindowTests
 			{
 				Directory.Delete(projectRoot, recursive: true);
 			}
+		}
+	}
+
+	[Test]
+	public void ReloadAssetDatabase_PreservesEngineMount()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineMountedRefreshTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "MountedRefreshTests");
+		var engineAsset = CreateAssetEntry(Guid.NewGuid(), "engine-hash");
+		var engineMount = new DirectoryAssetMount("engine", "Engine", Path.GetTempPath(), true,
+			new AssetDatabase { Assets = [engineAsset] });
+		var provider = Substitute.For<IEngineAssetMountProvider>();
+		provider.GetMounts().Returns([engineMount]);
+		var projectService = new EditorProjectService(
+			new TrackingProjectAssetPipelineService(), new TestAssetInstanceRegistry(), engineAssetMountProvider: provider);
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+			projectService.ReloadAssetDatabase();
+
+			Assert.That(projectService.CurrentAssetCatalog.GetAsset(engineAsset.Id).Mount.Id, Is.EqualTo("engine"));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot)) Directory.Delete(projectRoot, recursive: true);
+		}
+	}
+
+	[Test]
+	public void ReloadAssetMounts_InvalidatesInstancesFromReplacedMount()
+	{
+		var projectRoot = Path.Combine(Path.GetTempPath(), "WolfEngineMountReplacementTests", Guid.NewGuid().ToString("N"));
+		CreateManifestBackedProjectStructure(projectRoot, "MountReplacementTests");
+		var engineAssetId = Guid.NewGuid();
+		var firstMount = new DirectoryAssetMount("engine", "Engine", Path.Combine(Path.GetTempPath(), "engine-v1"), true,
+			new AssetDatabase { Assets = [CreateAssetEntry(engineAssetId, "first")] });
+		var secondMount = new DirectoryAssetMount("engine", "Engine", Path.Combine(Path.GetTempPath(), "engine-v2"), true,
+			new AssetDatabase { Assets = [CreateAssetEntry(engineAssetId, "second")] });
+		IReadOnlyList<IAssetMount> currentMounts = [firstMount];
+		var provider = Substitute.For<IEngineAssetMountProvider>();
+		provider.GetMounts().Returns(_ => currentMounts);
+		var registry = new TestAssetInstanceRegistry();
+		var projectService = new EditorProjectService(
+			new TrackingProjectAssetPipelineService(), registry, engineAssetMountProvider: provider);
+
+		try
+		{
+			Assert.That(projectService.OpenProject(projectRoot, out var errorMessage), Is.True, errorMessage);
+			registry.Register(engineAssetId, new object());
+			currentMounts = [secondMount];
+
+			projectService.ReloadAssetMounts();
+
+			Assert.That(registry.GetInstance(engineAssetId, typeof(object)), Is.Null);
+			Assert.That(projectService.CurrentAssetCatalog.GetAsset(engineAssetId).Mount.RootPath,
+				Is.EqualTo(secondMount.RootPath));
+		}
+		finally
+		{
+			projectService.CloseProject();
+			if (Directory.Exists(projectRoot)) Directory.Delete(projectRoot, recursive: true);
 		}
 	}
 

@@ -77,28 +77,32 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 
 	public void SaveMaterialAsset(AssetDatabaseEntry asset, MaterialAsset materialAsset)
 	{
-		_materialAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), materialAsset);
+		EnsureWritable(asset.Id);
+		_materialAssetStore.SaveAsset(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath), materialAsset);
 		SynchronizeRuntimeMaterial(asset.Id, materialAsset);
 		_projectService.RefreshAssetSource(asset.RelativeSourcePath, asset.Id);
 	}
 
 	public void SaveDataAsset(AssetDatabaseEntry asset, Type dataAssetType, IDataAsset dataAsset)
 	{
-		_dataAssetStore.SaveAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath), dataAssetType, dataAsset);
+		EnsureWritable(asset.Id);
+		_dataAssetStore.SaveAsset(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath), dataAssetType, dataAsset);
 		_projectService.RefreshAssetSource(asset.RelativeSourcePath);
 	}
 
 	public void ApplyMaterialAssetSnapshot(EditorAssetFileSnapshot snapshot)
 	{
-		WriteFileAtomically(_projectService.GetAbsolutePath(snapshot.RelativeAssetPath), snapshot.Json);
-		var materialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(snapshot.RelativeAssetPath));
+		EnsureWritable(snapshot.AssetId);
+		WriteFileAtomically(_projectService.GetAbsoluteAssetPath(snapshot.AssetId, snapshot.RelativeAssetPath), snapshot.Json);
+		var materialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsoluteAssetPath(snapshot.AssetId, snapshot.RelativeAssetPath));
 		SynchronizeRuntimeMaterial(snapshot.AssetId, materialAsset);
 		_projectService.RefreshAssetSource(snapshot.RelativeSourcePath, snapshot.AssetId);
 	}
 
 	public void ApplyDataAssetSnapshot(EditorAssetFileSnapshot snapshot)
 	{
-		WriteFileAtomically(_projectService.GetAbsolutePath(snapshot.RelativeAssetPath), snapshot.Json);
+		EnsureWritable(snapshot.AssetId);
+		WriteFileAtomically(_projectService.GetAbsoluteAssetPath(snapshot.AssetId, snapshot.RelativeAssetPath), snapshot.Json);
 		_projectService.RefreshAssetSource(snapshot.RelativeSourcePath);
 	}
 
@@ -108,7 +112,13 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 			asset.Id,
 			asset.RelativeAssetPath,
 			asset.RelativeSourcePath,
-			File.ReadAllText(_projectService.GetAbsolutePath(asset.RelativeAssetPath)));
+			File.ReadAllText(_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath)));
+	}
+
+	private void EnsureWritable(Guid assetId)
+	{
+		if (_projectService.IsAssetReadOnly(assetId))
+			throw new InvalidOperationException($"Asset '{assetId}' belongs to a read-only mount.");
 	}
 
 	private string SerializeMaterialAsset(MaterialAsset materialAsset)

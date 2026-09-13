@@ -29,7 +29,8 @@ public sealed class GameBuildService : IGameBuildService
 			{
 				ProjectRootPath = _projectService.ProjectRootPath,
 				GameplayProjectPath = _projectService.GameplayProjectPath,
-				AssetDatabase = _projectService.CloneCurrentAssetDatabase()
+				AssetDatabase = _projectService.CloneCurrentAssetDatabase(),
+				AssetCatalog = _projectService.CurrentAssetCatalog
 			},
 			new GameBuildOptions(outputPath, debug));
 	}

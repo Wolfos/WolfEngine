@@ -1193,8 +1193,10 @@ public class ComponentsWindow : EditorWindow, IComponentEditor
         {
             return;
         }
+        if (_projectService.IsAssetReadOnly(prefabAsset.Id))
+            throw new InvalidOperationException("Mounted prefabs are read-only. Create a project copy before applying overrides.");
 
-        var prefabPath = _projectService.GetAbsolutePath(prefabAsset.RelativeAssetPath);
+        var prefabPath = _projectService.GetAbsoluteAssetPath(prefabAsset.Id, prefabAsset.RelativeAssetPath);
         var prefabFile = PrefabAssetFile.Load(prefabPath);
         var sourceEntity = prefabFile.Entities.FirstOrDefault(candidate => candidate.EntityId == prefabSourcePath[0].PrefabEntityId);
         if (sourceEntity is null)

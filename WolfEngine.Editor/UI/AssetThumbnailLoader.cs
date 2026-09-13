@@ -51,7 +51,7 @@ public sealed class AssetThumbnailLoader : IAssetThumbnailLoader
 			return AssetThumbnailState.Unavailable;
 		}
 
-		var absoluteImportedPath = _projectService.GetAbsolutePath(summary.RelativeImportedPath);
+		var absoluteImportedPath = _projectService.GetAbsoluteAssetPath(asset.Id, summary.RelativeImportedPath);
 		if (File.Exists(absoluteImportedPath) == false)
 		{
 			return AssetThumbnailState.Unavailable;

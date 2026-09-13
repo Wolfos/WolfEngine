@@ -1,0 +1,27 @@
+{
+  "Version": 1,
+  "SourceId": "c2e67cc7-2514-4002-b9e0-95052830714d",
+  "ImporterId": "three-d-scene",
+  "ImporterVersion": 7,
+  "ImportSettingsJson": "{\n  \u0022ScaleFactor\u0022: 1\n}",
+  "SubAssets": [
+    {
+      "Key": "material:0",
+      "NodeId": "93f0a90c-bd8b-411a-a844-a0cc5b54bfdb",
+      "Type": "Material",
+      "Name": "Material 0"
+    },
+    {
+      "Key": "mesh:root-0-Quad:0:Quad",
+      "NodeId": "ced57b73-4607-4a0b-be8a-aba10df8f7a9",
+      "Type": "Mesh",
+      "Name": "Quad"
+    },
+    {
+      "Key": "scene",
+      "NodeId": "dd9c3005-1a10-41e9-97da-114d25c7c4b9",
+      "Type": "Model3D",
+      "Name": "Quad.obj"
+    }
+  ]
+}

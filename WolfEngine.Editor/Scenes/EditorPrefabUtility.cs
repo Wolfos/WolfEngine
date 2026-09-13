@@ -432,7 +432,8 @@ internal static class EditorPrefabUtility
 			throw new InvalidOperationException($"Cyclic prefab nesting detected while resolving prefab '{sourceLink.PrefabAssetId}'.");
 		}
 
-		var prefabFile = PrefabAssetFile.Load(projectService.GetAbsolutePath(prefabAsset.RelativeAssetPath));
+		var prefabFile = PrefabAssetFile.Load(projectService.GetAbsoluteAssetPath(
+			sourceLink.PrefabAssetId, prefabAsset.RelativeAssetPath));
 		var source = prefabFile.Entities.FirstOrDefault(entity => entity.EntityId == sourceLink.PrefabEntityId);
 		if (source is null)
 		{

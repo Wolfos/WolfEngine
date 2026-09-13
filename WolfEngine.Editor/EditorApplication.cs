@@ -23,12 +23,19 @@ public sealed class EditorApplication : IDisposable
 	public static EditorApplication Create(string? engineContentRoot = null)
 	{
 		var services = new ServiceCollection();
-		engineContentRoot ??= Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
+		engineContentRoot ??= Directory.Exists(Path.Combine(AppContext.BaseDirectory, "BuiltInContent", "Assets")) &&
+		                      File.Exists(Path.Combine(AppContext.BaseDirectory, "Shaders", "Geometry", "gbuffer.slang"))
+			? AppContext.BaseDirectory
+			: Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WolfEngine"));
 		WolfEngine.ConfigureServices(services);
 		services.AddWolfEngineGameplayUi();
 		services.AddEditorToolingShaders(new EngineShaderOptions { EngineContentRoot = engineContentRoot });
 		services.AddEditorToolingImporter();
 		Program.ConfigureServices(services);
+		services.AddSingleton<IEngineAssetMountProvider>(provider => new EngineAssetMountProvider(
+			engineContentRoot,
+			provider.GetRequiredService<IProjectAssetPipelineService>(),
+			provider.GetRequiredService<IRuntimeArtifactTargetProvider>()));
 		var provider = services.BuildServiceProvider();
 		provider.GetRequiredService<IUiFrameProvider>().DisableAutomaticIniPersistence();
 		EditorPreferences.Load();

@@ -45,7 +45,9 @@ internal sealed class AssetsWindowSelectionState
 		if (assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 		    projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
-			SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
+			var source = browserModel.SourcesBySourceId.Values.FirstOrDefault(item =>
+				item.PrimaryAsset.Id == selectedAssetId || item.SubAssets.Any(asset => asset.Id == selectedAssetId));
+			SetSelectedFolderPath(source?.FolderPath ?? ProjectPathUtility.GetFolderPath(selectedAsset.RelativeSourcePath));
 		}
 		else if (assetSelectionService.SelectedAssetId.HasValue)
 		{
@@ -69,7 +71,7 @@ internal sealed class AssetsWindowSelectionState
 		}
 
 		if (ExpandedSourceId.HasValue &&
-		    projectService.CurrentAssetDatabase.Assets.Any(asset => asset.SourceId == ExpandedSourceId.Value) == false)
+		    projectService.CurrentAssetCatalog.Assets.Any(asset => asset.Asset.SourceId == ExpandedSourceId.Value) == false)
 		{
 			ExpandedSourceId = null;
 		}

@@ -9,8 +9,8 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 	private readonly object _lock = new();
 	private readonly Dictionary<(Guid NodeId, Type RuntimeType), object> _instances = new();
 	private readonly HashSet<(Guid NodeId, Type RuntimeType)> _inProgress = new();
-	private Dictionary<Guid, AssetDatabaseEntry> _assetsById = new();
-	private string? _projectRootPath;
+	private Dictionary<Guid, MountedAsset> _assetsById = new();
+	private IAssetCatalog? _catalog;
 
 	public EditorAssetInstanceRegistry(IServiceProvider serviceProvider)
 	{
@@ -27,7 +27,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 
 		lock (_lock)
 		{
-			if (string.IsNullOrWhiteSpace(_projectRootPath))
+			if (_catalog is null)
 			{
 				return null;
 			}
@@ -71,19 +71,26 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 
 	public void RefreshProject(string projectRootPath, AssetDatabase database)
 	{
-		if (string.IsNullOrWhiteSpace(projectRootPath))
-		{
-			throw new ArgumentException("Project root path cannot be null or empty.", nameof(projectRootPath));
-		}
+		RefreshCatalog(new AssetCatalog([
+			new DirectoryAssetMount("project", "Project", projectRootPath, false, database)
+		]));
+	}
 
-		ArgumentNullException.ThrowIfNull(database);
+	public void RefreshCatalog(IAssetCatalog catalog)
+	{
+		ArgumentNullException.ThrowIfNull(catalog);
 
 		lock (_lock)
 		{
-			_projectRootPath = Path.GetFullPath(projectRootPath);
-			_assetsById = database.Assets.ToDictionary(asset => asset.Id, CloneEntry);
-			var validNodeIds = _assetsById.Keys.ToHashSet();
-			var staleKeys = _instances.Keys.Where(key => validNodeIds.Contains(key.NodeId) == false).ToList();
+			var previousAssets = _assetsById;
+			_catalog = catalog;
+			_assetsById = catalog.Assets.ToDictionary(
+				mounted => mounted.Asset.Id,
+				mounted => new MountedAsset(mounted.Mount, CloneEntry(mounted.Asset)));
+			var staleKeys = _instances.Keys.Where(key =>
+				!_assetsById.TryGetValue(key.NodeId, out var current) ||
+				!previousAssets.TryGetValue(key.NodeId, out var previous) ||
+				!MountedAssetsEquivalent(previous, current)).ToList();
 			for (var i = 0; i < staleKeys.Count; i++)
 			{
 				_instances.Remove(staleKeys[i]);
@@ -91,6 +98,21 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 
 			_inProgress.Clear();
 		}
+	}
+
+	private static bool MountedAssetsEquivalent(MountedAsset left, MountedAsset right)
+	{
+		var a = left.Asset;
+		var b = right.Asset;
+		return string.Equals(left.Mount.Id, right.Mount.Id, StringComparison.Ordinal) &&
+		       string.Equals(left.Mount.RootPath, right.Mount.RootPath, StringComparison.Ordinal) &&
+		       a.Type == b.Type &&
+		       string.Equals(a.RelativeAssetPath, b.RelativeAssetPath, StringComparison.Ordinal) &&
+		       string.Equals(a.SummaryJson, b.SummaryJson, StringComparison.Ordinal) &&
+		       a.Artifacts.Count == b.Artifacts.Count &&
+		       a.Artifacts.Zip(b.Artifacts).All(pair =>
+			       string.Equals(pair.First.RelativePath, pair.Second.RelativePath, StringComparison.Ordinal) &&
+			       string.Equals(pair.First.ContentHash, pair.Second.ContentHash, StringComparison.Ordinal));
 	}
 
 	public void InvalidateAssets(IEnumerable<Guid> assetIds)
@@ -125,8 +147,8 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 	{
 		lock (_lock)
 		{
-			_projectRootPath = null;
-			_assetsById = new Dictionary<Guid, AssetDatabaseEntry>();
+			_catalog = null;
+			_assetsById = new Dictionary<Guid, MountedAsset>();
 			_instances.Clear();
 			_inProgress.Clear();
 		}
@@ -141,8 +163,9 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 		}
 	}
 
-	private object? LoadInstance(AssetDatabaseEntry asset, Type expectedType)
+	private object? LoadInstance(MountedAsset mountedAsset, Type expectedType)
 	{
+		var asset = mountedAsset.Asset;
 		var descriptor = RuntimeAssetDescriptor.Get(expectedType);
 		if (descriptor.AssetType != asset.Type)
 		{
@@ -161,7 +184,7 @@ public sealed class EditorAssetInstanceRegistry : IAssetInstanceRegistry
 			asset.Id,
 			asset,
 			expectedType,
-			_projectRootPath ?? throw new InvalidOperationException("No project is currently loaded in the asset instance registry."),
+			mountedAsset.Mount,
 			ResolveReferencedAsset));
 	}
 

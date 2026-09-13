@@ -57,11 +57,16 @@ public sealed class AssetEditorWindow : EditorWindow
 
 		ImGui.TextUnformatted(asset.Name);
 		ImGui.TextDisabled(asset.RelativeAssetPath);
+		var readOnly = _projectService.IsAssetReadOnly(asset.Id);
+		if (readOnly)
+			ImGui.TextDisabled("Read-only mounted asset");
 		ImGui.Separator();
 
 		if (_assetHandlerRegistry.TryGetHandler(asset.Type, out var handler))
 		{
+			if (readOnly) ImGui.BeginDisabled();
 			handler.DrawEditor(asset);
+			if (readOnly) ImGui.EndDisabled();
 		}
 		else
 		{

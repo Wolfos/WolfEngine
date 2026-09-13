@@ -1,0 +1,27 @@
+{
+  "Version": 1,
+  "SourceId": "2fac13e9-29d9-4533-9c38-732e68735b69",
+  "ImporterId": "three-d-scene",
+  "ImporterVersion": 7,
+  "ImportSettingsJson": "{\n  \u0022ScaleFactor\u0022: 1\n}",
+  "SubAssets": [
+    {
+      "Key": "material:0",
+      "NodeId": "ef6998f0-17fd-48f9-bbc7-c52bb030de6b",
+      "Type": "Material",
+      "Name": "Material 0"
+    },
+    {
+      "Key": "mesh:root-0-Cube:0:Cube",
+      "NodeId": "ee15038d-b4d5-44c2-a0c6-a62caa57570f",
+      "Type": "Mesh",
+      "Name": "Cube"
+    },
+    {
+      "Key": "scene",
+      "NodeId": "719fd010-2913-490b-a57e-f2cef09917d4",
+      "Type": "Model3D",
+      "Name": "Cube.obj"
+    }
+  ]
+}

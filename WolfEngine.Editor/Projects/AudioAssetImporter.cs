@@ -48,6 +48,6 @@ public sealed class EditorAudioContentProvider : IAudioContentProvider
 		var artifact = asset.Artifacts.FirstOrDefault(item =>
 			string.Equals(item.Kind, AudioAssetConstants.RuntimeArtifactKind, StringComparison.Ordinal));
 		if (artifact is null) throw new InvalidDataException($"Audio asset '{assetId:D}' has no runtime artifact.");
-		return AudioArtifact.Open(_project.GetAbsolutePath(artifact.RelativePath));
+		return AudioArtifact.Open(_project.GetAbsoluteAssetPath(asset.Id, artifact.RelativePath));
 	}
 }

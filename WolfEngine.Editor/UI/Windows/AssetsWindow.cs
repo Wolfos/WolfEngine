@@ -139,8 +139,16 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			return;
 		}
 
+		var assetCatalog = _projectService.CurrentAssetCatalog;
+		if (assetCatalog is null || assetCatalog.Mounts.Count == 0)
+		{
+			assetCatalog = new AssetCatalog([
+				new DirectoryAssetMount("project", "Project", _projectService.ProjectRootPath!, false,
+					_projectService.CurrentAssetDatabase)
+			]);
+		}
 		var browserModel = _browserModelCache.GetOrBuild(
-			_projectService.CurrentAssetDatabase.Assets,
+			assetCatalog,
 			_projectService.AssetsPath,
 			_projectService.AssetDatabaseRevision);
 		_selection.Prune(browserModel, _projectService, _assetSelectionService);
@@ -187,7 +195,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		ImGui.BeginChild("AssetsContentPane", new Vector2(0.0f, 0.0f), ImGuiChildFlags.None);
 		var folderContents = AssetsWindowBrowserModelBuilder.GetFolderContents(selectedFolder, _assetSearchText);
 		DrawCurrentFolderContents(folderContents, scene);
-		_dragDrop.RegisterContentPaneDropTarget(_selection.SelectedFolderPath);
+		if (!IsReadOnlyBrowserFolder(_selection.SelectedFolderPath))
+			_dragDrop.RegisterContentPaneDropTarget(_selection.SelectedFolderPath);
 		if (ImGui.BeginPopupContextWindow(CurrentFolderContextMenuId,
 			    ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
 		{
@@ -234,7 +243,8 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		var open = ImGui.TreeNodeEx("##FolderNode", flags);
 		var leftClicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
 		var rightClicked = ImGui.IsItemClicked(ImGuiMouseButton.Right);
-		_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
+		if (!IsReadOnlyBrowserFolder(folder.RelativePath))
+			_dragDrop.RegisterFolderDropTarget(folder.RelativePath);
 		DrawFolderTreeLabel(folder, nodeCursorX);
 
 		if (leftClicked)
@@ -478,10 +488,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 		if (headerLeftClicked)
 		{
-			_dragDrop.Press(AssetBrowserDragTarget.ForSource(source.RelativeSourcePath));
+			if (!source.IsReadOnly)
+				_dragDrop.Press(AssetBrowserDragTarget.ForSource(source.RelativeSourcePath));
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
 			var wasPrimarySelected = _assetSelectionService.SelectedAssetId == source.PrimaryAsset.Id;
-			SelectAsset(source.PrimaryAsset);
+			SelectAsset(source.PrimaryAsset, folderPath: source.FolderPath);
 			if (headerDoubleClicked)
 			{
 				OpenAsset(source.PrimaryAsset, scene);
@@ -496,7 +507,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (headerRightClicked)
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(source.PrimaryAsset, requestFocus: false);
+			SelectAsset(source.PrimaryAsset, requestFocus: false, folderPath: source.FolderPath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
 
@@ -568,7 +579,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (ImGui.Selectable($"{subAsset.Name}  [{subAsset.Type}]", isSelected, ImGuiSelectableFlags.SpanAllColumns))
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(subAsset);
+			SelectAsset(subAsset, folderPath: source.FolderPath);
 		}
 
 		if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
@@ -580,7 +591,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (rightClicked)
 		{
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Assets);
-			SelectAsset(subAsset, requestFocus: false);
+			SelectAsset(subAsset, requestFocus: false, folderPath: source.FolderPath);
 			ImGui.OpenPopup(LocalItemContextMenuId);
 		}
 
@@ -629,6 +640,11 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 
 	private void DrawFolderScopedContextMenu(string folderPath)
 	{
+		if (IsReadOnlyBrowserFolder(folderPath))
+		{
+			ImGui.TextDisabled("Read-only mounted content");
+			return;
+		}
 		if (ImGui.BeginMenu("Create"))
 		{
 			if (ImGui.MenuItem("Folder"))
@@ -660,6 +676,15 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		}
 	}
 
+	private bool IsReadOnlyBrowserFolder(string folderPath)
+	{
+		var catalog = _projectService.CurrentAssetCatalog;
+		return catalog is not null && catalog.Mounts
+			.Where(mount => mount.IsReadOnly)
+			.Select(mount => $"{AssetPipelinePaths.AssetsFolderName}/{mount.DisplayName}")
+			.Any(root => ProjectPathUtility.IsSameOrDescendant(folderPath, root));
+	}
+
 	private void OpenFolderInFileManager(string folderPath)
 	{
 		try
@@ -677,6 +702,18 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		try
 		{
 			_fileManagerService.RevealPath(_projectService.GetAbsolutePath(relativeSourcePath));
+		}
+		catch (Exception ex)
+		{
+			ShowError($"Failed to show asset in {_fileManagerService.FileManagerName}: {ex.Message}");
+		}
+	}
+
+	private void RevealSourceInFileManager(Guid assetId, string relativeSourcePath)
+	{
+		try
+		{
+			_fileManagerService.RevealPath(_projectService.GetAbsoluteAssetPath(assetId, relativeSourcePath));
 		}
 		catch (Exception ex)
 		{
@@ -727,7 +764,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			try
 			{
 				_assetPipelineService.InstantiateImportedModel(
-					_projectService.ProjectRootPath!, asset.Id, scene.World, GetSceneSpawnPosition());
+					_projectService.CurrentAssetCatalog, asset.Id, scene.World, GetSceneSpawnPosition());
 				_interactionState.MarkSceneDirty(scene.World);
 			}
 			catch (Exception ex)
@@ -741,7 +778,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			try
 			{
 				_assetPipelineService.InstantiatePrefab(
-					_projectService.ProjectRootPath!, asset.Id, scene, GetSceneSpawnPosition());
+					_projectService.CurrentAssetCatalog, asset.Id, scene, GetSceneSpawnPosition());
 				_interactionState.MarkSceneDirty(scene.World);
 			}
 			catch (Exception ex)
@@ -761,6 +798,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 			}
 		}
 
+		if (sourceItem.IsReadOnly) ImGui.BeginDisabled();
 		if (ImGui.MenuItem(renameLabel))
 		{
 			RequestRename(PendingRenameTarget.ForSource(contextTarget.RelativeSourcePath!));
@@ -770,11 +808,12 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		{
 			RequestDelete(PendingDeleteTarget.ForSource(contextTarget.RelativeSourcePath!));
 		}
+		if (sourceItem.IsReadOnly) ImGui.EndDisabled();
 
 		ImGui.Separator();
 		if (ImGui.MenuItem($"Show in {_fileManagerService.FileManagerName}"))
 		{
-			RevealSourceInFileManager(contextTarget.RelativeSourcePath!);
+			RevealSourceInFileManager(contextTarget.AssetId!.Value, contextTarget.RelativeSourcePath!);
 		}
 	}
 
@@ -1070,6 +1109,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
+			if (_projectService.IsAssetReadOnly(selectedAssetId)) return false;
 			RequestRename(PendingRenameTarget.ForSource(selectedAsset.RelativeSourcePath));
 			return true;
 		}
@@ -1099,6 +1139,7 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		if (_assetSelectionService.SelectedAssetId is { } selectedAssetId &&
 		    _projectService.TryGetAsset(selectedAssetId, out var selectedAsset))
 		{
+			if (_projectService.IsAssetReadOnly(selectedAssetId)) return false;
 			RequestDelete(PendingDeleteTarget.ForSource(selectedAsset.RelativeSourcePath));
 			return true;
 		}
@@ -1120,9 +1161,9 @@ public sealed class AssetsWindow : EditorWindow, IEditorAssetDeletionHandler
 		_assetSelectionService.Clear();
 	}
 
-	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true)
+	private void SelectAsset(AssetDatabaseEntry asset, bool requestFocus = true, string? folderPath = null)
 	{
-		_selection.SetSelectedFolderPath(ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
+		_selection.SetSelectedFolderPath(folderPath ?? ProjectPathUtility.GetFolderPath(asset.RelativeSourcePath));
 		_assetSelectionService.Select(asset.Id, requestFocus);
 	}
 

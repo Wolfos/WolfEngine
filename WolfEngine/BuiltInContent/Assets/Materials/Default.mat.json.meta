@@ -1,0 +1,15 @@
+{
+  "Version": 1,
+  "SourceId": "0809c662-bfdf-4bff-b019-92d9bd946ced",
+  "ImporterId": "material",
+  "ImporterVersion": 1,
+  "ImportSettingsJson": "{}",
+  "SubAssets": [
+    {
+      "Key": "main",
+      "NodeId": "b8d409d6-fbb9-43eb-9326-8559949535ca",
+      "Type": "Material",
+      "Name": "Default.mat"
+    }
+  ]
+}

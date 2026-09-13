@@ -187,7 +187,9 @@ public sealed class PropertyDrawerRegistry : IPropertyDrawerRegistry
 		var authoringTypeName = descriptor.AuthoringType.AssemblyQualifiedName ?? string.Empty;
 		var authoringTypeId = _typeResolver.GetStableTypeId(descriptor.AuthoringType);
 		var candidates = _projectService.HasOpenProject
-			? AssetLinkPickerLogic.GetCandidates(_projectService.CurrentAssetDatabase.Assets, descriptor, authoringTypeName, authoringTypeId)
+			? AssetLinkPickerLogic.GetCandidates(
+				_projectService.CurrentAssetCatalog.Assets.Select(mounted => mounted.Asset).ToArray(),
+				descriptor, authoringTypeName, authoringTypeId)
 			: [];
 		var currentAsset = _projectService.HasOpenProject && _projectService.TryGetAsset(currentId, out var asset)
 			? asset

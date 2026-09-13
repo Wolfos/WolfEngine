@@ -91,7 +91,8 @@ public sealed class DataAssetEditor
 			_pendingBeforeSnapshot = null;
 			_loadedAssetId = asset.Id;
 			_loadedAssetEntry = asset;
-			_loadedAsset = _dataAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			_loadedAsset = _dataAssetStore.LoadAsset(
+				_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath));
 			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return _loadedAsset;
 		}

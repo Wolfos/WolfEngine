@@ -81,6 +81,9 @@ StyleCopReport.xml
 *.ilk
 *.meta
 *.obj
+!WolfEngine/BuiltInContent/Assets/**/*.meta
+!WolfEngine/BuiltInContent/Assets/**/*.obj
+WolfEngine/BuiltInContent/Library/
 *.iobj
 *.pch
 *.pdb

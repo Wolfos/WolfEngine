@@ -19,9 +19,21 @@ public readonly record struct RuntimeAssetResolveContext(
 	Guid AssetId,
 	AssetDatabaseEntry Asset,
 	Type RuntimeType,
-	string ProjectRootPath,
+	IAssetMount Mount,
 	Func<Guid, Type, object?> ResolveAsset)
 {
+	public RuntimeAssetResolveContext(
+		Guid assetId,
+		AssetDatabaseEntry asset,
+		Type runtimeType,
+		string projectRootPath,
+		Func<Guid, Type, object?> resolveAsset)
+		: this(assetId, asset, runtimeType,
+			new DirectoryAssetMount("project", "Project", projectRootPath, false,
+				new AssetDatabase { Assets = [asset] }), resolveAsset)
+	{
+	}
+
 	public string GetAbsolutePath(string relativePath)
 	{
 		if (string.IsNullOrWhiteSpace(relativePath))
@@ -30,7 +42,7 @@ public readonly record struct RuntimeAssetResolveContext(
 		}
 
 		var normalizedPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-		return Path.GetFullPath(Path.Combine(ProjectRootPath, normalizedPath));
+		return Mount.GetAbsolutePath(normalizedPath);
 	}
 }
 

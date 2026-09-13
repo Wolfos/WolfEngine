@@ -152,7 +152,8 @@ public sealed class MaterialAssetEditor
 			_pendingBeforeSnapshot = null;
 			_loadedMaterialAssetId = asset.Id;
 			_loadedAssetEntry = asset;
-			_loadedMaterialAsset = _materialAssetStore.LoadAsset(_projectService.GetAbsolutePath(asset.RelativeAssetPath));
+			_loadedMaterialAsset = _materialAssetStore.LoadAsset(
+				_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeAssetPath));
 			_loadedAssetDatabaseRevision = _projectService.AssetDatabaseRevision;
 			return _loadedMaterialAsset;
 		}
