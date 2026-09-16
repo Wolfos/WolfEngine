@@ -31,6 +31,12 @@ public unsafe class WolfRendererD3D : IRenderer
 private const int FrameCount = 3;
 private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
 private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
+private static readonly ulong MaxPackedVertexBufferBytes = ParsePositiveUlongEnvironmentVariable(
+	"WOLF_MAX_PACKED_VERTEX_BYTES",
+	2UL * 1024UL * 1024UL * 1024UL);
+private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvironmentVariable(
+	"WOLF_MAX_PACKED_INDEX_BYTES",
+	1UL * 1024UL * 1024UL * 1024UL);
 
 	private sealed class MeshResources
 	{
@@ -128,6 +134,9 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 	private ulong _packedVertexBufferUsedBytes;
 	private ulong _packedIndexBufferUsedBytes;
 	private readonly SkinnedInstanceVertexAllocator _skinnedInstanceVertexAllocator = new();
+	private bool _loggedPackedCapacityLimit;
+	private readonly BindlessResourceRegistry _bindlessRegistry;
+	private readonly GpuDrawHardeningStats _hardeningStats;
 
 	private uint _backbufferIndex;
 	private uint _swapchainFlags;
@@ -152,7 +161,9 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		IArenaAllocator arenaAllocator,
 		IInputSystem inputSystem,
 		IImGuiInputSink imguiSystem,
-		WindowChromeController windowChromeController)
+		WindowChromeController windowChromeController,
+		BindlessResourceRegistry bindlessRegistry,
+		GpuDrawHardeningStats hardeningStats)
 	{
 		_width = 1600;
 		_height = 900;
@@ -161,6 +172,8 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		_inputSystem = inputSystem ?? throw new ArgumentNullException(nameof(inputSystem));
 		_imguiInputSink = imguiSystem ?? throw new ArgumentNullException(nameof(imguiSystem));
 		_windowChromeController = windowChromeController ?? throw new ArgumentNullException(nameof(windowChromeController));
+		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
+		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 	}
 
 	public void Run(Action startup, Action<float> update, Action<float> render)
@@ -1522,16 +1535,153 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 
 	private void EnsurePackedGeometryBuffers()
 	{
-		_packedVertexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
-			DefaultPackedVertexBufferBytes,
-			BufferUsage.Vertex | BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "PackedMeshVertexBuffer"));
-		_packedIndexBuffer ??= _gfxDevice.CreateBuffer(new BufferDescriptor(
-			DefaultPackedIndexBufferBytes,
-			BufferUsage.Index | BufferUsage.Structured,
-			BufferFlags.AllowShaderResource,
-			name: "PackedMeshIndexBuffer"));
+		_packedVertexBuffer ??= CreatePackedVertexBuffer(DefaultPackedVertexBufferBytes);
+		_packedIndexBuffer ??= CreatePackedIndexBuffer(DefaultPackedIndexBufferBytes);
+	}
+
+	private IGfxBuffer CreatePackedVertexBuffer(ulong sizeInBytes) => _gfxDevice.CreateBuffer(new BufferDescriptor(
+		sizeInBytes,
+		BufferUsage.Vertex | BufferUsage.Structured,
+		BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+		name: "PackedMeshVertexBuffer"));
+
+	private IGfxBuffer CreatePackedIndexBuffer(ulong sizeInBytes) => _gfxDevice.CreateBuffer(new BufferDescriptor(
+		sizeInBytes,
+		BufferUsage.Index | BufferUsage.Structured,
+		BufferFlags.AllowShaderResource,
+		name: "PackedMeshIndexBuffer"));
+
+	private static ulong ParsePositiveUlongEnvironmentVariable(string name, ulong fallback)
+	{
+		var raw = Environment.GetEnvironmentVariable(name);
+		if (ulong.TryParse(raw, out var parsed) && parsed > 0)
+		{
+			return parsed;
+		}
+
+		return fallback;
+	}
+
+	private static ulong GrowCapacity(ulong currentCapacity, ulong requiredCapacity, ulong minimumCapacity)
+	{
+		var capacity = currentCapacity > 0 ? currentCapacity : minimumCapacity;
+		while (capacity < requiredCapacity)
+		{
+			capacity = checked(capacity * 2);
+		}
+
+		return capacity;
+	}
+
+	private void LogPackedCapacityLimitOnce(
+		ulong requiredVertexBytes,
+		ulong requiredIndexBytes,
+		ulong targetVertexCapacity,
+		ulong targetIndexCapacity)
+	{
+		if (_loggedPackedCapacityLimit)
+		{
+			return;
+		}
+
+		_loggedPackedCapacityLimit = true;
+		Console.WriteLine(
+			$"Packed geometry capacity cap reached. requiredVertexBytes={requiredVertexBytes}, requiredIndexBytes={requiredIndexBytes}, targetVertexCapacity={targetVertexCapacity}, targetIndexCapacity={targetIndexCapacity}, maxVertexBytes={MaxPackedVertexBufferBytes}, maxIndexBytes={MaxPackedIndexBufferBytes}.");
+	}
+
+	/// <summary>
+	/// Grows the packed geometry buffers so the given byte counts fit, doubling until they do. Returns
+	/// false once the growth ceiling is reached, leaving the existing buffers untouched so the caller can
+	/// degrade rather than take the process down.
+	/// </summary>
+	private bool EnsurePackedGeometryCapacity(ulong requiredVertexBytes, ulong requiredIndexBytes)
+	{
+		EnsurePackedGeometryBuffers();
+		if (_packedVertexBuffer is null || _packedIndexBuffer is null)
+		{
+			throw new InvalidOperationException("Packed geometry buffers are unavailable.");
+		}
+
+		var currentVertexCapacity = _packedVertexBuffer.Descriptor.SizeInBytes;
+		var currentIndexCapacity = _packedIndexBuffer.Descriptor.SizeInBytes;
+		var targetVertexCapacity = GrowCapacity(currentVertexCapacity, requiredVertexBytes, DefaultPackedVertexBufferBytes);
+		var targetIndexCapacity = GrowCapacity(currentIndexCapacity, requiredIndexBytes, DefaultPackedIndexBufferBytes);
+		if (targetVertexCapacity > MaxPackedVertexBufferBytes || targetIndexCapacity > MaxPackedIndexBufferBytes)
+		{
+			LogPackedCapacityLimitOnce(requiredVertexBytes, requiredIndexBytes, targetVertexCapacity, targetIndexCapacity);
+			_hardeningStats.IncrementPackedCapacityFailures();
+			return false;
+		}
+
+		var growVertex = targetVertexCapacity > currentVertexCapacity;
+		var growIndex = targetIndexCapacity > currentIndexCapacity;
+		if (growVertex == false && growIndex == false)
+		{
+			return true;
+		}
+
+		// The in-flight frame may still be reading the buffers about to be replaced, and the copy below
+		// has to observe everything the skinning pass has written into them.
+		_gfxDevice.WaitForIdle();
+		if (growVertex)
+		{
+			_packedVertexBuffer = ReplacePackedBuffer(
+				_packedVertexBuffer,
+				CreatePackedVertexBuffer(targetVertexCapacity),
+				_packedVertexBufferUsedBytes,
+				isVertexBuffer: true);
+		}
+
+		if (growIndex)
+		{
+			_packedIndexBuffer = ReplacePackedBuffer(
+				_packedIndexBuffer,
+				CreatePackedIndexBuffer(targetIndexCapacity),
+				_packedIndexBufferUsedBytes,
+				isVertexBuffer: false);
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// Publishes a grown packed buffer: copies the live bytes across, repoints every resident mesh at it,
+	/// and retires the old one. Meshes keep their byte offsets, so only the buffer identity changes.
+	/// </summary>
+	private IGfxBuffer ReplacePackedBuffer(
+		IGfxBuffer oldBuffer,
+		IGfxBuffer newBuffer,
+		ulong usedBytes,
+		bool isVertexBuffer)
+	{
+		if (oldBuffer is D3D12Buffer source && newBuffer is D3D12Buffer destination)
+		{
+			_gfxDevice.CopyBufferContents(source, destination, usedBytes);
+		}
+		else
+		{
+			throw new InvalidOperationException("Direct3D12 packed geometry buffers must be backed by D3D12Buffer.");
+		}
+
+		foreach (var mesh in _meshResources.Keys)
+		{
+			if (isVertexBuffer)
+			{
+				mesh.VertexBuffer = newBuffer;
+			}
+			else
+			{
+				mesh.IndexBuffer = newBuffer;
+			}
+		}
+
+		// The old descriptor slot would otherwise leak, and the draw stream picks the new buffer up when
+		// GpuDrawPass re-registers each mesh's buffers on its next update.
+		_bindlessRegistry.RegisterBuffer(newBuffer);
+		_bindlessRegistry.UnregisterBuffer(oldBuffer);
+		(oldBuffer as IDisposable)?.Dispose();
+
+		return newBuffer;
 	}
 
 	private MeshResources CreateMeshResources(Mesh mesh)
@@ -1543,14 +1693,6 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		}
 
 		EnsurePackedGeometryBuffers();
-		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer was not created.");
-		var indexBuffer = _packedIndexBuffer ?? throw new InvalidOperationException("Packed mesh index buffer was not created.");
-		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer ||
-		    indexBuffer is not IWritableGpuBuffer writableIndexBuffer)
-		{
-			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
-		}
-
 		var vertexCount = mesh.Vertices.Length;
 		var vertices = new VertexData[vertexCount];
 		for (var i = 0; i < vertexCount; i++)
@@ -1566,13 +1708,29 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		var indexDataSize = (ulong)sizeof(uint) * (uint)mesh.Indices.Length;
 		var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
 		var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
-		if (vertexOffsetBytes + vertexDataSize > vertexBuffer.Descriptor.SizeInBytes ||
-		    indexOffsetBytes + indexDataSize > indexBuffer.Descriptor.SizeInBytes)
+		if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexDataSize, indexOffsetBytes + indexDataSize) == false)
 		{
-			throw new InvalidOperationException(
-				$"Packed geometry capacity exceeded. requiredVertexBytes={vertexOffsetBytes + vertexDataSize}, " +
-				$"vertexCapacity={vertexBuffer.Descriptor.SizeInBytes}, requiredIndexBytes={indexOffsetBytes + indexDataSize}, " +
-				$"indexCapacity={indexBuffer.Descriptor.SizeInBytes}.");
+			// Past the growth ceiling the mesh gets a zero-index proxy instead of an exception: one scene
+			// too large for the cap should cost its geometry, not the whole frame. The cap breach is
+			// already logged by EnsurePackedGeometryCapacity.
+			_hardeningStats.IncrementFallbackProxySubstitutions();
+			mesh.VertexBuffer = _packedVertexBuffer;
+			mesh.IndexBuffer = _packedIndexBuffer;
+			mesh.StrideInBytes = vertexStride;
+			mesh.IndexCount = 0;
+			mesh.PackedVertexOffsetBytes = 0;
+			mesh.PackedIndexOffsetBytes = 0;
+			mesh.PackedBaseVertex = 0;
+			return new MeshResources(0, 0, 0, 0);
+		}
+
+		// Growth replaces the buffer objects, so these are read only after capacity has been secured.
+		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed geometry buffers were lost during growth.");
+		var indexBuffer = _packedIndexBuffer ?? throw new InvalidOperationException("Packed geometry buffers were lost during growth.");
+		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer ||
+		    indexBuffer is not IWritableGpuBuffer writableIndexBuffer)
+		{
+			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
 		}
 
 		writableVertexBuffer.Write<VertexData>(vertices, vertexOffsetBytes / vertexStride);
@@ -1624,12 +1782,6 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		}
 
 		EnsurePackedGeometryBuffers();
-		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed mesh vertex buffer was not created.");
-		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer)
-		{
-			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
-		}
-
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
 		var vertexCount = skinnedInstance.Vertices.Length;
 		var vertexRangeBytes = (ulong)vertexStride * (uint)vertexCount;
@@ -1637,15 +1789,21 @@ private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
 		if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
 		{
 			vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
-			if (vertexOffsetBytes + vertexRangeBytes > vertexBuffer.Descriptor.SizeInBytes)
+			if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexRangeBytes, _packedIndexBufferUsedBytes) == false)
 			{
-				throw new InvalidOperationException(
-					$"Packed geometry capacity exceeded allocating a skinned instance range. " +
-					$"requiredVertexBytes={vertexOffsetBytes + vertexRangeBytes}, " +
-					$"vertexCapacity={vertexBuffer.Descriptor.SizeInBytes}.");
+				// Leaving the instance unregistered skips its draw rather than aborting the frame; the
+				// source mesh it was cloned from stays resident and keeps drawing.
+				_hardeningStats.IncrementFallbackProxySubstitutions();
+				return;
 			}
 
 			_packedVertexBufferUsedBytes = vertexOffsetBytes + vertexRangeBytes;
+		}
+
+		var vertexBuffer = _packedVertexBuffer ?? throw new InvalidOperationException("Packed geometry buffers were lost during growth.");
+		if (vertexBuffer is not IWritableGpuBuffer writableVertexBuffer)
+		{
+			throw new InvalidOperationException("Direct3D12 packed mesh buffers must support CPU uploads.");
 		}
 
 		// Seed the range with the bind pose so the instance is drawable even on the first frame,

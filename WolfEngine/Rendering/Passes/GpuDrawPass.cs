@@ -555,6 +555,9 @@ public sealed class GpuDrawPass
 				terrainSurfaceReady);
 		}
 
+		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
+		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
+
 		if (_instanceUpdateData.Count == 0 &&
 		    _meshUpdateData.Count == 0 &&
 		    _materialUpdateData.Count == 0 &&
