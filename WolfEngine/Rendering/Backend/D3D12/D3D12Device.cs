@@ -1242,6 +1242,94 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		}
 	}
 
+	/// <summary>
+	/// Copies the leading <paramref name="byteCount"/> bytes of one buffer into another on the GPU
+	/// timeline. Packed geometry lives in a default heap that the skinning pass writes through a UAV,
+	/// so growing it cannot be a CPU-side memcpy of the staging copy: only the GPU resource holds the
+	/// current contents.
+	/// </summary>
+	internal void CopyBufferContents(D3D12Buffer source, D3D12Buffer destination, ulong byteCount)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentNullException.ThrowIfNull(destination);
+		if (byteCount == 0 || source.Resource.Handle is null || destination.Resource.Handle is null)
+		{
+			return;
+		}
+
+		if (byteCount > source.SizeInBytes || byteCount > destination.SizeInBytes)
+		{
+			throw new ArgumentOutOfRangeException(nameof(byteCount), "Copy range exceeds one of the buffers.");
+		}
+
+		lock (_uploadLock)
+		{
+			EnsureUploadCommandList();
+			SilkMarshal.ThrowHResult(_uploadAllocator.Reset());
+			SilkMarshal.ThrowHResult(_uploadCommandList.Reset(_uploadAllocator, (ID3D12PipelineState*)null));
+
+			var sourceState = source.CurrentState;
+			var destinationState = destination.CurrentState;
+			var barriers = stackalloc ResourceBarrier[2];
+			var barrierCount = 0u;
+			if (sourceState != ResourceStates.CopySource)
+			{
+				barriers[barrierCount++] = CreateTransition(source, sourceState, ResourceStates.CopySource);
+			}
+
+			if (destinationState != ResourceStates.CopyDest)
+			{
+				barriers[barrierCount++] = CreateTransition(destination, destinationState, ResourceStates.CopyDest);
+			}
+
+			if (barrierCount > 0)
+			{
+				_uploadCommandList.ResourceBarrier(barrierCount, barriers);
+			}
+
+			_uploadCommandList.CopyBufferRegion(destination.Resource, 0, source.Resource, 0, byteCount);
+
+			barrierCount = 0;
+			if (sourceState != ResourceStates.CopySource)
+			{
+				barriers[barrierCount++] = CreateTransition(source, ResourceStates.CopySource, sourceState);
+			}
+
+			if (destinationState != ResourceStates.CopyDest)
+			{
+				barriers[barrierCount++] = CreateTransition(destination, ResourceStates.CopyDest, destinationState);
+			}
+
+			if (barrierCount > 0)
+			{
+				_uploadCommandList.ResourceBarrier(barrierCount, barriers);
+			}
+
+			SilkMarshal.ThrowHResult(_uploadCommandList.Close());
+			ID3D12CommandList* copyLists = (ID3D12CommandList*)_uploadCommandList.Handle;
+			var fenceValue = ExecuteCommandList(_graphicsQueue, copyLists);
+			WaitForFence(fenceValue);
+		}
+	}
+
+	private static ResourceBarrier CreateTransition(D3D12Buffer buffer, ResourceStates before, ResourceStates after)
+	{
+		var barrier = new ResourceBarrier
+		{
+			Type = ResourceBarrierType.Transition,
+			Flags = ResourceBarrierFlags.None
+		};
+		barrier.Anonymous.Transition = new ResourceTransitionBarrier
+		{
+			PResource = buffer.Resource.Handle,
+			Subresource = D3D12Api.ResourceBarrierAllSubresources,
+			StateBefore = before,
+			StateAfter = after
+		};
+
+		return barrier;
+	}
+
 	private void EnsureUploadCommandList()
 	{
 		if (_uploadCommandList.Handle is not null)
