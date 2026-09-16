@@ -41,6 +41,10 @@ public sealed class EngineAssetMountProviderTests
 				Assert.That(first.RootPath, Does.StartWith(cacheRoot));
 				Assert.That(File.ReadAllText(Path.Combine(first.RootPath, "Assets", "BuiltIn.asset")), Is.EqualTo("first"));
 				Assert.That(File.Exists(Path.Combine(first.RootPath, "Library", "AssetPipeline.sqlite")), Is.True);
+				Assert.That(
+					Directory.EnumerateDirectories(cacheRoot).Select(Path.GetFileName),
+					Is.EqualTo(new[] { Path.GetFileName(first.RootPath) }),
+					"Publishing left a staging directory behind.");
 			});
 			pipeline.Received(1).RebuildProject(Arg.Any<string>());
 
@@ -50,6 +54,8 @@ public sealed class EngineAssetMountProviderTests
 			Assert.That(changed.RootPath, Is.Not.EqualTo(first.RootPath));
 			Assert.That(File.ReadAllText(Path.Combine(changed.RootPath, "Assets", "BuiltIn.asset")), Is.EqualTo("second"));
 			pipeline.Received(2).RebuildProject(Arg.Any<string>());
+
+			Assert.DoesNotThrow(() => Directory.Delete(cacheRoot, recursive: true));
 		}
 		finally
 		{
