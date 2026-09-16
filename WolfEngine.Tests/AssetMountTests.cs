@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using NUnit.Framework;
 using WolfEngine.AssetPipeline;
 
@@ -111,6 +112,7 @@ public sealed class AssetMountTests
 		}
 		finally
 		{
+			SqliteConnection.ClearAllPools();
 			if (Directory.Exists(root)) Directory.Delete(root, true);
 		}
 	}

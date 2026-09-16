@@ -146,7 +146,8 @@ public static class ReadOnlyAssetMountLoader
 		{
 			DataSource = databasePath,
 			Mode = SqliteOpenMode.ReadOnly,
-			Cache = SqliteCacheMode.Shared
+			Cache = SqliteCacheMode.Shared,
+			Pooling = false
 		};
 		using var connection = new SqliteConnection(builder.ToString());
 		connection.Open();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Microsoft.Data.Sqlite;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
@@ -23,6 +24,7 @@ public sealed class ColorLookupTableImportTests
 	[TearDown]
 	public void TearDown()
 	{
+		SqliteConnection.ClearAllPools();
 		if (Directory.Exists(_projectRoot))
 		{
 			Directory.Delete(_projectRoot, recursive: true);

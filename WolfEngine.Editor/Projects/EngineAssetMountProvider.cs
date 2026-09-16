@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine.Editor.Projects;
@@ -114,12 +115,36 @@ public sealed class EngineAssetMountProvider : IEngineAssetMountProvider
 
 			// Load before publishing so an incomplete database never becomes the active cache entry.
 			ReadOnlyAssetMountLoader.Load(stagingRoot);
+
+			SqliteConnection.ClearAllPools();
 			if (Directory.Exists(contentRoot)) Directory.Delete(contentRoot, recursive: true);
 			Directory.Move(stagingRoot, contentRoot);
 		}
 		finally
 		{
-			if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, recursive: true);
+			TryDeleteStaging(stagingRoot);
+		}
+	}
+
+	/// <summary>
+	/// Cleanup must never replace the failure that caused it: a staging directory that Windows still has open would
+	/// otherwise surface as a bogus "file is being used by another process" error instead of the real problem.
+	/// </summary>
+	private static void TryDeleteStaging(string stagingRoot)
+	{
+		if (!Directory.Exists(stagingRoot)) return;
+		try
+		{
+			SqliteConnection.ClearAllPools();
+			Directory.Delete(stagingRoot, recursive: true);
+		}
+		catch (IOException exception)
+		{
+			Console.Error.WriteLine($"Failed to remove built-in content staging directory '{stagingRoot}'. {exception.Message}");
+		}
+		catch (UnauthorizedAccessException exception)
+		{
+			Console.Error.WriteLine($"Failed to remove built-in content staging directory '{stagingRoot}'. {exception.Message}");
 		}
 	}
 
