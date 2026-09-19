@@ -111,9 +111,8 @@ void VolumetricFogInjectCS(uint3 id : SV_DispatchThreadID)
     float depth = SliceSampleDepth(id.z, Hash13(id));
     float3 relativePosition = ReconstructRelativePosition(id, depth);
     float3 worldPosition = relativePosition + cameraOrigin;
-    float3 viewDirection = normalize(-relativePosition);
     float3 lightDirection = normalize(-lightDirectionEnabled.xyz);
-    float phaseCosine = dot(viewDirection, lightDirection);
+    float phaseCosine = dot(normalize(relativePosition), lightDirection);
     float3 ambient = SampleEnvironment(irradianceHandle, linearSamplerHandle, float3(0.0f, 1.0f, 0.0f)) / PI;
     float3 sun = lightColorIntensity.rgb * lightColorIntensity.a * lightDirectionEnabled.w;
     float visibility = ShadowVisibility(relativePosition, depth, lightDirection);
