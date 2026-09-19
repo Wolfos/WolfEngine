@@ -39,7 +39,7 @@ public struct VolumetricFogConfig
 	public float Extinction { get; set; } = 0.01f;
 	public float BaseHeight { get; set; } = 0.0f;
 	public float HeightFalloff { get; set; } = 0.05f;
-	public Vector3 Albedo { get; set; } = new(0.85f, 0.9f, 1.0f);
+	public ColorRGBA Albedo { get; set; } = new(0.85f, 0.9f, 1.0f, 1.0f);
 	public float Anisotropy { get; set; } = 0.35f;
 	public float MaxDistance { get; set; } = 250.0f;
 	public int FroxelPixelSize { readonly get => _froxelPixelSize; set => _froxelPixelSize = Math.Clamp(value, 4, 32); }
