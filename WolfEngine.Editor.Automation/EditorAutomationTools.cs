@@ -101,6 +101,10 @@ public sealed class EditorAutomationTools
 	public Task<EditorWorkspaceStateResult> GetWorkspaceState(CancellationToken cancellationToken) =>
 		_controller.GetWorkspaceStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "get_editor_ui_state"), Description("Report every editor panel as of the last drawn frame: whether it is open, which dock node it sits in, whether it is that node's selected tab, whether it is focused or hovered, and its position and size in ImGui points. Dock nodes are also grouped, so tab selection can be asserted without reading a screenshot. Wait for render frames after a change before reading this.")]
+	public Task<EditorUiStateResult> GetEditorUiState(CancellationToken cancellationToken) =>
+		_controller.GetEditorUiStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "create_workspace"), Description("Create and activate an empty editor workspace.")]
 	public Task<EditorWorkspaceStateResult> CreateWorkspace(string name, CancellationToken cancellationToken) =>
 		_controller.CreateWorkspaceAsync(name, cancellationToken);
@@ -196,6 +200,12 @@ public sealed class EditorAutomationTools
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,
 		CancellationToken cancellationToken) =>
 		_controller.CaptureFrameAsync(outputPath, cancellationToken);
+
+	[McpServerTool(Name = "capture_editor_window"), Description("Capture a PNG of the whole editor window, including the ImGui panels, dock tabs and menus. Use this instead of capture_frame whenever the editor UI itself is what needs to be verified.")]
+	public Task<FrameCaptureResult> CaptureEditorWindow(
+		[Description("Absolute or project-relative PNG output path.")] string outputPath,
+		CancellationToken cancellationToken) =>
+		_controller.CaptureEditorWindowAsync(outputPath, cancellationToken);
 
 	[McpServerTool(Name = "capture_gameplay_frame"), Description("Enter or resume Play mode, verify that an enabled gameplay Camera is driving the viewport, wait for gameplay startup frames, and capture a PNG from that camera. Fails instead of silently falling back to the authoring camera.")]
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrame(

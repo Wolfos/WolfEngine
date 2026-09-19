@@ -153,6 +153,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 	private Vector2 _imguiMouseWheel;
 	private readonly object _frameCaptureSync = new();
 	private TaskCompletionSource<FrameCapture>? _pendingFrameCapture;
+	private FrameCaptureTarget _pendingFrameCaptureTarget;
 	private DescriptorHandle _defaultMaterialSamplerHandle = DescriptorHandle.Invalid;
 	private static readonly Guid DxgiDebugAll = new("e48ae283-da80-490b-87e6-43e9a9cfda08");
 
@@ -218,7 +219,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		_height = size.Y;
 	}
 
-	public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
+	public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
 	{
 		var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
 		lock (_frameCaptureSync)
@@ -229,6 +230,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			}
 
 			_pendingFrameCapture = completion;
+			_pendingFrameCaptureTarget = target;
 		}
 
 		if (cancellationToken.CanBeCanceled)
@@ -239,9 +241,13 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		return completion.Task;
 	}
 
-	public void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor)
+	public void CompletePendingFrameCapture(
+		RenderGraphResourceRegistry resourceRegistry,
+		RenderGraphResourceHandle sceneColor,
+		RenderGraphResourceHandle windowColor)
 	{
 		TaskCompletionSource<FrameCapture>? completion;
+		FrameCaptureTarget target;
 		lock (_frameCaptureSync)
 		{
 			completion = _pendingFrameCapture;
@@ -250,12 +256,14 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 				return;
 			}
 
+			target = _pendingFrameCaptureTarget;
 			_pendingFrameCapture = null;
 		}
 
+		var captureColor = target == FrameCaptureTarget.Window ? windowColor : sceneColor;
 		try
 		{
-			var texture = resourceRegistry.GetTexture(sceneColor);
+			var texture = resourceRegistry.GetTexture(captureColor);
 			if (texture is not ID3D12BackendTexture d3dTexture)
 			{
 				throw new InvalidOperationException("The automation capture color target was not created by the Direct3D12 backend.");
@@ -276,7 +284,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			var rowPitch = BufferAlignment.AlignUp((ulong)width * 4, D3D12.TextureDataPitchAlignment);
 			using var readbackBuffer = _gfxDevice.CreateBuffer(new BufferDescriptor(rowPitch * (ulong)height, BufferUsage.Staging)) as D3D12Buffer
 				?? throw new InvalidOperationException("Direct3D12 did not create a readable frame-capture buffer.");
-			var priorState = resourceRegistry.GetResourceState(sceneColor);
+			var priorState = resourceRegistry.GetResourceState(captureColor);
 			var commandList = _gfxDevice.BeginGraphics();
 			try
 			{

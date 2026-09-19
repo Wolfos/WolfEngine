@@ -143,6 +143,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetWorkspaceStateAsync(cancellationToken);
 
+	public Task<EditorUiStateResult> GetEditorUiStateAsync(CancellationToken cancellationToken) =>
+		GetRunningEditor().GetEditorUiStateAsync(cancellationToken);
+
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		GetRunningEditor().CreateWorkspaceAsync(name, cancellationToken);
 
@@ -205,6 +208,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
 
 	public Task<GameplayFrameCaptureResult> CaptureGameplayFrameAsync(
 		string outputPath,

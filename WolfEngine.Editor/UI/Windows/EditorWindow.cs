@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 
 namespace WolfEngine.Editor.UI;
@@ -17,12 +18,26 @@ public abstract class EditorWindow
 
 	internal bool IsFocused { get; private set; }
 
+	/// <summary>Dock node the window was submitted into, or zero while it floats. Automation reads this to
+	/// tell which panels share a tab bar.</summary>
+	internal uint DockId { get; private set; }
+
+	internal bool IsHovered { get; private set; }
+
+	internal Vector2 Position { get; private set; }
+
+	internal Vector2 Size { get; private set; }
+
 	internal void DrawInWorkspace(EditorScene scene, Guid workspaceId, string windowId, Action closeRequested)
 	{
 		_workspaceImGuiName = $"{Name}###{workspaceId:N}-{windowId}";
 		_closeRequested = closeRequested;
 		IsSelectedTab = false;
 		IsFocused = false;
+		IsHovered = false;
+		DockId = 0;
+		Position = Vector2.Zero;
+		Size = Vector2.Zero;
 		try { Draw(scene); }
 		finally { _workspaceImGuiName = null; _closeRequested = null; }
 	}
@@ -43,6 +58,10 @@ public abstract class EditorWindow
 		var visible = ImGui.Begin(_workspaceImGuiName ?? Name, ref isOpen);
 		IsSelectedTab = visible && ImGui.IsWindowDocked();
 		IsFocused = ImGui.IsWindowFocused();
+		IsHovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows);
+		DockId = ImGui.GetWindowDockID();
+		Position = ImGui.GetWindowPos();
+		Size = ImGui.GetWindowSize();
 		if (!isOpen) _closeRequested?.Invoke();
 		FocusOnRightClickStart();
 	}

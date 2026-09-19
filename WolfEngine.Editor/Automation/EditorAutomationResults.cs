@@ -7,6 +7,36 @@ public sealed record EditorWorkspaceStateResult(
 	IReadOnlyList<EditorWorkspaceSummaryResult> Workspaces,
 	int SavedLayoutCharacterCount);
 
+/// <summary>One editor panel as of the last drawn frame.</summary>
+public sealed record EditorUiWindowResult(
+	string Id,
+	string DisplayName,
+	bool IsOpen,
+	bool IsDocked,
+	string DockId,
+	bool IsSelectedTab,
+	bool IsFocused,
+	bool IsHovered,
+	float X,
+	float Y,
+	float Width,
+	float Height);
+
+/// <summary>Panels that share one dock node, and which of them is the selected tab.</summary>
+public sealed record EditorUiDockNodeResult(
+	string DockId,
+	string? SelectedWindowId,
+	IReadOnlyList<string> WindowIds);
+
+public sealed record EditorUiStateResult(
+	Guid ActiveWorkspaceId,
+	string ActiveWorkspaceName,
+	string? FocusedWindowId,
+	IReadOnlyList<EditorUiWindowResult> Windows,
+	IReadOnlyList<EditorUiDockNodeResult> DockNodes,
+	long EditorFrameSequence,
+	long RenderFrameSequence);
+
 public sealed record SceneLoadResult(
 	string ScenePath,
 	Guid SceneAssetId,

@@ -5,6 +5,24 @@ namespace WolfEngine.Editor.UI;
 
 public sealed record EditorWindowDescriptor(string Id, string DisplayName, EditorWindow Window);
 
+/// <summary>
+/// What one registered editor window looked like on the frame it was last submitted. Automation reads
+/// these to assert on panel visibility, docking and tab selection without screen-scraping a capture.
+/// </summary>
+public sealed record EditorWindowUiState(
+	string Id,
+	string DisplayName,
+	bool IsOpen,
+	bool IsDocked,
+	uint DockId,
+	bool IsSelectedTab,
+	bool IsFocused,
+	bool IsHovered,
+	float X,
+	float Y,
+	float Width,
+	float Height);
+
 public sealed class EditorWindowRegistry
 {
 	private const int TabRestoreFrames = 3;
@@ -75,8 +93,7 @@ public sealed class EditorWindowRegistry
 		}
 
 		_tabSelections.TryGetValue(workspace.Id, out var selection);
-		var restoring = _tabRestoreFramesLeft > 0 && selection is not null &&
-			Environment.GetEnvironmentVariable("WOLF_TAB_RESTORE_DISABLED") != "1"; // TEMP-DIAG
+		var restoring = _tabRestoreFramesLeft > 0 && selection is not null;
 		if (restoring) RequestSelectedTabs(workspace, selection!);
 
 		foreach (var descriptor in _windows)
@@ -98,6 +115,36 @@ public sealed class EditorWindowRegistry
 	}
 
 	public EditorWindowDescriptor Get(string id) => _windows.First(window => window.Id == id);
+
+	/// <summary>
+	/// Snapshots every registered window as of the last drawn frame. Windows that the active workspace
+	/// does not have open report <see cref="EditorWindowUiState.IsOpen"/> false and zeroed geometry,
+	/// because they were never submitted to Dear ImGui.
+	/// </summary>
+	public IReadOnlyList<EditorWindowUiState> GetUiState()
+	{
+		var workspace = _workspaces.ActiveWorkspace;
+		var states = new List<EditorWindowUiState>(_windows.Length);
+		foreach (var descriptor in _windows)
+		{
+			var window = descriptor.Window;
+			var isOpen = workspace.OpenWindows.Contains(descriptor.Id);
+			states.Add(new EditorWindowUiState(
+				descriptor.Id,
+				descriptor.DisplayName,
+				isOpen,
+				isOpen && window.DockId != 0,
+				window.DockId,
+				window.IsSelectedTab,
+				window.IsFocused,
+				window.IsHovered,
+				window.Position.X,
+				window.Position.Y,
+				window.Size.X,
+				window.Size.Y));
+		}
+		return states;
+	}
 
 	private void RequestSelectedTabs(EditorWorkspace workspace, WorkspaceTabSelection selection)
 	{
@@ -122,7 +169,6 @@ public sealed class EditorWindowRegistry
 			_tabSelections[workspace.Id] = selection;
 		}
 
-		var previous = string.Join(",", selection.SelectedTabWindowIds.OrderBy(id => id, StringComparer.Ordinal)); // TEMP-DIAG
 		selection.SelectedTabWindowIds.Clear();
 		foreach (var descriptor in _windows)
 		{
@@ -130,8 +176,6 @@ public sealed class EditorWindowRegistry
 			if (descriptor.Window.IsSelectedTab) selection.SelectedTabWindowIds.Add(descriptor.Id);
 			if (descriptor.Window.IsFocused) selection.FocusedWindowId = descriptor.Id;
 		}
-		var current = string.Join(",", selection.SelectedTabWindowIds.OrderBy(id => id, StringComparer.Ordinal)); // TEMP-DIAG
-		if (current != previous) Console.Error.WriteLine($"TEMP-DIAG selected tabs [{workspace.Name}] {current} focused={selection.FocusedWindowId}"); // TEMP-DIAG
 	}
 
 	private sealed class WorkspaceTabSelection

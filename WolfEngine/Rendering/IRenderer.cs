@@ -18,7 +18,14 @@ public interface IRenderer : IFrameCaptureSource
 	void Render(
 		RenderGraphResourceRegistry resourceRegistry,
 		RenderGraphResourceHandle finalColor);
-	void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor) { }
+	/// <summary>
+	/// Reads back whichever target the pending capture asked for. Both handles are supplied because the
+	/// renderer, not the render graph, knows which one the outstanding request wants.
+	/// </summary>
+	void CompletePendingFrameCapture(
+		RenderGraphResourceRegistry resourceRegistry,
+		RenderGraphResourceHandle sceneColor,
+		RenderGraphResourceHandle windowColor) { }
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	void ReleaseMeshResources(Mesh mesh);

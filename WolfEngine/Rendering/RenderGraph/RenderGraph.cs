@@ -525,10 +525,11 @@ public sealed class RenderGraph : IRenderResourceScheduler
 
 				_frameBuilder.Build(this);
 				Execute();
-				var captureColorHandle = _frameBuilder.GetCaptureColorHandle();
-				if (captureColorHandle.IsValid)
+				var sceneCaptureHandle = _frameBuilder.GetCaptureColorHandle();
+				var windowCaptureHandle = _frameBuilder.GetFinalColorHandle();
+				if (sceneCaptureHandle.IsValid || windowCaptureHandle.IsValid)
 				{
-					_renderer.CompletePendingFrameCapture(_resourceRegistry, captureColorHandle);
+					_renderer.CompletePendingFrameCapture(_resourceRegistry, sceneCaptureHandle, windowCaptureHandle);
 				}
 
 				_frameBuilder.CompleteFrame();

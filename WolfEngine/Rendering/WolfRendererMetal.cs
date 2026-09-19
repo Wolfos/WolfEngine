@@ -84,6 +84,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private Action<float> _renderCallback = static deltaTime => { };
     private readonly object _frameCaptureSync = new();
     private TaskCompletionSource<FrameCapture>? _pendingFrameCapture;
+    private FrameCaptureTarget _pendingFrameCaptureTarget;
 
 
     private static readonly Selector NextDrawableSelector = new("nextDrawable");
@@ -697,7 +698,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         _hasRequestedDrawableSize = true;
     }
 
-    public Task<FrameCapture> CaptureNextFrameAsync(CancellationToken cancellationToken = default)
+    public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
     {
         var completion = new TaskCompletionSource<FrameCapture>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_frameCaptureSync)
@@ -708,6 +709,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             }
 
             _pendingFrameCapture = completion;
+            _pendingFrameCaptureTarget = target;
         }
 
         if (cancellationToken.CanBeCanceled)
@@ -823,12 +825,27 @@ internal unsafe class WolfRendererMetal : IRenderer
         _presentFrameIndex++;
     }
 
-    public void CompletePendingFrameCapture(RenderGraphResourceRegistry resourceRegistry, RenderGraphResourceHandle sceneColor)
+    public void CompletePendingFrameCapture(
+        RenderGraphResourceRegistry resourceRegistry,
+        RenderGraphResourceHandle sceneColor,
+        RenderGraphResourceHandle windowColor)
     {
-        var texture = resourceRegistry.GetTexture(sceneColor) as MetalTexture;
+        FrameCaptureTarget target;
+        lock (_frameCaptureSync)
+        {
+            if (_pendingFrameCapture is null)
+            {
+                return;
+            }
+
+            target = _pendingFrameCaptureTarget;
+        }
+
+        var handle = target == FrameCaptureTarget.Window ? windowColor : sceneColor;
+        var texture = resourceRegistry.GetTexture(handle) as MetalTexture;
         if (texture is null || texture.Texture.NativePtr == IntPtr.Zero)
         {
-            CompletePendingFrameCaptureFailure("The automation capture color target was unavailable.");
+            CompletePendingFrameCaptureFailure($"The automation {target} capture target was unavailable.");
             return;
         }
 

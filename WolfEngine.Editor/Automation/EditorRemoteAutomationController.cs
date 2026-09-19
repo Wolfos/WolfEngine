@@ -130,6 +130,54 @@ public sealed class EditorRemoteAutomationController
 			workspace.Id, workspace.Name, workspace.OpenWindows.OrderBy(id => id, StringComparer.Ordinal).ToArray())).ToArray(),
 		EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings.Length ?? 0);
 
+	/// <summary>
+	/// Reports the editor's panel and docking state as of the last drawn frame. Wait for render frames
+	/// after any change that should be reflected here, because the values are recorded while drawing.
+	/// </summary>
+	public Task<EditorUiStateResult> GetEditorUiStateAsync(CancellationToken cancellationToken) =>
+		Enqueue(CreateEditorUiState, cancellationToken);
+
+	private EditorUiStateResult CreateEditorUiState()
+	{
+		var windows = _windows.GetUiState();
+		var results = windows
+			.Select(window => new EditorUiWindowResult(
+				window.Id,
+				window.DisplayName,
+				window.IsOpen,
+				window.IsDocked,
+				FormatDockId(window.DockId),
+				window.IsSelectedTab,
+				window.IsFocused,
+				window.IsHovered,
+				window.X,
+				window.Y,
+				window.Width,
+				window.Height))
+			.ToArray();
+
+		var dockNodes = results
+			.Where(window => window.IsDocked)
+			.GroupBy(window => window.DockId, StringComparer.Ordinal)
+			.OrderBy(group => group.Key, StringComparer.Ordinal)
+			.Select(group => new EditorUiDockNodeResult(
+				group.Key,
+				group.FirstOrDefault(window => window.IsSelectedTab)?.Id,
+				group.Select(window => window.Id).ToArray()))
+			.ToArray();
+
+		return new EditorUiStateResult(
+			_workspaces.ActiveWorkspace.Id,
+			_workspaces.ActiveWorkspace.Name,
+			results.FirstOrDefault(window => window.IsFocused)?.Id,
+			results,
+			dockNodes,
+			_editorFrameCoordinator.CompletedSequence,
+			_renderFrameCoordinator.CompletedSequence);
+	}
+
+	private static string FormatDockId(uint dockId) => $"0x{dockId:X8}";
+
 	public Task<string> SetAntiAliasingAsync(string mode, bool enabled, bool casSharpening, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{
@@ -633,10 +681,23 @@ public sealed class EditorRemoteAutomationController
 		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, cancellationToken);
+
+	/// <summary>
+	/// Captures the whole editor window, including the ImGui panels, docking tabs and menus composited
+	/// over the scene. This is what to use when the thing under test is the editor UI itself.
+	/// </summary>
+	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, cancellationToken);
+
+	private Task<FrameCaptureResult> CaptureFrameAsync(
+		string outputPath,
+		FrameCaptureTarget target,
+		CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
 		{
 			var fullOutputPath = ResolveOutputPath(outputPath);
-			var capture = await _renderer.CaptureNextFrameAsync(cancellationToken).ConfigureAwait(false);
+			var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
 			Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
 			using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
 			image.SaveAsPng(fullOutputPath);
