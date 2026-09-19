@@ -24,6 +24,7 @@ public sealed class FrameSnapshot
 	{
 		LightPackets = new List<LightPacket>(16);
 		DecalPackets = new List<DecalProjectorPacket>(16);
+		FogVolumePackets = new List<FogVolumePacket>(16);
 		SkinningPackets = new List<SkinningPacket>(8);
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
@@ -38,6 +39,7 @@ public sealed class FrameSnapshot
 	public bool HasPreviousCameraState { get; private set; }
 	public List<LightPacket> LightPackets { get; }
 	public List<DecalProjectorPacket> DecalPackets { get; }
+	public List<FogVolumePacket> FogVolumePackets { get; }
 
 	/// <summary>Skinned instances the render thread must deform this frame.</summary>
 	public List<SkinningPacket> SkinningPackets { get; }
@@ -93,6 +95,7 @@ public sealed class FrameSnapshot
 	{
 		LightPackets.Clear();
 		DecalPackets.Clear();
+		FogVolumePackets.Clear();
 		SkinningPackets.Clear();
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
@@ -144,6 +147,11 @@ public sealed class FrameSnapshot
 		DecalPackets.Add(new DecalProjectorPacket(projector, transform));
 	}
 
+	public void AddFogVolume(FogVolume volume, Matrix4x4 transform)
+	{
+		FogVolumePackets.Add(new FogVolumePacket(volume, transform));
+	}
+
 	public void SetSun(Vector3 sunDirection, float sunIntensityScale)
 	{
 		SunDirection = sunDirection == Vector3.Zero
@@ -159,6 +167,7 @@ public sealed class FrameSnapshot
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
 		Config.Lighting = config.Lighting;
 		Config.ShadowMaps = config.ShadowMaps;
+		Config.VolumetricFog = config.VolumetricFog;
 		Config.SkyboxConfig = config.SkyboxConfig;
 		Config.AntiAliasing = config.AntiAliasing;
 		Config.Tonemapping = config.Tonemapping;

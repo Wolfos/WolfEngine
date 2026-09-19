@@ -134,9 +134,16 @@ public class CubeLutParserTests
 	}
 
 	[Test]
-	public void TextureDescriptor_VolumeWithWritableUsage_IsRejected()
+	public void TextureDescriptor_VolumeAsRenderOrDepthTarget_IsRejected()
 	{
 		Assert.Throws<ArgumentException>(() => _ = new TextureDescriptor(
+			4, 4, TextureFormat.Rgba16Float, TextureUsage.ShaderResource | TextureUsage.RenderTarget,
+			dimension: TextureDimension.Texture3D, depth: 4));
+		Assert.Throws<ArgumentException>(() => _ = new TextureDescriptor(
+			4, 4, TextureFormat.D32Float, TextureUsage.ShaderResource | TextureUsage.DepthStencil,
+			dimension: TextureDimension.Texture3D, depth: 4));
+		// Compute volumes such as the volumetric fog froxel grid are written through UAVs.
+		Assert.DoesNotThrow(() => _ = new TextureDescriptor(
 			4, 4, TextureFormat.Rgba16Float, TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			dimension: TextureDimension.Texture3D, depth: 4));
 		Assert.Throws<ArgumentOutOfRangeException>(() => _ = new TextureDescriptor(

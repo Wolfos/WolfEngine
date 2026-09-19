@@ -3,6 +3,7 @@ import "../Common/constants.slang";
 import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Ddgi/ddgi_visibility.slang";
+import "../Common/volumetric_fog.slang";
 
 cbuffer BindlessHandles : register(b0)
 {
@@ -38,6 +39,7 @@ cbuffer BindlessHandles : register(b0)
     uint shadowMapHandle1;
     uint shadowMapHandle2;
     uint shadowSamplerHandle;
+    uint fogIntegratedHandle;
 };
 
 cbuffer CameraParams : register(b1)
@@ -90,6 +92,10 @@ cbuffer LightingParams : register(b2)
     uint framebufferSizeY;
     float diffuseIndirectMultiplier;
     float specularIndirectMultiplier;
+    uint fogEnabled;
+    uint fogSliceCount;
+    float fogMaxDistance;
+    float _fogPadding;
 };
 
 RWStructuredBuffer<PointLightData> g_PointLights : register(u3);
@@ -484,6 +490,12 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         float3 skyDir = ReconstructWorldDirection(dispatchThreadId.xy, uint2(width, height), 1.0f, camera.invViewProjection);
         float3 skyColor = SampleEnvironment(environmentHandle, samplerHandle, skyDir);
+        if (fogEnabled != 0u)
+        {
+            float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,
+                fogMaxDistance, fogSliceCount, nearPlane, fogMaxDistance);
+            skyColor = skyColor * fog.a + fog.rgb;
+        }
         if (ddgiFinalContributionDebugEnabled != 0u)
         {
             GetRWTexture(ddgiFinalContributionHandle)[dispatchThreadId.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -640,6 +652,13 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             float4(saturate(ddgiProbeRelocationDecisionDebug), 1.0f);
     }
     color += surface.emissive;
+
+    if (fogEnabled != 0u)
+    {
+        float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, uv,
+            viewPos.z, fogSliceCount, nearPlane, fogMaxDistance);
+        color = color * fog.a + fog.rgb;
+    }
 
     lightingTarget[dispatchThreadId.xy] = float4(color, 1.0f);
 }

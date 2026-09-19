@@ -28,6 +28,7 @@ internal sealed class RenderGraphPassSet
 		GBufferDecalSeedPass = new(shaderCompiler, bindlessResourceRegistry);
 		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
 		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
+		VolumetricFogPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsUpsamplePass = new(shaderCompiler, bindlessResourceRegistry);
 		TemporalAntiAliasingPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -68,6 +69,7 @@ internal sealed class RenderGraphPassSet
 	public GBufferDecalSeedPass GBufferDecalSeedPass { get; }
 	public ScreenSpaceDecalPass ScreenSpaceDecalPass { get; }
 	public DeferredLightingPass DeferredLightingPass { get; }
+	public VolumetricFogPass VolumetricFogPass { get; }
 	public ReflectionsPass ReflectionsPass { get; }
 	public ReflectionsUpsamplePass ReflectionsUpsamplePass { get; }
 	public TemporalAntiAliasingPass TemporalAntiAliasingPass { get; }

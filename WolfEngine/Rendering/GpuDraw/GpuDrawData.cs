@@ -414,6 +414,35 @@ public readonly struct GpuDecalProjectorData
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuFogVolumeData
+{
+	public GpuFogVolumeData(Matrix4x4 worldToLocal, Vector4 albedoExtinction, Vector4 parameters)
+	{
+		WorldToLocal = worldToLocal;
+		AlbedoExtinction = albedoExtinction;
+		Parameters = parameters;
+	}
+
+	public readonly Matrix4x4 WorldToLocal;
+	public readonly Vector4 AlbedoExtinction;
+	/// <summary>x anisotropy, y blend distance in normalized local space, z shape.</summary>
+	public readonly Vector4 Parameters;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct GpuFogCellHeader
+{
+	public GpuFogCellHeader(uint offset, uint count)
+	{
+		Offset = offset;
+		Count = count;
+	}
+
+	public readonly uint Offset;
+	public readonly uint Count;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct GpuTerrainMaterialUpdateData
 {
 	public GpuTerrainMaterialUpdateData(

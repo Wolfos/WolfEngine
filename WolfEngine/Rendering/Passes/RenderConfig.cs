@@ -12,6 +12,7 @@ public class RenderConfig: IDataAsset
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
 	public LightingConfig Lighting { get; set; } = new();
 	public ShadowMapConfig ShadowMaps { get; set; } = new();
+	public VolumetricFogConfig VolumetricFog { get; set; } = new();
 	public SkyboxPass.Config SkyboxConfig { get; set; } = new();
 	// Keep the serialized key for existing render-config assets while presenting the
 	// renderer that actually owns these settings in the editor.
@@ -22,6 +23,28 @@ public class RenderConfig: IDataAsset
 	public BloomConfig Bloom { get; set; } = new();
 	public DecalConfig Decals { get; set; } = new();
 	public MotionVectorDebugConfig MotionVectorDebug { get; set; } = new();
+}
+
+public struct VolumetricFogConfig
+{
+	private int _froxelPixelSize = 16;
+	private int _sliceCount = 64;
+	private float _historyWeight = 0.9f;
+
+	public VolumetricFogConfig()
+	{
+	}
+
+	public bool Enabled { get; set; } = false;
+	public float Extinction { get; set; } = 0.01f;
+	public float BaseHeight { get; set; } = 0.0f;
+	public float HeightFalloff { get; set; } = 0.05f;
+	public Vector3 Albedo { get; set; } = new(0.85f, 0.9f, 1.0f);
+	public float Anisotropy { get; set; } = 0.35f;
+	public float MaxDistance { get; set; } = 250.0f;
+	public int FroxelPixelSize { readonly get => _froxelPixelSize; set => _froxelPixelSize = Math.Clamp(value, 4, 32); }
+	public int SliceCount { readonly get => _sliceCount; set => _sliceCount = Math.Clamp(value, 16, 128); }
+	public float HistoryWeight { readonly get => _historyWeight; set => _historyWeight = Math.Clamp(value, 0.0f, 0.999f); }
 }
 
 public struct LightingConfig

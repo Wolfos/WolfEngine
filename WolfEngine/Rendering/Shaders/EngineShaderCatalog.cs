@@ -82,6 +82,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
+	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
 	private static ShaderProgramId Id(string name) => new($"engine://shaders/{name}");
 }
@@ -155,7 +156,8 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
-			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang")
+			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
+			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang")
 		};
 
 		_byId = new();
@@ -339,6 +341,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.Skinning) return ["SkinningCS"];
 		if (id == EngineShaderPrograms.TerrainAuthoringBrushes) return ["ApplyHeightmapRaiseLowerBrush", "ApplyHeightmapFlattenBrush", "ApplyHeightmapSmoothBrush", "ApplyLayerMapLayerBrush"];
 		if (id == EngineShaderPrograms.GBufferDecalSeed) return ["GBufferDecalSeedCS"];
+		if (id == EngineShaderPrograms.VolumetricFog) return ["VolumetricFogInjectCS", "VolumetricFogTemporalCS", "VolumetricFogIntegrateCS"];
 		return [];
 	}
 }

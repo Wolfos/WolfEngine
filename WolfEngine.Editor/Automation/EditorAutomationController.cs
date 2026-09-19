@@ -6,6 +6,8 @@ using WolfEngine.Editor.Projects;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Profiling;
+using System.Text.Json;
 
 namespace WolfEngine.Editor.Automation;
 
@@ -19,7 +21,12 @@ public sealed class EditorAutomationController
 	private readonly IRenderer _renderer;
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
+	private readonly GpuProfiler _gpuProfiler;
 	private Task<FrameCapture>? _captureTask;
+	private Task<IReadOnlyList<GpuProfileFrame>>? _profileTask;
+	private DateTime _profileDeadlineUtc;
+	private bool _warmupComplete;
+	private bool _profileComplete;
 	private DateTime _captureDeadlineUtc;
 	private int _completedFrames;
 	private bool _initialized;
@@ -31,7 +38,8 @@ public sealed class EditorAutomationController
 		IEditorPlaySession playSession,
 		IRenderer renderer,
 		EditorViewportStateBus viewportStateBus,
-		IGameplayAssemblyHost gameplayAssemblyHost)
+		IGameplayAssemblyHost gameplayAssemblyHost,
+		GpuProfiler gpuProfiler)
 	{
 		_options = options;
 		_projectService = projectService;
@@ -40,6 +48,7 @@ public sealed class EditorAutomationController
 		_renderer = renderer;
 		_viewportStateBus = viewportStateBus;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
+		_gpuProfiler = gpuProfiler;
 	}
 
 	public bool IsComplete { get; private set; }
@@ -108,7 +117,38 @@ public sealed class EditorAutomationController
 	public void OnFrameCompleted()
 	{
 		if (IsComplete || _initialized == false || _playSession.State != EditorPlayState.Playing) return;
-		if (_captureTask is null && ++_completedFrames >= _options.Frames)
+		if (!_warmupComplete)
+		{
+			_completedFrames++;
+			_warmupComplete = _completedFrames >= _options.Frames;
+			if (!_warmupComplete) return;
+		}
+
+		if (_options.ProfileFrames > 0 && !_profileComplete)
+		{
+			if (_profileTask is null)
+			{
+				var marker = _gpuProfiler.BeginCollection();
+				_profileTask = _gpuProfiler.CollectCompletedFramesAsync(marker, _options.ProfileFrames);
+				_profileDeadlineUtc = DateTime.UtcNow.AddMinutes(3);
+				return;
+			}
+			if (!_profileTask.IsCompleted)
+			{
+				if (DateTime.UtcNow > _profileDeadlineUtc) Fail(4, "Timed out waiting for GPU profile frames.");
+				return;
+			}
+			try
+			{
+				var frames = _profileTask.GetAwaiter().GetResult();
+				WriteProfile(frames);
+				_gpuProfiler.Enabled = false;
+				_profileComplete = true;
+			}
+			catch (Exception exception) { Fail(5, exception.Message); return; }
+		}
+
+		if (_captureTask is null)
 		{
 			try
 			{
@@ -152,6 +192,43 @@ public sealed class EditorAutomationController
 
 	private string GetCapturePath() => Path.GetFullPath(Path.IsPathRooted(_options.CapturePath)
 		? _options.CapturePath : Path.Combine(_options.ProjectPath, _options.CapturePath));
+	private string GetProfilePath() => Path.GetFullPath(Path.IsPathRooted(_options.ProfileOutputPath!)
+		? _options.ProfileOutputPath! : Path.Combine(_options.ProjectPath, _options.ProfileOutputPath!));
+
+	private void WriteProfile(IReadOnlyList<GpuProfileFrame> frames)
+	{
+		var passes = frames.SelectMany(frame => frame.Passes)
+			.GroupBy(pass => pass.Name, StringComparer.Ordinal)
+			.OrderBy(group => group.Key, StringComparer.Ordinal)
+			.Select(group => new GpuPassProfileResult(
+				group.Key,
+				Summarize(group.Select(pass => pass.DurationMs)),
+				group.SelectMany(pass => pass.Scopes)
+					.GroupBy(scope => scope.Name, StringComparer.Ordinal)
+					.OrderBy(scope => scope.Key, StringComparer.Ordinal)
+					.Select(scope => new GpuScopeProfileResult(scope.Key, Summarize(scope.Select(value => value.DurationMs))))
+					.ToArray()))
+			.ToArray();
+		var result = new GpuFrameProfileResult(
+			_options.ProfileFrames,
+			frames.Select(frame => frame.FrameIndex).ToArray(),
+			passes,
+			0,
+			0);
+		var path = GetProfilePath();
+		Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+		File.WriteAllText(path, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"gpu profile success frames={frames.Count} path={path}");
+	}
+
+	private static GpuTimingStatistics Summarize(IEnumerable<double> samples)
+	{
+		var sorted = samples.OrderBy(value => value).ToArray();
+		if (sorted.Length == 0) return new GpuTimingStatistics(0, 0.0, 0.0, 0.0);
+		var middle = sorted.Length / 2;
+		var median = (sorted.Length & 1) == 0 ? (sorted[middle - 1] + sorted[middle]) * 0.5 : sorted[middle];
+		return new GpuTimingStatistics(sorted.Length, median, sorted[(int)Math.Ceiling(sorted.Length * 0.95) - 1], sorted[^1]);
+	}
 	private static string Normalize(string path) => path.Replace('\\', '/');
 	private static bool HasRuntimeCamera(World? world)
 	{

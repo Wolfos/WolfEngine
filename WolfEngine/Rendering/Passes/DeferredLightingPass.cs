@@ -113,6 +113,7 @@ public sealed class DeferredLightingPass
 		var shadowMapDepth0 = context.GetTexture(resources.ShadowMapDepth0);
 		var shadowMapDepth1 = context.GetTexture(resources.ShadowMapDepth1);
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
+		var fogIntegrated = resources.FogIntegrated.IsValid ? context.GetTexture(resources.FogIntegrated) : null;
 
 		var environment = resources.SkyboxEnvironment.IsValid
 			? context.GetTexture(resources.SkyboxEnvironment)
@@ -192,6 +193,10 @@ public sealed class DeferredLightingPass
 			LightingOutput = _bindlessRegistry.RegisterRwTexture(lighting),
 			LinearSampler = _linearSampler,
 			ShadowSampler = _shadowSampler,
+			FogIntegrated = _bindlessRegistry.GetTextureHandle(fogIntegrated),
+			FogEnabled = fogIntegrated is not null,
+			FogSliceCount = Math.Clamp(resources.Config.VolumetricFog.SliceCount, 16, 128),
+			FogMaxDistance = Math.Max(resources.Config.VolumetricFog.MaxDistance, sceneData.NearPlane + 0.001f),
 			PointLightBuffer = gpuDrawResources.ClusterPointLightBuffer ?? throw new InvalidOperationException("Cluster point-light buffer missing."),
 			ClusterHeaderBuffer = gpuDrawResources.ClusterHeaderBuffer ?? throw new InvalidOperationException("Cluster header buffer missing."),
 			ClusterLightIndexBuffer = gpuDrawResources.ClusterLightIndexBuffer ?? throw new InvalidOperationException("Cluster light-index buffer missing."),
@@ -282,6 +287,7 @@ public sealed class DeferredLightingPass
 		bindlessWriter.SetUInt("shadowMapHandle1", config.ShadowMapDepth1.Value);
 		bindlessWriter.SetUInt("shadowMapHandle2", config.ShadowMapDepth2.Value);
 		bindlessWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
+		bindlessWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
 		commandList.SetComputeConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 
 		var cameraWriter = _cameraWriter
@@ -380,6 +386,9 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetFloat("farPlane", config.FarPlane);
 		lightingWriter.SetUInt("framebufferSizeX", (uint)Math.Max(config.DispatchSize.X, 1));
 		lightingWriter.SetUInt("framebufferSizeY", (uint)Math.Max(config.DispatchSize.Y, 1));
+		lightingWriter.SetUInt("fogEnabled", config.FogEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
+		lightingWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
 		commandList.SetComputeConstants(lightingWriter.RegisterIndex, lightingWriter.AsBytes());
 		commandList.SetComputeBuffer(3, config.PointLightBuffer);
 		commandList.SetComputeBuffer(4, config.ClusterHeaderBuffer);

@@ -3,6 +3,7 @@ import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
 import "../Common/common_lighting.slang";
 import "../Common/normal_decode.slang";
+import "../Common/volumetric_fog.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -33,9 +34,10 @@ cbuffer TransparentEnvironmentParams : register(b0)
     uint shadowMapHandle1;
     uint shadowMapHandle2;
     uint shadowSamplerHandle;
-    uint _envPadding0;
-    uint _envPadding1;
-    uint _envPadding2;
+    uint fogIntegratedHandle;
+    uint fogEnabled;
+    uint fogSliceCount;
+    float fogMaxDistance;
 };
 
 cbuffer CameraParams : register(b2)
@@ -234,6 +236,14 @@ TransparentOutput fragmentShader(VSOutput input)
         samplerHandle,
         IBL_EXPOSURE);
     color += surface.emissive;
+
+    if (fogEnabled != 0u)
+    {
+        float2 screenUv = input.position.xy / float2(frameSizeX, frameSizeY);
+        float4 fog = SampleIntegratedFog(fogIntegratedHandle, samplerHandle, screenUv,
+            input.viewPos.z, fogSliceCount, nearPlane, fogMaxDistance);
+        color = color * fog.a + fog.rgb;
+    }
 
     float alpha = saturate(materialData.baseColor.a * albedoSample.a);
     output.color = float4(color, alpha);
