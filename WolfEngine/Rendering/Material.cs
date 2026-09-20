@@ -1,3 +1,4 @@
+using System.Numerics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.AssetPipeline;
@@ -12,7 +13,7 @@ public sealed class Material
     private float _metallicFactor = 1.0f;
     private float _roughnessFactor = 1.0f;
     private float _normalScale = 1.0f;
-    private System.Numerics.Vector3 _emissiveFactor = System.Numerics.Vector3.Zero;
+    private Vector3 _emissiveFactor = Vector3.Zero;
     private float _emissiveIntensity = 1.0f;
     private Texture _albedoTexture = null!;
     private Texture _ormTexture = null!;

@@ -1,10 +1,9 @@
 import "../Common/common_bindless.slang";
 import "ddgi_common.slang";
+import "ddgi_sample.slang";
 
 static const uint DDGI_DIRECTION_RESOLUTION = 8u;
 static const uint DDGI_DIRECTION_COUNT = DDGI_DIRECTION_RESOLUTION * DDGI_DIRECTION_RESOLUTION;
-static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
-static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
 // A scheduled update contributes one stochastic estimate, regardless of how
 // many rendered frames elapsed. Cadence scaling gives sparse, noisy samples
 // nearly unit weight (73% at 64 frames) and makes indirect lighting pulse.

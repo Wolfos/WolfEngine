@@ -1,5 +1,6 @@
 import "../Common/common_bindless.slang";
 import "ddgi_common.slang";
+import "ddgi_sample.slang";
 import "ddgi_visibility.slang";
 
 static const uint DDGI_VISIBILITY_RESOLUTION = 16u;

@@ -2,6 +2,7 @@ import "../Common/common_bindless.slang";
 import "../Common/common_lighting.slang";
 import "../Common/draw_data.slang";
 import "ddgi_visibility.slang";
+import "ddgi_sample.slang";
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -113,12 +114,6 @@ float3 DdgiProbePosition(uint probeIndex)
     uint y = yz % probeCountY;
     uint z = yz / probeCountY;
     return origin + float3(float(x), float(y), float(z)) * probeSpacing;
-}
-
-int DdgiPositiveModulo(int value, int modulus)
-{
-    int remainder = value % max(modulus, 1);
-    return remainder < 0 ? remainder + modulus : remainder;
 }
 
 uint3 DdgiLogicalProbeCoord(uint probeIndex)
@@ -356,35 +351,15 @@ float2 DdgiInteriorUv(uint2 interiorPixel, uint interiorSize)
     return ((float2(interiorPixel) + 0.5f) / float(interiorSize)) * 2.0f - 1.0f;
 }
 
-float3 DdgiOctDecode(float2 f)
-{
-    float3 n = float3(f.x, f.y, 1.0f - abs(f.x) - abs(f.y));
-    float t = saturate(-n.z);
-    n.xy += select(n.xy >= 0.0f, -t.xx, t.xx);
-    return normalize(n);
-}
-
-float2 DdgiOctEncode(float3 n)
-{
-    n /= abs(n.x) + abs(n.y) + abs(n.z);
-    float2 enc = n.xy;
-    if (n.z < 0.0f)
-    {
-        enc = (1.0f - abs(enc.yx)) * select(enc.xy >= 0.0f, 1.0f.xx, -1.0f.xx);
-    }
-    return enc;
-}
-
 float2 DdgiProbeAtlasUv(uint probeIndex, float3 direction, uint interiorSize)
 {
-    uint tileSize = interiorSize + tileBorderSize * 2u;
-    uint physicalProbeIndex = DdgiPhysicalProbeIndex(probeIndex);
-    uint tileX = physicalProbeIndex % atlasColumns;
-    uint tileY = physicalProbeIndex / atlasColumns;
-    float2 interiorUv = DdgiOctEncode(normalize(direction)) * 0.5f + 0.5f;
-    float2 atlasPixel = float2(tileX * tileSize + tileBorderSize, tileY * tileSize + tileBorderSize) +
-        interiorUv * float(interiorSize - 1u) + 0.5f.xx;
-    return atlasPixel / float2(atlasColumns * tileSize, atlasRows * tileSize);
+    return DdgiProbeAtlasUvFromLayout(
+        DdgiPhysicalProbeIndex(probeIndex),
+        direction,
+        interiorSize,
+        tileBorderSize,
+        atlasColumns,
+        atlasRows);
 }
 
 float3 DdgiSampleHistory(float3 worldPosition, float3 normal)
