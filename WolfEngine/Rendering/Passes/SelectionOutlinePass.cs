@@ -80,7 +80,7 @@ public sealed class SelectionOutlinePass
 		var viewWriter = _viewWriter
 			?? throw new InvalidOperationException("Selection outline view writer was not initialized.");
 		viewWriter.Clear();
-		viewWriter.SetMatrix4x4("viewProjection", sceneData.ViewProjection);
+		viewWriter.SetMatrix4x4("unjitteredViewProjection", sceneData.UnjitteredViewProjection);
 		viewWriter.SetVector3("cameraPosition", sceneData.CameraOrigin);
 		viewWriter.SetVector2("targetSize", new System.Numerics.Vector2(
 			Math.Max(config.TargetWidth, 1),
@@ -90,6 +90,7 @@ public sealed class SelectionOutlinePass
 			Math.Max(config.DepthHeight, 1)));
 		viewWriter.SetUInt("depthHandle", _bindlessRegistry.RegisterDepthTexture(config.DepthTexture).Value);
 		viewWriter.SetFloat("depthBias", DepthBias);
+		viewWriter.SetVector2("jitterPixels", sceneData.JitterPixels);
 		commandList.SetGraphicsConstants(viewWriter.RegisterIndex, viewWriter.AsBytes());
 
 		var drawWriter = _drawWriter
