@@ -285,7 +285,8 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		var packedHandle = textureId switch
 		{
 			0 => _fallbackTextureHandleValue,
-			_ when textureId == UiTextureIds.SceneViewport => _fallbackTextureHandleValue,
+			// An unresolved viewport sentinel means the view had no output this frame.
+			_ when UiTextureIds.IsViewport(textureId) => _fallbackTextureHandleValue,
 			_ => unchecked((uint)(nuint)textureId)
 		};
 

@@ -189,6 +189,9 @@ internal sealed class RenderGraphFrameBuilder
 		RenderGraphResourceHandle Handle,
 		IGfxTexture Texture);
 	private readonly List<SceneDebugViewRegistration> _sceneDebugViews = [];
+	// Output texture id per view index, rebuilt each frame and consumed when the UI frame's viewport
+	// sentinels are rewritten. Zero means the view produced nothing this frame.
+	private readonly nint[] _viewportTextureIds = new nint[UiTextureIds.MaxViewports];
 	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
 	private SceneDebugViewOption[] _sceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
 	private string _requestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
@@ -1781,7 +1784,9 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId);
-		ResolveSceneViewportTextureId(_uiFrame, textureId);
+		Array.Clear(_viewportTextureIds);
+		_viewportTextureIds[RenderViewId.Primary.Index] = textureId;
+		ResolveViewportTextureIds(_uiFrame, _viewportTextureIds);
 		_resolvedSceneViewportState = new SceneViewportRenderState(
 			textureId,
 			_frameResources.SceneFramebufferSize,
@@ -1971,7 +1976,13 @@ internal sealed class RenderGraphFrameBuilder
 		       string.Equals(debugViewId, SceneDebugViewIds.DdgiProbeRelocationDecision, StringComparison.Ordinal);
 	}
 
-	private static void ResolveSceneViewportTextureId(UiFrameData uiFrame, nint textureId)
+	/// <summary>
+	/// Rewrites every viewport sentinel in the UI frame to the output its view resolved to this frame. The UI
+	/// frame is built on the game thread, before the render thread knows those texture ids, so each view's
+	/// image carries a sentinel until here. A view that resolved to nothing is left at zero, which the
+	/// backends draw with their fallback texture.
+	/// </summary>
+	private static void ResolveViewportTextureIds(UiFrameData uiFrame, nint[] textureIdsByViewIndex)
 	{
 		if (ReferenceEquals(uiFrame, UiFrameData.Empty) || uiFrame.CommandCount == 0)
 		{
@@ -1981,7 +1992,7 @@ internal sealed class RenderGraphFrameBuilder
 		for (var i = 0; i < uiFrame.CommandCount; i++)
 		{
 			var command = uiFrame.Commands[i];
-			if (command.TextureId != UiTextureIds.SceneViewport)
+			if (UiTextureIds.TryGetViewport(command.TextureId, out var view) == false)
 			{
 				continue;
 			}
@@ -1991,7 +2002,7 @@ internal sealed class RenderGraphFrameBuilder
 				command.IdxOffset,
 				command.VtxOffset,
 				command.ClipRect,
-				textureId);
+				textureIdsByViewIndex[view.Index]);
 		}
 	}
 

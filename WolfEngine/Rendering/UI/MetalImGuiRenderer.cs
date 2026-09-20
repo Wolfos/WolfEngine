@@ -197,7 +197,8 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 			return _fontHandle.Value;
 		}
 
-		if (textureId == UiTextureIds.SceneViewport)
+		// An unresolved viewport sentinel means the view had no output this frame.
+		if (UiTextureIds.IsViewport(textureId))
 		{
 			var errorHandle = _bindlessRegistry.ErrorTextureHandle;
 			return errorHandle.IsValid ? errorHandle.Value : _fontHandle.Value;
