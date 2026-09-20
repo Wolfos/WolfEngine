@@ -197,9 +197,9 @@ internal sealed class RenderGraphFrameBuilder
 	private string _requestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
 	private const int DdgiShCoefficientCount = DdgiUtilities.ShCoefficientCount;
 
-	// Per-view state that spans frames: history, fog, pyramid and DDGI. Held per view because two views
-	// resolving at different sizes with different cameras would otherwise overwrite each other's history.
-	private readonly Dictionary<RenderViewId, RenderViewState> _viewStates = new();
+	// Per-view state that spans frames: history, fog, pyramid and DDGI. Shared with the render graph, which
+	// needs the same views' output targets and render sizes.
+	private readonly RenderViewRegistry _viewRegistry;
 	// The view currently being recorded. Set by BeginFrame; while one view exists it is always the primary.
 	private RenderViewState _view;
 	
@@ -255,8 +255,10 @@ internal sealed class RenderGraphFrameBuilder
 		GpuDrawResources gpuDrawResources,
 		IImGuiRenderer imGuiRenderer,
 		GameplayUiGpuRenderer gameplayUiRenderer,
-		IShaderProvider shaderProvider)
+		IShaderProvider shaderProvider,
+		RenderViewRegistry viewRegistry)
 	{
+		_viewRegistry = viewRegistry ?? throw new ArgumentNullException(nameof(viewRegistry));
 		_passSet = passSet;
 		_rayTracingSceneResources = new RayTracingSceneResources(shaderProvider);
 		_skinningPass = new SkinningPass(shaderProvider);
@@ -1748,16 +1750,7 @@ internal sealed class RenderGraphFrameBuilder
 	/// view's temporal history, fog grid, colour pyramid and probe volume are only meaningful for the camera
 	/// and target size that produced them.
 	/// </summary>
-	private RenderViewState GetOrCreateViewState(RenderViewId view)
-	{
-		if (_viewStates.TryGetValue(view, out var state) == false)
-		{
-			state = new RenderViewState(view);
-			_viewStates.Add(view, state);
-		}
-
-		return state;
-	}
+	private RenderViewState GetOrCreateViewState(RenderViewId view) => _viewRegistry.GetOrCreate(view);
 
 	/// <summary>Exposes a view's state so tests can assert that views do not share history.</summary>
 	internal RenderViewState GetViewStateForTest(RenderViewId view) => GetOrCreateViewState(view);
@@ -1768,13 +1761,12 @@ internal sealed class RenderGraphFrameBuilder
 	/// </summary>
 	public void ReleaseView(RenderViewId view)
 	{
-		if (view == RenderViewId.Primary || _viewStates.TryGetValue(view, out var state) == false)
+		if (view == RenderViewId.Primary || _viewRegistry.TryGet(view, out var state) == false)
 		{
 			return;
 		}
 
-		state.ReleaseAll();
-		_viewStates.Remove(view);
+		_viewRegistry.Release(view, _renderer.GetGfxDevice());
 		if (ReferenceEquals(_view, state))
 		{
 			_view = GetOrCreateViewState(RenderViewId.Primary);

@@ -36,6 +36,19 @@ internal sealed class RenderViewState
 	/// <summary>What this view resolved to for the UI to sample, as of the last frame it was recorded.</summary>
 	public SceneViewportRenderState ResolvedSceneViewportState = SceneViewportRenderState.Empty;
 
+	/// <summary>
+	/// The texture this view is drawn into and handed to the UI. One per view: views size independently, and
+	/// a shared target would mean the last view recorded overwrote what every earlier one had drawn.
+	/// </summary>
+	public readonly EditorSceneRenderTargetManager SceneRenderTarget = new();
+
+	/// <summary>The size this view last rendered at, which its camera's jitter and projection derive from.</summary>
+	public Int2 SceneRenderSize;
+
+	public int PreviousJitterPhaseCount;
+	public bool SceneDataPreviousTaaEnabled;
+	public AntiAliasingMode SceneDataPreviousAntiAliasingMode;
+
 	// Previous-frame shape. History is only valid while the shape it was produced at still holds, so each
 	// view tracks its own: one view resizing must not invalidate another's history. The window framebuffer
 	// size is included because a view can be sized relative to it.
@@ -113,12 +126,21 @@ internal sealed class RenderViewState
 	/// Retires every GPU resource this view holds. Called when the view closes; each release goes through the
 	/// device's retirement queue, so resources outlive any submission still referencing them.
 	/// </summary>
-	public void ReleaseAll()
+	/// <param name="device">
+	/// The device the view's output target was created on. The history resources carry their own device, but
+	/// the target manager does not, and releasing its texture without a device would dispose it immediately —
+	/// while a UI frame still referencing it may be in flight.
+	/// </param>
+	public void ReleaseAll(IGfxDevice? device)
 	{
 		ReleaseTemporalHistoryResources();
 		ReleaseFogHistoryResources();
 		ReleaseColorPyramidResources();
 		ReleaseDdgiHistoryResources();
+		SceneRenderTarget.Release(device);
+		SceneRenderSize = Int2.Zero;
+		PreviousJitterPhaseCount = 0;
+		ResolvedSceneViewportState = SceneViewportRenderState.Empty;
 	}
 
 	public void ReleaseFogHistoryResources()

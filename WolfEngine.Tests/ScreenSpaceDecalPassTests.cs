@@ -226,7 +226,8 @@ public sealed class ScreenSpaceDecalPassTests
 			gpuDrawResources,
 			NullImGuiRenderer.Instance,
 			gameplayUiRenderer,
-			shaderProvider.Object);
+			shaderProvider.Object,
+			new RenderViewRegistry());
 
 		return (graph, frameBuilder);
 	}

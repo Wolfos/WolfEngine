@@ -41,7 +41,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private long _pendingShaderRevision;
 	private long _appliedShaderRevision;
-	private readonly EditorSceneRenderTargetManager _sceneRenderTargetManager = new();
+	private readonly RenderViewRegistry _viewRegistry = new();
+	private RenderViewState _view = null!;
 	private readonly int _gpuHardeningLogInterval;
 	// Populated from the snapshot buffer at the top of every frame, before anything reads them.
 	// Execute() still null-checks _activeSnapshot defensively for the pre-first-frame case.
@@ -51,10 +52,6 @@ public sealed class RenderGraph : IRenderResourceScheduler
 	private int _frameIndex;
 	private int _gpuCaptureRequested;
 	private bool _gpuCaptureActive;
-	private bool _previousTaaEnabled;
-	private AntiAliasingMode _previousAntiAliasingMode;
-	private int _previousJitterPhaseCount;
-	private Int2 _currentSceneRenderSize;
 	private RayTracingSceneState _latestRayTracingSceneState = RayTracingSceneState.Empty;
 
 	private readonly object _resourceSync = new();
@@ -100,7 +97,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 			gpuDrawResources,
 			imGuiRenderer,
 			gameplayUiRenderer,
-			shaderProvider);
+			shaderProvider,
+			_viewRegistry);
 		_gpuDrawResources = gpuDrawResources;
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_gpuProfiler = gpuProfiler ?? throw new ArgumentNullException(nameof(gpuProfiler));
@@ -155,7 +153,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		// FSR3 owns the sequence length. At native resolution this is eight phases; once
 		// render/display sizes split, the display width belongs in the second argument.
 		var phaseCount = snapshot.Config.AntiAliasing.Mode == AntiAliasingMode.Fsr3
-			? Fsr3Constants.GetJitterPhaseCount(_currentSceneRenderSize.X, _currentSceneRenderSize.X)
+			? Fsr3Constants.GetJitterPhaseCount(_view.SceneRenderSize.X, _view.SceneRenderSize.X)
 			: Math.Max(1, snapshot.Config.AntiAliasing.Taa.PhaseCount);
 		var jitterPixels = taaEnabled
 			? TemporalJitter.GetHaltonJitterPixels(
@@ -167,7 +165,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				(ulong)(_frameIndex - 1),
 				phaseCount)
 			: jitterPixels;
-		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _currentSceneRenderSize);
+		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _view.SceneRenderSize);
 		var jitteredProjection = taaEnabled
 			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
 			: snapshot.Camera.Perspective;
@@ -218,7 +216,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				invViewProjection,
 				cameraPosition,
 				previousCameraOrigin,
-				_currentSceneRenderSize,
+				_view.SceneRenderSize,
 				snapshot.Camera.NearPlane > 0.0f ? snapshot.Camera.NearPlane : Camera.DefaultNearPlane,
 				snapshot.Camera.FarPlane > 0.0f ? snapshot.Camera.FarPlane : Camera.DefaultFarPlane,
 				jitterPixels,
@@ -226,17 +224,17 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				jitterNdc,
 				hasPreviousCameraState == false ||
 				projectionChanged ||
-				(taaEnabled && (!_previousTaaEnabled ||
-				 _previousAntiAliasingMode != snapshot.Config.AntiAliasing.Mode ||
-				 _previousJitterPhaseCount != phaseCount)),
+				(taaEnabled && (!_view.SceneDataPreviousTaaEnabled ||
+				 _view.SceneDataPreviousAntiAliasingMode != snapshot.Config.AntiAliasing.Mode ||
+				 _view.PreviousJitterPhaseCount != phaseCount)),
 				_renderLights,
 				snapshot.DecalPackets,
 				snapshot.FogVolumePackets,
 				snapshot.OutlinePackets);
 
-			_previousTaaEnabled = taaEnabled;
-			_previousAntiAliasingMode = snapshot.Config.AntiAliasing.Mode;
-			_previousJitterPhaseCount = phaseCount;
+			_view.SceneDataPreviousTaaEnabled = taaEnabled;
+			_view.SceneDataPreviousAntiAliasingMode = snapshot.Config.AntiAliasing.Mode;
+			_view.PreviousJitterPhaseCount = phaseCount;
 		}
 
 		if (sceneData is null &&
@@ -435,7 +433,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
-		_sceneRenderTargetManager.Advance(_renderer.GetGfxDevice());
+		_view = _viewRegistry.GetOrCreate(RenderViewId.Primary);
+		_view.SceneRenderTarget.Advance(_renderer.GetGfxDevice());
 
 		using (FrameProfiler.Instance.Measure("Begin Frame"))
 		{
@@ -490,16 +489,16 @@ public sealed class RenderGraph : IRenderResourceScheduler
 					_gameplayUiFrame = latestGameplayUi;
 				}
 
-				_currentSceneRenderSize = sceneRenderSize;
+				_view.SceneRenderSize = sceneRenderSize;
 				var renderSceneToViewport = sceneEnabled && !renderSceneToWindow;
 				var sceneColorHandle = default(RenderGraphResourceHandle);
 				if (renderSceneToViewport)
 				{
-					var sceneTarget = _sceneRenderTargetManager.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
+					var sceneTarget = _view.SceneRenderTarget.EnsureTarget(_renderer.GetGfxDevice(), sceneRenderSize);
 					sceneColorHandle = _resourceRegistry.ImportTexture(
 						sceneTarget,
 						takeOwnership: false,
-						initialState: _sceneRenderTargetManager.CurrentState);
+						initialState: _view.SceneRenderTarget.CurrentState);
 				}
 
 				if (!Matrix4x4.Decompose(
@@ -537,7 +536,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				_frameBuilder.CompleteFrame();
 				if (sceneColorHandle.IsValid)
 				{
-					_sceneRenderTargetManager.SetCurrentState(_resourceRegistry.GetResourceState(sceneColorHandle));
+					_view.SceneRenderTarget.SetCurrentState(_resourceRegistry.GetResourceState(sceneColorHandle));
 				}
 
 				_renderer.Render(_resourceRegistry, _frameBuilder.GetFinalColorHandle());

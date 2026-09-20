@@ -91,6 +91,30 @@ public sealed class AntiAliasingRenderGraphTests
 	}
 
 	[Test]
+	public void FrameBuilderAndSceneDataTrackPreviousAntiAliasingSettingsSeparately()
+	{
+		// The builder writes its pair in BeginFrame; the render graph reads its own pair later in the same
+		// frame, when it builds scene data. Collapsing them into one pair would make that later read see the
+		// value BeginFrame just wrote for the current frame, so a mode change would never reset history.
+		var (_, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		var view = ViewState(builder);
+		view.SceneDataPreviousTaaEnabled = false;
+		view.SceneDataPreviousAntiAliasingMode = AntiAliasingMode.Fsr3;
+		builder.CompleteFrame();
+
+		BeginFrame(builder, AntiAliasingMode.Taa);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(view.PreviousTaaEnabled, Is.True, "the builder should have recorded this frame's setting");
+			Assert.That(view.PreviousAntiAliasingMode, Is.EqualTo(AntiAliasingMode.Taa));
+			Assert.That(view.SceneDataPreviousTaaEnabled, Is.False, "BeginFrame must not write the scene-data pair");
+			Assert.That(view.SceneDataPreviousAntiAliasingMode, Is.EqualTo(AntiAliasingMode.Fsr3));
+		});
+	}
+
+	[Test]
 	public void ReleaseView_RetiresThatViewsStateAndKeepsThePrimary()
 	{
 		var (_, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
