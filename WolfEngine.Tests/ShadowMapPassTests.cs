@@ -71,6 +71,7 @@ public sealed class ShadowMapPassTests
 			resetHistory: false,
 			lights,
 			Array.Empty<DecalProjectorPacket>(),
-			Array.Empty<FogVolumePacket>());
+			Array.Empty<FogVolumePacket>(),
+			Array.Empty<OutlinePacket>());
 	}
 }

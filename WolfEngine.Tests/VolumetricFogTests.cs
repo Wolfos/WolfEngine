@@ -364,7 +364,7 @@ public sealed class VolumetricFogTests
 			Matrix4x4.Identity, projection, projection, projection, projection, projection,
 			inverseProjection, inverseProjection, Vector3.Zero, Vector3.Zero, new Int2(1024, 512),
 			Near, 1000.0f, Vector2.Zero, Vector2.Zero, Vector2.Zero, resetHistory: false,
-			lights, Array.Empty<DecalProjectorPacket>(), volumes);
+			lights, Array.Empty<DecalProjectorPacket>(), volumes, Array.Empty<OutlinePacket>());
 	}
 
 	private static List<Int3> OccupiedCells(VolumetricFogBinningResult result)

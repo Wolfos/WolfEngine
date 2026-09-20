@@ -27,6 +27,7 @@ internal sealed class RenderGraphPassSet
 		ClusteredLightingPass = new(shaderCompiler);
 		GBufferDecalSeedPass = new(shaderCompiler, bindlessResourceRegistry);
 		ScreenSpaceDecalPass = new(renderer, shaderCompiler, bindlessResourceRegistry);
+		SelectionOutlinePass = new(shaderCompiler, bindlessResourceRegistry);
 		DeferredLightingPass = new(shaderCompiler, bindlessResourceRegistry);
 		VolumetricFogPass = new(shaderCompiler, bindlessResourceRegistry);
 		ReflectionsPass = new(shaderCompiler, bindlessResourceRegistry);
@@ -68,6 +69,8 @@ internal sealed class RenderGraphPassSet
 	public ClusteredLightingPass ClusteredLightingPass { get; }
 	public GBufferDecalSeedPass GBufferDecalSeedPass { get; }
 	public ScreenSpaceDecalPass ScreenSpaceDecalPass { get; }
+
+	public SelectionOutlinePass SelectionOutlinePass { get; }
 	public DeferredLightingPass DeferredLightingPass { get; }
 	public VolumetricFogPass VolumetricFogPass { get; }
 	public ReflectionsPass ReflectionsPass { get; }

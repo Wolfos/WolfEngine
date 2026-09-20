@@ -81,6 +81,7 @@ public static class EngineShaderPrograms
 	public static readonly ShaderProgramId Skinning = Id("skinning");
 	public static readonly ShaderProgramId TerrainAuthoringBrushes = Id("terrain-authoring-brushes");
 	public static readonly ShaderProgramId ScreenSpaceDecal = Id("screen-space-decal");
+	public static readonly ShaderProgramId SelectionOutline = Id("selection-outline");
 	public static readonly ShaderProgramId GBufferDecalSeed = Id("gbuffer-decal-seed");
 	public static readonly ShaderProgramId VolumetricFog = Id("volumetric-fog");
 
@@ -156,6 +157,7 @@ public sealed class EngineShaderCatalog
 			D(EngineShaderPrograms.Skinning, "Animation/skinning.compute.slang"),
 			D(EngineShaderPrograms.TerrainAuthoringBrushes, "Terrain/Tools/terrain_authoring_brushes.compute.slang"),
 			D(EngineShaderPrograms.ScreenSpaceDecal, "Geometry/screen_space_decal.slang"),
+			D(EngineShaderPrograms.SelectionOutline, "Geometry/selection_outline.slang"),
 			D(EngineShaderPrograms.GBufferDecalSeed, "Geometry/gbuffer_decal_seed.compute.slang"),
 			D(EngineShaderPrograms.VolumetricFog, "VolumetricFog/volumetric_fog.compute.slang")
 		};
@@ -276,7 +278,8 @@ public sealed class EngineShaderCatalog
 		id == EngineShaderPrograms.GBuffer || id == EngineShaderPrograms.ImGui ||
 		id == EngineShaderPrograms.TransparentForward || id == EngineShaderPrograms.ShadowMap ||
 		id == EngineShaderPrograms.TerrainSharedGBuffer || id == EngineShaderPrograms.DebugPrimitiveForward ||
-		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal;
+		id == EngineShaderPrograms.DebugPrimitiveGBuffer || id == EngineShaderPrograms.ScreenSpaceDecal ||
+		id == EngineShaderPrograms.SelectionOutline;
 
 	private static bool IsDeclaredGraphicsEntryPointCombination(ShaderRequest request) =>
 		request.VertexEntryPoint == "vertexShader" &&

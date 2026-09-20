@@ -116,6 +116,22 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<AnimationStateResult> GetAnimationStateAsync(CancellationToken cancellationToken) =>
 		GetRunningEditor().GetAnimationStateAsync(cancellationToken);
 
+	public Task<int> SelectEntitiesAsync(IReadOnlyList<string> entityIds, CancellationToken cancellationToken)
+	{
+		var parsed = new List<Guid>(entityIds.Count);
+		foreach (var entityId in entityIds)
+		{
+			if (Guid.TryParse(entityId, out var parsedId) == false)
+			{
+				throw new InvalidOperationException($"entity_id '{entityId}' must be a GUID.");
+			}
+
+			parsed.Add(parsedId);
+		}
+
+		return GetRunningEditor().SelectEntitiesAsync(parsed, cancellationToken);
+	}
+
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
 

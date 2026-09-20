@@ -209,6 +209,31 @@ public class RenderPipeline : IRenderPipeline
 					}
 				}
 
+				using (FrameProfiler.Instance.Measure("Gather outlines"))
+				{
+					// Runs after the skinned gather so a skinned entity's per-instance mesh
+					// already exists; outlining the source mesh would trace the bind pose.
+					foreach (var entry in world.View<WorldTransform, OutlineHighlight>())
+					{
+						if (world.IsEnabled(entry.Entity) == false)
+						{
+							continue;
+						}
+
+						if (TryResolveOutlineMesh(world, entry.Entity, out var outlineMesh) == false)
+						{
+							continue;
+						}
+
+						ref var outline = ref entry.Second;
+						snapshot.AddOutline(
+							outlineMesh,
+							entry.First.LocalToWorld,
+							outline.Color,
+							outline.GetResolvedThicknessPixels());
+					}
+				}
+
 				using (FrameProfiler.Instance.Measure("Clean used dirties"))
 				{
 					_dirtyWorldTransformRemovalScratch.Clear();
@@ -513,4 +538,40 @@ public class RenderPipeline : IRenderPipeline
 				terrain.AuthoringBrushPreviewLocalTransform * terrainTransform.LocalToWorld);
 		}
 	}
+
+	/// <summary>
+	/// The mesh whose silhouette an outlined entity should trace. Entities without
+	/// renderable geometry -- lights, cameras, bare transforms -- have none, and
+	/// terrain is excluded because its silhouette is the whole screen edge.
+	/// </summary>
+	private static bool TryResolveOutlineMesh(World world, Entity entity, out Mesh mesh)
+	{
+		mesh = null!;
+		if (world.HasComponent<SkinnedMeshRenderer>(entity))
+		{
+			ref var skinnedRenderer = ref world.GetComponent<SkinnedMeshRenderer>(entity);
+			if (skinnedRenderer.SkinnedInstance is not { } skinnedInstance)
+			{
+				return false;
+			}
+
+			mesh = skinnedInstance;
+			return true;
+		}
+
+		if (world.HasComponent<MeshRenderer>(entity) == false)
+		{
+			return false;
+		}
+
+		ref var meshRenderer = ref world.GetComponent<MeshRenderer>(entity);
+		if (meshRenderer.TryValidate() == false)
+		{
+			return false;
+		}
+
+		mesh = meshRenderer.Mesh;
+		return true;
+	}
+
 }

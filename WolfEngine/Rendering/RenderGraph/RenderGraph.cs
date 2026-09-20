@@ -231,7 +231,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				 _previousJitterPhaseCount != phaseCount)),
 				_renderLights,
 				snapshot.DecalPackets,
-				snapshot.FogVolumePackets);
+				snapshot.FogVolumePackets,
+				snapshot.OutlinePackets);
 
 			_previousTaaEnabled = taaEnabled;
 			_previousAntiAliasingMode = snapshot.Config.AntiAliasing.Mode;

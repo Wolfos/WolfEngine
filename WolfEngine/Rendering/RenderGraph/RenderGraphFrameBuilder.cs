@@ -156,6 +156,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ClusteredLightingPass _clusteredLightingPass;
 	private readonly GBufferDecalSeedPass _gBufferDecalSeedPass;
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
+	private readonly SelectionOutlinePass _selectionOutlinePass;
 	private readonly DeferredLightingPass _deferredLightingPass;
 	private readonly VolumetricFogPass _volumetricFogPass;
 	private readonly ReflectionsPass _reflectionsPass;
@@ -268,6 +269,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _clusteredLightingWriteExecute;
 	private readonly Action<RenderGraphContext> _gBufferDecalSeedExecute;
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
+	private readonly Action<RenderGraphContext> _selectionOutlineExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
 	private readonly Action<RenderGraphContext> _volumetricFogInjectExecute;
 	private readonly Action<RenderGraphContext> _volumetricFogTemporalExecute;
@@ -320,6 +322,7 @@ internal sealed class RenderGraphFrameBuilder
 		_clusteredLightingPass = passSet.ClusteredLightingPass;
 		_gBufferDecalSeedPass = passSet.GBufferDecalSeedPass;
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
+		_selectionOutlinePass = passSet.SelectionOutlinePass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
 		_volumetricFogPass = passSet.VolumetricFogPass;
 		_reflectionsPass = passSet.ReflectionsPass;
@@ -353,6 +356,7 @@ internal sealed class RenderGraphFrameBuilder
 		_clusteredLightingWriteExecute = ExecuteClusteredLightingWrite;
 		_gBufferDecalSeedExecute = ExecuteGBufferDecalSeed;
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
+		_selectionOutlineExecute = ExecuteSelectionOutline;
 		_deferredLightingExecute = ExecuteDeferredLighting;
 		_volumetricFogInjectExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Inject);
 		_volumetricFogTemporalExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Temporal);
@@ -1698,6 +1702,18 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
 
+			// After tonemapping and upscaling so the outline colour reaches the
+			// viewport exactly as authored, and only on EncodedSceneColor so the
+			// presented game image and play mode stay clean. capture_frame reads
+			// this target, which is what makes the outline verifiable.
+			if (_frameResources.GBufferDepth.IsValid)
+			{
+				graph.AddPass("Selection Outline", PassKind.Graphics)
+					.ReadTexture(_frameResources.GBufferDepth, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.RenderTarget)
+					.SetExecute(_selectionOutlineExecute);
+			}
+
 			if (ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
 			    _gameplayUiFrame.Screen.CommandCount > 0)
 			{
@@ -2208,6 +2224,15 @@ internal sealed class RenderGraphFrameBuilder
 			_gpuDrawResources,
 			context.SceneData);
 		_screenSpaceDecalPass.Record(context, in config, context.SceneData);
+	}
+
+	private void ExecuteSelectionOutline(RenderGraphContext context)
+	{
+		var config = _selectionOutlinePass.BuildConfig(
+			context,
+			_frameResources,
+			_renderer.GetGfxDevice());
+		_selectionOutlinePass.Record(context, in config, context.SceneData);
 	}
 
 	private void ExecuteGBufferDecalSeed(RenderGraphContext context)

@@ -125,6 +125,7 @@ public static class Program
 		services.AddSingleton<CapsuleColliderGizmoDrawer>();
 		services.AddSingleton<TransformGizmoController>();
 		services.AddSingleton<SceneSelectionController>();
+		services.AddSingleton<SelectionOutlineController>();
 		services.AddSingleton<EditorGui>();
 		services.AddSingleton<ProjectSettingsWindow>();
 		services.AddSingleton<EditorPreferencesWindow>();

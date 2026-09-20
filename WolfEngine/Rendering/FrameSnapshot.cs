@@ -26,6 +26,7 @@ public sealed class FrameSnapshot
 		DecalPackets = new List<DecalProjectorPacket>(16);
 		FogVolumePackets = new List<FogVolumePacket>(16);
 		SkinningPackets = new List<SkinningPacket>(8);
+		OutlinePackets = new List<OutlinePacket>(8);
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
 		Config = new();
@@ -40,6 +41,9 @@ public sealed class FrameSnapshot
 	public List<LightPacket> LightPackets { get; }
 	public List<DecalProjectorPacket> DecalPackets { get; }
 	public List<FogVolumePacket> FogVolumePackets { get; }
+
+	/// <summary>Meshes the render thread must outline this frame.</summary>
+	public List<OutlinePacket> OutlinePackets { get; }
 
 	/// <summary>Skinned instances the render thread must deform this frame.</summary>
 	public List<SkinningPacket> SkinningPackets { get; }
@@ -97,6 +101,7 @@ public sealed class FrameSnapshot
 		DecalPackets.Clear();
 		FogVolumePackets.Clear();
 		SkinningPackets.Clear();
+		OutlinePackets.Clear();
 		_boneMatrixArenaUsed = 0;
 		SunDirection = DefaultSunDirection;
 		SunIntensityScale = 1.0f;
@@ -145,6 +150,11 @@ public sealed class FrameSnapshot
 	public void AddDecal(DecalProjector projector, Matrix4x4 transform)
 	{
 		DecalPackets.Add(new DecalProjectorPacket(projector, transform));
+	}
+
+	public void AddOutline(Mesh mesh, Matrix4x4 transform, ColorRGBA color, float thicknessPixels)
+	{
+		OutlinePackets.Add(new OutlinePacket(mesh, transform, color, thicknessPixels));
 	}
 
 	public void AddFogVolume(FogVolume volume, Matrix4x4 transform)

@@ -51,6 +51,17 @@ public sealed class EditorAutomationTools
 	public Task<AnimationStateResult> GetAnimationState(CancellationToken cancellationToken) =>
 		_controller.GetAnimationStateAsync(cancellationToken);
 
+	[McpServerTool(Name = "select_entities"), Description("Set the editor's entity selection by persistent GUID, through the same selection path as clicking in the viewport or the entity hierarchy. Pass no ids to clear the selection.")]
+	public async Task<string> SelectEntities(
+		[Description("Persistent entity GUIDs to select. Empty clears the selection.")] string[]? entityIds = null,
+		CancellationToken cancellationToken = default)
+	{
+		var selected = await _controller
+			.SelectEntitiesAsync(entityIds ?? Array.Empty<string>(), cancellationToken)
+			.ConfigureAwait(false);
+		return selected == 0 ? "Cleared the entity selection." : $"Selected {selected} entities.";
+	}
+
 	[McpServerTool(Name = "load_scene"), Description("Load a scene from the open project's asset database through the editor's normal scene-replacement path. The persistent editor and renderer remain running until the scene load has completed.")]
 	public Task<SceneLoadResult> LoadScene(
 		[Description("Absolute or project-relative path of a .scene.json asset.")] string scenePath,

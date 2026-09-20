@@ -28,7 +28,8 @@ public sealed class SceneDrawData
 		bool resetHistory,
 		IReadOnlyList<LightPacket> lights,
 		IReadOnlyList<DecalProjectorPacket> decals,
-		IReadOnlyList<FogVolumePacket> fogVolumes)
+		IReadOnlyList<FogVolumePacket> fogVolumes,
+		IReadOnlyList<OutlinePacket> outlines)
 	{
 		ViewMatrix = viewMatrix;
 		ViewProjection = viewProjection;
@@ -50,6 +51,7 @@ public sealed class SceneDrawData
 		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
 		Decals = decals ?? throw new ArgumentNullException(nameof(decals));
 		FogVolumes = fogVolumes ?? throw new ArgumentNullException(nameof(fogVolumes));
+		Outlines = outlines ?? throw new ArgumentNullException(nameof(outlines));
 	}
 
 	public Matrix4x4 ViewMatrix { get; }
@@ -90,6 +92,9 @@ public sealed class SceneDrawData
 
 	public IReadOnlyList<DecalProjectorPacket> Decals { get; }
 	public IReadOnlyList<FogVolumePacket> FogVolumes { get; }
+
+	/// <summary>Meshes to outline, in absolute world space.</summary>
+	public IReadOnlyList<OutlinePacket> Outlines { get; }
 }
 
 public readonly struct LightPacket

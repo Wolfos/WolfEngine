@@ -463,6 +463,42 @@ public sealed class EditorRemoteAutomationController
 		_interactionState.MarkSceneDirty();
 	}, cancellationToken);
 
+	/// <summary>
+	/// Selects entities by persistent GUID through the same selection the entity
+	/// hierarchy and viewport picking write to, so anything driven by selection --
+	/// the transform gizmo, the outline -- behaves as it does for a real click.
+	/// </summary>
+	public Task<int> SelectEntitiesAsync(IReadOnlyList<Guid> entityIds, CancellationToken cancellationToken) => Enqueue(() =>
+	{
+		ArgumentNullException.ThrowIfNull(entityIds);
+		var scene = _sceneWorkspace.CurrentScene;
+		EditorGui.ClearEntitySelection();
+		if (entityIds.Count == 0)
+		{
+			return 0;
+		}
+
+		var entitiesById = new Dictionary<Guid, Entity>(scene.EntityIds.Count);
+		foreach (var entry in scene.EntityIds)
+		{
+			entitiesById[entry.Value] = entry.Key;
+		}
+
+		var selected = 0;
+		foreach (var entityId in entityIds)
+		{
+			if (entitiesById.TryGetValue(entityId, out var entity) == false)
+			{
+				throw new InvalidOperationException($"Entity '{entityId:D}' was not found.");
+			}
+
+			EditorGui.AddEntitySelection(entity, scene.World, requestFocus: false);
+			selected++;
+		}
+
+		return selected;
+	}, cancellationToken);
+
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>
 		{
