@@ -12,7 +12,9 @@ Stage 0 is complete. Stage 1 is underway, but nothing user-visible has changed y
 one recorded view. Every piece of persistent per-view state now lives per view, and the frame-resource bundle
 has been split into `RenderViewResources` and `RenderFrameSharedResources`. Recording has matching shared
 preparation, per-view, and shared presentation phases. The remaining structural step is to put a per-view
-snapshot behind that seam and loop the live submissions.
+snapshot behind that seam and loop the live submissions. `FrameSnapshot` now owns active
+`RenderViewSnapshot` entries with isolated scene packets, draw databases and camera history; the old members
+delegate to the primary entry until publishers and render-thread consumers migrate.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -432,8 +434,10 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    separately, and resource-ownership tests enforce the boundary.
 2. **In progress:** `Build` now has shared-preparation, per-view, and shared-presentation recording phases.
    It still invokes the per-view phase once; loop it after snapshots carry several view entries.
-3. **Next:** per-view snapshots. `FrameSnapshot` becomes a list, `SeedPreviousCameraFrom` seeds per view, and
-   `PublishSnapshot` takes submissions.
+3. **In progress:** `FrameSnapshot` now exposes an ordered list of active `RenderViewSnapshot` entries, with
+   isolated scene packets and draw databases, and `SeedPreviousCameraFrom` seeds camera history by
+   `RenderViewId`. The primary-view facade keeps current callers working. Next, make `PublishSnapshot` take
+   submissions and migrate render-thread consumers off that facade.
 4. Qualify pass names by view.
 5. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".
 6. Per-view bus consumers and per-viewport editor camera input.

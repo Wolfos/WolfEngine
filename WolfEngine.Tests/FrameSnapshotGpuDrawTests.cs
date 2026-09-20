@@ -255,6 +255,78 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshotBuffer_SeedsPreviousCameraIndependentlyForEveryView()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var secondaryView = RenderViewId.FromIndex(1);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotA), Is.True);
+		snapshotA.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
+		snapshotA.GetOrCreateView(secondaryView).SetCamera(CreateCamera(), CreateCameraTransform(10.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var snapshotB), Is.True);
+		snapshotB.SetCamera(CreateCamera(), CreateCameraTransform(2.0f));
+		snapshotB.GetOrCreateView(secondaryView).SetCamera(CreateCamera(), CreateCameraTransform(20.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var reusedSnapshotA), Is.True);
+		var primary = reusedSnapshotA.GetOrCreateView(RenderViewId.Primary);
+		var secondary = reusedSnapshotA.GetOrCreateView(secondaryView);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(primary.HasPreviousCameraState, Is.True);
+			Assert.That(primary.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+				Is.EqualTo(2.0f).Within(0.0001f));
+			Assert.That(secondary.HasPreviousCameraState, Is.True);
+			Assert.That(secondary.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+				Is.EqualTo(20.0f).Within(0.0001f));
+		});
+	}
+
+	[Test]
+	public void FrameSnapshot_ViewEntriesKeepScenePacketsAndDrawDatabasesIsolated()
+	{
+		var snapshot = new FrameSnapshot();
+		var primary = snapshot.GetOrCreateView(RenderViewId.Primary);
+		var secondary = snapshot.GetOrCreateView(RenderViewId.FromIndex(1));
+
+		primary.AddLight(new Light(), Matrix4x4.Identity);
+		secondary.AddFogVolume(new FogVolume { Extinction = 0.5f }, Matrix4x4.Identity);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(primary.LightPackets, Has.Count.EqualTo(1));
+			Assert.That(primary.FogVolumePackets, Is.Empty);
+			Assert.That(secondary.LightPackets, Is.Empty);
+			Assert.That(secondary.FogVolumePackets, Has.Count.EqualTo(1));
+			Assert.That(secondary.GpuDrawDatabase, Is.Not.SameAs(primary.GpuDrawDatabase));
+		});
+	}
+
+	[Test]
+	public void FrameSnapshot_ClearKeepsStorageButOmitsViewsNotSubmittedThisFrame()
+	{
+		var snapshot = new FrameSnapshot();
+		var secondaryView = RenderViewId.FromIndex(1);
+		var secondary = snapshot.GetOrCreateView(secondaryView);
+
+		snapshot.Clear();
+		snapshot.SetCamera(CreateCamera(), CreateCameraTransform(1.0f));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(snapshot.Views.Select(view => view.View), Is.EqualTo(new[] { RenderViewId.Primary }));
+			Assert.That(snapshot.GetOrCreateView(secondaryView), Is.SameAs(secondary));
+			Assert.That(snapshot.Views.Select(view => view.View),
+				Is.EqualTo(new[] { RenderViewId.Primary, secondaryView }));
+		});
+	}
+
+	[Test]
 	public void FrameSnapshotBuffer_DrawAddedInTheSecondSlotSpansOneFrameOfMovement()
 	{
 		// The slot that has not tracked a draw yet still has to describe its movement: reporting the
