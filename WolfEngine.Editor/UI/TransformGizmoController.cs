@@ -83,7 +83,7 @@ public sealed class TransformGizmoController
 			return;
 		}
 
-		var viewProjection = view * camera.Perspective;
+		var viewProjection = view * EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera);
 		if (Matrix4x4.Invert(viewProjection, out var inverseViewProjection) == false)
 		{
 			EndDrag();

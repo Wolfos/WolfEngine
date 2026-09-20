@@ -134,6 +134,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		ApplyPendingShaderReload();
 		// Compile barriers before execution
 		_compiler.Compile(_passes);
+		ResolveViewProjection();
 		_frameBuilder.PrepareSceneViewport();
 
 		var device = _renderer.GetGfxDevice();
@@ -167,8 +168,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 			: jitterPixels;
 		var jitterNdc = TemporalJitter.GetJitterNdc(jitterPixels, _view.SceneRenderSize);
 		var jitteredProjection = taaEnabled
-			? TemporalJitter.ApplyProjectionJitter(snapshot.Camera.Perspective, jitterNdc)
-			: snapshot.Camera.Perspective;
+			? TemporalJitter.ApplyProjectionJitter(_view.ResolvedProjection, jitterNdc)
+			: _view.ResolvedProjection;
 		if (Matrix4x4.Invert(world, out var view) &&
 		    Matrix4x4.Decompose(world, out _, out _, out var cameraPosition) &&
 		    Matrix4x4.Invert(jitteredProjection, out var invProjection))
@@ -185,7 +186,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 			// Remove camera translation from the view matrix since objects are camera-relative
 			view.Translation = Vector3.Zero;
 			var viewProjection = view * jitteredProjection;
-			var unjitteredViewProjection = view * snapshot.Camera.Perspective;
+			var unjitteredViewProjection = view * _view.ResolvedProjection;
 			if (Matrix4x4.Invert(viewProjection, out var invViewProjection) == false)
 			{
 				ReleasePasses();
@@ -195,20 +196,21 @@ public sealed class RenderGraph : IRenderResourceScheduler
 			var hasPreviousCameraState = TryCreatePreviousCameraState(
 				snapshot,
 				unjitteredViewProjection,
-				snapshot.Camera.Perspective,
+				_view.ResolvedProjection,
+				_view.HasPreviousResolvedProjection ? _view.PreviousResolvedProjection : _view.ResolvedProjection,
 				cameraPosition,
 				out var previousProjection,
 				out var previousViewProjection,
 				out var previousCameraOrigin);
 			var projectionChanged = hasPreviousCameraState &&
 			                        TemporalJitter.HasProjectionChanged(
-				                        snapshot.Camera.Perspective,
+				                        _view.ResolvedProjection,
 				                        previousProjection);
 
 			sceneData = new(
 				view,
 				viewProjection,
-				snapshot.Camera.Perspective,
+				_view.ResolvedProjection,
 				unjitteredViewProjection,
 				previousProjection,
 				previousViewProjection,
@@ -232,6 +234,8 @@ public sealed class RenderGraph : IRenderResourceScheduler
 				snapshot.FogVolumePackets,
 				snapshot.OutlinePackets);
 
+			_view.PreviousResolvedProjection = _view.ResolvedProjection;
+			_view.HasPreviousResolvedProjection = true;
 			_view.SceneDataPreviousTaaEnabled = taaEnabled;
 			_view.SceneDataPreviousAntiAliasingMode = snapshot.Config.AntiAliasing.Mode;
 			_view.PreviousJitterPhaseCount = phaseCount;
@@ -332,6 +336,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		FrameSnapshot snapshot,
 		in Matrix4x4 fallbackViewProjection,
 		in Matrix4x4 fallbackProjection,
+		in Matrix4x4 previousResolvedProjection,
 		in Vector3 fallbackCameraOrigin,
 		out Matrix4x4 previousProjection,
 		out Matrix4x4 previousViewProjection,
@@ -349,9 +354,26 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		}
 
 		previousView.Translation = Vector3.Zero;
-		previousProjection = snapshot.PreviousCamera.Perspective;
+		previousProjection = previousResolvedProjection;
 		previousViewProjection = previousView * previousProjection;
 		return true;
+	}
+
+	/// <summary>
+	/// Resolves the projection for the view being recorded from its own render size. The camera component's
+	/// baked projection carries whatever aspect was last written into it by a global, which is only right for
+	/// one view; a degenerate render size means the scene is not being drawn, so the baked value stands in.
+	/// </summary>
+	private void ResolveViewProjection()
+	{
+		if (_activeSnapshot is not { } snapshot)
+		{
+			return;
+		}
+
+		_view.ResolvedProjection = _view.SceneRenderSize.X > 0 && _view.SceneRenderSize.Y > 0
+			? snapshot.Camera.GetPerspective(_view.SceneRenderSize)
+			: snapshot.Camera.Perspective;
 	}
 
 	public void Startup(Action startup, Action<float> update)

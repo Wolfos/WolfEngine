@@ -21,6 +21,7 @@ public static class SceneViewportRayUtility
 	public static bool TryBuildInverseViewProjection(
 		in Camera camera,
 		in WorldTransform cameraWorldTransform,
+		in Matrix4x4 projection,
 		out Matrix4x4 inverseViewProjection)
 	{
 		inverseViewProjection = Matrix4x4.Identity;
@@ -31,7 +32,7 @@ public static class SceneViewportRayUtility
 			return false;
 		}
 
-		var viewProjection = view * camera.Perspective;
+		var viewProjection = view * projection;
 		return Matrix4x4.Invert(viewProjection, out inverseViewProjection);
 	}
 

@@ -45,6 +45,10 @@ internal sealed class RenderViewState
 	/// <summary>The size this view last rendered at, which its camera's jitter and projection derive from.</summary>
 	public Int2 SceneRenderSize;
 
+	public Matrix4x4 ResolvedProjection = Matrix4x4.Identity;
+	public Matrix4x4 PreviousResolvedProjection = Matrix4x4.Identity;
+	public bool HasPreviousResolvedProjection;
+
 	public int PreviousJitterPhaseCount;
 	public bool SceneDataPreviousTaaEnabled;
 	public AntiAliasingMode SceneDataPreviousAntiAliasingMode;
@@ -140,6 +144,9 @@ internal sealed class RenderViewState
 		SceneRenderTarget.Release(device);
 		SceneRenderSize = Int2.Zero;
 		PreviousJitterPhaseCount = 0;
+		ResolvedProjection = Matrix4x4.Identity;
+		PreviousResolvedProjection = Matrix4x4.Identity;
+		HasPreviousResolvedProjection = false;
 		ResolvedSceneViewportState = SceneViewportRenderState.Empty;
 	}
 

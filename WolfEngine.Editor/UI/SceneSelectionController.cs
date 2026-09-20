@@ -121,7 +121,8 @@ public sealed class SceneSelectionController
 		ScenePickSelectionMode mode)
 	{
 		if (_cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
-		    SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection) == false ||
+		    SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform,
+		        EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera), out var inverseViewProjection) == false ||
 		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, inverseViewProjection, out var ray) == false)
 		{
 			return;

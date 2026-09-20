@@ -72,7 +72,8 @@ public sealed class TerrainToolController
 		}
 
 		var io = ImGui.GetIO();
-		if (SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection) == false ||
+		if (SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform,
+			    EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera), out var inverseViewProjection) == false ||
 		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, io.MousePos, inverseViewProjection, out var sceneRay) == false)
 		{
 			ClearPreview();

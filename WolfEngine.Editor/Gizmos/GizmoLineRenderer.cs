@@ -46,7 +46,7 @@ public sealed class GizmoLineRenderer : IGizmoLineRenderer
 		}
 
 		_drawList = ImGui.GetWindowDrawList();
-		_viewProjection = view * camera.Perspective;
+		_viewProjection = view * UI.EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera);
 		_viewportMin = viewportState.ImageMin;
 		_viewportMax = viewportState.ImageMax;
 		_canDraw = true;

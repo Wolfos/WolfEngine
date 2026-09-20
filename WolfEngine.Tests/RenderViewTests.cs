@@ -95,6 +95,7 @@ public sealed class RenderViewTests
 		bus.PublishRenderState(new SceneViewportRenderState(
 			textureId: 42,
 			renderSizePixels: new Int2(1280, 720),
+			projection: System.Numerics.Matrix4x4.Identity,
 			debugViews: [],
 			activeDebugViewId: SceneDebugViewIds.FinalColor));
 
@@ -149,6 +150,36 @@ public sealed class RenderViewTests
 				Is.EqualTo(SceneDebugViewIds.GBufferNormal),
 				"an override has to reach views that publish after it");
 		});
+	}
+
+	[Test]
+	public void Camera_GetPerspective_DerivesAspectFromTheViewSizeNotTheComponent()
+	{
+		// The point of the change: one camera rendered by two views at different sizes must produce two
+		// projections. Camera.Perspective can only hold one, so views cannot read it.
+		var camera = new Camera { Fov = 70.0f, NearPlane = 0.1f, FarPlane = 1000.0f };
+		camera.ScreenResolution = new Int2(1280, 720);
+		camera.SetPerspective(70.0f);
+
+		var wide = camera.GetPerspective(new Int2(1600, 400));
+		var tall = camera.GetPerspective(new Int2(400, 1600));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(wide.M11, Is.Not.EqualTo(tall.M11).Within(0.0001f));
+			// A 16:9 request has to reproduce what the component baked for 1280x720.
+			Assert.That(camera.GetPerspective(new Int2(1280, 720)).M11, Is.EqualTo(camera.Perspective.M11).Within(0.0001f));
+			// The component is left alone; resolving a projection is not a mutation.
+			Assert.That(camera.ScreenResolution, Is.EqualTo(new Int2(1280, 720)));
+		});
+	}
+
+	[Test]
+	public void Camera_GetPerspective_ToleratesDegenerateSizes()
+	{
+		var camera = new Camera { Fov = 70.0f };
+		Assert.DoesNotThrow(() => camera.GetPerspective(Int2.Zero));
+		Assert.That(camera.GetPerspective(Int2.Zero).M11, Is.EqualTo(camera.GetPerspective(new Int2(1, 1)).M11).Within(0.0001f));
 	}
 
 	private static SceneViewportUiState CreateUiState(Int2 contentSizePixels, bool hovered) => new(

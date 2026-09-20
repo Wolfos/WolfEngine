@@ -1741,6 +1741,7 @@ internal sealed class RenderGraphFrameBuilder
 		_view.ResolvedSceneViewportState = new SceneViewportRenderState(
 			textureId,
 			_frameResources.SceneFramebufferSize,
+			_view.ResolvedProjection,
 			_sceneDebugViewOptions,
 			activeDebugViewId);
 	}

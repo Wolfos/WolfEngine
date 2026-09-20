@@ -36,7 +36,7 @@ public sealed class SceneViewportRayUtilityTests
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));
 
-		var builtInverse = SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection);
+		var builtInverse = SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, camera.Perspective, out var inverseViewProjection);
 		var builtRay = SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), inverseViewProjection, out var ray);
 
 		Assert.That(builtInverse, Is.True);
@@ -81,7 +81,7 @@ public sealed class SceneViewportRayUtilityTests
 			rightMousePressStartedHere: false,
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));
-		Assert.That(SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection), Is.True);
+		Assert.That(SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, camera.Perspective, out var inverseViewProjection), Is.True);
 		Assert.That(SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), inverseViewProjection, out var ray), Is.True);
 
 		using var physics = new RigidbodySystem();

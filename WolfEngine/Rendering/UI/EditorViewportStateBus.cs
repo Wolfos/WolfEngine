@@ -122,17 +122,20 @@ public readonly struct SceneViewportRenderState
 	public static readonly SceneViewportRenderState Empty = new(
 		textureId: 0,
 		renderSizePixels: Int2.Zero,
+		projection: Matrix4x4.Identity,
 		debugViews: Array.Empty<SceneDebugViewOption>(),
 		activeDebugViewId: SceneDebugViewIds.FinalColor);
 
 	public SceneViewportRenderState(
 		nint textureId,
 		Int2 renderSizePixels,
+		Matrix4x4 projection,
 		SceneDebugViewOption[] debugViews,
 		string activeDebugViewId)
 	{
 		TextureId = textureId;
 		RenderSizePixels = renderSizePixels;
+		Projection = projection;
 		DebugViews = debugViews ?? Array.Empty<SceneDebugViewOption>();
 		ActiveDebugViewId = string.IsNullOrWhiteSpace(activeDebugViewId)
 			? SceneDebugViewIds.FinalColor
@@ -141,6 +144,8 @@ public readonly struct SceneViewportRenderState
 
 	public nint TextureId { get; }
 	public Int2 RenderSizePixels { get; }
+
+	public Matrix4x4 Projection { get; }
 	public SceneDebugViewOption[] DebugViews { get; }
 	public string ActiveDebugViewId { get; }
 }
