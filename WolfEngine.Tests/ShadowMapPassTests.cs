@@ -70,6 +70,7 @@ public sealed class ShadowMapPassTests
 			Vector2.Zero,
 			resetHistory: false,
 			lights,
-			Array.Empty<DecalProjectorPacket>());
+			Array.Empty<DecalProjectorPacket>(),
+			Array.Empty<FogVolumePacket>());
 	}
 }

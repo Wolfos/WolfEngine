@@ -106,6 +106,9 @@ public sealed class TransparentForwardPass
 			? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeStateWrite))
 			: _bindlessRegistry.ErrorTextureHandle;
 		var ddgiGridShape = DdgiUtilities.GetGridShape(resources.Config.DiffuseGlobalIllumination);
+		var fogIntegrated = resources.FogIntegrated.IsValid
+			? _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.FogIntegrated))
+			: _bindlessRegistry.ErrorTextureHandle;
 
 		var buckets = BuildBuckets(device, gpuDrawResources);
 
@@ -128,6 +131,10 @@ public sealed class TransparentForwardPass
 			ShadowMapHandle1 = _bindlessRegistry.RegisterTexture(shadowMap1),
 			ShadowMapHandle2 = _bindlessRegistry.RegisterTexture(shadowMap2),
 			ShadowSampler = _shadowSampler,
+			FogIntegrated = fogIntegrated,
+			FogEnabled = resources.FogIntegrated.IsValid,
+			FogSliceCount = Math.Clamp(resources.Config.VolumetricFog.SliceCount, 16, 128),
+			FogMaxDistance = Math.Max(resources.Config.VolumetricFog.MaxDistance, sceneData.NearPlane + 0.001f),
 			DdgiProbeState = ddgiProbeState,
 			DdgiProbeStateAvailable = ddgiProbeStateAvailable,
 			DdgiProbeRelocationEnabled =
@@ -209,6 +216,10 @@ public sealed class TransparentForwardPass
 		environmentWriter.SetUInt("shadowMapHandle1", config.ShadowMapHandle1.Value);
 		environmentWriter.SetUInt("shadowMapHandle2", config.ShadowMapHandle2.Value);
 		environmentWriter.SetUInt("shadowSamplerHandle", config.ShadowSampler.Value);
+		environmentWriter.SetUInt("fogIntegratedHandle", config.FogIntegrated.Value);
+		environmentWriter.SetUInt("fogEnabled", config.FogEnabled ? 1u : 0u);
+		environmentWriter.SetUInt("fogSliceCount", (uint)config.FogSliceCount);
+		environmentWriter.SetFloat("fogMaxDistance", config.FogMaxDistance);
 
 		var lightingWriter = _lightingWriter
 			?? throw new InvalidOperationException("Transparent lighting writer was not initialized.");

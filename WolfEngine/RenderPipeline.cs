@@ -297,6 +297,17 @@ public class RenderPipeline : IRenderPipeline
 				{
 					CollectDecalProjectors(snapshot, world, _renderGraph);
 				}
+
+				using (FrameProfiler.Instance.Measure("Gather fog volumes"))
+				{
+					foreach (var entry in world.View<WorldTransform, FogVolume>())
+					{
+						if (world.IsEnabled(entry.Entity) && entry.Second.IsValid)
+						{
+							snapshot.AddFogVolume(entry.Second, entry.First.LocalToWorld);
+						}
+					}
+				}
 			}
 
 			using (FrameProfiler.Instance.Measure("Gather DDGI probe debug primitives"))

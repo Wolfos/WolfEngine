@@ -45,6 +45,10 @@ public struct DeferredLightingPassConfig
 	public required DescriptorHandle LightingOutput { get; init; }
 	public required DescriptorHandle LinearSampler { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
+	public required DescriptorHandle FogIntegrated { get; init; }
+	public required bool FogEnabled { get; init; }
+	public required int FogSliceCount { get; init; }
+	public required float FogMaxDistance { get; init; }
 
 	public required IGfxBuffer PointLightBuffer { get; init; }
 	public required IGfxBuffer ClusterHeaderBuffer { get; init; }

@@ -33,6 +33,7 @@ public struct ColorRGBA
 	}
 
 	public static implicit operator Vector4(ColorRGBA value) => value.ToVector4();
+	public static implicit operator Vector3(ColorRGBA value) => value.ToVector3();
 	public static implicit operator ColorRGBA(Vector4 value) => FromVector4(value);
 
 	public static ColorRGBA White => new(1.0f, 1.0f, 1.0f, 1.0f);

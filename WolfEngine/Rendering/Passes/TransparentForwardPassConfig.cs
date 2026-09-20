@@ -59,6 +59,10 @@ public struct TransparentForwardPassConfig
 	public required DescriptorHandle ShadowMapHandle1 { get; init; }
 	public required DescriptorHandle ShadowMapHandle2 { get; init; }
 	public required DescriptorHandle ShadowSampler { get; init; }
+	public required DescriptorHandle FogIntegrated { get; init; }
+	public required bool FogEnabled { get; init; }
+	public required int FogSliceCount { get; init; }
+	public required float FogMaxDistance { get; init; }
 	public required DescriptorHandle DdgiProbeState { get; init; }
 	public required bool DdgiProbeStateAvailable { get; init; }
 	public required bool DdgiProbeRelocationEnabled { get; init; }

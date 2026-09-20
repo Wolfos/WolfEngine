@@ -49,6 +49,9 @@ public sealed class GpuDrawResources : IDisposable
 	private readonly IGfxBuffer?[] _clusterWriteCursorBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _clusterOverflowBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _decalProjectorBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _fogVolumeBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _fogCellHeaderBuffers = new IGfxBuffer?[MaxFramesInFlight];
+	private readonly IGfxBuffer?[] _fogVolumeIndexBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _shadowDrawCountPerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
 	private readonly IGfxBuffer?[] _drawExecutionRangePerBucketBuffers = new IGfxBuffer?[MaxFramesInFlight];
@@ -162,6 +165,9 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? DdgiDebugBuffer => _ddgiDebugBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? DecalProjectorBuffer => _decalProjectorBuffers[_activeFrameSlot];
+	public IGfxBuffer? FogVolumeBuffer => _fogVolumeBuffers[_activeFrameSlot];
+	public IGfxBuffer? FogCellHeaderBuffer => _fogCellHeaderBuffers[_activeFrameSlot];
+	public IGfxBuffer? FogVolumeIndexBuffer => _fogVolumeIndexBuffers[_activeFrameSlot];
 
 	public IGfxBuffer? ClusterPointLightBuffer => _clusterPointLightBuffers[_activeFrameSlot];
 
@@ -430,6 +436,21 @@ public sealed class GpuDrawResources : IDisposable
 		CommitBindingInvalidation("Decal capacity growth");
 	}
 
+	public void EnsureFogVolumeCapacity(IGfxDevice device, int volumeCount, int cellCount, int indexCount)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+		for (var i = 0; i < MaxFramesInFlight; i++)
+		{
+			_fogVolumeBuffers[i] = EnsureStructuredBufferCapacity(
+				device, _fogVolumeBuffers[i], volumeCount, Marshal.SizeOf<GpuFogVolumeData>(), $"FogVolumeBuffer[{i}]");
+			_fogCellHeaderBuffers[i] = EnsureStructuredBufferCapacity(
+				device, _fogCellHeaderBuffers[i], cellCount, Marshal.SizeOf<GpuFogCellHeader>(), $"FogCellHeaderBuffer[{i}]");
+			_fogVolumeIndexBuffers[i] = EnsureStructuredBufferCapacity(
+				device, _fogVolumeIndexBuffers[i], indexCount, sizeof(uint), $"FogVolumeIndexBuffer[{i}]");
+		}
+		CommitBindingInvalidation("Fog volume capacity growth");
+	}
+
 	public IGfxBuffer? GetDrawGenerationBufferSlot(int frameSlot)
 	{
 		ValidateFrameSlot(frameSlot);
@@ -504,6 +525,9 @@ public sealed class GpuDrawResources : IDisposable
 			(_transparentLightingBuffers[i] as IDisposable)?.Dispose();
 			(_ddgiDebugBuffers[i] as IDisposable)?.Dispose();
 			(_decalProjectorBuffers[i] as IDisposable)?.Dispose();
+			(_fogVolumeBuffers[i] as IDisposable)?.Dispose();
+			(_fogCellHeaderBuffers[i] as IDisposable)?.Dispose();
+			(_fogVolumeIndexBuffers[i] as IDisposable)?.Dispose();
 			(_clusterPointLightBuffers[i] as IDisposable)?.Dispose();
 			(_clusterAabbBuffers[i] as IDisposable)?.Dispose();
 			(_clusterHeaderBuffers[i] as IDisposable)?.Dispose();
@@ -529,6 +553,9 @@ public sealed class GpuDrawResources : IDisposable
 			_transparentLightingBuffers[i] = null;
 			_ddgiDebugBuffers[i] = null;
 			_decalProjectorBuffers[i] = null;
+			_fogVolumeBuffers[i] = null;
+			_fogCellHeaderBuffers[i] = null;
+			_fogVolumeIndexBuffers[i] = null;
 			_clusterPointLightBuffers[i] = null;
 			_clusterAabbBuffers[i] = null;
 			_clusterHeaderBuffers[i] = null;

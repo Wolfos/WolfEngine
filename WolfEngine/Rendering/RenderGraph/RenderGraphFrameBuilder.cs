@@ -95,6 +95,11 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle ShadowMapDepth1 { get; init; }
 	public RenderGraphResourceHandle ShadowMapDepth2 { get; init; }
 	public RenderGraphResourceHandle LightingBuffer { get; init; }
+	public RenderGraphResourceHandle FogCurrent { get; init; }
+	public RenderGraphResourceHandle FogHistoryRead { get; init; }
+	public RenderGraphResourceHandle FogHistoryWrite { get; init; }
+	public RenderGraphResourceHandle FogIntegrated { get; init; }
+	public bool FogHistoryValid { get; init; }
 	public RenderGraphResourceHandle ReflectionsTrace { get; init; }
 	public RenderGraphResourceHandle ReflectionsRadiance { get; init; }
 	public RenderGraphResourceHandle ResolvedSceneColor { get; init; }
@@ -152,6 +157,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly GBufferDecalSeedPass _gBufferDecalSeedPass;
 	private readonly ScreenSpaceDecalPass _screenSpaceDecalPass;
 	private readonly DeferredLightingPass _deferredLightingPass;
+	private readonly VolumetricFogPass _volumetricFogPass;
 	private readonly ReflectionsPass _reflectionsPass;
 	private readonly ReflectionsUpsamplePass _reflectionsUpsamplePass;
 	private readonly TemporalAntiAliasingPass _temporalAntiAliasingPass;
@@ -196,11 +202,19 @@ internal sealed class RenderGraphFrameBuilder
 	private AntiAliasingMode _historyMode;
 	private bool _historyValid;
 	private bool _ddgiHistoryValid;
+	private bool _fogHistoryValid;
 	private bool _resetTaaHistoryThisFrame;
 	private IGfxDevice? _historyDevice;
 	private GraphicsBackendKind? _historyBackendKind;
 	private Int2 _historySize;
 	private int _historyReadIndex;
+	private readonly IGfxTexture?[] _fogHistoryTextures = new IGfxTexture?[2];
+	private readonly ResourceState[] _fogHistoryStates = new ResourceState[2];
+	private IGfxDevice? _fogHistoryDevice;
+	private GraphicsBackendKind? _fogHistoryBackendKind;
+	private Int3 _fogHistoryGrid;
+	private float _fogHistoryMaxDistance;
+	private int _fogHistoryReadIndex;
 	private readonly IGfxTexture?[] _historyColorTextures = new IGfxTexture?[2];
 	private readonly IGfxTexture?[] _historyDepthTextures = new IGfxTexture?[2];
 	private readonly ResourceState[] _historyColorStates = new ResourceState[2];
@@ -255,6 +269,9 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gBufferDecalSeedExecute;
 	private readonly Action<RenderGraphContext> _screenSpaceDecalExecute;
 	private readonly Action<RenderGraphContext> _deferredLightingExecute;
+	private readonly Action<RenderGraphContext> _volumetricFogInjectExecute;
+	private readonly Action<RenderGraphContext> _volumetricFogTemporalExecute;
+	private readonly Action<RenderGraphContext> _volumetricFogIntegrateExecute;
 	private readonly Action<RenderGraphContext> _reflectionsExecute;
 	private readonly Action<RenderGraphContext> _reflectionsUpsampleExecute;
 	private readonly Action<RenderGraphContext> _taaResolveExecute;
@@ -304,6 +321,7 @@ internal sealed class RenderGraphFrameBuilder
 		_gBufferDecalSeedPass = passSet.GBufferDecalSeedPass;
 		_screenSpaceDecalPass = passSet.ScreenSpaceDecalPass;
 		_deferredLightingPass = passSet.DeferredLightingPass;
+		_volumetricFogPass = passSet.VolumetricFogPass;
 		_reflectionsPass = passSet.ReflectionsPass;
 		_reflectionsUpsamplePass = passSet.ReflectionsUpsamplePass;
 		_temporalAntiAliasingPass = passSet.TemporalAntiAliasingPass;
@@ -336,6 +354,9 @@ internal sealed class RenderGraphFrameBuilder
 		_gBufferDecalSeedExecute = ExecuteGBufferDecalSeed;
 		_screenSpaceDecalExecute = ExecuteScreenSpaceDecal;
 		_deferredLightingExecute = ExecuteDeferredLighting;
+		_volumetricFogInjectExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Inject);
+		_volumetricFogTemporalExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Temporal);
+		_volumetricFogIntegrateExecute = context => ExecuteVolumetricFog(context, VolumetricFogStage.Integrate);
 		_reflectionsExecute = ExecuteReflections;
 		_reflectionsUpsampleExecute = ExecuteReflectionsUpsample;
 		_taaResolveExecute = ExecuteTemporalResolve;
@@ -418,6 +439,10 @@ internal sealed class RenderGraphFrameBuilder
 		if (!taaEnabled || !sceneEnabled)
 		{
 			ReleaseTemporalHistoryResources();
+		}
+		if (!config.VolumetricFog.Enabled || !sceneEnabled)
+		{
+			ReleaseFogHistoryResources();
 		}
 		_previousTaaEnabled = taaEnabled;
 		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, config.SkyboxConfig);
@@ -511,6 +536,11 @@ internal sealed class RenderGraphFrameBuilder
 		var bloomDownsampleLevels = Array.Empty<RenderGraphResourceHandle>();
 		var bloomUpsampleLevels = Array.Empty<RenderGraphResourceHandle>();
 		var bloomCompositeSceneColorHandle = default(RenderGraphResourceHandle);
+		var fogCurrentHandle = default(RenderGraphResourceHandle);
+		var fogHistoryReadHandle = default(RenderGraphResourceHandle);
+		var fogHistoryWriteHandle = default(RenderGraphResourceHandle);
+		var fogIntegratedHandle = default(RenderGraphResourceHandle);
+		var fogHistoryValid = false;
 		var fsr3Resources = default(Fsr3FrameResources);
 		if (sceneEnabled)
 		{
@@ -667,6 +697,27 @@ internal sealed class RenderGraphFrameBuilder
 				{
 					_colorPyramidValid = false;
 				}
+			}
+
+			if (config.VolumetricFog.Enabled)
+			{
+				var fogGrid = VolumetricFogPass.ComputeGrid(sceneFramebufferSize, config.VolumetricFog);
+				var maxDistance = Math.Max(config.VolumetricFog.MaxDistance, 0.001f);
+				EnsureFogHistoryResources(device, fogGrid, maxDistance);
+				var fogWriteIndex = 1 - _fogHistoryReadIndex;
+				fogCurrentHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
+				fogIntegratedHandle = _resources.CreateTransientTexture(CreateFogTextureDescriptor(fogGrid));
+				if (_fogHistoryTextures[_fogHistoryReadIndex] is IGfxTexture fogHistoryRead &&
+				    _fogHistoryTextures[fogWriteIndex] is IGfxTexture fogHistoryWrite)
+				{
+					fogHistoryReadHandle = _resources.ImportTexture(fogHistoryRead, false, _fogHistoryStates[_fogHistoryReadIndex]);
+					fogHistoryWriteHandle = _resources.ImportTexture(fogHistoryWrite, false, _fogHistoryStates[fogWriteIndex]);
+					fogHistoryValid = _fogHistoryValid && !frameShapeChanged;
+				}
+			}
+			else
+			{
+				ReleaseFogHistoryResources();
 			}
 
 			fsr3Resources = new Fsr3FrameResources { TransparencyMask = transparencyMaskHandle };
@@ -1056,6 +1107,11 @@ internal sealed class RenderGraphFrameBuilder
 			ShadowMapDepth1 = shadowMapHandle1,
 			ShadowMapDepth2 = shadowMapHandle2,
 			LightingBuffer = lightingHandle,
+			FogCurrent = fogCurrentHandle,
+			FogHistoryRead = fogHistoryReadHandle,
+			FogHistoryWrite = fogHistoryWriteHandle,
+			FogIntegrated = fogIntegratedHandle,
+			FogHistoryValid = fogHistoryValid,
 			ReflectionsTrace = reflectionsTraceHandle,
 			ReflectionsRadiance = reflectionsRadianceHandle,
 			ResolvedSceneColor = resolvedSceneColorHandle,
@@ -1305,6 +1361,26 @@ internal sealed class RenderGraphFrameBuilder
 					.SetExecute(_skyboxPrefilterExecute);
 			}
 
+			if (_frameResources.FogIntegrated.IsValid)
+			{
+				graph.AddPass("Volumetric Fog Inject", PassKind.Compute)
+					.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.FogCurrent, ResourceState.UnorderedAccess)
+					.SetExecute(_volumetricFogInjectExecute);
+				graph.AddPass("Volumetric Fog Temporal", PassKind.Compute)
+					.ReadTexture(_frameResources.FogCurrent, ResourceState.ShaderResource)
+					.ReadTexture(_frameResources.FogHistoryRead, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.FogHistoryWrite, ResourceState.UnorderedAccess)
+					.SetExecute(_volumetricFogTemporalExecute);
+				graph.AddPass("Volumetric Fog Integrate", PassKind.Compute)
+					.ReadTexture(_frameResources.FogHistoryWrite, ResourceState.ShaderResource)
+					.WriteTexture(_frameResources.FogIntegrated, ResourceState.UnorderedAccess)
+					.SetExecute(_volumetricFogIntegrateExecute);
+			}
+
 			if (_frameResources.DdgiTraceIrradiance.IsValid &&
 			    _frameResources.DdgiTraceVisibility.IsValid &&
 			    _frameResources.DdgiIrradianceEstimator.IsValid &&
@@ -1436,7 +1512,6 @@ internal sealed class RenderGraphFrameBuilder
 						.SetExecute(_reflectionsUpsampleExecute);
 				}
 			}
-
 			var deferredLightingBuilder = graph.AddPass("Deferred Lighting", PassKind.Compute)
 				.ReadTexture(_frameResources.GBufferAlbedo, ResourceState.ShaderResource)
 				.ReadTexture(_frameResources.GBufferNormal, ResourceState.ShaderResource)
@@ -1453,6 +1528,10 @@ internal sealed class RenderGraphFrameBuilder
 			if (_frameResources.ReflectionsRadiance.IsValid)
 			{
 				deferredLightingBuilder.ReadTexture(_frameResources.ReflectionsRadiance, ResourceState.ShaderResource);
+			}
+			if (_frameResources.FogIntegrated.IsValid)
+			{
+				deferredLightingBuilder.ReadTexture(_frameResources.FogIntegrated, ResourceState.ShaderResource);
 			}
 			if (_frameResources.DdgiIrradianceL0HistoryWrite.IsValid &&
 			    _frameResources.DdgiIrradianceLyHistoryWrite.IsValid &&
@@ -1509,6 +1588,10 @@ internal sealed class RenderGraphFrameBuilder
 				transparentForwardBuilder.ReadTexture(
 					_frameResources.DdgiProbeStateWrite,
 					ResourceState.ShaderResource);
+			}
+			if (_frameResources.FogIntegrated.IsValid)
+			{
+				transparentForwardBuilder.ReadTexture(_frameResources.FogIntegrated, ResourceState.ShaderResource);
 			}
 			
 			ReadSkyboxTextures(transparentForwardBuilder);
@@ -2146,6 +2229,23 @@ internal sealed class RenderGraphFrameBuilder
 			_shadowMapPass.GetCurrentFrameData(),
 			context.SceneData);
 		_deferredLightingPass.Record(context, ref config, context.SceneData);
+	}
+
+	private void ExecuteVolumetricFog(RenderGraphContext context, VolumetricFogStage stage)
+	{
+		var device = _renderer.GetGfxDevice();
+		if (stage == VolumetricFogStage.Inject)
+		{
+			_volumetricFogPass.PrepareFrame(
+				context,
+				_frameResources,
+				device,
+				_gpuDrawResources,
+				_shadowMapPass.GetCurrentFrameData(),
+				_frameResources.FogHistoryValid);
+		}
+		var config = _volumetricFogPass.BuildConfig(context, _frameResources, device, _gpuDrawResources, stage);
+		_volumetricFogPass.Record(context, stage, in config);
 	}
 
 	private void ExecuteReflections(RenderGraphContext context)
@@ -2792,6 +2892,24 @@ internal sealed class RenderGraphFrameBuilder
 			_historyValid = true;
 		}
 
+		if (_frameResources.Config.VolumetricFog.Enabled &&
+		    _frameResources.SceneEnabled &&
+		    _frameResources.FogHistoryWrite.IsValid)
+		{
+			if (_frameResources.FogHistoryRead.IsValid)
+			{
+				_fogHistoryStates[_fogHistoryReadIndex] = _resources.GetResourceState(_frameResources.FogHistoryRead);
+			}
+			var writeIndex = 1 - _fogHistoryReadIndex;
+			_fogHistoryStates[writeIndex] = _resources.GetResourceState(_frameResources.FogHistoryWrite);
+			_fogHistoryReadIndex = writeIndex;
+			_fogHistoryValid = true;
+		}
+		else
+		{
+			_fogHistoryValid = false;
+		}
+
 		if (HasRayTracedDdgi(_frameResources.Config) == false || _frameResources.SceneEnabled == false)
 		{
 			_ddgiHistoryValid = false;
@@ -2850,6 +2968,56 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			_ddgiIrradianceStates[coefficientIndex, historyIndex] = _resources.GetResourceState(handle);
 		}
+	}
+
+	private static TextureDescriptor CreateFogTextureDescriptor(Int3 grid) => new(
+		grid.X,
+		grid.Y,
+		TextureFormat.Rgba16Float,
+		TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+		new ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f),
+		dimension: TextureDimension.Texture3D,
+		depth: grid.Z);
+
+	private void EnsureFogHistoryResources(IGfxDevice device, Int3 grid, float maxDistance)
+	{
+		var changed = _fogHistoryDevice is not null &&
+		              (!ReferenceEquals(_fogHistoryDevice, device) ||
+		               _fogHistoryBackendKind != device.BackendKind ||
+		               !_fogHistoryGrid.Equals(grid) ||
+		               MathF.Abs(_fogHistoryMaxDistance - maxDistance) > 1e-5f);
+		if (changed) ReleaseFogHistoryResources();
+		if (_fogHistoryTextures[0] is not null && _fogHistoryTextures[1] is not null) return;
+		for (var i = 0; i < 2; i++)
+		{
+			_fogHistoryTextures[i] = device.CreateTexture(CreateFogTextureDescriptor(grid));
+			_fogHistoryStates[i] = ResourceState.UnorderedAccess;
+		}
+		_fogHistoryDevice = device;
+		_fogHistoryBackendKind = device.BackendKind;
+		_fogHistoryGrid = grid;
+		_fogHistoryMaxDistance = maxDistance;
+		_fogHistoryReadIndex = 0;
+		_fogHistoryValid = false;
+	}
+
+	private void ReleaseFogHistoryResources()
+	{
+		for (var i = 0; i < 2; i++)
+		{
+			if (_fogHistoryTextures[i] is IGfxTexture texture)
+			{
+				EnqueueTemporalRelease(_fogHistoryDevice, texture, _fogHistoryStates[i]);
+			}
+			_fogHistoryTextures[i] = null;
+			_fogHistoryStates[i] = ResourceState.Common;
+		}
+		_fogHistoryDevice = null;
+		_fogHistoryBackendKind = null;
+		_fogHistoryGrid = default;
+		_fogHistoryMaxDistance = 0.0f;
+		_fogHistoryReadIndex = 0;
+		_fogHistoryValid = false;
 	}
 
 	private void EnsureTemporalHistoryResources(IGfxDevice device, Int2 sceneFramebufferSize, AntiAliasingMode mode)

@@ -200,6 +200,8 @@ public sealed class RenderGraphCompiler
 	{
 		return a.Width == b.Width &&
 		       a.Height == b.Height &&
+		       a.Depth == b.Depth &&
+		       a.Dimension == b.Dimension &&
 		       a.Format == b.Format &&
 		       a.Usage == b.Usage &&
 		       a.MipLevels == b.MipLevels &&

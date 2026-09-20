@@ -14,9 +14,9 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 	/// <summary>
 	/// Number of typed views declared over the UAV descriptors in DescriptorHeapRWTextures
-	/// (float4, uint, globallycoherent float4). Must match common_bindless.slang.
+	/// (2D float4, 2D uint, 2D globallycoherent float4, 3D float4). Must match common_bindless.slang.
 	/// </summary>
-	private const int RwTextureViewCount = 3;
+	private const int RwTextureViewCount = 4;
 	private const ulong MinimumArgumentBufferCapacityBytes = 1024UL * 1024UL;
 	internal const int BindlessArgumentBufferIndexCounts = 27;
 	internal const int BindlessArgumentBufferIndexTextures = 28;
@@ -56,6 +56,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	private MetalTexture? _fallbackTexture;
 	private MetalTexture? _fallbackVolumeTexture;
 	private uint _fallbackVolumeTextureIndex;
+	private uint _fallbackRwVolumeTextureIndex;
 	private MetalBuffer? _fallbackConstantBuffer;
 
 	public MetalDescriptorTable(MTLDevice device, Action<MTLBuffer> retireArgumentBuffer)
@@ -249,7 +250,8 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 
 		// GetTexture3D cannot fall back to SRV 0, whose texture is 2D and only encoded in the 2D view.
 		// The volume fallback's index is published through the counts buffer instead.
-		var volumeDescriptor = new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm, TextureUsage.ShaderResource,
+		var volumeDescriptor = new TextureDescriptor(1, 1, TextureFormat.Rgba8Unorm,
+			TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
 			dimension: TextureDimension.Texture3D);
 		var metalVolumeDescriptor = new MTLTextureDescriptor
 		{
@@ -260,7 +262,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			PixelFormat = MTLPixelFormat.RGBA8Unorm,
 			TextureType = MTLTextureType.Type3D,
 			StorageMode = MTLStorageMode.Managed,
-			Usage = MTLTextureUsage.ShaderRead
+			Usage = MTLTextureUsage.ShaderRead | MTLTextureUsage.ShaderWrite
 		};
 		var volumeTexture = _device.NewTexture(metalVolumeDescriptor);
 		metalVolumeDescriptor.Dispose();
@@ -272,8 +274,10 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		UploadFallbackTexture(volumeTexture, isVolume: true);
 		_fallbackVolumeTexture = new MetalTexture("__BindlessFallbackVolumeTexture", volumeDescriptor, volumeTexture, this);
 		var volumeSrvHandle = AllocateShaderResourceView(_fallbackVolumeTexture);
-		_fallbackVolumeTexture.SetHandles(volumeSrvHandle, DescriptorHandle.Invalid, DescriptorHandle.Invalid);
+		var volumeUavHandle = AllocateUnorderedAccessView(_fallbackVolumeTexture);
+		_fallbackVolumeTexture.SetHandles(volumeSrvHandle, DescriptorHandle.Invalid, volumeUavHandle);
 		_fallbackVolumeTextureIndex = (uint)volumeSrvHandle.Index;
+		_fallbackRwVolumeTextureIndex = (uint)volumeUavHandle.Index;
 		UpdateCountBuffer();
 
 		var fallbackBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
@@ -303,14 +307,15 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 	{
 		if (_countBuffer.NativePtr == IntPtr.Zero)
 		{
-			_countBuffer = _device.NewBuffer(16, MTLResourceOptions.ResourceStorageModeShared);
+			_countBuffer = _device.NewBuffer(32, MTLResourceOptions.ResourceStorageModeShared);
 		}
 
-		var counts = new uint[4];
+		var counts = new uint[5];
 		counts[0] = (uint)_srvCount;
 		counts[1] = (uint)_uavCount;
 		counts[2] = (uint)_samplerCount;
 		counts[3] = _fallbackVolumeTextureIndex;
+		counts[4] = _fallbackRwVolumeTextureIndex;
 		BufferHelper.CopyToBuffer(counts, _countBuffer);
 	}
 
@@ -596,15 +601,16 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 		}
 
 		_singleTexture[0] = texture;
-		_rwTextureEncoder.SetTextures(_singleTexture, new NSRange { location = (ulong)index, length = 1 });
 
-		// common_bindless.slang declares three arrays in the RW argument buffer over the same
+		// common_bindless.slang declares four arrays in the RW argument buffer over the same
 		// descriptors, in this order: RWTexture2D<float4>, RWTexture2D<uint> (for the integer
 		// atomics a float-typed UAV cannot express), and globallycoherent RWTexture2D<float4>
 		// (for cross-thread-group visibility). Slang lays them out back to back, so the alias
 		// for descriptor `index` in view n lives at n * MaxUavDescriptors + index. Every slot
-		// is written because the shader picks the view, not the encoder.
-		for (var view = 1; view < RwTextureViewCount; view++)
+		// A Metal argument-buffer slot is dimension-typed, so encode only the compatible aliases.
+		var firstView = uavTexture.Descriptor.Dimension == TextureDimension.Texture3D ? 3 : 0;
+		var lastViewExclusive = uavTexture.Descriptor.Dimension == TextureDimension.Texture3D ? 4 : 3;
+		for (var view = firstView; view < lastViewExclusive; view++)
 		{
 			_rwTextureEncoder.SetTextures(
 				_singleTexture,

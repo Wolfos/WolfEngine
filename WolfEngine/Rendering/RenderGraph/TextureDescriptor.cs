@@ -18,11 +18,11 @@ public readonly struct TextureDescriptor
 		if (dimension == TextureDimension.Texture3D)
 		{
 			ArgumentOutOfRangeException.ThrowIfNegativeOrZero(depth);
-			// Volume textures are sampled content only. Neither backend binds a 3D render target, depth
-			// target or UAV today, so reject them here rather than at a backend-specific failure point.
-			if ((usage & (TextureUsage.RenderTarget | TextureUsage.DepthStencil | TextureUsage.UnorderedAccess)) != 0)
+			// Neither backend binds a 3D render target or depth target. Volume UAVs are supported for
+			// compute workloads such as camera-aligned froxel grids.
+			if ((usage & (TextureUsage.RenderTarget | TextureUsage.DepthStencil)) != 0)
 			{
-				throw new ArgumentException("3D textures support shader-resource usage only.", nameof(usage));
+				throw new ArgumentException("3D textures cannot be render targets or depth targets.", nameof(usage));
 			}
 		}
 

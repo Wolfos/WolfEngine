@@ -1650,7 +1650,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[6];
+		var ranges = stackalloc DescriptorRange[7];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1701,6 +1701,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		};
 		ranges[5] = new DescriptorRange
 		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 4,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[6] = new DescriptorRange
+		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
 			BaseShaderRegister = 0,
@@ -1716,13 +1724,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Graphics.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
+		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 4;
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
 		rootParameters[D3D12RootBindings.Graphics.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[5];
+		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[6];
 		rootParameters[D3D12RootBindings.Graphics.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Graphics.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;
@@ -1852,7 +1860,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		const uint maxUavDescriptors = 16384;
 		const uint maxSamplerDescriptors = 2048;
 
-		var ranges = stackalloc DescriptorRange[6];
+		var ranges = stackalloc DescriptorRange[7];
 		ranges[0] = new DescriptorRange
 		{
 			RangeType = DescriptorRangeType.Srv,
@@ -1903,6 +1911,14 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		};
 		ranges[5] = new DescriptorRange
 		{
+			RangeType = DescriptorRangeType.Uav,
+			NumDescriptors = maxUavDescriptors,
+			BaseShaderRegister = 0,
+			RegisterSpace = 4,
+			OffsetInDescriptorsFromTableStart = 0
+		};
+		ranges[6] = new DescriptorRange
+		{
 			RangeType = DescriptorRangeType.Sampler,
 			NumDescriptors = maxSamplerDescriptors,
 			BaseShaderRegister = 0,
@@ -1918,13 +1934,13 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 		rootParameters[D3D12RootBindings.Compute.BindlessSrvTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ParameterType = RootParameterType.TypeDescriptorTable;
-		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 3;
+		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.NumDescriptorRanges = 4;
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[2];
 		rootParameters[D3D12RootBindings.Compute.BindlessUavTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[5];
+		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].Anonymous.DescriptorTable.PDescriptorRanges = &ranges[6];
 		rootParameters[D3D12RootBindings.Compute.BindlessSamplerTable].ShaderVisibility = ShaderVisibility.All;
 
 		rootParameters[D3D12RootBindings.Compute.BindlessCountsCbv].ParameterType = RootParameterType.TypeCbv;

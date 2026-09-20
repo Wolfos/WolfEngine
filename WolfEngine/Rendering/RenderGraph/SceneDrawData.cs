@@ -27,7 +27,8 @@ public sealed class SceneDrawData
 		Vector2 jitterNdc,
 		bool resetHistory,
 		IReadOnlyList<LightPacket> lights,
-		IReadOnlyList<DecalProjectorPacket> decals)
+		IReadOnlyList<DecalProjectorPacket> decals,
+		IReadOnlyList<FogVolumePacket> fogVolumes)
 	{
 		ViewMatrix = viewMatrix;
 		ViewProjection = viewProjection;
@@ -48,6 +49,7 @@ public sealed class SceneDrawData
 		ResetHistory = resetHistory;
 		Lights = lights ?? throw new ArgumentNullException(nameof(lights));
 		Decals = decals ?? throw new ArgumentNullException(nameof(decals));
+		FogVolumes = fogVolumes ?? throw new ArgumentNullException(nameof(fogVolumes));
 	}
 
 	public Matrix4x4 ViewMatrix { get; }
@@ -87,6 +89,7 @@ public sealed class SceneDrawData
 	public IReadOnlyList<LightPacket> Lights { get; }
 
 	public IReadOnlyList<DecalProjectorPacket> Decals { get; }
+	public IReadOnlyList<FogVolumePacket> FogVolumes { get; }
 }
 
 public readonly struct LightPacket
