@@ -22,7 +22,8 @@ public sealed class CopyToFinalPass
 
 	public CopyToFinalPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
+		RenderFrameSharedResources sharedResources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -32,7 +33,7 @@ public sealed class CopyToFinalPass
 		_bindlessRegistry.EnsureInitialized(device);
 		// DisplayLinearSceneColor aliases tonemapping when CAS is disabled.
 		var input = context.GetTexture(resources.DisplayLinearSceneColor);
-		var output = context.GetTexture(resources.FinalColor);
+		var output = context.GetTexture(sharedResources.FinalColor);
 		var encodedSceneOutput = context.GetTexture(resources.EncodedSceneColor);
 
 		return new CopyToFinalPassConfig

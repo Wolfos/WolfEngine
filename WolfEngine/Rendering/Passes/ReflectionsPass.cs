@@ -41,7 +41,8 @@ public sealed class ReflectionsPass
 
 	public ReflectionsPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
+		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,
@@ -68,17 +69,17 @@ public sealed class ReflectionsPass
 		}
 
 		var emissiveFallback = context.GetTexture(resources.GBufferEmissive);
-		var environment = resources.SkyboxEnvironment.IsValid
-			? context.GetTexture(resources.SkyboxEnvironment)
+		var environment = sharedResources.SkyboxEnvironment.IsValid
+			? context.GetTexture(sharedResources.SkyboxEnvironment)
 			: emissiveFallback;
-		var irradiance = resources.SkyboxIrradiance.IsValid
-			? context.GetTexture(resources.SkyboxIrradiance)
+		var irradiance = sharedResources.SkyboxIrradiance.IsValid
+			? context.GetTexture(sharedResources.SkyboxIrradiance)
 			: emissiveFallback;
-		var prefiltered = resources.SkyboxPrefilter.IsValid
-			? context.GetTexture(resources.SkyboxPrefilter)
+		var prefiltered = sharedResources.SkyboxPrefilter.IsValid
+			? context.GetTexture(sharedResources.SkyboxPrefilter)
 			: emissiveFallback;
-		var brdfLut = resources.SkyboxBrdfLut.IsValid
-			? context.GetTexture(resources.SkyboxBrdfLut)
+		var brdfLut = sharedResources.SkyboxBrdfLut.IsValid
+			? context.GetTexture(sharedResources.SkyboxBrdfLut)
 			: emissiveFallback;
 		var isRayTraced = settings.Mode == ReflectionMode.RayTraced;
 		var screenSpace = settings.ScreenSpaceSettings;

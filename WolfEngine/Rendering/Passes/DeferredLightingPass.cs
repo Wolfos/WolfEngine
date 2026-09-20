@@ -29,7 +29,8 @@ public sealed class DeferredLightingPass
 
 	public DeferredLightingPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
+		RenderFrameSharedResources sharedResources,
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
 		ShadowFrameData shadowData,
@@ -115,17 +116,17 @@ public sealed class DeferredLightingPass
 		var shadowMapDepth2 = context.GetTexture(resources.ShadowMapDepth2);
 		var fogIntegrated = resources.FogIntegrated.IsValid ? context.GetTexture(resources.FogIntegrated) : null;
 
-		var environment = resources.SkyboxEnvironment.IsValid
-			? context.GetTexture(resources.SkyboxEnvironment)
+		var environment = sharedResources.SkyboxEnvironment.IsValid
+			? context.GetTexture(sharedResources.SkyboxEnvironment)
 			: emissive;
-		var irradiance = resources.SkyboxIrradiance.IsValid
-			? context.GetTexture(resources.SkyboxIrradiance)
+		var irradiance = sharedResources.SkyboxIrradiance.IsValid
+			? context.GetTexture(sharedResources.SkyboxIrradiance)
 			: emissive;
-		var prefilter = resources.SkyboxPrefilter.IsValid
-			? context.GetTexture(resources.SkyboxPrefilter)
+		var prefilter = sharedResources.SkyboxPrefilter.IsValid
+			? context.GetTexture(sharedResources.SkyboxPrefilter)
 			: emissive;
-		var brdfLut = resources.SkyboxBrdfLut.IsValid
-			? context.GetTexture(resources.SkyboxBrdfLut)
+		var brdfLut = sharedResources.SkyboxBrdfLut.IsValid
+			? context.GetTexture(sharedResources.SkyboxBrdfLut)
 			: emissive;
 
 		var lighting = context.GetTexture(resources.LightingBuffer);

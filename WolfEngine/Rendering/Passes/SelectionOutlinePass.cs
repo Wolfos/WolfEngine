@@ -36,7 +36,7 @@ public sealed class SelectionOutlinePass
 
 	public SelectionOutlinePassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);

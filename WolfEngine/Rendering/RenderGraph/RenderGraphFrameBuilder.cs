@@ -36,7 +36,8 @@ public readonly struct Fsr3FrameResources
 	public bool HistoryValid { get; init; }
 }
 
-public readonly struct RenderGraphFrameResources
+/// <summary>Transient and imported resources owned by one rendered view for the current frame.</summary>
+public readonly struct RenderViewResources
 {
 	public Int2 FramebufferSize { get; init; }
 	public Int2 SceneFramebufferSize { get; init; }
@@ -44,7 +45,6 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle TonemappedLinearSceneColor { get; init; }
 	public RenderGraphResourceHandle DisplayLinearSceneColor { get; init; }
 	public RenderGraphResourceHandle EncodedSceneColor { get; init; }
-	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle GBufferAlbedo { get; init; }
 	public RenderGraphResourceHandle GBufferNormal { get; init; }
 	public RenderGraphResourceHandle GBufferMaterial { get; init; }
@@ -117,11 +117,20 @@ public readonly struct RenderGraphFrameResources
 	public RenderGraphResourceHandle HistoryDepthRead { get; init; }
 	public RenderGraphResourceHandle HistoryDepthWrite { get; init; }
 	public Fsr3FrameResources Fsr3 { get; init; }
+	public RenderConfig Config { get; init; }
+}
+
+/// <summary>
+/// Resources recorded once for the whole rendered frame, regardless of how many views it contains.
+/// </summary>
+public readonly struct RenderFrameSharedResources
+{
+	public Int2 FramebufferSize { get; init; }
+	public RenderGraphResourceHandle FinalColor { get; init; }
 	public RenderGraphResourceHandle SkyboxEnvironment { get; init; }
 	public RenderGraphResourceHandle SkyboxIrradiance { get; init; }
 	public RenderGraphResourceHandle SkyboxPrefilter { get; init; }
 	public RenderGraphResourceHandle SkyboxBrdfLut { get; init; }
-	public RenderConfig Config { get; init; }
 }
 
 internal sealed class RenderGraphFrameBuilder
@@ -179,7 +188,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
 	private SkyboxResources? _externalSkybox;
-	private RenderGraphFrameResources _frameResources;
+	private RenderViewResources _frameResources;
+	private RenderFrameSharedResources _sharedResources;
 	private UiFrameData _uiFrame = UiFrameData.Empty;
 	private GameplayUiRenderFrame _gameplayUiFrame = GameplayUiRenderFrame.Empty;
 	private readonly List<GameplayTextureTarget> _gameplayTextureTargets = [];
@@ -1000,12 +1010,6 @@ internal sealed class RenderGraphFrameBuilder
 			TonemappedLinearSceneColor = tonemappedLinearSceneColorHandle,
 			DisplayLinearSceneColor = displayLinearSceneColorHandle,
 			EncodedSceneColor = encodedSceneColorHandle,
-			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
 			GBufferAlbedo = gbufferAlbedoHandle,
 			GBufferNormal = gbufferNormalHandle,
 			GBufferMaterial = gbufferMaterialHandle,
@@ -1083,11 +1087,21 @@ internal sealed class RenderGraphFrameBuilder
 			BloomDownsampleLevels = bloomDownsampleLevels,
 			BloomUpsampleLevels = bloomUpsampleLevels,
 			BloomCompositeSceneColor = bloomCompositeSceneColorHandle,
+			Config = config
+		};
+		_sharedResources = new()
+		{
+			FramebufferSize = framebufferSize,
+			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Bgra8Unorm,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
 			SkyboxEnvironment = skyboxEnvHandle,
 			SkyboxIrradiance = skyboxIrrHandle,
 			SkyboxPrefilter = skyboxPrefilterHandle,
-			SkyboxBrdfLut = skyboxBrdfHandle,
-			Config = config
+			SkyboxBrdfLut = skyboxBrdfHandle
 		};
 
 		if (sceneEnabled)
@@ -1181,6 +1195,13 @@ internal sealed class RenderGraphFrameBuilder
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public void Build(RenderGraph graph)
 	{
+		RecordSharedPreparationPasses(graph);
+		RecordViewPasses(graph);
+		RecordSharedPresentationPasses(graph);
+	}
+
+	private void RecordSharedPreparationPasses(RenderGraph graph)
+	{
 		for (var i = 0; i < _gameplayTextureTargets.Count; i++)
 		{
 			var target = _gameplayTextureTargets[i];
@@ -1194,6 +1215,34 @@ internal sealed class RenderGraphFrameBuilder
 				.SetExecute(context => ExecuteGameplayTextureUi(context, target));
 		}
 
+		if (_useProceduralSkybox && _recordProceduralSkyLighting)
+		{
+			graph.AddPass("Skybox Environment", PassKind.Compute)
+				.WriteTexture(_sharedResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
+				.SetExecute(_skyboxEnvironmentExecute);
+
+			graph.AddPass("Skybox Irradiance", PassKind.Compute)
+				.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource)
+				.WriteTexture(_sharedResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
+				.SetExecute(_skyboxIrradianceExecute);
+
+			graph.AddPass("Skybox Prefilter", PassKind.Compute)
+				.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource)
+				.WriteTexture(_sharedResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
+				.SetExecute(_skyboxPrefilterExecute);
+		}
+
+		if (_useProceduralSkybox && _recordProceduralSkyBrdf)
+		{
+			graph.AddPass("Skybox BRDF LUT", PassKind.Compute)
+				.WriteTexture(_sharedResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
+				.SetExecute(_skyboxBrdfExecute);
+		}
+	}
+
+	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
+	private void RecordViewPasses(RenderGraph graph)
+	{
 		if (_frameResources.SceneEnabled)
 		{
 			graph.AddPass("GpuDraw Update", PassKind.Compute)
@@ -1302,27 +1351,10 @@ internal sealed class RenderGraphFrameBuilder
 				}
 			}
 
-			if (_useProceduralSkybox && _recordProceduralSkyLighting)
-			{
-				graph.AddPass("Skybox Environment", PassKind.Compute)
-					.WriteTexture(_frameResources.SkyboxEnvironment, ResourceState.UnorderedAccess)
-					.SetExecute(_skyboxEnvironmentExecute);
-
-				graph.AddPass("Skybox Irradiance", PassKind.Compute)
-					.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.SkyboxIrradiance, ResourceState.UnorderedAccess)
-					.SetExecute(_skyboxIrradianceExecute);
-
-				graph.AddPass("Skybox Prefilter", PassKind.Compute)
-					.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource)
-					.WriteTexture(_frameResources.SkyboxPrefilter, ResourceState.UnorderedAccess)
-					.SetExecute(_skyboxPrefilterExecute);
-			}
-
 			if (_frameResources.FogIntegrated.IsValid)
 			{
 				graph.AddPass("Volumetric Fog Inject", PassKind.Compute)
-					.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource)
+					.ReadTexture(_sharedResources.SkyboxIrradiance, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.ShadowMapDepth0, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.ShadowMapDepth1, ResourceState.ShaderResource)
 					.ReadTexture(_frameResources.ShadowMapDepth2, ResourceState.ShaderResource)
@@ -1393,9 +1425,9 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_frameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiTraceIrradiance, ResourceState.UnorderedAccess)
 					.WriteTexture(_frameResources.DdgiTraceVisibility, ResourceState.UnorderedAccess);
-				if (_frameResources.SkyboxEnvironment.IsValid)
+				if (_sharedResources.SkyboxEnvironment.IsValid)
 				{
-					ddgiTraceBuilder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+					ddgiTraceBuilder.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource);
 				}
 				ddgiTraceBuilder.SetExecute(_ddgiTraceExecute);
 
@@ -1423,13 +1455,6 @@ internal sealed class RenderGraphFrameBuilder
 					.ReadTexture(_frameResources.DdgiVisibilityHistoryRead, ResourceState.ShaderResource)
 					.WriteTexture(_frameResources.DdgiVisibilityHistoryWrite, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiVisibilityIntegrateExecute);
-			}
-
-			if (_useProceduralSkybox && _recordProceduralSkyBrdf)
-			{
-				graph.AddPass("Skybox BRDF LUT", PassKind.Compute)
-					.WriteTexture(_frameResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
-					.SetExecute(_skyboxBrdfExecute);
 			}
 
 			graph.AddPass("Clustered Lighting Build", PassKind.Compute)
@@ -1653,7 +1678,7 @@ internal sealed class RenderGraphFrameBuilder
 			graph.AddPass("Copy To Final", PassKind.Compute)
 				.ReadTexture(_frameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
-				.WriteTexture(_frameResources.FinalColor, ResourceState.UnorderedAccess)
+				.WriteTexture(_sharedResources.FinalColor, ResourceState.UnorderedAccess)
 				.SetExecute(_copyToFinalExecute);
 
 			// After tonemapping and upscaling so the outline colour reaches the
@@ -1677,7 +1702,7 @@ internal sealed class RenderGraphFrameBuilder
 					.WriteTexture(_frameResources.EncodedSceneColor, ResourceState.RenderTarget)
 					.SetExecute(_gameplayScreenEncodedUiExecute);
 				graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
-					.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget)
+					.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget)
 					.SetExecute(_gameplayScreenFinalUiExecute);
 			}
 
@@ -1689,9 +1714,12 @@ internal sealed class RenderGraphFrameBuilder
 					.SetExecute(_motionVectorDebugExecute);
 			}
 		}
+	}
 
+	private void RecordSharedPresentationPasses(RenderGraph graph)
+	{
 		var imguiBuilder = graph.AddPass("ImGui", PassKind.Graphics)
-			.WriteTexture(_frameResources.FinalColor, ResourceState.RenderTarget);
+			.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget);
 		var selectedSceneDebugViewHandle = GetSelectedSceneDebugViewHandle();
 		if (selectedSceneDebugViewHandle.IsValid)
 		{
@@ -1708,21 +1736,21 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ReadSkyboxTextures(RenderGraphBuilder builder)
 	{
-		if (_frameResources.SkyboxEnvironment.IsValid)
+		if (_sharedResources.SkyboxEnvironment.IsValid)
 		{
-			builder.ReadTexture(_frameResources.SkyboxEnvironment, ResourceState.ShaderResource);
+			builder.ReadTexture(_sharedResources.SkyboxEnvironment, ResourceState.ShaderResource);
 		}
-		if (_frameResources.SkyboxIrradiance.IsValid)
+		if (_sharedResources.SkyboxIrradiance.IsValid)
 		{
-			builder.ReadTexture(_frameResources.SkyboxIrradiance, ResourceState.ShaderResource);
+			builder.ReadTexture(_sharedResources.SkyboxIrradiance, ResourceState.ShaderResource);
 		}
-		if (_frameResources.SkyboxPrefilter.IsValid)
+		if (_sharedResources.SkyboxPrefilter.IsValid)
 		{
-			builder.ReadTexture(_frameResources.SkyboxPrefilter, ResourceState.ShaderResource);
+			builder.ReadTexture(_sharedResources.SkyboxPrefilter, ResourceState.ShaderResource);
 		}
-		if (_frameResources.SkyboxBrdfLut.IsValid)
+		if (_sharedResources.SkyboxBrdfLut.IsValid)
 		{
-			builder.ReadTexture(_frameResources.SkyboxBrdfLut, ResourceState.ShaderResource);
+			builder.ReadTexture(_sharedResources.SkyboxBrdfLut, ResourceState.ShaderResource);
 		}
 	}
 
@@ -1774,7 +1802,7 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
-	public RenderGraphResourceHandle GetFinalColorHandle() => _frameResources.FinalColor;
+	public RenderGraphResourceHandle GetFinalColorHandle() => _sharedResources.FinalColor;
 	public RenderGraphResourceHandle GetCaptureColorHandle() => _frameResources.EncodedSceneColor;
 
 	private void RegisterSceneDebugView(
@@ -2240,6 +2268,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _deferredLightingPass.BuildConfig(
 			context,
 			_frameResources,
+			_sharedResources,
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
 			_shadowMapPass.GetCurrentFrameData(),
@@ -2260,7 +2289,13 @@ internal sealed class RenderGraphFrameBuilder
 				_shadowMapPass.GetCurrentFrameData(),
 				_frameResources.FogHistoryValid);
 		}
-		var config = _volumetricFogPass.BuildConfig(context, _frameResources, device, _gpuDrawResources, stage);
+		var config = _volumetricFogPass.BuildConfig(
+			context,
+			_frameResources,
+			_sharedResources,
+			device,
+			_gpuDrawResources,
+			stage);
 		_volumetricFogPass.Record(context, stage, in config);
 	}
 
@@ -2270,6 +2305,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _reflectionsPass.BuildConfig(
 			context,
 			_frameResources,
+			_sharedResources,
 			_renderer.GetGfxDevice(),
 			_renderer,
 			_gpuDrawResources,
@@ -2649,6 +2685,7 @@ internal sealed class RenderGraphFrameBuilder
 		_view.CurrentDdgiConfig = _ddgiPass.BuildConfig(
 			context,
 			_frameResources,
+			_sharedResources,
 			_renderer.GetGfxDevice(),
 			_renderer,
 			_gpuDrawResources,
@@ -2724,6 +2761,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _transparentForwardPass.BuildConfig(
 			context,
 			_frameResources,
+			_sharedResources,
 			device,
 			_gpuDrawResources,
 			_shadowMapPass.GetCurrentFrameData(),
@@ -2770,6 +2808,7 @@ internal sealed class RenderGraphFrameBuilder
 		var config = _copyToFinalPass.BuildConfig(
 			context,
 			_frameResources,
+			_sharedResources,
 			_renderer.GetGfxDevice());
 		_copyToFinalPass.Record(context, in config);
 	}
@@ -2788,7 +2827,7 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void ExecuteImGui(RenderGraphContext context)
 	{
-		var finalColor = context.GetTexture(_frameResources.FinalColor);
+		var finalColor = context.GetTexture(_sharedResources.FinalColor);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
 		_imGuiRenderer.Record(context, _uiFrame, finalColor, clearTarget: _frameResources.SceneEnabled == false);
 	}
@@ -2797,7 +2836,7 @@ internal sealed class RenderGraphFrameBuilder
 		ExecuteGameplayScreenUi(context, _frameResources.EncodedSceneColor);
 
 	private void ExecuteGameplayScreenFinalUi(RenderGraphContext context) =>
-		ExecuteGameplayScreenUi(context, _frameResources.FinalColor);
+		ExecuteGameplayScreenUi(context, _sharedResources.FinalColor);
 
 	private void ExecuteGameplayScreenUi(RenderGraphContext context, RenderGraphResourceHandle targetHandle)
 	{
@@ -2818,7 +2857,7 @@ internal sealed class RenderGraphFrameBuilder
 		target.Surface.IsDirty = false;
 	}
 
-	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderGraphFrameResources resources, int cascadeIndex)
+	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderViewResources resources, int cascadeIndex)
 	{
 		return cascadeIndex switch
 		{

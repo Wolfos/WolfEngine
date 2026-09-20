@@ -34,7 +34,7 @@ public sealed class TonemappingPass
 
 	public TonemappingPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);
