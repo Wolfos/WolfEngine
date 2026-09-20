@@ -1,3 +1,4 @@
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -180,6 +181,62 @@ public sealed class RenderViewTests
 		var camera = new Camera { Fov = 70.0f };
 		Assert.DoesNotThrow(() => camera.GetPerspective(Int2.Zero));
 		Assert.That(camera.GetPerspective(Int2.Zero).M11, Is.EqualTo(camera.GetPerspective(new Int2(1, 1)).M11).Within(0.0001f));
+	}
+
+	[Test]
+	public void RenderViewRegistry_RejectsASecondViewOverTheSameWorld()
+	{
+		// This is what keeps the renderer's transform-change tracking correct. A world gathered by two views'
+		// draw databases has its changes pruned before every database has consumed them, and draws go stale
+		// with nothing logged, so the binding is refused rather than merely discouraged.
+		var registry = new RenderViewRegistry();
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture);
+
+		var error = Assert.Throws<InvalidOperationException>(
+			() => registry.Create(world, "second", RenderViewOutput.Texture));
+
+		Assert.That(error!.Message, Does.Contain("at most one view"));
+		Assert.That(registry.TryGetViewForWorld(world, out var bound), Is.True);
+		Assert.That(bound, Is.EqualTo(first.View));
+	}
+
+	[Test]
+	public void RenderViewRegistry_AllocatesDistinctSlotsAndReusesThemAfterRelease()
+	{
+		var registry = new RenderViewRegistry();
+		var worldA = new World(WorldTag.All);
+		var worldB = new World(WorldTag.All);
+		var a = registry.Create(worldA, "a", RenderViewOutput.Texture).View;
+		var b = registry.Create(worldB, "b", RenderViewOutput.Texture).View;
+		Assert.That(a, Is.Not.EqualTo(b));
+
+		// Give the released view some state, so a reused slot inheriting it would be visible.
+		registry.TryGet(a, out var releasedState);
+		releasedState.HistoryValid = true;
+		Assert.That(registry.Release(a, null), Is.True);
+
+		var worldC = new World(WorldTag.All);
+		var c = registry.Create(worldC, "c", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(c.View, Is.EqualTo(a), "the freed slot should be reused");
+			Assert.That(c.HistoryValid, Is.False, "a reused slot must not inherit the released view's history");
+			Assert.That(c.World, Is.SameAs(worldC));
+			Assert.That(registry.TryGetViewForWorld(worldA, out _), Is.False);
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_AWorldFreedByReleaseCanBackAViewAgain()
+	{
+		var registry = new RenderViewRegistry();
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture).View;
+		registry.Release(first, null);
+
+		Assert.DoesNotThrow(() => registry.Create(world, "again", RenderViewOutput.Texture));
 	}
 
 	private static SceneViewportUiState CreateUiState(Int2 contentSizePixels, bool hovered) => new(

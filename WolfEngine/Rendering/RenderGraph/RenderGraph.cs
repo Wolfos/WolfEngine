@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using WolfEngine.ECS;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
@@ -15,7 +16,7 @@ namespace WolfEngine.Rendering;
 /// Entry point for recording and executing passes in the renderer's frame graph.
 /// Responsible for owning pass order, compiling transient resources, and dispatching execution.
 /// </summary>
-public sealed class RenderGraph : IRenderResourceScheduler
+public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 {
 	private readonly RenderGraphResourceRegistry _resourceRegistry;
 	private readonly RenderGraphFrameBuilder _frameBuilder;
@@ -108,6 +109,11 @@ public sealed class RenderGraph : IRenderResourceScheduler
 		_gameplayUiFrameProvider = gameplayUiFrameProvider ?? throw new ArgumentNullException(nameof(gameplayUiFrameProvider));
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
 		_presentationOptions = presentationOptions ?? new RenderPresentationOptions();
+		// The process-wide presentation mode describes the primary view; further views choose their own.
+		_viewRegistry.GetOrCreate(RenderViewId.Primary).Output =
+			_presentationOptions.OutputMode == RenderOutputMode.FullWindow
+				? RenderViewOutput.Backbuffer
+				: RenderViewOutput.Texture;
 		_editorFrameCoordinator =
 			editorFrameCoordinator ?? throw new ArgumentNullException(nameof(editorFrameCoordinator));
 		_renderFrameCoordinator =
@@ -376,6 +382,47 @@ public sealed class RenderGraph : IRenderResourceScheduler
 			: snapshot.Camera.Perspective;
 	}
 
+	public RenderViewId CreateView(in RenderViewDescriptor descriptor)
+	{
+		return _viewRegistry.Create(descriptor.World, descriptor.Name, descriptor.Output).View;
+	}
+
+	public bool DestroyView(RenderViewId view)
+	{
+		if (view == RenderViewId.Primary)
+		{
+			return false;
+		}
+
+		var released = _viewRegistry.Release(view, _renderer.GetGfxDevice());
+		if (released)
+		{
+			_viewportStateBus.RemoveView(view);
+		}
+
+		return released;
+	}
+
+	public bool TryGetViewTexture(RenderViewId view, out nint textureId, out Int2 size)
+	{
+		if (_viewRegistry.TryGet(view, out var state) == false)
+		{
+			textureId = 0;
+			size = Int2.Zero;
+			return false;
+		}
+
+		var resolved = state.ResolvedSceneViewportState;
+		textureId = resolved.TextureId;
+		size = resolved.RenderSizePixels;
+		return textureId != 0;
+	}
+
+	public bool TryGetViewForWorld(World world, out RenderViewId view) =>
+		_viewRegistry.TryGetViewForWorld(world, out view);
+
+	public IReadOnlyList<RenderViewId> Views => _viewRegistry.ViewIds;
+
 	public void Startup(Action startup, Action<float> update)
 	{
 		_renderer.Run(startup, update, OnRender);
@@ -493,7 +540,7 @@ public sealed class RenderGraph : IRenderResourceScheduler
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				var sceneViewportState = _viewportStateBus.GetUiState();
-				var renderSceneToWindow = _presentationOptions.OutputMode == RenderOutputMode.FullWindow;
+				var renderSceneToWindow = _view.Output == RenderViewOutput.Backbuffer;
 				var sceneEnabled = renderSceneToWindow
 					? TryComputeFullWindowSceneRenderSize(frameBufferSize, out var sceneRenderSize)
 					: TryComputeSceneRenderSize(sceneViewportState, out sceneRenderSize);

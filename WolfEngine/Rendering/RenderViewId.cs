@@ -2,8 +2,10 @@ namespace WolfEngine.Rendering;
 
 /// <summary>
 /// Identifies one rendered view: a world, a camera, a target, and the persistent GPU state derived from
-/// that pairing. Ids are stable for the life of the view and are never reused, so per-view state can be
-/// keyed by one without a stale id resolving to a later view.
+/// that pairing. An id is stable for the life of its view, but it is a slot rather than a serial number: the
+/// UI sentinel block is indexed by <see cref="Index"/> and is deliberately small, so a destroyed view's slot
+/// is handed to the next view created. Destroying a view therefore has to clear its state, because a stale id
+/// held past that point resolves to whatever view took the slot.
 /// </summary>
 /// <remarks>
 /// While only one view exists, everything uses <see cref="Primary"/>. The type is introduced ahead of that

@@ -1,4 +1,5 @@
 using System.Numerics;
+using WolfEngine.ECS;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Passes;
@@ -33,6 +34,12 @@ internal sealed class RenderViewState
 
 	public RenderViewId View { get; }
 
+	/// <summary>The world this view renders, or null for the primary view before anything bound one.</summary>
+	public World? World;
+
+	/// <summary>Short name, qualified into pass names so a crash log names the view a pass belonged to.</summary>
+	public string Name = "primary";
+
 	/// <summary>What this view resolved to for the UI to sample, as of the last frame it was recorded.</summary>
 	public SceneViewportRenderState ResolvedSceneViewportState = SceneViewportRenderState.Empty;
 
@@ -41,6 +48,9 @@ internal sealed class RenderViewState
 	/// a shared target would mean the last view recorded overwrote what every earlier one had drawn.
 	/// </summary>
 	public readonly EditorSceneRenderTargetManager SceneRenderTarget = new();
+
+	/// <summary>Where this view's image goes. Fixed for the life of the view.</summary>
+	public RenderViewOutput Output = RenderViewOutput.Texture;
 
 	/// <summary>The size this view last rendered at, which its camera's jitter and projection derive from.</summary>
 	public Int2 SceneRenderSize;
