@@ -31,7 +31,7 @@ public sealed class AntiAliasingRenderGraphTests
 			Assert.That(names.Contains("CAS Sharpen"), Is.EqualTo(usesTaa && cas));
 			Assert.That(Resources(builder).Fsr3.InternalHistoryWrite.IsValid, Is.EqualTo(usesFsr3));
 			Assert.That(Resources(builder).HistoryColorWrite.IsValid, Is.EqualTo(enabled));
-			Assert.That(GetField<Array>(builder, "_fsr3CurrentLumaTextures").GetValue(0) is not null, Is.EqualTo(usesFsr3));
+			Assert.That(ViewState(builder).Fsr3CurrentLumaTextures[0] is not null, Is.EqualTo(usesFsr3));
 		});
 		var producer = graph.Passes.Single(pass => pass.Name == (usesTaa && cas ? "CAS Sharpen" : "Tonemapping"));
 		Assert.That(graph.Passes.Single(pass => pass.Name == "Copy To Final").Reads, Does.Contain(producer.Writes.Single()));
@@ -51,20 +51,69 @@ public sealed class AntiAliasingRenderGraphTests
 		foreach (var mode in new[] { AntiAliasingMode.Taa, AntiAliasingMode.Fsr3, AntiAliasingMode.Taa })
 		{
 			BeginFrame(builder, mode);
-			Assert.That(GetField<bool>(builder, "_resetTaaHistoryThisFrame"), Is.True);
-			Assert.That(GetField<bool>(builder, "_historyValid"), Is.False);
+			Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.True);
+			Assert.That(ViewState(builder).HistoryValid, Is.False);
 			builder.CompleteFrame();
 			BeginFrame(builder, mode);
-			Assert.That(GetField<bool>(builder, "_resetTaaHistoryThisFrame"), Is.False);
-			Assert.That(GetField<bool>(builder, "_historyValid"), Is.True);
+			Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.False);
+			Assert.That(ViewState(builder).HistoryValid, Is.True);
 			builder.CompleteFrame();
 		}
 		BeginFrame(builder, AntiAliasingMode.Taa, enabled: false);
-		Assert.That(GetField<bool>(builder, "_historyValid"), Is.False);
-		Assert.That(GetField<Array>(builder, "_historyColorTextures").GetValue(0), Is.Null);
-		Assert.That(GetField<Array>(builder, "_fsr3CurrentLumaTextures").GetValue(0), Is.Null);
+		Assert.That(ViewState(builder).HistoryValid, Is.False);
+		Assert.That(ViewState(builder).HistoryColorTextures[0], Is.Null);
+		Assert.That(ViewState(builder).Fsr3CurrentLumaTextures[0], Is.Null);
 		BeginFrame(builder, AntiAliasingMode.Taa);
-		Assert.That(GetField<bool>(builder, "_resetTaaHistoryThisFrame"), Is.True);
+		Assert.That(ViewState(builder).ResetTaaHistoryThisFrame, Is.True);
+	}
+
+	[Test]
+	public void EachViewKeepsItsOwnTemporalHistory()
+	{
+		// The reason this state moved off the builder: two views must not share one history. A view that has
+		// never rendered has no history, no matter how many frames another view has accumulated.
+		var (_, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		builder.CompleteFrame();
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		builder.CompleteFrame();
+		Assert.That(ViewState(builder).HistoryValid, Is.True, "the primary view should have accumulated history");
+
+		var second = builder.GetViewStateForTest(RenderViewId.FromIndex(1));
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(second, Is.Not.SameAs(ViewState(builder)));
+			Assert.That(second.HistoryValid, Is.False);
+			Assert.That(second.HistoryColorTextures[0], Is.Null);
+			Assert.That(second.HistorySize, Is.EqualTo(Int2.Zero));
+		});
+	}
+
+	[Test]
+	public void ReleaseView_RetiresThatViewsStateAndKeepsThePrimary()
+	{
+		var (_, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		builder.CompleteFrame();
+		var primary = ViewState(builder);
+		var secondId = RenderViewId.FromIndex(1);
+		var second = builder.GetViewStateForTest(secondId);
+		second.HistoryValid = true;
+
+		builder.ReleaseView(secondId);
+
+		Assert.Multiple(() =>
+		{
+			// A later view reusing the id must not inherit the released view's history.
+			Assert.That(builder.GetViewStateForTest(secondId), Is.Not.SameAs(second));
+			Assert.That(builder.GetViewStateForTest(secondId).HistoryValid, Is.False);
+			Assert.That(ViewState(builder), Is.SameAs(primary), "releasing another view must not disturb the primary");
+		});
+
+		// The primary view is what the builder records into, so it cannot be released.
+		builder.ReleaseView(RenderViewId.Primary);
+		Assert.That(ViewState(builder), Is.SameAs(primary));
 	}
 
 	private static void BeginFrame(RenderGraphFrameBuilder builder, AntiAliasingMode mode, bool enabled = true, bool cas = true)
@@ -80,5 +129,9 @@ public sealed class AntiAliasingRenderGraphTests
 	}
 
 	private static RenderGraphFrameResources Resources(RenderGraphFrameBuilder builder) => GetField<RenderGraphFrameResources>(builder, "_frameResources");
+
+	/// <summary>The per-view state the builder is currently recording into.</summary>
+	private static RenderViewState ViewState(RenderGraphFrameBuilder builder) => GetField<RenderViewState>(builder, "_view");
+
 	private static T GetField<T>(object instance, string name) => (T)instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
 }

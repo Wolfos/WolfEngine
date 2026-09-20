@@ -288,9 +288,9 @@ public sealed class VolumetricFogTests
 			Assert.That(resources.FogHistoryValid, Is.False);
 		});
 
-		var firstReadIndex = GetField<int>(builder, "_fogHistoryReadIndex");
+		var firstReadIndex = ViewState(builder).FogHistoryReadIndex;
 		builder.CompleteFrame();
-		Assert.That(GetField<int>(builder, "_fogHistoryReadIndex"), Is.EqualTo(1 - firstReadIndex));
+		Assert.That(ViewState(builder).FogHistoryReadIndex, Is.EqualTo(1 - firstReadIndex));
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = true });
 		Assert.That(Resources(builder).FogHistoryValid, Is.True);
 		builder.CompleteFrame();
@@ -310,7 +310,7 @@ public sealed class VolumetricFogTests
 		builder.CompleteFrame();
 
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = false });
-		Assert.That(GetField<Array>(builder, "_fogHistoryTextures").GetValue(0), Is.Null);
+		Assert.That(ViewState(builder).FogHistoryTextures[0], Is.Null);
 		builder.CompleteFrame();
 		BeginFrame(builder, new VolumetricFogConfig { Enabled = true, SliceCount = 32, MaxDistance = 100.0f });
 		Assert.That(Resources(builder).FogHistoryValid, Is.False);
@@ -393,5 +393,8 @@ public sealed class VolumetricFogTests
 	}
 
 	private static RenderGraphFrameResources Resources(RenderGraphFrameBuilder builder) => GetField<RenderGraphFrameResources>(builder, "_frameResources");
+
+	/// <summary>The per-view state the builder is currently recording into.</summary>
+	private static RenderViewState ViewState(RenderGraphFrameBuilder builder) => GetField<RenderViewState>(builder, "_view");
 	private static T GetField<T>(object instance, string name) => (T)instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(instance)!;
 }
