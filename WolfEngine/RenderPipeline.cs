@@ -112,6 +112,8 @@ public class RenderPipeline : IRenderPipeline
 					continue;
 				}
 
+				gpuDrawDatabase.BeginWorld(world.Id);
+
 				using (FrameProfiler.Instance.Measure("Remove meshes"))
 				{
 					RemoveMeshesForWorldTransformRemovals(world, gpuDrawDatabase);
@@ -337,6 +339,7 @@ public class RenderPipeline : IRenderPipeline
 
 			using (FrameProfiler.Instance.Measure("Gather DDGI probe debug primitives"))
 			{
+				gpuDrawDatabase.BeginWorld(GpuDrawDatabase.NoWorldId);
 				CollectDdgiProbeDebugPrimitives(
 					config,
 					cameraOrigin,

@@ -25,6 +25,7 @@ public sealed class GpuDrawDatabase
 	private uint _activeDrawCommandUpperBound = 1;
 	private int _copiedHandleVersion = -1;
 	private int _syncStamp;
+	private int _currentWorldId;
 	private bool _reconcilePersistentMeshes;
 	private bool _updatesDropped;
 
@@ -43,9 +44,18 @@ public sealed class GpuDrawDatabase
 	public void BeginSync(bool reconcilePersistentMeshes = false)
 	{
 		_syncStamp++;
+		_currentWorldId = 0;
 		_reconcilePersistentMeshes = reconcilePersistentMeshes;
 		_transformHistory.BeginFrame();
 	}
+
+	public void BeginWorld(int worldId)
+	{
+		_currentWorldId = worldId;
+	}
+
+	/// <summary>World scope for draws that no <see cref="World"/> produced.</summary>
+	public const int NoWorldId = 0;
 
 	public void ResetForSnapshotWrite()
 	{
@@ -89,7 +99,7 @@ public sealed class GpuDrawDatabase
 	public void RemovePersistentMesh(Entity entity)
 	{
 		// Transient records sharing the key (e.g. skinned meshes) are reconciled by EndSync instead.
-		var key = new DrawRecordKey(entity, 0);
+		var key = new DrawRecordKey(_currentWorldId, entity, 0);
 		if (_persistentMeshKeys.Contains(key))
 		{
 			RemoveRecord(key);
@@ -98,7 +108,7 @@ public sealed class GpuDrawDatabase
 
 	private void TouchMesh(Entity entity, Mesh mesh, Material material, in Matrix4x4 worldTransform, bool persistent)
 	{
-		var key = new DrawRecordKey(entity, 0);
+		var key = new DrawRecordKey(_currentWorldId, entity, 0);
 		if (_records.TryGetValue(key, out var record))
 		{
 			SetPersistence(key, persistent);
@@ -132,7 +142,7 @@ public sealed class GpuDrawDatabase
 		in Matrix4x4 worldTransform,
 		TerrainChunkInstanceData instanceData = default)
 	{
-		var key = new DrawRecordKey(entity, 0);
+		var key = new DrawRecordKey(_currentWorldId, entity, 0);
 		var resolvedAlphaMode = alphaMode == AlphaMode.AlphaBlend
 			? AlphaMode.AlphaBlend
 			: AlphaMode.Opaque;
@@ -215,7 +225,7 @@ public sealed class GpuDrawDatabase
 		in TerrainRayTracingChunkData rayTracingChunk,
 		in Matrix4x4 worldTransform)
 	{
-		var key = new DrawRecordKey(entity, chunkIndex + 1);
+		var key = new DrawRecordKey(_currentWorldId, entity, chunkIndex + 1);
 		if (_records.TryGetValue(key, out var record))
 		{
 			if (record.DrawKind != GpuDrawKind.Terrain)
@@ -969,7 +979,7 @@ public sealed class GpuDrawDatabase
 		public int RefCount { get; set; }
 	}
 
-	internal readonly record struct DrawRecordKey(Entity Entity, int SubdrawId);
+	internal readonly record struct DrawRecordKey(int WorldId, Entity Entity, int SubdrawId);
 
 	private sealed class EntityComparer : IEqualityComparer<Entity>
 	{

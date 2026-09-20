@@ -6,16 +6,20 @@ namespace WolfEngine.ECS;
 public class World
 {
 	private const int MaxWorldTransformRemovals = 1 << 16;
+	private static int _nextId;
     private readonly FreeList _entities = new();
     private readonly Dictionary<Type, IComponentPool> _pools = new();
 	private readonly List<WorldTransformRemoval> _worldTransformRemovals = new();
 	private bool _worldTransformRemovalsOverflowed;
-    
+
     public WorldTag Tag { get; }
-    
+
+	public int Id { get; }
+
     public World(WorldTag tag)
     {
         Tag = tag;
+		Id = Interlocked.Increment(ref _nextId);
     }
 
     public Entity CreateEntity() => _entities.Create();

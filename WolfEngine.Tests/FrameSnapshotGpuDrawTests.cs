@@ -652,6 +652,66 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void GpuDrawDatabase_EqualEntitiesInTwoWorlds_AreSeparateDraws()
+	{
+		// Entity indices restart per world, so two worlds routinely hold the same index and generation.
+		// Without the world in the draw key the second gather would overwrite the first one's draw.
+		var database = new GpuDrawDatabase();
+		var first = new World(WorldTag.All);
+		var second = new World(WorldTag.All);
+		var entity = new Entity(4, 1);
+		var firstMesh = CreateTestMesh();
+		var secondMesh = CreateTestMesh();
+		var material = new Material("two-world-shader");
+		var entries = new List<GpuDrawEntry>();
+
+		database.BeginSync();
+		database.BeginWorld(first.Id);
+		database.TouchMesh(entity, firstMesh, material, Matrix4x4.Identity);
+		database.BeginWorld(second.Id);
+		database.TouchMesh(entity, secondMesh, material, Matrix4x4.CreateTranslation(50.0f, 0.0f, 0.0f));
+		database.EndSync();
+
+		database.CollectDrawEntries(entries);
+		Assert.That(entries, Has.Count.EqualTo(2));
+		Assert.That(entries.Select(entry => entry.DrawHandle.Index).Distinct().Count(), Is.EqualTo(2));
+		Assert.That(entries.Select(entry => entry.Mesh), Is.EquivalentTo(new[] { firstMesh, secondMesh }));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_EqualEntitiesInTwoWorlds_DoNotShareTransformHistory()
+	{
+		// The motion half of the same collision: one world's entity moving must not hand the other
+		// world's equal entity a previous transform it never had, which would smear its motion vectors.
+		var database = new GpuDrawDatabase();
+		var moving = new World(WorldTag.All);
+		var still = new World(WorldTag.All);
+		var entity = new Entity(7, 1);
+		var mesh = CreateTestMesh();
+		var material = new Material("two-world-history-shader");
+		var stillTransform = Matrix4x4.CreateTranslation(0.0f, 9.0f, 0.0f);
+		var entries = new List<GpuDrawEntry>();
+
+		database.BeginSync();
+		database.BeginWorld(moving.Id);
+		database.TouchMesh(entity, mesh, material, Matrix4x4.Identity);
+		database.BeginWorld(still.Id);
+		database.TouchMesh(entity, mesh, material, stillTransform);
+		database.EndSync();
+
+		database.BeginSync();
+		database.BeginWorld(moving.Id);
+		database.TouchMesh(entity, mesh, material, Matrix4x4.CreateTranslation(30.0f, 0.0f, 0.0f));
+		database.BeginWorld(still.Id);
+		database.TouchMesh(entity, mesh, material, stillTransform);
+		database.EndSync();
+
+		database.CollectDrawEntries(entries);
+		var stationary = entries.Single(entry => entry.World == stillTransform);
+		Assert.That(stationary.PreviousWorld, Is.EqualTo(stillTransform));
+	}
+
+	[Test]
 	public void GpuDrawDatabase_DebugPrimitiveRegistrationAndUpdates_PreserveDebugPrimitiveDrawKind()
 	{
 		var database = new GpuDrawDatabase();
