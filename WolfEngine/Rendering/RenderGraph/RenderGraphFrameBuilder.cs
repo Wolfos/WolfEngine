@@ -2021,7 +2021,7 @@ internal sealed class RenderGraphFrameBuilder
 		// Before RecordUpdate, not after. RecordUpdate would otherwise upload the instance through
 		// the ordinary mesh path, which allocates a vertex range but leaves the shared bind-pose
 		// source mesh unuploaded — and the skinning shader reads its bind pose from there.
-		var skinningPackets = context.FrameSnapshot.SkinningPackets;
+		var skinningPackets = context.ViewSnapshot.SkinningPackets;
 		EnsureSkinnedInstanceResources(skinningPackets);
 
 		// Graphics bindings require these buffers even when no meshes are skinned.
@@ -2038,7 +2038,7 @@ internal sealed class RenderGraphFrameBuilder
 			device,
 			_renderer,
 			skinningPackets,
-			context.FrameSnapshot.BoneMatrices,
+			context.ViewSnapshot.BoneMatrices,
 			context.GpuDrawDatabase);
 
 		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
@@ -2489,7 +2489,7 @@ internal sealed class RenderGraphFrameBuilder
 	private Fsr3ConstantValues BuildFsr3Constants(RenderGraphContext context)
 	{
 		var size = _frameResources.SceneFramebufferSize;
-		var camera = context.FrameSnapshot.Camera;
+		var camera = context.ViewSnapshot.Camera;
 		var verticalFov = float.DegreesToRadians(camera.Fov > 0.0f ? camera.Fov : 70.0f);
 		var depth = Fsr3Constants.BuildDeviceToViewDepth(context.SceneData.NearPlane,
 			context.SceneData.FarPlane, verticalFov, (float)Math.Max(size.X, 1) / Math.Max(size.Y, 1));

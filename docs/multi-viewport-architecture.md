@@ -422,6 +422,12 @@ better than the tightest same-build pair (104 pixels), maximum delta stayed at t
 high-delta pixel appeared. Treat this as noise-floor equivalent; the script's literal verdict is `OUTSIDE`
 only because of the 219-versus-218 upper bound.
 
+The per-view publisher was checked with three `publisher` captures against `resources1`–`resources3`.
+Same-build spread was 36–229 pixels across the new runs; cross-build spread was 105–238, 9 pixels above
+the strict ceiling. Maximum delta was 67 in both groups, no new high-delta pixel appeared, and the tightest
+cross-build pair (105 pixels) beat the tightest baseline pair (118 pixels). The script's literal verdict is
+`OUTSIDE`; this is reassuring but not a strict noise-floor pass.
+
 Once two views exist, the capture diff stops being the right check. The new one is two views rendering
 different worlds at different sizes with temporal anti-aliasing on: move one camera and assert the other
 view's image is unchanged.
@@ -442,8 +448,10 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
 3. **In progress:** `FrameSnapshot` now exposes an ordered list of active `RenderViewSnapshot` entries, with
    isolated scene packets and draw databases, and `SeedPreviousCameraFrom` seeds camera history by
    `RenderViewId`. `PublishSnapshot` accepts view submissions and gathers their bound worlds independently;
-   the runtime uses it and the primary-view facade keeps the editor working. Next, migrate render-thread
-   consumers off that facade; migrate the editor publisher when its overlay world no longer needs the legacy
+   the runtime uses it and the primary-view facade keeps the editor working. Pass contexts now expose their
+   own `RenderViewSnapshot`, and material changes reach every active view database. Next, migrate the
+   remaining render-thread setup off the frame facade and record
+   several views in one graph. Migrate the editor publisher when its overlay world no longer needs the legacy
    multi-world gather.
 4. Qualify pass names by view.
 5. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".

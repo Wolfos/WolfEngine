@@ -146,12 +146,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		var device = _renderer.GetGfxDevice();
 		var profilerBackend = (device as IGpuProfilerDevice)?.GpuProfilerBackend;
 
-		var snapshot = _activeSnapshot;
-		if (snapshot is null)
+		var frameSnapshot = _activeSnapshot;
+		if (frameSnapshot is null)
 		{
 			ReleasePasses();
 			return;
 		}
+		var snapshot = frameSnapshot.GetOrCreateView(_view.View);
 
 		// Build scene data from snapshot
 		SceneDrawData? sceneData = null;
@@ -299,7 +300,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					// throws if a pass that needs scene data reads it.
 					SceneData = sceneData!,
 					GpuDrawDatabase = snapshot.GpuDrawDatabase,
-					FrameSnapshot = snapshot
+					FrameSnapshot = frameSnapshot,
+					ViewSnapshot = snapshot
 				};
 				pass.Execute(context);
 				commandList.EndEvent();
@@ -339,7 +341,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	}
 
 	private static bool TryCreatePreviousCameraState(
-		FrameSnapshot snapshot,
+		RenderViewSnapshot snapshot,
 		in Matrix4x4 fallbackViewProjection,
 		in Matrix4x4 fallbackProjection,
 		in Matrix4x4 previousResolvedProjection,
@@ -372,10 +374,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	/// </summary>
 	private void ResolveViewProjection()
 	{
-		if (_activeSnapshot is not { } snapshot)
+		if (_activeSnapshot is not { } frameSnapshot)
 		{
 			return;
 		}
+		var snapshot = frameSnapshot.GetOrCreateView(_view.View);
 
 		_view.ResolvedProjection = _view.SceneRenderSize.X > 0 && _view.SceneRenderSize.Y > 0
 			? snapshot.Camera.GetPerspective(_view.SceneRenderSize)
@@ -547,9 +550,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 				_currentSnapshot = snapshot;
 				_activeSnapshot = snapshot;
-				for (var i = 0; i < changedMaterials.Count; i++)
+				for (var viewIndex = 0; viewIndex < snapshot.Views.Count; viewIndex++)
 				{
-					snapshot.GpuDrawDatabase.NotifyMaterialChanged(changedMaterials[i]);
+					var database = snapshot.Views[viewIndex].GpuDrawDatabase;
+					for (var i = 0; i < changedMaterials.Count; i++)
+					{
+						database.NotifyMaterialChanged(changedMaterials[i]);
+					}
 				}
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();

@@ -84,7 +84,7 @@ public readonly struct SkinningPacket
 	/// <summary>The instance-owned mesh the deformation is written into.</summary>
 	public Mesh InstanceMesh { get; }
 
-	/// <summary>Current-pose offset in <see cref="FrameSnapshot.BoneMatrices"/>.</summary>
+	/// <summary>Current-pose offset in <see cref="RenderViewSnapshot.BoneMatrices"/>.</summary>
 	public int BoneMatrixOffset { get; }
 
 	/// <summary>Start of the matrices for the pose the previous frame rendered.</summary>
