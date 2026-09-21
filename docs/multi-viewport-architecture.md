@@ -573,7 +573,29 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    every live database. The per-view remainder — skinning and the ray-tracing update — is "GpuDraw View
    Update". `GpuDrawFlagsTests` pins the Slang and Metal decoders to `GpuDrawFlags`; there are three decoders,
    including the Metal-native `gpu_draw_compact_icb.metal`, which a `.slang`-only search misses.
-5. Give every CPU-written per-frame buffer in `GpuDrawResources` a copy per view.
+5. **Done:** every buffer the CPU fills during a view's passes — camera, shadow camera, transparent
+   environment and lighting, DDGI debug, clustered point lights and the cluster overflow counter, decal
+   projectors, fog volumes — has a copy per view as well as per frame slot (`GpuDrawResources.ActiveViewIndex`,
+   set per pass by `RenderGraph.Execute`). GPU-written buffers used within one view's contiguous passes (draw
+   args, cluster AABBs, headers and index lists) stay shared: the D3D12 backend transitions each buffer as it is
+   bound, which also orders one view's reads before the next view's writes.
+
+   **Encoded indirect draw records bake these buffers' addresses**, so per-view buffers require per-view
+   indirect command sets. The G-buffer, transparent and per-cascade shadow sets are `PerViewIndirectCommandSets`
+   keyed by the same `ActiveViewIndex`, so a set and the buffers it bakes cannot belong to different views.
+   Structural records were already versioned per set, so each view's set catches up on its own. Destroying a
+   view unregisters and retires its sets and buffers.
+
+   **Replay-log compaction no longer waits on idle sets.** It took the minimum applied version over every
+   registered set, and a never-used set holds zero, which disables compaction entirely. A hidden view's sets —
+   and, before multi-viewport, a shadow cascade that stops being rendered — would pin the log and grow it without
+   bound. A set unused for a full turn of the slot ring is now excluded and invalidated
+   (`SharedDrawIndirectCommandSet.InvalidateEncoding`), so its next use re-encodes in full.
+
+   Checked against the pool of verified captures: `perview1`–`perview3` were within 100–122 pixels of a baseline
+   capture against a pool threshold of 120. The two-pixel excess on `perview2` was ordinary noise — 185 of its
+   202 differing channel samples within three levels, the rest the known flickering pixels — and it was 66 pixels
+   from another run of the same build.
 6. Qualify pass names by view.
 7. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".
 8. Move the editor onto the per-view publisher, and add a preview window that creates a second world and view

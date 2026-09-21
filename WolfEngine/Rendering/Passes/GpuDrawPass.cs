@@ -81,7 +81,11 @@ public sealed class GpuDrawPass
 	private readonly IGfxPipeline?[] _gbufferPipelines = new IGfxPipeline?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly SharedDrawGraphicsBufferBindings?[] _gbufferBufferBindings = new SharedDrawGraphicsBufferBindings?[GpuDrawExecutionLanes.ExecutionLaneCount];
 	private readonly ShaderReflectionLayout?[] _gbufferReflections = new ShaderReflectionLayout?[GpuDrawExecutionLanes.ExecutionLaneCount];
-	private readonly SharedDrawIndirectCommandSet _gbufferIndirectCommandSet = new();
+	private readonly PerViewIndirectCommandSets _gbufferIndirectCommandSets = new();
+	// Frames counted by the shared draw update, and when each registered command set was last used. A set idle
+	// for a full turn of the slot ring stops holding back replay-log compaction and re-encodes on its next use.
+	private long _updateFrame;
+	private readonly Dictionary<SharedDrawIndirectCommandSet, long> _commandSetLastUse = new();
 	private bool _gbufferCompactionActive;
 	private readonly Dictionary<uint, MaterialDrawState> _materialDrawStates = new();
 	private readonly Dictionary<uint, TerrainDrawSurface> _terrainMaterialStates = new();
@@ -154,7 +158,6 @@ public sealed class GpuDrawPass
 		_hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 		_renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
 		_backendBridge = backendBridge ?? throw new ArgumentNullException(nameof(backendBridge));
-		_knownIndirectCommandSets.Add(_gbufferIndirectCommandSet);
 	}
 
 	/// <summary>Single-view update: the context's database, owned by the primary view.</summary>
@@ -176,6 +179,7 @@ public sealed class GpuDrawPass
 			throw new ArgumentException("A draw update needs at least one source database.", nameof(sources));
 		}
 
+		_updateFrame++;
 		_liveSources.Clear();
 		for (var i = 0; i < sources.Length; i++)
 		{
@@ -1743,7 +1747,25 @@ public sealed class GpuDrawPass
 	/// pass falls back to executing its full command range.
 	/// </summary>
 	public IGfxBuffer? GBufferCompactedExecutionRangeBuffer =>
-		_gbufferCompactionActive ? _gbufferIndirectCommandSet.CompactedExecutionRangeBuffer : null;
+		_gbufferCompactionActive ? GBufferCommandSet.CompactedExecutionRangeBuffer : null;
+
+	/// <summary>The active view's G-buffer command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
+	private SharedDrawIndirectCommandSet GBufferCommandSet =>
+		_gbufferIndirectCommandSets.Get(_gpuDrawResources.ActiveViewIndex);
+
+	/// <summary>Removes a destroyed view's G-buffer command sets, for the caller to retire.</summary>
+	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+		_gbufferIndirectCommandSets.Take(viewIndex);
+
+	/// <summary>Stops tracking command sets that are about to be retired.</summary>
+	internal void ForgetIndirectCommandSets(IEnumerable<SharedDrawIndirectCommandSet> commandSets)
+	{
+		foreach (var commandSet in commandSets)
+		{
+			_knownIndirectCommandSets.Remove(commandSet);
+			_commandSetLastUse.Remove(commandSet);
+		}
+	}
 
 	/// <summary>
 	/// Encodes the GBuffer commands and compacts them against the camera cull results. Runs in the cull
@@ -1756,7 +1778,7 @@ public sealed class GpuDrawPass
 		EnsureGBufferIndirectCommands(context);
 		_gbufferCompactionActive = RecordIndirectCompaction(
 			context,
-			_gbufferIndirectCommandSet,
+			GBufferCommandSet,
 			DrawPassParticipation.GBuffer,
 			_gpuDrawResources.DrawArgsBuffer,
 			drawArgsBaseOffsetBytes: 0,
@@ -1770,7 +1792,7 @@ public sealed class GpuDrawPass
 		EnsureGBufferPipelines(device);
 		EnsureIndirectCommandsForPass(
 			context.GpuDrawDatabase,
-			_gbufferIndirectCommandSet,
+			GBufferCommandSet,
 			DrawPassParticipation.GBuffer,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
 			static _ => true,
@@ -1868,7 +1890,7 @@ public sealed class GpuDrawPass
 				bufferBindings.Value,
 				passBindings,
 				pipeline,
-				_gbufferIndirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
+				GBufferCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return buckets;
@@ -2055,6 +2077,7 @@ public sealed class GpuDrawPass
 
 	private void RegisterIndirectCommandSet(SharedDrawIndirectCommandSet commandSet)
 	{
+		_commandSetLastUse[commandSet] = _updateFrame;
 		for (var i = 0; i < _knownIndirectCommandSets.Count; i++)
 		{
 			if (ReferenceEquals(_knownIndirectCommandSets[i], commandSet))
@@ -2077,6 +2100,15 @@ public sealed class GpuDrawPass
 		for (var commandSetIndex = 0; commandSetIndex < _knownIndirectCommandSets.Count; commandSetIndex++)
 		{
 			var commandSet = _knownIndirectCommandSets[commandSetIndex];
+			// A set unused for a full turn of the slot ring — a hidden view's, or a cascade no longer rendered —
+			// would otherwise pin the log forever. It re-encodes in full on its next use instead of replaying.
+			if (_commandSetLastUse.TryGetValue(commandSet, out var lastUse) &&
+			    _updateFrame - lastUse > GpuDrawResources.IndirectCommandBufferSlotCount)
+			{
+				commandSet.InvalidateEncoding();
+				continue;
+			}
+
 			for (var slotIndex = 0; slotIndex < GpuDrawResources.IndirectCommandBufferSlotCount; slotIndex++)
 			{
 				var appliedVersion = commandSet.GetAppliedStructuralVersion(slotIndex);

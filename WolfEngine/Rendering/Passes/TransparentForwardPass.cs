@@ -15,7 +15,7 @@ public sealed class TransparentForwardPass
 	private readonly Dictionary<GpuDrawExecutionKey, IGfxPipeline> _pipelinesByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, SharedDrawGraphicsBufferBindings> _bufferBindingsByExecutionKey = new();
 	private readonly Dictionary<GpuDrawExecutionKey, ShaderReflectionLayout> _reflectionByExecutionKey = new();
-	private readonly SharedDrawIndirectCommandSet _indirectCommandSet = new();
+	private readonly PerViewIndirectCommandSets _indirectCommandSets = new();
 	private DescriptorHandle _linearSampler = DescriptorHandle.Invalid;
 	private DescriptorHandle _shadowSampler = DescriptorHandle.Invalid;
 	private GraphicsBackendKind? _reflectionBackendKind;
@@ -30,9 +30,14 @@ public sealed class TransparentForwardPass
 		_bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
 	}
 
-	public SharedDrawIndirectCommandSet IndirectCommandSet => _indirectCommandSet;
+	/// <summary>The given view's command set; see <see cref="PerViewIndirectCommandSets"/>.</summary>
+	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int viewIndex) => _indirectCommandSets.Get(viewIndex);
 
-	public void EnsureIndirectResources(IGfxDevice device)
+	/// <summary>Removes a destroyed view's command set, for the caller to retire.</summary>
+	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+		_indirectCommandSets.Take(viewIndex);
+
+	public void EnsureIndirectResources(IGfxDevice device, int viewIndex)
 	{
 		ArgumentNullException.ThrowIfNull(device);
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
@@ -41,7 +46,7 @@ public sealed class TransparentForwardPass
 			EnsurePipeline(device, laneDefinitions[i]);
 		}
 
-		_indirectCommandSet.EnsureCreated(device);
+		_indirectCommandSets.Get(viewIndex).EnsureCreated(device);
 	}
 
 	public bool HasIndirectLane(GpuDrawExecutionLaneDefinition lane) => _pipelinesByExecutionKey.ContainsKey(lane.Key);
@@ -373,7 +378,8 @@ public sealed class TransparentForwardPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent);
 		var buckets = new List<TransparentExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
-		_indirectCommandSet.EnsureCreated(device);
+		var indirectCommandSet = _indirectCommandSets.Get(gpuDrawResources.ActiveViewIndex);
+		indirectCommandSet.EnsureCreated(device);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var laneDefinition = laneDefinitions[i];
@@ -387,7 +393,7 @@ public sealed class TransparentForwardPass
 				GetPassBindingSet(laneDefinition, gpuDrawResources)
 					?? throw new InvalidOperationException($"Missing pass bindings for transparent lane '{laneDefinition.DebugName}'."),
 				pipeline,
-				_indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
+				indirectCommandSet.GetAllocatedPages(activeIndirectSlot, laneDefinition.ExecutionIndex)));
 		}
 
 		return buckets;

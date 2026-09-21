@@ -279,6 +279,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					_frameBuilder.BindView(boundView);
 				}
 
+				// The buffers the CPU fills for this pass are the pass's own view's.
+				_gpuDrawResources.ActiveViewIndex = passSnapshot.View.Index;
+
 				// Execute the pass with the command list and scene data
 				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
 				{
@@ -302,6 +305,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		gpuFrameCapture?.Seal();
 
 		SelectView(boundView);
+		_gpuDrawResources.ActiveViewIndex = boundView.Index;
 		ReleasePasses();
 	}
 
@@ -511,6 +515,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		var released = _viewRegistry.Release(view, _renderer.GetGfxDevice());
 		if (released)
 		{
+			_frameBuilder.ReleaseViewDrawResources(view);
+			_gpuDrawResources.ReleaseView(_renderer.GetGfxDevice(), view.Index);
 			_viewportStateBus.RemoveView(view);
 		}
 

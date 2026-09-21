@@ -1882,6 +1882,29 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
+	/// <summary>
+	/// Releases a destroyed view's draw resources: its indirect command sets in every pass, retired rather than
+	/// disposed because frames in flight may still execute them.
+	/// </summary>
+	public void ReleaseViewDrawResources(RenderViewId view)
+	{
+		if (view.IsValid == false || view == RenderViewId.Primary)
+		{
+			return;
+		}
+
+		var device = _renderer.GetGfxDevice();
+		var commandSets = new List<SharedDrawIndirectCommandSet>();
+		commandSets.AddRange(_gpuDrawPass.TakeViewCommandSets(view.Index));
+		commandSets.AddRange(_transparentForwardPass.TakeViewCommandSets(view.Index));
+		commandSets.AddRange(_shadowMapPass.TakeViewCommandSets(view.Index));
+		_gpuDrawPass.ForgetIndirectCommandSets(commandSets);
+		foreach (var commandSet in commandSets)
+		{
+			device.Retire(commandSet, $"Indirect command set for {view}");
+		}
+	}
+
 	/// <summary>Exposes a view's state so tests can assert that views do not share history.</summary>
 	internal RenderViewState GetViewStateForTest(RenderViewId view) => GetOrCreateViewState(view);
 
@@ -2239,7 +2262,7 @@ internal sealed class RenderGraphFrameBuilder
 			EnsureShadowIndirectCommands(context, device, cascadeIndex);
 			var compacted = _gpuDrawPass.RecordIndirectCompaction(
 				context,
-				_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
+				_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
 				DrawPassParticipation.ShadowCaster,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
 				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
@@ -2250,10 +2273,10 @@ internal sealed class RenderGraphFrameBuilder
 
 	private void EnsureShadowIndirectCommands(RenderGraphContext context, IGfxDevice device, int cascadeIndex)
 	{
-		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex);
+		_shadowMapPass.EnsureIndirectResources(device, cascadeIndex, _gpuDrawResources.ActiveViewIndex);
 		_gpuDrawPass.EnsureIndirectCommandsForPass(
 			context.GpuDrawDatabase,
-			_shadowMapPass.GetIndirectCommandSet(cascadeIndex),
+			_shadowMapPass.GetIndirectCommandSet(cascadeIndex, _gpuDrawResources.ActiveViewIndex),
 			DrawPassParticipation.ShadowCaster,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 				_gpuDrawResources,
@@ -2886,10 +2909,10 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteTransparentForward(RenderGraphContext context)
 	{
 		var device = _renderer.GetGfxDevice();
-		_transparentForwardPass.EnsureIndirectResources(device);
+		_transparentForwardPass.EnsureIndirectResources(device, _gpuDrawResources.ActiveViewIndex);
 		_gpuDrawPass.EnsureIndirectCommandsForPass(
 			context.GpuDrawDatabase,
-			_transparentForwardPass.IndirectCommandSet,
+			_transparentForwardPass.GetIndirectCommandSet(_gpuDrawResources.ActiveViewIndex),
 			DrawPassParticipation.ForwardTransparent,
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(_gpuDrawResources),
 			lane => _transparentForwardPass.HasIndirectLane(lane),
