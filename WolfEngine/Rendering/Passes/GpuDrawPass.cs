@@ -50,6 +50,13 @@ public sealed class GpuDrawPass
 	private ShaderPropertyWriter? _cullParamsWriter;
 	private ShaderPropertyWriter? _compactParamsWriter;
 	private readonly List<GpuDrawUpdate> _updates = new();
+	// Parallel to _updates: the view that owns each update's draw, and the database it came from.
+	private readonly List<RenderViewId> _updateOwners = new();
+	private readonly List<GpuDrawDatabase> _updateSources = new();
+	private readonly List<GpuDrawUpdate> _sourceUpdateScratch = new();
+	// Every database whose draws live in the shared tables this frame. Indirect-command maintenance that
+	// rebuilds from draw entries has to see all of them, or rebuilding for one view wipes the others.
+	private readonly List<GpuDrawSource> _liveSources = new();
 	private readonly List<GpuDrawInstanceUpdateData> _instanceUpdateData = new();
 	private readonly List<GpuDrawMeshUpdateData> _meshUpdateData = new();
 	private readonly List<GpuDrawMaterialUpdateData> _materialUpdateData = new();
@@ -63,6 +70,7 @@ public sealed class GpuDrawPass
 	private readonly Dictionary<uint, int> _terrainMaterialUpdateIndices = new();
 	private readonly List<GpuTerrainLayerUpdateData> _terrainLayerUpdateData = new();
 	private readonly List<GpuDrawEntry> _drawEntries = new();
+	private readonly List<GpuDrawEntry> _liveEntryScratch = new();
 	private readonly List<uint> _drawGenerations = new();
 	private readonly List<uint> _instanceGenerations = new();
 	private readonly List<uint> _meshGenerations = new();
@@ -149,9 +157,34 @@ public sealed class GpuDrawPass
 		_knownIndirectCommandSets.Add(_gbufferIndirectCommandSet);
 	}
 
+	/// <summary>Single-view update: the context's database, owned by the primary view.</summary>
 	public void RecordUpdate(RenderGraphContext context)
 	{
-		var drawDatabase = context.GpuDrawDatabase;
+		Span<GpuDrawSource> sources = [new GpuDrawSource(RenderViewId.Primary, context.GpuDrawDatabase)];
+		RecordUpdate(context, sources);
+	}
+
+	/// <summary>
+	/// Applies every source database's changes to the shared draw tables. Once per frame, before any view culls
+	/// or draws: it advances the frame-in-flight slot and fills that slot's upload buffers, so running it per
+	/// view would advance the ring twice and let a later view overwrite an earlier view's uploads.
+	/// </summary>
+	public void RecordUpdate(RenderGraphContext context, ReadOnlySpan<GpuDrawSource> sources)
+	{
+		if (sources.IsEmpty)
+		{
+			throw new ArgumentException("A draw update needs at least one source database.", nameof(sources));
+		}
+
+		_liveSources.Clear();
+		for (var i = 0; i < sources.Length; i++)
+		{
+			_liveSources.Add(sources[i]);
+		}
+
+		// Generation tables come from the shared handle registry and are identical in every source after the
+		// all-views refresh, so any source serves for the per-frame upload and the fallback handles.
+		var drawDatabase = sources[0].Database;
 		var device = _renderer.GetGfxDevice();
 		_bindlessRegistry.EnsureInitialized(device);
 		EnsureTerrainSamplers();
@@ -175,12 +208,24 @@ public sealed class GpuDrawPass
 		_gpuDrawResources.ActiveFrameSlot = activeSlot;
 		var requireFullGpuStateRefresh = backendSignals.RequiresFullSlotReencode;
 
-		drawDatabase.ConsumeUpdates(_updates);
-		var updatesDropped = drawDatabase.ConsumeDroppedUpdates();
+		_updates.Clear();
+		_updateOwners.Clear();
+		_updateSources.Clear();
+		var updatesDropped = false;
+		var drawCommandUpperBound = 0u;
+		for (var i = 0; i < sources.Length; i++)
+		{
+			var source = sources[i];
+			source.Database.ConsumeUpdates(_sourceUpdateScratch);
+			AppendFromSource(source, _sourceUpdateScratch);
+			updatesDropped |= source.Database.ConsumeDroppedUpdates();
+			drawCommandUpperBound = Math.Max(drawCommandUpperBound, source.Database.GetActiveDrawCommandUpperBound());
+		}
+
 		UploadGenerationTables(drawDatabase);
 		if (_gpuStateBootstrapPending)
 		{
-			var appended = AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
+			var appended = AppendFullGpuStateRefreshUpdates(sources);
 			if (appended > 0)
 			{
 				_gpuStateBootstrapPending = false;
@@ -189,7 +234,7 @@ public sealed class GpuDrawPass
 
 		if (requireFullGpuStateRefresh)
 		{
-			var refreshed = AppendFullGpuStateRefreshUpdates(drawDatabase, _updates);
+			var refreshed = AppendFullGpuStateRefreshUpdates(sources);
 			if (GraphicsConfig.LogGpuDrawEvents)
 			{
 				Console.WriteLine(
@@ -202,7 +247,15 @@ public sealed class GpuDrawPass
 		{
 			var droppedDeltaCount = _updates.Count;
 			_updates.Clear();
+			_updateOwners.Clear();
+			_updateSources.Clear();
 			AppendClearAllDraws(_updates);
+			// Clearing is not owned by any one view; the removes carry no flags, so the owner is immaterial.
+			for (var i = _updateOwners.Count; i < _updates.Count; i++)
+			{
+				_updateOwners.Add(RenderViewId.Primary);
+				_updateSources.Add(drawDatabase);
+			}
 			_gpuStateBootstrapPending = true;
 			var rebuiltCount = 0;
 			_hardeningStats.IncrementUpdateOverflowRecoveries();
@@ -214,7 +267,7 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		_gpuDrawResources.ActiveDrawCommandUpperBound = drawDatabase.GetActiveDrawCommandUpperBound();
+		_gpuDrawResources.ActiveDrawCommandUpperBound = drawCommandUpperBound;
 		// Republished every frame because capacity growth can replace the packed buffers underneath us.
 		_gpuDrawResources.PackedMeshVertexBuffer = _renderer.GetPackedMeshVertexBuffer();
 		_gpuDrawResources.PackedMeshIndexBuffer = _renderer.GetPackedMeshIndexBuffer();
@@ -245,6 +298,8 @@ public sealed class GpuDrawPass
 		for (var i = 0; i < updateCount; i++)
 		{
 			var update = _updates[i];
+			var ownerFlags = (uint)_updateOwners[i].Index << GpuDrawFlags.OwnerViewShift;
+			var updateDatabase = _updateSources[i];
 			var drawIdInRange = update.DrawIndex > 0 && update.DrawIndex < GpuDrawResources.MaxDrawCount;
 			if (drawIdInRange == false)
 			{
@@ -417,7 +472,7 @@ public sealed class GpuDrawPass
 
 			if (backendSignals.SupportsIndirectStructuralUpdates &&
 			    IsStructuralUpdateType(update.Type) &&
-			    drawDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
+			    updateDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
 			    update.DrawIndex > 0 &&
 			    update.DrawIndex < GpuDrawResources.MaxDrawCount)
 			{
@@ -473,7 +528,9 @@ public sealed class GpuDrawPass
 				(uint)drawKind,
 				update.MeshHandle.Value,
 				update.MaterialHandle.Value,
-				drawFlags));
+				// The owner is applied here rather than cached with the material's draw state: materials are
+				// shared across views, so a cached owner would stamp one view's ownership on another's draws.
+				drawFlags == 0u ? 0u : drawFlags | ownerFlags));
 
 			if (update.Type is GpuDrawUpdateType.Add or GpuDrawUpdateType.UpdateMesh)
 			{
@@ -694,6 +751,7 @@ public sealed class GpuDrawPass
 			cullParamsWriter.SetUInt("outputDrawArgsStride", GpuDrawResources.MaxDrawCount);
 			cullParamsWriter.SetUInt("outputLaneStride", (uint)executionLaneCount);
 			cullParamsWriter.SetUInt("participatingLaneMask", BuildParticipatingLaneMask(participation));
+			cullParamsWriter.SetUInt("ownerViewIndex", (uint)context.View.Index);
 			commandList.SetComputeConstants(cullParamsWriter.RegisterIndex, cullParamsWriter.AsBytes());
 
 			commandList.SetComputeBuffer(0, _gpuDrawResources.DrawCommandBuffer!);
@@ -1937,7 +1995,9 @@ public sealed class GpuDrawPass
 			}
 		}
 
-		drawDatabase.CollectDrawEntries(_drawEntries);
+		// Every command was just reset, so every live source's draws have to be re-encoded, not only the database
+		// of the pass that noticed the slot needed it.
+		CollectLiveDrawEntries(drawDatabase);
 		for (var i = 0; i < _drawEntries.Count; i++)
 		{
 			var entry = _drawEntries[i];
@@ -1968,6 +2028,29 @@ public sealed class GpuDrawPass
 				bindingResolver,
 				passBindingResolver);
 		}
+	}
+
+	/// <summary>
+	/// Draw entries of every database whose draws are in the shared tables this frame, or of
+	/// <paramref name="fallback"/> before the first update has named any.
+	/// </summary>
+	private void CollectLiveDrawEntries(GpuDrawDatabase fallback)
+	{
+		if (_liveSources.Count == 0)
+		{
+			fallback.CollectDrawEntries(_drawEntries);
+			return;
+		}
+
+		_liveEntryScratch.Clear();
+		for (var i = 0; i < _liveSources.Count; i++)
+		{
+			_liveSources[i].Database.CollectDrawEntries(_drawEntries);
+			_liveEntryScratch.AddRange(_drawEntries);
+		}
+
+		_drawEntries.Clear();
+		_drawEntries.AddRange(_liveEntryScratch);
 	}
 
 	private void RegisterIndirectCommandSet(SharedDrawIndirectCommandSet commandSet)
@@ -2132,13 +2215,37 @@ public sealed class GpuDrawPass
 		return DrawFlagActive | ((uint)bucketIndex & DrawFlagBucketMask) << DrawFlagBucketShift;
 	}
 
-	private int AppendFullGpuStateRefreshUpdates(GpuDrawDatabase drawDatabase, List<GpuDrawUpdate> destination)
+	private int AppendFullGpuStateRefreshUpdates(ReadOnlySpan<GpuDrawSource> sources)
 	{
+		var appended = 0;
+		for (var i = 0; i < sources.Length; i++)
+		{
+			appended += AppendFullGpuStateRefreshUpdates(sources[i]);
+		}
+
+		return appended;
+	}
+
+	private void AppendFromSource(in GpuDrawSource source, List<GpuDrawUpdate> updates)
+	{
+		for (var i = 0; i < updates.Count; i++)
+		{
+			_updates.Add(updates[i]);
+			_updateOwners.Add(source.Owner);
+			_updateSources.Add(source.Database);
+		}
+	}
+
+	private int AppendFullGpuStateRefreshUpdates(in GpuDrawSource source)
+	{
+		var destination = _updates;
 		var initialCount = destination.Count;
-		drawDatabase.CollectDrawEntries(_drawEntries);
+		source.Database.CollectDrawEntries(_drawEntries);
 		for (var i = 0; i < _drawEntries.Count; i++)
 		{
 			var entry = _drawEntries[i];
+			_updateOwners.Add(source.Owner);
+			_updateSources.Add(source.Database);
 			destination.Add(GpuDrawUpdate.CreateAdd(
 				entry.DrawKind,
 				entry.DrawHandle,

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
@@ -200,7 +201,10 @@ internal sealed class RenderGraphFrameBuilder
 	// Output texture id per view index, rebuilt each frame and consumed when the UI frame's viewport
 	// sentinels are rewritten. Zero means the view produced nothing this frame.
 	private readonly nint[] _viewportTextureIds = new nint[UiTextureIds.MaxViewports];
-	private readonly List<GpuDrawUpdate> _frameGpuDrawUpdates = [];
+	// Views set up this frame with their scene enabled, in setup order. Their databases feed the shared draw
+	// update, which runs once before any view's passes.
+	private readonly List<RenderViewId> _frameViews = [];
+	private readonly List<GpuDrawSource> _frameDrawSources = [];
 	private const int DdgiShCoefficientCount = DdgiUtilities.ShCoefficientCount;
 
 	// Per-view state that spans frames: history, fog, pyramid and DDGI. Shared with the render graph, which
@@ -241,6 +245,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly Action<RenderGraphContext> _gameplayScreenFinalUiExecute;
 	private readonly Action<RenderGraphContext> _imguiExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawUpdateExecute;
+	private readonly Action<RenderGraphContext> _gpuDrawViewUpdateExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawShadowCullExecute;
 	private readonly Action<RenderGraphContext> _shadowMapExecute;
 	private readonly Action<RenderGraphContext> _gpuDrawCameraCullExecute;
@@ -331,6 +336,7 @@ internal sealed class RenderGraphFrameBuilder
 		_gameplayScreenFinalUiExecute = ExecuteGameplayScreenFinalUi;
 		_imguiExecute = ExecuteImGui;
 		_gpuDrawUpdateExecute = ExecuteGpuDrawUpdate;
+		_gpuDrawViewUpdateExecute = ExecuteGpuDrawViewUpdate;
 		_gpuDrawShadowCullExecute = ExecuteGpuDrawCullShadow;
 		_shadowMapExecute = ExecuteShadowMap;
 		_gpuDrawCameraCullExecute = ExecuteGpuDrawCullCamera;
@@ -391,6 +397,7 @@ internal sealed class RenderGraphFrameBuilder
 	/// </remarks>
 	public void BeginSharedFrame(Int2 framebufferSize, Vector3 sunDirection, float sunIntensityScale, SkyboxPass.Config skyboxConfig)
 	{
+		_frameViews.Clear();
 		var device = _renderer.GetGfxDevice();
 		_gameplayTextureTargets.Clear();
 		for (var i = 0; i < _gameplayUiFrame.TextureSurfaces.Length; i++)
@@ -464,6 +471,10 @@ internal sealed class RenderGraphFrameBuilder
 		Vector3 cameraPosition)
 	{
 		_view = GetOrCreateViewState(view);
+		if (sceneEnabled && _frameViews.Contains(view) == false)
+		{
+			_frameViews.Add(view);
+		}
 
 		var device = _renderer.GetGfxDevice();
 		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
@@ -1299,6 +1310,14 @@ internal sealed class RenderGraphFrameBuilder
 				.WriteTexture(_sharedResources.SkyboxBrdfLut, ResourceState.UnorderedAccess)
 				.SetExecute(_skyboxBrdfExecute);
 		}
+
+		// The draw tables are shared by every view, so they are updated once, from every view's database,
+		// before any view culls or draws.
+		if (_frameViews.Count > 0)
+		{
+			graph.AddPass("GpuDraw Update", PassKind.Compute)
+				.SetExecute(_gpuDrawUpdateExecute);
+		}
 	}
 
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
@@ -1306,8 +1325,8 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		if (_view.FrameResources.SceneEnabled)
 		{
-			graph.AddPass("GpuDraw Update", PassKind.Compute)
-				.SetExecute(_gpuDrawUpdateExecute);
+			graph.AddPass("GpuDraw View Update", PassKind.Compute)
+				.SetExecute(_gpuDrawViewUpdateExecute);
 
 			graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
 				.SetExecute(_gpuDrawShadowCullExecute);
@@ -2102,15 +2121,36 @@ internal sealed class RenderGraphFrameBuilder
 		}
 	}
 
+	/// <summary>
+	/// Shared pass: applies every set-up view's draw-database changes to the shared draw tables, tagging each draw
+	/// with the view that owns it. Each view's changes are also copied for its own ray-tracing update, which runs
+	/// among that view's passes.
+	/// </summary>
 	private void ExecuteGpuDrawUpdate(RenderGraphContext context)
 	{
-		context.GpuDrawDatabase.CopyUpdates(_frameGpuDrawUpdates);
+		_frameDrawSources.Clear();
+		for (var i = 0; i < _frameViews.Count; i++)
+		{
+			var view = _frameViews[i];
+			if (context.FrameSnapshot.TryGetView(view, out var viewSnapshot) == false)
+			{
+				continue;
+			}
 
-		// Before RecordUpdate, not after. RecordUpdate would otherwise upload the instance through
-		// the ordinary mesh path, which allocates a vertex range but leaves the shared bind-pose
-		// source mesh unuploaded — and the skinning shader reads its bind pose from there.
-		var skinningPackets = context.ViewSnapshot.SkinningPackets;
-		EnsureSkinnedInstanceResources(skinningPackets);
+			var viewState = GetOrCreateViewState(view);
+			viewSnapshot.GpuDrawDatabase.CopyUpdates(viewState.RayTracingUpdates);
+
+			// Before RecordUpdate, not after. RecordUpdate would otherwise upload the instance through
+			// the ordinary mesh path, which allocates a vertex range but leaves the shared bind-pose
+			// source mesh unuploaded — and the skinning shader reads its bind pose from there.
+			EnsureSkinnedInstanceResources(viewSnapshot.SkinningPackets);
+			_frameDrawSources.Add(new GpuDrawSource(view, viewSnapshot.GpuDrawDatabase));
+		}
+
+		if (_frameDrawSources.Count == 0)
+		{
+			return;
+		}
 
 		// Graphics bindings require these buffers even when no meshes are skinned.
 		var device = _renderer.GetGfxDevice();
@@ -2119,8 +2159,17 @@ internal sealed class RenderGraphFrameBuilder
 		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
 		_gpuDrawResources.SkinnedInstanceBuffer = _skinningPass.SkinnedInstanceBuffer;
 
-		_gpuDrawPass.RecordUpdate(context);
+		_gpuDrawPass.RecordUpdate(context, CollectionsMarshal.AsSpan(_frameDrawSources));
+	}
 
+	/// <summary>
+	/// The view's own part of the draw update: skinning its instances and updating its acceleration structures.
+	/// Both still use renderer-wide resources — see the multi-viewport architecture notes.
+	/// </summary>
+	private void ExecuteGpuDrawViewUpdate(RenderGraphContext context)
+	{
+		var device = _renderer.GetGfxDevice();
+		var skinningPackets = context.ViewSnapshot.SkinningPackets;
 		_skinningPass.Record(
 			context.CommandList,
 			device,
@@ -2143,7 +2192,7 @@ internal sealed class RenderGraphFrameBuilder
 				_rayTracingSceneResources.QueueSkinnedInstanceRebuild(skinningPackets[i].InstanceMesh);
 			}
 
-			_rayTracingSceneResources.RecordUpdate(context, _renderer, _frameGpuDrawUpdates);
+			_rayTracingSceneResources.RecordUpdate(context, _renderer, _view.RayTracingUpdates);
 		}
 	}
 

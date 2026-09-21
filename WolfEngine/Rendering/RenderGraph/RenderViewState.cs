@@ -67,6 +67,9 @@ internal sealed class RenderViewState
 	/// </summary>
 	public readonly List<LightPacket> RenderLights = new();
 
+	/// <summary>This frame's draw changes for this view's world, kept for its ray-tracing update.</summary>
+	public readonly List<GpuDrawUpdate> RayTracingUpdates = new();
+
 	/// <summary>Where this view's image goes. Fixed for the life of the view.</summary>
 	public RenderViewOutput Output = RenderViewOutput.Texture;
 

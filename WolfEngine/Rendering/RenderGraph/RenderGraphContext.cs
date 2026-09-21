@@ -49,6 +49,12 @@ public sealed class RenderGraphContext
 		internal set => _frameSnapshot = value;
 	}
 
+	/// <summary>
+	/// The view this pass runs for. A pass given no view snapshot — a shared pass on a single-view frame, or a
+	/// test — belongs to the primary view.
+	/// </summary>
+	public RenderViewId View => _viewSnapshot?.View ?? RenderViewId.Primary;
+
 	/// <summary>The scene packets and camera state for the view this pass is recording.</summary>
 	public RenderViewSnapshot ViewSnapshot
 	{

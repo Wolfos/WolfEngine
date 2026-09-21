@@ -216,6 +216,32 @@ with no notion of which view a draw belongs to, and `ActiveDrawCommandUpperBound
 shared resources. Two views would each draw the union of both worlds. Each view's cull needs to be restricted
 to its own database's draws — a per-view list of draw indices, uploaded per view, is the direct form.
 
+**How the draw pipeline becomes per view.** `GpuDrawPass.RecordUpdate` is not a per-view operation, even
+though "GpuDraw Update" is currently recorded among each view's passes. It applies draw-database changes to the
+*shared* instance, mesh, material and draw-command tables; it advances the frame-in-flight slot
+(`AdvanceActiveIndirectSlot`) that selects every per-slot buffer copy; it fills the per-slot update upload
+buffers from the CPU; and it owns bootstrap and recovery state (`_gpuStateBootstrapPending`, the overflow path
+that emits "clear all draws") written for exactly one database. Run once per view, it would advance the
+in-flight ring twice a frame, have the second view's uploads overwrite the first's in the same slot before the
+GPU consumed them, stop bootstrapping after the first database, and let one view's recovery wipe another
+view's draws.
+
+So the update is a **shared** pass, run once per frame over every active view's database: one slot advance, one
+upload, bootstrap and refresh applied to each database, recovery re-adding every database. Because each
+update comes from exactly one view's database, it knows its owning view.
+
+That ownership is what the cull filters on. The cull reads each draw command's `flags`, where bit 0 is active
+and bits 1–31 were nominally the bucket index — but buckets must be below 32, so only five bits are ever used.
+The bucket field narrows to five bits and the owning view's slot goes in the bits above it, which needs no
+change to any GPU struct layout. The cull and compaction shaders are the only decoders of the bucket bits; the
+cull takes the view being culled as a parameter (its constants are set inline per dispatch, so they are already
+safe to vary per view) and skips draws owned by another view. `ddgi_classify` reads only the active bit, so it
+sees every view's draws, which belongs with the per-view DDGI and ray-tracing work below.
+
+The draw-command upper bound needs no per-view copy: every view's database allocates from the one shared
+handle registry, so after the all-views generation refresh each database reports the same bound, and with the
+owner filter a view cannot draw another view's commands anyway.
+
 **Two more shared GPU owners a first two-view build can avoid rather than fix:** the ray-tracing acceleration
 structure is one `RayTracingSceneResources` on the frame builder, and the skinning pass owns one set of
 skinning buffers. Ray-traced ambient occlusion, reflections and DDGI in a second view need a TLAS per view, and
@@ -501,6 +527,14 @@ and bases its verdict on that. Both the `bind` and `scene` sets pass it.
 The view loop in `OnRender` (`loop1`–`loop3` against `scene1`–`scene3`) passed nearest-neighbour: each new
 capture within 44–118 pixels of a baseline capture, against a baseline threshold of 206.
 
+**Three baseline runs can be too tight a threshold; widen the baseline rather than accept or reject on it.**
+The draw-ownership change (`owner1`–`owner3`) failed nearest-neighbour against `loop1`–`loop3` alone, because
+two of those three happened to land 42 pixels apart and set a 110-pixel threshold. Against the pool of every
+capture from builds already verified equivalent in `multi-viewport-stage1/` (`head`, `bind`, `scene`, `loop`,
+twelve runs, nearest-neighbour up to 125), the new captures were within 84–113 pixels and passed. Only pool
+captures from builds that were themselves verified; and keep scale in mind — a draw that vanishes or is
+filtered into the wrong view differs by thousands of pixels, not by a hundred.
+
 Once two views exist, the capture diff stops being the right check. The new one is two views rendering
 different worlds at different sizes with temporal anti-aliasing on: move one camera and assert the other
 view's image is unchanged.
@@ -530,8 +564,15 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    remaining render-thread setup off the frame facade and record
    several views in one graph. Migrate the editor publisher when its overlay world no longer needs the legacy
    multi-world gather.
-4. Restrict each view's camera and shadow culls to its own draws, and make `ActiveDrawCommandUpperBound`
-   per view.
+4. **Done:** "GpuDraw Update" is a shared preparation pass over every set-up view's database
+   (`GpuDrawPass.RecordUpdate(context, sources)`), recorded after all views are set up so it knows which draw.
+   Each draw's owning view slot is encoded in its flags (`GpuDrawFlags.Create`, bucket narrowed to five bits),
+   applied where instance data is built rather than cached per material, since materials are shared across
+   views. The cull takes `ownerViewIndex` and skips other views' draws before generation validation, so one
+   view never marks another's command stale. Full indirect re-encode and bootstrap refresh collect entries from
+   every live database. The per-view remainder — skinning and the ray-tracing update — is "GpuDraw View
+   Update". `GpuDrawFlagsTests` pins the Slang and Metal decoders to `GpuDrawFlags`; there are three decoders,
+   including the Metal-native `gpu_draw_compact_icb.metal`, which a `.slang`-only search misses.
 5. Give every CPU-written per-frame buffer in `GpuDrawResources` a copy per view.
 6. Qualify pass names by view.
 7. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".

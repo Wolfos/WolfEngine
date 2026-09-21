@@ -58,6 +58,27 @@ public sealed class MultiViewRecordingTests
 		Assert.That(names.IndexOf("ImGui"), Is.GreaterThan(lastViewPass), "presentation composites every view");
 	}
 
+	[Test]
+	public void TheSharedDrawUpdateRunsOnceBeforeEveryViewAndEachViewGetsItsOwnViewUpdate()
+	{
+		// The draw tables are shared, so their update is one pass over every view's database; running it per view
+		// would advance the frame-in-flight slot twice and let one view's uploads overwrite another's.
+		var (graph, _) = RecordTwoViews(new Int2(64, 32), new Int2(24, 48));
+		var passes = graph.Passes.ToList();
+		var sharedUpdates = passes.Where(pass => pass.Name == "GpuDraw Update").ToList();
+		var firstViewPass = passes.FindIndex(pass => pass.View.IsValid);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(sharedUpdates, Has.Count.EqualTo(1));
+			Assert.That(sharedUpdates[0].View, Is.EqualTo(RenderViewId.None));
+			Assert.That(passes.IndexOf(sharedUpdates[0]), Is.LessThan(firstViewPass));
+			Assert.That(
+				passes.Where(pass => pass.Name == "GpuDraw View Update").Select(pass => pass.View),
+				Is.EqualTo(new[] { RenderViewId.Primary, Second }));
+		});
+	}
+
 	private static (RenderGraph Graph, RenderGraphFrameBuilder Builder) RecordTwoViews(Int2 primarySize, Int2 secondSize)
 	{
 		var (graph, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
@@ -70,10 +91,12 @@ public sealed class MultiViewRecordingTests
 		};
 		var framebuffer = new Int2(128, 128);
 		builder.BeginSharedFrame(framebuffer, Vector3.UnitY, 1.0f, config.SkyboxConfig);
-		builder.RecordSharedPreparation(graph);
 		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero);
-		builder.RecordBoundView(graph);
 		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, config, Vector3.Zero);
+		builder.RecordSharedPreparation(graph);
+		builder.BindView(RenderViewId.Primary);
+		builder.RecordBoundView(graph);
+		builder.BindView(Second);
 		builder.RecordBoundView(graph);
 		builder.RecordSharedPresentation(graph);
 		return (graph, builder);

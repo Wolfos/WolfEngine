@@ -703,7 +703,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					primarySnapshot.Config.SkyboxConfig);
 				_frameBuilder.SetUiFrame(uiFrame);
 				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
-				_frameBuilder.RecordSharedPreparation(this);
 
 				_sceneColorHandles.Clear();
 				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
@@ -766,6 +765,15 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						viewSnapshot.DecalPackets.Count > 0,
 						viewSnapshot.Config,
 						viewCameraPosition);
+				}
+
+				// Every view is set up before anything is recorded: the shared draw update records first and
+				// has to know which views draw this frame. View state is per view, so setting up the next view
+				// does not disturb one already set up.
+				_frameBuilder.RecordSharedPreparation(this);
+				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)
+				{
+					SelectView(_recordedViews[viewIndex]);
 					_frameBuilder.RecordBoundView(this);
 				}
 
