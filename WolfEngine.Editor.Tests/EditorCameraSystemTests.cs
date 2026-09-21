@@ -51,12 +51,6 @@ public sealed class EditorCameraSystemTests
 		input.SetButton(InputActionBinding.MouseButtonRight, false);
 		system.BeginFrame();
 
-		var requestedForward = Vector3.Normalize(new Vector3(1, -1, 1));
-		Assert.That(system.SetCameraPose(RenderViewId.Primary, new Vector3(3, 2, 1), requestedForward), Is.True);
-		Assert.That(primaryWorld.GetComponent<LocalTransform>(primary).LocalPosition, Is.EqualTo(new Vector3(3, 2, 1)));
-		system.Update(0.0f, primaryWorld);
-		Assert.That(system.TryGetCameraPose(RenderViewId.Primary, out _, out var actualForward), Is.True);
-		Assert.That(Vector3.Distance(actualForward, requestedForward), Is.LessThan(0.0001f));
 		Assert.That(system.TryGetCameraPose(previewView, out var previewPosition, out _), Is.True);
 		Assert.That(previewPosition, Is.EqualTo(previewAfterInput));
 

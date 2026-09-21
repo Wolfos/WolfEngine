@@ -149,6 +149,5 @@ public static class Program
 			provider.GetRequiredService<IEditorLogStore>(),
 			provider.GetRequiredService<IIconManager>()));
 		services.AddSingleton<SceneWindow>();
-		services.AddSingleton<PreviewViewportWindow>();
 	}
 }

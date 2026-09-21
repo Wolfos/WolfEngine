@@ -22,6 +22,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorProjectService _projectService;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly IInputSystem _inputSystem;
@@ -35,10 +36,8 @@ public sealed class EditorRemoteAutomationController
 	private readonly RenderGraph _renderGraph;
 	private readonly GpuProfiler _gpuProfiler;
 	private readonly EditorViewportStateBus _viewportStateBus;
-	private readonly EditorCameraSystem _editorCameraSystem;
 	private readonly IEditorWorkspaceService _workspaces;
 	private readonly EditorWindowRegistry _windows;
-	private readonly PreviewViewportWindow _previewWindow;
 	private readonly SemaphoreSlim _captureGate = new(1, 1);
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -50,6 +49,7 @@ public sealed class EditorRemoteAutomationController
 		IEditorProjectService projectService,
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorSceneWorkspace sceneWorkspace,
+		IAssetSelectionService assetSelectionService,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorPlaySession playSession,
 		IInputSystem inputSystem,
@@ -63,17 +63,15 @@ public sealed class EditorRemoteAutomationController
 		RenderGraph renderGraph,
 		GpuProfiler gpuProfiler,
 		EditorViewportStateBus viewportStateBus,
-		EditorCameraSystem editorCameraSystem,
 		IEditorWorkspaceService workspaces,
-		EditorWindowRegistry windows,
-		PreviewViewportWindow previewWindow)
+		EditorWindowRegistry windows)
 	{
 		_viewportStateBus = viewportStateBus;
-		_editorCameraSystem = editorCameraSystem;
 		_projectPath = projectPath;
 		_projectService = projectService;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
 		_sceneWorkspace = sceneWorkspace;
+		_assetSelectionService = assetSelectionService;
 		_sceneSnapshotService = sceneSnapshotService;
 		_playSession = playSession;
 		_inputSystem = inputSystem;
@@ -88,11 +86,19 @@ public sealed class EditorRemoteAutomationController
 		_gpuProfiler = gpuProfiler;
 		_workspaces = workspaces;
 		_windows = windows;
-		_previewWindow = previewWindow;
 	}
 
 	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(CreateWorkspaceState, cancellationToken);
+
+	public Task<string> SelectAssetAsync(Guid assetId, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!_projectService.TryGetAsset(assetId, out var asset))
+				throw new InvalidOperationException($"Asset '{assetId}' was not found in the open project.");
+			_assetSelectionService.Select(assetId);
+			return $"Selected asset '{asset.Name}' ({assetId:D}) in the Asset Editor.";
+		}, cancellationToken);
 
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		Enqueue(() =>
@@ -724,35 +730,18 @@ public sealed class EditorRemoteAutomationController
 		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
-		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, RenderViewId.Primary, cancellationToken);
-
-	/// <summary>Frames one live editor camera in memory; the other view's camera is unchanged.</summary>
-	public Task<string> SetEditorCameraPoseAsync(int viewIndex, Vector3 position, Vector3 forward, CancellationToken cancellationToken) =>
-		Enqueue(() =>
-		{
-			var view = RenderViewId.FromIndex(viewIndex);
-			if (!_editorCameraSystem.SetCameraPose(view, position, forward))
-				throw new InvalidOperationException($"No live editor camera is registered for {view}.");
-			return $"Set {view} camera pose in memory.";
-		}, cancellationToken);
-
-	public Task SetPreviewFrozenAsync(bool frozen, CancellationToken cancellationToken) =>
-		Enqueue(() => _previewWindow.SetFrozen(frozen), cancellationToken);
-
-	public Task<FrameCaptureResult> CaptureRenderViewAsync(int viewIndex, string outputPath, CancellationToken cancellationToken) =>
-		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, RenderViewId.FromIndex(viewIndex), cancellationToken);
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, cancellationToken);
 
 	/// <summary>
 	/// Captures the whole editor window, including the ImGui panels, docking tabs and menus composited
 	/// over the scene. This is what to use when the thing under test is the editor UI itself.
 	/// </summary>
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
-		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, RenderViewId.Primary, cancellationToken);
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, cancellationToken);
 
 	private async Task<FrameCaptureResult> CaptureFrameAsync(
 		string outputPath,
 		FrameCaptureTarget target,
-		RenderViewId view,
 		CancellationToken cancellationToken)
 	{
 		await _captureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -760,25 +749,13 @@ public sealed class EditorRemoteAutomationController
 		{
 			return await EnqueueAsync(async () =>
 			{
-				if (target == FrameCaptureTarget.SceneColor &&
-				    (!_renderGraph.Views.Contains(view) ||
-				     (view != RenderViewId.Primary && !_viewportStateBus.GetUiState(view).Visible)))
-					throw new InvalidOperationException($"Render view {view} is not active and visible.");
-				if (target == FrameCaptureTarget.SceneColor) _renderGraph.SetSceneCaptureView(view);
-				try
-				{
-					var fullOutputPath = ResolveOutputPath(outputPath);
-					var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
-					Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-					using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-					image.SaveAsPng(fullOutputPath);
-					return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
-						_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
-				}
-				finally
-				{
-					if (target == FrameCaptureTarget.SceneColor) _renderGraph.SetSceneCaptureView(RenderViewId.Primary);
-				}
+				var fullOutputPath = ResolveOutputPath(outputPath);
+				var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
+				Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
+				image.SaveAsPng(fullOutputPath);
+				return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
+					_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
 			}, cancellationToken).ConfigureAwait(false);
 		}
 		finally

@@ -5,7 +5,6 @@ namespace WolfEngine.Editor.UI;
 public static class EditorWindowIds
 {
 	public const string Scene = "scene";
-	public const string Preview = "preview";
 	public const string Entities = "entities";
 	public const string Components = "components";
 	public const string Assets = "assets";
@@ -18,7 +17,7 @@ public static class EditorWindowIds
 
 	public static readonly HashSet<string> All =
 	[
-		Scene, Preview, Entities, Components, Assets, AssetEditor, Log, Profiler,
+		Scene, Entities, Components, Assets, AssetEditor, Log, Profiler,
 		MaterialImporter, Preferences, ProjectSettings
 	];
 }

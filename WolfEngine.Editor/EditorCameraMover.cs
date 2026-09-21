@@ -176,30 +176,6 @@ public class EditorCameraSystem: IUpdate
 		return false;
 	}
 
-	/// <summary>Frames the camera backing a view without changing another view's input or pose.</summary>
-	public bool SetCameraPose(RenderViewId view, Vector3 position, Vector3 forward)
-	{
-		if (!_cameraPoses.TryGetValue(view, out var pose) ||
-		    !pose.World.IsAlive(pose.Entity) ||
-		    !pose.World.HasComponent<EditorCameraMover>(pose.Entity) ||
-		    !float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
-		    !float.IsFinite(forward.X) || !float.IsFinite(forward.Y) || !float.IsFinite(forward.Z) ||
-		    forward.LengthSquared() < 1e-8f)
-		{
-			return false;
-		}
-
-		forward = Vector3.Normalize(forward);
-		ref var mover = ref pose.World.GetComponent<EditorCameraMover>(pose.Entity);
-		mover.Yaw = MathF.Atan2(forward.X, forward.Z);
-		mover.Pitch = -MathF.Asin(Math.Clamp(forward.Y, -1.0f, 1.0f));
-		mover.Initialized = true;
-		pose.World.SetLocalPosition(pose.Entity, position);
-		pose.World.SetLocalRotation(pose.Entity, Quaternion.CreateFromYawPitchRoll(mover.Yaw, mover.Pitch, 0.0f));
-		_cameraPoses[view] = pose with { Position = position, Forward = forward };
-		return true;
-	}
-
 	public WorldTag GetTag() => WorldTag.Editor;
 
 	private Vector3 GetMoveInput()

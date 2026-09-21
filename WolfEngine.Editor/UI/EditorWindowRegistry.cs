@@ -38,7 +38,6 @@ public sealed class EditorWindowRegistry
 		IEditorWorkspaceService workspaces,
 		IEditorNotificationService notifications,
 		SceneWindow scene,
-		PreviewViewportWindow preview,
 		EntitiesWindow entities,
 		ComponentsWindow components,
 		AssetsWindow assets,
@@ -54,7 +53,6 @@ public sealed class EditorWindowRegistry
 		_windows =
 		[
 			new(EditorWindowIds.Scene, "Scene", scene),
-			new(EditorWindowIds.Preview, "Preview", preview),
 			new(EditorWindowIds.Entities, "Entities", entities),
 			new(EditorWindowIds.Components, "Components", components),
 			new(EditorWindowIds.Assets, "Assets", assets),

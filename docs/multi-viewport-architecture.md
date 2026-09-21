@@ -8,9 +8,9 @@ Views that are not visible are skipped as an optimisation, never as a correctnes
 
 ## Handover status
 
-**Stage 1 is complete for the Scene and Preview viewports.** Two views render in the same frame, including
-in the interactive editor, and each has independent camera input and pose. The renderer baseline is
-`2a04213` on branch `multi-viewport`.
+**Stage 1 is complete; the useful second view is now the material editor preview.** The proof-of-concept
+Preview window, its box-and-sphere scene, and its dedicated capture automation have been removed. The renderer
+baseline is `2a04213` on branch `multi-viewport`.
 
 What works now, end to end:
 
@@ -20,26 +20,27 @@ What works now, end to end:
   and indirect command sets. Draws carry their owning view in their flags and each view's cull skips the rest.
 - The editor binds the primary view to the scene world, rebinds it on scene load and play-mode switches
   (`RebindView`), and publishes secondary views registered in `EditorRenderViews`.
-- `EditorPreviewScene` is a working second view. CLI automation renders and captures it:
-  `--preview-capture <path>` alongside `--capture`. With it active, the scene view stays within the
-  single-view noise floor and the preview is bit-identical across runs.
-- `PreviewViewportWindow` creates that preview scene on its first draw, publishes its own viewport size,
-  visibility and pointer state, and displays the view texture. Right-drag and movement keys control its own
-  camera. Closing it or switching to a workspace without it hides the view; the scene view remains active.
-  The Window menu lists it through `EditorWindowRegistry`.
+- `MaterialAssetEditor` creates a second view only when a material is shown. Its own world contains one
+  mesh sphere, a directional light and a camera. It uses the ordinary material runtime and normal render
+  passes — skybox, GPU draw, G-buffer, clustered lighting, deferred and transparent forward — with no
+  preview-specific shader. The image is embedded in the Asset Editor; the view is removed when that editor
+  closes or switches to another asset type.
+- Editable material values are copied to a reusable preview material as the controls change, without mutating
+  the material used by the main scene. Generated materials can display their resolved runtime material.
+- Unassigned transient texture handles no longer collide with compiled alias-slot IDs. The collision caused
+  an incompatible-descriptor assertion (and could stall rendering) when the material view and a populated
+  scene used different-sized resources. A regression test covers the slot namespace.
+- In-process editor automation opened the material preview alongside both Bistro and SyntyCity, waited for
+  completed frames, captured the combined editor window, and profiled the view-qualified normal render passes.
 - `EditorCameraSystem` routes one input snapshot to the viewport where the right drag began, then applies it
   only to that view's camera mover. The Scene-only selection, gizmo and terrain tools explicitly address the
-  primary view; the Preview cannot accidentally edit the authoring scene. Unit tests cover independent input
-  and pose changes across two editor worlds. The author confirmed both cameras rotate and move independently
-  in the interactive editor.
-- In-process automation has `set_editor_camera_pose`, `set_preview_frozen` and `capture_render_view` for future
-  deterministic per-view renderer comparisons. A pixel-diff capture with a populated authoring scene was not
-  part of this verification; the interactive check used an empty authoring scene.
+  primary view. Unit tests cover independent input and pose changes across two editor worlds; the author
+  previously confirmed both cameras move independently in the interactive proof of concept.
 - View lifecycle (create, destroy, rebind) runs on the render thread; bindings are lock-guarded.
 
 **Next step — Stage 2.** Add quality tiers and on-demand recording. Keep ray-traced effects and skinned
 meshes out of secondary views until the TLAS and skinning are per view. Selection and gizmo interaction in
-future document viewports belongs with the Stage 3 per-document editor context, not the Preview viewport.
+future document viewports belongs with the Stage 3 per-document editor context.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -558,8 +559,8 @@ Once two views exist, the capture diff stops being the right check. The new one 
 different worlds at different sizes with temporal anti-aliasing on: move one camera and assert the other
 view's image is unchanged.
 
-`capture_editor_window` now shows both viewports and their UI; `capture_frame` still reads back only the
-selected scene colour target. Direct per-view readback and state assertions would benefit from
+`capture_editor_window` can show the Asset Editor's material preview and the Scene viewport together;
+`capture_frame` still reads back only the primary scene colour target. Direct per-view readback and state assertions would benefit from
 `list_render_views`, `get_render_view_state(view)` and `capture_render_view(view, path)` in
 `WolfEngine.Editor.Automation`. Quality tiers and `set_render_view_quality(view, tier)` belong to stage 2.
 
@@ -627,7 +628,7 @@ selected scene colour target. Direct per-view readback and state assertions woul
    the authoring-to-runtime rebind was exercised on the real render thread; `editorview1`–`editorview3` were within
    22–96 pixels of the verified pool. `HasRenderWorldListChanged` stays for the compatibility overload, which
    `Wolfie.IAE` still uses.
-8. **Two views render in one frame.** `EditorPreviewScene` is a second world — light, camera, a box and a
+8. **Two views render in one frame.** The original `EditorPreviewScene` proof of concept was a second world — light, camera, a box and a
    sphere — with its own view, published through `EditorRenderViews`, the registry of secondary views the editor
    submits alongside the scene view. CLI automation gains `--preview-capture <path>`, which renders the preview at
    640×480 next to the 1280×720 scene and captures both (`RenderGraph.SetSceneCaptureView` selects which view a
@@ -646,21 +647,22 @@ selected scene colour target. Direct per-view readback and state assertions woul
    (`RenderViewState.OwnsPresentation`: the primary, or a backbuffer view) now writes it, via a `writeFinalOutput`
    flag on the copy shader, and only that view draws the gameplay screen UI.
 
-   `PreviewViewportWindow` now shows the preview interactively. Automation opened it in the Scene workspace,
+   The now-removed `PreviewViewportWindow` showed the preview interactively. Automation opened it in the Scene workspace,
    asserted its UI panel state, and captured the whole editor window: the floating Preview displays the box
    and sphere while Scene displays its own sky. A five-frame GPU profile contained view-qualified Preview
    passes while open; after closing the window and waiting ten frames, another five-frame profile contained
    no Preview passes. Reopening it showed the panel again, and the in-process editor shut down cleanly. The
-   window is created lazily, so merely registering it does not create a render view.
+   window was created lazily, so merely registering it did not create a render view. The current
+   `MaterialPreviewScene` uses a real `MeshRenderer` sphere and the selected material instead.
 
    Keep ray-traced effects and skinned meshes out of the second view until the TLAS and skinning are per view.
-9. **Done for Scene and Preview:** each camera mover is bound to a `RenderViewId`; `EditorCameraSystem.BeginFrame`
+9. **Done for camera-equipped editor viewports:** each camera mover is bound to a `RenderViewId`; `EditorCameraSystem.BeginFrame`
    chooses the viewport where right-drag started and takes one input snapshot before either editor world updates.
-   The Preview window exposes its image as an input region and no longer resets its camera transform during
-   submission. Scene-only editing tools name the primary view explicitly. The two-world camera test asserts
+   The proof-of-concept Preview window exposed its image as an input region; it has since been removed.
+   The material preview's camera is static. Scene-only editing tools name the primary view explicitly. The two-world camera test asserts
    that moving and rotating one camera leaves the other's pose unchanged; interactive navigation was confirmed
-   in both windows. Pixel-level image independence with a populated authoring scene is still a useful renderer
-   regression check, supported by the new in-process capture tools, but was not run in this slice.
+   in both proof-of-concept windows. Pixel-level image independence with a populated authoring scene is still
+   a useful renderer regression check but was not run in that slice.
 
 **Stage 2 — make it affordable.** Quality tiers, on-demand recording, skipping views that are not visible, and
 the per-view jitter sequence position that on-demand recording requires.
