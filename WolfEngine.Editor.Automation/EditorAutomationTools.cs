@@ -212,6 +212,10 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.CaptureFrameAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "select_asset"), Description("Select an asset by its persistent GUID through the editor's normal asset-selection path and focus the Asset Editor. The selection is in memory only.")]
+	public Task<string> SelectAsset(string assetId, CancellationToken cancellationToken) =>
+		_controller.SelectAssetAsync(Guid.Parse(assetId), cancellationToken);
+
 	[McpServerTool(Name = "capture_editor_window"), Description("Capture a PNG of the whole editor window, including the ImGui panels, dock tabs and menus. Use this instead of capture_frame whenever the editor UI itself is what needs to be verified.")]
 	public Task<FrameCaptureResult> CaptureEditorWindow(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

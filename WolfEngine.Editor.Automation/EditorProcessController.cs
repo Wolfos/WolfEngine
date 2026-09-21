@@ -225,6 +225,9 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
 
+	public Task<string> SelectAssetAsync(Guid assetId, CancellationToken cancellationToken) =>
+		GetRunningEditor().SelectAssetAsync(assetId, cancellationToken);
+
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
 

@@ -29,12 +29,8 @@ public sealed class ShadowMapPass
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), IGfxPipeline> _pipelinesByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), SharedDrawGraphicsBufferBindings> _bufferBindingsByCascadeExecutionKey = new();
 	private readonly Dictionary<(int CascadeIndex, GpuDrawExecutionKey ExecutionKey), ShaderReflectionLayout> _reflectionByCascadeExecutionKey = new();
-	private readonly SharedDrawIndirectCommandSet[] _indirectCommandSets =
-	[
-		new(),
-		new(),
-		new()
-	];
+	// One set per cascade, per view; see PerViewIndirectCommandSets.
+	private readonly PerViewIndirectCommandSets _indirectCommandSets = new(MaxCascadeCount);
 	private ShadowFrameData _currentFrameData = CreateDisabledFrameData();
 	private GraphicsBackendKind? _reflectionBackendKind;
 	private ShaderPropertyWriter? _cameraWriter;
@@ -53,6 +49,11 @@ public sealed class ShadowMapPass
 		ArgumentNullException.ThrowIfNull(sceneData);
 
 		var resolvedConfig = ResolvedShadowMapConfig.From(config);
+		if (!config.Enabled)
+		{
+			_currentFrameData = CreateDisabledFrameData(resolvedConfig);
+			return;
+		}
 		if (TryBuildShadowCascades(sceneData, resolvedConfig, out var matrices, out var splits, out var shadowedLightIndex))
 		{
 			_currentFrameData = new ShadowFrameData(
@@ -78,19 +79,26 @@ public sealed class ShadowMapPass
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
 
+	internal static ShadowFrameData GetDisabledFrameData(in ShadowMapConfig config) =>
+		CreateDisabledFrameData(ResolvedShadowMapConfig.From(config));
+
 	public void SetCompactedExecution(int cascadeIndex, bool enabled)
 	{
 		ValidateCascadeIndex(cascadeIndex);
 		_compactedExecutionByCascade[cascadeIndex] = enabled;
 	}
 
-	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int cascadeIndex)
+	public SharedDrawIndirectCommandSet GetIndirectCommandSet(int cascadeIndex, int viewIndex)
 	{
 		ValidateCascadeIndex(cascadeIndex);
-		return _indirectCommandSets[cascadeIndex];
+		return _indirectCommandSets.Get(viewIndex, cascadeIndex);
 	}
 
-	public void EnsureIndirectResources(IGfxDevice device, int cascadeIndex)
+	/// <summary>Removes a destroyed view's cascade command sets, for the caller to retire.</summary>
+	internal IReadOnlyList<SharedDrawIndirectCommandSet> TakeViewCommandSets(int viewIndex) =>
+		_indirectCommandSets.Take(viewIndex);
+
+	public void EnsureIndirectResources(IGfxDevice device, int cascadeIndex, int viewIndex)
 	{
 		ArgumentNullException.ThrowIfNull(device);
 		ValidateCascadeIndex(cascadeIndex);
@@ -100,7 +108,7 @@ public sealed class ShadowMapPass
 			EnsurePipeline(device, laneDefinitions[i], cascadeIndex);
 		}
 
-		_indirectCommandSets[cascadeIndex].EnsureCreated(device);
+		_indirectCommandSets.Get(viewIndex, cascadeIndex).EnsureCreated(device);
 	}
 
 	public bool HasIndirectLane(int cascadeIndex, GpuDrawExecutionLaneDefinition lane)
@@ -154,7 +162,7 @@ public sealed class ShadowMapPass
 		var laneDefinitions = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster);
 		var buckets = new List<ShadowMapExecutionBucket>(laneDefinitions.Length);
 		var activeIndirectSlot = gpuDrawResources.ActiveIndirectCommandSlot;
-		var commandSet = _indirectCommandSets[cascadeIndex];
+		var commandSet = _indirectCommandSets.Get(gpuDrawResources.ActiveViewIndex, cascadeIndex);
 		commandSet.EnsureCreated(device);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{

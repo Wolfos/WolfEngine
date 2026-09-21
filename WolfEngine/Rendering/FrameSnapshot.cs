@@ -7,21 +7,20 @@ namespace WolfEngine.Rendering;
 /// <summary>
 /// Reusable frame data handed from the game thread to the render thread.
 /// </summary>
-public sealed class FrameSnapshot
+public sealed class RenderViewSnapshot
 {
 	private static readonly Vector3 DefaultSunDirection = Vector3.Normalize(new Vector3(0.2f, 0.9f, 0.3f));
-
-	public FrameSnapshot()
-		: this(new GpuDrawTransformHistory(), new GpuDrawHandleRegistry())
-	{
-	}
 
 	/// <param name="drawTransformHistory">
 	/// Previous-frame draw transforms, shared with the other snapshots in the same buffer.
 	/// </param>
 	/// <param name="drawHandles">GPU table slots, shared with the other snapshots in the same buffer.</param>
-	internal FrameSnapshot(GpuDrawTransformHistory drawTransformHistory, GpuDrawHandleRegistry drawHandles)
+	internal RenderViewSnapshot(
+		RenderViewId view,
+		GpuDrawTransformHistory drawTransformHistory,
+		GpuDrawHandleRegistry drawHandles)
 	{
+		View = view;
 		LightPackets = new List<LightPacket>(16);
 		DecalPackets = new List<DecalProjectorPacket>(16);
 		FogVolumePackets = new List<FogVolumePacket>(16);
@@ -32,6 +31,10 @@ public sealed class FrameSnapshot
 		Config = new();
 		GpuDrawDatabase = new GpuDrawDatabase(drawTransformHistory, drawHandles);
 	}
+
+	public RenderViewId View { get; }
+	internal long BindingGeneration { get; private set; }
+	internal World? BoundWorld { get; private set; }
 
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
@@ -64,6 +67,34 @@ public sealed class FrameSnapshot
 	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
 	private int _boneMatrixArenaUsed;
 
+	/// <summary>
+	/// A view id is a reusable slot. Retire records and camera history when that slot is rebound, even if
+	/// the same world is bound again after a destroy/create cycle.
+	/// </summary>
+	internal void Bind(World world, long bindingGeneration)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		if (bindingGeneration <= 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(bindingGeneration));
+		}
+		if (ReferenceEquals(BoundWorld, world) && BindingGeneration == bindingGeneration)
+		{
+			return;
+		}
+
+		GpuDrawDatabase.BeginSync(reconcilePersistentMeshes: true);
+		GpuDrawDatabase.EndSync();
+		Camera = default;
+		CameraWorldTransform = default;
+		PreviousCamera = default;
+		PreviousCameraWorldTransform = default;
+		HasPreviousCameraState = false;
+		_hasCameraState = false;
+		BoundWorld = world;
+		BindingGeneration = bindingGeneration;
+	}
+
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
 		if (HasPreviousCameraState == false)
@@ -83,7 +114,7 @@ public sealed class FrameSnapshot
 	/// motion vector spans one frame, and the camera half of it has to line up with the transform half,
 	/// which <see cref="GpuDrawTransformHistory"/> also takes from the previously published frame.
 	/// </remarks>
-	internal void SeedPreviousCameraFrom(FrameSnapshot published)
+	internal void SeedPreviousCameraFrom(RenderViewSnapshot published)
 	{
 		if (ReferenceEquals(published, this) || published._hasCameraState == false)
 		{
@@ -201,6 +232,186 @@ public sealed class FrameSnapshot
 
 		public Light Light { get; }
 		public Matrix4x4 Transform { get; }
+	}
+}
+
+/// <summary>
+/// Reusable frame data handed from the game thread to the render thread, partitioned by render view.
+/// </summary>
+/// <remarks>
+/// The parameterless members are a compatibility facade for the primary view. New multi-view code should
+/// enumerate <see cref="Views"/> or address an entry through <see cref="GetOrCreateView"/>.
+/// </remarks>
+public sealed class FrameSnapshot
+{
+	private readonly GpuDrawTransformHistory _drawTransformHistory;
+	private readonly GpuDrawHandleRegistry _drawHandles;
+	private readonly List<RenderViewSnapshot> _viewEntries = [];
+	private readonly List<RenderViewSnapshot> _views = [];
+	private FrameSnapshot? _previousPublished;
+
+	public FrameSnapshot()
+		: this(new GpuDrawTransformHistory(), new GpuDrawHandleRegistry())
+	{
+	}
+
+	internal FrameSnapshot(GpuDrawTransformHistory drawTransformHistory, GpuDrawHandleRegistry drawHandles)
+	{
+		_drawTransformHistory = drawTransformHistory;
+		_drawHandles = drawHandles;
+		GetOrCreateView(RenderViewId.Primary);
+	}
+
+	public IReadOnlyList<RenderViewSnapshot> Views => _views;
+
+	internal RenderViewSnapshot BindView(RenderViewId view, World world, long bindingGeneration)
+	{
+		var snapshot = GetOrCreateView(view);
+		snapshot.Bind(world, bindingGeneration);
+		if (_previousPublished is not null &&
+		    _previousPublished.TryGetView(view, out var previous) &&
+		    ReferenceEquals(previous.BoundWorld, world) &&
+		    previous.BindingGeneration == bindingGeneration)
+		{
+			snapshot.SeedPreviousCameraFrom(previous);
+		}
+
+		return snapshot;
+	}
+
+	internal RenderViewSnapshot GetOrCreateView(RenderViewId view)
+	{
+		if (view.IsValid == false)
+		{
+			throw new ArgumentException("A snapshot entry needs a valid render view id.", nameof(view));
+		}
+
+		for (var i = 0; i < _viewEntries.Count; i++)
+		{
+			var existing = _viewEntries[i];
+			if (existing.View == view)
+			{
+				Activate(existing);
+				return existing;
+			}
+		}
+
+		var snapshot = new RenderViewSnapshot(view, _drawTransformHistory, _drawHandles);
+		if (_previousPublished is not null && _previousPublished.TryGetView(view, out var previous))
+		{
+			snapshot.SeedPreviousCameraFrom(previous);
+		}
+
+		var insertIndex = _viewEntries.FindIndex(candidate => candidate.View.CompareTo(view) > 0);
+		if (insertIndex < 0)
+		{
+			_viewEntries.Add(snapshot);
+		}
+		else
+		{
+			_viewEntries.Insert(insertIndex, snapshot);
+		}
+		Activate(snapshot);
+
+		return snapshot;
+	}
+
+	private void Activate(RenderViewSnapshot snapshot)
+	{
+		if (_views.Contains(snapshot))
+		{
+			return;
+		}
+
+		var insertIndex = _views.FindIndex(candidate => candidate.View.CompareTo(snapshot.View) > 0);
+		if (insertIndex < 0)
+		{
+			_views.Add(snapshot);
+		}
+		else
+		{
+			_views.Insert(insertIndex, snapshot);
+		}
+	}
+
+	public bool TryGetView(RenderViewId view, out RenderViewSnapshot snapshot)
+	{
+		for (var i = 0; i < _views.Count; i++)
+		{
+			if (_views[i].View == view)
+			{
+				snapshot = _views[i];
+				return true;
+			}
+		}
+
+		snapshot = null!;
+		return false;
+	}
+
+	private RenderViewSnapshot Primary => GetOrCreateView(RenderViewId.Primary);
+
+	public Camera Camera => Primary.Camera;
+	public WorldTransform CameraWorldTransform => Primary.CameraWorldTransform;
+	public Camera PreviousCamera => Primary.PreviousCamera;
+	public WorldTransform PreviousCameraWorldTransform => Primary.PreviousCameraWorldTransform;
+	public bool HasPreviousCameraState => Primary.HasPreviousCameraState;
+	public List<RenderViewSnapshot.LightPacket> LightPackets => Primary.LightPackets;
+	public List<DecalProjectorPacket> DecalPackets => Primary.DecalPackets;
+	public List<FogVolumePacket> FogVolumePackets => Primary.FogVolumePackets;
+	public List<OutlinePacket> OutlinePackets => Primary.OutlinePackets;
+	public List<SkinningPacket> SkinningPackets => Primary.SkinningPackets;
+	public ReadOnlySpan<Matrix4x4> BoneMatrices => Primary.BoneMatrices;
+	public Vector3 SunDirection => Primary.SunDirection;
+	public float SunIntensityScale => Primary.SunIntensityScale;
+	public RenderConfig Config => Primary.Config;
+	public ColorLookupTable? ColorGradingLookupTable => Primary.ColorGradingLookupTable;
+	public GpuDrawDatabase GpuDrawDatabase => Primary.GpuDrawDatabase;
+
+	public void SetCamera(Camera camera, WorldTransform worldTransform) => Primary.SetCamera(camera, worldTransform);
+	public void AddSkinning(
+		Mesh sourceMesh,
+		Mesh instanceMesh,
+		ReadOnlySpan<Matrix4x4> boneMatrices,
+		ReadOnlySpan<Matrix4x4> previousBoneMatrices) =>
+		Primary.AddSkinning(sourceMesh, instanceMesh, boneMatrices, previousBoneMatrices);
+	public void AddLight(Light light, Matrix4x4 transform) => Primary.AddLight(light, transform);
+	public void AddDecal(DecalProjector projector, Matrix4x4 transform) => Primary.AddDecal(projector, transform);
+	public void AddOutline(Mesh mesh, Matrix4x4 transform, ColorRGBA color, float thicknessPixels) =>
+		Primary.AddOutline(mesh, transform, color, thicknessPixels);
+	public void AddFogVolume(FogVolume volume, Matrix4x4 transform) => Primary.AddFogVolume(volume, transform);
+	public void SetSun(Vector3 sunDirection, float sunIntensityScale) => Primary.SetSun(sunDirection, sunIntensityScale);
+	public void SetConfig(RenderConfig config) => Primary.SetConfig(config);
+	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable) =>
+		Primary.SetColorGradingLookupTable(lookupTable);
+
+	public void Clear()
+	{
+		_previousPublished = null;
+		_views.Clear();
+		for (var i = 0; i < _viewEntries.Count; i++)
+		{
+			_viewEntries[i].Clear();
+		}
+	}
+
+	/// <summary>Seeds camera history independently for every retained view entry.</summary>
+	internal void SeedPreviousCameraFrom(FrameSnapshot published)
+	{
+		if (ReferenceEquals(published, this))
+		{
+			return;
+		}
+
+		_previousPublished = published;
+		for (var i = 0; i < _viewEntries.Count; i++)
+		{
+			var view = _viewEntries[i];
+			if (published.TryGetView(view.View, out var previous))
+			{
+				view.SeedPreviousCameraFrom(previous);
+			}
+		}
 	}
 }
 

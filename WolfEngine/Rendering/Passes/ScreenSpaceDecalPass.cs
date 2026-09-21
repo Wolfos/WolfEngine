@@ -47,7 +47,7 @@ public sealed class ScreenSpaceDecalPass
 
 	public ScreenSpaceDecalPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device,
 		GpuDrawResources gpuDrawResources,
 		SceneDrawData sceneData)

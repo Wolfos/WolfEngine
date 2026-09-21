@@ -30,11 +30,19 @@ public sealed class RenderGraphPass
 	
 	public PassKind Kind { get; private set; }
 
+	/// <summary>
+	/// The view this pass was recorded for, or <see cref="RenderViewId.None"/> for a pass shared by every view.
+	/// Execution rebinds per-view state from this, because a pass reads that state when it runs, not when it
+	/// is recorded.
+	/// </summary>
+	public RenderViewId View { get; private set; }
+
 	[MemberNotNull(nameof(Name))]
-	internal void Configure(string name, PassKind kind)
+	internal void Configure(string name, PassKind kind, RenderViewId view = default)
 	{
 		Name = name ?? throw new ArgumentNullException(nameof(name));
 		Kind = kind;
+		View = view;
 		Clear();
 	}
 

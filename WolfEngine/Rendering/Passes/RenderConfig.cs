@@ -144,6 +144,7 @@ public struct ShadowMapConfig
 	{
 	}
 
+	public bool Enabled { get; set; } = true;
 	public int CascadeCount { get; set; } = ShadowMapPass.MaxCascadeCount;
 	public int CascadeResolution { get; set; } = ShadowMapPass.DefaultCascadeResolution;
 	public float CascadeBlendDistance { get; set; } = ShadowMapPass.DefaultCascadeBlendDistance;

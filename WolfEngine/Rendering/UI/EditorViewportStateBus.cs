@@ -122,17 +122,20 @@ public readonly struct SceneViewportRenderState
 	public static readonly SceneViewportRenderState Empty = new(
 		textureId: 0,
 		renderSizePixels: Int2.Zero,
+		projection: Matrix4x4.Identity,
 		debugViews: Array.Empty<SceneDebugViewOption>(),
 		activeDebugViewId: SceneDebugViewIds.FinalColor);
 
 	public SceneViewportRenderState(
 		nint textureId,
 		Int2 renderSizePixels,
+		Matrix4x4 projection,
 		SceneDebugViewOption[] debugViews,
 		string activeDebugViewId)
 	{
 		TextureId = textureId;
 		RenderSizePixels = renderSizePixels;
+		Projection = projection;
 		DebugViews = debugViews ?? Array.Empty<SceneDebugViewOption>();
 		ActiveDebugViewId = string.IsNullOrWhiteSpace(activeDebugViewId)
 			? SceneDebugViewIds.FinalColor
@@ -141,45 +144,86 @@ public readonly struct SceneViewportRenderState
 
 	public nint TextureId { get; }
 	public Int2 RenderSizePixels { get; }
+
+	public Matrix4x4 Projection { get; }
 	public SceneDebugViewOption[] DebugViews { get; }
 	public string ActiveDebugViewId { get; }
 }
 
+/// <summary>
+/// Carries viewport state between the game thread, which owns the panels, and the render thread, which owns
+/// the images. State is held per <see cref="RenderViewId"/>: every viewport has its own size, hover, focus,
+/// pointer capture and debug-view selection, and its own resolved output.
+/// </summary>
+/// <remarks>
+/// The parameterless members address <see cref="RenderViewId.Primary"/>. They exist so the single-viewport
+/// editor keeps working while viewports are made per-panel; new code should name its view.
+/// </remarks>
 public sealed class EditorViewportStateBus
 {
 	private readonly object _sync = new();
-	private SceneViewportUiState _uiState = SceneViewportUiState.Hidden;
-	private SceneViewportRenderState _renderState = SceneViewportRenderState.Empty;
+	private readonly Dictionary<RenderViewId, ViewState> _views = new();
 	private bool _gizmoDragging;
 	private string? _debugViewOverrideId;
 
-	public SceneViewportUiState GetUiState()
+	public SceneViewportUiState GetUiState() => GetUiState(RenderViewId.Primary);
+
+	public SceneViewportUiState GetUiState(RenderViewId view)
 	{
 		lock (_sync)
 		{
-			return _uiState;
+			return _views.TryGetValue(view, out var state) ? state.Ui : SceneViewportUiState.Hidden;
 		}
 	}
 
-	public void PublishUiState(SceneViewportUiState state)
+	public void PublishUiState(SceneViewportUiState state) => PublishUiState(RenderViewId.Primary, state);
+
+	public void PublishUiState(RenderViewId view, SceneViewportUiState state)
 	{
 		lock (_sync)
 		{
-			_uiState = _debugViewOverrideId is null
+			GetOrAdd(view).Ui = _debugViewOverrideId is null
 				? state
 				: WithDebugView(state, _debugViewOverrideId);
 		}
 	}
 
-	/// <summary>Overrides the UI-selected debug view until released.</summary>
+	/// <summary>Views that have published state, in creation order.</summary>
+	public IReadOnlyList<RenderViewId> GetViews()
+	{
+		lock (_sync)
+		{
+			var views = new List<RenderViewId>(_views.Keys);
+			views.Sort();
+			return views;
+		}
+	}
+
+	/// <summary>
+	/// Drops a view's state when its panel closes, so a later view reusing the slot cannot inherit it.
+	/// </summary>
+	public void RemoveView(RenderViewId view)
+	{
+		lock (_sync)
+		{
+			_views.Remove(view);
+		}
+	}
+
+	/// <summary>Overrides the UI-selected debug view for every view until released.</summary>
 	public void OverrideDebugView(string? debugViewId)
 	{
 		lock (_sync)
 		{
 			_debugViewOverrideId = string.IsNullOrWhiteSpace(debugViewId) ? null : debugViewId;
-			if (_debugViewOverrideId is not null)
+			if (_debugViewOverrideId is null)
 			{
-				_uiState = WithDebugView(_uiState, _debugViewOverrideId);
+				return;
+			}
+
+			foreach (var state in _views.Values)
+			{
+				state.Ui = WithDebugView(state.Ui, _debugViewOverrideId);
 			}
 		}
 	}
@@ -197,19 +241,24 @@ public sealed class EditorViewportStateBus
 		state.ImageMin,
 		state.ImageMax);
 
-	public SceneViewportRenderState GetRenderState()
+	public SceneViewportRenderState GetRenderState() => GetRenderState(RenderViewId.Primary);
+
+	public SceneViewportRenderState GetRenderState(RenderViewId view)
 	{
 		lock (_sync)
 		{
-			return _renderState;
+			return _views.TryGetValue(view, out var state) ? state.Render : SceneViewportRenderState.Empty;
 		}
 	}
 
-	public void PublishRenderState(SceneViewportRenderState state)
+	public void PublishRenderState(SceneViewportRenderState state) =>
+		PublishRenderState(RenderViewId.Primary, state);
+
+	public void PublishRenderState(RenderViewId view, SceneViewportRenderState state)
 	{
 		lock (_sync)
 		{
-			_renderState = state;
+			GetOrAdd(view).Render = state;
 		}
 	}
 
@@ -227,5 +276,27 @@ public sealed class EditorViewportStateBus
 		{
 			_gizmoDragging = dragging;
 		}
+	}
+
+	private ViewState GetOrAdd(RenderViewId view)
+	{
+		if (view.IsValid == false)
+		{
+			throw new ArgumentException("Viewport state needs a valid view id.", nameof(view));
+		}
+
+		if (_views.TryGetValue(view, out var state) == false)
+		{
+			state = new ViewState();
+			_views.Add(view, state);
+		}
+
+		return state;
+	}
+
+	private sealed class ViewState
+	{
+		public SceneViewportUiState Ui = SceneViewportUiState.Hidden;
+		public SceneViewportRenderState Render = SceneViewportRenderState.Empty;
 	}
 }

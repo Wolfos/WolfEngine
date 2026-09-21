@@ -48,6 +48,19 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 				FarPlane);
 	}
 
+	public Matrix4x4 GetPerspective(Int2 targetSize)
+	{
+		var width = Math.Max(targetSize.X, 1);
+		var height = Math.Max(targetSize.Y, 1);
+		var nearPlane = NearPlane > 0.0f ? NearPlane : DefaultNearPlane;
+		var farPlane = FarPlane > nearPlane ? FarPlane : DefaultFarPlane;
+		return Matrix4x4.CreatePerspectiveFieldOfViewLeftHanded(
+			float.DegreesToRadians(Fov < 1.0f ? 70.0f : Fov),
+			width / (float)height,
+			nearPlane,
+			farPlane);
+	}
+
 	public void OnDeserialized()
 	{
 		ScreenResolution = new Int2(

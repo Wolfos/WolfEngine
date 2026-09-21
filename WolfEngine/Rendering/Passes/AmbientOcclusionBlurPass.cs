@@ -23,7 +23,7 @@ public sealed class AmbientOcclusionBlurPass
 
 	public AmbientOcclusionBlurPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device,
 		bool blurHorizontally)
 	{

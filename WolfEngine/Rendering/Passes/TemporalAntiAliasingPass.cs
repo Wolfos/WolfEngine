@@ -24,7 +24,7 @@ public sealed class TemporalAntiAliasingPass
 
 	public TemporalAntiAliasingPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device,
 		bool historyValid,
 		bool resetHistory)

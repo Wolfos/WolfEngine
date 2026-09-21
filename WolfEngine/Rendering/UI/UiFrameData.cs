@@ -6,7 +6,55 @@ namespace WolfEngine.Rendering.UI;
 public static class UiTextureIds
 {
 	public static readonly nint FontAtlas = unchecked((nint)(-2));
-	public static readonly nint SceneViewport = unchecked((nint)(-3));
+
+	/// <summary>
+	/// Views draw into the UI through a sentinel rather than a real texture id, because the UI frame is
+	/// built on the game thread before the render thread knows which texture a view resolved to. The render
+	/// thread rewrites each sentinel to that view's output. Sentinels run downwards from
+	/// <see cref="ViewportBase"/>, one per view: negative ids cannot collide with a packed bindless handle,
+	/// and the block is bounded so it cannot run into anything else either.
+	/// </summary>
+	private const nint ViewportBase = -3;
+
+	/// <summary>How many views can be submitted to one UI frame.</summary>
+	public const int MaxViewports = 64;
+
+	/// <summary>Sentinel for <see cref="RenderViewId.Primary"/>.</summary>
+	public static readonly nint SceneViewport = ViewportBase;
+
+	public static nint Viewport(RenderViewId view)
+	{
+		if (view.IsValid == false)
+		{
+			throw new ArgumentException("A viewport sentinel needs a valid view id.", nameof(view));
+		}
+
+		if (view.Index >= MaxViewports)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(view),
+				$"View {view} is beyond the {MaxViewports} views one UI frame can carry.");
+		}
+
+		return ViewportBase - view.Index;
+	}
+
+	/// <summary>True when <paramref name="textureId"/> is a viewport sentinel, and which view it belongs to.</summary>
+	public static bool TryGetViewport(nint textureId, out RenderViewId view)
+	{
+		var index = (int)(ViewportBase - textureId);
+		if (textureId <= ViewportBase && index < MaxViewports)
+		{
+			view = RenderViewId.FromIndex(index);
+			return true;
+		}
+
+		view = RenderViewId.None;
+		return false;
+	}
+
+	/// <summary>True when <paramref name="textureId"/> is any viewport sentinel.</summary>
+	public static bool IsViewport(nint textureId) => TryGetViewport(textureId, out _);
 }
 
 /// <summary>

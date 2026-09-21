@@ -22,6 +22,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorProjectService _projectService;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
+	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly IInputSystem _inputSystem;
@@ -37,6 +38,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly IEditorWorkspaceService _workspaces;
 	private readonly EditorWindowRegistry _windows;
+	private readonly SemaphoreSlim _captureGate = new(1, 1);
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -47,6 +49,7 @@ public sealed class EditorRemoteAutomationController
 		IEditorProjectService projectService,
 		IGameplayAssemblyHost gameplayAssemblyHost,
 		IEditorSceneWorkspace sceneWorkspace,
+		IAssetSelectionService assetSelectionService,
 		IEditorSceneSnapshotService sceneSnapshotService,
 		IEditorPlaySession playSession,
 		IInputSystem inputSystem,
@@ -68,6 +71,7 @@ public sealed class EditorRemoteAutomationController
 		_projectService = projectService;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
 		_sceneWorkspace = sceneWorkspace;
+		_assetSelectionService = assetSelectionService;
 		_sceneSnapshotService = sceneSnapshotService;
 		_playSession = playSession;
 		_inputSystem = inputSystem;
@@ -86,6 +90,15 @@ public sealed class EditorRemoteAutomationController
 
 	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
 		Enqueue(CreateWorkspaceState, cancellationToken);
+
+	public Task<string> SelectAssetAsync(Guid assetId, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!_projectService.TryGetAsset(assetId, out var asset))
+				throw new InvalidOperationException($"Asset '{assetId}' was not found in the open project.");
+			_assetSelectionService.Select(assetId);
+			return $"Selected asset '{asset.Name}' ({assetId:D}) in the Asset Editor.";
+		}, cancellationToken);
 
 	public Task<EditorWorkspaceStateResult> CreateWorkspaceAsync(string name, CancellationToken cancellationToken) =>
 		Enqueue(() =>
@@ -726,24 +739,30 @@ public sealed class EditorRemoteAutomationController
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
 		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, cancellationToken);
 
-	private Task<FrameCaptureResult> CaptureFrameAsync(
+	private async Task<FrameCaptureResult> CaptureFrameAsync(
 		string outputPath,
 		FrameCaptureTarget target,
-		CancellationToken cancellationToken) =>
-		EnqueueAsync(async () =>
+		CancellationToken cancellationToken)
+	{
+		await _captureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
 		{
-			var fullOutputPath = ResolveOutputPath(outputPath);
-			var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
-			Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-			using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-			image.SaveAsPng(fullOutputPath);
-			return new FrameCaptureResult(
-				fullOutputPath,
-				capture.Width,
-				capture.Height,
-				_editorFrameCoordinator.CompletedSequence,
-				_renderFrameCoordinator.CompletedSequence);
-		}, cancellationToken);
+			return await EnqueueAsync(async () =>
+			{
+				var fullOutputPath = ResolveOutputPath(outputPath);
+				var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
+				Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
+				image.SaveAsPng(fullOutputPath);
+				return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
+					_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
+			}, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_captureGate.Release();
+		}
+	}
 
 	/// <summary>
 	/// Enters or resumes Play mode, waits for gameplay startup to publish a runtime camera, verifies the

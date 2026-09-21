@@ -107,6 +107,7 @@ public sealed class EditorAutomationController
 				rightMousePressStartedHere: false,
 				imageMin: System.Numerics.Vector2.Zero,
 				imageMax: new System.Numerics.Vector2(_options.Resolution.X, _options.Resolution.Y)));
+
 		}
 		catch (Exception exception)
 		{
@@ -148,7 +149,7 @@ public sealed class EditorAutomationController
 			catch (Exception exception) { Fail(5, exception.Message); return; }
 		}
 
-		if (_captureTask is null)
+		if (_captureTask is null && _captureCompleted == false)
 		{
 			try
 			{
@@ -174,10 +175,18 @@ public sealed class EditorAutomationController
 				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
 				image.SaveAsPng(GetCapturePath());
 				Console.WriteLine($"capture success scene={_options.ScenePath} frames={_completedFrames} resolution={capture.Width}x{capture.Height} path={GetCapturePath()}");
-				Complete(0);
+				_captureTask = null;
+				_captureCompleted = true;
 			}
-			catch (Exception exception) { Fail(5, exception.Message); }
+			catch (Exception exception) { Fail(5, exception.Message); return; }
 		}
+
+		if (_captureCompleted == false)
+		{
+			return;
+		}
+
+		Complete(0);
 	}
 
 	private string NormalizeProjectPath(string scenePath)
@@ -189,6 +198,11 @@ public sealed class EditorAutomationController
 		}
 		return Normalize(Path.GetRelativePath(_options.ProjectPath, fullPath));
 	}
+
+	private string ResolveProjectPath(string path) => Path.GetFullPath(Path.IsPathRooted(path)
+		? path : Path.Combine(_options.ProjectPath, path));
+
+	private bool _captureCompleted;
 
 	private string GetCapturePath() => Path.GetFullPath(Path.IsPathRooted(_options.CapturePath)
 		? _options.CapturePath : Path.Combine(_options.ProjectPath, _options.CapturePath));

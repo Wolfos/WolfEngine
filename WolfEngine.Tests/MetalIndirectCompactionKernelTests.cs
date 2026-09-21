@@ -126,7 +126,7 @@ public class MetalIndirectCompactionKernelTests
 			.ToArray();
 	}
 
-	private static uint ReadUintConstant(string source, string name)
+	internal static uint ReadUintConstant(string source, string name)
 	{
 		var match = Regex.Match(source, Regex.Escape(name) + @"\s*=\s*(?<value>0[xX][0-9a-fA-F]+|\d+)u?\s*;");
 		Assert.That(match.Success, Is.True, $"'{name}' is not declared in the shader source.");
@@ -146,7 +146,7 @@ public class MetalIndirectCompactionKernelTests
 		return reader.ReadToEnd();
 	}
 
-	private static string ResolveShaderDirectory()
+	internal static string ResolveShaderDirectory()
 	{
 		var directory = new DirectoryInfo(AppContext.BaseDirectory);
 		while (directory is not null)

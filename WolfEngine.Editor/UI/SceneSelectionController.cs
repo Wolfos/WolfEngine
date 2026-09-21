@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Physics;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -67,7 +68,7 @@ public sealed class SceneSelectionController
 	{
 		ArgumentNullException.ThrowIfNull(scene);
 
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (viewportState.Visible == false)
 		{
 			_pressOwnedByViewport = false;
@@ -121,7 +122,8 @@ public sealed class SceneSelectionController
 		ScenePickSelectionMode mode)
 	{
 		if (_cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
-		    SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, out var inverseViewProjection) == false ||
+		    SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform,
+		        EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(RenderViewId.Primary), camera), out var inverseViewProjection) == false ||
 		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, inverseViewProjection, out var ray) == false)
 		{
 			return;

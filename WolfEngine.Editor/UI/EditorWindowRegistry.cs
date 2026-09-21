@@ -98,7 +98,11 @@ public sealed class EditorWindowRegistry
 
 		foreach (var descriptor in _windows)
 		{
-			if (!workspace.OpenWindows.Contains(descriptor.Id)) continue;
+			if (!workspace.OpenWindows.Contains(descriptor.Id))
+			{
+				descriptor.Window.OnHidden();
+				continue;
+			}
 			using (FrameProfiler.Instance.Measure(descriptor.DisplayName))
 			{
 				descriptor.Window.DrawInWorkspace(scene, workspace.Id, descriptor.Id, () => _workspaces.CloseWindow(descriptor.Id));
@@ -134,14 +138,14 @@ public sealed class EditorWindowRegistry
 				descriptor.DisplayName,
 				isOpen,
 				isOpen && window.DockId != 0,
-				window.DockId,
-				window.IsSelectedTab,
-				window.IsFocused,
-				window.IsHovered,
-				window.Position.X,
-				window.Position.Y,
-				window.Size.X,
-				window.Size.Y));
+				isOpen ? window.DockId : 0,
+				isOpen && window.IsSelectedTab,
+				isOpen && window.IsFocused,
+				isOpen && window.IsHovered,
+				isOpen ? window.Position.X : 0,
+				isOpen ? window.Position.Y : 0,
+				isOpen ? window.Size.X : 0,
+				isOpen ? window.Size.Y : 0));
 		}
 		return states;
 	}

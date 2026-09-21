@@ -34,7 +34,7 @@ public sealed class TonemappingPass
 
 	public TonemappingPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -60,7 +60,7 @@ public sealed class TonemappingPass
 		// The LUT is a persistent asset texture rather than a graph resource. Until its upload has published a
 		// volume SRV, grading is skipped: the bindless error texture is 2D and cannot stand in for it.
 		var colorGrading = resources.Config.ColorGrading;
-		var lookupTable = context.FrameSnapshot.ColorGradingLookupTable;
+		var lookupTable = context.ViewSnapshot.ColorGradingLookupTable;
 		var lookupTableResources = lookupTable is not null && lookupTable.Texture.HasGpuResources
 			? lookupTable.Texture.Resources
 			: null;

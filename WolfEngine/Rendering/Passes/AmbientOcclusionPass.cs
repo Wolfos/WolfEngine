@@ -31,7 +31,7 @@ public sealed class AmbientOcclusionPass
 
 	public AmbientOcclusionPassConfig BuildConfig(
 		RenderGraphContext context,
-		RenderGraphFrameResources resources,
+		RenderViewResources resources,
 		IGfxDevice device,
 		IRenderer renderer,
 		GpuDrawResources gpuDrawResources,

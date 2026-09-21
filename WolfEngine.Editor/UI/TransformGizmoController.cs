@@ -45,7 +45,7 @@ public sealed class TransformGizmoController
 		TransformSpace space,
 		TransformPivotMode pivotMode)
 	{
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (IsViewportValid(viewportState) == false ||
 		    selectedEntities.Count == 0 ||
 		    _cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
@@ -83,7 +83,7 @@ public sealed class TransformGizmoController
 			return;
 		}
 
-		var viewProjection = view * camera.Perspective;
+		var viewProjection = view * EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(RenderViewId.Primary), camera);
 		if (Matrix4x4.Invert(viewProjection, out var inverseViewProjection) == false)
 		{
 			EndDrag();
@@ -687,7 +687,7 @@ public sealed class TransformGizmoController
 	private bool TryBuildMouseRay(Vector2 mousePosition, Matrix4x4 inverseViewProjection, out Ray ray)
 	{
 		ray = default;
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, inverseViewProjection, out var sceneRay) == false)
 		{
 			return false;

@@ -265,6 +265,10 @@ public sealed class RenderGraphResourceRegistry
 
 	internal void AssignTransientTextureSlots(IReadOnlyDictionary<int, int> handleToSlotAssignments)
 	{
+		// The compiler numbers alias slots from 1, while unused transients have no assignment. Their raw
+		// handle IDs can equal a compiler slot from another view (for example a hidden or skipped pass),
+		// even when the descriptors differ. Reserve a separate range for those unassigned handles.
+		var maxAssignedSlotId = handleToSlotAssignments.Values.DefaultIfEmpty(0).Max();
 		var slotCompatibility = new Dictionary<int, TexturePoolKey>();
 		foreach (var (handleId, record) in _textures)
 		{
@@ -276,7 +280,7 @@ public sealed class RenderGraphResourceRegistry
 
 			var slotId = handleToSlotAssignments.TryGetValue(handleId, out var assignedSlot) && assignedSlot > 0
 				? assignedSlot
-				: handleId;
+				: checked(maxAssignedSlotId + handleId);
 			record.TransientSlotId = slotId;
 			record.StateTrackingKey = -slotId;
 

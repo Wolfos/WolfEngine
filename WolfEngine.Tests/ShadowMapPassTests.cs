@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Text.Json;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
@@ -8,6 +10,23 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public sealed class ShadowMapPassTests
 {
+	[Test]
+	public void ShadowMapConfigDefaultsOnForExistingSerializedAssets()
+	{
+		var config = JsonSerializer.Deserialize<RenderConfig>(
+			"""{ "ShadowMaps": { "CascadeCount": 2 } }""", AssetJson.SerializerOptions)!;
+		Assert.That(config.ShadowMaps.Enabled, Is.True);
+		Assert.That(config.ShadowMaps.CascadeCount, Is.EqualTo(2));
+	}
+
+	[Test]
+	public void PrepareFrame_ExplicitlyDisabledIgnoresDirectionalLight()
+	{
+		var pass = new ShadowMapPass(new ShaderCompiler());
+		pass.PrepareFrame(CreateSceneData(hasDirectionalLight: true), new ShadowMapConfig { Enabled = false });
+		Assert.That(pass.GetCurrentFrameData().Enabled, Is.False);
+	}
+
 	[TestCase(1)]
 	[TestCase(2)]
 	[TestCase(3)]

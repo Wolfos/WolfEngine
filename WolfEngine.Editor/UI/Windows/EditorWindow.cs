@@ -13,6 +13,7 @@ public abstract class EditorWindow
 	public abstract void Draw(EditorScene scene);
 	public virtual bool CanOpen(out string? reason) { reason = null; return true; }
 	public virtual void OnOpened() { }
+	public virtual void OnHidden() { }
 
 	internal bool IsSelectedTab { get; private set; }
 

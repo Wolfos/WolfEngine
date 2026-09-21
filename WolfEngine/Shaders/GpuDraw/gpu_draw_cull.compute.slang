@@ -6,9 +6,12 @@ import "../Common/draw_data.slang";
 #define WOLF_MAX_CULL_VIEW_COUNT 3
 #define WOLF_FRUSTUM_PLANE_COUNT 6
 
+// Mirrors GpuDrawFlags in GpuDrawData.cs.
 static const uint DRAW_FLAG_ACTIVE = 1;
 static const uint DRAW_FLAG_BUCKET_SHIFT = 1;
-static const uint DRAW_FLAG_BUCKET_MASK = 0x7FFFFFFF;
+static const uint DRAW_FLAG_BUCKET_MASK = 0x1F;
+static const uint DRAW_FLAG_OWNER_VIEW_SHIFT = 6;
+static const uint DRAW_FLAG_OWNER_VIEW_MASK = 0x7F;
 
 #ifdef WOLF_GPU_DRAW_DIAGNOSTICS
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
@@ -28,7 +31,8 @@ cbuffer CullParams : register(b12)
     uint outputDrawArgsStride;
     uint outputLaneStride;
     uint participatingLaneMask;
-    uint pad0;
+    // Slot of the render view being culled. Every view's draws share one command table.
+    uint ownerViewIndex;
 };
 
 RWStructuredBuffer<GpuDrawCommand> g_DrawCommands : register(u0);
@@ -94,6 +98,13 @@ void CSCull(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     GpuDrawCommand cmd = g_DrawCommands[drawId];
     if ((cmd.flags & DRAW_FLAG_ACTIVE) == 0)
+    {
+        return;
+    }
+
+    // Another view's draw: leave its args zeroed for this view. Checked before generation validation so this
+    // view never marks another view's command stale.
+    if (((cmd.flags >> DRAW_FLAG_OWNER_VIEW_SHIFT) & DRAW_FLAG_OWNER_VIEW_MASK) != ownerViewIndex)
     {
         return;
     }

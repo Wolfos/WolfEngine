@@ -226,7 +226,10 @@ public sealed class ScreenSpaceDecalPassTests
 			gpuDrawResources,
 			NullImGuiRenderer.Instance,
 			gameplayUiRenderer,
-			shaderProvider.Object);
+			shaderProvider.Object,
+			// Shared with the graph, as in production: the graph names and tags passes from the same view state
+			// the builder records into.
+			graph.ViewRegistry);
 
 		return (graph, frameBuilder);
 	}
