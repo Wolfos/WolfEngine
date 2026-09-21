@@ -616,7 +616,13 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    (`RenderViewState.QualifyPassName`, cached per view because passes are recorded every frame). The primary
    keeps plain names so existing names, tests and tooling stay stable. The test fixture now builds its frame
    builder over the graph's own `RenderViewRegistry`, as production does.
-7. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".
+7. **Done for the editor:** the editor binds the primary view to the scene world at startup and publishes one
+   `RenderViewSubmission` per frame, passing the editor camera explicitly; `RefreshRenderWorlds` became
+   `BindSceneView`, which rebinds on scene load, play-mode switch and gameplay reload. The editor overlay world is
+   no longer gathered, which is correct because it holds only the camera. The CLI capture runs in play mode, so
+   the authoring-to-runtime rebind was exercised on the real render thread; `editorview1`–`editorview3` were within
+   22–96 pixels of the verified pool. `HasRenderWorldListChanged` stays for the compatibility overload, which
+   `Wolfie.IAE` still uses.
 8. Move the editor onto the per-view publisher, and add a preview window that creates a second world and view
    and draws its sentinel — the first point two viewports appear on screen. The acceptance check is two views
    of different worlds at different sizes, each showing only its own content, and moving one camera leaving

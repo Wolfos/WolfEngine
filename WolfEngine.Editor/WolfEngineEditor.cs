@@ -35,7 +35,8 @@ public class WolfEngineEditor
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly EditorCameraContext _cameraContext;
-	private readonly List<World> _renderWorlds = new(2);
+	// One submission per rendered view, reused every frame.
+	private readonly RenderViewSubmission[] _viewSubmissions = new RenderViewSubmission[1];
 	private readonly EditorGui _editorGui;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorPlaySession _playSession;
@@ -182,7 +183,7 @@ public class WolfEngineEditor
 
 		_editorCamera = CreateEditorCamera(_editorWorld);
 		_currentScene = _playSession.ActiveScene;
-		RefreshRenderWorlds();
+		BindSceneView();
 	}
 
 	private void EditorLoop()
@@ -305,7 +306,10 @@ public class WolfEngineEditor
 			editorCamera,
 			editorCameraWorldTransform);
 		_cameraContext.Publish(camera, cameraWorldTransform);
-		_renderPipeline.PublishSnapshot(camera, cameraWorldTransform, GetConfig(), _renderWorlds);
+		// The scene view renders the current scene's world only; the editor camera lives in the editor world and is
+		// passed here explicitly, so that world contributes no draws and needs no view of its own.
+		_viewSubmissions[0] = new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig());
+		_renderPipeline.PublishSnapshot(_viewSubmissions);
 	}
 
 	private void SyncCurrentScene()
@@ -318,7 +322,7 @@ public class WolfEngineEditor
 
 		var selectedEntityIds = GetSelectedEntityIds(_currentScene);
 		_currentScene = nextScene;
-		RefreshRenderWorlds();
+		BindSceneView();
 		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
@@ -474,7 +478,7 @@ public class WolfEngineEditor
 		_playSession.Restart(previousState);
 		_currentScene = _playSession.ActiveScene;
 		RefreshAssetBackedComponents(_currentScene);
-		RefreshRenderWorlds();
+		BindSceneView();
 		RestoreSelectedEntities(_currentScene, selectedEntityIds);
 	}
 
@@ -542,11 +546,27 @@ public class WolfEngineEditor
 		EditorGui.ClearEntitySelection();
 	}
 
-	private void RefreshRenderWorlds()
+	/// <summary>
+	/// Points the scene view at the current scene's world. The view keeps its id and output across a scene load or
+	/// a play-mode switch; rebinding drops the draws and temporal history that belonged to the previous world.
+	/// </summary>
+	private void BindSceneView()
 	{
-		_renderWorlds.Clear();
-		_renderWorlds.Add(_editorWorld);
-		_renderWorlds.Add(_currentScene.World);
+		if (_renderGraph.TryGetViewForWorld(_currentScene.World, out var bound) && bound == RenderViewId.Primary)
+		{
+			return;
+		}
+
+		if (_renderGraph.RebindView(RenderViewId.Primary, _currentScene.World) == false)
+		{
+			var created = _renderGraph.CreateView(
+				new RenderViewDescriptor(_currentScene.World, "scene", RenderViewOutput.Texture));
+			if (created != RenderViewId.Primary)
+			{
+				throw new InvalidOperationException(
+					$"The scene view must be the primary render view, but it was created as {created}.");
+			}
+		}
 	}
 
 	private (WorldTag WorldMask, SystemExecutionGroup GroupMask) GetExecutionMask()
