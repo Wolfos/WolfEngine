@@ -28,8 +28,15 @@ fields onto `RenderViewState` so that rebinding is a single pointer swap. `Rende
 which views the graph contains — the bound view plus every view that recorded passes — resolves projection and
 viewport output for each, builds `SceneDrawData` for each (`TryBuildSceneData`, with its own camera-relative
 light list), and gives each pass its own view's scene data. Shared passes run against the bound view. The
-bound view is restored after execution, so the code in `OnRender` that follows `Execute` is unchanged.
-Recording is still single-view: `OnRender` sets up and records one view.
+bound view is restored after execution.
+
+`OnRender` now records every live view. It runs `BeginSharedFrame` once (gameplay UI targets, sky, final
+colour), `RecordSharedPreparation`, then for each view `BeginViewFrame` and `RecordBoundView`, then
+`RecordSharedPresentation`, `Execute`, and `CompleteFrame` plus target write-back per view. The primary view
+always records; another view records when the published snapshot has an active entry for it and it is visible.
+A hidden or unsubmitted view publishes an empty render state so the UI cannot sample a stale texture. With no
+second view submitted, output is unchanged. **Two views still cannot render correctly** until each view's
+culls see only its own draws and the CPU-written per-frame buffers are per view — items 4 and 5 below.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -378,6 +385,15 @@ while every view is recorded every frame. Once views can be skipped, a view must
 position, advanced only on the frames it was actually recorded, or a skipped frame jumps its jitter and breaks
 convergence. Belongs with on-demand recording in stage 2.
 
+**The procedural sky is prepared from one sun.** `BeginSharedFrame` takes the primary view's sun direction
+and sky config, so a second world with a different sun currently gets the primary view's sky. Keying the sky
+chain by its config is the fix when a view needs its own.
+
+**Gameplay UI texture targets are built from the previous frame's gameplay UI.** `OnRender` calls
+`SetGameplayUiFrame` after the shared setup that reads it, and always has. This looks like a one-frame lag, but
+it predates multi-viewport and the refactor deliberately preserved the order; check it deliberately rather than
+fixing it as a side effect.
+
 **Pass names must be qualified by view**, for example `$"GBuffer [{view.Name}]"`. DRED breadcrumb attribution
 reports the enclosing pass name and `GpuProfiler` keys its scopes the same way, so duplicate names across
 views make a device-removal log unattributable and merge unrelated timings. `RenderViewState.Name` exists for
@@ -482,6 +498,9 @@ build, is 288). A range comparison fails whenever the two sets split across the 
 checks that every new capture is as close to some baseline capture as the baseline captures are to each other,
 and bases its verdict on that. Both the `bind` and `scene` sets pass it.
 
+The view loop in `OnRender` (`loop1`–`loop3` against `scene1`–`scene3`) passed nearest-neighbour: each new
+capture within 44–118 pixels of a baseline capture, against a baseline threshold of 206.
+
 Once two views exist, the capture diff stops being the right check. The new one is two views rendering
 different worlds at different sizes with temporal anti-aliasing on: move one camera and assert the other
 view's image is unchanged.
@@ -497,15 +516,12 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
 1. **Done:** split `RenderGraphFrameResources` into `RenderViewResources` and
    `RenderFrameSharedResources`. Pass config builders now declare shared sky/presentation dependencies
    separately, and resource-ownership tests enforce the boundary.
-2. **In progress:** `Build` now has shared-preparation, per-view, and shared-presentation recording phases,
-   and the per-view phase is bracketed by `RenderGraph.BeginViewRecording`/`EndViewRecording` so its passes
-   are tagged. Execution rebinds per pass and builds scene data per executed view. Viewport output
-   resolution is split into `BeginViewportResolve`, a per-view `PrepareSceneViewport`, and one
-   `ResolveUiViewportTextures` per frame, because the UI frame holds every view's sentinel together. Still to
-   do: split `RenderGraphFrameBuilder.BeginFrame` into shared setup (gameplay texture targets, sky) and
-   per-view setup, then have `RenderGraph.OnRender` set up and record every live view. The post-`Execute`
-   part of `OnRender` — target state write-back, `CompleteFrame`, publishing render state — must then run per
-   view too.
+2. **Done:** recording and execution loop the live views. `BeginFrame` is split into `BeginSharedFrame` and
+   `BeginViewFrame` (with `BeginFrame` kept as a single-view wrapper for tests), `Build` into
+   `RecordSharedPreparation`, `RecordBoundView` and `RecordSharedPresentation`, and viewport output
+   resolution into `BeginViewportResolve`, a per-view `PrepareSceneViewport`, and one
+   `ResolveUiViewportTextures`. `MultiViewRecordingTests` records two views into one graph and checks their
+   passes are tagged, write distinct G-buffers, and keep distinct frame resources.
 3. **In progress:** `FrameSnapshot` now exposes an ordered list of active `RenderViewSnapshot` entries, with
    isolated scene packets and draw databases, and `SeedPreviousCameraFrom` seeds camera history by
    `RenderViewId`. `PublishSnapshot` accepts view submissions and gathers their bound worlds independently;

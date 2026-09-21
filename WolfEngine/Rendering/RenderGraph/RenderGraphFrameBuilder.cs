@@ -354,6 +354,9 @@ internal sealed class RenderGraphFrameBuilder
 		_externalSkybox = skybox;
 	}
 
+	/// <summary>
+	/// Single-view convenience: the shared frame setup followed by the primary view's.
+	/// </summary>
 	public void BeginFrame(
 		Int2 framebufferSize,
 		Int2 sceneFramebufferSize,
@@ -365,10 +368,29 @@ internal sealed class RenderGraphFrameBuilder
 		RenderConfig config,
 		Vector3 cameraPosition)
 	{
-		// Selects the view being recorded. While one view exists this is always the primary; when Build
-		// loops over views, each iteration re-points this at that view's own history.
-		_view = GetOrCreateViewState(RenderViewId.Primary);
+		BeginSharedFrame(framebufferSize, sunDirection, sunIntensityScale, config.SkyboxConfig);
+		BeginViewFrame(
+			RenderViewId.Primary,
+			framebufferSize,
+			sceneFramebufferSize,
+			sceneColorHandle,
+			sceneEnabled,
+			hasActiveDecals,
+			config,
+			cameraPosition);
+	}
 
+	/// <summary>
+	/// Sets up what every view in the frame shares: gameplay UI texture targets, the sky chain, and the final
+	/// presentation target. Once per frame, before any view.
+	/// </summary>
+	/// <remarks>
+	/// The procedural sky is prepared from one sun. With several views it is the bound view's, so a second
+	/// world with a different sun direction currently sees the first view's sky; keying the sky by its config
+	/// is the fix when that matters.
+	/// </remarks>
+	public void BeginSharedFrame(Int2 framebufferSize, Vector3 sunDirection, float sunIntensityScale, SkyboxPass.Config skyboxConfig)
+	{
 		var device = _renderer.GetGfxDevice();
 		_gameplayTextureTargets.Clear();
 		for (var i = 0; i < _gameplayUiFrame.TextureSurfaces.Length; i++)
@@ -379,37 +401,7 @@ internal sealed class RenderGraphFrameBuilder
 			_gameplayTextureTargets.Add(new GameplayTextureTarget(surface, handle, texture));
 		}
 		_gameplayUiRenderer.PruneTargets(device, _gameplayUiFrame);
-		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
-		{
-			config = CreateRayTracingDisabledConfig(config);
-		}
-
-		var taaEnabled = config.AntiAliasing.Enabled;
-		var frameShapeChanged = _view.HasPreviousFrameShape == false ||
-		                        _view.PreviousFramebufferSize.X != framebufferSize.X ||
-		                        _view.PreviousFramebufferSize.Y != framebufferSize.Y ||
-		                        _view.PreviousSceneFramebufferSize.X != sceneFramebufferSize.X ||
-		                        _view.PreviousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
-		                        _view.PreviousSceneEnabled != sceneEnabled;
-		var shadowMapResolution = Math.Max(1, config.ShadowMaps.CascadeResolution);
-		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, shadowMapResolution, sceneEnabled);
-		_view.SceneDebugViews.Clear();
-		_view.SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
-		_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
-		_view.CurrentDdgiConfigValid = false;
-		_view.ResetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled &&
-			(!_view.PreviousTaaEnabled || _view.PreviousAntiAliasingMode != config.AntiAliasing.Mode));
-		_view.PreviousAntiAliasingMode = config.AntiAliasing.Mode;
-		if (!taaEnabled || !sceneEnabled)
-		{
-			_view.ReleaseTemporalHistoryResources();
-		}
-		if (!config.VolumetricFog.Enabled || !sceneEnabled)
-		{
-			_view.ReleaseFogHistoryResources();
-		}
-		_view.PreviousTaaEnabled = taaEnabled;
-		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, config.SkyboxConfig);
+		_skyboxPass.PrepareFrame(_renderer.GetGfxDevice(), sunDirection, sunIntensityScale, skyboxConfig);
 		var activeSkybox = _externalSkybox ?? _skyboxPass.GetProceduralResources();
 		_useProceduralSkybox = ReferenceEquals(activeSkybox, _externalSkybox) == false;
 		_recordProceduralSkyLighting = _useProceduralSkybox && _skyboxPass.ShouldRecordProceduralLightingUpdate;
@@ -440,6 +432,70 @@ internal sealed class RenderGraphFrameBuilder
 			}
 		}
 
+		_sharedResources = new()
+		{
+			FramebufferSize = framebufferSize,
+			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
+				framebufferSize.X,
+				framebufferSize.Y,
+				TextureFormat.Bgra8Unorm,
+				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
+				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
+			SkyboxEnvironment = skyboxEnvHandle,
+			SkyboxIrradiance = skyboxIrrHandle,
+			SkyboxPrefilter = skyboxPrefilterHandle,
+			SkyboxBrdfLut = skyboxBrdfHandle
+		};
+	}
+
+	/// <summary>
+	/// Sets up <paramref name="view"/> for recording: its history bookkeeping, its transient resources and its
+	/// debug views. Once per view per frame, after <see cref="BeginSharedFrame"/>, and immediately before that
+	/// view's passes are recorded.
+	/// </summary>
+	public void BeginViewFrame(
+		RenderViewId view,
+		Int2 framebufferSize,
+		Int2 sceneFramebufferSize,
+		RenderGraphResourceHandle sceneColorHandle,
+		bool sceneEnabled,
+		bool hasActiveDecals,
+		RenderConfig config,
+		Vector3 cameraPosition)
+	{
+		_view = GetOrCreateViewState(view);
+
+		var device = _renderer.GetGfxDevice();
+		if (RequiresRayTracingScene(config) && (device.SupportsRayTracing == false || _renderer.GetPackedMeshIndexBuffer() is null))
+		{
+			config = CreateRayTracingDisabledConfig(config);
+		}
+
+		var taaEnabled = config.AntiAliasing.Enabled;
+		var frameShapeChanged = _view.HasPreviousFrameShape == false ||
+		                        _view.PreviousFramebufferSize.X != framebufferSize.X ||
+		                        _view.PreviousFramebufferSize.Y != framebufferSize.Y ||
+		                        _view.PreviousSceneFramebufferSize.X != sceneFramebufferSize.X ||
+		                        _view.PreviousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
+		                        _view.PreviousSceneEnabled != sceneEnabled;
+		var shadowMapResolution = Math.Max(1, config.ShadowMaps.CascadeResolution);
+		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, shadowMapResolution, sceneEnabled);
+		_view.SceneDebugViews.Clear();
+		_view.SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
+		_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
+		_view.CurrentDdgiConfigValid = false;
+		_view.ResetTaaHistoryThisFrame = frameShapeChanged || (taaEnabled &&
+			(!_view.PreviousTaaEnabled || _view.PreviousAntiAliasingMode != config.AntiAliasing.Mode));
+		_view.PreviousAntiAliasingMode = config.AntiAliasing.Mode;
+		if (!taaEnabled || !sceneEnabled)
+		{
+			_view.ReleaseTemporalHistoryResources();
+		}
+		if (!config.VolumetricFog.Enabled || !sceneEnabled)
+		{
+			_view.ReleaseFogHistoryResources();
+		}
+		_view.PreviousTaaEnabled = taaEnabled;
 		var lightingHandle = default(RenderGraphResourceHandle);
 		var reflectionsTraceHandle = default(RenderGraphResourceHandle);
 		var reflectionsRadianceHandle = default(RenderGraphResourceHandle);
@@ -1085,20 +1141,6 @@ internal sealed class RenderGraphFrameBuilder
 			BloomCompositeSceneColor = bloomCompositeSceneColorHandle,
 			Config = config
 		};
-		_sharedResources = new()
-		{
-			FramebufferSize = framebufferSize,
-			FinalColor = _resources.CreateTransientTexture(new TextureDescriptor(
-				framebufferSize.X,
-				framebufferSize.Y,
-				TextureFormat.Bgra8Unorm,
-				TextureUsage.RenderTarget | TextureUsage.ShaderResource | TextureUsage.UnorderedAccess,
-				new ColorRGBA(0.05f, 0.05f, 0.05f, 1.0f))),
-			SkyboxEnvironment = skyboxEnvHandle,
-			SkyboxIrradiance = skyboxIrrHandle,
-			SkyboxPrefilter = skyboxPrefilterHandle,
-			SkyboxBrdfLut = skyboxBrdfHandle
-		};
 
 		if (sceneEnabled)
 		{
@@ -1191,7 +1233,20 @@ internal sealed class RenderGraphFrameBuilder
 	[SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
 	public void Build(RenderGraph graph)
 	{
-		RecordSharedPreparationPasses(graph);
+		RecordSharedPreparation(graph);
+		RecordBoundView(graph);
+		RecordSharedPresentation(graph);
+	}
+
+	/// <summary>Records what every view depends on — gameplay UI textures and the sky chain. Once per frame, first.</summary>
+	public void RecordSharedPreparation(RenderGraph graph) => RecordSharedPreparationPasses(graph);
+
+	/// <summary>
+	/// Records the bound view's passes, tagged with that view so execution can rebind to it. Once per view, after
+	/// <see cref="BeginViewFrame"/> for that view.
+	/// </summary>
+	public void RecordBoundView(RenderGraph graph)
+	{
 		graph.BeginViewRecording(_view.View);
 		try
 		{
@@ -1201,9 +1256,10 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			graph.EndViewRecording();
 		}
-
-		RecordSharedPresentationPasses(graph);
 	}
+
+	/// <summary>Records presentation shared by every view. Once per frame, after every view.</summary>
+	public void RecordSharedPresentation(RenderGraph graph) => RecordSharedPresentationPasses(graph);
 
 	private void RecordSharedPreparationPasses(RenderGraph graph)
 	{
