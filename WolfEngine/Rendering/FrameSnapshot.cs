@@ -33,6 +33,8 @@ public sealed class RenderViewSnapshot
 	}
 
 	public RenderViewId View { get; }
+	internal long BindingGeneration { get; private set; }
+	internal World? BoundWorld { get; private set; }
 
 	public Camera Camera { get; private set; }
 	public WorldTransform CameraWorldTransform { get; private set; }
@@ -64,6 +66,34 @@ public sealed class RenderViewSnapshot
 	private bool _hasCameraState;
 	private Matrix4x4[] _boneMatrixArena = new Matrix4x4[512];
 	private int _boneMatrixArenaUsed;
+
+	/// <summary>
+	/// A view id is a reusable slot. Retire records and camera history when that slot is rebound, even if
+	/// the same world is bound again after a destroy/create cycle.
+	/// </summary>
+	internal void Bind(World world, long bindingGeneration)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		if (bindingGeneration <= 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(bindingGeneration));
+		}
+		if (ReferenceEquals(BoundWorld, world) && BindingGeneration == bindingGeneration)
+		{
+			return;
+		}
+
+		GpuDrawDatabase.BeginSync(reconcilePersistentMeshes: true);
+		GpuDrawDatabase.EndSync();
+		Camera = default;
+		CameraWorldTransform = default;
+		PreviousCamera = default;
+		PreviousCameraWorldTransform = default;
+		HasPreviousCameraState = false;
+		_hasCameraState = false;
+		BoundWorld = world;
+		BindingGeneration = bindingGeneration;
+	}
 
 	public void SetCamera(Camera camera, WorldTransform worldTransform)
 	{
@@ -233,6 +263,21 @@ public sealed class FrameSnapshot
 	}
 
 	public IReadOnlyList<RenderViewSnapshot> Views => _views;
+
+	internal RenderViewSnapshot BindView(RenderViewId view, World world, long bindingGeneration)
+	{
+		var snapshot = GetOrCreateView(view);
+		snapshot.Bind(world, bindingGeneration);
+		if (_previousPublished is not null &&
+		    _previousPublished.TryGetView(view, out var previous) &&
+		    ReferenceEquals(previous.BoundWorld, world) &&
+		    previous.BindingGeneration == bindingGeneration)
+		{
+			snapshot.SeedPreviousCameraFrom(previous);
+		}
+
+		return snapshot;
+	}
 
 	internal RenderViewSnapshot GetOrCreateView(RenderViewId view)
 	{

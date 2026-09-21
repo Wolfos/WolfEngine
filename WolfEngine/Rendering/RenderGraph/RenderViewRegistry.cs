@@ -11,6 +11,7 @@ namespace WolfEngine.Rendering;
 internal sealed class RenderViewRegistry
 {
 	private readonly Dictionary<RenderViewId, RenderViewState> _views = new();
+	private long _nextBindingGeneration;
 
 	/// <summary>The state for <paramref name="view"/>, created on first use.</summary>
 	public RenderViewState GetOrCreate(RenderViewId view)
@@ -58,8 +59,12 @@ internal sealed class RenderViewRegistry
 				$"World {world.Id} already backs {existing}. A world may back at most one view.");
 		}
 
-		var state = GetOrCreate(AllocateSlot());
+		var state = _views.Values
+			.Where(candidate => candidate.World is null)
+			.OrderBy(candidate => candidate.View)
+			.FirstOrDefault() ?? GetOrCreate(AllocateSlot());
 		state.World = world;
+		state.BindingGeneration = ++_nextBindingGeneration;
 		state.Name = string.IsNullOrWhiteSpace(name) ? state.View.ToString() : name;
 		state.Output = output;
 		return state;

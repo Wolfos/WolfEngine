@@ -327,6 +327,46 @@ public sealed class FrameSnapshotGpuDrawTests
 	}
 
 	[Test]
+	public void FrameSnapshotBuffer_ReboundSlotDropsCameraAndDrawStateEvenForTheSameWorld()
+	{
+		var buffer = new FrameSnapshotBuffer();
+		var world = new World(WorldTag.All);
+		var view = RenderViewId.FromIndex(1);
+		var mesh = CreateTestMesh();
+		var material = new Material("rebound-view");
+		var entity = new Entity(1, 1);
+
+		Assert.That(buffer.TryBeginWrite(out var firstFrame), Is.True);
+		var firstView = firstFrame.BindView(view, world, bindingGeneration: 1);
+		firstView.SetCamera(CreateCamera(), CreateCameraTransform(10.0f));
+		firstView.GpuDrawDatabase.BeginSync();
+		firstView.GpuDrawDatabase.BeginWorld(world.Id);
+		firstView.GpuDrawDatabase.TouchPersistentMesh(entity, mesh, material, Matrix4x4.Identity);
+		firstView.GpuDrawDatabase.EndSync();
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var secondFrame), Is.True);
+		var secondView = secondFrame.BindView(view, world, bindingGeneration: 1);
+		Assert.That(secondView.PreviousCameraWorldTransform.LocalToWorld.Translation.X,
+			Is.EqualTo(10.0f).Within(0.0001f));
+		secondView.SetCamera(CreateCamera(), CreateCameraTransform(20.0f));
+		Assert.That(buffer.TryPublishWrite(), Is.True);
+		Assert.That(buffer.TryConsumeLatest(out _), Is.True);
+
+		Assert.That(buffer.TryBeginWrite(out var reusedFrame), Is.True);
+		var rebound = reusedFrame.BindView(view, world, bindingGeneration: 2);
+		var entries = new List<GpuDrawEntry>();
+		rebound.GpuDrawDatabase.CollectDrawEntries(entries);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(rebound.HasPreviousCameraState, Is.False);
+			Assert.That(entries, Is.Empty);
+		});
+	}
+
+	[Test]
 	public void FrameSnapshotBuffer_DrawAddedInTheSecondSlotSpansOneFrameOfMovement()
 	{
 		// The slot that has not tracked a draw yet still has to describe its movement: reporting the
@@ -748,6 +788,37 @@ public sealed class FrameSnapshotGpuDrawTests
 		Assert.That(entries, Has.Count.EqualTo(2));
 		Assert.That(entries.Select(entry => entry.DrawHandle.Index).Distinct().Count(), Is.EqualTo(2));
 		Assert.That(entries.Select(entry => entry.Mesh), Is.EquivalentTo(new[] { firstMesh, secondMesh }));
+	}
+
+	[Test]
+	public void GpuDrawDatabase_RefreshSharedHandleState_SeesSlotsAllocatedByALaterViewGather()
+	{
+		var history = new GpuDrawTransformHistory();
+		var handles = new GpuDrawHandleRegistry();
+		var firstView = new GpuDrawDatabase(history, handles);
+		var secondView = new GpuDrawDatabase(history, handles);
+		var firstWorld = new World(WorldTag.All);
+		var secondWorld = new World(WorldTag.All);
+
+		firstView.BeginSync();
+		firstView.BeginWorld(firstWorld.Id);
+		firstView.TouchMesh(new Entity(1, 1), CreateTestMesh(), new Material("first-view"), Matrix4x4.Identity);
+		firstView.EndSync();
+
+		secondView.BeginSync();
+		secondView.BeginWorld(secondWorld.Id);
+		secondView.TouchMesh(new Entity(1, 1), CreateTestMesh(), new Material("second-view"), Matrix4x4.Identity);
+		secondView.EndSync();
+
+		var secondEntries = new List<GpuDrawEntry>();
+		secondView.CollectDrawEntries(secondEntries);
+		var laterHandle = secondEntries.Single().DrawHandle;
+		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.False,
+			"the early view copied generations before the later view allocated its slot");
+
+		firstView.RefreshSharedHandleState();
+
+		Assert.That(firstView.IsCurrentDrawHandle(laterHandle), Is.True);
 	}
 
 	[Test]

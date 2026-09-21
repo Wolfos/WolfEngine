@@ -202,6 +202,23 @@ public sealed class RenderViewTests
 	}
 
 	[Test]
+	public void RenderViewRegistry_CreateBindsThePrecreatedPrimarySlotFirst()
+	{
+		var registry = new RenderViewRegistry();
+		registry.GetOrCreate(RenderViewId.Primary);
+		var world = new World(WorldTag.All);
+
+		var state = registry.Create(world, "scene", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(state.View, Is.EqualTo(RenderViewId.Primary));
+			Assert.That(state.World, Is.SameAs(world));
+			Assert.That(registry.ViewIds, Is.EqualTo(new[] { RenderViewId.Primary }));
+		});
+	}
+
+	[Test]
 	public void RenderViewRegistry_AllocatesDistinctSlotsAndReusesThemAfterRelease()
 	{
 		var registry = new RenderViewRegistry();
@@ -237,6 +254,25 @@ public sealed class RenderViewTests
 		registry.Release(first, null);
 
 		Assert.DoesNotThrow(() => registry.Create(world, "again", RenderViewOutput.Texture));
+	}
+
+	[Test]
+	public void RenderViewRegistry_ReusedSlotReceivesANewBindingGeneration()
+	{
+		var registry = new RenderViewRegistry();
+		registry.GetOrCreate(RenderViewId.Primary);
+		var world = new World(WorldTag.All);
+		var first = registry.Create(world, "first", RenderViewOutput.Texture);
+		var firstGeneration = first.BindingGeneration;
+		registry.Release(first.View, null);
+
+		var rebound = registry.Create(world, "again", RenderViewOutput.Texture);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(rebound.View, Is.EqualTo(first.View));
+			Assert.That(rebound.BindingGeneration, Is.GreaterThan(firstGeneration));
+		});
 	}
 
 	private static SceneViewportUiState CreateUiState(Int2 contentSizePixels, bool hovered) => new(

@@ -290,6 +290,11 @@ public sealed class GpuDrawDatabase
 		_copiedHandleVersion = _handles.Version;
 	}
 
+	/// <summary>
+	/// Refreshes this view's copy after all view gathers have mutated the frame-shared handle registry.
+	/// </summary>
+	internal void RefreshSharedHandleState() => CopyHandleState();
+
 	private void CollectUnseen(HashSet<DrawRecordKey> keys)
 	{
 		foreach (var key in keys)

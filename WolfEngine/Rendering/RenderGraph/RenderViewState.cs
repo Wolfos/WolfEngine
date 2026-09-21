@@ -34,6 +34,9 @@ internal sealed class RenderViewState
 
 	public RenderViewId View { get; }
 
+	/// <summary>Changes whenever this slot is bound to a new view, even if the same world is rebound.</summary>
+	public long BindingGeneration;
+
 	/// <summary>The world this view renders, or null for the primary view before anything bound one.</summary>
 	public World? World;
 

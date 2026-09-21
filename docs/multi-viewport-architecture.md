@@ -11,10 +11,15 @@ Views that are not visible are skipped as an optimisation, never as a correctnes
 Stage 0 is complete. Stage 1 is underway, but nothing user-visible has changed yet: there is still exactly
 one recorded view. Every piece of persistent per-view state now lives per view, and the frame-resource bundle
 has been split into `RenderViewResources` and `RenderFrameSharedResources`. Recording has matching shared
-preparation, per-view, and shared presentation phases. The remaining structural step is to put a per-view
-snapshot behind that seam and loop the live submissions. `FrameSnapshot` now owns active
+preparation, per-view, and shared presentation phases. The remaining structural step is to migrate the
+render-thread consumers to per-view snapshots and loop the live submissions. `FrameSnapshot` now owns active
 `RenderViewSnapshot` entries with isolated scene packets, draw databases and camera history; the old members
-delegate to the primary entry until publishers and render-thread consumers migrate.
+delegate to the primary entry until render-thread consumers migrate. `RenderPipeline.PublishSnapshot` now
+also accepts the planned list of `RenderViewSubmission` values, gathers each bound view's world into its own
+entry, and refreshes every database's shared handle-generation tables after all gathers. The standalone
+runtime has migrated to that API; the editor remains on the compatibility publisher until its editor overlay
+world is folded into the document world. Snapshot entries also track a binding generation, so reusing a
+view slot does not carry the prior world's draw records or camera history into its replacement.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -64,8 +69,8 @@ A `RenderViewId` is a **slot, not a serial number**. The UI sentinel block is in
 deliberately small, so destroying a view hands its slot to the next view created. That is why destroying a
 view must clear its state: an id held past the destroy resolves to whatever view took the slot.
 
-Per frame the pipeline will take one submission per view instead of one camera. This is stage 1 work; today
-`PublishSnapshot` still takes a single camera and world list:
+Per frame the pipeline takes one submission per view instead of one camera. The editor retains the old
+single-camera-and-world-list overload until its document world replaces the overlay-world arrangement:
 
 ```csharp
 void PublishSnapshot(IReadOnlyList<RenderViewSubmission> views);
@@ -170,7 +175,7 @@ resolved projection and jitter-sequence shape.
 The registry is shared by `RenderGraph` and `RenderGraphFrameBuilder`, because both need the same view's state
 — the graph for its output target and render size, the builder for its history — and two copies would drift.
 
-`RenderGraphFrameResources` is still one bundle of per-frame handles. The split is:
+The former `RenderGraphFrameResources` bundle is split into:
 
 - `RenderViewResources` — G-buffer, depth, motion vectors, ambient occlusion, lighting and post-processing
   targets. These are transient, and the resource registry already pools transient textures **by descriptor**
@@ -436,8 +441,10 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    It still invokes the per-view phase once; loop it after snapshots carry several view entries.
 3. **In progress:** `FrameSnapshot` now exposes an ordered list of active `RenderViewSnapshot` entries, with
    isolated scene packets and draw databases, and `SeedPreviousCameraFrom` seeds camera history by
-   `RenderViewId`. The primary-view facade keeps current callers working. Next, make `PublishSnapshot` take
-   submissions and migrate render-thread consumers off that facade.
+   `RenderViewId`. `PublishSnapshot` accepts view submissions and gathers their bound worlds independently;
+   the runtime uses it and the primary-view facade keeps the editor working. Next, migrate render-thread
+   consumers off that facade; migrate the editor publisher when its overlay world no longer needs the legacy
+   multi-world gather.
 4. Qualify pass names by view.
 5. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".
 6. Per-view bus consumers and per-viewport editor camera input.

@@ -421,6 +421,20 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	public bool TryGetViewForWorld(World world, out RenderViewId view) =>
 		_viewRegistry.TryGetViewForWorld(world, out view);
 
+	internal bool TryGetViewBinding(RenderViewId view, out World world, out long bindingGeneration)
+	{
+		if (_viewRegistry.TryGet(view, out var state) && state.World is not null)
+		{
+			world = state.World;
+			bindingGeneration = state.BindingGeneration;
+			return true;
+		}
+
+		world = null!;
+		bindingGeneration = 0;
+		return false;
+	}
+
 	public IReadOnlyList<RenderViewId> Views => _viewRegistry.ViewIds;
 
 	public void Startup(Action startup, Action<float> update)

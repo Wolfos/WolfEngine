@@ -101,6 +101,8 @@ public static class Program
 
 		gameplay.OnLoaded(world);
 		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
+		var primaryView = provider.GetRequiredService<RenderGraph>().CreateView(
+			new RenderViewDescriptor(world, "game", RenderViewOutput.Backbuffer));
 		var running = true;
 		Exception? gameError = null;
 		
@@ -108,7 +110,7 @@ public static class Program
 		{
 			try
 			{
-				GameLoop(provider, world, gameplay, settings, options, ref running);
+				GameLoop(provider, world, primaryView, gameplay, settings, options, ref running);
 			}
 			catch (Exception exception)
 			{
@@ -143,6 +145,7 @@ public static class Program
 	private static void GameLoop(
 		IServiceProvider services,
 		World world,
+		RenderViewId view,
 		IGameplayModule gameplay,
 		CookedRuntimeSettings settings,
 		RuntimeOptions options,
@@ -189,7 +192,7 @@ public static class Program
 			}
 
 			var config = GetRenderConfig(world);
-			pipeline.PublishSnapshot(camera, transform, config, [world]);
+			pipeline.PublishSnapshot([new RenderViewSubmission(view, camera, transform, config)]);
 			frames++;
 			frameCoordinator.PublishCompletedFrame();
 			if (options.Frames > 0 && frames >= options.Frames && capture is null)
