@@ -49,6 +49,11 @@ public sealed class ShadowMapPass
 		ArgumentNullException.ThrowIfNull(sceneData);
 
 		var resolvedConfig = ResolvedShadowMapConfig.From(config);
+		if (!config.Enabled)
+		{
+			_currentFrameData = CreateDisabledFrameData(resolvedConfig);
+			return;
+		}
 		if (TryBuildShadowCascades(sceneData, resolvedConfig, out var matrices, out var splits, out var shadowedLightIndex))
 		{
 			_currentFrameData = new ShadowFrameData(
@@ -73,6 +78,9 @@ public sealed class ShadowMapPass
 	}
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
+
+	internal static ShadowFrameData GetDisabledFrameData(in ShadowMapConfig config) =>
+		CreateDisabledFrameData(ResolvedShadowMapConfig.From(config));
 
 	public void SetCompactedExecution(int cascadeIndex, bool enabled)
 	{

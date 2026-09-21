@@ -167,11 +167,11 @@ public sealed class DebugPrimitiveMeshFactory
 				var current = lat * (longitudeSegments + 1) + lon;
 				var next = current + longitudeSegments + 1;
 				indices.Add((uint)current);
-				indices.Add((uint)next);
-				indices.Add((uint)(current + 1));
 				indices.Add((uint)(current + 1));
 				indices.Add((uint)next);
+				indices.Add((uint)(current + 1));
 				indices.Add((uint)(next + 1));
+				indices.Add((uint)next);
 			}
 		}
 

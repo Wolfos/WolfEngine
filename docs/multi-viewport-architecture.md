@@ -24,7 +24,8 @@ What works now, end to end:
   mesh sphere, a directional light and a camera. It uses the ordinary material runtime and normal render
   passes — skybox, GPU draw, G-buffer, clustered lighting, deferred and transparent forward — with no
   preview-specific shader. The image is embedded in the Asset Editor; the view is removed when that editor
-  closes or switches to another asset type.
+  closes or switches to another asset type. The preview disables shadow maps and anti-aliasing through its
+  own `RenderConfig`; bloom, ambient occlusion, reflections and tonemapping retain their normal defaults.
 - Editable material values are copied to a reusable preview material as the controls change, without mutating
   the material used by the main scene. Generated materials can display their resolved runtime material.
 - Unassigned transient texture handles no longer collide with compiled alias-slot IDs. The collision caused

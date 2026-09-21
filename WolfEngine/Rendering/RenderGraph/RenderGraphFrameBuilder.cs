@@ -489,7 +489,9 @@ internal sealed class RenderGraphFrameBuilder
 		                        _view.PreviousSceneFramebufferSize.X != sceneFramebufferSize.X ||
 		                        _view.PreviousSceneFramebufferSize.Y != sceneFramebufferSize.Y ||
 		                        _view.PreviousSceneEnabled != sceneEnabled;
-		var shadowMapResolution = Math.Max(1, config.ShadowMaps.CascadeResolution);
+		var shadowMapResolution = config.ShadowMaps.Enabled
+			? Math.Max(1, config.ShadowMaps.CascadeResolution)
+			: 1;
 		InvalidateTransientPoolIfFrameShapeChanged(framebufferSize, sceneFramebufferSize, shadowMapResolution, sceneEnabled);
 		_view.SceneDebugViews.Clear();
 		_view.SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
@@ -659,20 +661,29 @@ internal sealed class RenderGraphFrameBuilder
 				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
 				default(ColorRGBA),
 				1.0f));
-			shadowMapHandle1 = _resources.CreateTransientTexture(new TextureDescriptor(
-				shadowMapResolution,
-				shadowMapResolution,
-				TextureFormat.D32Float,
-				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				default(ColorRGBA),
-				1.0f));
-			shadowMapHandle2 = _resources.CreateTransientTexture(new TextureDescriptor(
-				shadowMapResolution,
-				shadowMapResolution,
-				TextureFormat.D32Float,
-				TextureUsage.DepthStencil | TextureUsage.ShaderResource,
-				default(ColorRGBA),
-				1.0f));
+			if (config.ShadowMaps.Enabled)
+			{
+				shadowMapHandle1 = _resources.CreateTransientTexture(new TextureDescriptor(
+					shadowMapResolution,
+					shadowMapResolution,
+					TextureFormat.D32Float,
+					TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+					default(ColorRGBA),
+					1.0f));
+				shadowMapHandle2 = _resources.CreateTransientTexture(new TextureDescriptor(
+					shadowMapResolution,
+					shadowMapResolution,
+					TextureFormat.D32Float,
+					TextureUsage.DepthStencil | TextureUsage.ShaderResource,
+					default(ColorRGBA),
+					1.0f));
+			}
+			else
+			{
+				// Lighting bindings still expect three depth handles even when shadow sampling is off.
+				shadowMapHandle1 = shadowMapHandle0;
+				shadowMapHandle2 = shadowMapHandle0;
+			}
 			resolvedSceneColorHandle = sceneColorHandle.IsValid
 				? sceneColorHandle
 				: _resources.CreateTransientTexture(new TextureDescriptor(
@@ -1328,14 +1339,17 @@ internal sealed class RenderGraphFrameBuilder
 			graph.AddPass("GpuDraw View Update", PassKind.Compute)
 				.SetExecute(_gpuDrawViewUpdateExecute);
 
-			graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
-				.SetExecute(_gpuDrawShadowCullExecute);
+			if (_view.FrameResources.Config.ShadowMaps.Enabled)
+			{
+				graph.AddPass("GpuDraw Cull (Shadow View)", PassKind.Compute)
+					.SetExecute(_gpuDrawShadowCullExecute);
 
-			graph.AddPass("Shadow Map", PassKind.Graphics)
-				.WriteTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.DepthWrite)
-				.WriteTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.DepthWrite)
-				.WriteTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.DepthWrite)
-				.SetExecute(_shadowMapExecute);
+				graph.AddPass("Shadow Map", PassKind.Graphics)
+					.WriteTexture(_view.FrameResources.ShadowMapDepth0, ResourceState.DepthWrite)
+					.WriteTexture(_view.FrameResources.ShadowMapDepth1, ResourceState.DepthWrite)
+					.WriteTexture(_view.FrameResources.ShadowMapDepth2, ResourceState.DepthWrite)
+					.SetExecute(_shadowMapExecute);
+			}
 
 			graph.AddPass("GpuDraw Cull (Camera View)", PassKind.Compute)
 				.SetExecute(_gpuDrawCameraCullExecute);
@@ -2439,10 +2453,15 @@ internal sealed class RenderGraphFrameBuilder
 			_sharedResources,
 			_renderer.GetGfxDevice(),
 			_gpuDrawResources,
-			_shadowMapPass.GetCurrentFrameData(),
+			GetShadowFrameData(),
 			context.SceneData);
 		_deferredLightingPass.Record(context, ref config, context.SceneData);
 	}
+
+	private ShadowFrameData GetShadowFrameData() =>
+		_view.FrameResources.Config.ShadowMaps.Enabled
+			? _shadowMapPass.GetCurrentFrameData()
+			: ShadowMapPass.GetDisabledFrameData(_view.FrameResources.Config.ShadowMaps);
 
 	private void ExecuteVolumetricFog(RenderGraphContext context, VolumetricFogStage stage)
 	{
@@ -2454,7 +2473,7 @@ internal sealed class RenderGraphFrameBuilder
 				_view.FrameResources,
 				device,
 				_gpuDrawResources,
-				_shadowMapPass.GetCurrentFrameData(),
+				GetShadowFrameData(),
 				_view.FrameResources.FogHistoryValid);
 		}
 		var config = _volumetricFogPass.BuildConfig(
@@ -2932,7 +2951,7 @@ internal sealed class RenderGraphFrameBuilder
 			_sharedResources,
 			device,
 			_gpuDrawResources,
-			_shadowMapPass.GetCurrentFrameData(),
+			GetShadowFrameData(),
 			context.SceneData);
 		_transparentForwardPass.Record(context, in config, context.SceneData);
 	}

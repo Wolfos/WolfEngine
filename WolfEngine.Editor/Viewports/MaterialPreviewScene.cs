@@ -20,7 +20,11 @@ public sealed class MaterialPreviewScene : IEditorRenderViewSource, IDisposable
 	private readonly World _world = new(WorldTag.Editor);
 	private readonly Entity _sphere;
 	private readonly Entity _camera;
-	private readonly RenderConfig _config = new() { AntiAliasing = new AntiAliasingConfig { Enabled = false } };
+	private readonly RenderConfig _config = new()
+	{
+		AntiAliasing = new AntiAliasingConfig { Enabled = false },
+		ShadowMaps = new ShadowMapConfig { Enabled = false }
+	};
 	private bool _disposed;
 
 	public MaterialPreviewScene(
@@ -37,10 +41,10 @@ public sealed class MaterialPreviewScene : IEditorRenderViewSource, IDisposable
 		ArgumentNullException.ThrowIfNull(sphereMesh);
 
 		var light = _world.CreateEntity("Material Preview Light");
-		_world.AddTransform(light, Matrix4x4.CreateFromYawPitchRoll(0.6f, 0.9f, 0.0f));
+		_world.AddTransform(light, Matrix4x4.CreateFromYawPitchRoll(0.4f, 0.65f, 0.0f));
 		_world.AddComponent(light, new Light
 		{
-			Color = ColorRGBA.White, Intensity = 1.0f, Range = 25.0f,
+			Color = ColorRGBA.White, Intensity = 2.25f, Range = 25.0f,
 			Type = LightType.Directional, HorizonFade = true
 		});
 

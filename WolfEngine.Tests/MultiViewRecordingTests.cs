@@ -97,7 +97,34 @@ public sealed class MultiViewRecordingTests
 		});
 	}
 
-	private static (RenderGraph Graph, RenderGraphFrameBuilder Builder) RecordTwoViews(Int2 primarySize, Int2 secondSize)
+	[Test]
+	public void SecondaryViewCanDisableShadowMapsWithoutChangingPrimaryOrBloom()
+	{
+		var secondConfig = new RenderConfig
+		{
+			ShadowMaps = new ShadowMapConfig { Enabled = false },
+			AntiAliasing = new AntiAliasingConfig { Enabled = false },
+			AmbientOcclusion = new AmbientOcclusionConfig { Enabled = false },
+			Reflections = new ReflectionConfig { Enabled = false }
+		};
+		var (graph, builder) = RecordTwoViews(new Int2(64, 32), new Int2(24, 48), secondConfig);
+		var names = graph.Passes.Select(pass => pass.Name).ToArray();
+		builder.BindView(Second);
+		var resources = ViewState(builder).FrameResources;
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(names, Does.Contain("Shadow Map"));
+			Assert.That(names, Does.Not.Contain("Shadow Map [view2]"));
+			Assert.That(names, Does.Not.Contain("GpuDraw Cull (Shadow View) [view2]"));
+			Assert.That(names, Does.Contain("Bloom Prefilter [view2]"));
+			Assert.That(resources.ShadowMapDepth0, Is.EqualTo(resources.ShadowMapDepth1));
+			Assert.That(resources.ShadowMapDepth0, Is.EqualTo(resources.ShadowMapDepth2));
+		});
+	}
+
+	private static (RenderGraph Graph, RenderGraphFrameBuilder Builder) RecordTwoViews(
+		Int2 primarySize, Int2 secondSize, RenderConfig? secondConfig = null)
 	{
 		var (graph, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
 		var config = new RenderConfig
@@ -110,7 +137,7 @@ public sealed class MultiViewRecordingTests
 		var framebuffer = new Int2(128, 128);
 		builder.BeginSharedFrame(framebuffer, Vector3.UnitY, 1.0f, config.SkyboxConfig);
 		builder.BeginViewFrame(RenderViewId.Primary, framebuffer, primarySize, default, true, false, config, Vector3.Zero);
-		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, config, Vector3.Zero);
+		builder.BeginViewFrame(Second, framebuffer, secondSize, default, true, false, secondConfig ?? config, Vector3.Zero);
 		builder.RecordSharedPreparation(graph);
 		builder.BindView(RenderViewId.Primary);
 		builder.RecordBoundView(graph);

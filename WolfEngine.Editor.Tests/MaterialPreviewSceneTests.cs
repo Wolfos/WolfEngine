@@ -45,6 +45,8 @@ public sealed class MaterialPreviewSceneTests
 			false, false, false, false, false, Vector2.Zero, new Vector2(256, 256)));
 		Assert.That(preview.PrepareSubmission(0, out var submission), Is.True);
 		Assert.That(submission.View, Is.EqualTo(view));
+		Assert.That(submission.Config.ShadowMaps.Enabled, Is.False);
+		Assert.That(submission.Config.Bloom.Enabled, Is.True);
 		preview.Dispose();
 		Assert.That(preview.PrepareSubmission(0, out _), Is.False);
 		host.Received(1).DestroyView(view);
