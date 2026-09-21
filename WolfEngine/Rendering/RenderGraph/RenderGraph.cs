@@ -135,7 +135,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	public RenderGraphBuilder AddPass(string name, PassKind kind)
 	{
 		var pass = _passPool.Count > 0 ? _passPool.Dequeue() : new RenderGraphPass();
-		pass.Configure(name, kind, _recordingView);
+		var passName = _recordingView.IsValid ? _viewRegistry.GetOrCreate(_recordingView).QualifyPassName(name) : name;
+		pass.Configure(passName, kind, _recordingView);
 		_passes.Add(pass);
 		return new(pass, _resourceRegistry);
 	}
@@ -157,6 +158,9 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	internal void EndViewRecording() => _recordingView = RenderViewId.None;
 
 	internal IReadOnlyList<RenderGraphPass> Passes => _passes;
+
+	/// <summary>The view state shared with the frame builder; exposed so tests can build a builder over it.</summary>
+	internal RenderViewRegistry ViewRegistry => _viewRegistry;
 
 	public void Execute()
 	{

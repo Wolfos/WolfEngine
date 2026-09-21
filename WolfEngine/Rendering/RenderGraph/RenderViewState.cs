@@ -30,6 +30,7 @@ internal sealed class RenderViewState
 	public RenderViewState(RenderViewId view)
 	{
 		View = view;
+		Name = view == RenderViewId.Primary ? "primary" : view.ToString();
 	}
 
 	public RenderViewId View { get; }
@@ -41,7 +42,31 @@ internal sealed class RenderViewState
 	public World? World;
 
 	/// <summary>Short name, qualified into pass names so a crash log names the view a pass belonged to.</summary>
-	public string Name = "primary";
+	public string Name;
+
+	// Pass names qualified with this view's name, cached because passes are recorded every frame.
+	private readonly Dictionary<string, string> _qualifiedPassNames = new(StringComparer.Ordinal);
+
+	/// <summary>
+	/// <paramref name="passName"/> as recorded for this view. DRED breadcrumbs and GPU profiler scopes are keyed by
+	/// pass name, so two views recording the same unqualified name would make a device-removal log unattributable
+	/// and merge unrelated timings. The primary view keeps plain names, so existing names stay stable.
+	/// </summary>
+	public string QualifyPassName(string passName)
+	{
+		if (View == RenderViewId.Primary)
+		{
+			return passName;
+		}
+
+		if (_qualifiedPassNames.TryGetValue(passName, out var qualified) == false)
+		{
+			qualified = $"{passName} [{Name}]";
+			_qualifiedPassNames.Add(passName, qualified);
+		}
+
+		return qualified;
+	}
 
 	/// <summary>What this view resolved to for the UI to sample, as of the last frame it was recorded.</summary>
 	public SceneViewportRenderState ResolvedSceneViewportState = SceneViewportRenderState.Empty;

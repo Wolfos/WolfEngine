@@ -17,7 +17,7 @@ public sealed class MultiViewRecordingTests
 		var (graph, builder) = RecordTwoViews(new Int2(64, 32), new Int2(24, 48));
 
 		var primaryGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer" && pass.View == RenderViewId.Primary);
-		var secondGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer" && pass.View == Second);
+		var secondGBuffer = graph.Passes.Single(pass => pass.Name == "GBuffer [view2]" && pass.View == Second);
 		Assert.Multiple(() =>
 		{
 			// Each view writes its own G-buffer: sharing one would have the second view overwrite the first
@@ -74,8 +74,26 @@ public sealed class MultiViewRecordingTests
 			Assert.That(sharedUpdates[0].View, Is.EqualTo(RenderViewId.None));
 			Assert.That(passes.IndexOf(sharedUpdates[0]), Is.LessThan(firstViewPass));
 			Assert.That(
-				passes.Where(pass => pass.Name == "GpuDraw View Update").Select(pass => pass.View),
+				passes.Where(pass => pass.Name.StartsWith("GpuDraw View Update", StringComparison.Ordinal)).Select(pass => pass.View),
 				Is.EqualTo(new[] { RenderViewId.Primary, Second }));
+		});
+	}
+
+	[Test]
+	public void SecondaryViewPassNamesAreQualifiedAndThePrimarysAreNot()
+	{
+		// DRED breadcrumbs and GPU profiler scopes are keyed by pass name. Two views recording "GBuffer" would make
+		// a device-removal log unattributable; the primary keeps plain names so existing names stay stable.
+		var (graph, _) = RecordTwoViews(new Int2(64, 32), new Int2(24, 48));
+		var secondNames = graph.Passes.Where(pass => pass.View == Second).Select(pass => pass.Name).ToList();
+		var primaryNames = graph.Passes.Where(pass => pass.View == RenderViewId.Primary).Select(pass => pass.Name).ToList();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(secondNames, Is.Not.Empty);
+			Assert.That(secondNames, Has.All.EndsWith(" [view2]"));
+			Assert.That(primaryNames, Has.None.Contains("["));
+			Assert.That(graph.Passes.Select(pass => pass.Name), Is.Unique, "no two passes in a frame may share a name");
 		});
 	}
 

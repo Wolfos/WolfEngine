@@ -422,8 +422,8 @@ fixing it as a side effect.
 
 **Pass names must be qualified by view**, for example `$"GBuffer [{view.Name}]"`. DRED breadcrumb attribution
 reports the enclosing pass name and `GpuProfiler` keys its scopes the same way, so duplicate names across
-views make a device-removal log unattributable and merge unrelated timings. `RenderViewState.Name` exists for
-this and is not used yet.
+views make a device-removal log unattributable and merge unrelated timings. Done for every view but the
+primary; a test asserts no two passes in a frame share a name.
 
 **Per-view constants must ride the existing per-pass constant buffer.** Metal has roughly 31 buffer slots with
 27 to 30 taken by the bindless argument buffers, so a new persistent per-view buffer slot is not available.
@@ -596,7 +596,10 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    capture against a pool threshold of 120. The two-pixel excess on `perview2` was ordinary noise — 185 of its
    202 differing channel samples within three levels, the rest the known flickering pixels — and it was 66 pixels
    from another run of the same build.
-6. Qualify pass names by view.
+6. **Done:** passes recorded for a view other than the primary are named `"<pass> [<view name>]"`
+   (`RenderViewState.QualifyPassName`, cached per view because passes are recorded every frame). The primary
+   keeps plain names so existing names, tests and tooling stay stable. The test fixture now builds its frame
+   builder over the graph's own `RenderViewRegistry`, as production does.
 7. Drop `RefreshRenderWorlds` and `HasRenderWorldListChanged`; the reconcile trigger becomes "view created".
 8. Move the editor onto the per-view publisher, and add a preview window that creates a second world and view
    and draws its sentinel — the first point two viewports appear on screen. The acceptance check is two views
