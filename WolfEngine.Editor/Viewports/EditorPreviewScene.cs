@@ -11,8 +11,9 @@ namespace WolfEngine.Editor;
 /// the preview window shows and what automation captures to check that views stay independent.
 /// </summary>
 /// <remarks>
-/// The world has no hierarchy, so the scene writes its own world transforms rather than depending on which world
-/// tags the world manager updates in the current play state.
+/// The world has no hierarchy. The scene writes world transforms from local state so it also renders when
+/// Play mode excludes editor worlds from their normal transform-system update. The camera's local state is
+/// driven by <see cref="EditorCameraSystem"/> when editor worlds are updating.
 /// </remarks>
 public sealed class EditorPreviewScene : IEditorRenderViewSource, IDisposable
 {
@@ -49,12 +50,12 @@ public sealed class EditorPreviewScene : IEditorRenderViewSource, IDisposable
 
 		var camera = new Camera { ScreenResolution = new Mathematics.Int2(16, 9) };
 		camera.SetPerspective(60.0f);
-		_camera = _world.CreateEntity("Preview Camera");
-		_world.AddTransform(_camera, Matrix4x4.Identity);
+		_camera = _world.CreateEntity("Preview Camera", CreateCameraToWorld(CameraPosition, Vector3.Zero, Vector3.UnitY));
 		_world.AddComponent(_camera, camera);
 
 		_worldManager.RegisterWorld(_world);
 		View = _viewHost.CreateView(new RenderViewDescriptor(_world, name, RenderViewOutput.Texture));
+		_world.AddComponent(_camera, new EditorCameraMover { View = View });
 		WriteTransforms();
 		_views.Register(this);
 	}
@@ -111,7 +112,7 @@ public sealed class EditorPreviewScene : IEditorRenderViewSource, IDisposable
 		SetWorld(_box, Matrix4x4.CreateRotationY(spin) * Matrix4x4.CreateTranslation(-0.8f, 0.0f, 0.0f));
 		SetWorld(_sphere, Matrix4x4.CreateScale(0.9f) * Matrix4x4.CreateTranslation(0.9f, 0.0f, 0.4f));
 		SetWorld(_light, Matrix4x4.CreateFromYawPitchRoll(0.6f, 0.9f, 0.0f));
-		SetWorld(_camera, CreateCameraToWorld(CameraPosition, Vector3.Zero, Vector3.UnitY));
+		SetWorld(_camera, _world.GetComponent<LocalTransform>(_camera).GetTransform());
 	}
 
 	private void SetWorld(Entity entity, Matrix4x4 localToWorld)

@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
 using WolfEngine.Physics;
+using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
 namespace WolfEngine.Editor.UI;
@@ -44,7 +45,7 @@ public sealed class TerrainToolController
 	{
 		ArgumentNullException.ThrowIfNull(scene);
 
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (viewportState.Visible == false ||
 		    EditorGui.HasSelectedEntity == false ||
 		    scene.World.IsAlive(EditorGui.SelectedEntity) == false ||
@@ -73,7 +74,7 @@ public sealed class TerrainToolController
 
 		var io = ImGui.GetIO();
 		if (SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform,
-			    EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera), out var inverseViewProjection) == false ||
+			    EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(RenderViewId.Primary), camera), out var inverseViewProjection) == false ||
 		    SceneViewportRayUtility.TryBuildWorldRay(viewportState, io.MousePos, inverseViewProjection, out var sceneRay) == false)
 		{
 			ClearPreview();

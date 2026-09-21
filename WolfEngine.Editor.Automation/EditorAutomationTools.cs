@@ -212,6 +212,22 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.CaptureFrameAsync(outputPath, cancellationToken);
 
+	[McpServerTool(Name = "capture_render_view"), Description("Capture a specific visible render view as a scene-colour PNG. View index 0 is Scene; index 1 is Preview. The capture selection is restored afterward.")]
+	public Task<FrameCaptureResult> CaptureRenderView(int viewIndex, string outputPath, CancellationToken cancellationToken) =>
+		_controller.CaptureRenderViewAsync(viewIndex, outputPath, cancellationToken);
+
+	[McpServerTool(Name = "set_editor_camera_pose"), Description("Set one editor viewport camera pose in memory without moving the other view. View index 0 is Scene; index 1 is Preview. Forward is a direction vector.")]
+	public Task<string> SetEditorCameraPose(int viewIndex, float x, float y, float z, float forwardX, float forwardY, float forwardZ, CancellationToken cancellationToken) =>
+		_controller.SetEditorCameraPoseAsync(viewIndex, new System.Numerics.Vector3(x, y, z),
+			new System.Numerics.Vector3(forwardX, forwardY, forwardZ), cancellationToken);
+
+	[McpServerTool(Name = "set_preview_frozen"), Description("Freeze or resume the Preview window's primitive animation for deterministic view captures.")]
+	public async Task<string> SetPreviewFrozen(bool frozen, CancellationToken cancellationToken)
+	{
+		await _controller.SetPreviewFrozenAsync(frozen, cancellationToken).ConfigureAwait(false);
+		return frozen ? "Preview animation frozen." : "Preview animation resumed.";
+	}
+
 	[McpServerTool(Name = "capture_editor_window"), Description("Capture a PNG of the whole editor window, including the ImGui panels, dock tabs and menus. Use this instead of capture_frame whenever the editor UI itself is what needs to be verified.")]
 	public Task<FrameCaptureResult> CaptureEditorWindow(
 		[Description("Absolute or project-relative PNG output path.")] string outputPath,

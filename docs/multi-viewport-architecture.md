@@ -8,8 +8,8 @@ Views that are not visible are skipped as an optimisation, never as a correctnes
 
 ## Handover status
 
-**Two views render correctly in the same frame, including in the interactive editor.** Stage 1's remaining
-work is per-view editor input (item 9) and the camera-independence acceptance check. The renderer baseline is
+**Stage 1 is complete for the Scene and Preview viewports.** Two views render in the same frame, including
+in the interactive editor, and each has independent camera input and pose. The renderer baseline is
 `2a04213` on branch `multi-viewport`.
 
 What works now, end to end:
@@ -23,14 +23,23 @@ What works now, end to end:
 - `EditorPreviewScene` is a working second view. CLI automation renders and captures it:
   `--preview-capture <path>` alongside `--capture`. With it active, the scene view stays within the
   single-view noise floor and the preview is bit-identical across runs.
-- `PreviewViewportWindow` creates that preview scene on its first draw, publishes its own viewport size and
-  visibility, and displays the view texture. Closing it or switching to a workspace without it hides the view;
-  the scene view remains active. The Window menu lists it through `EditorWindowRegistry`.
+- `PreviewViewportWindow` creates that preview scene on its first draw, publishes its own viewport size,
+  visibility and pointer state, and displays the view texture. Right-drag and movement keys control its own
+  camera. Closing it or switching to a workspace without it hides the view; the scene view remains active.
+  The Window menu lists it through `EditorWindowRegistry`.
+- `EditorCameraSystem` routes one input snapshot to the viewport where the right drag began, then applies it
+  only to that view's camera mover. The Scene-only selection, gizmo and terrain tools explicitly address the
+  primary view; the Preview cannot accidentally edit the authoring scene. Unit tests cover independent input
+  and pose changes across two editor worlds. The author confirmed both cameras rotate and move independently
+  in the interactive editor.
+- In-process automation has `set_editor_camera_pose`, `set_preview_frozen` and `capture_render_view` for future
+  deterministic per-view renderer comparisons. A pixel-diff capture with a populated authoring scene was not
+  part of this verification; the interactive check used an empty authoring scene.
 - View lifecycle (create, destroy, rebind) runs on the render thread; bindings are lock-guarded.
 
-**Next step — per-view editor input.** The preview is intentionally display-only; it does not consume camera,
-selection or gizmo input. Move those consumers off the primary-view bus facade when adding a viewport host.
-Keep the view-world constraint intact and validate camera independence in both directions.
+**Next step — Stage 2.** Add quality tiers and on-demand recording. Keep ray-traced effects and skinned
+meshes out of secondary views until the TLAS and skinning are per view. Selection and gizmo interaction in
+future document viewports belongs with the Stage 3 per-document editor context, not the Preview viewport.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -644,9 +653,14 @@ selected scene colour target. Direct per-view readback and state assertions woul
    no Preview passes. Reopening it showed the panel again, and the in-process editor shut down cleanly. The
    window is created lazily, so merely registering it does not create a render view.
 
-   Still to check: move one camera and assert the other view's image is unchanged. Keep ray-traced effects
-   and skinned meshes out of the second view until the TLAS and skinning are per view.
-9. Per-view bus consumers and per-viewport editor camera input.
+   Keep ray-traced effects and skinned meshes out of the second view until the TLAS and skinning are per view.
+9. **Done for Scene and Preview:** each camera mover is bound to a `RenderViewId`; `EditorCameraSystem.BeginFrame`
+   chooses the viewport where right-drag started and takes one input snapshot before either editor world updates.
+   The Preview window exposes its image as an input region and no longer resets its camera transform during
+   submission. Scene-only editing tools name the primary view explicitly. The two-world camera test asserts
+   that moving and rotating one camera leaves the other's pose unchanged; interactive navigation was confirmed
+   in both windows. Pixel-level image independence with a populated authoring scene is still a useful renderer
+   regression check, supported by the new in-process capture tools, but was not run in this slice.
 
 **Stage 2 — make it affordable.** Quality tiers, on-demand recording, skipping views that are not visible, and
 the per-view jitter sequence position that on-demand recording requires.

@@ -15,6 +15,15 @@ public sealed class PreviewViewportWindow : EditorWindow
 	private readonly EditorRenderViews _renderViews;
 	private readonly EditorViewportStateBus _viewportStateBus;
 	private EditorPreviewScene? _preview;
+	private bool _rightMousePressStartedHere;
+	private bool _frozen;
+
+	/// <summary>Holds preview animation still for deterministic renderer captures.</summary>
+	public void SetFrozen(bool frozen)
+	{
+		_frozen = frozen;
+		if (_preview is { } preview) preview.Frozen = frozen;
+	}
 
 	public PreviewViewportWindow(
 		IRenderViewHost viewHost,
@@ -38,7 +47,7 @@ public sealed class PreviewViewportWindow : EditorWindow
 		ImGui.PopStyleVar();
 
 		// Creating the view at registration time would make a hidden preview render on editor startup.
-		var preview = _preview ??= new EditorPreviewScene(_viewHost, _worldManager, _renderViews, Name);
+		var preview = _preview ??= new EditorPreviewScene(_viewHost, _worldManager, _renderViews, Name) { Frozen = _frozen };
 		var io = ImGui.GetIO();
 		var contentSize = Vector2.Max(ImGui.GetContentRegionAvail(), Vector2.Zero);
 		var imageMin = ImGui.GetCursorScreenPos();
@@ -54,6 +63,24 @@ public sealed class PreviewViewportWindow : EditorWindow
 		{
 			ImGui.Image(UiTextureIds.Viewport(preview.View), contentSize);
 		}
+		var pointerAvailable = false;
+		var pointerCaptured = false;
+		if (contentSize.X > 0.0f && contentSize.Y > 0.0f)
+		{
+			ImGui.SetCursorScreenPos(imageMin);
+			ImGui.InvisibleButton("##PreviewViewportInput", contentSize,
+				ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
+			pointerAvailable = ImGui.IsItemHovered();
+			pointerCaptured = ImGui.IsItemActive();
+		}
+		if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+		{
+			_rightMousePressStartedHere = pointerAvailable;
+		}
+		else if (!ImGui.IsMouseDown(ImGuiMouseButton.Right))
+		{
+			_rightMousePressStartedHere = false;
+		}
 
 		_viewportStateBus.PublishUiState(preview.View, new SceneViewportUiState(
 			visible,
@@ -62,9 +89,9 @@ public sealed class PreviewViewportWindow : EditorWindow
 			SceneDebugViewIds.FinalColor,
 			ImGui.IsWindowHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem),
 			ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows),
-			pointerAvailable: false,
-			pointerCaptured: false,
-			rightMousePressStartedHere: false,
+			pointerAvailable,
+			pointerCaptured,
+			_rightMousePressStartedHere,
 			imageMin,
 			imageMax));
 
@@ -73,6 +100,7 @@ public sealed class PreviewViewportWindow : EditorWindow
 
 	public override void OnHidden()
 	{
+		_rightMousePressStartedHere = false;
 		if (_preview is { } preview)
 		{
 			_viewportStateBus.PublishUiState(preview.View, SceneViewportUiState.Hidden);

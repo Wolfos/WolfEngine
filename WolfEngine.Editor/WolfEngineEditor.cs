@@ -71,6 +71,7 @@ public class WolfEngineEditor
 	private IGameplayModule? _boundGameplayModule;
 	private EditorAutomationController? _automationController;
 	private EditorRemoteAutomationController? _remoteAutomationController;
+	private EditorCameraSystem _editorCameraSystem = null!;
 
 	public WolfEngineEditor(
 		IWorldManager worldManager,
@@ -170,7 +171,8 @@ public class WolfEngineEditor
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
 		_worldManager.AddSystem<AnimationSystem>();
 		_worldManager.AddSystem<TransformSystem>();
-		_worldManager.AddSystem(_serviceProvider.GetRequiredService<EditorCameraSystem>());
+		_editorCameraSystem = _serviceProvider.GetRequiredService<EditorCameraSystem>();
+		_worldManager.AddSystem(_editorCameraSystem);
 		_worldManager.AddSystem(_boxColliderGizmoDrawer);
 		_worldManager.AddSystem(_sphereColliderGizmoDrawer);
 		_worldManager.AddSystem(_capsuleColliderGizmoDrawer);
@@ -223,6 +225,7 @@ public class WolfEngineEditor
 
 				using (FrameProfiler.Instance.Measure("World Update"))
 				{
+					_editorCameraSystem.BeginFrame();
 					UpdatePhysics(deltaTime);
 					UpdateGameplay(deltaTime);
 					var (worldMask, groupMask) = GetExecutionMask();
@@ -684,7 +687,7 @@ public class WolfEngineEditor
 
 		var entity = world.CreateEntity("Editor Camera", worldTransform);
 		world.AddComponent(entity, camera);
-		world.AddComponent(entity, new EditorCameraMover());
+		world.AddComponent(entity, new EditorCameraMover { View = RenderViewId.Primary });
 		return entity;
 	}
 

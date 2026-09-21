@@ -31,7 +31,7 @@ public sealed class GizmoLineRenderer : IGizmoLineRenderer
 	public void BeginFrame()
 	{
 		_canDraw = false;
-		var viewportState = _viewportStateBus.GetUiState();
+		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (viewportState.Visible == false ||
 		    viewportState.ContentSizePixels.X <= 0 ||
 		    viewportState.ContentSizePixels.Y <= 0 ||
@@ -46,7 +46,7 @@ public sealed class GizmoLineRenderer : IGizmoLineRenderer
 		}
 
 		_drawList = ImGui.GetWindowDrawList();
-		_viewProjection = view * UI.EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(), camera);
+		_viewProjection = view * UI.EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(RenderViewId.Primary), camera);
 		_viewportMin = viewportState.ImageMin;
 		_viewportMax = viewportState.ImageMax;
 		_canDraw = true;

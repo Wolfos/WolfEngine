@@ -65,7 +65,7 @@ public class SceneWindow: EditorWindow
 
     public override void OnHidden()
     {
-        _viewportStateBus.PublishUiState(SceneViewportUiState.Hidden);
+        _viewportStateBus.PublishUiState(RenderViewId.Primary, SceneViewportUiState.Hidden);
         _terrainToolController.ClearPreview();
         _gizmoLineRenderer.BeginFrame();
     }
@@ -137,7 +137,7 @@ public class SceneWindow: EditorWindow
         }
 
         ImGui.SameLine();
-        var renderState = _viewportStateBus.GetRenderState();
+        var renderState = _viewportStateBus.GetRenderState(RenderViewId.Primary);
         var debugViews = renderState.DebugViews.Length > 0 ? renderState.DebugViews : FallbackDebugViews;
         ImGui.SetNextItemWidth(150.0f);
         if (ImGui.BeginCombo("##DebugView", GetDebugViewLabel(debugViews, renderState.ActiveDebugViewId)))
@@ -266,7 +266,7 @@ public class SceneWindow: EditorWindow
             _terrainToolSettingsOverlay.Draw(_terrainTool, _terrainToolController.Settings, layerSet, imageMin, imageMax);
         }
 
-        _viewportStateBus.PublishUiState(new SceneViewportUiState(
+        _viewportStateBus.PublishUiState(RenderViewId.Primary, new SceneViewportUiState(
             visible,
             contentPixels,
             _sceneViewportScale,

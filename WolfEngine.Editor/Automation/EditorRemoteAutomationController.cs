@@ -35,8 +35,11 @@ public sealed class EditorRemoteAutomationController
 	private readonly RenderGraph _renderGraph;
 	private readonly GpuProfiler _gpuProfiler;
 	private readonly EditorViewportStateBus _viewportStateBus;
+	private readonly EditorCameraSystem _editorCameraSystem;
 	private readonly IEditorWorkspaceService _workspaces;
 	private readonly EditorWindowRegistry _windows;
+	private readonly PreviewViewportWindow _previewWindow;
+	private readonly SemaphoreSlim _captureGate = new(1, 1);
 	private readonly ConcurrentQueue<Action> _pendingCommands = new();
 	private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -60,10 +63,13 @@ public sealed class EditorRemoteAutomationController
 		RenderGraph renderGraph,
 		GpuProfiler gpuProfiler,
 		EditorViewportStateBus viewportStateBus,
+		EditorCameraSystem editorCameraSystem,
 		IEditorWorkspaceService workspaces,
-		EditorWindowRegistry windows)
+		EditorWindowRegistry windows,
+		PreviewViewportWindow previewWindow)
 	{
 		_viewportStateBus = viewportStateBus;
+		_editorCameraSystem = editorCameraSystem;
 		_projectPath = projectPath;
 		_projectService = projectService;
 		_gameplayAssemblyHost = gameplayAssemblyHost;
@@ -82,6 +88,7 @@ public sealed class EditorRemoteAutomationController
 		_gpuProfiler = gpuProfiler;
 		_workspaces = workspaces;
 		_windows = windows;
+		_previewWindow = previewWindow;
 	}
 
 	public Task<EditorWorkspaceStateResult> GetWorkspaceStateAsync(CancellationToken cancellationToken) =>
@@ -717,33 +724,68 @@ public sealed class EditorRemoteAutomationController
 		Enqueue(() => _viewportStateBus.OverrideDebugView(debugViewId), cancellationToken);
 
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
-		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, cancellationToken);
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, RenderViewId.Primary, cancellationToken);
+
+	/// <summary>Frames one live editor camera in memory; the other view's camera is unchanged.</summary>
+	public Task<string> SetEditorCameraPoseAsync(int viewIndex, Vector3 position, Vector3 forward, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var view = RenderViewId.FromIndex(viewIndex);
+			if (!_editorCameraSystem.SetCameraPose(view, position, forward))
+				throw new InvalidOperationException($"No live editor camera is registered for {view}.");
+			return $"Set {view} camera pose in memory.";
+		}, cancellationToken);
+
+	public Task SetPreviewFrozenAsync(bool frozen, CancellationToken cancellationToken) =>
+		Enqueue(() => _previewWindow.SetFrozen(frozen), cancellationToken);
+
+	public Task<FrameCaptureResult> CaptureRenderViewAsync(int viewIndex, string outputPath, CancellationToken cancellationToken) =>
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.SceneColor, RenderViewId.FromIndex(viewIndex), cancellationToken);
 
 	/// <summary>
 	/// Captures the whole editor window, including the ImGui panels, docking tabs and menus composited
 	/// over the scene. This is what to use when the thing under test is the editor UI itself.
 	/// </summary>
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
-		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, cancellationToken);
+		CaptureFrameAsync(outputPath, FrameCaptureTarget.Window, RenderViewId.Primary, cancellationToken);
 
-	private Task<FrameCaptureResult> CaptureFrameAsync(
+	private async Task<FrameCaptureResult> CaptureFrameAsync(
 		string outputPath,
 		FrameCaptureTarget target,
-		CancellationToken cancellationToken) =>
-		EnqueueAsync(async () =>
+		RenderViewId view,
+		CancellationToken cancellationToken)
+	{
+		await _captureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
 		{
-			var fullOutputPath = ResolveOutputPath(outputPath);
-			var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
-			Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
-			using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
-			image.SaveAsPng(fullOutputPath);
-			return new FrameCaptureResult(
-				fullOutputPath,
-				capture.Width,
-				capture.Height,
-				_editorFrameCoordinator.CompletedSequence,
-				_renderFrameCoordinator.CompletedSequence);
-		}, cancellationToken);
+			return await EnqueueAsync(async () =>
+			{
+				if (target == FrameCaptureTarget.SceneColor &&
+				    (!_renderGraph.Views.Contains(view) ||
+				     (view != RenderViewId.Primary && !_viewportStateBus.GetUiState(view).Visible)))
+					throw new InvalidOperationException($"Render view {view} is not active and visible.");
+				if (target == FrameCaptureTarget.SceneColor) _renderGraph.SetSceneCaptureView(view);
+				try
+				{
+					var fullOutputPath = ResolveOutputPath(outputPath);
+					var capture = await _renderer.CaptureNextFrameAsync(target, cancellationToken).ConfigureAwait(false);
+					Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+					using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
+					image.SaveAsPng(fullOutputPath);
+					return new FrameCaptureResult(fullOutputPath, capture.Width, capture.Height,
+						_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
+				}
+				finally
+				{
+					if (target == FrameCaptureTarget.SceneColor) _renderGraph.SetSceneCaptureView(RenderViewId.Primary);
+				}
+			}, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_captureGate.Release();
+		}
+	}
 
 	/// <summary>
 	/// Enters or resumes Play mode, waits for gameplay startup to publish a runtime camera, verifies the

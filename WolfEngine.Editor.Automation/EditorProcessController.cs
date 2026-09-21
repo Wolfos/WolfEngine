@@ -225,6 +225,15 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<FrameCaptureResult> CaptureFrameAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureFrameAsync(outputPath, cancellationToken);
 
+	public Task<FrameCaptureResult> CaptureRenderViewAsync(int viewIndex, string outputPath, CancellationToken cancellationToken) =>
+		GetRunningEditor().CaptureRenderViewAsync(viewIndex, outputPath, cancellationToken);
+
+	public Task<string> SetEditorCameraPoseAsync(int viewIndex, System.Numerics.Vector3 position, System.Numerics.Vector3 forward, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetEditorCameraPoseAsync(viewIndex, position, forward, cancellationToken);
+
+	public Task SetPreviewFrozenAsync(bool frozen, CancellationToken cancellationToken) =>
+		GetRunningEditor().SetPreviewFrozenAsync(frozen, cancellationToken);
+
 	public Task<FrameCaptureResult> CaptureEditorWindowAsync(string outputPath, CancellationToken cancellationToken) =>
 		GetRunningEditor().CaptureEditorWindowAsync(outputPath, cancellationToken);
 
