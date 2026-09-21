@@ -8,35 +8,35 @@ Views that are not visible are skipped as an optimisation, never as a correctnes
 
 ## Handover status
 
-Stage 0 is complete. Stage 1 is underway, but nothing user-visible has changed yet: there is still exactly
-one recorded view. Every piece of persistent per-view state now lives per view, and the frame-resource bundle
-has been split into `RenderViewResources` and `RenderFrameSharedResources`. Recording has matching shared
-preparation, per-view, and shared presentation phases. The remaining structural step is to migrate the
-render-thread consumers to per-view snapshots and loop the live submissions. `FrameSnapshot` now owns active
-`RenderViewSnapshot` entries with isolated scene packets, draw databases and camera history; the old members
-delegate to the primary entry until render-thread consumers migrate. `RenderPipeline.PublishSnapshot` now
-also accepts the planned list of `RenderViewSubmission` values, gathers each bound view's world into its own
-entry, and refreshes every database's shared handle-generation tables after all gathers. The standalone
-runtime has migrated to that API; the editor remains on the compatibility publisher until its editor overlay
-world is folded into the document world. Snapshot entries also track a binding generation, so reusing a
-view slot does not carry the prior world's draw records or camera history into its replacement.
+**Two views render correctly in the same frame.** Stage 1 is complete except for the interactive editor window
+(item 8's last step) and per-view editor input (item 9). Last commit: `2a04213` on branch `multi-viewport`.
 
-Every render pass now records the view it belongs to (`RenderGraphPass.View`; `None` for shared passes), and
-execution rebinds the frame builder to that view before running it and hands the pass its own view's snapshot
-and draw database. The per-frame view bundle (`FrameResources`) and debug-view selection moved from builder
-fields onto `RenderViewState` so that rebinding is a single pointer swap. `RenderGraph.Execute` now works out
-which views the graph contains — the bound view plus every view that recorded passes — resolves projection and
-viewport output for each, builds `SceneDrawData` for each (`TryBuildSceneData`, with its own camera-relative
-light list), and gives each pass its own view's scene data. Shared passes run against the bound view. The
-bound view is restored after execution.
+What works now, end to end:
 
-`OnRender` now records every live view. It runs `BeginSharedFrame` once (gameplay UI targets, sky, final
-colour), `RecordSharedPreparation`, then for each view `BeginViewFrame` and `RecordBoundView`, then
-`RecordSharedPresentation`, `Execute`, and `CompleteFrame` plus target write-back per view. The primary view
-always records; another view records when the published snapshot has an active entry for it and it is visible.
-A hidden or unsubmitted view publishes an empty render state so the UI cannot sample a stale texture. With no
-second view submitted, output is unchanged. **Two views still cannot render correctly** until each view's
-culls see only its own draws and the CPU-written per-frame buffers are per view — items 4 and 5 below.
+- The renderer records and executes every live view in one frame: shared preparation (gameplay UI targets,
+  sky, the shared draw update), then each view's passes, then shared presentation (ImGui).
+- Each view has its own world, camera, projection, scene data, temporal history, per-view CPU-written buffers
+  and indirect command sets. Draws carry their owning view in their flags and each view's cull skips the rest.
+- The editor binds the primary view to the scene world, rebinds it on scene load and play-mode switches
+  (`RebindView`), and publishes secondary views registered in `EditorRenderViews`.
+- `EditorPreviewScene` is a working second view. CLI automation renders and captures it:
+  `--preview-capture <path>` alongside `--capture`. With it active, the scene view stays within the
+  single-view noise floor and the preview is bit-identical across runs.
+- View lifecycle (create, destroy, rebind) runs on the render thread; bindings are lock-guarded.
+
+**Next step — the preview window.** The work had started when this handover was written, but no code changed:
+1. Add `public virtual void OnHidden() { }` to `EditorWindow`. Have `EditorWindowRegistry.DrawVisible` call it
+   for every registered window the active workspace doesn't have open, make `SceneWindow.OnHidden` an override,
+   and drop the scene-specific `OnHidden` call at `EditorGui.cs:76`. Keep the one at line 61, the loading
+   screen, where nothing is drawn.
+2. Add `PreviewViewportWindow : EditorWindow` (id `EditorWindowIds.Preview`, listed in `All`, added to the
+   `EditorWindowRegistry` constructor and to DI in `Program.cs`). The Window menu lists registry windows
+   automatically. Create its `EditorPreviewScene` lazily on first draw, never in the constructor.
+   Each frame, compute the content size the way `SceneWindow` does and publish `SceneViewportUiState` for the
+   preview's view, then draw `ImGui.Image(UiTextureIds.Viewport(view), contentSize)`. `OnHidden` publishes
+   `SceneViewportUiState.Hidden` for that view, so the renderer stops recording it.
+3. Verify with `capture_editor_window` through the `wolfengine_editor` MCP server. The CLI capture path draws
+   no editor UI, so it can't see the window.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
