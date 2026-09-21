@@ -82,6 +82,22 @@ There is deliberately no `ConfigureView`. A view's per-frame settings — visibl
 debug view — already travel on `EditorViewportStateBus`, which the panel owning the viewport republishes every
 frame. A second channel carrying the same values would be state to keep in sync rather than state to read.
 
+`RebindView(view, world)` points an existing view at another world — the editor's scene view when a scene
+loads or play mode starts — keeping its id and output target. A new binding generation makes the snapshot drop
+the old world's draw records (a reconciling sync with nothing touched emits removals, which the shared update
+applies to the GPU tables) and makes the render thread drop the view's temporal history before it records
+again, because that history belongs to the old world's camera and content.
+
+**Threading.** View lifecycle — create, destroy, rebind — runs on the render thread, through the render-thread
+dispatcher, because it creates and retires state that passes use while they execute: history, output targets,
+indirect command sets, per-view buffers. `Invoke` runs inline when already on that thread, which is how the
+standalone runtime creates its view before rendering starts; from the game thread it blocks until the render
+thread picks it up, which it does even while waiting for the next editor frame. Bindings (world, generation,
+name, output) are additionally guarded by a lock in `RenderViewRegistry`, because the game thread reads them
+when it publishes a snapshot. Before this, `CreateView` and `DestroyView` mutated the registry and retired GPU
+resources on the caller's thread while the render thread enumerated it — safe only because nothing created or
+destroyed a view after rendering started.
+
 A `RenderViewId` is a **slot, not a serial number**. The UI sentinel block is indexed by it and is
 deliberately small, so destroying a view hands its slot to the next view created. That is why destroying a
 view must clear its state: an id held past the destroy resolves to whatever view took the slot.

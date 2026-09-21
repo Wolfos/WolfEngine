@@ -43,6 +43,14 @@ public interface IRenderViewHost
 	/// </summary>
 	bool DestroyView(RenderViewId view);
 
+	/// <summary>
+	/// Points <paramref name="view"/> at a different world — the editor's scene view when a scene loads or play mode
+	/// starts. The view keeps its id and output target; its temporal history is dropped, since it belongs to the
+	/// old world. Returns false when the view does not exist.
+	/// </summary>
+	/// <exception cref="InvalidOperationException">That world already backs another view.</exception>
+	bool RebindView(RenderViewId view, World world);
+
 	/// <summary>The texture a view last resolved to, for the UI to sample.</summary>
 	bool TryGetViewTexture(RenderViewId view, out nint textureId, out Int2 size);
 

@@ -38,14 +38,50 @@ internal sealed class RenderViewState
 	/// <summary>Changes whenever this slot is bound to a new view, even if the same world is rebound.</summary>
 	public long BindingGeneration;
 
+	/// <summary>
+	/// The binding generation this view's temporal history was built for. Render thread only: when it differs
+	/// from <see cref="BindingGeneration"/> the view was rebound to another world, and history accumulated
+	/// against the old world's camera and content is dropped before the view records again.
+	/// </summary>
+	public long HistoryBindingGeneration;
+
+	/// <summary>
+	/// Drops everything this view carried over from its previous world: temporal, fog, colour-pyramid and DDGI
+	/// history, and the projection motion vectors reproject through. The output target is kept, because the UI
+	/// keeps sampling it across the change.
+	/// </summary>
+	public void ResetHistoryForNewBinding()
+	{
+		ReleaseTemporalHistoryResources();
+		ReleaseFogHistoryResources();
+		ReleaseColorPyramidResources();
+		ReleaseDdgiHistoryResources();
+		HasPreviousFrameShape = false;
+		HasPreviousResolvedProjection = false;
+		PreviousResolvedProjection = Matrix4x4.Identity;
+		PreviousJitterPhaseCount = 0;
+		HistoryBindingGeneration = BindingGeneration;
+	}
+
 	/// <summary>The world this view renders, or null for the primary view before anything bound one.</summary>
 	public World? World;
 
 	/// <summary>Short name, qualified into pass names so a crash log names the view a pass belonged to.</summary>
-	public string Name;
+	public string Name
+	{
+		get => _name;
+		set
+		{
+			_name = value;
+			_qualifiedPassNames.Clear();
+		}
+	}
+
+	private string _name = string.Empty;
 
 	// Pass names qualified with this view's name, cached because passes are recorded every frame.
 	private readonly Dictionary<string, string> _qualifiedPassNames = new(StringComparer.Ordinal);
+
 
 	/// <summary>
 	/// <paramref name="passName"/> as recorded for this view. DRED breadcrumbs and GPU profiler scopes are keyed by

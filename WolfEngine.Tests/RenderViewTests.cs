@@ -275,6 +275,70 @@ public sealed class RenderViewTests
 		});
 	}
 
+	[Test]
+	public void RenderViewRegistry_Rebind_MovesAViewToAnotherWorldAndStartsANewBinding()
+	{
+		// The editor's scene view keeps its id and output when a scene loads or play mode starts, but everything
+		// derived from the old world has to go: a new generation tells the snapshot and the render thread so.
+		var registry = new RenderViewRegistry();
+		var authoring = new World(WorldTag.All);
+		var runtime = new World(WorldTag.All);
+		var view = registry.Create(authoring, "scene", RenderViewOutput.Texture).View;
+		registry.TryGetBinding(view, out _, out var firstGeneration);
+
+		Assert.That(registry.Rebind(view, runtime), Is.True);
+		registry.TryGetBinding(view, out var boundWorld, out var secondGeneration);
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(boundWorld, Is.SameAs(runtime));
+			Assert.That(secondGeneration, Is.GreaterThan(firstGeneration));
+			Assert.That(registry.TryGetViewForWorld(authoring, out _), Is.False, "the old world is free again");
+			Assert.That(registry.TryGetViewForWorld(runtime, out var byWorld), Is.True);
+			Assert.That(byWorld, Is.EqualTo(view));
+		});
+	}
+
+	[Test]
+	public void RenderViewRegistry_Rebind_RefusesAWorldThatBacksAnotherViewAndIgnoresTheSameWorld()
+	{
+		var registry = new RenderViewRegistry();
+		var first = new World(WorldTag.All);
+		var second = new World(WorldTag.All);
+		var firstView = registry.Create(first, "first", RenderViewOutput.Texture).View;
+		registry.Create(second, "second", RenderViewOutput.Texture);
+		registry.TryGetBinding(firstView, out _, out var generation);
+
+		Assert.Throws<InvalidOperationException>(() => registry.Rebind(firstView, second));
+		Assert.That(registry.Rebind(firstView, first), Is.True);
+		registry.TryGetBinding(firstView, out _, out var unchanged);
+		Assert.Multiple(() =>
+		{
+			Assert.That(unchanged, Is.EqualTo(generation), "rebinding to the same world must not reset its history");
+			Assert.That(registry.Rebind(RenderViewId.FromIndex(9), first), Is.False);
+		});
+	}
+
+	[Test]
+	public void RenderViewState_ResetHistoryForNewBinding_DropsHistoryAndRecordsTheGeneration()
+	{
+		var state = new RenderViewState(RenderViewId.Primary)
+		{
+			BindingGeneration = 4,
+			HistoryValid = true,
+			HasPreviousResolvedProjection = true
+		};
+
+		state.ResetHistoryForNewBinding();
+
+		Assert.Multiple(() =>
+		{
+			Assert.That(state.HistoryValid, Is.False);
+			Assert.That(state.HasPreviousResolvedProjection, Is.False);
+			Assert.That(state.HistoryBindingGeneration, Is.EqualTo(4));
+		});
+	}
+
 	private static SceneViewportUiState CreateUiState(Int2 contentSizePixels, bool hovered) => new(
 		visible: true,
 		contentSizePixels: contentSizePixels,

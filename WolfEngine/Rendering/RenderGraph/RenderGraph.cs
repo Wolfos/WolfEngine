@@ -504,9 +504,21 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			: snapshot.Camera.Perspective;
 	}
 
+	// View lifecycle runs on the render thread, between frames, because it creates and retires render-thread state
+	// — history, targets, command sets, per-view buffers — that passes use while they execute. Invoke runs inline
+	// when already on the render thread, as when the standalone runtime creates its view before rendering starts.
 	public RenderViewId CreateView(in RenderViewDescriptor descriptor)
 	{
-		return _viewRegistry.Create(descriptor.World, descriptor.Name, descriptor.Output).View;
+		var world = descriptor.World;
+		var name = descriptor.Name;
+		var output = descriptor.Output;
+		return _mainThreadDispatcher.Invoke(() => _viewRegistry.Create(world, name, output).View);
+	}
+
+	public bool RebindView(RenderViewId view, World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		return _mainThreadDispatcher.Invoke(() => _viewRegistry.Rebind(view, world));
 	}
 
 	public bool DestroyView(RenderViewId view)
@@ -515,6 +527,12 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		{
 			return false;
 		}
+
+		return _mainThreadDispatcher.Invoke(() => DestroyViewOnRenderThread(view));
+	}
+
+	private bool DestroyViewOnRenderThread(RenderViewId view)
+	{
 
 		var released = _viewRegistry.Release(view, _renderer.GetGfxDevice());
 		if (released)
@@ -545,19 +563,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	public bool TryGetViewForWorld(World world, out RenderViewId view) =>
 		_viewRegistry.TryGetViewForWorld(world, out view);
 
-	internal bool TryGetViewBinding(RenderViewId view, out World world, out long bindingGeneration)
-	{
-		if (_viewRegistry.TryGet(view, out var state) && state.World is not null)
-		{
-			world = state.World;
-			bindingGeneration = state.BindingGeneration;
-			return true;
-		}
-
-		world = null!;
-		bindingGeneration = 0;
-		return false;
-	}
+	internal bool TryGetViewBinding(RenderViewId view, out World world, out long bindingGeneration) =>
+		_viewRegistry.TryGetBinding(view, out world, out bindingGeneration);
 
 	public IReadOnlyList<RenderViewId> Views => _viewRegistry.ViewIds;
 
@@ -719,6 +726,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				{
 					var recordedView = _recordedViews[viewIndex];
 					SelectView(recordedView);
+					if (_view.HistoryBindingGeneration != _view.BindingGeneration)
+					{
+						_view.ResetHistoryForNewBinding();
+					}
+
 					var viewSnapshot = recordedView == RenderViewId.Primary
 						? primarySnapshot
 						: FindView(snapshot, recordedView);
