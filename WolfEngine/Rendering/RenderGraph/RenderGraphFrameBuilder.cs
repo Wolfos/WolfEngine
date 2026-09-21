@@ -1755,11 +1755,17 @@ internal sealed class RenderGraphFrameBuilder
 					.SetExecute(_casSharpenExecute);
 			}
 
-			graph.AddPass("Copy To Final", PassKind.Compute)
+			var copyToFinal = graph.AddPass("Copy To Final", PassKind.Compute)
 				.ReadTexture(_view.FrameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
-				.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.UnorderedAccess)
-				.WriteTexture(_sharedResources.FinalColor, ResourceState.UnorderedAccess)
-				.SetExecute(_copyToFinalExecute);
+				.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.UnorderedAccess);
+			// Only the view that owns the window's presentation writes the shared final target; any other view's
+			// copy would overwrite it.
+			if (_view.OwnsPresentation)
+			{
+				copyToFinal.WriteTexture(_sharedResources.FinalColor, ResourceState.UnorderedAccess);
+			}
+
+			copyToFinal.SetExecute(_copyToFinalExecute);
 
 			// After tonemapping and upscaling so the outline colour reaches the
 			// viewport exactly as authored, and only on EncodedSceneColor so the
@@ -1773,7 +1779,9 @@ internal sealed class RenderGraphFrameBuilder
 					.SetExecute(_selectionOutlineExecute);
 			}
 
-			if (ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
+			// Gameplay screen UI belongs to the game's view, not to previews or documents.
+			if (_view.OwnsPresentation &&
+			    ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
 			    _gameplayUiFrame.Screen.CommandCount > 0)
 			{
 				// Keep capture/debug output and the presented target identical. Both are BGRA8, which
@@ -2969,7 +2977,8 @@ internal sealed class RenderGraphFrameBuilder
 			context,
 			_view.FrameResources,
 			_sharedResources,
-			_renderer.GetGfxDevice());
+			_renderer.GetGfxDevice(),
+			_view.OwnsPresentation);
 		_copyToFinalPass.Record(context, in config);
 	}
 

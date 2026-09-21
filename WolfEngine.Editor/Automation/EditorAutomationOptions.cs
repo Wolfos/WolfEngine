@@ -14,6 +14,17 @@ public sealed class EditorAutomationOptions
 	public string? ProfileOutputPath { get; init; }
 	public Int2 Resolution { get; init; } = new(DefaultWidth, DefaultHeight);
 
+	/// <summary>
+	/// When set, a preview scene is rendered through a second view alongside the scene, and that view is captured
+	/// here after the scene capture. The preview view is a different size and aspect from the scene view, so the pair
+	/// checks views stay independent: the scene capture must match a single-view run, and the preview must show only
+	/// its own world.
+	/// </summary>
+	public string? PreviewCapturePath { get; init; }
+
+	/// <summary>Size of the preview view, deliberately not the scene view's aspect.</summary>
+	public static readonly Int2 PreviewResolution = new(640, 480);
+
 	public static bool TryParse(string[] args, out EditorAutomationOptions? options, out string error)
 	{
 		options = null;
@@ -29,13 +40,14 @@ public sealed class EditorAutomationOptions
 		int? frames = null;
 		var profileFrames = 0;
 		string? profileOutput = null;
+		string? previewCapture = null;
 		var width = DefaultWidth;
 		var height = DefaultHeight;
 		for (var index = 0; index < args.Length; index++)
 		{
 			var argument = args[index];
 			if (argument == "--quit") continue;
-			if (argument is not ("--project" or "--scene" or "--frames" or "--capture" or "--width" or "--height" or "--profile-frames" or "--profile-output"))
+			if (argument is not ("--project" or "--scene" or "--frames" or "--capture" or "--width" or "--height" or "--profile-frames" or "--profile-output" or "--preview-capture"))
 			{
 				error = $"Unknown option '{argument}'.";
 				return false;
@@ -57,6 +69,7 @@ public sealed class EditorAutomationOptions
 				case "--height" when int.TryParse(value, out var parsedHeight): height = parsedHeight; break;
 				case "--profile-frames" when int.TryParse(value, out var parsedProfileFrames): profileFrames = parsedProfileFrames; break;
 				case "--profile-output": profileOutput = value; break;
+				case "--preview-capture": previewCapture = value; break;
 				default:
 					error = $"Option '{argument}' requires a positive integer.";
 					return false;
@@ -83,7 +96,8 @@ public sealed class EditorAutomationOptions
 			Frames = frames.Value,
 			ProfileFrames = profileFrames,
 			ProfileOutputPath = profileOutput,
-			Resolution = new Int2(width, height)
+			Resolution = new Int2(width, height),
+			PreviewCapturePath = previewCapture
 		};
 		return true;
 	}

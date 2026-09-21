@@ -36,7 +36,10 @@ public class WolfEngineEditor
 	private readonly EditorFrameCoordinator _editorFrameCoordinator;
 	private readonly EditorCameraContext _cameraContext;
 	// One submission per rendered view, reused every frame.
-	private readonly RenderViewSubmission[] _viewSubmissions = new RenderViewSubmission[1];
+	private readonly List<RenderViewSubmission> _viewSubmissions = new(2);
+	// Secondary views — previews, prefab documents — published alongside the scene view. Null when the host
+	// registered none, as in tests that construct the editor directly.
+	private readonly EditorRenderViews? _editorRenderViews;
 	private readonly EditorGui _editorGui;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
 	private readonly IEditorPlaySession _playSession;
@@ -121,6 +124,7 @@ public class WolfEngineEditor
 		_audioRuntime = audioRuntime ?? throw new ArgumentNullException(nameof(audioRuntime));
 		_gameplayExceptionReporter = new GameplayExceptionReporter(logService);
 		_worldManager.SetExceptionHandler(SystemExecutionGroup.Gameplay, _gameplayExceptionReporter.ReportSystem);
+		_editorRenderViews = serviceProvider?.GetService(typeof(EditorRenderViews)) as EditorRenderViews;
 		_serviceProvider = serviceProvider;
 		_rigidbodySystem = serviceProvider.GetRequiredService<RigidbodySystem>();
 	}
@@ -234,7 +238,7 @@ public class WolfEngineEditor
 
 			using (FrameProfiler.Instance.Measure("Publish Snapshot"))
 			{
-				PublishSnapshot();
+				PublishSnapshot(deltaTime);
 			}
 
 			using (FrameProfiler.Instance.Measure("UI"))
@@ -296,7 +300,7 @@ public class WolfEngineEditor
 		}
 	}
 
-	private void PublishSnapshot()
+	private void PublishSnapshot(float deltaTime)
 	{
 		ref var editorCamera = ref _editorWorld.GetComponent<Camera>(_editorCamera);
 		ref var editorCameraWorldTransform = ref _editorWorld.GetComponent<WorldTransform>(_editorCamera);
@@ -308,7 +312,9 @@ public class WolfEngineEditor
 		_cameraContext.Publish(camera, cameraWorldTransform);
 		// The scene view renders the current scene's world only; the editor camera lives in the editor world and is
 		// passed here explicitly, so that world contributes no draws and needs no view of its own.
-		_viewSubmissions[0] = new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig());
+		_viewSubmissions.Clear();
+		_viewSubmissions.Add(new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig()));
+		_editorRenderViews?.AppendSubmissions(deltaTime, _viewSubmissions);
 		_renderPipeline.PublishSnapshot(_viewSubmissions);
 	}
 

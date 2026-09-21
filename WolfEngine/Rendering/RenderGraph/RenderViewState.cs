@@ -131,6 +131,13 @@ internal sealed class RenderViewState
 	/// <summary>This frame's draw changes for this view's world, kept for its ray-tracing update.</summary>
 	public readonly List<GpuDrawUpdate> RayTracingUpdates = new();
 
+	/// <summary>
+	/// Whether this view's image is the window's presentation: it writes the shared final target and carries the
+	/// gameplay screen UI. The primary view does — it is the editor's scene view and the standalone game — as does
+	/// any view that renders to the backbuffer. Every other view writes only its own image.
+	/// </summary>
+	public bool OwnsPresentation => View == RenderViewId.Primary || Output == RenderViewOutput.Backbuffer;
+
 	/// <summary>Where this view's image goes. Fixed for the life of the view.</summary>
 	public RenderViewOutput Output = RenderViewOutput.Texture;
 

@@ -23,6 +23,11 @@ public sealed class EditorAutomationController
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly GpuProfiler _gpuProfiler;
 	private Task<FrameCapture>? _captureTask;
+	private readonly RenderGraph _renderGraph;
+	private readonly IWorldManager _worldManager;
+	private readonly EditorRenderViews _editorRenderViews;
+	private EditorPreviewScene? _preview;
+	private Task<FrameCapture>? _previewCaptureTask;
 	private Task<IReadOnlyList<GpuProfileFrame>>? _profileTask;
 	private DateTime _profileDeadlineUtc;
 	private bool _warmupComplete;
@@ -39,8 +44,14 @@ public sealed class EditorAutomationController
 		IRenderer renderer,
 		EditorViewportStateBus viewportStateBus,
 		IGameplayAssemblyHost gameplayAssemblyHost,
-		GpuProfiler gpuProfiler)
+		GpuProfiler gpuProfiler,
+		RenderGraph renderGraph,
+		IWorldManager worldManager,
+		EditorRenderViews editorRenderViews)
 	{
+		_renderGraph = renderGraph;
+		_worldManager = worldManager;
+		_editorRenderViews = editorRenderViews;
 		_options = options;
 		_projectService = projectService;
 		_sceneWorkspace = sceneWorkspace;
@@ -107,6 +118,23 @@ public sealed class EditorAutomationController
 				rightMousePressStartedHere: false,
 				imageMin: System.Numerics.Vector2.Zero,
 				imageMax: new System.Numerics.Vector2(_options.Resolution.X, _options.Resolution.Y)));
+
+			if (_options.PreviewCapturePath is not null)
+			{
+				// Frozen, so its image is the same in every run and captures can be compared.
+				_preview = new EditorPreviewScene(_renderGraph, _worldManager, _editorRenderViews, "preview") { Frozen = true };
+				var previewSize = EditorAutomationOptions.PreviewResolution;
+				_viewportStateBus.PublishUiState(_preview.View, new SceneViewportUiState(
+					visible: true,
+					contentSizePixels: previewSize,
+					resolutionScale: 1.0f,
+					requestedDebugViewId: SceneDebugViewIds.FinalColor,
+					hovered: false, focused: false,
+					pointerAvailable: false, pointerCaptured: false,
+					rightMousePressStartedHere: false,
+					imageMin: System.Numerics.Vector2.Zero,
+					imageMax: new System.Numerics.Vector2(previewSize.X, previewSize.Y)));
+			}
 		}
 		catch (Exception exception)
 		{
@@ -148,7 +176,7 @@ public sealed class EditorAutomationController
 			catch (Exception exception) { Fail(5, exception.Message); return; }
 		}
 
-		if (_captureTask is null)
+		if (_captureTask is null && _captureCompleted == false)
 		{
 			try
 			{
@@ -174,10 +202,50 @@ public sealed class EditorAutomationController
 				using var image = Image.LoadPixelData<Rgba32>(capture.Rgba8, capture.Width, capture.Height);
 				image.SaveAsPng(GetCapturePath());
 				Console.WriteLine($"capture success scene={_options.ScenePath} frames={_completedFrames} resolution={capture.Width}x{capture.Height} path={GetCapturePath()}");
-				Complete(0);
+				_captureTask = null;
+				_captureCompleted = true;
 			}
-			catch (Exception exception) { Fail(5, exception.Message); }
+			catch (Exception exception) { Fail(5, exception.Message); return; }
 		}
+
+		if (_captureCompleted == false)
+		{
+			return;
+		}
+
+		if (_preview is null)
+		{
+			Complete(0);
+			return;
+		}
+
+		if (_previewCaptureTask is null)
+		{
+			_renderGraph.SetSceneCaptureView(_preview.View);
+			_previewCaptureTask = _renderer.CaptureNextFrameAsync();
+			_captureDeadlineUtc = DateTime.UtcNow.AddSeconds(30);
+			return;
+		}
+
+		if (_previewCaptureTask.IsCompleted == false)
+		{
+			if (DateTime.UtcNow > _captureDeadlineUtc) Fail(4, "Timed out waiting for the preview view capture.");
+			return;
+		}
+
+		try
+		{
+			_renderGraph.SetSceneCaptureView(RenderViewId.Primary);
+			var previewCapture = _previewCaptureTask.GetAwaiter().GetResult();
+			var previewPath = ResolveProjectPath(_options.PreviewCapturePath!);
+			Directory.CreateDirectory(Path.GetDirectoryName(previewPath)!);
+			using var previewImage = Image.LoadPixelData<Rgba32>(previewCapture.Rgba8, previewCapture.Width, previewCapture.Height);
+			previewImage.SaveAsPng(previewPath);
+			Console.WriteLine($"preview capture success view={_preview.View} resolution={previewCapture.Width}x{previewCapture.Height} path={previewPath}");
+			_preview.Dispose();
+			Complete(0);
+		}
+		catch (Exception exception) { Fail(5, exception.Message); }
 	}
 
 	private string NormalizeProjectPath(string scenePath)
@@ -189,6 +257,11 @@ public sealed class EditorAutomationController
 		}
 		return Normalize(Path.GetRelativePath(_options.ProjectPath, fullPath));
 	}
+
+	private string ResolveProjectPath(string path) => Path.GetFullPath(Path.IsPathRooted(path)
+		? path : Path.Combine(_options.ProjectPath, path));
+
+	private bool _captureCompleted;
 
 	private string GetCapturePath() => Path.GetFullPath(Path.IsPathRooted(_options.CapturePath)
 		? _options.CapturePath : Path.Combine(_options.ProjectPath, _options.CapturePath));

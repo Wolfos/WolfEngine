@@ -11,6 +11,9 @@ cbuffer CopySettings : register(b1)
 {
     uint renderSizeX;
     uint renderSizeY;
+    // Zero for a view that does not own the window's presentation: it writes only its own encoded image, not the
+    // shared final target, which every other view's copy would otherwise overwrite.
+    uint writeFinalOutput;
 };
 
 float3 LinearToSrgb(float3 color)
@@ -35,6 +38,9 @@ void CopyToFinalCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     int2 pixel = int2(dispatchThreadId.xy);
     float4 linearDisplayColor = inputTexture.Load(int3(pixel, 0));
     float4 encodedDisplayColor = float4(LinearToSrgb(saturate(linearDisplayColor.rgb)), linearDisplayColor.a);
-    outputTexture[pixel] = encodedDisplayColor;
+    if (writeFinalOutput != 0)
+    {
+        outputTexture[pixel] = encodedDisplayColor;
+    }
     encodedSceneOutputTexture[pixel] = encodedDisplayColor;
 }

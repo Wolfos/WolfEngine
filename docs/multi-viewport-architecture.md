@@ -623,8 +623,26 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    the authoring-to-runtime rebind was exercised on the real render thread; `editorview1`–`editorview3` were within
    22–96 pixels of the verified pool. `HasRenderWorldListChanged` stays for the compatibility overload, which
    `Wolfie.IAE` still uses.
-8. Move the editor onto the per-view publisher, and add a preview window that creates a second world and view
-   and draws its sentinel — the first point two viewports appear on screen. The acceptance check is two views
+8. **Two views render in one frame.** `EditorPreviewScene` is a second world — light, camera, a box and a
+   sphere — with its own view, published through `EditorRenderViews`, the registry of secondary views the editor
+   submits alongside the scene view. CLI automation gains `--preview-capture <path>`, which renders the preview at
+   640×480 next to the 1280×720 scene and captures both (`RenderGraph.SetSceneCaptureView` selects which view a
+   scene-colour capture reads).
+
+   Result: the preview shows only its own world, with a round sphere at its own aspect, and three runs were
+   bit-identical. The scene captures taken with the preview active were within 99–120 pixels of the verified
+   single-view pool (threshold 118; the two-pixel excess was the usual noise signature — 164 of 187 differing
+   channel samples within three levels, the rest the known flickering pixels). A leak through a shared buffer,
+   command set or cull would move thousands of pixels.
+
+   **The first run found two presentation bugs**, both fixed. Every view encoded its image at window size, so a
+   640×480 view was upscaled to 1280×720 and stretched to the window's aspect; a view that does not own the
+   presentation now displays at its own size. And every view's "Copy To Final" wrote the shared `FinalColor`, so
+   the last view recorded became the window's background image; only the view that owns the presentation
+   (`RenderViewState.OwnsPresentation`: the primary, or a backbuffer view) now writes it, via a `writeFinalOutput`
+   flag on the copy shader, and only that view draws the gameplay screen UI.
+
+   Still to do here: an editor window that shows a preview, so two viewports appear on screen interactively. The acceptance check is two views
    of different worlds at different sizes, each showing only its own content, and moving one camera leaving
    the other view's image unchanged. Keep ray-traced effects and skinned meshes out of the second view until
    the TLAS and skinning are per view.

@@ -1,3 +1,4 @@
+using WolfEngine.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
@@ -33,6 +34,8 @@ public static class Program
 		services.AddSingleton<RigidbodySystem>();
 		services.AddSingleton<IEditorPlaySession, EditorPlaySession>();
 		services.AddSingleton<EditorCameraContext>();
+		services.AddSingleton<EditorRenderViews>();
+		services.AddSingleton<IRenderViewHost>(provider => provider.GetRequiredService<RenderGraph>());
 		services.AddSingleton<EditorCameraSystem>();
 		services.AddSingleton<FramerateTool>();
 		services.AddSingleton<IEditorNotificationService, EditorNotificationService>();

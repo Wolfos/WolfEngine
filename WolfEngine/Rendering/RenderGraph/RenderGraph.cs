@@ -28,6 +28,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	private readonly FrameSnapshotBuffer _snapshotBuffer = new();
 	// Views the current Execute runs, and the scene data built for each.
 	private readonly List<RenderViewId> _executedViews = new();
+	// Which view's encoded scene colour a scene-colour frame capture reads back. Written by automation on the game
+	// thread, read once per frame on the render thread.
+	private int _sceneCaptureViewValue = RenderViewId.Primary.Value;
+
 	// Views OnRender records this frame, and the imported output target of each.
 	private readonly List<RenderViewId> _recordedViews = new();
 	private readonly Dictionary<RenderViewId, RenderGraphResourceHandle> _sceneColorHandles = new();
@@ -438,6 +442,33 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		return true;
 	}
 
+	/// <summary>
+	/// Makes scene-colour frame captures read <paramref name="view"/>'s image instead of the primary view's. A view
+	/// that did not record in the captured frame falls back to the primary, so a capture never reads a stale image.
+	/// </summary>
+	public void SetSceneCaptureView(RenderViewId view)
+	{
+		if (view.IsValid == false)
+		{
+			throw new ArgumentException("A capture needs a valid view.", nameof(view));
+		}
+
+		Volatile.Write(ref _sceneCaptureViewValue, view.Value);
+	}
+
+	private RenderGraphResourceHandle ResolveSceneCaptureHandle()
+	{
+		var captureView = new RenderViewId(Volatile.Read(ref _sceneCaptureViewValue));
+		if (captureView != RenderViewId.Primary &&
+		    _recordedViews.Contains(captureView) &&
+		    _viewRegistry.TryGet(captureView, out var state))
+		{
+			return state.FrameResources.EncodedSceneColor;
+		}
+
+		return _frameBuilder.GetCaptureColorHandle();
+	}
+
 	/// <summary>The snapshot's existing entry for <paramref name="view"/>, without creating one.</summary>
 	private static RenderViewSnapshot FindView(FrameSnapshot snapshot, RenderViewId view)
 	{
@@ -777,10 +808,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						viewCameraPosition = viewSnapshot.Config.DiffuseGlobalIllumination.Origin;
 					}
 
+					// The view that owns the presentation displays at window size, as it always has; any other view
+					// displays at its own size, or its image would be stretched to the window's aspect.
+					var viewDisplaySize = _view.OwnsPresentation ? frameBufferSize : sceneRenderSize;
 					_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 					_frameBuilder.BeginViewFrame(
 						recordedView,
-						frameBufferSize,
+						viewDisplaySize,
 						sceneRenderSize,
 						sceneColorHandle,
 						renderSceneToViewport || renderSceneToWindow,
@@ -803,7 +837,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				SelectView(RenderViewId.Primary);
 				_frameBuilder.RecordSharedPresentation(this);
 				Execute();
-				var sceneCaptureHandle = _frameBuilder.GetCaptureColorHandle();
+				var sceneCaptureHandle = ResolveSceneCaptureHandle();
 				var windowCaptureHandle = _frameBuilder.GetFinalColorHandle();
 				if (sceneCaptureHandle.IsValid || windowCaptureHandle.IsValid)
 				{
