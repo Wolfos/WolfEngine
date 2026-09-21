@@ -63,7 +63,7 @@ public class SceneWindow: EditorWindow
 
     public override string Name => "Scene";
 
-    public void OnHidden()
+    public override void OnHidden()
     {
         _viewportStateBus.PublishUiState(SceneViewportUiState.Hidden);
         _terrainToolController.ClearPreview();

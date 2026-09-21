@@ -8,8 +8,9 @@ Views that are not visible are skipped as an optimisation, never as a correctnes
 
 ## Handover status
 
-**Two views render correctly in the same frame.** Stage 1 is complete except for the interactive editor window
-(item 8's last step) and per-view editor input (item 9). Last commit: `2a04213` on branch `multi-viewport`.
+**Two views render correctly in the same frame, including in the interactive editor.** Stage 1's remaining
+work is per-view editor input (item 9) and the camera-independence acceptance check. The renderer baseline is
+`2a04213` on branch `multi-viewport`.
 
 What works now, end to end:
 
@@ -22,21 +23,14 @@ What works now, end to end:
 - `EditorPreviewScene` is a working second view. CLI automation renders and captures it:
   `--preview-capture <path>` alongside `--capture`. With it active, the scene view stays within the
   single-view noise floor and the preview is bit-identical across runs.
+- `PreviewViewportWindow` creates that preview scene on its first draw, publishes its own viewport size and
+  visibility, and displays the view texture. Closing it or switching to a workspace without it hides the view;
+  the scene view remains active. The Window menu lists it through `EditorWindowRegistry`.
 - View lifecycle (create, destroy, rebind) runs on the render thread; bindings are lock-guarded.
 
-**Next step — the preview window.** The work had started when this handover was written, but no code changed:
-1. Add `public virtual void OnHidden() { }` to `EditorWindow`. Have `EditorWindowRegistry.DrawVisible` call it
-   for every registered window the active workspace doesn't have open, make `SceneWindow.OnHidden` an override,
-   and drop the scene-specific `OnHidden` call at `EditorGui.cs:76`. Keep the one at line 61, the loading
-   screen, where nothing is drawn.
-2. Add `PreviewViewportWindow : EditorWindow` (id `EditorWindowIds.Preview`, listed in `All`, added to the
-   `EditorWindowRegistry` constructor and to DI in `Program.cs`). The Window menu lists registry windows
-   automatically. Create its `EditorPreviewScene` lazily on first draw, never in the constructor.
-   Each frame, compute the content size the way `SceneWindow` does and publish `SceneViewportUiState` for the
-   preview's view, then draw `ImGui.Image(UiTextureIds.Viewport(view), contentSize)`. `OnHidden` publishes
-   `SceneViewportUiState.Hidden` for that view, so the renderer stops recording it.
-3. Verify with `capture_editor_window` through the `wolfengine_editor` MCP server. The CLI capture path draws
-   no editor UI, so it can't see the window.
+**Next step — per-view editor input.** The preview is intentionally display-only; it does not consume camera,
+selection or gizmo input. Move those consumers off the primary-view bus facade when adding a viewport host.
+Keep the view-world constraint intact and validate camera independence in both directions.
 
 Landed in the `WolfEngine` submodule, commits `b0d19a3` through `d855a4f`:
 
@@ -555,9 +549,10 @@ Once two views exist, the capture diff stops being the right check. The new one 
 different worlds at different sizes with temporal anti-aliasing on: move one camera and assert the other
 view's image is unchanged.
 
-Automation cannot see a second view — `capture_frame` reads back the single scene colour target. Stage 1
-should add `list_render_views`, `get_render_view_state(view)`, `capture_render_view(view, path)` and
-`set_render_view_quality(view, tier)` to `WolfEngine.Editor.Automation`.
+`capture_editor_window` now shows both viewports and their UI; `capture_frame` still reads back only the
+selected scene colour target. Direct per-view readback and state assertions would benefit from
+`list_render_views`, `get_render_view_state(view)` and `capture_render_view(view, path)` in
+`WolfEngine.Editor.Automation`. Quality tiers and `set_render_view_quality(view, tier)` belong to stage 2.
 
 ## Remaining work
 
@@ -642,10 +637,15 @@ should add `list_render_views`, `get_render_view_state(view)`, `capture_render_v
    (`RenderViewState.OwnsPresentation`: the primary, or a backbuffer view) now writes it, via a `writeFinalOutput`
    flag on the copy shader, and only that view draws the gameplay screen UI.
 
-   Still to do here: an editor window that shows a preview, so two viewports appear on screen interactively. The acceptance check is two views
-   of different worlds at different sizes, each showing only its own content, and moving one camera leaving
-   the other view's image unchanged. Keep ray-traced effects and skinned meshes out of the second view until
-   the TLAS and skinning are per view.
+   `PreviewViewportWindow` now shows the preview interactively. Automation opened it in the Scene workspace,
+   asserted its UI panel state, and captured the whole editor window: the floating Preview displays the box
+   and sphere while Scene displays its own sky. A five-frame GPU profile contained view-qualified Preview
+   passes while open; after closing the window and waiting ten frames, another five-frame profile contained
+   no Preview passes. Reopening it showed the panel again, and the in-process editor shut down cleanly. The
+   window is created lazily, so merely registering it does not create a render view.
+
+   Still to check: move one camera and assert the other view's image is unchanged. Keep ray-traced effects
+   and skinned meshes out of the second view until the TLAS and skinning are per view.
 9. Per-view bus consumers and per-viewport editor camera input.
 
 **Stage 2 — make it affordable.** Quality tiers, on-demand recording, skipping views that are not visible, and

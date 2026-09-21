@@ -73,7 +73,6 @@ public class EditorGui
 
 		if (_componentsWindowFocusRequested) _windowRegistry.Open(EditorWindowIds.Components);
 		_windowRegistry.DrawVisible(scene);
-		if (!_workspaces.IsWindowOpen(EditorWindowIds.Scene)) _sceneWindow.OnHidden();
 		if (_workspaces.ActiveWorkspace.OpenWindows.Count == 0) DrawEmptyWorkspaceHint();
 
 		_commandService.ProcessShortcuts();
