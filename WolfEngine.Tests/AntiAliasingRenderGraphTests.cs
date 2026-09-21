@@ -140,6 +140,57 @@ public sealed class AntiAliasingRenderGraphTests
 		Assert.That(ViewState(builder), Is.SameAs(primary));
 	}
 
+	[Test]
+	public void ViewPassesAreTaggedWithTheirViewAndSharedPassesAreNot()
+	{
+		// Execution rebinds per-view state from the pass's view, so a view pass left untagged would run
+		// against whichever view happened to be bound, and a shared pass tagged with a view would be
+		// rebound needlessly.
+		var (graph, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		builder.Build(graph);
+
+		var gbuffer = graph.Passes.Single(pass => pass.Name == "GBuffer");
+		// Copy To Final reads the view's tonemapped colour, so it is a view pass; ImGui composites every view.
+		var copyToFinal = graph.Passes.Single(pass => pass.Name == "Copy To Final");
+		var imgui = graph.Passes.Single(pass => pass.Name == "ImGui");
+		Assert.Multiple(() =>
+		{
+			Assert.That(gbuffer.View, Is.EqualTo(RenderViewId.Primary));
+			Assert.That(copyToFinal.View, Is.EqualTo(RenderViewId.Primary));
+			Assert.That(imgui.View, Is.EqualTo(RenderViewId.None));
+		});
+	}
+
+	[Test]
+	public void BindView_SwitchesWhichViewsFrameResourcesExecutionReads()
+	{
+		var (_, builder) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		BeginFrame(builder, AntiAliasingMode.Taa);
+		var primary = ViewState(builder);
+		var second = builder.GetViewStateForTest(RenderViewId.FromIndex(1));
+
+		builder.BindView(second.View);
+		Assert.That(ViewState(builder), Is.SameAs(second));
+
+		// A shared pass carries no view and must not disturb the binding.
+		builder.BindView(RenderViewId.None);
+		Assert.That(ViewState(builder), Is.SameAs(second));
+
+		builder.BindView(RenderViewId.Primary);
+		Assert.That(ViewState(builder), Is.SameAs(primary));
+	}
+
+	[Test]
+	public void ViewRecordingsDoNotNest()
+	{
+		var (graph, _) = ScreenSpaceDecalPassTests.CreateSchedulingFixture(new RenderGraphResourceRegistry());
+		graph.BeginViewRecording(RenderViewId.Primary);
+		Assert.Throws<InvalidOperationException>(() => graph.BeginViewRecording(RenderViewId.FromIndex(1)));
+		graph.EndViewRecording();
+		Assert.DoesNotThrow(() => graph.BeginViewRecording(RenderViewId.FromIndex(1)));
+	}
+
 	private static void BeginFrame(RenderGraphFrameBuilder builder, AntiAliasingMode mode, bool enabled = true, bool cas = true)
 	{
 		var config = new RenderConfig
@@ -152,7 +203,7 @@ public sealed class AntiAliasingRenderGraphTests
 		builder.BeginFrame(new Int2(16, 16), new Int2(16, 16), default, true, false, Vector3.UnitY, 1.0f, config, Vector3.Zero);
 	}
 
-	private static RenderViewResources Resources(RenderGraphFrameBuilder builder) => GetField<RenderViewResources>(builder, "_frameResources");
+	private static RenderViewResources Resources(RenderGraphFrameBuilder builder) => ViewState(builder).FrameResources;
 
 	/// <summary>The per-view state the builder is currently recording into.</summary>
 	private static RenderViewState ViewState(RenderGraphFrameBuilder builder) => GetField<RenderViewState>(builder, "_view");

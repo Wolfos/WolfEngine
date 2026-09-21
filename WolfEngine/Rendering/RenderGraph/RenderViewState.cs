@@ -52,6 +52,21 @@ internal sealed class RenderViewState
 	/// </summary>
 	public readonly EditorSceneRenderTargetManager SceneRenderTarget = new();
 
+	// This frame's transient resources and debug-view selection. They are rebuilt every frame, but they are
+	// held here rather than on the frame builder because passes read them when they execute, not when they
+	// are recorded: with several views in one graph, a builder field would hold whichever view was recorded
+	// last by the time any pass ran.
+	public RenderViewResources FrameResources;
+	public readonly List<RenderGraphFrameBuilder.SceneDebugViewRegistration> SceneDebugViews = [];
+	public SceneDebugViewOption[] SceneDebugViewOptions = Array.Empty<SceneDebugViewOption>();
+	public string RequestedSceneDebugViewId = SceneDebugViewIds.FinalColor;
+
+	/// <summary>
+	/// This frame's lights, made relative to this view's camera. Scene data holds the list by reference until
+	/// the frame's passes have run, so each view needs its own rather than one list rebuilt per view.
+	/// </summary>
+	public readonly List<LightPacket> RenderLights = new();
+
 	/// <summary>Where this view's image goes. Fixed for the life of the view.</summary>
 	public RenderViewOutput Output = RenderViewOutput.Texture;
 

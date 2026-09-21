@@ -8,9 +8,12 @@ changed at all. Two runs are not enough to measure that spread; take at least th
     python3 scripts/capture-noise-floor.py --before base1.png base2.png base3.png \
                                           --after  new1.png new2.png new3.png
 
-The change is clean when the across-build range sits inside the within-build ranges, on both pixel count and
-maximum channel delta. A cross-build pair tighter than the tightest same-build pair is the strongest signal
-available: a real difference cannot make two builds agree more closely than one build agrees with itself.
+The primary check is nearest-neighbour: every new capture must sit as close to some baseline capture as the
+baseline captures sit to each other. Run-to-run noise is not a single spread; a run lands in one of a few
+distinct states, so comparing ranges fails whenever the two sets happen to split across states differently.
+The range comparison is still printed, and a cross-build pair tighter than the tightest same-build pair
+remains a strong signal: a real difference cannot make two builds agree more closely than one build agrees
+with itself.
 
 Reads PNGs directly (zlib plus manual unfiltering) so it needs no third-party packages.
 """
@@ -134,18 +137,39 @@ def main():
     print()
     print(f"same-build spread : {floor_low}-{floor_high} px, max delta {floor_delta}")
     print(f"across builds     : {across[0]}-{across[1]} px, max delta {across[2]}")
-    print("VERDICT: within the noise floor" if inside else
-          "VERDICT: OUTSIDE the noise floor - investigate")
+    print("range check       : " + ("within the same-build spread" if inside else
+          "outside the same-build spread (secondary; see nearest-neighbour)"))
     if across[0] < before[0]:
         print(f"         tightest cross-build pair ({across[0]} px) beats the tightest baseline pair "
               f"({before[0]} px), which a real difference cannot do")
+
+    # Nearest-neighbour check. Run-to-run noise here is not one spread but a few distinct states a run lands
+    # in, so ranges can be blown out by pairing a run from one state with a run from another. The robust
+    # question is whether every new capture sits as close to some baseline capture as the baseline captures
+    # sit to each other.
+    def nearest(path, pool):
+        return min(compare(images[path], images[other])[0] for other in pool if other != path)
+    baseline_nn = max(nearest(path, args.before) for path in args.before)
+    after_nn = {path: nearest(path, args.before) for path in args.after}
+    worst_after_nn = max(after_nn.values())
+    print()
+    print(f"nearest-neighbour : every baseline capture is within {baseline_nn} px of another baseline capture")
+    for path, distance in after_nn.items():
+        print(f"                    {path} is within {distance} px of a baseline capture")
+    passed = worst_after_nn <= baseline_nn
 
     new_outliers = sorted(set(across[3]) - set(before[3]) - set(after[3]))
     if new_outliers:
         print(f"         NEW high-delta pixels not seen within either build: {new_outliers}")
     else:
         print("         no high-delta pixels beyond those the noise floor already produces")
-    return 0 if inside else 1
+    print()
+    print("VERDICT: within the noise floor" if passed else
+          "VERDICT: OUTSIDE the noise floor - a new capture is further from every baseline capture than the "
+          "baseline captures are from each other; investigate")
+    if new_outliers:
+        print("         then print each new outlier pixel in every capture before concluding anything")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
