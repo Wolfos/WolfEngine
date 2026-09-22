@@ -45,6 +45,7 @@ void CSUpdateMaterial(uint3 dispatchThreadId : SV_DispatchThreadID)
     materialData.baseColor = update.baseColor;
     materialData.metallicRoughness = update.metallicRoughness;
     materialData.emissiveFactorIntensity = update.emissiveFactorIntensity;
+    materialData.uvOffsetScale = update.uvOffsetScale;
     materialData.albedoHandle = update.albedoHandle;
     materialData.ormHandle = update.ormHandle;
     materialData.normalHandle = update.normalHandle;

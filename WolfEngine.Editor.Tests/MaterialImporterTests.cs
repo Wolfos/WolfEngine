@@ -1,4 +1,7 @@
 using System.Reflection;
+using System.Numerics;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WolfEngine.AssetPipeline;
@@ -11,6 +14,22 @@ namespace WolfEngine.Editor.Tests;
 [TestFixture]
 public sealed class MaterialImporterTests
 {
+	[Test]
+	public void MaterialAssetStore_UvTransformDefaultsToIdentityAndRoundTrips()
+	{
+		using var tempDirectory = new TempDirectory();
+		var path = Path.Combine(tempDirectory.Path, "tiling.mat.json");
+		var store = new MaterialAssetStore();
+		var legacyJson = JsonNode.Parse(JsonSerializer.Serialize(store.CreateDefault(), AssetJson.SerializerOptions))!.AsObject();
+		legacyJson.Remove(nameof(MaterialAsset.UvOffsetScale));
+		File.WriteAllText(path, legacyJson.ToJsonString());
+		var material = store.LoadAsset(path);
+		Assert.That(material.UvOffsetScale, Is.EqualTo(new Vector4(0, 0, 1, 1)));
+		material.UvOffsetScale = new Vector4(0.25f, -0.5f, 4, 2);
+		store.SaveAsset(path, material);
+		Assert.That(store.LoadAsset(path).UvOffsetScale, Is.EqualTo(material.UvOffsetScale));
+	}
+
 	[TestCase(MaterialAssetType.Opaque, TextureSemantic.BaseColor)]
 	[TestCase(MaterialAssetType.AlphaTest, TextureSemantic.BaseColorTransparent)]
 	[TestCase(MaterialAssetType.AlphaBlend, TextureSemantic.BaseColorTransparent)]

@@ -36,6 +36,7 @@ struct GpuMaterialData
     float4 baseColor;
     float4 metallicRoughness;
     float4 emissiveFactorIntensity;
+    float4 uvOffsetScale;
     uint albedoHandle;
     uint ormHandle;
     uint normalHandle;
@@ -152,6 +153,7 @@ struct GpuDrawMaterialUpdateData
     float4 baseColor;
     float4 metallicRoughness;
     float4 emissiveFactorIntensity;
+    float4 uvOffsetScale;
     uint32_t albedoHandle;
     uint32_t ormHandle;
     uint32_t normalHandle;

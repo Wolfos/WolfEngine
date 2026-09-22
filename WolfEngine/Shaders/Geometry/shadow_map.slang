@@ -177,7 +177,8 @@ void fragmentShader(VSOutput input)
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
-    float alpha = albedoTex.Sample(sampler, input.uv).a * materialData.baseColor.a;
+    float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
+    float alpha = albedoTex.Sample(sampler, materialUv).a * materialData.baseColor.a;
     if (alpha < materialData.metallicRoughness.z)
     {
         discard;

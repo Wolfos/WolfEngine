@@ -141,6 +141,20 @@ public sealed class MaterialAssetEditor
 		var properties = materialAsset.GetActiveProperties();
 		var propertyDefinitions = _materialTypeRegistry.GetPropertiesForMaterialType(materialAsset.MaterialType);
 		DrawBaseColorEditor(asset, materialAsset, properties);
+		var uvOffset = new Vector2(properties.UvOffsetScale.X, properties.UvOffsetScale.Y);
+		var uvScale = new Vector2(properties.UvOffsetScale.Z, properties.UvOffsetScale.W);
+		if (EditorUIUtility.InputVector2("UV Offset", ref uvOffset))
+		{
+			BeginPendingChange(asset);
+			properties.UvOffsetScale = new Vector4(uvOffset.X, uvOffset.Y, uvScale.X, uvScale.Y);
+			_hasPendingChanges = true;
+		}
+		if (EditorUIUtility.InputVector2("UV Scale", ref uvScale))
+		{
+			BeginPendingChange(asset);
+			properties.UvOffsetScale = new Vector4(uvOffset.X, uvOffset.Y, uvScale.X, uvScale.Y);
+			_hasPendingChanges = true;
+		}
 		DrawFloatEditor("Metallic", properties.MetallicFactor, value =>
 		{
 			BeginPendingChange(asset);
@@ -208,6 +222,7 @@ public sealed class MaterialAssetEditor
 		var normal = ResolveTexture(properties.Textures.Normal, _textureFactory.GetNeutralNormalTexture());
 		var emissive = ResolveTexture(properties.Textures.Emissive, _textureFactory.GetWhiteTexture());
 		var changed = !material.Color.Equals(properties.BaseColor) ||
+		              material.UvOffsetScale != properties.UvOffsetScale ||
 		              material.MetallicFactor != properties.MetallicFactor ||
 		              material.RoughnessFactor != properties.RoughnessFactor ||
 		              material.NormalScale != properties.NormalScale ||
@@ -220,6 +235,7 @@ public sealed class MaterialAssetEditor
 		              material.AlphaMode != descriptor.RuntimeAlphaMode ||
 		              material.AlphaCutoff != asset.AlphaCutoff;
 		material.Color = properties.BaseColor;
+		material.UvOffsetScale = properties.UvOffsetScale;
 		material.MetallicFactor = properties.MetallicFactor;
 		material.RoughnessFactor = properties.RoughnessFactor;
 		material.NormalScale = properties.NormalScale;

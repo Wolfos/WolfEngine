@@ -191,15 +191,16 @@ PSOutput EvaluateFragment(VSOutput input)
     Texture2D<float4> normalTex = GetTexture(materialData.normalHandle);
     Texture2D<float4> emissiveTex = GetTexture(materialData.emissiveHandle);
 
-    float4 albedoSample = albedoTex.Sample(sampler, input.uv);
-    float4 ormSample = ormTex.Sample(sampler, input.uv);
+    float2 materialUv = input.uv * materialData.uvOffsetScale.zw + materialData.uvOffsetScale.xy;
+    float4 albedoSample = albedoTex.Sample(sampler, materialUv);
+    float4 ormSample = ormTex.Sample(sampler, materialUv);
 #ifdef WOLF_ALPHA_CLIP
     if(albedoSample.a < materialData.metallicRoughness.z) discard;
 #endif
     float3 tangentNormal = ApplyNormalMapScale(
-        DecodeNormalMapSample(normalTex.Sample(sampler, input.uv)),
+        DecodeNormalMapSample(normalTex.Sample(sampler, materialUv)),
         materialData.metallicRoughness.w);
-    float4 emissiveSample = emissiveTex.Sample(sampler, input.uv);
+    float4 emissiveSample = emissiveTex.Sample(sampler, materialUv);
     float3 emissive = emissiveSample.rgb * materialData.emissiveFactorIntensity.rgb * materialData.emissiveFactorIntensity.a;
     float3 N = normal;
     float3 T = normalize(input.tangent.xyz);

@@ -19,7 +19,8 @@ public interface IMaterialFactory
 		Texture? normalTexture = null,
 		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
-		float alphaCutoff = 0.5f);
+		float alphaCutoff = 0.5f,
+		Vector4? uvOffsetScale = null);
 }
 
 public class MaterialFactory : IMaterialFactory
@@ -46,7 +47,8 @@ public class MaterialFactory : IMaterialFactory
 		Texture? normalTexture = null,
 		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
-		float alphaCutoff = 0.5f)
+		float alphaCutoff = 0.5f,
+		Vector4? uvOffsetScale = null)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{
@@ -56,6 +58,7 @@ public class MaterialFactory : IMaterialFactory
 		var material = new Material(shader)
 		{
 			Color = color,
+			UvOffsetScale = uvOffsetScale ?? new Vector4(0.0f, 0.0f, 1.0f, 1.0f),
 			MetallicFactor = metallicFactor,
 			RoughnessFactor = roughnessFactor,
 			NormalScale = normalScale,

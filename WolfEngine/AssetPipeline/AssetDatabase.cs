@@ -288,6 +288,8 @@ public sealed class MaterialTextureAssignments
 public abstract class MaterialSurfaceProperties
 {
 	public ColorRGBA BaseColor { get; set; } = ColorRGBA.White;
+	// XY is UV offset; ZW is UV scale. Identity preserves older material assets.
+	public Vector4 UvOffsetScale { get; set; } = new(0.0f, 0.0f, 1.0f, 1.0f);
 	public float MetallicFactor { get; set; } = 1.0f;
 	public float RoughnessFactor { get; set; } = 1.0f;
 	public float NormalScale { get; set; } = 1.0f;

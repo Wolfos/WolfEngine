@@ -91,6 +91,7 @@ public readonly struct GpuMaterialData
 		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
+		Vector4 uvOffsetScale,
 		uint albedoHandle,
 		uint ormHandle,
 		uint normalHandle,
@@ -100,6 +101,7 @@ public readonly struct GpuMaterialData
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
+		UvOffsetScale = uvOffsetScale;
 		AlbedoHandle = albedoHandle;
 		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
@@ -113,6 +115,7 @@ public readonly struct GpuMaterialData
 	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
+	public readonly Vector4 UvOffsetScale;
 	public readonly uint AlbedoHandle;
 	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;
@@ -353,6 +356,7 @@ public readonly struct GpuDrawMaterialUpdateData
 		ColorRGBA baseColor,
 		Vector4 metallicRoughness,
 		Vector4 emissiveFactorIntensity,
+		Vector4 uvOffsetScale,
 		uint albedoHandle,
 		uint ormHandle,
 		uint normalHandle,
@@ -366,6 +370,7 @@ public readonly struct GpuDrawMaterialUpdateData
 		BaseColor = baseColor;
 		MetallicRoughness = metallicRoughness;
 		EmissiveFactorIntensity = emissiveFactorIntensity;
+		UvOffsetScale = uvOffsetScale;
 		AlbedoHandle = albedoHandle;
 		OrmHandle = ormHandle;
 		NormalHandle = normalHandle;
@@ -383,6 +388,7 @@ public readonly struct GpuDrawMaterialUpdateData
 	public readonly ColorRGBA BaseColor;
 	public readonly Vector4 MetallicRoughness;
 	public readonly Vector4 EmissiveFactorIntensity;
+	public readonly Vector4 UvOffsetScale;
 	public readonly uint AlbedoHandle;
 	public readonly uint OrmHandle;
 	public readonly uint NormalHandle;

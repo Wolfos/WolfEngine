@@ -464,8 +464,9 @@ bool DdgiTryResolveHitSurface(
 
     GpuMaterialData material = g_MaterialTable[materialIndex];
     SamplerState materialSampler = GetSampler(material.samplerHandle);
-    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
-    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, surface.uv, 0.0f).rgb;
+    float2 materialUv = surface.uv * material.uvOffsetScale.zw + material.uvOffsetScale.xy;
+    float3 albedoSample = GetTexture(material.albedoHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
+    float3 emissiveSample = GetTexture(material.emissiveHandle).SampleLevel(materialSampler, materialUv, 0.0f).rgb;
     surface.albedo = max(material.baseColor.rgb * albedoSample, 0.0f.xxx);
     surface.emissive =
         emissiveSample *

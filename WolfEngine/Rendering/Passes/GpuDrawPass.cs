@@ -383,6 +383,7 @@ public sealed class GpuDrawPass
 			var baseColor = ColorRGBA.White;
 			var metallicRoughness = Vector4.One;
 			var emissiveFactorIntensity = Vector4.Zero;
+			var uvOffsetScale = new Vector4(0.0f, 0.0f, 1.0f, 1.0f);
 			var bucketId = GpuDrawBucketId.Opaque;
 			var executionLaneIndex = 0;
 			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(executionLaneIndex);
@@ -512,6 +513,7 @@ public sealed class GpuDrawPass
 				baseColor = material!.Color;
 				metallicRoughness = new Vector4(material.MetallicFactor, material.RoughnessFactor, alphaCutoff, material.NormalScale);
 				emissiveFactorIntensity = new Vector4(material.EmissiveFactor, material.EmissiveIntensity);
+				uvOffsetScale = material.UvOffsetScale;
 			}
 			else if (material is not null && GpuDrawClassification.SupportsUnlitTintMaterialInterpretation(drawKind))
 			{
@@ -555,6 +557,7 @@ public sealed class GpuDrawPass
 					baseColor,
 					metallicRoughness,
 					emissiveFactorIntensity,
+					uvOffsetScale,
 					albedoHandle,
 					ormHandle,
 					normalHandle,
@@ -2466,6 +2469,7 @@ public sealed class GpuDrawPass
 			new ColorRGBA(1.0f, 0.0f, 1.0f, 1.0f),
 			Vector4.One,
 			Vector4.Zero,
+			new Vector4(0.0f, 0.0f, 1.0f, 1.0f),
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,

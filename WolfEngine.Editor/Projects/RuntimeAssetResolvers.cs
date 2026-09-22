@@ -71,7 +71,8 @@ public sealed class MaterialRuntimeAssetResolver : IMaterialRuntimeAssetResolver
 			normalTexture: ResolveTexture(properties.Textures.Normal),
 			emissiveTexture: ResolveTexture(properties.Textures.Emissive),
 			alphaMode: descriptor.RuntimeAlphaMode,
-			alphaCutoff: materialAsset.AlphaCutoff);
+			alphaCutoff: materialAsset.AlphaCutoff,
+			uvOffsetScale: properties.UvOffsetScale);
 	}
 
 	private static Texture? ResolveTexture(AssetRef<Texture> reference)

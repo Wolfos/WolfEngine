@@ -143,6 +143,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.MetallicFactor = properties.MetallicFactor;
 		runtimeMaterial.RoughnessFactor = properties.RoughnessFactor;
 		runtimeMaterial.NormalScale = properties.NormalScale;
+		runtimeMaterial.UvOffsetScale = properties.UvOffsetScale;
 		runtimeMaterial.EmissiveFactor = properties.EmissiveFactor;
 		runtimeMaterial.EmissiveIntensity = properties.EmissiveIntensity;
 		runtimeMaterial.AlbedoTexture = ResolveTexture(properties.Textures.Albedo) ?? _textureFactory.GetWhiteTexture();

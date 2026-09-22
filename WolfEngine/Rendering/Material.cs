@@ -10,6 +10,7 @@ public sealed class Material
 {
     private readonly object _stateSync = new();
     private ColorRGBA _color = ColorRGBA.White;
+    private Vector4 _uvOffsetScale = new(0.0f, 0.0f, 1.0f, 1.0f);
     private float _metallicFactor = 1.0f;
     private float _roughnessFactor = 1.0f;
     private float _normalScale = 1.0f;
@@ -45,6 +46,12 @@ public sealed class Material
     {
         get => _color;
         set => SetField(ref _color, value);
+    }
+
+    public Vector4 UvOffsetScale
+    {
+        get => _uvOffsetScale;
+        set => SetField(ref _uvOffsetScale, value);
     }
 
     public float MetallicFactor
