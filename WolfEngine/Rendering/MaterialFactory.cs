@@ -20,7 +20,8 @@ public interface IMaterialFactory
 		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f,
-		Vector4? uvOffsetScale = null);
+		Vector4? uvOffsetScale = null,
+		bool doubleSided = false);
 }
 
 public class MaterialFactory : IMaterialFactory
@@ -48,7 +49,8 @@ public class MaterialFactory : IMaterialFactory
 		Texture? emissiveTexture = null,
 		AlphaMode alphaMode = AlphaMode.Opaque,
 		float alphaCutoff = 0.5f,
-		Vector4? uvOffsetScale = null)
+		Vector4? uvOffsetScale = null,
+		bool doubleSided = false)
 	{
 		if (string.IsNullOrWhiteSpace(shader))
 		{
@@ -69,7 +71,8 @@ public class MaterialFactory : IMaterialFactory
 			NormalTexture = normalTexture ?? _textureFactory.GetNeutralNormalTexture(),
 			EmissiveTexture = emissiveTexture ?? _textureFactory.GetWhiteTexture(),
 			AlphaMode = alphaMode,
-			AlphaCutoff = alphaCutoff
+			AlphaCutoff = alphaCutoff,
+			DoubleSided = doubleSided
 		};
 		_renderGraph.EnsureMaterialResources(material);
 

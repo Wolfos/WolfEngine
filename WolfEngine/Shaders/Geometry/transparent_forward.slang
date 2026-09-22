@@ -138,7 +138,7 @@ struct TransparentOutput
     float4 reactive : SV_Target1;
 };
 
-TransparentOutput fragmentShader(VSOutput input)
+TransparentOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFace)
 {
     TransparentOutput output;
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
@@ -163,7 +163,9 @@ TransparentOutput fragmentShader(VSOutput input)
     }
 
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
-    float3 normal = normalize(input.normal);
+    // A double-sided lane rasterises back faces, whose interpolated normal still points away from the
+    // viewer. Single-sided lanes cull them, so the flip only ever fires for geometry that asked for it.
+    float3 normal = normalize(input.normal) * (isFrontFace ? 1.0f : -1.0f);
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);

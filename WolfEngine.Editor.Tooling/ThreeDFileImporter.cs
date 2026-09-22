@@ -115,6 +115,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     ? GetMaterialFloat(assimp, material, "$mat.gltf.alphaCutoff", 0.5f)
                     : 0.0f; // or ignore for non-MASK
 
+                var doubleSided = GetMaterialInt(assimp, material, Assimp.MatkeyTwosided, 0) != 0;
+
                 AlphaMode alphaMode = AlphaMode.Opaque;
                 switch (aMode)
                 {
@@ -201,7 +203,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     OcclusionTextureIndex: occlusionTextureIndex,
                     EmissiveTextureIndex: emissiveTextureIndex,
                     AlphaMode: alphaMode,
-                    AlphaCutoff: alphaCutoff
+                    AlphaCutoff: alphaCutoff,
+                    DoubleSided: doubleSided
                     ));
             }
 

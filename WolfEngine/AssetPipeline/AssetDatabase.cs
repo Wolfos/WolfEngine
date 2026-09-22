@@ -260,6 +260,7 @@ public sealed class MaterialAsset : MaterialSurfaceProperties
 	public AssetType AssetType { get; set; } = AssetType.Material;
 	public MaterialAssetType MaterialType { get; set; } = MaterialAssetType.Opaque;
 	public float AlphaCutoff { get; set; } = 0.5f;
+	public bool DoubleSided { get; set; }
 
 	// Retained as a compatibility convenience for callers that operate on surface properties.
 	public MaterialSurfaceProperties GetActiveProperties() => this;

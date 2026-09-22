@@ -408,7 +408,7 @@ public sealed class TransparentForwardPass
 
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
-			CullMode.Back,
+			lane.ResolveCullMode(CullMode.Back),
 			depthTestEnabled: true,
 			depthWriteEnabled: false,
 			BlendMode.AlphaBlend);

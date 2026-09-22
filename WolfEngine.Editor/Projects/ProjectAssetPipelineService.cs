@@ -2148,6 +2148,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		properties.Textures.Emissive = CreateTextureRef(importedMaterial.EmissiveTextureIndex, textureNodeIds);
 
 		materialAsset.AlphaCutoff = importedMaterial.AlphaCutoff;
+		materialAsset.DoubleSided = importedMaterial.DoubleSided;
 
 		return materialAsset;
 	}

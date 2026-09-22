@@ -37,6 +37,19 @@ public static class GpuDrawClassification
 		throw new NotSupportedException($"Shared draw kind '{drawKind}' does not define bucket participation yet.");
 	}
 
+	/// <summary>
+	/// Only mesh lanes have double-sided variants: terrain is a heightfield and debug primitives are
+	/// closed hulls, so neither has a back face worth rasterising.
+	/// </summary>
+	public static GpuDrawSidedness ResolveSidedness(GpuDrawKind drawKind, Material material)
+	{
+		ArgumentNullException.ThrowIfNull(material);
+
+		return drawKind == GpuDrawKind.Mesh && material.DoubleSided
+			? GpuDrawSidedness.DoubleSided
+			: GpuDrawSidedness.SingleSided;
+	}
+
 	public static bool TryResolveExecutionLane(GpuDrawKind drawKind, Material material,
 		out GpuDrawExecutionLaneDefinition laneDefinition)
 	{
@@ -48,7 +61,11 @@ public static class GpuDrawClassification
 			return false;
 		}
 
-		return GpuDrawExecutionLanes.TryGetDefinition(drawKind, bucketId, out laneDefinition);
+		return GpuDrawExecutionLanes.TryGetDefinition(
+			drawKind,
+			bucketId,
+			ResolveSidedness(drawKind, material),
+			out laneDefinition);
 	}
 
 	public static GpuDrawExecutionLaneDefinition ResolveExecutionLane(GpuDrawKind drawKind, Material material)

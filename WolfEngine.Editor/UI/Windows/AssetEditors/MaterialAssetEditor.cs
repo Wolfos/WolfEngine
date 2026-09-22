@@ -192,6 +192,16 @@ public sealed class MaterialAssetEditor
 			});
 		}
 
+		if (HasProperty(propertyDefinitions, MaterialPropertyKind.DoubleSided))
+		{
+			DrawBoolEditor("Double Sided", materialAsset.DoubleSided, value =>
+			{
+				BeginPendingChange(asset);
+				materialAsset.DoubleSided = value;
+				_hasPendingChanges = true;
+			});
+		}
+
 		ImGui.Separator();
 		ImGui.TextUnformatted("Textures");
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Albedo), "Albedo", properties.Textures.Albedo);
@@ -233,7 +243,8 @@ public sealed class MaterialAssetEditor
 		              !ReferenceEquals(material.NormalTexture, normal) ||
 		              !ReferenceEquals(material.EmissiveTexture, emissive) ||
 		              material.AlphaMode != descriptor.RuntimeAlphaMode ||
-		              material.AlphaCutoff != asset.AlphaCutoff;
+		              material.AlphaCutoff != asset.AlphaCutoff ||
+		              material.DoubleSided != asset.DoubleSided;
 		material.Color = properties.BaseColor;
 		material.UvOffsetScale = properties.UvOffsetScale;
 		material.MetallicFactor = properties.MetallicFactor;
@@ -247,6 +258,7 @@ public sealed class MaterialAssetEditor
 		material.EmissiveTexture = emissive;
 		material.AlphaMode = descriptor.RuntimeAlphaMode;
 		material.AlphaCutoff = asset.AlphaCutoff;
+		material.DoubleSided = asset.DoubleSided;
 		if (changed) _renderGraph.EnsureMaterialResources(material);
 		return material;
 	}
@@ -339,6 +351,15 @@ public sealed class MaterialAssetEditor
 	{
 		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(float), currentValue));
 		if (drawResult.Changed && drawResult.Value is float value)
+		{
+			setter(value);
+		}
+	}
+
+	private void DrawBoolEditor(string label, bool currentValue, Action<bool> setter)
+	{
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, typeof(bool), currentValue));
+		if (drawResult.Changed && drawResult.Value is bool value)
 		{
 			setter(value);
 		}

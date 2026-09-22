@@ -154,10 +154,10 @@ float ClipToDepth(float4 clipPosition)
     return clipPosition.z * invW;
 }
 
-PSOutput EvaluateFragment(VSOutput input)
+PSOutput EvaluateFragment(VSOutput input, bool isFrontFace)
 {
     PSOutput output;
-    
+
     if (input.instanceId >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.albedo = float4(1.0f, 0.0f, 1.0f, 1.0f);
@@ -183,7 +183,9 @@ PSOutput EvaluateFragment(VSOutput input)
     }
 
     GpuMaterialData materialData = g_MaterialTable[materialIndex];
-    float3 normal = normalize(input.normal);
+    // A double-sided lane rasterises back faces, whose interpolated normal still points away from the
+    // viewer. Single-sided lanes cull them, so the flip only ever fires for geometry that asked for it.
+    float3 normal = normalize(input.normal) * (isFrontFace ? 1.0f : -1.0f);
 
     SamplerState sampler = GetSampler(materialData.samplerHandle);
     Texture2D<float4> albedoTex = GetTexture(materialData.albedoHandle);
@@ -233,7 +235,7 @@ PSOutput EvaluateFragment(VSOutput input)
     return output;
 }
 
-PSOutput fragmentShader(VSOutput input)
+PSOutput fragmentShader(VSOutput input, bool isFrontFace : SV_IsFrontFace)
 {
-    return EvaluateFragment(input);
+    return EvaluateFragment(input, isFrontFace);
 }

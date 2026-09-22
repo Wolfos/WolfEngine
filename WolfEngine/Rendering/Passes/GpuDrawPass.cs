@@ -114,32 +114,25 @@ public sealed class GpuDrawPass
 			ulong version,
 			GpuDrawUpdateType type,
 			GpuDrawHandle drawHandle,
-			GpuDrawKind drawKind,
-			GpuDrawBucketId bucketId,
-			int executionIndex,
+			GpuDrawExecutionKey executionKey,
 			Mesh? mesh)
 		{
 			Version = version;
 			Type = type;
 			DrawHandle = drawHandle;
-			DrawKind = drawKind;
-			BucketId = bucketId;
-			ExecutionIndex = executionIndex;
+			ExecutionKey = executionKey;
 			Mesh = mesh;
 		}
 
 		public ulong Version { get; }
 		public GpuDrawUpdateType Type { get; }
 		public GpuDrawHandle DrawHandle { get; }
-		public GpuDrawKind DrawKind { get; }
-		public GpuDrawBucketId BucketId { get; }
-		public int ExecutionIndex { get; }
+		public GpuDrawExecutionKey ExecutionKey { get; }
 		public Mesh? Mesh { get; }
 	}
 
 	private readonly record struct MaterialDrawState(
-		GpuDrawKind DrawKind,
-		GpuDrawBucketId BucketId,
+		GpuDrawExecutionKey ExecutionKey,
 		int ExecutionIndex,
 		uint DrawFlags);
 
@@ -385,6 +378,7 @@ public sealed class GpuDrawPass
 			var emissiveFactorIntensity = Vector4.Zero;
 			var uvOffsetScale = new Vector4(0.0f, 0.0f, 1.0f, 1.0f);
 			var bucketId = GpuDrawBucketId.Opaque;
+			var sidedness = GpuDrawSidedness.SingleSided;
 			var executionLaneIndex = 0;
 			uint drawFlags = update.Type == GpuDrawUpdateType.Remove ? 0u : CreateDrawFlags(executionLaneIndex);
 			var alphaCutoff = 0.0f;
@@ -438,6 +432,7 @@ public sealed class GpuDrawPass
 				if (GpuDrawClassification.TryResolveExecutionLane(drawKind, material, out var laneDefinition))
 				{
 					bucketId = laneDefinition.BucketId;
+					sidedness = laneDefinition.Sidedness;
 					executionLaneIndex = laneDefinition.ExecutionIndex;
 					switch (material.AlphaMode)
 					{
@@ -459,8 +454,10 @@ public sealed class GpuDrawPass
 					drawFlags = materialReady ? desiredFlags : 0u;
 				}
 
-				_materialDrawStates[update.MaterialHandle.Value] =
-					new MaterialDrawState(drawKind, bucketId, executionLaneIndex, drawFlags);
+				_materialDrawStates[update.MaterialHandle.Value] = new MaterialDrawState(
+					new GpuDrawExecutionKey(drawKind, bucketId, sidedness),
+					executionLaneIndex,
+					drawFlags);
 				if (materialReady == false && update.Type != GpuDrawUpdateType.Remove)
 				{
 					_hardeningStats.AddMaterialFallbackIncident(bucketId);
@@ -470,8 +467,9 @@ public sealed class GpuDrawPass
 			         _materialDrawStates.TryGetValue(update.MaterialHandle.Value, out var cachedState))
 			{
 				drawFlags = cachedState.DrawFlags;
-				drawKind = cachedState.DrawKind;
-				bucketId = cachedState.BucketId;
+				drawKind = cachedState.ExecutionKey.DrawKind;
+				bucketId = cachedState.ExecutionKey.BucketId;
+				sidedness = cachedState.ExecutionKey.Sidedness;
 				executionLaneIndex = cachedState.ExecutionIndex;
 			}
 
@@ -481,7 +479,7 @@ public sealed class GpuDrawPass
 			    update.DrawIndex > 0 &&
 			    update.DrawIndex < GpuDrawResources.MaxDrawCount)
 			{
-				AppendStructuralRecord(update, mesh, drawKind, bucketId, executionLaneIndex);
+				AppendStructuralRecord(update, mesh, new GpuDrawExecutionKey(drawKind, bucketId, sidedness));
 			}
 
 			if (materialResources is not null && GpuDrawClassification.SupportsTexturedPbrMaterialInterpretation(drawKind))
@@ -1535,12 +1533,6 @@ public sealed class GpuDrawPass
 			return;
 		}
 
-		var renderState = new RenderStateDescriptor(
-			FillMode.Solid,
-			CullMode.Back,
-			depthTestEnabled: true,
-			depthWriteEnabled: true,
-			BlendMode.Opaque);
 		for (var i = 0; i < laneDefinitions.Length; i++)
 		{
 			var lane = laneDefinitions[i];
@@ -1549,6 +1541,12 @@ public sealed class GpuDrawPass
 				continue;
 			}
 
+			var renderState = new RenderStateDescriptor(
+				FillMode.Solid,
+				lane.ResolveCullMode(CullMode.Back),
+				depthTestEnabled: true,
+				depthWriteEnabled: true,
+				BlendMode.Opaque);
 			var compiled = GraphicsShaderCompiler.CompileWithReflection(
 				_shaderCompiler,
 				device.BackendKind,
@@ -1964,7 +1962,7 @@ public sealed class GpuDrawPass
 
 		var commandIndex = (uint)record.DrawHandle.Index;
 		if (record.Type == GpuDrawUpdateType.Remove ||
-		    GpuDrawClassification.SupportsMeshBackedGeometry(record.DrawKind) == false ||
+		    GpuDrawClassification.SupportsMeshBackedGeometry(record.ExecutionKey.DrawKind) == false ||
 		    record.Mesh is null)
 		{
 			ResetCommandAcrossBuckets(commandSet, slotIndex, commandIndex);
@@ -1974,8 +1972,7 @@ public sealed class GpuDrawPass
 		_renderer.EnsureMeshResources(record.Mesh);
 		EncodeCommandForPassLane(
 			commandIndex,
-			record.DrawKind,
-			record.BucketId,
+			record.ExecutionKey,
 			record.Mesh,
 			commandSet,
 			slotIndex,
@@ -1987,13 +1984,12 @@ public sealed class GpuDrawPass
 			passBindingResolver);
 	}
 
-	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, GpuDrawKind drawKind,
-		GpuDrawBucketId bucketId, int executionLaneIndex)
+	private void AppendStructuralRecord(in GpuDrawUpdate update, Mesh? mesh, GpuDrawExecutionKey executionKey)
 	{
 		var version = _nextStructuralVersion++;
 		var type = update.Type == GpuDrawUpdateType.Remove ? GpuDrawUpdateType.Remove : update.Type;
 		_structuralReplayRecords.Add(
-			new StructuralCommandRecord(version, type, update.DrawHandle, drawKind, bucketId, executionLaneIndex, mesh));
+			new StructuralCommandRecord(version, type, update.DrawHandle, executionKey, mesh));
 		_latestStructuralVersion = version;
 	}
 
@@ -2038,11 +2034,13 @@ public sealed class GpuDrawPass
 			}
 
 			_renderer.EnsureMeshResources(entry.Mesh);
-			var bucketId = GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material);
+			var executionKey = new GpuDrawExecutionKey(
+				entry.DrawKind,
+				GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material),
+				GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material));
 			EncodeCommandForPassLane(
 				(uint)entry.DrawIndex,
-				entry.DrawKind,
-				bucketId,
+				executionKey,
 				entry.Mesh,
 				commandSet,
 				slotIndex,
@@ -2163,8 +2161,7 @@ public sealed class GpuDrawPass
 
 	private void EncodeCommandForPassLane(
 		uint commandIndex,
-		GpuDrawKind drawKind,
-		GpuDrawBucketId bucketId,
+		GpuDrawExecutionKey executionKey,
 		Mesh mesh,
 		SharedDrawIndirectCommandSet commandSet,
 		int slotIndex,
@@ -2175,7 +2172,7 @@ public sealed class GpuDrawPass
 		Func<GpuDrawExecutionLaneDefinition, SharedDrawGraphicsBufferBindings?> bindingResolver,
 		Func<GpuDrawExecutionLaneDefinition, GraphicsPassBindingSet?> passBindingResolver)
 	{
-		if (GpuDrawExecutionLanes.TryGetDefinition(drawKind, bucketId, out var targetLane) == false ||
+		if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var targetLane) == false ||
 		    targetLane.SupportsPass(participation) == false ||
 		    laneAvailable(targetLane) == false)
 		{

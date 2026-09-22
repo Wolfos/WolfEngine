@@ -309,7 +309,7 @@ public sealed class ShadowMapPass
 
 		var renderState = new RenderStateDescriptor(
 			FillMode.Solid,
-			CullMode.Back,
+			lane.ResolveCullMode(CullMode.Back),
 			depthTestEnabled: true,
 			depthWriteEnabled: true,
 			BlendMode.Opaque);

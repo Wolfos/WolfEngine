@@ -139,7 +139,8 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			Resolve(properties.Textures.Normal),
 			Resolve(properties.Textures.Emissive),
 			descriptor.RuntimeAlphaMode,
-			asset.AlphaCutoff);
+			asset.AlphaCutoff,
+			doubleSided: asset.DoubleSided);
 	}
 
 	public object? GetInstance(Guid assetId, Type expectedType) => Load(assetId, expectedType);

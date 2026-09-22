@@ -152,6 +152,7 @@ public sealed class EditorAssetSnapshotService : IEditorAssetSnapshotService
 		runtimeMaterial.EmissiveTexture = ResolveTexture(properties.Textures.Emissive) ?? _textureFactory.GetWhiteTexture();
 		runtimeMaterial.AlphaMode = descriptor.RuntimeAlphaMode;
 		runtimeMaterial.AlphaCutoff = materialAsset.AlphaCutoff;
+		runtimeMaterial.DoubleSided = materialAsset.DoubleSided;
 		_renderGraph.RefreshMaterialResources(runtimeMaterial);
 	}
 

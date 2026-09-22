@@ -22,6 +22,7 @@ public sealed class Material
     private Texture _emissiveTexture = null!;
     private AlphaMode _alphaMode;
     private float _alphaCutoff;
+    private bool _doubleSided;
     private IMaterialResources? _resources;
     private int _contentRevision = 1;
     private int _resourceRevision;
@@ -118,6 +119,17 @@ public sealed class Material
     {
         get => _alphaCutoff;
         set => SetField(ref _alphaCutoff, value);
+    }
+
+    /// <summary>
+    /// Renders both faces of the surface, for geometry authored as single-sided cards such as foliage
+    /// or cloth. Draws using it are routed to a separate execution lane whose pipelines disable face
+    /// culling, so toggling this moves the draw between lanes rather than changing shading.
+    /// </summary>
+    public bool DoubleSided
+    {
+        get => _doubleSided;
+        set => SetField(ref _doubleSided, value);
     }
 
     internal IMaterialResources? Resources

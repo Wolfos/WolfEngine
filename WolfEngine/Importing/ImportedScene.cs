@@ -37,7 +37,8 @@ public record struct ImportedMaterial(
 	int? OcclusionTextureIndex,
 	int? EmissiveTextureIndex,
 	AlphaMode AlphaMode,
-	float AlphaCutoff
+	float AlphaCutoff,
+	bool DoubleSided
 );
 
 public record struct ImportedTexture(

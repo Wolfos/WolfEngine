@@ -82,7 +82,8 @@ public class SceneBuilder : ISceneBuilder
 				normalTexture,
 				emissiveTexture,
 				importedMaterial.AlphaMode,
-				importedMaterial.AlphaCutoff);
+				importedMaterial.AlphaCutoff,
+				doubleSided: importedMaterial.DoubleSided);
 			
 			materials.Add(material);
 		}

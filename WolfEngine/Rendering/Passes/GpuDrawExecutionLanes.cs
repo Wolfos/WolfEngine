@@ -1,12 +1,30 @@
+using WolfEngine.Rendering.Abstraction;
+
 namespace WolfEngine.Rendering.Passes;
 
-public readonly record struct GpuDrawExecutionKey(GpuDrawKind DrawKind, GpuDrawBucketId BucketId);
+/// <summary>
+/// Which faces of a lane's geometry survive rasterisation. Each pass owns the cull mode it uses for
+/// single-sided draws — the shadow pass biases differently from the GBuffer pass — so lanes carry the
+/// material's intent rather than a cull mode, and <see cref="GpuDrawExecutionLaneDefinition.ResolveCullMode"/>
+/// maps it onto the pass's own choice.
+/// </summary>
+public enum GpuDrawSidedness
+{
+	SingleSided = 0,
+	DoubleSided = 1
+}
+
+public readonly record struct GpuDrawExecutionKey(
+	GpuDrawKind DrawKind,
+	GpuDrawBucketId BucketId,
+	GpuDrawSidedness Sidedness);
 
 public readonly struct GpuDrawExecutionLaneDefinition
 {
 	public GpuDrawExecutionLaneDefinition(
 		GpuDrawKind drawKind,
 		GpuDrawBucketId bucketId,
+		GpuDrawSidedness sidedness,
 		int executionIndex,
 		string debugName,
 		string shaderVariant,
@@ -15,6 +33,7 @@ public readonly struct GpuDrawExecutionLaneDefinition
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
+		Sidedness = sidedness;
 		ExecutionIndex = executionIndex;
 		DebugName = debugName;
 		ShaderVariant = shaderVariant;
@@ -24,14 +43,18 @@ public readonly struct GpuDrawExecutionLaneDefinition
 
 	public GpuDrawKind DrawKind { get; }
 	public GpuDrawBucketId BucketId { get; }
+	public GpuDrawSidedness Sidedness { get; }
 	public int ExecutionIndex { get; }
 	public string DebugName { get; }
 	public string ShaderVariant { get; }
 	public string PreprocessorDefine { get; }
 	public DrawPassParticipation Participation { get; }
-	public GpuDrawExecutionKey Key => new(DrawKind, BucketId);
+	public GpuDrawExecutionKey Key => new(DrawKind, BucketId, Sidedness);
 
 	public bool SupportsPass(DrawPassParticipation pass) => (Participation & pass) != 0;
+
+	public CullMode ResolveCullMode(CullMode singleSidedCullMode) =>
+		Sidedness == GpuDrawSidedness.DoubleSided ? CullMode.None : singleSidedCullMode;
 }
 
 public sealed class GpuDrawExecutionLaneRegistry
@@ -55,7 +78,8 @@ public sealed class GpuDrawExecutionLaneRegistry
 			if (_definitionsByKey.TryAdd(definition.Key, definition) == false)
 			{
 				throw new InvalidOperationException(
-					$"Duplicate execution lane for draw kind '{definition.DrawKind}' and bucket '{definition.BucketId}'.");
+					$"Duplicate execution lane for draw kind '{definition.DrawKind}', bucket '{definition.BucketId}' " +
+					$"and sidedness '{definition.Sidedness}'.");
 			}
 
 			if (definition.ExecutionIndex < 0 || definition.ExecutionIndex >= _definitions.Length)
@@ -97,7 +121,8 @@ public sealed class GpuDrawExecutionLaneRegistry
 		}
 
 		throw new KeyNotFoundException(
-			$"Unknown shared draw execution lane for draw kind '{key.DrawKind}' and bucket '{key.BucketId}'.");
+			$"Unknown shared draw execution lane for draw kind '{key.DrawKind}', bucket '{key.BucketId}' " +
+			$"and sidedness '{key.Sidedness}'.");
 	}
 
 	public bool TryGetDefinition(GpuDrawExecutionKey key, out GpuDrawExecutionLaneDefinition definition) =>
@@ -136,6 +161,7 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.Mesh,
 			GpuDrawBucketId.Opaque,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 0,
 			"GBuffer.ExecuteMeshOpaque",
 			"MeshOpaque",
@@ -144,6 +170,7 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.Mesh,
 			GpuDrawBucketId.AlphaBlend,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 1,
 			"ForwardTransparent.ExecuteMeshAlphaBlend",
 			"MeshAlphaBlend",
@@ -152,6 +179,7 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.Mesh,
 			GpuDrawBucketId.AlphaTest,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 2,
 			"GBuffer.ExecuteMeshAlphaTest",
 			"MeshAlphaTest",
@@ -160,6 +188,7 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.DebugPrimitive,
 			GpuDrawBucketId.Opaque,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 3,
 			"GBuffer.ExecuteDebugPrimitiveOpaque",
 			"DebugPrimitiveOpaque",
@@ -168,6 +197,7 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.DebugPrimitive,
 			GpuDrawBucketId.AlphaBlend,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 4,
 			"ForwardTransparent.ExecuteDebugPrimitiveAlphaBlend",
 			"DebugPrimitiveAlphaBlend",
@@ -176,22 +206,56 @@ public static class GpuDrawExecutionLanes
 		new GpuDrawExecutionLaneDefinition(
 			GpuDrawKind.Terrain,
 			GpuDrawBucketId.Opaque,
+			GpuDrawSidedness.SingleSided,
 			executionIndex: 5,
 			"GBuffer.ExecuteTerrainOpaque",
 			"TerrainOpaque",
 			string.Empty,
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster),
+		new GpuDrawExecutionLaneDefinition(
+			GpuDrawKind.Mesh,
+			GpuDrawBucketId.Opaque,
+			GpuDrawSidedness.DoubleSided,
+			executionIndex: 6,
+			"GBuffer.ExecuteMeshOpaqueDoubleSided",
+			"MeshOpaqueDoubleSided",
+			string.Empty,
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster),
+		new GpuDrawExecutionLaneDefinition(
+			GpuDrawKind.Mesh,
+			GpuDrawBucketId.AlphaBlend,
+			GpuDrawSidedness.DoubleSided,
+			executionIndex: 7,
+			"ForwardTransparent.ExecuteMeshAlphaBlendDoubleSided",
+			"MeshAlphaBlendDoubleSided",
+			string.Empty,
+			DrawPassParticipation.ForwardTransparent),
+		new GpuDrawExecutionLaneDefinition(
+			GpuDrawKind.Mesh,
+			GpuDrawBucketId.AlphaTest,
+			GpuDrawSidedness.DoubleSided,
+			executionIndex: 8,
+			"GBuffer.ExecuteMeshAlphaTestDoubleSided",
+			"MeshAlphaTestDoubleSided",
+			"WOLF_ALPHA_CLIP",
 			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster));
 
 	public static GpuDrawExecutionLaneRegistry Registry => _registry;
 	public static ReadOnlySpan<GpuDrawExecutionLaneDefinition> Definitions => _registry.Definitions;
 	public static int ExecutionLaneCount => _registry.ExecutionLaneCount;
 
-	public static GpuDrawExecutionLaneDefinition GetDefinition(GpuDrawKind drawKind, GpuDrawBucketId bucketId) =>
-		_registry.GetDefinition(new GpuDrawExecutionKey(drawKind, bucketId));
+	public static GpuDrawExecutionLaneDefinition GetDefinition(
+		GpuDrawKind drawKind,
+		GpuDrawBucketId bucketId,
+		GpuDrawSidedness sidedness) =>
+		_registry.GetDefinition(new GpuDrawExecutionKey(drawKind, bucketId, sidedness));
 
-	public static bool TryGetDefinition(GpuDrawKind drawKind, GpuDrawBucketId bucketId,
+	public static bool TryGetDefinition(GpuDrawExecutionKey key, out GpuDrawExecutionLaneDefinition definition) =>
+		_registry.TryGetDefinition(key, out definition);
+
+	public static bool TryGetDefinition(GpuDrawKind drawKind, GpuDrawBucketId bucketId, GpuDrawSidedness sidedness,
 		out GpuDrawExecutionLaneDefinition definition) =>
-		_registry.TryGetDefinition(new GpuDrawExecutionKey(drawKind, bucketId), out definition);
+		_registry.TryGetDefinition(new GpuDrawExecutionKey(drawKind, bucketId, sidedness), out definition);
 
 	public static ReadOnlySpan<GpuDrawExecutionLaneDefinition> GetDefinitionsForPass(DrawPassParticipation pass) =>
 		_registry.GetDefinitionsForPass(pass);
