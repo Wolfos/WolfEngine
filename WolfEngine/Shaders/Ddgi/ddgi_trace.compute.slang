@@ -8,6 +8,7 @@ import "../Terrain/terrain_layer_blend.slang";
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_DRAW_KIND_TERRAIN 2u
+static const uint DDGI_STATIC_GEOMETRY_MASK = 0x02u;
 
 RaytracingAccelerationStructure sceneTlas : register(t3);
 StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t4);
@@ -581,7 +582,7 @@ DdgiTraceResult DdgiTraceGeometryRay(float3 originPosition, float3 rayDirection)
     ray.TMin = 0.001f;
     ray.TMax = maxRayDistance;
 
-    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, 0xFF);
+    WolfRayHit hit = WolfTraceClosest(sceneTlas, ray, DDGI_STATIC_GEOMETRY_MASK);
 
     DdgiTraceResult result = (DdgiTraceResult)0;
     result.hitDistance = maxRayDistance;

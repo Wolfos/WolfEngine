@@ -1737,6 +1737,7 @@ public sealed class RayTracingSceneResourcesTests
 		var updates = new List<GpuDrawUpdate>();
 		database.CopyUpdates(updates);
 		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x02u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1831,6 +1832,7 @@ public sealed class RayTracingSceneResourcesTests
 		var updates = new List<GpuDrawUpdate>();
 		database.CopyUpdates(updates);
 		resources.RecordUpdate(context, renderer, updates);
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x02u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1841,6 +1843,7 @@ public sealed class RayTracingSceneResourcesTests
 		resources.RecordUpdate(context, renderer, updates);
 		Assert.That(resources.LastStats.TopLevelRebuildReason, Is.EqualTo(RayTracingSceneRebuildReason.Transform));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x01u));
 		database.ConsumeUpdates(updates);
 
 		database.BeginSync();
@@ -1853,6 +1856,7 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(resources.LastStats.PendingBottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.BottomLevelBuildCount, Is.EqualTo(1));
 		Assert.That(commandList.TopLevelBuildCount, Is.EqualTo(1));
+		Assert.That(commandList.TopLevelInstances.Single().Mask, Is.EqualTo(0x01u));
 		database.ConsumeUpdates(updates);
 
 		commandList.ResetCounts();
@@ -2044,12 +2048,14 @@ public sealed class RayTracingSceneResourcesTests
 		public int BottomLevelBuildCount { get; private set; }
 		public int TopLevelBuildCount { get; private set; }
 		public List<IGfxBottomLevelAccelerationStructure> BottomLevelBuilds { get; } = new();
+		public RayTracingInstanceDescription[] TopLevelInstances { get; private set; } = [];
 		public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 		public void ResetCounts()
 		{
 			BottomLevelBuildCount = 0;
 			TopLevelBuildCount = 0;
 			BottomLevelBuilds.Clear();
+			TopLevelInstances = [];
 		}
 
 		public void BuildBottomLevelAccelerationStructure(IGfxBottomLevelAccelerationStructure accelerationStructure)
@@ -2057,7 +2063,11 @@ public sealed class RayTracingSceneResourcesTests
 			BottomLevelBuildCount++;
 			BottomLevelBuilds.Add(accelerationStructure);
 		}
-		public void BuildTopLevelAccelerationStructure(IGfxTopLevelAccelerationStructure accelerationStructure, ReadOnlySpan<RayTracingInstanceDescription> instances) => TopLevelBuildCount++;
+		public void BuildTopLevelAccelerationStructure(IGfxTopLevelAccelerationStructure accelerationStructure, ReadOnlySpan<RayTracingInstanceDescription> instances)
+		{
+			TopLevelBuildCount++;
+			TopLevelInstances = instances.ToArray();
+		}
 		public void SynchronizeAccelerationStructureBuildForComputeRead(IGfxTopLevelAccelerationStructure accelerationStructure) { }
 		public void BeginPass(in PassTargets targets, in Viewport viewport) => throw new NotSupportedException();
 		public void EndPass() => throw new NotSupportedException();

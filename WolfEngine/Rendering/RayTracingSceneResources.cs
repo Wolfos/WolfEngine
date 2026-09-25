@@ -87,6 +87,10 @@ public sealed record RayTracingSceneState(
 public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDisposable
 {
 	private const uint TerrainRayTracingVertexStrideBytes = 12;
+	// Each TLAS instance belongs to one geometry category. Queries using 0xFF
+	// see both; DDGI visibility and relocation request static geometry only.
+	private const uint DynamicGeometryMask = 0x01;
+	private const uint StaticGeometryMask = 0x02;
 	private readonly Dictionary<Mesh, MeshAccelerationStructureRecord> _meshRecords = new(new ReferenceComparer<Mesh>());
 	private readonly Dictionary<uint, InstanceRecord> _instances = new();
 	private readonly Dictionary<uint, TerrainInstanceRecord> _terrainInstances = new();
@@ -289,7 +293,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 				blas,
 				entry.World,
 				entry.InstanceHandle.Value,
-				entry.Material);
+				entry.Material,
+				entry.PreviousWorld != entry.World);
 		}
 
 		_tlasDirty = true;
@@ -362,7 +367,11 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 
 			if (_instances.TryGetValue(update.InstanceHandle.Value, out var record))
 			{
-				_instances[update.InstanceHandle.Value] = record with { World = update.World };
+				_instances[update.InstanceHandle.Value] = record with
+				{
+					World = update.World,
+					HasMoved = record.HasMoved || record.World != update.World
+				};
 				_tlasDirty = true;
 				statsBuilder.TopLevelRebuildReason |= RayTracingSceneRebuildReason.Transform;
 			}
@@ -401,7 +410,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			newBlas,
 			update.World,
 			update.InstanceHandle.Value,
-			material);
+			material,
+			(hasExistingRecord && oldRecord.HasMoved) || update.PreviousWorld != update.World);
 		_tlasDirty = true;
 		statsBuilder.TopLevelRebuildReason |= update.Type == GpuDrawUpdateType.UpdateMesh
 			? RayTracingSceneRebuildReason.Mesh
@@ -883,7 +893,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			_instanceDescriptions.Add(new RayTracingInstanceDescription(
 				instanceIndex,
 				record.AccelerationStructure,
-				record.World));
+				record.World,
+				record.HasMoved ? DynamicGeometryMask : StaticGeometryMask));
 			if (instanceIndex < _instanceIndexToInstanceHandle.Length)
 			{
 				_instanceIndexToInstanceHandle[instanceIndex] = record.InstanceHandle;
@@ -901,7 +912,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			_instanceDescriptions.Add(new RayTracingInstanceDescription(
 				instanceIndex,
 				record.AccelerationStructure,
-				record.World));
+				record.World,
+				StaticGeometryMask));
 			if (instanceIndex < _instanceIndexToInstanceHandle.Length)
 			{
 				_instanceIndexToInstanceHandle[instanceIndex] = record.InstanceHandle;
@@ -1026,7 +1038,8 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 		IGfxBottomLevelAccelerationStructure AccelerationStructure,
 		Matrix4x4 World,
 		uint InstanceHandle,
-		Material Material);
+		Material Material,
+		bool HasMoved);
 
 	private readonly record struct TerrainInstanceRecord(
 		uint InstanceHandle,
