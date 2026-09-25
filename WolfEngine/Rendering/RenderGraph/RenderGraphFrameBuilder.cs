@@ -79,6 +79,7 @@ public readonly struct RenderViewResources
 	public RenderGraphResourceHandle DdgiProbeStateRead { get; init; }
 	public RenderGraphResourceHandle DdgiProbeStateWrite { get; init; }
 	public RenderGraphResourceHandle DdgiProbeActivity { get; init; }
+	public RenderGraphResourceHandle DdgiProbeActivityMarks { get; init; }
 	public Vector3 DdgiRuntimeOrigin { get; init; }
 	public Int3 DdgiStorageOffset { get; init; }
 	public Int3 DdgiScrollDelta { get; init; }
@@ -550,6 +551,7 @@ internal sealed class RenderGraphFrameBuilder
 		var ddgiProbeStateReadHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeStateWriteHandle = default(RenderGraphResourceHandle);
 		var ddgiProbeActivityHandle = default(RenderGraphResourceHandle);
+		var ddgiProbeActivityMarksHandle = default(RenderGraphResourceHandle);
 		var ddgiRuntimeOrigin = config.DiffuseGlobalIllumination.Origin;
 		var ddgiStorageOffset = default(Int3);
 		var ddgiScrollDelta = default(Int3);
@@ -1005,6 +1007,12 @@ internal sealed class RenderGraphFrameBuilder
 						ddgiProbeActivity,
 						takeOwnership: false,
 						initialState: _view.DdgiProbeActivityState);
+					ddgiProbeActivityMarksHandle = _resources.CreateTransientTexture(new TextureDescriptor(
+						ddgiGridShape.AtlasColumns,
+						ddgiGridShape.AtlasRows,
+						TextureFormat.R32Uint,
+						TextureUsage.UnorderedAccess,
+						new ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f)));
 					ddgiFinalContributionHandle = _resources.CreateTransientTexture(new TextureDescriptor(
 						sceneFramebufferSize.X,
 						sceneFramebufferSize.Y,
@@ -1117,6 +1125,7 @@ internal sealed class RenderGraphFrameBuilder
 			DdgiProbeStateRead = ddgiProbeStateReadHandle,
 			DdgiProbeStateWrite = ddgiProbeStateWriteHandle,
 			DdgiProbeActivity = ddgiProbeActivityHandle,
+			DdgiProbeActivityMarks = ddgiProbeActivityMarksHandle,
 			DdgiRuntimeOrigin = ddgiRuntimeOrigin,
 			DdgiStorageOffset = ddgiStorageOffset,
 			DdgiScrollDelta = ddgiScrollDelta,
@@ -1480,9 +1489,11 @@ internal sealed class RenderGraphFrameBuilder
 				    _view.FrameResources.DdgiVisibilityHistoryWrite.IsValid &&
 				    _view.FrameResources.DdgiProbeStateRead.IsValid &&
 				    _view.FrameResources.DdgiProbeStateWrite.IsValid &&
-				    _view.FrameResources.DdgiProbeActivity.IsValid)
+				    _view.FrameResources.DdgiProbeActivity.IsValid &&
+				    _view.FrameResources.DdgiProbeActivityMarks.IsValid)
 			{
 				graph.AddPass("DDGI Probe Classify", PassKind.Compute)
+					.WriteTexture(_view.FrameResources.DdgiProbeActivityMarks, ResourceState.UnorderedAccess)
 					.WriteTexture(_view.FrameResources.DdgiProbeActivity, ResourceState.UnorderedAccess)
 					.SetExecute(_ddgiClassifyExecute);
 

@@ -14,6 +14,8 @@ public sealed class DdgiPass
 	private readonly IShaderProvider _shaderCompiler;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private IGfxPipeline? _classifyPipeline;
+	private IGfxPipeline? _classifyClearPipeline;
+	private IGfxPipeline? _classifyScatterPipeline;
 	private IGfxPipeline? _tracePipeline;
 	private IGfxPipeline? _relocationTracePipeline;
 	private IGfxPipeline? _relocatePipeline;
@@ -26,6 +28,7 @@ public sealed class DdgiPass
 	private ReadOnlyMemory<byte> _irradianceIntegrateShader;
 	private ReadOnlyMemory<byte> _visibilityIntegrateShader;
 	private ComputeThreadGroupSize? _classifyThreadGroupSize;
+	private ComputeThreadGroupSize? _classifyClearThreadGroupSize;
 	private ComputeThreadGroupSize? _traceThreadGroupSize;
 	private ComputeThreadGroupSize? _relocationTraceThreadGroupSize;
 	private ComputeThreadGroupSize? _relocateThreadGroupSize;
@@ -34,6 +37,10 @@ public sealed class DdgiPass
 	private GraphicsBackendKind? _compiledBackendKind;
 	private ShaderPropertyWriter? _classifyBindlessWriter;
 	private ShaderPropertyWriter? _classifySettingsWriter;
+	private ShaderPropertyWriter? _classifyClearBindlessWriter;
+	private ShaderPropertyWriter? _classifyClearSettingsWriter;
+	private ShaderPropertyWriter? _classifyScatterBindlessWriter;
+	private ShaderPropertyWriter? _classifyScatterSettingsWriter;
 	private ShaderPropertyWriter? _traceBindlessWriter;
 	private ShaderPropertyWriter? _traceSettingsWriter;
 	private ShaderPropertyWriter? _relocationTraceBindlessWriter;
@@ -158,6 +165,8 @@ public sealed class DdgiPass
 		return new DdgiPassConfig
 		{
 			ClassifyPipeline = _classifyPipeline!,
+			ClassifyClearPipeline = _classifyClearPipeline!,
+			ClassifyScatterPipeline = _classifyScatterPipeline!,
 			TracePipeline = _tracePipeline!,
 			RelocationTracePipeline = _relocationTracePipeline!,
 			RelocatePipeline = _relocatePipeline!,
@@ -183,6 +192,8 @@ public sealed class DdgiPass
 			ProbeStateWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeStateWrite)),
 			ProbeActivityReadHandle = _bindlessRegistry.GetTextureHandle(context.GetTexture(resources.DdgiProbeActivity)),
 			ProbeActivityWriteHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivity)),
+			ProbeActivityMarksHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeActivityMarks)),
+			ProbeActivityMarksTexture = context.GetTexture(resources.DdgiProbeActivityMarks),
 			ProbeRelocationDecisionHandle = _bindlessRegistry.RegisterRwTexture(context.GetTexture(resources.DdgiProbeRelocationDecision)),
 			EnvironmentHandle = sharedResources.SkyboxEnvironment.IsValid
 				? _bindlessRegistry.GetTextureHandle(context.GetTexture(sharedResources.SkyboxEnvironment))
@@ -242,6 +253,22 @@ public sealed class DdgiPass
 	public void RecordClassify(RenderGraphContext context, in DdgiPassConfig config)
 	{
 		var commandList = context.CommandList;
+		commandList.BindPipeline(config.ClassifyClearPipeline);
+		WriteBindlessConstants(_classifyClearBindlessWriter, commandList, config);
+		WriteSettingsConstants(_classifyClearSettingsWriter, commandList, config);
+		var clearThreadGroupSize = _classifyClearThreadGroupSize ?? throw new InvalidOperationException("DDGI activity clear threadgroup size was not initialized.");
+		var (clearX, clearY, clearZ) = clearThreadGroupSize.GetDispatchGroupCount((uint)config.GridShape.ProbeCount, 1u);
+		commandList.Dispatch(clearX, clearY, clearZ);
+		commandList.SynchronizeUnorderedAccess(config.ProbeActivityMarksTexture);
+
+		commandList.BindPipeline(config.ClassifyScatterPipeline);
+		WriteBindlessConstants(_classifyScatterBindlessWriter, commandList, config);
+		WriteSettingsConstants(_classifyScatterSettingsWriter, commandList, config);
+		commandList.SetComputeReadOnlyBuffer(2, config.DrawCommandBuffer);
+		commandList.SetComputeReadOnlyBuffer(3, config.InstanceBuffer);
+		commandList.Dispatch(Math.Max(config.ActiveDrawCommandUpperBound, 1u), 1u, 1u);
+		commandList.SynchronizeUnorderedAccess(config.ProbeActivityMarksTexture);
+
 		commandList.BindPipeline(config.ClassifyPipeline);
 		WriteBindlessConstants(_classifyBindlessWriter, commandList, config);
 		WriteSettingsConstants(_classifySettingsWriter, commandList, config);
@@ -381,6 +408,7 @@ public sealed class DdgiPass
 		bindlessWriter.SetUInt("probeStateWriteHandle", (stateWriteHandle ?? config.ProbeStateWriteHandle).Value);
 		bindlessWriter.SetUInt("probeActivityReadHandle", config.ProbeActivityReadHandle.Value);
 		bindlessWriter.SetUInt("probeActivityWriteHandle", config.ProbeActivityWriteHandle.Value);
+		bindlessWriter.SetUInt("probeActivityMarksHandle", config.ProbeActivityMarksHandle.Value);
 		bindlessWriter.SetUInt("probeRelocationDecisionHandle", config.ProbeRelocationDecisionHandle.Value);
 		bindlessWriter.SetUInt("environmentHandle", config.EnvironmentHandle.Value);
 		bindlessWriter.SetUInt("samplerHandle", config.SamplerHandle.Value);
@@ -552,6 +580,8 @@ public sealed class DdgiPass
 	private void EnsurePipelines(IGfxDevice device)
 	{
 		if (_classifyPipeline is not null &&
+		    _classifyClearPipeline is not null &&
+		    _classifyScatterPipeline is not null &&
 		    _tracePipeline is not null &&
 		    _relocationTracePipeline is not null &&
 		    _relocatePipeline is not null &&
@@ -571,6 +601,8 @@ public sealed class DdgiPass
 			throw new NotSupportedException("Ray traced DDGI requires a ray-tracing capable graphics device.");
 		}
 
+		var classifyClear = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiClassify, "DdgiProbeActivityClearCS", device.BackendKind);
+		var classifyScatter = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiClassify, "DdgiProbeActivityScatterCS", device.BackendKind);
 		var classify = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiClassify, "DdgiProbeClassifyCS", device.BackendKind);
 		var trace = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiTrace, "DdgiProbeTraceCS", device.BackendKind);
 		var relocationTrace = _shaderCompiler.GetComputeShaderWithReflection(EngineShaderPrograms.DdgiTrace, "DdgiRelocationTraceCS", device.BackendKind);
@@ -584,6 +616,7 @@ public sealed class DdgiPass
 		_irradianceIntegrateShader = irradianceIntegrate.Bytecode;
 		_visibilityIntegrateShader = visibilityIntegrate.Bytecode;
 		_classifyThreadGroupSize = classify.ThreadGroupSize;
+		_classifyClearThreadGroupSize = classifyClear.ThreadGroupSize;
 		_traceThreadGroupSize = trace.ThreadGroupSize;
 		_relocationTraceThreadGroupSize = relocationTrace.ThreadGroupSize;
 		_relocateThreadGroupSize = relocate.ThreadGroupSize;
@@ -591,6 +624,10 @@ public sealed class DdgiPass
 		_visibilityIntegrateThreadGroupSize = visibilityIntegrate.ThreadGroupSize;
 		_classifyBindlessWriter = new ShaderPropertyWriter(classify.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_classifySettingsWriter = new ShaderPropertyWriter(classify.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_classifyClearBindlessWriter = new ShaderPropertyWriter(classifyClear.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_classifyClearSettingsWriter = new ShaderPropertyWriter(classifyClear.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
+		_classifyScatterBindlessWriter = new ShaderPropertyWriter(classifyScatter.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
+		_classifyScatterSettingsWriter = new ShaderPropertyWriter(classifyScatter.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_traceBindlessWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
 		_traceSettingsWriter = new ShaderPropertyWriter(trace.ReflectionLayout.GetConstantBuffer("DdgiSettings"));
 		_relocationTraceBindlessWriter = new ShaderPropertyWriter(relocationTrace.ReflectionLayout.GetConstantBuffer("BindlessHandles"));
@@ -607,6 +644,18 @@ public sealed class DdgiPass
 			_classifyShader,
 			_classifyThreadGroupSize,
 			"DdgiProbeClassifyCS");
+		_classifyClearPipeline = CreatePipeline(
+			device,
+			"ddgi_classify.compute.slang:clear",
+			classifyClear.Bytecode,
+			classifyClear.ThreadGroupSize,
+			"DdgiProbeActivityClearCS");
+		_classifyScatterPipeline = CreatePipeline(
+			device,
+			"ddgi_classify.compute.slang:scatter",
+			classifyScatter.Bytecode,
+			classifyScatter.ThreadGroupSize,
+			"DdgiProbeActivityScatterCS");
 		_tracePipeline = CreatePipeline(
 			device,
 			"ddgi_trace.compute.slang",

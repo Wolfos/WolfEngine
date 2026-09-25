@@ -13,6 +13,49 @@ namespace WolfEngine.Tests;
 public sealed class RayTracingSceneResourcesTests
 {
 	[Test]
+	public void DdgiScatterBoundsCoverEveryIntersectingProbe()
+	{
+		const int count = 9;
+		const float spacing = 2.25f;
+		const float influence = spacing + 0.2f;
+		var origin = new Vector3(-9.0f, 3.0f, -4.0f);
+		var random = new Random(16462);
+		for (var sample = 0; sample < 1000; sample++)
+		{
+			var center = origin + new Vector3(
+				(float)random.NextDouble() * 32.0f - 6.0f,
+				(float)random.NextDouble() * 32.0f - 6.0f,
+				(float)random.NextDouble() * 32.0f - 6.0f);
+			var radius = (float)random.NextDouble() * 8.0f;
+			var reach = radius + influence;
+			var lower = (center - new Vector3(reach) - origin) / spacing;
+			var upper = (center + new Vector3(reach) - origin) / spacing;
+			var minimum = Vector3.Clamp(
+				new Vector3(MathF.Floor(lower.X), MathF.Floor(lower.Y), MathF.Floor(lower.Z)) - Vector3.One,
+				Vector3.Zero,
+				new Vector3(count - 1));
+			var maximum = Vector3.Clamp(
+				new Vector3(MathF.Ceiling(upper.X), MathF.Ceiling(upper.Y), MathF.Ceiling(upper.Z)) + Vector3.One,
+				Vector3.Zero,
+				new Vector3(count - 1));
+			for (var z = 0; z < count; z++)
+			for (var y = 0; y < count; y++)
+			for (var x = 0; x < count; x++)
+			{
+				var position = origin + new Vector3(x, y, z) * spacing;
+				var delta = Vector3.Abs(center - position) - new Vector3(influence);
+				var outside = Vector3.Max(delta, Vector3.Zero);
+				if (outside.LengthSquared() <= radius * radius)
+				{
+					Assert.That(x, Is.InRange(minimum.X, maximum.X));
+					Assert.That(y, Is.InRange(minimum.Y, maximum.Y));
+					Assert.That(z, Is.InRange(minimum.Z, maximum.Z));
+				}
+			}
+		}
+	}
+
+	[Test]
 	public void TonemappingAndPresentationShadersCompileForMetal()
 	{
 		if (OperatingSystem.IsMacOS() == false)
@@ -194,6 +237,8 @@ public sealed class RayTracingSceneResourcesTests
 		var shaderCompiler = new ShaderCompiler();
 		foreach (var shader in new[]
 		{
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityClearCS", ThreadsX: 64u, ThreadsY: 1u),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityScatterCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS", ThreadsX: 64u, ThreadsY: 1u),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS", ThreadsX: 16u, ThreadsY: 1u),
@@ -239,6 +284,8 @@ public sealed class RayTracingSceneResourcesTests
 		foreach (var shader in new[]
 		{
 			(Name: "AmbientOcclusion/ao_rtao.compute.slang", EntryPoint: "AmbientOcclusionRayTracedCS"),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityClearCS"),
+			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeActivityScatterCS"),
 			(Name: "Ddgi/ddgi_classify.compute.slang", EntryPoint: "DdgiProbeClassifyCS"),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiProbeTraceCS"),
 			(Name: "Ddgi/ddgi_trace.compute.slang", EntryPoint: "DdgiRelocationTraceCS"),

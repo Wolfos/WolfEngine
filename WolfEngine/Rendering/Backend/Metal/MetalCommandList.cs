@@ -1021,6 +1021,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		// Metal handles resource hazards implicitly for most use cases.
 	}
 
+	public void SynchronizeUnorderedAccess(IGfxResource resource)
+	{
+		ThrowIfDisposed();
+		ArgumentNullException.ThrowIfNull(resource);
+		// Encoder boundaries order texture writes and reads across dispatches.
+		EndActiveEncoders();
+	}
+
 	public void CopyTexture(MTLTexture source, MTLTexture destination, uint width, uint height)
 	{
 		ThrowIfDisposed();

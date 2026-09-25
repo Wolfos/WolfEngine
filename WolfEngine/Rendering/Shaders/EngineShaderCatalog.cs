@@ -306,7 +306,7 @@ public sealed class EngineShaderCatalog
 		if (id == EngineShaderPrograms.ReflectionsScreenSpace) return ["ReflectionsScreenSpaceCS"];
 		if (id == EngineShaderPrograms.ReflectionsRayTraced) return ["ReflectionsRayTracedCS"];
 		if (id == EngineShaderPrograms.ReflectionsUpsample) return ["ReflectionsUpsampleCS"];
-		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeClassifyCS"];
+		if (id == EngineShaderPrograms.DdgiClassify) return ["DdgiProbeActivityClearCS", "DdgiProbeActivityScatterCS", "DdgiProbeClassifyCS"];
 		if (id == EngineShaderPrograms.DdgiTrace) return ["DdgiProbeTraceCS", "DdgiRelocationTraceCS"];
 		if (id == EngineShaderPrograms.DdgiRelocate) return ["DdgiRelocationSolveCS"];
 		if (id == EngineShaderPrograms.DdgiIrradianceIntegrate) return ["DdgiIrradianceIntegrateCS"];

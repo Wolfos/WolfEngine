@@ -156,6 +156,10 @@ public interface IGfxCommandList
 
 	void Barrier(in ResourceBarrierDescription barrier);
 
+	/// <summary>Orders UAV writes before a later dispatch reads or writes the same resource.</summary>
+	void SynchronizeUnorderedAccess(IGfxResource resource) =>
+		throw new NotSupportedException($"{GetType().Name} does not support UAV synchronization.");
+
 	/// <summary>
 	/// Submits a group of barriers as one unit. Backends that can coalesce transitions turn this into a
 	/// single flush instead of one per barrier, which matters where a pass transitions many resources at

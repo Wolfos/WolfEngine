@@ -34,6 +34,7 @@ cbuffer BindlessHandles : register(b0)
     uint probeStateWriteHandle;
     uint probeActivityReadHandle;
     uint probeActivityWriteHandle;
+    uint probeActivityMarksHandle;
     uint probeRelocationDecisionHandle;
     uint environmentHandle;
     uint samplerHandle;
