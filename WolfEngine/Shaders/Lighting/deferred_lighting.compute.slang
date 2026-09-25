@@ -291,7 +291,7 @@ void DeferredLightingCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         brdfLutHandle,
         samplerHandle);
     float ddgiSpecularBlend = ddgiSample.valid != 0u
-        ? max(ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness), 1.0f)
+        ? ddgiGridInfluence * smoothstep(0.25f, 0.6f, roughness)
         : 0.0f;
     float3 specularContribution = lerp(
         skySpecularContribution,

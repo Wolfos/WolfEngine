@@ -13,14 +13,12 @@ public static class DdgiUtilities
 	public const int IrradianceEstimatorDirectionCount = IrradianceTileInteriorSize * IrradianceTileInteriorSize;
 	public const int IrradianceEstimatorStride = 16;
 	public const int RelocationRayCount = 16;
-	public const int TemporalReferenceRayCount = 16;
 	public const int RelocationIterationCount = 1;
 	public const float DefaultRecursiveBounceEnergy = 0.5f;
 	private const float ShBasisL0 = 0.28209479177f;
 	private const float ShBasisL1 = 0.48860251190f;
 	private const float ShDirectionalLimit = 0.95f;
 	private const float VisibilityVarianceFloor = 0.000001f;
-	private const float StableIrradianceMeanBlend = 0.02f;
 	private const float MaxProbeRelocationDistanceFactor = 0.45f;
 	private const float RelocationMinimumTolerance = 0.001f;
 
@@ -162,7 +160,7 @@ public static class DdgiUtilities
 	{
 		var visibilityRayCount = GetRaySampleCount(requestedRayCount, VisibilityTileInteriorSize);
 		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
-		return checked(visibilityRayCount + irradianceRayCount + TemporalReferenceRayCount);
+		return checked(visibilityRayCount + irradianceRayCount);
 	}
 
 	internal static bool IsRelocationTraceEnabled(RenderConfig config)
@@ -210,28 +208,19 @@ public static class DdgiUtilities
 
 	public static DdgiVarianceData UpdateVarianceEstimator(
 		Vector3 sampleValue,
-		Vector3 referenceValue,
 		DdgiVarianceData data,
-		float shortWindowBlend)
+		float temporalBlendSpeed)
 	{
+		var shortBlend = Math.Clamp(temporalBlendSpeed, 1.0f / 256.0f, 0.5f);
+		var meanBlend = Math.Clamp(temporalBlendSpeed * 0.5f, 0.01f, 0.1f);
 		var deviation = Vector3.SquareRoot(Vector3.Max(Vector3.Zero, data.Variance));
-		var referenceNoise = deviation.Length() * 0.25f;
-		var referenceDelta = referenceValue - data.ReferenceMean;
-		var referenceScale = Math.Max(Math.Max(referenceValue.Length(), data.ReferenceMean.Length()), 1e-4f);
-		var relativeChange = Math.Max(0.0f, referenceDelta.Length() - referenceNoise) / referenceScale;
-		var meanBlend = Math.Clamp(relativeChange * 8.0f, StableIrradianceMeanBlend, 1.0f);
-		shortWindowBlend = Math.Max(Math.Clamp(shortWindowBlend, 1.0f / 256.0f, 1.0f), meanBlend);
-		var referenceGain = Vector3.Clamp(data.Mean / Vector3.Max(data.ReferenceMean, new Vector3(1e-4f)), Vector3.One, new Vector3(8));
-		var predictedMean = Vector3.Max(Vector3.Zero, data.Mean + referenceDelta * referenceGain);
-		var highThreshold = data.ShortMean + new Vector3(1e-4f) + deviation * 8.0f +
-			Vector3.Max(Vector3.Zero, referenceDelta) * referenceGain;
-		sampleValue = Vector3.Min(sampleValue, highThreshold);
-		var residual = sampleValue - predictedMean;
-		data.Variance = Vector3.Lerp(data.Variance, residual * residual, shortWindowBlend * 0.5f);
-		data.ShortMean = Vector3.Lerp(data.ShortMean, sampleValue, shortWindowBlend);
-
-		data.Mean = Vector3.Lerp(data.Mean, sampleValue, meanBlend);
-		data.ReferenceMean = Vector3.Lerp(data.ReferenceMean, referenceValue, meanBlend);
+		var highThreshold = Vector3.Max(data.Mean, data.ShortMean) * 1.5f +
+			Vector3.Max(new Vector3(0.005f), deviation * 6.0f);
+		var filteredSample = Vector3.Min(sampleValue, highThreshold);
+		var residual = filteredSample - data.Mean;
+		data.Variance = Vector3.Lerp(data.Variance, residual * residual, shortBlend * 0.5f);
+		data.ShortMean = Vector3.Lerp(data.ShortMean, sampleValue, shortBlend);
+		data.Mean = Vector3.Lerp(data.Mean, filteredSample, meanBlend);
 		return data;
 	}
 
@@ -731,8 +720,7 @@ public readonly record struct DdgiL1Sh(
 public record struct DdgiVarianceData(
 	Vector3 Mean,
 	Vector3 ShortMean,
-	Vector3 Variance,
-	Vector3 ReferenceMean);
+	Vector3 Variance);
 
 public readonly record struct DdgiRelocationHit(
 	Vector3 Direction,

@@ -631,10 +631,10 @@ public sealed class RayTracingSceneResourcesTests
 			Is.EqualTo(expectedRayCount));
 	}
 
-	[TestCase(1, 18)]
-	[TestCase(64, 144)]
-	[TestCase(256, 336)]
-	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndTemporalReferenceRays(
+	[TestCase(1, 2)]
+	[TestCase(64, 128)]
+	[TestCase(256, 320)]
+	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndIrradianceRays(
 		int requestedRayCount,
 		int expectedInvocationCount)
 	{
@@ -886,130 +886,83 @@ public sealed class RayTracingSceneResourcesTests
 	}
 
 	[Test]
-	public void DdgiEstimatorRejectsRayNoiseWhenReferenceTransportIsUnchanged()
+	public void DdgiEstimatorLimitsEachScheduledObservation()
 	{
-		var state = new DdgiVarianceData(new Vector3(5), new Vector3(5), new Vector3(25), new Vector3(5));
+		var state = new DdgiVarianceData(new Vector3(5), new Vector3(5), new Vector3(25));
 		for (var update = 0; update < 128; update++)
 		{
 			var sample = new Vector3(update % 2 == 0 ? 0 : 10);
 			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, new Vector3(5), state, 0.1f);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+			state = DdgiUtilities.UpdateVarianceEstimator(sample, state, 0.2f);
+			Assert.That((state.Mean - previous).Length(),
+				Is.LessThanOrEqualTo((sample - previous).Length() * 0.10001f));
 		}
-		Assert.That(state.Mean.X, Is.EqualTo(5).Within(0.1f));
-	}
-
-	[TestCase(0.08f)]
-	[TestCase(0.5f)]
-	[TestCase(1.0f)]
-	public void DdgiEstimatorDoesNotAmplifyNoisyReferenceInDimIndirectLighting(float shortWindowBlend)
-	{
-		var level = new Vector3(0.001f);
-		var state = new DdgiVarianceData(level, level, new Vector3(1e-6f), level);
-		for (var update = 0; update < 128; update++)
-		{
-			var sample = new Vector3(update % 2 == 0 ? 0 : 0.002f);
-			var reference = new Vector3(update % 2 == 0 ? 0.00095f : 0.00105f);
-			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, shortWindowBlend);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
-		}
+		Assert.That(state.Mean.X, Is.EqualTo(5).Within(0.3f));
 	}
 
 	[Test]
-	public void DdgiEstimatorPackedNoiseEstimateSurvivesVeryDimLighting()
+	public void DdgiEstimatorClampsOneBrightIndirectOutlier()
+	{
+		var level = new Vector3(0.01f);
+		var state = new DdgiVarianceData(level, level, Vector3.Zero);
+		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(100), state, 0.2f);
+		Assert.That(state.Mean.X, Is.LessThanOrEqualTo(0.011f));
+	}
+
+	[TestCase(0.0f)]
+	[TestCase(0.01f)]
+	public void DdgiEstimatorTracksSustainedLightingChange(float initialLevel)
+	{
+		var level = new Vector3(initialLevel);
+		var state = new DdgiVarianceData(level, level, Vector3.Zero);
+		for (var update = 0; update < 40; update++)
+		{
+			state = DdgiUtilities.UpdateVarianceEstimator(Vector3.One, state, 0.2f);
+		}
+		Assert.That(state.Mean.X, Is.GreaterThan(0.8f));
+	}
+
+	[Test]
+	public void DdgiEstimatorPreservesNoiseEstimateInDimLighting()
 	{
 		var level = new Vector3(1e-5f);
-		var state = new DdgiVarianceData(level, level, new Vector3(1e-10f), level);
-		for (var update = 0; update < 128; update++)
+		var state = new DdgiVarianceData(level, level, new Vector3(1e-10f));
+		for (var update = 0; update < 32; update++)
 		{
-			// The GPU stores deviation, since directly packed variance underflows.
 			var deviation = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(Vector3.SquareRoot(state.Variance)));
 			state.Variance = deviation * deviation;
 			Assert.That(state.Variance.X, Is.GreaterThan(0));
-			var sample = new Vector3(update % 2 == 0 ? 0 : 2e-5f);
-			var reference = new Vector3(update % 2 == 0 ? 0.95e-5f : 1.05e-5f);
-			var previous = state.Mean;
-			state = DdgiUtilities.UpdateVarianceEstimator(sample, reference, state, 0.5f);
-			Assert.That((state.Mean - previous).Length(), Is.LessThanOrEqualTo((sample - previous).Length() * 0.02001f));
+			state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(update % 2 == 0 ? 0 : 2e-5f), state, 0.2f);
 			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
 			state.ShortMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ShortMean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
 		}
 	}
 
 	[Test]
-	public void DdgiEstimatorSmallReferenceChangeCannotDisableFireflyRejection()
+	public void DdgiEstimatorDarkensGraduallyAfterLightTurnsOff()
 	{
-		var level = new Vector3(0.01f);
-		var state = new DdgiVarianceData(level, level, Vector3.Zero, level);
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(100), new Vector3(0.0105f), state, 0.5f);
-		Assert.That(state.Mean.X, Is.LessThan(0.011f));
-	}
-
-	[TestCase(0.0f, 0.01f)]
-	[TestCase(0.01f, 0.0f)]
-	public void DdgiEstimatorStillTracksRealDimLightingChanges(float before, float after)
-	{
-		var state = new DdgiVarianceData(new Vector3(before), new Vector3(before), Vector3.Zero, new Vector3(before));
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(after), new Vector3(after), state, 0.5f);
-		Assert.That(state.Mean.X, Is.EqualTo(after).Within(1e-6f));
-	}
-
-	[Test]
-	public void DdgiEstimatorRejectsUncorroboratedFirefly()
-	{
-		var state = new DdgiVarianceData(Vector3.One, Vector3.One, Vector3.Zero, Vector3.One);
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(1000), Vector3.One, state, 0.1f);
-		Assert.That(state.Mean.X, Is.EqualTo(1).Within(0.01f));
-	}
-
-	[TestCase(0.0f, 10.0f)]
-	[TestCase(10.0f, 0.0f)]
-	[TestCase(1.0f, 10.0f)]
-	[TestCase(10.0f, 1.0f)]
-	public void DdgiEstimatorTracksTransportStepsInBothDirections(float before, float after)
-	{
-		var state = new DdgiVarianceData(new Vector3(before), new Vector3(before), Vector3.Zero, new Vector3(before));
-		state = DdgiUtilities.UpdateVarianceEstimator(new Vector3(after), new Vector3(after), state, 0.1f);
-		Assert.That(state.Mean.X, Is.EqualTo(after).Within(0.001f));
-	}
-
-	[Test]
-	public void DdgiEstimatorTracksContinuousTransportChangesWithoutLightingEvents()
-	{
-		var state = new DdgiVarianceData(new Vector3(1), new Vector3(1), Vector3.Zero, new Vector3(1));
-		for (var update = 1; update <= 512; update++)
+		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero);
+		state = DdgiUtilities.UpdateVarianceEstimator(Vector3.Zero, state, 0.2f);
+		Assert.That(state.Mean.X, Is.EqualTo(9.0f).Within(1e-6f));
+		for (var update = 0; update < 40; update++)
 		{
-			var target = 1.0f + 0.8f * MathF.Sin(update * 0.04f);
-			var noisySample = new Vector3(target + (update % 2 == 0 ? 0.03f : -0.03f));
-			state = DdgiUtilities.UpdateVarianceEstimator(noisySample, new Vector3(target), state, 0.1f);
-			// Include the same quantization as the GPU estimator between updates.
-			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
-			Assert.That(state.Mean.X, Is.EqualTo(target).Within(0.1f));
+			state = DdgiUtilities.UpdateVarianceEstimator(Vector3.Zero, state, 0.2f);
 		}
+		Assert.That(state.Mean.X, Is.LessThan(0.2f));
 	}
 
 	[Test]
-	public void DdgiEstimatorDoesNotLeaveQuantizedBounceLightingAfterSourceTurnsOff()
+	public void DdgiEstimatorRecursiveBounceDecaysWithoutAReferenceTrigger()
 	{
-		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero, new Vector3(10));
-		for (var update = 0; update < 24; update++)
+		var state = new DdgiVarianceData(new Vector3(10), new Vector3(10), Vector3.Zero);
+		for (var update = 0; update < 128; update++)
 		{
-			var bounced = state.Mean * 0.6f;
-			state = DdgiUtilities.UpdateVarianceEstimator(bounced, bounced, state, 0.1f);
+			var previous = state.Mean.X;
+			state = DdgiUtilities.UpdateVarianceEstimator(state.Mean * 0.6f, state, 0.2f);
 			state.Mean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.Mean));
-			state.ReferenceMean = DdgiUtilities.UnpackRgbe(DdgiUtilities.PackRgbe(state.ReferenceMean));
+			Assert.That(state.Mean.X, Is.LessThan(previous));
 		}
-		Assert.That(state.Mean.X, Is.LessThan(0.0001f));
-	}
-
-	[Test]
-	public void DdgiTemporalReferenceSamplesFitUnusedIrradianceTraceBorders()
-	{
-		var tileSize = DdgiUtilities.IrradianceTileInteriorSize + 2 * DdgiUtilities.TileBorderSize;
-		Assert.That(DdgiUtilities.TemporalReferenceRayCount, Is.LessThanOrEqualTo(2 * tileSize));
+		Assert.That(state.Mean.X, Is.LessThan(0.06f));
 	}
 
 	[Test]
