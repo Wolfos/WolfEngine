@@ -209,7 +209,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 		// Scene data per executed view, each against its own camera, lights and history.
 		_sceneDataByView.Clear();
-		var anyViewWithoutSceneData = false;
 		for (var i = 0; i < _executedViews.Count; i++)
 		{
 			SelectView(_executedViews[i]);
@@ -221,15 +220,16 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			}
 
 			_sceneDataByView[_view.View] = viewSceneData;
-			anyViewWithoutSceneData |= viewSceneData is null;
 		}
 
 		SelectView(boundView);
 		var snapshot = frameSnapshot.GetOrCreateView(boundView);
 		var sceneData = _sceneDataByView[boundView];
 
-		if (anyViewWithoutSceneData &&
-		    _passes.Any(p => p.Name != "ImGui")) // filthy, but we want to let the ImGui pass through even if there is no scene
+		// Shared preparation and presentation passes do not need a scene camera. In particular, the
+		// procedural sky may be prepared while the editor shows only its loading UI. A view pass does
+		// need scene data, so abandon the frame if that view's camera is invalid.
+		if (_passes.Any(p => p.View.IsValid && _sceneDataByView[p.View] is null))
 		{
 			ReleasePasses();
 			return;
@@ -294,8 +294,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				var context = new RenderGraphContext(_resourceRegistry, pass.Name)
 				{
 					CommandList = commandList,
-					// Null only on ImGui-only frames (see the guard above); RenderGraphContext.SceneData
-					// throws if a pass that needs scene data reads it.
+					// Null on frames with no valid scene camera; the guard above excludes view passes,
+					// and RenderGraphContext.SceneData throws if a shared pass reads it unexpectedly.
 					SceneData = passSceneData!,
 					GpuDrawDatabase = passSnapshot.GpuDrawDatabase,
 					FrameSnapshot = frameSnapshot,
