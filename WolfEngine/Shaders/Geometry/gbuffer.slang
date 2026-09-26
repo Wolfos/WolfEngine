@@ -2,7 +2,9 @@
 import "../Common/common_bindless.slang";
 import "../Common/draw_data.slang";
 import "../Common/normal_decode.slang";
+#ifdef WOLF_GBUFFER_SKINNED
 import "../Animation/skinning_common.slang";
+#endif
 
 #define WOLF_MAX_INSTANCE_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
@@ -12,10 +14,13 @@ StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
 
+#ifdef WOLF_GBUFFER_SKINNED
 // Rebuilds skinned vertices' previous positions for motion vectors.
 StructuredBuffer<GpuSkinVertex> g_SkinVertices : register(t14);
 StructuredBuffer<GpuBoneMatrix> g_BoneMatrices : register(t15);
 StructuredBuffer<GpuSkinnedInstanceData> g_SkinnedInstances : register(t16);
+
+#endif
 
 // Written per indirect command by the command signature's root constant rather than by any binding
 // call, so each draw can find its own entry in the draw args table.
@@ -63,6 +68,7 @@ struct VSOutput
     float4 previousClip : TEXCOORD5;
 };
 
+#ifdef WOLF_GBUFFER_SKINNED
 /// Rebuilds a skinned vertex's previous object-space position.
 float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData)
 {
@@ -93,6 +99,8 @@ float3 ResolvePreviousObjectPosition(VSInput input, GpuInstanceData instanceData
         skinnedInstance.boneCount);
 }
 
+#endif
+
 VSOutput vertexShader(VSInput input)
 {
     VSOutput output;
@@ -114,14 +122,20 @@ VSOutput vertexShader(VSInput input)
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
     float4 worldPosition = mul(float4(input.position, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
+#ifdef WOLF_GBUFFER_SKINNED
     float3 previousObjectPosition = ResolvePreviousObjectPosition(input, instanceData);
+#else
+    float3 previousObjectPosition = input.position;
+#endif
     float4 previousWorldPosition = mul(float4(previousObjectPosition, 1.0f), instanceData.previousWorld);
     previousWorldPosition.xyz -= previousCameraPosition;
     float4 worldNormal = mul(float4(input.normal, 0.0f), instanceData.world);
     float3 worldTangent = mul(float4(input.tangent.xyz, 0.0f), instanceData.world).xyz;
 
-    output.position = mul(worldPosition, viewProjection);
     output.currentClip = mul(worldPosition, unjitteredViewProjection);
+    output.position = output.currentClip;
+    // Left-handed perspective projection: view-space Z equals clip W.
+    output.position.xy += currentJitterNdc * output.currentClip.w;
     output.previousClip = mul(previousWorldPosition, previousViewProjection);
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;

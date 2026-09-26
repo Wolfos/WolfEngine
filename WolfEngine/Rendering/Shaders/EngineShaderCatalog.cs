@@ -196,7 +196,8 @@ public sealed class EngineShaderCatalog
 
 		foreach (var define in request.GetDefines())
 		{
-			var legal = define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
+			var legal = define == "WOLF_GBUFFER_SKINNED" && request.ProgramId == EngineShaderPrograms.GBuffer ||
+                            define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
 			            define == "WOLF_GPU_DRAW_DIAGNOSTICS" && request.ProgramId == EngineShaderPrograms.GpuDrawCull ||
 			            request.ProgramId == EngineShaderPrograms.ShadowMap &&
 			            (define == "WOLF_SHADOW_TERRAIN" || define == "WOLF_SHADOW_CASCADE_INDEX=0" ||
@@ -244,6 +245,11 @@ public sealed class EngineShaderCatalog
 				}
 				if (SupportsAlphaClip(descriptor.Id))
 					requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_ALPHA_CLIP"));
+                if (descriptor.Id == EngineShaderPrograms.GBuffer)
+                {
+                    requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_GBUFFER_SKINNED"));
+                    requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind, "WOLF_GBUFFER_SKINNED", "WOLF_ALPHA_CLIP"));
+                }
 				if (descriptor.Id == EngineShaderPrograms.ShadowMap)
 					for (var cascade = 0; cascade < 3; cascade++)
 					{

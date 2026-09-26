@@ -225,11 +225,15 @@ public sealed class GpuDrawBucketHardeningTests
 			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend, GpuDrawSidedness.DoubleSided),
-			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided)
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided, true)
 		}));
 		Assert.That(
 			definitions.Select(definition => definition.ExecutionIndex),
-			Is.EqualTo(new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 }));
+			Is.EqualTo(Enumerable.Range(0, 13)));
 	}
 
 	[Test]
@@ -276,7 +280,11 @@ public sealed class GpuDrawBucketHardeningTests
 			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided),
-			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided)
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided, true)
 		}));
 		Assert.That(transparent.Select(definition => definition.Key), Is.EqualTo(new[]
 		{
@@ -290,7 +298,11 @@ public sealed class GpuDrawBucketHardeningTests
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Terrain, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided),
-			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided)
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided, true),
+			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided, true)
 		}));
 	}
 }

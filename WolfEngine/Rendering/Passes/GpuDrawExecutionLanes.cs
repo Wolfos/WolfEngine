@@ -17,7 +17,8 @@ public enum GpuDrawSidedness
 public readonly record struct GpuDrawExecutionKey(
 	GpuDrawKind DrawKind,
 	GpuDrawBucketId BucketId,
-	GpuDrawSidedness Sidedness);
+	GpuDrawSidedness Sidedness,
+	bool IsSkinned = false);
 
 public readonly struct GpuDrawExecutionLaneDefinition
 {
@@ -29,7 +30,8 @@ public readonly struct GpuDrawExecutionLaneDefinition
 		string debugName,
 		string shaderVariant,
 		string preprocessorDefine,
-		DrawPassParticipation participation)
+		DrawPassParticipation participation,
+		bool isSkinned = false)
 	{
 		DrawKind = drawKind;
 		BucketId = bucketId;
@@ -39,6 +41,7 @@ public readonly struct GpuDrawExecutionLaneDefinition
 		ShaderVariant = shaderVariant;
 		PreprocessorDefine = preprocessorDefine;
 		Participation = participation;
+		IsSkinned = isSkinned;
 	}
 
 	public GpuDrawKind DrawKind { get; }
@@ -49,7 +52,8 @@ public readonly struct GpuDrawExecutionLaneDefinition
 	public string ShaderVariant { get; }
 	public string PreprocessorDefine { get; }
 	public DrawPassParticipation Participation { get; }
-	public GpuDrawExecutionKey Key => new(DrawKind, BucketId, Sidedness);
+	public bool IsSkinned { get; }
+	public GpuDrawExecutionKey Key => new(DrawKind, BucketId, Sidedness, IsSkinned);
 
 	public bool SupportsPass(DrawPassParticipation pass) => (Participation & pass) != 0;
 
@@ -238,7 +242,19 @@ public static class GpuDrawExecutionLanes
 			"GBuffer.ExecuteMeshAlphaTestDoubleSided",
 			"MeshAlphaTestDoubleSided",
 			"WOLF_ALPHA_CLIP",
-			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster));
+			DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster),
+		new GpuDrawExecutionLaneDefinition(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided,
+            9, "GBuffer.ExecuteSkinnedMeshOpaqueSingleSided", "SkinnedMeshOpaqueSingleSided", "",
+            DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster, isSkinned: true),
+		new GpuDrawExecutionLaneDefinition(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided,
+            10, "GBuffer.ExecuteSkinnedMeshAlphaTestSingleSided", "SkinnedMeshAlphaTestSingleSided", "WOLF_ALPHA_CLIP",
+            DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster, isSkinned: true),
+		new GpuDrawExecutionLaneDefinition(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided,
+            11, "GBuffer.ExecuteSkinnedMeshOpaqueDoubleSided", "SkinnedMeshOpaqueDoubleSided", "",
+            DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster, isSkinned: true),
+		new GpuDrawExecutionLaneDefinition(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided,
+            12, "GBuffer.ExecuteSkinnedMeshAlphaTestDoubleSided", "SkinnedMeshAlphaTestDoubleSided", "WOLF_ALPHA_CLIP",
+            DrawPassParticipation.GBuffer | DrawPassParticipation.ShadowCaster, isSkinned: true));
 
 	public static GpuDrawExecutionLaneRegistry Registry => _registry;
 	public static ReadOnlySpan<GpuDrawExecutionLaneDefinition> Definitions => _registry.Definitions;

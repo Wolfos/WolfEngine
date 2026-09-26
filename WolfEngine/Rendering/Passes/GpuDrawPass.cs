@@ -473,13 +473,22 @@ public sealed class GpuDrawPass
 				executionLaneIndex = cachedState.ExecutionIndex;
 			}
 
+            // Material state is shared by rigid and skinned meshes; specialize only after resolving it.
+            var executionKey = new GpuDrawExecutionKey(drawKind, bucketId, sidedness,
+                drawKind == GpuDrawKind.Mesh && bucketId != GpuDrawBucketId.AlphaBlend && mesh?.IsSkinned == true);
+            if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
+            {
+                executionLaneIndex = specializedLane.ExecutionIndex;
+                if (drawFlags != 0u) drawFlags = CreateDrawFlags(executionLaneIndex);
+            }
+
 			if (backendSignals.SupportsIndirectStructuralUpdates &&
 			    IsStructuralUpdateType(update.Type) &&
 			    updateDatabase.IsCurrentDrawHandle(update.DrawHandle) &&
 			    update.DrawIndex > 0 &&
 			    update.DrawIndex < GpuDrawResources.MaxDrawCount)
 			{
-				AppendStructuralRecord(update, mesh, new GpuDrawExecutionKey(drawKind, bucketId, sidedness));
+				AppendStructuralRecord(update, mesh, executionKey);
 			}
 
 			if (materialResources is not null && GpuDrawClassification.SupportsTexturedPbrMaterialInterpretation(drawKind))
@@ -1581,7 +1590,8 @@ public sealed class GpuDrawPass
 				GetGBufferShaderPath(lane.DrawKind),
 				"vertexShader",
 				"fragmentShader",
-				lane.PreprocessorDefine);
+				lane.PreprocessorDefine,
+                lane.IsSkinned ? "WOLF_GBUFFER_SKINNED" : string.Empty);
 			var shaderSet = compiled.Bytecode;
 			var pipelineKey = new PipelineKey(
 				PassKind.Graphics,
@@ -2066,7 +2076,8 @@ public sealed class GpuDrawPass
 			var executionKey = new GpuDrawExecutionKey(
 				entry.DrawKind,
 				GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material),
-				GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material));
+				GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material),
+                entry.DrawKind == GpuDrawKind.Mesh && entry.Material.AlphaMode != AlphaMode.AlphaBlend && entry.Mesh.IsSkinned);
 			EncodeCommandForPassLane(
 				(uint)entry.DrawIndex,
 				executionKey,
