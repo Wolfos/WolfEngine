@@ -350,6 +350,7 @@ public sealed class ShadowMapPass
 			"vertexShader",
 			"fragmentShader",
 			lane.PreprocessorDefine,
+			lane.DrawKind == GpuDrawKind.Terrain ? "WOLF_SHADOW_TERRAIN" : string.Empty,
 			cascadeDefine);
 		pipeline = device.GetOrCreatePipeline(key, compiled.Bytecode);
 		_pipelinesByCascadeExecutionKey[pipelineKeyByCascadeBucket] = pipeline;

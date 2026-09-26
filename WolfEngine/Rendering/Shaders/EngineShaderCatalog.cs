@@ -199,7 +199,8 @@ public sealed class EngineShaderCatalog
 			var legal = define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
 			            define == "WOLF_GPU_DRAW_DIAGNOSTICS" && request.ProgramId == EngineShaderPrograms.GpuDrawCull ||
 			            request.ProgramId == EngineShaderPrograms.ShadowMap &&
-			            (define == "WOLF_SHADOW_CASCADE_INDEX=0" || define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
+			            (define == "WOLF_SHADOW_TERRAIN" || define == "WOLF_SHADOW_CASCADE_INDEX=0" ||
+			             define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
 			if (legal == false)
 				throw new InvalidOperationException($"Define variant '{define}' is not declared for '{request.ProgramId}'.");
 		}
@@ -250,6 +251,8 @@ public sealed class EngineShaderCatalog
 							$"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
 						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
 							"WOLF_ALPHA_CLIP", $"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
+						requests.Add(ShaderRequest.Graphics(descriptor.Id, "vertexShader", "fragmentShader", backendKind,
+							"WOLF_SHADOW_TERRAIN", $"WOLF_SHADOW_CASCADE_INDEX={cascade}"));
 					}
 			}
 			else

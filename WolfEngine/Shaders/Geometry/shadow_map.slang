@@ -9,7 +9,9 @@ StructuredBuffer<GpuInstanceData> g_InstanceTable : register(t10);
 StructuredBuffer<GpuMaterialData> g_MaterialTable : register(t11);
 StructuredBuffer<GpuDrawArgs> g_DrawArgsTable : register(t12);
 StructuredBuffer<uint> g_MaterialGenerations : register(t13);
+#ifdef WOLF_SHADOW_TERRAIN
 StructuredBuffer<GpuTerrainMaterialData> g_TerrainMaterialTable : register(t14);
+#endif
 
 // Written per indirect command by the command signature's root constant rather than by any binding
 // call, so each draw can find its own entry in the draw args table.
@@ -36,6 +38,7 @@ cbuffer CameraParams : register(b4)
 
 struct VSInput
 {
+    // Keep UV at material attribute index 2 on Metal. Unused inputs are optimized out.
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
@@ -68,6 +71,7 @@ uint ResolveMaterialIndex(uint materialHandle)
     return 0;
 }
 
+#ifdef WOLF_SHADOW_TERRAIN
 float2 GetTerrainUv(float2 baseUv, GpuInstanceData instanceData)
 {
     return instanceData.terrainHeightmapUvScaleOffset.zw + baseUv * instanceData.terrainHeightmapUvScaleOffset.xy;
@@ -112,6 +116,7 @@ float SampleTerrainHeight(float2 uv, GpuTerrainMaterialData terrainData)
 
     return saturate(CubicHermite(rows[0], rows[1], rows[2], rows[3], fraction.y)) * terrainData.heightScale;
 }
+#endif
 
 VSOutput vertexShader(VSInput input)
 {
@@ -133,9 +138,9 @@ VSOutput vertexShader(VSInput input)
     float2 uv = input.uv;
 #endif
     float3 localPosition = input.position;
-    if (instanceData.drawKind == 2)
+#ifdef WOLF_SHADOW_TERRAIN
     {
-        // Only displaced terrain needs a material lookup in the vertex stage.
+        // The execution lane selects this variant; no per-vertex draw-kind branch is needed.
         uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
         GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
         float2 terrainUv = GetTerrainUv(input.uv, instanceData);
@@ -146,6 +151,7 @@ VSOutput vertexShader(VSInput input)
         localPosition.y = SampleTerrainHeight(terrainUv, terrainData) + input.position.y;
         localPosition.z = instanceData.terrainChunkOriginSize.y + input.position.z * instanceData.terrainChunkOriginSize.w;
     }
+#endif
 
     float4 worldPosition = mul(float4(localPosition, 1.0f), instanceData.world);
     worldPosition.xyz -= cameraPosition;
