@@ -61,6 +61,24 @@ public sealed class EditorCameraSystemTests
 		Assert.That(previewWorld.GetComponent<LocalTransform>(preview).LocalPosition, Is.EqualTo(before));
 	}
 
+	[Test]
+	public void SetCameraPose_LooksAtTargetAndSurvivesTheNextUpdate()
+	{
+		var states = new EditorViewportStateBus();
+		var system = new EditorCameraSystem(new InputSystem(), states);
+		var world = new World(WorldTag.Editor);
+		var camera = CreateCamera(world, RenderViewId.Primary);
+		system.Update(0, world);
+		var position = new Vector3(30, 50, -40);
+		var target = new Vector3(0, 5, 0);
+		Assert.That(system.TrySetCameraPose(RenderViewId.Primary, position, target), Is.True);
+		system.Update(0, world);
+		Assert.That(system.TryGetCameraPose(out var actualPosition, out var actualForward), Is.True);
+		Assert.That(actualPosition, Is.EqualTo(position));
+		Assert.That(Vector3.Distance(actualForward, Vector3.Normalize(target - position)), Is.LessThan(0.0001f));
+		Assert.That(world.GetComponent<LocalTransform>(camera).LocalPosition, Is.EqualTo(position));
+	}
+
 	private static Entity CreateCamera(World world, RenderViewId view)
 	{
 		var entity = world.CreateEntity($"Camera {view}", Matrix4x4.Identity);

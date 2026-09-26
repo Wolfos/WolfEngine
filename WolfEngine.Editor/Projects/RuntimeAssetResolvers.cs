@@ -177,6 +177,11 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 	public object Resolve(RuntimeAssetResolveContext context)
 	{
 		var summary = context.Asset.GetRequiredSummary<MeshAssetSummary>();
+		if (summary.CanonicalMeshNodeId != Guid.Empty)
+		{
+			return context.ResolveAsset(summary.CanonicalMeshNodeId, typeof(Mesh))
+			       ?? throw new InvalidOperationException($"Canonical mesh '{summary.CanonicalMeshNodeId}' is missing.");
+		}
 		var absoluteMeshPath = context.GetAbsolutePath(summary.RelativeImportedMeshPath);
 		var meshFile = ImportedMeshSerializer.Read(absoluteMeshPath);
 		var hasSkin = meshFile.BoneIndices.Length > 0 && meshFile.BoneWeights.Length > 0;

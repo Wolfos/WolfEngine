@@ -19,6 +19,7 @@ namespace WolfEngine.Editor.Automation;
 public sealed class EditorRemoteAutomationController
 {
 	private readonly string _projectPath;
+	private readonly EditorCameraSystem _cameraSystem;
 	private readonly IEditorProjectService _projectService;
 	private readonly IGameplayAssemblyHost _gameplayAssemblyHost;
 	private readonly IEditorSceneWorkspace _sceneWorkspace;
@@ -64,8 +65,10 @@ public sealed class EditorRemoteAutomationController
 		GpuProfiler gpuProfiler,
 		EditorViewportStateBus viewportStateBus,
 		IEditorWorkspaceService workspaces,
-		EditorWindowRegistry windows)
+		EditorWindowRegistry windows,
+		EditorCameraSystem cameraSystem)
 	{
+		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
 		_projectService = projectService;
@@ -824,6 +827,13 @@ public sealed class EditorRemoteAutomationController
 			capture.EditorFrameSequence,
 			capture.RenderFrameSequence);
 	}
+
+	public Task SetEditorCameraAsync(Vector3 position, Vector3 target, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			if (!_cameraSystem.TrySetCameraPose(RenderViewId.Primary, position, target))
+				throw new InvalidOperationException("The editor camera is not ready; wait for render frames first.");
+		}, cancellationToken);
 
 	public Task ShutdownAsync(CancellationToken cancellationToken) => Enqueue(() => { ShutdownRequested = true; }, cancellationToken);
 

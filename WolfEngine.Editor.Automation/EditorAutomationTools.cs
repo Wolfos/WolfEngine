@@ -19,6 +19,13 @@ public sealed class EditorAutomationTools
 		return "WolfEngine Editor is ready.";
 	}
 
+	[McpServerTool(Name = "set_editor_camera"), Description("Move the primary editor camera to a position looking at a target, in memory only. Wait for render frames after loading a scene before calling this.")]
+	public async Task<string> SetEditorCamera(float x, float y, float z, float targetX, float targetY, float targetZ, CancellationToken cancellationToken)
+	{
+		await _controller.SetEditorCameraAsync(new(x, y, z), new(targetX, targetY, targetZ), cancellationToken);
+		return "Editor camera updated in memory.";
+	}
+
 	[McpServerTool(Name = "create_entity"), Description("Create an entity in the running editor's authoring scene without saving the scene.")]
 	public async Task<string> CreateEntity(
 		[Description("Optional entity name.")] string? name = null,

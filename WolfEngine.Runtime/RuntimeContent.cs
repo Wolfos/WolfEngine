@@ -62,6 +62,7 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 	private readonly IMaterialFactory _materials;
 	private readonly IMaterialTypeRegistry _materialTypes;
 	private readonly Dictionary<(Guid, Type), object?> _cache = [];
+	private readonly Dictionary<string, Mesh> _meshesByContentHash = new(StringComparer.Ordinal);
 
 	public RuntimeAssetStore(WolfPackCatalog catalog, ITextureFactory textures, IMaterialFactory materials, IMaterialTypeRegistry materialTypes)
 	{
@@ -87,6 +88,14 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			_cache[(id, expectedType)] = clip;
 			return clip;
 		}
+		// Legacy mesh GUIDs can refer to the same imported geometry. Cooked entries carry a
+		// content hash, so their immutable geometry can share the same GPU resource identity too.
+		if (entry.Kind == nameof(AssetType.Mesh) && expectedType == typeof(Mesh) &&
+		    _meshesByContentHash.TryGetValue(entry.Sha256, out var sharedMesh))
+		{
+			_cache[(id, expectedType)] = sharedMesh;
+			return sharedMesh;
+		}
 		var bytes = _catalog.Read(id);
 		using var stream = new MemoryStream(bytes, false);
 		var value = entry.Kind switch
@@ -107,6 +116,7 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		if (value is not null && !expectedType.IsInstanceOfType(value))
 			throw new InvalidOperationException($"Cooked asset '{id}' resolved to the wrong runtime type.");
 
+		if (value is Mesh mesh) _meshesByContentHash[entry.Sha256] = mesh;
 		_cache[(id, expectedType)] = value;
 		return value;
 	}
@@ -149,9 +159,13 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 
 	public void InvalidateAssets(IEnumerable<Guid> assetIds) => throw new NotSupportedException("Runtime assets are immutable cooked packs.");
 
-	public void ClearCachedInstances() => _cache.Clear();
+	public void ClearCachedInstances()
+	{
+		_cache.Clear();
+		_meshesByContentHash.Clear();
+	}
 
-	public void Clear() => _cache.Clear();
+	public void Clear() => ClearCachedInstances();
 }
 
 public interface IRuntimeSceneLoader

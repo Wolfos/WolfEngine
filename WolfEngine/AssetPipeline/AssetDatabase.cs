@@ -171,6 +171,8 @@ public sealed class TerrainAssetSummary
 
 public sealed class MeshAssetSummary
 {
+	/// <summary>Legacy instance GUIDs resolve through this mesh; empty for the canonical asset.</summary>
+	public Guid CanonicalMeshNodeId { get; set; }
 	public string RelativeImportedMeshPath { get; set; } = string.Empty;
 	public int VertexCount { get; set; }
 	public int IndexCount { get; set; }

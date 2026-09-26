@@ -1149,6 +1149,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		};
 		var hierarchyKeys = new string[importedScene.Nodes.Count];
 		var childCounts = new int[importedScene.Nodes.Count];
+		// Assimp mesh identity is shared across instances; keep geometry independent of node placement.
+		var sharedMeshes = new Dictionary<Mesh, (Guid NodeId, string Path)>(ReferenceEqualityComparer.Instance);
 		var rootCount = 0;
 		for (var i = 0; i < importedScene.Nodes.Count; i++)
 		{
@@ -1182,6 +1184,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				GetModelNodeDisplayName(importedNode, totalRootCount, modelDisplayName),
 				materialNodeIds,
 				skeletonNodeIds,
+				sharedMeshes,
 				nodes,
 				dependencies));
 		}
@@ -1552,6 +1555,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		string displayName,
 		IReadOnlyList<Guid> materialNodeIds,
 		IReadOnlyList<Guid> skeletonNodeIds,
+		Dictionary<Mesh, (Guid NodeId, string Path)> sharedMeshes,
 		List<AssetNodeRecord> nodes,
 		List<AssetDependencyRecord> dependencies)
 	{
@@ -1573,16 +1577,35 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				metadata.SourceId.ToString("D"),
 				"meshes",
 				$"{nodeKey.Replace(':', '_')}.mesh.bin"));
-			ImportedMeshSerializer.Write(GetAbsolutePath(projectRootPath, relativeMeshPath), new ImportedMeshAssetFile
+			var canonicalMeshNodeId = Guid.Empty;
+			if (sharedMeshes.TryGetValue(meshInfo.Mesh, out var sharedMesh))
 			{
-				Vertices = meshInfo.Mesh.Vertices,
-				Indices = meshInfo.Mesh.Indices,
-				Normals = meshInfo.Mesh.Normals,
-				Tangents = meshInfo.Mesh.Tangents,
-				UVs = meshInfo.Mesh.UVs,
-				BoneIndices = meshInfo.Mesh.BoneIndices ?? [],
-				BoneWeights = meshInfo.Mesh.BoneWeights ?? []
-			});
+				// Preserve each legacy GUID as an alias, so saved scene AssetRefs still resolve.
+				relativeMeshPath = sharedMesh.Path;
+				canonicalMeshNodeId = sharedMesh.NodeId;
+				dependencies.Add(new AssetDependencyRecord
+				{
+					FromNodeId = meshNodeId,
+					ToNodeId = canonicalMeshNodeId,
+					Kind = "mesh-alias",
+					IsHard = true
+				});
+			}
+			else
+			{
+				sharedMeshes.Add(meshInfo.Mesh, (meshNodeId, relativeMeshPath));
+				ImportedMeshSerializer.Write(GetAbsolutePath(projectRootPath, relativeMeshPath), new ImportedMeshAssetFile
+				{
+					Vertices = meshInfo.Mesh.Vertices,
+					Indices = meshInfo.Mesh.Indices,
+					Normals = meshInfo.Mesh.Normals,
+					Tangents = meshInfo.Mesh.Tangents,
+					UVs = meshInfo.Mesh.UVs,
+					BoneIndices = meshInfo.Mesh.BoneIndices ?? [],
+					BoneWeights = meshInfo.Mesh.BoneWeights ?? []
+				});
+			}
+
 			nodes.Add(new AssetNodeRecord
 			{
 				NodeId = meshNodeId,
@@ -1596,6 +1619,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				RelativeMetaPath = relativeMetaPath,
 				SummaryJson = AssetPipelineSerialization.Serialize(new MeshAssetSummary
 				{
+					CanonicalMeshNodeId = canonicalMeshNodeId,
 					RelativeImportedMeshPath = relativeMeshPath,
 					VertexCount = meshInfo.Mesh.Vertices.Length,
 					IndexCount = meshInfo.Mesh.Indices.Length,
@@ -1612,7 +1636,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			modelNode.Meshes.Add(new ImportedModelAssetMeshInstance
 			{
 				Name = meshInfo.Name,
-				MeshNodeId = meshNodeId,
+				MeshNodeId = canonicalMeshNodeId == Guid.Empty ? meshNodeId : canonicalMeshNodeId,
 				MaterialNodeId = materialNodeId,
 				SkeletonNodeId = skeletonNodeId
 			});
@@ -2062,7 +2086,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportColorLookupTableSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				7,
+				8,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

@@ -176,6 +176,27 @@ public class EditorCameraSystem: IUpdate
 		return false;
 	}
 
+	public bool TrySetCameraPose(RenderViewId view, Vector3 position, Vector3 target)
+	{
+		var direction = target - position;
+		if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
+		    !float.IsFinite(direction.X) || !float.IsFinite(direction.Y) || !float.IsFinite(direction.Z) ||
+		    direction.LengthSquared() < 1e-8f)
+			throw new ArgumentException("Camera position and target must be finite and distinct.");
+		if (!_cameraPoses.TryGetValue(view, out var pose) || !pose.World.IsAlive(pose.Entity)) return false;
+		var forward = Vector3.Normalize(direction);
+		var up = MathF.Abs(Vector3.Dot(forward, Vector3.UnitY)) > 0.999f ? Vector3.UnitZ : Vector3.UnitY;
+		var right = Vector3.Normalize(Vector3.Cross(up, forward));
+		up = Vector3.Cross(forward, right);
+		var rotation = new Matrix4x4(right.X, right.Y, right.Z, 0, up.X, up.Y, up.Z, 0,
+			forward.X, forward.Y, forward.Z, 0, 0, 0, 0, 1);
+		pose.World.SetLocalPosition(pose.Entity, position);
+		pose.World.SetLocalRotation(pose.Entity, Quaternion.CreateFromRotationMatrix(rotation));
+		pose.World.GetComponent<EditorCameraMover>(pose.Entity).Initialized = false;
+		_cameraPoses[view] = new CameraPose(pose.World, pose.Entity, position, forward);
+		return true;
+	}
+
 	public WorldTag GetTag() => WorldTag.Editor;
 
 	private Vector3 GetMoveInput()
