@@ -36,6 +36,14 @@ public sealed class SharedDrawIndirectCommandSet : IDisposable
 	private readonly uint[] _bindlessEpochs = new uint[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly ulong[] _bindingVersions = new ulong[GpuDrawResources.IndirectCommandBufferSlotCount];
 	private readonly int[] _frameBindings = new int[GpuDrawResources.IndirectCommandBufferSlotCount];
+	private MeshIndexStream _indexStream;
+
+	internal void SetIndexStream(MeshIndexStream stream)
+	{
+		if (_indexStream == stream) return;
+		_indexStream = stream;
+		InvalidateEncoding();
+	}
 
 	public SharedDrawIndirectCommandSet()
 	{

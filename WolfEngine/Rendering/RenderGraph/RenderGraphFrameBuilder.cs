@@ -2321,7 +2321,8 @@ internal sealed class RenderGraphFrameBuilder
 			SharedDrawIndirectEncodeResources.FromGpuDrawResources(
 				_gpuDrawResources,
 				_gpuDrawResources.ShadowDrawArgsBuffer,
-				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex)),
+				GpuDrawResources.GetShadowDrawArgsOffsetBytes(cascadeIndex),
+				_view.FrameResources.Config.ShadowMaps.WeldShadowVertices ? MeshIndexStream.ShadowOpaque : MeshIndexStream.Main),
 			lane => _shadowMapPass.HasIndirectLane(cascadeIndex, lane),
 			lane => _shadowMapPass.GetBufferBindings(cascadeIndex, lane),
 			lane => _shadowMapPass.GetPassBindingSet(cascadeIndex, lane, _gpuDrawResources));

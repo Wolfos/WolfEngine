@@ -303,11 +303,13 @@ public abstract class MaterialSurfaceProperties
 
 public sealed class ImportedMeshAssetFile
 {
-	public const int CurrentVersion = 2;
+	public const int CurrentVersion = ImportedMeshSerializer.CurrentVersion;
 
 	public int Version { get; set; } = CurrentVersion;
 	public Vector4[] Vertices { get; set; } = [];
 	public uint[] Indices { get; set; } = [];
+	public uint[] ShadowOpaqueIndices { get; set; } = [];
+	public uint[] ShadowAlphaTestIndices { get; set; } = [];
 	public Vector3[] Normals { get; set; } = [];
 	public Vector4[] Tangents { get; set; } = [];
 	public Vector2[] UVs { get; set; } = [];

@@ -192,7 +192,8 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 		ulong drawArgsBaseOffsetBytes,
 		uint drawArgsCommandIndex,
 		GraphicsPassBindingSet passBindings,
-		in SharedDrawPerDrawBindings perDrawBindings)
+		in SharedDrawPerDrawBindings perDrawBindings,
+		MeshIndexStream indexStream = MeshIndexStream.Main)
 	{
 		ValidateCommandIndex(commandIndex);
 
@@ -210,9 +211,10 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			return;
 		}
 		var meshIndexBytes = checked((ulong)mesh.IndexCount * sizeof(uint));
+		var indexOffsetBytes = mesh.GetPackedIndexOffsetBytes(indexStream);
 		if (mesh.PackedVertexOffsetBytes >= vertexBuffer.SizeInBytes ||
-		    mesh.PackedIndexOffsetBytes > indexBuffer.SizeInBytes ||
-		    meshIndexBytes > indexBuffer.SizeInBytes - mesh.PackedIndexOffsetBytes)
+		    indexOffsetBytes > indexBuffer.SizeInBytes ||
+		    meshIndexBytes > indexBuffer.SizeInBytes - indexOffsetBytes)
 		{
 			ResetCommand(commandIndex);
 			return;
@@ -236,7 +238,7 @@ internal sealed unsafe class D3D12IndirectCommandBuffer : IGfxIndirectCommandBuf
 			{
 				IndexCountPerInstance = mesh.IndexCount,
 				InstanceCount = 1,
-				StartIndexLocation = checked((uint)(mesh.PackedIndexOffsetBytes / sizeof(uint))),
+				StartIndexLocation = checked((uint)(indexOffsetBytes / sizeof(uint))),
 				BaseVertexLocation = mesh.PackedBaseVertex,
 				StartInstanceLocation = 0
 			}

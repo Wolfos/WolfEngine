@@ -103,7 +103,8 @@ public sealed class D3D12GpuDrawBackendBridge : IGpuDrawBackendBridge
 			resources.DrawArgsBaseOffsetBytes,
 			drawArgsCommandIndex,
 			passBindings,
-			perDrawBindings);
+			perDrawBindings,
+			resources.IndexStream);
 		return true;
 	}
 

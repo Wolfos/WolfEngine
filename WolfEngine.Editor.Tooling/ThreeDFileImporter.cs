@@ -309,7 +309,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
                     geometry.Tangents,
                     geometry.BoneIndices,
                     geometry.BoneWeights);
-                meshData.Add((meshName, importedMesh, materialIndex, hasSkin ? 0 : -1));
+                meshData.Add((meshName, ShadowMeshOptimization.Optimize(importedMesh), materialIndex, hasSkin ? 0 : -1));
             }
 
             // Traverse node graph to preserve hierarchy and local transforms. Bone nodes are folded

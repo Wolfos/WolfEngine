@@ -121,7 +121,9 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		return value;
 	}
 
-	private static Mesh CreateMesh(ImportedMeshAssetFile mesh) => new(mesh.Vertices, mesh.Indices, mesh.Normals, mesh.UVs, mesh.Tangents);
+	private static Mesh CreateMesh(ImportedMeshAssetFile mesh) => new(mesh.Vertices, mesh.Indices, mesh.Normals, mesh.UVs, mesh.Tangents,
+        mesh.BoneIndices.Length > 0 ? mesh.BoneIndices : null, mesh.BoneWeights.Length > 0 ? mesh.BoneWeights : null,
+        mesh.ShadowOpaqueIndices, mesh.ShadowAlphaTestIndices);
 
 	private object CreateDataAsset(byte[] bytes, Type expectedType)
 	{

@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering;
 using WolfEngine.AssetPipeline;
 
 namespace WolfEngine;
@@ -11,6 +12,8 @@ public class Mesh
 {
     public Vector4[] Vertices { get; }
     public uint[] Indices { get; }
+    public uint[] ShadowOpaqueIndices { get; }
+    public uint[] ShadowAlphaTestIndices { get; }
     public Vector3[] Normals { get; }
     public Vector4[] Tangents { get; }
     public Vector2[] UVs { get; }
@@ -38,7 +41,17 @@ public class Mesh
     internal uint IndexCount { get; set; }
     internal ulong PackedVertexOffsetBytes { get; set; }
     internal ulong PackedIndexOffsetBytes { get; set; }
+    internal ulong PackedShadowOpaqueIndexOffsetBytes { get; set; }
+    internal ulong PackedShadowAlphaTestIndexOffsetBytes { get; set; }
     internal int PackedBaseVertex { get; set; }
+
+    internal ulong GetPackedIndexOffsetBytes(MeshIndexStream stream) => stream switch
+    {
+        MeshIndexStream.Main => PackedIndexOffsetBytes,
+        MeshIndexStream.ShadowOpaque => PackedShadowOpaqueIndexOffsetBytes,
+        MeshIndexStream.ShadowAlphaTest => PackedShadowAlphaTestIndexOffsetBytes,
+        _ => throw new ArgumentOutOfRangeException(nameof(stream))
+    };
 
     /// <summary>Offset of this mesh's influences in the renderer's skin attribute buffer.</summary>
     internal ulong PackedSkinOffsetBytes { get; set; }
@@ -61,7 +74,9 @@ public class Mesh
         IReadOnlyList<Vector2>? uvs = null,
         IReadOnlyList<Vector4>? tangents = null,
         IReadOnlyList<uint>? boneIndices = null,
-        IReadOnlyList<float>? boneWeights = null)
+        IReadOnlyList<float>? boneWeights = null,
+        IReadOnlyList<uint>? shadowOpaqueIndices = null,
+        IReadOnlyList<uint>? shadowAlphaTestIndices = null)
     {
         Vertices = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
         if (Vertices.Length == 0)
@@ -136,6 +151,11 @@ public class Mesh
             throw new ArgumentException("Bone indices and bone weights must be supplied together.", nameof(boneIndices));
         }
 
+        ShadowOpaqueIndices = ResolveShadowIndices(shadowOpaqueIndices, Indices);
+        ShadowAlphaTestIndices = ResolveShadowIndices(shadowAlphaTestIndices, Indices);
+        if (ShadowAlphaTestIndices.AsSpan().SequenceEqual(ShadowOpaqueIndices))
+            ShadowAlphaTestIndices = ShadowOpaqueIndices;
+
         BoundingSphere = ComputeBoundingSphere(Vertices);
         BoundingBox = ComputeBoundingBox(Vertices);
     }
@@ -149,6 +169,8 @@ public class Mesh
     {
         Vertices = source.Vertices;
         Indices = source.Indices;
+        ShadowOpaqueIndices = source.ShadowOpaqueIndices;
+        ShadowAlphaTestIndices = source.ShadowAlphaTestIndices;
         Normals = source.Normals;
         Tangents = source.Tangents;
         UVs = source.UVs;
@@ -187,6 +209,18 @@ public class Mesh
         return new Mesh(this, boundsExpansion);
     }
 
+
+    private uint[] ResolveShadowIndices(IReadOnlyList<uint>? supplied, uint[] main)
+    {
+        if (supplied is null || supplied.Count == 0) return main;
+        if (supplied.Count != main.Length)
+            throw new ArgumentException("Shadow index count must match the main triangle stream.", nameof(supplied));
+        var indices = supplied.ToArray();
+        foreach (var index in indices)
+            if (index >= Vertices.Length)
+                throw new ArgumentException("Shadow index is outside the vertex stream.", nameof(supplied));
+        return indices.AsSpan().SequenceEqual(main) ? main : indices;
+    }
 
     private static Vector3[] GenerateVertexNormals(Vector4[] vertices, uint[] indices)
     {

@@ -1713,10 +1713,10 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
 		var vertexDataSize = (ulong)vertexStride * (uint)vertexCount;
-		var indexDataSize = (ulong)sizeof(uint) * (uint)mesh.Indices.Length;
 		var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStride);
 		var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
-		if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexDataSize, indexOffsetBytes + indexDataSize) == false)
+		var shadowIndices = new ShadowIndexBuffers(mesh, indexOffsetBytes);
+		if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexDataSize, shadowIndices.EndOffsetBytes) == false)
 		{
 			// Past the growth ceiling the mesh gets a zero-index proxy instead of an exception: one scene
 			// too large for the cap should cost its geometry, not the whole frame. The cap breach is
@@ -1728,6 +1728,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			mesh.IndexCount = 0;
 			mesh.PackedVertexOffsetBytes = 0;
 			mesh.PackedIndexOffsetBytes = 0;
+			mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+			mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
 			mesh.PackedBaseVertex = 0;
 			return new MeshResources(0, 0, 0, 0);
 		}
@@ -1742,17 +1744,17 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		}
 
 		writableVertexBuffer.Write<VertexData>(vertices, vertexOffsetBytes / vertexStride);
-		writableIndexBuffer.Write<uint>(mesh.Indices, indexOffsetBytes / sizeof(uint));
+		shadowIndices.Upload(writableIndexBuffer);
 
 		mesh.VertexBuffer = vertexBuffer;
 		mesh.IndexBuffer = indexBuffer;
 		mesh.StrideInBytes = vertexStride;
 		mesh.IndexCount = (uint)mesh.Indices.Length;
 		mesh.PackedVertexOffsetBytes = vertexOffsetBytes;
-		mesh.PackedIndexOffsetBytes = indexOffsetBytes;
+		shadowIndices.AssignOffsets(mesh);
 		mesh.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
 		_packedVertexBufferUsedBytes = vertexOffsetBytes + vertexDataSize;
-		_packedIndexBufferUsedBytes = indexOffsetBytes + indexDataSize;
+		_packedIndexBufferUsedBytes = shadowIndices.EndOffsetBytes;
 
 		return new MeshResources(vertexOffsetBytes, indexOffsetBytes, mesh.PackedBaseVertex, mesh.IndexCount);
 	}
@@ -1836,6 +1838,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		skinnedInstance.IndexCount = source.IndexCount;
 		skinnedInstance.PackedVertexOffsetBytes = vertexOffsetBytes;
 		skinnedInstance.PackedIndexOffsetBytes = source.PackedIndexOffsetBytes;
+		skinnedInstance.PackedShadowOpaqueIndexOffsetBytes = source.PackedShadowOpaqueIndexOffsetBytes;
+		skinnedInstance.PackedShadowAlphaTestIndexOffsetBytes = source.PackedShadowAlphaTestIndexOffsetBytes;
 		skinnedInstance.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStride));
 
 		_meshResources.Add(skinnedInstance, new MeshResources(
@@ -1866,6 +1870,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		mesh.IndexCount = 0;
 		mesh.PackedVertexOffsetBytes = 0;
 		mesh.PackedIndexOffsetBytes = 0;
+		mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+		mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
 		mesh.PackedBaseVertex = 0;
 	}
 

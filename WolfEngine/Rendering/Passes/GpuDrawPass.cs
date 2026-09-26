@@ -1852,6 +1852,7 @@ public sealed class GpuDrawPass
 		var device = _renderer.GetGfxDevice();
 		RegisterIndirectCommandSet(commandSet);
 		commandSet.EnsureCreated(device);
+		commandSet.SetIndexStream(resources.IndexStream);
 		var activeSlot = _gpuDrawResources.ActiveIndirectCommandSlot;
 		var frameSlot = _gpuDrawResources.ActiveFrameSlot;
 		// Read the binding version here rather than trusting the frame-start backend signal: capacity
@@ -2223,7 +2224,8 @@ public sealed class GpuDrawPass
 					executionIndex,
 					commandIndex,
 					out var pageCommandIndex);
-				if (_backendBridge.TryEncodeIndexedDrawCommand(commandBuffer, pageCommandIndex, commandIndex, mesh, resources, passBindings, bindings.ToPerDrawBindings()) == false)
+				var laneResources = resources.ForLane(targetLane);
+				if (_backendBridge.TryEncodeIndexedDrawCommand(commandBuffer, pageCommandIndex, commandIndex, mesh, laneResources, passBindings, bindings.ToPerDrawBindings()) == false)
 				{
 					_backendBridge.ResetCommand(commandBuffer, pageCommandIndex);
 				}

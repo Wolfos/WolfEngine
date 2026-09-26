@@ -147,6 +147,8 @@ public struct ShadowMapConfig
 	public bool Enabled { get; set; } = true;
 	public int CascadeCount { get; set; } = ShadowMapPass.MaxCascadeCount;
 	public bool TightCasterCulling { get; set; } = true;
+	/// <summary>Use lossless shadow indices generated during asset import; UV and skinning seams are retained when required.</summary>
+	public bool WeldShadowVertices { get; set; } = true;
 	public int CascadeResolution { get; set; } = ShadowMapPass.DefaultCascadeResolution;
 	public float CascadeBlendDistance { get; set; } = ShadowMapPass.DefaultCascadeBlendDistance;
 	public float MaxDistance { get; set; } = ShadowMapPass.DefaultMaxShadowDistance;

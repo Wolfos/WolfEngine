@@ -192,7 +192,8 @@ public sealed class MeshRuntimeAssetResolver : IMeshRuntimeAssetResolver
 			meshFile.UVs,
 			meshFile.Tangents,
 			hasSkin ? meshFile.BoneIndices : null,
-			hasSkin ? meshFile.BoneWeights : null);
+			hasSkin ? meshFile.BoneWeights : null,
+			meshFile.ShadowOpaqueIndices, meshFile.ShadowAlphaTestIndices);
 	}
 }
 

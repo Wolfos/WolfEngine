@@ -1598,6 +1598,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				{
 					Vertices = meshInfo.Mesh.Vertices,
 					Indices = meshInfo.Mesh.Indices,
+					ShadowOpaqueIndices = meshInfo.Mesh.ShadowOpaqueIndices,
+					ShadowAlphaTestIndices = meshInfo.Mesh.ShadowAlphaTestIndices,
 					Normals = meshInfo.Mesh.Normals,
 					Tangents = meshInfo.Mesh.Tangents,
 					UVs = meshInfo.Mesh.UVs,
@@ -2086,7 +2088,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportColorLookupTableSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				8,
+				9,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

@@ -254,6 +254,21 @@ public sealed class EditorRemoteAutomationController
 			return $"Tight shadow-caster culling: {enabled}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetShadowVertexWeldingAsync(bool enabled, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.ShadowMaps;
+			settings.WeldShadowVertices = enabled;
+			config.ShadowMaps = settings;
+			return $"Shadow vertex welding: {enabled}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{

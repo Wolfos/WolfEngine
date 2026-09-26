@@ -211,6 +211,10 @@ public sealed class EditorAutomationTools
 	public Task<string> SetShadowCasterCulling(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetShadowCasterCullingAsync(enabled, cancellationToken);
 
+	[McpServerTool(Name = "set_shadow_vertex_welding"), Description("Enable or disable lossless shadow vertex welding in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
+	public Task<string> SetShadowVertexWelding(bool enabled, CancellationToken cancellationToken) =>
+		_controller.SetShadowVertexWeldingAsync(enabled, cancellationToken);
+
 	[McpServerTool(Name = "set_ddgi_relocation"), Description("Enable or disable DDGI probe relocation in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);

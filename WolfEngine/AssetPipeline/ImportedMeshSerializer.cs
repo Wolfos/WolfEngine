@@ -4,8 +4,8 @@ public static class ImportedMeshSerializer
 {
 	private static ReadOnlySpan<byte> Magic => "WEMH"u8;
 
-	/// <summary>Version 2 appends per-vertex skin influences. Version 1 artifacts read back as unskinned.</summary>
-	public const int CurrentVersion = 2;
+	/// <summary>Version 3 adds shared optional shadow index streams; versions 1 and 2 use main indices.</summary>
+	public const int CurrentVersion = 3;
 
 	private const int SkinnedVersion = 2;
 
@@ -25,6 +25,14 @@ public static class ImportedMeshSerializer
 			AssetBinaryPrimitives.WriteVector2Array(writer, mesh.UVs);
 			AssetBinaryPrimitives.WriteUInt32Array(writer, mesh.BoneIndices ?? []);
 			AssetBinaryPrimitives.WriteSingleArray(writer, mesh.BoneWeights ?? []);
+			var opaque = mesh.ShadowOpaqueIndices;
+			var alpha = mesh.ShadowAlphaTestIndices;
+			AssetBinaryPrimitives.WriteUInt32Array(writer,
+				opaque.AsSpan().SequenceEqual(mesh.Indices) ? [] : opaque);
+			var alphaSharesOpaque = alpha.Length > 0 && alpha.AsSpan().SequenceEqual(opaque);
+			writer.Write(alphaSharesOpaque);
+			AssetBinaryPrimitives.WriteUInt32Array(writer,
+				alphaSharesOpaque || alpha.AsSpan().SequenceEqual(mesh.Indices) ? [] : alpha);
 		});
 	}
 
@@ -71,6 +79,14 @@ public static class ImportedMeshSerializer
 		{
 			mesh.BoneIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
 			mesh.BoneWeights = AssetBinaryPrimitives.ReadSingleArray(reader);
+		}
+
+		if (version >= 3)
+		{
+			mesh.ShadowOpaqueIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
+			var alphaSharesOpaque = reader.ReadBoolean();
+			mesh.ShadowAlphaTestIndices = AssetBinaryPrimitives.ReadUInt32Array(reader);
+			if (alphaSharesOpaque) mesh.ShadowAlphaTestIndices = mesh.ShadowOpaqueIndices;
 		}
 
 		return mesh;

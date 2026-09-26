@@ -1216,7 +1216,6 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         var vertexStrideBytes = (ulong)Marshal.SizeOf<VertexData>();
         var vertexBufferLength = (ulong)(vertexData.Length * Marshal.SizeOf<VertexData>());
-        var indexBufferLength = (ulong)(mesh.Indices.Length * sizeof(uint));
 
         if (_packedVertexBuffer is null || _packedIndexBuffer is null)
         {
@@ -1226,11 +1225,12 @@ internal unsafe class WolfRendererMetal : IRenderer
         // baseVertex addressing requires offsets aligned to full vertex strides.
         var vertexOffsetBytes = BufferAlignment.AlignUp(_packedVertexBufferUsedBytes, vertexStrideBytes);
         var indexOffsetBytes = BufferAlignment.AlignUp(_packedIndexBufferUsedBytes, sizeof(uint));
-        if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, indexOffsetBytes + indexBufferLength) == false)
+        var shadowIndices = new ShadowIndexBuffers(mesh, indexOffsetBytes);
+        if (EnsurePackedGeometryCapacity(vertexOffsetBytes + vertexBufferLength, shadowIndices.EndOffsetBytes) == false)
         {
             _hardeningStats.IncrementFallbackProxySubstitutions();
             throw new InvalidOperationException(
-                $"Packed geometry capacity exceeded for mesh upload. requiredVertexBytes={vertexOffsetBytes + vertexBufferLength}, requiredIndexBytes={indexOffsetBytes + indexBufferLength}.");
+                $"Packed geometry capacity exceeded for mesh upload. requiredVertexBytes={vertexOffsetBytes + vertexBufferLength}, requiredIndexBytes={shadowIndices.EndOffsetBytes}.");
         }
         if (_packedVertexBuffer is null || _packedIndexBuffer is null)
         {
@@ -1238,18 +1238,18 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         CopyToBufferAtOffset<VertexData>(vertexData, _packedVertexBuffer.Buffer, vertexOffsetBytes);
-        CopyToBufferAtOffset<uint>(mesh.Indices, _packedIndexBuffer.Buffer, indexOffsetBytes);
+        shadowIndices.Upload(_packedIndexBuffer);
 
         mesh.VertexBuffer = _packedVertexBuffer;
         mesh.IndexBuffer = _packedIndexBuffer;
         mesh.StrideInBytes = (uint)vertexStrideBytes;
         mesh.IndexCount = (uint)mesh.Indices.Length;
         mesh.PackedVertexOffsetBytes = vertexOffsetBytes;
-        mesh.PackedIndexOffsetBytes = indexOffsetBytes;
+        shadowIndices.AssignOffsets(mesh);
         mesh.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStrideBytes));
 
         _packedVertexBufferUsedBytes = vertexOffsetBytes + vertexBufferLength;
-        _packedIndexBufferUsedBytes = indexOffsetBytes + indexBufferLength;
+        _packedIndexBufferUsedBytes = shadowIndices.EndOffsetBytes;
 
         return new MeshResources(vertexOffsetBytes, indexOffsetBytes, mesh.PackedBaseVertex, (ulong)mesh.Indices.Length);
     }
@@ -1278,6 +1278,8 @@ internal unsafe class WolfRendererMetal : IRenderer
                 mesh.IndexCount = 0;
                 mesh.PackedVertexOffsetBytes = 0;
                 mesh.PackedIndexOffsetBytes = 0;
+                mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+                mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
                 mesh.PackedBaseVertex = 0;
                 resources = new MeshResources(0, 0, 0, 0);
                 if (_loggedPackedCapacityLimit == false)
@@ -1337,6 +1339,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         skinnedInstance.IndexCount = source.IndexCount;
         skinnedInstance.PackedVertexOffsetBytes = vertexOffsetBytes;
         skinnedInstance.PackedIndexOffsetBytes = source.PackedIndexOffsetBytes;
+        skinnedInstance.PackedShadowOpaqueIndexOffsetBytes = source.PackedShadowOpaqueIndexOffsetBytes;
+        skinnedInstance.PackedShadowAlphaTestIndexOffsetBytes = source.PackedShadowAlphaTestIndexOffsetBytes;
         skinnedInstance.PackedBaseVertex = checked((int)(vertexOffsetBytes / vertexStrideBytes));
 
         _meshResources[skinnedInstance] = new MeshResources(
@@ -1381,6 +1385,8 @@ internal unsafe class WolfRendererMetal : IRenderer
         mesh.IndexCount = 0;
         mesh.PackedVertexOffsetBytes = 0;
         mesh.PackedIndexOffsetBytes = 0;
+        mesh.PackedShadowOpaqueIndexOffsetBytes = 0;
+        mesh.PackedShadowAlphaTestIndexOffsetBytes = 0;
         mesh.PackedBaseVertex = 0;
         _needsPackedGeometryReencode = true;
     }
