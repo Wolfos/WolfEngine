@@ -46,8 +46,10 @@ struct VSInput
 struct VSOutput
 {
     float4 position : SV_Position;
+#ifdef WOLF_ALPHA_CLIP
     float2 uv : TEXCOORD0;
     uint instanceId : TEXCOORD1;
+#endif
 };
 
 uint ResolveMaterialIndex(uint materialHandle)
@@ -118,22 +120,30 @@ VSOutput vertexShader(VSInput input)
     if (drawArgs.instanceCount == 0 || drawArgs.startInstance == 0 || drawArgs.startInstance >= WOLF_MAX_INSTANCE_COUNT)
     {
         output.position = float4(2.0f, 2.0f, 2.0f, 1.0f);
+#ifdef WOLF_ALPHA_CLIP
         output.uv = float2(0.0f, 0.0f);
         output.instanceId = 0;
+#endif
         return output;
     }
 
     uint instanceId = drawArgs.startInstance;
     GpuInstanceData instanceData = g_InstanceTable[instanceId];
-    uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
+#ifdef WOLF_ALPHA_CLIP
     float2 uv = input.uv;
+#endif
     float3 localPosition = input.position;
     if (instanceData.drawKind == 2)
     {
+        // Only displaced terrain needs a material lookup in the vertex stage.
+        uint materialIndex = ResolveMaterialIndex(instanceData.materialHandle);
         GpuTerrainMaterialData terrainData = g_TerrainMaterialTable[materialIndex];
-        uv = GetTerrainUv(input.uv, instanceData);
+        float2 terrainUv = GetTerrainUv(input.uv, instanceData);
+#ifdef WOLF_ALPHA_CLIP
+        uv = terrainUv;
+#endif
         localPosition.x = instanceData.terrainChunkOriginSize.x + input.position.x * instanceData.terrainChunkOriginSize.z;
-        localPosition.y = SampleTerrainHeight(uv, terrainData) + input.position.y;
+        localPosition.y = SampleTerrainHeight(terrainUv, terrainData) + input.position.y;
         localPosition.z = instanceData.terrainChunkOriginSize.y + input.position.z * instanceData.terrainChunkOriginSize.w;
     }
 
@@ -147,8 +157,10 @@ VSOutput vertexShader(VSInput input)
     viewProjection = viewProjection2;
 #endif
     output.position = mul(worldPosition, viewProjection);
+#ifdef WOLF_ALPHA_CLIP
     output.uv = uv;
     output.instanceId = instanceId;
+#endif
     return output;
 }
 
