@@ -18,6 +18,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly MTLCommandBuffer _commandBuffer;
 	private MTLRenderCommandEncoder _renderEncoder;
 	private MTLComputeCommandEncoder _computeEncoder;
+	private MTLDispatchType _computeEncoderDispatchType;
 	private CAMetalDrawable _presentDrawable;
 	private PassTargets _currentTargets;
 	private bool _hasTargets;
@@ -716,7 +717,9 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			return;
 		}
 
-		EnsureComputeEncoder();
+		// Pages write disjoint outputs, so they can run concurrently. A serial encoder drains the GPU after
+		// every ICB-writing dispatch (~40 us per page).
+		EnsureComputeEncoder(MTLDispatchType.Concurrent);
 
 		// This kernel belongs to the backend and has no MetalPipeline wrapper, so setting it directly
 		// leaves the cached compute bindings describing state that is no longer bound. Clearing them makes
@@ -1226,17 +1229,35 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		ApplyBindlessToRenderEncoder();
 	}
 
-	private void EnsureComputeEncoder()
+	/// <summary>
+	/// Reopens the encoder when the dispatch type changes. Only request Concurrent for independent dispatches.
+	/// </summary>
+	private void EnsureComputeEncoder(MTLDispatchType dispatchType = MTLDispatchType.Serial)
 	{
 		ThrowIfDisposed();
 		if (_computeEncoder.NativePtr != IntPtr.Zero)
 		{
-			return;
+			if (_computeEncoderDispatchType == dispatchType)
+			{
+				return;
+			}
+
+			EndActiveEncoders();
 		}
 
-		using var descriptor = new MTLComputePassDescriptor();
-		ConfigureComputeStageProfiling(descriptor);
-		_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
+		var descriptor = new MTLComputePassDescriptor();
+		try
+		{
+			descriptor.DispatchType = dispatchType;
+			ConfigureComputeStageProfiling(descriptor);
+			_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
+		}
+		finally
+		{
+			descriptor.Dispose();
+		}
+
+		_computeEncoderDispatchType = dispatchType;
 		_currentComputePipeline = null;
 		_bindlessBuffersSetCompute = false;
 		_lastBindlessVersionCompute = uint.MaxValue;
