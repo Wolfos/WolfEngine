@@ -672,7 +672,9 @@ public sealed class GpuDrawPass
 		ReadOnlySpan<Matrix4x4> viewProjections,
 		Vector3 cameraOrigin,
 		bool useShadowBuffers,
-		DrawPassParticipation participation)
+		DrawPassParticipation participation,
+		ReadOnlySpan<Vector4> cullingPlanes = default,
+		ReadOnlySpan<int> cullingPlaneCounts = default)
 	{
 		if (viewProjections.IsEmpty || viewProjections.Length > GpuDrawResources.MaxShadowViewCount)
 		{
@@ -680,6 +682,22 @@ public sealed class GpuDrawPass
 				nameof(viewProjections),
 				viewProjections.Length,
 				$"Cull view count must be between 1 and {GpuDrawResources.MaxShadowViewCount}.");
+		}
+
+		if (!cullingPlanes.IsEmpty || !cullingPlaneCounts.IsEmpty)
+		{
+			if (cullingPlanes.Length != viewProjections.Length * FrustumCulling.MaxPlaneCount ||
+			    cullingPlaneCounts.Length != viewProjections.Length)
+			{
+				throw new ArgumentException("Custom culling volumes must provide one fixed-stride plane set and count per view.");
+			}
+			foreach (var count in cullingPlaneCounts)
+			{
+				if (count < 6 || count > FrustumCulling.MaxPlaneCount)
+				{
+					throw new ArgumentOutOfRangeException(nameof(cullingPlaneCounts));
+				}
+			}
 		}
 
 		var device = _renderer.GetGfxDevice();
@@ -736,11 +754,21 @@ public sealed class GpuDrawPass
 			cullParamsWriter.Clear();
 			for (var viewIndex = 0; viewIndex < outputViewCount; viewIndex++)
 			{
-				ExtractFrustumPlanes(viewProjections[viewIndex], planes);
-				for (var planeIndex = 0; planeIndex < planes.Length; planeIndex++)
+				scoped ReadOnlySpan<Vector4> viewPlanes;
+				if (cullingPlanes.IsEmpty)
 				{
-					var flattenedPlaneIndex = (viewIndex * planes.Length) + planeIndex;
-					cullParamsWriter.SetVector4($"planes[{flattenedPlaneIndex}]", planes[planeIndex]);
+					FrustumCulling.ExtractPlanes(viewProjections[viewIndex], planes);
+					viewPlanes = planes;
+				}
+				else
+				{
+					viewPlanes = cullingPlanes.Slice(viewIndex * FrustumCulling.MaxPlaneCount, cullingPlaneCounts[viewIndex]);
+				}
+				cullParamsWriter.SetUInt($"planeCounts[{viewIndex}]", (uint)viewPlanes.Length);
+				for (var planeIndex = 0; planeIndex < viewPlanes.Length; planeIndex++)
+				{
+					var flattenedPlaneIndex = (viewIndex * FrustumCulling.MaxPlaneCount) + planeIndex;
+					cullParamsWriter.SetVector4($"planes[{flattenedPlaneIndex}]", viewPlanes[planeIndex]);
 				}
 			}
 
@@ -2212,34 +2240,6 @@ public sealed class GpuDrawPass
 				_backendBridge.ResetCommand(staleCommandBuffer, stalePageCommandIndex);
 			}
 		}
-	}
-
-	private static void ExtractFrustumPlanes(Matrix4x4 viewProjection, Span<Vector4> planes)
-	{
-		var col1 = new Vector4(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
-		var col2 = new Vector4(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
-		var col3 = new Vector4(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
-		var col4 = new Vector4(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
-
-		planes[0] = NormalizePlane(col4 + col1);
-		planes[1] = NormalizePlane(col4 - col1);
-		planes[2] = NormalizePlane(col4 + col2);
-		planes[3] = NormalizePlane(col4 - col2);
-		planes[4] = NormalizePlane(col3);
-		planes[5] = NormalizePlane(col4 - col3);
-	}
-
-	private static Vector4 NormalizePlane(Vector4 plane)
-	{
-		var normal = new Vector3(plane.X, plane.Y, plane.Z);
-		var length = normal.Length();
-		if (length <= 0.0f)
-		{
-			return plane;
-		}
-
-		var invLength = 1.0f / length;
-		return plane * invLength;
 	}
 
 	private static uint CreateDrawFlags(int bucketIndex)

@@ -17,6 +17,7 @@ public sealed class ShadowMapPassTests
 			"""{ "ShadowMaps": { "CascadeCount": 2 } }""", AssetJson.SerializerOptions)!;
 		Assert.That(config.ShadowMaps.Enabled, Is.True);
 		Assert.That(config.ShadowMaps.CascadeCount, Is.EqualTo(2));
+		Assert.That(config.ShadowMaps.TightCasterCulling, Is.True);
 	}
 
 	[Test]

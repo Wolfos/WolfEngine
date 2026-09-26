@@ -79,6 +79,23 @@ public sealed class ShadowMapPass
 
 	public ShadowFrameData GetCurrentFrameData() => _currentFrameData;
 
+	internal int BuildCasterCullingPlanes(SceneDrawData sceneData, int cascadeIndex, bool tightCulling,
+		Span<Vector4> destination)
+	{
+		ValidateCascadeIndex(cascadeIndex);
+		var matrix = _currentFrameData.GetCascadeViewProjection(cascadeIndex);
+		if (!tightCulling || !TryGetShadowedDirectionalLight(sceneData, out var lightDirection, out _))
+		{
+			FrustumCulling.ExtractPlanes(matrix, destination);
+			return 6;
+		}
+		var receiverDepth = _currentFrameData.GetCascadeSplit(cascadeIndex);
+		// Four texels cover the 5x5 PCF footprint and numerical roundoff.
+		var filterPadding = 4 * (receiverDepth * 2 / _currentFrameData.MapResolution);
+		return FrustumCulling.BuildShadowCasterPlanes(sceneData, matrix, lightDirection,
+			receiverDepth, filterPadding, destination);
+	}
+
 	internal static ShadowFrameData GetDisabledFrameData(in ShadowMapConfig config) =>
 		CreateDisabledFrameData(ResolvedShadowMapConfig.From(config));
 

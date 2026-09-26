@@ -2275,9 +2275,14 @@ internal sealed class RenderGraphFrameBuilder
 		}
 
 		Span<Matrix4x4> cascadeViewProjections = stackalloc Matrix4x4[ShadowMapPass.MaxCascadeCount];
+		Span<Vector4> casterPlanes = stackalloc Vector4[ShadowMapPass.MaxCascadeCount * FrustumCulling.MaxPlaneCount];
+		Span<int> casterPlaneCounts = stackalloc int[ShadowMapPass.MaxCascadeCount];
 		for (var cascadeIndex = 0; cascadeIndex < shadowData.CascadeCount; cascadeIndex++)
 		{
 			cascadeViewProjections[cascadeIndex] = shadowData.GetCascadeViewProjection(cascadeIndex);
+			casterPlaneCounts[cascadeIndex] = _shadowMapPass.BuildCasterCullingPlanes(
+				sceneData, cascadeIndex, _view.FrameResources.Config.ShadowMaps.TightCasterCulling,
+				casterPlanes.Slice(cascadeIndex * FrustumCulling.MaxPlaneCount, FrustumCulling.MaxPlaneCount));
 		}
 
 		_gpuDrawPass.RecordCullForViews(
@@ -2285,7 +2290,9 @@ internal sealed class RenderGraphFrameBuilder
 			cascadeViewProjections[..shadowData.CascadeCount],
 			sceneData.CameraOrigin,
 			useShadowBuffers: true,
-			DrawPassParticipation.ShadowCaster);
+			DrawPassParticipation.ShadowCaster,
+			casterPlanes[..(shadowData.CascadeCount * FrustumCulling.MaxPlaneCount)],
+			casterPlaneCounts[..shadowData.CascadeCount]);
 
 		// Encoding and compaction both belong here rather than in the shadow pass: compaction is compute
 		// work, and it has to complete before the render pass that executes its output begins.

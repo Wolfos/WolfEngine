@@ -214,6 +214,46 @@ public sealed class EditorRemoteAutomationController
 			return $"Anti-aliasing: {selectedMode}, enabled: {enabled}, CAS: {settings.UsesCasSharpening}. Changed in memory only.";
 		}, cancellationToken);
 
+	public Task<string> SetRenderEffectsAsync(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
+		bool volumetricFog, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var ao = config.AmbientOcclusion;
+			ao.Enabled = ambientOcclusion;
+			config.AmbientOcclusion = ao;
+			var reflection = config.Reflections;
+			reflection.Enabled = reflections;
+			config.Reflections = reflection;
+			var gi = config.DiffuseGlobalIllumination;
+			gi.Enabled = diffuseGlobalIllumination;
+			config.DiffuseGlobalIllumination = gi;
+			var fog = config.VolumetricFog;
+			fog.Enabled = volumetricFog;
+			config.VolumetricFog = fog;
+			return "Render effects updated in memory only.";
+		}, cancellationToken);
+
+	public Task<string> SetShadowCasterCullingAsync(bool enabled, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			RenderConfig? config = null;
+			foreach (var entry in scene.World.View<WorldSettings>())
+				config = entry.First.RenderConfigAsset.Asset;
+			if (config is null)
+				throw new InvalidOperationException("The active scene has no resolved render config asset.");
+			var settings = config.ShadowMaps;
+			settings.TightCasterCulling = enabled;
+			config.ShadowMaps = settings;
+			return $"Tight shadow-caster culling: {enabled}. Changed in memory only.";
+		}, cancellationToken);
+
 	public Task<string> SetDdgiRelocationAsync(bool enabled, CancellationToken cancellationToken) =>
 		Enqueue(() =>
 		{

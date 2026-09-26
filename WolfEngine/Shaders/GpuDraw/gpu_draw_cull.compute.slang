@@ -4,7 +4,8 @@ import "../Common/draw_data.slang";
 #define WOLF_MAX_MESH_COUNT 65535
 #define WOLF_MAX_MATERIAL_COUNT 65535
 #define WOLF_MAX_CULL_VIEW_COUNT 3
-#define WOLF_FRUSTUM_PLANE_COUNT 6
+// Mirrors FrustumCulling.MaxPlaneCount; camera views use six, shadow volumes may use more.
+#define WOLF_CULL_PLANE_COUNT 24
 
 // Mirrors GpuDrawFlags in GpuDrawData.cs.
 static const uint DRAW_FLAG_ACTIVE = 1;
@@ -22,7 +23,8 @@ static const uint HARDEN_COUNTER_MATERIAL_FALLBACK_DRAW = 5;
 
 cbuffer CullParams : register(b12)
 {
-    float4 planes[WOLF_MAX_CULL_VIEW_COUNT * WOLF_FRUSTUM_PLANE_COUNT];
+    float4 planes[WOLF_MAX_CULL_VIEW_COUNT * WOLF_CULL_PLANE_COUNT];
+    uint planeCounts[WOLF_MAX_CULL_VIEW_COUNT];
     float4 cameraPositionAndMaxDrawCount;
     uint viewCount;
     uint bucketCount;
@@ -53,8 +55,8 @@ RWStructuredBuffer<uint> g_Diagnostics : register(u10);
 
 bool IsSphereVisible(uint viewIndex, float3 center, float radius)
 {
-    uint planeBase = viewIndex * WOLF_FRUSTUM_PLANE_COUNT;
-    for (uint i = 0; i < WOLF_FRUSTUM_PLANE_COUNT; i++)
+    uint planeBase = viewIndex * WOLF_CULL_PLANE_COUNT;
+    for (uint i = 0; i < planeCounts[viewIndex]; i++)
     {
         float4 plane = planes[planeBase + i];
         float dist = dot(plane.xyz, center) + plane.w;

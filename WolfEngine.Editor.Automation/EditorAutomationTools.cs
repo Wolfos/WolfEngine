@@ -202,6 +202,15 @@ public sealed class EditorAutomationTools
 			: $"Scene viewport pinned to debug view '{debugViewId}'.";
 	}
 
+	[McpServerTool(Name = "set_render_effects"), Description("Set AO, reflections, diffuse GI and volumetric fog enabled states in memory without saving the render config. Disable temporal effects to isolate geometry and direct shadows for deterministic image comparisons.")]
+	public Task<string> SetRenderEffects(bool ambientOcclusion, bool reflections, bool diffuseGlobalIllumination,
+		bool volumetricFog, CancellationToken cancellationToken) =>
+		_controller.SetRenderEffectsAsync(ambientOcclusion, reflections, diffuseGlobalIllumination, volumetricFog, cancellationToken);
+
+	[McpServerTool(Name = "set_shadow_caster_culling"), Description("Enable or disable tighter shadow-caster culling in memory without saving the render config. Use for identical-scene capture and GPU timing comparisons.")]
+	public Task<string> SetShadowCasterCulling(bool enabled, CancellationToken cancellationToken) =>
+		_controller.SetShadowCasterCullingAsync(enabled, cancellationToken);
+
 	[McpServerTool(Name = "set_ddgi_relocation"), Description("Enable or disable DDGI probe relocation in the active scene's render config in memory, without saving the asset. Works in authoring and Play mode.")]
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);

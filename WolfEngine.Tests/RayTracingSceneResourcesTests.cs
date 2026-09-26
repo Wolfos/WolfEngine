@@ -133,6 +133,8 @@ public sealed class RayTracingSceneResourcesTests
 		Assert.That(compiled.Bytecode.IsEmpty, Is.False);
 		Assert.That(compiled.ThreadGroupSize.X, Is.EqualTo(64));
 		Assert.That(cullParams.GetFieldOrThrow("planes[17]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Vector4));
+		Assert.That(cullParams.GetFieldOrThrow("planes[71]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.Vector4));
+		Assert.That(cullParams.GetFieldOrThrow("planeCounts[2]").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("viewCount").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("outputDrawArgsStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
 		Assert.That(cullParams.GetFieldOrThrow("outputLaneStride").ValueKind, Is.EqualTo(ShaderConstantFieldValueKind.UInt));
