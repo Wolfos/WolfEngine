@@ -10,6 +10,55 @@ namespace WolfEngine.Tests;
 [TestFixture]
 public sealed class FrameSnapshotGpuDrawTests
 {
+	[TestCase(-1, 1, 1, true)]
+	[TestCase(-1, -1, 1, false)]
+	[TestCase(-1, -1, -1, true)]
+	[TestCase(1, 1, 1, false)]
+	public void MirroredWorldTransform_UsesReflectionParity(float x, float y, float z, bool mirrored)
+	{
+		var world = Matrix4x4.CreateScale(x, y, z) * Matrix4x4.CreateRotationY(0.7f) *
+		            Matrix4x4.CreateTranslation(10, 20, 30);
+		Assert.That(GpuDrawClassification.ReversesWinding(world), Is.EqualTo(mirrored));
+		// Two inherited reflections cancel even when separated by a rotation.
+		var parent = Matrix4x4.CreateScale(-2, 3, 4);
+		Assert.That(GpuDrawClassification.ReversesWinding(world * parent), Is.EqualTo(!mirrored));
+	}
+
+	[Test]
+	public void MirroredLanes_PreserveParticipationAndMaterialSidedness()
+	{
+		foreach (var lane in GpuDrawExecutionLanes.Definitions.ToArray().Where(lane => !lane.ReverseWinding))
+		{
+			Assert.That(GpuDrawExecutionLanes.TryGetDefinition(lane.Key with { ReverseWinding = true }, out var mirrored), Is.True);
+			Assert.That(mirrored.Participation, Is.EqualTo(lane.Participation));
+			Assert.That(mirrored.ResolveCullMode(global::WolfEngine.Rendering.Abstraction.CullMode.Back),
+				Is.EqualTo(lane.ResolveCullMode(global::WolfEngine.Rendering.Abstraction.CullMode.Back)));
+		}
+	}
+
+	[Test]
+	public void GpuDrawDatabase_WindingChange_EmitsStructuralUpdateAndRetainsMeshOnTransformUpdates()
+	{
+		var database = new GpuDrawDatabase();
+		var mesh = CreateTestMesh();
+		var material = new Material("shader");
+		var entity = new Entity(1, 1);
+		var updates = new List<GpuDrawUpdate>();
+		foreach (var scale in new[] { 1f, -1f, -2f, 1f })
+		{
+			database.BeginSync();
+			database.TouchMesh(entity, mesh, material, Matrix4x4.CreateScale(scale, 1, 1));
+			database.EndSync();
+			database.ConsumeUpdates(updates);
+			if (scale == -1f || (scale == 1f && updates.All(update => update.Type != GpuDrawUpdateType.Add)))
+				Assert.That(updates.Any(update => update.Type == GpuDrawUpdateType.UpdateMaterial), Is.True);
+			if (scale == -2f)
+				Assert.That(updates.Any(update => update.Type == GpuDrawUpdateType.UpdateMaterial), Is.False);
+			foreach (var update in updates.Where(update => update.Type == GpuDrawUpdateType.UpdateTransform))
+				Assert.That(update.Mesh, Is.SameAs(mesh));
+		}
+	}
+
 	[Test]
 	public void FrameSnapshot_SetConfig_CopiesBloom()
 	{

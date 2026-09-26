@@ -2129,7 +2129,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 				AbstractionCullMode.Front => D3DCullMode.Front,
 				_ => D3DCullMode.Back
 			},
-			FrontCounterClockwise = 0,
+			FrontCounterClockwise = state.ReverseWinding,
 			DepthBias = D3D12Api.DefaultDepthBias,
 			DepthBiasClamp = 0.0f,
 			SlopeScaledDepthBias = 0.0f,

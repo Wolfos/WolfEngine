@@ -475,7 +475,8 @@ public sealed class GpuDrawPass
 
             // Material state is shared by rigid and skinned meshes; specialize only after resolving it.
             var executionKey = new GpuDrawExecutionKey(drawKind, bucketId, sidedness,
-                drawKind == GpuDrawKind.Mesh && bucketId != GpuDrawBucketId.AlphaBlend && mesh?.IsSkinned == true);
+                drawKind == GpuDrawKind.Mesh && bucketId != GpuDrawBucketId.AlphaBlend && mesh?.IsSkinned == true,
+                GpuDrawClassification.ReversesWinding(update.World));
             if (GpuDrawExecutionLanes.TryGetDefinition(executionKey, out var specializedLane))
             {
                 executionLaneIndex = specializedLane.ExecutionIndex;
@@ -1583,7 +1584,8 @@ public sealed class GpuDrawPass
 				lane.ResolveCullMode(CullMode.Back),
 				depthTestEnabled: true,
 				depthWriteEnabled: true,
-				BlendMode.Opaque);
+				BlendMode.Opaque,
+				reverseWinding: lane.ReverseWinding);
 			var compiled = GraphicsShaderCompiler.CompileWithReflection(
 				_shaderCompiler,
 				device.BackendKind,
@@ -2077,7 +2079,8 @@ public sealed class GpuDrawPass
 				entry.DrawKind,
 				GpuDrawClassification.ResolveBucketId(entry.DrawKind, entry.Material),
 				GpuDrawClassification.ResolveSidedness(entry.DrawKind, entry.Material),
-                entry.DrawKind == GpuDrawKind.Mesh && entry.Material.AlphaMode != AlphaMode.AlphaBlend && entry.Mesh.IsSkinned);
+                entry.DrawKind == GpuDrawKind.Mesh && entry.Material.AlphaMode != AlphaMode.AlphaBlend && entry.Mesh.IsSkinned,
+                GpuDrawClassification.ReversesWinding(entry.World));
 			EncodeCommandForPassLane(
 				(uint)entry.DrawIndex,
 				executionKey,

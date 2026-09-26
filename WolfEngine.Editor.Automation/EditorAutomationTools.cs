@@ -219,6 +219,13 @@ public sealed class EditorAutomationTools
 	public Task<string> SetDdgiRelocation(bool enabled, CancellationToken cancellationToken) =>
 		_controller.SetDdgiRelocationAsync(enabled, cancellationToken);
 
+	[McpServerTool(Name = "set_entity_scale"), Description("Set an entity's local scale in the active authoring or Play-mode scene without saving. Supports per-axis negative scales for mirrored-geometry validation.")]
+	public async Task<string> SetEntityScale(string entityId, float x, float y, float z, CancellationToken cancellationToken)
+	{
+		await _controller.SetEntityScaleAsync(Guid.Parse(entityId), new System.Numerics.Vector3(x, y, z), cancellationToken);
+		return $"Entity {entityId}: scale ({x}, {y}, {z}). Changed in memory only.";
+	}
+
 	[McpServerTool(Name = "set_entity_rotation"), Description("Set an entity's local Euler rotation in degrees in the active authoring or Play-mode scene, without saving. Uses the same transform setter as the inspector.")]
 	public async Task<string> SetEntityRotation(string entityId, float pitch, float yaw, float roll, CancellationToken cancellationToken)
 	{

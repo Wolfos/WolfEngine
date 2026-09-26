@@ -127,7 +127,9 @@ VSOutput vertexShader(VSInput input)
     output.viewPos = viewPosition.xyz;
     output.normal = normalize(worldNormal.xyz);
     output.uv = input.uv;
-    output.tangent = float4(normalize(worldTangent), input.tangent.w);
+    // A reflection reverses the tangent frame handedness as well as triangle winding.
+    float orientation = determinant((float3x3)instanceData.world) < 0.0f ? -1.0f : 1.0f;
+    output.tangent = float4(normalize(worldTangent), input.tangent.w * orientation);
     output.instanceId = instanceId;
     return output;
 }

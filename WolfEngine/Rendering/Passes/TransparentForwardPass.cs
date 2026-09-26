@@ -411,7 +411,8 @@ public sealed class TransparentForwardPass
 			lane.ResolveCullMode(CullMode.Back),
 			depthTestEnabled: true,
 			depthWriteEnabled: false,
-			BlendMode.AlphaBlend);
+			BlendMode.AlphaBlend,
+				reverseWinding: lane.ReverseWinding);
 
 		var key = new PipelineKey(
 			PassKind.Graphics,

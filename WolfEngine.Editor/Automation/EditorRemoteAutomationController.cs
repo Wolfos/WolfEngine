@@ -298,6 +298,19 @@ public sealed class EditorRemoteAutomationController
 			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
 		}, cancellationToken);
 
+	public Task SetEntityScaleAsync(Guid entityId, Vector3 scale, CancellationToken cancellationToken) =>
+		Enqueue(() =>
+		{
+			var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+			foreach (var pair in scene.EntityIds)
+			{
+				if (pair.Value != entityId) continue;
+				scene.World.SetLocalScale(pair.Key, scale);
+				return;
+			}
+			throw new InvalidOperationException($"Entity '{entityId:D}' was not found in the active scene.");
+		}, cancellationToken);
+
 	public Task Ready => _ready.Task;
 	public Task Stopped => _stopped.Task;
 	public bool ShutdownRequested { get; private set; }

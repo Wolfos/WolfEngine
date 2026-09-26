@@ -215,7 +215,7 @@ public sealed class GpuDrawBucketHardeningTests
 	{
 		var definitions = GpuDrawExecutionLanes.Definitions.ToArray();
 
-		Assert.That(definitions.Select(definition => definition.Key), Is.EqualTo(new[]
+		Assert.That(definitions.Where(definition => !definition.ReverseWinding).Select(definition => definition.Key), Is.EqualTo(new[]
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend, GpuDrawSidedness.SingleSided),
@@ -233,7 +233,7 @@ public sealed class GpuDrawBucketHardeningTests
 		}));
 		Assert.That(
 			definitions.Select(definition => definition.ExecutionIndex),
-			Is.EqualTo(Enumerable.Range(0, 13)));
+			Is.EqualTo(Enumerable.Range(0, 26)));
 	}
 
 	[Test]
@@ -273,7 +273,7 @@ public sealed class GpuDrawBucketHardeningTests
 		var transparent = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ForwardTransparent).ToArray();
 		var shadow = GpuDrawExecutionLanes.GetDefinitionsForPass(DrawPassParticipation.ShadowCaster).ToArray();
 
-		Assert.That(gbuffer.Select(definition => definition.Key), Is.EqualTo(new[]
+		Assert.That(gbuffer.Where(definition => !definition.ReverseWinding).Select(definition => definition.Key), Is.EqualTo(new[]
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided),
@@ -286,13 +286,13 @@ public sealed class GpuDrawBucketHardeningTests
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.DoubleSided, true),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.DoubleSided, true)
 		}));
-		Assert.That(transparent.Select(definition => definition.Key), Is.EqualTo(new[]
+		Assert.That(transparent.Where(definition => !definition.ReverseWinding).Select(definition => definition.Key), Is.EqualTo(new[]
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.DebugPrimitive, GpuDrawBucketId.AlphaBlend, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaBlend, GpuDrawSidedness.DoubleSided)
 		}));
-		Assert.That(shadow.Select(definition => definition.Key), Is.EqualTo(new[]
+		Assert.That(shadow.Where(definition => !definition.ReverseWinding).Select(definition => definition.Key), Is.EqualTo(new[]
 		{
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.Opaque, GpuDrawSidedness.SingleSided),
 			new GpuDrawExecutionKey(GpuDrawKind.Mesh, GpuDrawBucketId.AlphaTest, GpuDrawSidedness.SingleSided),

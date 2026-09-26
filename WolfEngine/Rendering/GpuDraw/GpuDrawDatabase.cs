@@ -452,6 +452,8 @@ public sealed class GpuDrawDatabase
 
 		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
+		var windingChanged = GpuDrawClassification.ReversesWinding(record.World) !=
+		                     GpuDrawClassification.ReversesWinding(worldTransform);
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
 		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
@@ -505,7 +507,7 @@ public sealed class GpuDrawDatabase
 				mesh));
 		}
 
-		if (materialChanged || materialResourceChanged)
+		if (materialChanged || materialResourceChanged || windingChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
@@ -530,7 +532,8 @@ public sealed class GpuDrawDatabase
 				record.MaterialHandle,
 				record.PreviousWorld,
 				record.World,
-				record.BoundsCenterRadius));
+				record.BoundsCenterRadius,
+				mesh: record.Mesh));
 		}
 
 		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
@@ -548,6 +551,8 @@ public sealed class GpuDrawDatabase
 		var material = record.Material;
 		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
+		var windingChanged = GpuDrawClassification.ReversesWinding(record.World) !=
+		                     GpuDrawClassification.ReversesWinding(worldTransform);
 		var meshChanged = ReferenceEquals(record.Mesh, primitiveMesh) == false;
 		var tintChanged = material.Color.Equals(tint) == false;
 		var alphaModeChanged = material.AlphaMode != alphaMode;
@@ -590,7 +595,7 @@ public sealed class GpuDrawDatabase
 				record.TerrainInstanceData));
 		}
 
-		if (tintChanged || alphaModeChanged)
+		if (tintChanged || alphaModeChanged || windingChanged)
 		{
 			material.Color = tint;
 			material.AlphaMode = alphaMode;
@@ -619,7 +624,8 @@ public sealed class GpuDrawDatabase
 				record.PreviousWorld,
 				record.World,
 				record.BoundsCenterRadius,
-				record.TerrainInstanceData));
+				record.TerrainInstanceData,
+				mesh: record.Mesh));
 		}
 
 		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
@@ -638,6 +644,8 @@ public sealed class GpuDrawDatabase
 	{
 		var uploadPreviousWorld = _transformHistory.Advance(key, worldTransform);
 		var transformChanged = record.World.Equals(worldTransform) == false;
+		var windingChanged = GpuDrawClassification.ReversesWinding(record.World) !=
+		                     GpuDrawClassification.ReversesWinding(worldTransform);
 		var meshChanged = ReferenceEquals(record.Mesh, mesh) == false;
 		var materialChanged = ReferenceEquals(record.Material, material) == false;
 		var materialResourceChanged = materialChanged == false && record.MaterialResourceRevision != material.ResourceRevision;
@@ -717,7 +725,7 @@ public sealed class GpuDrawDatabase
 				record.TerrainRayTracingChunk));
 		}
 
-		if (materialChanged || materialResourceChanged || surfaceChanged || rayTracingChunkChanged)
+		if (materialChanged || materialResourceChanged || surfaceChanged || rayTracingChunkChanged || windingChanged)
 		{
 			_updates.Add(GpuDrawUpdate.CreateMaterialUpdate(
 				record.DrawKind,
@@ -747,7 +755,8 @@ public sealed class GpuDrawDatabase
 				record.World,
 				record.BoundsCenterRadius,
 				record.TerrainInstanceData,
-				record.TerrainRayTracingChunk));
+				record.TerrainRayTracingChunk,
+				mesh: record.Mesh));
 		}
 
 		_transformHistory.RecordUpload(key, record.PreviousWorld, record.World);
@@ -1168,7 +1177,8 @@ public readonly struct GpuDrawUpdate
 		in Matrix4x4 world,
 		Vector4 boundsCenterRadius,
 		TerrainChunkInstanceData terrainInstanceData = default,
-		TerrainRayTracingChunkData terrainRayTracingChunk = default)
+		TerrainRayTracingChunkData terrainRayTracingChunk = default,
+		Mesh? mesh = null)
 	{
 		return new GpuDrawUpdate(
 			GpuDrawUpdateType.UpdateTransform,
@@ -1180,7 +1190,7 @@ public readonly struct GpuDrawUpdate
 			previousWorld,
 			world,
 			boundsCenterRadius,
-			null,
+			mesh,
 			null,
 			terrainInstanceData,
 			null,

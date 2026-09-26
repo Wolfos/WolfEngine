@@ -441,13 +441,15 @@ public readonly struct RenderStateDescriptor : IEquatable<RenderStateDescriptor>
 		CullMode cullMode,
 		bool depthTestEnabled,
 		bool depthWriteEnabled,
-		BlendMode blendMode)
+		BlendMode blendMode,
+		bool reverseWinding = false)
 	{
 		FillMode = fillMode;
 		CullMode = cullMode;
 		DepthTestEnabled = depthTestEnabled;
 		DepthWriteEnabled = depthWriteEnabled;
 		BlendMode = blendMode;
+		ReverseWinding = reverseWinding;
 	}
 
 	public FillMode FillMode { get; }
@@ -460,18 +462,21 @@ public readonly struct RenderStateDescriptor : IEquatable<RenderStateDescriptor>
 
 	public BlendMode BlendMode { get; }
 
+	public bool ReverseWinding { get; }
+
 	public bool Equals(RenderStateDescriptor other)
 	{
 		return FillMode == other.FillMode
 		       && CullMode == other.CullMode
 		       && DepthTestEnabled == other.DepthTestEnabled
 		       && DepthWriteEnabled == other.DepthWriteEnabled
-		       && BlendMode == other.BlendMode;
+		       && BlendMode == other.BlendMode
+		       && ReverseWinding == other.ReverseWinding;
 	}
 
 	public override bool Equals(object? obj) => obj is RenderStateDescriptor other && Equals(other);
 
-	public override int GetHashCode() => HashCode.Combine(FillMode, CullMode, DepthTestEnabled, DepthWriteEnabled, BlendMode);
+	public override int GetHashCode() => HashCode.Combine(FillMode, CullMode, DepthTestEnabled, DepthWriteEnabled, BlendMode, ReverseWinding);
 }
 
 public enum FillMode

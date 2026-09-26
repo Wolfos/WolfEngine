@@ -1,9 +1,13 @@
+using System.Numerics;
 using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering;
 
 public static class GpuDrawClassification
 {
+	/// <summary>Reflection parity of the full world transform, including inherited scales.</summary>
+	public static bool ReversesWinding(in Matrix4x4 world) => world.GetDeterminant() < 0.0f;
+
 	public static bool TryResolveBucketId(GpuDrawKind drawKind, Material material, out GpuDrawBucketId bucketId)
 	{
 		ArgumentNullException.ThrowIfNull(material);

@@ -329,7 +329,8 @@ public sealed class ShadowMapPass
 			lane.ResolveCullMode(CullMode.Back),
 			depthTestEnabled: true,
 			depthWriteEnabled: true,
-			BlendMode.Opaque);
+			BlendMode.Opaque,
+				reverseWinding: lane.ReverseWinding);
 
 		var key = new PipelineKey(
 			PassKind.Graphics,

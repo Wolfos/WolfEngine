@@ -152,7 +152,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 				CullMode.Back => MTLCullMode.Back,
 				_ => MTLCullMode.None
 			});
-			var winding = metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox
+			var winding = (metalPipeline.Key.Layout == GraphicsLayoutKind.Skybox) ^ metalPipeline.RenderState.ReverseWinding
 				? MTLWinding.CounterClockwise
 				: MTLWinding.Clockwise;
 			_renderEncoder.SetFrontFacingWinding(winding);
