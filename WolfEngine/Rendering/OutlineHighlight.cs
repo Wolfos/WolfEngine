@@ -4,15 +4,9 @@ namespace WolfEngine.Rendering;
 
 /// <summary>
 /// Draws a screen-space outline around this entity's mesh.
-///
-/// The editor adds this to the current selection, but it is a runtime component
-/// rather than an editor-only one so gameplay can use it for the same purpose --
-/// highlighting an interactable, a quest target, or a hovered object.
-///
-/// The entity keeps rendering normally. The outline is an extra pass over the
-/// finished image, so shadows, ray tracing, motion vectors and every
-/// screen-space effect see an outlined entity exactly as they see any other.
+/// The editor adds this to the current selection
 /// </summary>
+[ExcludeFromEditor, NotSerialized]
 public struct OutlineHighlight : IEntityComponent
 {
 	/// <summary>WolfEngine blue.</summary>
