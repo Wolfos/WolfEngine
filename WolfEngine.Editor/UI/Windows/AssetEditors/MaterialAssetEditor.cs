@@ -103,7 +103,6 @@ public sealed class MaterialAssetEditor
 			}
 			ImGui.TextUnformatted("Generated material");
 			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only.");
-			return;
 		}
 
 		var materialAsset = EnsureMaterialAssetLoaded(asset);
@@ -113,10 +112,34 @@ public sealed class MaterialAssetEditor
 			ImGui.TextUnformatted("Failed to load material asset.");
 			return;
 		}
-		var previewMaterial = SyncPreviewMaterial(materialAsset);
-		DrawPreview(previewMaterial);
-		if (_readOnly) ImGui.BeginDisabled();
+		if (!asset.IsGenerated)
+		{
+			var previewMaterial = SyncPreviewMaterial(materialAsset);
+			DrawPreview(previewMaterial);
+		}
+		var readOnly = _readOnly || asset.IsGenerated;
+		ImGui.BeginDisabled(readOnly);
+		try
+		{
+			DrawProperties(asset, materialAsset);
+		}
+		finally
+		{
+			ImGui.EndDisabled();
+		}
 
+		if (!readOnly)
+		{
+			SyncPreviewMaterial(materialAsset);
+			if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
+			{
+				CommitPendingChanges();
+			}
+		}
+	}
+
+	private void DrawProperties(AssetDatabaseEntry asset, MaterialAsset materialAsset)
+	{
 		var descriptors = _materialTypeRegistry.GetAll();
 		EditorUIUtility.Combo("Material Type", materialAsset.MaterialType.ToString(), () =>
 		{
@@ -208,13 +231,6 @@ public sealed class MaterialAssetEditor
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Orm), "ORM", properties.Textures.Orm);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Normal), "Normal", properties.Textures.Normal);
 		DrawTextureAssignmentEditor(asset, properties.Textures, nameof(MaterialTextureAssignments.Emissive), "Emissive", properties.Textures.Emissive);
-		SyncPreviewMaterial(materialAsset);
-
-		if (_hasPendingChanges && ImGui.IsAnyItemActive() == false)
-		{
-			CommitPendingChanges();
-		}
-		if (_readOnly) ImGui.EndDisabled();
 	}
 
 	private Material SyncPreviewMaterial(MaterialAsset asset)
@@ -429,6 +445,11 @@ public sealed class MaterialAssetEditor
 
 	private void BeginPendingChange(AssetDatabaseEntry asset)
 	{
+		if (_readOnly || asset.IsGenerated)
+		{
+			return;
+		}
+
 		if (_pendingBeforeSnapshot.HasValue)
 		{
 			return;
@@ -439,7 +460,8 @@ public sealed class MaterialAssetEditor
 
 	private void CommitPendingChanges()
 	{
-		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null || _loadedMaterialAsset is null)
+		if (_hasPendingChanges == false || _pendingBeforeSnapshot is not { } before || _loadedAssetEntry is null ||
+		    _loadedAssetEntry.IsGenerated || _loadedMaterialAsset is null)
 		{
 			_hasPendingChanges = false;
 			_pendingBeforeSnapshot = null;
