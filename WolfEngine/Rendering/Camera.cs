@@ -68,4 +68,11 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 			Math.Max(ScreenResolution.Y, 1));
 		SetPerspective(Fov > 0.0f ? Fov : 70.0f);
 	}
+	
+	public void ApplyDefaultValues(World world, Entity entity)
+	{
+		Fov = 70;
+		NearPlane = DefaultNearPlane;
+		FarPlane = DefaultFarPlane;
+	}
 }
