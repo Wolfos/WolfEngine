@@ -17,6 +17,8 @@ public sealed class MaterialAssetEditor
 	private readonly IPropertyDrawerRegistry _propertyDrawerRegistry;
 	private readonly IEditorAssetSnapshotService _assetSnapshotService;
 	private readonly IEditorUndoRedoService _undoRedoService;
+	private readonly IMaterialExtractionService _materialExtractionService;
+	private readonly IEditorNotificationService _notificationService;
 	private readonly IIconManager _icons;
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IMaterialFactory _materialFactory;
@@ -52,7 +54,9 @@ public sealed class MaterialAssetEditor
 		RenderGraph renderGraph,
 		IWorldManager worldManager,
 		EditorRenderViews renderViews,
-		EditorViewportStateBus viewportStateBus)
+		EditorViewportStateBus viewportStateBus,
+		IMaterialExtractionService materialExtractionService,
+		IEditorNotificationService notificationService)
 	{
 		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
 		_materialAssetStore = materialAssetStore ?? throw new ArgumentNullException(nameof(materialAssetStore));
@@ -69,6 +73,8 @@ public sealed class MaterialAssetEditor
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 		_renderViews = renderViews ?? throw new ArgumentNullException(nameof(renderViews));
 		_viewportStateBus = viewportStateBus ?? throw new ArgumentNullException(nameof(viewportStateBus));
+		_materialExtractionService = materialExtractionService ?? throw new ArgumentNullException(nameof(materialExtractionService));
+		_notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
 	}
 
 	public void SetHostVisible(bool visible)
@@ -103,6 +109,20 @@ public sealed class MaterialAssetEditor
 			}
 			ImGui.TextUnformatted("Generated material");
 			ImGui.TextDisabled("This material was produced from an imported 3D source and is read-only.");
+			ImGui.BeginDisabled(_readOnly);
+			var extract = ImGui.Button("Extract Material");
+			ImGui.EndDisabled();
+			if (extract)
+			{
+				var result = _materialExtractionService.Extract(asset);
+				if (result.Success && result.AssetId is { } extractedId)
+				{
+					_notificationService.ReportInfo("Material extracted and scene and prefab references replaced.");
+					_assetSelectionService.Select(extractedId);
+					return;
+				}
+				_notificationService.ReportError(result.ErrorMessage ?? "Material extraction failed.");
+			}
 		}
 
 		var materialAsset = EnsureMaterialAssetLoaded(asset);

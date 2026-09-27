@@ -318,7 +318,7 @@ public sealed class EditorProjectService : IEditorProjectService
 			.ToHashSet();
 		previousNodeIds.UnionWith(currentNodeIds);
 
-		ApplyDatabase(database);
+		ApplyDatabase(database, preservedRuntimeAssetId);
 		var invalidatedNodeIds = _assetPipelineService.ExpandInvalidationClosure(_projectRootPath!, previousNodeIds);
 		if (preservedRuntimeAssetId != Guid.Empty)
 		{
@@ -837,7 +837,7 @@ public sealed class EditorProjectService : IEditorProjectService
 		return candidate;
 	}
 
-	private void ApplyDatabase(AssetDatabase database)
+	private void ApplyDatabase(AssetDatabase database, Guid preservedRuntimeAssetId = default)
 	{
 		ArgumentNullException.ThrowIfNull(database);
 		_currentAssetDatabase = database;
@@ -846,7 +846,10 @@ public sealed class EditorProjectService : IEditorProjectService
 			_assetPipelineService.GetDependencies(_projectRootPath!));
 		_currentAssetCatalog = new AssetCatalog([projectMount, .._engineAssetMountProvider.GetMounts()]);
 		_assetDatabaseRevision++;
-		_assetInstanceRegistry.RefreshCatalog(_currentAssetCatalog);
+		if (preservedRuntimeAssetId == Guid.Empty)
+			_assetInstanceRegistry.RefreshCatalog(_currentAssetCatalog);
+		else
+			_assetInstanceRegistry.RefreshCatalog(_currentAssetCatalog, preservedRuntimeAssetId);
 	}
 
 	private static IReadOnlyCollection<Guid> CollectChangedNodeIds(AssetDatabase previousDatabase, AssetDatabase refreshedDatabase)

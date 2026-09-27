@@ -41,6 +41,37 @@ public sealed class MountedAssetResolutionTests
 		}
 	}
 
+	[Test]
+	public void CatalogRefreshPreservesOnlyRequestedInstanceAndStillInvalidatesChangedIdentity()
+	{
+		var preservedId = Guid.NewGuid();
+		var otherId = Guid.NewGuid();
+		using var services = new ServiceCollection().AddSingleton<TestMountedAssetResolver>().BuildServiceProvider();
+		var registry = new EditorAssetInstanceRegistry(services);
+		IAssetCatalog Catalog(string summary, string preservedPath = "Assets/preserved.asset") => new AssetCatalog([
+			new DirectoryAssetMount("project", "Project", Path.GetTempPath(), false, new AssetDatabase
+			{
+				Assets = [
+					new AssetDatabaseEntry { Id = preservedId, Type = AssetType.DataAsset, RelativeAssetPath = preservedPath, SummaryJson = summary },
+					new AssetDatabaseEntry { Id = otherId, Type = AssetType.DataAsset, RelativeAssetPath = "Assets/other.asset", SummaryJson = summary }
+				]
+			})
+		]);
+		registry.RefreshCatalog(Catalog("before"));
+		var preserved = registry.GetInstance(preservedId, typeof(TestMountedAsset));
+		var other = registry.GetInstance(otherId, typeof(TestMountedAsset));
+		registry.RefreshCatalog(Catalog("after"), preservedId);
+		Assert.That(registry.GetInstance(preservedId, typeof(TestMountedAsset)), Is.SameAs(preserved));
+		Assert.That(registry.GetInstance(otherId, typeof(TestMountedAsset)), Is.Not.SameAs(other));
+
+		registry.RefreshCatalog(Catalog("after", "Assets/renamed.asset"), preservedId);
+		var renamed = (TestMountedAsset)registry.GetInstance(preservedId, typeof(TestMountedAsset))!;
+		Assert.That(renamed, Is.Not.SameAs(preserved));
+		Assert.That(renamed.Path, Is.EqualTo(Path.Combine(Path.GetTempPath(), "Assets/renamed.asset")));
+		registry.RefreshCatalog(new AssetCatalog([]), preservedId);
+		Assert.That(registry.GetInstance(preservedId, typeof(TestMountedAsset)), Is.Null);
+	}
+
 	[RuntimeAsset(AssetType.DataAsset, typeof(object), typeof(TestMountedAssetResolver))]
 	private sealed class TestMountedAsset
 	{

@@ -72,6 +72,7 @@ public static class Program
 		services.AddSingleton<IMaterialAssetStore, MaterialAssetStore>();
 		services.AddSingleton<IDataAssetStore, DataAssetStore>();
 		services.AddSingleton<IMaterialAssetCreator, MaterialAssetCreator>();
+		services.AddSingleton<IMaterialExtractionService, MaterialExtractionService>();
 		services.AddSingleton<IDataAssetCreator, DataAssetCreator>();
 		services.AddSingleton<ITerrainAssetCreator, TerrainAssetCreator>();
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
