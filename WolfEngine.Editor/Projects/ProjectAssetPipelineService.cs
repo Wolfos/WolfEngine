@@ -2088,7 +2088,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportColorLookupTableSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				9,
+				10,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

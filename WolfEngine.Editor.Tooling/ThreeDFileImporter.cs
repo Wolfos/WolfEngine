@@ -25,6 +25,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
     private const string GlobalScaleFactorProperty = "GLOBAL_SCALE_FACTOR";
 
     private const string FbxPreservePivotsProperty = "IMPORT_FBX_PRESERVE_PIVOTS";
+    private const string MaxBoneWeightsProperty = "PP_LBW_MAX_WEIGHTS";
 
     private readonly IImageLoader _imageLoader;
 
@@ -53,10 +54,12 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         // LimitBoneWeights caps influences at four per vertex. Without it Assimp happily emits more,
         // and the extra influences would be silently dropped when packing the GPU skin attributes.
+        // Leave vertex joining to MeshOptimization, which compares bone indices and weights too.
+        // Assimp 5.4.1's JoinIdenticalVertices can leave stale bone weights that LimitBoneWeights
+        // writes out of bounds (TT_RTS_Ballista.FBX), and can merge distinct skin bindings.
         // GlobalScale bakes the import scale into vertices, bone offsets and animation keys instead
         // of leaving a scale on the root node for every consumer of the hierarchy to reapply.
         const PostProcessSteps postProcessSteps = PostProcessSteps.Triangulate
-                                                  | PostProcessSteps.JoinIdenticalVertices
                                                   | PostProcessSteps.CalculateTangentSpace
                                                   | PostProcessSteps.MakeLeftHanded
                                                   | PostProcessSteps.FlipWindingOrder
@@ -405,6 +408,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         try
         {
             assimp.SetImportPropertyFloat(propertyStore, GlobalScaleFactorProperty, scaleFactor);
+            assimp.SetImportPropertyInteger(propertyStore, MaxBoneWeightsProperty, global::WolfEngine.Mesh.InfluencesPerVertex);
             if (preserveFbxPivots == false)
             {
                 assimp.SetImportPropertyInteger(propertyStore, FbxPreservePivotsProperty, 0);
