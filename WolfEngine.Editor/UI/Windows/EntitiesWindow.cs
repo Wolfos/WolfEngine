@@ -11,6 +11,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private static readonly List<Entity> RootEntities = new();
 	private static readonly List<Entity> VisibleEntities = new();
 	private static readonly List<Entity> PendingDeleteEntities = new();
+	private static readonly List<Entity> DraggedEntities = new();
 	private static readonly HashSet<Entity> RevealAncestors = new();
 	private static readonly Vector2 EntityIconSize = Vector2.One * 15.5f;
 	private const string ContextMenuId = "EntitiesContextMenu";
@@ -28,6 +29,7 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 	private Entity? _draggedEntity;
 	private Entity? _hoveredEntity;
 	private EntitySelectionClick? _pendingSelectionClick;
+	private Entity? _deferredSelectionEntity;
 	private Entity? _revealEntity;
 
 	public EntitiesWindow(
@@ -171,10 +173,19 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 			_pressedEntity = entity;
 			_interactionState.SetFocusedWindow(EditorFocusedWindow.Entities);
 			var io = ImGui.GetIO();
-			_pendingSelectionClick = new EntitySelectionClick(
-				entity,
-				io.KeyShift,
-				io.KeyCtrl);
+			if (isSelected && io.KeyShift == false && io.KeyCtrl == false)
+			{
+				// Pressing an already-selected row may be the start of dragging the whole selection, so
+				// narrowing the selection to this row waits until the button is released without a drag.
+				_deferredSelectionEntity = entity;
+			}
+			else
+			{
+				_pendingSelectionClick = new EntitySelectionClick(
+					entity,
+					io.KeyShift,
+					io.KeyCtrl);
+			}
 		}
 
 		if (hasChildren && open)
@@ -276,12 +287,14 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 		    ImGui.IsMouseDragging(ImGuiMouseButton.Left))
 		{
 			_draggedEntity = pressedEntity;
+			_deferredSelectionEntity = null;
 		}
 
 		if (_draggedEntity is not { } draggedEntity)
 		{
 			if (ImGui.IsMouseDown(ImGuiMouseButton.Left) == false)
 			{
+				ApplyDeferredSelection(scene.World);
 				_pressedEntity = null;
 			}
 
@@ -296,17 +309,65 @@ public class EntitiesWindow : EditorWindow, IEditorEntityDeletionHandler
 
 		if (ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows))
 		{
-			EntityHierarchyEditorOperations.TryReparentEntity(
+			CollectDraggedEntities(draggedEntity);
+			EntityHierarchyEditorOperations.TryReparentEntities(
 				scene,
-				draggedEntity,
+				DraggedEntities,
 				_hoveredEntity,
 				_sceneSnapshotService,
 				_undoRedoService,
 				_interactionState);
+			DraggedEntities.Clear();
 		}
 
 		_pressedEntity = null;
 		_draggedEntity = null;
+	}
+
+	private void ApplyDeferredSelection(World world)
+	{
+		if (_deferredSelectionEntity is not { } entity)
+		{
+			return;
+		}
+
+		_deferredSelectionEntity = null;
+		if (world.IsAlive(entity))
+		{
+			EditorGui.ReplaceEntitySelection(entity, world);
+			EditorGui.DiscardSelectionRevealRequest();
+		}
+	}
+
+	/// <summary>
+	/// Dragging a selected row carries the whole selection, in hierarchy order so the moved entities
+	/// keep their relative order under the new parent. Dragging an unselected row carries only that row.
+	/// </summary>
+	private static void CollectDraggedEntities(Entity draggedEntity)
+	{
+		DraggedEntities.Clear();
+		if (EditorGui.SelectedEntities.Contains(draggedEntity) == false)
+		{
+			DraggedEntities.Add(draggedEntity);
+			return;
+		}
+
+		foreach (var entity in VisibleEntities)
+		{
+			if (EditorGui.SelectedEntities.Contains(entity))
+			{
+				DraggedEntities.Add(entity);
+			}
+		}
+
+		// Selected entities inside collapsed branches are not in the visible list.
+		foreach (var entity in EditorGui.SelectedEntities)
+		{
+			if (DraggedEntities.Contains(entity) == false)
+			{
+				DraggedEntities.Add(entity);
+			}
+		}
 	}
 
 	private static nint ResolveIconTexture(IIconManager icons, string iconName)
