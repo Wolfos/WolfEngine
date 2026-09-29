@@ -206,6 +206,11 @@ public sealed class Vector3Curve
 			return defaultValue;
 		}
 
+		return EvaluateSegment(keyA, keyB, blend);
+	}
+
+	internal Vector3 EvaluateSegment(int keyA, int keyB, float blend)
+	{
 		if (keyA == keyB || Interpolation == CurveInterpolation.Constant)
 		{
 			return Values[keyA];
@@ -259,6 +264,11 @@ public sealed class QuaternionCurve
 			return defaultValue;
 		}
 
+		return EvaluateSegment(keyA, keyB, blend);
+	}
+
+	internal Quaternion EvaluateSegment(int keyA, int keyB, float blend)
+	{
 		if (keyA == keyB || Interpolation == CurveInterpolation.Constant)
 		{
 			return Values[keyA];

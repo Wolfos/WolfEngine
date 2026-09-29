@@ -85,6 +85,38 @@ public sealed class AnimationGraphTests
         }
     }
     [Test]
+    public void SharedAndMixedTransformTimelinesMatchDirectClipSampling()
+    {
+        foreach (var mixed in new[] { false, true })
+        {
+            var common = new[] { 0f, .5f, 1f };
+            var rotation = new QuaternionCurve(common, [Quaternion.Identity,
+                Quaternion.CreateFromAxisAngle(Vector3.UnitZ, .3f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, .7f)]);
+            var scale = new Vector3Curve(common, [Vector3.One, new(1.2f), new(1.5f)], CurveInterpolation.CubicHermite,
+                [Vector3.Zero, Vector3.Zero, Vector3.Zero], [Vector3.Zero, Vector3.Zero, Vector3.Zero]);
+            var first = new TransformTrack(AnimationBinding.ForBone("root"),
+                new Vector3Curve(common, [Vector3.Zero, Vector3.UnitX, Vector3.UnitX * 2]), rotation, scale);
+            var second = new TransformTrack(AnimationBinding.ForBone("hand"),
+                mixed ? new Vector3Curve([0, .25f, 1], [Vector3.Zero, Vector3.UnitY, Vector3.UnitY * 2]) :
+                    new Vector3Curve(common, [Vector3.Zero, Vector3.UnitY, Vector3.UnitY * 2]), rotation, scale);
+            var clip = new AnimationClip("timelines", 1, 30, true, [first, second], [], "", []);
+            var instance = Program(Graph(Clip("A")), new() { ["A"] = clip }).CreateInstance();
+            var expected = clip.CreatePose(_skeleton);
+            var sampler = new SingleClipPoseSource(clip, _skeleton);
+            var previous = 0f;
+            foreach (var time in new[] { 0f, .2f, .5f, .65f, 1f, 1.2f })
+            {
+                instance.Evaluate(time - previous); sampler.Evaluate(time - previous, expected); previous = time;
+                for (var bone = 0; bone < _skeleton.BoneCount; bone++)
+                {
+                    Assert.That(instance.Output.Bones[bone].Position, Is.EqualTo(expected.Bones[bone].Position));
+                    Assert.That(instance.Output.Bones[bone].Rotation, Is.EqualTo(expected.Bones[bone].Rotation));
+                    Assert.That(instance.Output.Bones[bone].Scale, Is.EqualTo(expected.Bones[bone].Scale));
+                }
+            }
+        }
+    }
+    [Test]
     public void ClipSwitch_ReturnsUnanimatedBonesToBindPose()
     {
         var a = Clip("A"); var b = Clip("B"); var select = new AnimationNode { Kind = AnimationNodeKind.Select, Inputs = [a.Id, b.Id], Parameter = "Select" };
@@ -192,6 +224,61 @@ public sealed class AnimationGraphTests
         var instance = Program(Graph(locomotion, a, b), new() { ["A"] = Motion("root", 1, 1), ["B"] = Motion("root", 1, 0.5f) }).CreateInstance(); instance.Evaluate(0.2f);
         Assert.That(instance.Contributions[0].NormalizedTime, Is.EqualTo(instance.Contributions[1].NormalizedTime).Within(1e-6));
     }
+    [Test]
+    public void ZeroWeightLocomotionSamplesOnlyOneClipAndKeepsPhaseWhenSecondActivates()
+    {
+        var a = Clip("A"); var b = Clip("B");
+        var locomotion = new AnimationNode { Kind = AnimationNodeKind.Locomotion1D, Inputs = [a.Id, b.Id], Thresholds = [1, 3], Parameter = "Speed" };
+        var graph = Graph(locomotion, a, b); graph.Parameters = [new() { Name = "Speed", Default = 1 }];
+        var instance = Program(graph, new() { ["A"] = Motion("root", 1, 1), ["B"] = Motion("root", 2, .5f) }).CreateInstance();
+        instance.Evaluate(.2f);
+        Assert.That(instance.SampledClipCount, Is.EqualTo(1));
+        Assert.That(instance.Contributions.Select(c => c.ClipSlot), Is.EqualTo(new[] { "A" }));
+        instance.SetFloat(instance.Program.GetParameter("Speed", AnimationParameterType.Float), 2);
+        instance.Evaluate(.2f);
+        Assert.That(instance.SampledClipCount, Is.EqualTo(2));
+        Assert.That(instance.Contributions[0].NormalizedTime, Is.EqualTo(instance.Contributions[1].NormalizedTime).Within(1e-6));
+    }
+
+    [Test]
+    public void HeldSampleSkipsKeysButStillDeliversLoopMarkersAndInvalidatesCapturedDefaults()
+    {
+        var a = Clip("A");
+        var tracked = new AnimationClip("held", 1, 30, true,
+            [new(AnimationBinding.ForBone("root"), new Vector3Curve([0, 1], [Vector3.Zero, Vector3.UnitX]), QuaternionCurve.Empty, Vector3Curve.Empty)],
+            [new(AnimationBinding.ForProperty("Lamp", "Intensity"), FloatCurve.Empty)], "", []);
+        var instance = Program(Graph(a), new() { ["A"] = tracked },
+            new() { ["A"] = new() { Markers = [new() { Name = "Pulse", Time = .5f }] } }).CreateInstance();
+        instance.SetPropertyDefault(0, 2);
+        instance.Evaluate(1);
+        Assert.That(instance.SampledClipCount, Is.EqualTo(1));
+        Assert.That(instance.Markers, Has.Count.EqualTo(1));
+        instance.Evaluate(1);
+        Assert.That(instance.SampledClipCount, Is.Zero);
+        Assert.That(instance.Markers, Has.Count.EqualTo(1));
+        Assert.That(instance.Output.Values[0], Is.EqualTo(2));
+        instance.SetPropertyDefault(0, 7);
+        instance.Evaluate(1);
+        Assert.That(instance.SampledClipCount, Is.EqualTo(1));
+        Assert.That(instance.Output.Values[0], Is.EqualTo(7));
+        instance.Seek(3);
+        Assert.That(instance.Markers, Is.Empty);
+    }
+
+    [Test]
+    public void MaskedBlendSamplesBaseOnlyWhenItsWeightsContribute()
+    {
+        var a=Clip("A");var b=Clip("B");
+        var mask = new BoneMask { Bones = [new() { Bone = "root" }] };
+        var blend = new AnimationNode { Kind = AnimationNodeKind.MaskedBlend, Inputs = [a.Id,b.Id], Value = 1 };
+        var instance=Program(Graph(blend,a,b),new(){["A"]=Motion("root",1),["B"]=Motion("root",2)}, mask:mask).CreateInstance();
+        instance.Evaluate(.25f);
+        Assert.That(instance.SampledClipCount, Is.EqualTo(1));
+        Assert.That(instance.Contributions.Select(c=>c.ClipSlot), Is.EqualTo(new[]{"B"}));
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(.5f));
+        Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
+    }
+
     [Test] public void DeferredSampling_PreservesClockAndMarkers()
     {
         var node=Clip("A");var instance=Program(Graph(node),new(){["A"]=Motion("root",1)},new(){["A"]=new(){Markers=[new(){Name="Foot",Time=.5f}]}}).CreateInstance();

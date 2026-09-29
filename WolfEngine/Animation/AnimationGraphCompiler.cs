@@ -25,6 +25,7 @@ public sealed class CompiledAnimationGraph
     internal readonly int[][] ConditionParameters;
     internal readonly BoundAnimationClip?[] Clips;
     internal readonly float[]?[] Masks;
+    internal readonly float[] MinimumMaskWeights;
     internal readonly int[] RemapCurves;
     internal readonly AnimationParameter[] ParameterDefinitions;
     internal readonly int Output;
@@ -72,7 +73,7 @@ public sealed class CompiledAnimationGraph
         Inputs = new int[Nodes.Length][];
         Parameters = new int[Nodes.Length]; TimeParameters = new int[Nodes.Length]; SequenceParameters = new int[Nodes.Length];
         ConditionParameters = new int[Nodes.Length][];
-        Clips = new BoundAnimationClip?[Nodes.Length]; Masks = new float[]?[Nodes.Length]; RemapCurves = new int[Nodes.Length];
+        Clips = new BoundAnimationClip?[Nodes.Length]; Masks = new float[]?[Nodes.Length]; MinimumMaskWeights = new float[Nodes.Length]; RemapCurves = new int[Nodes.Length];
         var curveNames = new List<string>(); var transforms = new List<AnimationBinding>(); var properties = new List<AnimationBinding>();
         CurveIndices = new(StringComparer.Ordinal);
         for (var i = 0; i < Nodes.Length; i++)
@@ -98,6 +99,7 @@ public sealed class CompiledAnimationGraph
                 if (mask.SkeletonId != Guid.Empty && !ReferenceEquals(resolve(mask.SkeletonId, typeof(Skeleton)), skeleton))
                     throw new InvalidOperationException($"Mask '{node.Name}' targets another skeleton.");
                 Masks[i] = mask.Compile(skeleton);
+                MinimumMaskWeights[i] = Masks[i]!.Length == 0 ? 1 : Masks[i]!.Min();
             }
             if (node.Kind == AnimationNodeKind.CurveRemap && !curveNames.Contains(node.Curve, StringComparer.Ordinal)) curveNames.Add(node.Curve);
         }
@@ -184,6 +186,7 @@ internal sealed class BoundAnimationClip
     internal readonly int[] BoneSlots, TransformSlots, PropertySlots, CurveSlots;
     internal readonly FloatCurve[] Curves;
     internal readonly Vector3?[] ConstantPositions, ConstantScales;
+    internal readonly float[]? SharedTransformTimes;
     internal readonly AnimationMarker[] Markers;
     private static Vector3? ConstantValue(Vector3Curve curve)
     {
@@ -204,6 +207,7 @@ internal sealed class BoundAnimationClip
             throw new InvalidOperationException($"Clip '{clip.Name}' contains duplicate output bindings.");
         BoneSlots = new int[clip.TransformTracks.Length]; TransformSlots = new int[BoneSlots.Length];
         ConstantPositions = new Vector3?[BoneSlots.Length]; ConstantScales = new Vector3?[BoneSlots.Length];
+        SharedTransformTimes = FindSharedTransformTimes(clip.TransformTracks);
         Array.Fill(BoneSlots, -1); Array.Fill(TransformSlots, -1);
         var matches = 0;
         for (var i = 0; i < BoneSlots.Length; i++)
@@ -241,6 +245,17 @@ internal sealed class BoundAnimationClip
                 throw new InvalidOperationException("Invalid animation marker.");
             return new AnimationMarker { Name = marker.Name, Time = marker.Time };
         }).ToArray();
+    }
+    private static float[]? FindSharedTransformTimes(TransformTrack[] tracks)
+    {
+        if (tracks.Length == 0) return null;
+        var times = tracks[0].Rotation.Times;
+        if (times.Length == 0) return null;
+        foreach (var track in tracks)
+            if (!track.Position.Times.AsSpan().SequenceEqual(times) ||
+                !track.Rotation.Times.AsSpan().SequenceEqual(times) ||
+                !track.Scale.Times.AsSpan().SequenceEqual(times)) return null;
+        return times;
     }
     private static int Slot<T>(List<T> slots, T binding)
     {

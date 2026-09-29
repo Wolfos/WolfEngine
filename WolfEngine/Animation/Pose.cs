@@ -111,28 +111,30 @@ public sealed class Pose
 	/// <summary>
     /// Per-element interpolation from <paramref name="a"/> to <paramref name="b"/>.
 	/// </summary>
-	public static void Blend(Pose a, Pose b, float weight, Pose destination)
+	public static void Blend(Pose a, Pose b, float weight, Pose destination, ReadOnlySpan<float> boneMask = default)
 	{
 		ArgumentNullException.ThrowIfNull(a);
 		ArgumentNullException.ThrowIfNull(b);
 		ArgumentNullException.ThrowIfNull(destination);
 
 		var boneCount = Math.Min(destination.Bones.Length, Math.Min(a.Bones.Length, b.Bones.Length));
-		for (var i = 0; i < boneCount; i++)
-		{
-			destination.Bones[i] = BoneTransform.Lerp(a.Bones[i], b.Bones[i], weight);
-		}
+        if (!boneMask.IsEmpty && boneMask.Length < boneCount) throw new ArgumentException("Mask must cover every blended bone.", nameof(boneMask));
+        for (var i = 0; i < boneCount; i++)
+        {
+            var boneWeight = boneMask.IsEmpty ? weight : weight * boneMask[i];
+            destination.Bones[i] = boneWeight == 0 ? a.Bones[i] : boneWeight == 1 ? b.Bones[i] : BoneTransform.Lerp(a.Bones[i], b.Bones[i], boneWeight);
+        }
 
 		var transformCount = Math.Min(destination.Transforms.Length, Math.Min(a.Transforms.Length, b.Transforms.Length));
 		for (var i = 0; i < transformCount; i++)
 		{
-			destination.Transforms[i] = BoneTransform.Lerp(a.Transforms[i], b.Transforms[i], weight);
+			destination.Transforms[i] = weight == 0 ? a.Transforms[i] : weight == 1 ? b.Transforms[i] : BoneTransform.Lerp(a.Transforms[i], b.Transforms[i], weight);
 		}
 
 		var valueCount = Math.Min(destination.Values.Length, Math.Min(a.Values.Length, b.Values.Length));
 		for (var i = 0; i < valueCount; i++)
 		{
-			destination.Values[i] = float.Lerp(a.Values[i], b.Values[i], weight);
+			destination.Values[i] = weight == 0 ? a.Values[i] : weight == 1 ? b.Values[i] : float.Lerp(a.Values[i], b.Values[i], weight);
 		}
 	}
 

@@ -9,8 +9,10 @@ public sealed class AnimationGraphInstance
     private readonly Pose[] _poses;
     private readonly Pose[] _transitionPoses;
     private readonly Pose _defaults;
-    private readonly float[] _times, _previousTimes, _weights, _syncTimes, _blendTimes;
-    private readonly int[] _visited, _lastVisited, _sequences, _states;
+    private readonly float[] _times, _previousTimes, _weights, _syncTimes, _blendTimes, _sampledTimes;
+    private readonly int[] _sampledDefaults;
+    private int _defaultsRevision;
+    private readonly int[] _visited, _lastVisited, _sequences, _states, _sharedCursors;
     private readonly bool[] _started;
     private readonly int[][] _positionCursors, _rotationCursors, _scaleCursors, _propertyCursors, _curveCursors;
     private readonly string[] _transitionReasons;
@@ -28,6 +30,8 @@ public sealed class AnimationGraphInstance
     public IReadOnlyList<AnimationContribution> Contributions => _contributions;
     public IReadOnlyList<AnimationStateInspection> States => _inspections;
     public float Time { get; private set; }
+    /// <summary>Clip players that sampled keys during the last pose evaluation.</summary>
+    public int SampledClipCount { get; private set; }
 
     internal AnimationGraphInstance(CompiledAnimationGraph graph)
     {
@@ -36,8 +40,9 @@ public sealed class AnimationGraphInstance
         _integers = graph.ParameterDefinitions.Select(p => (int)p.Default).ToArray();
         var count = graph.NodeCount;
         _poses = new Pose[count]; _transitionPoses = new Pose[count];
+        _sampledTimes = new float[count]; Array.Fill(_sampledTimes, float.NaN); _sampledDefaults = new int[count];
         _times = new float[count]; _previousTimes = new float[count]; _weights = new float[count]; _syncTimes = new float[count]; _blendTimes = new float[count];
-        _visited = new int[count]; _lastVisited = new int[count]; _sequences = new int[count]; _states = new int[count]; _started = new bool[count];
+        _visited = new int[count]; _lastVisited = new int[count]; _sequences = new int[count]; _states = new int[count]; _sharedCursors = new int[count]; _started = new bool[count];
         _positionCursors = new int[count][]; _rotationCursors = new int[count][]; _scaleCursors = new int[count][]; _propertyCursors = new int[count][]; _curveCursors = new int[count][];
         _transitionReasons = new string[count];
         _contributions = new(count); _inspections = new(count);
@@ -58,8 +63,8 @@ public sealed class AnimationGraphInstance
         pose.SetToBindPose(_graph.Skeleton);
         return pose;
     }
-    public void SetTransformDefault(int slot, in BoneTransform value) => _defaults.Transforms[slot] = value;
-    public void SetPropertyDefault(int slot, float value) => _defaults.Values[slot] = value;
+    public void SetTransformDefault(int slot, in BoneTransform value) { _defaults.Transforms[slot] = value; _defaultsRevision++; }
+    public void SetPropertyDefault(int slot, float value) { _defaults.Values[slot] = value; _defaultsRevision++; }
     public void SetFloat(AnimationParameterHandle handle, float value) { Validate(handle, AnimationParameterType.Float); if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value)); _parameters[handle.Index] = value; }
     public void SetBool(AnimationParameterHandle handle, bool value) { Validate(handle, AnimationParameterType.Bool); _parameters[handle.Index] = value ? 1 : 0; }
     public void SetInteger(AnimationParameterHandle handle, int value) { Validate(handle, AnimationParameterType.Integer); _integers[handle.Index] = value; _parameters[handle.Index] = value; }
@@ -111,6 +116,7 @@ public sealed class AnimationGraphInstance
         _emitMarkers = emitMarkers && _delta > 0;
         if (++_tick == int.MaxValue) { Array.Clear(_visited); Array.Clear(_lastVisited); _tick = 1; }
         Array.Clear(_weights); Array.Fill(_syncTimes, float.NaN);
+        SampledClipCount = 0;
         _markers.Clear(); _contributions.Clear(); _inspections.Clear();
         EvaluateNode(_graph.Output);
         AccumulateWeights(_graph.Output, 1);
@@ -144,19 +150,13 @@ public sealed class AnimationGraphInstance
             case AnimationNodeKind.Blend:
             case AnimationNodeKind.MaskedBlend:
                 var alpha = Math.Clamp(Value(index), 0, 1);
-                if (alpha < 1 || node.Kind == AnimationNodeKind.MaskedBlend) EvaluateNode(inputs[0]);
+                if (alpha < 1 || node.Kind == AnimationNodeKind.MaskedBlend && _graph.MinimumMaskWeights[index] < 1) EvaluateNode(inputs[0]);
                 if (alpha > 0) EvaluateNode(inputs[1]);
                 if (alpha == 0) pose.CopyFrom(_poses[inputs[0]]);
+                else if (node.Kind == AnimationNodeKind.MaskedBlend)
+                    Pose.Blend(_poses[inputs[0]], _poses[inputs[1]], alpha, pose, _graph.Masks[index]);
                 else if (alpha == 1) pose.CopyFrom(_poses[inputs[1]]);
                 else Pose.Blend(_poses[inputs[0]], _poses[inputs[1]], alpha, pose);
-                if (node.Kind == AnimationNodeKind.MaskedBlend && alpha > 0)
-                    for (var bone = 0; bone < pose.BoneCount; bone++)
-                    {
-                        var boneWeight = alpha * _graph.Masks[index]![bone];
-                        pose.Bones[bone] = boneWeight == 0 ? _poses[inputs[0]].Bones[bone] :
-                            boneWeight == 1 ? _poses[inputs[1]].Bones[bone] :
-                            BoneTransform.Lerp(_poses[inputs[0]].Bones[bone], _poses[inputs[1]].Bones[bone], boneWeight);
-                    }
                 break;
             case AnimationNodeKind.Select:
                 var selection = Math.Clamp((int)Value(index), 0, inputs.Length - 1);
@@ -186,8 +186,15 @@ public sealed class AnimationGraphInstance
         if (!wasActive && node.RestartOnActivation && !_seeking) _times[index] = node.StartTime;
         _times[index] += _delta * frequency;
         for (var i = 0; i < inputs.Length; i++) _syncTimes[inputs[i]] = _times[index] * _graph.Clips[inputs[i]]!.Clip.Duration;
-        EvaluateNode(inputs[a]); if (b != a) EvaluateNode(inputs[b]);
-        Pose.Blend(_poses[inputs[a]], _poses[inputs[b]], weight, _poses[index]);
+        if (a == b || weight == 0)
+        {
+            EvaluateNode(inputs[a]); _poses[index].CopyFrom(_poses[inputs[a]]);
+        }
+        else
+        {
+            EvaluateNode(inputs[a]); EvaluateNode(inputs[b]);
+            Pose.Blend(_poses[inputs[a]], _poses[inputs[b]], weight, _poses[index]);
+        }
         float Frequency(int position)
         {
             var threshold = node.Thresholds[position]; var clip = _graph.Clips[inputs[position]]!.Clip;
@@ -264,7 +271,7 @@ public sealed class AnimationGraphInstance
     private void Sample(int index, bool wasActive)
     {
         var node = _graph.Nodes[index]; var bound = _graph.Clips[index]!; var clip = bound.Clip;
-        var pose = _poses[index]; pose.CopyFrom(_defaults);
+        var pose = _poses[index];
         var sequence = _graph.SequenceParameters[index] >= 0 ? _integers[_graph.SequenceParameters[index]] : 0;
         var activation = !_started[index] || (!wasActive && node.RestartOnActivation) || sequence != _sequences[index];
         var previous = _times[index];
@@ -280,7 +287,23 @@ public sealed class AnimationGraphInstance
         if (activation && !float.IsNaN(_syncTimes[index])) _previousTimes[index] = _times[index] - _delta * node.Speed;
         _sequences[index] = sequence; _started[index] = true;
         var time = node.Loop && clip.Duration > 0 ? Wrap(_times[index], clip.Duration) : Math.Clamp(_times[index], 0, clip.Duration);
-        for (var i = 0; i < clip.TransformTracks.Length; i++)
+        // Clock/activation bookkeeping above always runs, even for a held sample.
+        // Marker intervals are collected separately after contribution weights resolve.
+        if (_sampledTimes[index] == time && _sampledDefaults[index] == _defaultsRevision) return;
+        _sampledTimes[index] = time; _sampledDefaults[index] = _defaultsRevision;
+        pose.CopyFrom(_defaults);
+        SampledClipCount++;
+        if (bound.SharedTransformTimes is { } sharedTimes && CurveKeys.TryFindSegment(sharedTimes, time, ref _sharedCursors[index], out var keyA, out var keyB, out var blend))
+        {
+            for (var i = 0; i < clip.TransformTracks.Length; i++)
+            {
+                var track = clip.TransformTracks[i]; var bone = bound.BoneSlots[i]; var slot = bound.TransformSlots[i];
+                var value = new BoneTransform(bound.ConstantPositions[i] ?? track.Position.EvaluateSegment(keyA, keyB, blend),
+                    track.Rotation.EvaluateSegment(keyA, keyB, blend), bound.ConstantScales[i] ?? track.Scale.EvaluateSegment(keyA, keyB, blend));
+                if (bone >= 0) pose.Bones[bone] = value; else pose.Transforms[slot] = value;
+            }
+        }
+        else for (var i = 0; i < clip.TransformTracks.Length; i++)
         {
             var track = clip.TransformTracks[i]; var bone = bound.BoneSlots[i]; var slot = bound.TransformSlots[i];
             var rest = bone >= 0 ? _defaults.Bones[bone] : _defaults.Transforms[slot];
@@ -308,7 +331,7 @@ public sealed class AnimationGraphInstance
                 var alpha = Math.Clamp(Value(index), 0, 1);
                 var baseWeight = 1 - alpha;
                 if (_graph.Nodes[index].Kind == AnimationNodeKind.MaskedBlend)
-                    foreach (var mask in _graph.Masks[index]!) baseWeight = Math.Max(baseWeight, 1 - alpha * mask);
+                    baseWeight = 1 - alpha * _graph.MinimumMaskWeights[index];
                 AccumulateWeights(inputs[0], weight * baseWeight); AccumulateWeights(inputs[1], weight * alpha); break;
             case AnimationNodeKind.Select:
                 AccumulateWeights(inputs[Math.Clamp((int)Value(index), 0, inputs.Length - 1)], weight); break;
