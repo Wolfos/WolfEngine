@@ -82,7 +82,7 @@ public sealed class AnimationSystem : IUpdate
 	/// <summary>
 	/// Copies model-space bone transforms onto the entities that opted into being sockets.
 	/// </summary>
-	private static void ApplyExposedBones(World world)
+    internal static void ApplyExposedBones(World world)
 	{
 		foreach (var entry in world.View<ExposedBone>())
 		{
@@ -129,4 +129,23 @@ public sealed class AnimationSystem : IUpdate
 			world.SetLocalScale(entry.Entity, scale);
 		}
 	}
+}
+
+/// <summary>Maintains renderable bind poses and sockets in the editor's authoring world.</summary>
+public sealed class BindPoseAnimationSystem : IUpdate
+{
+    public WorldTag GetTag() => WorldTag.Authoring;
+
+    public void Update(float deltaTime, World world)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        using var profile = Profiling.FrameProfiler.Instance.Measure("Animation bind pose");
+        foreach (var entry in world.View<Animator>())
+        {
+            if (!world.IsEnabled(entry.Entity)) continue;
+            ref var animator = ref entry.First;
+            animator.TryPrepareBindPose();
+        }
+        AnimationSystem.ApplyExposedBones(world);
+    }
 }

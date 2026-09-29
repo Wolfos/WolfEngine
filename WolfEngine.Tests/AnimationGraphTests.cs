@@ -30,6 +30,28 @@ public sealed class AnimationGraphTests
         return new() { Nodes = [.. nodes, result, output], Output = output.Id };
     }
     [Test]
+    public void AuthoringBindPoseRendersAndPositionsSocketsWithoutEvaluatingGraph()
+    {
+        var clip = Clip("A");
+        var world = new World(WorldTag.Authoring);
+        var entity = world.CreateEntity("authoring unit", Matrix4x4.Identity);
+        world.AddComponent(entity, new Animator { Skeleton = _skeleton, Graph = Graph(clip) });
+        var socket = world.CreateEntity("hand socket", Matrix4x4.Identity);
+        world.SetParent(socket, entity); world.AddComponent(socket, new ExposedBone(entity, "hand"));
+        var system = new BindPoseAnimationSystem();
+        system.Update(0, world);
+        ref var animator = ref world.GetComponent<Animator>(entity);
+        Assert.That(animator.GraphInstance, Is.Null);
+        Assert.That(animator.Pose!.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
+        Assert.That(animator.SkinningMatrices, Is.Not.Null);
+        Assert.That(animator.PreviousSkinningMatrices, Is.EqualTo(animator.SkinningMatrices));
+        Assert.That(world.GetComponent<LocalTransform>(socket).LocalPosition, Is.EqualTo(Vector3.UnitY));
+        var generation = animator.PoseGeneration;
+        system.Update(10, world);
+        Assert.That(animator.GraphInstance, Is.Null);
+        Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
+    }
+    [Test]
     public void ExitProgress_UsesTheSelectedPoseSubgraph()
     {
         var a = Clip("A"); var b = Clip("B");

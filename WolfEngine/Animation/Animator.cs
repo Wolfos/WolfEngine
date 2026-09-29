@@ -20,6 +20,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
     [JsonIgnore] internal Matrix4x4[]? SkinningMatrices;
     [JsonIgnore] internal Matrix4x4[]? PreviousSkinningMatrices;
     [JsonIgnore] internal bool HasPreviousPose;
+    [JsonIgnore] internal bool BindPosePrepared;
     [JsonIgnore] internal uint PoseGeneration;
     [JsonIgnore] internal uint LastRenderedPoseGeneration;
     [JsonIgnore] public string? Diagnostic { get; internal set; }
@@ -29,6 +30,24 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
     public static Animator Create(AssetRef<Skeleton> skeleton, AssetRef<AnimationGraph> graph, AssetRef<AnimationSet> clips = default)
         => new() { SkeletonAsset = skeleton, GraphAsset = graph, ClipSetAsset = clips };
     [JsonIgnore] public AnimationGraphInstance? Instance => TryPrepare() ? GraphInstance : null;
+    /// <summary>Prepare a static bind pose for an authoring world without compiling a graph.</summary>
+    internal bool TryPrepareBindPose()
+    {
+        var skeleton = SkeletonAsset.IsValid ? SkeletonAsset.Asset : Skeleton;
+        if (skeleton is null) return false;
+        if (BindPosePrepared && ReferenceEquals(Skeleton, skeleton) && GraphInstance is null && Pose is not null &&
+            SkinningMatrices?.Length == skeleton.BoneCount && PreviousSkinningMatrices?.Length == skeleton.BoneCount && HasPreviousPose)
+            return true;
+
+        var pose = new Pose(skeleton.BoneCount);
+        pose.SetToBindPose(skeleton);
+        var matrices = new Matrix4x4[skeleton.BoneCount];
+        pose.ComputeSkinningMatrices(skeleton, matrices);
+        Skeleton = skeleton; GraphInstance = null; Pose = pose; Bindings = null;
+        SkinningMatrices = matrices; PreviousSkinningMatrices = (Matrix4x4[])matrices.Clone();
+        HasPreviousPose = true; BindPosePrepared = true; PoseGeneration++; Diagnostic = null;
+        return true;
+    }
     internal bool TryPrepare()
     {
         var skeleton = SkeletonAsset.IsValid ? SkeletonAsset.Asset : Skeleton;
@@ -43,7 +62,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
             Skeleton = skeleton; Graph = graph; ClipSet = clips;
             Pose = GraphInstance.Output;
             SkinningMatrices = new Matrix4x4[skeleton.BoneCount]; PreviousSkinningMatrices = new Matrix4x4[skeleton.BoneCount];
-            HasPreviousPose = false; Bindings = null; Diagnostic = null;
+            HasPreviousPose = false; BindPosePrepared = false; Bindings = null; Diagnostic = null;
             return true;
         }
         catch (InvalidOperationException exception) { Diagnostic = exception.Message; return false; }
@@ -55,7 +74,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
     public void OnDeserialized()
     {
         Skeleton = null; Graph = null; ClipSet = null; GraphInstance = null; Pose = null; Bindings = null;
-        SkinningMatrices = null; PreviousSkinningMatrices = null; HasPreviousPose = false;
+        SkinningMatrices = null; PreviousSkinningMatrices = null; HasPreviousPose = false; BindPosePrepared = false;
         PoseGeneration = 0; LastRenderedPoseGeneration = 0; Diagnostic = null;
     }
 }
