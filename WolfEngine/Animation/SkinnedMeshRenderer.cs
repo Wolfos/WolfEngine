@@ -56,12 +56,17 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
             LocalSkinningMatrices = new Matrix4x4[current.Length];
             PreviousLocalSkinningMatrices = new Matrix4x4[current.Length];
         }
+        // A consecutive generation's previous rig pose is the palette we converted last frame.
+        // Rebuild it when rendering skipped a generation or the mesh bind space changed.
+        var reusePrevious = _paletteInitialized && ReferenceEquals(current, _sourcePalette) &&
+            generation == unchecked(_animatorPoseGeneration + 1) && bind == _cachedBindToRig;
         for (var bone = 0; bone < current.Length; bone++)
         {
             // Row vectors: mesh -> rig -> deformed rig -> mesh. The draw transform then
             // places mesh-local output in the scene. Sockets keep using rig-space poses.
+            var lastCurrent = LocalSkinningMatrices[bone];
             LocalSkinningMatrices[bone] = bind * current[bone] * rigToMesh;
-            PreviousLocalSkinningMatrices[bone] = bind * previous[bone] * rigToMesh;
+            PreviousLocalSkinningMatrices[bone] = reusePrevious ? lastCurrent : bind * previous[bone] * rigToMesh;
         }
         _sourcePalette = current;
         _animatorPoseGeneration = generation; _cachedBindToRig = bind; _paletteInitialized = true;

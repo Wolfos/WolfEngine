@@ -124,9 +124,7 @@ public sealed class AnimationSystem : IUpdate
 
 			// The socket is parented to the animator entity, so the bone's model-space transform is
 			// already the correct local transform relative to it.
-			world.SetLocalPosition(entry.Entity, translation);
-			world.SetLocalRotation(entry.Entity, rotation);
-			world.SetLocalScale(entry.Entity, scale);
+			world.SetLocalTransform(entry.Entity, translation, rotation, scale);
 		}
 	}
 }

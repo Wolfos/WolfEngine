@@ -90,8 +90,10 @@ public sealed class AnimationGraphTests
         Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
         Assert.That(animator.SkinningMatrices, Is.EqualTo(matrices));
         Assert.That(world.GetComponent<LocalTransform>(socket).LocalPosition, Is.EqualTo(Vector3.UnitY));
+        new TransformSystem().PreRender(0, world);
         animator.Instance.Playing = false; system.Update(10, world);
         Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
+        Assert.That(world.HasComponent<DirtyTransformRoot>(socket), Is.False);
     }
 
     [Test]

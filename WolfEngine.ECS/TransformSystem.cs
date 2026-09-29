@@ -130,9 +130,12 @@ public class TransformSystem : IPreRender
 
     private static Matrix4x4 ComposeTRS(in LocalTransform local)
     {
-        return
-            Matrix4x4.CreateScale(local.LocalScale) *
-            Matrix4x4.CreateFromQuaternion(local.LocalRotation) *
-            Matrix4x4.CreateTranslation(local.LocalPosition);
+        var matrix = Matrix4x4.CreateFromQuaternion(local.LocalRotation);
+        matrix.M11 *= local.LocalScale.X; matrix.M12 *= local.LocalScale.X; matrix.M13 *= local.LocalScale.X;
+        matrix.M21 *= local.LocalScale.Y; matrix.M22 *= local.LocalScale.Y; matrix.M23 *= local.LocalScale.Y;
+        matrix.M31 *= local.LocalScale.Z; matrix.M32 *= local.LocalScale.Z; matrix.M33 *= local.LocalScale.Z;
+        matrix.M41 = local.LocalPosition.X; matrix.M42 = local.LocalPosition.Y; matrix.M43 = local.LocalPosition.Z;
+        return matrix;
     }
+
 }

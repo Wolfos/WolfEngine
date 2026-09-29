@@ -33,6 +33,7 @@ public class SkinningBindSpaceTests
         Assert.That(current[0].Translation.Y, Is.EqualTo(1.2f), "Shared rig palette remains unchanged.");
     }
 
+
     [Test]
     public void SharedRigSupportsDifferentMeshBindSpacesWithoutSteadyAllocations()
     {
@@ -56,6 +57,28 @@ public class SkinningBindSpaceTests
         second.PrepareSkinningPalette(pose, pose, 100, Matrix4x4.Identity);
         Assert.That(second.LocalPoseGeneration, Is.EqualTo(generation + 1));
         Assert.That(second.LocalSkinningMatrices[0], Is.EqualTo(pose[0]));
+    }
+
+    [Test]
+    public void ConsecutivePaletteReusesLastCurrentButSkippedGenerationRebuildsPrevious()
+    {
+        var bind = Matrix4x4.CreateRotationX(MathF.PI / 2);
+        var renderer = new SkinnedMeshRenderer { MeshBindToRig = bind };
+        var current = new[] { Matrix4x4.CreateTranslation(0, 1, 0) };
+        var previous = new[] { Matrix4x4.Identity };
+        renderer.PrepareSkinningPalette(current, previous, 1, Matrix4x4.Identity);
+        var firstLocal = renderer.LocalSkinningMatrices[0];
+
+        previous[0] = current[0];
+        current[0] = Matrix4x4.CreateTranslation(0, 2, 0);
+        renderer.PrepareSkinningPalette(current, previous, 2, Matrix4x4.Identity);
+        Assert.That(renderer.PreviousLocalSkinningMatrices[0], Is.EqualTo(firstLocal));
+
+        previous[0] = Matrix4x4.CreateTranslation(0, 4, 0);
+        current[0] = Matrix4x4.CreateTranslation(0, 5, 0);
+        renderer.PrepareSkinningPalette(current, previous, 4, Matrix4x4.Identity);
+        Matrix4x4.Invert(bind, out var rigToMesh);
+        Assert.That(renderer.PreviousLocalSkinningMatrices[0], Is.EqualTo(bind * previous[0] * rigToMesh));
     }
 
     private static void AssertClose(Vector3 actual, Vector3 expected) =>

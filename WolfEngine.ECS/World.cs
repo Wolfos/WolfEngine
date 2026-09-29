@@ -463,6 +463,7 @@ public class World
     public void SetLocalPosition(Entity e, Vector3 position)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalPosition == position) return;
         localTransform.LocalPosition = position;
         MarkDirty(e);
     }
@@ -470,6 +471,7 @@ public class World
     public void SetLocalRotation(Entity e, Quaternion rotation)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalRotation == rotation) return;
         localTransform.LocalRotation = rotation;
         MarkDirty(e);
     }
@@ -477,8 +479,22 @@ public class World
     public void SetLocalScale(Entity e, Vector3 scale)
     {
         ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalScale == scale) return;
         localTransform.LocalScale = scale;
         MarkDirty(e);
+    }
+
+    /// <summary>Updates a complete local pose and dirties its subtree only when it changes.</summary>
+    public bool SetLocalTransform(Entity e, Vector3 position, Quaternion rotation, Vector3 scale)
+    {
+        ref var localTransform = ref GetComponent<LocalTransform>(e);
+        if (localTransform.LocalPosition == position && localTransform.LocalRotation == rotation && localTransform.LocalScale == scale)
+            return false;
+        localTransform.LocalPosition = position;
+        localTransform.LocalRotation = rotation;
+        localTransform.LocalScale = scale;
+        MarkDirty(e);
+        return true;
     }
 
     public void SetWorldPosition(Entity e, Vector3 position)
