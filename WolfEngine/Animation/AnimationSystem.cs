@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using WolfEngine.ECS;
 
 namespace WolfEngine.Animation;
@@ -23,6 +24,7 @@ public sealed class AnimationSystem : IUpdate
 		ArgumentNullException.ThrowIfNull(world);
         using var profile = Profiling.FrameProfiler.Instance.Measure("Animation evaluation");
 
+		long prepareTicks = 0, graphTicks = 0, matrixTicks = 0, bindingTicks = 0;
 		foreach (var entry in world.View<Animator>())
 		{
 			if (world.IsEnabled(entry.Entity) == false)
@@ -30,6 +32,7 @@ public sealed class AnimationSystem : IUpdate
 				continue;
 			}
 
+			var start = Stopwatch.GetTimestamp();
 			ref var animator = ref entry.First;
 			if (animator.TryPrepare() == false)
 			{
@@ -43,7 +46,11 @@ public sealed class AnimationSystem : IUpdate
                 try { animator.Bindings = AnimationOutputBindings.Resolve(world, entry.Entity, instance); }
                 catch (InvalidOperationException exception) { animator.Diagnostic = exception.Message; continue; }
             }
+            prepareTicks += Stopwatch.GetTimestamp() - start;
+            start = Stopwatch.GetTimestamp();
             var changed = instance.Evaluate(deltaTime);
+            graphTicks += Stopwatch.GetTimestamp() - start;
+            start = Stopwatch.GetTimestamp();
             if (changed || !animator.HasPreviousPose)
             {
                 animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
@@ -56,10 +63,19 @@ public sealed class AnimationSystem : IUpdate
                 }
                 if (bonesChanged) animator.PoseGeneration++;
             }
+            matrixTicks += Stopwatch.GetTimestamp() - start;
+            start = Stopwatch.GetTimestamp();
             animator.Bindings.Apply(instance.Output);
+            bindingTicks += Stopwatch.GetTimestamp() - start;
 
 		}
 
+        var profiler = Profiling.FrameProfiler.Instance;
+        profiler.RecordElapsed("Animation prepare", prepareTicks);
+        profiler.RecordElapsed("Animation graph sampling", graphTicks);
+        profiler.RecordElapsed("Animation rig matrices", matrixTicks);
+        profiler.RecordElapsed("Animation bound outputs", bindingTicks);
+        using var sockets = profiler.Measure("Animation sockets");
 		ApplyExposedBones(world);
 	}
 

@@ -6,6 +6,17 @@ namespace WolfEngine.Tests;
 public class SkinningBindSpaceTests
 {
     [Test]
+    public void DirectTrsCompositionMatchesGeneralMatricesWithNonUniformAndNegativeScale()
+    {
+        for (var i = 0; i < 40; i++)
+        {
+            var bone = new BoneTransform(new(i * .2f, -3, 8), Quaternion.CreateFromYawPitchRoll(i * .1f, .3f, -.7f), new(-.3f, i * .02f, 2));
+            var reference = Matrix4x4.CreateScale(bone.Scale) * Matrix4x4.CreateFromQuaternion(bone.Rotation) * Matrix4x4.CreateTranslation(bone.Position);
+            AssertClose(Vector3.Transform(new(.3f, -2, 4), bone.ToMatrix()), Vector3.Transform(new(.3f, -2, 4), reference));
+        }
+    }
+
+    [Test]
     public void RotatedMeshMatchesRigSocketForCurrentAndPreviousPose()
     {
         var bind = Matrix4x4.CreateRotationX(MathF.PI / 2) * Matrix4x4.CreateTranslation(0, .3f, 0);

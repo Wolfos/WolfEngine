@@ -23,10 +23,17 @@ public struct BoneTransform
 	public static BoneTransform Identity => new(Vector3.Zero, Quaternion.Identity, Vector3.One);
 
 	/// <summary>Composes to a row-vector matrix, matching <c>TransformSystem.ComposeTRS</c>.</summary>
-	public readonly Matrix4x4 ToMatrix() =>
-		Matrix4x4.CreateScale(Scale) *
-		Matrix4x4.CreateFromQuaternion(Rotation) *
-		Matrix4x4.CreateTranslation(Position);
+    public readonly Matrix4x4 ToMatrix()
+    {
+        var matrix = Matrix4x4.CreateFromQuaternion(Rotation);
+        // Scale the basis rows and set translation directly: identical row-vector TRS,
+        // without two general 4x4 matrix multiplications per bone.
+        matrix.M11 *= Scale.X; matrix.M12 *= Scale.X; matrix.M13 *= Scale.X;
+        matrix.M21 *= Scale.Y; matrix.M22 *= Scale.Y; matrix.M23 *= Scale.Y;
+        matrix.M31 *= Scale.Z; matrix.M32 *= Scale.Z; matrix.M33 *= Scale.Z;
+        matrix.M41 = Position.X; matrix.M42 = Position.Y; matrix.M43 = Position.Z;
+        return matrix;
+    }
 
 	public static BoneTransform FromMatrix(in Matrix4x4 matrix)
 	{
@@ -102,9 +109,7 @@ public sealed class Pose
 	}
 
 	/// <summary>
-	/// Per-element interpolation from <paramref name="a"/> to <paramref name="b"/>. Nothing in the
-	/// POC calls this; it exists so the blend contract the animator graph will build on is fixed
-	/// alongside the pose format rather than retrofitted onto it.
+    /// Per-element interpolation from <paramref name="a"/> to <paramref name="b"/>.
 	/// </summary>
 	public static void Blend(Pose a, Pose b, float weight, Pose destination)
 	{

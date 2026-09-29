@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Numerics;
 using System.Text.Json;
 using WolfEngine.AssetPipeline;
 
@@ -182,7 +183,17 @@ internal sealed class BoundAnimationClip
     internal readonly float PlaybackSpeed;
     internal readonly int[] BoneSlots, TransformSlots, PropertySlots, CurveSlots;
     internal readonly FloatCurve[] Curves;
+    internal readonly Vector3?[] ConstantPositions, ConstantScales;
     internal readonly AnimationMarker[] Markers;
+    private static Vector3? ConstantValue(Vector3Curve curve)
+    {
+        // Empty channels retain instance-captured defaults. Cubic curves may move even
+        // with equal endpoint values, so leave their tangent evaluation untouched.
+        if (curve.Values.Length == 0 || curve.Interpolation == CurveInterpolation.CubicHermite) return null;
+        var value = curve.Values[0];
+        foreach (var key in curve.Values) if (key != value) return null;
+        return value;
+    }
     internal BoundAnimationClip(AnimationClip clip, AnimationSequence sequence, Skeleton skeleton,
         List<AnimationBinding> transforms, List<AnimationBinding> properties, List<string> curveNames)
     {
@@ -192,11 +203,14 @@ internal sealed class BoundAnimationClip
         if(clip.TransformTracks.Select(t=>t.Binding).Distinct().Count()!=clip.TransformTracks.Length || clip.PropertyTracks.Select(t=>t.Binding).Distinct().Count()!=clip.PropertyTracks.Length)
             throw new InvalidOperationException($"Clip '{clip.Name}' contains duplicate output bindings.");
         BoneSlots = new int[clip.TransformTracks.Length]; TransformSlots = new int[BoneSlots.Length];
+        ConstantPositions = new Vector3?[BoneSlots.Length]; ConstantScales = new Vector3?[BoneSlots.Length];
         Array.Fill(BoneSlots, -1); Array.Fill(TransformSlots, -1);
         var matches = 0;
         for (var i = 0; i < BoneSlots.Length; i++)
         {
             var track = clip.TransformTracks[i];
+            ConstantPositions[i] = ConstantValue(track.Position);
+            ConstantScales[i] = ConstantValue(track.Scale);
             if (track.IsBoneTrack)
             {
                 if (!skeleton.TryGetBoneIndex(track.Binding.Path, out BoneSlots[i])) throw new InvalidOperationException($"Clip bone '{track.Binding.Path}' is absent from '{skeleton.Name}'.");

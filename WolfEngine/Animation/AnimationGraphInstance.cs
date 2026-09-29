@@ -149,9 +149,14 @@ public sealed class AnimationGraphInstance
                 if (alpha == 0) pose.CopyFrom(_poses[inputs[0]]);
                 else if (alpha == 1) pose.CopyFrom(_poses[inputs[1]]);
                 else Pose.Blend(_poses[inputs[0]], _poses[inputs[1]], alpha, pose);
-                if (node.Kind == AnimationNodeKind.MaskedBlend)
+                if (node.Kind == AnimationNodeKind.MaskedBlend && alpha > 0)
                     for (var bone = 0; bone < pose.BoneCount; bone++)
-                        pose.Bones[bone] = BoneTransform.Lerp(_poses[inputs[0]].Bones[bone], _poses[inputs[1]].Bones[bone], alpha * _graph.Masks[index]![bone]);
+                    {
+                        var boneWeight = alpha * _graph.Masks[index]![bone];
+                        pose.Bones[bone] = boneWeight == 0 ? _poses[inputs[0]].Bones[bone] :
+                            boneWeight == 1 ? _poses[inputs[1]].Bones[bone] :
+                            BoneTransform.Lerp(_poses[inputs[0]].Bones[bone], _poses[inputs[1]].Bones[bone], boneWeight);
+                    }
                 break;
             case AnimationNodeKind.Select:
                 var selection = Math.Clamp((int)Value(index), 0, inputs.Length - 1);
@@ -279,8 +284,8 @@ public sealed class AnimationGraphInstance
         {
             var track = clip.TransformTracks[i]; var bone = bound.BoneSlots[i]; var slot = bound.TransformSlots[i];
             var rest = bone >= 0 ? _defaults.Bones[bone] : _defaults.Transforms[slot];
-            var value = new BoneTransform(track.Position.Evaluate(time, ref _positionCursors[index][i], rest.Position),
-                track.Rotation.Evaluate(time, ref _rotationCursors[index][i], rest.Rotation), track.Scale.Evaluate(time, ref _scaleCursors[index][i], rest.Scale));
+            var value = new BoneTransform(bound.ConstantPositions[i] ?? track.Position.Evaluate(time, ref _positionCursors[index][i], rest.Position),
+                track.Rotation.Evaluate(time, ref _rotationCursors[index][i], rest.Rotation), bound.ConstantScales[i] ?? track.Scale.Evaluate(time, ref _scaleCursors[index][i], rest.Scale));
             if (bone >= 0) pose.Bones[bone] = value; else pose.Transforms[slot] = value;
         }
         for (var i = 0; i < bound.PropertySlots.Length; i++)

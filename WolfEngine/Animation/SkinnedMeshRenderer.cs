@@ -34,6 +34,7 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
     [JsonIgnore] internal uint LocalPoseGeneration;
     [JsonIgnore] private uint _animatorPoseGeneration;
     [JsonIgnore] private Matrix4x4 _cachedBindToRig;
+    [JsonIgnore] private Matrix4x4 _cachedRigToMesh;
     [JsonIgnore] private Matrix4x4? _capturedBindToRig;
     [JsonIgnore] private bool _paletteInitialized;
     [JsonIgnore] private Matrix4x4[]? _sourcePalette;
@@ -44,7 +45,12 @@ public struct SkinnedMeshRenderer : IEntityComponent, IJsonOnDeserialized
         _capturedBindToRig ??= fallbackBindToRig;
         var bind = MeshBindToRig ?? _capturedBindToRig.Value;
         if (_paletteInitialized && ReferenceEquals(current, _sourcePalette) && generation == _animatorPoseGeneration && bind == _cachedBindToRig && LocalSkinningMatrices.Length == current.Length) return;
-        if (!Matrix4x4.Invert(bind, out var rigToMesh)) throw new InvalidOperationException("Skinned mesh bind transform must be invertible.");
+        if (!_paletteInitialized || bind != _cachedBindToRig)
+        {
+            if (!Matrix4x4.Invert(bind, out _cachedRigToMesh))
+                throw new InvalidOperationException("Skinned mesh bind transform must be invertible.");
+        }
+        var rigToMesh = _cachedRigToMesh;
         if (LocalSkinningMatrices is null || LocalSkinningMatrices.Length != current.Length)
         {
             LocalSkinningMatrices = new Matrix4x4[current.Length];

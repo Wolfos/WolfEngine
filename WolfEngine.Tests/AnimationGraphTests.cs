@@ -94,6 +94,45 @@ public sealed class AnimationGraphTests
         Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
     }
     [Test]
+    public void InactiveMaskedActionDoesNotSampleOrDeliverMarkers_ThenActivatesNormally()
+    {
+        var a = Clip("A"); var b = Clip("B");
+        var blend = new AnimationNode { Kind = AnimationNodeKind.MaskedBlend, Inputs = [a.Id, b.Id], Parameter = "Weight" };
+        var graph = Graph(blend, a, b); graph.Parameters = [new() { Name = "Weight" }];
+        var instance = Program(graph, new() { ["A"] = Motion("root", 2), ["B"] = Motion("hand", 4) },
+            new() { ["B"] = new() { Markers = [new() { Name = "Start", Time = .1f }] } },
+            new() { Bones = [new() { Bone = "hand" }] }).CreateInstance();
+        instance.Evaluate(.5f);
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(1));
+        Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
+        Assert.That(instance.Markers, Is.Empty);
+        Assert.That(instance.Contributions.Select(c => c.ClipSlot), Is.EquivalentTo(new[] { "A" }));
+        instance.SetFloat(instance.Program.GetParameter("Weight", AnimationParameterType.Float), 1);
+        instance.Evaluate(.25f);
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(1.5f));
+        Assert.That(instance.Output.Bones[1].Position.X, Is.EqualTo(1));
+        Assert.That(instance.Markers.Single().Name, Is.EqualTo("Start"));
+    }
+
+    [Test]
+    public void ConstantChannelCompilationPreservesCubicTangentsAndMissingDefaults()
+    {
+        var position = new Vector3Curve([0, 1], [Vector3.One, Vector3.One]);
+        var scale = new Vector3Curve([0, 1], [Vector3.One, Vector3.One], CurveInterpolation.CubicHermite,
+            [Vector3.Zero, Vector3.Zero], [Vector3.UnitX, Vector3.Zero]);
+        var clip = new AnimationClip("constant", 1, 30, true,
+            [new(AnimationBinding.ForBone("hand"), position, QuaternionCurve.Empty, scale)], [], "", []);
+        var node = Clip("A"); var instance = Program(Graph(node), new() { ["A"] = clip }).CreateInstance();
+        foreach (var time in new[] { 0f, .25f, .5f, .9f })
+        {
+            instance.Seek(time); var cursor = 0;
+            Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.One));
+            Assert.That(instance.Output.Bones[1].Scale, Is.EqualTo(scale.Evaluate(time, ref cursor, Vector3.Zero)));
+            Assert.That(instance.Output.Bones[0].Position, Is.EqualTo(Vector3.Zero));
+        }
+    }
+
+    [Test]
     public void MaskedBlend_LeavesLowerBodyUntouched()
     {
         var a = Clip("A"); var b = Clip("B"); var blend = new AnimationNode { Kind = AnimationNodeKind.MaskedBlend, Inputs = [a.Id, b.Id], Value = 1 };
