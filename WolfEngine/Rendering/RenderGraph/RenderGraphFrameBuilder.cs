@@ -1,5 +1,6 @@
+using WolfEngine.Profiling;
 using System.Runtime.InteropServices;
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using WolfEngine.Mathematics;
 using WolfEngine.Rendering.Abstraction;
@@ -186,6 +187,7 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly GpuDrawResources _gpuDrawResources;
 	private readonly RayTracingSceneResources _rayTracingSceneResources;
 	private readonly SkinningPass _skinningPass;
+    public int LastSkinningDispatchCount => _skinningPass.LastDispatchedInstanceCount;
 	private readonly SkyboxPass _skyboxPass;
 	private readonly IImGuiRenderer _imGuiRenderer;
 	private readonly GameplayUiGpuRenderer _gameplayUiRenderer;
@@ -2226,6 +2228,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		var device = _renderer.GetGfxDevice();
 		var skinningPackets = context.ViewSnapshot.SkinningPackets;
+        context.CommandList.BeginEvent("Skeletal deformation");
 		_skinningPass.Record(
 			context.CommandList,
 			device,
@@ -2233,6 +2236,7 @@ internal sealed class RenderGraphFrameBuilder
 			skinningPackets,
 			context.ViewSnapshot.BoneMatrices,
 			context.GpuDrawDatabase);
+        context.CommandList.EndEvent();
 
 		_gpuDrawResources.SkinVertexBuffer = _skinningPass.SkinVertexBuffer;
 		_gpuDrawResources.BoneMatrixBuffer = _skinningPass.BoneMatrixBuffer;
@@ -2245,10 +2249,12 @@ internal sealed class RenderGraphFrameBuilder
 			// previous one.
 			for (var i = 0; i < skinningPackets.Count; i++)
 			{
-				_rayTracingSceneResources.QueueSkinnedInstanceRebuild(skinningPackets[i].InstanceMesh);
+				if (_skinningPass.WasDeformed(skinningPackets[i].InstanceMesh))
+                    _rayTracingSceneResources.QueueSkinnedInstanceRebuild(skinningPackets[i].InstanceMesh);
 			}
 
-			_rayTracingSceneResources.RecordUpdate(context, _renderer, _view.RayTracingUpdates);
+			using var profile = FrameProfiler.Instance.Measure("Animation acceleration structures");
+            _rayTracingSceneResources.RecordUpdate(context, _renderer, _view.RayTracingUpdates);
 		}
 	}
 

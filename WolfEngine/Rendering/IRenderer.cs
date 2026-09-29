@@ -29,6 +29,8 @@ public interface IRenderer : IFrameCaptureSource
 	RenderGraphResourceHandle ImportBackbuffer(RenderGraphResourceRegistry registry, int width, int height);
 	void EnsureMeshResources(Mesh mesh);
 	void ReleaseMeshResources(Mesh mesh);
+	/// <summary>Live private geometry allocations, excluding shared bind-pose meshes.</summary>
+	SkinnedGeometryResourceStatistics? GetSkinnedGeometryResourceStatistics() => null;
 	IGfxBuffer GetPackedMeshVertexBuffer();
 	IGfxBuffer GetPackedMeshIndexBuffer();
 
@@ -52,3 +54,5 @@ public interface IRenderer : IFrameCaptureSource
 	bool TryStartGpuCapture(string outputPath, out string error);
 	bool TryStopGpuCapture(out string error);
 }
+
+public sealed record SkinnedGeometryResourceStatistics(int InstanceCount, ulong VertexBytes);

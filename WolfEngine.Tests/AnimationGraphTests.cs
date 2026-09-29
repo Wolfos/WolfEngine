@@ -1,0 +1,211 @@
+using System.Numerics;
+using WolfEngine.Animation;
+using WolfEngine.ECS;
+
+namespace WolfEngine.Tests;
+
+[TestFixture]
+public sealed class AnimationGraphTests
+{
+    private readonly Skeleton _skeleton = new("rig", ["root", "hand"], [-1, 0], [BoneTransform.Identity, new(Vector3.UnitY, Quaternion.Identity, Vector3.One)], [Matrix4x4.Identity, Matrix4x4.CreateTranslation(0, -1, 0)]);
+    private static AnimationNode Clip(string slot) => new() { Kind = AnimationNodeKind.Clip, ClipSlot = slot, Loop = true };
+    private static AnimationClip Motion(string bone, float end, float duration = 1) => new("motion", duration, 30, true,
+        [new(AnimationBinding.ForBone(bone), new Vector3Curve([0, duration], [Vector3.Zero, Vector3.UnitX * end]), QuaternionCurve.Empty, Vector3Curve.Empty)], [], "", []);
+    private CompiledAnimationGraph Program(AnimationGraph graph, Dictionary<string, AnimationClip>? clips = null,
+        Dictionary<string, AnimationSequence>? sequences = null, BoneMask? mask = null)
+    {
+        var assets = new Dictionary<Guid, object>(); var set = new AnimationSet();
+        foreach (var item in clips ?? [])
+        {
+            var clipId = Guid.NewGuid(); var sequenceId = Guid.NewGuid(); assets[clipId] = item.Value;
+            var sequence = sequences?.GetValueOrDefault(item.Key) ?? new AnimationSequence(); sequence.ClipId = clipId;
+            assets[sequenceId] = sequence; set.Clips[item.Key] = sequenceId;
+        }
+        if (mask is not null) foreach (var node in graph.Nodes.Where(n => n.Kind == AnimationNodeKind.MaskedBlend)) { node.MaskId = Guid.NewGuid(); assets[node.MaskId] = mask; }
+        return AnimationGraphCompiler.Compile(graph, _skeleton, set, (id, _) => assets.GetValueOrDefault(id));
+    }
+    private static AnimationGraph Graph(AnimationNode result, params AnimationNode[] nodes)
+    {
+        var output = new AnimationNode { Kind = AnimationNodeKind.Output, Inputs = [result.Id] };
+        return new() { Nodes = [.. nodes, result, output], Output = output.Id };
+    }
+    [Test]
+    public void ExitProgress_UsesTheSelectedPoseSubgraph()
+    {
+        var a = Clip("A"); var b = Clip("B");
+        var select = new AnimationNode { Kind = AnimationNodeKind.Select, Parameter = "Variant", Inputs = [a.Id, b.Id] };
+        var rest = new AnimationNode { Kind = AnimationNodeKind.BindPose };
+        var state = new AnimationNode { Kind = AnimationNodeKind.StateMachine, Inputs = [select.Id, rest.Id],
+            Transitions = [new() { From = 0, To = 1, ExitTime = .05f, Duration = 0 }] };
+        var graph = Graph(state, a, b, select, rest);
+        graph.Parameters = [new() { Name = "Variant", Type = AnimationParameterType.Integer, Default = 1 }];
+        var instance = Program(graph, new() { ["A"] = Motion("root", 1, 10), ["B"] = Motion("root", 1, 1) }).CreateInstance();
+        instance.Evaluate(.1f); instance.Evaluate(.1f);
+        Assert.That(instance.States.Single().State, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void CurveOnlyChanges_DoNotScheduleDeformation_AndKeepSocketsStable()
+    {
+        var rest = new AnimationNode { Kind = AnimationNodeKind.BindPose };
+        var a = new AnimationNode { Kind = AnimationNodeKind.CurveRemap, Curve = "Intensity", CurveOffset = 1, Inputs = [rest.Id] };
+        var b = new AnimationNode { Kind = AnimationNodeKind.CurveRemap, Curve = "Intensity", CurveOffset = 2, Inputs = [rest.Id] };
+        var select = new AnimationNode { Kind = AnimationNodeKind.Select, Parameter = "Mode", Inputs = [a.Id, b.Id] };
+        var graph = Graph(select, rest, a, b);
+        graph.Parameters = [new() { Name = "Mode", Type = AnimationParameterType.Integer }];
+        var world = new World(WorldTag.Game);
+        var entity = world.CreateEntity("unit", Matrix4x4.Identity);
+        world.AddComponent(entity, new Animator { Skeleton = _skeleton, Graph = graph });
+        var socket = world.CreateEntity("hand socket", Matrix4x4.Identity);
+        world.SetParent(socket, entity); world.AddComponent(socket, new ExposedBone(entity, "hand"));
+        var system = new AnimationSystem(); system.Update(0, world);
+        ref var animator = ref world.GetComponent<Animator>(entity);
+        var generation = animator.PoseGeneration;
+        var matrices = animator.SkinningMatrices!.ToArray();
+        animator.Instance!.SetInteger(animator.Instance.Program.GetParameter("Mode", AnimationParameterType.Integer), 1);
+        system.Update(.1f, world);
+        Assert.That(animator.Instance.GetCurve(animator.Instance.Program.GetCurve("Intensity")), Is.EqualTo(2));
+        Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
+        Assert.That(animator.SkinningMatrices, Is.EqualTo(matrices));
+        Assert.That(world.GetComponent<LocalTransform>(socket).LocalPosition, Is.EqualTo(Vector3.UnitY));
+        animator.Instance.Playing = false; system.Update(10, world);
+        Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
+    }
+
+    [Test]
+    public void SingleClip_MatchesLegacySamplerAndResetsMissingBones()
+    {
+        var node = Clip("A"); var clip = Motion("root", 4); var instance = Program(Graph(node), new() { ["A"] = clip }).CreateInstance();
+        var baseline = new SingleClipPoseSource(clip, _skeleton); var pose = clip.CreatePose(_skeleton);
+        foreach (var delta in new[] { 0f, 0.2f, 0.7f, 0.5f })
+        {
+            baseline.Evaluate(delta, pose); instance.Evaluate(delta);
+            Assert.That(instance.Output.Bones[0].Position, Is.EqualTo(pose.Bones[0].Position));
+            Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
+        }
+    }
+    [Test]
+    public void ClipSwitch_ReturnsUnanimatedBonesToBindPose()
+    {
+        var a = Clip("A"); var b = Clip("B"); var select = new AnimationNode { Kind = AnimationNodeKind.Select, Inputs = [a.Id, b.Id], Parameter = "Select" };
+        var graph = Graph(select, a, b); graph.Parameters = [new() { Name = "Select", Type = AnimationParameterType.Integer }];
+        var instance = Program(graph, new() { ["A"] = Motion("hand", 4), ["B"] = Motion("root", 8) }).CreateInstance();
+        instance.Evaluate(0.5f); instance.SetInteger(instance.Program.GetParameter("Select", AnimationParameterType.Integer), 1); instance.Evaluate(0.25f);
+        Assert.That(instance.Output.Bones[1].Position, Is.EqualTo(Vector3.UnitY));
+    }
+    [Test]
+    public void MaskedBlend_LeavesLowerBodyUntouched()
+    {
+        var a = Clip("A"); var b = Clip("B"); var blend = new AnimationNode { Kind = AnimationNodeKind.MaskedBlend, Inputs = [a.Id, b.Id], Value = 1 };
+        var instance = Program(Graph(blend, a, b), new() { ["A"] = Motion("root", 2), ["B"] = Motion("hand", 4) },
+            mask: new() { Bones = [new() { Bone = "hand" }] }).CreateInstance();
+        instance.Evaluate(0.5f);
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(1)); Assert.That(instance.Output.Bones[1].Position.X, Is.EqualTo(2));
+    }
+    [Test]
+    public void MarkerIntervals_HandleLoopsLargeDeltasAndScrub()
+    {
+        var node = Clip("A"); var instance = Program(Graph(node), new() { ["A"] = Motion("root", 1) },
+            new() { ["A"] = new() { Markers = [new() { Name = "Impact", Time = 0.5f }] } }).CreateInstance();
+        instance.Evaluate(2.75f); Assert.That(instance.Markers, Has.Count.EqualTo(3));
+        instance.Evaluate(0.01f); Assert.That(instance.Markers, Is.Empty);
+        instance.Seek(5); Assert.That(instance.Markers, Is.Empty);
+        instance.Playing = false; instance.Evaluate(1); Assert.That(instance.Markers, Is.Empty);
+    }
+    [Test]
+    public void RepeatedExternallyTimedActions_UseSequenceIdentity()
+    {
+        var node = Clip("A"); node.Loop = false; node.TimeParameter = "Time"; node.SequenceParameter = "Sequence";
+        var graph = Graph(node); graph.Parameters = [new() { Name = "Time" }, new() { Name = "Sequence", Type = AnimationParameterType.Integer }];
+        var instance = Program(graph, new() { ["A"] = Motion("root", 1) }, new() { ["A"] = new() { Markers = [new() { Name = "Impact", Time = 0.5f }] } }).CreateInstance();
+        var time = instance.Program.GetParameter("Time", AnimationParameterType.Float); var sequence = instance.Program.GetParameter("Sequence", AnimationParameterType.Integer);
+        instance.SetFloat(time, 0.6f); instance.Evaluate(0.1f); Assert.That(instance.Markers, Has.Count.EqualTo(1));
+        instance.Evaluate(0.1f); Assert.That(instance.Markers, Is.Empty);
+        instance.SetInteger(sequence, 1); instance.Evaluate(0.1f); Assert.That(instance.Markers, Has.Count.EqualTo(1));
+    }
+    [Test]
+    public void SharedProgram_InstancesRemainIndependent_AndDoNotAllocate()
+    {
+        var node = Clip("A"); var program = Program(Graph(node), new() { ["A"] = Motion("root", 1) });
+        var a = program.CreateInstance(); var b = program.CreateInstance(); a.Evaluate(0.25f); b.Evaluate(0.75f);
+        Assert.That(a.Output.Bones[0].Position.X, Is.EqualTo(0.25f)); Assert.That(b.Output.Bones[0].Position.X, Is.EqualTo(0.75f));
+        for (var i = 0; i < 100; i++) a.Evaluate(0.01f);
+        var before = GC.GetAllocatedBytesForCurrentThread(); for (var i = 0; i < 100; i++) a.Evaluate(0.01f);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+    [Test]
+    public void InvalidCycleAndMissingSlots_AreDiagnosed()
+    {
+        var a = new AnimationNode { Kind = AnimationNodeKind.Output }; a.Inputs = [a.Id];
+        Assert.Throws<InvalidOperationException>(() => Program(new() { Nodes = [a], Output = a.Id }));
+        Assert.Throws<InvalidOperationException>(() => Program(Graph(Clip("Missing"))));
+    }
+    [Test]
+    public void FrozenPose_DoesNotReportRepeatedChanges()
+    {
+        var node = Clip("A"); var instance = Program(Graph(node), new() { ["A"] = Motion("root", 1) }).CreateInstance();
+        instance.Evaluate(0.5f); instance.Playing = false; Assert.That(instance.Evaluate(1), Is.False);
+    }
+    [Test]
+    public void Locomotion_SynchronizesDifferentClipDurations()
+    {
+        var a = Clip("A"); var b = Clip("B"); var locomotion = new AnimationNode { Kind = AnimationNodeKind.Locomotion1D, Inputs = [a.Id, b.Id], Thresholds = [1, 3], Value = 2 };
+        var instance = Program(Graph(locomotion, a, b), new() { ["A"] = Motion("root", 1, 1), ["B"] = Motion("root", 1, 0.5f) }).CreateInstance(); instance.Evaluate(0.2f);
+        Assert.That(instance.Contributions[0].NormalizedTime, Is.EqualTo(instance.Contributions[1].NormalizedTime).Within(1e-6));
+    }
+    [Test] public void DeferredSampling_PreservesClockAndMarkers()
+    {
+        var node=Clip("A");var instance=Program(Graph(node),new(){["A"]=Motion("root",1)},new(){["A"]=new(){Markers=[new(){Name="Foot",Time=.5f}]}}).CreateInstance();
+        instance.AdvanceClock(.3f);instance.AdvanceClock(.3f);Assert.That(instance.Time,Is.EqualTo(.6f).Within(1e-6));instance.EvaluatePose();
+        Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.6f).Within(1e-6));Assert.That(instance.Markers,Has.Count.EqualTo(1));
+    }
+    [Test] public void Channels_BlendByIdentity_AndCaptureMissingDefaults()
+    {
+        AnimationClip clip(string[] paths,float[] values)=>new("channels",1,30,true,paths.Select((path,i)=>new TransformTrack(AnimationBinding.ForProperty(path,""),new([0],[new Vector3(values[i],0,0)]),QuaternionCurve.Empty,Vector3Curve.Empty)).ToArray(),[],"",[]);
+        var a=Clip("A");var b=Clip("B");var blend=new AnimationNode{Kind=AnimationNodeKind.Blend,Inputs=[a.Id,b.Id],Value=.5f};
+        var instance=Program(Graph(blend,a,b),new(){["A"]=clip(["Door","Turret"],[2,4]),["B"]=clip(["Turret","Door"],[8,6])}).CreateInstance();instance.Evaluate(0);
+        Assert.That(instance.Output.Transforms[0].Position.X,Is.EqualTo(4));Assert.That(instance.Output.Transforms[1].Position.X,Is.EqualTo(6));
+    }
+    [Test] public void Curves_BlendAndRemap_WithMissingCurveDefaults()
+    {
+        var a=Clip("A");var b=Clip("B");var blend=new AnimationNode{Kind=AnimationNodeKind.Blend,Inputs=[a.Id,b.Id],Value=.5f};var remap=new AnimationNode{Kind=AnimationNodeKind.CurveRemap,Inputs=[blend.Id],Curve="Glow",CurveScale=3,CurveOffset=1};
+        var instance=Program(Graph(remap,a,b,blend),new(){["A"]=Motion("root",1),["B"]=Motion("root",1)},new(){["A"]=new(){Curves=[new(){Name="Glow",Times=[0,1],Values=[0,2]}]}}).CreateInstance();instance.Evaluate(.5f);
+        Assert.That(instance.GetCurve(instance.Program.GetCurve("Glow")),Is.EqualTo(2.5f));
+    }
+    [Test] public void StateInterruption_CapturesBlendedPose_AndSuppressesExitedMarkers()
+    {
+        var a=Clip("A");var b=Clip("B");var c=Clip("C");var state=new AnimationNode{Kind=AnimationNodeKind.StateMachine,Inputs=[a.Id,b.Id,c.Id],Transitions=[new(){To=1,Duration=1,Conditions=[new(){Parameter="State",Value=1}]},new(){To=2,Duration=1,Conditions=[new(){Parameter="State",Value=2}]}]};
+        var graph=Graph(state,a,b,c);graph.Parameters=[new(){Name="State",Type=AnimationParameterType.Integer}];var instance=Program(graph,new(){["A"]=Motion("root",0),["B"]=Motion("root",4),["C"]=Motion("root",8)},new(){["B"]=new(){Markers=[new(){Name="Exited",Time=.5f}]}}).CreateInstance();
+        var handle=instance.Program.GetParameter("State",AnimationParameterType.Integer);instance.Evaluate(0);instance.SetInteger(handle,1);instance.Evaluate(.25f);var before=instance.Output.Bones[0].Position.X;
+        instance.SetInteger(handle,2);instance.Evaluate(0);Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(before));instance.Evaluate(.6f);Assert.That(instance.Markers,Is.Empty);
+    }
+    [Test] public void SelectedBranch_RestartsAfterZeroWeight_AndHoldsNonLoopingFinalPose()
+    {
+        var a=Clip("A");a.Loop=false;var rest=new AnimationNode{Kind=AnimationNodeKind.BindPose};var blend=new AnimationNode{Kind=AnimationNodeKind.Blend,Inputs=[rest.Id,a.Id],Parameter="Weight"};var graph=Graph(blend,rest,a);graph.Parameters=[new(){Name="Weight"}];
+        var instance=Program(graph,new(){["A"]=Motion("root",4)}).CreateInstance();var handle=instance.Program.GetParameter("Weight",AnimationParameterType.Float);
+        instance.Evaluate(.7f);instance.SetFloat(handle,1);instance.Evaluate(.2f);Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.8f));instance.Evaluate(3);Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(4));Assert.That(instance.Evaluate(1),Is.False);
+    }
+
+    [Test] public void MarkerIntervals_DeliverChronologicallyAcrossLoops()
+    {
+        var node = Clip("A");
+        var instance = Program(Graph(node), new() { ["A"] = Motion("root", 1) },
+            new() { ["A"] = new() { Markers = [new() { Name="Late", Time=.8f }, new() { Name="Early", Time=.2f }] } }).CreateInstance();
+        instance.Evaluate(2);
+        Assert.That(instance.Markers.Select(m => m.Name), Is.EqualTo(new[] {"Early", "Late", "Early", "Late"}));
+    }
+    [Test] public void SeekLocomotion_PreservesRequestedPhase_AndSuppressesMarkers()
+    {
+        var a=Clip("A"); var b=Clip("B");
+        var blend=new AnimationNode {Kind=AnimationNodeKind.Locomotion1D,Inputs=[a.Id,b.Id],Thresholds=[1,2],Value=1};
+        var instance=Program(Graph(blend,a,b),new(){["A"]=Motion("root",1),["B"]=Motion("root",2)}).CreateInstance();
+        instance.Seek(.75f);
+        Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.75f)); Assert.That(instance.Markers,Is.Empty);
+    }
+    [Test] public void SequencePlaybackSpeed_IsAuthoredSeparatelyFromImportedKeys()
+    {
+        var node=Clip("A"); var instance=Program(Graph(node),new(){["A"]=Motion("root",1)},new(){["A"]=new(){PlaybackSpeed=2}}).CreateInstance();
+        instance.Evaluate(.2f); Assert.That(instance.Output.Bones[0].Position.X,Is.EqualTo(.4f).Within(1e-6));
+    }
+
+}

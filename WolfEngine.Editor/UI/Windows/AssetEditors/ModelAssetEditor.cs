@@ -10,6 +10,7 @@ public sealed class ModelAssetEditor
 	private readonly IAssetMetadataStore _metadataStore;
 	private AssetSourceMetaFile? _loadedMetadata;
 	private Guid? _loadedModelAssetId;
+    private string _ignoredChannelText = "";
 
 	public ModelAssetEditor(IEditorProjectService projectService, IAssetMetadataStore metadataStore)
 	{
@@ -36,7 +37,20 @@ public sealed class ModelAssetEditor
 		}
 
 		var modelImportSettings = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
-		var scaleFactor = modelImportSettings.ScaleFactor;
+		var rigId = modelImportSettings.AnimationSkeletonId;
+        if (AnimationWindow.AssetChoice(_projectService, "Animation rig", AssetType.Skeleton, ref rigId))
+        {
+            modelImportSettings.AnimationSkeletonId = rigId;
+            metadata.SetImportSettings(modelImportSettings);
+            SaveModelMetadata(asset, metadata);
+        }
+        ImGui.InputText("Ignored channels (; separated)", ref _ignoredChannelText, 1024);
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            modelImportSettings.IgnoredAnimationChannels = _ignoredChannelText.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            metadata.SetImportSettings(modelImportSettings); SaveModelMetadata(asset, metadata);
+        }
+        var scaleFactor = modelImportSettings.ScaleFactor;
 		EditorUIUtility.DrawLabeledField("Scale Factor", () => ImGui.InputFloat("##value", ref scaleFactor));
 
 		// Reimporting a model is expensive, so the edit is committed once the field loses focus
@@ -73,6 +87,7 @@ public sealed class ModelAssetEditor
 			_loadedModelAssetId = asset.Id;
 			_loadedMetadata = _metadataStore.Load(
 				_projectService.GetAbsoluteAssetPath(asset.Id, asset.RelativeMetaPath));
+            _ignoredChannelText = string.Join(";", _loadedMetadata.GetImportSettingsOrDefault(() => new ModelImportSettings()).IgnoredAnimationChannels);
 			return _loadedMetadata;
 		}
 		catch

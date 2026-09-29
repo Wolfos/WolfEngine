@@ -145,7 +145,7 @@ public sealed class RenderViewSnapshot
 		Mesh sourceMesh,
 		Mesh instanceMesh,
 		ReadOnlySpan<Matrix4x4> boneMatrices,
-		ReadOnlySpan<Matrix4x4> previousBoneMatrices)
+		ReadOnlySpan<Matrix4x4> previousBoneMatrices, uint poseGeneration = uint.MaxValue)
 	{
 		if (boneMatrices.IsEmpty || previousBoneMatrices.Length != boneMatrices.Length)
 		{
@@ -170,7 +170,7 @@ public sealed class RenderViewSnapshot
 			instanceMesh,
 			boneMatrixOffset,
 			previousBoneMatrixOffset,
-			boneCount));
+			boneCount, poseGeneration));
 	}
 
 	public void AddLight(Light light, Matrix4x4 transform)

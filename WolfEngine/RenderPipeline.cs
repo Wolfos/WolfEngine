@@ -316,7 +316,12 @@ public class RenderPipeline : IRenderPipeline
 						if (animator.SkinningMatrices is not { Length: > 0 } skinningMatrices) continue;
 						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
-						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices, previousSkinningMatrices);
+						var meshToRig = world.HasComponent<WorldTransform>(animatorEntity)
+                            ? transform.LocalToWorld * world.GetComponent<WorldTransform>(animatorEntity).WorldToLocal
+                            : transform.LocalToWorld;
+                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToRig);
+                        snapshot.AddSkinning(sourceMesh, instanceMesh, skinnedRenderer.LocalSkinningMatrices,
+                            skinnedRenderer.PreviousLocalSkinningMatrices, skinnedRenderer.LocalPoseGeneration);
 						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
 					}
 				}

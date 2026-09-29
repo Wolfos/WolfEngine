@@ -90,6 +90,7 @@ public static class Program
 		var worldManager = provider.GetRequiredService<IWorldManager>();
 		worldManager.RegisterWorld(world);
 		worldManager.AddSystem<CameraResolutionUpdater>();
+        worldManager.AddSystem(new AnimationRenderResourceLifecycle(provider.GetRequiredService<RenderGraph>()));
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
 		worldManager.AddSystem<AnimationSystem>();
 		// Register before TransformSystem so interpolated child poses propagate this frame.

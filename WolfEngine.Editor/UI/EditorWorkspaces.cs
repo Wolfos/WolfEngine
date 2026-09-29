@@ -4,6 +4,7 @@ namespace WolfEngine.Editor.UI;
 
 public static class EditorWindowIds
 {
+	public const string Animation = "animation";
 	public const string Scene = "scene";
 	public const string Entities = "entities";
 	public const string Components = "components";
@@ -17,7 +18,7 @@ public static class EditorWindowIds
 
 	public static readonly HashSet<string> All =
 	[
-		Scene, Entities, Components, Assets, AssetEditor, Log, Profiler,
+		Animation, Scene, Entities, Components, Assets, AssetEditor, Log, Profiler,
 		MaterialImporter, Preferences, ProjectSettings
 	];
 }
@@ -57,6 +58,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 {
 	internal static readonly Guid SceneWorkspaceId = Guid.Parse("35cc1006-e127-405e-8368-e55b9a8b2531");
 	internal static readonly Guid AssetsWorkspaceId = Guid.Parse("ca584798-3557-40f4-a1ca-b6c334f4a62c");
+	internal static readonly Guid AnimationWorkspaceId = Guid.Parse("b3181fbd-d60e-4fde-b116-78fafb25b105");
 	private const int CurrentVersion = 1;
 	private static readonly TimeSpan IniSaveDelay = TimeSpan.FromMilliseconds(500);
 
@@ -205,9 +207,13 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 			_workspaces.Add(new EditorWorkspace(AssetsWorkspaceId, "Assets",
 				[EditorWindowIds.Assets, EditorWindowIds.Components, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
 		}
-		_activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
+        if (preferences?.AnimationWorkspaceSeeded != true && !_workspaces.Any(w => w.Id == AnimationWorkspaceId || string.Equals(w.Name, "Animation", StringComparison.OrdinalIgnoreCase)))
+            _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, "Animation",
+                [EditorWindowIds.Assets, EditorWindowIds.Animation, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
+        _activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
 			? active
 			: _workspaces[0].Id;
+        if (preferences is not null) EditorPreferences.SetWorkspaceImGuiSettings(preferences.ImGuiSettings);
 		Persist(saveToDisk: false);
 	}
 
@@ -231,6 +237,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		EditorPreferences.SetWorkspaceSettings(new EditorWorkspacePreferences
 		{
 			Version = CurrentVersion,
+			AnimationWorkspaceSeeded = true,
 			ActiveWorkspaceId = _activeId,
 			ImGuiSettings = EditorPreferences.GetWorkspaceSettings()?.ImGuiSettings ?? string.Empty,
 			Workspaces = _workspaces.Select(workspace => new EditorWorkspacePreference

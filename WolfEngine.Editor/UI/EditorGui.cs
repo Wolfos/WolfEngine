@@ -358,7 +358,7 @@ public class EditorGui
 	private void ApplyDefaultDockLayout(EditorWorkspace workspace, uint dockspaceId)
 	{
 		if (NativeDockBuilder.GetNode(dockspaceId) != IntPtr.Zero) return;
-		if (workspace.Id != EditorWorkspaceService.SceneWorkspaceId && workspace.Id != EditorWorkspaceService.AssetsWorkspaceId) return;
+		if (workspace.Id != EditorWorkspaceService.SceneWorkspaceId && workspace.Id != EditorWorkspaceService.AssetsWorkspaceId && workspace.Id != EditorWorkspaceService.AnimationWorkspaceId) return;
 
 		// ImGui.NET 1.91 does not expose DockBuilder even though the cimgui library
 		// bundled with the engine does. Build a layout once, then let the workspace
@@ -371,8 +371,17 @@ public class EditorGui
 		NativeDockBuilder.SplitNode(centerAndRightId, ImGuiDir.Right, 0.20f, out var rightId, out var centerId);
 		NativeDockBuilder.SplitNode(centerId, ImGuiDir.Down, 0.25f, out var bottomId, out var centerTopId);
 
-		if (workspace.Id == EditorWorkspaceService.SceneWorkspaceId)
-		{
+		if (workspace.Id == EditorWorkspaceService.AnimationWorkspaceId)
+        {
+            Dock(EditorWindowIds.Assets, leftId);
+            Dock(EditorWindowIds.Animation, centerTopId);
+            Dock(EditorWindowIds.AssetEditor, rightId);
+            Dock(EditorWindowIds.Log, bottomId);
+            NativeDockBuilder.Finish(dockspaceId);
+            return;
+        }
+        if (workspace.Id == EditorWorkspaceService.SceneWorkspaceId)
+        {
 			Dock(EditorWindowIds.Entities, leftId);
 			Dock(EditorWindowIds.Scene, centerTopId);
 		}

@@ -93,6 +93,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
 
         try
         {
+            AnimationNodeIdentity.Normalize(scene);
             // Materials (including texture references)
             for (var materialIndex = 0; materialIndex < scene->MNumMaterials; materialIndex++)
             {
@@ -686,44 +687,6 @@ public class ThreeDFileImporter : IThreeDFileImporter
         AppendNode(root, meshData, output, parentIndex: -1, fallbackName: "Node_0", skeletonNodeNames);
     }
 
-    /// <summary>
-    /// A bone becomes part of the <see cref="ImportedSkeleton"/> rather than an entity, so its node
-    /// is dropped from the hierarchy. The subtree check keeps geometry parented under a bone — a
-    /// weapon on a hand bone, say — from disappearing along with the bone chain.
-    /// </summary>
-    private static unsafe bool ShouldSkipSkeletonNode(Node* node, IReadOnlySet<string>? skeletonNodeNames)
-    {
-        if (skeletonNodeNames is null || node is null)
-        {
-            return false;
-        }
-
-        return skeletonNodeNames.Contains(node->MName.AsString) && SubtreeHasMeshes(node) == false;
-    }
-
-    private static unsafe bool SubtreeHasMeshes(Node* node)
-    {
-        if (node is null)
-        {
-            return false;
-        }
-
-        if (node->MNumMeshes > 0)
-        {
-            return true;
-        }
-
-        for (var i = 0; i < node->MNumChildren; i++)
-        {
-            if (SubtreeHasMeshes(node->MChildren[i]))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static unsafe bool ShouldTreatChildrenAsRoots(Node* root)
     {
         if (root is null || root->MNumMeshes > 0 || root->MNumChildren == 0)
@@ -740,15 +703,22 @@ public class ThreeDFileImporter : IThreeDFileImporter
         List<ImportedNode> output,
         int parentIndex,
         string fallbackName,
-        IReadOnlySet<string>? skeletonNodeNames)
+        IReadOnlySet<string>? skeletonNodeNames,
+        string? boneParentName = null,
+        Matrix4x4? parentBindToRig = null)
     {
         if (node is null)
         {
             return;
         }
 
-        if (ShouldSkipSkeletonNode(node, skeletonNodeNames))
+        var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
+        var isBone = skeletonNodeNames?.Contains(nodeName) == true;
+        var bindToRig = GetTransform(node->MTransformation) * (parentBindToRig ?? Matrix4x4.Identity);
+        if (isBone && node->MNumMeshes == 0)
         {
+            for (var i = 0; i < node->MNumChildren; i++)
+                AppendNode(node->MChildren[i], meshData, output, parentIndex, $"{fallbackName}_{i}", skeletonNodeNames, nodeName, bindToRig);
             return;
         }
 
@@ -766,9 +736,8 @@ public class ThreeDFileImporter : IThreeDFileImporter
             meshes.Add(new ImportedNodeMesh(meshName, mesh, materialIndex, skeletonIndex));
         }
 
-        var nodeName = string.IsNullOrWhiteSpace(node->MName.AsString) ? fallbackName : node->MName.AsString;
         var nodeIndex = output.Count;
-        output.Add(new ImportedNode(nodeName, GetTransform(node->MTransformation), meshes, parentIndex));
+        output.Add(new ImportedNode(nodeName, isBone ? Matrix4x4.Identity : GetTransform(node->MTransformation), meshes, parentIndex, isBone ? nodeName : boneParentName, meshes.Any(mesh => mesh.SkeletonIndex >= 0) ? bindToRig : null));
 
         for (var childIndex = 0; childIndex < node->MNumChildren; childIndex++)
         {
@@ -784,7 +753,9 @@ public class ThreeDFileImporter : IThreeDFileImporter
                 output,
                 nodeIndex,
                 $"{fallbackName}_{childIndex}",
-                skeletonNodeNames);
+                skeletonNodeNames,
+                isBone ? nodeName : null,
+                bindToRig);
         }
     }
 

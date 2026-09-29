@@ -11,7 +11,7 @@ public sealed class EditorWorkspaceServiceTests
 	{
 		var service = new EditorWorkspaceService((EditorWorkspacePreferences?)null);
 
-		Assert.That(service.Workspaces.Select(workspace => workspace.Name), Is.EqualTo(new[] { "Scene", "Assets" }));
+		Assert.That(service.Workspaces.Select(workspace => workspace.Name), Is.EqualTo(new[] { "Scene", "Assets", "Animation" }));
 		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Scene"));
 		Assert.That(service.Workspaces[0].OpenWindows, Does.Contain(EditorWindowIds.Scene));
 		Assert.That(service.Workspaces[1].OpenWindows, Does.Contain(EditorWindowIds.Assets));
@@ -63,7 +63,7 @@ public sealed class EditorWorkspaceServiceTests
 		service.TryCreate("Third", out var third, out _);
 
 		Assert.That(service.Delete(third!.Id), Is.True);
-		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Assets"));
+		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Animation"));
 	}
 
 	[Test]
@@ -72,6 +72,7 @@ public sealed class EditorWorkspaceServiceTests
 		var settings = new EditorWorkspacePreferences
 		{
 			Version = 1,
+            AnimationWorkspaceSeeded = true,
 			ActiveWorkspaceId = Guid.Parse("118ed69b-4212-4cbf-a7bb-415ed4c9dd31"),
 			Workspaces =
 			[
@@ -95,6 +96,7 @@ public sealed class EditorWorkspaceServiceTests
 		var settings = new EditorWorkspacePreferences
 		{
 			Version = 1,
+            AnimationWorkspaceSeeded = true,
 			ActiveWorkspaceId = id,
 			Workspaces =
 			[
@@ -116,6 +118,7 @@ public sealed class EditorWorkspaceServiceTests
 		var settings = new EditorWorkspacePreferences
 		{
 			Version = 1,
+            AnimationWorkspaceSeeded = true,
 			ActiveWorkspaceId = id,
 			ImGuiSettings = "[Docking][Data]",
 			Workspaces = [new EditorWorkspacePreference { Id = id, Name = "Lighting", OpenWindowIds = [EditorWindowIds.Scene] }]

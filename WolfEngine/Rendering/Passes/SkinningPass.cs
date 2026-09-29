@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using WolfEngine.Rendering.Abstraction;
@@ -69,10 +70,11 @@ public readonly struct SkinningPacket
 		Mesh instanceMesh,
 		int boneMatrixOffset,
 		int previousBoneMatrixOffset,
-		int boneCount)
+		int boneCount, uint poseGeneration = uint.MaxValue)
 	{
 		SourceMesh = sourceMesh;
 		InstanceMesh = instanceMesh;
+        PoseGeneration = poseGeneration;
 		BoneMatrixOffset = boneMatrixOffset;
 		PreviousBoneMatrixOffset = previousBoneMatrixOffset;
 		BoneCount = boneCount;
@@ -91,6 +93,7 @@ public readonly struct SkinningPacket
 	public int PreviousBoneMatrixOffset { get; }
 
 	public int BoneCount { get; }
+    public uint PoseGeneration { get; }
 }
 
 /// <summary>
@@ -105,6 +108,23 @@ public readonly struct SkinningPacket
 /// </remarks>
 public sealed class SkinningPass
 {
+    private sealed class PoseHistory
+    {
+        internal Matrix4x4[] Matrices = [];
+        internal Matrix4x4[] PreviousMatrices = [];
+        internal ulong FrameSubmission = ulong.MaxValue;
+        internal ulong DeformedSubmission = ulong.MaxValue;
+        internal uint Generation;
+        internal IGfxBuffer? VertexBuffer;
+        internal int BaseVertex;
+        internal bool Initialized;
+    }
+    private readonly ConditionalWeakTable<Mesh, PoseHistory> _poseHistory = new();
+    private uint[] _boneOffsets = [];
+    public static bool ForceUpdates { get; set; } = Environment.GetEnvironmentVariable("WOLF_FORCE_SKINNING_UPDATES") == "1";
+    private ulong _frameSubmission;
+    public bool WasDeformed(Mesh mesh) => _poseHistory.TryGetValue(mesh, out var history) && history.DeformedSubmission == _frameSubmission;
+
 	private readonly IShaderProvider _shaderProvider;
 	private readonly Dictionary<Mesh, SkinAttributeRange> _skinRangesBySourceMesh = new(new ReferenceComparer<Mesh>());
 	private readonly List<Mesh> _skinUploadOrder = new();
@@ -156,6 +176,7 @@ public sealed class SkinningPass
 		ArgumentNullException.ThrowIfNull(drawDatabase);
 
 		_lastDispatchedInstanceCount = 0;
+        _frameSubmission = device.LastPrimarySubmission.Value;
 		if (EnsureResources(device) == false)
 		{
 			return;
@@ -214,8 +235,18 @@ public sealed class SkinningPass
 			commandList.SetComputeConstants(writer.RegisterIndex, writer.AsBytes());
 
 			var (dispatchX, dispatchY, dispatchZ) = threadGroupSize.GetDispatchGroupCount(vertexCount, 1, 1);
-			commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
-			_lastDispatchedInstanceCount++;
+			var history = _poseHistory.GetOrCreateValue(instance);
+            if (ForceUpdates || packet.PoseGeneration == uint.MaxValue || !history.Initialized || history.Generation != packet.PoseGeneration ||
+                !ReferenceEquals(history.VertexBuffer, instance.VertexBuffer) || history.BaseVertex != instance.PackedBaseVertex)
+            {
+                commandList.Dispatch(dispatchX, dispatchY, dispatchZ);
+                _lastDispatchedInstanceCount++;
+                history.DeformedSubmission = _frameSubmission;
+            }
+            if (history.Matrices.Length != packet.BoneCount) history.Matrices = new Matrix4x4[packet.BoneCount];
+            boneMatrices.Slice(packet.BoneMatrixOffset, packet.BoneCount).CopyTo(history.Matrices);
+            history.Generation = packet.PoseGeneration;
+            history.VertexBuffer = instance.VertexBuffer; history.BaseVertex = instance.PackedBaseVertex; history.Initialized = true;
 
 			PublishSkinnedInstance(
 				drawDatabase,
@@ -466,7 +497,8 @@ public sealed class SkinningPass
 		ReadOnlySpan<Matrix4x4> boneMatrices,
 		out uint[] boneMatrixOffsets)
 	{
-		boneMatrixOffsets = new uint[packets.Count];
+		if (_boneOffsets.Length < packets.Count) Array.Resize(ref _boneOffsets, Math.Max(packets.Count, _boneOffsets.Length * 2));
+        boneMatrixOffsets = _boneOffsets;
 		var totalMatrices = 0;
 		for (var i = 0; i < packets.Count; i++)
 		{
@@ -506,7 +538,18 @@ public sealed class SkinningPass
 
 			var destination = (int)boneMatrixOffsets[i];
 			boneMatrices.Slice(packet.BoneMatrixOffset, boneCount).CopyTo(staging[destination..]);
-			boneMatrices.Slice(packet.PreviousBoneMatrixOffset, boneCount).CopyTo(staging[(destination + boneCount)..]);
+			var history = _poseHistory.GetOrCreateValue(packet.InstanceMesh);
+            if (history.FrameSubmission != _frameSubmission)
+            {
+                if (history.PreviousMatrices.Length != boneCount) history.PreviousMatrices = new Matrix4x4[boneCount];
+                if (history.Initialized && history.Matrices.Length == boneCount)
+                    history.Matrices.AsSpan().CopyTo(history.PreviousMatrices);
+                else boneMatrices.Slice(packet.BoneMatrixOffset, boneCount).CopyTo(history.PreviousMatrices);
+                history.FrameSubmission = _frameSubmission;
+            }
+            if (history.PreviousMatrices.Length == boneCount)
+                history.PreviousMatrices.AsSpan().CopyTo(staging[(destination + boneCount)..]);
+            else boneMatrices.Slice(packet.BoneMatrixOffset, boneCount).CopyTo(staging[(destination + boneCount)..]);
 		}
 
 		((IWritableGpuBuffer)_boneMatrixBuffer!).Write<Matrix4x4>(staging[..totalMatrices]);

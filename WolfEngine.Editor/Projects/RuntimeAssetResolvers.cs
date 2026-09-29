@@ -216,3 +216,9 @@ public sealed class AnimationClipRuntimeAssetResolver : IAnimationClipRuntimeAss
 		return AnimationClipSerializer.Read(absolutePath).ToClip();
 	}
 }
+
+public sealed class AnimationAssetRuntimeResolver : IAnimationAssetRuntimeResolver
+{
+    public object Resolve(RuntimeAssetResolveContext context) => global::WolfEngine.Animation.AnimationAssetJson.Read(
+        context.GetAbsolutePath(context.Asset.RelativeAssetPath), context.RuntimeType);
+}

@@ -449,7 +449,8 @@ public sealed class EditorRemoteAutomationController
 			{
 				ref var animator = ref entry.First;
 				var skeleton = animator.Skeleton;
-				var clip = animator.Clip;
+				var instance = animator.GraphInstance;
+                var clip = instance?.Program.Clips.FirstOrDefault(c => c is not null)?.Clip;
 				var matrices = animator.SkinningMatrices;
 
 				var maxOffset = 0.0f;
@@ -463,11 +464,8 @@ public sealed class EditorRemoteAutomationController
 
 				var matched = 0;
 				var unmatched = 0;
-				if (animator.PoseSource is SingleClipPoseSource clipSource)
-				{
-					matched = clipSource.MatchedBoneTrackCount;
-					unmatched = clipSource.UnmatchedBoneTrackCount;
-				}
+                if (instance is not null)
+                    matched = instance.Program.Clips.Where(c => c is not null).Sum(c => c!.BoneSlots.Count(slot => slot >= 0));
 
 				animators.Add(new AnimatorStateResult(
 					_sceneSnapshotService.EnsurePersistentEntityId(_sceneWorkspace.CurrentScene, entry.Entity),
@@ -480,9 +478,9 @@ public sealed class EditorRemoteAutomationController
 					clip?.TransformTracks.Length ?? 0,
 					matched,
 					unmatched,
-					animator.Time,
+					instance?.Time ?? 0,
 					clip?.Duration ?? 0.0f,
-					animator.Playing,
+					instance?.Playing ?? false,
 					maxOffset));
 			}
 
@@ -521,7 +519,8 @@ public sealed class EditorRemoteAutomationController
 				animators,
 				skinnedRenderers,
 				_editorFrameCoordinator.CompletedSequence,
-				_renderFrameCoordinator.CompletedSequence);
+				_renderFrameCoordinator.CompletedSequence)
+            { PrivateGeometry = _renderGraph.GetSkinnedGeometryResourceStatistics(), LastSkinningDispatchCount = _renderGraph.LastSkinningDispatchCount };
 		}, cancellationToken);
 
 	/// <summary>
@@ -777,7 +776,8 @@ public sealed class EditorRemoteAutomationController
 					frames.Select(frame => frame.FrameIndex).ToArray(),
 					SummarizeGpuFrames(frames),
 					_editorFrameCoordinator.CompletedSequence,
-					_renderFrameCoordinator.CompletedSequence);
+					_renderFrameCoordinator.CompletedSequence)
+				{ MeasuredGpuWork = SummarizeTimings(frames.Select(frame => frame.DurationMs)) };
 			}
 			finally
 			{
@@ -1129,4 +1129,63 @@ public sealed class EditorRemoteAutomationController
 	private static string Normalize(string path) => path.Replace('\\', '/');
 
 	public void NotifyStopped() => _stopped.TrySetResult();
+    private AnimationWindow AnimationEditor => (AnimationWindow)_windows.Get(EditorWindowIds.Animation).Window;
+    public Task<AnimationGraphInspectionResult> ConfigureAnimationPreviewAsync(Guid assetId, Guid modelId, Guid setId, CancellationToken token) =>
+        Enqueue(() => { AnimationEditor.ConfigurePreview(assetId, modelId, setId); return InspectAnimation(AnimationEditor.PreviewInstance!, AnimationEditor.Diagnostic); }, token);
+    public Task<AnimationGraphInspectionResult> AnimationPreviewTransportAsync(bool playing, float? seek, float? step, CancellationToken token) =>
+        Enqueue(() => { AnimationEditor.PreviewTransport(playing, seek, step); return InspectAnimation(AnimationEditor.PreviewInstance!, AnimationEditor.Diagnostic); }, token);
+    public Task<AnimationGraphInspectionResult> GetAnimationGraphAsync(Guid? entityId, CancellationToken token) =>
+        Enqueue(() => InspectAnimation(ResolveAnimationInstance(entityId), AnimationEditor.Diagnostic), token);
+    public Task<AnimationGraphInspectionResult> SetAnimationParameterAsync(Guid? entityId, string name, float value, CancellationToken token) =>
+        Enqueue(() =>
+        {
+            var instance = ResolveAnimationInstance(entityId);
+            var definition = instance.Program.ParameterSchema.FirstOrDefault(parameter => parameter.Name == name)
+                ?? throw new InvalidOperationException($"Unknown animation parameter '{name}'.");
+            var handle = instance.Program.GetParameter(name, definition.Type);
+            switch (definition.Type)
+            {
+                case AnimationParameterType.Float: instance.SetFloat(handle, value); break;
+                case AnimationParameterType.Bool:
+                    if (value is not (0 or 1)) throw new InvalidOperationException("Boolean parameter requires 0 or 1.");
+                    instance.SetBool(handle, value != 0); break;
+                case AnimationParameterType.Integer:
+                    if (!float.IsFinite(value) || value != MathF.Truncate(value)) throw new InvalidOperationException("Integer parameter requires an integer value.");
+                    instance.SetInteger(handle, checked((int)value)); break;
+            }
+            return InspectAnimation(instance, null);
+        }, token);
+    public Task<AnimationGraphInspectionResult> EditAnimationGraphAsync(string operation, Guid nodeId, int inputIndex, Guid inputId, CancellationToken token) =>
+        Enqueue(() => { AnimationEditor.EditGraph(operation, nodeId, inputIndex, inputId); return InspectAnimation(AnimationEditor.PreviewInstance!, AnimationEditor.Diagnostic); }, token);
+    public async Task<FrameCaptureResult> CaptureAnimationPreviewAsync(string path, CancellationToken token)
+    {
+        var view = await Enqueue(() => AnimationEditor.PreviewView ?? throw new InvalidOperationException("No preview is open."), token);
+        var previous = _renderGraph.SceneCaptureView;
+        _renderGraph.SetSceneCaptureView(view);
+        try { return await CaptureFrameAsync(path, token); }
+        finally { _renderGraph.SetSceneCaptureView(previous); }
+    }
+    public Task<bool> SetSkinningForceUpdatesAsync(bool forced, CancellationToken token) =>
+        Enqueue(() => { SkinningPass.ForceUpdates = forced; return forced; }, token);
+    private AnimationGraphInstance ResolveAnimationInstance(Guid? entityId)
+    {
+        if (entityId is null) return AnimationEditor.PreviewInstance ?? throw new InvalidOperationException("No animation preview is open.");
+        var scene = _playSession.RuntimeScene ?? _sceneWorkspace.CurrentScene;
+        var entity = scene.EntityIds.FirstOrDefault(pair => pair.Value == entityId.Value).Key;
+        if (!entity.IsValid || !scene.World.HasComponent<Animator>(entity)) throw new InvalidOperationException("Animator entity was not found.");
+        ref var animator = ref scene.World.GetComponent<Animator>(entity);
+        return animator.Instance ?? throw new InvalidOperationException(animator.Diagnostic ?? "Animator is unavailable.");
+    }
+    private static AnimationGraphInspectionResult InspectAnimation(AnimationGraphInstance instance, string? diagnostic) =>
+        new(diagnostic, instance.Time, instance.Playing, instance.Program.Skeleton.BoneCount, instance.Program.NodeCount,
+            instance.Contributions.ToArray(), instance.States.ToArray(),
+            instance.Program.Curves.ToDictionary(name => name, name => instance.GetCurve(instance.Program.GetCurve(name))), instance.Markers.ToArray()) { PoseHash = HashPose(instance.Output) };
+    private static ulong HashPose(Pose pose)
+    {
+        ulong hash = 14695981039346656037;
+        void Add(float value) { hash = (hash ^ BitConverter.SingleToUInt32Bits(value)) * 1099511628211; }
+        foreach(var bone in pose.Bones) { Add(bone.Position.X); Add(bone.Position.Y); Add(bone.Position.Z); Add(bone.Rotation.X); Add(bone.Rotation.Y); Add(bone.Rotation.Z); Add(bone.Rotation.W); Add(bone.Scale.X); Add(bone.Scale.Y); Add(bone.Scale.Z); }
+        return hash;
+    }
+
 }
