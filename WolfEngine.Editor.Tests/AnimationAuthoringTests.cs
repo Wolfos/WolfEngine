@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Numerics;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Editor.Projects;
@@ -22,6 +23,19 @@ public sealed class AnimationAuthoringTests
         var restored=(AnimationGraph)new AnimationDocument(path).Asset;
         Assert.That(restored.Nodes[0].Id,Is.EqualTo(node.Id));Assert.That(restored.Nodes[0].Name,Is.EqualTo("Changed"));Assert.That(restored.Layout[0].X,Is.EqualTo(20));Assert.That(document.Dirty,Is.False);
     }
+    [Test] public void Document_SaveFollowsRenamedGraphSource()
+    {
+        var original=Path.Combine(_root,"Assets","Original.animgraph.json");
+        var renamed=Path.Combine(_root,"Assets","Renamed.animgraph.json");
+        AnimationAssetJson.Write(original,new AnimationGraph());
+        var document=new AnimationDocument(original);
+        File.Move(original,renamed);
+        document.Relocate(renamed);
+        document.Edit(()=>((AnimationGraph)document.Asset).Parameters.Add(new(){Name="Speed"}));
+        document.Save();
+        Assert.That(File.Exists(original),Is.False);
+        Assert.That(AnimationAssetJson.Read<AnimationGraph>(renamed).Parameters.Single().Name,Is.EqualTo("Speed"));
+    }
     [Test] public void LegacyMigration_CreatesGraphAssetsPreservesPlaybackAndIsIdempotent()
     {
         var clip=Guid.NewGuid();var rig=Guid.NewGuid();var path=Path.Combine(_root,"Assets","unit.prefab.json");
@@ -40,5 +54,34 @@ public sealed class AnimationAuthoringTests
         Assert.That(service.Workspaces.Count(w=>w.Id==EditorWorkspaceService.AnimationWorkspaceId),Is.EqualTo(1));
         service.Delete(EditorWorkspaceService.AnimationWorkspaceId);
         var restored=new EditorWorkspaceService(EditorPreferences.GetWorkspaceSettings());Assert.That(restored.Workspaces.Any(w=>w.Id==EditorWorkspaceService.AnimationWorkspaceId),Is.False);
+    }
+    [Test] public void AnimationWorkspace_MigratesOldDefaultButPreservesCustomPanels()
+    {
+        var old=new EditorWorkspacePreferences { Version=1, AnimationWorkspaceSeeded=true,
+            ActiveWorkspaceId=EditorWorkspaceService.AnimationWorkspaceId,
+            Workspaces=[new(){Id=EditorWorkspaceService.AnimationWorkspaceId,Name="Animation",
+                OpenWindowIds=[EditorWindowIds.Assets,EditorWindowIds.Animation,EditorWindowIds.AssetEditor,EditorWindowIds.Log]}]};
+        var migrated=new EditorWorkspaceService(old);
+        Assert.That(migrated.ActiveWorkspace.OpenWindows,Is.EquivalentTo(new[]{EditorWindowIds.Animation}));
+        Assert.That(migrated.ConsumeAnimationDockLayoutReset(),Is.True);
+        Assert.That(migrated.ConsumeAnimationDockLayoutReset(),Is.False);
+        old.Workspaces[0].OpenWindowIds=[EditorWindowIds.Animation,EditorWindowIds.Profiler];
+        var custom=new EditorWorkspaceService(old);
+        Assert.That(custom.ActiveWorkspace.OpenWindows,Is.EquivalentTo(new[]{EditorWindowIds.Animation,EditorWindowIds.Profiler}));
+        Assert.That(custom.ConsumeAnimationDockLayoutReset(),Is.False);
+    }
+    [Test] public void GraphContextActions_CreateAtPointerAndDeleteConnectedNode()
+    {
+        var graph=new AnimationGraph();
+        var clip=AnimationWindow.CreateNode(graph,AnimationNodeKind.Clip,new Vector2(120,80));
+        var output=AnimationWindow.CreateNode(graph,AnimationNodeKind.Output,new Vector2(340,80));
+        output.Inputs[0]=clip.Id;
+        Assert.That(graph.Layout.Single(layout=>layout.NodeId==clip.Id).X,Is.EqualTo(120));
+        Assert.That(graph.Output,Is.EqualTo(output.Id));
+        AnimationWindow.DeleteNode(graph,clip.Id);
+        Assert.That(output.Inputs[0],Is.EqualTo(Guid.Empty));
+        Assert.That(graph.Layout.Any(layout=>layout.NodeId==clip.Id),Is.False);
+        AnimationWindow.DeleteNode(graph,output.Id);
+        Assert.That(graph.Output,Is.EqualTo(Guid.Empty));
     }
 }

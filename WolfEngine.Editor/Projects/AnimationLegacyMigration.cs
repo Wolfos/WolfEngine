@@ -40,7 +40,7 @@ public static class AnimationLegacyMigration
                             Loop = data["Loop"]?.GetValue<bool>() ?? true, Speed = data["Speed"]?.GetValue<float>() ?? 1,
                             StartTime = data["Time"]?.GetValue<float>() ?? 0, Parameter = "Playing" };
                         var output = new AnimationNode { Kind = AnimationNodeKind.Output, Name = "Output", Inputs = [clip.Id] };
-                        var graph = new AnimationGraph { Name = "Migrated Clip", Nodes = [clip, output], Output = output.Id,
+                        var graph = new AnimationGraph { Nodes = [clip, output], Output = output.Id,
                             Parameters = [new() { Name = "Playing", Type = AnimationParameterType.Bool, Default = playing ? 1 : 0 }],
                             Layout = [new() { NodeId = clip.Id, X = 20, Y = 20 }, new() { NodeId = output.Id, X = 250, Y = 20 }] };
                         Write(sequenceId, key + ".clip" + AnimationSequence.Extension, new AnimationSequence { ClipId = clipId }, AssetType.DataAsset);

@@ -93,7 +93,6 @@ public sealed class AnimationGraph
 	public const string Extension = ".animgraph.json";
 
 	public int Version { get; set; } = 1;
-	public string Name { get; set; } = "Animation Graph";
 	public List<AnimationParameter> Parameters { get; set; } = [];
 	public List<AnimationNode> Nodes { get; set; } = [];
 	public Guid Output { get; set; }

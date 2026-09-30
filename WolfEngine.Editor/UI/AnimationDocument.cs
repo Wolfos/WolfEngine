@@ -11,7 +11,7 @@ public sealed class AnimationDocument
     private readonly Type _type;
     private string _saved;
     public object Asset { get; private set; }
-    public string Path { get; }
+    public string Path { get; private set; }
     public long Revision { get; private set; }
     public bool Dirty => Snapshot() != _saved;
     public bool CanUndo => _undo.Count > 0;
@@ -20,6 +20,11 @@ public sealed class AnimationDocument
     {
         Path = path; _type = AnimationAssetJson.GetAssetType(path) ?? throw new ArgumentException("Unsupported animation document.");
         Asset = AnimationAssetJson.Read(path, _type); _saved = Snapshot();
+    }
+    public void Relocate(string path)
+    {
+        if (AnimationAssetJson.GetAssetType(path) != _type) throw new ArgumentException("Incompatible animation document path.", nameof(path));
+        Path = path;
     }
     public string Snapshot() => JsonSerializer.Serialize(Asset, _type, AnimationAssetJson.Options);
     public void Commit(string before)

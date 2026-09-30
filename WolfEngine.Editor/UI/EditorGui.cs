@@ -357,6 +357,8 @@ public class EditorGui
 
 	private void ApplyDefaultDockLayout(EditorWorkspace workspace, uint dockspaceId)
 	{
+		if (workspace.Id == EditorWorkspaceService.AnimationWorkspaceId && _workspaces.ConsumeAnimationDockLayoutReset())
+			NativeDockBuilder.RemoveNode(dockspaceId);
 		if (NativeDockBuilder.GetNode(dockspaceId) != IntPtr.Zero) return;
 		if (workspace.Id != EditorWorkspaceService.SceneWorkspaceId && workspace.Id != EditorWorkspaceService.AssetsWorkspaceId && workspace.Id != EditorWorkspaceService.AnimationWorkspaceId) return;
 
@@ -366,20 +368,17 @@ public class EditorGui
 		NativeDockBuilder.RemoveNode(dockspaceId);
 		NativeDockBuilder.AddNode(dockspaceId, NativeDockBuilder.DockSpaceFlag);
 		NativeDockBuilder.SetNodeSize(dockspaceId, ImGui.GetWindowSize());
+		if (workspace.Id == EditorWorkspaceService.AnimationWorkspaceId)
+		{
+			Dock(EditorWindowIds.Animation, dockspaceId);
+			NativeDockBuilder.Finish(dockspaceId);
+			return;
+		}
 
 		NativeDockBuilder.SplitNode(dockspaceId, ImGuiDir.Left, 0.18f, out var leftId, out var centerAndRightId);
 		NativeDockBuilder.SplitNode(centerAndRightId, ImGuiDir.Right, 0.20f, out var rightId, out var centerId);
 		NativeDockBuilder.SplitNode(centerId, ImGuiDir.Down, 0.25f, out var bottomId, out var centerTopId);
 
-		if (workspace.Id == EditorWorkspaceService.AnimationWorkspaceId)
-        {
-            Dock(EditorWindowIds.Assets, leftId);
-            Dock(EditorWindowIds.Animation, centerTopId);
-            Dock(EditorWindowIds.AssetEditor, rightId);
-            Dock(EditorWindowIds.Log, bottomId);
-            NativeDockBuilder.Finish(dockspaceId);
-            return;
-        }
         if (workspace.Id == EditorWorkspaceService.SceneWorkspaceId)
         {
 			Dock(EditorWindowIds.Entities, leftId);

@@ -22,6 +22,8 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     private readonly Dictionary<Guid, AnimationDocument> _documents = new();
     private AnimationDocument? _document;
     private Guid _assetId, _selectedNode, _connectFrom, _modelId, _setId;
+    private Guid _contextNode;
+    private Vector2 _contextCanvasPosition;
     private string? _gestureSnapshot;
     private AnimationPreviewScene? _preview;
     private string? _projectPath, _diagnostic;
@@ -47,6 +49,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             _document = new AnimationDocument(_project.GetAbsoluteAssetPath(asset.Id, asset.RelativeSourcePath));
             _documents.Add(asset.Id, _document);
         }
+        else _document.Relocate(_project.GetAbsoluteAssetPath(asset.Id, asset.RelativeSourcePath));
         _assetId = asset.Id;
         _gestureSnapshot = null; _selectedNode = default; _compiledRevision = -1; _diagnostic = null;
         if (_workspaces.Workspaces.Any(w => w.Id == EditorWorkspaceService.AnimationWorkspaceId)) _workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
@@ -70,8 +73,13 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         {
             try { Open(asset); } catch (Exception exception) { _diagnostic = exception.Message; }
         }
+        if (_document is not null && _project.TryGetAsset(_assetId, out var currentAsset))
+            _document.Relocate(_project.GetAbsoluteAssetPath(_assetId, currentAsset.RelativeSourcePath));
         if (_document is null) { ImGui.TextUnformatted("Open an animation graph from Assets."); DrawLive(scene); ImGui.End(); return; }
-        ImGui.TextUnformatted(System.IO.Path.GetFileName(_document.Path) + (_document.Dirty ? " *" : ""));
+        var sourceName = System.IO.Path.GetFileName(_document.Path);
+        var graphName = sourceName.EndsWith(AnimationGraph.Extension, StringComparison.OrdinalIgnoreCase)
+            ? sourceName[..^AnimationGraph.Extension.Length] : System.IO.Path.GetFileNameWithoutExtension(sourceName);
+        ImGui.TextUnformatted(graphName + (_document.Dirty ? " *" : ""));
         var readOnly = _project.IsAssetReadOnly(_assetId);
         ImGui.BeginDisabled(readOnly);
         if (ImGui.Button("Save")) Save(); ImGui.SameLine();
@@ -148,23 +156,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     }
     private void DrawGraph(AnimationGraph graph)
     {
-        var name = graph.Name; if (ImGui.InputText("Graph name", ref name, 128)) graph.Name = name;
-        if (ImGui.BeginCombo("Add node", "Choose operation"))
-        {
-            foreach (var kind in Enum.GetValues<AnimationNodeKind>())
-                if (ImGui.Selectable(kind.ToString()))
-                {
-                    var node = new AnimationNode { Kind = kind, Name = kind.ToString() };
-                    var count = kind is AnimationNodeKind.Blend or AnimationNodeKind.MaskedBlend or AnimationNodeKind.Locomotion1D ? 2 :
-                        kind is AnimationNodeKind.Output or AnimationNodeKind.CurveRemap or AnimationNodeKind.Select or AnimationNodeKind.StateMachine ? 1 : 0;
-                    for (var i = 0; i < count; i++) node.Inputs.Add(Guid.Empty);
-                    if (kind == AnimationNodeKind.Locomotion1D) node.Thresholds = [0, 1];
-                    graph.Nodes.Add(node); graph.Layout.Add(new() { NodeId = node.Id, X = 40 + graph.Nodes.Count * 20, Y = 40 + graph.Nodes.Count * 15 });
-                    if (kind == AnimationNodeKind.Output) graph.Output = node.Id;
-                    _selectedNode = node.Id;
-                }
-            ImGui.EndCombo();
-        }
         var content = ImGui.GetContentRegionAvail();
         const float dividerSize = 6;
         var minimumSectionHeight = Math.Min(140, Math.Max(0, (content.Y - dividerSize) * .25f));
@@ -206,6 +197,19 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         {
             if (ImGui.IsMouseDragging(ImGuiMouseButton.Middle)) _pan += ImGui.GetIO().MouseDelta;
             if (ImGui.GetIO().MouseWheel != 0) _zoom = Math.Clamp(_zoom + ImGui.GetIO().MouseWheel * 0.1f, 0.4f, 2);
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+            {
+                var mouse = ImGui.GetMousePos();
+                _contextCanvasPosition = (mouse - origin) / _zoom;
+                _contextNode = graph.Nodes.LastOrDefault(node =>
+                {
+                    var position = Position(node.Id);
+                    var height = Math.Max(80, 62 + node.Inputs.Count * 22);
+                    return mouse.X >= position.X && mouse.X <= position.X + 160 * _zoom &&
+                           mouse.Y >= position.Y && mouse.Y <= position.Y + height * _zoom;
+                })?.Id ?? Guid.Empty;
+                ImGui.OpenPopup("Graph context menu");
+            }
         }
         foreach (var node in graph.Nodes)
         {
@@ -241,12 +245,55 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             }
             ImGui.PopID();
         }
+        if (ImGui.BeginPopup("Graph context menu"))
+        {
+            if (_contextNode != Guid.Empty)
+            {
+                if (ImGui.MenuItem("Delete node"))
+                {
+                    DeleteNode(graph, _contextNode);
+                    if (_selectedNode == _contextNode) _selectedNode = Guid.Empty;
+                    if (_connectFrom == _contextNode) _connectFrom = Guid.Empty;
+                    _contextNode = Guid.Empty;
+                }
+            }
+            else if (ImGui.BeginMenu("Add node"))
+            {
+                foreach (var kind in Enum.GetValues<AnimationNodeKind>())
+                    if (ImGui.MenuItem(kind.ToString()))
+                        _selectedNode = CreateNode(graph, kind, _contextCanvasPosition).Id;
+                ImGui.EndMenu();
+            }
+            ImGui.EndPopup();
+        }
         ImGui.EndChild();
         Vector2 Position(Guid id)
         {
             var layout = graph.Layout.FirstOrDefault(p => p.NodeId == id);
             return origin + new Vector2(layout?.X ?? 20, layout?.Y ?? 20) * _zoom;
         }
+    }
+    internal static AnimationNode CreateNode(AnimationGraph graph, AnimationNodeKind kind, Vector2 position)
+    {
+        var node = new AnimationNode { Kind = kind, Name = kind.ToString() };
+        var count = kind is AnimationNodeKind.Blend or AnimationNodeKind.MaskedBlend or AnimationNodeKind.Locomotion1D ? 2 :
+            kind is AnimationNodeKind.Output or AnimationNodeKind.CurveRemap or AnimationNodeKind.Select or AnimationNodeKind.StateMachine ? 1 : 0;
+        for (var i = 0; i < count; i++) node.Inputs.Add(Guid.Empty);
+        if (kind == AnimationNodeKind.Locomotion1D) node.Thresholds = [0, 1];
+        graph.Nodes.Add(node);
+        graph.Layout.Add(new() { NodeId = node.Id, X = position.X, Y = position.Y });
+        if (kind == AnimationNodeKind.Output) graph.Output = node.Id;
+        return node;
+    }
+    internal static void DeleteNode(AnimationGraph graph, Guid nodeId)
+    {
+        graph.Nodes.RemoveAll(node => node.Id == nodeId);
+        graph.Layout.RemoveAll(layout => layout.NodeId == nodeId);
+        foreach (var node in graph.Nodes)
+            for (var i = 0; i < node.Inputs.Count; i++)
+                if (node.Inputs[i] == nodeId) node.Inputs[i] = Guid.Empty;
+        if (graph.Output == nodeId)
+            graph.Output = graph.Nodes.FirstOrDefault(node => node.Kind == AnimationNodeKind.Output)?.Id ?? Guid.Empty;
     }
     private void DrawNode(AnimationGraph graph, AnimationNode node)
     {
@@ -291,8 +338,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             var offset = node.CurveOffset; if (ImGui.InputFloat("Offset", ref offset)) node.CurveOffset = offset;
         }
         if (node.Kind == AnimationNodeKind.Output && ImGui.Button("Use as graph output")) graph.Output = node.Id;
-        if (ImGui.Button("Delete node"))
-        { graph.Nodes.Remove(node); graph.Layout.RemoveAll(p => p.NodeId == node.Id); foreach (var other in graph.Nodes) for (var i = 0; i < other.Inputs.Count; i++) if (other.Inputs[i] == node.Id) other.Inputs[i] = Guid.Empty; }
         ImGui.PopID();
     }
     private static void ParameterChoice(AnimationGraph graph, string label, ref string name)
@@ -344,7 +389,11 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         if (changed || _document?.Revision != _compiledRevision) TryCompilePreview();
         if (_preview is null) return;
         var instance = _preview.Instance;
-        var playing = instance.Playing; if (ImGui.Checkbox("Play preview", ref playing)) instance.Playing = playing;
+        if (ImGui.Button(instance.Playing ? "Stop preview" : "Play preview"))
+        {
+            if (instance.Playing) { instance.Playing = false; _preview.Seek(0); }
+            else instance.Playing = true;
+        }
         ImGui.SameLine(); if (ImGui.Button("Step frame")) _preview.Step(1f / 30);
         var speed = instance.Speed; if (ImGui.SliderFloat("Speed", ref speed, 0, 3)) instance.Speed = speed;
         _scrub = instance.Time; if (ImGui.SliderFloat("Scrub seconds", ref _scrub, 0, 10)) { instance.Playing = false; _preview.Seek(_scrub); }

@@ -15,6 +15,7 @@ public sealed class EditorWorkspaceServiceTests
 		Assert.That(service.ActiveWorkspace.Name, Is.EqualTo("Scene"));
 		Assert.That(service.Workspaces[0].OpenWindows, Does.Contain(EditorWindowIds.Scene));
 		Assert.That(service.Workspaces[1].OpenWindows, Does.Contain(EditorWindowIds.Assets));
+		Assert.That(service.Workspaces[2].OpenWindows, Is.EquivalentTo(new[] { EditorWindowIds.Animation }));
 	}
 
 	[Test]

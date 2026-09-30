@@ -52,6 +52,7 @@ public interface IEditorWorkspaceService
 	void CloseWindow(string windowId);
 	void LoadImGuiSettings();
 	void SaveImGuiSettingsIfNeeded(bool force = false);
+	bool ConsumeAnimationDockLayoutReset();
 }
 
 public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposable
@@ -68,6 +69,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	private Guid _activeId;
 	private DateTime _lastIniSave = DateTime.MinValue;
 	private bool _imguiSettingsLoaded;
+	private bool _animationDockLayoutNeedsReset;
 
 	public EditorWorkspaceService(IEditorNotificationService notifications)
 	{
@@ -185,6 +187,12 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 	}
 
 	public void Dispose() => SaveImGuiSettingsIfNeeded(true);
+	public bool ConsumeAnimationDockLayoutReset()
+	{
+		var reset = _animationDockLayoutNeedsReset;
+		_animationDockLayoutNeedsReset = false;
+		return reset;
+	}
 
 	private void Restore(EditorWorkspacePreferences? preferences)
 	{
@@ -195,8 +203,14 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 				if (saved.Id == Guid.Empty || string.IsNullOrWhiteSpace(saved.Name) ||
 				    _workspaces.Any(workspace => workspace.Id == saved.Id || string.Equals(workspace.Name, saved.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
 					continue;
-				_workspaces.Add(new EditorWorkspace(saved.Id, saved.Name.Trim()[..Math.Min(saved.Name.Trim().Length, 64)],
-					saved.OpenWindowIds.Where(EditorWindowIds.All.Contains)));
+				var openWindows = saved.OpenWindowIds.Where(EditorWindowIds.All.Contains).ToArray();
+				if (saved.Id == AnimationWorkspaceId && openWindows.ToHashSet(StringComparer.Ordinal).SetEquals(
+					[EditorWindowIds.Assets, EditorWindowIds.Animation, EditorWindowIds.AssetEditor, EditorWindowIds.Log]))
+				{
+					openWindows = [EditorWindowIds.Animation];
+					_animationDockLayoutNeedsReset = true;
+				}
+				_workspaces.Add(new EditorWorkspace(saved.Id, saved.Name.Trim()[..Math.Min(saved.Name.Trim().Length, 64)], openWindows));
 			}
 		}
 
@@ -209,7 +223,7 @@ public sealed class EditorWorkspaceService : IEditorWorkspaceService, IDisposabl
 		}
         if (preferences?.AnimationWorkspaceSeeded != true && !_workspaces.Any(w => w.Id == AnimationWorkspaceId || string.Equals(w.Name, "Animation", StringComparison.OrdinalIgnoreCase)))
             _workspaces.Add(new EditorWorkspace(AnimationWorkspaceId, "Animation",
-                [EditorWindowIds.Assets, EditorWindowIds.Animation, EditorWindowIds.AssetEditor, EditorWindowIds.Log]));
+                [EditorWindowIds.Animation]));
         _activeId = preferences?.ActiveWorkspaceId is { } active && _workspaces.Any(workspace => workspace.Id == active)
 			? active
 			: _workspaces[0].Id;
