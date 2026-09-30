@@ -499,6 +499,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     }
     private static void DrawInstance(AnimationGraphInstance instance, bool readOnly)
     {
+        ImGui.PushID(readOnly ? "Live animator parameters" : "Preview parameters");
         ImGui.BeginDisabled(readOnly);
         foreach (var parameter in instance.Program.ParameterSchema)
         {
@@ -515,5 +516,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         foreach (var state in instance.States) ImGui.TextUnformatted($"State {state.State}, blend {state.BlendRemaining:F2}s, reason: {state.Reason}");
         foreach (var curve in instance.Program.Curves) ImGui.TextUnformatted($"{curve}: {instance.GetCurve(instance.Program.GetCurve(curve)):F3}");
         foreach (var marker in instance.Markers) ImGui.TextUnformatted($"Marker: {marker.Name} @ {marker.ClipTime:F2}s");
+        ImGui.PopID();
     }
 }
