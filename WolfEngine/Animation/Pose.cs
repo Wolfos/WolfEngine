@@ -23,17 +23,26 @@ public struct BoneTransform
 	public static BoneTransform Identity => new(Vector3.Zero, Quaternion.Identity, Vector3.One);
 
 	/// <summary>Composes to a row-vector matrix, matching <c>TransformSystem.ComposeTRS</c>.</summary>
-    public readonly Matrix4x4 ToMatrix()
-    {
-        var matrix = Matrix4x4.CreateFromQuaternion(Rotation);
-        // Scale the basis rows and set translation directly: identical row-vector TRS,
-        // without two general 4x4 matrix multiplications per bone.
-        matrix.M11 *= Scale.X; matrix.M12 *= Scale.X; matrix.M13 *= Scale.X;
-        matrix.M21 *= Scale.Y; matrix.M22 *= Scale.Y; matrix.M23 *= Scale.Y;
-        matrix.M31 *= Scale.Z; matrix.M32 *= Scale.Z; matrix.M33 *= Scale.Z;
-        matrix.M41 = Position.X; matrix.M42 = Position.Y; matrix.M43 = Position.Z;
-        return matrix;
-    }
+	public readonly Matrix4x4 ToMatrix()
+	{
+		var matrix = Matrix4x4.CreateFromQuaternion(Rotation);
+
+		// Scale the basis rows and set translation directly: identical row-vector TRS,
+		// without two general 4x4 matrix multiplications per bone.
+		matrix.M11 *= Scale.X;
+		matrix.M12 *= Scale.X;
+		matrix.M13 *= Scale.X;
+		matrix.M21 *= Scale.Y;
+		matrix.M22 *= Scale.Y;
+		matrix.M23 *= Scale.Y;
+		matrix.M31 *= Scale.Z;
+		matrix.M32 *= Scale.Z;
+		matrix.M33 *= Scale.Z;
+		matrix.M41 = Position.X;
+		matrix.M42 = Position.Y;
+		matrix.M43 = Position.Z;
+		return matrix;
+	}
 
 	public static BoneTransform FromMatrix(in Matrix4x4 matrix)
 	{
@@ -109,7 +118,7 @@ public sealed class Pose
 	}
 
 	/// <summary>
-    /// Per-element interpolation from <paramref name="a"/> to <paramref name="b"/>.
+	/// Per-element interpolation from <paramref name="a"/> to <paramref name="b"/>.
 	/// </summary>
 	public static void Blend(Pose a, Pose b, float weight, Pose destination, ReadOnlySpan<float> boneMask = default)
 	{
@@ -118,12 +127,16 @@ public sealed class Pose
 		ArgumentNullException.ThrowIfNull(destination);
 
 		var boneCount = Math.Min(destination.Bones.Length, Math.Min(a.Bones.Length, b.Bones.Length));
-        if (!boneMask.IsEmpty && boneMask.Length < boneCount) throw new ArgumentException("Mask must cover every blended bone.", nameof(boneMask));
-        for (var i = 0; i < boneCount; i++)
-        {
-            var boneWeight = boneMask.IsEmpty ? weight : weight * boneMask[i];
-            destination.Bones[i] = boneWeight == 0 ? a.Bones[i] : boneWeight == 1 ? b.Bones[i] : BoneTransform.Lerp(a.Bones[i], b.Bones[i], boneWeight);
-        }
+		if (boneMask.IsEmpty == false && boneMask.Length < boneCount)
+		{
+			throw new ArgumentException("Mask must cover every blended bone.", nameof(boneMask));
+		}
+
+		for (var i = 0; i < boneCount; i++)
+		{
+			var boneWeight = boneMask.IsEmpty ? weight : weight * boneMask[i];
+			destination.Bones[i] = boneWeight == 0 ? a.Bones[i] : boneWeight == 1 ? b.Bones[i] : BoneTransform.Lerp(a.Bones[i], b.Bones[i], boneWeight);
+		}
 
 		var transformCount = Math.Min(destination.Transforms.Length, Math.Min(a.Transforms.Length, b.Transforms.Length));
 		for (var i = 0; i < transformCount; i++)

@@ -15,16 +15,24 @@ namespace WolfEngine.Animation;
 public sealed class AnimationSystem : IUpdate
 {
 	private readonly WorldTag _tag;
-    public AnimationSystem() : this(WorldTag.All) { }
-    public AnimationSystem(WorldTag tag) => _tag = tag;
-    public WorldTag GetTag() => _tag;
+
+	public AnimationSystem() : this(WorldTag.All)
+	{
+	}
+
+	public AnimationSystem(WorldTag tag) => _tag = tag;
+
+	public WorldTag GetTag() => _tag;
 
 	public void Update(float deltaTime, World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
-        using var profile = Profiling.FrameProfiler.Instance.Measure("Animation evaluation");
+		using var profile = Profiling.FrameProfiler.Instance.Measure("Animation evaluation");
 
-		long prepareTicks = 0, graphTicks = 0, matrixTicks = 0, bindingTicks = 0;
+		long prepareTicks = 0;
+		long graphTicks = 0;
+		long matrixTicks = 0;
+		long bindingTicks = 0;
 		foreach (var entry in world.View<Animator>())
 		{
 			if (world.IsEnabled(entry.Entity) == false)
@@ -39,50 +47,65 @@ public sealed class AnimationSystem : IUpdate
 				continue;
 			}
 
+			var instance = animator.GraphInstance!;
+			if (animator.Bindings is null)
+			{
+				try
+				{
+					animator.Bindings = AnimationOutputBindings.Resolve(world, entry.Entity, instance);
+				}
+				catch (InvalidOperationException exception)
+				{
+					animator.Diagnostic = exception.Message;
+					continue;
+				}
+			}
 
-            var instance = animator.GraphInstance!;
-            if (animator.Bindings is null)
-            {
-                try { animator.Bindings = AnimationOutputBindings.Resolve(world, entry.Entity, instance); }
-                catch (InvalidOperationException exception) { animator.Diagnostic = exception.Message; continue; }
-            }
-            prepareTicks += Stopwatch.GetTimestamp() - start;
-            start = Stopwatch.GetTimestamp();
-            var changed = instance.Evaluate(deltaTime);
-            graphTicks += Stopwatch.GetTimestamp() - start;
-            start = Stopwatch.GetTimestamp();
-            if (changed || !animator.HasPreviousPose)
-            {
-                animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
-                instance.Output.ComputeSkinningMatrices(animator.Skeleton!, animator.SkinningMatrices!);
-                var bonesChanged = !animator.HasPreviousPose || !animator.SkinningMatrices.AsSpan().SequenceEqual(animator.PreviousSkinningMatrices);
-                if (!animator.HasPreviousPose)
-                {
-                    animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
-                    animator.HasPreviousPose = true;
-                }
-                if (bonesChanged) animator.PoseGeneration++;
-            }
-            matrixTicks += Stopwatch.GetTimestamp() - start;
-            start = Stopwatch.GetTimestamp();
-            animator.Bindings.Apply(instance.Output);
-            bindingTicks += Stopwatch.GetTimestamp() - start;
+			prepareTicks += Stopwatch.GetTimestamp() - start;
 
+			start = Stopwatch.GetTimestamp();
+			var changed = instance.Evaluate(deltaTime);
+			graphTicks += Stopwatch.GetTimestamp() - start;
+
+			start = Stopwatch.GetTimestamp();
+			if (changed || animator.HasPreviousPose == false)
+			{
+				animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+				instance.Output.ComputeSkinningMatrices(animator.Skeleton!, animator.SkinningMatrices!);
+				var bonesChanged = animator.HasPreviousPose == false ||
+					animator.SkinningMatrices.AsSpan().SequenceEqual(animator.PreviousSkinningMatrices) == false;
+				if (animator.HasPreviousPose == false)
+				{
+					animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+					animator.HasPreviousPose = true;
+				}
+
+				if (bonesChanged)
+				{
+					animator.PoseGeneration++;
+				}
+			}
+
+			matrixTicks += Stopwatch.GetTimestamp() - start;
+
+			start = Stopwatch.GetTimestamp();
+			animator.Bindings.Apply(instance.Output);
+			bindingTicks += Stopwatch.GetTimestamp() - start;
 		}
 
-        var profiler = Profiling.FrameProfiler.Instance;
-        profiler.RecordElapsed("Animation prepare", prepareTicks);
-        profiler.RecordElapsed("Animation graph sampling", graphTicks);
-        profiler.RecordElapsed("Animation rig matrices", matrixTicks);
-        profiler.RecordElapsed("Animation bound outputs", bindingTicks);
-        using var sockets = profiler.Measure("Animation sockets");
+		var profiler = Profiling.FrameProfiler.Instance;
+		profiler.RecordElapsed("Animation prepare", prepareTicks);
+		profiler.RecordElapsed("Animation graph sampling", graphTicks);
+		profiler.RecordElapsed("Animation rig matrices", matrixTicks);
+		profiler.RecordElapsed("Animation bound outputs", bindingTicks);
+		using var sockets = profiler.Measure("Animation sockets");
 		ApplyExposedBones(world);
 	}
 
 	/// <summary>
 	/// Copies model-space bone transforms onto the entities that opted into being sockets.
 	/// </summary>
-    internal static void ApplyExposedBones(World world)
+	internal static void ApplyExposedBones(World world)
 	{
 		foreach (var entry in world.View<ExposedBone>())
 		{
@@ -132,18 +155,24 @@ public sealed class AnimationSystem : IUpdate
 /// <summary>Maintains renderable bind poses and sockets in the editor's authoring world.</summary>
 public sealed class BindPoseAnimationSystem : IUpdate
 {
-    public WorldTag GetTag() => WorldTag.Authoring;
+	public WorldTag GetTag() => WorldTag.Authoring;
 
-    public void Update(float deltaTime, World world)
-    {
-        ArgumentNullException.ThrowIfNull(world);
-        using var profile = Profiling.FrameProfiler.Instance.Measure("Animation bind pose");
-        foreach (var entry in world.View<Animator>())
-        {
-            if (!world.IsEnabled(entry.Entity)) continue;
-            ref var animator = ref entry.First;
-            animator.TryPrepareBindPose();
-        }
-        AnimationSystem.ApplyExposedBones(world);
-    }
+	public void Update(float deltaTime, World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		using var profile = Profiling.FrameProfiler.Instance.Measure("Animation bind pose");
+
+		foreach (var entry in world.View<Animator>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			ref var animator = ref entry.First;
+			animator.TryPrepareBindPose();
+		}
+
+		AnimationSystem.ApplyExposedBones(world);
+	}
 }
