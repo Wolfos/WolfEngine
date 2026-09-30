@@ -975,7 +975,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				}
 			],
 			Artifacts = [],
-			Dependencies = []
+			Dependencies = loadResult.Asset is IDataAssetDependencies dependencies
+				? dependencies.GetDependencies().Where(id => id != Guid.Empty).Distinct().Select(id => new AssetDependencyRecord
+				{
+					FromNodeId = nodeId,
+					ToNodeId = id,
+					Kind = "data-asset",
+					IsHard = true
+				}).ToList()
+				: []
 		};
 	}
 

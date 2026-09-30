@@ -14,7 +14,7 @@ public static class AnimationLegacyMigration
     {
         var assets = Path.Combine(projectRoot, "Assets");
         if (!Directory.Exists(assets)) throw new DirectoryNotFoundException(assets);
-        var count = 0;
+        var count = MigrateStandaloneAssets(assets);
         foreach (var path in Directory.EnumerateFiles(assets, "*.json", SearchOption.AllDirectories).ToArray())
         {
             if (!(path.EndsWith(".cell.json", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".prefab.json", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".scene.json", StringComparison.OrdinalIgnoreCase))) continue;
@@ -43,8 +43,8 @@ public static class AnimationLegacyMigration
                         var graph = new AnimationGraph { Name = "Migrated Clip", Nodes = [clip, output], Output = output.Id,
                             Parameters = [new() { Name = "Playing", Type = AnimationParameterType.Bool, Default = playing ? 1 : 0 }],
                             Layout = [new() { NodeId = clip.Id, X = 20, Y = 20 }, new() { NodeId = output.Id, X = 250, Y = 20 }] };
-                        Write(sequenceId, key + AnimationSequence.Extension, new AnimationSequence { ClipId = clipId }, AssetType.AnimationSequence);
-                        Write(setId, key + AnimationSet.Extension, new AnimationSet { SkeletonId = skeletonId, Clips = new() { ["Clip"] = sequenceId } }, AssetType.AnimationSet);
+                        Write(sequenceId, key + ".clip" + AnimationSequence.Extension, new AnimationSequence { ClipId = clipId }, AssetType.DataAsset);
+                        Write(setId, key + ".set" + AnimationSet.Extension, new AnimationSet { SkeletonId = skeletonId, Clips = new() { ["Clip"] = sequenceId } }, AssetType.DataAsset);
                         Write(graphId, key + AnimationGraph.Extension, graph, AssetType.AnimationGraph);
                         data["GraphAsset"] = new JsonObject { ["NodeId"] = graphId }; data["ClipSetAsset"] = new JsonObject { ["NodeId"] = setId };
                     }
@@ -60,13 +60,49 @@ public static class AnimationLegacyMigration
         {
             var path = Path.Combine(assets, "Animation", "Migrated", name);
             if (File.Exists(path)) return;
-            AnimationAssetJson.Write(path, asset);
+            if (asset is IDataAsset dataAsset) new DataAssetStore().SaveAsset(path, asset.GetType(), dataAsset);
+            else AnimationAssetJson.Write(path, asset);
             new AssetMetadataStore().Save(path + ".meta", new AssetSourceMetaFile
             {
-                SourceId = StableId("source:" + id), ImporterId = "animation-asset", ImporterVersion = 1,
+                SourceId = StableId("source:" + id), ImporterId = asset is IDataAsset ? AssetImporterIds.DataAsset : "animation-asset", ImporterVersion = 1,
                 SubAssets = [new() { Key = "main", NodeId = id, Type = type, Name = name }]
             });
         }
+    }
+    private static int MigrateStandaloneAssets(string assets)
+    {
+        var store = new DataAssetStore();
+        var metadataStore = new AssetMetadataStore();
+        var count = 0;
+        foreach (var (extension, type) in new[]
+        {
+            (AnimationSet.LegacyExtension, typeof(AnimationSet)),
+            (AnimationSequence.LegacyExtension, typeof(AnimationSequence)),
+            (BoneMask.LegacyExtension, typeof(BoneMask))
+        })
+        {
+            foreach (var oldPath in Directory.EnumerateFiles(assets, "*" + extension, SearchOption.AllDirectories).ToArray())
+            {
+                var newPath = oldPath[..^".json".Length] + DataAssetFile.FileExtension;
+                if (File.Exists(newPath))
+                    throw new IOException($"Cannot migrate '{oldPath}': '{newPath}' already exists.");
+                var asset = (IDataAsset)AnimationAssetJson.Read(oldPath, type);
+                var metadata = metadataStore.Load(oldPath + ".meta");
+                store.SaveAsset(newPath, type, asset);
+                metadata.ImporterId = AssetImporterIds.DataAsset;
+                metadata.ImporterVersion = 1;
+                foreach (var subAsset in metadata.SubAssets)
+                {
+                    subAsset.Type = AssetType.DataAsset;
+                    subAsset.Name = Path.GetFileName(newPath);
+                }
+                metadataStore.Save(newPath + ".meta", metadata);
+                File.Delete(oldPath);
+                File.Delete(oldPath + ".meta");
+                count++;
+            }
+        }
+        return count;
     }
     private static Guid StableId(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
 }

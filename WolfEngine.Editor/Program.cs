@@ -16,7 +16,7 @@ public static class Program
 	{
 		if (args.Length == 2 && args[0] == "--migrate-animation")
         {
-            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components.");
+            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components and animation assets.");
             return;
         }
         using var application = EditorApplication.Create();
@@ -109,7 +109,7 @@ public static class Program
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<ModelAssetEditor>();
         services.AddSingleton<AnimationWindow>();
-        foreach (var type in new[] { AssetType.AnimationGraph, AssetType.AnimationSet, AssetType.AnimationSequence, AssetType.BoneMask })
+        foreach (var type in new[] { AssetType.AnimationGraph })
             services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
                 provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();

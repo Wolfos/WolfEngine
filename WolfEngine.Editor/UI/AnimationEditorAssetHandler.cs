@@ -8,7 +8,7 @@ namespace WolfEngine.Editor.UI;
 public sealed class AnimationEditorAssetHandler(AssetType type, AnimationWindow window, IEditorProjectService project, IProjectAssetPipelineService pipeline) : IEditorAssetHandler
 {
     public AssetType AssetType => type;
-    public string DisplayName => type switch { AssetType.AnimationGraph => "Animation Graph", AssetType.AnimationSequence => "Animation Clip", AssetType.AnimationSet => "Animation Clip Set", _ => "Bone Mask" };
+    public string DisplayName => "Animation Graph";
     public string ThumbnailLabel => "ANIM";
     public string GetSubtitle(AssetDatabaseEntry asset) => DisplayName;
     public void DrawEditor(AssetDatabaseEntry asset) { if (ImGui.Button("Open in Animation")) window.Open(asset); }
@@ -17,12 +17,8 @@ public sealed class AnimationEditorAssetHandler(AssetType type, AnimationWindow 
     {
         try
         {
-            object asset = type switch
-            {
-                AssetType.AnimationGraph => RestGraph(), AssetType.AnimationSet => new AnimationSet(),
-                AssetType.AnimationSequence => new AnimationSequence(), _ => new BoneMask()
-            };
-            var extension = type switch { AssetType.AnimationGraph => AnimationGraph.Extension, AssetType.AnimationSet => AnimationSet.Extension, AssetType.AnimationSequence => AnimationSequence.Extension, _ => BoneMask.Extension };
+            var asset = RestGraph();
+            var extension = AnimationGraph.Extension;
             var path = folder.TrimEnd('/') + "/New " + DisplayName + extension; var suffix = 1;
             while (File.Exists(project.GetAbsolutePath(path))) path = folder.TrimEnd('/') + "/New " + DisplayName + " " + suffix++ + extension;
             AnimationAssetJson.Write(project.GetAbsolutePath(path), asset); project.RefreshAssetSource(path);

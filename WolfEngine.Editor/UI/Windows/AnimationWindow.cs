@@ -21,7 +21,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     private readonly EditorViewportStateBus _viewUi;
     private readonly Dictionary<Guid, AnimationDocument> _documents = new();
     private AnimationDocument? _document;
-    private Guid _assetId, _selectedNode, _connectFrom, _modelId, _setId, _previewGraphId;
+    private Guid _assetId, _selectedNode, _connectFrom, _modelId, _setId;
     private string? _gestureSnapshot;
     private AnimationPreviewScene? _preview;
     private string? _projectPath, _diagnostic;
@@ -47,7 +47,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             _documents.Add(asset.Id, _document);
         }
         _assetId = asset.Id;
-        if (_document.Asset is AnimationGraph) _previewGraphId = asset.Id;
         _gestureSnapshot = null; _selectedNode = default; _compiledRevision = -1; _diagnostic = null;
         if (_workspaces.Workspaces.Any(w => w.Id == EditorWorkspaceService.AnimationWorkspaceId)) _workspaces.Activate(EditorWorkspaceService.AnimationWorkspaceId);
         _workspaces.OpenWindow(EditorWindowIds.Animation); RequestFocus();
@@ -70,7 +69,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         {
             try { Open(asset); } catch (Exception exception) { _diagnostic = exception.Message; }
         }
-        if (_document is null) { ImGui.TextUnformatted("Open an animation graph, clip, clip set, or bone mask from Assets."); DrawLive(scene); ImGui.End(); return; }
+        if (_document is null) { ImGui.TextUnformatted("Open an animation graph from Assets."); DrawLive(scene); ImGui.End(); return; }
         ImGui.TextUnformatted(System.IO.Path.GetFileName(_document.Path) + (_document.Dirty ? " *" : ""));
         var readOnly = _project.IsAssetReadOnly(_assetId);
         ImGui.BeginDisabled(readOnly);
@@ -83,9 +82,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         switch (_document.Asset)
         {
             case AnimationGraph graph: DrawGraph(graph); break;
-            case AnimationSequence clip: DrawSequence(clip); break;
-            case AnimationSet set: DrawSet(set); break;
-            case BoneMask mask: DrawMask(mask); break;
         }
         if (!readOnly)
         {
@@ -106,6 +102,22 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         if (_document is null || _project.IsAssetReadOnly(_assetId)) return;
         try { _document.Save(); var source = _project.TryGetAsset(_assetId, out var asset) ? asset.RelativeSourcePath : null; if (source is not null) _project.RefreshAssetSource(source); }
         catch (Exception exception) { _diagnostic = exception.Message; }
+    }
+    public static bool DataAssetChoice<T>(IEditorProjectService project, string label, ref Guid id) where T : IDataAsset
+    {
+        var current = project.TryGetAsset(id, out var selected) ? selected.RelativeSourcePath : "None";
+        var changed = false;
+        if (ImGui.BeginCombo(label, current))
+        {
+            if (ImGui.Selectable("None", id == Guid.Empty)) { id = Guid.Empty; changed = true; }
+            foreach (var asset in project.CurrentAssetDatabase.Assets)
+                if (asset.Type == AssetType.DataAsset && asset.TryGetSummary<DataAssetSummary>(out var summary) &&
+                    summary.DataAssetType.StartsWith(typeof(T).FullName + ",", StringComparison.Ordinal) &&
+                    ImGui.Selectable(asset.RelativeSourcePath + "##" + asset.Id, id == asset.Id))
+                { id = asset.Id; changed = true; }
+            ImGui.EndCombo();
+        }
+        return changed;
     }
     public static bool AssetChoice(IEditorProjectService project, string label, AssetType type, ref Guid id)
     {
@@ -223,7 +235,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             var sequence = node.SequenceParameter; ParameterChoice(graph, "Action sequence", ref sequence); node.SequenceParameter = sequence;
         }
         var restart = node.RestartOnActivation; if (ImGui.Checkbox("Restart when activated", ref restart)) node.RestartOnActivation = restart;
-        if (node.Kind == AnimationNodeKind.MaskedBlend) { var mask = node.MaskId; AssetChoice(_project, "Bone mask", AssetType.BoneMask, ref mask); node.MaskId = mask; }
+        if (node.Kind == AnimationNodeKind.MaskedBlend) { var mask = node.MaskId; DataAssetChoice<BoneMask>(_project, "Bone mask", ref mask); node.MaskId = mask; }
         for (var i = 0; i < node.Inputs.Count; i++)
         {
             ImGui.PushID(i); var input = node.Inputs[i];
@@ -286,100 +298,6 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         }
         if (ImGui.Button("Add transition")) node.Transitions.Add(new());
     }
-    private void DrawSequence(AnimationSequence sequence)
-    {
-        var playbackSpeed = sequence.PlaybackSpeed; if (ImGui.InputFloat("Clip playback speed", ref playbackSpeed)) sequence.PlaybackSpeed = playbackSpeed;
-        var clip = sequence.ClipId; AssetChoice(_project, "Imported clip", AssetType.AnimationClip, ref clip); sequence.ClipId = clip;
-        var duration = sequence.ClipId != Guid.Empty ? AssetDatabase.GetInstance<AnimationClip>(sequence.ClipId)?.Duration ?? 1 : 1;
-        for (var i = 0; i < sequence.Curves.Count; i++)
-        {
-            var curve = sequence.Curves[i]; ImGui.PushID("curve" + i);
-            var name = curve.Name; if (ImGui.InputText("Curve name", ref name, 128)) curve.Name = name;
-            var interpolation = (int)curve.Interpolation;
-            if (ImGui.Combo("Interpolation", ref interpolation, "Step\0Linear\0Cubic\0")) curve.Interpolation = (CurveInterpolation)interpolation;
-            var draw = ImGui.GetWindowDrawList(); var origin = ImGui.GetCursorScreenPos(); var size = new Vector2(Math.Max(100, ImGui.GetContentRegionAvail().X), 80);
-            ImGui.InvisibleButton("Curve plot", size); draw.AddRectFilled(origin, origin + size, 0xFF242424);
-            var min = curve.Values.Length == 0 ? 0 : Math.Min(0, curve.Values.Min()); var max = curve.Values.Length == 0 ? 1 : Math.Max(1, curve.Values.Max());
-            try
-            {
-                var sampler = curve.Compile(); var cursor = 0; var previous = origin;
-                for (var sample = 0; sample <= 100; sample++)
-                {
-                    var value = sampler.Evaluate(duration * sample / 100, ref cursor, 0);
-                    var position = origin + new Vector2(size.X * sample / 100, size.Y * (1 - (value - min) / (max - min)));
-                    if (sample > 0) draw.AddLine(previous, position, 0xFF60D8F0, 2); previous = position;
-                }
-            }
-            catch (Exception exception) { _diagnostic = exception.Message; }
-            for (var key = 0; key < Math.Min(curve.Times.Length, curve.Values.Length); key++)
-            {
-                ImGui.PushID(key); var time = curve.Times[key]; var value = curve.Values[key];
-                if (ImGui.InputFloat("Time", ref time)) curve.Times[key] = time;
-                if (ImGui.InputFloat("Value", ref value)) curve.Values[key] = value;
-                if (curve.Interpolation == CurveInterpolation.CubicHermite)
-                {
-                    if (curve.InTangents?.Length != curve.Times.Length) curve.InTangents = new float[curve.Times.Length];
-                    if (curve.OutTangents?.Length != curve.Times.Length) curve.OutTangents = new float[curve.Times.Length];
-                    var input = curve.InTangents[key]; var output = curve.OutTangents[key];
-                    if (ImGui.InputFloat("In tangent", ref input)) curve.InTangents[key] = input;
-                    if (ImGui.InputFloat("Out tangent", ref output)) curve.OutTangents[key] = output;
-                }
-                if (ImGui.Button("Remove key"))
-                {
-                    curve.Times = curve.Times.Where((_, index) => index != key).ToArray(); curve.Values = curve.Values.Where((_, index) => index != key).ToArray();
-                    curve.InTangents = curve.InTangents?.Where((_, index) => index != key).ToArray(); curve.OutTangents = curve.OutTangents?.Where((_, index) => index != key).ToArray();
-                    key--;
-                }
-                ImGui.PopID();
-            }
-            if (ImGui.Button("Add key at scrub time"))
-            {
-                var times = curve.Times.Append(Math.Clamp(_scrub, 0, duration)).ToArray(); var values = curve.Values.Append(0f).ToArray();
-                var order = Enumerable.Range(0, times.Length).OrderBy(index => times[index]).ToArray();
-                curve.Times = order.Select(index => times[index]).ToArray(); curve.Values = order.Select(index => values[index]).ToArray();
-                if (curve.Interpolation == CurveInterpolation.CubicHermite) { curve.InTangents = new float[times.Length]; curve.OutTangents = new float[times.Length]; }
-            }
-            if (ImGui.Button("Remove curve")) sequence.Curves.RemoveAt(i--);
-            ImGui.PopID();
-        }
-        if (ImGui.Button("Add curve")) sequence.Curves.Add(new() { Name = "Curve" + sequence.Curves.Count });
-        for (var i = 0; i < sequence.Markers.Count; i++)
-        {
-            ImGui.PushID("marker" + i); var marker = sequence.Markers[i];
-            var name = marker.Name; if (ImGui.InputText("Marker", ref name, 128)) marker.Name = name;
-            var time = marker.Time; if (ImGui.InputFloat("At seconds", ref time)) marker.Time = time;
-            if (ImGui.Button("Remove marker")) sequence.Markers.RemoveAt(i--);
-            ImGui.PopID();
-        }
-        if (ImGui.Button("Add marker at scrub time")) sequence.Markers.Add(new() { Name = "Marker", Time = Math.Clamp(_scrub, 0, duration) });
-    }
-    private void DrawSet(AnimationSet set)
-    {
-        var rig = set.SkeletonId; AssetChoice(_project, "Skeleton", AssetType.Skeleton, ref rig); set.SkeletonId = rig;
-        foreach (var slot in set.Clips.Keys.ToArray())
-        {
-            var id = set.Clips[slot]; ImGui.PushID(slot);
-            var renamed = slot;
-            if (ImGui.InputText("Slot name", ref renamed, 128) && !string.IsNullOrWhiteSpace(renamed) && !set.Clips.ContainsKey(renamed))
-            { set.Clips.Remove(slot); set.Clips.Add(renamed, id); ImGui.PopID(); continue; }
-            AssetChoice(_project, slot, AssetType.AnimationSequence, ref id); set.Clips[slot] = id;
-            if (ImGui.Button("Remove slot")) set.Clips.Remove(slot); ImGui.PopID();
-        }
-        if (ImGui.Button("Add clip slot")) { var name = "Clip" + set.Clips.Count; while (set.Clips.ContainsKey(name)) name += "_"; set.Clips.Add(name, Guid.Empty); }
-    }
-    private void DrawMask(BoneMask mask)
-    {
-        var rig = mask.SkeletonId; AssetChoice(_project, "Skeleton", AssetType.Skeleton, ref rig); mask.SkeletonId = rig;
-        for (var i = 0; i < mask.Bones.Count; i++)
-        {
-            var bone = mask.Bones[i]; ImGui.PushID(i);
-            var name = bone.Bone; if (ImGui.InputText("Bone", ref name, 128)) bone.Bone = name;
-            var weight = bone.Weight; if (ImGui.SliderFloat("Weight", ref weight, 0, 1)) bone.Weight = weight;
-            var children = bone.IncludeChildren; if (ImGui.Checkbox("Include descendants", ref children)) bone.IncludeChildren = children;
-            if (ImGui.Button("Remove bone")) mask.Bones.RemoveAt(i--); ImGui.PopID();
-        }
-        if (ImGui.Button("Add bone")) mask.Bones.Add(new());
-    }
     private void DrawPreview()
     {
         var model = _modelId; var set = _setId;
@@ -392,9 +310,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
                 if (asset.Type is AssetType.Model3D or AssetType.Prefab && ImGui.Selectable(asset.RelativeSourcePath + "##" + asset.Id, model == asset.Id)) { model = asset.Id; changed = true; }
             ImGui.EndCombo();
         }
-        if (_document?.Asset is AnimationSet or BoneMask)
-            changed |= AssetChoice(_project, "Preview graph", AssetType.AnimationGraph, ref _previewGraphId);
-        changed |= AssetChoice(_project, "Preview clip set", AssetType.AnimationSet, ref set);
+        changed |= DataAssetChoice<AnimationSet>(_project, "Preview clip set", ref set);
         _modelId = model; _setId = set;
         if (changed || _document?.Revision != _compiledRevision) TryCompilePreview();
         if (_preview is null) return;
@@ -418,16 +334,9 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         if (_modelId == Guid.Empty || _document is null) return false;
         try
         {
-            AnimationGraph graph; AnimationSet? clips = _document.Asset is AnimationSet authoredSet ? authoredSet : _setId == Guid.Empty ? null : AssetDatabase.GetInstance<AnimationSet>(_setId);
-            if (_document.Asset is AnimationGraph authored) graph = authored;
-            else if (_document.Asset is AnimationSequence)
-            {
-                var clip = new AnimationNode { Kind = AnimationNodeKind.Clip, ClipSlot = "Clip" };
-                var output = new AnimationNode { Kind = AnimationNodeKind.Output, Inputs = [clip.Id] };
-                graph = new() { Nodes = [clip, output], Output = output.Id }; clips = new() { Clips = new() { ["Clip"] = _assetId } };
-            }
-            else graph = AssetDatabase.GetInstance<AnimationGraph>(_previewGraphId) ?? throw new InvalidOperationException("Select a preview graph.");
-            object? Resolve(Guid id, Type type) => id == _assetId && type.IsInstanceOfType(_document.Asset) ? _document.Asset : Animator.Resolve(id, type);
+            var graph = (AnimationGraph)_document.Asset;
+            var clips = _setId == Guid.Empty ? null : AssetDatabase.GetInstance<AnimationSet>(_setId);
+            object? Resolve(Guid id, Type type) => id == _assetId && type == typeof(AnimationGraph) ? graph : Animator.Resolve(id, type);
             var preview = new AnimationPreviewScene(_host, _views, _viewUi, _pipeline, _project, _modelId, graph, clips, Resolve);
             var previous = _preview?.Instance;
             if (previous is not null)

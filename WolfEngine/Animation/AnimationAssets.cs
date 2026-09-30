@@ -100,14 +100,16 @@ public sealed class AnimationGraph
 	public List<AnimationNodeLayout> Layout { get; set; } = [];
 }
 
-[RuntimeAsset(AssetType.AnimationSet, typeof(AnimationSet), typeof(IAnimationAssetRuntimeResolver))]
-public sealed class AnimationSet
+[RuntimeAsset(AssetType.DataAsset, typeof(AnimationSet), typeof(IDataAssetRuntimeResolver))]
+public sealed class AnimationSet : IDataAsset, IDataAssetDependencies
 {
-	public const string Extension = ".animset.json";
+	public const string Extension = DataAssetFile.FileExtension;
+	public const string LegacyExtension = ".animset.json";
 
 	public int Version { get; set; } = 1;
 	public Guid SkeletonId { get; set; }
 	public Dictionary<string, Guid> Clips { get; set; } = new(StringComparer.Ordinal);
+	public IEnumerable<Guid> GetDependencies() => Clips.Values.Append(SkeletonId).Where(id => id != Guid.Empty);
 }
 
 public sealed class AnimationMarker
@@ -133,16 +135,18 @@ public sealed class AnimationCurve
 		(float[]?)OutTangents?.Clone());
 }
 
-[RuntimeAsset(AssetType.AnimationSequence, typeof(AnimationSequence), typeof(IAnimationAssetRuntimeResolver))]
-public sealed class AnimationSequence
+[RuntimeAsset(AssetType.DataAsset, typeof(AnimationSequence), typeof(IDataAssetRuntimeResolver))]
+public sealed class AnimationSequence : IDataAsset, IDataAssetDependencies
 {
-	public const string Extension = ".animclip.json";
+	public const string Extension = DataAssetFile.FileExtension;
+	public const string LegacyExtension = ".animclip.json";
 
 	public int Version { get; set; } = 1;
 	public Guid ClipId { get; set; }
 	public float PlaybackSpeed { get; set; } = 1;
 	public List<AnimationCurve> Curves { get; set; } = [];
 	public List<AnimationMarker> Markers { get; set; } = [];
+	public IEnumerable<Guid> GetDependencies() => ClipId == Guid.Empty ? [] : [ClipId];
 }
 
 public sealed class BoneMaskEntry
@@ -152,14 +156,16 @@ public sealed class BoneMaskEntry
 	public bool IncludeChildren { get; set; } = true;
 }
 
-[RuntimeAsset(AssetType.BoneMask, typeof(BoneMask), typeof(IAnimationAssetRuntimeResolver))]
-public sealed class BoneMask
+[RuntimeAsset(AssetType.DataAsset, typeof(BoneMask), typeof(IDataAssetRuntimeResolver))]
+public sealed class BoneMask : IDataAsset, IDataAssetDependencies
 {
-	public const string Extension = ".bonemask.json";
+	public const string Extension = DataAssetFile.FileExtension;
+	public const string LegacyExtension = ".bonemask.json";
 
 	public int Version { get; set; } = 1;
 	public Guid SkeletonId { get; set; }
 	public List<BoneMaskEntry> Bones { get; set; } = [];
+	public IEnumerable<Guid> GetDependencies() => SkeletonId == Guid.Empty ? [] : [SkeletonId];
 
 	public float[] Compile(Skeleton skeleton)
 	{
@@ -222,9 +228,7 @@ public static class AnimationAssetJson
 
 	public static Type? GetAssetType(string path) =>
 		path.EndsWith(AnimationGraph.Extension, StringComparison.OrdinalIgnoreCase) ? typeof(AnimationGraph) :
-		path.EndsWith(AnimationSet.Extension, StringComparison.OrdinalIgnoreCase) ? typeof(AnimationSet) :
-		path.EndsWith(AnimationSequence.Extension, StringComparison.OrdinalIgnoreCase) ? typeof(AnimationSequence) :
-		path.EndsWith(BoneMask.Extension, StringComparison.OrdinalIgnoreCase) ? typeof(BoneMask) : null;
+		null;
 
 	public static object Read(string path, Type type) =>
 		JsonSerializer.Deserialize(File.ReadAllText(path), type, Options)
@@ -232,9 +236,7 @@ public static class AnimationAssetJson
 
 	public static IEnumerable<Guid> Dependencies(object asset) => asset switch
 	{
-		AnimationSet set => set.Clips.Values.Append(set.SkeletonId).Where(id => id != Guid.Empty),
-		AnimationSequence clip => [clip.ClipId],
-		BoneMask mask => mask.SkeletonId == Guid.Empty ? [] : [mask.SkeletonId],
+		IDataAssetDependencies dependencies => dependencies.GetDependencies(),
 		AnimationGraph graph => graph.Nodes.Select(node => node.MaskId).Where(id => id != Guid.Empty),
 		_ => []
 	};

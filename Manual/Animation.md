@@ -7,9 +7,9 @@ Every animator evaluates a graph, including ordinary single-clip playback. Gamep
 | Source | Purpose |
 | --- | --- |
 | `.animgraph.json` | Typed parameters, pose nodes, constrained state machines, output and separate canvas layout. |
-| `.animset.json` | Rig reference and named clip-slot assignments. |
-| `.animclip.json` | Imported clip reference, playback-speed multiplier, scalar curves and timed presentation markers. |
-| `.bonemask.json` | Rig reference and weighted bones, optionally including descendants. |
+| `.data.json` (AnimationSet) | Rig reference and named clip-slot assignments. |
+| `.data.json` (AnimationSequence) | Imported clip reference, playback-speed multiplier, scalar curves and timed presentation markers. |
+| `.data.json` (BoneMask) | Rig reference and weighted bones, optionally including descendants. |
 
 These files live under `Assets`. References use persistent metadata GUIDs. The asset pipeline records dependencies and produces Library artifacts. Edit curves and markers in the wrapper asset: FBX reimport replaces imported skeletal keys without replacing this metadata. Skeletal keys are read-only.
 
@@ -40,7 +40,7 @@ Bone channels default to bind pose. Entity-transform and scalar-property channel
 
 ## Animation workspace
 
-Open an animation asset from Assets to use the **Animation** workspace. It has Assets on the left, Animation in the center, Asset Editor on the right and Log below. Existing workspace layouts and the active workspace are preserved when this workspace is first seeded. Rename/delete/save it normally.
+Open a graph from Assets to use the **Animation** workspace. Edit clip sets, clip metadata and bone masks as DataAssets in the **Asset Editor**. It has Assets on the left, Animation in the center, Asset Editor on the right and Log below. Existing workspace layouts and the active workspace are preserved when this workspace is first seeded. Rename/delete/save it normally.
 
 The Animation window provides a node canvas with middle-button pan, wheel zoom, node dragging, node creation/deletion and pose connections. Connect an output button to a pose-input button, or choose inputs in the selected-node inspector. State-machine inputs can be inspected as subgraphs. Undo/redo preserves node IDs and layout. Save writes authoritative JSON through the normal asset refresh path.
 
