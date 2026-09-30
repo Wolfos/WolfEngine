@@ -21,6 +21,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 	[JsonIgnore] internal Matrix4x4[]? SkinningMatrices;
 	[JsonIgnore] internal Matrix4x4[]? PreviousSkinningMatrices;
 	[JsonIgnore] internal bool HasPreviousPose;
+	[JsonIgnore] internal bool WasVisibilityCulled;
 	[JsonIgnore] internal bool BindPosePrepared;
 	[JsonIgnore] internal uint PoseGeneration;
 	[JsonIgnore] internal uint LastRenderedPoseGeneration;
@@ -94,6 +95,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 			SkinningMatrices = new Matrix4x4[skeleton.BoneCount];
 			PreviousSkinningMatrices = new Matrix4x4[skeleton.BoneCount];
 			HasPreviousPose = false;
+			WasVisibilityCulled = false;
 			BindPosePrepared = false;
 			Bindings = null;
 			Diagnostic = null;
@@ -123,6 +125,7 @@ public struct Animator : IEntityComponent, IJsonOnDeserialized
 		SkinningMatrices = null;
 		PreviousSkinningMatrices = null;
 		HasPreviousPose = false;
+		WasVisibilityCulled = false;
 		BindPosePrepared = false;
 		PoseGeneration = 0;
 		LastRenderedPoseGeneration = 0;

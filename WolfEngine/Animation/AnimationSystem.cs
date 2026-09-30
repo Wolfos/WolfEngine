@@ -14,7 +14,10 @@ namespace WolfEngine.Animation;
 /// </remarks>
 public sealed class AnimationSystem : IUpdate
 {
+	/// <summary>Reference path for profiling and image comparisons.</summary>
+	public static bool ForceFullEvaluation { get; set; } = Environment.GetEnvironmentVariable("WOLF_FORCE_ANIMATION_UPDATES") == "1";
 	private readonly WorldTag _tag;
+	private readonly AnimationVisibility _visibility = new();
 
 	public AnimationSystem() : this(WorldTag.All)
 	{
@@ -28,6 +31,13 @@ public sealed class AnimationSystem : IUpdate
 	{
 		ArgumentNullException.ThrowIfNull(world);
 		using var profile = Profiling.FrameProfiler.Instance.Measure("Animation evaluation");
+		using (Profiling.FrameProfiler.Instance.Measure("Animation visibility"))
+		{
+			if (ForceFullEvaluation == false)
+			{
+				_visibility.Update(world);
+			}
+		}
 
 		long prepareTicks = 0;
 		long graphTicks = 0;
@@ -62,9 +72,18 @@ public sealed class AnimationSystem : IUpdate
 			}
 
 			prepareTicks += Stopwatch.GetTimestamp() - start;
+			if (ForceFullEvaluation == false && animator.HasPreviousPose && instance.Program.TransformBindings.Length == 0 &&
+				instance.Program.PropertyBindings.Length == 0 && _visibility.IsCulled(entry.Entity))
+			{
+				instance.AdvanceClock(deltaTime);
+				animator.WasVisibilityCulled = true;
+				continue;
+			}
 
 			start = Stopwatch.GetTimestamp();
-			var changed = instance.Evaluate(deltaTime);
+			var resumed = animator.WasVisibilityCulled;
+			animator.WasVisibilityCulled = false;
+			var changed = instance.Evaluate(deltaTime, emitMarkers: resumed == false);
 			graphTicks += Stopwatch.GetTimestamp() - start;
 
 			start = Stopwatch.GetTimestamp();
@@ -74,6 +93,12 @@ public sealed class AnimationSystem : IUpdate
 				instance.Output.ComputeSkinningMatrices(animator.Skeleton!, animator.SkinningMatrices!);
 				var bonesChanged = animator.HasPreviousPose == false ||
 					animator.SkinningMatrices.AsSpan().SequenceEqual(animator.PreviousSkinningMatrices) == false;
+				if (resumed)
+				{
+					// An offscreen pose is not the previous rendered pose. Avoid a large motion vector
+					// and force local palette conversion to rebuild both generations.
+					animator.SkinningMatrices.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+				}
 				if (animator.HasPreviousPose == false)
 				{
 					animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
@@ -82,7 +107,7 @@ public sealed class AnimationSystem : IUpdate
 
 				if (bonesChanged)
 				{
-					animator.PoseGeneration++;
+					animator.PoseGeneration += resumed ? 2u : 1u;
 				}
 			}
 
@@ -122,6 +147,10 @@ public sealed class AnimationSystem : IUpdate
 			}
 
 			ref var animator = ref world.GetComponent<Animator>(animatorEntity);
+			if (animator.WasVisibilityCulled)
+			{
+				continue;
+			}
 			var skeleton = animator.Skeleton;
 			var pose = animator.Pose;
 			if (skeleton is null || pose is null)

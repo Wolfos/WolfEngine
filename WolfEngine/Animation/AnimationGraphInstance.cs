@@ -223,6 +223,7 @@ public sealed class AnimationGraphInstance
 			throw new ArgumentOutOfRangeException(nameof(deltaTime));
 		}
 
+		_markers.Clear();
 		var delta = Playing ? deltaTime * Speed : 0;
 		Time += delta;
 		_pendingDelta += delta;

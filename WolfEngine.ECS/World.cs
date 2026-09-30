@@ -555,7 +555,8 @@ public class World
         return TryGetCurrentWorldMatrix(parent, out var parentWorld) && Matrix4x4.Invert(parentWorld, out parentWorldToLocal);
     }
 
-    private bool TryGetCurrentWorldMatrix(Entity entity, out Matrix4x4 worldMatrix)
+    /// <summary>Computes the current hierarchy transform before the pre-render transform pass runs.</summary>
+    public bool TryGetCurrentWorldMatrix(Entity entity, out Matrix4x4 worldMatrix)
     {
         worldMatrix = Matrix4x4.Identity;
         if (HasComponent<LocalTransform>(entity) == false || HasComponent<WorldTransform>(entity) == false)

@@ -229,6 +229,47 @@ public sealed class AnimationGraphTests
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
     [Test]
+    public void OffscreenSkinnedAnimatorAdvancesClockAndResamplesOnReentry()
+    {
+        var clip = Clip("A");
+        var graph = Graph(clip);
+        var instance = Program(graph, new() { ["A"] = Motion("root", 1) },
+            new() { ["A"] = new() { Markers = [new() { Name = "Offscreen", Time = .15f }] } }).CreateInstance();
+        var world = new World(WorldTag.Game);
+        var camera = new Camera { ScreenResolution = new(800, 600) };
+        camera.SetPerspective(70);
+        var cameraEntity = world.CreateEntity("camera", Matrix4x4.Identity);
+        world.AddComponent(cameraEntity, camera);
+        var unit = world.CreateEntity("unit", new Vector3(100, 0, 10), Quaternion.Identity, Vector3.One);
+        world.AddComponent(unit, new Animator
+        {
+            Skeleton = _skeleton, Graph = graph, GraphInstance = instance, Pose = instance.Output,
+            SkinningMatrices = new Matrix4x4[_skeleton.BoneCount],
+            PreviousSkinningMatrices = new Matrix4x4[_skeleton.BoneCount]
+        });
+        var meshEntity = world.CreateEntity("mesh", Matrix4x4.Identity);
+        world.SetParent(meshEntity, unit);
+        var mesh = new Mesh(
+            [new Vector4(-.5f, 0, 0, 1), new Vector4(.5f, 0, 0, 1), new Vector4(0, 1, 0, 1)],
+            [0u, 1u, 2u], boneIndices: new uint[12], boneWeights: new float[12]);
+        world.AddComponent(meshEntity, new SkinnedMeshRenderer { AnimatorEntity = unit, Mesh = mesh });
+        var system = new AnimationSystem();
+        system.Update(.1f, world); // Initialize the pose and skinning palette, even when offscreen.
+        var initialPosition = instance.Output.Bones[0].Position;
+        system.Update(.1f, world);
+        Assert.That(instance.Time, Is.EqualTo(.2f).Within(1e-5f));
+        Assert.That(instance.Output.Bones[0].Position, Is.EqualTo(initialPosition));
+        Assert.That(instance.Markers, Is.Empty);
+        world.SetLocalPosition(unit, new Vector3(0, 0, 10));
+        system.Update(.1f, world);
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(.3f).Within(1e-5f));
+        Assert.That(instance.Markers, Is.Empty);
+        ref var animator = ref world.GetComponent<Animator>(unit);
+        Assert.That(animator.PreviousSkinningMatrices, Is.EqualTo(animator.SkinningMatrices));
+        system.Update(.1f, world);
+        Assert.That(instance.Output.Bones[0].Position.X, Is.EqualTo(.4f).Within(1e-5f));
+    }
+    [Test]
     public void InvalidCycleAndMissingSlots_AreDiagnosed()
     {
         var a = new AnimationNode { Kind = AnimationNodeKind.Output }; a.Inputs = [a.Id];
