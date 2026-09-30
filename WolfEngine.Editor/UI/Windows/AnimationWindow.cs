@@ -28,6 +28,7 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
     private long _compiledRevision = -1;
     private Vector2 _pan = new(20, 20);
     private float _zoom = 1, _scrub;
+    private float _authoringWidthFraction = .7f, _canvasHeightFraction = .76f;
     private Entity _liveEntity;
     public override string Name => "Animation";
     public AnimationDocument? Document => _document;
@@ -78,7 +79,11 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         ImGui.BeginDisabled(!_document.CanRedo); if (ImGui.Button("Redo")) _document.Redo(); ImGui.EndDisabled();
         var before = _document.Snapshot();
         var available = ImGui.GetContentRegionAvail();
-        ImGui.BeginChild("Authoring", new Vector2(available.X * .58f, available.Y), ImGuiChildFlags.Borders);
+        const float dividerSize = 6;
+        var minimumPaneWidth = Math.Min(240, Math.Max(0, (available.X - dividerSize) * .25f));
+        var authoringWidth = Math.Clamp(available.X * _authoringWidthFraction, minimumPaneWidth,
+            Math.Max(minimumPaneWidth, available.X - dividerSize - minimumPaneWidth));
+        ImGui.BeginChild("Authoring", new Vector2(authoringWidth, available.Y), ImGuiChildFlags.Borders);
         switch (_document.Asset)
         {
             case AnimationGraph graph: DrawGraph(graph); break;
@@ -90,7 +95,16 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
         }
         ImGui.EndChild();
         ImGui.EndDisabled();
-        ImGui.SameLine();
+        ImGui.SameLine(0, 0);
+        ImGui.InvisibleButton("##AnimationColumnDivider", new Vector2(dividerSize, available.Y));
+        var dividerStart = ImGui.GetItemRectMin();
+        ImGui.GetWindowDrawList().AddRectFilled(dividerStart + new Vector2(2, 0),
+            ImGui.GetItemRectMax() - new Vector2(2, 0), ImGui.IsItemHovered() || ImGui.IsItemActive() ? 0xFF888888 : 0xFF444444);
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive()) ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+        if (ImGui.IsItemActive() && available.X > 0)
+            _authoringWidthFraction = Math.Clamp((authoringWidth + ImGui.GetIO().MouseDelta.X) / available.X,
+                minimumPaneWidth / available.X, (available.X - dividerSize - minimumPaneWidth) / available.X);
+        ImGui.SameLine(0, 0);
         ImGui.BeginChild("Preview and inspection", new Vector2(0, available.Y), ImGuiChildFlags.Borders);
         if (_diagnostic is not null) ImGui.TextWrapped(_diagnostic);
         DrawPreview(); DrawLive(scene);
@@ -151,7 +165,21 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
                 }
             ImGui.EndCombo();
         }
-        DrawCanvas(graph);
+        var content = ImGui.GetContentRegionAvail();
+        const float dividerSize = 6;
+        var minimumSectionHeight = Math.Min(140, Math.Max(0, (content.Y - dividerSize) * .25f));
+        var canvasHeight = Math.Clamp(content.Y * _canvasHeightFraction, minimumSectionHeight,
+            Math.Max(minimumSectionHeight, content.Y - dividerSize - minimumSectionHeight));
+        DrawCanvas(graph, canvasHeight);
+        ImGui.InvisibleButton("##GraphInspectorDivider", new Vector2(Math.Max(1, content.X), dividerSize));
+        var dividerStart = ImGui.GetItemRectMin();
+        ImGui.GetWindowDrawList().AddRectFilled(dividerStart + new Vector2(0, 2),
+            ImGui.GetItemRectMax() - new Vector2(0, 2), ImGui.IsItemHovered() || ImGui.IsItemActive() ? 0xFF888888 : 0xFF444444);
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive()) ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeNS);
+        if (ImGui.IsItemActive() && content.Y > 0)
+            _canvasHeightFraction = Math.Clamp((canvasHeight + ImGui.GetIO().MouseDelta.Y) / content.Y,
+                minimumSectionHeight / content.Y, (content.Y - dividerSize - minimumSectionHeight) / content.Y);
+        ImGui.BeginChild("Graph inspector", new Vector2(0, 0), ImGuiChildFlags.Borders);
         var selected = graph.Nodes.FirstOrDefault(n => n.Id == _selectedNode);
         if (selected is not null) DrawNode(graph, selected);
         if (ImGui.CollapsingHeader("Parameters"))
@@ -167,10 +195,11 @@ public sealed class AnimationWindow : EditorWindow, IDisposable
             }
             if (ImGui.Button("Add parameter")) graph.Parameters.Add(new() { Name = "Parameter" + graph.Parameters.Count });
         }
+        ImGui.EndChild();
     }
-    private void DrawCanvas(AnimationGraph graph)
+    private void DrawCanvas(AnimationGraph graph, float canvasHeight)
     {
-        var size = new Vector2(Math.Max(100, ImGui.GetContentRegionAvail().X), 300);
+        var size = new Vector2(Math.Max(100, ImGui.GetContentRegionAvail().X), Math.Max(1, canvasHeight));
         ImGui.BeginChild("PoseCanvas", size, ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
         var origin = ImGui.GetCursorScreenPos() + _pan; var draw = ImGui.GetWindowDrawList();
         if (ImGui.IsWindowHovered())
