@@ -20,6 +20,7 @@ public static class AssetPipelinePaths
 
 public static class AssetImporterIds
 {
+	public const string Font = "font";
 	public const string Texture = "texture";
 	public const string Audio = "audio";
 	public const string ColorLookupTable = "color-lookup-table";

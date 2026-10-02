@@ -64,6 +64,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	private readonly IDataAssetStore _dataAssetStore;
 	private readonly IMaterialAssetStore _materialAssetStore;
 	private readonly IThreeDFileImporter _threeDFileImporter;
+	private readonly IFontCompiler? _fontCompiler;
 	private readonly ITextureGpuCompressionService _textureGpuCompressionService;
 	private readonly IProjectTypeResolver? _typeResolver;
 	private readonly IEditorNotificationService? _notificationService;
@@ -79,7 +80,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		IThreeDFileImporter threeDFileImporter,
 		ITextureGpuCompressionService textureGpuCompressionService,
 		IProjectTypeResolver? typeResolver = null,
-		IEditorNotificationService? notificationService = null)
+		IEditorNotificationService? notificationService = null,
+		IFontCompiler? fontCompiler = null)
 	{
 		_index = index ?? throw new ArgumentNullException(nameof(index));
 		_metadataStore = metadataStore ?? throw new ArgumentNullException(nameof(metadataStore));
@@ -90,6 +92,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		_textureGpuCompressionService = textureGpuCompressionService ?? new UnsupportedTextureGpuCompressionService();
 		_typeResolver = typeResolver;
 		_notificationService = notificationService;
+		_fontCompiler = fontCompiler;
 		_importers = CreateImporters();
 	}
 
@@ -769,6 +772,37 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			],
 			Artifacts = runtimeArtifacts,
 			Dependencies = []
+		};
+	}
+
+	private ImportGraph ImportFontSource(string projectRootPath, string absoluteSourcePath,
+		string relativeSourcePath, string relativeMetaPath, AssetSourceMetaFile metadata)
+	{
+		var compiler = _fontCompiler ?? throw new InvalidOperationException("Font import requires editor tooling registration.");
+		var settings = metadata.GetImportSettingsOrDefault(() => new FontImportSettings());
+		var name = Path.GetFileNameWithoutExtension(relativeSourcePath);
+		var nodeId = GetOrCreateNodeId(metadata, "main", AssetType.Font, name);
+		var folder = NormalizeRelativePath(Path.Combine(AssetPipelinePaths.LibraryFolderName,
+			AssetPipelinePaths.ArtifactsFolderName, nodeId.ToString("D")));
+		var result = compiler.Compile(absoluteSourcePath, GetAbsolutePath(projectRootPath, folder), settings);
+		return new ImportGraph
+		{
+			Nodes = [new AssetNodeRecord
+			{
+				NodeId = nodeId, SourceId = metadata.SourceId, Type = AssetType.Font, NodeKey = "main", Name = name,
+				RelativeSourcePath = relativeSourcePath, RelativeAssetPath = folder + "/font.wolffont",
+				RelativeMetaPath = relativeMetaPath, SummaryJson = AssetPipelineSerialization.Serialize(result.Summary)
+			}],
+			Artifacts = [Artifact("runtime-font", "RuntimeFont", result.ArtifactPath),
+				Artifact("font-atlas", "FontAtlasPreview", result.AtlasPath), Artifact("font-preview", "FontTextPreview", result.PreviewPath)],
+			Dependencies = []
+		};
+
+		AssetArtifactRecord Artifact(string key, string kind, string path) => new()
+		{
+			NodeId = nodeId, ArtifactKey = key, Kind = kind, Target = "generic",
+			RelativePath = NormalizeRelativePath(Path.GetRelativePath(projectRootPath, path)),
+			ContentHash = AssetHashing.ComputeFileHash(path), ByteSize = new FileInfo(path).Length, ChunkCount = 1
 		};
 	}
 
@@ -1777,6 +1811,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 
 	private static string NormalizeImportSettingsJson(AssetSourceMetaFile metadata)
 	{
+		if (string.Equals(metadata.ImporterId, AssetImporterIds.Font, StringComparison.Ordinal))
+			metadata.GetImportSettingsOrDefault(() => new FontImportSettings());
 		if (string.Equals(metadata.ImporterId, AssetImporterIds.Texture, StringComparison.Ordinal))
 		{
 			metadata.GetImportSettingsOrDefault(() => new TextureImportSettings());
@@ -2097,6 +2133,10 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		return
         [
+			new AssetImporterDescriptor(AssetImporterIds.Font, 1,
+				path => Path.GetExtension(path).Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
+				        Path.GetExtension(path).Equals(".otf", StringComparison.OrdinalIgnoreCase),
+				() => AssetPipelineSerialization.Serialize(new FontImportSettings()), ImportFontSource),
             new AssetImporterDescriptor("animation-asset", 1, path => AnimationAssetJson.GetAssetType(path) is not null, () => "{}", ImportAnimationAssetSource),
             new AssetImporterDescriptor(
 				AssetImporterIds.Material,

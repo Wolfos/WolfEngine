@@ -25,7 +25,8 @@ public enum AssetType
 	AnimationGraph,
 	AnimationSet,
 	AnimationSequence,
-	BoneMask
+	BoneMask,
+	Font
 }
 
 public enum MaterialAssetType

@@ -31,6 +31,7 @@ public sealed class MenuBar : IMenuBar
 	private readonly IEditorProjectService _projectService;
 	private readonly ITextureAssetImporter _textureAssetImporter;
 	private readonly IAudioAssetImporter _audioAssetImporter;
+	private readonly IFontAssetImporter _fontAssetImporter;
 	private readonly IIconManager _icons;
 	private readonly IWindowChromeController _windowChromeController;
 	private readonly IEditorWorkspaceService _workspaces;
@@ -74,7 +75,8 @@ public sealed class MenuBar : IMenuBar
 		IEditorNotificationService notificationService,
 		IEditorCommandService commandService,
 		IGameBuildService gameBuildService,
-		IEditorOperationService operationService)
+		IEditorOperationService operationService,
+		IFontAssetImporter fontAssetImporter)
 	{
 		_fileDialogService = fileDialogService;
 		_sceneImporter = sceneImporter;
@@ -82,6 +84,7 @@ public sealed class MenuBar : IMenuBar
 		_projectService = projectService;
 		_textureAssetImporter = textureAssetImporter;
 		_audioAssetImporter = audioAssetImporter;
+		_fontAssetImporter = fontAssetImporter;
 		_icons = icons;
 		_windowChromeController = windowChromeController;
 		_workspaces = workspaces;
@@ -510,6 +513,12 @@ public sealed class MenuBar : IMenuBar
 		{
 			var result = _audioAssetImporter.ImportAudio();
 			if (!result.Success && !result.Cancelled) ShowError(result.ErrorMessage ?? "Audio import failed.");
+		}
+
+		if (ImGui.MenuItem("Import Font..."))
+		{
+			var result = _fontAssetImporter.ImportFont();
+			if (!result.Success && !result.Cancelled) ShowError(result.ErrorMessage ?? "Font import failed.");
 		}
 
 		if (ImGui.MenuItem("Material..."))

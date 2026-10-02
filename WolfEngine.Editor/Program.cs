@@ -83,6 +83,7 @@ public static class Program
 		services.AddSingleton<IPrefabAssetCreator, PrefabAssetCreator>();
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();
+		services.AddSingleton<IFontAssetImporter, FontAssetImporter>();
 		services.AddSingleton<EditorAudioContentProvider>();
 		services.AddSingleton<IAudioContentProvider>(provider => provider.GetRequiredService<EditorAudioContentProvider>());
 		services.AddSingleton<AudioService>();
@@ -115,6 +116,7 @@ public static class Program
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();
+		services.AddSingleton<IEditorAssetHandler, FontEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, MaterialEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, DataEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, TerrainEditorAssetHandler>();
