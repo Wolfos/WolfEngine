@@ -696,6 +696,22 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			return;
 		}
 
+		if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
+		{
+			snapshot = _currentSnapshot;
+		}
+		_currentSnapshot = snapshot;
+		_activeSnapshot = snapshot;
+		var primarySnapshot = snapshot.GetOrCreateView(RenderViewId.Primary);
+		var primaryView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
+		if (!IsViewSnapshotCurrent(primaryView, primarySnapshot))
+		{
+			// Play can end in the UI after snapshot publication. Keep the last presented image until
+			// the new binding has a snapshot; presenting an empty viewport exposes ImGui's fallback texture.
+			FrameProfiler.Instance.EndFrame();
+			return;
+		}
+
 		_resourceRegistry.SetDevice(_renderer.GetGfxDevice());
 		_gpuDrawResources.EnsureCreated(_renderer.GetGfxDevice());
 		_view = _viewRegistry.GetOrCreate(RenderViewId.Primary);
@@ -722,13 +738,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					uiFrame = latestUi;
 				}
 
-				if (_snapshotBuffer.TryConsumeLatest(out var snapshot) == false)
-				{
-					snapshot = _currentSnapshot;
-				}
-
-				_currentSnapshot = snapshot;
-				_activeSnapshot = snapshot;
 				for (var viewIndex = 0; viewIndex < snapshot.Views.Count; viewIndex++)
 				{
 					var database = snapshot.Views[viewIndex].GpuDrawDatabase;
@@ -741,7 +750,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				var frameBufferSize = _renderer.GetFrameBufferSize();
 				// Screen UI uses the displayed game view, not the editor window or the scene's
 				// downscaled internal rendering resolution. DPI remains a single uniform scale.
-				var primaryView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
 				var gameplayDisplaySize = ResolveViewDisplaySize(primaryView.Output, frameBufferSize,
 					_viewportStateBus.GetUiState(RenderViewId.Primary), frameBufferSize);
 				_gameplayUiFrameProvider.SetViewportSize(gameplayDisplaySize, ComputeDisplayScale(frameBufferSize));
@@ -766,7 +774,6 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				}
 
 				// Shared setup takes its sun and sky from the primary view; see BeginSharedFrame.
-				var primarySnapshot = snapshot.GetOrCreateView(RenderViewId.Primary);
 				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
 				_frameBuilder.BeginSharedFrame(
 					frameBufferSize,
