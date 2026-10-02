@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using EditorUI = WolfEngine.Editor.UI;
 using WolfEngine.AssetPipeline;
@@ -673,6 +674,79 @@ public sealed class ScenePersistenceTests
 		var component = scene.World.GetComponent<EntityReferenceComponent>(instanceRoot);
 
 		Assert.That(component.Target, Is.EqualTo(instanceChild));
+	}
+
+	[Test]
+	public void PlayModeSpawn_ThroughAssetReference_InstantiatesEachInstanceWithItsOwnReferences()
+	{
+		using var environment = new TestEnvironment();
+		var prefabAssetId = CreateReferencingPrefab(environment, out _);
+		using var services = new ServiceCollection()
+			.AddSingleton<IPrefabRuntimeAssetResolver>(
+				new PrefabRuntimeAssetResolver(environment.ProjectService, environment.TypeResolver))
+			.BuildServiceProvider();
+		var registry = new EditorAssetInstanceRegistry(services);
+		registry.RefreshCatalog(environment.ProjectService.CurrentAssetCatalog);
+		AssetDatabase.SetInstanceRegistry(registry);
+		var world = new World(WorldTag.Game);
+		var prefab = new AssetRef<Prefab> { NodeId = prefabAssetId };
+
+		var first = world.Instantiate(prefab, new Vector3(5.0f, 0.0f, 0.0f), Quaternion.Identity);
+		var second = world.Instantiate(prefab, new Vector3(-5.0f, 0.0f, 0.0f), Quaternion.Identity);
+
+		var firstPivot = world.GetComponent<Children>(first).First;
+		var secondPivot = world.GetComponent<Children>(second).First;
+		Assert.Multiple(() =>
+		{
+			Assert.That(registry.GetInstance(prefabAssetId, typeof(Prefab)), Is.SameAs(prefab.Asset),
+				"The template is built once and reused for every spawn.");
+			Assert.That(world.GetComponent<NameComponent>(first).Name, Is.EqualTo("Rig Root"));
+			Assert.That(world.GetComponent<NameComponent>(firstPivot).Name, Is.EqualTo("Rig Pivot"));
+			Assert.That(world.GetComponent<LocalTransform>(first).LocalPosition, Is.EqualTo(new Vector3(5.0f, 0.0f, 0.0f)));
+			Assert.That(world.GetComponent<EntityReferenceComponent>(first).Target, Is.EqualTo(firstPivot));
+			Assert.That(world.GetComponent<EntityReferenceComponent>(second).Target, Is.EqualTo(secondPivot));
+		});
+	}
+
+	[Test]
+	public void PrefabRuntimeAssetResolver_MergesNestedPrefabsWithTheirCurrentSource()
+	{
+		using var environment = new TestEnvironment();
+		var innerAuthoring = environment.Factory.New();
+		var innerRoot = innerAuthoring.World.CreateEntity("Inner");
+		innerAuthoring.World.AddTransform(innerRoot, Matrix4x4.Identity);
+		innerAuthoring.World.AddComponent(innerRoot, new TestSceneComponent { Count = 1, Label = "v1" });
+		var inner = environment.PrefabCreator.SaveEntityAsPrefab(innerAuthoring, innerRoot, "Assets/Prefabs");
+		Assert.That(inner.Success, Is.True, inner.ErrorMessage);
+
+		var outerAuthoring = environment.Factory.New();
+		var outerRoot = outerAuthoring.World.CreateEntity("Outer");
+		outerAuthoring.World.AddTransform(outerRoot, Matrix4x4.Identity);
+		environment.PipelineService.InstantiatePrefab(environment.ProjectService.ProjectRootPath!, inner.AssetId!.Value, outerAuthoring);
+		outerAuthoring.World.SetParent(FindEntityByName(outerAuthoring.World, "Inner"), outerRoot);
+		var outer = environment.PrefabCreator.SaveEntityAsPrefab(outerAuthoring, outerRoot, "Assets/Prefabs");
+		Assert.That(outer.Success, Is.True, outer.ErrorMessage);
+
+		// Edit the inner prefab after the outer one was saved; the outer file still holds the old values.
+		Assert.That(environment.ProjectService.TryGetAsset(inner.AssetId.Value, out var innerAsset), Is.True);
+		var innerPath = environment.ProjectService.GetAbsolutePath(innerAsset.RelativeAssetPath);
+		var innerFile = PrefabAssetFile.Load(innerPath);
+		var counter = innerFile.Entities.Single().Components.Single(component => component.Type.Contains(nameof(TestSceneComponent)));
+		counter.Data = JsonSerializer.SerializeToElement(new TestSceneComponent { Count = 2, Label = "v2" }, AssetJson.SerializerOptions);
+		File.WriteAllText(innerPath, JsonSerializer.Serialize(innerFile, AssetJson.SerializerOptions));
+		environment.ProjectService.RefreshAssetSource(innerAsset.RelativeAssetPath);
+
+		Assert.That(environment.ProjectService.TryGetAsset(outer.AssetId!.Value, out var outerAsset), Is.True);
+		var resolver = new PrefabRuntimeAssetResolver(environment.ProjectService, environment.TypeResolver);
+		var prefab = (Prefab)resolver.Resolve(new RuntimeAssetResolveContext(
+			outerAsset.Id, outerAsset, typeof(Prefab), environment.ProjectService.ProjectRootPath!, (_, _) => null));
+		var world = new World(WorldTag.Game);
+		var root = prefab.Instantiate(world);
+
+		var spawnedInner = world.GetComponent<Children>(root).First;
+		Assert.That(world.GetComponent<NameComponent>(spawnedInner).Name, Is.EqualTo("Inner"));
+		Assert.That(world.GetComponent<TestSceneComponent>(spawnedInner).Count, Is.EqualTo(2));
+		Assert.That(world.GetComponent<TestSceneComponent>(spawnedInner).Label, Is.EqualTo("v2"));
 	}
 
 	private static List<Entity> GetAllEntities(World world)
