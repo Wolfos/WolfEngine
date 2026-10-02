@@ -1,4 +1,6 @@
 using WolfEngine.AssetPipeline;
+using WolfEngine.ECS;
+using WolfEngine.Editor.UI;
 using WolfEngine.Importing;
 
 namespace WolfEngine.Editor.Projects;
@@ -221,4 +223,120 @@ public sealed class AnimationAssetRuntimeResolver : IAnimationAssetRuntimeResolv
 {
     public object Resolve(RuntimeAssetResolveContext context) => global::WolfEngine.Animation.AnimationAssetJson.Read(
         context.GetAbsolutePath(context.Asset.RelativeAssetPath), context.RuntimeType);
+}
+
+/// <summary>
+/// Builds the spawn template gameplay code instantiates in Play mode. Nested prefab instances are merged with
+/// their current source, as placing the prefab in a scene does, so Play mode spawns what the editor shows.
+/// </summary>
+public sealed class PrefabRuntimeAssetResolver : IPrefabRuntimeAssetResolver
+{
+	private readonly IEditorProjectService _projectService;
+	private readonly IProjectTypeResolver? _typeResolver;
+	private readonly IEditorNotificationService? _notificationService;
+
+	public PrefabRuntimeAssetResolver(
+		IEditorProjectService projectService,
+		IProjectTypeResolver? typeResolver = null,
+		IEditorNotificationService? notificationService = null)
+	{
+		_projectService = projectService ?? throw new ArgumentNullException(nameof(projectService));
+		_typeResolver = typeResolver;
+		_notificationService = notificationService;
+	}
+
+	public object Resolve(RuntimeAssetResolveContext context)
+	{
+		var prefabFile = PrefabAssetFile.Load(context.GetAbsolutePath(context.Asset.RelativeAssetPath));
+		var document = new PrefabDocument
+		{
+			Version = PrefabDocument.CurrentVersion,
+			RootEntityId = prefabFile.RootEntityId,
+			Entities = new List<PrefabDocumentEntity>(prefabFile.Entities.Count)
+		};
+		for (var i = 0; i < prefabFile.Entities.Count; i++)
+		{
+			var savedEntity = prefabFile.Entities[i];
+			if (EditorPrefabUtility.TryResolvePrefabSourceEntity(_projectService, savedEntity, out var sourceEntity))
+			{
+				savedEntity = EditorPrefabUtility.MergePrefabSourceEntity(savedEntity, sourceEntity);
+			}
+
+			document.Entities.Add(ToDocumentEntity(savedEntity));
+		}
+
+		var skippedComponents = new List<string>();
+		var prefab = Prefab.Create(context.AssetId, document, component =>
+		{
+			if (TryResolveComponentType(component, out var componentType) &&
+			    componentType.IsValueType &&
+			    typeof(IEntityComponent).IsAssignableFrom(componentType))
+			{
+				return componentType;
+			}
+
+			skippedComponents.Add(string.IsNullOrWhiteSpace(component.TypeId) ? component.Type : component.TypeId);
+			return null;
+		});
+		ReportSkippedComponents(context.Asset.RelativeAssetPath, skippedComponents);
+		return prefab;
+	}
+
+	private static PrefabDocumentEntity ToDocumentEntity(SavedEntity savedEntity)
+	{
+		var components = new List<PrefabDocumentComponent>(savedEntity.Components.Count);
+		for (var i = 0; i < savedEntity.Components.Count; i++)
+		{
+			var component = savedEntity.Components[i];
+			components.Add(new PrefabDocumentComponent
+			{
+				Type = component.Type,
+				TypeId = component.TypeId,
+				Data = component.Data
+			});
+		}
+
+		return new PrefabDocumentEntity
+		{
+			EntityId = savedEntity.EntityId,
+			ParentEntityId = savedEntity.ParentEntityId,
+			HasName = savedEntity.HasName,
+			Name = savedEntity.Name,
+			Enabled = savedEntity.Enabled,
+			LocalTransform = savedEntity.LocalTransform,
+			Components = components
+		};
+	}
+
+	private bool TryResolveComponentType(PrefabDocumentComponent component, out Type componentType)
+	{
+		if (_typeResolver?.TryResolveStableTypeId(component.TypeId, out componentType) == true)
+		{
+			return true;
+		}
+
+		if (_typeResolver?.TryResolveType(component.Type, out componentType) == true)
+		{
+			return true;
+		}
+
+		return ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.TypeId, out componentType) ||
+		       ProjectTypeResolverUtility.TryResolveFromLoadedAssemblies(component.Type, out componentType);
+	}
+
+	// Play mode keeps running without the missing components, matching how the editor places the prefab.
+	private void ReportSkippedComponents(string prefabRelativePath, List<string> skippedComponents)
+	{
+		if (skippedComponents.Count == 0)
+		{
+			return;
+		}
+
+		var message =
+			$"Prefab '{prefabRelativePath}' spawns without {skippedComponents.Count} component(s) that could not be resolved: " +
+			$"{string.Join(", ", skippedComponents.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))}. " +
+			"Gameplay components need the gameplay assembly to be built and loaded.";
+		Console.WriteLine($"[Prefab] {message}");
+		_notificationService?.ReportError(message);
+	}
 }

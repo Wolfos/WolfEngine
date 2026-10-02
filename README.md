@@ -37,3 +37,4 @@ As part of this vision, WolfEngine is not distributed as a binary and never will
 - [Screen points and world rays](Manual/ScreenToRay.md)
 - [Animation graphs](Manual/Animation.md)
 - [Audio](Manual/Audio.md)
+- [Spawning prefabs at runtime](Manual/Prefabs.md)

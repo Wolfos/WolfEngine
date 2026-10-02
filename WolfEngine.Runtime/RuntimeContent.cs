@@ -117,6 +117,7 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
             nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize<AnimationSequence>(bytes, AnimationAssetJson.Options),
             nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize<BoneMask>(bytes, AnimationAssetJson.Options),
             nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
+			nameof(AssetType.Prefab) when expectedType == typeof(Prefab) => CreatePrefab(id, bytes),
 			_ => throw new InvalidOperationException(
 				$"Cooked entry '{id}' of kind '{entry.Kind}' cannot resolve '{expectedType.FullName}'.")
 		};
@@ -131,6 +132,12 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 	private static Mesh CreateMesh(ImportedMeshAssetFile mesh) => new(mesh.Vertices, mesh.Indices, mesh.Normals, mesh.UVs, mesh.Tangents,
         mesh.BoneIndices.Length > 0 ? mesh.BoneIndices : null, mesh.BoneWeights.Length > 0 ? mesh.BoneWeights : null,
         mesh.ShadowOpaqueIndices, mesh.ShadowAlphaTestIndices);
+
+	// Cooked prefabs are the authored file, which stores every entity's full component data (nested prefab
+	// instances included, as of the prefab's last save), as cooked scene cells do. Every component has to
+	// resolve: a spawned unit silently missing a gameplay component is harder to track down than a load failure.
+	private static Prefab CreatePrefab(Guid id, byte[] bytes) =>
+		Prefab.Load(id, bytes, component => RuntimeComponentTypes.Resolve(component.TypeId, component.Type));
 
 	private object CreateDataAsset(byte[] bytes, Type expectedType)
 	{
@@ -232,9 +239,7 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 
 	private static void ApplyComponent(World world, Entity entity, CookedComponent component, IReadOnlyDictionary<Guid, Entity> entities)
 	{
-		var type = ResolveType(component.TypeId, component.Type);
-		if (type is null || !type.IsValueType || !typeof(IEntityComponent).IsAssignableFrom(type))
-			throw new InvalidDataException($"Runtime component type '{component.TypeId}' is unavailable.");
+		var type = RuntimeComponentTypes.Resolve(component.TypeId, component.Type);
 
 		var options = new JsonSerializerOptions(AssetJson.GetSerializerOptions(type));
 		options.Converters.Insert(0, new EntityReferenceConverter(entities));
@@ -247,7 +252,37 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 
 	private static void AddComponent<T>(World world, Entity entity, object value) where T : struct, IEntityComponent => world.AddComponent(entity, (T)value);
 
-	private static Type? ResolveType(string stableId, string typeName)
+	private sealed class EntityReferenceConverter(IReadOnlyDictionary<Guid, Entity> entities) : JsonConverter<Entity>
+	{
+		public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+		{
+			using var document = JsonDocument.ParseValue(ref reader);
+			if (document.RootElement.ValueKind == JsonValueKind.Object
+			    && document.RootElement.TryGetProperty(Prefab.EntityReferenceIdPropertyName, out var value)
+			    && Guid.TryParse(value.GetString(), out var id)
+			    && entities.TryGetValue(id, out var entity))
+				return entity;
+
+			return default;
+		}
+
+		public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) => throw new NotSupportedException();
+	}
+}
+
+internal static class RuntimeComponentTypes
+{
+	/// <summary>Resolves a cooked component's runtime type, failing when it is not an entity component struct.</summary>
+	public static Type Resolve(string stableId, string typeName)
+	{
+		var type = Find(stableId, typeName);
+		if (type is null || !type.IsValueType || !typeof(IEntityComponent).IsAssignableFrom(type))
+			throw new InvalidDataException($"Runtime component type '{stableId}' is unavailable.");
+
+		return type;
+	}
+
+	private static Type? Find(string stableId, string typeName)
 	{
 		var gameplayName = stableId.StartsWith("gameplay:", StringComparison.Ordinal) ? stableId[9..] : null;
 		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -259,23 +294,6 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 		}
 
 		return null;
-	}
-
-	private sealed class EntityReferenceConverter(IReadOnlyDictionary<Guid, Entity> entities) : JsonConverter<Entity>
-	{
-		public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-		{
-			using var document = JsonDocument.ParseValue(ref reader);
-			if (document.RootElement.ValueKind == JsonValueKind.Object
-			    && document.RootElement.TryGetProperty("__entityRefId", out var value)
-			    && Guid.TryParse(value.GetString(), out var id)
-			    && entities.TryGetValue(id, out var entity))
-				return entity;
-
-			return default;
-		}
-
-		public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) => throw new NotSupportedException();
 	}
 }
 
