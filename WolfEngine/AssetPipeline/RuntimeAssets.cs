@@ -83,6 +83,10 @@ public interface IColorLookupTableRuntimeResolver : IRuntimeAssetResolver
 {
 }
 
+public interface IPrefabRuntimeAssetResolver : IRuntimeAssetResolver
+{
+}
+
 public interface IRuntimeArtifactTargetProvider
 {
 	string CurrentTarget { get; }

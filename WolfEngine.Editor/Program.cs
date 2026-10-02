@@ -101,6 +101,7 @@ public static class Program
 		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationAssetRuntimeResolver, AnimationAssetRuntimeResolver>();
+		services.AddSingleton<IPrefabRuntimeAssetResolver, PrefabRuntimeAssetResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<AudioAssetEditor>();

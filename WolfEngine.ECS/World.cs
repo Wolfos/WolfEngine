@@ -299,6 +299,12 @@ public class World
         AddTransform(entity, new LocalTransform(transform));
     }
 
+    /// <summary>Adds a transform from an already decomposed pose, skipping the matrix decomposition.</summary>
+    public void AddTransform(Entity entity, Vector3 localPosition, Quaternion localRotation, Vector3 localScale)
+    {
+        AddTransform(entity, new LocalTransform(localPosition, localRotation, localScale));
+    }
+
     public void SetParent(Entity child, Entity parent)
     {
         if (!parent.IsValid)
