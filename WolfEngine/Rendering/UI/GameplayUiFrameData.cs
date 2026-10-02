@@ -51,6 +51,7 @@ public sealed class GameplayUiTextureSurfaceFrame
 	public required long SurfaceId { get; init; }
 	public required Texture Target { get; init; }
 	public UiFrameData Frame { get; init; } = UiFrameData.Empty;
-	public bool IsDirty { get; set; }
+	/// <summary>Monotonic geometry revision, independent of snapshot publication or consumption.</summary>
+	public long Revision { get; init; }
 	public ColorRGBA ClearColor { get; init; } = new(0.0f, 0.0f, 0.0f, 0.0f);
 }

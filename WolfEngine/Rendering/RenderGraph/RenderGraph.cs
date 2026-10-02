@@ -749,13 +749,13 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 				// Shared setup takes its sun and sky from the primary view; see BeginSharedFrame.
 				var primarySnapshot = snapshot.GetOrCreateView(RenderViewId.Primary);
+				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
 				_frameBuilder.BeginSharedFrame(
 					frameBufferSize,
 					primarySnapshot.SunDirection,
 					primarySnapshot.SunIntensityScale,
 					primarySnapshot.Config.SkyboxConfig);
 				_frameBuilder.SetUiFrame(uiFrame);
-				_frameBuilder.SetGameplayUiFrame(_gameplayUiFrame);
 
 				_sceneColorHandles.Clear();
 				for (var viewIndex = 0; viewIndex < _recordedViews.Count; viewIndex++)

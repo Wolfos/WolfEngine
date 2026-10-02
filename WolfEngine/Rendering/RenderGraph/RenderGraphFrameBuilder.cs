@@ -1299,7 +1299,7 @@ internal sealed class RenderGraphFrameBuilder
 		for (var i = 0; i < _gameplayTextureTargets.Count; i++)
 		{
 			var target = _gameplayTextureTargets[i];
-			if (target.Surface.IsDirty == false)
+			if (!_gameplayUiRenderer.NeedsRedraw(target.Surface))
 			{
 				continue;
 			}
@@ -3072,7 +3072,7 @@ internal sealed class RenderGraphFrameBuilder
 			target.Texture,
 			clearTarget: true,
 			target.Surface.ClearColor);
-		target.Surface.IsDirty = false;
+		_gameplayUiRenderer.MarkRendered(target.Surface);
 	}
 
 	private static RenderGraphResourceHandle GetShadowMapHandle(in RenderViewResources resources, int cascadeIndex)

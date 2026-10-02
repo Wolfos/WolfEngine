@@ -3,6 +3,13 @@ using WolfEngine.Rendering.Shaders;
 
 namespace WolfEngine.Rendering.UI;
 
+internal sealed class GameplayUiTextureRevision
+{
+	private long? _rendered;
+	public bool NeedsRedraw(long revision) => _rendered != revision;
+	public void MarkRendered(long revision) => _rendered = revision;
+}
+
 /// <summary>
 /// Owns the native gameplay UI renderer, its white texture, and upload buffers.
 /// </summary>
@@ -13,11 +20,12 @@ public sealed class GameplayUiGpuRenderer
 		public required IGfxTexture Texture { get; init; }
 		public required DescriptorHandle RegisteredShaderResourceView { get; init; }
 		public DescriptorHandle ShaderResourceView => RegisteredShaderResourceView;
+		public GameplayUiTextureRevision Revision { get; } = new();
 	}
 
 	private readonly IUiDrawRenderer _renderer;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
-	private readonly Dictionary<Texture, ITextureResources> _targets = new(ReferenceEqualityComparer.Instance);
+	private readonly Dictionary<Texture, RenderTargetResources> _targets = new(ReferenceEqualityComparer.Instance);
 	private readonly Dictionary<Texture, ITextureResources> _atlases = new(ReferenceEqualityComparer.Instance);
 	private readonly IRenderer _resourceFactory;
 	private readonly HashSet<Texture> _active = new(ReferenceEqualityComparer.Instance);
@@ -90,6 +98,12 @@ public sealed class GameplayUiGpuRenderer
 				device.Retire(disposable, $"Gameplay UI target '{target.Name}'");
 		}
 	}
+
+	internal bool NeedsRedraw(GameplayUiTextureSurfaceFrame surface) =>
+		_targets[surface.Target].Revision.NeedsRedraw(surface.Revision);
+
+	internal void MarkRendered(GameplayUiTextureSurfaceFrame surface) =>
+		_targets[surface.Target].Revision.MarkRendered(surface.Revision);
 
 	private void CollectAtlases(UiFrameData data)
 	{

@@ -11,6 +11,26 @@ namespace WolfEngine.UI.Tests;
 public sealed class GameplayUiTests
 {
 	[Test]
+	public void WorldTextureRevisionSurvivesDroppedSnapshotsAndScreenOnlyPublications()
+	{
+		using var services = new ServiceCollection().BuildServiceProvider();
+		using var host = new GameplayUiHost(services);
+		using var world = host.Create<ConcurrentHud>(new UiSurfaceOptions { Kind = UiSurfaceKind.Texture });
+		using var screen = host.Create<ConcurrentHud>(new UiSurfaceOptions());
+		Assert.That(host.TryConsumeLatest(out var initial), Is.True);
+		var originalRevision = initial.TextureSurfaces.Single().Revision; initial.Release();
+		for (var i = 1; i <= 10; i++) world.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = i });
+		// This publication used to mark the world clean even though none of its updates were rendered.
+		screen.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 99 });
+		Assert.That(host.TryConsumeLatest(out var latest), Is.True);
+		var revision = latest.TextureSurfaces.Single().Revision;
+		Assert.That(revision, Is.GreaterThan(originalRevision));
+		Assert.That(latest.TextureSurfaces.Single().Frame, Is.Not.SameAs(UiFrameData.Empty)); latest.Release();
+		screen.SetParameters(new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 100 });
+		Assert.That(host.TryConsumeLatest(out var unchanged), Is.True);
+		Assert.That(unchanged.TextureSurfaces.Single().Revision, Is.EqualTo(revision)); unchanged.Release();
+	}
+	[Test]
 	public async Task ScreenSurfaceSerializesResizeAndParameterRebuilds()
 	{
 		using var services = new ServiceCollection().BuildServiceProvider();

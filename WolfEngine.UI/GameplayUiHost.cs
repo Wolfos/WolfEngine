@@ -66,7 +66,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	public Texture? Texture { get; }
 	public UiPerformanceSnapshot Performance { get; private set; }
 	internal UiFrameData Frame { get; private set; } = UiFrameData.Empty;
-	internal bool IsDirty { get; private set; } = true;
+	internal long FrameRevision { get; private set; }
 
 	public void SetParameters(IReadOnlyDictionary<string, object?> parameters)
 	{
@@ -96,7 +96,6 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		}
 	}
 
-	internal void MarkPublishedClean() => IsDirty = false;
 
 	private void Rebuild()
 	{
@@ -182,11 +181,17 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 			{
 				using (FrameProfiler.Instance.Measure("Gameplay UI.Build Geometry"))
 				{
-					var previousFrame = Frame;
-					Frame = _frames.Build(_root!, outputWidth, outputHeight, scale);
-					previousFrame.Release();
+					var nextFrame = _frames.Build(_root!, outputWidth, outputHeight, scale);
+					// Publish/retain and replacement/release share a lock: pooled geometry
+					// must not be returned while another surface publishes this one.
+					lock (_host.FrameSync)
+					{
+						var previousFrame = Frame;
+						Frame = nextFrame;
+						FrameRevision++;
+						previousFrame.Release();
+					}
 				}
-				IsDirty = true;
 			}
 			timer.Stop();
 			_revision++;
@@ -229,6 +234,7 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 {
 	private readonly IServiceProvider _services;
 	private readonly object _sync = new();
+	internal object FrameSync => _sync;
 	private readonly List<GameplayUiSurface> _surfaces = [];
 	private readonly ConcurrentQueue<GameplayUiRenderFrame> _pendingFrames = new();
 	private long _nextSurfaceId;
@@ -353,7 +359,7 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 						SurfaceId = surface.Id,
 						Target = surface.Texture,
 						Frame = surface.Frame.Retain(),
-						IsDirty = surface.IsDirty,
+						Revision = surface.FrameRevision,
 						ClearColor = surface.Options.ClearColor
 					};
 				}
@@ -363,7 +369,6 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 					Screen = screen?.Frame.Retain() ?? UiFrameData.Empty,
 					TextureSurfaces = textureSurfaces
 				};
-				for (var i = 0; i < _surfaces.Count; i++) _surfaces[i].MarkPublishedClean();
 			}
 			_pendingFrames.Enqueue(frame);
 			while (_pendingFrames.Count > 2 && _pendingFrames.TryDequeue(out var dropped)) dropped.Release();
