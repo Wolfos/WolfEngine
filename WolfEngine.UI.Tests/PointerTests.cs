@@ -286,6 +286,8 @@ public sealed class PointerTests
 		using var surface = host.Create<RazorClickCounter>(new()); var input = new InputSystem(new PointerInputQueue());
 		var root = ((GameplayUiSurface)surface).Root!;
 		Assert.That(root.Children[0].Events.ContainsKey("onclick"), Is.True, "Razor must compile @onclick as a callback, not a literal attribute.");
+		Assert.That(root.Children[0].Children, Has.Count.EqualTo(1), "Literal and interpolated text must share one layout node.");
+		Assert.That(root.Children[0].Children[0].Text, Is.EqualTo("Clicks: 0"));
 		input.SetAxis2D(InputActionBinding.MousePosition, new(10, 10)); input.SetButton(InputActionBinding.MouseButtonLeft, true); input.ProcessPointerInput(host, Context);
 		for (var frame = 1; frame <= 20; frame++)
 		{
@@ -294,5 +296,6 @@ public sealed class PointerTests
 		}
 		input.SetButton(InputActionBinding.MouseButtonLeft, false); input.ProcessPointerInput(host, Context);
 		Assert.That(Text(((GameplayUiSurface)surface).Root!), Does.Contain("Clicks: 1"));
+		Assert.That(((GameplayUiSurface)surface).Root!.Children[0].Children, Has.Count.EqualTo(1));
 	}
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text;
 
 #pragma warning disable BL0006
 
@@ -12,6 +13,7 @@ internal sealed class RazorTreeRenderer : Renderer
 {
 	private readonly Dictionary<int, ArrayRange<RenderTreeFrame>> _frames = [];
 	private readonly Stack<UiNode> _nodePool = [];
+	private readonly StringBuilder _textRun = new();
 	private Exception? _exception;
 	private readonly record struct IdentityKey(long Parent, int Component, object? Key, int Sequence, int Occurrence, int Markup, string Name);
 	private readonly Dictionary<IdentityKey, long> _identities = [];
@@ -61,6 +63,7 @@ internal sealed class RazorTreeRenderer : Renderer
 		_liveIdentities.Clear();
 		_occurrences.Clear();
 		AppendComponent(rootComponentId, root);
+		CoalesceTextRuns(root);
 		// Removed identities must never revive captures when a keyed element is recreated later.
 		_removedIdentities.Clear();
 		foreach (var pair in _identities) if (!_liveIdentities.Contains(pair.Value)) _removedIdentities.Add(pair.Key);
@@ -133,12 +136,7 @@ internal sealed class RazorTreeRenderer : Renderer
 					break;
 				}
 				case RenderTreeFrameType.Text:
-					if (!string.IsNullOrWhiteSpace(frame.TextContent))
-					{
-						var text = RentNode("#text");
-						text.Text = frame.TextContent;
-						parent.Children.Add(text);
-					}
+					AppendText(frame.TextContent, parent);
 					i++;
 					break;
 				case RenderTreeFrameType.Markup:
@@ -168,7 +166,7 @@ internal sealed class RazorTreeRenderer : Renderer
 
 	private void AppendMarkup(string markup, UiNode parent, int componentId, int sequence, int occurrence)
 	{
-		if (string.IsNullOrWhiteSpace(markup)) return;
+		if (string.IsNullOrEmpty(markup)) return;
 		var stack = new Stack<UiNode>();
 		stack.Push(parent);
 		var position = 0;
@@ -177,14 +175,14 @@ internal sealed class RazorTreeRenderer : Renderer
 			var tagStart = markup.IndexOf('<', position);
 			if (tagStart < 0)
 			{
-				AppendText(markup[position..], stack.Peek());
+				AppendText(System.Net.WebUtility.HtmlDecode(markup[position..]), stack.Peek());
 				break;
 			}
-			AppendText(markup[position..tagStart], stack.Peek());
+			AppendText(System.Net.WebUtility.HtmlDecode(markup[position..tagStart]), stack.Peek());
 			var tagEnd = markup.IndexOf('>', tagStart + 1);
 			if (tagEnd < 0)
 			{
-				AppendText(markup[tagStart..], stack.Peek());
+				AppendText(System.Net.WebUtility.HtmlDecode(markup[tagStart..]), stack.Peek());
 				break;
 			}
 			var tag = markup[(tagStart + 1)..tagEnd].Trim();
@@ -214,12 +212,50 @@ internal sealed class RazorTreeRenderer : Renderer
 
 	private void AppendText(string text, UiNode parent)
 	{
-		if (!string.IsNullOrWhiteSpace(text))
+		if (!string.IsNullOrEmpty(text))
 		{
 			var node = RentNode("#text");
-			node.Text = System.Net.WebUtility.HtmlDecode(text);
+			node.Text = text;
 			parent.Children.Add(node);
 		}
+	}
+
+	// Razor splits literals, expressions and regions into separate frames. Those
+	// boundaries are not layout boundaries: adjacent text under one element must
+	// be measured, wrapped and painted together. Never merge across child elements.
+	private void CoalesceTextRuns(UiNode parent)
+	{
+		var children = parent.Children;
+		var write = 0;
+		for (var read = 0; read < children.Count;)
+		{
+			var first = children[read];
+			if (!first.IsText)
+			{
+				CoalesceTextRuns(first);
+				children[write++] = first;
+				read++;
+				continue;
+			}
+
+			var end = read + 1;
+			while (end < children.Count && children[end].IsText) end++;
+			if (end > read + 1)
+			{
+				// Reuse one builder to avoid quadratic string concatenation for long runs.
+				_textRun.Clear();
+				for (var i = read; i < end; i++) _textRun.Append(children[i].Text);
+				first.Text = _textRun.ToString();
+				for (var i = read + 1; i < end; i++) RecycleTree(children[i]);
+			}
+
+			// Keep the existing treatment of indentation between elements, but retain
+			// whitespace fragments within a meaningful run ("A", " ", "B" => "A B").
+			if (string.IsNullOrWhiteSpace(first.Text)) RecycleTree(first);
+			else children[write++] = first;
+			read = end;
+		}
+		if (write < children.Count) children.RemoveRange(write, children.Count - write);
 	}
 
 	private UiNode RentNode(string name)

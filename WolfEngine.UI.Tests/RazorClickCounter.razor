@@ -1,4 +1,4 @@
-<button style="width: 100px; height: 50px" @onclick="CountClick"><span>Clicks: @_clicks</span></button>
+<button style="width: 100px; height: 50px" @onclick="CountClick">Clicks: @_clicks</button>
 @code {
     private int _clicks;
     private void CountClick() => _clicks++;
