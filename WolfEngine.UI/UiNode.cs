@@ -12,6 +12,7 @@ internal sealed class UiNode
 	public float Width { get; set; }
 	public float Height { get; set; }
 	public UiTextLayout? TextLayout { get; set; }
+	public UiInsets ResolvedPadding { get; set; }
 
 	public string? Id => Attributes.TryGetValue("id", out var value) ? value?.ToString() : null;
 	public string? Classes => Attributes.TryGetValue("class", out var value) ? value?.ToString() : null;
@@ -29,6 +30,7 @@ internal sealed class UiNode
 		Top = 0;
 		Width = 0;
 		Height = 0;
+		ResolvedPadding = default;
 	}
 
 	public int CountNodes()
@@ -83,9 +85,9 @@ internal static class UiTreeReconciler
 		left.Absolute == right.Absolute && left.Width == right.Width && left.Height == right.Height &&
 		left.MinWidth == right.MinWidth && left.MinHeight == right.MinHeight &&
 		left.MaxWidth == right.MaxWidth && left.MaxHeight == right.MaxHeight &&
-		left.Left == right.Left && left.Top == right.Top && left.FlexGrow == right.FlexGrow &&
+		left.Left == right.Left && left.Top == right.Top && left.Right == right.Right && left.Bottom == right.Bottom && left.FlexGrow == right.FlexGrow &&
 		left.FlexShrink == right.FlexShrink && left.Gap == right.Gap && left.Padding == right.Padding &&
 		left.Margin == right.Margin && left.JustifyContent == right.JustifyContent &&
-		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize && left.FontFamily == right.FontFamily &&
+		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize && left.RootFontSize == right.RootFontSize && left.FontFamily == right.FontFamily &&
 		left.LineHeight == right.LineHeight && left.LineHeightPixels == right.LineHeightPixels && left.NoWrap == right.NoWrap;
 }

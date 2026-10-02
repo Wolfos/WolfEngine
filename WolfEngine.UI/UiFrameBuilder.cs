@@ -33,7 +33,7 @@ internal sealed class UiFrameBuilder
 		_geometry.Prepare();
 		try
 		{
-			Append(_geometry, root, 1, scale);
+			Append(_geometry, root, 1, scale, new Vector4(0, 0, outputWidth, outputHeight));
 			return _geometry.BuildFrame(outputWidth, outputHeight, WhiteAtlas);
 		}
 		catch
@@ -43,9 +43,10 @@ internal sealed class UiFrameBuilder
 		}
 	}
 
-	private void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity, float scale)
+	private void Append(UiGeometryBuilder geometry, UiNode node, float inheritedOpacity, float scale, Vector4 clip)
 	{
-		if (!node.Style.Display) return;
+		if (!node.Style.Display || clip.Z <= clip.X || clip.W <= clip.Y) return;
+		geometry.SetClip(clip);
 		var opacity = inheritedOpacity * node.Style.Opacity;
 		if (!node.IsText && node.Width > 0 && node.Height > 0 && node.Style.Background.A * opacity > 0.001f)
 		{
@@ -65,7 +66,9 @@ internal sealed class UiFrameBuilder
 				foreach (var placement in text.Glyphs)
 				{
 					var glyph = placement.Glyph;
-					var origin = new Vector2(node.Left, node.Top) + placement.Origin;
+					var offset = text.LineOffset(placement.Line,
+						node.Width - node.ResolvedPadding.Left - node.ResolvedPadding.Right, node.Style.TextAlign);
+					var origin = new Vector2(node.Left + offset, node.Top) + placement.Origin;
 					geometry.AddGlyph((origin + new Vector2(glyph.Left, -glyph.Top) * size) * scale,
 						(origin + new Vector2(glyph.Right, -glyph.Bottom) * size) * scale,
 						new Vector2(glyph.AtlasX / (float)font.Atlas.Width, glyph.AtlasY / (float)font.Atlas.Height),
@@ -74,7 +77,12 @@ internal sealed class UiFrameBuilder
 				}
 			}
 		}
-		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale);
+		if (node.Style.ClipOverflow)
+		{
+			clip = new Vector4(MathF.Max(clip.X, node.Left * scale), MathF.Max(clip.Y, node.Top * scale),
+				MathF.Min(clip.Z, (node.Left + node.Width) * scale), MathF.Min(clip.W, (node.Top + node.Height) * scale));
+		}
+		for (var i = 0; i < node.Children.Count; i++) Append(geometry, node.Children[i], opacity, scale, clip);
 	}
 
 	private static uint Pack(ColorRGBA value)
@@ -102,7 +110,9 @@ internal sealed class UiGeometryBuilder : IDisposable
 	private int _vertexCount;
 	private int _indexCount;
 	private bool _transferred;
-	private readonly List<(Texture? Atlas, float Range, int Start)> _batches = [];
+	private readonly List<(Texture? Atlas, float Range, Vector4? Clip, int Start)> _batches = [];
+	private Vector4? _clip;
+	public void SetClip(Vector4 clip) => _clip = clip;
 
 	/// <summary>Starts another build after the previous buffers were transferred to a frame.</summary>
 	public void Prepare()
@@ -118,13 +128,14 @@ internal sealed class UiGeometryBuilder : IDisposable
 		_vertexCount = 0;
 		_indexCount = 0;
 		_batches.Clear();
+		_clip = null;
 		_transferred = false;
 	}
 
 	public void AddFilledRect(Vector2 min, Vector2 max, uint color, float radius = 0)
 	{
-		if (max.X <= min.X || max.Y <= min.Y) return;
-		if (_batches.Count == 0) BeginBatch(null, 0);
+		if (max.X <= min.X || max.Y <= min.Y || OutsideClip(min, max)) return;
+		BeginBatch(_batches.Count == 0 ? null : _batches[^1].Atlas, _batches.Count == 0 ? 0 : _batches[^1].Range);
 		var clampedRadius = MathF.Min(MathF.Max(radius, 0), MathF.Min(max.X - min.X, max.Y - min.Y) * 0.5f);
 		if (clampedRadius < 0.5f)
 		{
@@ -176,12 +187,13 @@ internal sealed class UiGeometryBuilder : IDisposable
 
 	private void BeginBatch(Texture? atlas, float range)
 	{
-		if (_batches.Count > 0 && ReferenceEquals(_batches[^1].Atlas, atlas) && _batches[^1].Range == range) return;
-		_batches.Add((atlas, range, _indexCount));
+		if (_batches.Count > 0 && ReferenceEquals(_batches[^1].Atlas, atlas) && _batches[^1].Range == range && _batches[^1].Clip == _clip) return;
+		_batches.Add((atlas, range, _clip, _indexCount));
 	}
 
 	public void AddGlyph(Vector2 min, Vector2 max, Vector2 uvMin, Vector2 uvMax, uint color, Texture atlas, float range)
 	{
+		if (OutsideClip(min, max)) return;
 		BeginBatch(atlas, range);
 		EnsureVertices(4); EnsureIndices(6);
 		var first = (uint)_vertexCount;
@@ -192,6 +204,9 @@ internal sealed class UiGeometryBuilder : IDisposable
 		_indices[_indexCount++] = first; _indices[_indexCount++] = first + 1; _indices[_indexCount++] = first + 2;
 		_indices[_indexCount++] = first; _indices[_indexCount++] = first + 2; _indices[_indexCount++] = first + 3;
 	}
+
+	private bool OutsideClip(Vector2 min, Vector2 max) => _clip is { } clip &&
+		(max.X <= clip.X || max.Y <= clip.Y || min.X >= clip.Z || min.Y >= clip.W);
 
 	private void AddCorner(Vector2 center, float radius, float startAngle, float endAngle, int segments, uint color)
 	{
@@ -215,7 +230,7 @@ internal sealed class UiGeometryBuilder : IDisposable
 				(i + 1 < commandCount ? _batches[i + 1].Start : _indexCount) - batch.Start,
 				batch.Start,
 				0,
-				new Vector4(0, 0, width, height),
+				batch.Clip ?? new Vector4(0, 0, width, height),
 				UiTextureIds.FontAtlas, batch.Atlas, batch.Range, solid: batch.Atlas is null);
 		}
 

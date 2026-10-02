@@ -80,8 +80,17 @@ internal sealed class UiFont : IDisposable
 }
 
 internal readonly record struct ShapedGlyph(FontGlyph Glyph, float Advance, Vector2 Offset);
-internal readonly record struct TextGlyph(FontGlyph Glyph, Vector2 Origin);
-internal sealed record UiTextLayout(UiFont? Font, TextGlyph[] Glyphs, float Width, float Height);
+internal readonly record struct TextGlyph(FontGlyph Glyph, Vector2 Origin, int Line);
+internal sealed record UiTextLayout(UiFont? Font, TextGlyph[] Glyphs, float Width, float Height, float[] LineWidths)
+{
+	// Alignment is a paint operation: share shaping/measurement caches and do not dirty Yoga.
+	public float LineOffset(int line, float contentWidth, UiTextAlign alignment) => alignment switch
+	{
+		UiTextAlign.Center => (contentWidth - LineWidths[line]) * .5f,
+		UiTextAlign.Right => contentWidth - LineWidths[line],
+		_ => 0
+	};
+}
 
 internal sealed class UiFontCatalog(IFontContentProvider? provider) : IDisposable
 {
@@ -127,6 +136,7 @@ internal sealed class UiTextService(UiFontCatalog? catalog = null)
 
 	public UiTextLayout Layout(string text, ComputedStyle style, float width = float.PositiveInfinity)
 	{
+		if (style.FontSize <= 0) return EmptyLayout;
 		if (!_resolvedFamilies.TryGetValue(style.FontFamily, out var font))
 		{
 			foreach (var family in style.FontFamily.Split(','))
@@ -146,15 +156,18 @@ internal sealed class UiTextService(UiFontCatalog? catalog = null)
 		if (result.Glyphs.Length <= 131072) { _layouts.Add(key, result); _order.Enqueue(key); _cachedGlyphs += result.Glyphs.Length; }
 		return result;
 	}
+	private static readonly UiTextLayout EmptyLayout = new(null, [], 0, 0, []);
 
 	private static UiTextLayout BuildLayout(UiFont? font, string text, ComputedStyle style, float width, float resolvedLineHeight)
 	{
 		var glyphs = new List<TextGlyph>();
+		var lineWidths = new List<float>();
 		var size = style.FontSize;
 		var lineHeight = (resolvedLineHeight > 0 ? resolvedLineHeight : font?.Data.Metrics.LineHeight ?? 1.2f) * size;
 		var baseline = (lineHeight - (font?.Data.Metrics.Ascender - font?.Data.Metrics.Descender ?? 1) * size) / 2 +
 			(font?.Data.Metrics.Ascender ?? 0.8f) * size;
 		var pen = 0f; var line = 0; var maximum = 0f;
+		var contentEnd = 0f;
 		foreach (Match part in Regex.Matches(text.Replace("\r\n", "\n"), @"[^\s]+|[^\S\n]+|\n"))
 		{
 			var token = part.Value;
@@ -163,18 +176,20 @@ internal sealed class UiTextService(UiFontCatalog? catalog = null)
 			var tokenWidth = shaped?.Sum(g => g.Advance * size) ?? token.Length * size * 0.6f;
 			var space = char.IsWhiteSpace(token[0]);
 			if (!style.NoWrap && pen > 0 && pen + tokenWidth > width) { NewLine(); if (space) continue; }
-			if (shaped is null) { pen += tokenWidth; continue; }
+			if (shaped is null) { pen += tokenWidth; if (!space) contentEnd = pen; continue; }
 			foreach (var glyph in shaped)
 			{
 				var advance = glyph.Advance * size;
 				if (!style.NoWrap && pen > 0 && pen + advance > width && !space) NewLine();
 				if (glyph.Glyph.AtlasWidth > 0) glyphs.Add(new TextGlyph(glyph.Glyph,
-					new Vector2(pen, baseline + line * lineHeight) + glyph.Offset * size));
+					new Vector2(pen, baseline + line * lineHeight) + glyph.Offset * size, line));
 				pen += advance;
+				if (!space) contentEnd = pen;
 			}
 		}
 		maximum = Math.Max(maximum, pen);
-		return new UiTextLayout(font, glyphs.ToArray(), maximum, text.Length == 0 ? 0 : (line + 1) * lineHeight);
-		void NewLine() { maximum = Math.Max(maximum, pen); pen = 0; line++; }
+		lineWidths.Add(contentEnd);
+		return new UiTextLayout(font, glyphs.ToArray(), maximum, text.Length == 0 ? 0 : (line + 1) * lineHeight, lineWidths.ToArray());
+		void NewLine() { maximum = Math.Max(maximum, pen); lineWidths.Add(contentEnd); contentEnd = 0; pen = 0; line++; }
 	}
 }

@@ -47,6 +47,54 @@ public sealed class FontRenderingTests
 		}
 	}
 
+	[TestCase("Short\n\nA much longer line", "Center", 400)]
+	[TestCase("Short\nA much longer line", "Right", 400)]
+	[TestCase("A paragraph with several words wrapping onto different lines", "Center", 150)]
+	[TestCase("A paragraph with several words wrapping onto different lines", "Right", 150)]
+	public void EachLineIsAlignedWithinItsActualTextBox(string value, string alignmentName, float width)
+	{
+		var alignment = Enum.Parse<UiTextAlign>(alignmentName);
+		var layout = _text.Layout(value, Style, width);
+		Assert.That(layout.LineWidths.Length, Is.GreaterThan(1));
+		var alignedStyle = Style with { TextAlign = alignment };
+		Assert.That(_text.Layout(value, alignedStyle, width), Is.SameAs(layout), "Alignment must share measurement caches.");
+		var node = new UiNode { Name = "#text", Text = value, Width = width, Height = layout.Height, Style = alignedStyle, TextLayout = layout };
+		var frame = new UiFrameBuilder(_text).Build(node, 500, 400);
+		try
+		{
+			for (var i = 0; i < layout.Glyphs.Length; i++)
+			{
+				var placement = layout.Glyphs[i];
+				var lineWidth = layout.LineWidths[placement.Line];
+				var expectedOffset = (width - lineWidth) * (alignment == UiTextAlign.Center ? .5f : 1);
+				Assert.That(frame.Vertices[i * 4].Position.X,
+					Is.EqualTo(placement.Origin.X + placement.Glyph.Left * Style.FontSize + expectedOffset).Within(.001));
+			}
+		}
+		finally { frame.Release(); }
+	}
+
+	[Test]
+	public void TextAlignmentInheritsAndUpdatesWithoutInvalidatingLayout()
+	{
+		UiNode Tree(string alignment)
+		{
+			var root = new UiNode { Name = "div" };
+			root.Attributes["style"] = "text-align: " + alignment;
+			var child = new UiNode { Name = "#text", Text = "Short\nLonger line" }; root.Children.Add(child);
+			CssStyleSheet.Parse("").Apply(root, 400, 200);
+			return root;
+		}
+		var retained = Tree("left"); var updated = Tree("center");
+		Assert.That(updated.Children[0].Style.TextAlign, Is.EqualTo(UiTextAlign.Center));
+		var changes = UiTreeReconciler.Reconcile(retained, updated);
+		Assert.That(changes.LayoutChanged, Is.False);
+		Assert.That(retained.Children[0].Style.TextAlign, Is.EqualTo(UiTextAlign.Center));
+		var child = retained.Children[0]; child.Attributes["style"] = "text-align: right; text-align: inherit";
+		CssStyleSheet.Parse("").Apply(retained, 400, 200);
+		Assert.That(child.Style.TextAlign, Is.EqualTo(UiTextAlign.Center));
+	}
+
 	[TestCase(GraphicsBackendKind.Metal)]
 	[TestCase(GraphicsBackendKind.D3D12)]
 	public void FontShaderCompilesWithBackendReflection(GraphicsBackendKind backend)
@@ -143,6 +191,28 @@ public sealed class FontRenderingTests
 		var resized = Tree("Another header", "WWW");
 		using var resizedFull = new YogaLayoutEngine(_text); resizedFull.Layout(resized, 400, 200);
 		Assert.That(retained.Children[1].Children[0].Left, Is.EqualTo(resized.Children[1].Children[0].Left).Within(0.6));
+	}
+
+	[Test]
+	public void IncrementalTextRespectsAsymmetricRelativePadding()
+	{
+		UiNode Tree(string value)
+		{
+			var root = new UiNode { Name = "root" };
+			var cell = new UiNode { Name = "div", Style = Style with { Width = UiLength.Pixels(200), Height = UiLength.Pixels(100),
+				Padding = new UiEdges(new UiLength(.5f, UiLengthUnit.Em), UiLength.Pixels(20), UiLength.Pixels(30), new UiLength(2, UiLengthUnit.Rem)),
+				AlignItems = "center", JustifyContent = "center" } };
+			cell.Children.Add(new UiNode { Name = "#text", Text = value, Style = Style }); root.Children.Add(cell); return root;
+		}
+		var retained = Tree("iii");
+		using var incremental = new YogaLayoutEngine(_text); incremental.Layout(retained, 400, 200);
+		var updated = Tree("WWW"); var changes = UiTreeReconciler.Reconcile(retained, updated);
+		incremental.Layout(retained, 400, 200, changes.LayoutChanged);
+		using var full = new YogaLayoutEngine(_text); full.Layout(updated, 400, 200);
+		Assert.That(retained.Children[0].ResolvedPadding, Is.EqualTo(new UiInsets(12, 20, 30, 32)));
+		var actual = retained.Children[0].Children[0]; var expected = updated.Children[0].Children[0];
+		Assert.That(actual.Left, Is.EqualTo(expected.Left).Within(.6)); Assert.That(actual.Top, Is.EqualTo(expected.Top).Within(.6));
+		Assert.That(actual.TextLayout!.Width, Is.EqualTo(expected.TextLayout!.Width));
 	}
 
 	[Test]

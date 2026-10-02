@@ -142,7 +142,7 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 	private static bool CanPatchContainedText(Binding text)
 	{
 		var textStyle = text.Source.Style;
-		if (textStyle.Absolute || textStyle.FlexGrow != 0 || textStyle.Margin != 0 ||
+		if (textStyle.Absolute || textStyle.FlexGrow != 0 || !textStyle.Margin.IsZero || !textStyle.Padding.IsZero ||
 		    !TryFindContainmentBoundary(text, out var boundary, out var branchRoot)) return false;
 		return ReferenceEquals(branchRoot, text) || boundary.Source.Style.AlignItems != "stretch";
 	}
@@ -154,7 +154,8 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		var parentNode = boundary.Source;
 		var parentStyle = parentNode.Style;
 		var textNode = text.Source;
-		var measured = text.Text.Layout(textNode.Text ?? "", textNode.Style, Math.Max(0, parentNode.Width - parentStyle.Padding * 2));
+		var padding = parentNode.ResolvedPadding;
+		var measured = text.Text.Layout(textNode.Text ?? "", textNode.Style, Math.Max(0, parentNode.Width - padding.Left - padding.Right));
 		textNode.TextLayout = measured;
 		var width = measured.Width;
 		var height = measured.Height;
@@ -167,11 +168,10 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			wrapper.Source.Height = height;
 		}
 
-		var padding = parentStyle.Padding;
-		var contentLeft = parentNode.Left + padding;
-		var contentTop = parentNode.Top + padding;
-		var contentWidth = MathF.Max(0, parentNode.Width - padding * 2);
-		var contentHeight = MathF.Max(0, parentNode.Height - padding * 2);
+		var contentLeft = parentNode.Left + padding.Left;
+		var contentTop = parentNode.Top + padding.Top;
+		var contentWidth = MathF.Max(0, parentNode.Width - padding.Left - padding.Right);
+		var contentHeight = MathF.Max(0, parentNode.Height - padding.Top - padding.Bottom);
 
 		if (parentStyle.Row)
 		{
@@ -221,7 +221,7 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 				boundary = parent;
 				return true;
 			}
-			if (style.Absolute || style.FlexGrow != 0 || style.Padding != 0 || style.Margin != 0 || style.Gap != 0)
+			if (style.Absolute || style.FlexGrow != 0 || !style.Padding.IsZero || !style.Margin.IsZero || style.Gap != 0)
 			{
 				boundary = null!;
 				return false;
@@ -260,18 +260,20 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		YGNodeStyleSetFlexGrow(yoga, style.FlexGrow);
 		YGNodeStyleSetFlexShrink(yoga, style.FlexShrink);
 		YGNodeStyleSetGap(yoga, YGGutter.All, style.Gap);
-		YGNodeStyleSetPadding(yoga, YGEdge.All, style.Padding);
-		YGNodeStyleSetMargin(yoga, YGEdge.All, style.Margin);
+		SetSpacing(yoga, style.Padding, false, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetSpacing(yoga, style.Margin, true, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
 		YGNodeStyleSetJustifyContent(yoga, ParseJustify(style.JustifyContent));
 		YGNodeStyleSetAlignItems(yoga, ParseAlign(style.AlignItems));
-		SetDimension(yoga, style.Width, true, viewportWidth, viewportHeight, style.FontSize);
-		SetDimension(yoga, style.Height, false, viewportWidth, viewportHeight, style.FontSize);
-		SetMinDimension(yoga, style.MinWidth, true, viewportWidth, viewportHeight, style.FontSize);
-		SetMinDimension(yoga, style.MinHeight, false, viewportWidth, viewportHeight, style.FontSize);
-		SetMaxDimension(yoga, style.MaxWidth, true, viewportWidth, viewportHeight, style.FontSize);
-		SetMaxDimension(yoga, style.MaxHeight, false, viewportWidth, viewportHeight, style.FontSize);
-		SetPosition(yoga, YGEdge.Left, style.Left, viewportWidth, viewportHeight, style.FontSize);
-		SetPosition(yoga, YGEdge.Top, style.Top, viewportWidth, viewportHeight, style.FontSize);
+		SetDimension(yoga, style.Width, true, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetDimension(yoga, style.Height, false, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetMinDimension(yoga, style.MinWidth, true, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetMinDimension(yoga, style.MinHeight, false, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetMaxDimension(yoga, style.MaxWidth, true, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetMaxDimension(yoga, style.MaxHeight, false, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetPosition(yoga, YGEdge.Left, style.Left, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetPosition(yoga, YGEdge.Top, style.Top, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetPosition(yoga, YGEdge.Right, style.Right, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
+		SetPosition(yoga, YGEdge.Bottom, style.Bottom, viewportWidth, viewportHeight, style.FontSize, style.RootFontSize);
 
 		if (source.IsText)
 		{
@@ -305,6 +307,8 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		binding.Source.Top = top;
 		binding.Source.Width = YGNodeLayoutGetWidth(binding.Yoga);
 		binding.Source.Height = YGNodeLayoutGetHeight(binding.Yoga);
+		binding.Source.ResolvedPadding = new(YGNodeLayoutGetPadding(binding.Yoga, YGEdge.Top), YGNodeLayoutGetPadding(binding.Yoga, YGEdge.Right),
+			YGNodeLayoutGetPadding(binding.Yoga, YGEdge.Bottom), YGNodeLayoutGetPadding(binding.Yoga, YGEdge.Left));
 		if (binding.Source.IsText)
 			binding.Source.TextLayout = binding.Text.Layout(binding.Source.Text ?? "", binding.Source.Style, binding.Source.Width);
 		YGNodeSetHasNewLayout(binding.Yoga, false);
@@ -312,7 +316,7 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			Read(binding.Children[i], left, top, moved);
 	}
 
-	private static void SetDimension(Node node, UiLength length, bool width, float vw, float vh, float em)
+	private static void SetDimension(Node node, UiLength length, bool width, float vw, float vh, float em, float rem)
 	{
 		if (length.Unit == UiLengthUnit.Auto)
 		{
@@ -324,11 +328,11 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			if (width) YGNodeStyleSetWidthPercent(node, length.Value); else YGNodeStyleSetHeightPercent(node, length.Value);
 			return;
 		}
-		var value = Resolve(length, vw, vh, em);
+		var value = UiCssValues.Resolve(length, vw, vh, em, rem);
 		if (width) YGNodeStyleSetWidth(node, value); else YGNodeStyleSetHeight(node, value);
 	}
 
-	private static void SetMinDimension(Node node, UiLength length, bool width, float vw, float vh, float em)
+	private static void SetMinDimension(Node node, UiLength length, bool width, float vw, float vh, float em, float rem)
 	{
 		if (length.Unit == UiLengthUnit.Auto)
 		{
@@ -340,11 +344,11 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			if (width) YGNodeStyleSetMinWidthPercent(node, length.Value); else YGNodeStyleSetMinHeightPercent(node, length.Value);
 			return;
 		}
-		var value = Resolve(length, vw, vh, em);
+		var value = UiCssValues.Resolve(length, vw, vh, em, rem);
 		if (width) YGNodeStyleSetMinWidth(node, value); else YGNodeStyleSetMinHeight(node, value);
 	}
 
-	private static void SetMaxDimension(Node node, UiLength length, bool width, float vw, float vh, float em)
+	private static void SetMaxDimension(Node node, UiLength length, bool width, float vw, float vh, float em, float rem)
 	{
 		if (length.Unit == UiLengthUnit.Auto)
 		{
@@ -356,11 +360,11 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			if (width) YGNodeStyleSetMaxWidthPercent(node, length.Value); else YGNodeStyleSetMaxHeightPercent(node, length.Value);
 			return;
 		}
-		var value = Resolve(length, vw, vh, em);
+		var value = UiCssValues.Resolve(length, vw, vh, em, rem);
 		if (width) YGNodeStyleSetMaxWidth(node, value); else YGNodeStyleSetMaxHeight(node, value);
 	}
 
-	private static void SetPosition(Node node, YGEdge edge, UiLength length, float vw, float vh, float em)
+	private static void SetPosition(Node node, YGEdge edge, UiLength length, float vw, float vh, float em, float rem)
 	{
 		if (length.Unit == UiLengthUnit.Auto)
 		{
@@ -368,17 +372,30 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			return;
 		}
 		if (length.Unit == UiLengthUnit.Percent) YGNodeStyleSetPositionPercent(node, edge, length.Value);
-		else YGNodeStyleSetPosition(node, edge, Resolve(length, vw, vh, em));
+		else YGNodeStyleSetPosition(node, edge, UiCssValues.Resolve(length, vw, vh, em, rem));
 	}
 
-	private static float Resolve(UiLength length, float vw, float vh, float em) => length.Unit switch
+	private static void SetSpacing(Node node, UiEdges edges, bool margin, float vw, float vh, float em, float rem)
 	{
-		UiLengthUnit.ViewWidth => vw * length.Value / 100f,
-		UiLengthUnit.ViewHeight => vh * length.Value / 100f,
-		UiLengthUnit.Em => em * length.Value,
-		UiLengthUnit.Rem => 16f * length.Value,
-		_ => length.Value
-	};
+		SetSpacingEdge(node, YGEdge.Top, edges.Top, margin, vw, vh, em, rem);
+		SetSpacingEdge(node, YGEdge.Right, edges.Right, margin, vw, vh, em, rem);
+		SetSpacingEdge(node, YGEdge.Bottom, edges.Bottom, margin, vw, vh, em, rem);
+		SetSpacingEdge(node, YGEdge.Left, edges.Left, margin, vw, vh, em, rem);
+	}
+
+	private static void SetSpacingEdge(Node node, YGEdge edge, UiLength length, bool margin, float vw, float vh, float em, float rem)
+	{
+		if (margin && length.Unit == UiLengthUnit.Auto) YGNodeStyleSetMarginAuto(node, edge);
+		else if (length.Unit == UiLengthUnit.Percent)
+		{
+			if (margin) YGNodeStyleSetMarginPercent(node, edge, length.Value); else YGNodeStyleSetPaddingPercent(node, edge, length.Value);
+		}
+		else
+		{
+			var value = UiCssValues.Resolve(length, vw, vh, em, rem);
+			if (margin) YGNodeStyleSetMargin(node, edge, value); else YGNodeStyleSetPadding(node, edge, value);
+		}
+	}
 
 	private static YGJustify ParseJustify(string value) => value switch
 	{
