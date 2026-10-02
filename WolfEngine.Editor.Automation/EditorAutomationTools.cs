@@ -13,9 +13,11 @@ public sealed class EditorAutomationTools
 	[McpServerTool(Name = "start_editor"), Description("Start WolfEngine Editor for a project and wait until it is ready for automation.")]
 	public async Task<string> StartEditor(
 		[Description("Absolute or relative path to a WolfEngine project folder.")] string projectPath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		[Description("Optional initial renderer window width; specify together with height.")] int width = 0,
+		[Description("Optional initial renderer window height; specify together with width.")] int height = 0)
 	{
-		await _controller.StartAsync(projectPath, cancellationToken).ConfigureAwait(false);
+		await _controller.StartAsync(projectPath, cancellationToken, width, height).ConfigureAwait(false);
 		return "WolfEngine Editor is ready.";
 	}
 

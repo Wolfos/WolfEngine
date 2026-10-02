@@ -8,7 +8,7 @@ public sealed record CreatedEntity(Guid EntityId, string Name);
 /// </summary>
 public sealed class EditorProcessController : IAsyncDisposable
 {
-	private sealed record StartRequest(string ProjectPath, TaskCompletionSource Ready);
+	private sealed record StartRequest(string ProjectPath, TaskCompletionSource Ready, global::WolfEngine.Mathematics.Int2? WindowSize);
 
 	private readonly object _sync = new();
 	private readonly SemaphoreSlim _startSignal = new(0);
@@ -16,9 +16,11 @@ public sealed class EditorProcessController : IAsyncDisposable
 	private EditorApplication? _application;
 	private EditorRemoteAutomationController? _editor;
 
-	public async Task StartAsync(string projectPath, CancellationToken cancellationToken)
+	public async Task StartAsync(string projectPath, CancellationToken cancellationToken, int width = 0, int height = 0)
 	{
 		if (string.IsNullOrWhiteSpace(projectPath)) throw new InvalidOperationException("project_path is required.");
+		if (width < 0 || height < 0 || (width == 0) != (height == 0))
+			throw new ArgumentOutOfRangeException(nameof(width), "Specify both positive window dimensions, or omit both.");
 		var fullProjectPath = Path.GetFullPath(projectPath);
 		if (Directory.Exists(fullProjectPath) == false) throw new InvalidOperationException($"Project directory '{fullProjectPath}' does not exist.");
 
@@ -26,7 +28,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 		lock (_sync)
 		{
 			if (_application is not null || _pendingStart is not null) throw new InvalidOperationException("WolfEngine Editor is already running.");
-			_pendingStart = new StartRequest(fullProjectPath, ready);
+			_pendingStart = new StartRequest(fullProjectPath, ready, width > 0 ? new(width, height) : null);
 			_startSignal.Release();
 		}
 
@@ -67,7 +69,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 					else if (task.IsCanceled) request.Ready.TrySetCanceled();
 					else request.Ready.TrySetResult();
 				}, TaskScheduler.Default);
-				application.Run(automationController: editor);
+				application.Run(automationController: editor, windowSize: request.WindowSize);
 				if (editor.Ready.IsCompleted == false) request.Ready.TrySetException(new InvalidOperationException("Editor stopped before it became ready."));
 			}
 			catch (Exception exception)

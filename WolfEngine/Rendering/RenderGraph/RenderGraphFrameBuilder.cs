@@ -1785,9 +1785,9 @@ internal sealed class RenderGraphFrameBuilder
 			var copyToFinal = graph.AddPass("Copy To Final", PassKind.Compute)
 				.ReadTexture(_view.FrameResources.DisplayLinearSceneColor, ResourceState.ShaderResource)
 				.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.UnorderedAccess);
-			// Only the view that owns the window's presentation writes the shared final target; any other view's
-			// copy would overwrite it.
-			if (_view.OwnsPresentation)
+			// Only a backbuffer view copies directly into the window. Editor views are
+			// displayed by ImGui from their independently sized encoded scene texture.
+			if (_view.Output == RenderViewOutput.Backbuffer)
 			{
 				copyToFinal.WriteTexture(_sharedResources.FinalColor, ResourceState.UnorderedAccess);
 			}
@@ -1811,14 +1811,17 @@ internal sealed class RenderGraphFrameBuilder
 			    ReferenceEquals(_gameplayUiFrame.Screen, UiFrameData.Empty) == false &&
 			    _gameplayUiFrame.Screen.CommandCount > 0)
 			{
-				// Keep capture/debug output and the presented target identical. Both are BGRA8, which
-				// matches the UI pipeline, and CSS colors are already authored in display space.
+				// Captures and the editor viewport use the encoded scene texture. Standalone
+				// also composites into the window target. CSS colors are in display space.
 				graph.AddPass("Gameplay UI Screen Capture", PassKind.Graphics)
 					.WriteTexture(_view.FrameResources.EncodedSceneColor, ResourceState.RenderTarget)
 					.SetExecute(_gameplayScreenEncodedUiExecute);
-				graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
-					.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget)
-					.SetExecute(_gameplayScreenFinalUiExecute);
+				if (_view.Output == RenderViewOutput.Backbuffer)
+				{
+					graph.AddPass("Gameplay UI Screen", PassKind.Graphics)
+						.WriteTexture(_sharedResources.FinalColor, ResourceState.RenderTarget)
+						.SetExecute(_gameplayScreenFinalUiExecute);
+				}
 			}
 
 			if (_view.FrameResources.MotionVectorDebugColor.IsValid)
@@ -3022,7 +3025,7 @@ internal sealed class RenderGraphFrameBuilder
 			_view.FrameResources,
 			_sharedResources,
 			_renderer.GetGfxDevice(),
-			_view.OwnsPresentation);
+			_view.Output == RenderViewOutput.Backbuffer);
 		_copyToFinalPass.Record(context, in config);
 	}
 
@@ -3041,8 +3044,10 @@ internal sealed class RenderGraphFrameBuilder
 	private void ExecuteImGui(RenderGraphContext context)
 	{
 		var finalColor = context.GetTexture(_sharedResources.FinalColor);
+		var presentationView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
 		_imGuiRenderer.EnsureResources(_renderer.GetGfxDevice(), _uiFrame);
-		_imGuiRenderer.Record(context, _uiFrame, finalColor, clearTarget: _view.FrameResources.SceneEnabled == false);
+		_imGuiRenderer.Record(context, _uiFrame, finalColor,
+			clearTarget: presentationView.Output != RenderViewOutput.Backbuffer || presentationView.FrameResources.SceneEnabled == false);
 	}
 
 	private void ExecuteGameplayScreenEncodedUi(RenderGraphContext context) =>

@@ -48,7 +48,8 @@ public sealed class EditorApplication : IDisposable
 	public EditorRemoteAutomationController CreateAutomationController(string projectPath) =>
 		ActivatorUtilities.CreateInstance<EditorRemoteAutomationController>(_services, Path.GetFullPath(projectPath));
 
-	public void Run(EditorAutomationController? captureController = null, EditorRemoteAutomationController? automationController = null)
+	public void Run(EditorAutomationController? captureController = null, EditorRemoteAutomationController? automationController = null,
+		global::WolfEngine.Mathematics.Int2? windowSize = null)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		var worldManager = _services.GetRequiredService<IWorldManager>();
@@ -59,6 +60,7 @@ public sealed class EditorApplication : IDisposable
 		_services.GetRequiredService<IIconManager>();
 
 		var editor = _services.GetRequiredService<WolfEngineEditor>();
+		if (windowSize is { } size) _services.GetRequiredService<IRenderer>().SetWindowSize(size);
 		if (captureController is not null)
 		{
 			_services.GetRequiredService<IRenderer>().SetWindowSize(captureController.Resolution);

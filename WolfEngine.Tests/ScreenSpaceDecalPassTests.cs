@@ -192,7 +192,7 @@ public sealed class ScreenSpaceDecalPassTests
 		var bindlessRegistry = new BindlessResourceRegistry();
 		var gpuDrawResources = new GpuDrawResources(shaderProvider.Object);
 		var hardeningStats = new GpuDrawHardeningStats();
-		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry);
+		var gameplayUiRenderer = new GameplayUiGpuRenderer(shaderProvider.Object, bindlessRegistry, renderer.Object);
 
 		var graph = new RenderGraph(
 			registry,

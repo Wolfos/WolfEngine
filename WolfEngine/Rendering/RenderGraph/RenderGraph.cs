@@ -721,9 +721,12 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				}
 
 				var frameBufferSize = _renderer.GetFrameBufferSize();
-				// Gameplay screen UI is recorded into the full presentation targets. The editor later
-				// scales those targets into its scene viewport, while standalone presents them directly.
-				_gameplayUiFrameProvider.SetViewportSize(frameBufferSize, ComputeDisplayScale(frameBufferSize));
+				// Screen UI uses the displayed game view, not the editor window or the scene's
+				// downscaled internal rendering resolution. DPI remains a single uniform scale.
+				var primaryView = _viewRegistry.GetOrCreate(RenderViewId.Primary);
+				var gameplayDisplaySize = ResolveViewDisplaySize(primaryView.Output, frameBufferSize,
+					_viewportStateBus.GetUiState(RenderViewId.Primary), frameBufferSize);
+				_gameplayUiFrameProvider.SetViewportSize(gameplayDisplaySize, ComputeDisplayScale(frameBufferSize));
 				if (_gameplayUiFrameProvider.TryConsumeLatest(out var latestGameplayUi))
 				{
 					_gameplayUiFrame.Release();
@@ -810,9 +813,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 						viewCameraPosition = viewSnapshot.Config.DiffuseGlobalIllumination.Origin;
 					}
 
-					// The view that owns the presentation displays at window size, as it always has; any other view
-					// displays at its own size, or its image would be stretched to the window's aspect.
-					var viewDisplaySize = _view.OwnsPresentation ? frameBufferSize : sceneRenderSize;
+					var viewDisplaySize = ResolveViewDisplaySize(_view.Output, frameBufferSize, sceneViewportState, sceneRenderSize);
 					_frameBuilder.SetSceneViewportSelection(sceneViewportState.RequestedDebugViewId);
 					_frameBuilder.BeginViewFrame(
 						recordedView,
@@ -938,6 +939,12 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 		return (frameBufferSize.X / (float)windowSize.X + frameBufferSize.Y / (float)windowSize.Y) * 0.5f;
 	}
+
+	internal static Int2 ResolveViewDisplaySize(RenderViewOutput output, Int2 windowFramebufferSize,
+		SceneViewportUiState viewport, Int2 fallbackSize) =>
+		output == RenderViewOutput.Backbuffer ? windowFramebufferSize :
+		viewport.Visible && viewport.ContentSizePixels.X > 0 && viewport.ContentSizePixels.Y > 0
+			? viewport.ContentSizePixels : fallbackSize;
 
 	public Int2 GetFrameBufferSize() => _renderer.GetFrameBufferSize();
 
