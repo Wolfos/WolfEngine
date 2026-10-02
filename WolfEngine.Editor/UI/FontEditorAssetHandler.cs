@@ -18,6 +18,11 @@ public sealed class FontEditorAssetHandler(IEditorProjectService project, IImage
 	public void DrawEditor(AssetDatabaseEntry asset)
 	{
 		ImGui.TextUnformatted(GetSubtitle(asset));
+		if (ImGui.Button("Copy CSS @font-face"))
+		{
+			var family = asset.Name.Replace("\"", "");
+			ImGui.SetClipboardText($"@font-face {{\n    font-family: \"{family}\";\n    src: url(\"/{asset.RelativeSourcePath}\");\n}}\n");
+		}
 		if (!asset.TryGetSummary<FontAssetSummary>(out var summary)) return;
 		ImGui.TextWrapped($"Bake resolution: {summary.PixelsPerEm} pixels/em | Range: {summary.DistanceRange} pixels");
 		ImGui.TextWrapped($"Coverage: {summary.Coverage}");

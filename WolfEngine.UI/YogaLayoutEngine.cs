@@ -23,7 +23,10 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		public required Binding[] Children { get; init; }
 		public Binding? Parent { get; init; }
 		public ComputedStyle? AppliedStyle { get; set; }
-		public int AppliedTextLength { get; set; } = -1;
+		public string? AppliedText { get; set; }
+		public required UiTextService Text { get; init; }
+		public int AppliedTextRevision { get; set; } = -1;
+		public bool NativeTextStale { get; set; }
 	}
 
 	private Binding? _root;
@@ -31,6 +34,9 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 	private float _viewportHeight = -1;
 	private bool _disposed;
 	private readonly List<Binding> _changedTextBindings = [];
+	private readonly List<Binding> _patchedTextBindings = [];
+	private readonly UiTextService _text;
+	public YogaLayoutEngine(UiTextService? text = null) => _text = text ?? new UiTextService();
 
 	public void Layout(UiNode root, float width, float height, bool fullLayoutRequired = true)
 	{
@@ -47,14 +53,16 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 
 		var viewportChanged = _viewportWidth != width || _viewportHeight != height;
 		_changedTextBindings.Clear();
+		_patchedTextBindings.Clear();
 		using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Sync Dirty Nodes"))
 		{
-			Sync(_root!, width, height, viewportChanged, _changedTextBindings);
+			Sync(_root!, width, height, viewportChanged, _changedTextBindings, !rebuilt && !viewportChanged && !fullLayoutRequired);
 			YGNodeStyleSetWidth(_root!.Yoga, width);
 			YGNodeStyleSetHeight(_root.Yoga, height);
 		}
-		if (!rebuilt && !viewportChanged && !fullLayoutRequired && TryPatchContainedText())
+		if (!rebuilt && !viewportChanged && !fullLayoutRequired && _changedTextBindings.Count == 0)
 		{
+			PatchContainedTexts();
 			_viewportWidth = width;
 			_viewportHeight = height;
 			return;
@@ -66,16 +74,24 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Readback"))
 		{
 			Read(_root!, 0, 0, rebuilt);
+			// An uncontained sibling may have moved a fixed-size boundary. Restore its
+			// independently measured text after native readback, using the new position.
+			PatchContainedTexts();
 		}
 		_viewportWidth = width;
 		_viewportHeight = height;
 	}
 
-	private static Binding Build(UiNode source, Binding? parent, float viewportWidth, float viewportHeight)
+	private Binding Build(UiNode source, Binding? parent, float viewportWidth, float viewportHeight)
 	{
 		var yoga = YGNodeNew();
 		var children = new Binding[source.Children.Count];
-		var binding = new Binding { Source = source, Yoga = yoga, Children = children, Parent = parent };
+		var binding = new Binding { Source = source, Yoga = yoga, Children = children, Parent = parent, Text = _text };
+		if (source.IsText)
+		{
+			YGNodeSetContext(yoga, binding);
+			YGNodeSetMeasureFunc(yoga, MeasureText);
+		}
 		ApplyStyle(binding, viewportWidth, viewportHeight);
 		for (var i = 0; i < children.Length; i++)
 		{
@@ -85,37 +101,41 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		return binding;
 	}
 
-	private static void Sync(
+	private void Sync(
 		Binding binding,
 		float viewportWidth,
 		float viewportHeight,
 		bool force,
-		List<Binding> changedTextBindings)
+		List<Binding> changedTextBindings,
+		bool allowContainedPatch)
 	{
 		var styleChanged = force || !ReferenceEquals(binding.AppliedStyle, binding.Source.Style) &&
 			!Equals(binding.AppliedStyle, binding.Source.Style);
-		var textLength = binding.Source.IsText ? binding.Source.Text?.Length ?? 0 : -1;
-		if (binding.Source.IsText && binding.AppliedTextLength >= 0 && textLength != binding.AppliedTextLength)
-			changedTextBindings.Add(binding);
-		if (styleChanged || textLength != binding.AppliedTextLength)
+		var textChanged = binding.Source.IsText && (binding.AppliedTextRevision != binding.Text.Revision ||
+			!string.Equals(binding.Source.Text, binding.AppliedText, StringComparison.Ordinal));
+		if (textChanged && !styleChanged && allowContainedPatch && CanPatchContainedText(binding))
 		{
-			ApplyStyle(binding, viewportWidth, viewportHeight);
+			binding.AppliedText = binding.Source.Text;
+			binding.NativeTextStale = true;
+			_patchedTextBindings.Add(binding);
 		}
+		else if (styleChanged || textChanged || binding.NativeTextStale && !allowContainedPatch)
+		{
+			if (binding.Source.IsText) changedTextBindings.Add(binding);
+			ApplyStyle(binding, viewportWidth, viewportHeight);
+			if (binding.Source.IsText) binding.Yoga.MarkDirtyAndPropagate();
+			binding.NativeTextStale = false;
+		}
+		else if (binding.NativeTextStale) _patchedTextBindings.Add(binding);
 		for (var i = 0; i < binding.Children.Length; i++)
-			Sync(binding.Children[i], viewportWidth, viewportHeight, force, changedTextBindings);
+			Sync(binding.Children[i], viewportWidth, viewportHeight, force, changedTextBindings, allowContainedPatch);
 	}
 
-	private bool TryPatchContainedText()
+	private void PatchContainedTexts()
 	{
 		using (FrameProfiler.Instance.Measure("Gameplay UI.Yoga Patch Contained Text"))
 		{
-			if (_changedTextBindings.Count == 0) return false;
-			for (var i = 0; i < _changedTextBindings.Count; i++)
-			{
-				if (!CanPatchContainedText(_changedTextBindings[i])) return false;
-			}
-			for (var i = 0; i < _changedTextBindings.Count; i++) PatchContainedText(_changedTextBindings[i]);
-			return true;
+			foreach (var text in _patchedTextBindings) PatchContainedText(text);
 		}
 	}
 
@@ -134,9 +154,10 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		var parentNode = boundary.Source;
 		var parentStyle = parentNode.Style;
 		var textNode = text.Source;
-		var pixel = MathF.Max(1, textNode.Style.FontSize / 7f);
-		var width = MathF.Max(1, (textNode.Text?.Length ?? 0) * 6f * pixel);
-		var height = MathF.Max(1, 7f * pixel);
+		var measured = text.Text.Layout(textNode.Text ?? "", textNode.Style, Math.Max(0, parentNode.Width - parentStyle.Padding * 2));
+		textNode.TextLayout = measured;
+		var width = measured.Width;
+		var height = measured.Height;
 		textNode.Width = width;
 		textNode.Height = height;
 
@@ -162,6 +183,14 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 			branchRoot.Source.Left = PositionCross(contentLeft, contentWidth, width, parentStyle.AlignItems);
 			branchRoot.Source.Top = PositionMain(contentTop, contentHeight, height, parentStyle.JustifyContent);
 		}
+		// Match Yoga's default one-point pixel grid. Text leading edges round down
+		// and fractional extents round outwards rather than clipping glyphs.
+		var left = branchRoot.Source.Left;
+		var top = branchRoot.Source.Top;
+		branchRoot.Source.Left = ReferenceEquals(branchRoot, text) ? MathF.Floor(left) : MathF.Round(left);
+		branchRoot.Source.Top = ReferenceEquals(branchRoot, text) ? MathF.Floor(top) : MathF.Round(top);
+		textNode.Width = (width % 1 > 0.0001f ? MathF.Ceiling(left + width) : MathF.Floor(left + width)) - MathF.Floor(left);
+		textNode.Height = (height % 1 > 0.0001f ? MathF.Ceiling(top + height) : MathF.Floor(top + height)) - MathF.Floor(top);
 
 		for (var wrapper = branchRoot; !ReferenceEquals(wrapper, text);)
 		{
@@ -246,12 +275,22 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 
 		if (source.IsText)
 		{
-			var pixel = MathF.Max(1, style.FontSize / 7f);
-			YGNodeStyleSetWidth(yoga, MathF.Max(1, (source.Text?.Length ?? 0) * 6f * pixel));
-			YGNodeStyleSetHeight(yoga, MathF.Max(1, 7f * pixel));
+			YGNodeStyleSetWidthAuto(yoga);
+			YGNodeStyleSetHeightAuto(yoga);
 		}
 		binding.AppliedStyle = style;
-		binding.AppliedTextLength = source.IsText ? source.Text?.Length ?? 0 : -1;
+		binding.AppliedText = source.Text;
+		binding.AppliedTextRevision = binding.Text.Revision;
+	}
+
+	private static YGSize MeasureText(Node node, float width, MeasureMode widthMode, float height, MeasureMode heightMode)
+	{
+		var binding = (Binding)YGNodeGetContext(node)!;
+		var text = binding.Source;
+		var measured = binding.Text.Layout(text.Text ?? "", text.Style, widthMode == MeasureMode.Undefined ? float.PositiveInfinity : width);
+		text.TextLayout = measured;
+		return new YGSize { Width = widthMode == MeasureMode.Exactly ? width : measured.Width,
+			Height = heightMode == MeasureMode.Exactly ? height : measured.Height };
 	}
 
 	private static void Read(Binding binding, float parentLeft, float parentTop, bool ancestorMoved)
@@ -266,6 +305,8 @@ internal sealed class YogaLayoutEngine : IUiLayoutEngine
 		binding.Source.Top = top;
 		binding.Source.Width = YGNodeLayoutGetWidth(binding.Yoga);
 		binding.Source.Height = YGNodeLayoutGetHeight(binding.Yoga);
+		if (binding.Source.IsText)
+			binding.Source.TextLayout = binding.Text.Layout(binding.Source.Text ?? "", binding.Source.Style, binding.Source.Width);
 		YGNodeSetHasNewLayout(binding.Yoga, false);
 		for (var i = 0; i < binding.Children.Length; i++)
 			Read(binding.Children[i], left, top, moved);

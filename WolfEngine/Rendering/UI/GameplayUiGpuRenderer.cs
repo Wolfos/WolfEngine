@@ -18,10 +18,15 @@ public sealed class GameplayUiGpuRenderer
 	private readonly IUiDrawRenderer _renderer;
 	private readonly BindlessResourceRegistry _bindlessRegistry;
 	private readonly Dictionary<Texture, ITextureResources> _targets = new(ReferenceEqualityComparer.Instance);
+	private readonly Dictionary<Texture, ITextureResources> _atlases = new(ReferenceEqualityComparer.Instance);
+	private readonly IRenderer _resourceFactory;
+	private readonly HashSet<Texture> _active = new(ReferenceEqualityComparer.Instance);
+	private readonly List<Texture> _unused = [];
 
-	public GameplayUiGpuRenderer(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry)
+	public GameplayUiGpuRenderer(IShaderProvider shaderProvider, BindlessResourceRegistry bindlessRegistry, IRenderer resourceFactory)
 	{
 		_bindlessRegistry = bindlessRegistry;
+		_resourceFactory = resourceFactory;
 		_renderer = OperatingSystem.IsMacOS()
 			? new MetalUiRenderer(shaderProvider, bindlessRegistry, sampleTexture: false)
 			: new D3D12UiRenderer(shaderProvider, sampleTexture: false);
@@ -55,19 +60,53 @@ public sealed class GameplayUiGpuRenderer
 
 	public void PruneTargets(IGfxDevice device, GameplayUiRenderFrame frame)
 	{
-		if (_targets.Count == 0) return;
-		var active = new HashSet<Texture>(ReferenceEqualityComparer.Instance);
-		for (var i = 0; i < frame.TextureSurfaces.Length; i++) active.Add(frame.TextureSurfaces[i].Target);
-		foreach (var pair in _targets.ToArray())
+		_active.Clear();
+		CollectAtlases(frame.Screen);
+		foreach (var surface in frame.TextureSurfaces) CollectAtlases(surface.Frame);
+		_unused.Clear();
+		foreach (var atlas in _atlases.Keys) if (!_active.Contains(atlas)) _unused.Add(atlas);
+		foreach (var atlas in _unused)
 		{
-			if (active.Contains(pair.Key)) continue;
-			_targets.Remove(pair.Key);
-			if (pair.Value.Texture is IDisposable disposable)
-				device.Retire(disposable, $"Gameplay UI target '{pair.Key.Name}'");
+			var resources = _atlases[atlas];
+			_atlases.Remove(atlas);
+			atlas.DetachGpuResources();
+			device.Retire(() =>
+			{
+				(resources.Texture as IDisposable)?.Dispose();
+				if (!ReferenceEquals(resources.Texture, resources)) (resources as IDisposable)?.Dispose();
+			}, "Gameplay UI font atlas");
+		}
+		if (_targets.Count == 0) return;
+		_active.Clear();
+		for (var i = 0; i < frame.TextureSurfaces.Length; i++) _active.Add(frame.TextureSurfaces[i].Target);
+		_unused.Clear();
+		foreach (var target in _targets.Keys) if (!_active.Contains(target)) _unused.Add(target);
+		foreach (var target in _unused)
+		{
+			var resources = _targets[target];
+			_targets.Remove(target);
+			target.DetachGpuResources();
+			if (resources.Texture is IDisposable disposable)
+				device.Retire(disposable, $"Gameplay UI target '{target.Name}'");
 		}
 	}
 
-	public void EnsureResources(IGfxDevice device, UiFrameData frame) => _renderer.EnsureResources(device, frame);
+	private void CollectAtlases(UiFrameData data)
+	{
+		for (var i = 0; i < data.CommandCount; i++) if (data.Commands[i].Atlas is { } atlas) _active.Add(atlas);
+	}
+
+	public void EnsureResources(IGfxDevice device, UiFrameData frame)
+	{
+		for (var i = 0; i < frame.CommandCount; i++)
+		{
+			if (frame.Commands[i].Atlas is not { } atlas || _atlases.ContainsKey(atlas)) continue;
+			var resources = _resourceFactory.CreateTextureResources(atlas);
+			atlas.MarkGpuResourcesCreated(resources);
+			_atlases.Add(atlas, resources);
+		}
+		_renderer.EnsureResources(device, frame);
+	}
 
 	public void Record(RenderGraphContext context, UiFrameData frame, IGfxTexture target, bool clearTarget,
 		ColorRGBA? clearColor = null) =>

@@ -11,6 +11,10 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Yoga.Net" Version="3.2.3" />
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.1.102" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.macOS" Version="14.2.1.102" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Win32" Version="14.2.1.102" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.2.1.102" />
   </ItemGroup>
 
   <ItemGroup>

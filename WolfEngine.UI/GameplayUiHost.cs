@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
+using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
@@ -17,6 +19,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	private readonly CssStyleSheet _styleSheet;
 	private readonly IUiLayoutEngine _layout;
 	private readonly UiFrameBuilder _frames;
+	private readonly UiTextService _text;
 	private readonly string _profilerName;
 	private readonly Dictionary<string, object?> _parameters;
 	private bool _disposed;
@@ -43,8 +46,10 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		_renderer = new RazorTreeRenderer(services);
 		_rootComponentId = _renderer.AttachRoot(componentType);
 		_styleSheet = CssStyleSheet.Parse(css ?? string.Empty);
-		_layout = new YogaLayoutEngine();
-		_frames = new UiFrameBuilder();
+		_text = new UiTextService(host.Fonts);
+		_text.SetFonts(_styleSheet.FontSources);
+		_layout = new YogaLayoutEngine(_text);
+		_frames = new UiFrameBuilder(_text);
 		if (options.Kind == UiSurfaceKind.Texture)
 		{
 			Texture = Texture.CreateRenderTarget(
@@ -158,8 +163,9 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 				_renderer.RecycleTree(updatedRoot);
 			}
 
+			var fontsChanged = _text.SetFonts(_styleSheet.FontSources);
 			var fullLayoutRequired = topologyChanged || _layoutWidth != width || _layoutHeight != height ||
-			                         _layoutScale.Equals(scale) == false || changes.LayoutChanged;
+			                         _layoutScale.Equals(scale) == false || changes.LayoutChanged || fontsChanged;
 			var layoutRan = fullLayoutRequired || changes.IntrinsicSizeChanged;
 			if (layoutRan)
 			{
@@ -232,7 +238,12 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 	private const float MinDisplayScale = 0.25f;
 	private const float MaxDisplayScale = 8.0f;
 
-	public GameplayUiHost(IServiceProvider services) => _services = services;
+	internal UiFontCatalog Fonts { get; }
+	public GameplayUiHost(IServiceProvider services)
+	{
+		_services = services;
+		Fonts = new UiFontCatalog(services.GetService<IFontContentProvider>());
+	}
 
 	/// <summary>Screen render target size, in physical pixels.</summary>
 	internal Int2 ViewportSize
@@ -381,6 +392,7 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 		GameplayUiSurface[] surfaces;
 		lock (_sync) surfaces = _surfaces.ToArray();
 		for (var i = 0; i < surfaces.Length; i++) surfaces[i].Dispose();
+		Fonts.Dispose();
 		while (_pendingFrames.TryDequeue(out var frame)) frame.Release();
 	}
 }

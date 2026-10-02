@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />
+    <ProjectReference Include="..\WolfEngine.Editor.Tooling\WolfEngine.Editor.Tooling.csproj" />
+    <None Include="../WolfEngine/Assets/Fonts/Inter-VariableFont_opsz,wght.ttf" Link="Fixtures/Inter.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

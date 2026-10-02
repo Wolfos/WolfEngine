@@ -154,13 +154,17 @@ public sealed class UiTextureAtlas
 
 public readonly struct UiDrawCommand
 {
-	public UiDrawCommand(int elemCount, int idxOffset, int vtxOffset, Vector4 clipRect, nint textureId)
+	public UiDrawCommand(int elemCount, int idxOffset, int vtxOffset, Vector4 clipRect, nint textureId,
+		Texture? atlas = null, float distanceRange = 0, bool solid = false)
 	{
 		ElemCount = elemCount;
 		IdxOffset = idxOffset;
 		VtxOffset = vtxOffset;
 		ClipRect = clipRect;
 		TextureId = textureId;
+		Atlas = atlas;
+		DistanceRange = distanceRange;
+		Solid = solid;
 	}
 
 	public int ElemCount { get; }
@@ -168,4 +172,7 @@ public readonly struct UiDrawCommand
 	public int VtxOffset { get; }
 	public Vector4 ClipRect { get; }
 	public nint TextureId { get; }
+	public Texture? Atlas { get; }
+	public float DistanceRange { get; }
+	public bool Solid { get; }
 }

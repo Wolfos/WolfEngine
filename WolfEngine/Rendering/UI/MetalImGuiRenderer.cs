@@ -138,6 +138,8 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 			?? throw new InvalidOperationException("Metal ImGui bindless writer was not initialized.");
 		uint activeTextureHandle = 0;
 		var hasActiveTextureHandle = false;
+		uint activeMode = uint.MaxValue;
+		float activeRange = -1;
 
 		var scaleX = 1.0f;
 		var scaleY = 1.0f;
@@ -150,16 +152,20 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
-			var textureHandle = ResolveTextureHandle(cmd.TextureId);
-			if (hasActiveTextureHandle == false || textureHandle != activeTextureHandle)
+			var textureHandle = cmd.Atlas?.Resources?.ShaderResourceView.Value ?? ResolveTextureHandle(cmd.TextureId);
+			var mode = cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : _sampleTexture ? 1u : 0u;
+			if (!hasActiveTextureHandle || textureHandle != activeTextureHandle || mode != activeMode || cmd.DistanceRange != activeRange)
 			{
 				bindlessWriter.Clear();
 				bindlessWriter.SetUInt("textureHandle", textureHandle);
 				bindlessWriter.SetUInt("samplerHandle", _samplerHandle.Value);
-				bindlessWriter.SetUInt("sampleTexture", _sampleTexture ? 1u : 0u);
+				bindlessWriter.SetUInt("sampleTexture", mode);
+				bindlessWriter.SetFloat("distanceRange", cmd.DistanceRange);
 				commandList.SetGraphicsConstants(bindlessWriter.RegisterIndex, bindlessWriter.AsBytes());
 				activeTextureHandle = textureHandle;
 				hasActiveTextureHandle = true;
+				activeMode = mode;
+				activeRange = cmd.DistanceRange;
 			}
 
 			var clip = cmd.ClipRect;

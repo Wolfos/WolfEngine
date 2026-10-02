@@ -44,6 +44,7 @@ public sealed class FontCompiler : IFontCompiler
 			using var buffer = ShapeText(font, line);
 			foreach (var info in buffer.GlyphInfos) glyphIds.Add(info.Codepoint);
 		}
+		HarfBuzzGlyphClosure.Expand(face, glyphIds);
 		var baked = new List<BakedGlyph>(glyphIds.Count);
 		foreach (var id in glyphIds) baked.Add(BakeGlyph(font, units, id, settings));
 		// Deterministic shelf packing with a one-texel guard between glyph rectangles.

@@ -66,6 +66,7 @@ public static class Program
 		services.AddSingleton<IImGuiInputSink>(nullUi);
 		services.AddSingleton<IImGuiRenderer>(NullImGuiRenderer.Instance);
 		services.AddSingleton(catalog);
+		services.AddSingleton<IFontContentProvider>(new WolfPackFontContentProvider(catalog));
 		services.AddSingleton<IAudioContentProvider>(new WolfPackAudioContentProvider(catalog));
 		services.AddSingleton<AudioService>();
 		services.AddSingleton<IAudioService>(provider => provider.GetRequiredService<AudioService>());

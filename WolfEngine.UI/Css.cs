@@ -38,6 +38,10 @@ internal sealed record ComputedStyle
 	public ColorRGBA Color { get; init; } = ColorRGBA.White;
 	public float Opacity { get; init; } = 1;
 	public float FontSize { get; init; } = 16;
+	public string FontFamily { get; init; } = "";
+	public float LineHeight { get; init; }
+	public bool LineHeightPixels { get; init; }
+	public bool NoWrap { get; init; }
 	public float BorderRadius { get; init; }
 }
 
@@ -86,6 +90,10 @@ internal sealed class CssStyleSheet
 		public ColorRGBA Color;
 		public float Opacity;
 		public float FontSize;
+		public string FontFamily;
+		public float LineHeight;
+		public bool LineHeightPixels;
+		public bool NoWrap;
 		public float BorderRadius;
 
 		public StyleAccumulator(ComputedStyle inherited)
@@ -113,6 +121,10 @@ internal sealed class CssStyleSheet
 			Color = inherited.Color;
 			Opacity = inherited.Opacity;
 			FontSize = inherited.FontSize;
+			FontFamily = inherited.FontFamily;
+			LineHeight = inherited.LineHeight;
+			LineHeightPixels = inherited.LineHeightPixels;
+			NoWrap = inherited.NoWrap;
 			BorderRadius = 0;
 		}
 
@@ -147,6 +159,11 @@ internal sealed class CssStyleSheet
 					: ParseColor(value, Color); break;
 				case "opacity": Opacity = Math.Clamp(Number(value, Opacity), 0, 1); break;
 				case "font-size": FontSize = Number(value, FontSize); break;
+				case "font-family": if (value != "inherit") FontFamily = value; break;
+				case "line-height":
+					LineHeight = value == "normal" ? 0 : Math.Max(0, Number(value, LineHeight));
+					LineHeightPixels = value.EndsWith("px", StringComparison.OrdinalIgnoreCase); break;
+				case "white-space": NoWrap = value is "nowrap" or "pre"; break;
 				case "border-radius": BorderRadius = Number(value, BorderRadius); break;
 			}
 		}
@@ -176,11 +193,16 @@ internal sealed class CssStyleSheet
 			Color = Color,
 			Opacity = Opacity,
 			FontSize = FontSize,
+			FontFamily = FontFamily,
+			LineHeight = LineHeight,
+			LineHeightPixels = LineHeightPixels,
+			NoWrap = NoWrap,
 			BorderRadius = BorderRadius
 		};
 	}
 
 	private readonly Rule[] _rules;
+	public IReadOnlyDictionary<string, string> FontSources { get; private init; } = new Dictionary<string, string>();
 	private readonly Dictionary<StyleCacheKey, ComputedStyle> _styleCache = [];
 
 	private CssStyleSheet(List<Rule> rules)
@@ -199,6 +221,7 @@ internal sealed class CssStyleSheet
 		css = Regex.Replace(css, @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
 		var rules = new List<Rule>();
 		var order = 0;
+		var fonts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		foreach (Match match in Regex.Matches(css, @"(?<selector>[^{}]+)\{(?<body>[^{}]*)\}"))
 		{
 			var declarationList = new List<Declaration>();
@@ -212,6 +235,14 @@ internal sealed class CssStyleSheet
 			}
 
 			var declarations = declarationList.ToArray();
+			if (match.Groups["selector"].Value.Trim().Equals("@font-face", StringComparison.OrdinalIgnoreCase))
+			{
+				var family = declarations.FirstOrDefault(d => d.Name == "font-family").Value?.Trim('\'', '"');
+				var source = AssetPipeline.FontSourceReferences.Find("@font-face {" + match.Groups["body"].Value + "}").FirstOrDefault();
+				if (string.IsNullOrWhiteSpace(family) || source is null) throw new FormatException("@font-face requires font-family and a project asset URL.");
+				fonts[family] = source;
+				continue;
+			}
 			foreach (var selectorSource in match.Groups["selector"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
 			{
 				var selector = selectorSource.Trim();
@@ -222,7 +253,7 @@ internal sealed class CssStyleSheet
 				rules.Add(new Rule(target, parent, declarations, Specificity(selector), order++));
 			}
 		}
-		return new CssStyleSheet(rules);
+		return new CssStyleSheet(rules) { FontSources = fonts };
 	}
 
 	public void Apply(UiNode root, float viewportWidth, float viewportHeight) =>
@@ -230,7 +261,7 @@ internal sealed class CssStyleSheet
 
 	private void ApplyNode(UiNode node, UiNode? parent, float vw, float vh)
 	{
-		var inherited = parent?.Style ?? ComputedStyle.Default;
+		var inherited = parent?.Style ?? ComputedStyle.Default with { FontFamily = FontSources.Keys.FirstOrDefault() ?? "" };
 		var inlineStyle = node.Attributes.TryGetValue("style", out var inlineValue) && inlineValue is not null
 			? inlineValue.ToString()
 			: null;

@@ -36,6 +36,8 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 	private D3D12DescriptorTable? _bindlessTable;
 	private uint _fallbackTextureHandleValue = InvalidDescriptorValue;
 	private ShaderPropertyWriter? _projectionWriter;
+	private ShaderPropertyWriter? _drawWriter;
+	private readonly bool _sampleTexture;
 
 	private ComPtr<ID3D12DescriptorHeap> _srvHeap;
 	private GpuDescriptorHandle _srvGpuHandle;
@@ -53,7 +55,8 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 	public D3D12UiRenderer(IShaderProvider shaderCompiler, bool sampleTexture = true)
 	{
 		_shaderCompiler = shaderCompiler ?? throw new ArgumentNullException(nameof(shaderCompiler));
-		_pixelEntryPoint = sampleTexture ? "fragmentShader" : "solidFragmentShader";
+		_pixelEntryPoint = "fragmentShader";
+		_sampleTexture = sampleTexture;
 	}
 
 	public void EnsureResources(IGfxDevice device, UiFrameData frame)
@@ -229,15 +232,21 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 		for (var i = 0; i < frame.CommandCount; i++)
 		{
 			var cmd = frame.Commands[i];
-			if (hasActiveTexture == false || cmd.TextureId != activeTextureId)
+			var textureId = cmd.Atlas?.Resources is { } atlasResources ? (nint)atlasResources.ShaderResourceView.Value : cmd.TextureId;
+			if (hasActiveTexture == false || textureId != activeTextureId)
 			{
-				ResolveTextureBinding(cmd.TextureId, out var heap, out var textureHandle);
+				ResolveTextureBinding(textureId, out var heap, out var textureHandle);
 				native->SetDescriptorHeaps(1, &heap);
 				commandList.NotifyExternalDescriptorHeapBinding();
 				native->SetGraphicsRootDescriptorTable(0, textureHandle);
-				activeTextureId = cmd.TextureId;
+				activeTextureId = textureId;
 				hasActiveTexture = true;
 			}
+			var draw = _drawWriter!;
+			draw.Clear();
+			draw.SetUInt("sampleTexture", cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : _sampleTexture ? 1u : 0u);
+			draw.SetFloat("distanceRange", cmd.DistanceRange);
+			fixed (byte* constants = draw.AsBytes()) native->SetGraphicsRoot32BitConstants(2, (uint)draw.AsBytes().Length / 4, constants, 0);
 
 			var clip = cmd.ClipRect;
 			var clipX1 = (int) Math.Floor((clip.X - frame.DisplayPos.X) * scaleX);
@@ -628,13 +637,14 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			_pixelEntryPoint,
 			GraphicsBackendKind.D3D12);
 		_projectionWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("Projection"));
+		_drawWriter = new ShaderPropertyWriter(compiled.ReflectionLayout.GetConstantBuffer("UiDraw"));
 		if (_projectionWriter.RegisterIndex != 0)
 		{
 			throw new InvalidOperationException(
 				$"Expected ImGui projection constants at b0, but reflection returned b{_projectionWriter.RegisterIndex}.");
 		}
 
-		var rootParameters = stackalloc RootParameter[2];
+		var rootParameters = stackalloc RootParameter[3];
 		rootParameters[0] = default;
 		rootParameters[0].ParameterType = RootParameterType.TypeDescriptorTable;
 		rootParameters[0].Anonymous.DescriptorTable = new()
@@ -653,10 +663,15 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			Num32BitValues = (uint)_projectionWriter.AsBytes().Length / 4
 		};
 		rootParameters[1].ShaderVisibility = ShaderVisibility.Vertex;
+		rootParameters[2] = default;
+		rootParameters[2].ParameterType = RootParameterType.Type32BitConstants;
+		rootParameters[2].Anonymous.Constants = new() { ShaderRegister = 1, RegisterSpace = 0,
+			Num32BitValues = (uint)_drawWriter.AsBytes().Length / 4 };
+		rootParameters[2].ShaderVisibility = ShaderVisibility.Pixel;
 
 		var rootSignatureDesc = new RootSignatureDesc
 		{
-			NumParameters = 2,
+			NumParameters = 3,
 			PParameters = rootParameters,
 			NumStaticSamplers = 1,
 			PStaticSamplers = sampler,

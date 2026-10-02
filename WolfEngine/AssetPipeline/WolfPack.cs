@@ -49,6 +49,7 @@ public sealed class CookedRuntimeSettings
 
 public sealed class WolfBootstrapManifest
 {
+	public Dictionary<string, Guid> FontSources { get; set; } = new(StringComparer.Ordinal);
 	public const int CurrentVersion = 1;
 	public int Version { get; set; } = CurrentVersion;
 	public string Target { get; set; } = string.Empty;

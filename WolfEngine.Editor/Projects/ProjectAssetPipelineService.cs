@@ -2133,7 +2133,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 	{
 		return
         [
-			new AssetImporterDescriptor(AssetImporterIds.Font, 1,
+			new AssetImporterDescriptor(AssetImporterIds.Font, 2,
 				path => Path.GetExtension(path).Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
 				        Path.GetExtension(path).Equals(".otf", StringComparison.OrdinalIgnoreCase),
 				() => AssetPipelineSerialization.Serialize(new FontImportSettings()), ImportFontSource),

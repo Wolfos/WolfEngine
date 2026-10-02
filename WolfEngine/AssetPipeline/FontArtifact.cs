@@ -55,7 +55,12 @@ public static class FontArtifactSerializer
 	public static FontArtifact Read(string path)
 	{
 		using var stream = File.OpenRead(path);
-		using var reader = new BinaryReader(stream);
+		return Read(stream);
+	}
+
+	public static FontArtifact Read(Stream stream)
+	{
+		using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
 		if (reader.ReadUInt32() != Magic || reader.ReadInt32() != FontArtifact.CurrentVersion)
 			throw new InvalidDataException("Unsupported font artifact header.");
 		var artifact = JsonSerializer.Deserialize<FontArtifact>(ReadBlock(reader, 4 * 1024 * 1024), Json)

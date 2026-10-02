@@ -166,6 +166,17 @@ public sealed class Texture
         }
     }
 
+    internal void DetachGpuResources()
+    {
+        lock (_resourceSync)
+        {
+            _resources = null;
+            _hasGpuResources = false;
+            _resourceRequestPending = false;
+            _resourceRevision++;
+        }
+    }
+
     public void ApplyTextureData(int width, int height, bool isSrgb, TextureFormat format, TextureMipData[] mipLevels,
         TextureDimension dimension = TextureDimension.Texture2D, int depth = 1)
     {

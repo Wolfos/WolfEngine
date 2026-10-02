@@ -178,7 +178,7 @@ public sealed class GameplayUiTests
 		{
 			Assert.That(changes.CanRetain, Is.True);
 			Assert.That(changes.LayoutChanged, Is.False);
-			Assert.That(changes.IntrinsicSizeChanged, Is.False);
+			Assert.That(changes.IntrinsicSizeChanged, Is.True, "Equal-length proportional text can have different metrics.");
 			Assert.That(changes.VisualChanged, Is.True);
 			Assert.That(retained.Children[0].Text, Is.EqualTo("0043"));
 			Assert.That(retained.Children[0].Style.Opacity, Is.EqualTo(0.25f));

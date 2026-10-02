@@ -116,7 +116,8 @@ public static class GameBuilder
 		foreach (var asset in database.Values)
 			AddSerializedDependencies(asset, graph);
 
-		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Distinct().ToArray();
+		var fontSources = ResolveCssFonts(gameplayDll, database);
+		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Concat(fontSources.Values).Distinct().ToArray();
 		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
@@ -144,6 +145,7 @@ public static class GameBuilder
 
 		var manifest = new WolfBootstrapManifest
 		{
+			FontSources = fontSources,
 			Target = rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
@@ -366,6 +368,24 @@ public static class GameBuilder
 			args.AddRange(["-p:DebugType=portable", "-p:DebugSymbols=true", "-p:Optimize=false"]);
 		else
 			args.AddRange(["-p:DebugType=None", "-p:DebugSymbols=false"]);
+	}
+
+	internal static Dictionary<string, Guid> ResolveCssFonts(string assemblyPath, Dictionary<Guid, MountedAsset> database)
+	{
+		var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(assemblyPath));
+		var result = new Dictionary<string, Guid>(StringComparer.Ordinal);
+		foreach (var resource in assembly.GetManifestResourceNames().Where(n => n.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
+		{
+			using var stream = assembly.GetManifestResourceStream(resource)!;
+			using var reader = new StreamReader(stream);
+			foreach (var source in FontSourceReferences.Find(reader.ReadToEnd()))
+			{
+				var candidates = database.Values.Where(a => a.Mount.Id == "project" && a.Asset.Type == AssetType.Font && a.Asset.RelativeSourcePath == source).ToArray();
+				if (candidates.Length != 1) throw new InvalidOperationException($"CSS resource '{resource}' references missing or ambiguous font '/{source}'.");
+				result[source] = candidates[0].Asset.Id;
+			}
+		}
+		return result;
 	}
 
 	private static void ValidateGameplayAssembly(string path)

@@ -11,6 +11,7 @@ internal sealed class UiNode
 	public float Top { get; set; }
 	public float Width { get; set; }
 	public float Height { get; set; }
+	public UiTextLayout? TextLayout { get; set; }
 
 	public string? Id => Attributes.TryGetValue("id", out var value) ? value?.ToString() : null;
 	public string? Classes => Attributes.TryGetValue("class", out var value) ? value?.ToString() : null;
@@ -20,6 +21,7 @@ internal sealed class UiNode
 	{
 		Name = name;
 		Text = null;
+		TextLayout = null;
 		Attributes.Clear();
 		Children.Clear();
 		Style = ComputedStyle.Default;
@@ -58,7 +60,7 @@ internal static class UiTreeReconciler
 		}
 
 		var textChanged = !string.Equals(retained.Text, updated.Text, StringComparison.Ordinal);
-		var intrinsicSizeChanged = (retained.Text?.Length ?? 0) != (updated.Text?.Length ?? 0);
+		var intrinsicSizeChanged = textChanged;
 		var layoutChanged = !LayoutStyleEquals(retained.Style, updated.Style);
 		var visualChanged = textChanged || !Equals(retained.Style, updated.Style);
 		retained.Text = updated.Text;
@@ -84,5 +86,6 @@ internal static class UiTreeReconciler
 		left.Left == right.Left && left.Top == right.Top && left.FlexGrow == right.FlexGrow &&
 		left.FlexShrink == right.FlexShrink && left.Gap == right.Gap && left.Padding == right.Padding &&
 		left.Margin == right.Margin && left.JustifyContent == right.JustifyContent &&
-		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize;
+		left.AlignItems == right.AlignItems && left.FontSize == right.FontSize && left.FontFamily == right.FontFamily &&
+		left.LineHeight == right.LineHeight && left.LineHeightPixels == right.LineHeightPixels && left.NoWrap == right.NoWrap;
 }

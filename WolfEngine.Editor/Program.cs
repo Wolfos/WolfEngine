@@ -84,6 +84,7 @@ public static class Program
 		services.AddSingleton<ITextureAssetImporter, TextureAssetImporter>();
 		services.AddSingleton<IAudioAssetImporter, AudioAssetImporter>();
 		services.AddSingleton<IFontAssetImporter, FontAssetImporter>();
+		services.AddSingleton<IFontContentProvider, EditorFontContentProvider>();
 		services.AddSingleton<EditorAudioContentProvider>();
 		services.AddSingleton<IAudioContentProvider>(provider => provider.GetRequiredService<EditorAudioContentProvider>());
 		services.AddSingleton<AudioService>();
