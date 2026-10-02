@@ -198,6 +198,7 @@ internal unsafe class WolfRendererMetal : IRenderer
                     _isRunning = false;
                     break;
                 case EventType.Windowevent:
+                    _inputHandler.HandleInputEvents(ref @event);
                     HandleWindowEvent(@event);
                     break;
                 case EventType.Mousebuttondown:

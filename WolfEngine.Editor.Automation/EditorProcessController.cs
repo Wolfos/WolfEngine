@@ -153,6 +153,11 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>
 		GetRunningEditor().SetInputButtonAsync(binding, pressed, cancellationToken);
 
+	public Task SetScenePointerAsync(System.Numerics.Vector2 position, bool? pressed, CancellationToken cancellationToken, bool? focused = null) =>
+		GetRunningEditor().SetScenePointerAsync(position, pressed, cancellationToken, focused);
+
+	public Task<string> GetScenePointerStateAsync(CancellationToken cancellationToken) => GetRunningEditor().GetScenePointerStateAsync(cancellationToken);
+
 	public Task SetInputAxis2DAsync(
 		string binding,
 		System.Numerics.Vector2 value,

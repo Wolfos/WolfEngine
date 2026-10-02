@@ -99,6 +99,17 @@ public sealed class EditorAutomationTools
 		return $"Input binding '{binding}' is now {(pressed ? "pressed" : "released")}.";
 	}
 
+	[McpServerTool(Name = "set_scene_pointer"), Description("Move the mouse in Scene viewport logical points and optionally press/release its primary button. Delivers independent input to gameplay and editor ImGui. Works in authoring, running and paused modes to validate routing.")]
+	public async Task<string> SetScenePointer(float x, float y, CancellationToken cancellationToken, bool? pressed = null,
+		[Description("Optional synthetic native focus state, for deterministic background-window and focus-loss tests.")] bool? focused = null)
+	{
+		await _controller.SetScenePointerAsync(new(x, y), pressed, cancellationToken, focused).ConfigureAwait(false);
+		return $"Scene pointer at ({x}, {y}); primary button: {pressed?.ToString() ?? "unchanged"}.";
+	}
+
+	[McpServerTool(Name = "get_scene_pointer_state"), Description("Read the Scene viewport pointer availability, capture, focus, logical origin and size after completed render frames.")]
+	public Task<string> GetScenePointerState(CancellationToken cancellationToken) => _controller.GetScenePointerStateAsync(cancellationToken);
+
 	[McpServerTool(Name = "set_input_axis_2d"), Description("Set one named two-dimensional input binding in a running Play-mode scene, through the same input system used by gameplay.")]
 	public async Task<string> SetInputAxis2D(
 		[Description("InputActionBinding name, such as MouseDelta or GamepadLeftStick.")] string binding,

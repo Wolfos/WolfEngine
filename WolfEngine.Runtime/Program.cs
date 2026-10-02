@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WolfEngine.Input;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Animation;
@@ -96,10 +97,6 @@ public static class Program
 		worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem(provider.GetRequiredService<RigidbodySystem>(), SystemExecutionGroup.Gameplay);
 		worldManager.AddSystem<TransformSystem>();
-		foreach (var system in gameplay.CreateSystems(provider))
-			worldManager.AddSystem(system, SystemExecutionGroup.Gameplay);
-
-		gameplay.OnLoaded(world);
 		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
 		var primaryView = provider.GetRequiredService<RenderGraph>().CreateView(
 			new RenderViewDescriptor(world, "game", RenderViewOutput.Backbuffer));
@@ -110,6 +107,9 @@ public static class Program
 		{
 			try
 			{
+				foreach (var system in gameplay.CreateSystems(provider))
+					worldManager.AddSystem(system, SystemExecutionGroup.Gameplay);
+				gameplay.OnLoaded(world);
 				GameLoop(provider, world, primaryView, gameplay, settings, options, ref running);
 			}
 			catch (Exception exception)
@@ -118,6 +118,11 @@ public static class Program
 				Console.Error.WriteLine($"runtime game loop failed: {exception}");
 				provider.GetRequiredService<EditorFrameCoordinator>().RequestShutdown();
 				renderer.RequestShutdown();
+			}
+			finally
+			{
+				try { gameplay.OnUnloading(world); }
+				catch (Exception exception) { gameError ??= exception; Console.Error.WriteLine($"runtime gameplay cleanup failed: {exception}"); }
 			}
 		})
 		{
@@ -134,7 +139,6 @@ public static class Program
 
 		running = false;
 		gameThread?.Join();
-		gameplay.OnUnloading(world);
 		AssetDatabase.ClearInstanceRegistry();
 		if (gameError is not null)
 			throw gameError;
@@ -161,6 +165,8 @@ public static class Program
 		var last = stopwatch.Elapsed;
 		var accumulator = 0f;
 		var frames = 0;
+		var input = services.GetRequiredService<IInputSystem>();
+		var pointerRouter = services.GetRequiredService<IPointerInputRouter>();
 		while (running)
 		{
 			var now = stopwatch.Elapsed;
@@ -169,6 +175,9 @@ public static class Program
 				: Math.Clamp((float)(now - last).TotalSeconds, 0, 0.1f);
 			last = now;
 			accumulator += delta;
+			var windowSize = renderer.GetWindowSize();
+			input.ProcessPointerInput(pointerRouter, new PointerInputContext(true, true, true, System.Numerics.Vector2.Zero,
+				new(windowSize.X, windowSize.Y)));
 
 			var steps = 0;
 			while (accumulator >= settings.FixedDeltaTime && steps++ < settings.MaxPhysicsStepsPerFrame)

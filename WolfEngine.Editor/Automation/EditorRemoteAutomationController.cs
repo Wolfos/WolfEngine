@@ -27,6 +27,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
 	private readonly IInputSystem _inputSystem;
+	private readonly IImGuiInputSink _imguiInput;
 	private readonly IEditorInteractionState _interactionState;
 	private readonly IEditorCommandService _commandService;
 	private readonly ITerrainAuthoringService _terrainAuthoringService;
@@ -66,7 +67,8 @@ public sealed class EditorRemoteAutomationController
 		EditorViewportStateBus viewportStateBus,
 		IEditorWorkspaceService workspaces,
 		EditorWindowRegistry windows,
-		EditorCameraSystem cameraSystem)
+		EditorCameraSystem cameraSystem,
+		IImGuiInputSink imguiInput)
 	{
 		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
@@ -78,6 +80,7 @@ public sealed class EditorRemoteAutomationController
 		_sceneSnapshotService = sceneSnapshotService;
 		_playSession = playSession;
 		_inputSystem = inputSystem;
+		_imguiInput = imguiInput;
 		_interactionState = interactionState;
 		_commandService = commandService;
 		_terrainAuthoringService = terrainAuthoringService;
@@ -623,6 +626,27 @@ public sealed class EditorRemoteAutomationController
 			}
 			return GetPlayModeState();
 		}, cancellationToken);
+
+	/// <summary>Inject window-relative input into both independent mouse consumers, in any editor mode.</summary>
+	public Task SetScenePointerAsync(Vector2 position, bool? pressed, CancellationToken cancellationToken, bool? focused = null) =>
+		Enqueue(() =>
+		{
+			var viewport = _viewportStateBus.GetUiState(RenderViewId.Primary);
+			if (!viewport.Visible) throw new InvalidOperationException("The Scene viewport is not visible.");
+			if (focused.HasValue) _inputSystem.SetPointerFocus(focused.Value);
+			var windowPosition = viewport.ImageMin + position;
+			_inputSystem.SetAxis2D(InputActionBinding.MousePosition, windowPosition);
+			_imguiInput.SetMousePosition(windowPosition);
+			if (pressed.HasValue) _imguiInput.SetMouseButton(0, pressed.Value);
+			if (pressed.HasValue) _inputSystem.SetButton(InputActionBinding.MouseButtonLeft, pressed.Value);
+		}, cancellationToken);
+
+	public Task<string> GetScenePointerStateAsync(CancellationToken cancellationToken) => Enqueue(() =>
+	{
+		var state = _viewportStateBus.GetUiState(RenderViewId.Primary);
+		return System.Text.Json.JsonSerializer.Serialize(new { state.Visible, state.Focused, state.PointerAvailable, state.PointerCaptured,
+			NativeFocused = _inputSystem.PointerFocused, Origin = new[] { state.ImageMin.X, state.ImageMin.Y }, Size = new[] { state.ImageMax.X - state.ImageMin.X, state.ImageMax.Y - state.ImageMin.Y } });
+	}, cancellationToken);
 
 	/// <summary>Injects a button binding through the same input system used by gameplay.</summary>
 	public Task SetInputButtonAsync(string binding, bool pressed, CancellationToken cancellationToken) =>

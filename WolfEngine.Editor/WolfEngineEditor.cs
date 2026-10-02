@@ -215,6 +215,13 @@ public class WolfEngineEditor
 
 			var deltaTime = _automationController?.DeltaTime ?? (float)(frameStart - last).TotalSeconds;
 			last = frameStart;
+			var pointerViewport = _viewportStateBus.GetUiState(RenderViewId.Primary);
+			var pointerRouter = _serviceProvider.GetService(typeof(IPointerInputRouter)) as IPointerInputRouter ?? NullPointerInputRouter.Instance;
+			_inputSystem.ProcessPointerInput(pointerRouter, new PointerInputContext(
+				_playSession.State == EditorPlayState.Playing && !_operationService.Current.IsActive,
+				pointerViewport.Visible && pointerViewport.PointerAvailable,
+				pointerViewport.Visible && (pointerViewport.Focused || pointerViewport.PointerAvailable || pointerViewport.PointerCaptured),
+				pointerViewport.ImageMin, pointerViewport.ImageMax - pointerViewport.ImageMin));
 			UpdateAudioLifecycle(deltaTime);
 
 			// A loading operation owns editor state. Keep publishing frames, but do not let

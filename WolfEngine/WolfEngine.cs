@@ -30,7 +30,9 @@ public static class WolfEngine
 		services.AddSingleton<IAssetMetadataStore, AssetMetadataStore>();
 		services.AddSingleton<IRuntimeArtifactTargetProvider, RuntimeArtifactTargetProvider>();
 		services.AddSingleton<IArenaAllocator, ArenaAllocator>();
+		services.AddSingleton<PointerInputQueue>();
 		services.AddSingleton<IInputSystem, InputSystem>();
+		services.AddSingleton<IPointerInputRouter>(NullPointerInputRouter.Instance);
 		services.AddSingleton<ImGuiUiSystem>();
 		services.AddSingleton<IImGuiInputSink>(sp => sp.GetRequiredService<ImGuiUiSystem>());
 		services.AddSingleton<IUiFrameProvider>(sp => sp.GetRequiredService<ImGuiUiSystem>());

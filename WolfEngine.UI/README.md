@@ -4,6 +4,60 @@ Razor components and CSS remain in the gameplay project. This is an intentionall
 small flex-layout subset, not a browser: elements default to flex containers and
 relative positioning, and dimensions use Yoga's border-box sizing.
 
+## Screen-space mouse input
+
+Use Blazor event attributes in gameplay Razor components. Callbacks passed into
+child components should be `EventCallback` or `EventCallback<MouseEventArgs>`.
+
+Add these imports to the gameplay project's `_Imports.razor` (or the component):
+
+```razor
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+```
+
+The web import enables Razor's event directives. Without it, Razor can compile
+`@onclick` as an inert literal HTML attribute instead of an event binding.
+
+```razor
+<button class="action" @onclick="Increment" @onclick:stopPropagation="true">
+    <span>Clicks: @_clicks</span>
+</button>
+@code {
+    private int _clicks;
+    private void Increment() => _clicks++;
+}
+```
+
+Supported attributes: `@onclick`, `@onmousedown`, `@onmouseup`, `@onmousemove`,
+`@onmouseenter`, and `@onmouseleave`. Click/down/up/move bubble, with
+`:stopPropagation` modifiers; enter/leave do not. Only primary-button matched
+presses/releases generate clicks. Use `@key` for stable identity in lists.
+A disabled button consumes input without invoking callbacks.
+
+Buttons have no implicit appearance. Style them with `:hover`, `:active`, and
+`:disabled`. `pointer-events: auto | none` inherits; children can restore `auto`.
+Hit-testing uses element boxes, reverse paint order, and nested rectangular clips.
+Paint-only changes reuse layout; stationary frames do not rebuild. Noninteractive
+HUD regions pass input to gameplay. Only the displayed screen surface handles
+input; texture surfaces never do.
+
+Mouse input is queued and drained before gameplay/physics. Each button retains
+its original owner until release, even when dragged outside UI. Focus loss,
+hidden viewports, target removal, disposal/hot reload, or leaving running Play
+cancel captures without clicking. Editor ImGui receives input independently.
+
+Creation, parameter updates, events, and async Razor continuations belong to the
+gameplay thread. Async callbacks can await without blocking updates; their renders
+publish automatically. Viewport resize requests are deferred to the UI pump.
+Custom hosts must call `IInputSystem.ProcessPointerInput` with the registered
+`IPointerInputRouter` every update, even when interaction is disabled, and supply
+viewport origin/size in window logical points. The editor and standalone runtime
+already do this, including DPI conversion.
+
+Keyboard activation, focus navigation, text entry, scrolling, double-click,
+context menus, and world-space picking remain deferred.
+
 ```css
 :root { font-size: 20px; }
 .hud {

@@ -1,0 +1,5 @@
+.target { background-color: #112233; }
+.target:hover { background-color: #334455; }
+.target:active { background-color: #556677; }
+.target:disabled { background-color: #778899; }
+.layout-change:hover { margin-left: 20px; }

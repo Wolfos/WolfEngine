@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Input;
 
 namespace WolfEngine.UI;
 
@@ -10,6 +11,7 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<GameplayUiHost>();
 		services.AddSingleton<IGameplayUiHost>(provider => provider.GetRequiredService<GameplayUiHost>());
 		services.AddSingleton<IGameplayUiFrameProvider>(provider => provider.GetRequiredService<GameplayUiHost>());
+		services.AddSingleton<IPointerInputRouter>(provider => provider.GetRequiredService<GameplayUiHost>());
 		return services;
 	}
 }

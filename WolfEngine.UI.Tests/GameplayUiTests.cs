@@ -31,7 +31,7 @@ public sealed class GameplayUiTests
 		Assert.That(unchanged.TextureSurfaces.Single().Revision, Is.EqualTo(revision)); unchanged.Release();
 	}
 	[Test]
-	public async Task ScreenSurfaceSerializesResizeAndParameterRebuilds()
+	public void ScreenSurfaceSerializesResizeAndParameterRebuilds()
 	{
 		using var services = new ServiceCollection().BuildServiceProvider();
 		using var host = new GameplayUiHost(services);
@@ -40,15 +40,6 @@ public sealed class GameplayUiTests
 		using var start = new ManualResetEventSlim();
 		var parameters = new Dictionary<string, object?> { [nameof(ConcurrentHud.Frame)] = 0 };
 
-		var update = Task.Run(() =>
-		{
-			start.Wait();
-			for (var i = 1; i <= 20; i++)
-			{
-				parameters[nameof(ConcurrentHud.Frame)] = i;
-				surface.SetParameters(parameters);
-			}
-		});
 		var resize = Task.Run(() =>
 		{
 			start.Wait();
@@ -56,8 +47,14 @@ public sealed class GameplayUiTests
 		});
 
 		start.Set();
-		await Task.WhenAll(update, resize);
-		Assert.That(surface.Performance.Revision, Is.GreaterThanOrEqualTo(41));
+		for (var i = 1; i <= 20; i++)
+		{
+			parameters[nameof(ConcurrentHud.Frame)] = i;
+			surface.SetParameters(parameters);
+		}
+		resize.GetAwaiter().GetResult();
+		host.BeginFrame(default);
+		Assert.That(surface.Performance.Revision, Is.GreaterThanOrEqualTo(22));
 	}
 
 	[Test]

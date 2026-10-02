@@ -1,0 +1,6 @@
+<button style="width: 100px; height: 50px" @onclick="CountClick"><span>Clicks: @_clicks</span></button>
+@code {
+    private int _clicks;
+    private void CountClick() => _clicks++;
+    [Parameter] public int Frame { get; set; }
+}

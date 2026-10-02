@@ -32,6 +32,7 @@ internal sealed record ComputedStyle
 	public UiLength Right { get; init; } = UiLength.Auto;
 	public UiLength Bottom { get; init; } = UiLength.Auto;
 	public bool ClipOverflow { get; init; }
+	public bool PointerEvents { get; init; } = true;
 	public float FlexGrow { get; init; }
 	public float FlexShrink { get; init; } = 1;
 	public float Gap { get; init; }
@@ -55,11 +56,11 @@ internal sealed record ComputedStyle
 internal sealed class CssStyleSheet
 {
 	private readonly record struct Declaration(string Name, string Value);
-	private readonly record struct SimpleSelector(string? Tag, string? Id, string? Class);
+	private readonly record struct SimpleSelector(string? Tag, string? Id, string? Class, int States);
 	// Only inherited values affect child declarations. Vector4 avoids ColorRGBA's
 	// default boxed ValueType hash in the per-node, per-frame cache lookup.
 	private readonly record struct InheritedStyleKey(float FontSize, float RootFontSize, string FontFamily,
-		float LineHeight, bool LineHeightPixels, bool NoWrap, UiTextAlign TextAlign, float Opacity, Vector4 Color);
+		float LineHeight, bool LineHeightPixels, bool NoWrap, UiTextAlign TextAlign, bool PointerEvents, float Opacity, Vector4 Color);
 	private readonly record struct StyleCacheKey(
 		string Name,
 		string? Id,
@@ -69,6 +70,8 @@ internal sealed class CssStyleSheet
 		string? ParentId,
 		string? ParentClasses,
 		bool ParentIsRoot,
+		int State,
+		int ParentState,
 		InheritedStyleKey Inherited);
 	private sealed record Rule(
 		SimpleSelector Target,
@@ -94,6 +97,7 @@ internal sealed class CssStyleSheet
 		public UiLength Right;
 		public UiLength Bottom;
 		public bool ClipOverflow;
+		public bool PointerEvents;
 		public float FlexGrow;
 		public float FlexShrink;
 		public float Gap;
@@ -132,6 +136,7 @@ internal sealed class CssStyleSheet
 			Right = UiLength.Auto;
 			Bottom = UiLength.Auto;
 			ClipOverflow = false;
+			PointerEvents = inherited.PointerEvents;
 			FlexGrow = 0;
 			FlexShrink = 1;
 			Gap = 0;
@@ -201,6 +206,7 @@ internal sealed class CssStyleSheet
 					LineHeight = value == "normal" ? 0 : Math.Max(0, Number(value, LineHeight));
 					LineHeightPixels = value.EndsWith("px", StringComparison.OrdinalIgnoreCase); break;
 				case "white-space": NoWrap = value is "nowrap" or "pre"; break;
+				case "pointer-events": PointerEvents = value == "auto"; break;
 				case "text-align": TextAlign = value switch
 				{
 					"center" => UiTextAlign.Center,
@@ -233,6 +239,7 @@ internal sealed class CssStyleSheet
 			Right = Right,
 			Bottom = Bottom,
 			ClipOverflow = ClipOverflow,
+			PointerEvents = PointerEvents,
 			FlexGrow = FlexGrow,
 			FlexShrink = FlexShrink,
 			Gap = Gap,
@@ -345,8 +352,10 @@ internal sealed class CssStyleSheet
 			parent?.Id,
 			parent?.Classes,
 			parentIsRoot,
+			node.InteractionState,
+			parent?.InteractionState ?? 0,
 			new InheritedStyleKey(inherited.FontSize, inherited.RootFontSize, inherited.FontFamily,
-				inherited.LineHeight, inherited.LineHeightPixels, inherited.NoWrap, inherited.TextAlign, inherited.Opacity,
+				inherited.LineHeight, inherited.LineHeightPixels, inherited.NoWrap, inherited.TextAlign, inherited.PointerEvents, inherited.Opacity,
 				new Vector4(inherited.Color.R, inherited.Color.G, inherited.Color.B, inherited.Color.A)));
 		var cacheable = inlineStyle is null;
 		if (!cacheable || !_styleCache.TryGetValue(cacheKey, out var style))
@@ -424,6 +433,7 @@ internal sealed class CssStyleSheet
 			case "gap": case "border-radius": return LengthValue(false, false) && Length(value).Unit == UiLengthUnit.Pixels;
 			case "line-height": return value == "normal" || Scalar() || value.EndsWith("px", StringComparison.Ordinal) && LengthValue(false, false);
 			case "white-space": return value is "normal" or "nowrap" or "pre";
+			case "pointer-events": return value is "auto" or "none";
 			case "text-align": return value is "left" or "center" or "right" or "inherit";
 			case "color": case "background-color":
 				return value is "white" or "black" or "transparent" || name == "color" && value == "inherit" ||
@@ -480,6 +490,7 @@ internal sealed class CssStyleSheet
 
 	private static bool MatchesSimple(UiNode node, SimpleSelector selector)
 	{
+		if ((node.InteractionState & selector.States) != selector.States) return false;
 		if (selector.Tag is { Length: > 0 } tag && tag is not ("*" or ":root") &&
 		    !string.Equals(tag, node.Name, StringComparison.OrdinalIgnoreCase)) return false;
 		if (selector.Id is not null && !string.Equals(selector.Id, node.Id, StringComparison.Ordinal)) return false;
@@ -488,6 +499,11 @@ internal sealed class CssStyleSheet
 
 	private static SimpleSelector ParseSimpleSelector(string selector)
 	{
+		var states = 0;
+		foreach (var (pseudo, bit) in new[] { (":hover", 1), (":active", 2), (":disabled", 4) })
+		{
+			if (selector.Contains(pseudo, StringComparison.Ordinal)) { states |= bit; selector = selector.Replace(pseudo, "", StringComparison.Ordinal); }
+		}
 		var idIndex = selector.IndexOf('#');
 		var classIndex = selector.IndexOf('.');
 		var tagEnd = selector.Length;
@@ -501,7 +517,7 @@ internal sealed class CssStyleSheet
 			id = selector[(idIndex + 1)..end];
 		}
 		var className = classIndex >= 0 ? selector[(classIndex + 1)..] : null;
-		return new SimpleSelector(tag, id, className);
+		return new SimpleSelector(tag, id, className, states);
 	}
 
 	private static bool ContainsClass(string? classes, string required)

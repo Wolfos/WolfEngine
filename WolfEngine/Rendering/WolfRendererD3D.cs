@@ -188,6 +188,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		var window = _window ?? throw new InvalidOperationException("Window was not initialised.");
 
 		window.Load += OnWindowLoad;
+		window.FocusChanged += OnWindowFocusChanged;
 		window.Update += OnWindowUpdate;
 		window.Render += OnWindowRender;
 		window.FramebufferResize += OnWindowFramebufferResize;
@@ -441,6 +442,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		_isInitialized = false;
 	}
 
+	private void OnWindowFocusChanged(bool focused) => _inputSystem.SetPointerFocus(focused);
+
 	private void HookKeyboards()
 	{
 		_keyboards.Clear();
@@ -534,6 +537,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 	private void HandleMouseDown(IMouse mouse, MouseButton button)
 	{
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, new(mouse.Position.X, mouse.Position.Y));
+		_imguiInputSink.SetMousePosition(new(mouse.Position.X, mouse.Position.Y));
 		if (TryMapMouseButton(button, out var binding))
 		{
 			_inputSystem.SetButton(binding, true);
@@ -547,6 +552,8 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 	private void HandleMouseUp(IMouse mouse, MouseButton button)
 	{
+		_inputSystem.SetAxis2D(InputActionBinding.MousePosition, new(mouse.Position.X, mouse.Position.Y));
+		_imguiInputSink.SetMousePosition(new(mouse.Position.X, mouse.Position.Y));
 		if (TryMapMouseButton(button, out var binding))
 		{
 			_inputSystem.SetButton(binding, false);
@@ -2461,6 +2468,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			// Unhooked before DetachWindow, not after: restoring the default chrome calls SetWindowPos, which
 			// synchronously drives GLFW's resize callback back into this instance while these are still live.
 			_window.Load -= OnWindowLoad;
+			_window.FocusChanged -= OnWindowFocusChanged;
 			_window.Update -= OnWindowUpdate;
 			_window.Render -= OnWindowRender;
 			_window.FramebufferResize -= OnWindowFramebufferResize;

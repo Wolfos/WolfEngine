@@ -4,6 +4,13 @@ internal sealed class UiNode
 {
 	public string Name { get; set; } = string.Empty;
 	public string? Text { get; set; }
+	public long Identity { get; set; }
+	public object? Key { get; set; }
+	public bool Hovered { get; set; }
+	public bool Active { get; set; }
+	public Dictionary<string, ulong> Events { get; } = new(StringComparer.Ordinal);
+	public bool Disabled => Name == "button" && Attributes.TryGetValue("disabled", out var value) && value is not false;
+	public int InteractionState => (Hovered ? 1 : 0) | (Active ? 2 : 0) | (Disabled ? 4 : 0);
 	public Dictionary<string, object?> Attributes { get; } = new(StringComparer.OrdinalIgnoreCase);
 	public List<UiNode> Children { get; } = [];
 	public ComputedStyle Style { get; set; } = ComputedStyle.Default;
@@ -21,6 +28,7 @@ internal sealed class UiNode
 	public void Reset(string name)
 	{
 		Name = name;
+		Identity = 0; Key = null; Hovered = Active = false; Events.Clear();
 		Text = null;
 		TextLayout = null;
 		Attributes.Clear();
@@ -66,6 +74,9 @@ internal static class UiTreeReconciler
 		var layoutChanged = !LayoutStyleEquals(retained.Style, updated.Style);
 		var visualChanged = textChanged || !Equals(retained.Style, updated.Style);
 		retained.Text = updated.Text;
+		retained.Identity = updated.Identity; retained.Key = updated.Key;
+		retained.Hovered = updated.Hovered; retained.Active = updated.Active;
+		retained.Events.Clear(); foreach (var pair in updated.Events) retained.Events[pair.Key] = pair.Value;
 		retained.Style = updated.Style;
 		retained.Attributes.Clear();
 		foreach (var pair in updated.Attributes) retained.Attributes[pair.Key] = pair.Value;
@@ -80,7 +91,7 @@ internal static class UiTreeReconciler
 		return new UiTreeChanges(true, layoutChanged, intrinsicSizeChanged, visualChanged);
 	}
 
-	private static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>
+	internal static bool LayoutStyleEquals(ComputedStyle left, ComputedStyle right) =>
 		left.Display == right.Display && left.Row == right.Row && left.Wrap == right.Wrap &&
 		left.Absolute == right.Absolute && left.Width == right.Width && left.Height == right.Height &&
 		left.MinWidth == right.MinWidth && left.MinHeight == right.MinHeight &&

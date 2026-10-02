@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Mathematics;
+using WolfEngine.Input;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
@@ -28,6 +30,11 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	private int _layoutWidth;
 	private int _layoutHeight;
 	private float _layoutScale = 1.0f;
+	private readonly List<ComputedStyle> _previousInteractionStyles = [];
+	internal UiNode? Root => _root;
+	internal float LogicalWidth => _layoutWidth;
+	internal float LogicalHeight => _layoutHeight;
+	internal UiPointerController Pointer { get; }
 
 	public GameplayUiSurface(
 		GameplayUiHost host,
@@ -43,7 +50,8 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		Options = options;
 		_profilerName = $"Gameplay UI.Rebuild [{options.Name ?? id.ToString()}]";
 		_parameters = new Dictionary<string, object?>(initialParameters);
-		_renderer = new RazorTreeRenderer(services);
+		_renderer = new RazorTreeRenderer(services, host.Dispatcher);
+		Pointer = new UiPointerController(this);
 		_rootComponentId = _renderer.AttachRoot(componentType);
 		_styleSheet = CssStyleSheet.Parse(css ?? string.Empty);
 		_text = new UiTextService(host.Fonts);
@@ -70,6 +78,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 
 	public void SetParameters(IReadOnlyDictionary<string, object?> parameters)
 	{
+		_host.Dispatcher.Bind();
 		ArgumentNullException.ThrowIfNull(parameters);
 		lock (_rebuildSync)
 		{
@@ -81,6 +90,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 
 	public void Invalidate()
 	{
+		_host.Dispatcher.Bind();
 		lock (_rebuildSync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
@@ -114,7 +124,19 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		foreach (var pair in parameters) _parameters[pair.Key] = pair.Value;
 	}
 
-	private void RebuildCore()
+	internal void DispatchMouse(ulong handler, MouseEventArgs args)
+	{
+		_renderer.DispatchMouse(handler, args); FlushComponentRender();
+	}
+	internal void FlushComponentRender()
+	{
+		if (!_disposed && _renderer.DisplayChanged) RebuildCore(false);
+	}
+	internal void RefreshInteraction()
+	{
+		if (!_disposed && _root is not null) RebuildCore(false, interactionOnly: true);
+	}
+	private void RebuildCore(bool renderComponent = true, bool interactionOnly = false)
 	{
 		using (FrameProfiler.Instance.Measure(_profilerName))
 		{
@@ -128,13 +150,20 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 			var timer = Stopwatch.StartNew();
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Razor Render"))
 			{
-				_renderer.Render(_rootComponentId, _parameters);
+				if (renderComponent) _renderer.Render(_rootComponentId, _parameters);
 			}
 
 			UiNode updatedRoot;
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Build Tree"))
 			{
-				updatedRoot = _renderer.BuildTree(_rootComponentId);
+				if (interactionOnly)
+				{
+					_previousInteractionStyles.Clear();
+					CaptureStyles(_root!);
+					updatedRoot = _root!;
+				}
+				else updatedRoot = _renderer.BuildTree(_rootComponentId);
+				Pointer.ApplyState(updatedRoot);
 			}
 
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Apply CSS"))
@@ -145,7 +174,8 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 			UiTreeChanges changes;
 			using (FrameProfiler.Instance.Measure("Gameplay UI.Reconcile"))
 			{
-				changes = _root is null
+				var styleIndex = 0;
+				changes = interactionOnly ? CompareStyles(updatedRoot, ref styleIndex) : _root is null
 					? UiTreeChanges.Rebuild
 					: UiTreeReconciler.Reconcile(_root, updatedRoot);
 			}
@@ -157,7 +187,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 				_root = updatedRoot;
 				_renderer.RecycleTree(previousRoot);
 			}
-			else
+			else if (!interactionOnly)
 			{
 				_renderer.RecycleTree(updatedRoot);
 			}
@@ -211,12 +241,30 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 		}
 	}
 
+	private void CaptureStyles(UiNode node)
+	{
+		_previousInteractionStyles.Add(node.Style);
+		foreach (var child in node.Children) CaptureStyles(child);
+	}
+	private UiTreeChanges CompareStyles(UiNode node, ref int index)
+	{
+		var previous = _previousInteractionStyles[index++];
+		var layout = !UiTreeReconciler.LayoutStyleEquals(previous, node.Style);
+		var paint = previous != node.Style;
+		foreach (var child in node.Children)
+		{
+			var changes = CompareStyles(child, ref index); layout |= changes.LayoutChanged; paint |= changes.VisualChanged;
+		}
+		return new(true, layout, false, paint);
+	}
+
 	public void Dispose()
 	{
 		lock (_rebuildSync)
 		{
 			if (_disposed) return;
 			_disposed = true;
+			Pointer.Cancel();
 #pragma warning disable BL0006
 			_renderer.Dispose();
 #pragma warning restore BL0006
@@ -230,7 +278,7 @@ internal sealed class GameplayUiSurface : IGameplayUiSurface
 	}
 }
 
-public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, IDisposable
+public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, IPointerInputRouter, IDisposable
 {
 	private readonly IServiceProvider _services;
 	private readonly object _sync = new();
@@ -240,6 +288,12 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 	private long _nextSurfaceId;
 	private Int2 _viewportSize = new(1280, 720);
 	private float _displayScale = 1.0f;
+	private Int2 _requestedViewportSize = new(1280, 720);
+	private float _requestedScale = 1;
+	private bool _resizePending;
+	internal UiDispatcher Dispatcher { get; } = new();
+	private GameplayUiSurface? _inputSurface;
+	private PointerInputContext _inputContext;
 
 	private const float MinDisplayScale = 0.25f;
 	private const float MaxDisplayScale = 8.0f;
@@ -286,6 +340,7 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 		IReadOnlyDictionary<string, object?>? initialParameters = null) where TComponent : IComponent
 	{
 		ArgumentNullException.ThrowIfNull(options);
+		Dispatcher.Bind();
 		var css = LoadCss(typeof(TComponent).Assembly, cssResourceName);
 		GameplayUiSurface surface;
 		lock (_sync)
@@ -300,7 +355,6 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 
 	public void SetViewportSize(Int2 size, float displayScale = 1.0f)
 	{
-		GameplayUiSurface[] screens;
 		lock (_sync)
 		{
 			if (size.X <= 0 || size.Y <= 0) return;
@@ -309,13 +363,39 @@ public sealed class GameplayUiHost : IGameplayUiHost, IGameplayUiFrameProvider, 
 				? Math.Clamp(displayScale, MinDisplayScale, MaxDisplayScale)
 				: 1.0f;
 
-			if (_viewportSize.X == size.X && _viewportSize.Y == size.Y && _displayScale.Equals(scale)) return;
-
-			_viewportSize = size;
-			_displayScale = scale;
-			screens = _surfaces.Where(x => x.Options.Kind == UiSurfaceKind.Screen).ToArray();
+			if (_requestedViewportSize.X == size.X && _requestedViewportSize.Y == size.Y && _requestedScale.Equals(scale)) return;
+			_requestedViewportSize = size; _requestedScale = scale; _resizePending = true;
 		}
-		for (var i = 0; i < screens.Length; i++) screens[i].ResizeAndRebuild();
+	}
+
+	/// <summary>Pump once on the gameplay thread, even when interaction is disabled.</summary>
+	public void BeginFrame(PointerInputContext context)
+	{
+		Dispatcher.Pump();
+		_inputContext = context;
+		lock (_sync)
+		{
+			if (_resizePending)
+			{
+				_viewportSize = _requestedViewportSize; _displayScale = _requestedScale; _resizePending = false;
+				foreach (var surface in _surfaces) if (surface.Options.Kind == UiSurfaceKind.Screen) surface.ResizeAndRebuild();
+			}
+			GameplayUiSurface? selected = null;
+			foreach (var surface in _surfaces)
+			{
+				surface.FlushComponentRender();
+				if (surface.Options.Kind == UiSurfaceKind.Screen && (selected is null || surface.Options.Layer >= selected.Options.Layer)) selected = surface;
+			}
+			if (!ReferenceEquals(_inputSurface, selected)) { _inputSurface?.Pointer.Cancel(); _inputSurface = selected; }
+		}
+		_inputSurface?.Pointer.BeginFrame(context);
+	}
+	public bool Route(PointerInputEvent input) => _inputSurface?.Pointer.Route(input) ?? false;
+	public void EndFrame()
+	{
+		Dispatcher.Pump();
+		lock (_sync) foreach (var surface in _surfaces) surface.FlushComponentRender();
+		_inputSurface?.Pointer.BeginFrame(_inputContext);
 	}
 
 	public bool TryConsumeLatest(out GameplayUiRenderFrame frame)

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -12,13 +13,32 @@ internal sealed class RazorTreeRenderer : Renderer
 	private readonly Dictionary<int, ArrayRange<RenderTreeFrame>> _frames = [];
 	private readonly Stack<UiNode> _nodePool = [];
 	private Exception? _exception;
+	private readonly record struct IdentityKey(long Parent, int Component, object? Key, int Sequence, int Occurrence, int Markup, string Name);
+	private readonly Dictionary<IdentityKey, long> _identities = [];
+	private readonly List<IdentityKey> _removedIdentities = [];
+	private readonly Dictionary<(long Parent, int Component, int Sequence), int> _occurrences = [];
+	private readonly HashSet<long> _liveIdentities = [];
+	private readonly HashSet<string> _unboundEventWarnings = new(StringComparer.Ordinal);
+	private long _nextIdentity;
+	public bool DisplayChanged { get; set; }
 
-	public RazorTreeRenderer(IServiceProvider services)
+	public RazorTreeRenderer(IServiceProvider services, UiDispatcher? dispatcher = null)
 		: base(services, services.GetService(typeof(ILoggerFactory)) as ILoggerFactory ?? NullLoggerFactory.Instance)
 	{
+		var owner = dispatcher ?? new UiDispatcher();
+		owner.Bind(); Dispatcher = owner;
 	}
 
-	public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
+	public override Dispatcher Dispatcher { get; }
+
+	public void DispatchMouse(ulong handler, MouseEventArgs args)
+	{
+		_ = Dispatcher.InvokeAsync(async () =>
+		{
+			try { await DispatchEventAsync(handler, null, args); }
+			catch (Exception exception) { Console.Error.WriteLine($"[Gameplay UI] Mouse callback failed: {exception}"); }
+		});
+	}
 
 	public int AttachRoot(Type componentType)
 	{
@@ -30,15 +50,22 @@ internal sealed class RazorTreeRenderer : Renderer
 	{
 		_exception = null;
 		var dictionary = parameters as IDictionary<string, object?> ?? new Dictionary<string, object?>(parameters);
-		Dispatcher.InvokeAsync(() => RenderRootComponentAsync(componentId, ParameterView.FromDictionary(dictionary)))
-			.GetAwaiter().GetResult();
+		var render = Dispatcher.InvokeAsync(() => RenderRootComponentAsync(componentId, ParameterView.FromDictionary(dictionary)));
+		if (render.IsCompleted) render.GetAwaiter().GetResult();
 		if (_exception is not null) throw new InvalidOperationException("Gameplay UI component render failed.", _exception);
 	}
 
 	public UiNode BuildTree(int rootComponentId)
 	{
 		var root = RentNode("root");
+		_liveIdentities.Clear();
+		_occurrences.Clear();
 		AppendComponent(rootComponentId, root);
+		// Removed identities must never revive captures when a keyed element is recreated later.
+		_removedIdentities.Clear();
+		foreach (var pair in _identities) if (!_liveIdentities.Contains(pair.Value)) _removedIdentities.Add(pair.Key);
+		foreach (var key in _removedIdentities) _identities.Remove(key);
+		DisplayChanged = false;
 		return root;
 	}
 
@@ -52,6 +79,8 @@ internal sealed class RazorTreeRenderer : Renderer
 
 	protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
 	{
+		DisplayChanged = true;
+		for (var i = 0; i < renderBatch.DisposedComponentIDs.Count; i++) _frames.Remove(renderBatch.DisposedComponentIDs.Array[i]);
 		for (var i = 0; i < renderBatch.UpdatedComponents.Count; i++)
 		{
 			var componentId = renderBatch.UpdatedComponents.Array[i].ComponentId;
@@ -60,15 +89,19 @@ internal sealed class RazorTreeRenderer : Renderer
 		return Task.CompletedTask;
 	}
 
-	protected override void HandleException(Exception exception) => _exception = exception;
+	protected override void HandleException(Exception exception)
+	{
+		_exception = exception;
+		Console.Error.WriteLine($"[Gameplay UI] Component failed: {exception}");
+	}
 
 	private void AppendComponent(int componentId, UiNode parent)
 	{
 		if (!_frames.TryGetValue(componentId, out var range)) range = GetCurrentRenderTreeFrames(componentId);
-		AppendRange(range.Array, 0, range.Count, parent);
+		AppendRange(range.Array, 0, range.Count, parent, componentId);
 	}
 
-	private void AppendRange(RenderTreeFrame[] frames, int start, int count, UiNode parent)
+	private void AppendRange(RenderTreeFrame[] frames, int start, int count, UiNode parent, int componentId)
 	{
 		var end = start + count;
 		for (var i = start; i < end;)
@@ -79,14 +112,22 @@ internal sealed class RazorTreeRenderer : Renderer
 				case RenderTreeFrameType.Element:
 				{
 					var node = RentNode(frame.ElementName);
+					node.Key = frame.ElementKey;
+					var identityKey = new IdentityKey(parent.Identity, componentId, frame.ElementKey, frame.ElementKey is null ? frame.Sequence : 0,
+						frame.ElementKey is null ? NextOccurrence(parent.Identity, componentId, frame.Sequence) : 0, -1, frame.ElementName);
+					if (!_identities.TryGetValue(identityKey, out var identity)) _identities[identityKey] = identity = ++_nextIdentity;
+					node.Identity = identity; _liveIdentities.Add(identity);
 					var subtreeEnd = i + frame.ElementSubtreeLength;
 					var child = i + 1;
 					while (child < subtreeEnd && frames[child].FrameType == RenderTreeFrameType.Attribute)
 					{
 						node.Attributes[frames[child].AttributeName] = frames[child].AttributeValue;
+						WarnUnboundEvent(frames[child].AttributeName);
+						if (frames[child].AttributeEventHandlerId != 0)
+							node.Events[frames[child].AttributeName] = frames[child].AttributeEventHandlerId;
 						child++;
 					}
-					AppendRange(frames, child, subtreeEnd - child, node);
+					AppendRange(frames, child, subtreeEnd - child, node, componentId);
 					parent.Children.Add(node);
 					i = subtreeEnd;
 					break;
@@ -101,7 +142,7 @@ internal sealed class RazorTreeRenderer : Renderer
 					i++;
 					break;
 				case RenderTreeFrameType.Markup:
-					AppendMarkup(frame.MarkupContent, parent);
+					AppendMarkup(frame.MarkupContent, parent, componentId, frame.Sequence, NextOccurrence(parent.Identity, componentId, frame.Sequence));
 					i++;
 					break;
 				case RenderTreeFrameType.Component:
@@ -109,7 +150,7 @@ internal sealed class RazorTreeRenderer : Renderer
 					i += frame.ComponentSubtreeLength;
 					break;
 				case RenderTreeFrameType.Region:
-					AppendRange(frames, i + 1, frame.RegionSubtreeLength - 1, parent);
+					AppendRange(frames, i + 1, frame.RegionSubtreeLength - 1, parent, componentId);
 					i += frame.RegionSubtreeLength;
 					break;
 				default:
@@ -119,7 +160,13 @@ internal sealed class RazorTreeRenderer : Renderer
 		}
 	}
 
-	private void AppendMarkup(string markup, UiNode parent)
+	private int NextOccurrence(long parent, int component, int sequence)
+	{
+		var key = (parent, component, sequence);
+		_occurrences.TryGetValue(key, out var count); _occurrences[key] = count + 1; return count;
+	}
+
+	private void AppendMarkup(string markup, UiNode parent, int componentId, int sequence, int occurrence)
 	{
 		if (string.IsNullOrWhiteSpace(markup)) return;
 		var stack = new Stack<UiNode>();
@@ -155,7 +202,11 @@ internal sealed class RazorTreeRenderer : Renderer
 			var name = separator < 0 ? tag : tag[..separator];
 			if (name.Length == 0) continue;
 			var node = RentNode(name);
+			var identityKey = new IdentityKey(parent.Identity, componentId, null, sequence, occurrence, tagStart, name);
+			if (!_identities.TryGetValue(identityKey, out var identity)) _identities[identityKey] = identity = ++_nextIdentity;
+			node.Identity = identity; _liveIdentities.Add(identity);
 			if (separator >= 0) ParseAttributes(tag[(separator + 1)..], node.Attributes);
+			foreach (var attribute in node.Attributes.Keys) WarnUnboundEvent(attribute);
 			stack.Peek().Children.Add(node);
 			if (!selfClosing && name is not ("br" or "img" or "input" or "meta" or "link")) stack.Push(node);
 		}
@@ -179,6 +230,12 @@ internal sealed class RazorTreeRenderer : Renderer
 			return node;
 		}
 		return new UiNode { Name = name };
+	}
+
+	private void WarnUnboundEvent(string attribute)
+	{
+		if (attribute.StartsWith("@on", StringComparison.Ordinal) && _unboundEventWarnings.Add(attribute))
+			Console.Error.WriteLine($"[Gameplay UI] '{attribute}' is an unbound literal attribute. Add '@using Microsoft.AspNetCore.Components.Web' to the gameplay project's _Imports.razor to enable Blazor event directives.");
 	}
 
 	private static void ParseAttributes(string source, Dictionary<string, object?> attributes)

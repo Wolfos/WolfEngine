@@ -11,10 +11,55 @@ public interface IInputSystem
 	void SetButton(InputActionBinding binding, bool isPressed);
 	void SetAxis1D(InputActionBinding binding, float value);
 	void SetAxis2D(InputActionBinding binding, Vector2 value);
+	void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context) { }
+	void SetPointerFocus(bool focused) { }
+	bool PointerFocused => true;
 }
 
 public class InputSystem : IInputSystem
 {
+	private readonly PointerInputQueue? _pointer;
+	private readonly Dictionary<InputActionBinding, bool> _pointerOwners = [];
+	public InputSystem(PointerInputQueue? pointer = null) => _pointer = pointer;
+	public void SetPointerFocus(bool focused) => _pointer?.SetFocus(focused);
+	public bool PointerFocused => _pointer?.Focused ?? true;
+
+	public void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context)
+	{
+		context = context with { Focused = context.Focused && (_pointer?.Focused ?? true) };
+		router.BeginFrame(context);
+		try
+		{
+			if (!context.Focused)
+				foreach (var binding in _pointerOwners.Keys)
+					if (!_pointerOwners[binding]) ApplyButton(binding, false);
+			if (_pointer is null) return;
+			var events = _pointer.Drain();
+			try
+			{
+				foreach (var input in events)
+				{
+					if (input.Cancelled)
+					{
+						router.BeginFrame(context with { Focused = false });
+						foreach (var owner in _pointerOwners) if (!owner.Value) ApplyButton(owner.Key, false);
+						router.BeginFrame(context);
+						continue;
+					}
+					var consumed = router.Route(input);
+					if (PointerInputQueue.Button(input.Binding) >= 0)
+					{
+						if (input.Pressed) _pointerOwners[input.Binding] = consumed;
+						else if (_pointerOwners.Remove(input.Binding, out var owner)) consumed = owner;
+						if (!consumed) ApplyButton(input.Binding, input.Pressed);
+					}
+					else if (!consumed) ApplyAxis2D(input.Binding, input.Value);
+				}
+			}
+			finally { events.Clear(); }
+		}
+		finally { router.EndFrame(); }
+	}
 	private const float AxisButtonThreshold = 0.5f;
 	private const float Axis2DButtonThresholdSquared = AxisButtonThreshold * AxisButtonThreshold;
 
@@ -83,6 +128,13 @@ public class InputSystem : IInputSystem
 	}
 
 	public void SetButton(InputActionBinding binding, bool isPressed)
+	{
+		_pointer?.SetModifier(binding, isPressed);
+		if (_pointer?.EnqueueButton(binding, isPressed) == true) return;
+		ApplyButton(binding, isPressed);
+	}
+
+	private void ApplyButton(InputActionBinding binding, bool isPressed)
 	{
 		EnsureBindingKind(binding, BindingKind.Button);
 
@@ -158,6 +210,12 @@ public class InputSystem : IInputSystem
 	}
 
 	public void SetAxis2D(InputActionBinding binding, Vector2 value)
+	{
+		if (_pointer?.EnqueueAxis(binding, value) == true) return;
+		ApplyAxis2D(binding, value);
+	}
+
+	private void ApplyAxis2D(InputActionBinding binding, Vector2 value)
 	{
 		EnsureBindingKind(binding, BindingKind.Axis2D);
 
