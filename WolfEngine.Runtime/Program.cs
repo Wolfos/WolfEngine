@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using WolfEngine.Animation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
@@ -162,7 +160,6 @@ public static class Program
 		var last = stopwatch.Elapsed;
 		var accumulator = 0f;
 		var frames = 0;
-		Task<FrameCapture>? capture = null;
 		while (running)
 		{
 			var now = stopwatch.Elapsed;
@@ -196,18 +193,8 @@ public static class Program
 			pipeline.PublishSnapshot([new RenderViewSubmission(view, camera, transform, config)]);
 			frames++;
 			frameCoordinator.PublishCompletedFrame();
-			if (options.Frames > 0 && frames >= options.Frames && capture is null)
-				capture = renderer.CaptureNextFrameAsync();
-			if (capture is { IsCompleted: true })
+			if (options.Frames > 0 && frames >= options.Frames)
 			{
-				var imageData = capture.GetAwaiter().GetResult();
-				if (options.Capture is not null)
-				{
-					Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.Capture))!);
-					using var image = Image.LoadPixelData<Rgba32>(imageData.Rgba8, imageData.Width, imageData.Height);
-					image.SaveAsPng(options.Capture);
-				}
-
 				renderer.RequestShutdown();
 				running = false;
 			}
@@ -260,12 +247,11 @@ public static class Program
 		throw new PlatformNotSupportedException();
 	}
 
-	private readonly record struct RuntimeOptions(string? Manifest, int Frames, string? Capture)
+	private readonly record struct RuntimeOptions(string? Manifest, int Frames)
 	{
 		public static RuntimeOptions Parse(string[] args)
 		{
 			string? manifest = null;
-			string? capture = null;
 			var frames = 0;
 			for (var i = 0; i < args.Length; i++)
 			{
@@ -275,19 +261,13 @@ public static class Program
 				         && int.TryParse(args[i], out frames) && frames > 0)
 				{
 				}
-				else if (args[i] == "--capture" && ++i < args.Length)
-					capture = Path.GetFullPath(args[i]);
 				else if (args[i] == "--quit")
 				{
 				}
 				else
 					throw new ArgumentException($"Unknown or invalid argument '{args[i]}'.");
 			}
-
-			if (capture is not null && frames == 0)
-				throw new ArgumentException("--capture requires --frames.");
-
-			return new RuntimeOptions(manifest, frames, capture);
+			return new RuntimeOptions(manifest, frames);
 		}
 	}
 }
