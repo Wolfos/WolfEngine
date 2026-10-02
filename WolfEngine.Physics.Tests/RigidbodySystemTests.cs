@@ -156,6 +156,32 @@ public sealed class RigidbodySystemTests
 	}
 
 	[Test]
+	public void WorldManagerRemoval_ReleasesPhysicsAndReplacementSimulatesIndependently()
+	{
+		var manager = new WorldManager();
+		using var system = new RigidbodySystem();
+		manager.AddSystem(system);
+		var first = manager.CreateWorld(WorldTag.Game);
+		var oldEntity = first.CreateEntity("Old Box", Matrix4x4.Identity);
+		first.AddComponent(oldEntity, BoxCollider.CreateDefault());
+		first.AddComponent(oldEntity, Rigidbody.CreateDefault());
+		manager.PhysicsUpdate(1f / 60, WorldTag.Game);
+		Assert.That(system.GetTrackedBodyCount(first), Is.EqualTo(1));
+		Assert.That(manager.RemoveWorld(first), Is.True);
+		Assert.That(system.GetTrackedWorldCount(), Is.Zero);
+		var second = manager.CreateWorld(WorldTag.Game);
+		var newEntity = second.CreateEntity("New Box", Matrix4x4.Identity);
+		second.AddComponent(newEntity, BoxCollider.CreateDefault());
+		second.AddComponent(newEntity, Rigidbody.CreateDefault());
+		manager.PhysicsUpdate(1f / 60, WorldTag.Game);
+		Assert.That(system.GetTrackedWorldCount(), Is.EqualTo(1));
+		Assert.That(system.GetTrackedBodyCount(first), Is.Zero);
+		Assert.That(system.GetTrackedBodyCount(second), Is.EqualTo(1));
+		manager.RemoveWorld(second);
+		Assert.That(system.GetTrackedWorldCount(), Is.Zero);
+	}
+
+	[Test]
 	public void PhysicsUpdate_DestroyedEntityRemovesTrackedBody()
 	{
 		var world = new World(WorldTag.Game);

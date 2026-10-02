@@ -88,7 +88,6 @@ public static class Program
 		var world = provider.GetRequiredService<IRuntimeSceneLoader>().Load(catalog.Manifest.InitialSceneId);
 		Console.WriteLine($"runtime loaded scene {catalog.Manifest.InitialSceneId:D}");
 		var worldManager = provider.GetRequiredService<IWorldManager>();
-		worldManager.RegisterWorld(world);
 		worldManager.AddSystem<CameraResolutionUpdater>();
         worldManager.AddSystem(new AnimationRenderResourceLifecycle(provider.GetRequiredService<RenderGraph>()));
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
@@ -100,6 +99,13 @@ public static class Program
 		var renderPipeline = provider.GetRequiredService<IRenderPipeline>();
 		var primaryView = provider.GetRequiredService<RenderGraph>().CreateView(
 			new RenderViewDescriptor(world, "game", RenderViewOutput.Backbuffer));
+		var sceneRequests = provider.GetRequiredService<SceneLoadRequests>();
+		var session = new GameplayWorldSession(worldManager, gameplay, provider,
+			next =>
+			{
+				if (!provider.GetRequiredService<RenderGraph>().RebindView(primaryView, next))
+					throw new InvalidOperationException("Runtime render view is unavailable.");
+			}, provider.GetRequiredService<IAudioRuntime>().StopAll);
 		var running = true;
 		Exception? gameError = null;
 		
@@ -107,22 +113,21 @@ public static class Program
 		{
 			try
 			{
-				foreach (var system in gameplay.CreateSystems(provider))
-					worldManager.AddSystem(system, SystemExecutionGroup.Gameplay);
-				gameplay.OnLoaded(world);
-				GameLoop(provider, world, primaryView, gameplay, settings, options, ref running);
+				session.Replace(world);
+				GameLoop(provider, session, primaryView, gameplay, settings, options, ref running);
 			}
 			catch (Exception exception)
 			{
 				gameError = exception;
 				Console.Error.WriteLine($"runtime game loop failed: {exception}");
-				provider.GetRequiredService<EditorFrameCoordinator>().RequestShutdown();
-				renderer.RequestShutdown();
 			}
 			finally
 			{
-				try { gameplay.OnUnloading(world); }
+				try { session.Stop(); }
 				catch (Exception exception) { gameError ??= exception; Console.Error.WriteLine($"runtime gameplay cleanup failed: {exception}"); }
+				sceneRequests.CancelPending();
+				provider.GetRequiredService<EditorFrameCoordinator>().RequestShutdown();
+				renderer.RequestShutdown();
 			}
 		})
 		{
@@ -131,15 +136,19 @@ public static class Program
 		};
 		gameThread.Start();
 		
-		renderPipeline.Run(() =>
+		try
 		{
-			Console.WriteLine("runtime renderer ready");
-			
-		});
+			renderPipeline.Run(() => Console.WriteLine("runtime renderer ready"));
+		}
+		finally
+		{
+			running = false;
+			// Teardown can dispatch GPU retirement after the render loop exits. Service it until the game thread stops.
+			var dispatcher = provider.GetRequiredService<global::WolfEngine.Utility.IMainThreadDispatcher>();
+			while (!gameThread.Join(1)) dispatcher.ExecutePending();
+			AssetDatabase.ClearInstanceRegistry();
+		}
 
-		running = false;
-		gameThread?.Join();
-		AssetDatabase.ClearInstanceRegistry();
 		if (gameError is not null)
 			throw gameError;
 
@@ -148,7 +157,7 @@ public static class Program
 
 	private static void GameLoop(
 		IServiceProvider services,
-		World world,
+		GameplayWorldSession session,
 		RenderViewId view,
 		IGameplayModule gameplay,
 		CookedRuntimeSettings settings,
@@ -167,8 +176,30 @@ public static class Program
 		var frames = 0;
 		var input = services.GetRequiredService<IInputSystem>();
 		var pointerRouter = services.GetRequiredService<IPointerInputRouter>();
+		var requests = services.GetRequiredService<SceneLoadRequests>();
+		var loader = services.GetRequiredService<IRuntimeSceneLoader>();
 		while (running)
 		{
+			if (requests.TryTake(session.World, out var request))
+			{
+				try
+				{
+					var next = loader.Load(request.SceneId);
+					if (!TryGetCamera(next, out _, out _)) throw new InvalidOperationException("Scene has no active camera.");
+					session.Replace(next);
+					accumulator = 0;
+					last = stopwatch.Elapsed;
+					request.Complete();
+				}
+				catch (Exception exception)
+				{
+					request.Fail(exception);
+					// Loading failed before teardown: keep the current world. Lifecycle failures are fatal.
+					if (!ReferenceEquals(session.World, request.World)) throw;
+					Console.Error.WriteLine($"Scene load failed: {exception}");
+				}
+			}
+			var world = session.World ?? throw new InvalidOperationException("No active runtime world.");
 			var now = stopwatch.Elapsed;
 			var delta = options.Frames > 0
 				? settings.FixedDeltaTime
@@ -196,7 +227,7 @@ public static class Program
 			manager.OnPreRender(delta, WorldTag.Game, SystemExecutionGroup.All);
 			if (TryGetCamera(world, out var camera, out var transform) == false)
 			{
-				throw new InvalidOperationException("Initial scene has no active camera.");
+				throw new InvalidOperationException("Active scene has no active camera.");
 			}
 
 			var config = GetRenderConfig(world);
@@ -205,14 +236,11 @@ public static class Program
 			frameCoordinator.PublishCompletedFrame();
 			if (options.Frames > 0 && frames >= options.Frames)
 			{
-				renderer.RequestShutdown();
 				running = false;
 			}
 
 			Thread.Sleep(0);
 		}
-
-		frameCoordinator.RequestShutdown();
 	}
 
 	private static bool TryGetCamera(World world, out Camera camera, out WorldTransform transform)

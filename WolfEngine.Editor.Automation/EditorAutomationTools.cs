@@ -77,6 +77,10 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.LoadSceneAsync(scenePath, cancellationToken);
 
+	[McpServerTool(Name = "load_play_scene"), Description("Replace the active Play-mode scene through the gameplay scene-load service. Leaves the authoring scene unchanged and waits for lifecycle completion.")]
+	public Task<SceneLoadResult> LoadPlayScene(string scenePath, CancellationToken cancellationToken) =>
+		_controller.LoadPlaySceneAsync(scenePath, cancellationToken);
+
 	[McpServerTool(Name = "enter_play_mode"), Description("Enter Play mode from the current authoring scene. Play mode creates an isolated runtime scene without saving or mutating the authoring scene.")]
 	public Task<PlayModeStateResult> EnterPlayMode(CancellationToken cancellationToken) =>
 		_controller.EnterPlayModeAsync(cancellationToken);

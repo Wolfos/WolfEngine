@@ -170,6 +170,38 @@ public sealed class TerrainTests
 	}
 
 	[Test]
+	public void RemovedTerrainWorldReleasesCurrentAndPendingGeneratedMeshesOnce()
+	{
+		using var assets = new TestAssetRegistry();
+		var heightmapId = Guid.NewGuid();
+		assets.Register(heightmapId, CreateHeightTexture("height", 5, 5));
+		var world = new ECS.World(ECS.WorldTag.Game);
+		var entity = world.CreateEntity();
+		var runtime = TerrainRuntimeRegistry.GetOrCreateRuntime(world, entity);
+		var component = new TerrainComponent
+		{
+			TerrainAsset = new AssetRef<TerrainAsset> { NodeId = heightmapId },
+			WorldSizeMeters = new Vector2(64, 64), ChunkSizeMeters = 64,
+			LodCount = 3, Lod0ResolutionInQuads = 4
+		};
+		Assert.That(runtime.EnsureBuilt(component), Is.True);
+		var oldMeshes = runtime.SharedLodMeshes.ToArray();
+		var released = new List<Mesh>();
+		var scheduler = new Mock<IRenderResourceScheduler>();
+		scheduler.Setup(value => value.ReleaseMeshResources(It.IsAny<Mesh>())).Callback<Mesh>(released.Add);
+		runtime.CollectChunkDrawRecords(scheduler.Object, new Material("terrain"), Vector3.Zero, Matrix4x4.Identity, []);
+		component.LodCount = 2;
+		runtime.EnsureBuilt(component);
+		var currentMeshes = runtime.SharedLodMeshes.ToArray();
+		TerrainRuntimeRegistry.RemoveWorld(world);
+		Assert.That(released, Is.EquivalentTo(oldMeshes.Concat(currentMeshes)));
+		Assert.That(runtime.SharedLodMeshes, Is.Empty);
+		Assert.That(runtime.Chunks, Is.Empty);
+		TerrainRuntimeRegistry.RemoveWorld(world);
+		Assert.That(released.Count, Is.EqualTo(oldMeshes.Length + currentMeshes.Length));
+	}
+
+	[Test]
 	public void CollectChunkDrawRecords_SelectsLodsByDistanceWithoutCpuFrustumCulling()
 	{
 		using var registry = new TestAssetRegistry();

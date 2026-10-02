@@ -11,6 +11,7 @@ public enum EditorPlayState
 
 public interface IEditorPlaySession
 {
+	event Action<World>? RuntimeSceneUnloading;
 	EditorPlayState State { get; }
 	bool IsActive { get; }
 	EditorScene AuthoringScene { get; }
@@ -20,6 +21,8 @@ public interface IEditorPlaySession
 	bool Pause();
 	bool Resume();
 	bool Stop();
+	EditorScene PrepareSceneLoad(Guid sceneId);
+	void ReplaceRuntimeScene(EditorScene scene);
 	void Restart(EditorPlayState targetState);
 }
 
@@ -39,6 +42,8 @@ public sealed class EditorPlaySession : IEditorPlaySession
 		_sceneReloadService = sceneReloadService ?? throw new ArgumentNullException(nameof(sceneReloadService));
 		_worldManager = worldManager ?? throw new ArgumentNullException(nameof(worldManager));
 	}
+
+	public event Action<World>? RuntimeSceneUnloading;
 
 	public EditorPlayState State { get; private set; } = EditorPlayState.Edit;
 
@@ -86,6 +91,25 @@ public sealed class EditorPlaySession : IEditorPlaySession
 		return true;
 	}
 
+	public EditorScene PrepareSceneLoad(Guid sceneId)
+	{
+		if (!IsActive) throw new InvalidOperationException("Scene loads require Play mode.");
+		var source = _sceneWorkspace.LoadSceneAsset(sceneId);
+		return _sceneReloadService.Restore(_sceneReloadService.Capture(source), WorldTag.Game);
+	}
+
+	public void ReplaceRuntimeScene(EditorScene scene)
+	{
+		ArgumentNullException.ThrowIfNull(scene);
+		if (!IsActive || _runtimeScene is null) throw new InvalidOperationException("Scene loads require Play mode.");
+		if (scene.World.Tag != WorldTag.Game || ReferenceEquals(scene.World, _runtimeScene.World))
+			throw new ArgumentException("Replacement requires a new runtime world.", nameof(scene));
+		RuntimeSceneUnloading?.Invoke(_runtimeScene.World);
+		_worldManager.RemoveWorld(_runtimeScene.World);
+		_worldManager.RegisterWorld(scene.World);
+		_runtimeScene = scene;
+	}
+
 	public bool Stop()
 	{
 		if (_runtimeScene is null)
@@ -94,6 +118,7 @@ public sealed class EditorPlaySession : IEditorPlaySession
 			return false;
 		}
 
+		RuntimeSceneUnloading?.Invoke(_runtimeScene.World);
 		_worldManager.RemoveWorld(_runtimeScene.World);
 		_runtimeScene = null;
 		State = EditorPlayState.Edit;

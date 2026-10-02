@@ -556,10 +556,20 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		return _mainThreadDispatcher.Invoke(() => _viewRegistry.Create(world, name, output).View);
 	}
 
+	internal static bool IsViewSnapshotCurrent(RenderViewState state, RenderViewSnapshot snapshot) =>
+		state.World is null ||
+		(ReferenceEquals(state.World, snapshot.BoundWorld) && state.BindingGeneration == snapshot.BindingGeneration);
+
 	public bool RebindView(RenderViewId view, World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
-		return _mainThreadDispatcher.Invoke(() => _viewRegistry.Rebind(view, world));
+		return _mainThreadDispatcher.Invoke(() =>
+		{
+			var changed = _viewRegistry.TryGetBinding(view, out var previous, out _) && !ReferenceEquals(previous, world);
+			var rebound = _viewRegistry.Rebind(view, world);
+			if (rebound && changed && view == RenderViewId.Primary) _frameBuilder.ResetRayTracingScene();
+			return rebound;
+		});
 	}
 
 	public bool DestroyView(RenderViewId view)
@@ -770,14 +780,23 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				{
 					var recordedView = _recordedViews[viewIndex];
 					SelectView(recordedView);
+					var viewSnapshot = recordedView == RenderViewId.Primary
+						? primarySnapshot
+						: FindView(snapshot, recordedView);
+					if (!IsViewSnapshotCurrent(_view, viewSnapshot))
+					{
+						// A rebind can precede publication. Never draw or bootstrap RT from the outgoing world's snapshot.
+						_view.FrameResources = new RenderViewResources { FramebufferSize = frameBufferSize, Config = viewSnapshot.Config };
+						_view.SceneDebugViews.Clear();
+						_view.SceneDebugViewOptions = [];
+						_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
+						_recordedViews.RemoveAt(viewIndex--);
+						continue;
+					}
 					if (_view.HistoryBindingGeneration != _view.BindingGeneration)
 					{
 						_view.ResetHistoryForNewBinding();
 					}
-
-					var viewSnapshot = recordedView == RenderViewId.Primary
-						? primarySnapshot
-						: FindView(snapshot, recordedView);
 					var sceneViewportState = _viewportStateBus.GetUiState(recordedView);
 					var renderSceneToWindow = _view.Output == RenderViewOutput.Backbuffer;
 					var sceneEnabled = renderSceneToWindow
@@ -1065,7 +1084,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			throw new ArgumentNullException(nameof(mesh));
 		}
 
-		_renderer.ReleaseMeshResources(mesh);
+		_mainThreadDispatcher.Invoke(() =>
+			_renderer.GetGfxDevice().Retire(() => _renderer.ReleaseMeshResources(mesh), "Removed mesh geometry"));
 	}
 
 

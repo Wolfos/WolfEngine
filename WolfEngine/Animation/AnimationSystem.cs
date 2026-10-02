@@ -12,7 +12,7 @@ namespace WolfEngine.Animation;
 /// <see cref="TransformSystem"/>: exposed bone sockets write into entity local transforms, and
 /// those need to propagate in the same frame they were produced, not the next one.
 /// </remarks>
-public sealed class AnimationSystem : IUpdate
+public sealed class AnimationSystem : IUpdate, IWorldRemovedListener
 {
 	/// <summary>Reference path for profiling and image comparisons.</summary>
 	public static bool ForceFullEvaluation { get; set; } = Environment.GetEnvironmentVariable("WOLF_FORCE_ANIMATION_UPDATES") == "1";
@@ -26,6 +26,11 @@ public sealed class AnimationSystem : IUpdate
 	public AnimationSystem(WorldTag tag) => _tag = tag;
 
 	public WorldTag GetTag() => _tag;
+
+	public void OnWorldRemoved(World world)
+	{
+		foreach (var entry in world.View<Animator>()) entry.First.OnDeserialized();
+	}
 
 	public void Update(float deltaTime, World world)
 	{

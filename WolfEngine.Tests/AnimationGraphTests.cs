@@ -52,6 +52,28 @@ public sealed class AnimationGraphTests
         Assert.That(animator.PoseGeneration, Is.EqualTo(generation));
     }
     [Test]
+    public void RemovedWorldDropsAnimationInstancesPosesAndBindings()
+    {
+        var world = new World(WorldTag.Game);
+        var entity = world.CreateEntity("unit", Matrix4x4.Identity);
+        world.AddComponent(entity, new Animator { Skeleton = _skeleton });
+        var system = new AnimationSystem();
+        var manager = new WorldManager();
+        manager.RegisterWorld(world);
+        manager.AddSystem(system);
+        system.Update(0, world);
+        ref var animator = ref world.GetComponent<Animator>(entity);
+        Assert.That(animator.GraphInstance, Is.Not.Null);
+        Assert.That(animator.Bindings, Is.Not.Null);
+        Assert.That(animator.SkinningMatrices, Is.Not.Null);
+        manager.RemoveWorld(world);
+        Assert.That(animator.GraphInstance, Is.Null);
+        Assert.That(animator.Pose, Is.Null);
+        Assert.That(animator.Bindings, Is.Null);
+        Assert.That(animator.SkinningMatrices, Is.Null);
+        Assert.That(animator.PreviousSkinningMatrices, Is.Null);
+    }
+    [Test]
     public void ExitProgress_UsesTheSelectedPoseSubgraph()
     {
         var a = Clip("A"); var b = Clip("B");

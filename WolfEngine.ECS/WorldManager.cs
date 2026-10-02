@@ -51,9 +51,9 @@ public class WorldManager: IWorldManager
 			return false;
 		}
 
-		for (var index = 0; index < _systems.Count; index++)
+		List<Exception>? failures = null;
+		foreach (var registration in _systems.ToArray())
 		{
-			var registration = _systems[index];
 			if (registration.System is not IWorldRemovedListener listener)
 			{
 				continue;
@@ -67,8 +67,13 @@ public class WorldManager: IWorldManager
 			{
 				_exceptionHandler!(registration.System, exception);
 			}
+			catch (Exception exception)
+			{
+				(failures ??= []).Add(exception);
+			}
 		}
 
+		if (failures is not null) throw new AggregateException("World removal listeners failed.", failures);
 		return true;
 	}
 

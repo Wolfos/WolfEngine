@@ -112,6 +112,13 @@ public class WolfEngineEditor
 		_editorGui = editorGui ?? throw new ArgumentNullException(nameof(editorGui));
 		_sceneWorkspace = sceneWorkspace ?? throw new ArgumentNullException(nameof(sceneWorkspace));
 		_playSession = playSession ?? throw new ArgumentNullException(nameof(playSession));
+		_playSession.RuntimeSceneUnloading += world =>
+		{
+			// Stop rendering the outgoing world before its removal listeners retire private GPU geometry.
+			if (_renderGraph.TryGetViewForWorld(world, out var view) && view == RenderViewId.Primary)
+				_renderGraph.RebindView(view, _playSession.AuthoringScene.World);
+			if (ReferenceEquals(_boundGameplayWorld, world)) UnbindGameplayModule();
+		};
 		_typeCatalog = typeCatalog ?? throw new ArgumentNullException(nameof(typeCatalog));
 		_gameplayAssemblyHost = gameplayAssemblyHost ?? throw new ArgumentNullException(nameof(gameplayAssemblyHost));
 		_sceneReloadService = sceneReloadService ?? throw new ArgumentNullException(nameof(sceneReloadService));
@@ -229,6 +236,7 @@ public class WolfEngineEditor
 			if (_operationService.Current.IsActive == false)
 			{
 				HandleGameplayBuildAndReload();
+				ProcessSceneLoadRequest();
 				SyncCurrentScene();
 				ValidateSelection();
 				EnsureGameplayModuleBound();
@@ -329,6 +337,31 @@ public class WolfEngineEditor
 		_viewSubmissions.Add(new RenderViewSubmission(RenderViewId.Primary, camera, cameraWorldTransform, GetConfig()));
 		_editorRenderViews?.AppendSubmissions(deltaTime, _viewSubmissions);
 		_renderPipeline.PublishSnapshot(_viewSubmissions);
+	}
+
+	private void ProcessSceneLoadRequest()
+	{
+		var requests = _serviceProvider.GetRequiredService<SceneLoadRequests>();
+		if (!requests.TryTake(_playSession.RuntimeScene?.World, out var request)) return;
+		try
+		{
+			// Deserialize before touching the live scene, so a missing or invalid asset leaves Play running.
+			var next = _playSession.PrepareSceneLoad(request.SceneId);
+			if (!_renderGraph.RebindView(RenderViewId.Primary, next.World))
+				throw new InvalidOperationException("Scene render view is unavailable.");
+			UnbindGameplayModule();
+			_playSession.ReplaceRuntimeScene(next);
+			_physicsAccumulator.Reset();
+			SyncCurrentScene();
+			EnsureGameplayModuleBound();
+			if (_playSession.State == EditorPlayState.Paused) _audioRuntime.PauseAll();
+			request.Complete();
+		}
+		catch (Exception exception)
+		{
+			request.Fail(exception);
+			_notificationService.ReportError($"Scene load failed:{Environment.NewLine}{exception}");
+		}
 	}
 
 	private void SyncCurrentScene()
@@ -673,7 +706,10 @@ public class WolfEngineEditor
 		_audioRuntime.StopAll();
 		for (var index = _registeredGameplaySystems.Count - 1; index >= 0; index--)
 		{
-			_worldManager.RemoveSystem(_registeredGameplaySystems[index]);
+			var system = _registeredGameplaySystems[index];
+			if (system is IWorldRemovedListener listener)
+				_gameplayExceptionReporter.Run(nameof(IWorldRemovedListener.OnWorldRemoved), () => listener.OnWorldRemoved(_boundGameplayWorld));
+			_worldManager.RemoveSystem(system);
 		}
 
 		_registeredGameplaySystems.Clear();

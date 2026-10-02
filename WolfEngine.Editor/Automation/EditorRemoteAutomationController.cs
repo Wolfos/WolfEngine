@@ -8,6 +8,7 @@ using WolfEngine.ECS;
 using WolfEngine.Editor.Projects;
 using WolfEngine.Editor.UI;
 using WolfEngine.Input;
+using WolfEngine.Gameplay;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
@@ -26,6 +27,7 @@ public sealed class EditorRemoteAutomationController
 	private readonly IAssetSelectionService _assetSelectionService;
 	private readonly IEditorSceneSnapshotService _sceneSnapshotService;
 	private readonly IEditorPlaySession _playSession;
+	private readonly SceneLoadRequests _sceneLoadRequests;
 	private readonly IInputSystem _inputSystem;
 	private readonly IImGuiInputSink _imguiInput;
 	private readonly IEditorInteractionState _interactionState;
@@ -68,8 +70,10 @@ public sealed class EditorRemoteAutomationController
 		IEditorWorkspaceService workspaces,
 		EditorWindowRegistry windows,
 		EditorCameraSystem cameraSystem,
-		IImGuiInputSink imguiInput)
+		IImGuiInputSink imguiInput,
+		SceneLoadRequests sceneLoadRequests)
 	{
+		_sceneLoadRequests = sceneLoadRequests;
 		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
@@ -595,6 +599,16 @@ public sealed class EditorRemoteAutomationController
 				scene.Id,
 				_editorFrameCoordinator.CompletedSequence,
 				_renderFrameCoordinator.CompletedSequence);
+		}, cancellationToken);
+
+	public Task<SceneLoadResult> LoadPlaySceneAsync(string scenePath, CancellationToken cancellationToken) =>
+		EnqueueAsync(async () =>
+		{
+			var scene = ResolveSceneAsset(scenePath);
+			var world = _playSession.RuntimeScene?.World ?? throw new InvalidOperationException("Scene loads require Play mode.");
+			await _sceneLoadRequests.LoadAsync(world, new AssetRef<SceneAsset> { NodeId = scene.Id }).ConfigureAwait(false);
+			return new SceneLoadResult(scene.RelativeAssetPath, scene.Id,
+				_editorFrameCoordinator.CompletedSequence, _renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
 
 	public Task<PlayModeStateResult> EnterPlayModeAsync(CancellationToken cancellationToken) =>

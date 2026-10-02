@@ -22,6 +22,8 @@ public static class WolfEngine
 	public static void ConfigureServices(IServiceCollection services)
 	{
 		services.AddSingleton<ILogService, LogService>();
+		services.AddSingleton<Gameplay.SceneLoadRequests>();
+		services.AddSingleton<Gameplay.ISceneLoadService>(sp => sp.GetRequiredService<Gameplay.SceneLoadRequests>());
 		services.AddSingleton<EngineShaderCatalog>();
 		services.AddSingleton<IImageLoader, StbImageLoader>();
 		services.AddSingleton<ITextureFactory, TextureFactory>();

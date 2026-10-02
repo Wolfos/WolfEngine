@@ -10,6 +10,7 @@ public sealed class TerrainRuntimeData
 	private readonly List<TerrainChunkRuntime> _chunks = new();
 	private readonly List<TerrainRayTracingChunkRuntime> _rayTracingChunks = new();
 	private readonly List<Mesh> _pendingReleasedMeshes = new();
+	private IRenderResourceScheduler? _resourceScheduler;
 	private Mesh[] _sharedLodMeshes = Array.Empty<Mesh>();
 	private TerrainAsset? _resolvedTerrainAsset;
 	private Texture? _resolvedHeightmap;
@@ -94,9 +95,19 @@ public sealed class TerrainRuntimeData
 			: dirtyRegion;
 	}
 
+	internal void ReleaseRenderResources()
+	{
+		ClearRenderLayout();
+		if (_resourceScheduler is { } scheduler) ReleasePendingMeshResources(scheduler);
+		else _pendingReleasedMeshes.Clear(); // A CPU-only terrain has never requested GPU geometry.
+		_resourceScheduler = null;
+		_built = false;
+	}
+
 	public void ReleasePendingMeshResources(IRenderResourceScheduler resourceScheduler)
 	{
 		ArgumentNullException.ThrowIfNull(resourceScheduler);
+		_resourceScheduler = resourceScheduler;
 		if (_pendingReleasedMeshes.Count == 0)
 		{
 			return;
@@ -118,6 +129,7 @@ public sealed class TerrainRuntimeData
 		List<TerrainChunkDrawRecord> destination)
 	{
 		ArgumentNullException.ThrowIfNull(resourceScheduler);
+		_resourceScheduler = resourceScheduler;
 		ArgumentNullException.ThrowIfNull(material);
 		ArgumentNullException.ThrowIfNull(destination);
 		if (_built == false || _chunks.Count == 0 || _sharedLodMeshes.Length == 0)

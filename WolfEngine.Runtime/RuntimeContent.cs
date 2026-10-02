@@ -83,6 +83,8 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			return cached;
 
 		var entry = _catalog.GetEntry(id);
+		if (entry.Kind == nameof(AssetType.Scene) && expectedType == typeof(global::WolfEngine.Gameplay.SceneAsset))
+			return new global::WolfEngine.Gameplay.SceneAsset();
 		if (entry.Kind == nameof(AssetType.AudioClip) && expectedType == typeof(AudioClip))
 		{
 			var clip = new AudioClip(id);
@@ -190,6 +192,8 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 
 	public World Load(Guid sceneId)
 	{
+		if (_catalog.GetEntry(sceneId).Kind != nameof(AssetType.Scene))
+			throw new InvalidDataException($"Asset '{sceneId}' is not a scene.");
 		var scene = JsonSerializer.Deserialize<CookedSceneManifest>(_catalog.Read(sceneId), AssetJson.SerializerOptions)
 			?? throw new InvalidDataException("Cooked scene manifest is invalid.");
 		if (scene.Version != 1)

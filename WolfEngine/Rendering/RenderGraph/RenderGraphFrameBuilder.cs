@@ -185,7 +185,8 @@ internal sealed class RenderGraphFrameBuilder
 	private readonly ShadowMapPass _shadowMapPass;
 	private readonly GpuDrawPass _gpuDrawPass;
 	private readonly GpuDrawResources _gpuDrawResources;
-	private readonly RayTracingSceneResources _rayTracingSceneResources;
+	private RayTracingSceneResources _rayTracingSceneResources;
+	private readonly IShaderProvider _rayTracingShaderProvider;
 	private readonly SkinningPass _skinningPass;
     public int LastSkinningDispatchCount => _skinningPass.LastDispatchedInstanceCount;
 	private readonly SkyboxPass _skyboxPass;
@@ -274,6 +275,7 @@ internal sealed class RenderGraphFrameBuilder
 	{
 		_viewRegistry = viewRegistry ?? throw new ArgumentNullException(nameof(viewRegistry));
 		_passSet = passSet;
+		_rayTracingShaderProvider = shaderProvider;
 		_rayTracingSceneResources = new RayTracingSceneResources(shaderProvider);
 		_skinningPass = new SkinningPass(shaderProvider);
 		_resources = resources;
@@ -354,6 +356,14 @@ internal sealed class RenderGraphFrameBuilder
 		_passSet.InvalidateShaderPipelines();
 		ShaderPipelineInvalidation.Invalidate(_rayTracingSceneResources);
 		_skinningPass.InvalidateShaders();
+	}
+
+	public void ResetRayTracingScene()
+	{
+		// The replacement scene may have RT disabled, so waiting for its next RT pass leaks the old scene.
+		var previous = _rayTracingSceneResources;
+		_rayTracingSceneResources = new RayTracingSceneResources(_rayTracingShaderProvider);
+		_renderer.GetGfxDevice().Retire(previous, "Replaced scene ray tracing resources");
 	}
 
 	public RayTracingSceneState GetRayTracingSceneState() => _rayTracingSceneResources.GetState();

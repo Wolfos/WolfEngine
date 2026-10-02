@@ -71,7 +71,9 @@ public class RenderPipeline : IRenderPipeline
 					return;
 				}
 
-				snapshot = frameSnapshot.GetOrCreateView(RenderViewId.Primary);
+				snapshot = _renderGraph.TryGetViewBinding(RenderViewId.Primary, out var world, out var generation)
+					? frameSnapshot.BindView(RenderViewId.Primary, world, generation)
+					: frameSnapshot.GetOrCreateView(RenderViewId.Primary);
 				PrepareViewSnapshot(snapshot, camera, cameraWorldTransform, config);
 			}
 
