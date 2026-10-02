@@ -23,7 +23,7 @@ public static class SceneViewportPicker
 	/// Finds the closest renderable entity along <paramref name="ray"/> within
 	/// <paramref name="maxDistance"/> world units.
 	/// </summary>
-	public static bool TryPick(World world, in SceneViewportRay ray, float maxDistance, out ScenePickHit hit)
+	public static bool TryPick(World world, in Ray ray, float maxDistance, out ScenePickHit hit)
 	{
 		ArgumentNullException.ThrowIfNull(world);
 
@@ -73,7 +73,7 @@ public static class SceneViewportPicker
 	private static bool TryIntersectMesh(
 		Mesh mesh,
 		in Matrix4x4 localToWorld,
-		in SceneViewportRay ray,
+		in Ray ray,
 		float maxDistance,
 		out float distance)
 	{

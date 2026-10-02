@@ -31,3 +31,9 @@ As part of this vision, WolfEngine is not distributed as a binary and never will
 - Slang for GPU shaders
 - Direct3D 12 and Metal backends
 - Silk.NET, ImGui, and Jolt Physics
+
+## Manual
+
+- [Screen points and world rays](Manual/ScreenToRay.md)
+- [Animation graphs](Manual/Animation.md)
+- [Audio](Manual/Audio.md)

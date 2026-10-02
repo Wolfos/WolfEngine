@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.UI;
 
@@ -48,7 +49,7 @@ public sealed class TransformGizmoController
 		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
 		if (IsViewportValid(viewportState) == false ||
 		    selectedEntities.Count == 0 ||
-		    _cameraContext.TryGet(out var camera, out var cameraWorldTransform) == false ||
+		    _cameraContext.TryGet(out var camera, out _) == false ||
 		    camera.ScreenResolution.X <= 0 ||
 		    camera.ScreenResolution.Y <= 0)
 		{
@@ -77,18 +78,13 @@ public sealed class TransformGizmoController
 		}
 
 		objectWorldRotation = NormalizeOrIdentity(objectWorldRotation);
-		if (Matrix4x4.Invert(cameraWorldTransform.LocalToWorld, out var view) == false)
+		var renderState = _viewportStateBus.GetRenderState(RenderViewId.Primary);
+		if (renderState.ViewProjection.IsValid == false)
 		{
 			EndDrag();
 			return;
 		}
-
-		var viewProjection = view * EditorViewportProjection.Resolve(_viewportStateBus.GetRenderState(RenderViewId.Primary), camera);
-		if (Matrix4x4.Invert(viewProjection, out var inverseViewProjection) == false)
-		{
-			EndDrag();
-			return;
-		}
+		var viewProjection = renderState.ViewProjection.WorldToClip;
 
 		var axisRotation = mode == TransformGizmoMode.Scale || space == TransformSpace.Local
 			? objectWorldRotation
@@ -97,7 +93,7 @@ public sealed class TransformGizmoController
 		var axisY = SafeNormalize(Vector3.Transform(Vector3.UnitY, axisRotation), Vector3.UnitY);
 		var axisZ = SafeNormalize(Vector3.Transform(Vector3.UnitZ, axisRotation), Vector3.UnitZ);
 
-		var cameraPosition = cameraWorldTransform.LocalToWorld.Translation;
+		var cameraPosition = renderState.ViewProjection.CameraOrigin;
 		var distanceToCamera = Vector3.Distance(cameraPosition, gizmoPivotWorld);
 		var handleLength = MathF.Max(MinHandleLength, distanceToCamera * HandleLengthDistanceScale);
 		var ringRadius = handleLength * 0.8f;
@@ -151,7 +147,7 @@ public sealed class TransformGizmoController
 					space,
 					_hoveredAxis,
 					mousePosition,
-					inverseViewProjection,
+					renderState.ViewProjection,
 					cameraPosition,
 					gizmoPivotWorld,
 					entityWorldPosition,
@@ -167,7 +163,7 @@ public sealed class TransformGizmoController
 
 		if (_dragState.Active)
 		{
-			UpdateDrag(world, mousePosition, inverseViewProjection);
+			UpdateDrag(world, mousePosition, renderState.ViewProjection);
 			_hoveredAxis = _dragState.Axis;
 		}
 
@@ -197,7 +193,7 @@ public sealed class TransformGizmoController
 		TransformSpace space,
 		GizmoAxis axis,
 		Vector2 mousePosition,
-		Matrix4x4 inverseViewProjection,
+		ViewProjection viewProjection,
 		Vector3 cameraPosition,
 		Vector3 gizmoPivotWorld,
 		Vector3 entityWorldPosition,
@@ -209,7 +205,7 @@ public sealed class TransformGizmoController
 		float handleLength,
 		bool rotateAroundPivot)
 	{
-		if (TryBuildMouseRay(mousePosition, inverseViewProjection, out var ray) == false)
+		if (TryBuildMouseRay(mousePosition, viewProjection, out var ray) == false)
 		{
 			return;
 		}
@@ -283,9 +279,9 @@ public sealed class TransformGizmoController
 		_dragState.StartAxisParameter = Vector3.Dot(planeHitPoint - gizmoPivotWorld, axisWorld);
 	}
 
-	private void UpdateDrag(World world, Vector2 mousePosition, Matrix4x4 inverseViewProjection)
+	private void UpdateDrag(World world, Vector2 mousePosition, ViewProjection viewProjection)
 	{
-		if (_dragState.Active == false || TryBuildMouseRay(mousePosition, inverseViewProjection, out var ray) == false)
+		if (_dragState.Active == false || TryBuildMouseRay(mousePosition, viewProjection, out var ray) == false)
 		{
 			return;
 		}
@@ -684,11 +680,11 @@ public sealed class TransformGizmoController
 		return baseColor;
 	}
 
-	private bool TryBuildMouseRay(Vector2 mousePosition, Matrix4x4 inverseViewProjection, out Ray ray)
+	private bool TryBuildMouseRay(Vector2 mousePosition, ViewProjection viewProjection, out Ray ray)
 	{
 		ray = default;
 		var viewportState = _viewportStateBus.GetUiState(RenderViewId.Primary);
-		if (SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, inverseViewProjection, out var sceneRay) == false)
+		if (SceneViewportRayUtility.TryBuildWorldRay(viewportState, mousePosition, viewProjection, out var sceneRay) == false)
 		{
 			return false;
 		}

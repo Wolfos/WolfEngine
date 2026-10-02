@@ -2,6 +2,7 @@ using System.Numerics;
 using WolfEngine.Animation;
 using WolfEngine.Editor.UI;
 using WolfEngine.ECS;
+using WolfEngine.Mathematics;
 
 namespace WolfEngine.Editor.Tests;
 
@@ -124,7 +125,7 @@ public sealed class SceneViewportPickerTests
 			Material = new Material("test")
 		});
 
-		var ray = new SceneViewportRay(Vector3.Zero, Vector3.Normalize(new Vector3(0.0f, -1.0f, 1.0f)));
+		var ray = new Ray(Vector3.Zero, new Vector3(0.0f, -1.0f, 1.0f));
 		var picked = SceneViewportPicker.TryPick(world, ray, 1000.0f, out var hit);
 
 		Assert.That(picked, Is.True);
@@ -180,7 +181,7 @@ public sealed class SceneViewportPickerTests
 			Is.EqualTo(expected));
 	}
 
-	private static SceneViewportRay ForwardRay() => new(Vector3.Zero, Vector3.UnitZ);
+	private static Ray ForwardRay() => new(Vector3.Zero, Vector3.UnitZ);
 
 	private static Entity CreateCube(World world, string name, Matrix4x4 localToWorld)
 	{

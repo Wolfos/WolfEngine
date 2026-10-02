@@ -131,11 +131,13 @@ public readonly struct SceneViewportRenderState
 		Int2 renderSizePixels,
 		Matrix4x4 projection,
 		SceneDebugViewOption[] debugViews,
-		string activeDebugViewId)
+		string activeDebugViewId,
+		ViewProjection viewProjection = default)
 	{
 		TextureId = textureId;
 		RenderSizePixels = renderSizePixels;
 		Projection = projection;
+		ViewProjection = viewProjection;
 		DebugViews = debugViews ?? Array.Empty<SceneDebugViewOption>();
 		ActiveDebugViewId = string.IsNullOrWhiteSpace(activeDebugViewId)
 			? SceneDebugViewIds.FinalColor
@@ -146,6 +148,8 @@ public readonly struct SceneViewportRenderState
 	public Int2 RenderSizePixels { get; }
 
 	public Matrix4x4 Projection { get; }
+	/// <summary>The unjittered camera projection for this rendered view and frame.</summary>
+	public ViewProjection ViewProjection { get; }
 	public SceneDebugViewOption[] DebugViews { get; }
 	public string ActiveDebugViewId { get; }
 }

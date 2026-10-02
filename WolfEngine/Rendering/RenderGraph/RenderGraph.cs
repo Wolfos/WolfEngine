@@ -191,7 +191,15 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		{
 			SelectView(_executedViews[i]);
 			ResolveViewProjection();
-			_frameBuilder.PrepareSceneViewport();
+			var viewProjection = default(ViewProjection);
+			var renderView = _activeSnapshot?.GetOrCreateView(_view.View);
+			if (renderView is not null &&
+			    renderView.Camera.ScreenResolution.X > 0 && renderView.Camera.ScreenResolution.Y > 0 &&
+			    Matrix4x4.Invert(renderView.CameraWorldTransform.LocalToWorld, out var view))
+			{
+				ViewProjection.TryCreate(view, _view.ResolvedProjection, out viewProjection);
+			}
+			_frameBuilder.PrepareSceneViewport(viewProjection);
 		}
 
 		_frameBuilder.ResolveUiViewportTextures();

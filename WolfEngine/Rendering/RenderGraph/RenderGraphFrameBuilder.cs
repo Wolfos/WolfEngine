@@ -1880,7 +1880,7 @@ internal sealed class RenderGraphFrameBuilder
 	/// frame, including one that recorded no passes, so a hidden view publishes an empty state rather than
 	/// keeping last frame's.
 	/// </summary>
-	public void PrepareSceneViewport()
+	public void PrepareSceneViewport(ViewProjection viewProjection)
 	{
 		if (_view.FrameResources.SceneEnabled == false)
 		{
@@ -1896,7 +1896,8 @@ internal sealed class RenderGraphFrameBuilder
 			_view.FrameResources.SceneFramebufferSize,
 			_view.ResolvedProjection,
 			_view.SceneDebugViewOptions,
-			activeDebugViewId);
+			activeDebugViewId,
+			viewProjection);
 	}
 
 	/// <summary>

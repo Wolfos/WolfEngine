@@ -62,4 +62,55 @@ public sealed class PointerInputTests
 		input.ProcessPointerInput(router, Context);
 		Assert.That(router.Events[0].ShiftKey, Is.True); Assert.That(router.Events[1].ShiftKey, Is.False);
 	}
+
+	[Test]
+	public void MouseViewportPosition_TracksConsumedMotionAndRemapsWhenViewportMoves()
+	{
+		var input = new InputSystem(new PointerInputQueue());
+		var router = new Router { Consume = true };
+		input.SetAxis2D(InputActionBinding.MousePosition, new Vector2(150.0f, 60.0f));
+		input.ProcessPointerInput(router, new PointerInputContext(true, false, true,
+			new Vector2(50.0f, 20.0f), new Vector2(100.0f, 40.0f)));
+
+		Assert.That(input.TryGetMouseViewportPosition(out var first), Is.True);
+		Assert.That(first, Is.EqualTo(Vector2.One));
+		Assert.That(router.Events, Has.Count.EqualTo(1));
+
+		// No pointer event: only the viewport rectangle moved and resized.
+		input.ProcessPointerInput(router, new PointerInputContext(true, false, true,
+			new Vector2(100.0f, 40.0f), new Vector2(100.0f, 40.0f)));
+
+		Assert.That(input.TryGetMouseViewportPosition(out var remapped), Is.True);
+		Assert.That(remapped, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+	}
+
+	[Test]
+	public void MouseViewportPosition_RejectsUnknownInvalidDisabledAndUnfocusedState()
+	{
+		var input = new InputSystem(new PointerInputQueue());
+		var router = new Router();
+		input.ProcessPointerInput(router, Context);
+		Assert.That(input.TryGetMouseViewportPosition(out _), Is.False);
+		Assert.That(float.IsNaN(input.GetMouseViewportPosition().X), Is.True);
+
+		input.SetAxis2D(InputActionBinding.MousePosition, new Vector2(150.0f, 60.0f));
+		input.ProcessPointerInput(router, new PointerInputContext(true, false, true,
+			new Vector2(50.0f, 20.0f), new Vector2(100.0f, 40.0f)));
+		Assert.That(input.TryGetMouseViewportPosition(out var extrapolated), Is.True);
+		Assert.That(extrapolated, Is.EqualTo(Vector2.One));
+
+		input.ProcessPointerInput(router, new PointerInputContext(false, true, true,
+			Vector2.Zero, new Vector2(100.0f, 100.0f)));
+		Assert.That(input.TryGetMouseViewportPosition(out _), Is.False);
+
+		input.ProcessPointerInput(router, new PointerInputContext(true, true, true,
+			Vector2.Zero, new Vector2(0.0f, 100.0f)));
+		Assert.That(input.TryGetMouseViewportPosition(out _), Is.False);
+
+		input.ProcessPointerInput(router, new PointerInputContext(true, true, true,
+			Vector2.Zero, new Vector2(100.0f, 100.0f)));
+		Assert.That(input.TryGetMouseViewportPosition(out _), Is.True);
+		input.SetPointerFocus(false);
+		Assert.That(input.TryGetMouseViewportPosition(out _), Is.False);
+	}
 }

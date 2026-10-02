@@ -14,11 +14,26 @@ public interface IInputSystem
 	void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context) { }
 	void SetPointerFocus(bool focused) { }
 	bool PointerFocused => true;
+	/// <summary>Gets the mouse position normalized to the current pointer viewport.</summary>
+	/// <remarks>Returns false until a position/context is known or while gameplay input is disabled or unfocused.</remarks>
+	bool TryGetMouseViewportPosition(out Vector2 position)
+	{
+		position = default;
+		return false;
+	}
+	/// <summary>Returns normalized mouse coordinates, or a non-finite vector when unavailable.</summary>
+	Vector2 GetMouseViewportPosition() =>
+		TryGetMouseViewportPosition(out var position) ? position : new Vector2(float.NaN);
 }
 
 public class InputSystem : IInputSystem
 {
 	private readonly PointerInputQueue? _pointer;
+	private readonly object _mouseViewportSync = new();
+	private PointerInputContext _mouseViewportContext;
+	private bool _hasMouseViewportContext;
+	private Vector2 _localMousePosition;
+	private bool _hasLocalMousePosition;
 	private readonly Dictionary<InputActionBinding, bool> _pointerOwners = [];
 	public InputSystem(PointerInputQueue? pointer = null) => _pointer = pointer;
 	public void SetPointerFocus(bool focused) => _pointer?.SetFocus(focused);
@@ -27,6 +42,11 @@ public class InputSystem : IInputSystem
 	public void ProcessPointerInput(IPointerInputRouter router, PointerInputContext context)
 	{
 		context = context with { Focused = context.Focused && (_pointer?.Focused ?? true) };
+		lock (_mouseViewportSync)
+		{
+			_mouseViewportContext = context;
+			_hasMouseViewportContext = true;
+		}
 		router.BeginFrame(context);
 		try
 		{
@@ -211,9 +231,71 @@ public class InputSystem : IInputSystem
 
 	public void SetAxis2D(InputActionBinding binding, Vector2 value)
 	{
+		if (binding == InputActionBinding.MousePosition && _pointer is null)
+		{
+			lock (_mouseViewportSync)
+			{
+				_localMousePosition = value;
+				_hasLocalMousePosition = true;
+			}
+		}
+
 		if (_pointer?.EnqueueAxis(binding, value) == true) return;
 		ApplyAxis2D(binding, value);
 	}
+
+	public bool TryGetMouseViewportPosition(out Vector2 position)
+	{
+		position = default;
+		Vector2 screenPosition;
+		bool hasScreenPosition;
+		if (_pointer is not null)
+		{
+			hasScreenPosition = _pointer.TryGetMousePosition(out screenPosition);
+		}
+		else
+		{
+			lock (_mouseViewportSync)
+			{
+				screenPosition = _localMousePosition;
+				hasScreenPosition = _hasLocalMousePosition;
+			}
+		}
+
+		if (hasScreenPosition == false)
+		{
+			return false;
+		}
+
+		PointerInputContext context;
+		bool hasContext;
+		lock (_mouseViewportSync)
+		{
+			context = _mouseViewportContext;
+			hasContext = _hasMouseViewportContext;
+		}
+
+		if (hasContext == false || context.Enabled == false || context.Focused == false || (_pointer?.Focused ?? true) == false ||
+		    IsFinite(screenPosition) == false || IsFinite(context.Origin) == false || IsFinite(context.Size) == false ||
+		    context.Size.X <= 0.0f || context.Size.Y <= 0.0f)
+		{
+			return false;
+		}
+
+		position = (screenPosition - context.Origin) / context.Size;
+		if (IsFinite(position) == false)
+		{
+			position = default;
+			return false;
+		}
+
+		return true;
+	}
+
+	public Vector2 GetMouseViewportPosition() =>
+		TryGetMouseViewportPosition(out var position) ? position : new Vector2(float.NaN);
+
+	private static bool IsFinite(Vector2 value) => float.IsFinite(value.X) && float.IsFinite(value.Y);
 
 	private void ApplyAxis2D(InputActionBinding binding, Vector2 value)
 	{

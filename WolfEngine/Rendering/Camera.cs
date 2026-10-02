@@ -61,6 +61,46 @@ public struct Camera: IEntityComponent, IJsonOnDeserialized
 			farPlane);
 	}
 
+	/// <summary>
+	/// Builds a world-space ray from normalized viewport coordinates using this camera's current projection
+	/// settings and world transform. Coordinates use a top-left origin and extrapolate outside 0..1.
+	/// </summary>
+	/// <remarks>Returns an invalid default ray when the camera, transform, or viewport point is invalid.</remarks>
+	public Ray ViewportPointToRay(Vector2 viewportPoint, in WorldTransform cameraWorldTransform)
+	{
+		TryViewportPointToRay(viewportPoint, cameraWorldTransform, out var ray);
+		return ray;
+	}
+
+	/// <summary>Tries to build a ray from this camera's current projection settings and world transform.</summary>
+	public bool TryViewportPointToRay(
+		Vector2 viewportPoint,
+		in WorldTransform cameraWorldTransform,
+		out Ray ray)
+	{
+		ray = default;
+		if (ScreenResolution.X <= 0 || ScreenResolution.Y <= 0 ||
+		    float.IsFinite(Fov) == false || float.IsFinite(NearPlane) == false || float.IsFinite(FarPlane) == false ||
+		    Matrix4x4.Invert(cameraWorldTransform.LocalToWorld, out var view) == false)
+		{
+			return false;
+		}
+
+		var effectiveFov = Fov < 1.0f ? 70.0f : Fov;
+		var effectiveFovRadians = float.DegreesToRadians(effectiveFov);
+		var effectiveNearPlane = NearPlane > 0.0f ? NearPlane : DefaultNearPlane;
+		var effectiveFarPlane = FarPlane > effectiveNearPlane ? FarPlane : DefaultFarPlane;
+		if (effectiveFov <= 0.0f || effectiveFov >= 180.0f ||
+		    float.IsFinite(effectiveFovRadians) == false || effectiveFovRadians <= 0.0f || effectiveFovRadians >= MathF.PI ||
+		    effectiveNearPlane <= 0.0f || effectiveFarPlane <= effectiveNearPlane ||
+		    ViewProjection.TryCreate(view, GetPerspective(ScreenResolution), out var viewProjection) == false)
+		{
+			return false;
+		}
+
+		return viewProjection.TryViewportPointToRay(viewportPoint, out ray);
+	}
+
 	public void OnDeserialized()
 	{
 		ScreenResolution = new Int2(

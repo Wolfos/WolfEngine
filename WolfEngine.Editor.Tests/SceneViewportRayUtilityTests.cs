@@ -36,14 +36,89 @@ public sealed class SceneViewportRayUtilityTests
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));
 
-		var builtInverse = SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, camera.Perspective, out var inverseViewProjection);
-		var builtRay = SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), inverseViewProjection, out var ray);
+		Assert.That(ViewProjection.TryCreate(cameraWorldTransform.WorldToLocal, camera.Perspective, out var viewProjection), Is.True);
+		var builtRay = SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), viewProjection, out var ray);
 
-		Assert.That(builtInverse, Is.True);
 		Assert.That(builtRay, Is.True);
 		Assert.That(ray.Direction.Y, Is.LessThan(-0.8f));
 		Assert.That(MathF.Abs(ray.Direction.X), Is.LessThan(0.1f));
 		Assert.That(MathF.Abs(ray.Direction.Z), Is.LessThan(0.1f));
+		Assert.That(ray.Direction.Length(), Is.EqualTo(1.0f).Within(1e-5f));
+	}
+
+	[Test]
+	public void TryViewportPointToRay_UsesTopLeftCoordinatesAndAllowsExtrapolation()
+	{
+		var camera = CreateCamera(800, 600, 70.0f);
+		var cameraWorldTransform = CreateCameraWorldTransform(new Vector3(0.0f, 5.0f, 0.0f), Vector3.Zero, Vector3.UnitZ);
+		Assert.That(ViewProjection.TryCreate(cameraWorldTransform.WorldToLocal, camera.Perspective, out var viewProjection), Is.True);
+
+		Assert.That(viewProjection.TryViewportPointToRay(new Vector2(0.5f, 0.5f), out var center), Is.True);
+		Assert.That(viewProjection.TryViewportPointToRay(new Vector2(-0.25f, 1.25f), out var outside), Is.True);
+		Assert.That(center.Direction.Y, Is.LessThan(-0.8f));
+		Assert.That(Vector3.Distance(center.Origin, outside.Origin), Is.GreaterThan(0.0f));
+	}
+
+	[Test]
+	public void TryViewportPointToRay_OrthographicRaysStartAtNearPlaneAndStayParallel()
+	{
+		var projection = Matrix4x4.CreateOrthographicOffCenterLeftHanded(-4.0f, 4.0f, -3.0f, 3.0f, 2.0f, 20.0f);
+		Assert.That(ViewProjection.TryCreate(Matrix4x4.Identity, projection, out var viewProjection), Is.True);
+
+		Assert.That(viewProjection.TryViewportPointToRay(new Vector2(0.5f, 0.5f), out var center), Is.True);
+		Assert.That(viewProjection.TryViewportPointToRay(new Vector2(0.0f, 0.0f), out var corner), Is.True);
+		Assert.That(center.Origin.Z, Is.EqualTo(2.0f).Within(1e-4f));
+		Assert.That(corner.Origin.Z, Is.EqualTo(2.0f).Within(1e-4f));
+		Assert.That(Vector3.Distance(center.Direction, corner.Direction), Is.LessThan(1e-5f));
+		Assert.That(center.Direction, Is.EqualTo(Vector3.UnitZ));
+	}
+
+	[Test]
+	public void TryViewportPointToRay_InvalidSnapshotsFail()
+	{
+		Assert.That(default(ViewProjection).TryViewportPointToRay(Vector2.Zero, out _), Is.False);
+		Assert.That(ViewProjection.TryCreate(Matrix4x4.Identity, default, out _), Is.False);
+		var nonFiniteProjection = Matrix4x4.Identity;
+		nonFiniteProjection.M11 = float.NaN;
+		Assert.That(ViewProjection.TryCreate(Matrix4x4.Identity, nonFiniteProjection, out _), Is.False);
+	}
+
+	[Test]
+	public void TryScreenPointToRay_OffsetAndScaledRectanglesMapTheSameViewportPoint()
+	{
+		var camera = CreateCamera(800, 600, 70.0f);
+		var cameraWorldTransform = CreateCameraWorldTransform(Vector3.Zero, Vector3.UnitZ, Vector3.UnitY);
+		Assert.That(ViewProjection.TryCreate(cameraWorldTransform.WorldToLocal, camera.Perspective, out var viewProjection), Is.True);
+
+		Assert.That(viewProjection.TryScreenPointToRay(new Vector2(220.0f, 180.0f),
+			new Vector2(20.0f, 30.0f), new Vector2(820.0f, 630.0f), out var first), Is.True);
+		Assert.That(viewProjection.TryScreenPointToRay(new Vector2(500.0f, 500.0f),
+			new Vector2(100.0f, 200.0f), new Vector2(1700.0f, 1400.0f), out var scaled), Is.True);
+		Assert.That(Vector3.Distance(first.Origin, scaled.Origin), Is.LessThan(1e-5f));
+		Assert.That(Vector3.Distance(first.Direction, scaled.Direction), Is.LessThan(1e-5f));
+	}
+
+	[Test]
+	public void Ray_NormalizesLargeFiniteDirectionsWithoutOverflow()
+	{
+		var ray = new Ray(Vector3.Zero, new Vector3(float.MaxValue, float.MaxValue, 0.0f));
+
+		Assert.That(ray.IsValid, Is.True);
+		Assert.That(ray.Direction.Length(), Is.EqualTo(1.0f).Within(1e-5f));
+		Assert.That(ray.Direction.X, Is.EqualTo(ray.Direction.Y).Within(1e-5f));
+	}
+
+	[Test]
+	public void TryScreenPointToRay_RejectsNonFiniteRectangleExtent()
+	{
+		var camera = CreateCamera(800, 600, 70.0f);
+		var cameraWorldTransform = CreateCameraWorldTransform(Vector3.Zero, Vector3.UnitZ, Vector3.UnitY);
+		Assert.That(ViewProjection.TryCreate(cameraWorldTransform.WorldToLocal, camera.Perspective, out var viewProjection), Is.True);
+
+		Assert.That(
+			viewProjection.TryScreenPointToRay(Vector2.Zero,
+				new Vector2(-float.MaxValue, 0.0f), new Vector2(float.MaxValue, 1.0f), out _),
+			Is.False);
 	}
 
 	[Test]
@@ -81,8 +156,8 @@ public sealed class SceneViewportRayUtilityTests
 			rightMousePressStartedHere: false,
 			imageMin: Vector2.Zero,
 			imageMax: new Vector2(800.0f, 600.0f));
-		Assert.That(SceneViewportRayUtility.TryBuildInverseViewProjection(camera, cameraWorldTransform, camera.Perspective, out var inverseViewProjection), Is.True);
-		Assert.That(SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), inverseViewProjection, out var ray), Is.True);
+		Assert.That(ViewProjection.TryCreate(cameraWorldTransform.WorldToLocal, camera.Perspective, out var viewProjection), Is.True);
+		Assert.That(SceneViewportRayUtility.TryBuildWorldRay(viewportState, new Vector2(400.0f, 300.0f), viewProjection, out var ray), Is.True);
 
 		using var physics = new RigidbodySystem();
 		var hitSomething = physics.TryRaycast(world, ray.Origin, ray.Direction * 20.0f, out var hit);

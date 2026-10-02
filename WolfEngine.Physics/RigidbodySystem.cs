@@ -146,6 +146,30 @@ public sealed class RigidbodySystem : IPhysicsUpdate, IPreRender, IWorldRemovedL
 		return true;
 	}
 
+	/// <summary>Casts a valid world ray up to a maximum distance.</summary>
+	/// <remarks>The hit fraction is relative to <paramref name="maxDistance"/>. Invalid rays or distances return false.</remarks>
+	public bool TryRaycast(
+		World world,
+		in global::WolfEngine.Mathematics.Ray ray,
+		float maxDistance,
+		out PhysicsRaycastHit hit,
+		uint layerMask = uint.MaxValue,
+		Entity ignoredEntity = default)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		hit = default;
+		if (ray.IsValid == false || float.IsFinite(maxDistance) == false || maxDistance <= 0.0f)
+		{
+			return false;
+		}
+
+		return TryRaycast(world, ray.Origin, ray.Direction * maxDistance, out hit, layerMask, ignoredEntity);
+	}
+
+	/// <summary>
+	/// Casts a ray using a direction displacement. The displacement length determines the maximum query distance.
+	/// </summary>
+	/// <remarks>Prefer the overload accepting <see cref="global::WolfEngine.Mathematics.Ray"/> and a max distance when available.</remarks>
 	public bool TryRaycast(
 		World world,
 		Vector3 origin,

@@ -29,6 +29,7 @@ public sealed class PointerInputQueue
 	private List<PointerInputEvent> _pending = [];
 	private List<PointerInputEvent> _draining = [];
 	private Vector2 _position;
+	private bool _hasPosition;
 	private long _buttons;
 	private readonly HashSet<InputActionBinding> _modifiers = [];
 	private volatile bool _focused = true;
@@ -89,6 +90,7 @@ public sealed class PointerInputQueue
 		{
 			if (binding == InputActionBinding.MousePosition)
 			{
+				_hasPosition = true;
 				if (_position == value) return true;
 				_position = value;
 			}
@@ -107,6 +109,14 @@ public sealed class PointerInputQueue
 			_pending.Add(next);
 		}
 		return true;
+	}
+	internal bool TryGetMousePosition(out Vector2 position)
+	{
+		lock (_sync)
+		{
+			position = _position;
+			return _hasPosition;
+		}
 	}
 	internal List<PointerInputEvent> Drain()
 	{
