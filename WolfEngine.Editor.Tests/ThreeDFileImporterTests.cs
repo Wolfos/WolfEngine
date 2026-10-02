@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Numerics;
+using WolfEngine.Animation;
 using NSubstitute;
 using WolfEngine.AssetPipeline;
 using WolfEngine.Importing;
@@ -65,7 +67,19 @@ public sealed class ThreeDFileImporterTests
         }
     }
 
-    private ImportedScene ImportFixture(bool skinned, bool excessInfluences = false)
+    [Test]
+    public void Import_SkinnedMeshPreservesModelBindSpace()
+    {
+        var scene = ImportFixture(skinned: true, transformedMesh: true);
+        var node = scene.Nodes.Single(n => n.Meshes.Any());
+        Assert.That(node.SkinBindToRig, Is.Not.Null);
+        // glTF is converted to the engine's left-handed coordinates.
+        var expected = Matrix4x4.CreateRotationX(-MathF.PI / 2) * Matrix4x4.CreateTranslation(0, 3, 0);
+        Assert.That(Vector3.Distance(Vector3.Transform(Vector3.UnitY, node.SkinBindToRig!.Value),
+            Vector3.Transform(Vector3.UnitY, expected)), Is.LessThan(.00001f));
+    }
+
+    private ImportedScene ImportFixture(bool skinned, bool excessInfluences = false, bool transformedMesh = false)
     {
         var boneCount = excessInfluences ? 5 : 2;
         using var data = new MemoryStream();
@@ -126,9 +140,9 @@ public sealed class ThreeDFileImporterTests
         var nodes = new List<object>();
         if (skinned)
         {
-            nodes.Add(new { name = "Root", children = Enumerable.Range(1, boneCount + 1).ToArray() });
-            nodes.Add(new { name = "Mesh", mesh = 0, skin = 0 });
-            for (var bone = 0; bone < boneCount; bone++) nodes.Add(new { name = $"Bone{(char)('A' + bone)}" });
+            nodes.Add(new { name = "Root", translation = new[] { 0f, transformedMesh ? 3f : 0f, 0f }, children = Enumerable.Range(1, boneCount + 1).ToArray() });
+            nodes.Add(new { name = "Mesh", mesh = 0, skin = 0, rotation = transformedMesh ? new[] { MathF.Sqrt(.5f), 0f, 0f, MathF.Sqrt(.5f) } : new[] { 0f, 0f, 0f, 1f } });
+            for (var bone = 0; bone < boneCount; bone++) nodes.Add(new { name = $"Bone{(char)('A' + bone)}", translation = new[] { 0f, 0f, 0f } });
         }
         else nodes.Add(new { name = "Mesh", mesh = 0 });
         var document = new Dictionary<string, object>

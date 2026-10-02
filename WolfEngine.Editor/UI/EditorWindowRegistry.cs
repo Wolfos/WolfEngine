@@ -37,6 +37,7 @@ public sealed class EditorWindowRegistry
 	public EditorWindowRegistry(
 		IEditorWorkspaceService workspaces,
 		IEditorNotificationService notifications,
+		AnimationWindow animation,
 		SceneWindow scene,
 		EntitiesWindow entities,
 		ComponentsWindow components,
@@ -52,6 +53,7 @@ public sealed class EditorWindowRegistry
 		_notifications = notifications;
 		_windows =
 		[
+			new(EditorWindowIds.Animation, "Animation", animation),
 			new(EditorWindowIds.Scene, "Scene", scene),
 			new(EditorWindowIds.Entities, "Entities", entities),
 			new(EditorWindowIds.Components, "Components", components),

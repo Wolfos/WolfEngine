@@ -14,7 +14,12 @@ public static class Program
 {
 	public static void Main(string[] args)
 	{
-		using var application = EditorApplication.Create();
+		if (args.Length == 2 && args[0] == "--migrate-animation")
+        {
+            Console.WriteLine($"Migrated {AnimationLegacyMigration.UpgradeProject(Path.GetFullPath(args[1]))} animator components and animation assets.");
+            return;
+        }
+        using var application = EditorApplication.Create();
 
 		if (EditorAutomationOptions.TryParse(args, out var automationOptions, out var parseError) == false)
 		{
@@ -93,6 +98,7 @@ public static class Program
 		services.AddSingleton<IMeshRuntimeAssetResolver, MeshRuntimeAssetResolver>();
 		services.AddSingleton<ISkeletonRuntimeAssetResolver, SkeletonRuntimeAssetResolver>();
 		services.AddSingleton<IAnimationClipRuntimeAssetResolver, AnimationClipRuntimeAssetResolver>();
+		services.AddSingleton<IAnimationAssetRuntimeResolver, AnimationAssetRuntimeResolver>();
 		services.AddSingleton<IPropertyDrawerRegistry, PropertyDrawerRegistry>();
 		services.AddSingleton<TextureAssetEditor>();
 		services.AddSingleton<AudioAssetEditor>();
@@ -102,6 +108,10 @@ public static class Program
 		services.AddSingleton<SceneAssetEditor>();
 		services.AddSingleton<PrefabAssetEditor>();
 		services.AddSingleton<ModelAssetEditor>();
+        services.AddSingleton<AnimationWindow>();
+        foreach (var type in new[] { AssetType.AnimationGraph })
+            services.AddSingleton<IEditorAssetHandler>(provider => new AnimationEditorAssetHandler(type,
+                provider.GetRequiredService<AnimationWindow>(), provider.GetRequiredService<IEditorProjectService>(), provider.GetRequiredService<IProjectAssetPipelineService>()));
 		services.AddSingleton<IEditorAssetHandler, TextureEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, AudioEditorAssetHandler>();
 		services.AddSingleton<IEditorAssetHandler, ColorLookupTableEditorAssetHandler>();

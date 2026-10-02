@@ -7,6 +7,22 @@ namespace WolfEngine.ECS.Tests;
 public class TransformSystemTests
 {
     [Test]
+    public void ReassigningIdenticalLocalPoseDoesNotDirtyHierarchy()
+    {
+        var world = new World(WorldTag.Game);
+        var entity = world.CreateEntity("stationary", new Vector3(1, 2, 3), Quaternion.Identity, Vector3.One);
+        var system = new TransformSystem();
+        system.PreRender(0, world);
+        world.SetLocalPosition(entity, new Vector3(1, 2, 3));
+        world.SetLocalRotation(entity, Quaternion.Identity);
+        world.SetLocalScale(entity, Vector3.One);
+        Assert.That(world.SetLocalTransform(entity, new Vector3(1, 2, 3), Quaternion.Identity, Vector3.One), Is.False);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(entity), Is.False);
+        Assert.That(world.SetLocalTransform(entity, new Vector3(4, 2, 3), Quaternion.Identity, Vector3.One), Is.True);
+        Assert.That(world.HasComponent<DirtyTransformRoot>(entity), Is.True);
+    }
+
+    [Test]
     public void PreRender_MovingChild_UpdatesOnlyItsSubtreeUsingParentWorldMatrix()
     {
         var world = new World(WorldTag.All);

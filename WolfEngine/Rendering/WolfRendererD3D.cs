@@ -1849,6 +1849,12 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 			source.IndexCount));
 	}
 
+    public SkinnedGeometryResourceStatistics GetSkinnedGeometryResourceStatistics()
+    {
+        var meshes = _meshResources.Keys.Where(mesh => mesh.IsSkinnedInstance);
+        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.Vertices.Length * Marshal.SizeOf<VertexData>()));
+    }
+
 	public void ReleaseMeshResources(Mesh mesh)
 	{
 		ArgumentNullException.ThrowIfNull(mesh);

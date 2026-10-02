@@ -842,6 +842,11 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         var handle = target == FrameCaptureTarget.Window ? windowColor : sceneColor;
+        if (!handle.IsValid)
+        {
+            CompletePendingFrameCaptureFailure($"The automation {target} capture view is hidden or unavailable.");
+            return;
+        }
         var texture = resourceRegistry.GetTexture(handle) as MetalTexture;
         if (texture is null || texture.Texture.NativePtr == IntPtr.Zero)
         {
@@ -1362,6 +1367,12 @@ internal unsafe class WolfRendererMetal : IRenderer
         var source = new ReadOnlySpan<byte>(basePointer + (nint)sourceOffsetBytes, length);
         var destination = new Span<byte>(basePointer + (nint)destinationOffsetBytes, length);
         source.CopyTo(destination);
+    }
+
+    public SkinnedGeometryResourceStatistics GetSkinnedGeometryResourceStatistics()
+    {
+        var meshes = _meshResources.Keys.Where(mesh => mesh.IsSkinnedInstance);
+        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.Vertices.Length * Marshal.SizeOf<VertexData>()));
     }
 
     public void ReleaseMeshResources(Mesh mesh)

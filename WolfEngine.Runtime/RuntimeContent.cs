@@ -1,3 +1,4 @@
+using WolfEngine.Animation;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
@@ -109,7 +110,13 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 				TerrainAssetSerializer.Read(stream, id.ToString("D")),
 			nameof(AssetType.Material) when expectedType == typeof(Material) =>
 				CreateMaterial(JsonSerializer.Deserialize<MaterialAsset>(bytes, AssetJson.SerializerOptions)!),
-			nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
+			nameof(AssetType.Skeleton) when expectedType == typeof(Skeleton) => SkeletonSerializer.Read(stream).ToSkeleton(),
+            nameof(AssetType.AnimationClip) when expectedType == typeof(AnimationClip) => AnimationClipSerializer.Read(stream).ToClip(),
+            nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize<AnimationGraph>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize<AnimationSet>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize<AnimationSequence>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize<BoneMask>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
 			_ => throw new InvalidOperationException(
 				$"Cooked entry '{id}' of kind '{entry.Kind}' cannot resolve '{expectedType.FullName}'.")
 		};

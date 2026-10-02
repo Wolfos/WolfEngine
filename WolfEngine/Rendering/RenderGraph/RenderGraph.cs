@@ -446,6 +446,8 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 	/// Makes scene-colour frame captures read <paramref name="view"/>'s image instead of the primary view's. A view
 	/// that did not record in the captured frame falls back to the primary, so a capture never reads a stale image.
 	/// </summary>
+	public RenderViewId SceneCaptureView => new(Volatile.Read(ref _sceneCaptureViewValue));
+
 	public void SetSceneCaptureView(RenderViewId view)
 	{
 		if (view.IsValid == false)
@@ -1022,6 +1024,24 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 
 		_ensureMeshQueue.Enqueue(mesh);
 	}
+
+    public SkinnedGeometryResourceStatistics? GetSkinnedGeometryResourceStatistics() => _mainThreadDispatcher.Invoke(() => _renderer.GetSkinnedGeometryResourceStatistics());
+    public int LastSkinningDispatchCount => _frameBuilder.LastSkinningDispatchCount;
+
+    public void ReleaseWorldSkinningResources(World world)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        var meshes = new HashSet<Mesh>();
+        foreach (var entry in world.View<global::WolfEngine.Animation.SkinnedMeshRenderer>())
+            if (entry.First.SkinnedInstance is { } mesh) meshes.Add(mesh);
+        _mainThreadDispatcher.Invoke(() =>
+        {
+            var device = _renderer.GetGfxDevice();
+            foreach (var mesh in meshes)
+                device.Retire(() => _renderer.ReleaseMeshResources(mesh!), "Removed world geometry");
+            return true;
+        });
+    }
 
 	public void ReleaseMeshResources(Mesh mesh)
 	{

@@ -47,6 +47,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	private readonly List<GpuTimestampScope> _gpuTimestampScopes = new();
 	private bool _gpuProfilingFailed;
 	private ulong _gpuFrameIndex;
+    private readonly List<string> _eventNames = new();
 
 	public MetalCommandList(
 		MTLCommandQueue queue,
@@ -65,11 +66,14 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 	{
 		ThrowIfDisposed();
 		EndActiveEncoders();
+        _eventNames.Add(name);
 	}
 
 	public void EndEvent()
 	{
 		ThrowIfDisposed();
+        EndActiveEncoders();
+        if (_eventNames.Count > 0) _eventNames.RemoveAt(_eventNames.Count - 1);
 	}
 
 	public void BeginPass(in PassTargets targets, in Viewport viewport)
@@ -297,7 +301,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			attachment.SampleBuffer = block.SampleBuffer;
 			attachment.StartOfEncoderSampleIndex = start;
 			attachment.EndOfEncoderSampleIndex = end;
-			_gpuTimestampScopes.Add(new GpuTimestampScope("Compute stage", block, start, end));
+			_gpuTimestampScopes.Add(new GpuTimestampScope(_eventNames.Count > 1 ? _eventNames[^1] : "Compute stage", block, start, end));
 		}
 		catch (Exception exception)
 		{

@@ -58,57 +58,114 @@ internal static class EntityHierarchyEditorOperations
 		IEditorUndoRedoService undoRedoService,
 		IEditorInteractionState interactionState)
 	{
+		return TryReparentEntities(scene, [entity], parent, sceneSnapshotService, undoRedoService, interactionState);
+	}
+
+	/// <summary>
+	/// Moves <paramref name="entities"/> under <paramref name="parent"/> (or to the root when null) as one
+	/// undo step, preserving each entity's world transform. Entities that cannot move — nested prefab
+	/// entities, or ones already under <paramref name="parent"/> — are skipped. The whole move is refused
+	/// when <paramref name="parent"/> is one of the moved entities or sits inside one of their subtrees.
+	/// </summary>
+	public static bool TryReparentEntities(
+		EditorScene scene,
+		IReadOnlyList<Entity> entities,
+		Entity? parent,
+		IEditorSceneSnapshotService sceneSnapshotService,
+		IEditorUndoRedoService undoRedoService,
+		IEditorInteractionState interactionState)
+	{
 		ArgumentNullException.ThrowIfNull(scene);
+		ArgumentNullException.ThrowIfNull(entities);
 		ArgumentNullException.ThrowIfNull(sceneSnapshotService);
 		ArgumentNullException.ThrowIfNull(undoRedoService);
 		ArgumentNullException.ThrowIfNull(interactionState);
 
-			var world = scene.World;
-			if (world.IsAlive(entity) == false)
+		var world = scene.World;
+		if (parent is { } parentEntity &&
+		    (world.IsAlive(parentEntity) == false || EditorPrefabUtility.IsPrefabEntity(scene, parentEntity)))
+		{
+			return false;
+		}
+
+		var movedEntities = new List<Entity>(entities.Count);
+		for (var i = 0; i < entities.Count; i++)
+		{
+			var entity = entities[i];
+			if (world.IsAlive(entity) == false || movedEntities.Contains(entity))
+			{
+				continue;
+			}
+
+			if (parent is { } target && IsDescendantOf(world, target, entity))
 			{
 				return false;
 			}
 
 			if (EditorPrefabUtility.IsNestedPrefabEntity(scene, entity))
 			{
-				return false;
+				continue;
 			}
 
-		if (parent is { } parentEntity)
-		{
-			if (world.IsAlive(parentEntity) == false ||
-			    EditorPrefabUtility.IsPrefabEntity(scene, parentEntity) ||
-			    entity == parentEntity ||
-			    IsSameParent(world, entity, parentEntity) ||
-			    IsDescendantOf(world, parentEntity, entity))
+			var alreadyInPlace = parent is { } newParent
+				? IsSameParent(world, entity, newParent)
+				: world.HasComponent<Parent>(entity) == false;
+			if (alreadyInPlace == false)
 			{
-				return false;
+				movedEntities.Add(entity);
 			}
 		}
-		else if (world.HasComponent<Parent>(entity) == false)
+
+		// An entity inside another moved entity's subtree travels with that ancestor; moving it as well
+		// would pull it out of the subtree.
+		for (var i = movedEntities.Count - 1; i >= 0; i--)
+		{
+			if (HasAncestorIn(world, movedEntities[i], movedEntities))
+			{
+				movedEntities.RemoveAt(i);
+			}
+		}
+
+		if (movedEntities.Count == 0)
 		{
 			return false;
 		}
 
-		var before = CaptureSnapshot(scene, entity, sceneSnapshotService);
-		var worldTransform = world.HasComponent<LocalTransform>(entity)
-			? GetWorldTransform(world, entity)
-			: (Matrix4x4?)null;
-
-		ApplyParent(world, entity, parent);
-		if (worldTransform is { } preservedWorldTransform && world.HasComponent<LocalTransform>(entity))
+		var before = new EntityHierarchySnapshot[movedEntities.Count];
+		var worldTransforms = new Matrix4x4?[movedEntities.Count];
+		for (var i = 0; i < movedEntities.Count; i++)
 		{
-			ApplyWorldTransform(world, entity, preservedWorldTransform);
+			var entity = movedEntities[i];
+			before[i] = CaptureSnapshot(scene, entity, sceneSnapshotService);
+			worldTransforms[i] = world.HasComponent<LocalTransform>(entity)
+				? GetWorldTransform(world, entity)
+				: null;
 		}
 
-		var after = CaptureSnapshot(scene, entity, sceneSnapshotService);
-		undoRedoService.BeginCapture(parent is null ? "Unparent Entity" : "Reparent Entity");
-		undoRedoService.CommitCapture(new EntityHierarchyUndoRedoEntry(
-			parent is null ? "Unparent Entity" : "Reparent Entity",
-			before,
-			after));
+		var after = new EntityHierarchySnapshot[movedEntities.Count];
+		for (var i = 0; i < movedEntities.Count; i++)
+		{
+			var entity = movedEntities[i];
+			ApplyParent(world, entity, parent);
+			if (worldTransforms[i] is { } preservedWorldTransform && world.HasComponent<LocalTransform>(entity))
+			{
+				ApplyWorldTransform(world, entity, preservedWorldTransform);
+			}
 
-		EditorGui.SelectEntity(entity, world, requestFocus: false);
+			after[i] = CaptureSnapshot(scene, entity, sceneSnapshotService);
+		}
+
+		var description = (parent is null ? "Unparent " : "Reparent ") +
+		                  (movedEntities.Count == 1 ? "Entity" : "Entities");
+		undoRedoService.BeginCapture(description);
+		undoRedoService.CommitCapture(new EntityHierarchyUndoRedoEntry(description, before, after));
+
+		EditorGui.ReplaceEntitySelection(movedEntities[0], world, requestFocus: false);
+		for (var i = 1; i < movedEntities.Count; i++)
+		{
+			EditorGui.AddEntitySelection(movedEntities[i], world, requestFocus: false);
+		}
+
 		interactionState.MarkSceneDirty(scene.World);
 		return true;
 	}
@@ -178,6 +235,25 @@ internal static class EntityHierarchyEditorOperations
 			}
 
 			current = world.GetComponent<Parent>(current).Value;
+		}
+
+		return false;
+	}
+
+	private static bool HasAncestorIn(World world, Entity entity, List<Entity> candidates)
+	{
+		if (world.HasComponent<Parent>(entity) == false)
+		{
+			return false;
+		}
+
+		var parent = world.GetComponent<Parent>(entity).Value;
+		for (var i = 0; i < candidates.Count; i++)
+		{
+			if (candidates[i] != entity && IsDescendantOf(world, parent, candidates[i]))
+			{
+				return true;
+			}
 		}
 
 		return false;

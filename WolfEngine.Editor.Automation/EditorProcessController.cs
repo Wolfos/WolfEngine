@@ -72,6 +72,7 @@ public sealed class EditorProcessController : IAsyncDisposable
 			}
 			catch (Exception exception)
 			{
+                Console.Error.WriteLine($"Editor automation run failed: {exception}");
 				request.Ready.TrySetException(exception);
 			}
 			finally
@@ -281,4 +282,12 @@ public sealed class EditorProcessController : IAsyncDisposable
 		_startSignal.Dispose();
 		return ValueTask.CompletedTask;
 	}
+    public Task<AnimationGraphInspectionResult> ConfigureAnimationPreviewAsync(Guid asset, Guid model, Guid set, CancellationToken token) => GetRunningEditor().ConfigureAnimationPreviewAsync(asset, model, set, token);
+    public Task<AnimationGraphInspectionResult> AnimationPreviewTransportAsync(bool playing, float? seek, float? step, CancellationToken token) => GetRunningEditor().AnimationPreviewTransportAsync(playing, seek, step, token);
+    public Task<AnimationGraphInspectionResult> GetAnimationGraphAsync(Guid? entity, CancellationToken token) => GetRunningEditor().GetAnimationGraphAsync(entity, token);
+    public Task<AnimationGraphInspectionResult> SetAnimationParameterAsync(Guid? entity, string name, float value, CancellationToken token) => GetRunningEditor().SetAnimationParameterAsync(entity, name, value, token);
+    public Task<bool> SetSkinningForceUpdatesAsync(bool forced, CancellationToken token) => GetRunningEditor().SetSkinningForceUpdatesAsync(forced, token);
+    public Task<AnimationGraphInspectionResult> EditAnimationGraphAsync(string operation, Guid nodeId, int inputIndex, Guid inputId, CancellationToken token) => GetRunningEditor().EditAnimationGraphAsync(operation, nodeId, inputIndex, inputId, token);
+    public Task<FrameCaptureResult> CaptureAnimationPreviewAsync(string path, CancellationToken token) => GetRunningEditor().CaptureAnimationPreviewAsync(path, token);
+
 }

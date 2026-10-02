@@ -114,7 +114,11 @@ public sealed record AnimationStateResult(
 	IReadOnlyList<AnimatorStateResult> Animators,
 	IReadOnlyList<SkinnedRendererStateResult> SkinnedRenderers,
 	long EditorFrameSequence,
-	long RenderFrameSequence);
+	long RenderFrameSequence)
+{
+    public global::WolfEngine.SkinnedGeometryResourceStatistics? PrivateGeometry { get; init; }
+    public int LastSkinningDispatchCount { get; init; }
+}
 
 public sealed record RayTracingSceneStateResult(
 	string TlasIdentity,
@@ -172,7 +176,11 @@ public sealed record GpuFrameProfileResult(
 	IReadOnlyList<ulong> GpuFrameIndices,
 	IReadOnlyList<GpuPassProfileResult> Passes,
 	long EditorFrameSequence,
-	long RenderFrameSequence);
+	long RenderFrameSequence)
+{
+	/// <summary>Sum of measured GPU scopes per completed frame, excluding uninstrumented work.</summary>
+	public GpuTimingStatistics? MeasuredGpuWork { get; init; }
+}
 
 public sealed record CpuProfileNodeResult(
 	string Name,
@@ -189,3 +197,11 @@ public sealed record CpuFrameProfileResult(
 	IReadOnlyList<CpuThreadProfileResult> Threads,
 	long EditorFrameSequence,
 	long RenderFrameSequence);
+
+public sealed record AnimationGraphInspectionResult(string? Diagnostic, float Time, bool Playing,
+    int BoneCount, int NodeCount, IReadOnlyList<global::WolfEngine.Animation.AnimationContribution> Contributions,
+    IReadOnlyList<global::WolfEngine.Animation.AnimationStateInspection> States, IReadOnlyDictionary<string, float> Curves,
+    IReadOnlyList<global::WolfEngine.Animation.AnimationPresentationMarker> Markers)
+{
+    public ulong PoseHash { get; init; }
+}

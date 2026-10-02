@@ -289,6 +289,7 @@ public class RenderPipeline : IRenderPipeline
 
 				using (FrameProfiler.Instance.Measure("Gather skinned meshes"))
 				{
+                    long paletteTicks = 0, snapshotTicks = 0, drawTicks = 0;
 					foreach (var entry in world.View<WorldTransform, SkinnedMeshRenderer>())
 					{
 						if (world.IsEnabled(entry.Entity) == false) continue;
@@ -316,9 +317,23 @@ public class RenderPipeline : IRenderPipeline
 						if (animator.SkinningMatrices is not { Length: > 0 } skinningMatrices) continue;
 						if (animator.PreviousSkinningMatrices is not { Length: > 0 } previousSkinningMatrices) continue;
 
-						snapshot.AddSkinning(sourceMesh, instanceMesh, skinningMatrices, previousSkinningMatrices);
-						gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
+						var paletteStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        var meshToRig = skinnedRenderer.MeshBindToRig ?? (world.HasComponent<WorldTransform>(animatorEntity)
+                            ? transform.LocalToWorld * world.GetComponent<WorldTransform>(animatorEntity).WorldToLocal
+                            : transform.LocalToWorld);
+                        skinnedRenderer.PrepareSkinningPalette(skinningMatrices, previousSkinningMatrices, animator.PoseGeneration, meshToRig);
+                        paletteTicks += System.Diagnostics.Stopwatch.GetTimestamp() - paletteStart;
+                        var snapshotStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        snapshot.AddSkinning(sourceMesh, instanceMesh, skinnedRenderer.LocalSkinningMatrices,
+                            skinnedRenderer.PreviousLocalSkinningMatrices, skinnedRenderer.LocalPoseGeneration);
+						snapshotTicks += System.Diagnostics.Stopwatch.GetTimestamp() - snapshotStart;
+                        var drawStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        gpuDrawDatabase.TouchMesh(entry.Entity, instanceMesh, material, transform.LocalToWorld);
+                        drawTicks += System.Diagnostics.Stopwatch.GetTimestamp() - drawStart;
 					}
+                    FrameProfiler.Instance.RecordElapsed("Skin palette conversion", paletteTicks);
+                    FrameProfiler.Instance.RecordElapsed("Skin snapshot copy", snapshotTicks);
+                    FrameProfiler.Instance.RecordElapsed("Skin draw registration", drawTicks);
 				}
 
 				using (FrameProfiler.Instance.Measure("Gather outlines"))

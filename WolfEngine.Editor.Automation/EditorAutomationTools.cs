@@ -262,4 +262,24 @@ public sealed class EditorAutomationTools
 		await _controller.ShutdownAsync(cancellationToken).ConfigureAwait(false);
 		return "WolfEngine Editor has shut down.";
 	}
+    [McpServerTool(Name = "configure_animation_preview"), Description("Open a graph or authored clip in the Animation workspace using an isolated model or prefab preview.")]
+    public Task<AnimationGraphInspectionResult> ConfigureAnimationPreview(string assetId, string modelId, string? clipSetId = null, CancellationToken cancellationToken = default) =>
+        _controller.ConfigureAnimationPreviewAsync(Guid.Parse(assetId), Guid.Parse(modelId), clipSetId is null ? Guid.Empty : Guid.Parse(clipSetId), cancellationToken);
+    [McpServerTool(Name = "animation_preview_transport"), Description("Play, pause, scrub or step the isolated animation preview. Seeking suppresses markers.")]
+    public Task<AnimationGraphInspectionResult> AnimationPreviewTransport(bool playing, float? seekSeconds = null, float? stepSeconds = null, CancellationToken cancellationToken = default) =>
+        _controller.AnimationPreviewTransportAsync(playing, seekSeconds, stepSeconds, cancellationToken);
+    [McpServerTool(Name = "get_animation_graph"), Description("Inspect contributing clips, states, curves and markers. Omit entityId to inspect the isolated preview.")]
+    public Task<AnimationGraphInspectionResult> GetAnimationGraph(string? entityId = null, CancellationToken cancellationToken = default) =>
+        _controller.GetAnimationGraphAsync(entityId is null ? null : Guid.Parse(entityId), cancellationToken);
+    [McpServerTool(Name = "set_animation_parameter"), Description("Set a typed graph parameter; omit entityId to modify the isolated preview. Bool values are 0 or 1.")]
+    public Task<AnimationGraphInspectionResult> SetAnimationParameter(string name, float value, string? entityId = null, CancellationToken cancellationToken = default) =>
+        _controller.SetAnimationParameterAsync(entityId is null ? null : Guid.Parse(entityId), name, value, cancellationToken);
+    [McpServerTool(Name = "set_skinning_force_updates"), Description("Force skinning dispatches and BLAS updates for reference-image comparisons, or restore pose-generation scheduling.")]
+    public Task<bool> SetSkinningForceUpdates(bool forced, CancellationToken cancellationToken = default) => _controller.SetSkinningForceUpdatesAsync(forced, cancellationToken);
+    [McpServerTool(Name = "edit_animation_graph"), Description("Edit an input connection in the open animation document, or undo/redo it. Edits are unsaved; invalid edits retain the last valid preview.")]
+    public Task<AnimationGraphInspectionResult> EditAnimationGraph(string operation, string? nodeId = null, int inputIndex = 0, string? inputId = null, CancellationToken cancellationToken = default) =>
+        _controller.EditAnimationGraphAsync(operation, nodeId is null ? Guid.Empty : Guid.Parse(nodeId), inputIndex, inputId is null ? Guid.Empty : Guid.Parse(inputId), cancellationToken);
+    [McpServerTool(Name = "capture_animation_preview"), Description("Capture the isolated animation preview render view without editor UI. Keep the Animation window visible.")]
+    public Task<FrameCaptureResult> CaptureAnimationPreview(string outputPath, CancellationToken cancellationToken) => _controller.CaptureAnimationPreviewAsync(outputPath, cancellationToken);
+
 }

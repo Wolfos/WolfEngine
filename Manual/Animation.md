@@ -1,110 +1,67 @@
-# Animation
+# Animation graphs
 
-WolfEngine plays skeletal animation imported from FBX and glTF. A rigged source file produces
-three kinds of asset: the meshes, one `Skeleton`, and one `AnimationClip` per animation take.
+Every animator evaluates a graph, including ordinary single-clip playback. Gameplay C# owns movement, facing, action selection, damage timing and projectile creation. Graphs compose presentation poses; they cannot call gameplay code.
 
-This first version plays a single clip per character. Blending, state machines, retargeting and an
-in-engine curve editor are not implemented, but the asset format and the runtime seams are built
-for them — see [Extending](#extending).
+## Authoritative assets
 
-## Importing a rigged model
-
-Drop a rigged `.fbx` or `.gltf`/`.glb` into `Assets/` and the pipeline imports it like any other 3D
-source. Alongside the usual meshes, materials and textures you get:
-
-- a **Skeleton** sub-asset holding bone names, the hierarchy, the bind pose and inverse bind matrices
-- an **AnimationClip** sub-asset per take
-
-Bones do **not** become entities. A character with 65 bones would otherwise push 65 transforms
-through the ECS hierarchy every frame, which does not scale to crowds. The bone hierarchy lives in
-the `Skeleton` asset, and the pose lives in a flat array on the `Animator`.
-
-Dragging the model into a scene attaches a `SkinnedMeshRenderer` to each skinned mesh and one
-shared `Animator` to the model root.
-
-> **Source units.** Mixamo and many FBX exporters author in centimetres, so a character imports
-> roughly 100× too large. Set the root entity's scale to 0.01 until an import-time scale setting
-> exists.
-
-## Components
-
-`Animator` drives one skeleton:
-
-| Field | Meaning |
+| Source | Purpose |
 | --- | --- |
-| `SkeletonAsset` | The skeleton to pose. |
-| `ClipAsset` | The clip to play. |
-| `Speed` | Playback rate multiplier. |
-| `Loop` | Whether the clip wraps or clamps at its end. |
-| `Playing` | Set false to freeze; `Time` can still be edited to scrub. |
-| `Time` | Playback position in seconds. |
+| `.animgraph.json` | Typed parameters, pose nodes, constrained state machines, output and separate canvas layout. |
+| `.data.json` (AnimationSet) | Rig reference and named clip-slot assignments. |
+| `.data.json` (AnimationSequence) | Imported clip reference, playback-speed multiplier, scalar curves and timed presentation markers. |
+| `.data.json` (BoneMask) | Rig reference and weighted bones, optionally including descendants. |
 
-`SkinnedMeshRenderer` draws a mesh deformed by an animator:
+These files live under `Assets`. References use persistent metadata GUIDs. The asset pipeline records dependencies and produces Library artifacts. Edit curves and markers in the wrapper asset: FBX reimport replaces imported skeletal keys without replacing this metadata. Skeletal keys are read-only.
 
-| Field | Meaning |
-| --- | --- |
-| `MeshAsset`, `MaterialAsset` | As `MeshRenderer`. |
-| `SkeletonAsset` | Must match the skeleton the mesh was skinned to. |
-| `AnimatorEntity` | Entity carrying the driving `Animator`. Defaults to the same entity. |
-| `BoundsExpansion` | Culling bounds multiplier over the bind pose. |
+For animation-only FBXs, set **Animation skeleton** in the model importer before reimporting. Binding validates joint names, ancestry, invariant joint offsets and units against the target. The target rig supplies the bind pose; the animation-only export's first animated frame is not treated as a new bind pose. Genuine entity-transform channels remain entity channels. Explicit ignored-channel settings handle known export defects and should be used narrowly. Imported skinned meshes preserve their full bind transform into rig coordinates. Rendering converts the shared rig palette into each mesh's bind coordinates for current and previous poses; sockets continue using rig coordinates.
 
-Several skinned meshes sharing one animator is the normal arrangement — a body and its clothing are
-separate renderers but one skeleton, and a per-mesh animator would let the parts drift apart.
+## Components and gameplay API
 
-### Attaching things to bones
+`Animator` has `SkeletonAsset`, `GraphAsset` and `ClipSetAsset`. An unassigned graph displays the bind pose. All renderers sharing a rig reference one animator. Bones stay in flat arrays; `ExposedBone` provides opt-in entity sockets for equipment.
 
-Bones are not entities, so add an `ExposedBone` to opt one in as an attachment socket:
+Resolve typed handles when the graph instance changes, then reuse them:
 
 ```csharp
-var hand = world.CreateEntity("WeaponSocket");
-world.SetParent(hand, characterEntity);
-world.AddTransform(hand, Matrix4x4.Identity);
-world.AddComponent(hand, new ExposedBone(characterEntity, "mixamorig:RightHand"));
+var instance = animator.Instance;
+var speed = instance.Program.GetParameter("Speed", AnimationParameterType.Float);
+var dead = instance.Program.GetParameter("Dead", AnimationParameterType.Bool);
+// In gameplay updates:
+instance.SetFloat(speed, actualMovementSpeed);
+instance.SetBool(dead, isDead);
 ```
 
-`AnimationSystem` writes that bone's model-space transform into the entity's local transform each
-frame, before `TransformSystem` propagates it. Anything parented to the socket follows the bone.
+Use `AnimationActionHandles` and `SetAction` for externally timed actions. The input contains integer kind, variant and sequence ID plus normalized time. Increment the sequence for another occurrence of the same action. Animation follows gameplay's phase; presentation markers do not confer damage or projectile authority. Consume `Markers` after evaluation and before the next evaluation replaces the queue. Resolve a curve handle with `Program.GetCurve` and read it with `GetCurve`.
 
-## How a frame runs
+Graph nodes include bind pose, clip, two-pose blend, integer/bool selection, synchronized 1D locomotion, state machine, weighted bone-mask blend, scalar-curve remap and output. State inputs are pose subgraphs; transitions use typed parameter comparisons and clip progress. Authored node speed multiplies clip-wrapper playback speed. Looping, start time and restart policy belong to clip nodes. Non-looping clips hold the final pose.
 
-1. `AnimationSystem` (an `IUpdate`, so it lands before `TransformSystem`) advances each animator,
-   samples the clip into a `Pose`, and turns the pose into skinning matrices.
-2. `RenderPipeline` copies those matrices into the frame snapshot and registers each skinned
-   instance for drawing.
-3. On the render thread, `SkinningPass` runs a compute shader that writes the deformed vertices into
-   each instance's private range of the packed vertex buffer.
-4. Bottom-level acceleration structures for those instances are rebuilt from the new vertices.
+Locomotion thresholds represent actual movement speeds. Walk and run share normalized phase and adjust playback frequency with measured speed. Use in-place assets and inspect displacement rather than relying on filenames. Clip sets substitute slots within a compatible rig family; missing slots or incompatible rigs produce diagnostics before playback.
 
-Step 3 is why skinned characters are real geometry rather than a vertex-shader effect: they appear
-correctly in ray-traced reflections and in DDGI, and they reuse the existing culling and
-indirect-draw path with no shader variant.
+Bone channels default to bind pose. Entity-transform and scalar-property channels default to captured target values. Channels blend by binding identity, independent of imported track order. Extend `AnimationPropertyBindings.Register<T>` with typed component getters/setters for additional property targets; unresolved targets report diagnostics.
 
-Each instance owns a copy of the mesh's GPU vertex range, so instancing a character costs vertex
-memory. The index buffer is shared with the source mesh.
+## Animation workspace
 
-## Non-skeletal animation
+Open a graph from Assets to use the **Animation** workspace. Edit clip sets, clip metadata and bone masks as DataAssets in the **Asset Editor**. The default workspace contains only the Animation window. Existing customized layouts and the active workspace are preserved; the former four-panel default is migrated. Rename/delete/save workspaces normally.
 
-A clip carries two kinds of track, and both travel through the same sampler and the same blending:
+The Animation window has draggable dividers between graph and preview and between canvas and node inspector. The graph starts with most of the space. The Animation window provides a node canvas with middle-button pan, wheel zoom, node dragging, right-click creation/deletion menus and pose connections. The graph name follows the source filename; rename it in Assets. Connect an output button to a pose-input button, or choose inputs in the selected-node inspector. State-machine inputs can be inspected as subgraphs. Undo/redo preserves node IDs and layout. Save writes authoritative JSON through the normal asset refresh path.
 
-- **transform tracks** — a local TRS, bound either to a skeleton bone or, by node path, to an
-  arbitrary entity. An animated door or turret arrives this way with no separate system.
-- **property tracks** — a single scalar bound to a named property, for things like a light's
-  intensity.
+Select a preview model or curated prefab and a clip set. The isolated preview uses the runtime evaluator with play/stop, step, speed and scrub controls, parameter editing and evaluation inspection. Scrubbing emits no markers. Invalid edits retain the last valid compiled preview and show a diagnostic. Hidden previews stop advancing and submitting render views. Closing the project/window releases the preview view and retires its private deformed geometry. Scene animators can be inspected read-only.
 
-The importer emits bone-bound transform tracks for channels that name a skeleton bone and
-node-bound ones for everything else. There is no authoring UI for property tracks yet.
+Curve wrappers support constant (step), linear and cubic Hermite interpolation, tangent editing, key insertion/removal and timed named markers. Imported skeletal keys remain read-only.
 
-## Extending
+## Frame order and scheduling
 
-The seams the unimplemented features attach to:
+Gameplay writes inputs, animation samples once per shared subgraph, resolved outputs/sockets are applied, transforms propagate, then rendering snapshots the result. `AdvanceClock` and `EvaluatePose` separate logical time from pose sampling for later crowd scheduling. Marker intervals account for skipped samples and loop boundaries. Exited state branches stop delivering markers; interrupted transitions capture their current blended pose.
 
-- **Animator graph.** Implement `IPoseSource`. `SingleClipPoseSource` is the current one;
-  `Pose.Blend` already defines the blend contract a graph node would call.
-- **Retargeting.** `BoneRemap` resolves a clip's tracks against a skeleton by bone name. Humanoid
-  retargeting replaces that one lookup with a rig mapping plus per-bone basis correction. It works
-  because clips address bones by name rather than index, store local-space TRS rather than baked
-  matrices, and retain the bind pose they were authored against.
-- **Curve editor.** Curves already carry an interpolation mode and optional tangents, and cubic
-  Hermite is implemented, so authored curves need no format change.
-- **BLAS refit.** Skinned acceleration structures are fully rebuilt each frame. Refitting would be
-  substantially cheaper and is the obvious next step at higher character counts.
+Pose generations increment only when skeletal matrices change. Skinning dispatches and skinned BLAS updates stop for unchanged poses; rendered-pose history still settles motion vectors after a change. Set `WOLF_FORCE_SKINNING_UPDATES=1` or use the automation reference toggle to compare against unconditional deformation.
+
+## Legacy conversion
+
+Run the one-time migration before opening legacy scenes/prefabs:
+
+```sh
+dotnet WolfEngine.Editor/bin/Debug/netcoreapp10.0/WolfEngine.Editor.dll --migrate-animation /absolute/project/path
+```
+
+It creates ordinary single-clip graph/set/wrapper assets under `Assets/Animation/Migrated`, preserves prior loop/speed/time/playback settings, and replaces legacy Animator fields. The conversion is idempotent. The POC runtime interface and public direct-clip playback path have been removed; a test-only sampler verifies equivalent single-clip output.
+
+Root-motion application, retargeting, IK, additive poses and skeletal-key editing are future work.

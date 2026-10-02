@@ -257,6 +257,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 
 		ImportSource(projectRootPath, absoluteSourcePath, normalizedRelativePath, existingSource);
+        var rigIds = _metadataStore.Load(absoluteSourcePath + ".meta").SubAssets.Where(a => a.Type == AssetType.Skeleton).Select(a => a.NodeId).ToHashSet();
+        if (rigIds.Count > 0 && !IsRigBoundSource(absoluteSourcePath))
+            foreach (var source in _index.GetSources(projectRootPath))
+            {
+                var path = GetAbsolutePath(projectRootPath, source.RelativeSourcePath);
+                if (path == absoluteSourcePath || !IsRigBoundSource(path)) continue;
+                if (rigIds.Contains(_metadataStore.Load(path + ".meta").GetImportSettingsOrDefault(() => new ModelImportSettings()).AnimationSkeletonId))
+                    ImportSource(projectRootPath, path, source.RelativeSourcePath, source);
+            }
 	}
 
 	public AssetDatabase LoadDatabase(string projectRootPath)
@@ -510,6 +519,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var entities = new Entity[nodes.Count];
 		Entity? firstRoot = null;
 		var skinnedMeshEntities = new List<Entity>();
+		var sockets = new List<(Entity Entity, string Bone)>();
 
 		for (var nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
 		{
@@ -536,6 +546,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				}
 			}
 
+			if (node.BoneParentName is { } bone) sockets.Add((entity, bone));
 			world.AddTransform(entity, node.LocalTransform);
 			for (var meshIndex = 0; meshIndex < node.Meshes.Count; meshIndex++)
 			{
@@ -562,6 +573,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 						new AssetRef<Skeleton> { NodeId = meshInstance.SkeletonNodeId },
 						// Patched once the animator's owning entity is known, below.
 						default));
+					world.GetComponent<SkinnedMeshRenderer>(meshEntity).MeshBindToRig = node.SkinBindToRig;
 					skinnedMeshEntities.Add(meshEntity);
 					continue;
 				}
@@ -583,6 +595,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			AttachModelAnimator(world, rootParent ?? resolvedRoot, skinnedMeshEntities, modelFile);
 		}
 
+		var animatorRoot = rootParent ?? resolvedRoot;
+		foreach (var attachment in sockets)
+		{
+			var socket = world.CreateEntity(attachment.Bone + " socket");
+			world.SetParent(socket, animatorRoot);
+			world.AddTransform(socket, System.Numerics.Matrix4x4.Identity);
+			world.AddComponent(socket, new ExposedBone(animatorRoot, attachment.Bone));
+			world.SetParent(attachment.Entity, socket);
+		}
 		return resolvedRoot;
 	}
 
@@ -598,13 +619,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		ImportedModelAssetFile? modelFile)
 	{
 		var skeletonNodeId = modelFile?.SkeletonNodeIds.FirstOrDefault() ?? Guid.Empty;
-		var clipNodeId = modelFile?.AnimationNodeIds.FirstOrDefault() ?? Guid.Empty;
+
 
 		if (skeletonNodeId != Guid.Empty && world.HasComponent<Animator>(animatorEntity) == false)
 		{
 			world.AddComponent(animatorEntity, Animator.Create(
 				new AssetRef<Skeleton> { NodeId = skeletonNodeId },
-				new AssetRef<AnimationClip> { NodeId = clipNodeId }));
+				default));
 		}
 
 		for (var i = 0; i < skinnedMeshEntities.Count; i++)
@@ -954,7 +975,15 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				}
 			],
 			Artifacts = [],
-			Dependencies = []
+			Dependencies = loadResult.Asset is IDataAssetDependencies dependencies
+				? dependencies.GetDependencies().Where(id => id != Guid.Empty).Distinct().Select(id => new AssetDependencyRecord
+				{
+					FromNodeId = nodeId,
+					ToNodeId = id,
+					Kind = "data-asset",
+					IsHard = true
+				}).ToList()
+				: []
 		};
 	}
 
@@ -1010,6 +1039,13 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var importSettings = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings());
 		LogLibraryBuildStage($"Parsing 3D source '{relativeSourcePath}' (scale {importSettings.GetEffectiveScaleFactor()}).");
 		var importedScene = _threeDFileImporter.Import(absoluteSourcePath, importSettings);
+        if (importSettings.AnimationSkeletonId != Guid.Empty)
+        {
+            if (!TryGetAsset(projectRootPath, importSettings.AnimationSkeletonId, out var rigEntry))
+                throw new InvalidOperationException($"Animation rig '{importSettings.AnimationSkeletonId}' must be imported first.");
+            var rig = SkeletonSerializer.Read(GetAbsolutePath(projectRootPath, rigEntry.RelativeAssetPath));
+            importedScene = AnimationRigBinding.Bind(importedScene, new ImportedSkeleton(rig.Name, rig.BoneNames, rig.ParentIndices, rig.BindPoseLocal, rig.InverseBindMatrices), importSettings.IgnoredAnimationChannels.ToHashSet(StringComparer.Ordinal));
+        }
 		LogLibraryBuildStage($"Parsed 3D source '{relativeSourcePath}' ({importedScene.Textures.Count} textures, {importedScene.Materials.Count} materials, {importedScene.Nodes.Count(node => node.ParentIndex < 0)} root nodes).");
 		var nodes = new List<AssetNodeRecord>();
 		var artifacts = new List<AssetArtifactRecord>();
@@ -1469,9 +1505,12 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		for (var i = 0; i < importedScene.Animations.Count; i++)
 		{
 			var animation = importedScene.Animations[i];
+            var targetRigId = metadata.GetImportSettingsOrDefault(() => new ModelImportSettings()).AnimationSkeletonId;
 			var nodeKey = $"animation:{i}";
 			var name = string.IsNullOrWhiteSpace(animation.Name) ? $"Animation {i}" : animation.Name;
 			var nodeId = GetOrCreateNodeId(metadata, nodeKey, AssetType.AnimationClip, name);
+            if (targetRigId != Guid.Empty) dependencies.Add(new AssetDependencyRecord
+            { FromNodeId = nodeId, ToNodeId = targetRigId, Kind = "animation-rig", IsHard = true });
 			animationNodeIds.Add(nodeId);
 
 			var relativeClipPath = NormalizeRelativePath(Path.Combine(
@@ -1563,7 +1602,9 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		{
 			Name = displayName,
 			LocalTransform = node.LocalTransform,
-			ParentIndex = node.ParentIndex
+			ParentIndex = node.ParentIndex,
+			BoneParentName = node.BoneParentName,
+            SkinBindToRig = node.SkinBindToRig
 		};
 
 		for (var i = 0; i < node.Meshes.Count; i++)
@@ -1857,6 +1898,17 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		}
 	}
 
+	private bool IsRigBoundSource(string path)
+	{
+		if (!File.Exists(path + ".meta")) return false;
+		try
+		{
+			var metadata = _metadataStore.Load(path + ".meta");
+			return metadata.ImporterId == AssetImporterIds.ThreeDScene && System.Text.Json.JsonSerializer.Deserialize<ModelImportSettings>(metadata.ImportSettingsJson, AssetJson.SerializerOptions) is { AnimationSkeletonId: var rigId } && rigId != Guid.Empty;
+		}
+		catch { return false; }
+	}
+
 	private AssetDatabase ImportAllSupportedSources(
 		string projectRootPath,
 		bool loadExistingSources,
@@ -1868,9 +1920,11 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		var existingSources = loadExistingSources ? _index.GetSources(projectRootPath) : [];
 		var indexedSourcesByPath =
 			existingSources.ToDictionary(source => source.RelativeSourcePath, StringComparer.OrdinalIgnoreCase);
-		var sourceFiles = EnumerateSupportedSourceFiles(assetsPath);
+		var sourceFiles = EnumerateSupportedSourceFiles(assetsPath)
+			.OrderBy(path => IsRigBoundSource(path) ? 1 : 0).ToList();
 		LogLibraryBuildStage($"Enumerated {sourceFiles.Count} supported source files.");
 
+        var changedRigs = new HashSet<Guid>();
 		var knownRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		for (var i = 0; i < sourceFiles.Count; i++)
 		{
@@ -1878,7 +1932,8 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 			var relativeSourcePath = ToProjectRelativePath(projectRootPath, absoluteSourcePath);
 			knownRelativePaths.Add(relativeSourcePath);
 
-			if (loadExistingSources
+            var rigChanged = IsRigBoundSource(absoluteSourcePath) && changedRigs.Contains(_metadataStore.Load(absoluteSourcePath + ".meta").GetImportSettingsOrDefault(() => new ModelImportSettings()).AnimationSkeletonId);
+			if (loadExistingSources && !rigChanged
 			    && indexedSourcesByPath.TryGetValue(relativeSourcePath, out var existingSource)
 			    && TryRefreshSourceScanState(projectRootPath, absoluteSourcePath, relativeSourcePath, existingSource))
 			{
@@ -1894,6 +1949,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 					: null))
 			{
 				reimportedSourcePaths?.Add(relativeSourcePath);
+                foreach (var rig in _metadataStore.Load(absoluteSourcePath + ".meta").SubAssets.Where(a => a.Type == AssetType.Skeleton)) changedRigs.Add(rig.NodeId);
 			}
 		}
 
@@ -2014,11 +2070,35 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return false;
 	}
 
-	private IReadOnlyList<AssetImporterDescriptor> CreateImporters()
+	private ImportGraph ImportAnimationAssetSource(string projectRootPath, string absoluteSourcePath,
+        string relativeSourcePath, string relativeMetaPath, AssetSourceMetaFile metadata)
+    {
+        var runtimeType = AnimationAssetJson.GetAssetType(relativeSourcePath)!;
+        var authoring = AnimationAssetJson.Read(absoluteSourcePath, runtimeType);
+        var descriptor = RuntimeAssetDescriptor.Get(runtimeType);
+        var nodeId = GetOrCreateNodeId(metadata, "main", descriptor.AssetType, Path.GetFileName(relativeSourcePath));
+        var artifactPath = NormalizeRelativePath(Path.Combine("Library", "Imported", metadata.SourceId.ToString("D"), "animation.json"));
+        AnimationAssetJson.Write(GetAbsolutePath(projectRootPath, artifactPath), authoring);
+        return new ImportGraph
+        {
+            Nodes = [new AssetNodeRecord
+            {
+                NodeId = nodeId, SourceId = metadata.SourceId, Type = descriptor.AssetType, NodeKey = "main",
+                Name = Path.GetFileName(relativeSourcePath), IsGenerated = false,
+                RelativeSourcePath = relativeSourcePath, RelativeAssetPath = artifactPath, RelativeMetaPath = relativeMetaPath,
+                SummaryJson = "{}"
+            }], Artifacts = [],
+            Dependencies = AnimationAssetJson.Dependencies(authoring).Distinct().Select(id => new AssetDependencyRecord
+            { FromNodeId = nodeId, ToNodeId = id, Kind = "animation", IsHard = true }).ToList()
+        };
+    }
+
+    private IReadOnlyList<AssetImporterDescriptor> CreateImporters()
 	{
 		return
-		[
-			new AssetImporterDescriptor(
+        [
+            new AssetImporterDescriptor("animation-asset", 1, path => AnimationAssetJson.GetAssetType(path) is not null, () => "{}", ImportAnimationAssetSource),
+            new AssetImporterDescriptor(
 				AssetImporterIds.Material,
 				1,
 				path => path.EndsWith(MaterialAsset.FileExtension, StringComparison.OrdinalIgnoreCase),
@@ -2088,7 +2168,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportColorLookupTableSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.ThreeDScene,
-				10,
+				13,
 				path =>
 				{
 					var extension = Path.GetExtension(path);

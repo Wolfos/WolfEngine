@@ -58,6 +58,22 @@ public sealed class ProfilerWindowTests
 		Assert.That(frame.Root.AllocatedBytes, Is.GreaterThanOrEqualTo(outer.AllocatedBytes));
 	}
 
+    [Test]
+    public void FrameProfiler_BatchedTimingStaysInsideTheMeasuredParent()
+    {
+        var profiler = new FrameProfiler();
+        profiler.RecordElapsed("Outside frame", 10);
+        profiler.BeginFrame();
+        using (profiler.Measure("Batch"))
+        {
+            profiler.RecordElapsed("Sampling", System.Diagnostics.Stopwatch.Frequency / 1000);
+        }
+        profiler.EndFrame();
+        var batch = profiler.GetLastFrames().Single().Root.Children.Single();
+        Assert.That(batch.Name, Is.EqualTo("Batch"));
+        Assert.That(batch.Children.Single().DurationMs, Is.EqualTo(1).Within(.0001));
+    }
+
 	[Test]
 	public void AggregateChildren_SumsAllocationBytesForRepeatedSiblingNames()
 	{

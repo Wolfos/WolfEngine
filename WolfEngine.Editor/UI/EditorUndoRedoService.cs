@@ -185,14 +185,17 @@ public sealed class EntityCreationUndoRedoEntry : IEditorUndoRedoEntry
 
 public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
 {
-	private readonly EntityHierarchySnapshot _before;
-	private readonly EntityHierarchySnapshot _after;
+	private readonly IReadOnlyList<EntityHierarchySnapshot> _before;
+	private readonly IReadOnlyList<EntityHierarchySnapshot> _after;
 
-	public EntityHierarchyUndoRedoEntry(string description, EntityHierarchySnapshot before, EntityHierarchySnapshot after)
+	public EntityHierarchyUndoRedoEntry(
+		string description,
+		IReadOnlyList<EntityHierarchySnapshot> before,
+		IReadOnlyList<EntityHierarchySnapshot> after)
 	{
 		Description = string.IsNullOrWhiteSpace(description) ? "Edit Hierarchy" : description;
-		_before = before;
-		_after = after;
+		_before = before ?? throw new ArgumentNullException(nameof(before));
+		_after = after ?? throw new ArgumentNullException(nameof(after));
 	}
 
 	public string Description { get; }
@@ -201,13 +204,21 @@ public sealed class EntityHierarchyUndoRedoEntry : IEditorUndoRedoEntry
 
 	public void Undo(EditorUndoRedoContext context)
 	{
-		EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, _before);
-		context.InteractionState.MarkSceneDirty();
+		Apply(context, _before);
 	}
 
 	public void Redo(EditorUndoRedoContext context)
 	{
-		EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, _after);
+		Apply(context, _after);
+	}
+
+	private static void Apply(EditorUndoRedoContext context, IReadOnlyList<EntityHierarchySnapshot> snapshots)
+	{
+		for (var i = 0; i < snapshots.Count; i++)
+		{
+			EntityHierarchyEditorOperations.ApplySnapshot(context.SceneWorkspace.CurrentScene, snapshots[i]);
+		}
+
 		context.InteractionState.MarkSceneDirty();
 	}
 }

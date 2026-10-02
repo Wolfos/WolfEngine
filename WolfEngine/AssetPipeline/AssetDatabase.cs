@@ -21,7 +21,11 @@ public enum AssetType
 	// Persisted as integers in the SQLite index, so new members are appended rather than inserted.
 	Skeleton,
 	AnimationClip,
-	ColorLookupTable
+	ColorLookupTable,
+	AnimationGraph,
+	AnimationSet,
+	AnimationSequence,
+	BoneMask
 }
 
 public enum MaterialAssetType
@@ -236,6 +240,10 @@ public sealed class TextureImportSettings
 
 public sealed class ModelImportSettings
 {
+	/// <summary>Explicit rig for animation-only sources. No retargeting is performed.</summary>
+	public Guid AnimationSkeletonId { get; set; }
+	public List<string> IgnoredAnimationChannels { get; set; } = [];
+
 	/// <summary>
 	/// Uniform scale applied while the source file is parsed. Assimp's global-scale step bakes it
 	/// into mesh vertices, bone offset matrices, animation position keys and node translations, so
@@ -373,6 +381,8 @@ public sealed class ImportedModelAssetFile
 
 public sealed class ImportedModelAssetNode
 {
+	public string? BoneParentName { get; set; }
+	public Matrix4x4? SkinBindToRig { get; set; }
 	public string Name { get; set; } = string.Empty;
 	public Matrix4x4 LocalTransform { get; set; } = Matrix4x4.Identity;
 	public List<ImportedModelAssetMeshInstance> Meshes { get; set; } = new();

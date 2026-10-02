@@ -62,6 +62,18 @@ public sealed class FrameProfiler
 		return new Scope(this);
 	}
 
+    /// <summary>
+    /// Records time accumulated over a batch without allocating one scope per item.
+    /// Allocation deltas remain attributed to the enclosing measured scope.
+    /// </summary>
+    public void RecordElapsed(string name, long elapsedTicks)
+    {
+        var state = _state.Value!;
+        if (!state.FrameActive) return;
+        var node = new ProfileNode(name) { EndTicks = elapsedTicks };
+        state.Stack.Peek().Children.Add(node);
+    }
+
 	public IReadOnlyList<ThreadFrame> GetLastFrames()
 	{
 		var frames = new List<ThreadFrame>();

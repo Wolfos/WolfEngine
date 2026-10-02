@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using WolfEngine.ECS;
 
 namespace WolfEngine.Animation;
@@ -13,12 +14,35 @@ namespace WolfEngine.Animation;
 /// </remarks>
 public sealed class AnimationSystem : IUpdate
 {
-	public WorldTag GetTag() => WorldTag.All;
+	/// <summary>Reference path for profiling and image comparisons.</summary>
+	public static bool ForceFullEvaluation { get; set; } = Environment.GetEnvironmentVariable("WOLF_FORCE_ANIMATION_UPDATES") == "1";
+	private readonly WorldTag _tag;
+	private readonly AnimationVisibility _visibility = new();
+
+	public AnimationSystem() : this(WorldTag.All)
+	{
+	}
+
+	public AnimationSystem(WorldTag tag) => _tag = tag;
+
+	public WorldTag GetTag() => _tag;
 
 	public void Update(float deltaTime, World world)
 	{
 		ArgumentNullException.ThrowIfNull(world);
+		using var profile = Profiling.FrameProfiler.Instance.Measure("Animation evaluation");
+		using (Profiling.FrameProfiler.Instance.Measure("Animation visibility"))
+		{
+			if (ForceFullEvaluation == false)
+			{
+				_visibility.Update(world);
+			}
+		}
 
+		long prepareTicks = 0;
+		long graphTicks = 0;
+		long matrixTicks = 0;
+		long bindingTicks = 0;
 		foreach (var entry in world.View<Animator>())
 		{
 			if (world.IsEnabled(entry.Entity) == false)
@@ -26,60 +50,87 @@ public sealed class AnimationSystem : IUpdate
 				continue;
 			}
 
+			var start = Stopwatch.GetTimestamp();
 			ref var animator = ref entry.First;
 			if (animator.TryPrepare() == false)
 			{
 				continue;
 			}
 
-			var poseSource = animator.PoseSource;
-			var pose = animator.Pose;
-			var skeleton = animator.Skeleton;
-			if (poseSource is null || pose is null || skeleton is null ||
-			    animator.SkinningMatrices is null || animator.PreviousSkinningMatrices is null)
+			var instance = animator.GraphInstance!;
+			if (animator.Bindings is null)
 			{
+				try
+				{
+					animator.Bindings = AnimationOutputBindings.Resolve(world, entry.Entity, instance);
+				}
+				catch (InvalidOperationException exception)
+				{
+					animator.Diagnostic = exception.Message;
+					continue;
+				}
+			}
+
+			prepareTicks += Stopwatch.GetTimestamp() - start;
+			if (ForceFullEvaluation == false && animator.HasPreviousPose && instance.Program.TransformBindings.Length == 0 &&
+				instance.Program.PropertyBindings.Length == 0 && _visibility.IsCulled(entry.Entity))
+			{
+				instance.AdvanceClock(deltaTime);
+				animator.WasVisibilityCulled = true;
 				continue;
 			}
 
-			if (poseSource is SingleClipPoseSource clipSource)
+			start = Stopwatch.GetTimestamp();
+			var resumed = animator.WasVisibilityCulled;
+			animator.WasVisibilityCulled = false;
+			var changed = instance.Evaluate(deltaTime, emitMarkers: resumed == false);
+			graphTicks += Stopwatch.GetTimestamp() - start;
+
+			start = Stopwatch.GetTimestamp();
+			if (changed || animator.HasPreviousPose == false)
 			{
-				// The component fields are the authoring surface, including the editor's scrubber,
-				// so they drive the source rather than the other way round.
-				clipSource.Speed = animator.Speed;
-				clipSource.Playing = animator.Playing;
-				clipSource.Time = animator.Time;
+				animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+				instance.Output.ComputeSkinningMatrices(animator.Skeleton!, animator.SkinningMatrices!);
+				var bonesChanged = animator.HasPreviousPose == false ||
+					animator.SkinningMatrices.AsSpan().SequenceEqual(animator.PreviousSkinningMatrices) == false;
+				if (resumed)
+				{
+					// An offscreen pose is not the previous rendered pose. Avoid a large motion vector
+					// and force local palette conversion to rebuild both generations.
+					animator.SkinningMatrices.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+				}
+				if (animator.HasPreviousPose == false)
+				{
+					animator.SkinningMatrices!.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
+					animator.HasPreviousPose = true;
+				}
+
+				if (bonesChanged)
+				{
+					animator.PoseGeneration += resumed ? 2u : 1u;
+				}
 			}
 
-			// Keep the last evaluated pose for motion vectors without copying matrices.
-			(animator.SkinningMatrices, animator.PreviousSkinningMatrices) =
-				(animator.PreviousSkinningMatrices, animator.SkinningMatrices);
-			var skinningMatrices = animator.SkinningMatrices;
+			matrixTicks += Stopwatch.GetTimestamp() - start;
 
-			poseSource.Evaluate(deltaTime, pose);
-			pose.ComputeSkinningMatrices(skeleton, skinningMatrices);
-
-			if (animator.HasPreviousPose == false)
-			{
-				// Seed the first previous pose to avoid identity-matrix motion.
-				skinningMatrices.AsSpan().CopyTo(animator.PreviousSkinningMatrices);
-				animator.HasPreviousPose = true;
-			}
-
-			if (poseSource is SingleClipPoseSource advanced)
-			{
-				animator.Time = advanced.Time;
-			}
-
-			animator.PoseGeneration++;
+			start = Stopwatch.GetTimestamp();
+			animator.Bindings.Apply(instance.Output);
+			bindingTicks += Stopwatch.GetTimestamp() - start;
 		}
 
+		var profiler = Profiling.FrameProfiler.Instance;
+		profiler.RecordElapsed("Animation prepare", prepareTicks);
+		profiler.RecordElapsed("Animation graph sampling", graphTicks);
+		profiler.RecordElapsed("Animation rig matrices", matrixTicks);
+		profiler.RecordElapsed("Animation bound outputs", bindingTicks);
+		using var sockets = profiler.Measure("Animation sockets");
 		ApplyExposedBones(world);
 	}
 
 	/// <summary>
 	/// Copies model-space bone transforms onto the entities that opted into being sockets.
 	/// </summary>
-	private static void ApplyExposedBones(World world)
+	internal static void ApplyExposedBones(World world)
 	{
 		foreach (var entry in world.View<ExposedBone>())
 		{
@@ -96,6 +147,10 @@ public sealed class AnimationSystem : IUpdate
 			}
 
 			ref var animator = ref world.GetComponent<Animator>(animatorEntity);
+			if (animator.WasVisibilityCulled)
+			{
+				continue;
+			}
 			var skeleton = animator.Skeleton;
 			var pose = animator.Pose;
 			if (skeleton is null || pose is null)
@@ -103,7 +158,7 @@ public sealed class AnimationSystem : IUpdate
 				continue;
 			}
 
-			if (exposedBone.BoneIndex < 0)
+			if (exposedBone.BoneIndex < 0 || exposedBone.BoneIndex >= skeleton.BoneCount || skeleton.BoneNames[exposedBone.BoneIndex] != exposedBone.BoneName)
 			{
 				if (skeleton.TryGetBoneIndex(exposedBone.BoneName, out var resolved) == false)
 				{
@@ -121,9 +176,32 @@ public sealed class AnimationSystem : IUpdate
 
 			// The socket is parented to the animator entity, so the bone's model-space transform is
 			// already the correct local transform relative to it.
-			world.SetLocalPosition(entry.Entity, translation);
-			world.SetLocalRotation(entry.Entity, rotation);
-			world.SetLocalScale(entry.Entity, scale);
+			world.SetLocalTransform(entry.Entity, translation, rotation, scale);
 		}
+	}
+}
+
+/// <summary>Maintains renderable bind poses and sockets in the editor's authoring world.</summary>
+public sealed class BindPoseAnimationSystem : IUpdate
+{
+	public WorldTag GetTag() => WorldTag.Authoring;
+
+	public void Update(float deltaTime, World world)
+	{
+		ArgumentNullException.ThrowIfNull(world);
+		using var profile = Profiling.FrameProfiler.Instance.Measure("Animation bind pose");
+
+		foreach (var entry in world.View<Animator>())
+		{
+			if (world.IsEnabled(entry.Entity) == false)
+			{
+				continue;
+			}
+
+			ref var animator = ref entry.First;
+			animator.TryPrepareBindPose();
+		}
+
+		AnimationSystem.ApplyExposedBones(world);
 	}
 }

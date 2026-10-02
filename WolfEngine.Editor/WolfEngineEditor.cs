@@ -168,8 +168,11 @@ public class WolfEngineEditor
 		_sceneWorkspace.Initialize(authoringScene);
 
 		_worldManager.AddSystem<CameraResolutionUpdater>();
-		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
-		_worldManager.AddSystem<AnimationSystem>();
+        _worldManager.AddSystem(new AnimationRenderResourceLifecycle(_serviceProvider.GetRequiredService<RenderGraph>()));
+        // Authoring renders skeletons at rest without advancing or compiling animation graphs.
+        // Keep this before TransformSystem so newly added bind-pose sockets propagate immediately.
+        _worldManager.AddSystem(new BindPoseAnimationSystem(), SystemExecutionGroup.Shared);
+        _worldManager.AddSystem(new AnimationSystem(WorldTag.Game), SystemExecutionGroup.Gameplay);
 		_worldManager.AddSystem<TransformSystem>();
 		_editorCameraSystem = _serviceProvider.GetRequiredService<EditorCameraSystem>();
 		_worldManager.AddSystem(_editorCameraSystem);

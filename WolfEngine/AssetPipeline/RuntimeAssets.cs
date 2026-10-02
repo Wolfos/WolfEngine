@@ -132,3 +132,5 @@ public static class RuntimeAssetDescriptor
 		}
 	}
 }
+
+public interface IAnimationAssetRuntimeResolver : IRuntimeAssetResolver { }
