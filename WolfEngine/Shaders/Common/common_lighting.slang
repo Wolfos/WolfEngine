@@ -501,11 +501,13 @@ float3 EvaluateSpecularImageBasedLightingFromRadiance(
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
 
     float cosTheta = saturate(dot(normal, viewDir));
-    float3 fresnel = FresnelSchlick(cosTheta, F0);
     SamplerState linearSampler = GetSampler(samplerHandle);
     Texture2D<float4> brdfLutTex = GetTexture(brdfLutHandle);
     float2 brdf = brdfLutTex.SampleLevel(linearSampler, float2(cosTheta, roughness), 0.0f).rg;
-    float3 specular = environmentRadiance * (fresnel * brdf.x + brdf.y);
+    // The LUT integrates Schlick Fresnel into A and B: F0 * A + F90 * B (F90 = 1).
+    // Applying FresnelSchlick(NdotV, F0) here again exaggerates grazing reflections,
+    // including on fully rough dielectrics.
+    float3 specular = environmentRadiance * (F0 * brdf.x + brdf.y);
     return specular * 0.5f * occlusion;
 }
 
