@@ -69,6 +69,8 @@ float4 fragmentShader(PixelInput input) : SV_TARGET
         float screenRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
         return float4(input.Color.rgb, input.Color.a * saturate((median - 0.5) * screenRange + 0.5));
     }
+    // The texture's alpha holds data rather than coverage, so only the vertex alpha blends.
+    if (sampleTexture == 3) return float4(input.Color.rgb * sampled.rgb, input.Color.a);
     return input.Color * sampled;
 }
 

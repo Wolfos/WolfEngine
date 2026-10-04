@@ -155,7 +155,7 @@ public sealed class UiTextureAtlas
 public readonly struct UiDrawCommand
 {
 	public UiDrawCommand(int elemCount, int idxOffset, int vtxOffset, Vector4 clipRect, nint textureId,
-		Texture? atlas = null, float distanceRange = 0, bool solid = false)
+		Texture? atlas = null, float distanceRange = 0, bool solid = false, bool opaque = false)
 	{
 		ElemCount = elemCount;
 		IdxOffset = idxOffset;
@@ -165,6 +165,7 @@ public readonly struct UiDrawCommand
 		Atlas = atlas;
 		DistanceRange = distanceRange;
 		Solid = solid;
+		Opaque = opaque;
 	}
 
 	public int ElemCount { get; }
@@ -175,4 +176,6 @@ public readonly struct UiDrawCommand
 	public Texture? Atlas { get; }
 	public float DistanceRange { get; }
 	public bool Solid { get; }
+	/// <summary>Draws the sampled texture with the vertex alpha only, ignoring the texture's own alpha.</summary>
+	public bool Opaque { get; }
 }

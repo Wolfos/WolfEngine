@@ -153,7 +153,7 @@ internal sealed unsafe class MetalUiRenderer : IImGuiRenderer
 		{
 			var cmd = frame.Commands[i];
 			var textureHandle = cmd.Atlas?.Resources?.ShaderResourceView.Value ?? ResolveTextureHandle(cmd.TextureId);
-			var mode = cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : _sampleTexture ? 1u : 0u;
+			var mode = cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : !_sampleTexture ? 0u : cmd.Opaque ? 3u : 1u;
 			if (!hasActiveTextureHandle || textureHandle != activeTextureHandle || mode != activeMode || cmd.DistanceRange != activeRange)
 			{
 				bindlessWriter.Clear();

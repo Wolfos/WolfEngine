@@ -23,6 +23,7 @@ public static class SceneDebugViewIds
 	public const string DdgiFinalContribution = "ddgi-final-contribution";
 	public const string GBufferAlbedo = "gbuffer-albedo";
 	public const string GBufferNormal = "gbuffer-normal";
+	public const string GBufferMaterial = "gbuffer-material";
 	public const string MotionVectors = "motion-vectors";
 	public const string BloomPrefilter = "bloom-prefilter";
 	public const string BloomContribution = "bloom-contribution";
@@ -31,7 +32,12 @@ public static class SceneDebugViewIds
 public enum SceneDebugViewKind
 {
 	Color,
-	Depth
+	Depth,
+	/// <summary>
+	/// A colour target whose alpha channel holds data rather than coverage, such as the GBuffer material
+	/// target's reactive mask. The viewport draws it opaque, since blending by that alpha would hide the image.
+	/// </summary>
+	ColorIgnoreAlpha
 }
 
 public readonly struct SceneDebugViewOption

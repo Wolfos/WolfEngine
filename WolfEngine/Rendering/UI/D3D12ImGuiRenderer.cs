@@ -244,7 +244,7 @@ internal unsafe sealed class D3D12UiRenderer : IImGuiRenderer
 			}
 			var draw = _drawWriter!;
 			draw.Clear();
-			draw.SetUInt("sampleTexture", cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : _sampleTexture ? 1u : 0u);
+			draw.SetUInt("sampleTexture", cmd.Atlas is not null ? 2u : cmd.Solid ? 0u : !_sampleTexture ? 0u : cmd.Opaque ? 3u : 1u);
 			draw.SetFloat("distanceRange", cmd.DistanceRange);
 			fixed (byte* constants = draw.AsBytes()) native->SetGraphicsRoot32BitConstants(2, (uint)draw.AsBytes().Length / 4, constants, 0);
 
