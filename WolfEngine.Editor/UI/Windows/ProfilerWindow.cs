@@ -20,16 +20,22 @@ public class ProfilerWindow: EditorWindow
 	public override void Draw(EditorScene scene)
 	{
 		Begin();
+		var enabled = FrameProfiler.Instance.Enabled;
+		if (ImGui.Checkbox("Enable profiler", ref enabled))
+		{
+			FrameProfiler.Instance.Enabled = enabled;
+			_gpuProfiler.RecordingEnabled = enabled;
+		}
 		if (ImGui.BeginTabBar("profiler-tabs"))
 		{
 			if (ImGui.BeginTabItem("CPU"))
 			{
-				DrawCpuProfiler();
+				DrawFrameTabs(gpu: false);
 				ImGui.EndTabItem();
 			}
 			if (ImGui.BeginTabItem("GPU"))
 			{
-				DrawGpuProfiler();
+				DrawFrameTabs(gpu: true);
 				ImGui.EndTabItem();
 			}
 			ImGui.EndTabBar();
@@ -37,7 +43,28 @@ public class ProfilerWindow: EditorWindow
 		ImGui.End();
 	}
 
-	private static void DrawCpuProfiler()
+	private void DrawFrameTabs(bool gpu)
+	{
+		if (!ImGui.BeginTabBar("profiler-frame-tabs")) return;
+		if (ImGui.BeginTabItem("Current"))
+		{
+			if (gpu) DrawGpuProfiler(spike: false);
+			else DrawCpuProfiler(spike: false);
+			ImGui.EndTabItem();
+		}
+		if (ImGui.BeginTabItem("Spike"))
+		{
+			ImGui.TextUnformatted(gpu
+				? "Slowest completed GPU frame in the last five seconds."
+				: "Slowest completed frame per thread in the last five seconds.");
+			if (gpu) DrawGpuProfiler(spike: true);
+			else DrawCpuProfiler(spike: true);
+			ImGui.EndTabItem();
+		}
+		ImGui.EndTabBar();
+	}
+
+	private static void DrawCpuProfiler(bool spike)
 	{
 		var vsyncEnabled = Screen.VSyncEnabled;
 		if (ImGui.Checkbox("VSync", ref vsyncEnabled))
@@ -46,7 +73,7 @@ public class ProfilerWindow: EditorWindow
 		}
 
 		ImGui.Separator();
-		var frames = FrameProfiler.Instance.GetLastFrames();
+		var frames = spike ? FrameProfiler.Instance.GetSpikeFrames() : FrameProfiler.Instance.GetLastFrames();
 		if (frames.Count == 0)
 		{
 			ImGui.TextUnformatted("No profiler data available.");
@@ -74,7 +101,7 @@ public class ProfilerWindow: EditorWindow
 		}
 	}
 
-	private void DrawGpuProfiler()
+	private void DrawGpuProfiler(bool spike)
 	{
 		var unsupportedReason = _gpuProfiler.UnsupportedReason;
 		var enabled = _gpuProfiler.Enabled;
@@ -100,19 +127,19 @@ public class ProfilerWindow: EditorWindow
 			return;
 		}
 
-		var frame = _gpuProfiler.LatestFrame;
+		var frame = spike ? _gpuProfiler.SpikeFrame : _gpuProfiler.LatestFrame;
 		if (frame is null)
 		{
-			ImGui.TextUnformatted(enabled
-				? "Waiting for the first completed GPU profile frame..."
-				: "GPU profiling is disabled.");
+			ImGui.TextUnformatted(enabled && _gpuProfiler.RecordingEnabled
+				? "Waiting for a completed GPU profile frame..."
+				: "GPU profiling is disabled or paused.");
 			return;
 		}
 
 		ImGui.Text($"Frame: {frame.FrameIndex}");
 		ImGui.SameLine();
 		ImGui.Text($"Total shader time: {frame.DurationMs:0.00} ms");
-		if (!enabled)
+		if (!enabled || !_gpuProfiler.RecordingEnabled)
 		{
 			ImGui.TextUnformatted("Showing the last captured frame.");
 		}

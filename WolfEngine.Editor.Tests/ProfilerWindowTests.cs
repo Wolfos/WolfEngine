@@ -206,6 +206,114 @@ public sealed class ProfilerWindowTests
 		Assert.That(ProfilerWindowModelBuilder.FormatGpuTime(2.5, 10.0), Is.EqualTo("2.50 ms (25.0%)"));
 	}
 
+	[Test]
+	public void SpikeWindow_ExpiresMaximumAndFallsBackToNextCandidate()
+	{
+		var clock = new ProfilerTestClock();
+		var window = new SpikeFrameWindow<string>(clock);
+		window.Add("spike", 40, clock.GetTimestamp());
+		clock.Advance(1);
+		window.Add("next", 20, clock.GetTimestamp());
+		clock.Advance(1);
+		window.Add("current", 5, clock.GetTimestamp());
+		Assert.That(window.TryGet(clock.GetTimestamp(), out var frame), Is.True);
+		Assert.That(frame, Is.EqualTo("spike"));
+		clock.Advance(3);
+		Assert.That(window.TryGet(clock.GetTimestamp(), out frame), Is.True);
+		Assert.That(frame, Is.EqualTo("next"));
+		clock.Advance(2);
+		Assert.That(window.TryGet(clock.GetTimestamp(), out _), Is.False);
+	}
+
+	[Test]
+	public void FrameProfiler_PausePreservesTreesAndDiscardsInFlightFrame()
+	{
+		var clock = new ProfilerTestClock();
+		var profiler = new FrameProfiler(clock);
+		Assert.That(profiler.Enabled, Is.True);
+		profiler.BeginFrame();
+		using (profiler.Measure("Sporadic work")) { }
+		profiler.EndFrame();
+		var captured = profiler.GetLastFrames().Single().Root;
+		profiler.BeginFrame("In flight");
+		profiler.Enabled = false;
+		using (profiler.Measure("Disabled")) { }
+		profiler.EndFrame();
+		clock.Advance(10);
+		profiler.BeginFrame("Disabled");
+		profiler.RecordElapsed("Disabled", 100);
+		profiler.EndFrame();
+		Assert.That(profiler.GetLastFrames().Single().Root, Is.SameAs(captured));
+		Assert.That(profiler.GetSpikeFrames().Single().Root, Is.SameAs(captured));
+		Assert.That(captured.Children.Single().Name, Is.EqualTo("Sporadic work"));
+		profiler.Enabled = true;
+		Assert.That(profiler.GetSpikeFrames(), Is.Empty);
+		profiler.BeginFrame("Resumed");
+		profiler.EndFrame();
+		Assert.That(profiler.GetSpikeFrames().Single().Root.Name, Is.EqualTo("Resumed"));
+		clock.Advance(5);
+		Assert.That(profiler.GetSpikeFrames(), Is.Empty);
+	}
+
+	[Test]
+	public void FrameProfiler_PauseAndResumeDuringFrameDiscardsPartialCapture()
+	{
+		var profiler = new FrameProfiler();
+		profiler.BeginFrame();
+		profiler.EndFrame();
+		var captured = profiler.GetLastFrames().Single().Root;
+		profiler.BeginFrame();
+		profiler.Enabled = false;
+		profiler.Enabled = true;
+		using (profiler.Measure("Partial")) { }
+		profiler.EndFrame();
+		Assert.That(profiler.GetLastFrames().Single().Root, Is.SameAs(captured));
+	}
+
+	[Test]
+	public void GpuProfiler_SpikeUsesFiveSecondsAndPauseRejectsLateResults()
+	{
+		var clock = new ProfilerTestClock();
+		var profiler = new GpuProfiler(clock) { Enabled = true };
+		CompleteGpuFrame(profiler, 1, 40);
+		clock.Advance(1);
+		CompleteGpuFrame(profiler, 2, 10);
+		Assert.That(profiler.LatestFrame!.FrameIndex, Is.EqualTo(2));
+		Assert.That(profiler.SpikeFrame!.FrameIndex, Is.EqualTo(1));
+		clock.Advance(4);
+		Assert.That(profiler.SpikeFrame!.FrameIndex, Is.EqualTo(2));
+		var pending = profiler.BeginFrame(3)!;
+		var pass = pending.AddPass("Pending");
+		pending.Seal();
+		profiler.RecordingEnabled = false;
+		clock.Advance(10);
+		pass.Complete(new[] { new GpuProfileScope("Late", 100) });
+		Assert.That(profiler.BeginFrame(4), Is.Null);
+		Assert.That(profiler.LatestFrame!.FrameIndex, Is.EqualTo(2));
+		Assert.That(profiler.SpikeFrame!.FrameIndex, Is.EqualTo(2));
+		profiler.RecordingEnabled = true;
+		Assert.That(profiler.SpikeFrame, Is.Null);
+		CompleteGpuFrame(profiler, 5, 5);
+		Assert.That(profiler.SpikeFrame!.FrameIndex, Is.EqualTo(5));
+		clock.Advance(5);
+		Assert.That(profiler.SpikeFrame, Is.Null);
+	}
+
+	private static void CompleteGpuFrame(GpuProfiler profiler, ulong index, double duration)
+	{
+		var capture = profiler.BeginFrame(index)!;
+		capture.AddPass("Pass").Complete(new[] { new GpuProfileScope("Shader", duration) });
+		capture.Seal();
+	}
+
+	private sealed class ProfilerTestClock : TimeProvider
+	{
+		private long _timestamp;
+		public override long TimestampFrequency => 1000;
+		public override long GetTimestamp() => _timestamp;
+		public void Advance(int seconds) => _timestamp += seconds * TimestampFrequency;
+	}
+
 	private static FrameProfiler.ProfileNode CreateNode(string name, long durationTicks, long allocatedBytes, params FrameProfiler.ProfileNode[] children)
 	{
 		var node = new FrameProfiler.ProfileNode(name)
