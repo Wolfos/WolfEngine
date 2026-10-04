@@ -53,6 +53,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
+        <ProjectReference Include="..\WolfEngine.Profiling\WolfEngine.Profiling.csproj" />
     </ItemGroup>
 
     <ItemGroup>

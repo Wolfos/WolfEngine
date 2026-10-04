@@ -1,3 +1,5 @@
+using WolfEngine.Profiling;
+
 namespace WolfEngine.ECS;
 
 public interface IWorldManager
@@ -124,7 +126,7 @@ public class WorldManager: IWorldManager
 			{
 				continue;
 			}
-
+			
 			for (var index = 0; index < _systems.Count; index++)
 			{
 				var registration = _systems[index];
@@ -138,7 +140,10 @@ public class WorldManager: IWorldManager
 				{
 					if ((updateable.GetTag() & world.Tag) != 0)
 					{
-						updateable.Update(deltaTime, world);
+						using(FrameProfiler.Instance.Measure(updateable.GetType().Name))
+						{
+							updateable.Update(deltaTime, world);
+						}
 					}
 				}
 				catch (Exception exception) when (CanRecoverException(registration.Group))
@@ -171,7 +176,10 @@ public class WorldManager: IWorldManager
 				{
 					if ((physicsUpdate.GetTag() & world.Tag) != 0)
 					{
-						physicsUpdate.PhysicsUpdate(fixedDeltaTime, world);
+						using (FrameProfiler.Instance.Measure(physicsUpdate.GetType().Name))
+						{
+							physicsUpdate.PhysicsUpdate(fixedDeltaTime, world);
+						}
 					}
 				}
 				catch (Exception exception) when (CanRecoverException(registration.Group))
@@ -204,7 +212,10 @@ public class WorldManager: IWorldManager
 				{
 					if ((preRender.GetTag() & world.Tag) != 0)
 					{
-						preRender.PreRender(deltaTime, world);
+						using (FrameProfiler.Instance.Measure(preRender.GetType().Name))
+						{
+							preRender.PreRender(deltaTime, world);
+						}
 					}
 				}
 				catch (Exception exception) when (CanRecoverException(registration.Group))
