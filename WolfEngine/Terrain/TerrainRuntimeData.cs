@@ -63,6 +63,13 @@ public sealed class TerrainRuntimeData
 	public Box LocalBounds { get; private set; }
 	public int RuntimeVersion { get; private set; }
 
+	/// <summary>Refreshes CPU surface queries without creating terrain render geometry.</summary>
+	public bool EnsureSampling(TerrainComponent component)
+	{
+		Resolve(component);
+		return EnsureSamplingState(component);
+	}
+
 	public bool EnsureBuilt(TerrainComponent component)
 	{
 		Resolve(component);
