@@ -11,6 +11,12 @@ public sealed class GpuProfiler
 		TaskCompletionSource<IReadOnlyList<GpuProfileFrame>> Completion);
 
 	private int _enabled;
+	private int _recordingEnabled = 1;
+	private int _collectionGeneration;
+	private long _pausedTimestamp;
+	private readonly TimeProvider _clock;
+	private readonly SpikeFrameWindow<GpuProfileFrame> _spikes;
+
 	private GpuProfileFrame? _latestFrame;
 	private string? _unsupportedReason;
 	private readonly object _publishSync = new();
@@ -18,6 +24,42 @@ public sealed class GpuProfiler
 	private readonly List<CollectionWaiter> _collectionWaiters = [];
 	private ulong _lastStartedFrameIndex;
 	private bool _hasStartedFrame;
+
+	public GpuProfiler(TimeProvider? clock = null)
+	{
+		_clock = clock ?? TimeProvider.System;
+		_spikes = new SpikeFrameWindow<GpuProfileFrame>(_clock);
+	}
+
+	/// <summary>Pauses collection without changing the GPU profiling opt-in or displayed frames.</summary>
+	public bool RecordingEnabled
+	{
+		get => Volatile.Read(ref _recordingEnabled) != 0;
+		set
+		{
+			lock (_publishSync)
+			{
+				if (RecordingEnabled == value) return;
+				_pausedTimestamp = _clock.GetTimestamp();
+				if (value) _spikes.Clear();
+				else _spikes.TryGet(_pausedTimestamp, out _);
+				_collectionGeneration++;
+				Volatile.Write(ref _recordingEnabled, value ? 1 : 0);
+			}
+		}
+	}
+
+	public GpuProfileFrame? SpikeFrame
+	{
+		get
+		{
+			lock (_publishSync)
+			{
+				return _spikes.TryGet(RecordingEnabled ? _clock.GetTimestamp() : _pausedTimestamp, out var frame)
+					? frame : null;
+			}
+		}
+	}
 
 	public bool Enabled
 	{
@@ -33,6 +75,7 @@ public sealed class GpuProfiler
 	public GpuProfileCollectionMarker BeginCollection()
 	{
 		Enabled = true;
+		RecordingEnabled = true;
 		lock (_publishSync)
 		{
 			return new GpuProfileCollectionMarker(_hasStartedFrame ? _lastStartedFrameIndex : null);
@@ -100,17 +143,20 @@ public sealed class GpuProfiler
 		{
 			_lastStartedFrameIndex = frameIndex;
 			_hasStartedFrame = true;
+			var generation = _collectionGeneration;
+			return Enabled && RecordingEnabled && UnsupportedReason is null
+				? new GpuProfileFrameCapture(frameIndex, frame => Publish(frame, generation))
+				: null;
 		}
-		return Enabled && UnsupportedReason is null
-			? new GpuProfileFrameCapture(frameIndex, Publish)
-			: null;
 	}
 
-	private void Publish(GpuProfileFrame frame)
+	private void Publish(GpuProfileFrame frame, int generation)
 	{
 		List<(TaskCompletionSource<IReadOnlyList<GpuProfileFrame>> Completion, IReadOnlyList<GpuProfileFrame> Frames)>? ready = null;
 		lock (_publishSync)
 		{
+			if (!RecordingEnabled || generation != _collectionGeneration) return;
+			_spikes.Add(frame, frame.DurationMs, _clock.GetTimestamp());
 			_completedFrames[frame.FrameIndex] = frame;
 			while (_completedFrames.Count > MaxRetainedCompletedFrames)
 			{

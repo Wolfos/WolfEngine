@@ -16,6 +16,26 @@ public sealed class TerrainTests
 	}
 
 	[Test]
+	public void EnsureSampling_ProvidesSurfaceQueriesWithoutRenderGeometry()
+	{
+		using var registry = new TestAssetRegistry();
+		var assetId = Guid.NewGuid();
+		registry.Register(assetId, CreateHeightTexture("height-flat", 2, 2, 128));
+		var runtime = new TerrainRuntimeData();
+		var component = new TerrainComponent
+		{
+			TerrainAsset = new() { NodeId = assetId },
+			WorldSizeMeters = new(20),
+			HeightScaleMeters = 8
+		};
+		Assert.That(runtime.EnsureSampling(component), Is.True);
+		Assert.That(runtime.TrySampleHeight(Matrix4x4.CreateTranslation(0, 3, 0), Vector3.Zero, out var height), Is.True);
+		Assert.That(height, Is.EqualTo(3 + 128f / 255 * 8).Within(.001f));
+		Assert.That(runtime.SharedLodMeshes, Is.Empty);
+		Assert.That(runtime.Chunks, Is.Empty);
+	}
+
+	[Test]
 	public void TerrainLayerSet_SupportsMoreThanFourLayers()
 	{
 		var layerSet = new TerrainLayerSet
