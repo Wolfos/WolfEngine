@@ -205,6 +205,8 @@ internal sealed class RenderGraphFrameBuilder
 	// Output texture id per view index, rebuilt each frame and consumed when the UI frame's viewport
 	// sentinels are rewritten. Zero means the view produced nothing this frame.
 	private readonly nint[] _viewportTextureIds = new nint[UiTextureIds.MaxViewports];
+	// Whether each view's output is drawn ignoring its alpha, because that alpha holds data rather than coverage.
+	private readonly bool[] _viewportOpaque = new bool[UiTextureIds.MaxViewports];
 	// Views set up this frame with their scene enabled, in setup order. Their databases feed the shared draw
 	// update, which runs once before any view's passes.
 	private readonly List<RenderViewId> _frameViews = [];
@@ -1244,6 +1246,7 @@ internal sealed class RenderGraphFrameBuilder
 			}
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferAlbedo, "GBuffer Albedo", gbufferAlbedoHandle, SceneDebugViewKind.Color);
 			RegisterSceneDebugView(SceneDebugViewIds.GBufferNormal, "GBuffer Normal", gbufferNormalHandle, SceneDebugViewKind.Color);
+			RegisterSceneDebugView(SceneDebugViewIds.GBufferMaterial, "GBuffer Material", gbufferMaterialHandle, SceneDebugViewKind.ColorIgnoreAlpha);
 			// The flow-field encoding only exists while this view is selected; the option itself
 			// has to stay in the dropdown so it can be selected in the first place.
 			RegisterSceneDebugView(
@@ -1883,7 +1886,11 @@ internal sealed class RenderGraphFrameBuilder
 	}
 
 	/// <summary>Starts resolving this frame's view outputs: every view begins the frame with none.</summary>
-	public void BeginViewportResolve() => Array.Clear(_viewportTextureIds);
+	public void BeginViewportResolve()
+	{
+		Array.Clear(_viewportTextureIds);
+		Array.Clear(_viewportOpaque);
+	}
 
 	/// <summary>
 	/// Resolves the bound view's output texture and the render state it publishes. Runs for every view in the
@@ -1895,12 +1902,14 @@ internal sealed class RenderGraphFrameBuilder
 		if (_view.FrameResources.SceneEnabled == false)
 		{
 			_viewportTextureIds[_view.View.Index] = 0;
+			_viewportOpaque[_view.View.Index] = false;
 			_view.ResolvedSceneViewportState = SceneViewportRenderState.Empty;
 			return;
 		}
 
-		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId);
+		var textureId = ResolveSceneViewportTextureId(out var activeDebugViewId, out var activeDebugViewKind);
 		_viewportTextureIds[_view.View.Index] = textureId;
+		_viewportOpaque[_view.View.Index] = activeDebugViewKind == SceneDebugViewKind.ColorIgnoreAlpha;
 		_view.ResolvedSceneViewportState = new SceneViewportRenderState(
 			textureId,
 			_view.FrameResources.SceneFramebufferSize,
@@ -2099,7 +2108,7 @@ internal sealed class RenderGraphFrameBuilder
 			: texture.ShaderResourceView;
 	}
 
-	private nint ResolveSceneViewportTextureId(out string activeDebugViewId)
+	private nint ResolveSceneViewportTextureId(out string activeDebugViewId, out SceneDebugViewKind activeDebugViewKind)
 	{
 		var resolvedView = GetResolvedSceneDebugView();
 		if (resolvedView.HasValue)
@@ -2108,6 +2117,7 @@ internal sealed class RenderGraphFrameBuilder
 			if (descriptorHandle.IsValid)
 			{
 				activeDebugViewId = resolvedView.Value.Id;
+				activeDebugViewKind = resolvedView.Value.Kind;
 				return (nint)descriptorHandle.Value;
 			}
 		}
@@ -2116,10 +2126,12 @@ internal sealed class RenderGraphFrameBuilder
 		{
 			var fallbackTextureId = ResolveSceneDebugTextureHandle(sceneColorView);
 			activeDebugViewId = SceneDebugViewIds.FinalColor;
+			activeDebugViewKind = sceneColorView.Kind;
 			return fallbackTextureId.IsValid ? (nint)fallbackTextureId.Value : 0;
 		}
 
 		activeDebugViewId = SceneDebugViewIds.FinalColor;
+		activeDebugViewKind = SceneDebugViewKind.Color;
 		return 0;
 	}
 
@@ -2161,7 +2173,7 @@ internal sealed class RenderGraphFrameBuilder
 	/// Rewrites the UI frame's viewport sentinels to the outputs resolved this frame. Once per frame, after every
 	/// view has been prepared, because the UI frame holds the sentinels of all views together.
 	/// </summary>
-	public void ResolveUiViewportTextures() => ResolveViewportTextureIds(_uiFrame, _viewportTextureIds);
+	public void ResolveUiViewportTextures() => ResolveViewportTextureIds(_uiFrame, _viewportTextureIds, _viewportOpaque);
 
 	/// <summary>
 	/// Rewrites every viewport sentinel in the UI frame to the output its view resolved to this frame. The UI
@@ -2169,7 +2181,7 @@ internal sealed class RenderGraphFrameBuilder
 	/// image carries a sentinel until here. A view that resolved to nothing is left at zero, which the
 	/// backends draw with their fallback texture.
 	/// </summary>
-	private static void ResolveViewportTextureIds(UiFrameData uiFrame, nint[] textureIdsByViewIndex)
+	private static void ResolveViewportTextureIds(UiFrameData uiFrame, nint[] textureIdsByViewIndex, bool[] opaqueByViewIndex)
 	{
 		if (ReferenceEquals(uiFrame, UiFrameData.Empty) || uiFrame.CommandCount == 0)
 		{
@@ -2189,7 +2201,11 @@ internal sealed class RenderGraphFrameBuilder
 				command.IdxOffset,
 				command.VtxOffset,
 				command.ClipRect,
-				textureIdsByViewIndex[view.Index]);
+				textureIdsByViewIndex[view.Index],
+				command.Atlas,
+				command.DistanceRange,
+				command.Solid,
+				opaqueByViewIndex[view.Index]);
 		}
 	}
 
