@@ -302,7 +302,8 @@ public class InputSystem : IInputSystem
 		EnsureBindingKind(binding, BindingKind.Axis2D);
 
 		var previous = _axis2DStates.TryGetValue(binding, out var state) ? state : Vector2.Zero;
-		if (Vector2Equals(previous, value))
+		var isScroll = binding == InputActionBinding.MouseScroll;
+		if (isScroll == false && Vector2Equals(previous, value))
 		{
 			_axis2DStates[binding] = value;
 			return;
@@ -315,7 +316,7 @@ public class InputSystem : IInputSystem
 			foreach (var registration in axisActions)
 			{
 				var newValue = EvaluateAxis2D(registration.Action.Bindings);
-				if (Vector2Equals(newValue, registration.CurrentValue))
+				if (isScroll == false && Vector2Equals(newValue, registration.CurrentValue))
 				{
 					continue;
 				}
