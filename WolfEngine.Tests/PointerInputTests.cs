@@ -15,6 +15,27 @@ public sealed class PointerInputTests
 		public void EndFrame() { }
 	}
 	private static readonly PointerInputContext Context = new(true, true, true, Vector2.Zero, new(100, 100));
+
+	[Test]
+	public void RepeatedMouseScrollEventsReachGameplay()
+	{
+		var input = new InputSystem(new PointerInputQueue());
+		var router = new Router();
+		var scrollEvents = new List<Vector2>();
+
+		input.RegisterAxis2D(
+			new InputAction("Scroll", InputActionType.Axis2D, [InputActionBinding.MouseScroll]),
+			callback => scrollEvents.Add(callback.Value));
+
+		input.SetAxis2D(InputActionBinding.MouseScroll, new Vector2(0, 1));
+		input.ProcessPointerInput(router, Context);
+
+		input.SetAxis2D(InputActionBinding.MouseScroll, new Vector2(0, 1));
+		input.ProcessPointerInput(router, Context);
+
+		Assert.That(scrollEvents, Is.EqualTo(new[] { new Vector2(0, 1), new Vector2(0, 1) }));
+	}
+
 	[Test]
 	public void CoalescesNativeMotionButNeverAcrossButtonTransitions()
 	{
