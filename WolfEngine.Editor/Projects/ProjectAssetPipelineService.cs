@@ -1009,15 +1009,14 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				}
 			],
 			Artifacts = [],
-			Dependencies = loadResult.Asset is IDataAssetDependencies dependencies
-				? dependencies.GetDependencies().Where(id => id != Guid.Empty).Distinct().Select(id => new AssetDependencyRecord
+			Dependencies = AssetDependencyCollector.Collect(loadResult.Asset)
+				.Select(id => new AssetDependencyRecord
 				{
 					FromNodeId = nodeId,
 					ToNodeId = id,
 					Kind = "data-asset",
 					IsHard = true
 				}).ToList()
-				: []
 		};
 	}
 
@@ -2106,28 +2105,53 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 		return false;
 	}
 
-	private ImportGraph ImportAnimationAssetSource(string projectRootPath, string absoluteSourcePath,
-        string relativeSourcePath, string relativeMetaPath, AssetSourceMetaFile metadata)
-    {
-        var runtimeType = AnimationAssetJson.GetAssetType(relativeSourcePath)!;
-        var authoring = AnimationAssetJson.Read(absoluteSourcePath, runtimeType);
-        var descriptor = RuntimeAssetDescriptor.Get(runtimeType);
-        var nodeId = GetOrCreateNodeId(metadata, "main", descriptor.AssetType, Path.GetFileName(relativeSourcePath));
-        var artifactPath = NormalizeRelativePath(Path.Combine("Library", "Imported", metadata.SourceId.ToString("D"), "animation.json"));
-        AnimationAssetJson.Write(GetAbsolutePath(projectRootPath, artifactPath), authoring);
-        return new ImportGraph
-        {
-            Nodes = [new AssetNodeRecord
-            {
-                NodeId = nodeId, SourceId = metadata.SourceId, Type = descriptor.AssetType, NodeKey = "main",
-                Name = Path.GetFileName(relativeSourcePath), IsGenerated = false,
-                RelativeSourcePath = relativeSourcePath, RelativeAssetPath = artifactPath, RelativeMetaPath = relativeMetaPath,
-                SummaryJson = "{}"
-            }], Artifacts = [],
-            Dependencies = AnimationAssetJson.Dependencies(authoring).Distinct().Select(id => new AssetDependencyRecord
-            { FromNodeId = nodeId, ToNodeId = id, Kind = "animation", IsHard = true }).ToList()
-        };
-    }
+	private ImportGraph ImportAnimationAssetSource(
+		string projectRootPath,
+		string absoluteSourcePath,
+		string relativeSourcePath,
+		string relativeMetaPath,
+		AssetSourceMetaFile metadata)
+	{
+		var runtimeType = AnimationAssetJson.GetAssetType(relativeSourcePath)!;
+		var authoring = AnimationAssetJson.Read(absoluteSourcePath, runtimeType);
+		var descriptor = RuntimeAssetDescriptor.Get(runtimeType);
+		var nodeId = GetOrCreateNodeId(metadata, "main", descriptor.AssetType, Path.GetFileName(relativeSourcePath));
+		var artifactPath = NormalizeRelativePath(Path.Combine(
+			"Library",
+			"Imported",
+			metadata.SourceId.ToString("D"),
+			"animation.json"));
+		AnimationAssetJson.Write(GetAbsolutePath(projectRootPath, artifactPath), authoring);
+
+		return new ImportGraph
+		{
+			Nodes =
+			[
+				new AssetNodeRecord
+				{
+					NodeId = nodeId,
+					SourceId = metadata.SourceId,
+					Type = descriptor.AssetType,
+					NodeKey = "main",
+					Name = Path.GetFileName(relativeSourcePath),
+					IsGenerated = false,
+					RelativeSourcePath = relativeSourcePath,
+					RelativeAssetPath = artifactPath,
+					RelativeMetaPath = relativeMetaPath,
+					SummaryJson = "{}"
+				}
+			],
+			Artifacts = [],
+			Dependencies = AssetDependencyCollector.Collect(authoring)
+				.Select(id => new AssetDependencyRecord
+				{
+					FromNodeId = nodeId,
+					ToNodeId = id,
+					Kind = "animation",
+					IsHard = true
+				}).ToList()
+		};
+	}
 
     private IReadOnlyList<AssetImporterDescriptor> CreateImporters()
 	{
@@ -2146,7 +2170,7 @@ public sealed class ProjectAssetPipelineService : IProjectAssetPipelineService
 				ImportMaterialSource),
 			new AssetImporterDescriptor(
 				AssetImporterIds.DataAsset,
-				1,
+				2,
 				path => path.EndsWith(DataAssetFile.FileExtension, StringComparison.OrdinalIgnoreCase),
 				() => "{}",
 				ImportDataAssetSource),

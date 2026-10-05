@@ -100,7 +100,7 @@ public sealed class AnimationGraph
 }
 
 [RuntimeAsset(AssetType.DataAsset, typeof(AnimationSet), typeof(IDataAssetRuntimeResolver))]
-public sealed class AnimationSet : IDataAsset, IDataAssetDependencies
+public sealed class AnimationSet : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".animset.json";
@@ -108,7 +108,6 @@ public sealed class AnimationSet : IDataAsset, IDataAssetDependencies
 	public int Version { get; set; } = 1;
 	public Guid SkeletonId { get; set; }
 	public Dictionary<string, Guid> Clips { get; set; } = new(StringComparer.Ordinal);
-	public IEnumerable<Guid> GetDependencies() => Clips.Values.Append(SkeletonId).Where(id => id != Guid.Empty);
 }
 
 public sealed class AnimationMarker
@@ -135,7 +134,7 @@ public sealed class AnimationCurve
 }
 
 [RuntimeAsset(AssetType.DataAsset, typeof(AnimationSequence), typeof(IDataAssetRuntimeResolver))]
-public sealed class AnimationSequence : IDataAsset, IDataAssetDependencies
+public sealed class AnimationSequence : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".animclip.json";
@@ -145,7 +144,6 @@ public sealed class AnimationSequence : IDataAsset, IDataAssetDependencies
 	public float PlaybackSpeed { get; set; } = 1;
 	public List<AnimationCurve> Curves { get; set; } = [];
 	public List<AnimationMarker> Markers { get; set; } = [];
-	public IEnumerable<Guid> GetDependencies() => ClipId == Guid.Empty ? [] : [ClipId];
 }
 
 public sealed class BoneMaskEntry
@@ -156,7 +154,7 @@ public sealed class BoneMaskEntry
 }
 
 [RuntimeAsset(AssetType.DataAsset, typeof(BoneMask), typeof(IDataAssetRuntimeResolver))]
-public sealed class BoneMask : IDataAsset, IDataAssetDependencies
+public sealed class BoneMask : IDataAsset
 {
 	public const string Extension = DataAssetFile.FileExtension;
 	public const string LegacyExtension = ".bonemask.json";
@@ -164,7 +162,6 @@ public sealed class BoneMask : IDataAsset, IDataAssetDependencies
 	public int Version { get; set; } = 1;
 	public Guid SkeletonId { get; set; }
 	public List<BoneMaskEntry> Bones { get; set; } = [];
-	public IEnumerable<Guid> GetDependencies() => SkeletonId == Guid.Empty ? [] : [SkeletonId];
 
 	public float[] Compile(Skeleton skeleton)
 	{
@@ -232,11 +229,4 @@ public static class AnimationAssetJson
 	public static object Read(string path, Type type) =>
 		JsonSerializer.Deserialize(File.ReadAllText(path), type, Options)
 		?? throw new InvalidOperationException($"Animation asset '{path}' is empty.");
-
-	public static IEnumerable<Guid> Dependencies(object asset) => asset switch
-	{
-		IDataAssetDependencies dependencies => dependencies.GetDependencies(),
-		AnimationGraph graph => graph.Nodes.Select(node => node.MaskId).Where(id => id != Guid.Empty),
-		_ => []
-	};
 }
