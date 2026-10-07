@@ -132,20 +132,10 @@ public sealed class DataAssetEditor
 			try
 			{
 				var value = property.GetValue(target);
-				var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(property.Name, property.PropertyType, value));
-				if (drawResult.Handled)
+				var drawResult = DrawValue(property.Name, property.PropertyType, value);
+				if (drawResult.Changed)
 				{
-					if (drawResult.Changed)
-					{
-						property.SetValue(target, drawResult.Value);
-						changed = true;
-					}
-
-					continue;
-				}
-
-				if (TryDrawNestedProperty(target, property, value))
-				{
+					property.SetValue(target, drawResult.Value);
 					changed = true;
 				}
 			}
@@ -465,44 +455,130 @@ public sealed class DataAssetEditor
 				assetId => _assetSelectionService.Select(assetId)));
 	}
 
-	private bool TryDrawNestedProperty(object target, PropertyInfo property, object? value)
+	internal PropertyDrawerResult DrawValue(string label, Type valueType, object? value)
 	{
-		var propertyType = property.PropertyType;
-		if (IsNestedObjectType(propertyType) == false)
+		if (valueType.IsArray)
 		{
-			DrawUnsupportedProperty(property.Name, propertyType);
-			return false;
+			return DrawArray(label, valueType, value as Array);
 		}
 
-		var propertyValue = value;
-		var changed = false;
-		if (propertyValue is null)
+		var drawResult = _propertyDrawerRegistry.Draw(CreatePropertyDrawerContext(label, valueType, value));
+		if (drawResult.Handled)
 		{
-			var constructor = propertyType.GetConstructor(Type.EmptyTypes);
-			if (constructor is null)
+			return drawResult;
+		}
+
+		if (IsNestedObjectType(valueType) == false)
+		{
+			DrawUnsupportedProperty(label, valueType);
+			return new PropertyDrawerResult(true, false, value);
+		}
+
+		var nextValue = value;
+		var changed = DrawCollapsibleGroup(label, () =>
+		{
+			if (nextValue is null)
 			{
-				DrawUnsupportedProperty(property.Name, propertyType);
+				var canCreate = DataAssetArrayEditing.CanCreateElement(valueType);
+				ImGui.TextDisabled("Null");
+				ImGui.BeginDisabled(canCreate == false);
+				try
+				{
+					if (ImGui.Button("Create"))
+					{
+						nextValue = DataAssetArrayEditing.CreateElement(valueType);
+						return true;
+					}
+				}
+				finally
+				{
+					ImGui.EndDisabled();
+				}
+
 				return false;
 			}
 
-			propertyValue = constructor.Invoke(null);
-			property.SetValue(target, propertyValue);
-			changed = true;
+			return DrawObjectProperties(nextValue, nextValue.GetType(), includeHeader: false);
+		});
+
+		return new PropertyDrawerResult(true, changed, nextValue);
+	}
+
+	private PropertyDrawerResult DrawArray(string label, Type arrayType, Array? value)
+	{
+		if (arrayType.IsSZArray == false)
+		{
+			DrawUnsupportedProperty(label, arrayType);
+			return new PropertyDrawerResult(true, false, value);
 		}
 
-		if (propertyType.IsValueType)
+		var elementType = arrayType.GetElementType()!;
+		var next = value;
+		// Keep the ImGui ID stable when the element count changes.
+		var changed = DrawCollapsibleGroup($"{label} ({value?.Length ?? 0})###Array", () =>
 		{
-			var boxedValue = propertyValue;
-			if (DrawObjectProperties(boxedValue, propertyType, includeHeader: true, property.Name))
+			var removeIndex = -1;
+			var elementsChanged = false;
+			if (next is null || next.Length == 0)
 			{
-				property.SetValue(target, boxedValue);
-				changed = true;
+				ImGui.TextDisabled("Empty array");
 			}
 
-			return changed;
-		}
+			for (var index = 0; index < (next?.Length ?? 0); index++)
+			{
+				ImGui.PushID(index);
+				try
+				{
+					var elementResult = DrawValue($"[{index}]", elementType, next!.GetValue(index));
+					if (elementResult.Changed)
+					{
+						next.SetValue(elementResult.Value, index);
+						elementsChanged = true;
+					}
 
-		return DrawObjectProperties(propertyValue, propertyType, includeHeader: true, property.Name) || changed;
+					if (ImGui.Button("Remove element"))
+					{
+						removeIndex = index;
+					}
+				}
+				finally
+				{
+					ImGui.PopID();
+				}
+
+				ImGui.Separator();
+			}
+
+			if (removeIndex >= 0)
+			{
+				next = DataAssetArrayEditing.RemoveElement(next!, removeIndex);
+				elementsChanged = true;
+			}
+
+			var canAdd = DataAssetArrayEditing.CanCreateElement(elementType);
+			ImGui.BeginDisabled(canAdd == false);
+			try
+			{
+				if (ImGui.Button("Add element"))
+				{
+					next = DataAssetArrayEditing.AddElement(next, elementType);
+					elementsChanged = true;
+				}
+			}
+			finally
+			{
+				ImGui.EndDisabled();
+			}
+
+			if (canAdd == false)
+			{
+				ImGui.TextDisabled($"{elementType.Name} needs a public parameterless constructor to add elements.");
+			}
+
+			return elementsChanged;
+		});
+
+		return new PropertyDrawerResult(true, changed, next);
 	}
 
 	private static IReadOnlyList<PropertyInfo> GetEditableProperties(Type targetType)
