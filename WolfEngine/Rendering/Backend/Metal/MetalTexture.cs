@@ -5,6 +5,7 @@ using WolfEngine.Rendering.Abstraction;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalTexture : IGfxTexture, IDisposable
 {
 	private bool _isDisposed;

@@ -28,6 +28,7 @@ internal struct MetalAccelerationStructureInstanceDescriptorData
 }
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAccelerationStructure, IDisposable
 {
 	public MTLPrimitiveAccelerationStructureDescriptor MetalDescriptor;
@@ -83,6 +84,7 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 }
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerationStructure, IDisposable
 {
 	public MTLInstanceAccelerationStructureDescriptor MetalDescriptor;

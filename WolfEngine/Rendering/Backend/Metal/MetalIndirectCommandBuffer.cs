@@ -7,6 +7,7 @@ using WolfEngine.Rendering.Passes;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
 {
 	private readonly Dictionary<uint, CommandBufferReferences> _commandReferences = new();
@@ -167,7 +168,8 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			RemoveBufferRefs(in previousRefs);
 		}
 
-		using var command = Buffer.IndirectRenderCommand(commandIndex);
+		// Not disposed: the command is owned by the indirect command buffer and returned autoreleased.
+		var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
 		command.SetVertexBuffer(instanceBuffer.Buffer, 0, perDrawBindings.InstanceRegisterIndex);

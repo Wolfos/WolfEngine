@@ -7,6 +7,7 @@ using WolfEngine.Rendering.Abstraction;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 {
 	internal const ulong SamplesPerBlock = 64;
@@ -192,7 +193,8 @@ internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 				throw new ArgumentOutOfRangeException(nameof(endIndex));
 			}
 			var length = endIndex - startIndex + 1;
-			using var data = SampleBuffer.ResolveCounterRange(new NSRange { location = startIndex, length = length });
+			// Not disposed: resolveCounterRange returns autoreleased data the caller does not own.
+			var data = SampleBuffer.ResolveCounterRange(new NSRange { location = startIndex, length = length });
 			if (data.MutableBytes == IntPtr.Zero || data.Length < length * sizeof(ulong))
 			{
 				throw new InvalidOperationException("Metal returned an incomplete timestamp counter result.");

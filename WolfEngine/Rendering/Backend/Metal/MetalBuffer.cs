@@ -6,6 +6,7 @@ using WolfEngine.Rendering.Abstraction;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDisposable
 {
 	// Metal indirect commands cache native buffer pointers without retaining them.

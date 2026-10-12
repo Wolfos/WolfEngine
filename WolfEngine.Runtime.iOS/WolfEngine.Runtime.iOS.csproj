@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		iOS runtime host. Not part of WolfEngine.sln: building it needs the iOS workload and Xcode,
+		which Windows machines do not have. Build it directly:
+		  dotnet build WolfEngine.Runtime.iOS/WolfEngine.Runtime.iOS.csproj -r iossimulator-arm64
+		  dotnet publish WolfEngine.Runtime.iOS/WolfEngine.Runtime.iOS.csproj -r ios-arm64
+	-->
+	<PropertyGroup>
+		<TargetFramework>net10.0-ios</TargetFramework>
+		<OutputType>Exe</OutputType>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<!-- Bindless needs argument buffer tier 2 (A13 and later). iOS 17 is the oldest release on every such device we target. -->
+		<SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
+		<ApplicationId>com.wolfengine.runtime</ApplicationId>
+		<ApplicationTitle>WolfEngine</ApplicationTitle>
+		<!-- iOS forbids JIT, so published builds are NativeAOT-compiled. This is what the spike is proving. -->
+		<PublishAot>true</PublishAot>
+		<TrimMode>full</TrimMode>
+		<!-- SharpMetal marks its whole API macOS-only, but it is plain objc_msgSend against Metal, which iOS has. -->
+		<NoWarn>$(NoWarn);CA1416</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+	</ItemGroup>
+
+</Project>

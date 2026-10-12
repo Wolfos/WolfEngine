@@ -10,6 +10,7 @@ using WolfEngine.Platform;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissionTimeline, IGpuProfilerDevice
 {
 	private const int SubmissionsPerFrame = 2;
@@ -367,7 +368,7 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 		textureDescriptor.TextureType = descriptor.Dimension == TextureDimension.Texture3D
 			? MTLTextureType.Type3D
 			: MTLTextureType.Type2D;
-		textureDescriptor.StorageMode = MTLStorageMode.Managed;
+		textureDescriptor.StorageMode = MTLStorageMode.Shared;
 		textureDescriptor.Usage = ToUsage(descriptor.Usage);
 
 		var texture = _device.NewTexture(textureDescriptor);

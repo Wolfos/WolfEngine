@@ -178,11 +178,21 @@ internal unsafe class WolfRendererMetal : IRenderer
 
         while (_isRunning && _shutdownRequested == false)
         {
-            PumpEvents(ref @event);
+            // Metal hands out command buffers, encoders and drawables autoreleased. Nothing else drains
+            // a pool on this thread, so without this one they would accumulate for the life of the process.
+            var pool = ObjCNative.ObjcAutoreleasePoolPush();
+            try
+            {
+                PumpEvents(ref @event);
 
-            // TODO: Delta time
-            _updateCallback(0);
-            _renderCallback(0);
+                // TODO: Delta time
+                _updateCallback(0);
+                _renderCallback(0);
+            }
+            finally
+            {
+                ObjCNative.ObjcAutoreleasePoolPop(pool);
+            }
         }
     }
 

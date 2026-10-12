@@ -5,11 +5,13 @@ using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Platform;
 using WolfEngine.Profiling;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
-[SupportedOSPlatform("MacOS")]
+[SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 {
 	private readonly MTLCommandQueue _queue;
@@ -58,6 +60,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_descriptorTable = descriptorTable;
 		_indirectCompactionKernel = indirectCompactionKernel;
 		_commandBuffer = _queue.CommandBuffer();
+		TakeOwnership(_commandBuffer.NativePtr);
 	}
 
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
@@ -683,6 +686,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		blit.FillBuffer(metalBuffer.Buffer, new NSRange { location = 0, length = metalBuffer.Buffer.Length }, 0);
 		blit.EndEncoding();
 		if (blit.NativePtr != IntPtr.Zero)
@@ -826,6 +830,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		TakeOwnership(encoder.NativePtr);
 		encoder.BuildAccelerationStructure(
 			blas.AccelerationStructure,
 			blas.MetalDescriptor,
@@ -877,6 +882,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		EndActiveEncoders();
 		var encoder = _commandBuffer.AccelerationStructureCommandEncoder();
+		TakeOwnership(encoder.NativePtr);
 		for (var i = 0; i < instances.Length; i++)
 		{
 			if (instances[i].AccelerationStructure is MetalBottomLevelAccelerationStructure blas)
@@ -1009,6 +1015,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		EndActiveEncoders();
 
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		blit.CopyFromBuffer(
 			sourceBuffer.Buffer,
 			(nuint)sourceOffset,
@@ -1047,6 +1054,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		EndActiveEncoders();
 
 		var blit = _commandBuffer.BlitCommandEncoder();
+		TakeOwnership(blit.NativePtr);
 		var origin = new MTLOrigin { x = 0, y = 0, z = 0 };
 		var size = new MTLSize { width = width, height = height, depth = 1 };
 		blit.CopyFromTexture(source, 0, 0, origin, size, destination, 0, 0, origin);
@@ -1149,6 +1157,21 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		_disposed = true;
 	}
 
+	/// <summary>
+	/// Metal returns command buffers and encoders autoreleased, so the caller does not own them. This class
+	/// releases them through SharpMetal's Dispose, so it must retain them first. Otherwise the enclosing
+	/// autorelease pool releases them a second time when it drains.
+	/// </summary>
+	private static void TakeOwnership(IntPtr nativePtr)
+	{
+		if (nativePtr == IntPtr.Zero)
+		{
+			return;
+		}
+
+		ObjCNative.ObjcRetain(nativePtr);
+	}
+
 	private void EnsureRenderEncoder()
 	{
 		ThrowIfDisposed();
@@ -1216,6 +1239,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 
 		ConfigureRenderStageProfiling(descriptor);
 		_renderEncoder = _commandBuffer.RenderCommandEncoder(descriptor);
+		TakeOwnership(_renderEncoder.NativePtr);
 		_currentGraphicsPipeline = null;
 		_bindlessBuffersSetRender = false;
 		_lastBindlessVersionRender = uint.MaxValue;
@@ -1255,6 +1279,7 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 			descriptor.DispatchType = dispatchType;
 			ConfigureComputeStageProfiling(descriptor);
 			_computeEncoder = _commandBuffer.ComputeCommandEncoder(descriptor);
+			TakeOwnership(_computeEncoder.NativePtr);
 		}
 		finally
 		{
