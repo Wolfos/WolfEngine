@@ -1,17 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+	<!--
+		The runtime host shared by every platform: it mounts a cooked game, builds the engine's services, loads
+		scenes and steps gameplay. Platform executables (WolfEngine.Runtime.Desktop, WolfEngine.Runtime.iOS) own
+		the entry point, threads and render loop. It must stay NativeAOT-compatible, so it does not reference
+		WolfEngine.UI, whose ASP.NET Core dependency does not exist on iOS; hosts add UI themselves.
+	-->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
-    <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
-    <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
-    <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
-    <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
+		<ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
+		<ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
+		<ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
+	</ItemGroup>
+
 </Project>

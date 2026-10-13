@@ -26,6 +26,7 @@ internal static class ProjectGameplayScaffolder
 	private const string EngineTestsSolutionReference = @"..\WolfEngine\WolfEngine.Tests\WolfEngine.Tests.csproj";
 	private const string EditorAutomationSolutionReference = @"..\WolfEngine\WolfEngine.Editor.Automation\WolfEngine.Editor.Automation.csproj";
 	private const string RuntimeSolutionReference = @"..\WolfEngine\WolfEngine.Runtime\WolfEngine.Runtime.csproj";
+	private const string DesktopRuntimeSolutionReference = @"..\WolfEngine\WolfEngine.Runtime.Desktop\WolfEngine.Runtime.Desktop.csproj";
 	private const string BuildSolutionReference = @"..\WolfEngine\WolfEngine.Build\WolfEngine.Build.csproj";
 	private const string AudioTestsSolutionReference = @"..\WolfEngine\WolfEngine.Audio.Tests\WolfEngine.Audio.Tests.csproj";
 	private const string AudioSolutionReference = @"..\WolfEngine\WolfEngine.Audio\WolfEngine.Audio.csproj";
@@ -150,6 +151,7 @@ internal static class ProjectGameplayScaffolder
 		var engineTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var editorAutomationProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var runtimeProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
+		var desktopRuntimeProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var buildProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var audioTestsProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
 		var audioProjectGuid = Guid.NewGuid().ToString("B").ToUpperInvariant();
@@ -182,6 +184,8 @@ internal static class ProjectGameplayScaffolder
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Editor.Automation", "{{EditorAutomationSolutionReference}}", "{{editorAutomationProjectGuid}}"
 			  EndProject
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Runtime", "{{RuntimeSolutionReference}}", "{{runtimeProjectGuid}}"
+			  EndProject
+			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Runtime.Desktop", "{{DesktopRuntimeSolutionReference}}", "{{desktopRuntimeProjectGuid}}"
 			  EndProject
 			  Project("{{CsProjectTypeGuid}}") = "WolfEngine.Build", "{{BuildSolutionReference}}", "{{buildProjectGuid}}"
 			  EndProject
@@ -247,6 +251,10 @@ internal static class ProjectGameplayScaffolder
 			  		{{runtimeProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
 			  		{{runtimeProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
 			  		{{runtimeProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
+			  		{{desktopRuntimeProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+			  		{{desktopRuntimeProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
+			  		{{desktopRuntimeProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
+			  		{{desktopRuntimeProjectGuid}}.Release|Any CPU.Build.0 = Release|Any CPU
 			  		{{buildProjectGuid}}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 			  		{{buildProjectGuid}}.Debug|Any CPU.Build.0 = Debug|Any CPU
 			  		{{buildProjectGuid}}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -275,6 +283,7 @@ internal static class ProjectGameplayScaffolder
 			  		{{physicsProjectGuid}} = {{engineFolderGuid}}
 			  		{{editorAutomationProjectGuid}} = {{engineFolderGuid}}
 			  		{{runtimeProjectGuid}} = {{engineFolderGuid}}
+			  		{{desktopRuntimeProjectGuid}} = {{engineFolderGuid}}
 			  		{{buildProjectGuid}} = {{engineFolderGuid}}
 			  		{{audioProjectGuid}} = {{engineFolderGuid}}
 			  		{{uiProjectGuid}} = {{engineFolderGuid}}

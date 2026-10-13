@@ -88,7 +88,7 @@ public static class GameBuilder
 
 		Directory.CreateDirectory(staging);
 		var rid = GetCurrentRid();
-		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime", "WolfEngine.Runtime.csproj");
+		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime.Desktop", "WolfEngine.Runtime.Desktop.csproj");
 		var publishArgs = new List<string>
 		{
 			"publish",

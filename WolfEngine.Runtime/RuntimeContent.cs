@@ -1,15 +1,11 @@
 using WolfEngine.Animation;
-using System.Reflection;
-using System.Runtime.Loader;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using ImGuiNET;
 using WolfEngine.Audio;
-using WolfEngine.Serialization;
 
 namespace WolfEngine.Runtime;
 
@@ -210,26 +206,5 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 		var world = new World(WorldTag.Game);
 		CookedSceneCell.Instantiate(world, cells);
 		return world;
-	}
-}
-
-public sealed class GameplayAssemblyLoader
-{
-	public (Assembly Assembly, global::WolfEngine.Gameplay.IGameplayModule Module) Load(byte[] bytes, byte[]? symbols = null)
-	{
-		using var stream = new MemoryStream(bytes, false);
-		using var symbolStream = symbols is null ? null : new MemoryStream(symbols, false);
-		var assembly = symbolStream is null
-			? AssemblyLoadContext.Default.LoadFromStream(stream)
-			: AssemblyLoadContext.Default.LoadFromStream(stream, symbolStream);
-		// Scenes are loaded before any gameplay code runs, so register the gameplay serializers now.
-		SerializedTypeRegistry.EnsureRegistered(assembly);
-		var method = assembly.GetTypes()
-			.Select(type => type.GetMethod("CreateModule", BindingFlags.Public | BindingFlags.Static))
-			.SingleOrDefault(candidate => candidate is not null)
-			?? throw new InvalidDataException("Gameplay assembly has no unique public CreateModule entrypoint.");
-		var module = (global::WolfEngine.Gameplay.IGameplayModule?)method.Invoke(null, null)
-			?? throw new InvalidDataException("Gameplay CreateModule returned null.");
-		return (assembly, module);
 	}
 }
