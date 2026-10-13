@@ -52,7 +52,9 @@ public sealed class CompiledAnimationGraph
 		}
 
 		// Copy authoring data once so live edits cannot mutate a program already in use.
-		var copy = JsonSerializer.Deserialize<AnimationGraph>(JsonSerializer.Serialize(graph, AnimationAssetJson.Options), AnimationAssetJson.Options)!;
+		var copy = JsonSerializer.Deserialize(
+			JsonSerializer.SerializeToUtf8Bytes(graph, EngineJsonContext.Default.AnimationGraph),
+			EngineJsonContext.Default.AnimationGraph)!;
 		if (copy.Nodes is null || copy.Parameters is null)
 		{
 			throw new InvalidOperationException("Graph nodes and parameters must be arrays.");

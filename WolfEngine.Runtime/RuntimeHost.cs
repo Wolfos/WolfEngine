@@ -142,9 +142,9 @@ public sealed class RuntimeHost : IDisposable
 		Console.WriteLine($"runtime mounted {catalog.Manifest.Packs.Count} cooked packs");
 		RuntimeTarget.EnsureCanRun(catalog.Manifest.Target);
 
-		var settings = JsonSerializer.Deserialize<CookedRuntimeSettings>(
+		var settings = JsonSerializer.Deserialize(
 			               catalog.Read(catalog.Manifest.RuntimeSettingsId),
-			               AssetJson.SerializerOptions)
+			               EngineJsonContext.Default.CookedRuntimeSettings)
 		               ?? throw new InvalidDataException("Runtime settings are invalid.");
 
 		RegisterSerializers(options.ComponentAssemblies);

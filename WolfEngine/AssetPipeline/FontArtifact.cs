@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WolfEngine.AssetPipeline;
 
@@ -34,10 +35,16 @@ public sealed record FontAssetSummary
 public sealed record FontGlyph(uint Id, float Advance, float Left, float Bottom, float Right, float Top,
 	int AtlasX, int AtlasY, int AtlasWidth, int AtlasHeight);
 
-public static class FontArtifactSerializer
+public static partial class FontArtifactSerializer
 {
+	/// <summary>Source-generated, so a NativeAOT game can read fonts. The options match how artifacts have always been written.</summary>
+	[JsonSourceGenerationOptions(WriteIndented = true)]
+	[JsonSerializable(typeof(FontArtifact))]
+	private sealed partial class FontArtifactJson : JsonSerializerContext
+	{
+	}
+
 	private const uint Magic = 0x544E4657; // WFNT
-	private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
 	public static void Write(string path, FontArtifact artifact)
 	{
@@ -46,7 +53,7 @@ public static class FontArtifactSerializer
 		using var writer = new BinaryWriter(stream);
 		writer.Write(Magic);
 		writer.Write(FontArtifact.CurrentVersion);
-		var metadata = JsonSerializer.SerializeToUtf8Bytes(artifact with { PixelsRgba = [], FontData = [] }, Json);
+		var metadata = JsonSerializer.SerializeToUtf8Bytes(artifact with { PixelsRgba = [], FontData = [] }, FontArtifactJson.Default.FontArtifact);
 		WriteBlock(writer, metadata);
 		WriteBlock(writer, artifact.PixelsRgba);
 		WriteBlock(writer, artifact.FontData);
@@ -63,7 +70,7 @@ public static class FontArtifactSerializer
 		using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
 		if (reader.ReadUInt32() != Magic || reader.ReadInt32() != FontArtifact.CurrentVersion)
 			throw new InvalidDataException("Unsupported font artifact header.");
-		var artifact = JsonSerializer.Deserialize<FontArtifact>(ReadBlock(reader, 4 * 1024 * 1024), Json)
+		var artifact = JsonSerializer.Deserialize(ReadBlock(reader, 4 * 1024 * 1024), FontArtifactJson.Default.FontArtifact)
 		               ?? throw new InvalidDataException("Missing font metadata.");
 		var pixels = ReadBlock(reader, 4096 * 4096 * 4);
 		var font = ReadBlock(reader, 64 * 1024 * 1024);

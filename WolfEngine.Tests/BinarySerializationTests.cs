@@ -194,26 +194,35 @@ public sealed class BinarySerializationTests
 		{
 			foreach (var property in obj.ToArray())
 			{
-				obj[property.Key] = ChangedValue(property.Value);
+				if (property.Value is JsonObject or JsonArray)
+				{
+					ChangeEveryValue(property.Value);
+				}
+				else
+				{
+					obj[property.Key] = ChangedValue(property.Value);
+				}
 			}
 		}
 		else if (node is JsonArray array)
 		{
 			for (var i = 0; i < array.Count; i++)
 			{
-				array[i] = ChangedValue(array[i]);
+				if (array[i] is JsonObject or JsonArray)
+				{
+					ChangeEveryValue(array[i]!);
+				}
+				else
+				{
+					array[i] = ChangedValue(array[i]);
+				}
 			}
 		}
 	}
 
+	/// <summary>A changed copy of a leaf value. Containers are changed in place by <see cref="ChangeEveryValue"/>.</summary>
 	private static JsonNode? ChangedValue(JsonNode? value)
 	{
-		if (value is JsonObject or JsonArray)
-		{
-			ChangeEveryValue(value);
-			return value;
-		}
-
 		if (value is not JsonValue leaf)
 		{
 			return value;

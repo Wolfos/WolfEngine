@@ -141,7 +141,7 @@ public static class GameBuilder
 			new WolfPackSource(
 				RuntimeSettingsId,
 				"RuntimeSettings",
-				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, AssetJson.SerializerOptions),
+				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, EngineJsonContext.Default.CookedRuntimeSettings),
 				[])
 		];
 		if (options.Debug)
@@ -196,7 +196,7 @@ public static class GameBuilder
 			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId }
 		];
 		File.WriteAllBytes(Path.Combine(contentRoot, "bootstrap.wolfmanifest"),
-			JsonSerializer.SerializeToUtf8Bytes(manifest, AssetJson.SerializerOptions));
+			JsonSerializer.SerializeToUtf8Bytes(manifest, EngineJsonContext.Default.WolfBootstrapManifest));
 		ValidateCleanOutput(staging, projectRoot);
 		if (Directory.Exists(output))
 			Directory.Delete(output, true);

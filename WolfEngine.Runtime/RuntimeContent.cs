@@ -108,13 +108,13 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			nameof(AssetType.Terrain) when expectedType == typeof(TerrainAsset) =>
 				TerrainAssetSerializer.Read(stream, id.ToString("D")),
 			nameof(AssetType.Material) when expectedType == typeof(Material) =>
-				CreateMaterial(JsonSerializer.Deserialize<MaterialAsset>(bytes, AssetJson.SerializerOptions)!),
+				CreateMaterial(JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.MaterialAsset)!),
 			nameof(AssetType.Skeleton) when expectedType == typeof(Skeleton) => SkeletonSerializer.Read(stream).ToSkeleton(),
             nameof(AssetType.AnimationClip) when expectedType == typeof(AnimationClip) => AnimationClipSerializer.Read(stream).ToClip(),
-            nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize<AnimationGraph>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize<AnimationSet>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize<AnimationSequence>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize<BoneMask>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationGraph),
+            nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSet),
+            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSequence),
+            nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.BoneMask),
             nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
 			nameof(AssetType.Prefab) when expectedType == typeof(Prefab) => CreatePrefab(id, bytes),
 			_ => throw new InvalidOperationException(
@@ -191,7 +191,7 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 	{
 		if (_catalog.GetEntry(sceneId).Kind != nameof(AssetType.Scene))
 			throw new InvalidDataException($"Asset '{sceneId}' is not a scene.");
-		var scene = JsonSerializer.Deserialize<SceneManifestDocument>(_catalog.Read(sceneId), AssetJson.SerializerOptions)
+		var scene = JsonSerializer.Deserialize(_catalog.Read(sceneId), EngineJsonContext.Default.SceneManifestDocument)
 			?? throw new InvalidDataException("Cooked scene manifest is invalid.");
 		if (scene.Version != SceneManifestDocument.CurrentVersion)
 			throw new InvalidDataException($"Unsupported scene version {scene.Version}.");
