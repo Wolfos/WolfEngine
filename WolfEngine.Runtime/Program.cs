@@ -14,6 +14,7 @@ using WolfEngine.Rendering.Shaders;
 using WolfEngine.Rendering.UI;
 using WolfEngine.Audio;
 using WolfEngine.UI;
+using WolfEngine.Serialization;
 
 namespace WolfEngine.Runtime;
 
@@ -48,6 +49,14 @@ public static class Program
 			AssetJson.SerializerOptions) ?? throw new InvalidDataException("Runtime settings are invalid.");
 		if (options.Frames > 0)
 			Screen.VSyncEnabled = false;
+
+		// Each assembly registers its component and data asset serializers the first time it is used, which can be
+		// after the first scene is read, so register every engine assembly that declares them up front.
+		SerializedTypeRegistry.EnsureRegistered(typeof(World).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(Camera).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(RigidbodySystem).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(AudioService).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(ServiceCollectionExtensions).Assembly);
 
 		var gameplaySymbols = catalog.Manifest.GameplaySymbolsId == Guid.Empty ? null : catalog.Read(catalog.Manifest.GameplaySymbolsId);
 		var (_, gameplay) = new GameplayAssemblyLoader().Load(

@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
+using WolfEngine.Serialization;
 
 namespace WolfEngine;
 
@@ -42,10 +43,14 @@ public sealed class Prefab
 	// Entities in parent-before-child order; index 0 is the root.
 	private readonly EntityTemplate[] _entities;
 
-	private Prefab(Guid assetId, EntityTemplate[] entities)
+	// Prefab-local index of each entity id, for cooked components whose entity references are stored as ids.
+	private readonly Dictionary<Guid, int>? _localIndices;
+
+	private Prefab(Guid assetId, EntityTemplate[] entities, Dictionary<Guid, int>? localIndices = null)
 	{
 		AssetId = assetId;
 		_entities = entities;
+		_localIndices = localIndices;
 	}
 
 	public Guid AssetId { get; }
@@ -53,22 +58,68 @@ public sealed class Prefab
 	/// <summary>Number of entities every instance creates, the root included.</summary>
 	public int EntityCount => _entities.Length;
 
-	/// <summary>Reads a cooked prefab document and builds its template.</summary>
-	/// <param name="resolveComponentType">
-	/// Maps a serialized component to its runtime type. Returning null leaves that component out of the template.
-	/// </param>
-	public static Prefab Load(Guid assetId, ReadOnlySpan<byte> utf8Json, Func<PrefabDocumentComponent, Type?> resolveComponentType)
+	/// <summary>
+	/// Reads a prefab cooked by <see cref="CookedPrefab.Write"/>. Component data refers into <paramref name="data"/>,
+	/// which must not be modified while the prefab is in use.
+	/// </summary>
+	public static Prefab LoadCooked(Guid assetId, byte[] data)
 	{
-		var document = JsonSerializer.Deserialize<PrefabDocument>(utf8Json, AssetJson.SerializerOptions)
-			?? throw new InvalidDataException($"Prefab '{assetId}' is not a valid prefab document.");
-		return Create(assetId, document, resolveComponentType);
+		var entities = CookedPrefab.Read(assetId, data);
+		var localIndices = new Dictionary<Guid, int>(entities.Count);
+		for (var i = 0; i < entities.Count; i++)
+		{
+			localIndices[entities[i].EntityId] = i;
+		}
+
+		var templates = new EntityTemplate[entities.Count];
+		for (var i = 0; i < entities.Count; i++)
+		{
+			var source = entities[i];
+			var parentIndex = -1;
+			if (i > 0)
+			{
+				if (source.ParentEntityId is not { } parentId ||
+				    localIndices.TryGetValue(parentId, out parentIndex) == false ||
+				    parentIndex >= i)
+				{
+					throw new InvalidDataException(
+						$"Cooked prefab '{assetId}' entity '{source.EntityId}' does not follow its parent.");
+				}
+			}
+
+			var position = Vector3.Zero;
+			var rotation = Quaternion.Identity;
+			var scale = Vector3.One;
+			if (source.LocalTransform is { } transform)
+			{
+				Matrix4x4.Decompose(transform, out scale, out rotation, out position);
+			}
+
+			var components = new ComponentTemplate[source.Components.Count];
+			for (var componentIndex = 0; componentIndex < components.Length; componentIndex++)
+			{
+				components[componentIndex] = new CookedComponentTemplate(source.Components[componentIndex], source.EntityId);
+			}
+
+			templates[i] = new EntityTemplate(
+				source.Name,
+				source.Enabled,
+				parentIndex,
+				source.LocalTransform.HasValue,
+				position,
+				rotation,
+				scale,
+				components);
+		}
+
+		return new Prefab(assetId, templates, localIndices);
 	}
 
 	/// <summary>Builds a template from an already resolved prefab document.</summary>
 	/// <param name="resolveComponentType">
 	/// Maps a serialized component to its runtime type. Returning null leaves that component out of the template.
 	/// </param>
-	public static Prefab Create(Guid assetId, PrefabDocument document, Func<PrefabDocumentComponent, Type?> resolveComponentType)
+	public static Prefab Create(Guid assetId, PrefabDocument document, Func<ComponentDocument, Type?> resolveComponentType)
 	{
 		ArgumentNullException.ThrowIfNull(document);
 		ArgumentNullException.ThrowIfNull(resolveComponentType);
@@ -138,6 +189,7 @@ public sealed class Prefab
 		}
 
 		var instance = ArrayPool<Entity>.Shared.Rent(_entities.Length);
+		var references = _localIndices is null ? null : new InstanceEntityReferences(_localIndices, instance);
 		var root = default(Entity);
 		try
 		{
@@ -179,7 +231,7 @@ public sealed class Prefab
 				var components = _entities[i].Components;
 				for (var componentIndex = 0; componentIndex < components.Length; componentIndex++)
 				{
-					components[componentIndex].Add(world, instance[i], instance);
+					components[componentIndex].Add(world, instance[i], instance, references);
 				}
 			}
 
@@ -204,11 +256,11 @@ public sealed class Prefab
 	/// Orders the entities reachable from the root depth first, parents before children and siblings in file
 	/// order, which is the order the editor places a prefab in. Entities not under the root are not part of it.
 	/// </summary>
-	private static List<PrefabDocumentEntity> OrderFromRoot(Guid assetId, PrefabDocument document)
+	internal static List<EntityDocument> OrderFromRoot(Guid assetId, PrefabDocument document)
 	{
 		var entities = document.Entities ?? [];
-		var entitiesById = new Dictionary<Guid, PrefabDocumentEntity>(entities.Count);
-		var childrenByParent = new Dictionary<Guid, List<PrefabDocumentEntity>>();
+		var entitiesById = new Dictionary<Guid, EntityDocument>(entities.Count);
+		var childrenByParent = new Dictionary<Guid, List<EntityDocument>>();
 		for (var i = 0; i < entities.Count; i++)
 		{
 			var entity = entities[i];
@@ -236,9 +288,9 @@ public sealed class Prefab
 			throw new InvalidDataException($"Prefab '{assetId}' does not contain its root entity '{document.RootEntityId}'.");
 		}
 
-		var ordered = new List<PrefabDocumentEntity>(entities.Count);
+		var ordered = new List<EntityDocument>(entities.Count);
 		var visited = new HashSet<Guid>();
-		var pending = new Stack<PrefabDocumentEntity>();
+		var pending = new Stack<EntityDocument>();
 		pending.Push(root);
 		while (pending.TryPop(out var entity))
 		{
@@ -262,9 +314,9 @@ public sealed class Prefab
 
 	private static ComponentTemplate[] CreateComponentTemplates(
 		Guid assetId,
-		PrefabDocumentEntity entity,
+		EntityDocument entity,
 		IReadOnlyDictionary<Guid, int> localIndices,
-		Func<PrefabDocumentComponent, Type?> resolveComponentType)
+		Func<ComponentDocument, Type?> resolveComponentType)
 	{
 		var components = entity.Components ?? [];
 		var templates = new List<ComponentTemplate>(components.Count);
@@ -302,7 +354,7 @@ public sealed class Prefab
 
 	// Mirrors what scenes persist: names and hierarchy are carried by the entity record, and transient or
 	// editor-side state is never part of a spawned instance.
-	private static bool IsInstantiatedComponentType(Type componentType)
+	internal static bool IsInstantiatedComponentType(Type componentType)
 	{
 		return componentType != typeof(NameComponent)
 		       && Attribute.IsDefined(componentType, typeof(NotSerializedAttribute)) == false
@@ -401,7 +453,7 @@ public sealed class Prefab
 	/// Reads a serialized entity reference: an object carrying <see cref="EntityReferenceIdPropertyName"/>.
 	/// Anything else, including null, is not a reference to resolve.
 	/// </summary>
-	private static bool TryReadEntityReferenceId(ref Utf8JsonReader reader, out Guid entityId)
+	internal static bool TryReadEntityReferenceId(ref Utf8JsonReader reader, out Guid entityId)
 	{
 		entityId = Guid.Empty;
 		if (reader.TokenType != JsonTokenType.StartObject)
@@ -444,7 +496,32 @@ public sealed class Prefab
 	private abstract class ComponentTemplate
 	{
 		/// <param name="instance">The new instance's entities by local index; may be longer than the prefab.</param>
-		public abstract void Add(World world, Entity entity, Entity[] instance);
+		/// <param name="references">Resolves entity ids to <paramref name="instance"/>; only set for cooked prefabs.</param>
+		public abstract void Add(World world, Entity entity, Entity[] instance, IEntityReferenceDecoder? references);
+	}
+
+	/// <summary>
+	/// A cooked component, decoded again for every instance. Decoding is a straight read with no reflection, so
+	/// this is cheap, and it gives every instance its own collections and its own entity references.
+	/// </summary>
+	private sealed class CookedComponentTemplate(CookedComponent component, Guid entityId) : ComponentTemplate
+	{
+		public override void Add(World world, Entity entity, Entity[] instance, IEntityReferenceDecoder? references)
+		{
+			var reader = new BinaryAssetReader(component.Data.Span, references);
+			component.Type.ReadAndAdd(ref reader, world, entity);
+			CookedSceneCell.EnsureFullyRead(ref reader, component, entityId);
+		}
+	}
+
+	/// <summary>Resolves a cooked prefab's entity ids to the entities of the instance being spawned.</summary>
+	private sealed class InstanceEntityReferences(IReadOnlyDictionary<Guid, int> localIndices, Entity[] instance)
+		: IEntityReferenceDecoder
+	{
+		public Entity Decode(Guid id)
+		{
+			return localIndices.TryGetValue(id, out var localIndex) ? instance[localIndex] : default;
+		}
 	}
 
 	private sealed class ComponentTemplate<T> : ComponentTemplate where T : struct, IEntityComponent
@@ -475,7 +552,7 @@ public sealed class Prefab
 
 		public static ComponentTemplate<T> CreateFreshDefault() => new();
 
-		public override void Add(World world, Entity entity, Entity[] instance)
+		public override void Add(World world, Entity entity, Entity[] instance, IEntityReferenceDecoder? references)
 		{
 			if (_fresh)
 			{

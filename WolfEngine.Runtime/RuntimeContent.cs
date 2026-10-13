@@ -9,6 +9,7 @@ using WolfEngine.Rendering.UI;
 using WolfEngine.Mathematics;
 using ImGuiNET;
 using WolfEngine.Audio;
+using WolfEngine.Serialization;
 
 namespace WolfEngine.Runtime;
 
@@ -135,19 +136,12 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
         mesh.BoneIndices.Length > 0 ? mesh.BoneIndices : null, mesh.BoneWeights.Length > 0 ? mesh.BoneWeights : null,
         mesh.ShadowOpaqueIndices, mesh.ShadowAlphaTestIndices);
 
-	// Cooked prefabs are the authored file, which stores every entity's full component data (nested prefab
-	// instances included, as of the prefab's last save), as cooked scene cells do. Every component has to
-	// resolve: a spawned unit silently missing a gameplay component is harder to track down than a load failure.
-	private static Prefab CreatePrefab(Guid id, byte[] bytes) =>
-		Prefab.Load(id, bytes, component => RuntimeComponentTypes.Resolve(component.TypeId, component.Type));
+	// Cooked prefabs store every entity's full component data (nested prefab instances included, as of the
+	// prefab's last save), as cooked scene cells do. The build already failed on any component it could not
+	// resolve, so a spawned unit cannot silently miss a gameplay component.
+	private static Prefab CreatePrefab(Guid id, byte[] bytes) => Prefab.LoadCooked(id, bytes);
 
-	private object CreateDataAsset(byte[] bytes, Type expectedType)
-	{
-		var file = JsonSerializer.Deserialize<DataAssetFile>(bytes, AssetJson.SerializerOptions)
-			?? throw new InvalidDataException("Cooked data asset is invalid.");
-		return file.Data.Deserialize(expectedType, AssetJson.GetSerializerOptions(expectedType))
-			?? throw new InvalidDataException($"Could not deserialize data asset '{expectedType.FullName}'.");
-	}
+	private static object CreateDataAsset(byte[] bytes, Type expectedType) => CookedDataAsset.Read(bytes, expectedType);
 
 	private Material CreateMaterial(MaterialAsset asset)
 	{
@@ -201,140 +195,22 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 	{
 		if (_catalog.GetEntry(sceneId).Kind != nameof(AssetType.Scene))
 			throw new InvalidDataException($"Asset '{sceneId}' is not a scene.");
-		var scene = JsonSerializer.Deserialize<CookedSceneManifest>(_catalog.Read(sceneId), AssetJson.SerializerOptions)
+		var scene = JsonSerializer.Deserialize<SceneManifestDocument>(_catalog.Read(sceneId), AssetJson.SerializerOptions)
 			?? throw new InvalidDataException("Cooked scene manifest is invalid.");
-		if (scene.Version != 1)
+		if (scene.Version != SceneManifestDocument.CurrentVersion)
 			throw new InvalidDataException($"Unsupported scene version {scene.Version}.");
 
-		var cells = new List<CookedCell>();
 		var cellIds = new[] { scene.GlobalCellId }
 			.Concat(scene.SpatialCells.Select(cell => cell.CellId))
 			.Where(id => id != Guid.Empty);
+		var cells = new List<CookedSceneCell>();
 		foreach (var id in cellIds)
-		{
-			var cell = JsonSerializer.Deserialize<CookedCell>(_catalog.Read(id), AssetJson.SerializerOptions)
-				?? throw new InvalidDataException($"Scene cell '{id}' is invalid.");
-			cells.Add(cell);
-		}
+			cells.Add(CookedSceneCell.Read(_catalog.Read(id)));
 
 		var world = new World(WorldTag.Game);
-		var entities = new Dictionary<Guid, Entity>();
-		foreach (var saved in cells.SelectMany(cell => cell.Entities))
-		{
-			var entity = saved.HasName ? world.CreateEntity(saved.Name) : world.CreateEntity();
-			if (saved.LocalTransform is { } transform)
-				world.AddTransform(entity, transform);
-
-			world.SetEnabled(entity, saved.Enabled);
-			entities.Add(saved.EntityId, entity);
-		}
-
-		foreach (var saved in cells.SelectMany(cell => cell.Entities))
-		{
-			var entity = entities[saved.EntityId];
-			foreach (var component in saved.Components)
-				ApplyComponent(world, entity, component, entities);
-			if (saved.ParentEntityId is { } parent && entities.TryGetValue(parent, out var parentEntity))
-				world.SetParent(entity, parentEntity);
-		}
-
+		CookedSceneCell.Instantiate(world, cells);
 		return world;
 	}
-
-	private static void ApplyComponent(World world, Entity entity, CookedComponent component, IReadOnlyDictionary<Guid, Entity> entities)
-	{
-		var type = RuntimeComponentTypes.Resolve(component.TypeId, component.Type);
-
-		var options = new JsonSerializerOptions(AssetJson.GetSerializerOptions(type));
-		options.Converters.Insert(0, new EntityReferenceConverter(entities));
-		var value = component.Data.Deserialize(type, options) ?? Activator.CreateInstance(type)!;
-		typeof(RuntimeSceneLoader)
-			.GetMethod(nameof(AddComponent), BindingFlags.Static | BindingFlags.NonPublic)!
-			.MakeGenericMethod(type)
-			.Invoke(null, [world, entity, value]);
-	}
-
-	private static void AddComponent<T>(World world, Entity entity, object value) where T : struct, IEntityComponent => world.AddComponent(entity, (T)value);
-
-	private sealed class EntityReferenceConverter(IReadOnlyDictionary<Guid, Entity> entities) : JsonConverter<Entity>
-	{
-		public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-		{
-			using var document = JsonDocument.ParseValue(ref reader);
-			if (document.RootElement.ValueKind == JsonValueKind.Object
-			    && document.RootElement.TryGetProperty(Prefab.EntityReferenceIdPropertyName, out var value)
-			    && Guid.TryParse(value.GetString(), out var id)
-			    && entities.TryGetValue(id, out var entity))
-				return entity;
-
-			return default;
-		}
-
-		public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) => throw new NotSupportedException();
-	}
-}
-
-internal static class RuntimeComponentTypes
-{
-	/// <summary>Resolves a cooked component's runtime type, failing when it is not an entity component struct.</summary>
-	public static Type Resolve(string stableId, string typeName)
-	{
-		var type = Find(stableId, typeName);
-		if (type is null || !type.IsValueType || !typeof(IEntityComponent).IsAssignableFrom(type))
-			throw new InvalidDataException($"Runtime component type '{stableId}' is unavailable.");
-
-		return type;
-	}
-
-	private static Type? Find(string stableId, string typeName)
-	{
-		var gameplayName = stableId.StartsWith("gameplay:", StringComparison.Ordinal) ? stableId[9..] : null;
-		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-		{
-			if (gameplayName is not null && assembly.GetType(gameplayName, false) is { } gameplayType)
-				return gameplayType;
-			if (Type.GetType(typeName, false) is { } type)
-				return type;
-		}
-
-		return null;
-	}
-}
-
-public sealed class CookedSceneManifest
-{
-	public int Version { get; set; }
-	public Guid GlobalCellId { get; set; }
-	public List<CookedSpatialCell> SpatialCells { get; set; } = [];
-}
-
-public sealed class CookedSpatialCell
-{
-	public Guid CellId { get; set; }
-}
-
-public sealed class CookedCell
-{
-	public int Version { get; set; }
-	public List<CookedEntity> Entities { get; set; } = [];
-}
-
-public sealed class CookedEntity
-{
-	public Guid EntityId { get; set; }
-	public Guid? ParentEntityId { get; set; }
-	public bool HasName { get; set; }
-	public string Name { get; set; } = string.Empty;
-	public bool Enabled { get; set; } = true;
-	public System.Numerics.Matrix4x4? LocalTransform { get; set; }
-	public List<CookedComponent> Components { get; set; } = [];
-}
-
-public sealed class CookedComponent
-{
-	public string Type { get; set; } = string.Empty;
-	public string TypeId { get; set; } = string.Empty;
-	public JsonElement Data { get; set; }
 }
 
 public sealed class GameplayAssemblyLoader
@@ -346,6 +222,8 @@ public sealed class GameplayAssemblyLoader
 		var assembly = symbolStream is null
 			? AssemblyLoadContext.Default.LoadFromStream(stream)
 			: AssemblyLoadContext.Default.LoadFromStream(stream, symbolStream);
+		// Scenes are loaded before any gameplay code runs, so register the gameplay serializers now.
+		SerializedTypeRegistry.EnsureRegistered(assembly);
 		var method = assembly.GetTypes()
 			.Select(type => type.GetMethod("CreateModule", BindingFlags.Public | BindingFlags.Static))
 			.SingleOrDefault(candidate => candidate is not null)

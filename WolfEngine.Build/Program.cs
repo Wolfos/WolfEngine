@@ -8,6 +8,7 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
 using WolfEngine.Editor.Tooling;
+using WolfEngine.Serialization;
 
 namespace WolfEngine.Build;
 
@@ -104,9 +105,14 @@ public static class GameBuilder
 		};
 		AddSymbolProperties(publishArgs, options.Debug);
 		Run("dotnet", publishArgs, engineSolutionRoot);
-		var leakedEngineAssets = Path.Combine(staging, "Assets");
-		if (Directory.Exists(leakedEngineAssets))
-			Directory.Delete(leakedEngineAssets, true);
+		// The engine project copies its loose content next to its assembly for the editor. A game gets those assets
+		// from the cooked packs, so the publish output's copies are removed.
+		foreach (var leakedFolder in new[] { "Assets", "BuiltInContent" })
+		{
+			var leakedPath = Path.Combine(staging, leakedFolder);
+			if (Directory.Exists(leakedPath))
+				Directory.Delete(leakedPath, true);
+		}
 
 		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
 			.GroupBy(edge => edge.FromNodeId)
@@ -117,12 +123,13 @@ public static class GameBuilder
 			AddSerializedDependencies(asset, graph);
 
 		var fontSources = ResolveCssFonts(gameplayDll, database);
+		var cooker = CreateContentCooker(gameplayDll);
 		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Concat(fontSources.Values).Distinct().ToArray();
 		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
 		var groups = closure
-			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? []))
+			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? [], cooker))
 			.GroupBy(source => GetPackName(database[source.Id].Asset.Type))
 			.ToDictionary(group => group.Key, group => group.ToList());
 
@@ -199,9 +206,17 @@ public static class GameBuilder
 		return new GameBuildResult(output, closure.Count);
 	}
 
-	private static WolfPackSource CreateSource(MountedAsset mountedAsset, IReadOnlyCollection<Guid> dependencies)
+	private static WolfPackSource CreateSource(
+		MountedAsset mountedAsset,
+		IReadOnlyCollection<Guid> dependencies,
+		ContentCooker cooker)
 	{
 		var asset = mountedAsset.Asset;
+		if (asset.Type is AssetType.SceneCell or AssetType.Prefab or AssetType.DataAsset)
+		{
+			return new WolfPackSource(asset.Id, asset.Type.ToString(), CookAuthoredJson(mountedAsset, cooker), dependencies);
+		}
+
 		string path;
 		if (asset.Type == AssetType.Texture2D)
 		{
@@ -322,6 +337,7 @@ public static class GameBuilder
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
 		AssetType.AudioClip => "audio",
+		AssetType.Font => "fonts",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 
@@ -388,6 +404,85 @@ public static class GameBuilder
 		return result;
 	}
 
+	/// <summary>
+	/// Scene cells, prefabs and data assets ship in the binary format the generated serializers read, so a game
+	/// never parses JSON or uses reflection to load them.
+	/// </summary>
+	private static byte[] CookAuthoredJson(MountedAsset mountedAsset, ContentCooker cooker)
+	{
+		var asset = mountedAsset.Asset;
+		var absolute = mountedAsset.Mount.GetAbsolutePath(asset.RelativeAssetPath);
+		if (!File.Exists(absolute))
+			throw new FileNotFoundException($"Cooked input for '{asset.Id}' is missing.", absolute);
+
+		var json = File.ReadAllBytes(absolute);
+		try
+		{
+			return asset.Type switch
+			{
+				AssetType.SceneCell => cooker.CookSceneCell(asset.Id, DeserializeDocument<SceneCellDocument>(json)),
+				AssetType.Prefab => cooker.CookPrefab(asset.Id, DeserializeDocument<PrefabDocument>(json)),
+				AssetType.DataAsset => cooker.CookDataAsset(asset.Id, DeserializeDocument<DataAssetFile>(json)),
+				_ => throw new InvalidOperationException($"Asset type '{asset.Type}' is not cooked from JSON.")
+			};
+		}
+		catch (Exception exception) when (exception is JsonException or InvalidDataException or InvalidOperationException)
+		{
+			throw new InvalidDataException($"Could not cook '{asset.RelativeAssetPath}' ({asset.Id}): {exception.Message}", exception);
+		}
+	}
+
+	private static T DeserializeDocument<T>(byte[] json) where T : class
+	{
+		return JsonSerializer.Deserialize<T>(json, AssetJson.SerializerOptions)
+		       ?? throw new InvalidDataException($"The file is not a valid {typeof(T).Name}.");
+	}
+
+	/// <summary>
+	/// Loads the gameplay assembly the cooker resolves gameplay types from, and makes sure it and every engine
+	/// assembly that declares components have registered their generated serializers.
+	/// </summary>
+	private static ContentCooker CreateContentCooker(string gameplayDll)
+	{
+		var gameplayAssembly = System.Reflection.Assembly.Load(File.ReadAllBytes(gameplayDll));
+		var gameplayAssemblyName = gameplayAssembly.GetName().Name;
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.ECS.World).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(Camera).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.Physics.RigidbodySystem).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(AudioService).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.UI.ServiceCollectionExtensions).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(gameplayAssembly);
+
+		return new ContentCooker((typeId, typeName) =>
+			ResolveCookedType(typeId, gameplayAssembly, gameplayAssemblyName) ??
+			ResolveCookedType(typeName, gameplayAssembly, gameplayAssemblyName));
+	}
+
+	/// <summary>
+	/// Resolves a saved type name. Gameplay types are looked up in the loaded gameplay assembly, both by their
+	/// <c>gameplay:</c> stable id and by an assembly-qualified name naming the gameplay assembly, because asking
+	/// the runtime to load the gameplay assembly by name would find a different copy, or none.
+	/// </summary>
+	private static Type? ResolveCookedType(string name, System.Reflection.Assembly gameplayAssembly, string? gameplayAssemblyName)
+	{
+		const string gameplayPrefix = "gameplay:";
+		if (string.IsNullOrWhiteSpace(name))
+			return null;
+		if (name.StartsWith(gameplayPrefix, StringComparison.Ordinal))
+			return gameplayAssembly.GetType(name[gameplayPrefix.Length..], false);
+
+		var separator = name.IndexOf(',');
+		if (separator > 0)
+		{
+			var assemblyPart = name[(separator + 1)..].Trim();
+			var assemblySimpleName = assemblyPart.Split(',')[0].Trim();
+			if (string.Equals(assemblySimpleName, gameplayAssemblyName, StringComparison.Ordinal))
+				return gameplayAssembly.GetType(name[..separator].Trim(), false);
+		}
+
+		return Type.GetType(name, false);
+	}
+
 	private static void ValidateGameplayAssembly(string path)
 	{
 		var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(path));
@@ -401,16 +496,32 @@ public static class GameBuilder
 
 	private static void Run(string file, IReadOnlyList<string> args, string cwd)
 	{
+		// Forward child output through Console rather than letting the child inherit this process's stdout.
+		// A host can then route it: the editor automation server reserves stdout for its protocol.
 		var info = new ProcessStartInfo(file)
 		{
 			WorkingDirectory = cwd,
-			UseShellExecute = false
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
 		};
 		foreach (var arg in args)
 			info.ArgumentList.Add(arg);
 
 		using var process = Process.Start(info)
 			?? throw new InvalidOperationException($"Could not start {file}.");
+		process.OutputDataReceived += (_, line) =>
+		{
+			if (line.Data is not null)
+				Console.Out.WriteLine(line.Data);
+		};
+		process.ErrorDataReceived += (_, line) =>
+		{
+			if (line.Data is not null)
+				Console.Error.WriteLine(line.Data);
+		};
+		process.BeginOutputReadLine();
+		process.BeginErrorReadLine();
 		process.WaitForExit();
 		if (process.ExitCode != 0)
 			throw new InvalidOperationException($"{file} exited with code {process.ExitCode}.");

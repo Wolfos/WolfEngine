@@ -13,6 +13,7 @@ using WolfEngine.Profiling;
 using WolfEngine.Rendering;
 using WolfEngine.Rendering.Passes;
 using WolfEngine.Rendering.UI;
+using WolfEngine.Build;
 
 namespace WolfEngine.Editor.Automation;
 
@@ -48,6 +49,8 @@ public sealed class EditorRemoteAutomationController
 	private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private bool _initialized;
 
+	private readonly IGameBuildService _gameBuildService;
+
 	public EditorRemoteAutomationController(
 		string projectPath,
 		IEditorProjectService projectService,
@@ -71,9 +74,11 @@ public sealed class EditorRemoteAutomationController
 		EditorWindowRegistry windows,
 		EditorCameraSystem cameraSystem,
 		IImGuiInputSink imguiInput,
-		SceneLoadRequests sceneLoadRequests)
+		SceneLoadRequests sceneLoadRequests,
+		IGameBuildService gameBuildService)
 	{
 		_sceneLoadRequests = sceneLoadRequests;
+		_gameBuildService = gameBuildService;
 		_cameraSystem = cameraSystem;
 		_viewportStateBus = viewportStateBus;
 		_projectPath = projectPath;
@@ -600,6 +605,17 @@ public sealed class EditorRemoteAutomationController
 				_editorFrameCoordinator.CompletedSequence,
 				_renderFrameCoordinator.CompletedSequence);
 		}, cancellationToken);
+
+	/// <summary>
+	/// Builds the open project into a runnable game, as the Build menu does. Building compiles gameplay code and
+	/// publishes the runtime, which takes far longer than a frame, so like the menu it runs off the editor thread.
+	/// </summary>
+	public Task<GameBuildResult> BuildGameAsync(string outputPath, bool debug, CancellationToken cancellationToken)
+	{
+		var fullOutputPath = Path.GetFullPath(outputPath);
+
+		return Task.Run(() => _gameBuildService.Build(fullOutputPath, debug), cancellationToken);
+	}
 
 	public Task<SceneLoadResult> LoadPlaySceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		EnqueueAsync(async () =>

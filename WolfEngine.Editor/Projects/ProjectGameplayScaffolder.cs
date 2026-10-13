@@ -11,6 +11,7 @@ internal static class ProjectGameplayScaffolder
 	private const string SolutionFolderTypeGuid = "{2150E333-8FDC-42A3-9474-1A3956D46DE8}";
 	private const string TargetFramework = "net10.0";
 	private const string EngineProjectReference = "../../WolfEngine/WolfEngine/WolfEngine.csproj";
+	private const string SourceGeneratorsProjectReference = "../../WolfEngine/WolfEngine.SourceGenerators/WolfEngine.SourceGenerators.csproj";
 	private const string EcsProjectReference = "../../WolfEngine/WolfEngine.ECS/WolfEngine.ECS.csproj";
 	private const string PhysicsProjectReference = "../../WolfEngine/WolfEngine.Physics/WolfEngine.Physics.csproj";
 	private const string AudioProjectReference = "../../WolfEngine/WolfEngine.Audio/WolfEngine.Audio.csproj";
@@ -80,6 +81,8 @@ internal static class ProjectGameplayScaffolder
 
 			   <ItemGroup>
 			     <ProjectReference Include="{EngineProjectReference}" />
+			     <!-- Generates the binary serializers for this project's components and data assets. -->
+			     <ProjectReference Include="{SourceGeneratorsProjectReference}" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 			     <ProjectReference Include="{EcsProjectReference}" />
 			     <ProjectReference Include="{PhysicsProjectReference}" />
 			     <ProjectReference Include="{AudioProjectReference}" />
