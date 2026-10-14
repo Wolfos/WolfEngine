@@ -163,6 +163,36 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 
 	public object? GetInstance(Guid assetId, Type expectedType) => Load(assetId, expectedType);
 
+	/// <summary>Diagnostic: the CPU-side data the loaded meshes and textures keep, by asset kind.</summary>
+	public string DescribeCpuMemory()
+	{
+		long meshBytes = 0;
+		var meshCount = 0;
+		long textureBytes = 0;
+		var textureCount = 0;
+		foreach (var value in _cache.Values.ToArray())
+		{
+			if (value is Mesh mesh)
+			{
+				meshCount++;
+				meshBytes += (long)mesh.Vertices.Length * 16 + (long)mesh.Normals.Length * 12 + (long)mesh.UVs.Length * 8 +
+				             (long)mesh.Tangents.Length * 16 +
+				             ((long)mesh.Indices.Length + mesh.ShadowOpaqueIndices.Length + mesh.ShadowAlphaTestIndices.Length) * 4;
+			}
+			else if (value is Texture texture)
+			{
+				textureCount++;
+				foreach (var mip in texture.MipLevels ?? [])
+				{
+					textureBytes += mip.Data?.Length ?? 0;
+				}
+			}
+		}
+
+		return $"Asset CPU data: {meshCount} meshes keep {meshBytes / (1024.0 * 1024.0):F1} MB of arrays, " +
+		       $"{textureCount} textures keep {textureBytes / (1024.0 * 1024.0):F1} MB of mip data.";
+	}
+
 	public void RefreshProject(string projectRootPath, AssetDatabase database) => throw new NotSupportedException("Runtime assets are immutable cooked packs.");
 
 	public void InvalidateAssets(IEnumerable<Guid> assetIds) => throw new NotSupportedException("Runtime assets are immutable cooked packs.");

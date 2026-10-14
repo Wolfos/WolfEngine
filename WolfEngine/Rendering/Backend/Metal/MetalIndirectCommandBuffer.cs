@@ -104,6 +104,9 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		Buffer = buffer;
 		CompactedBuffer = compactedBuffer;
 		CompactionArguments = compactionArguments;
+		GpuMemoryCensus.Track(this, "Indirect command buffer", buffer.NativePtr, name);
+		GpuMemoryCensus.Track(this, "Indirect command buffer (compacted)", compactedBuffer.NativePtr, name);
+		GpuMemoryCensus.Track(this, "Indirect compaction arguments", compactionArguments.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -322,6 +325,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	public void Dispose()
 	{
+		GpuMemoryCensus.Untrack(this);
 		foreach (var entry in _bufferRefsByPointer.Values)
 		{
 			entry.Owner?.ReleaseFromIndirectUse();

@@ -103,6 +103,9 @@ internal sealed class MetalDevice : IGfxDevice, ITexturePoolDevice, IGpuSubmissi
 
 	public IGfxDescriptorTable GlobalTable => _descriptorTable;
 
+	/// <summary>The live GPU resources by kind and owner. Empty unless the GPU memory census is enabled.</summary>
+	internal string FormatMemoryReport() => GpuMemoryCensus.FormatReport(_device.NativePtr);
+
 	public GraphicsBackendKind BackendKind => GraphicsBackendKind.Metal;
 	public bool SupportsRayTracing => _device.SupportsRaytracing;
 	IGpuProfilerBackend IGpuProfilerDevice.GpuProfilerBackend => _gpuProfilerBackend;

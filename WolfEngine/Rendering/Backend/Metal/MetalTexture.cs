@@ -20,6 +20,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		ShaderResourceView = DescriptorHandle.Invalid;
 		DepthShaderResourceView = DescriptorHandle.Invalid;
 		UnorderedAccessView = DescriptorHandle.Invalid;
+		GpuMemoryCensus.Track(this, "Texture", texture.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -51,6 +52,7 @@ internal sealed class MetalTexture : IGfxTexture, IDisposable
 		}
 
 		_isDisposed = true;
+		GpuMemoryCensus.Untrack(this);
 		if (ShaderResourceView.IsValid)
 		{
 			_descriptorTable.Free(ShaderResourceView);

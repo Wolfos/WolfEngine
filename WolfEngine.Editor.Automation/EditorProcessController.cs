@@ -141,8 +141,8 @@ public sealed class EditorProcessController : IAsyncDisposable
 	public Task<SceneLoadResult> LoadSceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadSceneAsync(scenePath, cancellationToken);
 
-	public Task<global::WolfEngine.Build.GameBuildResult> BuildGameAsync(string outputPath, bool debug, CancellationToken cancellationToken) =>
-		GetRunningEditor().BuildGameAsync(outputPath, debug, cancellationToken);
+	public Task<global::WolfEngine.Build.GameBuildResult> BuildGameAsync(string outputPath, bool debug, string? target, CancellationToken cancellationToken) =>
+		GetRunningEditor().BuildGameAsync(outputPath, debug, target, cancellationToken);
 
 	public Task<SceneLoadResult> LoadPlaySceneAsync(string scenePath, CancellationToken cancellationToken) =>
 		GetRunningEditor().LoadPlaySceneAsync(scenePath, cancellationToken);

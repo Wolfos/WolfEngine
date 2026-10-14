@@ -3,7 +3,7 @@ namespace WolfEngine.Runtime.iOS;
 [Register("SceneDelegate")]
 public sealed class SceneDelegate : UIResponder, IUIWindowSceneDelegate
 {
-	private SpikeRenderer? _renderer;
+	private IAppFrameHost? _renderer;
 
 	[Export("window")]
 	public UIWindow? Window { get; set; }
@@ -30,7 +30,15 @@ public sealed class SceneDelegate : UIResponder, IUIWindowSceneDelegate
 		Window.MakeKeyAndVisible();
 
 		var probesPassed = EngineProbes.RunAll();
-		_renderer = new SpikeRenderer(view, probesPassed);
+		var manifest = IosGameHost.FindBundledManifest();
+		if (manifest is null)
+		{
+			// Built without game content: show the renderer check instead.
+			_renderer = new SpikeRenderer(view, probesPassed);
+			return;
+		}
+
+		_renderer = IosGameHost.Create(view, manifest);
 	}
 
 	[Export("sceneDidBecomeActive:")]

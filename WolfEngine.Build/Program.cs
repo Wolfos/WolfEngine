@@ -20,7 +20,18 @@ public sealed class GameBuildContext
 	public IAssetCatalog? AssetCatalog { get; init; }
 }
 
-public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false);
+/// <param name="Target">
+/// The runtime identifier to build for, or null for the machine building. Besides the host's own, a Mac can build
+/// <c>ios-arm64</c>: the cooked content an iOS app bundles, without a desktop executable.
+/// </param>
+public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false, string? Target = null);
+
+/// <summary>What a build produces for one runtime identifier.</summary>
+internal readonly record struct GameBuildTarget(
+	string Rid,
+	GraphicsBackendKind Backend,
+	string TextureTarget,
+	bool PublishesDesktopRuntime);
 
 public readonly record struct GameBuildResult(string OutputPath, int CookedAssetCount);
 
@@ -87,31 +98,11 @@ public static class GameBuilder
 			Directory.Delete(staging, true);
 
 		Directory.CreateDirectory(staging);
-		var rid = GetCurrentRid();
-		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime.Desktop", "WolfEngine.Runtime.Desktop.csproj");
-		var publishArgs = new List<string>
+		var target = ResolveTarget(options.Target);
+		Console.WriteLine($"Building for {target.Rid}.");
+		if (target.PublishesDesktopRuntime)
 		{
-			"publish",
-			runtimeProject,
-			"--configuration",
-			configuration,
-			"--runtime",
-			rid,
-			"--self-contained",
-			config.SelfContained ? "true" : "false",
-			"--output",
-			staging,
-			"/m:1"
-		};
-		AddSymbolProperties(publishArgs, options.Debug);
-		Run("dotnet", publishArgs, engineSolutionRoot);
-		// The engine project copies its loose content next to its assembly for the editor. A game gets those assets
-		// from the cooked packs, so the publish output's copies are removed.
-		foreach (var leakedFolder in new[] { "Assets", "BuiltInContent" })
-		{
-			var leakedPath = Path.Combine(staging, leakedFolder);
-			if (Directory.Exists(leakedPath))
-				Directory.Delete(leakedPath, true);
+			PublishDesktopRuntime(engineSolutionRoot, configuration, target.Rid, config.SelfContained, staging, options.Debug);
 		}
 
 		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
@@ -129,11 +120,11 @@ public static class GameBuilder
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
 		var groups = closure
-			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? [], cooker))
+			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? [], cooker, target.TextureTarget))
 			.GroupBy(source => GetPackName(database[source.Id].Asset.Type))
 			.ToDictionary(group => group.Key, group => group.ToList());
 
-		var shaderSources = CookShaders(provider, GetBackend());
+		var shaderSources = CookShaders(provider, target.Backend);
 		groups["shaders"] = shaderSources;
 		groups["bootstrap"] =
 		[
@@ -153,7 +144,7 @@ public static class GameBuilder
 		var manifest = new WolfBootstrapManifest
 		{
 			FontSources = fontSources,
-			Target = rid,
+			Target = target.Rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
 			InitialSceneId = sceneIds[0],
@@ -209,7 +200,8 @@ public static class GameBuilder
 	private static WolfPackSource CreateSource(
 		MountedAsset mountedAsset,
 		IReadOnlyCollection<Guid> dependencies,
-		ContentCooker cooker)
+		ContentCooker cooker,
+		string textureTarget)
 	{
 		var asset = mountedAsset.Asset;
 		if (asset.Type is AssetType.SceneCell or AssetType.Prefab or AssetType.DataAsset)
@@ -220,9 +212,8 @@ public static class GameBuilder
 		string path;
 		if (asset.Type == AssetType.Texture2D)
 		{
-			var target = OperatingSystem.IsMacOS() ? "metal" : "d3d12";
-			path = asset.Artifacts.FirstOrDefault(item => item.Kind == "RuntimeTexture" && item.Target == target)?.RelativePath
-				?? throw new InvalidOperationException($"Texture '{asset.Id}' has no {target} runtime artifact.");
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == "RuntimeTexture" && item.Target == textureTarget)?.RelativePath
+				?? throw new InvalidOperationException($"Texture '{asset.Id}' has no {textureTarget} runtime artifact.");
 		}
 		else if (asset.Type == AssetType.AudioClip)
 		{
@@ -343,14 +334,59 @@ public static class GameBuilder
 
 	private static Guid CreateDeterministicId(string value) => new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
-	private static GraphicsBackendKind GetBackend()
+	/// <summary>
+	/// The host's own target, or iOS from a Mac. iOS uses the Metal textures and shaders a Mac cooks, which the
+	/// devices load as they are, so it needs no cooking of its own; its app is built separately.
+	/// </summary>
+	private static GameBuildTarget ResolveTarget(string? requestedRid)
 	{
-		if (OperatingSystem.IsMacOS())
-			return GraphicsBackendKind.Metal;
-		if (OperatingSystem.IsWindows())
-			return GraphicsBackendKind.D3D12;
+		var hostRid = GetCurrentRid();
+		var hostBackend = OperatingSystem.IsMacOS() ? GraphicsBackendKind.Metal : GraphicsBackendKind.D3D12;
+		var hostTextureTarget = OperatingSystem.IsMacOS() ? "metal" : "d3d12";
+		if (requestedRid is null || string.Equals(requestedRid, hostRid, StringComparison.Ordinal))
+			return new GameBuildTarget(hostRid, hostBackend, hostTextureTarget, PublishesDesktopRuntime: true);
 
-		throw new PlatformNotSupportedException();
+		if (string.Equals(requestedRid, "ios-arm64", StringComparison.Ordinal) && OperatingSystem.IsMacOS())
+			return new GameBuildTarget(requestedRid, GraphicsBackendKind.Metal, "metal", PublishesDesktopRuntime: false);
+
+		throw new PlatformNotSupportedException(
+			$"Cannot build for '{requestedRid}' on {hostRid}. Builds target the host, or ios-arm64 from a Mac.");
+	}
+
+	private static void PublishDesktopRuntime(
+		string engineSolutionRoot,
+		string configuration,
+		string rid,
+		bool selfContained,
+		string staging,
+		bool debug)
+	{
+		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime.Desktop", "WolfEngine.Runtime.Desktop.csproj");
+		var publishArgs = new List<string>
+		{
+			"publish",
+			runtimeProject,
+			"--configuration",
+			configuration,
+			"--runtime",
+			rid,
+			"--self-contained",
+			selfContained ? "true" : "false",
+			"--output",
+			staging,
+			"/m:1"
+		};
+		AddSymbolProperties(publishArgs, debug);
+		Run("dotnet", publishArgs, engineSolutionRoot);
+
+		// The engine project copies its loose content next to its assembly for the editor. A game gets those assets
+		// from the cooked packs, so the publish output's copies are removed.
+		foreach (var leakedFolder in new[] { "Assets", "BuiltInContent" })
+		{
+			var leakedPath = Path.Combine(staging, leakedFolder);
+			if (Directory.Exists(leakedPath))
+				Directory.Delete(leakedPath, true);
+		}
 	}
 
 	private static string GetCurrentRid()

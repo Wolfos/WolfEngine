@@ -14,7 +14,7 @@ namespace WolfEngine.Runtime.iOS;
 /// drawable through the renderer, as the render graph does, and clears it. The colour pulses green when every engine
 /// probe passed and red when any failed.
 /// </summary>
-internal sealed class SpikeRenderer : IDisposable
+internal sealed class SpikeRenderer : IAppFrameHost
 {
 	private readonly MetalLayerView _view;
 	private readonly bool _probesPassed;

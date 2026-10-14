@@ -47,6 +47,8 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 		AccelerationStructure = accelerationStructure;
 		ScratchBuffer = scratchBuffer;
 		BuildFence = buildFence;
+		GpuMemoryCensus.Track(this, "BLAS", accelerationStructure.NativePtr, name);
+		GpuMemoryCensus.Track(this, "BLAS scratch", scratchBuffer.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -61,6 +63,7 @@ internal sealed class MetalBottomLevelAccelerationStructure : IGfxBottomLevelAcc
 
 	public void Dispose()
 	{
+		GpuMemoryCensus.Untrack(this);
 		if (BuildFence.NativePtr != IntPtr.Zero)
 		{
 			BuildFence.Dispose();
@@ -107,6 +110,9 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 		InstanceDescriptorBuffer = instanceDescriptorBuffer;
 		ScratchBuffer = scratchBuffer;
 		BuildFence = buildFence;
+		GpuMemoryCensus.Track(this, "TLAS", accelerationStructure.NativePtr, name);
+		GpuMemoryCensus.Track(this, "TLAS instances", instanceDescriptorBuffer.NativePtr, name);
+		GpuMemoryCensus.Track(this, "TLAS scratch", scratchBuffer.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -123,6 +129,7 @@ internal sealed class MetalTopLevelAccelerationStructure : IGfxTopLevelAccelerat
 
 	public void Dispose()
 	{
+		GpuMemoryCensus.Untrack(this);
 		if (BuildFence.NativePtr != IntPtr.Zero)
 		{
 			BuildFence.Dispose();

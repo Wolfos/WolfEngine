@@ -44,6 +44,12 @@ public sealed class RuntimeHostOptions
 	/// real time until the host stops.
 	/// </summary>
 	public int FrameCount { get; init; }
+
+	/// <summary>
+	/// Whether to simulate physics. Platforms without a physics library build, such as iOS until Jolt is built for
+	/// it, turn this off; rigidbodies, colliders and vehicles then stay where they were placed.
+	/// </summary>
+	public bool EnablePhysics { get; init; } = true;
 }
 
 /// <summary>
@@ -58,12 +64,13 @@ public sealed class RuntimeHost : IDisposable
 	private readonly RenderViewId _primaryView;
 	private readonly World _initialWorld;
 	private readonly int _frameCount;
+	private readonly int _memoryReportFrame = ReadMemoryReportFrame();
 	private readonly IWorldManager _worldManager;
 	private readonly IRenderPipeline _renderPipeline;
 	private readonly IRenderer _renderer;
 	private readonly EditorFrameCoordinator _frameCoordinator;
 	private readonly IAudioRuntime _audio;
-	private readonly RigidbodySystem _rigidbodySystem;
+	private readonly RigidbodySystem? _rigidbodySystem;
 	private readonly IInputSystem _input;
 	private readonly IPointerInputRouter _pointerRouter;
 	private readonly SceneLoadRequests _sceneRequests;
@@ -85,7 +92,7 @@ public sealed class RuntimeHost : IDisposable
 		_renderer = services.GetRequiredService<IRenderer>();
 		_frameCoordinator = services.GetRequiredService<EditorFrameCoordinator>();
 		_audio = services.GetRequiredService<IAudioRuntime>();
-		_rigidbodySystem = services.GetRequiredService<RigidbodySystem>();
+		_rigidbodySystem = options.EnablePhysics ? services.GetRequiredService<RigidbodySystem>() : null;
 		_input = services.GetRequiredService<IInputSystem>();
 		_pointerRouter = services.GetRequiredService<IPointerInputRouter>();
 		_sceneRequests = services.GetRequiredService<SceneLoadRequests>();
@@ -102,9 +109,17 @@ public sealed class RuntimeHost : IDisposable
 		_worldManager.AddSystem(new AnimationRenderResourceLifecycle(services.GetRequiredService<RenderGraph>()));
 		// Before TransformSystem, so exposed bone sockets propagate in the frame they are posed.
 		_worldManager.AddSystem<AnimationSystem>();
-		// Register before TransformSystem so interpolated child poses propagate this frame.
-		_worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
-		_worldManager.AddSystem(_rigidbodySystem, SystemExecutionGroup.Gameplay);
+		if (_rigidbodySystem is not null)
+		{
+			// Register before TransformSystem so interpolated child poses propagate this frame.
+			_worldManager.AddSystem(new VehicleSystem(), SystemExecutionGroup.Gameplay);
+			_worldManager.AddSystem(_rigidbodySystem, SystemExecutionGroup.Gameplay);
+		}
+		else
+		{
+			Console.WriteLine("runtime physics disabled");
+		}
+
 		_worldManager.AddSystem<TransformSystem>();
 
 		var renderGraph = services.GetRequiredService<RenderGraph>();
@@ -206,7 +221,7 @@ public sealed class RuntimeHost : IDisposable
 
 		// The accumulator left over after this frame's steps is how far the frame being rendered has
 		// advanced past the last one, which is what rigidbody interpolation blends by.
-		_rigidbodySystem.PublishFixedStepAccumulator(world, _accumulator, Settings.FixedDeltaTime);
+		_rigidbodySystem?.PublishFixedStepAccumulator(world, _accumulator, Settings.FixedDeltaTime);
 		_gameplay.Update(delta, world);
 		_worldManager.Update(delta, WorldTag.Game, SystemExecutionGroup.All);
 		_audio.Update(delta);
@@ -220,6 +235,10 @@ public sealed class RuntimeHost : IDisposable
 		_renderPipeline.PublishSnapshot([new RenderViewSubmission(_primaryView, camera, transform, config)]);
 		_frames++;
 		_frameCoordinator.PublishCompletedFrame();
+		if (_frames == _memoryReportFrame)
+		{
+			PrintMemoryReport();
+		}
 
 		return _frameCount <= 0 || _frames < _frameCount;
 	}
@@ -246,6 +265,23 @@ public sealed class RuntimeHost : IDisposable
 	{
 		AssetDatabase.ClearInstanceRegistry();
 		_services.Dispose();
+	}
+
+	/// <summary>Diagnostic: <c>WOLF_MEMORY_REPORT_FRAME=N</c> prints where memory goes once N frames have run.</summary>
+	private static int ReadMemoryReportFrame()
+	{
+		return int.TryParse(Environment.GetEnvironmentVariable("WOLF_MEMORY_REPORT_FRAME"), out var frame) ? frame : 0;
+	}
+
+	private void PrintMemoryReport()
+	{
+		Console.WriteLine($"memory report at frame {_frames}:");
+		Console.WriteLine(EngineMemoryReport.Format(_renderer));
+		Console.WriteLine(_services.GetRequiredService<RuntimeAssetStore>().DescribeCpuMemory());
+		if (_services.GetService<IPackagedShaderProvider>() is PackagedShaderProvider shaders)
+		{
+			Console.WriteLine(shaders.DescribeMemory());
+		}
 	}
 
 	/// <summary>

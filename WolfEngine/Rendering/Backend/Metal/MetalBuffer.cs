@@ -21,6 +21,7 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 		Name = name;
 		Descriptor = descriptor;
 		Buffer = buffer;
+		GpuMemoryCensus.Track(this, "Buffer", buffer.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -105,6 +106,7 @@ internal sealed class MetalBuffer : IWritableGpuBuffer, IReadableGpuBuffer, IDis
 			}
 
 			_disposeRequested = true;
+			GpuMemoryCensus.Untrack(this);
 			if (_indirectReferenceCount == 0 && _nativeDisposed == false)
 			{
 				_nativeDisposed = true;

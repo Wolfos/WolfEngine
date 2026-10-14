@@ -610,11 +610,11 @@ public sealed class EditorRemoteAutomationController
 	/// Builds the open project into a runnable game, as the Build menu does. Building compiles gameplay code and
 	/// publishes the runtime, which takes far longer than a frame, so like the menu it runs off the editor thread.
 	/// </summary>
-	public Task<GameBuildResult> BuildGameAsync(string outputPath, bool debug, CancellationToken cancellationToken)
+	public Task<GameBuildResult> BuildGameAsync(string outputPath, bool debug, string? target, CancellationToken cancellationToken)
 	{
 		var fullOutputPath = Path.GetFullPath(outputPath);
 
-		return Task.Run(() => _gameBuildService.Build(fullOutputPath, debug), cancellationToken);
+		return Task.Run(() => _gameBuildService.Build(fullOutputPath, debug, target), cancellationToken);
 	}
 
 	public Task<SceneLoadResult> LoadPlaySceneAsync(string scenePath, CancellationToken cancellationToken) =>
