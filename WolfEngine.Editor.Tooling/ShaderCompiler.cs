@@ -75,7 +75,7 @@ public class ShaderCompiler : IShaderProvider
 		var args = new List<string>
 		{
 			shaderPath,
-			"-target", "metallib",
+			"-target", "metal",
 			"-D", "WOLF_TARGET_METAL=1",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
@@ -101,8 +101,9 @@ public class ShaderCompiler : IShaderProvider
 		}
 
 		var compileArgs = args.ToArray();
-		var metalLibrary = SlangCompiler.Compile(compileArgs);
-		DumpMetalLibraryIfRequested(shaderPath, compileArgs, metalLibrary);
+		var metalSource = SlangCompiler.Compile(compileArgs);
+		var metalLibrary = MetalLibraryCompiler.Compile(metalSource, shaderPath);
+		DumpMetalShaderIfRequested(shaderPath, compileArgs, metalSource, metalLibrary);
 		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
 		return metalLibrary;
 	}
@@ -135,7 +136,7 @@ public class ShaderCompiler : IShaderProvider
 		var args = new[]
 		{
 			shaderPath,
-			"-target", "metallib",
+			"-target", "metal",
 			"-D", "WOLF_TARGET_METAL=1",
 			"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 			"-D", "WOLF_BINDLESS_MAX=16384",
@@ -144,13 +145,18 @@ public class ShaderCompiler : IShaderProvider
 			"-o", "-"
 		};
 
-		var metalLibrary = SlangCompiler.Compile(args);
-		DumpMetalLibraryIfRequested(shaderPath, args, metalLibrary);
+		var metalSource = SlangCompiler.Compile(args);
+		var metalLibrary = MetalLibraryCompiler.Compile(metalSource, shaderPath);
+		DumpMetalShaderIfRequested(shaderPath, args, metalSource, metalLibrary);
 		_cachedMetalLibraries.Add(cacheKey, metalLibrary);
 		return metalLibrary;
 	}
 
-	private static void DumpMetalLibraryIfRequested(string shaderPath, IReadOnlyList<string> compileArgs, ReadOnlySpan<byte> metalLibrary)
+	private static void DumpMetalShaderIfRequested(
+		string shaderPath,
+		IReadOnlyList<string> compileArgs,
+		ReadOnlySpan<byte> metalSource,
+		ReadOnlySpan<byte> metalLibrary)
 	{
 		var shouldDumpMetallib = Environment.GetEnvironmentVariable("WOLF_DUMP_METALLIB") == "1";
 		var shouldDumpMsl = Environment.GetEnvironmentVariable("WOLF_DUMP_MSL") == "1";
@@ -165,36 +171,14 @@ public class ShaderCompiler : IShaderProvider
 		if (shouldDumpMetallib)
 		{
 			var metallibPath = Path.Combine(shaderOutputDirectory, $"{dumpBaseName}.metallib");
-			File.WriteAllBytes(metallibPath, metalLibrary.ToArray());
+			File.WriteAllBytes(metallibPath, metalLibrary);
 		}
 
 		if (shouldDumpMsl)
 		{
-			var metalSourceArgs = RewriteMetalCompileArgsForSource(compileArgs);
-			var metalSource = SlangCompiler.Compile(metalSourceArgs);
 			var metalSourcePath = Path.Combine(shaderOutputDirectory, $"{dumpBaseName}.metal");
-			File.WriteAllBytes(metalSourcePath, metalSource.ToArray());
+			File.WriteAllBytes(metalSourcePath, metalSource);
 		}
-	}
-
-	private static string[] RewriteMetalCompileArgsForSource(IReadOnlyList<string> compileArgs)
-	{
-		var rewritten = new List<string>(compileArgs.Count);
-		for (var i = 0; i < compileArgs.Count; i++)
-		{
-			var arg = compileArgs[i];
-			if (arg == "-target" && i + 1 < compileArgs.Count)
-			{
-				rewritten.Add(arg);
-				rewritten.Add("metal");
-				i++;
-				continue;
-			}
-
-			rewritten.Add(arg);
-		}
-
-		return rewritten.ToArray();
 	}
 
 	private static string BuildMetalDumpBaseName(string shaderPath, IReadOnlyList<string> compileArgs)
@@ -335,7 +319,7 @@ public class ShaderCompiler : IShaderProvider
 		}
 
 		var normalizedDefines = BuildDefineSuffix(defines);
-		var target = backendKind == GraphicsBackendKind.Metal ? "metallib" : "dxil";
+		var target = backendKind == GraphicsBackendKind.Metal ? "metal" : "dxil";
 		var profile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "cs_6_6";
 		var stage = backendKind == GraphicsBackendKind.Metal ? "compute" : string.Empty;
 		var cacheKey = (filename, entryPoint, target, profile, stage, normalizedDefines);
@@ -350,7 +334,7 @@ public class ShaderCompiler : IShaderProvider
 			args =
 			[
 				shaderPath,
-				"-target", "metallib",
+				"-target", "metal",
 				"-D", "WOLF_TARGET_METAL=1",
 				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 				"-D", "WOLF_BINDLESS_MAX=16384",
@@ -390,6 +374,11 @@ public class ShaderCompiler : IShaderProvider
 		}
 
 		var compiled = SlangCompiler.CompileWithReflection(args.ToArray(), out var reflection);
+		if (backendKind == GraphicsBackendKind.Metal)
+		{
+			compiled = MetalLibraryCompiler.Compile(compiled, shaderPath);
+		}
+
 		var reflectionLayout = ShaderReflectionLayoutBuilder.Build(reflection);
 		var threadGroupSize = ResolveComputeThreadGroupSize(reflection, entryPoint);
 		var result = new CompiledComputeShaderWithReflection(compiled, reflectionLayout, threadGroupSize);
@@ -427,7 +416,7 @@ public class ShaderCompiler : IShaderProvider
 		}
 
 		var normalizedDefines = BuildDefineSuffix(defines);
-		var target = backendKind == GraphicsBackendKind.Metal ? "metallib" : "dxil";
+		var target = backendKind == GraphicsBackendKind.Metal ? "metal" : "dxil";
 		var vsProfile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "vs_6_0";
 		var psProfile = backendKind == GraphicsBackendKind.Metal ? string.Empty : "ps_6_0";
 		var cacheKey = (filename, vertexEntryPoint, pixelEntryPoint, target, vsProfile, psProfile, normalizedDefines);
@@ -477,6 +466,10 @@ public class ShaderCompiler : IShaderProvider
 		return result.ReflectionLayout;
 	}
 
+	/// <remarks>
+	/// For Metal this only reflects: the returned bytes are Metal source, and the library both stages share comes from
+	/// <see cref="GetMetalLibrary(string, string, string, string[])"/>.
+	/// </remarks>
 	private static (ReadOnlyMemory<byte> Bytecode, ShaderReflectionLayout ReflectionLayout) CompileGraphicsStageWithReflection(
 		string shaderPath,
 		GraphicsBackendKind backendKind,
@@ -492,7 +485,7 @@ public class ShaderCompiler : IShaderProvider
 			args =
 			[
 				shaderPath,
-				"-target", "metallib",
+				"-target", "metal",
 				"-D", "WOLF_TARGET_METAL=1",
 				"-D", "WOLF_BINDLESS_FIXED_SIZE=1",
 				"-D", "WOLF_BINDLESS_MAX=16384",
