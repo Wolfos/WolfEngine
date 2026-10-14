@@ -277,6 +277,7 @@ public sealed class RuntimeHost : IDisposable
 	{
 		Console.WriteLine($"memory report at frame {_frames}:");
 		Console.WriteLine(EngineMemoryReport.Format(_renderer));
+		Console.WriteLine(_services.GetRequiredService<RenderGraphResourceRegistry>().TransientMemory);
 		Console.WriteLine(_services.GetRequiredService<RuntimeAssetStore>().DescribeCpuMemory());
 		if (_services.GetService<IPackagedShaderProvider>() is PackagedShaderProvider shaders)
 		{
