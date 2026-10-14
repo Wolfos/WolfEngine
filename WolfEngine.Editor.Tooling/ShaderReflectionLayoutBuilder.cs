@@ -99,15 +99,17 @@ internal static class ShaderReflectionLayoutBuilder
 
 		var fields = new Dictionary<string, ShaderConstantFieldLayout>(StringComparer.Ordinal);
 		var rootOffset = checked((int)elementVarLayout.Binding.Offset);
+		var resourceExtent = 0;
 		CollectFields(
 			elementType,
 			pathPrefix: string.Empty,
 			baseOffset: rootOffset,
 			fields,
+			ref resourceExtent,
 			bufferName);
 
 		var elementSize = checked((int)elementVarLayout.Binding.Size);
-		var sizeInBytes = ResolveBufferSize(containerSize, elementSize, fields.Values, bufferName);
+		var sizeInBytes = ResolveBufferSize(containerSize, elementSize, fields.Values, resourceExtent, bufferName);
 		return new ShaderConstantBufferLayout(bufferName, registerIndex, sizeInBytes, fields);
 	}
 
@@ -151,13 +153,15 @@ internal static class ShaderReflectionLayoutBuilder
 		return checked((uint)selected.Index);
 	}
 
+	/// <param name="resourceExtent">Where the skipped resource bindings end, which can be all a block contains.</param>
 	private static int ResolveBufferSize(
 		int containerSize,
 		int elementSize,
 		IEnumerable<ShaderConstantFieldLayout> fields,
+		int resourceExtent,
 		string bufferName)
 	{
-		var maxFieldEnd = 0;
+		var maxFieldEnd = resourceExtent;
 		foreach (var field in fields)
 		{
 			var fallbackByteSize = field.ByteSize > 0 ? field.ByteSize : 1;
@@ -211,13 +215,27 @@ internal static class ShaderReflectionLayoutBuilder
 			$"Reflected parameter '{bufferName}' is neither ConstantBuffer nor ParameterBlock (kind={kindName}).");
 	}
 
+	/// <summary>
+	/// Records every constant-data leaf of <paramref name="type"/> by path. Textures, buffers and samplers are not
+	/// constant data: they are bound, never written through a field. They are skipped without walking their arrays,
+	/// because expanding the bindless descriptor arrays element by element produced tens of thousands of fields
+	/// per buffer. Only where they end is kept, in <paramref name="resourceExtent"/>, because a block holding
+	/// nothing else takes its size from it.
+	/// </summary>
 	private static void CollectFields(
 		SlangType type,
 		string pathPrefix,
 		int baseOffset,
 		Dictionary<string, ShaderConstantFieldLayout> fields,
+		ref int resourceExtent,
 		string bufferName)
 	{
+		if (ContainsConstantData(type) == false)
+		{
+			resourceExtent = Math.Max(resourceExtent, MeasureExtent(type, baseOffset));
+			return;
+		}
+
 		var typeKind = type.Kind.ToString();
 		if (string.Equals(typeKind, "Struct", StringComparison.Ordinal))
 		{
@@ -242,7 +260,7 @@ internal static class ShaderReflectionLayoutBuilder
 					? field.Name
 					: $"{pathPrefix}.{field.Name}";
 				var nextOffset = checked(baseOffset + checked((int)field.Binding.Offset));
-				CollectFields(field.Type, nextPath, nextOffset, fields, bufferName);
+				CollectFields(field.Type, nextPath, nextOffset, fields, ref resourceExtent, bufferName);
 			}
 
 			return;
@@ -272,7 +290,7 @@ internal static class ShaderReflectionLayoutBuilder
 					? $"[{i}]"
 					: $"{pathPrefix}[{i}]";
 				var elementOffset = checked(baseOffset + checked(i * stride));
-				CollectFields(elementType, elementPath, elementOffset, fields, bufferName);
+				CollectFields(elementType, elementPath, elementOffset, fields, ref resourceExtent, bufferName);
 			}
 
 			return;
@@ -290,6 +308,85 @@ internal static class ShaderReflectionLayoutBuilder
 		{
 			throw new InvalidOperationException(
 				$"Duplicate reflected shader field path '{pathPrefix}' in constant buffer '{bufferName}'.");
+		}
+	}
+
+	/// <summary>
+	/// Where a type laid out at <paramref name="baseOffset"/> ends, measured as the expanded fields used to: each leaf
+	/// ends at its offset plus its size, or one byte for leaves of unknown size. An array's last element ends last.
+	/// </summary>
+	private static int MeasureExtent(SlangType type, int baseOffset)
+	{
+		var typeKind = type.Kind.ToString();
+		if (string.Equals(typeKind, "Struct", StringComparison.Ordinal))
+		{
+			var extent = 0;
+			foreach (var field in type.Struct?.Fields ?? [])
+			{
+				if (field.Type is null || field.Binding is null)
+				{
+					continue;
+				}
+
+				extent = Math.Max(extent, MeasureExtent(field.Type, checked(baseOffset + checked((int)field.Binding.Offset))));
+			}
+
+			return extent;
+		}
+
+		if (string.Equals(typeKind, "Array", StringComparison.Ordinal))
+		{
+			if (type.Array?.ElementType is not { } elementType)
+			{
+				return 0;
+			}
+
+			var elementCount = checked((int)type.Array.ElementCount);
+			if (elementCount <= 0)
+			{
+				return 0;
+			}
+
+			var stride = checked((int)type.Array.UniformStride);
+			if (stride <= 0)
+			{
+				stride = Math.Max(GetFallbackByteSize(elementType), 1);
+			}
+
+			return MeasureExtent(elementType, checked(baseOffset + checked((elementCount - 1) * stride)));
+		}
+
+		var byteSize = GetFallbackByteSize(type);
+		return checked(baseOffset + (byteSize > 0 ? byteSize : 1));
+	}
+
+	/// <summary>Whether a type holds values a constant buffer stores, as opposed to resource bindings.</summary>
+	private static bool ContainsConstantData(SlangType type)
+	{
+		var typeKind = type.Kind.ToString();
+		switch (typeKind)
+		{
+			case "Scalar":
+			case "Vector":
+			case "Matrix":
+				return true;
+
+			case "Array":
+				return type.Array?.ElementType is { } elementType && ContainsConstantData(elementType);
+
+			case "Struct":
+				foreach (var field in type.Struct?.Fields ?? [])
+				{
+					if (field.Type is { } fieldType && ContainsConstantData(fieldType))
+					{
+						return true;
+					}
+				}
+
+				return false;
+
+			default:
+				return false;
 		}
 	}
 
