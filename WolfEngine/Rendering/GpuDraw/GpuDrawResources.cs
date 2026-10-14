@@ -15,6 +15,12 @@ public sealed class GpuDrawResources : IDisposable
 	public const int MaxMaterialCount = 65535;
 	public const int MaxMeshCount = 65535;
 	public const int MaxTerrainLayerCount = MaxMaterialCount * 16;
+	/// <summary>
+	/// The layer table starts with room for a few dozen terrain materials and doubles when an allocation needs
+	/// more, up to <see cref="MaxTerrainLayerCount"/>.
+	/// </summary>
+	public const int InitialTerrainLayerCapacity = 1024;
+	private const int MinimumUploadBufferElementCount = 256;
 	public const int HardeningCounterCount = 16;
 	public const int MaxShadowViewCount = ShadowMapPass.MaxCascadeCount;
 	private readonly IShaderProvider _shaderCompiler;
@@ -23,6 +29,7 @@ public sealed class GpuDrawResources : IDisposable
 	public IGfxBuffer? MaterialBuffer { get; private set; }
 	public IGfxBuffer? TerrainMaterialBuffer { get; private set; }
 	public IGfxBuffer? TerrainLayerBuffer { get; private set; }
+	public int TerrainLayerCapacity { get; private set; }
 	public IGfxBuffer? MeshBuffer { get; private set; }
 	public IGfxBuffer? DrawCommandBuffer { get; private set; }
 	public IGfxBuffer? DrawArgsBuffer { get; private set; }
@@ -314,11 +321,15 @@ public sealed class GpuDrawResources : IDisposable
 			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
 			name: "TerrainMaterialBuffer"));
 
-		TerrainLayerBuffer ??= device.CreateBuffer(new BufferDescriptor(
-			(ulong)(MaxTerrainLayerCount * Marshal.SizeOf<GpuTerrainLayerData>()),
-			BufferUsage.Structured,
-			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
-			name: "TerrainLayerBuffer"));
+		if (TerrainLayerBuffer is null)
+		{
+			TerrainLayerBuffer = device.CreateBuffer(new BufferDescriptor(
+				(ulong)(InitialTerrainLayerCapacity * Marshal.SizeOf<GpuTerrainLayerData>()),
+				BufferUsage.Structured,
+				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+				name: "TerrainLayerBuffer"));
+			TerrainLayerCapacity = InitialTerrainLayerCapacity;
+		}
 
 		MeshBuffer ??= device.CreateBuffer(new BufferDescriptor(
 			(ulong)(MaxMeshCount * Marshal.SizeOf<GpuMeshData>()),
@@ -349,31 +360,6 @@ public sealed class GpuDrawResources : IDisposable
 
 		for (var i = 0; i < MaxFramesInFlight; i++)
 		{
-			_instanceUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawInstanceUpdateData>()),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_meshUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawMeshUpdateData>()),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_materialUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuDrawMaterialUpdateData>()),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_terrainMaterialUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxDrawCount * Marshal.SizeOf<GpuTerrainMaterialUpdateData>()),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
-			_terrainLayerUpdateBuffers[i] ??= device.CreateBuffer(new BufferDescriptor(
-				(ulong)(MaxTerrainLayerCount * Marshal.SizeOf<GpuTerrainLayerUpdateData>()),
-				BufferUsage.Structured,
-				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
-
 			ActiveView.Camera[i] = EnsureConstantBufferCapacity(
 				device,
 				ActiveView.Camera[i],
@@ -445,6 +431,89 @@ public sealed class GpuDrawResources : IDisposable
 				BufferUsage.Structured,
 				BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource));
 		}
+	}
+
+	/// <summary>
+	/// Sizes the active frame slot's upload buffers for this frame's queued updates. Most frames queue none, so
+	/// the buffers grow to the largest batch a slot has seen (typically a scene load) rather than being sized
+	/// for every draw, material and terrain layer changing at once.
+	/// </summary>
+	public void EnsureUpdateBufferCapacity(
+		IGfxDevice device,
+		int instanceUpdateCount,
+		int meshUpdateCount,
+		int materialUpdateCount,
+		int terrainMaterialUpdateCount,
+		int terrainLayerUpdateCount)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		var slot = _activeFrameSlot;
+		_instanceUpdateBuffers[slot] = EnsureUploadBufferCapacity(
+			device,
+			_instanceUpdateBuffers[slot],
+			instanceUpdateCount,
+			Marshal.SizeOf<GpuDrawInstanceUpdateData>(),
+			$"InstanceUpdateBuffer[{slot}]");
+		_meshUpdateBuffers[slot] = EnsureUploadBufferCapacity(
+			device,
+			_meshUpdateBuffers[slot],
+			meshUpdateCount,
+			Marshal.SizeOf<GpuDrawMeshUpdateData>(),
+			$"MeshUpdateBuffer[{slot}]");
+		_materialUpdateBuffers[slot] = EnsureUploadBufferCapacity(
+			device,
+			_materialUpdateBuffers[slot],
+			materialUpdateCount,
+			Marshal.SizeOf<GpuDrawMaterialUpdateData>(),
+			$"MaterialUpdateBuffer[{slot}]");
+		_terrainMaterialUpdateBuffers[slot] = EnsureUploadBufferCapacity(
+			device,
+			_terrainMaterialUpdateBuffers[slot],
+			terrainMaterialUpdateCount,
+			Marshal.SizeOf<GpuTerrainMaterialUpdateData>(),
+			$"TerrainMaterialUpdateBuffer[{slot}]");
+		_terrainLayerUpdateBuffers[slot] = EnsureUploadBufferCapacity(
+			device,
+			_terrainLayerUpdateBuffers[slot],
+			terrainLayerUpdateCount,
+			Marshal.SizeOf<GpuTerrainLayerUpdateData>(),
+			$"TerrainLayerUpdateBuffer[{slot}]");
+	}
+
+	/// <summary>
+	/// Grows the terrain layer table so it holds at least <paramref name="requiredLayerCount"/> layers. The new
+	/// table starts empty: the caller has to upload every allocated layer again, including the fallback in slot 0.
+	/// </summary>
+	/// <returns>
+	/// True when the table was replaced, false when it was already large enough or would exceed
+	/// <see cref="MaxTerrainLayerCount"/>.
+	/// </returns>
+	public bool TryGrowTerrainLayerTable(IGfxDevice device, int requiredLayerCount)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		if (requiredLayerCount <= TerrainLayerCapacity || requiredLayerCount > MaxTerrainLayerCount)
+		{
+			return false;
+		}
+
+		var capacity = Math.Max(TerrainLayerCapacity, InitialTerrainLayerCapacity);
+		while (capacity < requiredLayerCount)
+		{
+			capacity = Math.Min(capacity * 2, MaxTerrainLayerCount);
+		}
+
+		TerrainLayerBuffer = EnsureStructuredBufferCapacity(
+			device,
+			TerrainLayerBuffer,
+			capacity,
+			Marshal.SizeOf<GpuTerrainLayerData>(),
+			"TerrainLayerBuffer");
+		TerrainLayerCapacity = capacity;
+		CommitBindingInvalidation("Terrain layer table growth");
+
+		return true;
 	}
 
 	public void EnsureClusteredLightingCapacity(IGfxDevice device, Int2 sceneFramebufferSize)
@@ -657,6 +726,7 @@ public sealed class GpuDrawResources : IDisposable
 
 		TerrainMaterialBuffer = null;
 		TerrainLayerBuffer = null;
+		TerrainLayerCapacity = 0;
 		ShadowDrawArgsBuffer = null;
 	}
 
@@ -751,6 +821,43 @@ public sealed class GpuDrawResources : IDisposable
 		}
 
 		return existingBuffer;
+	}
+
+	/// <summary>
+	/// Grows a per-frame-slot upload buffer. Unlike <see cref="EnsureStructuredBufferCapacity"/> this does not
+	/// invalidate indirect bindings: upload buffers are only bound directly by the update dispatches that read
+	/// them, never baked into indirect command records.
+	/// </summary>
+	private static IGfxBuffer EnsureUploadBufferCapacity(
+		IGfxDevice device,
+		IGfxBuffer? existingBuffer,
+		int elementCount,
+		int elementSizeInBytes,
+		string debugName)
+	{
+		var requiredBytes = checked((ulong)Math.Max(elementCount, 1) * (ulong)elementSizeInBytes);
+		if (existingBuffer is not null && existingBuffer.Descriptor.SizeInBytes >= requiredBytes)
+		{
+			return existingBuffer;
+		}
+
+		var capacity = (ulong)MinimumUploadBufferElementCount;
+		while (capacity < (ulong)elementCount)
+		{
+			capacity *= 2;
+		}
+
+		// The frame that last used this slot may still be on the GPU.
+		if (existingBuffer is IDisposable disposableBuffer)
+		{
+			device.Retire(disposableBuffer, debugName);
+		}
+
+		return device.CreateBuffer(new BufferDescriptor(
+			capacity * (ulong)elementSizeInBytes,
+			BufferUsage.Structured,
+			BufferFlags.AllowUnorderedAccess | BufferFlags.AllowShaderResource,
+			debugName));
 	}
 
 	private IGfxBuffer EnsureStructuredBufferCapacity(
