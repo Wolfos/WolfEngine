@@ -6,8 +6,6 @@ using SharpMetal.Foundation;
 using SharpMetal.Metal;
 using SharpMetal.ObjectiveCCore;
 using SharpMetal.QuartzCore;
-using Silk.NET.Core.Native;
-using Silk.NET.SDL;
 using WolfEngine.Backend.Metal;
 using WolfEngine.Mathematics;
 using WolfEngine.Platform;
@@ -21,9 +19,9 @@ using AbstractionBlendMode = WolfEngine.Rendering.Abstraction.BlendMode;
 namespace WolfEngine;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal unsafe class WolfRendererMetal : IRenderer
 {
-    private const string WindowTitle = "WolfEngine";
     private const ulong DefaultPackedVertexBufferBytes = 256UL * 1024UL * 1024UL;
     private const ulong DefaultPackedIndexBufferBytes = 128UL * 1024UL * 1024UL;
     private static readonly ulong MaxPackedVertexBufferBytes = ParsePositiveUlongEnvironmentVariable(
@@ -36,7 +34,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     private int _width;
     private int _height;
     private readonly IShaderProvider _shaderCompiler;
-    private readonly IMacOSInputHandler _inputHandler;
+    private readonly IMetalSurface _surface;
     private readonly BindlessResourceRegistry _bindlessRegistry;
     private readonly GpuDrawHardeningStats _hardeningStats;
     private readonly Dictionary<Mesh, MeshResources> _meshResources = new();
@@ -48,20 +46,17 @@ internal unsafe class WolfRendererMetal : IRenderer
     private bool _needsPackedGeometryReencode;
     private MTLTexture _depthTexture;
     private MTLDepthStencilState _depthState;
-    private readonly Sdl _sdl;
 
     private MTLDevice _device;
     private MTLCommandQueue _commandQueue;
     // Created during renderer initialization, before any frame work touches it.
     private MetalDevice _gfxDevice = null!;
-    private Window* _window;
-    private void* _metalView;
     private CAMetalLayer _metalLayer;
-    private IntPtr _nativeWindow = IntPtr.Zero;
+    private bool _surfaceInitialized;
+    private bool _hasRequestedWindowSize;
     private bool _isRunning;
     private volatile bool _shutdownRequested;
     private bool _hasDrawableSize;
-    private bool _hasRequestedDrawableSize;
     private double _drawableWidth;
     private double _drawableHeight;
     private bool _skipFrameAfterResize;
@@ -95,8 +90,6 @@ internal unsafe class WolfRendererMetal : IRenderer
     private static readonly Selector PresentsWithTransactionSelector = new("presentsWithTransaction");
     private static readonly Selector SetAllowsNextDrawableTimeoutSelector = new("setAllowsNextDrawableTimeout:");
     private static readonly Selector AllowsNextDrawableTimeoutSelector = new("allowsNextDrawableTimeout");
-    private const int MacTitlebarDoubleClickHeight = 28;
-    private const int MacTrafficLightExclusionWidth = 70;
 
     private sealed class MeshResources
     {
@@ -128,241 +121,134 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public WolfRendererMetal(
         IShaderProvider shaderCompiler,
-        IMacOSInputHandler inputHandler,
+        IMetalSurface surface,
         BindlessResourceRegistry bindlessRegistry,
         GpuDrawHardeningStats hardeningStats)
     {
         _width = 1600;
         _height = 900;
         _shaderCompiler = shaderCompiler;
-        _inputHandler = inputHandler;
+        _surface = surface ?? throw new ArgumentNullException(nameof(surface));
         _bindlessRegistry = bindlessRegistry ?? throw new ArgumentNullException(nameof(bindlessRegistry));
         _hardeningStats = hardeningStats ?? throw new ArgumentNullException(nameof(hardeningStats));
 
         ObjectiveC.LinkMetal();
         ObjectiveC.LinkCoreGraphics();
-        ObjectiveC.LinkAppKit();
-        ObjectiveC.LinkMetalKit();
+        if (OperatingSystem.IsMacOS())
+        {
+            ObjectiveC.LinkAppKit();
+        }
 
-        _sdl = Sdl.GetApi();
+        ObjectiveC.LinkMetalKit();
     }
     
     public void Run(Action startup, Action<float> update, Action<float> render)
+    {
+        try
+        {
+            Start(startup, update, render);
+            while (RunFrame())
+            {
+            }
+        }
+        finally
+        {
+            Stop();
+        }
+    }
+
+    /// <summary>
+    /// Creates the device, attaches to the surface and runs <paramref name="startup"/>. Call it on the thread that
+    /// will render, and call <see cref="Stop"/> afterwards even if it throws.
+    /// </summary>
+    public void Start(Action startup, Action<float> update, Action<float> render)
     {
         _startupCallback = startup ?? throw new ArgumentNullException(nameof(startup));
         _updateCallback = update ?? throw new ArgumentNullException(nameof(update));
         _renderCallback = render ?? throw new ArgumentNullException(nameof(render));
 
+        CreateDevice();
+        CreateCommandQueue();
+        CreateDepthState();
+        InitializeSurface();
+
+        _isRunning = true;
+        if (_surface.CanDisableVSync)
+        {
+            StartDrawableAcquireThread();
+        }
+
+        _startupCallback();
+    }
+
+    /// <summary>Renders one frame. Returns false once the window closed or shutdown was requested.</summary>
+    public bool RunFrame()
+    {
+        if (_isRunning == false || _shutdownRequested)
+        {
+            return false;
+        }
+
+        // Metal hands out command buffers, encoders and drawables autoreleased. Nothing else drains a pool on the
+        // desktop render thread, so without this one they would accumulate for the life of the process.
+        var pool = ObjCNative.ObjcAutoreleasePoolPush();
         try
         {
-            CreateDevice();
-            CreateCommandQueue();
-            CreateDepthState();
-            InitializeWindow();
-            MainLoop();
+            PumpSurfaceEvents();
+
+            // TODO: Delta time
+            _updateCallback(0);
+            _renderCallback(0);
         }
         finally
         {
-            Shutdown();
+            ObjCNative.ObjcAutoreleasePoolPop(pool);
         }
-    }
-    
 
-    private void MainLoop()
-    {
-        _isRunning = true;
-        var @event = new Event();
-        StartDrawableAcquireThread();
-
-        _startupCallback();
-
-        while (_isRunning && _shutdownRequested == false)
-        {
-            // Metal hands out command buffers, encoders and drawables autoreleased. Nothing else drains
-            // a pool on this thread, so without this one they would accumulate for the life of the process.
-            var pool = ObjCNative.ObjcAutoreleasePoolPush();
-            try
-            {
-                PumpEvents(ref @event);
-
-                // TODO: Delta time
-                _updateCallback(0);
-                _renderCallback(0);
-            }
-            finally
-            {
-                ObjCNative.ObjcAutoreleasePoolPop(pool);
-            }
-        }
+        return _isRunning && _shutdownRequested == false;
     }
 
-    private void PumpEvents(ref Event @event)
+    /// <summary>Releases the renderer's GPU resources and the surface.</summary>
+    public void Stop()
     {
-        _inputHandler.StartInputFrame();
-        
-        while (_sdl.PollEvent(ref @event) != 0)
-        {
-            switch ((EventType)@event.Type)
-            {
-                case EventType.Quit:
-                    _isRunning = false;
-                    break;
-                case EventType.Windowevent:
-                    _inputHandler.HandleInputEvents(ref @event);
-                    HandleWindowEvent(@event);
-                    break;
-                case EventType.Mousebuttondown:
-                    if (HandleMacTitlebarDoubleClick(@event.Button))
-                    {
-                        break;
-                    }
-                    _inputHandler.HandleInputEvents(ref @event);
-                    break;
-                default:
-                    _inputHandler.HandleInputEvents(ref @event);
-                    break;
-            }
-        }
-        
-        _inputHandler.EndInputFrame();
+        _isRunning = false;
+        Shutdown();
     }
-    
 
-    private void HandleWindowEvent(Event @event)
+    private void PumpSurfaceEvents()
     {
-        if (@event.Window.Event == (byte)WindowEventID.Close)
+        var events = _surface.PumpEvents();
+        if ((events & MetalSurfaceEvents.CloseRequested) != 0)
         {
             _isRunning = false;
             return;
         }
 
-        if (@event.Window.Event is (byte)WindowEventID.Resized or (byte)WindowEventID.SizeChanged)
+        if ((events & MetalSurfaceEvents.Resized) != 0)
         {
             UpdateDrawableSize();
         }
     }
 
-    private void InitializeWindow()
+    private void InitializeSurface()
     {
-        if (_sdl.Init(Sdl.InitVideo) < 0)
-        {
-            throw new InvalidOperationException("Failed to initialise SDL video subsystem.");
-        }
+        var layerPtr = _surface.Initialize(new Int2(_width, _height), _hasRequestedWindowSize);
+        _surfaceInitialized = true;
 
-        var titlePtr = SilkMarshal.StringToPtr(WindowTitle, NativeStringEncoding.UTF8);
-        try
-        {
-            var flags = WindowFlags.Resizable | WindowFlags.AllowHighdpi | WindowFlags.Metal;
-            _window = _sdl.CreateWindow((byte*)titlePtr, Sdl.WindowposCentered, Sdl.WindowposCentered, _width, _height, (uint)flags);
-        }
-        finally
-        {
-            SilkMarshal.Free(titlePtr);
-        }
-
-        if (_window is null)
-        {
-            throw new InvalidOperationException("Failed to create SDL window.");
-        }
-
-        _metalView = _sdl.MetalCreateView(_window);
-        if (_metalView is null)
-        {
-            throw new InvalidOperationException("Failed to create Metal view for SDL window.");
-        }
-
-        RefreshMetalLayer();
-
-        UpdateDrawableSize();
-        ConfigureNativeWindowChrome();
-        UpdateDrawableSize();
-    }
-
-    private void ConfigureNativeWindowChrome()
-    {
-        if (_metalView is null)
-        {
-            return;
-        }
-
-        var nsView = new IntPtr(_metalView);
-        var nsWindow = ObjectiveC.IntPtr_objc_msgSend(nsView, "window");
-        if (nsWindow == IntPtr.Zero)
-        {
-            return;
-        }
-
-        _nativeWindow = nsWindow;
-        var window = new NSWindowInstance(nsWindow);
-        window.EnableUnifiedTitlebarChrome(includeFullSizeContentView: true);
-        RecreateMetalViewAndLayer();
-    }
-
-    private void RefreshMetalLayer()
-    {
-        if (_metalView is null)
-        {
-            return;
-        }
-
-        var layerPtr = _sdl.MetalGetLayer(_metalView);
-        if (layerPtr is null)
-        {
-            throw new InvalidOperationException("Failed to retrieve CAMetalLayer from SDL view.");
-        }
-
-        _metalLayer = new CAMetalLayer(new IntPtr(layerPtr));
+        _metalLayer = new CAMetalLayer(layerPtr);
         _metalLayer.Device = _device;
         _metalLayer.PixelFormat = MTLPixelFormat.BGRA8Unorm;
         _metalLayer.FramebufferOnly = false;
         ClearQueuedDrawable();
         ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetPresentsWithTransactionSelector.SelPtr, false);
         ObjCNative.ObjcMsgSendSetBool(_metalLayer.NativePtr, SetAllowsNextDrawableTimeoutSelector.SelPtr, false);
-        ApplyDisplaySync(Screen.VSyncEnabled);
+        if (_surface.CanDisableVSync)
+        {
+            ApplyDisplaySync(Screen.VSyncEnabled);
+        }
+
         _hasDrawableSize = false;
-    }
-
-    private void RecreateMetalViewAndLayer()
-    {
-        if (_window is null)
-        {
-            return;
-        }
-
-        if (_metalView is not null)
-        {
-            _sdl.MetalDestroyView(_metalView);
-            _metalView = null;
-        }
-
-        _metalView = _sdl.MetalCreateView(_window);
-        if (_metalView is null)
-        {
-            throw new InvalidOperationException("Failed to recreate Metal view for SDL window.");
-        }
-
-        RefreshMetalLayer();
-    }
-
-    private bool HandleMacTitlebarDoubleClick(MouseButtonEvent buttonEvent)
-    {
-        if (_nativeWindow == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        if (buttonEvent.Button != Sdl.ButtonLeft || buttonEvent.Clicks < 2)
-        {
-            return false;
-        }
-
-        if (buttonEvent.Y > MacTitlebarDoubleClickHeight || buttonEvent.X < MacTrafficLightExclusionWidth)
-        {
-            return false;
-        }
-
-        ObjectiveC.objc_msgSend(_nativeWindow, "zoom:", IntPtr.Zero);
-        return true;
+        UpdateDrawableSize();
     }
 
     private void CreateDevice()
@@ -402,40 +288,13 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     private void UpdateDrawableSize()
     {
-        if (_window is null)
+        if (_surfaceInitialized == false || _surface.TryGetDrawableSize(out var drawableSize) == false)
         {
             return;
         }
 
-        int drawableWidth = 0;
-        int drawableHeight = 0;
-        _sdl.MetalGetDrawableSize(_window, ref drawableWidth, ref drawableHeight);
-
-        if (_hasRequestedDrawableSize)
-        {
-            int windowWidth = 0;
-            int windowHeight = 0;
-            _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
-
-            // SetWindowSize also requests an exact initial drawable resolution so
-            // automation captures are independent of the display scale. Stop
-            // enforcing it as soon as the user resizes the logical window; from
-            // then on, SDL's drawable size is authoritative.
-            if (windowWidth == _width && windowHeight == _height)
-            {
-                drawableWidth = _width;
-                drawableHeight = _height;
-            }
-            else
-            {
-                _hasRequestedDrawableSize = false;
-            }
-        }
-
-        if (drawableWidth <= 0 || drawableHeight <= 0)
-        {
-            return;
-        }
+        var drawableWidth = drawableSize.X;
+        var drawableHeight = drawableSize.Y;
 
         if (_hasDrawableSize && NearlyEqual(drawableWidth, _drawableWidth) && NearlyEqual(drawableHeight, _drawableHeight))
         {
@@ -552,19 +411,11 @@ internal unsafe class WolfRendererMetal : IRenderer
         _skinnedInstanceVertexAllocator.Clear();
         _meshResources.Clear();
 
-        if (_metalView is not null)
+        if (_surfaceInitialized)
         {
-            _sdl.MetalDestroyView(_metalView);
-            _metalView = null;
+            _surface.Shutdown();
+            _surfaceInitialized = false;
         }
-
-        if (_window is not null)
-        {
-            _sdl.DestroyWindow(_window);
-            _window = null;
-        }
-
-        _sdl.Quit();
     }
 
     public IMaterialResources CreateMaterialResources(Material material)
@@ -676,20 +527,12 @@ internal unsafe class WolfRendererMetal : IRenderer
 
     public Int2 GetWindowSize()
     {
-        if (_window is null)
+        if (_surfaceInitialized && _surface.TryGetWindowSize(out var size))
         {
-            return new Int2(_width, _height);
+            return size;
         }
 
-        int windowWidth = 0;
-        int windowHeight = 0;
-        _sdl.GetWindowSize(_window, ref windowWidth, ref windowHeight);
-        if (windowWidth <= 0 || windowHeight <= 0)
-        {
-            return new Int2(_width, _height);
-        }
-
-        return new Int2(windowWidth, windowHeight);
+        return new Int2(_width, _height);
     }
 
     public void SetWindowSize(Int2 size)
@@ -699,14 +542,14 @@ internal unsafe class WolfRendererMetal : IRenderer
             throw new ArgumentOutOfRangeException(nameof(size), "Window size must be positive.");
         }
 
-        if (_window is not null)
+        if (_surfaceInitialized)
         {
             throw new InvalidOperationException("Window size must be configured before the renderer starts.");
         }
 
         _width = size.X;
         _height = size.Y;
-        _hasRequestedDrawableSize = true;
+        _hasRequestedWindowSize = true;
     }
 
     public Task<FrameCapture> CaptureNextFrameAsync(FrameCaptureTarget target, CancellationToken cancellationToken = default)
@@ -741,11 +584,14 @@ internal unsafe class WolfRendererMetal : IRenderer
     {
         EnsureLayerPresentFlags();
 
-        var desiredVSync = Screen.VSyncEnabled;
-        _vsyncEnabled = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, DisplaySyncEnabledSelector.SelPtr) != 0;
-        if (_vsyncEnabled != desiredVSync)
+        if (_surface.CanDisableVSync)
         {
-            ApplyDisplaySync(desiredVSync);
+            var desiredVSync = Screen.VSyncEnabled;
+            _vsyncEnabled = ObjCNative.ObjcMsgSendBool(_metalLayer.NativePtr, DisplaySyncEnabledSelector.SelPtr) != 0;
+            if (_vsyncEnabled != desiredVSync)
+            {
+                ApplyDisplaySync(desiredVSync);
+            }
         }
 
         UpdateDrawableSize();
@@ -773,8 +619,10 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         nint drawablePtr;
-        var releaseDrawableAfterSubmit = Screen.VSyncEnabled == false;
-        if (Screen.VSyncEnabled)
+        // Without vsync control the layer always presents in step with the display, and no thread acquires ahead.
+        var vsync = Screen.VSyncEnabled || _surface.CanDisableVSync == false;
+        var releaseDrawableAfterSubmit = vsync == false;
+        if (vsync)
         {
             using (FrameProfiler.Instance.Measure("AcquireDrawableLate"))
             {

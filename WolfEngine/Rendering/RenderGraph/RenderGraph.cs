@@ -624,6 +624,22 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_renderer.Run(startup, update, OnRender);
 	}
 
+	/// <summary>Starts rendering on the calling thread without taking it over. See <see cref="IRenderer.Start"/>.</summary>
+	public void Start(Action startup, Action<float> update)
+	{
+		_renderer.Start(startup, update, OnRender);
+	}
+
+	public bool RenderFrame()
+	{
+		return _renderer.RunFrame();
+	}
+
+	public void Stop()
+	{
+		_renderer.Stop();
+	}
+
 	public bool TryBeginSnapshotWrite(out FrameSnapshot snapshot)
 	{
 		return _snapshotBuffer.TryBeginWrite(out snapshot);
