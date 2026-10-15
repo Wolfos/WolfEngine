@@ -2,7 +2,9 @@ using CoreAnimation;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Gameplay;
+using Microsoft.Extensions.DependencyInjection;
 using WolfEngine.Mathematics;
+using WolfEngine.Profiling;
 using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Runtime.iOS;
@@ -29,6 +31,7 @@ internal sealed class IosGameHost : IAppFrameHost
 	private readonly HostMetalSurface _surface;
 	private readonly WolfPackCatalog _catalog;
 	private readonly RuntimeHost _host;
+	private readonly IosPerformanceReport? _performanceReport;
 	private CADisplayLink? _displayLink;
 	private Thread? _gameThread;
 	private volatile bool _gameRunning;
@@ -40,6 +43,7 @@ internal sealed class IosGameHost : IAppFrameHost
 		_surface = surface;
 		_catalog = catalog;
 		_host = host;
+		_performanceReport = IosPerformanceReport.CreateIfRequested(host.Services.GetRequiredService<GpuProfiler>());
 	}
 
 	/// <summary>The bundled game's manifest, or null when the app was built without content.</summary>
@@ -127,8 +131,13 @@ internal sealed class IosGameHost : IAppFrameHost
 	{
 		if (_host.RenderPipeline.RenderFrame() == false)
 		{
+			Console.WriteLine("runtime render pipeline stopped; no more frames will be presented");
 			Stop();
+
+			return;
 		}
+
+		_performanceReport?.OnFrame(_displayLink?.Timestamp ?? 0.0);
 	}
 
 	private void RunGameLoop()
@@ -161,9 +170,11 @@ internal sealed class IosGameHost : IAppFrameHost
 	{
 		var bounds = _view.Bounds;
 		var scale = _view.ContentScaleFactor;
+		var framebufferSize = new Int2((int)Math.Round(bounds.Width * scale), (int)Math.Round(bounds.Height * scale));
 		_surface.SetSize(
-			new Int2((int)Math.Round(bounds.Width * scale), (int)Math.Round(bounds.Height * scale)),
+			framebufferSize,
 			new Int2((int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height)));
+		Console.WriteLine($"runtime surface {framebufferSize.X}x{framebufferSize.Y}");
 	}
 
 	/// <summary>Stands in for the game's gameplay until it can be compiled into the app.</summary>

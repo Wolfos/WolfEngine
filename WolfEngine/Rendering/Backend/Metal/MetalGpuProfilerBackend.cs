@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
+using WolfEngine.Platform;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 
@@ -35,6 +36,9 @@ internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 			var candidate = new MTLCounterSet(counterSets.Object(i));
 			if (candidate.Name.ToString()?.Contains("timestamp", StringComparison.OrdinalIgnoreCase) == true)
 			{
+				// counterSets is autoreleased, so its elements are only borrowed. Retained for the device's
+				// lifetime: iOS frees them before the first sample buffer is created.
+				ObjCNative.ObjcRetain(candidate.NativePtr);
 				_timestampCounterSet = candidate;
 				break;
 			}

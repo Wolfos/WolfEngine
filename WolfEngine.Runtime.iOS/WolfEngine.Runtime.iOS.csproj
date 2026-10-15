@@ -38,4 +38,13 @@
 		<BundleResource Include="$(WolfGameContent)/**/*" LogicalName="Content/%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
+	<!--
+		On Unix, .NET takes a shared flock on every read-only FileStream, and the runtime keeps its cooked packs
+		open. iOS kills a suspended app that holds a file lock (RunningBoard 0xdead10cc), so the app was killed
+		whenever it lost focus. Nothing in the app relies on advisory locks.
+	-->
+	<ItemGroup>
+		<RuntimeHostConfigurationOption Include="System.IO.DisableFileLocking" Value="true" Trim="true" />
+	</ItemGroup>
+
 </Project>

@@ -1115,6 +1115,24 @@ internal sealed unsafe class MetalCommandList : IGfxCommandList, IDisposable
 		}
 	}
 
+	/// <summary>Metal's error if this command buffer failed. Call once <see cref="HasFinishedExecuting"/> is true.</summary>
+	internal string? ReadExecutionError()
+	{
+		if (_disposed ||
+		    _committed == false ||
+		    _commandBuffer.NativePtr == IntPtr.Zero ||
+		    _commandBuffer.Status != MTLCommandBufferStatus.Error)
+		{
+			return null;
+		}
+
+		var error = _commandBuffer.Error;
+
+		return error.NativePtr == IntPtr.Zero
+			? "unknown error"
+			: error.LocalizedDescription.ToString() ?? "unknown error";
+	}
+
 	public void SetPresentDrawable(CAMetalDrawable drawable)
 	{
 		ThrowIfDisposed();
