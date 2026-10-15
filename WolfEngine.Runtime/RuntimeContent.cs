@@ -100,11 +100,10 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		using var stream = new MemoryStream(bytes, false);
 		var value = entry.Kind switch
 		{
-			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) =>
-				_textures.GetTexture(TextureArtifactSerializer.Read(stream, id.ToString("D"))),
+			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) => CreateTexture(id, stream),
 			nameof(AssetType.ColorLookupTable) when expectedType == typeof(ColorLookupTable) =>
 				ColorLookupTable.Create($"lut:{id:D}", ColorLookupTableArtifactSerializer.Read(stream), _textures),
-			nameof(AssetType.Mesh) when expectedType == typeof(Mesh) => CreateMesh(ImportedMeshSerializer.Read(stream)),
+			nameof(AssetType.Mesh) when expectedType == typeof(Mesh) => CreateMesh(id, stream),
 			nameof(AssetType.Terrain) when expectedType == typeof(TerrainAsset) =>
 				TerrainAssetSerializer.Read(stream, id.ToString("D")),
 			nameof(AssetType.Material) when expectedType == typeof(Material) =>
@@ -126,6 +125,44 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		if (value is Mesh mesh) _meshesByContentHash[entry.Sha256] = mesh;
 		_cache[(id, expectedType)] = value;
 		return value;
+	}
+
+	/// <summary>
+	/// Cooked packs are immutable, so the CPU copy of a texture's mips can go once it is on the GPU and be read
+	/// from the pack again if anything asks for it.
+	/// </summary>
+	private Texture CreateTexture(Guid id, Stream stream)
+	{
+		var texture = TextureArtifactSerializer.Read(stream, id.ToString("D"));
+		texture.MipDataSource = () => ReadTexture(id).MipLevels;
+
+		return _textures.GetTexture(texture);
+	}
+
+	private Texture ReadTexture(Guid id)
+	{
+		using var stream = new MemoryStream(_catalog.Read(id), false);
+
+		return TextureArtifactSerializer.Read(stream, id.ToString("D"));
+	}
+
+	/// <summary>
+	/// As for textures: the geometry can go once it is on the GPU and be rebuilt from the pack, for a mesh collider
+	/// for example.
+	/// </summary>
+	private Mesh CreateMesh(Guid id, Stream stream)
+	{
+		var mesh = CreateMesh(ImportedMeshSerializer.Read(stream));
+		mesh.CpuGeometrySource = () => ReadMesh(id);
+
+		return mesh;
+	}
+
+	private Mesh ReadMesh(Guid id)
+	{
+		using var stream = new MemoryStream(_catalog.Read(id), false);
+
+		return CreateMesh(ImportedMeshSerializer.Read(stream));
 	}
 
 	private static Mesh CreateMesh(ImportedMeshAssetFile mesh) => new(mesh.Vertices, mesh.Indices, mesh.Normals, mesh.UVs, mesh.Tangents,
@@ -168,11 +205,22 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 	{
 		long meshBytes = 0;
 		var meshCount = 0;
+		var releasedMeshCount = 0;
 		long textureBytes = 0;
 		var textureCount = 0;
-		foreach (var value in _cache.Values.ToArray())
+		var releasedTextureCount = 0;
+		// Distinct: meshes shared by content hash are cached under every id that refers to them.
+		foreach (var value in _cache.Values.Distinct(ReferenceEqualityComparer.Instance).ToArray())
 		{
-			if (value is Mesh mesh)
+			if (value is Mesh { HasCpuGeometry: false })
+			{
+				releasedMeshCount++;
+			}
+			else if (value is Texture { HasCpuMipData: false })
+			{
+				releasedTextureCount++;
+			}
+			else if (value is Mesh mesh)
 			{
 				meshCount++;
 				meshBytes += (long)mesh.Vertices.Length * 16 + (long)mesh.Normals.Length * 12 + (long)mesh.UVs.Length * 8 +
@@ -189,8 +237,9 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 			}
 		}
 
-		return $"Asset CPU data: {meshCount} meshes keep {meshBytes / (1024.0 * 1024.0):F1} MB of arrays, " +
-		       $"{textureCount} textures keep {textureBytes / (1024.0 * 1024.0):F1} MB of mip data.";
+		return $"Asset CPU data: {meshCount} meshes keep {meshBytes / (1024.0 * 1024.0):F1} MB of arrays " +
+		       $"({releasedMeshCount} released after upload), {textureCount} textures keep " +
+		       $"{textureBytes / (1024.0 * 1024.0):F1} MB of mip data ({releasedTextureCount} released after upload).";
 	}
 
 	public void RefreshProject(string projectRootPath, AssetDatabase database) => throw new NotSupportedException("Runtime assets are immutable cooked packs.");

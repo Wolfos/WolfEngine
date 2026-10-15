@@ -1125,6 +1125,7 @@ internal unsafe class WolfRendererMetal : IRenderer
             try
             {
                 resources = UploadMesh(mesh);
+                mesh.ReleaseCpuGeometryAfterUpload();
             }
             catch (InvalidOperationException ex)
             {
@@ -1178,7 +1179,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         }
 
         var vertexStrideBytes = (ulong)Marshal.SizeOf<VertexData>();
-        var vertexRangeBytes = (ulong)skinnedInstance.Vertices.Length * vertexStrideBytes;
+        var vertexRangeBytes = (ulong)skinnedInstance.VertexCount * vertexStrideBytes;
 
         if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
         {
@@ -1231,7 +1232,7 @@ internal unsafe class WolfRendererMetal : IRenderer
     public SkinnedGeometryResourceStatistics GetSkinnedGeometryResourceStatistics()
     {
         var meshes = _meshResources.Keys.Where(mesh => mesh.IsSkinnedInstance);
-        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.Vertices.Length * Marshal.SizeOf<VertexData>()));
+        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.VertexCount * Marshal.SizeOf<VertexData>()));
     }
 
     public void ReleaseMeshResources(Mesh mesh)
@@ -1246,7 +1247,7 @@ internal unsafe class WolfRendererMetal : IRenderer
         {
             _skinnedInstanceVertexAllocator.Release(
                 mesh.PackedVertexOffsetBytes,
-                (ulong)mesh.Vertices.Length * (ulong)Marshal.SizeOf<VertexData>());
+                (ulong)mesh.VertexCount * (ulong)Marshal.SizeOf<VertexData>());
         }
 
         mesh.VertexBuffer = null;

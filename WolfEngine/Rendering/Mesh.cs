@@ -10,13 +10,35 @@ namespace WolfEngine;
 [RuntimeAsset(AssetType.Mesh, typeof(ImportedMeshAssetFile), typeof(IMeshRuntimeAssetResolver))]
 public class Mesh
 {
-    public Vector4[] Vertices { get; }
-    public uint[] Indices { get; }
-    public uint[] ShadowOpaqueIndices { get; }
-    public uint[] ShadowAlphaTestIndices { get; }
-    public Vector3[] Normals { get; }
-    public Vector4[] Tangents { get; }
-    public Vector2[] UVs { get; }
+    /// <summary>
+    /// The CPU copy of the geometry. Once the renderer has uploaded it, a mesh with a
+    /// <see cref="CpuGeometrySource"/> drops it, and the next reader reloads it from that source.
+    /// </summary>
+    private sealed class CpuGeometry
+    {
+        public required Vector4[] Vertices { get; init; }
+        public required uint[] Indices { get; init; }
+        public required uint[] ShadowOpaqueIndices { get; init; }
+        public required uint[] ShadowAlphaTestIndices { get; init; }
+        public required Vector3[] Normals { get; init; }
+        public required Vector4[] Tangents { get; init; }
+        public required Vector2[] UVs { get; init; }
+        public uint[]? BoneIndices { get; init; }
+        public float[]? BoneWeights { get; init; }
+    }
+
+    private readonly object _cpuGeometrySync = new();
+    private CpuGeometry? _cpuGeometry;
+    private readonly bool _isSkinned;
+
+    public Vector4[] Vertices => GetCpuGeometry().Vertices;
+    public uint[] Indices => GetCpuGeometry().Indices;
+    public uint[] ShadowOpaqueIndices => GetCpuGeometry().ShadowOpaqueIndices;
+    public uint[] ShadowAlphaTestIndices => GetCpuGeometry().ShadowAlphaTestIndices;
+    public Vector3[] Normals => GetCpuGeometry().Normals;
+    public Vector4[] Tangents => GetCpuGeometry().Tangents;
+    public Vector2[] UVs => GetCpuGeometry().UVs;
+    public int VertexCount { get; }
     public BoundingSphere BoundingSphere { get; }
     public Box BoundingBox { get; }
 
@@ -25,8 +47,18 @@ public class Mesh
     /// packed vertex format on purpose: widening every vertex in the world by 32 bytes to serve
     /// the handful of skinned meshes would be a poor trade.
     /// </summary>
-    public uint[]? BoneIndices { get; }
-    public float[]? BoneWeights { get; }
+    public uint[]? BoneIndices => GetCpuGeometry().BoneIndices;
+    public float[]? BoneWeights => GetCpuGeometry().BoneWeights;
+
+    /// <summary>
+    /// Rebuilds this mesh's geometry from immutable content, such as a cooked pack. Set only when that content
+    /// cannot change; it lets the CPU copy go once the renderer has uploaded it. The returned mesh must hold the
+    /// same geometry.
+    /// </summary>
+    internal Func<Mesh>? CpuGeometrySource { get; set; }
+
+    /// <summary>Diagnostic: whether the CPU copy of the geometry is currently held.</summary>
+    internal bool HasCpuGeometry => Volatile.Read(ref _cpuGeometry) is not null || SkinningSource is not null;
 
     /// <summary>
     /// For a per-instance skinned clone, the bind-pose mesh the skinning pass reads from.
@@ -59,7 +91,7 @@ public class Mesh
     internal bool HasSkinAttributeAllocation { get; set; }
 
     [MemberNotNullWhen(true, nameof(BoneIndices), nameof(BoneWeights))]
-    public bool IsSkinned => BoneIndices is not null && BoneWeights is not null;
+    public bool IsSkinned => _isSkinned;
 
     /// <summary>True when this mesh owns a per-instance vertex range written by the skinning pass.</summary>
     internal bool IsSkinnedInstance => SkinningSource is not null;
@@ -78,63 +110,68 @@ public class Mesh
         IReadOnlyList<uint>? shadowOpaqueIndices = null,
         IReadOnlyList<uint>? shadowAlphaTestIndices = null)
     {
-        Vertices = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
-        if (Vertices.Length == 0)
+        var vertexArray = vertices?.ToArray() ?? throw new ArgumentNullException(nameof(vertices));
+        if (vertexArray.Length == 0)
         {
             throw new ArgumentException("Mesh must contain at least one vertex.", nameof(vertices));
         }
 
-        Indices = indices?.ToArray() ?? throw new ArgumentNullException(nameof(indices));
-        if (Indices.Length == 0)
+        var indexArray = indices?.ToArray() ?? throw new ArgumentNullException(nameof(indices));
+        if (indexArray.Length == 0)
         {
             throw new ArgumentException("Mesh must contain at least one index.", nameof(indices));
         }
 
+        Vector4[] tangentArray;
         if (tangents is not null)
         {
-            if (tangents.Count != Vertices.Length)
+            if (tangents.Count != vertexArray.Length)
             {
                 throw new ArgumentException("Tangent count must match vertex count.", nameof(tangents));
             }
 
-            Tangents = tangents.ToArray();
+            tangentArray = tangents.ToArray();
         }
         else
         {
-            Tangents = Enumerable.Repeat(new Vector4(1, 0, 0, 1), Vertices.Length).ToArray();
+            tangentArray = Enumerable.Repeat(new Vector4(1, 0, 0, 1), vertexArray.Length).ToArray();
         }
 
+        Vector3[] normalArray;
         if (normals is not null)
         {
-            if (normals.Count != Vertices.Length)
+            if (normals.Count != vertexArray.Length)
             {
                 throw new ArgumentException("Normal count must match vertex count.", nameof(normals));
             }
 
-            Normals = normals.ToArray();
+            normalArray = normals.ToArray();
         }
         else
         {
-            Normals = GenerateVertexNormals(Vertices, Indices);
+            normalArray = GenerateVertexNormals(vertexArray, indexArray);
         }
 
+        Vector2[] uvArray;
         if (uvs is not null)
         {
-            if (uvs.Count != Vertices.Length)
+            if (uvs.Count != vertexArray.Length)
             {
                 throw new ArgumentException("UV count must match vertex count.", nameof(uvs));
             }
 
-            UVs = uvs.ToArray();
+            uvArray = uvs.ToArray();
         }
         else
         {
-            UVs = Enumerable.Repeat(Vector2.Zero, Vertices.Length).ToArray();
+            uvArray = Enumerable.Repeat(Vector2.Zero, vertexArray.Length).ToArray();
         }
 
+        uint[]? boneIndexArray = null;
+        float[]? boneWeightArray = null;
         if (boneIndices is not null && boneWeights is not null)
         {
-            var expected = Vertices.Length * InfluencesPerVertex;
+            var expected = vertexArray.Length * InfluencesPerVertex;
             if (boneIndices.Count != expected || boneWeights.Count != expected)
             {
                 throw new ArgumentException(
@@ -143,21 +180,38 @@ public class Mesh
                     nameof(boneIndices));
             }
 
-            BoneIndices = boneIndices.ToArray();
-            BoneWeights = boneWeights.ToArray();
+            boneIndexArray = boneIndices.ToArray();
+            boneWeightArray = boneWeights.ToArray();
         }
         else if (boneIndices is not null || boneWeights is not null)
         {
             throw new ArgumentException("Bone indices and bone weights must be supplied together.", nameof(boneIndices));
         }
 
-        ShadowOpaqueIndices = ResolveShadowIndices(shadowOpaqueIndices, Indices);
-        ShadowAlphaTestIndices = ResolveShadowIndices(shadowAlphaTestIndices, Indices);
-        if (ShadowAlphaTestIndices.AsSpan().SequenceEqual(ShadowOpaqueIndices))
-            ShadowAlphaTestIndices = ShadowOpaqueIndices;
+        var shadowOpaqueIndexArray = ResolveShadowIndices(shadowOpaqueIndices, indexArray, vertexArray.Length);
+        var shadowAlphaTestIndexArray = ResolveShadowIndices(shadowAlphaTestIndices, indexArray, vertexArray.Length);
+        if (shadowAlphaTestIndexArray.AsSpan().SequenceEqual(shadowOpaqueIndexArray))
+        {
+            shadowAlphaTestIndexArray = shadowOpaqueIndexArray;
+        }
 
-        BoundingSphere = ComputeBoundingSphere(Vertices);
-        BoundingBox = ComputeBoundingBox(Vertices);
+        _cpuGeometry = new CpuGeometry
+        {
+            Vertices = vertexArray,
+            Indices = indexArray,
+            ShadowOpaqueIndices = shadowOpaqueIndexArray,
+            ShadowAlphaTestIndices = shadowAlphaTestIndexArray,
+            Normals = normalArray,
+            Tangents = tangentArray,
+            UVs = uvArray,
+            BoneIndices = boneIndexArray,
+            BoneWeights = boneWeightArray
+        };
+        _isSkinned = boneIndexArray is not null;
+        VertexCount = vertexArray.Length;
+
+        BoundingSphere = ComputeBoundingSphere(vertexArray);
+        BoundingBox = ComputeBoundingBox(vertexArray);
     }
 
     /// <summary>
@@ -167,15 +221,8 @@ public class Mesh
     /// </summary>
     private Mesh(Mesh source, float boundsExpansion)
     {
-        Vertices = source.Vertices;
-        Indices = source.Indices;
-        ShadowOpaqueIndices = source.ShadowOpaqueIndices;
-        ShadowAlphaTestIndices = source.ShadowAlphaTestIndices;
-        Normals = source.Normals;
-        Tangents = source.Tangents;
-        UVs = source.UVs;
-        BoneIndices = source.BoneIndices;
-        BoneWeights = source.BoneWeights;
+        _isSkinned = source._isSkinned;
+        VertexCount = source.VertexCount;
         SkinningSource = source;
 
         // A deformed pose leaves the bind pose's bounds, and the exact per-frame bounds are not
@@ -210,14 +257,67 @@ public class Mesh
     }
 
 
-    private uint[] ResolveShadowIndices(IReadOnlyList<uint>? supplied, uint[] main)
+    /// <summary>
+    /// Drops the CPU copy of the geometry once the renderer has uploaded it, when it can be rebuilt from
+    /// <see cref="CpuGeometrySource"/>. Skinned meshes keep theirs: every spawned instance reads the bind pose.
+    /// </summary>
+    internal void ReleaseCpuGeometryAfterUpload()
+    {
+        if (CpuGeometrySource is null || _isSkinned || SkinningSource is not null)
+        {
+            return;
+        }
+
+        lock (_cpuGeometrySync)
+        {
+            _cpuGeometry = null;
+        }
+    }
+
+    private CpuGeometry GetCpuGeometry()
+    {
+        if (SkinningSource is { } skinningSource)
+        {
+            return skinningSource.GetCpuGeometry();
+        }
+
+        var geometry = Volatile.Read(ref _cpuGeometry);
+        if (geometry is not null)
+        {
+            return geometry;
+        }
+
+        lock (_cpuGeometrySync)
+        {
+            if (_cpuGeometry is not null)
+            {
+                return _cpuGeometry;
+            }
+
+            var source = CpuGeometrySource
+                ?? throw new InvalidOperationException("Mesh geometry was released and has no source to reload it from.");
+            var reloaded = source();
+            if (reloaded.VertexCount != VertexCount)
+            {
+                throw new InvalidOperationException(
+                    $"Reloaded mesh geometry has {reloaded.VertexCount} vertices where {VertexCount} were uploaded.");
+            }
+
+            // Kept from then on: a reader that needed it once, such as a mesh collider, often needs it again.
+            Volatile.Write(ref _cpuGeometry, reloaded.GetCpuGeometry());
+
+            return _cpuGeometry!;
+        }
+    }
+
+    private static uint[] ResolveShadowIndices(IReadOnlyList<uint>? supplied, uint[] main, int vertexCount)
     {
         if (supplied is null || supplied.Count == 0) return main;
         if (supplied.Count != main.Length)
             throw new ArgumentException("Shadow index count must match the main triangle stream.", nameof(supplied));
         var indices = supplied.ToArray();
         foreach (var index in indices)
-            if (index >= Vertices.Length)
+            if (index >= vertexCount)
                 throw new ArgumentException("Shadow index is outside the vertex stream.", nameof(supplied));
         return indices.AsSpan().SequenceEqual(main) ? main : indices;
     }

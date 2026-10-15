@@ -1776,6 +1776,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		resources = CreateMeshResources(mesh);
 		_meshResources.Add(mesh, resources);
+		mesh.ReleaseCpuGeometryAfterUpload();
 	}
 
 	public void EnsureSkinnedInstanceResources(Mesh skinnedInstance)
@@ -1800,7 +1801,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 
 		EnsurePackedGeometryBuffers();
 		var vertexStride = (uint)Unsafe.SizeOf<VertexData>();
-		var vertexCount = skinnedInstance.Vertices.Length;
+		var vertexCount = skinnedInstance.VertexCount;
 		var vertexRangeBytes = (ulong)vertexStride * (uint)vertexCount;
 
 		if (_skinnedInstanceVertexAllocator.TryReuse(vertexRangeBytes, out var vertexOffsetBytes) == false)
@@ -1859,7 +1860,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
     public SkinnedGeometryResourceStatistics GetSkinnedGeometryResourceStatistics()
     {
         var meshes = _meshResources.Keys.Where(mesh => mesh.IsSkinnedInstance);
-        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.Vertices.Length * Marshal.SizeOf<VertexData>()));
+        return new(meshes.Count(), (ulong)meshes.Sum(mesh => (long)mesh.VertexCount * Marshal.SizeOf<VertexData>()));
     }
 
 	public void ReleaseMeshResources(Mesh mesh)
@@ -1874,7 +1875,7 @@ private static readonly ulong MaxPackedIndexBufferBytes = ParsePositiveUlongEnvi
 		{
 			_skinnedInstanceVertexAllocator.Release(
 				mesh.PackedVertexOffsetBytes,
-				(ulong)mesh.Vertices.Length * (uint)Unsafe.SizeOf<VertexData>());
+				(ulong)mesh.VertexCount * (uint)Unsafe.SizeOf<VertexData>());
 		}
 
 		mesh.VertexBuffer = null;

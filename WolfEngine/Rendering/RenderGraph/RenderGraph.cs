@@ -1202,6 +1202,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				? currentResources
 				: _renderer.CreateTextureResources(texture);
 			var previousResources = texture.MarkGpuResourcesCreated(resources);
+			texture.ReleaseMipDataAfterUpload();
 			if (previousResources is not null)
 			{
 				QueueTextureResourceRelease(previousResources);
