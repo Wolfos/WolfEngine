@@ -7,6 +7,21 @@ namespace WolfEngine.Rendering.Passes;
 [RuntimeAsset(AssetType.DataAsset, typeof(RenderConfig), typeof(IDataAssetRuntimeResolver))]
 public class RenderConfig: IDataAsset
 {
+	public const float MinRenderScale = 0.25f;
+
+	private float _renderScale = 1.0f;
+
+	/// <summary>
+	/// Per-axis fraction of the output resolution the scene renders at. Everything up to tonemapping runs at the
+	/// scaled size (G-buffer, lighting, AO, reflections, temporal anti-aliasing); FSR3 then upscales temporally,
+	/// and otherwise tonemapping filters the image up to the output. Post-processing and UI stay at full size.
+	/// </summary>
+	public float RenderScale
+	{
+		get => _renderScale;
+		set => _renderScale = float.IsFinite(value) ? Math.Clamp(value, MinRenderScale, 1.0f) : 1.0f;
+	}
+
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public ReflectionConfig Reflections { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();

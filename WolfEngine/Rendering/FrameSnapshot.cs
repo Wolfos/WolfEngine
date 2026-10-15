@@ -201,8 +201,14 @@ public sealed class RenderViewSnapshot
 		SunIntensityScale = Math.Clamp(sunIntensityScale, 0.0f, 1.0f);
 	}
 
+	/// <summary>
+	/// Copies every setting into the snapshot's own config, which the render thread reads while the game thread
+	/// may be editing the source. A new <see cref="RenderConfig"/> property has to be added here;
+	/// FrameSnapshotConfigTests fails until it is.
+	/// </summary>
 	public void SetConfig(RenderConfig config)
 	{
+		Config.RenderScale = config.RenderScale;
 		Config.AmbientOcclusion = config.AmbientOcclusion;
 		Config.Reflections = config.Reflections;
 		Config.DiffuseGlobalIllumination = config.DiffuseGlobalIllumination;
@@ -215,6 +221,7 @@ public sealed class RenderViewSnapshot
 		Config.ColorGrading = config.ColorGrading;
 		Config.Bloom = config.Bloom;
 		Config.Decals = config.Decals;
+		Config.MotionVectorDebug = config.MotionVectorDebug;
 	}
 
 	public void SetColorGradingLookupTable(ColorLookupTable? lookupTable)
