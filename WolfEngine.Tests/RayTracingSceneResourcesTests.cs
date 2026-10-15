@@ -572,7 +572,7 @@ public sealed class RayTracingSceneResourcesTests
 		var shape = DdgiUtilities.GetGridShape(ddgi);
 		Assert.That(shape.ProbeCount, Is.EqualTo(2048));
 		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.IrradianceTileInteriorSize), Is.EqualTo(new Int2(460, 450)));
-		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.VisibilityTileInteriorSize), Is.EqualTo(new Int2(828, 810)));
+		Assert.That(DdgiUtilities.GetAtlasSize(shape, DdgiUtilities.FullVisibilityTileInteriorSize), Is.EqualTo(new Int2(828, 810)));
 	}
 
 	[Test]
@@ -669,7 +669,7 @@ public sealed class RayTracingSceneResourcesTests
 	[TestCase(0, DdgiUtilities.IrradianceTileInteriorSize, 1)]
 	[TestCase(32, DdgiUtilities.IrradianceTileInteriorSize, 32)]
 	[TestCase(1024, DdgiUtilities.IrradianceTileInteriorSize, 64)]
-	[TestCase(1024, DdgiUtilities.VisibilityTileInteriorSize, 256)]
+	[TestCase(1024, DdgiUtilities.FullVisibilityTileInteriorSize, 256)]
 	public void DdgiRaySampleCountDoesNotExceedTemporaryTileCapacity(
 		int requestedRayCount,
 		int tileInteriorSize,
@@ -680,15 +680,17 @@ public sealed class RayTracingSceneResourcesTests
 			Is.EqualTo(expectedRayCount));
 	}
 
-	[TestCase(1, 2)]
-	[TestCase(64, 128)]
-	[TestCase(256, 320)]
+	[TestCase(1, DdgiUtilities.FullVisibilityTileInteriorSize, 2)]
+	[TestCase(64, DdgiUtilities.FullVisibilityTileInteriorSize, 128)]
+	[TestCase(256, DdgiUtilities.FullVisibilityTileInteriorSize, 320)]
+	[TestCase(256, DdgiUtilities.HalfVisibilityTileInteriorSize, 128)]
 	public void DdgiProbeTraceInvocationCountIncludesVisibilityAndIrradianceRays(
 		int requestedRayCount,
+		int visibilityTileInteriorSize,
 		int expectedInvocationCount)
 	{
 		Assert.That(
-			DdgiUtilities.GetProbeTraceInvocationCount(requestedRayCount),
+			DdgiUtilities.GetProbeTraceInvocationCount(requestedRayCount, visibilityTileInteriorSize),
 			Is.EqualTo(expectedInvocationCount));
 	}
 

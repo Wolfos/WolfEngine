@@ -219,6 +219,7 @@ internal sealed class RenderViewState
 	public ResourceState DdgiIrradianceEstimatorState = ResourceState.Common;
 	public Vector3 DdgiHistoryLatticeAnchor;
 	public float DdgiHistoryProbeSpacing;
+	public int DdgiHistoryVisibilityTileInteriorSize;
 	public Vector3 DdgiCommittedRuntimeOrigin;
 	public Int3 DdgiCommittedStorageOffset;
 	public bool DdgiCommittedPlacementValid;
@@ -381,6 +382,7 @@ internal sealed class RenderViewState
 		DdgiHistoryGridShape = default;
 		DdgiHistoryLatticeAnchor = Vector3.Zero;
 		DdgiHistoryProbeSpacing = 0.0f;
+		DdgiHistoryVisibilityTileInteriorSize = 0;
 		DdgiHistoryReadIndex = 0;
 		DdgiHistoryValid = false;
 		DdgiCommittedRuntimeOrigin = Vector3.Zero;

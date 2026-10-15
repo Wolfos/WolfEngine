@@ -161,6 +161,19 @@ public enum DiffuseGlobalIlluminationMode
 	RayTracedDdgi
 }
 
+/// <summary>
+/// Per-axis texels each probe gets in the DDGI visibility atlas, which stores the depth moments that keep light
+/// from leaking through walls. Half stores 8x8 per probe instead of 16x16: a quarter of the memory and of the
+/// integration work, with coarser occlusion. It holds up to 64 rays per probe, so more rays than that are not
+/// used for visibility.
+/// </summary>
+public enum DdgiVisibilityResolution
+{
+	// Full is zero so serialized settings that predate this property keep their original behavior.
+	Full = 0,
+	Half = 1
+}
+
 public struct DdgiProbeCounts
 {
 	public DdgiProbeCounts()
@@ -184,6 +197,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public DdgiProbeCounts ProbeCounts { get; set; } = new();
 	public float ProbeSpacing { get; set; } = 2.0f;
 	public int RaysPerProbe { get; set; } = 64;
+	public DdgiVisibilityResolution VisibilityResolution { get; set; } = DdgiVisibilityResolution.Full;
 	public int ProbeUpdateFrames { get; set; } = 8;
 	public float MaxRayDistance { get; set; } = 6.0f;
 	public float NormalBias { get; set; } = 0.05f;

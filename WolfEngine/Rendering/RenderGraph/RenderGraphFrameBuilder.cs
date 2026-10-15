@@ -915,12 +915,14 @@ internal sealed class RenderGraphFrameBuilder
 				var ddgiGridShape = DdgiUtilities.GetGridShape(ddgiConfig);
 				var ddgiProbeSpacing = Math.Max(ddgiConfig.ProbeSpacing, 0.001f);
 				var irradianceAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, DdgiUtilities.IrradianceTileInteriorSize);
-				var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, DdgiUtilities.VisibilityTileInteriorSize);
+				var visibilityTileInteriorSize = DdgiUtilities.GetVisibilityTileInteriorSize(ddgiConfig);
+				var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(ddgiGridShape, visibilityTileInteriorSize);
 				EnsureDdgiHistoryResources(
 					_renderer.GetGfxDevice(),
 					ddgiGridShape,
 					ddgiConfig.Origin,
-					ddgiProbeSpacing);
+					ddgiProbeSpacing,
+					visibilityTileInteriorSize);
 				ddgiRuntimeOrigin = DdgiUtilities.GetRuntimeOrigin(
 					ddgiConfig.Origin,
 					ddgiGridShape,
@@ -3449,7 +3451,8 @@ internal sealed class RenderGraphFrameBuilder
 		IGfxDevice device,
 		DdgiGridShape gridShape,
 		Vector3 latticeAnchor,
-		float probeSpacing)
+		float probeSpacing,
+		int visibilityTileInteriorSize)
 	{
 		var deviceChanged = _view.DdgiHistoryDevice is not null && ReferenceEquals(_view.DdgiHistoryDevice, device) == false;
 		var backendChanged = _view.DdgiHistoryBackendKind.HasValue && _view.DdgiHistoryBackendKind.Value != device.BackendKind;
@@ -3457,7 +3460,14 @@ internal sealed class RenderGraphFrameBuilder
 		var latticeAnchorChanged = _view.DdgiHistoryDevice is not null && _view.DdgiHistoryLatticeAnchor != latticeAnchor;
 		var probeSpacingChanged = _view.DdgiHistoryDevice is not null &&
 		                          MathF.Abs(_view.DdgiHistoryProbeSpacing - probeSpacing) > 1e-6f;
-		if (deviceChanged || backendChanged || shapeChanged || latticeAnchorChanged || probeSpacingChanged)
+		var visibilityResolutionChanged = _view.DdgiHistoryDevice is not null &&
+		                                  _view.DdgiHistoryVisibilityTileInteriorSize != visibilityTileInteriorSize;
+		if (deviceChanged ||
+		    backendChanged ||
+		    shapeChanged ||
+		    latticeAnchorChanged ||
+		    probeSpacingChanged ||
+		    visibilityResolutionChanged)
 		{
 			_view.ReleaseDdgiHistoryResources();
 		}
@@ -3480,7 +3490,7 @@ internal sealed class RenderGraphFrameBuilder
 			return;
 		}
 
-		var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, DdgiUtilities.VisibilityTileInteriorSize);
+		var visibilityAtlasSize = DdgiUtilities.GetAtlasSize(gridShape, visibilityTileInteriorSize);
 		var shCoefficientTextureSize = DdgiUtilities.GetShCoefficientTextureSize(gridShape);
 		for (var i = 0; i < 2; i++)
 		{
@@ -3527,6 +3537,7 @@ internal sealed class RenderGraphFrameBuilder
 		_view.DdgiHistoryGridShape = gridShape;
 		_view.DdgiHistoryLatticeAnchor = latticeAnchor;
 		_view.DdgiHistoryProbeSpacing = probeSpacing;
+		_view.DdgiHistoryVisibilityTileInteriorSize = visibilityTileInteriorSize;
 		_view.DdgiHistoryReadIndex = 0;
 		_view.DdgiHistoryValid = false;
 	}

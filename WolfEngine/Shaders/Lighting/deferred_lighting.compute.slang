@@ -57,6 +57,7 @@ cbuffer LightingParams : register(b2)
     uint ddgiEnabled;
     uint ddgiFinalContributionDebugEnabled;
     uint ddgiProbeDebugEnabled;
+    uint ddgiVisibilityTileInteriorSize;
     DirectionalLightData directionalLights[MAX_DIRECTIONAL_LIGHTS];
     row_major float4x4 shadowViewProjection0;
     row_major float4x4 shadowViewProjection1;
@@ -117,6 +118,7 @@ DdgiSampleParams MakeDdgiSampleParams()
     params.atlasColumns = ddgiAtlasColumns;
     params.atlasRows = ddgiAtlasRows;
     params.tileBorderSize = DDGI_TILE_BORDER_SIZE;
+    params.visibilityTileInteriorSize = ddgiVisibilityTileInteriorSize;
     params.maxRayDistance = ddgiMaxRayDistance;
     params.viewBias = ddgiViewBias;
     params.horizontalBlendDistance = ddgiHorizontalBlendDistance;

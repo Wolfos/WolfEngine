@@ -1,4 +1,5 @@
 using WolfEngine.Rendering.Abstraction;
+using WolfEngine.Rendering.Passes;
 
 namespace WolfEngine.Rendering.Shaders;
 
@@ -199,6 +200,8 @@ public sealed class EngineShaderCatalog
 			var legal = define == "WOLF_GBUFFER_SKINNED" && request.ProgramId == EngineShaderPrograms.GBuffer ||
                             define == "WOLF_ALPHA_CLIP" && SupportsAlphaClip(request.ProgramId) ||
 			            define == "WOLF_GPU_DRAW_DIAGNOSTICS" && request.ProgramId == EngineShaderPrograms.GpuDrawCull ||
+			            define == DdgiUtilities.GetVisibilityIntegrateDefine(DdgiUtilities.HalfVisibilityTileInteriorSize) &&
+			            request.ProgramId == EngineShaderPrograms.DdgiIntegrate ||
 			            request.ProgramId == EngineShaderPrograms.ShadowMap &&
 			            (define == "WOLF_SHADOW_TERRAIN" || define == "WOLF_SHADOW_CASCADE_INDEX=0" ||
 			             define == "WOLF_SHADOW_CASCADE_INDEX=1" || define == "WOLF_SHADOW_CASCADE_INDEX=2");
@@ -273,6 +276,15 @@ public sealed class EngineShaderCatalog
 							entryPoint,
 							backendKind,
 							"WOLF_GPU_DRAW_DIAGNOSTICS"));
+					}
+
+					if (descriptor.Id == EngineShaderPrograms.DdgiIntegrate)
+					{
+						requests.Add(ShaderRequest.Compute(
+							descriptor.Id,
+							entryPoint,
+							backendKind,
+							DdgiUtilities.GetVisibilityIntegrateDefine(DdgiUtilities.HalfVisibilityTileInteriorSize)!));
 					}
 				}
 			}
