@@ -1,10 +1,20 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Shaders;
 
-public static class ShaderArtifactSerializer
+public static partial class ShaderArtifactSerializer
 {
+	/// <summary>
+	/// Source-generated, so a NativeAOT game can read its shaders. Default options, as the artifacts have always been
+	/// written with: properties only and enums as numbers.
+	/// </summary>
+	[JsonSerializable(typeof(ArtifactDto))]
+	private sealed partial class ShaderArtifactJson : JsonSerializerContext
+	{
+	}
+
 	private static readonly byte[] Magic = "WOLFSHDR"u8.ToArray();
 
 	public static void Write(Stream destination, CompiledShaderArtifact artifact)
@@ -14,7 +24,7 @@ public static class ShaderArtifactSerializer
 		using var writer = new BinaryWriter(destination, System.Text.Encoding.UTF8, leaveOpen: true);
 		writer.Write(Magic);
 		writer.Write(CompiledShaderArtifact.CurrentFormatVersion);
-		var json = JsonSerializer.SerializeToUtf8Bytes(ToDto(artifact));
+		var json = JsonSerializer.SerializeToUtf8Bytes(ToDto(artifact), ShaderArtifactJson.Default.ArtifactDto);
 		writer.Write(json.Length);
 		writer.Write(json);
 	}
@@ -31,7 +41,7 @@ public static class ShaderArtifactSerializer
 		var jsonLength = reader.ReadInt32();
 		if (jsonLength <= 0 || jsonLength > 128 * 1024 * 1024)
 			throw new InvalidDataException("Shader artifact payload length is invalid.");
-		var dto = JsonSerializer.Deserialize<ArtifactDto>(reader.ReadBytes(jsonLength))
+		var dto = JsonSerializer.Deserialize(reader.ReadBytes(jsonLength), ShaderArtifactJson.Default.ArtifactDto)
 		          ?? throw new InvalidDataException("Shader artifact payload is invalid.");
 		return FromDto(dto);
 	}

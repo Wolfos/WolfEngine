@@ -90,25 +90,27 @@ public sealed class DeferredLightingPass
 		var ddgiProbeRelocationDecision = resources.DdgiProbeRelocationDecision.IsValid
 			? context.GetTexture(resources.DdgiProbeRelocationDecision)
 			: null;
-		var ddgiFinalContribution = resources.DdgiFinalContribution.IsValid
+		// The debug targets are only declared, and so only allocated, while a debug view reads them. Fetching an
+		// undeclared transient would allocate it every frame outside the graph's lifetimes and barriers.
+		var ddgiFinalContribution = resources.WriteDdgiFinalContributionDebug
 			? context.GetTexture(resources.DdgiFinalContribution)
 			: null;
-		var ddgiProbeBaseWeightDebug = resources.DdgiProbeBaseWeightDebug.IsValid
+		var ddgiProbeBaseWeightDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiProbeBaseWeightDebug)
 			: null;
-		var ddgiWeightedVisibilityDebug = resources.DdgiWeightedVisibilityDebug.IsValid
+		var ddgiWeightedVisibilityDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiWeightedVisibilityDebug)
 			: null;
-		var ddgiDominantProbeDebug = resources.DdgiDominantProbeDebug.IsValid
+		var ddgiDominantProbeDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiDominantProbeDebug)
 			: null;
-		var ddgiDominantProbeCoordDebug = resources.DdgiDominantProbeCoordDebug.IsValid
+		var ddgiDominantProbeCoordDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiDominantProbeCoordDebug)
 			: null;
-		var ddgiProbeRelocationDebug = resources.DdgiProbeRelocationDebug.IsValid
+		var ddgiProbeRelocationDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiProbeRelocationDebug)
 			: null;
-		var ddgiProbeRelocationDecisionDebug = resources.DdgiProbeRelocationDecisionDebug.IsValid
+		var ddgiProbeRelocationDecisionDebug = resources.WriteDdgiProbeDebug
 			? context.GetTexture(resources.DdgiProbeRelocationDecisionDebug)
 			: null;
 		var shadowMapDepth0 = context.GetTexture(resources.ShadowMapDepth0);
@@ -184,6 +186,7 @@ public sealed class DeferredLightingPass
 				: DescriptorHandle.Invalid,
 			DdgiFinalContributionDebugEnabled = resources.WriteDdgiFinalContributionDebug,
 			DdgiProbeDebugEnabled = resources.WriteDdgiProbeDebug,
+			DdgiVisibilityTileInteriorSize = DdgiUtilities.GetVisibilityTileInteriorSize(resources.Config.DiffuseGlobalIllumination),
 			ShadowMapDepth0 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth0),
 			ShadowMapDepth1 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth1),
 			ShadowMapDepth2 = _bindlessRegistry.RegisterDepthTexture(shadowMapDepth2),
@@ -363,6 +366,7 @@ public sealed class DeferredLightingPass
 		lightingWriter.SetUInt("ddgiEnabled", config.DdgiEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiFinalContributionDebugEnabled", config.DdgiFinalContributionDebugEnabled ? 1u : 0u);
 		lightingWriter.SetUInt("ddgiProbeDebugEnabled", config.DdgiProbeDebugEnabled ? 1u : 0u);
+		lightingWriter.SetUInt("ddgiVisibilityTileInteriorSize", (uint)config.DdgiVisibilityTileInteriorSize);
 		lightingWriter.SetVector3("ddgiOrigin", config.DdgiOrigin);
 		lightingWriter.SetFloat("ddgiProbeSpacing", config.DdgiProbeSpacing);
 		lightingWriter.SetInt("ddgiStorageOffsetX", config.DdgiStorageOffset.X);

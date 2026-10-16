@@ -624,6 +624,22 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_renderer.Run(startup, update, OnRender);
 	}
 
+	/// <summary>Starts rendering on the calling thread without taking it over. See <see cref="IRenderer.Start"/>.</summary>
+	public void Start(Action startup, Action<float> update)
+	{
+		_renderer.Start(startup, update, OnRender);
+	}
+
+	public bool RenderFrame()
+	{
+		return _renderer.RunFrame();
+	}
+
+	public void Stop()
+	{
+		_renderer.Stop();
+	}
+
 	public bool TryBeginSnapshotWrite(out FrameSnapshot snapshot)
 	{
 		return _snapshotBuffer.TryBeginWrite(out snapshot);
@@ -806,9 +822,10 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 					}
 					var sceneViewportState = _viewportStateBus.GetUiState(recordedView);
 					var renderSceneToWindow = _view.Output == RenderViewOutput.Backbuffer;
+					var renderScale = viewSnapshot.Config.RenderScale;
 					var sceneEnabled = renderSceneToWindow
-						? TryComputeFullWindowSceneRenderSize(frameBufferSize, out var sceneRenderSize)
-						: TryComputeSceneRenderSize(sceneViewportState, out sceneRenderSize);
+						? TryComputeFullWindowSceneRenderSize(frameBufferSize, renderScale, out var sceneRenderSize)
+						: TryComputeSceneRenderSize(sceneViewportState, renderScale, out sceneRenderSize);
 					if (recordedView == RenderViewId.Primary)
 					{
 						var currentResolution = sceneEnabled ? sceneRenderSize : frameBufferSize;
@@ -1107,7 +1124,11 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 		_passes.Clear();
 	}
 
-	private static bool TryComputeSceneRenderSize(SceneViewportUiState state, out Int2 sceneRenderSize)
+	/// <summary>
+	/// An editor viewport combines the render config's scale with its own, so the viewport shows the game's
+	/// resolution and can lower it further for editing.
+	/// </summary>
+	private static bool TryComputeSceneRenderSize(SceneViewportUiState state, float renderScale, out Int2 sceneRenderSize)
 	{
 		if (state.Visible == false || state.ContentSizePixels.X <= 0 || state.ContentSizePixels.Y <= 0)
 		{
@@ -1115,17 +1136,31 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 			return false;
 		}
 
-		var scale = Math.Clamp(state.ResolutionScale, 0.5f, 1.0f);
-		var width = Math.Max(1, (int)MathF.Round(state.ContentSizePixels.X * scale));
-		var height = Math.Max(1, (int)MathF.Round(state.ContentSizePixels.Y * scale));
-		sceneRenderSize = new Int2(width, height);
+		var scale = Math.Clamp(state.ResolutionScale, 0.5f, 1.0f) * renderScale;
+		sceneRenderSize = ScaleRenderSize(state.ContentSizePixels, scale);
+
 		return true;
 	}
 
-	private static bool TryComputeFullWindowSceneRenderSize(Int2 framebufferSize, out Int2 sceneRenderSize)
+	private static bool TryComputeFullWindowSceneRenderSize(Int2 framebufferSize, float renderScale, out Int2 sceneRenderSize)
 	{
-		sceneRenderSize = framebufferSize;
-		return framebufferSize.X > 0 && framebufferSize.Y > 0;
+		if (framebufferSize.X <= 0 || framebufferSize.Y <= 0)
+		{
+			sceneRenderSize = framebufferSize;
+			return false;
+		}
+
+		sceneRenderSize = ScaleRenderSize(framebufferSize, renderScale);
+
+		return true;
+	}
+
+	internal static Int2 ScaleRenderSize(Int2 outputSize, float scale)
+	{
+		var width = Math.Max(1, (int)MathF.Round(outputSize.X * scale));
+		var height = Math.Max(1, (int)MathF.Round(outputSize.Y * scale));
+
+		return new Int2(width, height);
 	}
 
 	private static int ParsePositiveIntEnvironmentVariable(string name, int fallback)
@@ -1186,6 +1221,7 @@ public sealed class RenderGraph : IRenderResourceScheduler, IRenderViewHost
 				? currentResources
 				: _renderer.CreateTextureResources(texture);
 			var previousResources = texture.MarkGpuResourcesCreated(resources);
+			texture.ReleaseMipDataAfterUpload();
 			if (previousResources is not null)
 			{
 				QueueTextureResourceRelease(previousResources);

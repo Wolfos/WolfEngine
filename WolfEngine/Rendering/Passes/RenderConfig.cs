@@ -7,6 +7,21 @@ namespace WolfEngine.Rendering.Passes;
 [RuntimeAsset(AssetType.DataAsset, typeof(RenderConfig), typeof(IDataAssetRuntimeResolver))]
 public class RenderConfig: IDataAsset
 {
+	public const float MinRenderScale = 0.25f;
+
+	private float _renderScale = 1.0f;
+
+	/// <summary>
+	/// Per-axis fraction of the output resolution the scene renders at. Everything up to tonemapping runs at the
+	/// scaled size (G-buffer, lighting, AO, reflections, temporal anti-aliasing); FSR3 then upscales temporally,
+	/// and otherwise tonemapping filters the image up to the output. Post-processing and UI stay at full size.
+	/// </summary>
+	public float RenderScale
+	{
+		get => _renderScale;
+		set => _renderScale = float.IsFinite(value) ? Math.Clamp(value, MinRenderScale, 1.0f) : 1.0f;
+	}
+
 	public AmbientOcclusionConfig AmbientOcclusion { get; set; } = new();
 	public ReflectionConfig Reflections { get; set; } = new();
 	public DiffuseGlobalIlluminationConfig DiffuseGlobalIllumination { get; set; } = new();
@@ -161,6 +176,19 @@ public enum DiffuseGlobalIlluminationMode
 	RayTracedDdgi
 }
 
+/// <summary>
+/// Per-axis texels each probe gets in the DDGI visibility atlas, which stores the depth moments that keep light
+/// from leaking through walls. Half stores 8x8 per probe instead of 16x16: a quarter of the memory and of the
+/// integration work, with coarser occlusion. It holds up to 64 rays per probe, so more rays than that are not
+/// used for visibility.
+/// </summary>
+public enum DdgiVisibilityResolution
+{
+	// Full is zero so serialized settings that predate this property keep their original behavior.
+	Full = 0,
+	Half = 1
+}
+
 public struct DdgiProbeCounts
 {
 	public DdgiProbeCounts()
@@ -184,6 +212,7 @@ public struct DiffuseGlobalIlluminationConfig
 	public DdgiProbeCounts ProbeCounts { get; set; } = new();
 	public float ProbeSpacing { get; set; } = 2.0f;
 	public int RaysPerProbe { get; set; } = 64;
+	public DdgiVisibilityResolution VisibilityResolution { get; set; } = DdgiVisibilityResolution.Full;
 	public int ProbeUpdateFrames { get; set; } = 8;
 	public float MaxRayDistance { get; set; } = 6.0f;
 	public float NormalBias { get; set; } = 0.05f;

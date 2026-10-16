@@ -65,6 +65,16 @@ public static class WolfEngine
 		if (OperatingSystem.IsMacOS())
 		{
 			services.AddSingleton<IMacOSInputHandler, MacOsInputHandler>();
+			services.AddSingleton<IMetalSurface, SdlMetalSurface>();
+			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
+			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
+			services.AddSingleton<IRenderer, WolfRendererMetal>();
+			services.AddSingleton<IRenderPipeline, RenderPipeline>();
+		}
+		else if (OperatingSystem.IsIOS())
+		{
+			// The app owns the view and the main loop, so it registers its layer with AddHostMetalSurface and drives
+			// frames through IRenderPipeline.Start and RenderFrame.
 			services.AddSingleton<IGpuDrawBackendBridge, MetalGpuDrawBackendBridge>();
 			services.AddSingleton<IImGuiRenderer, MetalUiRenderer>();
 			services.AddSingleton<IRenderer, WolfRendererMetal>();

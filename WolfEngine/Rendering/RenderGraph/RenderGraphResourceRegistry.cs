@@ -56,30 +56,41 @@ public sealed class RenderGraphResourceRegistry
 
 	private readonly struct TransientPoolEntry
 	{
-		public TransientPoolEntry(IGfxTexture texture, ResourceState lastKnownState)
+		public TransientPoolEntry(IGfxTexture texture, ResourceState lastKnownState, GpuSubmissionToken lastUse, long returnedFrame)
 		{
 			Texture = texture;
 			LastKnownState = lastKnownState;
+			LastUse = lastUse;
+			ReturnedFrame = returnedFrame;
 		}
 
 		public IGfxTexture Texture { get; }
 		public ResourceState LastKnownState { get; }
+
+		/// <summary>The submission of the last frame that used the texture. It is only destroyed once that completes.</summary>
+		public GpuSubmissionToken LastUse { get; }
+
+		public long ReturnedFrame { get; }
 	}
 
 	private readonly struct ActiveTransientSlot
 	{
-		public ActiveTransientSlot(int slotId, TexturePoolKey poolKey, IGfxTexture texture, ResourceState initialState)
+		public ActiveTransientSlot(int slotId, TexturePoolKey poolKey, IGfxTexture texture, ResourceState initialState, int poolEpoch)
 		{
 			SlotId = slotId;
 			PoolKey = poolKey;
 			Texture = texture;
 			InitialState = initialState;
+			PoolEpoch = poolEpoch;
 		}
 
 		public int SlotId { get; }
 		public TexturePoolKey PoolKey { get; }
 		public IGfxTexture Texture { get; }
 		public ResourceState InitialState { get; }
+
+		/// <summary>The pool epoch the texture was acquired in. Textures from before an invalidation are not reused.</summary>
+		public int PoolEpoch { get; }
 	}
 
 	private sealed class TextureRecord
@@ -157,8 +168,16 @@ public sealed class RenderGraphResourceRegistry
 		}
 	}
 
+	// Pooled transient textures nothing has reused for this many frames are released, so textures for a resolution or
+	// feature no longer in use do not stay alive.
+	private const int TransientPoolIdleFrameLimit = 120;
+
 	private int _nextHandleId = 1;
 	private int _transientPoolEpoch = 1;
+	private long _frameIndex;
+	private int _liveTransientTextureCount;
+	private long _liveTransientTextureBytes;
+	private TransientTextureMemory _lastFrameTransientMemory = new(0, 0, 0, 0, 0, 0, 0, 0);
 	private readonly Dictionary<int, TextureRecord> _textures = new();
 	private readonly Dictionary<int, BufferRecord> _buffers = new();
 	private readonly Stack<TextureRecord> _textureRecordPool = new();
@@ -166,6 +185,7 @@ public sealed class RenderGraphResourceRegistry
 	private readonly Dictionary<int, ActiveTransientSlot> _activeTransientSlots = new();
 	private readonly Dictionary<int, ResourceState> _transientSlotStates = new();
 	private readonly Dictionary<TexturePoolKey, Stack<TransientPoolEntry>> _availableTransientTextures = new();
+	private readonly List<TransientPoolEntry> _retainedPoolEntries = new();
 	private IGfxDevice? _device;
 	private ITexturePoolDevice? _texturePoolDevice;
 	private GpuSubmissionToken _previousFrameSubmission;
@@ -199,7 +219,9 @@ public sealed class RenderGraphResourceRegistry
 
 	public void BeginFrame()
 	{
+		_frameIndex++;
 		ReclaimFrameRecordsToDevice(_device, _texturePoolDevice, _previousFrameSubmission);
+		ReleaseIdleTransientTextures();
 		_previousFrameSubmission = GpuSubmissionToken.Invalid;
 		_frameStartPrimarySubmission = _device?.LastPrimarySubmission ?? GpuSubmissionToken.Invalid;
 		_nextHandleId = 1;
@@ -207,6 +229,8 @@ public sealed class RenderGraphResourceRegistry
 
 	public void EndFrame()
 	{
+		PublishTransientMemory();
+
 		// Resources remain tracked until the next BeginFrame call, where they are reclaimed.
 		var submitted = _device?.LastPrimarySubmission ?? GpuSubmissionToken.Invalid;
 		_previousFrameSubmission = submitted.IsValid && submitted.Equals(_frameStartPrimarySubmission) == false
@@ -518,13 +542,15 @@ public sealed class RenderGraphResourceRegistry
 			}
 
 			texture = _device.CreateTexture(record.Descriptor);
+			Interlocked.Increment(ref _liveTransientTextureCount);
+			Interlocked.Add(ref _liveTransientTextureBytes, EstimateTextureBytes(record.Descriptor));
 		}
 
 		record.Texture = texture;
 		record.CurrentState = state;
 		record.TransientSlotId = slotId;
 		record.StateTrackingKey = -slotId;
-		_activeTransientSlots[slotId] = new ActiveTransientSlot(slotId, key, texture, state);
+		_activeTransientSlots[slotId] = new ActiveTransientSlot(slotId, key, texture, state, _transientPoolEpoch);
 		_transientSlotStates[slotId] = state;
 		return texture;
 	}
@@ -534,35 +560,30 @@ public sealed class RenderGraphResourceRegistry
 		ITexturePoolDevice? poolDevice,
 		GpuSubmissionToken submission)
 	{
+		// Transient textures go straight back to the pool, while the GPU may still be running the frame that used them.
+		// The next frame reuses them rather than allocating a set per frame in flight. That is safe because every frame
+		// is recorded to the same queue and executes in order: Metal tracks hazards on these textures (bindless ones
+		// are declared with useResource), and D3D12 transitions them from the state the previous frame left them in.
+		// Their contents never carry over between frames. Destroying one still waits for the GPU, see LastUse.
 		foreach (var slot in _activeTransientSlots.Values)
 		{
 			var lastKnownState = _transientSlotStates.TryGetValue(slot.SlotId, out var state)
 				? state
 				: slot.InitialState;
-			var texture = slot.Texture;
-			var key = slot.PoolKey;
-			var poolEpoch = _transientPoolEpoch;
-			QueueRetirement(
-				device,
-				submission,
-				() =>
-				{
-					if (poolEpoch == _transientPoolEpoch)
-					{
-						if (_availableTransientTextures.TryGetValue(key, out var pool) == false)
-						{
-							pool = new Stack<TransientPoolEntry>();
-							_availableTransientTextures[key] = pool;
-						}
+			var entry = new TransientPoolEntry(slot.Texture, lastKnownState, submission, _frameIndex);
+			if (slot.PoolEpoch != _transientPoolEpoch)
+			{
+				RetireTransientTexture(device, entry);
+				continue;
+			}
 
-						pool.Push(new TransientPoolEntry(texture, lastKnownState));
-					}
-					else
-					{
-						DisposeTexture(texture);
-					}
-				},
-				texture.Name ?? "Transient render-graph texture");
+			if (_availableTransientTextures.TryGetValue(slot.PoolKey, out var pool) == false)
+			{
+				pool = new Stack<TransientPoolEntry>();
+				_availableTransientTextures[slot.PoolKey] = pool;
+			}
+
+			pool.Push(entry);
 		}
 
 		foreach (var record in _textures.Values)
@@ -661,6 +682,13 @@ public sealed class RenderGraphResourceRegistry
 		}
 	}
 
+	private void DisposeTransientTexture(IGfxTexture texture)
+	{
+		Interlocked.Decrement(ref _liveTransientTextureCount);
+		Interlocked.Add(ref _liveTransientTextureBytes, -EstimateTextureBytes(texture.Descriptor));
+		DisposeTexture(texture);
+	}
+
 	private static void DisposeTexture(IGfxTexture texture)
 	{
 		if (texture is IDisposable disposableTexture)
@@ -675,10 +703,163 @@ public sealed class RenderGraphResourceRegistry
 		{
 			while (pool.Count > 0)
 			{
-				DisposeTexture(pool.Pop().Texture);
+				RetireTransientTexture(_device, pool.Pop());
 			}
 		}
 
 		_availableTransientTextures.Clear();
+	}
+
+	/// <summary>Releases pooled textures nothing has reused for <see cref="TransientPoolIdleFrameLimit"/> frames.</summary>
+	private void ReleaseIdleTransientTextures()
+	{
+		foreach (var pool in _availableTransientTextures.Values)
+		{
+			var hasIdleEntry = false;
+			foreach (var entry in pool)
+			{
+				if (_frameIndex - entry.ReturnedFrame > TransientPoolIdleFrameLimit)
+				{
+					hasIdleEntry = true;
+					break;
+				}
+			}
+
+			if (hasIdleEntry == false)
+			{
+				continue;
+			}
+
+			// The stack is rebuilt in its original order, so the most recently returned texture stays on top.
+			_retainedPoolEntries.Clear();
+			while (pool.Count > 0)
+			{
+				var entry = pool.Pop();
+				if (_frameIndex - entry.ReturnedFrame > TransientPoolIdleFrameLimit)
+				{
+					RetireTransientTexture(_device, entry);
+				}
+				else
+				{
+					_retainedPoolEntries.Add(entry);
+				}
+			}
+
+			for (var i = _retainedPoolEntries.Count - 1; i >= 0; i--)
+			{
+				pool.Push(_retainedPoolEntries[i]);
+			}
+		}
+
+		_retainedPoolEntries.Clear();
+	}
+
+	private void RetireTransientTexture(IGfxDevice? device, TransientPoolEntry entry)
+	{
+		var texture = entry.Texture;
+		QueueRetirement(
+			device,
+			entry.LastUse,
+			() => DisposeTransientTexture(texture),
+			texture.Name ?? "Transient render-graph texture");
+	}
+
+	/// <summary>Transient texture memory as of the last completed frame. Safe to read from any thread.</summary>
+	public TransientTextureMemory TransientMemory => Volatile.Read(ref _lastFrameTransientMemory);
+
+	private void PublishTransientMemory()
+	{
+		var transientHandles = 0;
+		foreach (var record in _textures.Values)
+		{
+			if (record.IsTransient)
+			{
+				transientHandles++;
+			}
+		}
+
+		var activeBytes = 0L;
+		foreach (var slot in _activeTransientSlots.Values)
+		{
+			activeBytes += EstimateTextureBytes(slot.Texture.Descriptor);
+		}
+
+		var pooledCount = 0;
+		var pooledBytes = 0L;
+		var pooledDescriptors = 0;
+		foreach (var pool in _availableTransientTextures.Values)
+		{
+			if (pool.Count > 0)
+			{
+				pooledDescriptors++;
+			}
+
+			foreach (var entry in pool)
+			{
+				pooledCount++;
+				pooledBytes += EstimateTextureBytes(entry.Texture.Descriptor);
+			}
+		}
+
+		Volatile.Write(
+			ref _lastFrameTransientMemory,
+			new TransientTextureMemory(
+				transientHandles,
+				_activeTransientSlots.Count,
+				activeBytes,
+				pooledCount,
+				pooledBytes,
+				Volatile.Read(ref _liveTransientTextureCount),
+				Interlocked.Read(ref _liveTransientTextureBytes),
+				pooledDescriptors));
+	}
+
+	/// <summary>Bytes a texture's mip chain occupies, before any padding or alignment the driver adds.</summary>
+	internal static long EstimateTextureBytes(in TextureDescriptor descriptor)
+	{
+		var total = 0L;
+		var mipLevels = Math.Max(descriptor.MipLevels, 1);
+		for (var mip = 0; mip < mipLevels; mip++)
+		{
+			var width = Math.Max(descriptor.Width >> mip, 1);
+			var height = Math.Max(descriptor.Height >> mip, 1);
+			var depth = descriptor.Dimension == TextureDimension.Texture3D
+				? Math.Max(descriptor.Depth >> mip, 1)
+				: 1;
+			total += TextureFormatUtilities.GetMipDataSize(descriptor.Format, width, height, depth);
+		}
+
+		return total;
+	}
+}
+
+/// <summary>
+/// Where the render graph's transient textures are as of one frame. Textures that are neither in use by that frame
+/// nor back in the pool are retiring: an earlier frame still in flight on the GPU holds them.
+/// </summary>
+public sealed record TransientTextureMemory(
+	int TransientHandles,
+	int ActiveSlots,
+	long ActiveBytes,
+	int PooledTextures,
+	long PooledBytes,
+	int LiveTextures,
+	long LiveBytes,
+	int DistinctDescriptors)
+{
+	public override string ToString()
+	{
+		var retiringTextures = LiveTextures - ActiveSlots - PooledTextures;
+		var retiringBytes = LiveBytes - ActiveBytes - PooledBytes;
+
+		return
+			$"Render graph transients: {TransientHandles} handles in {ActiveSlots} alias slots using {Megabytes(ActiveBytes)} this frame; " +
+			$"{LiveTextures} textures alive ({Megabytes(LiveBytes)}): {PooledTextures} pooled ({Megabytes(PooledBytes)}, {DistinctDescriptors} descriptors), " +
+			$"{retiringTextures} retiring with frames in flight ({Megabytes(retiringBytes)}).";
+	}
+
+	private static string Megabytes(long bytes)
+	{
+		return $"{bytes / (1024.0 * 1024.0):F1} MB";
 	}
 }

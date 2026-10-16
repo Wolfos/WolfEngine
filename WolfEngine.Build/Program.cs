@@ -8,6 +8,7 @@ using WolfEngine.Rendering.Abstraction;
 using WolfEngine.Rendering.Shaders;
 using WolfEngine.Audio;
 using WolfEngine.Editor.Tooling;
+using WolfEngine.Serialization;
 
 namespace WolfEngine.Build;
 
@@ -19,7 +20,18 @@ public sealed class GameBuildContext
 	public IAssetCatalog? AssetCatalog { get; init; }
 }
 
-public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false);
+/// <param name="Target">
+/// The runtime identifier to build for, or null for the machine building. Besides the host's own, a Mac can build
+/// <c>ios-arm64</c>: the cooked content an iOS app bundles, without a desktop executable.
+/// </param>
+public readonly record struct GameBuildOptions(string OutputPath, bool Debug = false, string? Target = null);
+
+/// <summary>What a build produces for one runtime identifier.</summary>
+internal readonly record struct GameBuildTarget(
+	string Rid,
+	GraphicsBackendKind Backend,
+	string TextureTarget,
+	bool PublishesDesktopRuntime);
 
 public readonly record struct GameBuildResult(string OutputPath, int CookedAssetCount);
 
@@ -86,27 +98,12 @@ public static class GameBuilder
 			Directory.Delete(staging, true);
 
 		Directory.CreateDirectory(staging);
-		var rid = GetCurrentRid();
-		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime", "WolfEngine.Runtime.csproj");
-		var publishArgs = new List<string>
+		var target = ResolveTarget(options.Target);
+		Console.WriteLine($"Building for {target.Rid}.");
+		if (target.PublishesDesktopRuntime)
 		{
-			"publish",
-			runtimeProject,
-			"--configuration",
-			configuration,
-			"--runtime",
-			rid,
-			"--self-contained",
-			config.SelfContained ? "true" : "false",
-			"--output",
-			staging,
-			"/m:1"
-		};
-		AddSymbolProperties(publishArgs, options.Debug);
-		Run("dotnet", publishArgs, engineSolutionRoot);
-		var leakedEngineAssets = Path.Combine(staging, "Assets");
-		if (Directory.Exists(leakedEngineAssets))
-			Directory.Delete(leakedEngineAssets, true);
+			PublishDesktopRuntime(engineSolutionRoot, configuration, target.Rid, config.SelfContained, staging, options.Debug);
+		}
 
 		var graph = catalog.Mounts.SelectMany(mount => mount.Dependencies)
 			.GroupBy(edge => edge.FromNodeId)
@@ -117,16 +114,17 @@ public static class GameBuilder
 			AddSerializedDependencies(asset, graph);
 
 		var fontSources = ResolveCssFonts(gameplayDll, database);
+		var cooker = CreateContentCooker(gameplayDll);
 		var roots = sceneIds.Concat(config.GetExplicitAssetIds()).Concat(fontSources.Values).Distinct().ToArray();
 		var closure = ComputeClosure(roots, database, graph);
 		var contentRoot = Path.Combine(staging, "Content");
 		Directory.CreateDirectory(contentRoot);
 		var groups = closure
-			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? []))
+			.Select(id => CreateSource(database[id], graph.GetValueOrDefault(id) ?? [], cooker, target.TextureTarget))
 			.GroupBy(source => GetPackName(database[source.Id].Asset.Type))
 			.ToDictionary(group => group.Key, group => group.ToList());
 
-		var shaderSources = CookShaders(provider, GetBackend());
+		var shaderSources = CookShaders(provider, target.Backend);
 		groups["shaders"] = shaderSources;
 		groups["bootstrap"] =
 		[
@@ -134,7 +132,7 @@ public static class GameBuilder
 			new WolfPackSource(
 				RuntimeSettingsId,
 				"RuntimeSettings",
-				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, AssetJson.SerializerOptions),
+				JsonSerializer.SerializeToUtf8Bytes(config.RuntimeSettings, EngineJsonContext.Default.CookedRuntimeSettings),
 				[])
 		];
 		if (options.Debug)
@@ -146,7 +144,7 @@ public static class GameBuilder
 		var manifest = new WolfBootstrapManifest
 		{
 			FontSources = fontSources,
-			Target = rid,
+			Target = target.Rid,
 			RuntimeVersion = Environment.Version.ToString(),
 			BuildConfiguration = configuration,
 			InitialSceneId = sceneIds[0],
@@ -189,7 +187,7 @@ public static class GameBuilder
 			new WolfManifestRoot { Kind = "RuntimeSettings", Id = RuntimeSettingsId }
 		];
 		File.WriteAllBytes(Path.Combine(contentRoot, "bootstrap.wolfmanifest"),
-			JsonSerializer.SerializeToUtf8Bytes(manifest, AssetJson.SerializerOptions));
+			JsonSerializer.SerializeToUtf8Bytes(manifest, EngineJsonContext.Default.WolfBootstrapManifest));
 		ValidateCleanOutput(staging, projectRoot);
 		if (Directory.Exists(output))
 			Directory.Delete(output, true);
@@ -199,15 +197,23 @@ public static class GameBuilder
 		return new GameBuildResult(output, closure.Count);
 	}
 
-	private static WolfPackSource CreateSource(MountedAsset mountedAsset, IReadOnlyCollection<Guid> dependencies)
+	private static WolfPackSource CreateSource(
+		MountedAsset mountedAsset,
+		IReadOnlyCollection<Guid> dependencies,
+		ContentCooker cooker,
+		string textureTarget)
 	{
 		var asset = mountedAsset.Asset;
+		if (asset.Type is AssetType.SceneCell or AssetType.Prefab or AssetType.DataAsset)
+		{
+			return new WolfPackSource(asset.Id, asset.Type.ToString(), CookAuthoredJson(mountedAsset, cooker), dependencies);
+		}
+
 		string path;
 		if (asset.Type == AssetType.Texture2D)
 		{
-			var target = OperatingSystem.IsMacOS() ? "metal" : "d3d12";
-			path = asset.Artifacts.FirstOrDefault(item => item.Kind == "RuntimeTexture" && item.Target == target)?.RelativePath
-				?? throw new InvalidOperationException($"Texture '{asset.Id}' has no {target} runtime artifact.");
+			path = asset.Artifacts.FirstOrDefault(item => item.Kind == "RuntimeTexture" && item.Target == textureTarget)?.RelativePath
+				?? throw new InvalidOperationException($"Texture '{asset.Id}' has no {textureTarget} runtime artifact.");
 		}
 		else if (asset.Type == AssetType.AudioClip)
 		{
@@ -322,19 +328,65 @@ public static class GameBuilder
 		AssetType.Scene or AssetType.SceneCell or AssetType.Prefab => "scenes-prefabs",
 		AssetType.Material or AssetType.DataAsset or AssetType.Terrain => "materials-data-terrain",
 		AssetType.AudioClip => "audio",
+		AssetType.Font => "fonts",
 		_ => throw new InvalidOperationException($"Asset type '{type}' has no cooked pack class.")
 	};
 
 	private static Guid CreateDeterministicId(string value) => new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
-	private static GraphicsBackendKind GetBackend()
+	/// <summary>
+	/// The host's own target, or iOS from a Mac. iOS uses the Metal textures and shaders a Mac cooks, which the
+	/// devices load as they are, so it needs no cooking of its own; its app is built separately.
+	/// </summary>
+	private static GameBuildTarget ResolveTarget(string? requestedRid)
 	{
-		if (OperatingSystem.IsMacOS())
-			return GraphicsBackendKind.Metal;
-		if (OperatingSystem.IsWindows())
-			return GraphicsBackendKind.D3D12;
+		var hostRid = GetCurrentRid();
+		var hostBackend = OperatingSystem.IsMacOS() ? GraphicsBackendKind.Metal : GraphicsBackendKind.D3D12;
+		var hostTextureTarget = OperatingSystem.IsMacOS() ? "metal" : "d3d12";
+		if (requestedRid is null || string.Equals(requestedRid, hostRid, StringComparison.Ordinal))
+			return new GameBuildTarget(hostRid, hostBackend, hostTextureTarget, PublishesDesktopRuntime: true);
 
-		throw new PlatformNotSupportedException();
+		if (string.Equals(requestedRid, "ios-arm64", StringComparison.Ordinal) && OperatingSystem.IsMacOS())
+			return new GameBuildTarget(requestedRid, GraphicsBackendKind.Metal, "metal", PublishesDesktopRuntime: false);
+
+		throw new PlatformNotSupportedException(
+			$"Cannot build for '{requestedRid}' on {hostRid}. Builds target the host, or ios-arm64 from a Mac.");
+	}
+
+	private static void PublishDesktopRuntime(
+		string engineSolutionRoot,
+		string configuration,
+		string rid,
+		bool selfContained,
+		string staging,
+		bool debug)
+	{
+		var runtimeProject = Path.Combine(engineSolutionRoot, "WolfEngine.Runtime.Desktop", "WolfEngine.Runtime.Desktop.csproj");
+		var publishArgs = new List<string>
+		{
+			"publish",
+			runtimeProject,
+			"--configuration",
+			configuration,
+			"--runtime",
+			rid,
+			"--self-contained",
+			selfContained ? "true" : "false",
+			"--output",
+			staging,
+			"/m:1"
+		};
+		AddSymbolProperties(publishArgs, debug);
+		Run("dotnet", publishArgs, engineSolutionRoot);
+
+		// The engine project copies its loose content next to its assembly for the editor. A game gets those assets
+		// from the cooked packs, so the publish output's copies are removed.
+		foreach (var leakedFolder in new[] { "Assets", "BuiltInContent" })
+		{
+			var leakedPath = Path.Combine(staging, leakedFolder);
+			if (Directory.Exists(leakedPath))
+				Directory.Delete(leakedPath, true);
+		}
 	}
 
 	private static string GetCurrentRid()
@@ -388,6 +440,85 @@ public static class GameBuilder
 		return result;
 	}
 
+	/// <summary>
+	/// Scene cells, prefabs and data assets ship in the binary format the generated serializers read, so a game
+	/// never parses JSON or uses reflection to load them.
+	/// </summary>
+	private static byte[] CookAuthoredJson(MountedAsset mountedAsset, ContentCooker cooker)
+	{
+		var asset = mountedAsset.Asset;
+		var absolute = mountedAsset.Mount.GetAbsolutePath(asset.RelativeAssetPath);
+		if (!File.Exists(absolute))
+			throw new FileNotFoundException($"Cooked input for '{asset.Id}' is missing.", absolute);
+
+		var json = File.ReadAllBytes(absolute);
+		try
+		{
+			return asset.Type switch
+			{
+				AssetType.SceneCell => cooker.CookSceneCell(asset.Id, DeserializeDocument<SceneCellDocument>(json)),
+				AssetType.Prefab => cooker.CookPrefab(asset.Id, DeserializeDocument<PrefabDocument>(json)),
+				AssetType.DataAsset => cooker.CookDataAsset(asset.Id, DeserializeDocument<DataAssetFile>(json)),
+				_ => throw new InvalidOperationException($"Asset type '{asset.Type}' is not cooked from JSON.")
+			};
+		}
+		catch (Exception exception) when (exception is JsonException or InvalidDataException or InvalidOperationException)
+		{
+			throw new InvalidDataException($"Could not cook '{asset.RelativeAssetPath}' ({asset.Id}): {exception.Message}", exception);
+		}
+	}
+
+	private static T DeserializeDocument<T>(byte[] json) where T : class
+	{
+		return JsonSerializer.Deserialize<T>(json, AssetJson.SerializerOptions)
+		       ?? throw new InvalidDataException($"The file is not a valid {typeof(T).Name}.");
+	}
+
+	/// <summary>
+	/// Loads the gameplay assembly the cooker resolves gameplay types from, and makes sure it and every engine
+	/// assembly that declares components have registered their generated serializers.
+	/// </summary>
+	private static ContentCooker CreateContentCooker(string gameplayDll)
+	{
+		var gameplayAssembly = System.Reflection.Assembly.Load(File.ReadAllBytes(gameplayDll));
+		var gameplayAssemblyName = gameplayAssembly.GetName().Name;
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.ECS.World).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(Camera).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.Physics.RigidbodySystem).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(AudioService).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(typeof(global::WolfEngine.UI.ServiceCollectionExtensions).Assembly);
+		SerializedTypeRegistry.EnsureRegistered(gameplayAssembly);
+
+		return new ContentCooker((typeId, typeName) =>
+			ResolveCookedType(typeId, gameplayAssembly, gameplayAssemblyName) ??
+			ResolveCookedType(typeName, gameplayAssembly, gameplayAssemblyName));
+	}
+
+	/// <summary>
+	/// Resolves a saved type name. Gameplay types are looked up in the loaded gameplay assembly, both by their
+	/// <c>gameplay:</c> stable id and by an assembly-qualified name naming the gameplay assembly, because asking
+	/// the runtime to load the gameplay assembly by name would find a different copy, or none.
+	/// </summary>
+	private static Type? ResolveCookedType(string name, System.Reflection.Assembly gameplayAssembly, string? gameplayAssemblyName)
+	{
+		const string gameplayPrefix = "gameplay:";
+		if (string.IsNullOrWhiteSpace(name))
+			return null;
+		if (name.StartsWith(gameplayPrefix, StringComparison.Ordinal))
+			return gameplayAssembly.GetType(name[gameplayPrefix.Length..], false);
+
+		var separator = name.IndexOf(',');
+		if (separator > 0)
+		{
+			var assemblyPart = name[(separator + 1)..].Trim();
+			var assemblySimpleName = assemblyPart.Split(',')[0].Trim();
+			if (string.Equals(assemblySimpleName, gameplayAssemblyName, StringComparison.Ordinal))
+				return gameplayAssembly.GetType(name[..separator].Trim(), false);
+		}
+
+		return Type.GetType(name, false);
+	}
+
 	private static void ValidateGameplayAssembly(string path)
 	{
 		var assembly = System.Reflection.Assembly.Load(File.ReadAllBytes(path));
@@ -401,16 +532,32 @@ public static class GameBuilder
 
 	private static void Run(string file, IReadOnlyList<string> args, string cwd)
 	{
+		// Forward child output through Console rather than letting the child inherit this process's stdout.
+		// A host can then route it: the editor automation server reserves stdout for its protocol.
 		var info = new ProcessStartInfo(file)
 		{
 			WorkingDirectory = cwd,
-			UseShellExecute = false
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
 		};
 		foreach (var arg in args)
 			info.ArgumentList.Add(arg);
 
 		using var process = Process.Start(info)
 			?? throw new InvalidOperationException($"Could not start {file}.");
+		process.OutputDataReceived += (_, line) =>
+		{
+			if (line.Data is not null)
+				Console.Out.WriteLine(line.Data);
+		};
+		process.ErrorDataReceived += (_, line) =>
+		{
+			if (line.Data is not null)
+				Console.Error.WriteLine(line.Data);
+		};
+		process.BeginOutputReadLine();
+		process.BeginErrorReadLine();
 		process.WaitForExit();
 		if (process.ExitCode != 0)
 			throw new InvalidOperationException($"{file} exited with code {process.ExitCode}.");

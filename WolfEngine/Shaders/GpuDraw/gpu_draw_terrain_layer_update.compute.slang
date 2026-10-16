@@ -1,14 +1,13 @@
 import "../Common/draw_data.slang";
 
 #define WOLF_MAX_MATERIAL_COUNT 65535
-#define WOLF_MAX_TERRAIN_LAYER_COUNT 1048560
 
 static const uint HARDEN_COUNTER_STALE_REJECT = 0;
 
 cbuffer UpdateParams : register(b11)
 {
     uint updateCount;
-    uint pad0;
+    uint layerTableCapacity;
     uint pad1;
     uint pad2;
 };
@@ -49,7 +48,7 @@ void CSUpdateTerrainLayer(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint layerTableIndex = update.layerStart + update.layerIndex;
-    if (layerTableIndex >= WOLF_MAX_TERRAIN_LAYER_COUNT)
+    if (layerTableIndex >= layerTableCapacity)
     {
         InterlockedAdd(g_Diagnostics[HARDEN_COUNTER_STALE_REJECT], 1);
         return;

@@ -11,6 +11,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\WolfEngine.SourceGenerators\WolfEngine.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\WolfEngine.Profiling\WolfEngine.Profiling.csproj" />
     </ItemGroup>
 

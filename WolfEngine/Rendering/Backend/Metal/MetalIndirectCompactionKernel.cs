@@ -17,6 +17,7 @@ namespace WolfEngine.Rendering.Backend.Metal;
 /// reports itself unavailable and leaves the shared draw passes on their full-range fallback.
 /// </summary>
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalIndirectCompactionKernel : IDisposable
 {
 	public const uint ThreadsPerThreadgroup = 64;

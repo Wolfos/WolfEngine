@@ -1,12 +1,14 @@
 using System.Runtime.Versioning;
 using SharpMetal.Foundation;
 using SharpMetal.Metal;
+using WolfEngine.Platform;
 using WolfEngine.Profiling;
 using WolfEngine.Rendering.Abstraction;
 
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 {
 	internal const ulong SamplesPerBlock = 64;
@@ -34,6 +36,9 @@ internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 			var candidate = new MTLCounterSet(counterSets.Object(i));
 			if (candidate.Name.ToString()?.Contains("timestamp", StringComparison.OrdinalIgnoreCase) == true)
 			{
+				// counterSets is autoreleased, so its elements are only borrowed. Retained for the device's
+				// lifetime: iOS frees them before the first sample buffer is created.
+				ObjCNative.ObjcRetain(candidate.NativePtr);
 				_timestampCounterSet = candidate;
 				break;
 			}
@@ -192,7 +197,8 @@ internal sealed class MetalGpuProfilerBackend : IGpuProfilerCaptureBackend
 				throw new ArgumentOutOfRangeException(nameof(endIndex));
 			}
 			var length = endIndex - startIndex + 1;
-			using var data = SampleBuffer.ResolveCounterRange(new NSRange { location = startIndex, length = length });
+			// Not disposed: resolveCounterRange returns autoreleased data the caller does not own.
+			var data = SampleBuffer.ResolveCounterRange(new NSRange { location = startIndex, length = length });
 			if (data.MutableBytes == IntPtr.Zero || data.Length < length * sizeof(ulong))
 			{
 				throw new InvalidOperationException("Metal returned an incomplete timestamp counter result.");

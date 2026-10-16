@@ -8,6 +8,18 @@ public interface IRenderer : IFrameCaptureSource
 {
 	void SetWindowSize(Int2 size) => throw new PlatformNotSupportedException("Window configuration is not supported by this renderer.");
 	void Run(Action startup, Action<float> update, Action<float> render);
+
+	/// <summary>
+	/// Starts rendering without taking over the thread, for hosts that own their main loop, such as iOS apps driven
+	/// by the display. Call <see cref="RunFrame"/> once per frame on the same thread, then <see cref="Stop"/>.
+	/// </summary>
+	void Start(Action startup, Action<float> update, Action<float> render) =>
+		throw new PlatformNotSupportedException("This renderer can only run its own loop.");
+
+	/// <summary>Renders one frame. Returns false once the renderer has been asked to stop.</summary>
+	bool RunFrame() => throw new PlatformNotSupportedException("This renderer can only run its own loop.");
+
+	void Stop() => throw new PlatformNotSupportedException("This renderer can only run its own loop.");
 	IMaterialResources CreateMaterialResources(Material material);
 	ITextureResources CreateTextureResources(Texture texture);
 	bool TryUpdateTextureResources(Texture texture, ITextureResources resources) => false;

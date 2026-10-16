@@ -7,6 +7,7 @@ using WolfEngine.Rendering.Passes;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, IDisposable
 {
 	private readonly Dictionary<uint, CommandBufferReferences> _commandReferences = new();
@@ -103,6 +104,9 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 		Buffer = buffer;
 		CompactedBuffer = compactedBuffer;
 		CompactionArguments = compactionArguments;
+		GpuMemoryCensus.Track(this, "Indirect command buffer", buffer.NativePtr, name);
+		GpuMemoryCensus.Track(this, "Indirect command buffer (compacted)", compactedBuffer.NativePtr, name);
+		GpuMemoryCensus.Track(this, "Indirect compaction arguments", compactionArguments.NativePtr, name);
 	}
 
 	public string? Name { get; }
@@ -167,7 +171,8 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 			RemoveBufferRefs(in previousRefs);
 		}
 
-		using var command = Buffer.IndirectRenderCommand(commandIndex);
+		// Not disposed: the command is owned by the indirect command buffer and returned autoreleased.
+		var command = Buffer.IndirectRenderCommand(commandIndex);
 		command.Reset();
 		command.SetVertexBuffer(vertexBuffer.Buffer, vertexBufferOffsetBytes, 0);
 		command.SetVertexBuffer(instanceBuffer.Buffer, 0, perDrawBindings.InstanceRegisterIndex);
@@ -320,6 +325,7 @@ internal sealed class MetalIndirectCommandBuffer : IGfxIndirectCommandBuffer, ID
 
 	public void Dispose()
 	{
+		GpuMemoryCensus.Untrack(this);
 		foreach (var entry in _bufferRefsByPointer.Values)
 		{
 			entry.Owner?.ReleaseFromIndirectUse();

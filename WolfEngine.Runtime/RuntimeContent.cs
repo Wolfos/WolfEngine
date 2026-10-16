@@ -1,8 +1,5 @@
 using WolfEngine.Animation;
-using System.Reflection;
-using System.Runtime.Loader;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using WolfEngine.AssetPipeline;
 using WolfEngine.ECS;
 using WolfEngine.Rendering.UI;
@@ -103,21 +100,20 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		using var stream = new MemoryStream(bytes, false);
 		var value = entry.Kind switch
 		{
-			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) =>
-				_textures.GetTexture(TextureArtifactSerializer.Read(stream, id.ToString("D"))),
+			nameof(AssetType.Texture2D) when expectedType == typeof(Texture) => CreateTexture(id, stream),
 			nameof(AssetType.ColorLookupTable) when expectedType == typeof(ColorLookupTable) =>
 				ColorLookupTable.Create($"lut:{id:D}", ColorLookupTableArtifactSerializer.Read(stream), _textures),
-			nameof(AssetType.Mesh) when expectedType == typeof(Mesh) => CreateMesh(ImportedMeshSerializer.Read(stream)),
+			nameof(AssetType.Mesh) when expectedType == typeof(Mesh) => CreateMesh(id, stream),
 			nameof(AssetType.Terrain) when expectedType == typeof(TerrainAsset) =>
 				TerrainAssetSerializer.Read(stream, id.ToString("D")),
 			nameof(AssetType.Material) when expectedType == typeof(Material) =>
-				CreateMaterial(JsonSerializer.Deserialize<MaterialAsset>(bytes, AssetJson.SerializerOptions)!),
+				CreateMaterial(JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.MaterialAsset)!),
 			nameof(AssetType.Skeleton) when expectedType == typeof(Skeleton) => SkeletonSerializer.Read(stream).ToSkeleton(),
             nameof(AssetType.AnimationClip) when expectedType == typeof(AnimationClip) => AnimationClipSerializer.Read(stream).ToClip(),
-            nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize<AnimationGraph>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize<AnimationSet>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize<AnimationSequence>(bytes, AnimationAssetJson.Options),
-            nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize<BoneMask>(bytes, AnimationAssetJson.Options),
+            nameof(AssetType.AnimationGraph) when expectedType == typeof(AnimationGraph) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationGraph),
+            nameof(AssetType.AnimationSet) when expectedType == typeof(AnimationSet) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSet),
+            nameof(AssetType.AnimationSequence) when expectedType == typeof(AnimationSequence) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.AnimationSequence),
+            nameof(AssetType.BoneMask) when expectedType == typeof(BoneMask) => JsonSerializer.Deserialize(bytes, EngineJsonContext.Default.BoneMask),
             nameof(AssetType.DataAsset) => CreateDataAsset(bytes, expectedType),
 			nameof(AssetType.Prefab) when expectedType == typeof(Prefab) => CreatePrefab(id, bytes),
 			_ => throw new InvalidOperationException(
@@ -131,23 +127,54 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 		return value;
 	}
 
+	/// <summary>
+	/// Cooked packs are immutable, so the CPU copy of a texture's mips can go once it is on the GPU and be read
+	/// from the pack again if anything asks for it.
+	/// </summary>
+	private Texture CreateTexture(Guid id, Stream stream)
+	{
+		var texture = TextureArtifactSerializer.Read(stream, id.ToString("D"));
+		texture.MipDataSource = () => ReadTexture(id).MipLevels;
+
+		return _textures.GetTexture(texture);
+	}
+
+	private Texture ReadTexture(Guid id)
+	{
+		using var stream = new MemoryStream(_catalog.Read(id), false);
+
+		return TextureArtifactSerializer.Read(stream, id.ToString("D"));
+	}
+
+	/// <summary>
+	/// As for textures: the geometry can go once it is on the GPU and be rebuilt from the pack, for a mesh collider
+	/// for example.
+	/// </summary>
+	private Mesh CreateMesh(Guid id, Stream stream)
+	{
+		var mesh = CreateMesh(ImportedMeshSerializer.Read(stream));
+		mesh.CpuGeometrySource = () => ReadMesh(id);
+
+		return mesh;
+	}
+
+	private Mesh ReadMesh(Guid id)
+	{
+		using var stream = new MemoryStream(_catalog.Read(id), false);
+
+		return CreateMesh(ImportedMeshSerializer.Read(stream));
+	}
+
 	private static Mesh CreateMesh(ImportedMeshAssetFile mesh) => new(mesh.Vertices, mesh.Indices, mesh.Normals, mesh.UVs, mesh.Tangents,
         mesh.BoneIndices.Length > 0 ? mesh.BoneIndices : null, mesh.BoneWeights.Length > 0 ? mesh.BoneWeights : null,
         mesh.ShadowOpaqueIndices, mesh.ShadowAlphaTestIndices);
 
-	// Cooked prefabs are the authored file, which stores every entity's full component data (nested prefab
-	// instances included, as of the prefab's last save), as cooked scene cells do. Every component has to
-	// resolve: a spawned unit silently missing a gameplay component is harder to track down than a load failure.
-	private static Prefab CreatePrefab(Guid id, byte[] bytes) =>
-		Prefab.Load(id, bytes, component => RuntimeComponentTypes.Resolve(component.TypeId, component.Type));
+	// Cooked prefabs store every entity's full component data (nested prefab instances included, as of the
+	// prefab's last save), as cooked scene cells do. The build already failed on any component it could not
+	// resolve, so a spawned unit cannot silently miss a gameplay component.
+	private static Prefab CreatePrefab(Guid id, byte[] bytes) => Prefab.LoadCooked(id, bytes);
 
-	private object CreateDataAsset(byte[] bytes, Type expectedType)
-	{
-		var file = JsonSerializer.Deserialize<DataAssetFile>(bytes, AssetJson.SerializerOptions)
-			?? throw new InvalidDataException("Cooked data asset is invalid.");
-		return file.Data.Deserialize(expectedType, AssetJson.GetSerializerOptions(expectedType))
-			?? throw new InvalidDataException($"Could not deserialize data asset '{expectedType.FullName}'.");
-	}
+	private static object CreateDataAsset(byte[] bytes, Type expectedType) => CookedDataAsset.Read(bytes, expectedType);
 
 	private Material CreateMaterial(MaterialAsset asset)
 	{
@@ -172,6 +199,48 @@ public sealed class RuntimeAssetStore : IRuntimeAssetStore, IAssetInstanceRegist
 	}
 
 	public object? GetInstance(Guid assetId, Type expectedType) => Load(assetId, expectedType);
+
+	/// <summary>Diagnostic: the CPU-side data the loaded meshes and textures keep, by asset kind.</summary>
+	public string DescribeCpuMemory()
+	{
+		long meshBytes = 0;
+		var meshCount = 0;
+		var releasedMeshCount = 0;
+		long textureBytes = 0;
+		var textureCount = 0;
+		var releasedTextureCount = 0;
+		// Distinct: meshes shared by content hash are cached under every id that refers to them.
+		foreach (var value in _cache.Values.Distinct(ReferenceEqualityComparer.Instance).ToArray())
+		{
+			if (value is Mesh { HasCpuGeometry: false })
+			{
+				releasedMeshCount++;
+			}
+			else if (value is Texture { HasCpuMipData: false })
+			{
+				releasedTextureCount++;
+			}
+			else if (value is Mesh mesh)
+			{
+				meshCount++;
+				meshBytes += (long)mesh.Vertices.Length * 16 + (long)mesh.Normals.Length * 12 + (long)mesh.UVs.Length * 8 +
+				             (long)mesh.Tangents.Length * 16 +
+				             ((long)mesh.Indices.Length + mesh.ShadowOpaqueIndices.Length + mesh.ShadowAlphaTestIndices.Length) * 4;
+			}
+			else if (value is Texture texture)
+			{
+				textureCount++;
+				foreach (var mip in texture.MipLevels ?? [])
+				{
+					textureBytes += mip.Data?.Length ?? 0;
+				}
+			}
+		}
+
+		return $"Asset CPU data: {meshCount} meshes keep {meshBytes / (1024.0 * 1024.0):F1} MB of arrays " +
+		       $"({releasedMeshCount} released after upload), {textureCount} textures keep " +
+		       $"{textureBytes / (1024.0 * 1024.0):F1} MB of mip data ({releasedTextureCount} released after upload).";
+	}
 
 	public void RefreshProject(string projectRootPath, AssetDatabase database) => throw new NotSupportedException("Runtime assets are immutable cooked packs.");
 
@@ -201,157 +270,20 @@ public sealed class RuntimeSceneLoader : IRuntimeSceneLoader
 	{
 		if (_catalog.GetEntry(sceneId).Kind != nameof(AssetType.Scene))
 			throw new InvalidDataException($"Asset '{sceneId}' is not a scene.");
-		var scene = JsonSerializer.Deserialize<CookedSceneManifest>(_catalog.Read(sceneId), AssetJson.SerializerOptions)
+		var scene = JsonSerializer.Deserialize(_catalog.Read(sceneId), EngineJsonContext.Default.SceneManifestDocument)
 			?? throw new InvalidDataException("Cooked scene manifest is invalid.");
-		if (scene.Version != 1)
+		if (scene.Version != SceneManifestDocument.CurrentVersion)
 			throw new InvalidDataException($"Unsupported scene version {scene.Version}.");
 
-		var cells = new List<CookedCell>();
 		var cellIds = new[] { scene.GlobalCellId }
 			.Concat(scene.SpatialCells.Select(cell => cell.CellId))
 			.Where(id => id != Guid.Empty);
+		var cells = new List<CookedSceneCell>();
 		foreach (var id in cellIds)
-		{
-			var cell = JsonSerializer.Deserialize<CookedCell>(_catalog.Read(id), AssetJson.SerializerOptions)
-				?? throw new InvalidDataException($"Scene cell '{id}' is invalid.");
-			cells.Add(cell);
-		}
+			cells.Add(CookedSceneCell.Read(_catalog.Read(id)));
 
 		var world = new World(WorldTag.Game);
-		var entities = new Dictionary<Guid, Entity>();
-		foreach (var saved in cells.SelectMany(cell => cell.Entities))
-		{
-			var entity = saved.HasName ? world.CreateEntity(saved.Name) : world.CreateEntity();
-			if (saved.LocalTransform is { } transform)
-				world.AddTransform(entity, transform);
-
-			world.SetEnabled(entity, saved.Enabled);
-			entities.Add(saved.EntityId, entity);
-		}
-
-		foreach (var saved in cells.SelectMany(cell => cell.Entities))
-		{
-			var entity = entities[saved.EntityId];
-			foreach (var component in saved.Components)
-				ApplyComponent(world, entity, component, entities);
-			if (saved.ParentEntityId is { } parent && entities.TryGetValue(parent, out var parentEntity))
-				world.SetParent(entity, parentEntity);
-		}
-
+		CookedSceneCell.Instantiate(world, cells);
 		return world;
-	}
-
-	private static void ApplyComponent(World world, Entity entity, CookedComponent component, IReadOnlyDictionary<Guid, Entity> entities)
-	{
-		var type = RuntimeComponentTypes.Resolve(component.TypeId, component.Type);
-
-		var options = new JsonSerializerOptions(AssetJson.GetSerializerOptions(type));
-		options.Converters.Insert(0, new EntityReferenceConverter(entities));
-		var value = component.Data.Deserialize(type, options) ?? Activator.CreateInstance(type)!;
-		typeof(RuntimeSceneLoader)
-			.GetMethod(nameof(AddComponent), BindingFlags.Static | BindingFlags.NonPublic)!
-			.MakeGenericMethod(type)
-			.Invoke(null, [world, entity, value]);
-	}
-
-	private static void AddComponent<T>(World world, Entity entity, object value) where T : struct, IEntityComponent => world.AddComponent(entity, (T)value);
-
-	private sealed class EntityReferenceConverter(IReadOnlyDictionary<Guid, Entity> entities) : JsonConverter<Entity>
-	{
-		public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-		{
-			using var document = JsonDocument.ParseValue(ref reader);
-			if (document.RootElement.ValueKind == JsonValueKind.Object
-			    && document.RootElement.TryGetProperty(Prefab.EntityReferenceIdPropertyName, out var value)
-			    && Guid.TryParse(value.GetString(), out var id)
-			    && entities.TryGetValue(id, out var entity))
-				return entity;
-
-			return default;
-		}
-
-		public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) => throw new NotSupportedException();
-	}
-}
-
-internal static class RuntimeComponentTypes
-{
-	/// <summary>Resolves a cooked component's runtime type, failing when it is not an entity component struct.</summary>
-	public static Type Resolve(string stableId, string typeName)
-	{
-		var type = Find(stableId, typeName);
-		if (type is null || !type.IsValueType || !typeof(IEntityComponent).IsAssignableFrom(type))
-			throw new InvalidDataException($"Runtime component type '{stableId}' is unavailable.");
-
-		return type;
-	}
-
-	private static Type? Find(string stableId, string typeName)
-	{
-		var gameplayName = stableId.StartsWith("gameplay:", StringComparison.Ordinal) ? stableId[9..] : null;
-		foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-		{
-			if (gameplayName is not null && assembly.GetType(gameplayName, false) is { } gameplayType)
-				return gameplayType;
-			if (Type.GetType(typeName, false) is { } type)
-				return type;
-		}
-
-		return null;
-	}
-}
-
-public sealed class CookedSceneManifest
-{
-	public int Version { get; set; }
-	public Guid GlobalCellId { get; set; }
-	public List<CookedSpatialCell> SpatialCells { get; set; } = [];
-}
-
-public sealed class CookedSpatialCell
-{
-	public Guid CellId { get; set; }
-}
-
-public sealed class CookedCell
-{
-	public int Version { get; set; }
-	public List<CookedEntity> Entities { get; set; } = [];
-}
-
-public sealed class CookedEntity
-{
-	public Guid EntityId { get; set; }
-	public Guid? ParentEntityId { get; set; }
-	public bool HasName { get; set; }
-	public string Name { get; set; } = string.Empty;
-	public bool Enabled { get; set; } = true;
-	public System.Numerics.Matrix4x4? LocalTransform { get; set; }
-	public List<CookedComponent> Components { get; set; } = [];
-}
-
-public sealed class CookedComponent
-{
-	public string Type { get; set; } = string.Empty;
-	public string TypeId { get; set; } = string.Empty;
-	public JsonElement Data { get; set; }
-}
-
-public sealed class GameplayAssemblyLoader
-{
-	public (Assembly Assembly, global::WolfEngine.Gameplay.IGameplayModule Module) Load(byte[] bytes, byte[]? symbols = null)
-	{
-		using var stream = new MemoryStream(bytes, false);
-		using var symbolStream = symbols is null ? null : new MemoryStream(symbols, false);
-		var assembly = symbolStream is null
-			? AssemblyLoadContext.Default.LoadFromStream(stream)
-			: AssemblyLoadContext.Default.LoadFromStream(stream, symbolStream);
-		var method = assembly.GetTypes()
-			.Select(type => type.GetMethod("CreateModule", BindingFlags.Public | BindingFlags.Static))
-			.SingleOrDefault(candidate => candidate is not null)
-			?? throw new InvalidDataException("Gameplay assembly has no unique public CreateModule entrypoint.");
-		var module = (global::WolfEngine.Gameplay.IGameplayModule?)method.Invoke(null, null)
-			?? throw new InvalidDataException("Gameplay CreateModule returned null.");
-		return (assembly, module);
 	}
 }

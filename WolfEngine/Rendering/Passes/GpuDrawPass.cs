@@ -575,7 +575,7 @@ public sealed class GpuDrawPass
 				if (GpuDrawClassification.SupportsTerrainMaterialInterpretation(drawKind) &&
 				    update.TerrainSurface is { } terrainSurface)
 				{
-					var allocation = EnsureTerrainMaterialAllocation(update.MaterialHandle.Value, layerCount);
+					var allocation = EnsureTerrainMaterialAllocation(device, update.MaterialHandle.Value, layerCount);
 					layerStart = allocation.LayerStart;
 					if (layerStart == 0)
 					{
@@ -638,6 +638,14 @@ public sealed class GpuDrawPass
 		{
 			return;
 		}
+
+		_gpuDrawResources.EnsureUpdateBufferCapacity(
+			device,
+			_instanceUpdateData.Count,
+			_meshUpdateData.Count,
+			_materialUpdateData.Count,
+			_terrainMaterialUpdateData.Count,
+			_terrainLayerUpdateData.Count);
 
 		DispatchInstanceUpdates(context, device);
 		DispatchMeshUpdates(context, device);
@@ -878,7 +886,10 @@ public sealed class GpuDrawPass
 		_terrainMaterialUpdateData.Add(update);
 	}
 
-	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(uint materialHandle, uint requiredLayerCount)
+	private TerrainMaterialAllocation EnsureTerrainMaterialAllocation(
+		IGfxDevice device,
+		uint materialHandle,
+		uint requiredLayerCount)
 	{
 		requiredLayerCount = Math.Max(requiredLayerCount, 1u);
 
@@ -892,15 +903,40 @@ public sealed class GpuDrawPass
 			return existingAllocation with { Reallocated = false };
 		}
 
-		if ((uint)_nextTerrainLayerSlot + requiredLayerCount > GpuDrawResources.MaxTerrainLayerCount)
+		var requiredTableSize = (long)_nextTerrainLayerSlot + requiredLayerCount;
+		if (requiredTableSize > _gpuDrawResources.TerrainLayerCapacity)
 		{
-			return new TerrainMaterialAllocation(0, 1, true);
+			if (requiredTableSize > GpuDrawResources.MaxTerrainLayerCount ||
+			    _gpuDrawResources.TryGrowTerrainLayerTable(device, (int)requiredTableSize) == false)
+			{
+				return new TerrainMaterialAllocation(0, 1, true);
+			}
+
+			RequeueTerrainLayerTable();
 		}
 
 		var allocation = new TerrainMaterialAllocation((uint)_nextTerrainLayerSlot, requiredLayerCount, true);
 		_nextTerrainLayerSlot += (int)requiredLayerCount;
 		_terrainMaterialAllocations[materialHandle] = allocation;
 		return allocation;
+	}
+
+	/// <summary>
+	/// A grown layer table starts empty, so everything the old one held is uploaded again this frame: the
+	/// fallback in slot 0 directly, and every allocated material's layers through the update dispatch.
+	/// </summary>
+	private void RequeueTerrainLayerTable()
+	{
+		WriteFallbackTerrainLayer();
+		foreach (var (materialHandle, allocation) in _terrainMaterialAllocations)
+		{
+			if (_terrainMaterialStates.TryGetValue(materialHandle, out var surface) == false)
+			{
+				continue;
+			}
+
+			AppendTerrainLayerUpdates(materialHandle, allocation.LayerStart, surface, null, forceAllLayers: true);
+		}
 	}
 
 	private void AppendTerrainLayerUpdates(
@@ -1092,6 +1128,7 @@ public sealed class GpuDrawPass
 			_terrainLayerUpdateParamsWriter!,
 			_terrainLayerUpdateThreadGroupSize!.Value,
 			(uint)_terrainLayerUpdateData.Count,
+			writer => writer.SetUInt("layerTableCapacity", (uint)_gpuDrawResources.TerrainLayerCapacity),
 			commandList =>
 			{
 				var slots = _terrainLayerUpdateBindings?.Slots
@@ -1111,12 +1148,32 @@ public sealed class GpuDrawPass
 		uint updateCount,
 		Action<IGfxCommandList> bindBuffers)
 	{
+		DispatchUpdatePass(
+			context,
+			pipeline,
+			updateParamsWriter,
+			threadGroupSize,
+			updateCount,
+			writeParams: null,
+			bindBuffers);
+	}
+
+	private void DispatchUpdatePass(
+		RenderGraphContext context,
+		IGfxPipeline pipeline,
+		ShaderPropertyWriter updateParamsWriter,
+		ComputeThreadGroupSize threadGroupSize,
+		uint updateCount,
+		Action<ShaderPropertyWriter>? writeParams,
+		Action<IGfxCommandList> bindBuffers)
+	{
 		var commandList = context.CommandList;
 		using (FrameProfiler.Instance.Measure("GpuDraw.Update"))
 		{
 			commandList.BindPipeline(pipeline);
 			updateParamsWriter.Clear();
 			updateParamsWriter.SetUInt("updateCount", updateCount);
+			writeParams?.Invoke(updateParamsWriter);
 			commandList.SetComputeConstants(updateParamsWriter.RegisterIndex, updateParamsWriter.AsBytes());
 			bindBuffers(commandList);
 			var (groupCountX, groupCountY, groupCountZ) = threadGroupSize.GetDispatchGroupCount(updateCount);
@@ -1723,7 +1780,7 @@ public sealed class GpuDrawPass
 		{
 			problems.Add("layerCount is zero");
 		}
-		else if ((ulong)layerStart + layerCount > (ulong)GpuDrawResources.MaxTerrainLayerCount)
+		else if ((ulong)layerStart + layerCount > (ulong)_gpuDrawResources.TerrainLayerCapacity)
 		{
 			problems.Add($"layer range {layerStart}..{layerStart + layerCount} overruns the layer table");
 		}
@@ -2501,6 +2558,14 @@ public sealed class GpuDrawPass
 			4.0f,
 			64.0f,
 			12.0f);
+		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
+		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
+		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");
+		WriteFallbackTerrainLayer();
+	}
+
+	private void WriteFallbackTerrainLayer()
+	{
 		var fallbackTerrainLayerData = new GpuTerrainLayerData(
 			_bindlessRegistry.ErrorTextureHandle.Value,
 			_bindlessRegistry.ErrorTextureHandle.Value,
@@ -2513,9 +2578,6 @@ public sealed class GpuDrawPass
 			0.0f,
 			0,
 			0);
-		WriteBufferElement(_gpuDrawResources.MeshBuffer!, fallbackMeshData, 0, "MeshBuffer");
-		WriteBufferElement(_gpuDrawResources.MaterialBuffer!, fallbackMaterialData, 0, "MaterialBuffer");
-		WriteBufferElement(_gpuDrawResources.TerrainMaterialBuffer!, fallbackTerrainMaterialData, 0, "TerrainMaterialBuffer");
 		WriteBufferElement(_gpuDrawResources.TerrainLayerBuffer!, fallbackTerrainLayerData, 0, "TerrainLayerBuffer");
 	}
 

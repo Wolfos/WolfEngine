@@ -6,6 +6,7 @@ using WolfEngine.Rendering.Passes;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalGpuDrawBackendBridge : IGpuDrawBackendBridge
 {
 	private nint _lastBindlessCountBufferPtr;

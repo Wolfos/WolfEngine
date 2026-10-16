@@ -77,6 +77,14 @@ public sealed class EditorAutomationTools
 		CancellationToken cancellationToken) =>
 		_controller.LoadSceneAsync(scenePath, cancellationToken);
 
+	[McpServerTool(Name = "build_game"), Description("Build the open project into a runnable game in the output folder, through the same path as the editor's Build menu: compile gameplay, cook content and publish the runtime. Returns the output path and cooked asset count.")]
+	public Task<global::WolfEngine.Build.GameBuildResult> BuildGame(
+		[Description("Folder to write the game to. Write builds below Artifacts/ and do not commit them.")] string outputPath,
+		CancellationToken cancellationToken,
+		[Description("Keep debug symbols and build gameplay unoptimized.")] bool debug = false,
+		[Description("Runtime identifier to build for, such as ios-arm64 for the content an iOS app bundles. Omit to build for this machine.")] string? target = null) =>
+		_controller.BuildGameAsync(outputPath, debug, target, cancellationToken);
+
 	[McpServerTool(Name = "load_play_scene"), Description("Replace the active Play-mode scene through the gameplay scene-load service. Leaves the authoring scene unchanged and waits for lifecycle completion.")]
 	public Task<SceneLoadResult> LoadPlayScene(string scenePath, CancellationToken cancellationToken) =>
 		_controller.LoadPlaySceneAsync(scenePath, cancellationToken);

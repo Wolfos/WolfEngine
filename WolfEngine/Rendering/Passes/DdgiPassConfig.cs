@@ -55,6 +55,7 @@ public readonly struct DdgiPassConfig
 	public required IGfxBuffer FirstProbeRelocationReadbackBuffer { get; init; }
 	public required Int2 IrradianceAtlasSize { get; init; }
 	public required Int2 VisibilityAtlasSize { get; init; }
+	public required int VisibilityTileInteriorSize { get; init; }
 	public required DdgiGridShape GridShape { get; init; }
 	public required Vector3 Origin { get; init; }
 	public required Int3 StorageOffset { get; init; }

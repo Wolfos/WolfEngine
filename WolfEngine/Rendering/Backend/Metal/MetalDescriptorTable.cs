@@ -7,6 +7,7 @@ using WolfEngine.Platform;
 namespace WolfEngine.Rendering.Backend.Metal;
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 {
 	private const int MaxDescriptors = 16384;
@@ -231,7 +232,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			MipmapLevelCount = 1,
 			PixelFormat = MTLPixelFormat.RGBA8Unorm,
 			TextureType = MTLTextureType.Type2D,
-			StorageMode = MTLStorageMode.Managed,
+			StorageMode = MTLStorageMode.Shared,
 			Usage = MTLTextureUsage.ShaderRead | MTLTextureUsage.ShaderWrite
 		};
 
@@ -261,7 +262,7 @@ internal sealed class MetalDescriptorTable : IGfxDescriptorTable
 			MipmapLevelCount = 1,
 			PixelFormat = MTLPixelFormat.RGBA8Unorm,
 			TextureType = MTLTextureType.Type3D,
-			StorageMode = MTLStorageMode.Managed,
+			StorageMode = MTLStorageMode.Shared,
 			Usage = MTLTextureUsage.ShaderRead | MTLTextureUsage.ShaderWrite
 		};
 		var volumeTexture = _device.NewTexture(metalVolumeDescriptor);

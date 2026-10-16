@@ -3,7 +3,13 @@ import "ddgi_common.slang";
 import "ddgi_sample.slang";
 import "ddgi_visibility.slang";
 
-static const uint DDGI_VISIBILITY_RESOLUTION = 16u;
+// Fixed per variant because it sizes the thread group and the groupshared arrays. Must match the
+// visibilityTileInteriorSize the pass binds; the catalog declares the variants that exist.
+#ifndef WOLF_DDGI_VISIBILITY_TILE_SIZE
+#define WOLF_DDGI_VISIBILITY_TILE_SIZE 16
+#endif
+
+static const uint DDGI_VISIBILITY_RESOLUTION = WOLF_DDGI_VISIBILITY_TILE_SIZE;
 static const uint DDGI_VISIBILITY_TEXEL_COUNT =
     DDGI_VISIBILITY_RESOLUTION * DDGI_VISIBILITY_RESOLUTION;
 
@@ -36,7 +42,7 @@ uint2 DdgiVisibilityBorderLocalPixel(uint borderIndex)
         tileBorderSize + verticalIndex - visibilityTileInteriorSize);
 }
 
-[numthreads(16, 16, 1)]
+[numthreads(WOLF_DDGI_VISIBILITY_TILE_SIZE, WOLF_DDGI_VISIBILITY_TILE_SIZE, 1)]
 void DdgiVisibilityIntegrateCS(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID,

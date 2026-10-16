@@ -6,10 +6,11 @@ namespace WolfEngine.Rendering.Passes;
 public static class DdgiUtilities
 {
 	public const int IrradianceTileInteriorSize = 8;
-	public const int VisibilityTileInteriorSize = 16;
+	public const int FullVisibilityTileInteriorSize = 16;
+	public const int HalfVisibilityTileInteriorSize = 8;
 	public const int TileBorderSize = 1;
 	public const int ShCoefficientCount = 4;
-	public const int MaxRaySamplesPerProbe = VisibilityTileInteriorSize * VisibilityTileInteriorSize;
+	public const int MaxRaySamplesPerProbe = FullVisibilityTileInteriorSize * FullVisibilityTileInteriorSize;
 	public const int IrradianceEstimatorDirectionCount = IrradianceTileInteriorSize * IrradianceTileInteriorSize;
 	public const int IrradianceEstimatorStride = 16;
 	public const int RelocationRayCount = 16;
@@ -37,6 +38,21 @@ public static class DdgiUtilities
 		var atlasColumns = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(probeCount)));
 		var atlasRows = Math.Max(1, (probeCount + atlasColumns - 1) / atlasColumns);
 		return new DdgiGridShape(countX, countY, countZ, probeCount, atlasColumns, atlasRows);
+	}
+
+	public static int GetVisibilityTileInteriorSize(DiffuseGlobalIlluminationConfig config)
+	{
+		return config.VisibilityResolution == DdgiVisibilityResolution.Half
+			? HalfVisibilityTileInteriorSize
+			: FullVisibilityTileInteriorSize;
+	}
+
+	/// <summary>The shader define that compiles the visibility integrate pass for a tile size, or null for the default.</summary>
+	public static string? GetVisibilityIntegrateDefine(int tileInteriorSize)
+	{
+		return tileInteriorSize == FullVisibilityTileInteriorSize
+			? null
+			: $"WOLF_DDGI_VISIBILITY_TILE_SIZE={tileInteriorSize}";
 	}
 
 	public static Int2 GetAtlasSize(DdgiGridShape shape, int tileInteriorSize)
@@ -156,9 +172,9 @@ public static class DdgiUtilities
 		return Math.Clamp(requestedRayCount, 1, tileCapacity);
 	}
 
-	internal static int GetProbeTraceInvocationCount(int requestedRayCount)
+	internal static int GetProbeTraceInvocationCount(int requestedRayCount, int visibilityTileInteriorSize)
 	{
-		var visibilityRayCount = GetRaySampleCount(requestedRayCount, VisibilityTileInteriorSize);
+		var visibilityRayCount = GetRaySampleCount(requestedRayCount, visibilityTileInteriorSize);
 		var irradianceRayCount = GetRaySampleCount(requestedRayCount, IrradianceTileInteriorSize);
 		return checked(visibilityRayCount + irradianceRayCount);
 	}

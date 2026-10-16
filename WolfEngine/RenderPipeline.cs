@@ -17,6 +17,18 @@ public interface IRenderPipeline
 {
 	void Run(Action? startup = null);
 
+	/// <summary>
+	/// Starts rendering on the calling thread without taking it over, for hosts that own their main loop, such as
+	/// iOS apps driven by the display. Call <see cref="RenderFrame"/> once per frame on the same thread, then
+	/// <see cref="Stop"/>, which also runs if <see cref="Start"/> throws.
+	/// </summary>
+	void Start(Action? startup = null);
+
+	/// <summary>Renders one frame. Returns false once rendering has been asked to stop.</summary>
+	bool RenderFrame();
+
+	void Stop();
+
 	void PublishSnapshot(Camera camera, WorldTransform cameraWorldTransform, RenderConfig config,
 		IReadOnlyList<World> worlds);
 
@@ -50,6 +62,28 @@ public class RenderPipeline : IRenderPipeline
 		try
 		{
 			_renderGraph.Startup(startup ?? (() => { }), static _ => { });
+		}
+		finally
+		{
+			_renderGraph.CompleteSnapshotPublishing();
+		}
+	}
+
+	public void Start(Action? startup = null)
+	{
+		_renderGraph.Start(startup ?? (() => { }), static _ => { });
+	}
+
+	public bool RenderFrame()
+	{
+		return _renderGraph.RenderFrame();
+	}
+
+	public void Stop()
+	{
+		try
+		{
+			_renderGraph.Stop();
 		}
 		finally
 		{

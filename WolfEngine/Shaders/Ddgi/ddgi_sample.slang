@@ -10,7 +10,6 @@
 import "../Common/common_bindless.slang";
 import "ddgi_visibility.slang";
 
-static const uint DDGI_VISIBILITY_TILE_INTERIOR_SIZE = 16u;
 static const uint DDGI_TILE_BORDER_SIZE = 1u;
 static const float DDGI_SH_BASIS_L0 = 0.28209479177f;
 static const float DDGI_SH_BASIS_L1 = 0.48860251190f;
@@ -27,6 +26,7 @@ struct DdgiSampleParams
     uint atlasColumns;
     uint atlasRows;
     uint tileBorderSize;
+    uint visibilityTileInteriorSize;
     float maxRayDistance;
     float viewBias;
     float horizontalBlendDistance;
@@ -303,7 +303,7 @@ DdgiShSample SampleDdgiSh(
                 float2 visibilityUv = DdgiProbeAtlasUvFromLayout(
                     physicalProbeIndex,
                     direction,
-                    DDGI_VISIBILITY_TILE_INTERIOR_SIZE,
+                    params.visibilityTileInteriorSize,
                     params.tileBorderSize,
                     params.atlasColumns,
                     params.atlasRows);

@@ -789,7 +789,7 @@ public sealed class RayTracingSceneResources : IRayTracingSceneResources, IDispo
 			mesh.VertexBuffer,
 			mesh.PackedVertexOffsetBytes,
 			mesh.StrideInBytes,
-			(uint)mesh.Vertices.Length,
+			(uint)mesh.VertexCount,
 			mesh.IndexBuffer,
 			mesh.PackedIndexOffsetBytes,
 			mesh.IndexCount);

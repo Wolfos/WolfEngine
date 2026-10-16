@@ -25,10 +25,9 @@ public sealed class RuntimeSceneTransitionTests
 			{
 				var cellId = Guid.NewGuid();
 				sources.Add(new WolfPackSource(id, nameof(AssetType.Scene), JsonSerializer.SerializeToUtf8Bytes(
-					new CookedSceneManifest { Version = 1, GlobalCellId = cellId }, AssetJson.SerializerOptions), [cellId]));
-				sources.Add(new WolfPackSource(cellId, nameof(AssetType.SceneCell), JsonSerializer.SerializeToUtf8Bytes(
-					new CookedCell { Version = 1, Entities = [new CookedEntity { EntityId = Guid.NewGuid(), HasName = true, Name = name }] },
-					AssetJson.SerializerOptions), []));
+					new SceneManifestDocument { Version = 1, GlobalCellId = cellId }, AssetJson.SerializerOptions), [cellId]));
+				sources.Add(new WolfPackSource(cellId, nameof(AssetType.SceneCell), CookedSceneCell.Write(
+					[new CookedEntity { EntityId = Guid.NewGuid(), Name = name }]), []));
 			}
 			Scene(firstId, "First");
 			Scene(secondId, "Second");

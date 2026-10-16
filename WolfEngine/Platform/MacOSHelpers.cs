@@ -254,6 +254,7 @@ internal enum NSApplicationActivationPolicy : long
 }
 
 [SupportedOSPlatform("macos")]
+[SupportedOSPlatform("ios")]
 internal static class ObjCNative
 {
     [DllImport("/usr/lib/libobjc.A.dylib", EntryPoint = "objc_msgSend")]

@@ -252,7 +252,7 @@ public sealed class PrefabRuntimeAssetResolver : IPrefabRuntimeAssetResolver
 		{
 			Version = PrefabDocument.CurrentVersion,
 			RootEntityId = prefabFile.RootEntityId,
-			Entities = new List<PrefabDocumentEntity>(prefabFile.Entities.Count)
+			Entities = new List<EntityDocument>(prefabFile.Entities.Count)
 		};
 		for (var i = 0; i < prefabFile.Entities.Count; i++)
 		{
@@ -282,13 +282,13 @@ public sealed class PrefabRuntimeAssetResolver : IPrefabRuntimeAssetResolver
 		return prefab;
 	}
 
-	private static PrefabDocumentEntity ToDocumentEntity(SavedEntity savedEntity)
+	private static EntityDocument ToDocumentEntity(SavedEntity savedEntity)
 	{
-		var components = new List<PrefabDocumentComponent>(savedEntity.Components.Count);
+		var components = new List<ComponentDocument>(savedEntity.Components.Count);
 		for (var i = 0; i < savedEntity.Components.Count; i++)
 		{
 			var component = savedEntity.Components[i];
-			components.Add(new PrefabDocumentComponent
+			components.Add(new ComponentDocument
 			{
 				Type = component.Type,
 				TypeId = component.TypeId,
@@ -296,7 +296,7 @@ public sealed class PrefabRuntimeAssetResolver : IPrefabRuntimeAssetResolver
 			});
 		}
 
-		return new PrefabDocumentEntity
+		return new EntityDocument
 		{
 			EntityId = savedEntity.EntityId,
 			ParentEntityId = savedEntity.ParentEntityId,
@@ -308,7 +308,7 @@ public sealed class PrefabRuntimeAssetResolver : IPrefabRuntimeAssetResolver
 		};
 	}
 
-	private bool TryResolveComponentType(PrefabDocumentComponent component, out Type componentType)
+	private bool TryResolveComponentType(ComponentDocument component, out Type componentType)
 	{
 		if (_typeResolver?.TryResolveStableTypeId(component.TypeId, out componentType) == true)
 		{

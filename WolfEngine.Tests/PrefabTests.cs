@@ -25,10 +25,11 @@ public sealed class PrefabTests
 		["test:name"] = typeof(NameComponent)
 	};
 
-	[Test]
-	public void Instantiate_CreatesHierarchyWithNamesTransformsAndEnabledState()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void Instantiate_CreatesHierarchyWithNamesTransformsAndEnabledState(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 
 		var root = prefab.Instantiate(world);
@@ -54,10 +55,11 @@ public sealed class PrefabTests
 		});
 	}
 
-	[Test]
-	public void Instantiate_WithPose_ReplacesRootPositionAndRotationAndKeepsAuthoredScale()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void Instantiate_WithPose_ReplacesRootPositionAndRotationAndKeepsAuthoredScale(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 		var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
 
@@ -69,10 +71,11 @@ public sealed class PrefabTests
 		Assert.That(transform.LocalScale.X, Is.EqualTo(2).Within(1e-5f));
 	}
 
-	[Test]
-	public void Instantiate_WithParent_AttachesTheRoot()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void Instantiate_WithParent_AttachesTheRoot(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 		var factory = world.CreateEntity("Factory");
 		world.AddTransform(factory, Matrix4x4.Identity);
@@ -83,10 +86,11 @@ public sealed class PrefabTests
 		Assert.Throws<ArgumentException>(() => prefab.Instantiate(world, Vector3.Zero, Quaternion.Identity, new Entity(4096, 1)));
 	}
 
-	[Test]
-	public void EntityReferences_PointIntoTheirOwnInstance()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void EntityReferences_PointIntoTheirOwnInstance(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 
 		var first = prefab.Instantiate(world);
@@ -96,10 +100,11 @@ public sealed class PrefabTests
 		AssertReferencesStayInInstance(world, second);
 	}
 
-	[Test]
-	public void EntityReferences_OutsideThePrefab_BecomeInvalid()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void EntityReferences_OutsideThePrefab_BecomeInvalid(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 
 		var root = prefab.Instantiate(world);
@@ -108,10 +113,11 @@ public sealed class PrefabTests
 		Assert.That(world.GetComponent<PrefabTestAim>(turret).Fallback.IsValid, Is.False);
 	}
 
-	[Test]
-	public void MutableComponentState_IsNotSharedBetweenInstances()
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void MutableComponentState_IsNotSharedBetweenInstances(PrefabSource source)
 	{
-		var prefab = CreateUnitPrefab();
+		var prefab = CreateUnitPrefab(source);
 		var world = new World(WorldTag.Game);
 
 		var first = prefab.Instantiate(world);
@@ -201,13 +207,13 @@ public sealed class PrefabTests
 	}
 
 	[Test]
-	public void Load_ReadsAPrefabFromACookedPack()
+	public void LoadCooked_ReadsAPrefabFromACookedPack()
 	{
 		var root = Path.Combine(Path.GetTempPath(), "PrefabTests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(root);
 		try
 		{
-			// The build cooks the editor's prefab file verbatim, authoring-only members included.
+			// The editor's prefab file carries authoring-only members, which cooking ignores.
 			var json = JsonSerializer.SerializeToNode(CreateUnitDocument(), AssetJson.SerializerOptions)!.AsObject();
 			foreach (var entity in json["Entities"]!.AsArray())
 			{
@@ -216,9 +222,10 @@ public sealed class PrefabTests
 				entity["PrefabOverrides"] = new JsonObject { ["Name"] = false };
 			}
 
+			var document = json.Deserialize<PrefabDocument>(AssetJson.SerializerOptions)!;
 			var packPath = Path.Combine(root, "scenes-prefabs.wolfpack");
 			WolfPackFile.Write(packPath,
-				[new WolfPackSource(PrefabId, nameof(AssetType.Prefab), JsonSerializer.SerializeToUtf8Bytes(json), [])]);
+				[new WolfPackSource(PrefabId, nameof(AssetType.Prefab), CreateCooker().CookPrefab(PrefabId, document), [])]);
 			var packBytes = File.ReadAllBytes(packPath);
 			var manifestPath = Path.Combine(root, "bootstrap.wolfmanifest");
 			File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(new WolfBootstrapManifest
@@ -237,7 +244,7 @@ public sealed class PrefabTests
 			}, AssetJson.SerializerOptions));
 
 			using var catalog = new WolfPackCatalog(manifestPath);
-			var prefab = Prefab.Load(PrefabId, catalog.Read(PrefabId), ResolveTestComponent);
+			var prefab = Prefab.LoadCooked(PrefabId, catalog.Read(PrefabId));
 			var world = new World(WorldTag.Game);
 			var spawned = prefab.Instantiate(world);
 
@@ -253,9 +260,21 @@ public sealed class PrefabTests
 	}
 
 	[Test]
-	public void WorldInstantiate_ResolvesTheAssetReference()
+	public void LoadCooked_RejectsJsonAndForeignFiles()
 	{
-		var prefab = CreateUnitPrefab();
+		var json = JsonSerializer.SerializeToUtf8Bytes(CreateUnitDocument(), AssetJson.SerializerOptions);
+		var cell = CookedSceneCell.Write([]);
+
+		var jsonError = Assert.Throws<InvalidDataException>(() => Prefab.LoadCooked(PrefabId, json));
+		Assert.Throws<InvalidDataException>(() => Prefab.LoadCooked(PrefabId, cell));
+		Assert.That(jsonError!.Message, Does.Contain("rebuild the game content"));
+	}
+
+	[TestCase(PrefabSource.Authored)]
+	[TestCase(PrefabSource.Cooked)]
+	public void WorldInstantiate_ResolvesTheAssetReference(PrefabSource source)
+	{
+		var prefab = CreateUnitPrefab(source);
 		var registry = new SinglePrefabRegistry(prefab);
 		AssetDatabase.SetInstanceRegistry(registry);
 		try
@@ -296,7 +315,29 @@ public sealed class PrefabTests
 		});
 	}
 
-	private static Prefab CreateUnitPrefab() => Prefab.Create(PrefabId, CreateUnitDocument(), ResolveTestComponent);
+	public enum PrefabSource
+	{
+		/// <summary>Built from the authored document, as the editor does.</summary>
+		Authored,
+
+		/// <summary>Cooked to binary and loaded back, as a built game does.</summary>
+		Cooked,
+	}
+
+	private static Prefab CreateUnitPrefab(PrefabSource source)
+	{
+		if (source == PrefabSource.Authored)
+		{
+			return Prefab.Create(PrefabId, CreateUnitDocument(), ResolveTestComponent);
+		}
+
+		return Prefab.LoadCooked(PrefabId, CreateCooker().CookPrefab(PrefabId, CreateUnitDocument()));
+	}
+
+	private static ContentCooker CreateCooker()
+	{
+		return new ContentCooker((typeId, _) => ComponentTypes.GetValueOrDefault(typeId));
+	}
 
 	/// <summary>
 	/// Unit (root) ─┬─ Turret ── Barrel
@@ -311,12 +352,12 @@ public sealed class PrefabTests
 			RootEntityId = RootId,
 			Entities =
 			[
-				new PrefabDocumentEntity
+				new EntityDocument
 				{
 					EntityId = BarrelId, ParentEntityId = TurretId, HasName = true, Name = "Barrel",
 					LocalTransform = Matrix4x4.Identity
 				},
-				new PrefabDocumentEntity
+				new EntityDocument
 				{
 					EntityId = RootId, HasName = true, Name = "Unit", LocalTransform = rootTransform,
 					Components =
@@ -325,7 +366,7 @@ public sealed class PrefabTests
 						Component("test:inventory", new JsonObject { ["Items"] = new JsonArray(1, 2) })
 					]
 				},
-				new PrefabDocumentEntity
+				new EntityDocument
 				{
 					EntityId = TurretId, ParentEntityId = RootId, HasName = true, Name = "Turret",
 					LocalTransform = Matrix4x4.CreateTranslation(0, 1, 0),
@@ -340,7 +381,7 @@ public sealed class PrefabTests
 						})
 					]
 				},
-				new PrefabDocumentEntity
+				new EntityDocument
 				{
 					EntityId = BannerId, ParentEntityId = RootId, Enabled = false,
 					Components = [Component("test:label", new JsonObject { ["Text"] = "Infantry", ["Owner"] = Reference(RootId) })]
@@ -349,10 +390,10 @@ public sealed class PrefabTests
 		};
 	}
 
-	private static PrefabDocumentEntity EntityOf(PrefabDocument document, Guid entityId) =>
+	private static EntityDocument EntityOf(PrefabDocument document, Guid entityId) =>
 		document.Entities.Single(entity => entity.EntityId == entityId);
 
-	private static PrefabDocumentComponent Component(string typeId, JsonObject data) => new()
+	private static ComponentDocument Component(string typeId, JsonObject data) => new()
 	{
 		TypeId = typeId,
 		Type = ComponentTypes.TryGetValue(typeId, out var type) ? type.AssemblyQualifiedName! : typeId,
@@ -362,7 +403,7 @@ public sealed class PrefabTests
 	private static JsonObject Reference(Guid entityId) =>
 		new() { [Prefab.EntityReferenceIdPropertyName] = entityId.ToString("D") };
 
-	private static Type? ResolveTestComponent(PrefabDocumentComponent component) =>
+	private static Type? ResolveTestComponent(ComponentDocument component) =>
 		ComponentTypes.GetValueOrDefault(component.TypeId);
 
 	private sealed class SinglePrefabRegistry(Prefab prefab) : IAssetInstanceRegistry

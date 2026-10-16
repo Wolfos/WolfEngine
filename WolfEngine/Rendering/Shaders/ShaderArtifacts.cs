@@ -58,7 +58,8 @@ public readonly record struct ShaderRequest
 
 public sealed class CompiledShaderArtifact
 {
-	public const int CurrentFormatVersion = 1;
+	// 2: reflection no longer records resource bindings as constant fields.
+	public const int CurrentFormatVersion = 2;
 
 	public CompiledShaderArtifact(ShaderRequest request, string contentKey, ShaderBytecodeSet bytecode,
 		ShaderReflectionLayout reflectionLayout, ComputeThreadGroupSize? threadGroupSize = null)
