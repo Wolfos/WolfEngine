@@ -8,9 +8,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- Referenced as a normal assembly so the tests can drive the generator over source snippets. -->
 		<ProjectReference Include="..\WolfEngine.SourceGenerators\WolfEngine.SourceGenerators.csproj" />
-		<!-- Snippets compile against the real engine types the generator looks for. -->
 		<ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
 	</ItemGroup>
 

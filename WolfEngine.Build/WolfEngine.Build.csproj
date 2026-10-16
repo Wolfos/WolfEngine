@@ -8,7 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="..\WolfEngine.Audio\WolfEngine.Audio.csproj" />
     <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
-    <!-- Every engine assembly that declares components, so their serializers are available when cooking. -->
     <ProjectReference Include="..\WolfEngine.ECS\WolfEngine.ECS.csproj" />
     <ProjectReference Include="..\WolfEngine.Physics\WolfEngine.Physics.csproj" />
     <ProjectReference Include="..\WolfEngine.UI\WolfEngine.UI.csproj" />

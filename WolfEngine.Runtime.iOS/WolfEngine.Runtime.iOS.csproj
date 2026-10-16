@@ -1,25 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!--
-		iOS runtime host. Not part of WolfEngine.sln: building it needs the iOS workload and Xcode,
-		which Windows machines do not have. Build it directly:
-		  dotnet build WolfEngine.Runtime.iOS/WolfEngine.Runtime.iOS.csproj -r iossimulator-arm64
-		  dotnet publish WolfEngine.Runtime.iOS/WolfEngine.Runtime.iOS.csproj -r ios-arm64
-	-->
 	<PropertyGroup>
 		<TargetFramework>net10.0-ios</TargetFramework>
 		<OutputType>Exe</OutputType>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<!-- Bindless needs argument buffer tier 2 (A13 and later). iOS 17 is the oldest release on every such device we target. -->
 		<SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
 		<ApplicationId>com.wolfengine.runtime</ApplicationId>
 		<ApplicationTitle>WolfEngine</ApplicationTitle>
-		<!-- iOS forbids JIT, so published builds are NativeAOT-compiled. This is what the spike is proving. -->
 		<PublishAot>true</PublishAot>
 		<TrimMode>full</TrimMode>
-		<!-- SharpMetal marks its whole API macOS-only, but it is plain objc_msgSend against Metal, which iOS has. -->
 		<NoWarn>$(NoWarn);CA1416</NoWarn>
 	</PropertyGroup>
 
@@ -28,11 +19,6 @@
 		<ProjectReference Include="..\WolfEngine.Runtime\WolfEngine.Runtime.csproj" />
 	</ItemGroup>
 
-	<!--
-		The cooked game to bundle, as built for ios-arm64 by the build tool (build_game with target ios-arm64):
-		  -p:WolfGameContent=/path/to/build/Content
-		The app is only a host for that content, so building without it is an error.
-	-->
 	<ItemGroup Condition="'$(WolfGameContent)' != ''">
 		<BundleResource Include="$(WolfGameContent)/**/*" LogicalName="Content/%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
@@ -43,11 +29,6 @@
 			Text="Set WolfGameContent to a cooked ios-arm64 build's Content folder (build_game with target ios-arm64), for example -p:WolfGameContent=/path/to/build/Content." />
 	</Target>
 
-	<!--
-		On Unix, .NET takes a shared flock on every read-only FileStream, and the runtime keeps its cooked packs
-		open. iOS kills a suspended app that holds a file lock (RunningBoard 0xdead10cc), so the app was killed
-		whenever it lost focus. Nothing in the app relies on advisory locks.
-	-->
 	<ItemGroup>
 		<RuntimeHostConfigurationOption Include="System.IO.DisableFileLocking" Value="true" Trim="true" />
 	</ItemGroup>

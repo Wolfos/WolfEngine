@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- The desktop entry point for a built game: macOS and Windows. The build tool publishes this project. -->
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>

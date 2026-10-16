@@ -1,12 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!--
-		Roslyn source generators that run inside every assembly declaring components or data assets.
-		Reference it as an analyzer, never as an assembly:
-		  <ProjectReference Include="...\WolfEngine.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-	-->
 	<PropertyGroup>
-		<!-- Compilers load analyzers as netstandard2.0, whatever the project they run in targets. -->
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
@@ -17,7 +11,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- 4.12 is the oldest compiler the engine supports building with; generators cannot use newer APIs than the host compiler. -->
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
 	</ItemGroup>
