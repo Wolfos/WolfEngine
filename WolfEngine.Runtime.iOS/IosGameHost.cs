@@ -9,14 +9,6 @@ using WolfEngine.Rendering.Backend.Metal;
 
 namespace WolfEngine.Runtime.iOS;
 
-/// <summary>Something the scene delegate starts when the app becomes active and stops when it resigns.</summary>
-internal interface IAppFrameHost : IDisposable
-{
-	void Start();
-
-	void Stop();
-}
-
 /// <summary>
 /// Runs the cooked game bundled in the app. Gameplay steps on its own thread, as on desktop, while the render
 /// pipeline renders one frame per display refresh on the main thread, which UIKit owns.
@@ -25,7 +17,7 @@ internal interface IAppFrameHost : IDisposable
 /// Physics stays off until Jolt is built for iOS. The gameplay assembly cannot be loaded at runtime under
 /// NativeAOT, and the game's own gameplay project does not build for iOS yet, so an empty module stands in.
 /// </remarks>
-internal sealed class IosGameHost : IAppFrameHost
+internal sealed class IosGameHost : IDisposable
 {
 	private readonly MetalLayerView _view;
 	private readonly HostMetalSurface _surface;
@@ -46,12 +38,16 @@ internal sealed class IosGameHost : IAppFrameHost
 		_performanceReport = IosPerformanceReport.CreateIfRequested(host.Services.GetRequiredService<GpuProfiler>());
 	}
 
-	/// <summary>The bundled game's manifest, or null when the app was built without content.</summary>
-	public static string? FindBundledManifest()
+	/// <summary>The manifest of the game bundled in the app. The build fails without one, so its absence is a packaging error.</summary>
+	public static string GetBundledManifest()
 	{
 		var path = Path.Combine(AppContext.BaseDirectory, "Content", "bootstrap.wolfmanifest");
+		if (File.Exists(path) == false)
+		{
+			throw new FileNotFoundException("The app bundle contains no game content.", path);
+		}
 
-		return File.Exists(path) ? path : null;
+		return path;
 	}
 
 	public static IosGameHost Create(MetalLayerView view, string manifestPath)

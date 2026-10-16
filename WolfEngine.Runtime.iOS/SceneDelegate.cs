@@ -3,7 +3,7 @@ namespace WolfEngine.Runtime.iOS;
 [Register("SceneDelegate")]
 public sealed class SceneDelegate : UIResponder, IUIWindowSceneDelegate
 {
-	private IAppFrameHost? _renderer;
+	private IosGameHost? _game;
 
 	[Export("window")]
 	public UIWindow? Window { get; set; }
@@ -29,35 +29,26 @@ public sealed class SceneDelegate : UIResponder, IUIWindowSceneDelegate
 		Window.RootViewController = controller;
 		Window.MakeKeyAndVisible();
 
-		var probesPassed = EngineProbes.RunAll();
-		var manifest = IosGameHost.FindBundledManifest();
-		if (manifest is null)
-		{
-			// Built without game content: show the renderer check instead.
-			_renderer = new SpikeRenderer(view, probesPassed);
-			return;
-		}
-
-		_renderer = IosGameHost.Create(view, manifest);
+		_game = IosGameHost.Create(view, IosGameHost.GetBundledManifest());
 	}
 
 	[Export("sceneDidBecomeActive:")]
 	public void DidBecomeActive(UIScene scene)
 	{
-		_renderer?.Start();
+		_game?.Start();
 	}
 
 	// iOS terminates apps that submit GPU work while backgrounded, so rendering stops before that.
 	[Export("sceneWillResignActive:")]
 	public void WillResignActive(UIScene scene)
 	{
-		_renderer?.Stop();
+		_game?.Stop();
 	}
 
 	[Export("sceneDidDisconnect:")]
 	public void DidDisconnect(UIScene scene)
 	{
-		_renderer?.Dispose();
-		_renderer = null;
+		_game?.Dispose();
+		_game = null;
 	}
 }

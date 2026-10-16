@@ -26,17 +26,22 @@
 	<ItemGroup>
 		<ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
 		<ProjectReference Include="..\WolfEngine.Runtime\WolfEngine.Runtime.csproj" />
-		<ProjectReference Include="..\WolfEngine.SourceGenerators\WolfEngine.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<!--
 		The cooked game to bundle, as built for ios-arm64 by the build tool (build_game with target ios-arm64):
 		  -p:WolfGameContent=/path/to/build/Content
-		Without it the app shows the renderer check instead of a game.
+		The app is only a host for that content, so building without it is an error.
 	-->
 	<ItemGroup Condition="'$(WolfGameContent)' != ''">
 		<BundleResource Include="$(WolfGameContent)/**/*" LogicalName="Content/%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
+
+	<Target Name="RequireWolfGameContent" BeforeTargets="PrepareForBuild">
+		<Error
+			Condition="'$(WolfGameContent)' == '' Or Exists('$(WolfGameContent)/bootstrap.wolfmanifest') == false"
+			Text="Set WolfGameContent to a cooked ios-arm64 build's Content folder (build_game with target ios-arm64), for example -p:WolfGameContent=/path/to/build/Content." />
+	</Target>
 
 	<!--
 		On Unix, .NET takes a shared flock on every read-only FileStream, and the runtime keeps its cooked packs
