@@ -697,7 +697,7 @@ public class ThreeDFileImporter : IThreeDFileImporter
         return IsApproximatelyIdentity(GetTransform(root->MTransformation));
     }
 
-    private static unsafe void AppendNode(
+    internal static unsafe void AppendNode(
         Node* node,
         IReadOnlyList<(string meshName, Mesh mesh, int materialIndex, int skeletonIndex)> meshData,
         List<ImportedNode> output,
