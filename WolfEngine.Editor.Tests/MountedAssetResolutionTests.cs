@@ -67,7 +67,7 @@ public sealed class MountedAssetResolutionTests
 		registry.RefreshCatalog(Catalog("after", "Assets/renamed.asset"), preservedId);
 		var renamed = (TestMountedAsset)registry.GetInstance(preservedId, typeof(TestMountedAsset))!;
 		Assert.That(renamed, Is.Not.SameAs(preserved));
-		Assert.That(renamed.Path, Is.EqualTo(Path.Combine(Path.GetTempPath(), "Assets/renamed.asset")));
+		Assert.That(renamed.Path, Is.EqualTo(Path.Combine(Path.GetTempPath(), "Assets", "renamed.asset")));
 		registry.RefreshCatalog(new AssetCatalog([]), preservedId);
 		Assert.That(registry.GetInstance(preservedId, typeof(TestMountedAsset)), Is.Null);
 	}
