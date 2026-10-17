@@ -6,6 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WolfEngine.Editor.Tests" />
     <ProjectReference Include="..\WolfEngine\WolfEngine.csproj" />
   </ItemGroup>
   <ItemGroup>

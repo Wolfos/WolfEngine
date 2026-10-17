@@ -1,8 +1,5 @@
-using System.Text.Json;
 using System.Numerics;
-using WolfEngine.Animation;
-using NSubstitute;
-using WolfEngine.AssetPipeline;
+using Silk.NET.Assimp;
 using WolfEngine.Importing;
 
 namespace WolfEngine.Editor.Tests;
@@ -10,155 +7,73 @@ namespace WolfEngine.Editor.Tests;
 [TestFixture]
 public sealed class ThreeDFileImporterTests
 {
-    private string _directory = null!;
-
-    [SetUp]
-    public void SetUp() => Directory.CreateDirectory(_directory = Path.Combine(Path.GetTempPath(), "WolfEngineModelImportTests", Guid.NewGuid().ToString("N")));
-
-    [TearDown]
-    public void TearDown() => Directory.Delete(_directory, recursive: true);
-
-    [Test]
-    public void Import_StaticGeometry_StillJoinsDuplicateVertices()
+    [TestCase(false)]
+    [TestCase(true)]
+    public unsafe void AppendNode_PreservesModelBindSpaceAcrossAncestors(bool boneParent)
     {
-        var scene = ImportFixture(skinned: false);
-        var mesh = scene.Nodes.SelectMany(node => node.Meshes).Single().Mesh;
-
-        Assert.That(mesh.Vertices, Has.Length.EqualTo(4));
-        Assert.That(mesh.Indices, Has.Length.EqualTo(6));
-        Assert.That(mesh.IsSkinned, Is.False);
-    }
-
-    [Test]
-    public void Import_CoincidentVerticesWithDifferentBones_PreservesBothBindings()
-    {
-        var scene = ImportFixture(skinned: true);
-        var mesh = scene.Nodes.SelectMany(node => node.Meshes).Single().Mesh;
-
-        Assert.That(mesh.Vertices, Has.Length.EqualTo(6), "Welding by position loses distinct skin bindings.");
-        Assert.That(mesh.IsSkinned, Is.True);
-        var sharedPositions = mesh.Vertices.Select((position, index) => (position, index))
-            .GroupBy(vertex => vertex.position).Where(group => group.Count() == 2).ToArray();
-        Assert.That(sharedPositions, Has.Length.EqualTo(2));
-        foreach (var group in sharedPositions)
+        // These structs contain already-converted left-handed transforms. Constructing them
+        // directly exercises our traversal without invoking Assimp's native parser.
+        var rootTransform = Matrix4x4.CreateTranslation(0, 3, 0);
+        var meshTransform = Matrix4x4.CreateRotationX(-MathF.PI / 2);
+        uint meshIndex = 0;
+        var child = new Node
         {
-            var vertices = group.ToArray();
-            Assert.That(mesh.BoneIndices![vertices[0].index * Mesh.InfluencesPerVertex],
-                Is.Not.EqualTo(mesh.BoneIndices[vertices[1].index * Mesh.InfluencesPerVertex]));
-        }
-        Assert.That(mesh.BoneWeights!.Where((_, index) => index % Mesh.InfluencesPerVertex == 0), Is.All.EqualTo(1));
-    }
-
-    [Test]
-    public void Import_MoreThanFourInfluences_KeepsStrongestWeightsAndNormalizes()
-    {
-        var scene = ImportFixture(skinned: true, excessInfluences: true);
-        var mesh = scene.Nodes.SelectMany(node => node.Meshes).Single().Mesh;
-        var boneNames = scene.Skeletons.Single().BoneNames;
-        Assert.That(mesh.IsSkinned, Is.True);
-        for (var vertex = 0; vertex < mesh.Vertices.Length; vertex++)
-        {
-            var offset = vertex * Mesh.InfluencesPerVertex;
-            var keptBones = mesh.BoneIndices!.Skip(offset).Take(Mesh.InfluencesPerVertex).Select(index => boneNames[index]);
-            Assert.That(keptBones, Is.EquivalentTo(new[] { "BoneB", "BoneC", "BoneD", "BoneE" }));
-            var weights = mesh.BoneWeights!.Skip(offset).Take(Mesh.InfluencesPerVertex).ToArray();
-            Assert.That(weights, Is.All.GreaterThan(0));
-            Assert.That(weights.Sum(), Is.EqualTo(1f).Within(0.00001f));
-        }
-    }
-
-    [Test]
-    public void Import_SkinnedMeshPreservesModelBindSpace()
-    {
-        var scene = ImportFixture(skinned: true, transformedMesh: true);
-        var node = scene.Nodes.Single(n => n.Meshes.Any());
-        Assert.That(node.SkinBindToRig, Is.Not.Null);
-        // glTF is converted to the engine's left-handed coordinates.
-        var expected = Matrix4x4.CreateRotationX(-MathF.PI / 2) * Matrix4x4.CreateTranslation(0, 3, 0);
-        Assert.That(Vector3.Distance(Vector3.Transform(Vector3.UnitY, node.SkinBindToRig!.Value),
-            Vector3.Transform(Vector3.UnitY, expected)), Is.LessThan(.00001f));
-    }
-
-    private ImportedScene ImportFixture(bool skinned, bool excessInfluences = false, bool transformedMesh = false)
-    {
-        var boneCount = excessInfluences ? 5 : 2;
-        using var data = new MemoryStream();
-        using var writer = new BinaryWriter(data);
-        var views = new List<object>();
-        var accessors = new List<object>();
-        int AddAccessor(Action write, int componentType, int count, string type, float[]? min = null, float[]? max = null)
-        {
-            while (data.Position % 4 != 0) writer.Write((byte)0);
-            var offset = (int)data.Position;
-            write();
-            views.Add(new { buffer = 0, byteOffset = offset, byteLength = (int)data.Position - offset });
-            accessors.Add(new { bufferView = views.Count - 1, componentType, count, type, min, max });
-            return accessors.Count - 1;
-        }
-
-        var attributes = new Dictionary<string, int>();
-        attributes["POSITION"] = AddAccessor(() =>
-        {
-            foreach (var value in new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0 }) writer.Write(value);
-        }, 5126, 6, "VEC3", [0, 0, 0], [1, 1, 0]);
-        attributes["NORMAL"] = AddAccessor(() =>
-        {
-            for (var i = 0; i < 6; i++) { writer.Write(0f); writer.Write(0f); writer.Write(1f); }
-        }, 5126, 6, "VEC3");
-        if (skinned)
-        {
-            attributes["JOINTS_0"] = AddAccessor(() =>
-            {
-                for (var i = 0; i < 6; i++)
-                    foreach (var joint in excessInfluences ? new ushort[] { 0, 1, 2, 3 } : new ushort[] { (ushort)(i / 3), 0, 0, 0 }) writer.Write(joint);
-            }, 5123, 6, "VEC4");
-            attributes["WEIGHTS_0"] = AddAccessor(() =>
-            {
-                for (var i = 0; i < 6; i++)
-                    foreach (var weight in excessInfluences ? new float[] { 0.05f, 0.15f, 0.25f, 0.3f } : new float[] { 1, 0, 0, 0 }) writer.Write(weight);
-            }, 5126, 6, "VEC4");
-            if (excessInfluences)
-            {
-                attributes["JOINTS_1"] = AddAccessor(() =>
-                {
-                    for (var i = 0; i < 6; i++)
-                        foreach (var joint in new ushort[] { 4, 0, 0, 0 }) writer.Write(joint);
-                }, 5123, 6, "VEC4");
-                attributes["WEIGHTS_1"] = AddAccessor(() =>
-                {
-                    for (var i = 0; i < 6; i++)
-                        foreach (var weight in new float[] { 0.25f, 0, 0, 0 }) writer.Write(weight);
-                }, 5126, 6, "VEC4");
-            }
-        }
-        var indices = AddAccessor(() => { for (ushort i = 0; i < 6; i++) writer.Write(i); }, 5123, 6, "SCALAR");
-        var inverseBindMatrices = skinned ? AddAccessor(() =>
-        {
-            for (var bone = 0; bone < boneCount; bone++)
-                for (var i = 0; i < 16; i++) writer.Write(i % 5 == 0 ? 1f : 0f);
-        }, 5126, boneCount, "MAT4") : -1;
-        var nodes = new List<object>();
-        if (skinned)
-        {
-            nodes.Add(new { name = "Root", translation = new[] { 0f, transformedMesh ? 3f : 0f, 0f }, children = Enumerable.Range(1, boneCount + 1).ToArray() });
-            nodes.Add(new { name = "Mesh", mesh = 0, skin = 0, rotation = transformedMesh ? new[] { MathF.Sqrt(.5f), 0f, 0f, MathF.Sqrt(.5f) } : new[] { 0f, 0f, 0f, 1f } });
-            for (var bone = 0; bone < boneCount; bone++) nodes.Add(new { name = $"Bone{(char)('A' + bone)}", translation = new[] { 0f, 0f, 0f } });
-        }
-        else nodes.Add(new { name = "Mesh", mesh = 0 });
-        var document = new Dictionary<string, object>
-        {
-            ["asset"] = new { version = "2.0" },
-            ["scene"] = 0,
-            ["scenes"] = new[] { new { nodes = new[] { 0 } } },
-            ["nodes"] = nodes,
-            ["meshes"] = new[] { new { primitives = new[] { new { attributes, indices } } } },
-            ["buffers"] = new[] { new { byteLength = (int)data.Length, uri = "data:application/octet-stream;base64," + Convert.ToBase64String(data.ToArray()) } },
-            ["bufferViews"] = views,
-            ["accessors"] = accessors
+            MName = new AssimpString("Mesh"),
+            MTransformation = Matrix4x4.Transpose(meshTransform),
+            MNumMeshes = 1,
+            MMeshes = &meshIndex
         };
-        if (skinned) document["skins"] = new[] { new { joints = Enumerable.Range(2, boneCount).ToArray(), inverseBindMatrices } };
-        var path = Path.Combine(_directory, "duplicate-vertices.gltf");
-        File.WriteAllText(path, JsonSerializer.Serialize(document, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }));
-        return new ThreeDFileImporter(Substitute.For<IImageLoader>()).Import(path, new ModelImportSettings());
+        Node* childPointer = &child;
+        var root = new Node
+        {
+            MName = new AssimpString("Root"),
+            MTransformation = Matrix4x4.Transpose(rootTransform),
+            MNumChildren = 1,
+            MChildren = &childPointer
+        };
+        var mesh = new global::WolfEngine.Mesh(
+            [new Vector4(0, 0, 0, 1), new Vector4(1, 0, 0, 1), new Vector4(0, 1, 0, 1)],
+            [0, 1, 2]);
+        var output = new List<ImportedNode>();
+
+        ThreeDFileImporter.AppendNode(&root, [("Mesh", mesh, 0, 0)], output, -1,
+            "Fallback", boneParent ? new HashSet<string> { "Root" } : null);
+
+        var node = output.Single(n => n.Meshes.Count > 0);
+        Assert.That(node.SkinBindToRig, Is.Not.Null);
+        var expected = meshTransform * rootTransform;
+        foreach (var point in new[] { Vector3.Zero, Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
+        {
+            Assert.That(Vector3.Distance(Vector3.Transform(point, node.SkinBindToRig!.Value),
+                Vector3.Transform(point, expected)), Is.LessThan(.00001f));
+        }
+        Assert.That(node.LocalTransform, Is.EqualTo(meshTransform));
+        Assert.That(node.ParentIndex, Is.EqualTo(boneParent ? -1 : 0));
+        Assert.That(node.BoneParentName, Is.EqualTo(boneParent ? "Root" : null));
+    }
+
+    [Test]
+    public unsafe void PackSkinWeights_MapsSkeletonIndicesAndNormalizesEachVertex()
+    {
+        // LimitBoneWeights belongs to Assimp. Test our conversion of its bone-major output
+        // into the vertex-major shader layout with a deliberately different skeleton order.
+        var weightsA = stackalloc VertexWeight[2];
+        weightsA[0] = new VertexWeight { MVertexId = 0, MWeight = .2f };
+        weightsA[1] = new VertexWeight { MVertexId = 1, MWeight = .4f };
+        var weightsB = stackalloc VertexWeight[1];
+        weightsB[0] = new VertexWeight { MVertexId = 0, MWeight = .6f };
+        var boneA = new Bone { MName = new AssimpString("A"), MNumWeights = 2, MWeights = weightsA };
+        var boneB = new Bone { MName = new AssimpString("B"), MNumWeights = 1, MWeights = weightsB };
+        var bones = stackalloc Bone*[2];
+        bones[0] = &boneA;
+        bones[1] = &boneB;
+        var mesh = new Silk.NET.Assimp.Mesh { MNumVertices = 2, MNumBones = 2, MBones = bones };
+
+        var packed = SkinWeightPacker.TryPack(&mesh, new Dictionary<string, int> { ["A"] = 3, ["B"] = 1 },
+            2, "Mesh", out var indices, out var weights);
+
+        Assert.That(packed, Is.True);
+        Assert.That(indices, Is.EqualTo(new uint[] { 3, 1, 0, 0, 3, 0, 0, 0 }));
+        Assert.That(weights, Is.EqualTo(new float[] { .25f, .75f, 0, 0, 1, 0, 0, 0 }).Within(.00001f));
     }
 }

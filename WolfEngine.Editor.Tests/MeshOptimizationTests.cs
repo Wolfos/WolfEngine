@@ -162,6 +162,29 @@ public sealed class MeshOptimizationTests
 	}
 
 	[Test]
+	public void Optimize_KeepsCoincidentVerticesWithDifferentSkinBindings()
+	{
+		var boneIndices = new uint[6 * Mesh.InfluencesPerVertex];
+		var boneWeights = new float[boneIndices.Length];
+		for (var vertex = 0; vertex < 6; vertex++)
+		{
+			boneIndices[vertex * Mesh.InfluencesPerVertex] = (uint)(vertex / 3);
+			boneWeights[vertex * Mesh.InfluencesPerVertex] = 1;
+		}
+		var geometry = new MeshGeometry([P0, P1, P2, P2, P1, P3], null, null, null,
+			boneIndices, boneWeights, [0, 1, 2, 3, 4, 5]);
+
+		var optimized = MeshOptimization.Optimize(geometry);
+
+		Assert.That(optimized.Positions, Has.Length.EqualTo(6));
+		Assert.That(optimized.Indices, Has.Length.EqualTo(6));
+		// Compare corner attributes regardless of triangle and vertex order.
+		static string[] Corners(MeshGeometry mesh) => mesh.Indices.Select(index =>
+			$"{mesh.Positions[index]}|{mesh.BoneIndices![index * Mesh.InfluencesPerVertex]}|{mesh.BoneWeights![index * Mesh.InfluencesPerVertex]}").ToArray();
+		Assert.That(Corners(optimized), Is.EquivalentTo(Corners(geometry)));
+	}
+
+	[Test]
 	public void Optimize_LeavesGeometryUntouchedWhenItIsNotATriangleList()
 	{
 		var geometry = new MeshGeometry([P0, P1], null, null, null, null, null, [0, 1]);
