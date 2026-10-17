@@ -20,7 +20,7 @@ WolfEngine is a bespoke, C# game engine for building large, seamless open-world 
 | Linux | Viable future addition with Vulkan or VKD3D |
 | PS5/XSX | Viable future additions |
 | Switch 2 | Viable future addition |
-| Last-gen consoles, older PC's | Infeasible |
+| Last-gen consoles, older PC (pre-2020) | Infeasible |
 | Android | Infeasible due to poor Vulkan adoption of popular chipsets |
 | WebGPU | Undesired as lagging feature support would hold back other platforms |
 
