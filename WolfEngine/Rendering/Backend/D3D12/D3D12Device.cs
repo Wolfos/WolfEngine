@@ -331,13 +331,22 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			clearValuePtr = &clearValue;
 		}
 
-		SilkMarshal.ThrowHResult(_device.CreateCommittedResource(
+		var createResult = _device.CreateCommittedResource(
 			&heapProps,
 			HeapFlags.None,
 			in resourceDesc,
 			initialState,
 			clearValuePtr,
-			out ComPtr<ID3D12Resource> resource));
+			out ComPtr<ID3D12Resource> resource);
+		if (createResult < 0)
+		{
+			throw new InvalidOperationException(
+				$"CreateCommittedResource failed (0x{createResult:X8}) for texture " +
+				$"{descriptor.Width}x{descriptor.Height}x{descriptor.Depth} {descriptor.Dimension} " +
+				$"format={descriptor.Format} srgb={descriptor.IsSrgb} mips={descriptor.MipLevels} " +
+				$"usage={descriptor.Usage} dxgi={resourceFormat} flags={resourceDesc.Flags} state={initialState}.",
+				Marshal.GetExceptionForHR(createResult));
+		}
 
 		var texture = new D3D12Texture();
 		texture.Initialize(null, descriptor, resource);
@@ -2257,7 +2266,7 @@ public sealed unsafe class D3D12Device : IGfxDevice, ITexturePoolDevice, IGpuSub
 			flags |= ResourceFlags.AllowUnorderedAccess;
 		}
 
-		if ((usage & TextureUsage.ShaderResource) == 0)
+		if ((usage & TextureUsage.ShaderResource) == 0 && (usage & TextureUsage.DepthStencil) != 0)
 		{
 			flags |= ResourceFlags.DenyShaderResource;
 		}
