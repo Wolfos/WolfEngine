@@ -4,10 +4,24 @@ WolfEngine is a bespoke, C# game engine for building large, seamless open-world 
 
 ## Features
 
-- Cross-platform rendering on Direct3D 12 and Metal.
-- A modern real-time pipeline with GPU-driven draws, clustered lighting, shadows, ambient occlusion, decals, temporal anti-aliasing, bloom, tone mapping, and optional DDGI.
-- An ECS-based gameplay foundation, Jolt-powered physics and vehicles, input, and runtime scene loading.
-- An ImGui-based editor with scene hierarchy, component inspection, transform tools, terrain authoring, asset browsing, material and prefab workflows, and profiling tools.
+- Familiar editor workflows - Build worlds with an intuitive scene editor, featuring terrain painting, prefab and material editing, asset management, and integrated profiling tools.
+- Modern, high-fidelity rendering - Bring worlds to life with dynamic global illumination, realistic lighting and shadows, volumetric effects, and modern post-processing.
+- Designed for large, detailed worlds - GPU-driven rendering and an ECS-based architecture provide a foundation for complex scenes and expansive environments.
+- Physics and gameplay out of the box - Create interactive worlds with integrated physics, vehicles, input handling, and a flexible gameplay foundation.
+- Cross-platform from the start - Native Direct3D 12 and Metal rendering backends for Windows and macOS.
+
+## Platform support
+| Platform   | Status |
+|--------|---------|
+| Windows | Actively supported |
+| MacOS | Actively supported |
+| iOS   | A successful proof-of-concept port was made, but currently unsupported |
+| Linux | Viable future addition with Vulkan |
+| PS5/XSX | Viable future additions |
+| Switch 2 | Viable future addition |
+| Last-gen consoles, older PC's | Infeasible |
+| Android | Infeasible due to poor Vulkan drivers |
+| WebGPU | Undesired as lagging feature support would hold back other platforms |
 
 ## Current status
 WolfEngine is **NOT** production-ready. While it's certainly capable enough to ship a small game, the engine is still under heavy development and the API is simply not yet stable. 
