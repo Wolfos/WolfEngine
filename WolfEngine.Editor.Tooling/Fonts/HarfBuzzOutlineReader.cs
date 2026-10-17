@@ -55,35 +55,35 @@ internal sealed unsafe class HarfBuzzOutlineReader : IDisposable
 		catch (Exception exception) { reader._callbackException = exception; }
 	}
 
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static void Move(nint funcs, nint data, nint state, float x, float y, nint user) => Run(data, r =>
 	{
 		r._contour = new Contour();
 		r._shape.Contours.Add(r._contour);
 		r._current = r._start = r.Point(x, y);
 	});
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static void Line(nint funcs, nint data, nint state, float x, float y, nint user) => Run(data, r =>
 	{
 		var end = r.Point(x, y);
 		if (end != r._current) r._contour!.Edges.Add(new LinearSegment(r._current, end, EdgeColor.White));
 		r._current = end;
 	});
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static void Quadratic(nint funcs, nint data, nint state, float cx, float cy, float x, float y, nint user) => Run(data, r =>
 	{
 		var end = r.Point(x, y);
 		r._contour!.Edges.Add(new QuadraticSegment(r._current, r.Point(cx, cy), end, EdgeColor.White));
 		r._current = end;
 	});
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static void Cubic(nint funcs, nint data, nint state, float cx, float cy, float dx, float dy, float x, float y, nint user) => Run(data, r =>
 	{
 		var end = r.Point(x, y);
 		r._contour!.Edges.Add(new CubicSegment(r._current, r.Point(cx, cy), r.Point(dx, dy), end, EdgeColor.White));
 		r._current = end;
 	});
-	[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+	[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 	private static void Close(nint funcs, nint data, nint state, nint user) => Run(data, r =>
 	{
 		if (r._current != r._start) r._contour!.Edges.Add(new LinearSegment(r._current, r._start, EdgeColor.White));
